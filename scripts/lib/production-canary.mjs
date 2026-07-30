@@ -536,7 +536,7 @@ export async function discoverProductionCanaryInventory(input) {
   assertDatabaseIdentity(d1Output, input.databaseId, spec.resources.d1);
   const secretNames = parseSecretNames(run(["secret", "list", "--name", spec.workerName]));
 
-  const [routes, domains, schedulesResult] = await Promise.all([
+  const [routes, domains, schedulesResult, deploymentsResult] = await Promise.all([
     cloudflareApiRequest(input.auditToken, `/zones/${spec.zoneId}/workers/routes`, {
       fetchImplementation: input.fetchImplementation,
     }),
@@ -546,12 +546,15 @@ export async function discoverProductionCanaryInventory(input) {
     cloudflareApiRequest(input.auditToken, `/accounts/${spec.accountId}/workers/scripts/${encodeURIComponent(spec.workerName)}/schedules`, {
       fetchImplementation: input.fetchImplementation,
     }),
+    cloudflareApiRequest(input.auditToken, `/accounts/${spec.accountId}/workers/scripts/${encodeURIComponent(spec.workerName)}/deployments`, {
+      fetchImplementation: input.fetchImplementation,
+    }),
   ]);
   const schedules = Array.isArray(schedulesResult) ? schedulesResult : schedulesResult?.schedules;
-  const deployments = parseJson(
-    run(["deployments", "list", "--env", "production", "--json"]),
-    "production_canary_deployments_invalid",
-  );
+  const deployments = Array.isArray(deploymentsResult)
+    ? deploymentsResult
+    : deploymentsResult?.deployments;
+  if (!Array.isArray(deployments)) throw new Error("production_canary_deployments_invalid");
   const versions = parseJson(
     run(["versions", "list", "--env", "production", "--json"]),
     "production_canary_versions_invalid",

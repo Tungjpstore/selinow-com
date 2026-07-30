@@ -461,7 +461,6 @@ describe("production canary live inventory", () => {
       if (joined.startsWith("whoami")) return { stderr: "", stdout: `Account ID: ${ACCOUNT_ID}` };
       if (joined.startsWith("d1 list")) return { stderr: "", stdout: JSON.stringify([{ name: "selinow-production", uuid: DATABASE_ID }]) };
       if (joined.startsWith("secret list")) return { stderr: "", stdout: JSON.stringify(REQUIRED_WORKER_SECRET_NAMES.map((name) => ({ name }))) };
-      if (joined.startsWith("deployments list")) return { stderr: "", stdout: JSON.stringify(inventory().deployments) };
       if (joined.startsWith("versions list")) return { stderr: "", stdout: JSON.stringify([version(CONTROL_VERSION)]) };
       return { stderr: "", stdout: "[]" };
     };
@@ -473,7 +472,9 @@ describe("production canary live inventory", () => {
         ? baseRoutes()
         : url.endsWith("/domains")
           ? []
-          : { schedules: [] };
+        : url.endsWith("/schedules")
+          ? { schedules: [] }
+          : { deployments: inventory().deployments };
       return new Response(JSON.stringify({ success: true, result }), { headers: { "content-type": "application/json" } });
     };
     const discovered = await discoverProductionCanaryInventory({
@@ -488,14 +489,14 @@ describe("production canary live inventory", () => {
     });
     expect(discovered.schedules).toEqual([]);
     expect(commands.slice(0, 3).map((args) => args.slice(0, 2).join(" "))).toEqual(["whoami --json", "d1 list", "secret list"]);
-    expect(commands.findIndex((args) => args[0] === "deployments")).toBeGreaterThanOrEqual(3);
     expect(commands.findIndex((args) => args[0] === "versions")).toBeGreaterThanOrEqual(3);
-    expect(fetchCalls).toHaveLength(3);
+    expect(fetchCalls).toHaveLength(4);
     expect(fetchCalls.every((call) => call.method === "GET" && call.authorization === "Bearer audit-token")).toBe(true);
     expect(fetchCalls.map((call) => call.url)).toEqual(expect.arrayContaining([
       `https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes`,
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/domains`,
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/scripts/${productionSpec.workerName}/schedules`,
+      `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/scripts/${productionSpec.workerName}/deployments`,
     ]));
   });
 
