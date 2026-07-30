@@ -370,6 +370,17 @@ export function requireCanaryWorkerToken(environment) {
   return requireToken(environment, CANARY_WORKER_TOKEN_NAME);
 }
 
+export function isFirstProductionPlaceholderVersionView(view) {
+  const bindings = view?.resources?.bindings;
+  if (!Array.isArray(bindings) || view?.resources?.assets !== null || view?.bindings !== null) return false;
+  const names = bindings
+    .filter((binding) => binding?.type === "secret_text" && typeof binding?.name === "string")
+    .map((binding) => binding.name)
+    .sort();
+  return names.length === REQUIRED_WORKER_SECRET_NAMES.length
+    && names.every((name, index) => name === [...REQUIRED_WORKER_SECRET_NAMES].sort()[index]);
+}
+
 export function buildCanaryWranglerEnvironment(environment, accountId, token) {
   if (!ACCOUNT_ID_PATTERN.test(accountId ?? "")) throw new Error("production_canary_account_invalid");
   if (typeof token !== "string" || token.trim().length === 0) throw new Error("production_canary_token_invalid");
@@ -951,7 +962,7 @@ export async function runProductionCanaryUpload(input) {
   if (!isDeepStrictEqual(invariantInventory(before), invariantInventory(admitted))) {
     throw new Error("production_canary_admission_changed");
   }
-  await input.uploadImplementation();
+  await input.uploadImplementation(activeVersionId(admitted));
   const after = normalizeCanaryInventory(await input.inventoryImplementation());
   assertUploadRouteNeutral(admitted, after);
   const candidate = candidateFromInventories(admitted, after);

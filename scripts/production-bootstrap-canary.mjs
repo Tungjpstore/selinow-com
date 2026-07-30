@@ -14,6 +14,7 @@ import {
   requireCanaryRouteToken,
   requireCanaryWorkerToken,
   resolveProductionCanaryDns,
+  isFirstProductionPlaceholderVersionView,
   runProductionCanaryApply,
   runProductionCanaryRollback,
   runProductionCanaryUpload,
@@ -215,6 +216,16 @@ try {
   let result;
   if (options.mode === "upload") {
     const message = options.message || `first-production canary ${common.repositoryState.commitSha}`;
+    const versionViewImplementation = async (versionId) => {
+      const output = runWrangler([
+        "versions", "view", versionId, "--env", "production", "--json",
+      ], { cwd: repositoryRoot, env: auditEnvironment }).stdout;
+      try {
+        return JSON.parse(output);
+      } catch {
+        throw new Error("production_canary_candidate_view_invalid");
+      }
+    };
     result = await runProductionCanaryUpload({
       ...common,
       buildImplementation: async () => {
@@ -225,29 +236,35 @@ try {
         });
       },
       tag: options.tag,
-      uploadImplementation: async () => {
-        runWrangler([
-          "versions",
-          "upload",
-          "--env",
-          "production",
-          "--strict",
-          "--tag",
-          options.tag,
-          "--message",
-          message,
-        ], { cwd: repositoryRoot, env: workerEnvironment });
-      },
-      versionViewImplementation: async (versionId) => {
-        const output = runWrangler([
-          "versions", "view", versionId, "--env", "production", "--json",
-        ], { cwd: repositoryRoot, env: auditEnvironment }).stdout;
+      uploadImplementation: async (controlVersionId) => {
         try {
-          return JSON.parse(output);
-        } catch {
-          throw new Error("production_canary_candidate_view_invalid");
+          runWrangler([
+            "versions",
+            "upload",
+            "--env",
+            "production",
+            "--strict",
+            "--tag",
+            options.tag,
+            "--message",
+            message,
+          ], { cwd: repositoryRoot, env: workerEnvironment });
+        } catch (error) {
+          const controlView = await versionViewImplementation(controlVersionId);
+          if (!isFirstProductionPlaceholderVersionView(controlView)) throw error;
+          runWrangler([
+            "versions",
+            "upload",
+            "--env",
+            "production",
+            "--tag",
+            options.tag,
+            "--message",
+            message,
+          ], { cwd: repositoryRoot, env: workerEnvironment });
         }
       },
+      versionViewImplementation,
     });
   } else if (options.mode === "apply") {
     result = await runProductionCanaryApply({

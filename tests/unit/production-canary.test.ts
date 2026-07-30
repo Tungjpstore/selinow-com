@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -13,6 +13,7 @@ import {
   createProductionCanaryRoute,
   deleteProductionCanaryRoute,
   discoverProductionCanaryInventory,
+  isFirstProductionPlaceholderVersionView,
   requireCanaryAuditToken,
   requireCanaryRouteToken,
   requireCanaryWorkerToken,
@@ -373,6 +374,25 @@ describe("production canary static admission", () => {
 });
 
 describe("production canary candidate binding contract", () => {
+  it("admits a first-bootstrap control version containing only the required secrets", () => {
+    const placeholder = {
+      bindings: null,
+      resources: {
+        assets: null,
+        bindings: REQUIRED_WORKER_SECRET_NAMES.map((name) => ({ name, type: "secret_text" })),
+      },
+    };
+    expect(isFirstProductionPlaceholderVersionView(placeholder)).toBe(true);
+    expect(isFirstProductionPlaceholderVersionView({
+      ...placeholder,
+      resources: { ...placeholder.resources, assets: { config: {} } },
+    })).toBe(false);
+    expect(isFirstProductionPlaceholderVersionView({
+      ...placeholder,
+      resources: { ...placeholder.resources, bindings: placeholder.resources.bindings.slice(1) },
+    })).toBe(false);
+  });
+
   const contract = { generatedManifest, productionSpec, wranglerConfig };
 
   function replaceBinding(name: string, patch: Record<string, unknown>) {
@@ -711,7 +731,7 @@ describe("production canary upload", () => {
 
   it("keeps the upload command route-neutral and forbids deploy/triggers", () => {
     const source = readFileSync("scripts/production-bootstrap-canary.mjs", "utf8");
-    expect(source).toContain('"versions",\n          "upload"');
+    expect(source).toContain('"versions",\n            "upload"');
     expect(source).toContain('"--strict"');
     expect(source).toContain('"--tag"');
     expect(source).toContain('"--message"');
