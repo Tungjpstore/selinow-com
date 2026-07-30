@@ -215,6 +215,8 @@ try {
 
   const result = await runProductionBootstrapMigrations({
     backupRoot: options.backupRoot,
+    confirmFirstProductionBootstrap: options.confirmFirstProductionBootstrap,
+    confirmProduction: options.confirmProduction,
     dryRun: options.dryRun,
     evidence,
     generatedManifest,
