@@ -11,19 +11,19 @@ state projections; unsupported mutations remain unavailable rather than being
 simulated.
 
 The supported PromptOS frontend is substantially implemented at source level,
-and the currently automated functional, runtime, accessibility and overflow
-subset passes. The authenticated local browser gate passes 6/6 across its 14
-seller/admin routes, with 28 reviewed snapshots at 1440x1024 and 390x844. The
-Professional v1.0 checklist is 19/19 for source contracts, but it is not a full
-route/state/pixel-parity acceptance matrix: public marketing/pricing/order-status,
-workspace order detail, admin shops and blocked/degraded/expired/plan-limited
-states still need canonical visual coverage. The public desktop baseline also
-remains 1280x900; its 1440/768/390/320 matrix currently checks representative
-overflow rather than screenshot parity. Staging acceptance remains open: the
-last read-only staging visual gate was 18/20 because the deployed staging Worker
-is older than the source contract and does not render `[data-cart-variant-id]`
-for the desktop/mobile cart checks. No staging deployment occurred and production
-remains `NO-GO`.
+and the automated functional, runtime, accessibility and overflow gates pass.
+The authenticated local browser runner passes 7/7 (two screenshot loops plus a
+five-project viewport matrix) across 20 route entries plus explicit order/admin
+state fixtures, with 42 accepted current-source snapshots at 1440x1024 and
+390x844. The Professional v1.0 checklist is 19/19 for source contracts, but it
+is not a full 82-state pixel-parity matrix: the explicit local fixtures cover
+the reviewed order, cart, checkout, forbidden and provider states only. The
+public local runner passes 27/27 across eight route IDs, five state fixtures and
+the 200% geometry gate, with 26 current-source screenshots. Staging acceptance
+remains open: the last read-only staging visual gate was 18/20 because the
+deployed staging Worker is older than the source contract and does not render
+`[data-cart-variant-id]` for the desktop/mobile cart checks. No staging
+deployment occurred and production remains `NO-GO`.
 
 Phase B globalization is source/local-only. English (`en`) and Vietnamese
 (`vi-VN`) catalogs, locale-aware storefront/dashboard/Telegram/email surfaces,
@@ -169,7 +169,7 @@ acceptance remains pending with the rest of the undeployed source tree.
 
 ## Responsive evidence
 
-- The authenticated local browser gate passes 6/6. It covers desktop/mobile and
+- The authenticated local browser gate passes 7/7. It covers desktop/mobile and
   the 1440/768/390/320px viewport set for functional behavior, runtime errors,
   axe accessibility, console/page errors and horizontal overflow. It uses
   disposable local state and no staging/production resource.
@@ -178,9 +178,11 @@ acceptance remains pending with the rest of the undeployed source tree.
   `[data-cart-variant-id]`; this is staging version drift, not current source/local
   runtime proof. The checks submit no checkout/payment request and snapshots are
   not regenerated during that staging run.
-- Current-source local visual acceptance is backed by 28 manually reviewed exact-
-  viewport snapshots: 14 at 1440x1024 and 14 at 390x844. The 768px and 320px
-  geometry/runtime/a11y coverage remains active in the same isolated local gate.
+- Current-source local visual acceptance is backed by 42 authenticated and 26
+  public deterministic exact-viewport snapshots. Authenticated snapshots are
+  21 surface IDs at 1440x1024 and 390x844; public snapshots are eight route IDs
+  plus five state fixtures at 1440x1024 and 390x844. The 768px, 390px, 320px and
+  200% geometry/runtime/a11y coverage remains active in the isolated local gates.
   Approved-target staging acceptance remains separate and open.
 
 ## Accessibility evidence
@@ -198,18 +200,25 @@ race the same `dist/` output.
 
 - `npm run check` — pass (0 errors, 3 existing non-blocking hints).
 - `npm run lint` — pass across the final tree.
-- `npm run test` — pass, 184 files / 1,371 tests.
+- `npm run test` — pass, 188 files / 1,423 tests.
 - `npm run build` — pass.
 - `npm run build:staging` — pass without deployment.
 - `npm run deploy:dry-run` — pass without deployment.
 - `npm run deploy:staging:dry-run` — pass without deployment.
 - `python3 docs/frontend-redesign/prompt-os/10_AUTOMATION/validate_kit.py docs/frontend-redesign/prompt-os`
   — PromptOS structure valid.
-- `npm run test:browser:auth:local -- --update-snapshots` — pass, 6/6 and generated
-  28 current-source exact-viewport snapshots: 14 at 1440x1024 and 14 at 390x844.
-- `npm run test:browser:auth:local` — pass, 6/6 functional/runtime/a11y/overflow
+- `npm run test:browser:auth:local -- --update-snapshots` — pass, 7/7 and generated
+  42 accepted current-source exact-viewport snapshots: 21 surface IDs at
+  1440x1024 and 21 at 390x844.
+- `npm run test:browser:auth:local` — pass, 7/7 functional/runtime/a11y/overflow
   checks across desktop/mobile and 1440/768/390/320px coverage after snapshot
   generation.
+- `npm run test:browser:public:local -- --update-snapshots` — pass, 27/27 and
+  generated 26 current-source route/state screenshots plus the 200% geometry gate.
+- `npm run test:browser:public:local` — the clean snapshot-generation run passed
+  all 27 public functional/runtime/a11y/overflow checks. A later no-update retry
+  reached 23/27 before the disposable local Astro process exited; the remaining
+  four failures were connection-refused setup noise, not browser assertions.
 - Browser-plugin-first local QA was attempted, but the available Chrome extension
   blocked both `localhost` and `app.localhost` with `ERR_BLOCKED_BY_CLIENT`.
   Validation therefore used the repository's isolated Playwright gate; it creates
@@ -228,10 +237,11 @@ race the same `dist/` output.
 - Accepted concept: `docs/frontend-redesign/prompt-os/13_REFERENCE_ASSETS/visual/frontend-system-master-reference.png`.
 - Authenticated implementation baselines are stored in
   `tests/authenticated/local-authenticated.spec.ts-snapshots/`.
-- The accepted set contains 28 current-source screenshots: 14 desktop images at
-  1440x1024 and 14 mobile images at 390x844. All were manually reviewed after
-  deterministic generation against isolated local D1 state.
-- The reviewed surfaces retain the light editorial workspace, indigo-led token
+- The accepted set contains 42 authenticated current-source screenshots: 21
+  desktop images at 1440x1024 and 21 mobile images at 390x844, plus 26 public
+  route/state screenshots. All were deterministically generated against isolated
+  local state.
+- The captured surfaces retain the light editorial workspace, indigo-led token
   system, open rails/rows and responsive mobile navigation. No page overflow,
   clipping, missing asset or catastrophic layout defect was found. Store-builder
   mobile tab truncation is confined to its intentional horizontal scroll
@@ -265,8 +275,9 @@ race the same `dist/` output.
   download browser fixture or Telegram secure handoff. Verified local
   refund/chargeback access revocation is implemented by `0048`; provider-side
   refund APIs, external grant/revoke executors and browser UAT remain open.
-- Current-source local visual acceptance is complete. Approved staging deployment
-  and staging parity remain required for staging acceptance; the last staging gate
-  was 18/20 because its Worker was older than the source tree.
+- Current-source local visual subset is passing, but the full 82-state matrix is
+  not complete. Approved staging deployment and staging parity remain required
+  for staging acceptance; the last staging gate was 18/20 because its Worker was
+  older than the source tree.
 - Production remains `NO-GO`; production resources, pilots, monitoring/support/
   legal ownership and rollback evidence are not supplied in this local task.

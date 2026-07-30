@@ -14,6 +14,7 @@ export const REQUIRED_PRODUCTION_VARS = [
   "ACTIVE_INVENTORY_KEY_VERSION",
   "API_ORIGIN",
   "APP_ENV",
+  "CANARY_HOSTNAME",
   "CLOUDFLARE_ZONE_ID",
   "CREDENTIAL_KEY_VERSION",
   "DASHBOARD_ORIGIN",
@@ -176,6 +177,7 @@ function validHttpsOrigin(value) {
 
 function validProductionVar(name, value) {
   if (name === "APP_ENV") return value === "production";
+  if (name === "CANARY_HOSTNAME") return validHostname(value) && value === "canary.selinow.com";
   if (name === "CLOUDFLARE_ZONE_ID") return typeof value === "string" && /^[a-f0-9]{32}$/u.test(value);
   if (["API_ORIGIN", "DASHBOARD_ORIGIN", "MEDIA_PUBLIC_BASE_URL", "PLATFORM_ORIGIN"].includes(name)) return validHttpsOrigin(value);
   if (name === "PLATFORM_BASE_DOMAIN" || name === "SAAS_CNAME_TARGET") return validHostname(value);

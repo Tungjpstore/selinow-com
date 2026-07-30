@@ -74,16 +74,12 @@ function assertRepositoryState(repositoryState, evidence) {
   }
 }
 
-function assertSpecContract(productionSpec, stagingSpec) {
+function assertProductionSpecContract(productionSpec) {
   const zoneName = productionSpec?.zoneName;
   if (
     productionSpec?.environment !== "production"
-    || stagingSpec?.environment !== "staging"
     || !ACCOUNT_ID_PATTERN.test(productionSpec?.accountId ?? "")
     || !ACCOUNT_ID_PATTERN.test(productionSpec?.zoneId ?? "")
-    || productionSpec.accountId !== stagingSpec.accountId
-    || productionSpec.zoneId !== stagingSpec.zoneId
-    || zoneName !== stagingSpec.zoneName
     || zoneName !== "selinow.com"
     || productionSpec.workerName !== "selinow-com-production"
   ) {
@@ -117,6 +113,53 @@ function assertSpecContract(productionSpec, stagingSpec) {
   }
 
   exactKeys(
+    productionSpec.routing,
+    [
+      "canaryOverrideRoute",
+      "externalCustomDomainFallbackRoute",
+      "externalCustomDomainStrategy",
+      "platformApexRoute",
+      "platformStorefrontWildcard",
+      "routeHandoff",
+      "stagingExternalCustomDomainInventory",
+      "stagingRouteExceptions",
+    ],
+    "production_bootstrap_route_strategy_invalid",
+  );
+  if (
+    productionSpec.routing.canaryOverrideRoute !== `canary.${zoneName}/*`
+    || productionSpec.routing.externalCustomDomainFallbackRoute !== "*/*"
+    || productionSpec.routing.externalCustomDomainStrategy !== "production_fallback_with_platform_staging_exceptions"
+    || productionSpec.routing.platformApexRoute !== `${zoneName}/*`
+    || productionSpec.routing.platformStorefrontWildcard !== `*.${zoneName}/*`
+    || productionSpec.routing.routeHandoff !== "atomic_shared_zone_route_replacement"
+    || !new Set(["pending_inventory", "verified_none_active"]).has(
+      productionSpec.routing.stagingExternalCustomDomainInventory,
+    )
+    || !Array.isArray(productionSpec.routing.stagingRouteExceptions)
+    || productionSpec.routing.stagingRouteExceptions.some((route) => (
+      typeof route !== "string" || route.length === 0 || route.length > 253
+    ))
+  ) {
+    throw new Error("production_bootstrap_route_strategy_invalid");
+  }
+
+  exactKeys(
+    productionSpec.turnstile,
+    ["externalCustomDomainAdmission", "externalCustomDomainStrategy", "platformHostname"],
+    "production_bootstrap_turnstile_strategy_invalid",
+  );
+  if (
+    productionSpec.turnstile.platformHostname !== zoneName
+    || productionSpec.turnstile.externalCustomDomainStrategy !== "exact_hostname_admission_before_activation"
+    || !new Set(["pending_runtime_lifecycle", "verified_before_domain_activation"]).has(
+      productionSpec.turnstile.externalCustomDomainAdmission,
+    )
+  ) {
+    throw new Error("production_bootstrap_turnstile_strategy_invalid");
+  }
+
+  exactKeys(
     productionSpec.resources,
     RESOURCE_DESCRIPTORS.map((resource) => resource.key),
     "production_bootstrap_resource_spec_invalid",
@@ -136,7 +179,23 @@ function assertSpecContract(productionSpec, stagingSpec) {
   }
 }
 
-function assertSecretNames(secretNames) {
+export function assertProductionBootstrapSpecIdentity(productionSpec) {
+  assertProductionSpecContract(productionSpec);
+}
+
+function assertSpecContract(productionSpec, stagingSpec) {
+  assertProductionSpecContract(productionSpec);
+  if (
+    stagingSpec?.environment !== "staging"
+    || productionSpec.accountId !== stagingSpec.accountId
+    || productionSpec.zoneId !== stagingSpec.zoneId
+    || productionSpec.zoneName !== stagingSpec.zoneName
+  ) {
+    throw new Error("production_bootstrap_spec_identity_invalid");
+  }
+}
+
+export function assertProductionBootstrapSecretNames(secretNames) {
   if (!Array.isArray(secretNames) || secretNames.length === 0) {
     throw new Error("production_bootstrap_secret_names_invalid");
   }
@@ -225,7 +284,17 @@ function expectedStagingDomains(stagingSpec) {
 }
 
 function planTraffic(phase, productionSpec, stagingSpec, inventory) {
-  const routeAudit = validateStagingRouteInventory(stagingSpec, inventory.routes);
+  const canaryPattern = productionSpec.routing.canaryOverrideRoute;
+  const canaryRoutes = inventory.routes.filter((route) => route?.pattern === canaryPattern);
+  if (canaryRoutes.length > 1 || canaryRoutes.some((route) => route.script !== productionSpec.workerName)) {
+    throw new Error("production_bootstrap_canary_route_drift");
+  }
+  const routeAudit = validateStagingRouteInventory(
+    stagingSpec,
+    phase === "resources"
+      ? inventory.routes
+      : inventory.routes.filter((route) => route?.pattern !== canaryPattern),
+  );
   if (!routeAudit.ok) {
     const failed = routeAudit.checks.find((check) => !check.ok)?.code ?? "unknown";
     throw new Error(`production_bootstrap_staging_route_drift:${failed}`);
@@ -241,8 +310,6 @@ function planTraffic(phase, productionSpec, stagingSpec, inventory) {
   }
 
   const expected = expectedStagingDomains(stagingSpec);
-  const canaryHostname = productionSpec.bootstrap.canaryHostname;
-  if (phase !== "resources") expected.set(canaryHostname, productionSpec.workerName);
   if (phase === "promote") {
     for (const hostname of Object.values(productionSpec.hostnames)) {
       const service = observed.get(hostname);
@@ -261,7 +328,6 @@ function planTraffic(phase, productionSpec, stagingSpec, inventory) {
   }
   for (const [hostname, service] of expected) {
     if (observed.get(hostname) !== service) {
-      if (phase === "canary" && hostname === canaryHostname) continue;
       throw new Error(`production_bootstrap_domain_missing:${hostname}`);
     }
   }
@@ -269,9 +335,10 @@ function planTraffic(phase, productionSpec, stagingSpec, inventory) {
   if (phase === "resources") return [];
   if (phase === "canary") {
     return [{
-      action: observed.has(canaryHostname) ? "reuse" : "create",
-      code: "traffic.canary_domain",
-      hostname: canaryHostname,
+      action: canaryRoutes.length === 1 ? "reuse" : "create",
+      code: "traffic.canary_route",
+      pattern: canaryPattern,
+      script: productionSpec.workerName,
       workerName: productionSpec.workerName,
     }];
   }
@@ -361,29 +428,99 @@ function assertPromotionPrerequisites(evidence) {
 
 export function inspectProductionBootstrapCutoverBlockers(input) {
   const zoneName = input.productionSpec?.zoneName;
+  const platformApexRoute = `${zoneName}/*`;
   const platformWildcard = `*.${zoneName}/*`;
+  const stagingRoot = input.stagingSpec?.hostnames?.[0];
+  const stagingRouteExceptions = [
+    `${stagingRoot}/*`,
+    ...(input.stagingSpec?.hostnames ?? [])
+      .filter((hostname) => hostname !== stagingRoot && !hostname.endsWith(`.${stagingRoot}`))
+      .map((hostname) => `${hostname}/*`),
+    input.stagingSpec?.wildcardRoute,
+  ].filter((route) => typeof route === "string");
   const blockers = [];
+  if (input.productionSpec?.routing?.platformApexRoute !== platformApexRoute) {
+    blockers.push("platform_apex_route_missing");
+  }
   if (input.productionSpec?.routing?.platformStorefrontWildcard !== platformWildcard) {
     blockers.push("platform_storefront_wildcard_missing");
   }
+  if (input.productionSpec?.routing?.canaryOverrideRoute !== `canary.${zoneName}/*`) {
+    blockers.push("production_canary_override_route_missing");
+  }
+  if (
+    input.productionSpec?.routing?.routeHandoff !== "atomic_shared_zone_route_replacement"
+    || !isDeepStrictEqual(input.productionSpec?.routing?.stagingRouteExceptions, stagingRouteExceptions)
+  ) {
+    blockers.push("staging_route_exceptions_not_declared");
+  }
+  if (input.productionSpec?.routing?.externalCustomDomainFallbackRoute !== "*/*") {
+    blockers.push("external_custom_domain_fallback_route_missing");
+  }
   if (input.stagingSpec?.sharedZoneDisabledRoutes?.includes(platformWildcard)) {
     blockers.push("platform_storefront_wildcard_disabled_by_staging_guard");
+  }
+  if (input.stagingSpec?.sharedZoneDisabledRoutes?.includes(platformApexRoute)) {
+    blockers.push("platform_apex_route_disabled_by_staging_guard");
   }
   if (input.stagingSpec?.workerRoutes?.some((route) => route?.pattern === "*/*")) {
     blockers.push("external_custom_domains_captured_by_staging_catch_all");
   }
   if (
     input.productionSpec?.routing?.externalCustomDomainStrategy
-      !== "explicit_production_worker_domain_per_hostname"
+      !== "production_fallback_with_platform_staging_exceptions"
   ) {
     blockers.push("external_custom_domain_route_strategy_missing");
   }
-  if (!new Set(["enterprise_hostname_management", "tenant_scoped_widget_keys"]).has(
-    input.productionSpec?.turnstile?.externalCustomDomainStrategy,
-  )) {
+  if (input.productionSpec?.routing?.stagingExternalCustomDomainInventory !== "verified_none_active") {
+    blockers.push("staging_external_custom_domain_inventory_unverified");
+  }
+  if (
+    input.productionSpec?.turnstile?.platformHostname !== zoneName
+    || input.productionSpec?.turnstile?.externalCustomDomainStrategy
+      !== "exact_hostname_admission_before_activation"
+  ) {
     blockers.push("turnstile_external_hostname_strategy_missing");
   }
+  if (input.productionSpec?.turnstile?.externalCustomDomainAdmission !== "verified_before_domain_activation") {
+    blockers.push("turnstile_external_hostname_admission_unverified");
+  }
   return blockers;
+}
+
+/**
+ * Route-only handoff contract. The caller must reconcile this matrix against
+ * a fresh live inventory and apply it atomically; this helper never mutates
+ * Cloudflare.
+ */
+export function buildProductionRouteHandoff(productionSpec, stagingSpec) {
+  const zoneName = productionSpec?.zoneName;
+  const productionWorker = productionSpec?.workerName;
+  const stagingWorker = stagingSpec?.workerName;
+  if (typeof zoneName !== "string" || typeof productionWorker !== "string" || typeof stagingWorker !== "string") {
+    throw new Error("production_bootstrap_route_strategy_invalid");
+  }
+  const stagingRoot = stagingSpec?.hostnames?.[0];
+  if (typeof stagingRoot !== "string") throw new Error("production_bootstrap_route_strategy_invalid");
+  const stagingExceptions = [
+    `${stagingRoot}/*`,
+    ...(stagingSpec.hostnames ?? [])
+      .filter((hostname) => hostname !== stagingRoot && !hostname.endsWith(`.${stagingRoot}`))
+      .map((hostname) => `${hostname}/*`),
+    stagingSpec.wildcardRoute,
+  ];
+  return {
+    canary: [
+      { pattern: `canary.${zoneName}/*`, script: productionWorker },
+    ],
+    promote: [
+      { pattern: `${zoneName}/*`, script: productionWorker },
+      { pattern: `*.${zoneName}/*`, script: productionWorker },
+      ...stagingExceptions.map((pattern) => ({ pattern, script: stagingWorker })),
+      { pattern: "*/*", script: productionWorker },
+    ],
+    stagingExceptions,
+  };
 }
 
 export function buildProductionBootstrapPlan(input) {
@@ -392,7 +529,7 @@ export function buildProductionBootstrapPlan(input) {
   assertCommonEvidence(input.evidence, input.phase);
   assertRepositoryState(input.repositoryState, input.evidence);
   assertInventoryIdentity(input.productionSpec, input.inventory);
-  const secretNames = assertSecretNames(input.secretNames);
+  const secretNames = assertProductionBootstrapSecretNames(input.secretNames);
   const resources = normalizeInventoryResources(input.inventory);
   const resourceActions = planResources(input.productionSpec, resources);
   if (input.phase !== "resources" && resourceActions.some((action) => action.action !== "reuse")) {
@@ -459,7 +596,7 @@ export function buildProductionBootstrapPlan(input) {
       allowedMutations: input.phase === "resources"
         ? ["named_production_resources"]
         : input.phase === "canary"
-          ? ["production_canary_worker_domain"]
+          ? ["production_candidate_worker_version", "production_canary_worker_route"]
           : ["production_stable_worker_domains"],
       cutoverBlockers,
       forwardOnlyMigrations: true,

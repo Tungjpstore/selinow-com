@@ -143,6 +143,22 @@ export function assertFreshStagingBackupEvidence(options: {
   now?: Date;
 }): Promise<{ completedAt: string; reportRef: string; snapshotId: string }>;
 
+export function assertFreshProductionBootstrapBackupEvidence(options: {
+  accountId: string;
+  backupRoot?: string;
+  databaseId: string;
+  databaseName: string;
+  now?: Date;
+}): Promise<{
+  artifactPath: string;
+  completedAt: string;
+  checksumSha256: string;
+  providerBookmarkRecorded: true;
+  reportRef: string;
+  sizeBytes: number;
+  snapshotId: string;
+}>;
+
 export function assertProductionBackupAdmission(input: {
   environment?: NodeJS.ProcessEnv;
   identityImplementation?: ProductionIdentityImplementation;

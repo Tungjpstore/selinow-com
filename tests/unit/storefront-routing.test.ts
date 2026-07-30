@@ -7,7 +7,7 @@ const env = {
   DASHBOARD_ORIGIN: "https://app-staging.selinow.com",
   PLATFORM_BASE_DOMAIN: "staging.selinow.com",
   PLATFORM_ORIGIN: "https://staging.selinow.com",
-} as const;
+};
 
 describe("storefront hostname routing", () => {
   it("keeps platform, reserved and tenant hosts in separate namespaces", () => {
@@ -16,6 +16,21 @@ describe("storefront hostname routing", () => {
     expect(classifyPlatformHost("admin.staging.selinow.com", env)).toBe("reserved");
     expect(classifyPlatformHost("signal.staging.selinow.com", env)).toBe("tenant-candidate");
     expect(classifyPlatformHost("nested.signal.staging.selinow.com", env)).toBe("unknown");
+  });
+
+  it("treats the explicitly configured first-production canary as marketing", () => {
+    expect(classifyPlatformHost("canary.selinow.com", {
+      ...env,
+      CANARY_HOSTNAME: "canary.selinow.com",
+      PLATFORM_BASE_DOMAIN: "selinow.com",
+      PLATFORM_ORIGIN: "https://selinow.com",
+    })).toBe("marketing");
+    expect(classifyPlatformHost("other.selinow.com", {
+      ...env,
+      CANARY_HOSTNAME: "canary.selinow.com",
+      PLATFORM_BASE_DOMAIN: "selinow.com",
+      PLATFORM_ORIGIN: "https://selinow.com",
+    })).toBe("tenant-candidate");
   });
 
   it("rejects IP and malformed hostname input", () => {

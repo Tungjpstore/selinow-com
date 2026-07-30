@@ -47,6 +47,7 @@ export function validatePublicPlaywrightArguments(args) {
   const allowedProjects = new Set([
     "public-desktop-1440",
     "public-mobile-390",
+    "public-zoom-200",
   ]);
   const updateSnapshotArgs = args.filter((arg) => arg === "--update-snapshots");
   const projectArgs = args.filter((arg) => arg.startsWith("--project="));

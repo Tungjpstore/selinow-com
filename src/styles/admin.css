@@ -408,7 +408,7 @@ select {
   padding: 0 16px;
   border-bottom: 1px solid var(--selinow-ink-700);
   background: var(--selinow-ink-950);
-  color: var(--selinow-slate-500);
+  color: var(--selinow-slate-400);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: .08em;
@@ -919,7 +919,7 @@ select {
 
   .admin-cell-label {
     display: block;
-    color: var(--selinow-slate-500);
+    color: var(--selinow-slate-400);
     font-size: 8px;
     font-weight: 700;
     letter-spacing: .08em;

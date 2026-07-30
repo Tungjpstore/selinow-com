@@ -384,7 +384,7 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
   .export-ledger { display: grid; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); overflow: hidden; }
   .export-ledger article { display: grid; grid-template-columns: 42px minmax(180px, 1.3fr) repeat(4, minmax(115px, .8fr)); gap: 14px; align-items: center; min-height: 82px; padding: 14px 16px; border-top: 1px solid var(--sln-border-default); }
   .export-ledger article:first-child { border-top: 0; }
-  .record-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--sln-tint-indigo); color: var(--sln-action-primary); font-weight: 800; }
+  .record-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--sln-tint-indigo); color: var(--sln-action-primary-strong); font-weight: 800; }
   .export-ledger article:has(.record-mark:first-child:nth-last-child(n)) .record-mark { flex: none; }
   .export-ledger article > div:not(.record-mark) { display: grid; gap: 3px; min-width: 0; }
   .export-ledger span, .export-ledger time, .export-ledger code { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }

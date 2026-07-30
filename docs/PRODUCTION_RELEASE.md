@@ -2,9 +2,9 @@
 
 Phase 10 uses a prepare, backup, deploy, verify, confirm-or-rollback sequence. Repository tooling is fail-closed: production configuration, secret names, backup evidence, security status, monitoring ownership and pilot evidence must be complete before a release manifest can be written.
 
-The repository currently provides readiness tooling and templates only. Phase 10 remains NO-GO and production remains untouched until every completion gate below has real evidence and the separate production mutation is explicitly approved.
+Phase 10 remains NO-GO. The named Cloudflare production resources, eight required Worker secrets, the production Turnstile widget, a protected empty-D1 backup and an isolated empty-baseline restore drill now exist. No production migration, Worker traffic deployment, route handoff, DNS cutover, payment or Telegram acceptance has been completed.
 
-The scripts in this document do not provision production resources, migrate a remote database, deploy a Worker, change DNS, create a payment or contact Telegram unless a later operator step explicitly authorizes that separate action.
+The planning commands in this document do not mutate Cloudflare. The explicitly confirmed backup/restore/migration commands are separate production actions and remain fail-closed behind exact target and evidence checks.
 
 ## Release artifacts
 
@@ -50,15 +50,129 @@ npm run release:production:bootstrap -- \
 
 Repeat for `canary` only after baseline backup/restore and forward-only migration evidence are complete. Repeat for `promote` only after canary acceptance. These plan artifacts authorize only the mutation class named in `safeguards.allowedMutations`; they do not authorize DNS, payment, Telegram, secret-value, database down-migration or unrelated resource changes.
 
+### First-production migration execution
+
+After the named production resources exist, create the protected production report-v2 backup and isolated restore evidence. Then use the dedicated migration executor below. It validates the exact `infra/environments/production.json`, generated `infra/generated/production.json` resource manifest, production `PLATFORM_DB` binding, clean reviewed Git commit/tree, name-only secret inventory and the fresh backup artifact before it asks Wrangler to apply the ordered repository migration set:
+
+The migration sink requires `CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN`; the isolated empty-baseline drill separately requires `CLOUDFLARE_PRODUCTION_EMPTY_BASELINE_API_TOKEN`. Neither may be replaced with the application runtime secret `CLOUDFLARE_API_TOKEN` or a general operator token, and each child Wrangler environment receives only its dedicated value.
+
+```bash
+npm run release:production:bootstrap:migrate -- \
+  --env production \
+  --secret-names .wrangler/bootstrap/production-secret-names.json \
+  --confirm-production \
+  --confirm-first-production-bootstrap \
+  --execute \
+  --json
+```
+
+The command performs an account-pinned `whoami`, verifies the exact generated D1/KV/R2/queue inventory, runs only `d1 migrations apply PLATFORM_DB --remote --env production`, then repeats the complete identity check. It never reads secret values, requires no regular release manifest or previous Worker version, and contains no Worker deploy, route, DNS, seed, payment or Telegram sink. Use the default dry-run first:
+
+```bash
+npm run release:production:bootstrap:migrate -- --env production --dry-run --json
+```
+
+If backup, generated-manifest, Git, account, D1, migration-ledger or confirmation evidence changes between checks, the command stops before Wrangler. Record the migration completion timestamp and exact applied ledger in the private bootstrap evidence before moving to the canary phase.
+
+### First-production Worker canary
+
+The first production Worker canary uses `npm run release:production:canary`. It is deliberately separate from the normal deploy path: **do not use `wrangler deploy --env production` for the first canary** because it can publish the script and configured routes/triggers as one broad operation. Do not use `wrangler triggers deploy` or a bulk Worker Routes `PUT` either; both can replace unrelated routes, schedules or queue consumers in the shared account/zone.
+
+The command must receive the reviewed `canary-plan.json` produced by `npm run release:production:bootstrap -- --phase canary`; its fingerprints bind the ceremony to the exact clean source tree, production spec, saved inventory and allowed mutation classes (`production_candidate_worker_version` plus `production_canary_worker_route`). A plan that authorizes a Worker Domain or a different route class is rejected.
+
+Keep three temporary, least-privilege operator tokens separate from the runtime Worker secret named `CLOUDFLARE_API_TOKEN`:
+
+| Environment variable | Required permission and use |
+| --- | --- |
+| `CLOUDFLARE_CANARY_AUDIT_API_TOKEN` | Read-only access to account identity, D1 inventory, production Worker secret names, routes, Worker Domains, schedules, versions, deployments and queue consumers. It is used for fresh admission and post-action verification only. |
+| `CLOUDFLARE_CANARY_WORKER_API_TOKEN` | Workers Scripts edit access for the approved production account/Worker. It is mapped to Wrangler only for `versions upload` and `versions deploy`. |
+| `CLOUDFLARE_CANARY_ROUTE_API_TOKEN` | Workers Routes edit access limited to the `selinow.com` zone. It is used only to create the exact canary route and delete the captured route ID during rollback. |
+
+Do not combine these into one broad token, store them in repository files or pass them to the application build. The command strips all Cloudflare/operator tokens from the build environment and emits safe error codes rather than token values. The audit phase only reads queue consumers and cron schedules; this ceremony never creates, updates or removes either trigger type.
+
+Before upload, the private bootstrap evidence must be in phase `canary`, name the exact clean reviewed commit/tree, record the fresh backup and restore drill, and list the complete forward-only migration ledger. The live inventory must match the reviewed account, zone, D1 UUID/name, Worker and saved route/domain snapshot; the production Worker must have every required secret name and must have no existing route, Worker Domain, cron schedule or queue consumer.
+
+Upload a route-neutral candidate with a unique reviewed tag:
+
+```bash
+npm run release:production:canary -- \
+  --env production \
+  --mode upload \
+  --plan .wrangler/bootstrap/<ceremony-id>/canary-plan.json \
+  --tag bootstrap-<release-id> \
+  --execute \
+  --confirm-production \
+  --confirm-first-production-bootstrap \
+  --json
+```
+
+The upload phase builds without operator credentials and invokes only `wrangler versions upload --env production --strict`; it never invokes `wrangler deploy`, writes a route or changes triggers. It then requires exactly one new preview-disabled Worker version, inspects the candidate bindings and proves that routes, Worker Domains, deployments, queue consumers and cron schedules did not drift. The private report is written mode `0600` at `.wrangler/bootstrap/<ceremony-id>/canary-upload.json`. Record its `candidateVersionId` as `candidateWorkerVersion` in the private bootstrap evidence before apply.
+
+Apply the candidate only from that exact upload report:
+
+```bash
+npm run release:production:canary -- \
+  --env production \
+  --mode apply \
+  --plan .wrangler/bootstrap/<ceremony-id>/canary-plan.json \
+  --upload-report .wrangler/bootstrap/<ceremony-id>/canary-upload.json \
+  --execute \
+  --confirm-production \
+  --confirm-first-production-bootstrap \
+  --json
+```
+
+Apply first runs `wrangler versions deploy <candidate-version>@100%`, verifies that the captured route/domain/queue/cron inventory is unchanged, and only then creates exactly `canary.selinow.com/* -> selinow-com-production` with a single route `POST`. It does not add a Worker Custom Domain and does not hand off `selinow.com`, `*.selinow.com` or `*/*`. The captured route ID, control version and before/after route snapshots are stored at `.wrangler/bootstrap/<ceremony-id>/canary-applied.json`.
+
+If canary acceptance fails, rollback from the captured state rather than rediscovering or guessing a route ID:
+
+```bash
+npm run release:production:canary -- \
+  --env production \
+  --mode rollback \
+  --plan .wrangler/bootstrap/<ceremony-id>/canary-plan.json \
+  --state .wrangler/bootstrap/<ceremony-id>/canary-applied.json \
+  --execute \
+  --confirm-production \
+  --confirm-first-production-bootstrap \
+  --json
+```
+
+Rollback verifies that the candidate and exact post-apply route snapshot are still active, deletes only the captured canary route ID, verifies the original routes are restored, and then deploys the exact captured control version at 100%. The final private report is `.wrangler/bootstrap/<ceremony-id>/canary-rollback.json`. Any route, version, domain, queue or cron drift fails closed for operator review; the tool never repairs drift with a full route replacement.
+
+Worker rollback does **not** roll back D1. Production migrations remain forward-only: fix forward when possible, or follow the separately approved backup/isolated-restore and controlled database cutover procedure. Never run a down migration as part of canary rollback.
+
+### Empty-baseline restore drill
+
+When the first production D1 contains only Cloudflare metadata and an empty migration ledger, the regular restore drill is intentionally inapplicable because it expects application tables. Use the dedicated empty-baseline drill instead. It validates the production spec, generated D1/account identity and fresh report-v2 backup artifact, checks the live source is still empty, creates one generated temporary D1, imports the protected export, verifies application-table absence, an empty migration ledger, SQLite integrity and foreign-key health, then re-proves the exact temporary name+UUID before the name-based Wrangler delete and verifies both are absent afterward. A create timeout is reconciled through bounded D1 relists so an uncertain temporary target is not silently orphaned. The private mode-`0600` report records metadata and safe error codes only; it never records provider bookmarks, credentials or exported SQL:
+
+```bash
+npm run release:production:bootstrap:empty-baseline -- \
+  --env production \
+  --confirm-production \
+  --confirm-first-production-bootstrap \
+  --execute \
+  --json
+```
+
+Use the default network-free plan before any execution:
+
+```bash
+npm run release:production:bootstrap:empty-baseline -- --env production --dry-run --json
+```
+
+The command has no migration, Worker deploy, route, DNS, seed, payment or Telegram sink. Do not run it with a staging target or a regular non-empty restore artifact.
+
 ### Current cutover blockers
 
 The planner deliberately allows resource and canary preparation while listing stable-cutover blockers, but `promote` fails closed while any blocker remains:
 
-- The checked-in staging contract keeps `*.selinow.com/*` as a null-script guard. A production configuration containing only `selinow.com`, `app.selinow.com` and `api.selinow.com` therefore does not serve tenant slug storefronts.
-- The checked-in staging `*/*` route still sends otherwise unmatched external custom domains to the staging Worker. Production promotion requires a reviewed per-hostname production routing strategy and retirement/replacement of that global staging catch-all without losing the explicit staging hosts.
-- The current Turnstile production hostname coverage is limited to `selinow.com` subdomains. External custom domains require an admitted enterprise hostname-management or tenant-scoped widget-key strategy before live checkout cutover.
+- Cloudflare Routes take precedence over Worker Custom Domains. The current null guards (`selinow.com/*` and `*.selinow.com/*`) therefore bypass a production Custom Domain and prevent the production canary/platform wildcard from receiving traffic.
+- The checked-in staging `*/*` route still sends otherwise unmatched external custom domains to `selinow-com-staging`. The reviewed handoff is an atomic shared-zone matrix: `selinow.com/*` and `*.selinow.com/*` point to `selinow-com-production`; exact in-zone staging exceptions (`staging.selinow.com/*`, `app-staging.selinow.com/*`, `api-staging.selinow.com/*`, and `*.staging.selinow.com/*`) point to `selinow-com-staging`; and the final `*/*` fallback points to production. Because Worker route patterns must belong to the zone, an external staging custom hostname cannot be made safe by assuming an exact `selinow.com` route; the handoff therefore requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher before such testing resumes.
+- The canary phase needs the exact `canary.selinow.com/* -> selinow-com-production` override while the old null wildcard is still present; the override is removed only after the production wildcard is active.
+- The production Turnstile widget is authorized for `selinow.com`, which covers its subdomains. Turnstile does not support wildcard hostnames; every external custom hostname must be admitted explicitly before activation (or the account must use Enterprise Any Hostname). The current application has no runtime hostname-admission lifecycle evidence, so external custom-domain checkout remains blocked.
 
-Do not remove these blockers by broadening a shared-zone wildcard or disabling Turnstile. Update the staging and production route contracts together, capture a fresh read-only inventory, rerun staging acceptance and add tenant-routing/Turnstile regression evidence first.
+Do not remove these blockers by broadening a shared-zone wildcard without the exact in-zone staging exceptions, routing an external staging hostname through production, or disabling Turnstile. Update the staging and production route contracts together, capture a fresh read-only inventory (including the external custom-hostname inventory), rerun staging acceptance and add tenant-routing/Turnstile regression evidence first. The route handoff is documented in `buildProductionRouteHandoff`; it is a plan-only helper and performs no Cloudflare mutation.
 
 ## 1. Prepare
 

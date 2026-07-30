@@ -21,12 +21,13 @@ describe("deterministic local public PromptOS browser gate", () => {
     expect(() => validateLocalPublicBrowserBaseUrl("http://app.localhost:4399/")).toThrow("local_public_browser_gate_base_url_invalid");
   });
 
-  it("accepts only the two exact public PromptOS screenshot projects", () => {
+  it("accepts only the three exact public PromptOS screenshot projects", () => {
     expect(validatePublicPlaywrightArguments([])).toEqual([]);
     expect(validatePublicPlaywrightArguments(["--project=public-desktop-1440"])).toEqual(["--project=public-desktop-1440"]);
     expect(validatePublicPlaywrightArguments(["--project=public-mobile-390"])).toEqual(["--project=public-mobile-390"]);
     expect(validatePublicPlaywrightArguments(["--update-snapshots"])).toEqual(["--update-snapshots"]);
     expect(validatePublicPlaywrightArguments(["--project=public-desktop-1440", "--update-snapshots"])).toEqual(["--project=public-desktop-1440", "--update-snapshots"]);
+    expect(validatePublicPlaywrightArguments(["--project=public-zoom-200"])).toEqual(["--project=public-zoom-200"]);
     expect(() => validatePublicPlaywrightArguments(["--project=desktop"])).toThrow("local_public_browser_gate_arguments_invalid");
   });
 
@@ -60,12 +61,17 @@ describe("deterministic local public PromptOS browser gate", () => {
     expect(config).toContain("height: 1024, width: 1440");
     expect(config).toContain("public-mobile-390");
     expect(config).toContain("height: 844, width: 390");
+    expect(config).toContain("public-zoom-200");
+    expect(config).toContain('name: "public-zoom-200"');
+    expect(config).toContain("use: { viewport: { height: 512, width: 720 } }");
+    expect(config).not.toContain("deviceScaleFactor: 2");
     expect(config).toContain('outputPath: "test-results/public-local-safe-failures.json"');
     expect(spec).toContain('request.method() !== "GET" && request.method() !== "HEAD"');
     expect(spec).toContain('routeHandle.abort("blockedbyclient")');
     expect(spec).toContain("expect(externalRequests, externalRequests.join");
-    expect(spec).not.toContain("checkout");
-    expect(spec).not.toContain("payment");
+    expect(spec).not.toContain("checkout-submit");
+    expect(spec).not.toContain("POST /api/store/checkout");
+    expect(spec).not.toContain("payment-submit");
     expect(spec).toContain("marketing-home");
     expect(spec).toContain("public-pricing.png");
     expect(spec).toContain("public-login.png");
@@ -81,11 +87,37 @@ describe("deterministic local public PromptOS browser gate", () => {
     const snapshots = readdirSync("tests/visual/local-public.spec.ts-snapshots", { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith(".png"))
       .map((entry) => entry.name);
-    expect(snapshots).toHaveLength(8);
-    for (const stem of ["public-marketing-home", "public-pricing", "public-login", "public-storefront-home"]) {
+    expect(snapshots).toHaveLength(16);
+    for (const stem of [
+      "public-marketing-home",
+      "public-pricing",
+      "public-login",
+      "public-storefront-home",
+      "public-storefront-product-detail",
+      "public-storefront-cart",
+      "public-storefront-checkout",
+      "public-storefront-order-status",
+    ]) {
       expect(snapshots.filter((filename) => filename.startsWith(`${stem}-`))).toHaveLength(2);
       expect(snapshots.some((filename) => filename.startsWith(`${stem}-public-desktop-1440-`))).toBe(true);
       expect(snapshots.some((filename) => filename.startsWith(`${stem}-public-mobile-390-`))).toBe(true);
     }
+  });
+
+  it("keeps contract-accurate transaction state baselines without a server mutation sink", () => {
+    const spec = readFileSync("tests/visual/local-public-states.spec.ts", "utf8");
+    const snapshots = readdirSync("tests/visual/local-public-states.spec.ts-snapshots", { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".png"))
+      .map((entry) => entry.name);
+
+    expect(spec).toContain('"POST /api/store/cart"');
+    expect(spec).toContain('"POST /api/store/quote"');
+    expect(spec).toContain("route.fulfill");
+    expect(spec).toContain("unmockedMutations");
+    expect(spec).toContain("price_changed");
+    expect(spec).toContain("provider_unavailable");
+    expect(spec).toContain("pending_payment");
+    expect(spec).toContain("fulfilled");
+    expect(snapshots).toHaveLength(10);
   });
 });

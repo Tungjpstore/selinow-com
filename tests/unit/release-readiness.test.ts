@@ -24,6 +24,7 @@ function readyWranglerConfig(): Record<string, unknown> {
   const vars = Object.fromEntries(REQUIRED_PRODUCTION_VARS.map((name) => [name, name === "APP_ENV" ? "production" : `configured-${name.toLowerCase()}`]));
   Object.assign(vars, {
     API_ORIGIN: "https://api.selinow.com",
+    CANARY_HOSTNAME: "canary.selinow.com",
     CLOUDFLARE_ZONE_ID: "0123456789abcdef0123456789abcdef",
     DASHBOARD_ORIGIN: "https://app.selinow.com",
     EMAIL_FROM_ADDRESS: "no-reply@selinow.com",

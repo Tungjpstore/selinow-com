@@ -50,6 +50,11 @@ export default defineConfig({
       testMatch: /local-authenticated-viewport-matrix\.spec\.ts$/u,
       use: { viewport: { height: 844, width: 320 } },
     },
+    {
+      name: "kit-auth-zoom-200",
+      testMatch: /local-authenticated-viewport-matrix\.spec\.ts$/u,
+      use: { viewport: { height: 512, width: 720 } },
+    },
   ],
   reporter: [
     ["list"],

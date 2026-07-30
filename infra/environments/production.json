@@ -24,6 +24,26 @@
     "firstVersionRollback": "restore_pre_bootstrap_traffic_inventory",
     "promotionStrategy": "canary_then_stable_domains"
   },
+  "routing": {
+    "canaryOverrideRoute": "canary.selinow.com/*",
+    "externalCustomDomainFallbackRoute": "*/*",
+    "externalCustomDomainStrategy": "production_fallback_with_platform_staging_exceptions",
+    "platformApexRoute": "selinow.com/*",
+    "platformStorefrontWildcard": "*.selinow.com/*",
+    "routeHandoff": "atomic_shared_zone_route_replacement",
+    "stagingExternalCustomDomainInventory": "pending_inventory",
+    "stagingRouteExceptions": [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
+      "*.staging.selinow.com/*"
+    ]
+  },
+  "turnstile": {
+    "externalCustomDomainAdmission": "pending_runtime_lifecycle",
+    "externalCustomDomainStrategy": "exact_hostname_admission_before_activation",
+    "platformHostname": "selinow.com"
+  },
   "saas": {
     "fallbackOrigin": "proxy-fallback.selinow.com",
     "cnameTarget": "customers.selinow.com"

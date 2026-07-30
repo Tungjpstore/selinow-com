@@ -108,6 +108,18 @@ export function inspectProductionBootstrapCutoverBlockers(input: {
   stagingSpec: Record<string, unknown>;
 }): string[];
 
+export function buildProductionRouteHandoff(
+  productionSpec: Record<string, any>,
+  stagingSpec: Record<string, any>,
+): {
+  canary: Array<{ pattern: string; script: string }>;
+  promote: Array<{ pattern: string; script: string }>;
+  stagingExceptions: string[];
+};
+
+export function assertProductionBootstrapSpecIdentity(productionSpec: Record<string, unknown>): void;
+export function assertProductionBootstrapSecretNames(secretNames: string[]): string[];
+
 export function buildProductionBootstrapPlan(input: ProductionBootstrapInput): ProductionBootstrapPlan;
 
 export function assertProductionBootstrapExecutionAdmission(input: {

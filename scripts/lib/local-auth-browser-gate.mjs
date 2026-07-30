@@ -188,6 +188,7 @@ export function validatePlaywrightArguments(args) {
     "kit-auth-tablet-768",
     "kit-auth-mobile-390",
     "kit-auth-minimum-320",
+    "kit-auth-zoom-200",
   ]);
   if (args.length > 0 && args.every((arg) => arg.startsWith("--project=") && allowedProjects.has(arg.slice("--project=".length)))) {
     return [...args];

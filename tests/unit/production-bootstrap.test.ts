@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertProductionBootstrapExecutionAdmission,
   buildProductionBootstrapPlan,
+  buildProductionRouteHandoff,
   inspectProductionBootstrapCutoverBlockers,
   type ProductionBootstrapEvidence,
   type ProductionBootstrapInput,
@@ -74,11 +75,24 @@ const productionSpec = {
     sessionKv: "selinow-session-production",
   },
   routing: {
-    externalCustomDomainStrategy: "explicit_production_worker_domain_per_hostname",
+    canaryOverrideRoute: "canary.selinow.com/*",
+    externalCustomDomainFallbackRoute: "*/*",
+    externalCustomDomainStrategy: "production_fallback_with_platform_staging_exceptions",
+    platformApexRoute: "selinow.com/*",
     platformStorefrontWildcard: "*.selinow.com/*",
+    routeHandoff: "atomic_shared_zone_route_replacement",
+    stagingExternalCustomDomainInventory: "pending_inventory",
+    stagingRouteExceptions: [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
+      "*.staging.selinow.com/*",
+    ],
   },
   turnstile: {
-    externalCustomDomainStrategy: "enterprise_hostname_management",
+    externalCustomDomainAdmission: "pending_runtime_lifecycle",
+    externalCustomDomainStrategy: "exact_hostname_admission_before_activation",
+    platformHostname: "selinow.com",
   },
   workerName: "selinow-com-production",
   zoneId: ZONE_ID,
@@ -177,14 +191,9 @@ function input(phase: "resources" | "canary" | "promote"): ProductionBootstrapIn
     inventory.resources = reconciledResources();
   }
   if (phase === "promote") {
-    inventory.domains = [
-      ...stagingDomains,
-      {
-        hostname: "canary.selinow.com",
-        service: "selinow-com-production",
-        zoneId: ZONE_ID,
-        zoneName: "selinow.com",
-      },
+    inventory.routes = [
+      ...inventory.routes,
+      { pattern: "canary.selinow.com/*", script: "selinow-com-production" },
     ];
   }
   return {
@@ -201,6 +210,23 @@ function input(phase: "resources" | "canary" | "promote"): ProductionBootstrapIn
 }
 
 describe("first-production bootstrap ceremony", () => {
+  it("builds a specificity-safe route handoff that preserves staging before the production fallback", () => {
+    const handoff = buildProductionRouteHandoff(productionSpec, stagingSpec);
+
+    expect(handoff.canary).toEqual([
+      { pattern: "canary.selinow.com/*", script: "selinow-com-production" },
+    ]);
+    expect(handoff.promote).toEqual([
+      { pattern: "selinow.com/*", script: "selinow-com-production" },
+      { pattern: "*.selinow.com/*", script: "selinow-com-production" },
+      { pattern: "staging.selinow.com/*", script: "selinow-com-staging" },
+      { pattern: "app-staging.selinow.com/*", script: "selinow-com-staging" },
+      { pattern: "api-staging.selinow.com/*", script: "selinow-com-staging" },
+      { pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" },
+      { pattern: "*/*", script: "selinow-com-production" },
+    ]);
+  });
+
   it("plans only exact named resource creates and records name-only secret admission", () => {
     const plan = buildProductionBootstrapPlan(input("resources"));
 
@@ -209,7 +235,10 @@ describe("first-production bootstrap ceremony", () => {
       allowedMutations: ["named_production_resources"],
       cutoverBlockers: [
         "platform_storefront_wildcard_disabled_by_staging_guard",
+        "platform_apex_route_disabled_by_staging_guard",
         "external_custom_domains_captured_by_staging_catch_all",
+        "staging_external_custom_domain_inventory_unverified",
+        "turnstile_external_hostname_admission_unverified",
       ],
       forwardOnlyMigrations: true,
       secretNameCount: REQUIRED_WORKER_SECRET_NAMES.length,
@@ -289,9 +318,13 @@ describe("first-production bootstrap ceremony", () => {
     const candidate = input("canary");
     const plan = buildProductionBootstrapPlan(candidate);
     expect(plan.actions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "create", code: "traffic.canary_domain" }),
+      expect.objectContaining({ action: "create", code: "traffic.canary_route" }),
       expect.objectContaining({ action: "deploy", code: "worker.candidate_canary_only" }),
     ]));
+    expect(plan.safeguards.allowedMutations).toEqual([
+      "production_candidate_worker_version",
+      "production_canary_worker_route",
+    ]);
 
     candidate.evidence.migrations.direction = "down_then_up";
     expect(() => buildProductionBootstrapPlan(candidate))
@@ -322,6 +355,7 @@ describe("first-production bootstrap ceremony", () => {
       "external_custom_domains_captured_by_staging_catch_all",
       "external_custom_domain_route_strategy_missing",
       "turnstile_external_hostname_strategy_missing",
+      "turnstile_external_hostname_admission_unverified",
     ]));
   });
 

@@ -11,6 +11,7 @@ import {
   assertExactMigrationLedger,
   assertDistinctRestoreTarget,
   assertFreshStagingBackupEvidence,
+  assertFreshProductionBootstrapBackupEvidence,
   buildBackupSnapshotRecord,
   buildRestoreDrillRecord,
   cleanupRestoreTempDirectory,
@@ -95,6 +96,39 @@ async function writeStagingBackupEvidence(root: string, completedAt: string) {
       database_id: STAGING_DATABASE_ID,
       database_name: "selinow-staging",
       resource_ref: "d1:selinow-staging",
+    },
+  }), "utf8");
+  return { snapshotDirectory, snapshotId };
+}
+
+async function writeProductionBackupEvidence(root: string, completedAt: string) {
+  const snapshotId = "bkp_20260730000000_020202020202";
+  const snapshotDirectory = resolve(root, snapshotId);
+  const artifact = "-- protected production bootstrap backup fixture\n";
+  const checksum = createHash("sha256").update(artifact).digest("hex");
+  await mkdir(snapshotDirectory, { recursive: true });
+  await writeFile(resolve(snapshotDirectory, "database.sql"), artifact, "utf8");
+  await writeFile(resolve(snapshotDirectory, "snapshot.json"), JSON.stringify({
+    artifact: { format: "sql", path: "database.sql" },
+    records: {
+      backup_snapshots: [{
+        checksum_sha256: checksum,
+        completed_at: completedAt,
+        environment: "production",
+        id: snapshotId,
+        provider_reference: "bookmark-prod-1234",
+        resource_ref: "d1:selinow-production",
+        size_bytes: Buffer.byteLength(artifact),
+        snapshot_kind: "time_travel",
+        status: "available",
+      }],
+    },
+    report_version: 2,
+    source: {
+      account_id: PRODUCTION_ACCOUNT_ID,
+      database_id: PRODUCTION_DATABASE_ID,
+      database_name: "selinow-production",
+      resource_ref: "d1:selinow-production",
     },
   }), "utf8");
   return { snapshotDirectory, snapshotId };
@@ -366,6 +400,39 @@ describe("backup CLI dry runs", () => {
         databaseName: "selinow-staging",
         now: new Date("2026-07-26T01:00:00.000Z"),
       })).rejects.toThrow("staging_backup_artifact_invalid");
+    } finally {
+      await rm(backupRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("admits a fresh production report-v2 backup only for the exact bootstrap D1 target", async () => {
+    const backupRoot = await mkdtemp(join(tmpdir(), "selinow-production-backup-evidence-"));
+    try {
+      const completedAt = "2026-07-30T00:30:00.000Z";
+      const { snapshotId } = await writeProductionBackupEvidence(backupRoot, completedAt);
+      await expect(assertFreshProductionBootstrapBackupEvidence({
+        accountId: PRODUCTION_ACCOUNT_ID,
+        backupRoot,
+        databaseId: PRODUCTION_DATABASE_ID,
+        databaseName: "selinow-production",
+        now: new Date("2026-07-30T01:00:00.000Z"),
+      })).resolves.toMatchObject({ completedAt, providerBookmarkRecorded: true, snapshotId });
+
+      await expect(assertFreshProductionBootstrapBackupEvidence({
+        accountId: PRODUCTION_ACCOUNT_ID,
+        backupRoot,
+        databaseId: "11111111-1111-4111-8111-111111111111",
+        databaseName: "selinow-production",
+        now: new Date("2026-07-30T01:00:00.000Z"),
+      })).rejects.toThrow("production_bootstrap_backup_target_mismatch");
+
+      await expect(assertFreshProductionBootstrapBackupEvidence({
+        accountId: PRODUCTION_ACCOUNT_ID,
+        backupRoot,
+        databaseId: PRODUCTION_DATABASE_ID,
+        databaseName: "selinow-production",
+        now: new Date("2026-07-31T01:00:00.001Z"),
+      })).rejects.toThrow("production_bootstrap_backup_evidence_stale");
     } finally {
       await rm(backupRoot, { force: true, recursive: true });
     }

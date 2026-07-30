@@ -22,13 +22,18 @@ export default defineConfig({
   projects: [
     {
       name: "public-desktop-1440",
-      testMatch: /local-public\.spec\.ts$/u,
+      testMatch: /local-public(?:-states)?\.spec\.ts$/u,
       use: { viewport: { height: 1024, width: 1440 } },
     },
     {
       name: "public-mobile-390",
-      testMatch: /local-public\.spec\.ts$/u,
+      testMatch: /local-public(?:-states)?\.spec\.ts$/u,
       use: { viewport: { height: 844, width: 390 } },
+    },
+    {
+      name: "public-zoom-200",
+      testMatch: /local-zoom\.spec\.ts$/u,
+      use: { viewport: { height: 512, width: 720 } },
     },
   ],
   reporter: [

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { CloudflareCustomHostname } from "../../src/lib/domains/cloudflare";
 import { reconcileCustomDomains } from "../../src/lib/domains/reconciliation";
-import { checkCustomDomain, createCustomDomain as createCustomDomainClaim, customDomainBackoffSeconds, deleteCustomDomain, setPrimaryDomain, type DomainProvider } from "../../src/lib/domains/store";
+import { checkCustomDomain, createCustomDomain as createCustomDomainClaim, customDomainBackoffSeconds, deleteCustomDomain, listShopDomains, setPrimaryDomain, type DomainProvider } from "../../src/lib/domains/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
 type FakeDomain = {
@@ -683,6 +683,26 @@ async function createCustomDomain(input: Parameters<typeof createCustomDomainCla
 }
 
 describe("custom domain store", () => {
+  it("lists platform domains without requiring the custom-hostname provider token", async () => {
+    const database = new DomainDatabase();
+    const env = environment(database) as AppBindings & { CLOUDFLARE_API_TOKEN?: string };
+    delete env.CLOUDFLARE_API_TOKEN;
+
+    const domains = await listShopDomains({
+      env,
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+
+    expect(domains).toEqual([
+      expect.objectContaining({
+        hostname: "shop-a.staging.selinow.com",
+        status: "active",
+        type: "platform_subdomain",
+      }),
+    ]);
+  });
+
   it("creates once and returns the same tenant-owned domain on retry", async () => {
     const database = new DomainDatabase();
     const provider = new Provider();

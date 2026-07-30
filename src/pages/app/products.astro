@@ -107,15 +107,15 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
             <label>{t("dashboard.products.search.label")}<input type="search" placeholder={t("dashboard.products.search.placeholder")} data-product-search /></label>
             <label>{t("dashboard.products.filter.status_label")}<select data-product-status><option value="">{t("dashboard.products.filter.all")}</option><option value="active">{t("dashboard.products.filter.active")}</option><option value="draft">{t("dashboard.products.filter.draft")}</option><option value="suspended">{t("dashboard.products.filter.suspended")}</option><option value="archived">{t("dashboard.products.filter.archived")}</option><option value="out_of_stock">{t("dashboard.products.filter.out_of_stock")}</option></select></label>
           </div><div class="product-table" role="table" aria-label={t("dashboard.products.table.aria")}>
-            <div class="table-head" role="row"><span>{t("dashboard.products.table.product")}</span><span>{t("dashboard.products.table.price_variant")}</span><span>{t("dashboard.products.table.stock")}</span><span>{t("dashboard.products.table.status")}</span><span>{t("dashboard.products.table.updated")}</span><span>{t("dashboard.products.table.actions")}</span></div>
+            <div class="table-head" role="row"><span role="columnheader">{t("dashboard.products.table.product")}</span><span role="columnheader">{t("dashboard.products.table.price_variant")}</span><span role="columnheader">{t("dashboard.products.table.stock")}</span><span role="columnheader">{t("dashboard.products.table.status")}</span><span role="columnheader">{t("dashboard.products.table.updated")}</span><span role="columnheader">{t("dashboard.products.table.actions")}</span></div>
             {productRows.map(({ product, productId, rows, lowest, stock, index, updatedAt, updatedLabel }) => (
               <article class="table-row" role="row" data-product-row data-product-status={String(product.status ?? "")} data-product-stock={stock === 0 ? "out_of_stock" : "available"} data-product-search-text={`${String(product.title ?? "")} ${String(product.slug ?? "")} ${rows.map((row) => `${String(row.sku ?? "")} ${String(row.title ?? "")}`).join(" ")}`}>
-                <div class="product-cell"><span class="product-index">{String(index + 1).padStart(2, "0")}</span><div><strong>{String(product.title ?? t("dashboard.products.product.untitled"))}</strong><small>/{String(product.slug ?? "")}</small></div></div>
-                <div class="price-cell">{lowest === null ? <span>{t("dashboard.products.price.none")}</span> : <Money value={lowest} currency={shop.currency} locale={locale ?? "en"} />}<small>{t("dashboard.products.variant.count", { count: rows.length })}</small></div>
-                <div class="stock-cell"><strong>{stock}</strong><small>{stock === 0 ? t("dashboard.products.stock.out") : stock < 5 ? t("dashboard.products.stock.low") : t("dashboard.products.stock.available")}</small></div>
-                <div><StatusBadge label={labelForStatus[String(product.status)] ?? t("dashboard.products.status.unknown")} tone={toneForStatus(product.status)} /></div>
-                <div class="updated-cell">{updatedAt === "" ? <span>{updatedLabel}</span> : <time datetime={updatedAt}>{updatedLabel}</time>}<small>{t("dashboard.products.updated.record")}</small></div>
-                <div class="row-action"><a href={workspaceHref(`/app/products?product=${encodeURIComponent(productId)}`)} aria-label={t("dashboard.products.row.open_aria", { product: String(product.title ?? t("dashboard.products.product.untitled")) })}>{t("dashboard.products.row.open")} <span aria-hidden="true">→</span></a></div>
+                <div class="product-cell" role="cell"><span class="product-index">{String(index + 1).padStart(2, "0")}</span><div><strong>{String(product.title ?? t("dashboard.products.product.untitled"))}</strong><small>/{String(product.slug ?? "")}</small></div></div>
+                <div class="price-cell" role="cell">{lowest === null ? <span>{t("dashboard.products.price.none")}</span> : <Money value={lowest} currency={shop.currency} locale={locale ?? "en"} />}<small>{t("dashboard.products.variant.count", { count: rows.length })}</small></div>
+                <div class="stock-cell" role="cell"><strong>{stock}</strong><small>{stock === 0 ? t("dashboard.products.stock.out") : stock < 5 ? t("dashboard.products.stock.low") : t("dashboard.products.stock.available")}</small></div>
+                <div role="cell"><StatusBadge label={labelForStatus[String(product.status)] ?? t("dashboard.products.status.unknown")} tone={toneForStatus(product.status)} /></div>
+                <div class="updated-cell" role="cell">{updatedAt === "" ? <span>{updatedLabel}</span> : <time datetime={updatedAt}>{updatedLabel}</time>}<small>{t("dashboard.products.updated.record")}</small></div>
+                <div class="row-action" role="cell"><a href={workspaceHref(`/app/products?product=${encodeURIComponent(productId)}`)} aria-label={t("dashboard.products.row.open_aria", { product: String(product.title ?? t("dashboard.products.product.untitled")) })}>{t("dashboard.products.row.open")} <span aria-hidden="true">→</span></a></div>
               </article>
             ))}
           </div><p class="catalog-no-results" data-product-no-results hidden>{t("dashboard.products.no_results")}</p></>
@@ -246,14 +246,14 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .catalog-toolbar input, .catalog-toolbar select { width: 100%; min-height: 42px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
   .catalog-no-results { margin: 16px 0 0; padding: 20px; border: 1px dashed var(--sln-border-strong); border-radius: var(--sln-radius-md); color: var(--sln-text-secondary); }
   .table-head, .table-row { display: grid; grid-template-columns: minmax(210px, 1.8fr) minmax(120px, .9fr) minmax(80px, .6fr) minmax(120px, .8fr) minmax(130px, .9fr) minmax(120px, .7fr); gap: 18px; align-items: center; padding: 15px 18px; }
-  .table-head { background: var(--sln-bg-subtle); color: var(--sln-text-muted); font: var(--sln-font-caption); font-weight: 700; }
+  .table-head { background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
   .table-row { min-height: 78px; border-top: 1px solid var(--sln-border-default); }
   .product-cell, .price-cell, .stock-cell { display: flex; align-items: center; gap: 11px; min-width: 0; }
   .product-cell > div, .price-cell, .stock-cell, .updated-cell { display: grid; gap: 3px; }
   .product-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .product-cell small, .price-cell small, .stock-cell small, .updated-cell small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .updated-cell { min-width: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
-  .product-index { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; }
+  .product-index { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 750; }
   .stock-cell strong { font-variant-numeric: tabular-nums; }
   .row-action a { color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
   .product-dialog { width: min(100% - 32px, 480px); border: 0; border-radius: var(--sln-radius-xl); padding: 0; background: transparent; }

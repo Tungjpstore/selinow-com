@@ -220,6 +220,7 @@
       },
       "vars": {
         "APP_ENV": "production",
+        "CANARY_HOSTNAME": "canary.selinow.com",
         "PLATFORM_NAME": "Selinow",
         "PLATFORM_BASE_DOMAIN": "selinow.com",
         "PLATFORM_ORIGIN": "https://selinow.com",

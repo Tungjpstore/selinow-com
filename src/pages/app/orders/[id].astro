@@ -20,7 +20,10 @@ const auth = await authenticateRequest(Astro.request, env).catch(() => null);
 if (auth === null) return Astro.redirect("/login");
 
 const shops = await listShopsForMember({ env, userId: auth.userId });
-const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const requestedShopPublicId = Astro.url.searchParams.get("shop");
+const unauthorizedShopRequest = requestedShopPublicId !== null
+  && !shops.some((candidate) => candidate.publicId === requestedShopPublicId);
+const shop = selectShopForMember(shops, requestedShopPublicId);
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
 const locale = Astro.locals.locale;
 const t = createDashboardTranslator(locale);
@@ -29,7 +32,9 @@ const orderParam = Astro.params.id;
 let order: SellerOrderDetail | null = null;
 let state: "ready" | "not_found" | "forbidden" | "error" = "ready";
 
-if (shop === undefined) {
+if (unauthorizedShopRequest) {
+  state = "forbidden";
+} else if (shop === undefined) {
   state = "not_found";
 } else {
   try {
@@ -230,7 +235,7 @@ const formatShortId = (value: string): string => value.replace(/^order_/u, "").s
   .item-ledger { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
   .item-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(130px, auto); gap: 14px; align-items: center; min-height: 78px; padding: 14px 16px; border-top: 1px solid var(--sln-border-default); }
   .item-row:first-child { border-top: 0; }
-  .item-index { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; }
+  .item-index { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-action-primary-strong); font: var(--sln-font-caption); font-weight: 750; }
   .item-copy { display: grid; gap: 4px; min-width: 0; }
   .item-copy strong, .item-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-copy span, .item-copy small, .item-price small { color: var(--sln-text-muted); font: var(--sln-font-caption); }

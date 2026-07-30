@@ -70,6 +70,10 @@ describe("deterministic local authenticated browser gate", () => {
       INNER JOIN shop_domains ON shop_domains.id = shops.canonical_domain_id
       INNER JOIN shop_subscriptions ON shop_subscriptions.shop_id = shops.id
       INNER JOIN shop_onboarding_profiles ON shop_onboarding_profiles.shop_id = shops.id
+      WHERE platform_users.email_normalized IN (
+        'browser-gate-desktop@selinow.invalid',
+        'browser-gate-mobile@selinow.invalid'
+      )
       ORDER BY platform_users.email_normalized
     `).all() as Array<{
       domain_status: string;
@@ -136,6 +140,29 @@ describe("deterministic local authenticated browser gate", () => {
     }
   });
 
+  it("seeds deterministic order-detail states and isolated viewport identities", () => {
+    const orderStates = database.prepare(`
+      SELECT status, payment_status AS paymentStatus, fulfillment_status AS fulfillmentStatus, COUNT(*) AS count
+      FROM orders
+      WHERE shop_id IN ('shp_browser_desktop', 'shp_browser_mobile')
+      GROUP BY status, payment_status, fulfillment_status
+      ORDER BY status
+    `).all() as Array<{ count: number; fulfillmentStatus: string; paymentStatus: string; status: string }>;
+    expect(orderStates).toEqual(expect.arrayContaining([
+      { count: 2, fulfillmentStatus: "fulfilled", paymentStatus: "paid", status: "completed" },
+      { count: 2, fulfillmentStatus: "failed", paymentStatus: "failed", status: "exception" },
+      { count: 2, fulfillmentStatus: "unfulfilled", paymentStatus: "unpaid", status: "pending_payment" },
+      { count: 2, fulfillmentStatus: "reserved", paymentStatus: "paid", status: "processing" },
+    ]));
+
+    const matrixMembers = database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM shop_members
+      WHERE shop_id = 'shp_browser_matrix' AND status = 'active'
+    `).get() as { count: number };
+    expect(matrixMembers.count).toBe(5);
+  });
+
   it("keeps the runner local-only and the Playwright flow free of credential export", () => {
     const dashboard = readFileSync("src/pages/app/index.astro", "utf8");
     const runner = readFileSync("scripts/local-auth-browser-gate.mjs", "utf8");
@@ -172,15 +199,30 @@ describe("deterministic local authenticated browser gate", () => {
       "/app/products",
       "/app/inventory",
       "/app/orders",
+      "/app/automation",
       "/app/customers",
       "/app/integrations",
       "/app/store",
       "/app/data",
       "/app/members",
       "/app/billing",
+      "/admin/shops",
     ]) {
       expect(spec).toContain(`path: "${path}"`);
     }
+    for (const suffix of ["000000000101", "000000000102", "000000000103", "000000000104", "000000000201", "000000000202", "000000000203", "000000000204"]) {
+      expect(spec).toContain(`"${suffix}"`);
+    }
+    for (const screenshot of [
+      "authenticated-order-pending.png",
+      "authenticated-order-paid-processing.png",
+      "authenticated-order-fulfilled.png",
+      "authenticated-order-failed.png",
+      "authenticated-order-forbidden.png",
+    ]) {
+      expect(spec).toContain(`screenshot: "${screenshot}"`);
+    }
+    expect(spec).toContain("expectedStatus: 403");
   });
 
   it("covers authenticated representative surfaces at the PromptOS viewport matrix without new baselines", () => {
@@ -199,9 +241,12 @@ describe("deterministic local authenticated browser gate", () => {
       expect(config).toContain(`name: "${name}"`);
       expect(config).toContain(`use: { viewport: { height: ${String(height)}, width: ${String(width)} } }`);
     }
+    expect(config).toContain('name: "kit-auth-zoom-200"');
+    expect(config).toContain("use: { viewport: { height: 512, width: 720 } }");
+    expect(config).not.toContain("deviceScaleFactor: 2");
 
     expect(config).toContain("local-authenticated-viewport-matrix\\.spec\\.ts");
-    expect(matrixSpec).toContain("browser-gate-desktop@selinow.invalid");
+    expect(matrixSpec).toContain("browser-gate-${projectName}@selinow.invalid");
     expect(matrixSpec).toContain('request.method() === "GET" || request.method() === "HEAD"');
     expect(matrixSpec).toContain('route.abort("blockedbyclient")');
     expect(matrixSpec).toContain("expect(nonReadOnlyRequests).toEqual([])");
@@ -297,6 +342,8 @@ describe("authenticated browser gate isolation", () => {
     expect(validatePlaywrightArguments(["--update-snapshots"])).toEqual(["--update-snapshots"]);
     expect(validatePlaywrightArguments(["--project=kit-auth-desktop-1440", "--project=kit-auth-minimum-320"]))
       .toEqual(["--project=kit-auth-desktop-1440", "--project=kit-auth-minimum-320"]);
+    expect(validatePlaywrightArguments(["--project=kit-auth-zoom-200"]))
+      .toEqual(["--project=kit-auth-zoom-200"]);
     expect(() => validatePlaywrightArguments(["--config", "playwright.config.ts"]))
       .toThrow("local_auth_browser_gate_arguments_invalid");
     expect(() => validatePlaywrightArguments(["--project=desktop"]))

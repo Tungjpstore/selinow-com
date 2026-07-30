@@ -22,11 +22,11 @@ function expectPrivateHeaders(headers: Record<string, string>): void {
   expect(headers["x-robots-tag"]).toContain("noindex");
 }
 
-async function authenticateThroughVisibleMagicLink(page: Page): Promise<void> {
+async function authenticateThroughVisibleMagicLink(page: Page, projectName: string): Promise<void> {
   await page.goto("/login");
   await expect(page).toHaveTitle("Đăng nhập — Selinow");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Đăng nhập để tiếp tục");
-  await page.getByLabel("Email").fill("browser-gate-desktop@selinow.invalid");
+  await page.getByLabel("Email").fill(`browser-gate-${projectName}@selinow.invalid`);
   await page.getByLabel("Tên hiển thị").fill("Browser Gate");
   const magicLinkResponsePromise = page.waitForResponse((response) => {
     try {
@@ -168,7 +168,7 @@ test("authenticated representative surfaces remain stable across the PromptOS vi
     runtimeIssues.push(`pageerror: ${redactRuntimeMessage(error.message)}`);
   });
 
-  await authenticateThroughVisibleMagicLink(page);
+  await authenticateThroughVisibleMagicLink(page, testInfo.project.name);
 
   const nonReadOnlyRequests: string[] = [];
   await page.route("**/*", async (route) => {

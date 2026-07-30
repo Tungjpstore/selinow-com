@@ -16,6 +16,14 @@ Phase 7 implementation and the shared-zone route matrix are accepted on staging.
 
 Production routing remains intentionally unchanged.
 
+## Production canary hostname
+
+The exact production hostname `canary.selinow.com` is configured through `CANARY_HOSTNAME` and classifies as the public marketing surface. It does not enter storefront tenant resolution and does not grant access to seller or admin routes. Other subdomains continue through the normal reserved-platform or tenant-host rules; the canary behavior is not a suffix or wildcard match.
+
+During first-production canary, the only approved route mutation is one exact `canary.selinow.com/* -> selinow-com-production` route. The guarded runbook deploys the reviewed Worker version first, creates that route with one `POST`, records the returned route ID, and removes only that ID on rollback before restoring the captured control version. Queue consumers and cron schedules are inventory-only invariants throughout this workflow.
+
+Do not use `wrangler deploy --env production`, `wrangler triggers deploy` or a bulk Worker Routes `PUT` for the first canary. Those operations can replace the shared-zone route/trigger contract and are outside the canary authorization boundary. See `docs/PRODUCTION_RELEASE.md` for the dedicated upload/apply/rollback commands and token separation.
+
 ## Staging SaaS contract
 
 | Item | Required value |
@@ -78,6 +86,22 @@ The deployed shared-zone configuration uses four explicit Worker routes:
 Cloudflare applies the more specific disabled routes before the broad fallback route. This keeps the apex and normal platform subdomains out of the staging Worker while allowing arbitrary external custom hostnames to reach the Cloudflare for SaaS fallback. The disabled null-script guards were applied manually and verified against staging; production Worker resources and routes were not changed.
 
 The staging environment specification validates the full reviewed contract. Wrangler owns and regenerates only the seven custom domains plus the active wildcard and `*/*` Worker routes; the two disabled null-script guards remain operator-managed because the Worker routes API does not accept them as script-owned routes. `platform:doctor` and every non-dry staging deploy now use a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` to require the exact two `script=null` guards and bind both `*.staging.selinow.com/*` and `*/*` to `selinow-com-staging`; a missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
+
+### Production handoff matrix (not live)
+
+The reviewed production handoff intentionally differs from the current staging inventory and has not been applied. Cloudflare evaluates the most-specific route first, so the safe target is:
+
+| Route | Worker |
+| --- | --- |
+| `selinow.com/*` | `selinow-com-production` |
+| `*.selinow.com/*` | `selinow-com-production` |
+| `staging.selinow.com/*` | `selinow-com-staging` |
+| `app-staging.selinow.com/*` | `selinow-com-staging` |
+| `api-staging.selinow.com/*` | `selinow-com-staging` |
+| `*.staging.selinow.com/*` | `selinow-com-staging` |
+| `*/*` | `selinow-com-production` |
+
+The exact in-zone staging routes are required because a production wildcard route outranks a staging Custom Domain. Worker route patterns must belong to the zone, so an external staging custom hostname cannot be protected by assuming an exact route in `selinow.com`; the handoff requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher before such testing resumes. During first-production canary, add `canary.selinow.com/* -> selinow-com-production` as a temporary specificity override while the existing null wildcard is still present. This matrix is plan-only evidence until a fresh live inventory confirms that every entry and service binding matches.
 
 The active fallback origin and deployed route matrix prove the shared-zone configuration exists. The accepted external customer-hostname lifecycle additionally proves resolution through `customers.selinow.com`, successful HTTPS, correct tenant rendering and removal that stops routing. Every future route or SaaS-contract change must repeat the relevant checks rather than relying only on this baseline.
 

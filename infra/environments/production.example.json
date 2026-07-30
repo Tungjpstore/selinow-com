@@ -10,11 +10,24 @@
     "firstVersionRollback": "restore_pre_bootstrap_traffic_inventory"
   },
   "routing": {
+    "canaryOverrideRoute": "canary.selinow.com/*",
+    "externalCustomDomainFallbackRoute": "*/*",
+    "externalCustomDomainStrategy": "production_fallback_with_platform_staging_exceptions",
+    "platformApexRoute": "selinow.com/*",
     "platformStorefrontWildcard": "*.selinow.com/*",
-    "externalCustomDomainStrategy": "not_admitted_until_staging_catch_all_is_retired"
+    "routeHandoff": "atomic_shared_zone_route_replacement",
+    "stagingExternalCustomDomainInventory": "pending_inventory",
+    "stagingRouteExceptions": [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
+      "*.staging.selinow.com/*"
+    ]
   },
   "turnstile": {
-    "externalCustomDomainStrategy": "not_admitted"
+    "externalCustomDomainAdmission": "pending_runtime_lifecycle",
+    "externalCustomDomainStrategy": "exact_hostname_admission_before_activation",
+    "platformHostname": "selinow.com"
   },
   "resources": {
     "d1": "selinow-production",

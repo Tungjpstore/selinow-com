@@ -47,6 +47,38 @@ const routes: readonly PublicRoute[] = [
     screenshot: "public-storefront-home.png",
     title: "Signal Supply — Cửa hàng sản phẩm số",
   },
+  {
+    heading: "Signal Editor Lifetime",
+    id: "storefront-product-detail",
+    origin: storefrontOrigin,
+    path: "/products/signal-editor-lifetime",
+    screenshot: "public-storefront-product-detail.png",
+    title: "Signal Editor Lifetime — Signal Supply",
+  },
+  {
+    heading: "Kiểm tra trước khi đặt hàng.",
+    id: "storefront-cart",
+    origin: storefrontOrigin,
+    path: "/cart",
+    screenshot: "public-storefront-cart.png",
+    title: "Giỏ hàng — Signal Supply",
+  },
+  {
+    heading: "Hoàn tất thông tin đơn hàng.",
+    id: "storefront-checkout",
+    origin: storefrontOrigin,
+    path: "/checkout",
+    screenshot: "public-storefront-checkout.png",
+    title: "Thanh toán — Signal Supply",
+  },
+  {
+    heading: "Thanh toán và giao hàng, rõ từng trạng thái.",
+    id: "storefront-order-status",
+    origin: storefrontOrigin,
+    path: "/orders/order_00000000-0000-4000-8000-000000000099",
+    screenshot: "public-storefront-order-status.png",
+    title: "Đơn hàng — Signal Supply",
+  },
 ];
 
 function redactRuntimeMessage(value: string): string {
@@ -137,6 +169,9 @@ for (const route of routes) {
     expect(await page.evaluate(() => location.origin)).toBe(route.origin);
     expect(await page.evaluate(() => location.pathname)).toBe(route.path);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(route.heading);
+    if (route.id === "storefront-product-detail") {
+      await expect(page.locator("#detail-add")).toBeEnabled();
+    }
     await expectNoFrameworkOverlay(page);
     await expectStablePage(page, expectedWidth);
     expectNoPrivateLeakage(route, response?.headers() ?? {});
@@ -145,7 +180,7 @@ for (const route of routes) {
     expect(nonReadOnlyRequests, nonReadOnlyRequests.join("\n")).toEqual([]);
     expect(runtimeIssues, runtimeIssues.join("\n")).toEqual([]);
 
-    await expect(page).toHaveScreenshot(route.screenshot, { fullPage: false });
+    await expect(page).toHaveScreenshot(route.screenshot, { fullPage: route.id === "marketing-home" });
     if (route.id === "marketing-home") {
       const faq = page.locator(".faq-list details").first();
       await faq.locator("summary").click();

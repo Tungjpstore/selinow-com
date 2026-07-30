@@ -530,6 +530,90 @@ export async function assertFreshStagingBackupEvidence(options) {
   };
 }
 
+export async function assertFreshProductionBootstrapBackupEvidence(options) {
+  const backupRoot = options.backupRoot ?? resolve(BACKUP_ROOT, "production");
+  let entries;
+  try {
+    entries = await readdir(backupRoot, { withFileTypes: true });
+  } catch {
+    throw new Error("production_bootstrap_backup_evidence_missing");
+  }
+  const latestDirectory = entries
+    .filter((entry) => entry.isDirectory() && /^bkp_\d{14}_[a-f0-9]{12}$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .at(-1);
+  if (latestDirectory === undefined) throw new Error("production_bootstrap_backup_evidence_missing");
+
+  const snapshotDirectory = resolve(backupRoot, latestDirectory);
+  const reportPath = resolve(snapshotDirectory, "snapshot.json");
+  let report;
+  try {
+    report = JSON.parse(await readFile(reportPath, "utf8"));
+  } catch {
+    throw new Error("production_bootstrap_backup_evidence_invalid");
+  }
+  const records = report?.records?.backup_snapshots;
+  const record = Array.isArray(records) && records.length === 1 ? records[0] : null;
+  const source = report?.source;
+  if (
+    report?.report_version !== 2
+    || report?.artifact?.format !== "sql"
+    || report?.artifact?.path !== "database.sql"
+    || record?.id !== latestDirectory
+    || record?.environment !== "production"
+    || record?.resource_ref !== `d1:${options.databaseName}`
+    || record?.snapshot_kind !== "time_travel"
+    || record?.status !== "available"
+    || typeof record?.provider_reference !== "string"
+    || record.provider_reference.length < 8
+    || !/^[a-f0-9]{64}$/u.test(record?.checksum_sha256 ?? "")
+    || !Number.isSafeInteger(record?.size_bytes)
+    || record.size_bytes <= 0
+  ) {
+    throw new Error("production_bootstrap_backup_evidence_invalid");
+  }
+  if (
+    source?.account_id !== options.accountId
+    || source?.database_id !== options.databaseId
+    || source?.database_name !== options.databaseName
+    || source?.resource_ref !== `d1:${options.databaseName}`
+  ) {
+    throw new Error("production_bootstrap_backup_target_mismatch");
+  }
+
+  const completedAt = new Date(record.completed_at);
+  const age = (options.now ?? new Date()).getTime() - completedAt.getTime();
+  if (!Number.isFinite(completedAt.getTime()) || age < 0 || age > 24 * 60 * 60_000) {
+    throw new Error("production_bootstrap_backup_evidence_stale");
+  }
+
+  const artifactPath = resolve(snapshotDirectory, report.artifact.path);
+  assertPathInside(snapshotDirectory, artifactPath);
+  let artifactStat;
+  try {
+    artifactStat = await stat(artifactPath);
+  } catch {
+    throw new Error("production_bootstrap_backup_artifact_invalid");
+  }
+  if (!artifactStat.isFile() || artifactStat.size !== record.size_bytes) {
+    throw new Error("production_bootstrap_backup_artifact_invalid");
+  }
+  if (await sha256File(artifactPath) !== record.checksum_sha256) {
+    throw new Error("production_bootstrap_backup_artifact_invalid");
+  }
+
+  return {
+    artifactPath,
+    completedAt: completedAt.toISOString(),
+    checksumSha256: record.checksum_sha256,
+    providerBookmarkRecorded: true,
+    reportRef: options.backupRoot === undefined ? relativeReportPath(reportPath) : reportPath,
+    sizeBytes: record.size_bytes,
+    snapshotId: record.id,
+  };
+}
+
 function assertPathInside(parent, child) {
   const normalizedParent = resolve(parent);
   const normalizedChild = resolve(child);

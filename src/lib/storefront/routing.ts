@@ -1,4 +1,3 @@
-import type { AppBindings } from "../platform/bindings";
 import { resolveLocale } from "../i18n/locale";
 
 const RESERVED_SUBDOMAINS = new Set([
@@ -8,6 +7,14 @@ const RESERVED_SUBDOMAINS = new Set([
 ]);
 
 export type PlatformHostKind = "api" | "dashboard" | "marketing" | "reserved" | "tenant-candidate" | "unknown";
+
+type PlatformHostEnvironment = {
+  API_ORIGIN: string;
+  CANARY_HOSTNAME?: string;
+  DASHBOARD_ORIGIN: string;
+  PLATFORM_BASE_DOMAIN: string;
+  PLATFORM_ORIGIN: string;
+};
 
 export function normalizeHostname(value: string): string {
   const normalized = value.trim().toLowerCase().replace(/\.+$/u, "");
@@ -21,9 +28,10 @@ function originHostname(origin: string): string {
   return normalizeHostname(new URL(origin).hostname);
 }
 
-export function classifyPlatformHost(hostnameInput: string, env: Pick<AppBindings, "API_ORIGIN" | "DASHBOARD_ORIGIN" | "PLATFORM_BASE_DOMAIN" | "PLATFORM_ORIGIN">): PlatformHostKind {
+export function classifyPlatformHost(hostnameInput: string, env: PlatformHostEnvironment): PlatformHostKind {
   const hostname = normalizeHostname(hostnameInput);
   if (hostname === "") return "unknown";
+  if (env.CANARY_HOSTNAME !== undefined && hostname === normalizeHostname(env.CANARY_HOSTNAME)) return "marketing";
   if (hostname === originHostname(env.PLATFORM_ORIGIN) || hostname === normalizeHostname(env.PLATFORM_BASE_DOMAIN)) return "marketing";
   if (hostname === originHostname(env.DASHBOARD_ORIGIN)) return "dashboard";
   if (hostname === originHostname(env.API_ORIGIN)) return "api";

@@ -309,7 +309,7 @@ const filterTags = (order: SellerOrderSummary): string => [
   .order-filters { display: flex; flex-wrap: wrap; gap: 6px; }
   .order-filters button { min-height: 38px; border: 1px solid transparent; border-radius: var(--sln-radius-pill); padding: 7px 12px; background: transparent; color: var(--sln-text-secondary); font: var(--sln-font-label); cursor: pointer; }
   .order-filters button:hover { background: var(--sln-bg-subtle); color: var(--sln-text-primary); }
-  .order-filters button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--sln-action-primary) 24%, transparent); background: var(--sln-tint-indigo); color: var(--sln-action-primary); }
+  .order-filters button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--sln-action-primary) 24%, transparent); background: var(--sln-tint-indigo); color: var(--sln-action-primary-strong); }
   .order-search { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: center; width: min(100%, 290px); min-height: 42px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 0 12px; background: var(--sln-bg-canvas); color: var(--sln-text-muted); }
   .order-search:focus-within { border-color: var(--sln-action-primary); box-shadow: 0 0 0 3px var(--sln-focus-ring); }
   .order-search svg { width: 18px; height: 18px; stroke: currentcolor; stroke-width: 1.8; fill: none; }
@@ -321,7 +321,7 @@ const filterTags = (order: SellerOrderSummary): string => [
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   .order-table { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
   .table-head, .order-row { display: grid; grid-template-columns: minmax(150px, 1.05fr) minmax(180px, 1.35fr) minmax(100px, .75fr) minmax(130px, 1fr) minmax(120px, .95fr) minmax(120px, .8fr) minmax(95px, .65fr); gap: 14px; align-items: center; padding: 14px 16px; }
-  .table-head { background: var(--sln-bg-subtle); color: var(--sln-text-muted); font: var(--sln-font-caption); font-weight: 700; }
+  .table-head { background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
   .order-row { min-height: 86px; border-top: 1px solid var(--sln-border-default); }
   .order-row[hidden] { display: none; }
   .order-row:hover { background: color-mix(in srgb, var(--sln-tint-indigo) 32%, var(--sln-bg-surface)); }
