@@ -18,11 +18,17 @@ import {
 import { discoverProductionCanaryInventory } from "./lib/production-canary.mjs";
 import { listMigrationNames, readOptionalJson } from "./lib/release.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
+import { assertProductionPromotionStagingContract } from "./lib/production-promotion-staging.mjs";
 
 const DEFAULT_EVIDENCE_PATH = resolve(repositoryRoot, ".wrangler/bootstrap/production-evidence.json");
 const DEFAULT_MANIFEST_PATH = resolve(repositoryRoot, "infra/generated/production.json");
 const DEFAULT_SPEC_PATH = resolve(repositoryRoot, "infra/environments/production.json");
-const DEFAULT_STAGING_SPEC_PATH = resolve(repositoryRoot, "infra/environments/staging.json");
+const DEFAULT_STAGING_SPEC_PATH = resolve(repositoryRoot, "infra/release/production-promotion-staging.json");
+const CANONICAL_STAGING_SPEC_PATH = resolve(repositoryRoot, "infra/environments/staging.json");
+const CANONICAL_PROMOTION_STAGING_SPEC_PATH = resolve(
+  repositoryRoot,
+  "infra/release/production-promotion-staging.json",
+);
 const DEFAULT_TRAFFIC_PATH = resolve(repositoryRoot, ".wrangler/bootstrap/production-inventory.json");
 
 function parseArguments(argv) {
@@ -115,12 +121,13 @@ function writeResult(result, json) {
 try {
   const options = parseArguments(process.argv.slice(2));
   const now = new Date();
-  const [productionSpec, stagingSpec, manifest, canonicalProductionSpec, canonicalStagingSpec, canonicalManifest, plan, evidence, trafficSnapshot, canaryState, acceptanceEvidence, state, savedInventory, migrationNames] = await Promise.all([
+  const [productionSpec, stagingSpec, manifest, canonicalProductionSpec, canonicalStagingSpec, canonicalPromotionStagingSpec, canonicalManifest, plan, evidence, trafficSnapshot, canaryState, acceptanceEvidence, state, savedInventory, migrationNames] = await Promise.all([
     requireJson(options.specPath, "production_spec_missing"),
     requireJson(options.stagingSpecPath, "staging_spec_missing"),
     requireJson(options.manifestPath, "production_bootstrap_generated_manifest_missing"),
     requireJson(DEFAULT_SPEC_PATH, "production_spec_missing"),
-    requireJson(DEFAULT_STAGING_SPEC_PATH, "staging_spec_missing"),
+    requireJson(CANONICAL_STAGING_SPEC_PATH, "staging_spec_missing"),
+    requireJson(CANONICAL_PROMOTION_STAGING_SPEC_PATH, "staging_spec_missing"),
     requireJson(DEFAULT_MANIFEST_PATH, "production_bootstrap_generated_manifest_missing"),
     requireJson(options.planPath, "production_promotion_plan_missing"),
     requireJson(options.evidencePath, "production_bootstrap_evidence_missing"),
@@ -131,9 +138,13 @@ try {
     options.savedInventoryPath === null ? null : requireJson(options.savedInventoryPath, "production_promotion_saved_inventory_missing"),
     listMigrationNames(),
   ]);
+  assertProductionPromotionStagingContract(canonicalStagingSpec, canonicalPromotionStagingSpec);
+  if (!isDeepStrictEqual(stagingSpec, canonicalPromotionStagingSpec)) {
+    throw new Error("production_promotion_staging_contract_invalid");
+  }
   if (
     !isDeepStrictEqual(productionSpec, canonicalProductionSpec)
-    || !isDeepStrictEqual(stagingSpec, canonicalStagingSpec)
+    || !isDeepStrictEqual(stagingSpec, canonicalPromotionStagingSpec)
     || !isDeepStrictEqual(manifest, canonicalManifest)
   ) throw new Error("production_promotion_static_identity_mismatch");
   if (

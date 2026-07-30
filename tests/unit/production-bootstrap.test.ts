@@ -351,7 +351,10 @@ describe("first-production bootstrap ceremony", () => {
       }),
     ]));
 
-    candidate.inventory.domains[candidate.inventory.domains.length - 1].service = "unapproved-worker";
+    const canaryCarrier = candidate.inventory.domains.at(-1);
+    expect(canaryCarrier).toBeDefined();
+    if (canaryCarrier === undefined) throw new Error("canary carrier fixture missing");
+    canaryCarrier.service = "unapproved-worker";
     expect(() => buildProductionBootstrapPlan(candidate))
       .toThrow("production_bootstrap_domain_drift:canary.selinow.com");
   });
@@ -400,11 +403,8 @@ describe("first-production bootstrap ceremony", () => {
 
   it("keeps external custom-domain fallback on staging in platform-only mode", () => {
     const platformOnly = input("promote");
-    platformOnly.productionSpec.routing.stagingExternalCustomDomainInventory = "pending_inventory";
-    platformOnly.stagingSpec.sharedZoneDisabledRoutes = [];
-    platformOnly.stagingSpec.workerRoutes = platformOnly.stagingSpec.workerRoutes.filter(
-      (route: { pattern?: string }) => route.pattern !== "*/*",
-    );
+    (platformOnly.productionSpec as typeof productionSpec).routing.stagingExternalCustomDomainInventory = "pending_inventory";
+    (platformOnly.stagingSpec as typeof stagingSpec).sharedZoneDisabledRoutes = [];
     const plan = buildProductionBootstrapPlan(platformOnly);
     expect(plan.safeguards.cutoverBlockers).toEqual([]);
     expect(plan.actions).toEqual(expect.arrayContaining([

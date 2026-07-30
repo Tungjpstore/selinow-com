@@ -1,0 +1,62 @@
+{
+  "environment": "staging",
+  "accountId": "ef250a88911fd24073cb73d1c07e0218",
+  "zoneId": "ce1536fca500680c544662e361ed869b",
+  "zoneName": "selinow.com",
+  "workerName": "selinow-com-staging",
+  "resources": {
+    "d1": "selinow-staging",
+    "r2": "selinow-media-staging",
+    "privateExports": "selinow-private-exports-staging",
+    "platformCacheKv": "selinow-cache-staging",
+    "sessionKv": "selinow-session-staging",
+    "integrationQueue": "selinow-integration-staging",
+    "notificationQueue": "selinow-notification-staging",
+    "deadLetterQueue": "selinow-dlq-staging"
+  },
+  "hostnames": [
+    "staging.selinow.com",
+    "app-staging.selinow.com",
+    "api-staging.selinow.com",
+    "signal.staging.selinow.com",
+    "canvas.staging.selinow.com",
+    "coming-soon.staging.selinow.com",
+    "paused.staging.selinow.com"
+  ],
+  "wildcardRoute": "*.staging.selinow.com/*",
+  "sharedZoneDisabledRoutes": [],
+  "workerRoutes": [
+    { "custom_domain": true, "pattern": "staging.selinow.com" },
+    { "custom_domain": true, "pattern": "app-staging.selinow.com" },
+    { "custom_domain": true, "pattern": "api-staging.selinow.com" },
+    { "custom_domain": true, "pattern": "signal.staging.selinow.com" },
+    { "custom_domain": true, "pattern": "canvas.staging.selinow.com" },
+    { "custom_domain": true, "pattern": "coming-soon.staging.selinow.com" },
+    { "custom_domain": true, "pattern": "paused.staging.selinow.com" },
+    { "pattern": "*.staging.selinow.com/*", "zone_name": "selinow.com" },
+    { "pattern": "*/*", "zone_name": "selinow.com" }
+  ],
+  "saas": {
+    "fallbackOrigin": "proxy-fallback.selinow.com",
+    "cnameTarget": "customers.selinow.com",
+    "dnsRecords": [
+      {
+        "key": "fallbackOrigin",
+        "type": "AAAA",
+        "name": "proxy-fallback.selinow.com",
+        "content": "100::",
+        "proxied": true,
+        "ttl": 1
+      },
+      {
+        "key": "cnameTarget",
+        "type": "CNAME",
+        "name": "customers.selinow.com",
+        "content": "proxy-fallback.selinow.com",
+        "proxied": true,
+        "ttl": 1
+      }
+    ]
+  },
+  "cron": "* * * * *"
+}

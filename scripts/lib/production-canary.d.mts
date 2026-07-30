@@ -8,6 +8,11 @@ export interface ProductionCanaryRoute {
   script: string | null;
 }
 
+export interface ProductionCanaryWorkerSubdomain {
+  enabled: boolean;
+  previewsEnabled: boolean;
+}
+
 export interface ProductionCanaryInventory {
   accountId: string;
   databaseId: string;
@@ -21,6 +26,7 @@ export interface ProductionCanaryInventory {
   secretNames: string[];
   versions: Array<{ annotations: Record<string, unknown>; id: string; metadata: Record<string, unknown>; number: number | null }>;
   workerName: string;
+  workerSubdomain: ProductionCanaryWorkerSubdomain;
   zoneId: string;
   zoneName: string;
 }
@@ -33,6 +39,7 @@ export interface ProductionCanaryDnsAdmission {
 export function requireCanaryAuditToken(environment: NodeJS.ProcessEnv): string;
 export function requireCanaryRouteToken(environment: NodeJS.ProcessEnv): string;
 export function requireCanaryWorkerToken(environment: NodeJS.ProcessEnv): string;
+export function isFirstProductionPlaceholderVersionView(view: Record<string, any>): boolean;
 export function buildCanaryWranglerEnvironment(environment: NodeJS.ProcessEnv, accountId: string, token: string): NodeJS.ProcessEnv;
 export function buildCanaryBuildEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 export function resolveProductionCanaryDns(input: {

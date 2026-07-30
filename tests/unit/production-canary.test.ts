@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -184,6 +184,7 @@ function inventory(options: {
   schedules?: Array<{ cron: string }>;
   queueConsumers?: Array<{ queueName: string; consumers: unknown[] }>;
   secretNames?: string[];
+  workerSubdomain?: Record<string, unknown>;
   versions?: Array<Record<string, unknown>>;
   deployments?: Array<Record<string, unknown>>;
 } = {}) {
@@ -206,6 +207,7 @@ function inventory(options: {
     secretNames: options.secretNames ?? [...REQUIRED_WORKER_SECRET_NAMES],
     versions,
     workerName: productionSpec.workerName,
+    workerSubdomain: options.workerSubdomain ?? { enabled: false, previews_enabled: false },
     zoneId: ZONE_ID,
     zoneName: productionSpec.zoneName,
   };
@@ -445,7 +447,7 @@ describe("production canary candidate binding contract", () => {
     )).toThrow("production_canary_candidate_binding_mismatch:APP_ENV:text");
   });
 
-  it("rejects invalid static identity, previews, handlers, duplicate, and unexpected bindings", () => {
+  it("rejects invalid static identity, handlers, duplicate, and unexpected bindings", () => {
     expect(() => validateCandidateVersionView(candidateView(), CANDIDATE_VERSION, {
       ...contract,
       generatedManifest: { ...generatedManifest, workerName: "different-worker" },
@@ -454,7 +456,7 @@ describe("production canary candidate binding contract", () => {
       { ...candidateView(), metadata: { has_preview: true } },
       CANDIDATE_VERSION,
       contract,
-    )).toThrow("production_canary_candidate_view_invalid");
+    )).not.toThrow();
     expect(() => validateCandidateVersionView(
       { ...candidateView(), resources: { bindings: completeBindings(), script: { handlers: ["scheduled"] } } },
       CANDIDATE_VERSION,
@@ -516,6 +518,8 @@ describe("production canary live inventory", () => {
           ? []
         : url.endsWith("/schedules")
           ? { schedules: [] }
+          : url.endsWith("/subdomain")
+            ? { enabled: false, previews_enabled: false }
           : { deployments: inventory().deployments };
       return new Response(JSON.stringify({ success: true, result }), { headers: { "content-type": "application/json" } });
     };
@@ -530,19 +534,21 @@ describe("production canary live inventory", () => {
       runWranglerImplementation: runner,
     });
     expect(discovered.schedules).toEqual([]);
+    expect(discovered.workerSubdomain).toEqual({ enabled: false, previewsEnabled: false });
     await expect(runProductionCanaryUpload(input({
       inventoryImplementation: async () => discovered,
       trafficSnapshot: { domains: discovered.domains, routes: routeSnapshot(discovered.routes) },
     }))).resolves.toMatchObject({ executed: false, ok: true });
     expect(commands.slice(0, 3).map((args) => args.slice(0, 2).join(" "))).toEqual(["whoami --json", "d1 list", "secret list"]);
     expect(commands.findIndex((args) => args[0] === "versions")).toBeGreaterThanOrEqual(3);
-    expect(fetchCalls).toHaveLength(4);
+    expect(fetchCalls).toHaveLength(5);
     expect(fetchCalls.every((call) => call.method === "GET" && call.authorization === "Bearer audit-token")).toBe(true);
     expect(fetchCalls.map((call) => call.url)).toEqual(expect.arrayContaining([
       `https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/workers/routes`,
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/domains`,
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/scripts/${productionSpec.workerName}/schedules`,
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/scripts/${productionSpec.workerName}/deployments`,
+      `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/scripts/${productionSpec.workerName}/subdomain`,
     ]));
   });
 
@@ -566,6 +572,9 @@ describe("production canary live inventory", () => {
     }))).rejects.toThrow("production_canary_existing_worker_domain");
     await expect(invoke({ schedules: [{ cron: "*/5 * * * *" }] })).rejects.toThrow("production_canary_cron_trigger_present");
     await expect(invoke({ queueConsumers: [{ queueName: productionSpec.resources.integrationQueue, consumers: [{ id: "consumer" }] }, ...valid.queueConsumers.slice(1)] })).rejects.toThrow("production_canary_queue_consumer_present");
+    await expect(invoke({ workerSubdomain: { enabled: true, previews_enabled: false } })).rejects.toThrow("production_canary_worker_subdomain_enabled");
+    await expect(invoke({ workerSubdomain: { enabled: false, previews_enabled: true } })).rejects.toThrow("production_canary_worker_subdomain_enabled");
+    await expect(invoke({ workerSubdomain: { enabled: false } })).rejects.toThrow("production_canary_worker_subdomain_inventory_invalid");
   });
 });
 
@@ -661,7 +670,7 @@ describe("production canary upload", () => {
     expect(uploadImplementation).not.toHaveBeenCalled();
   });
 
-  it("captures exactly one non-preview candidate and validates all bindings", async () => {
+  it("captures exactly one candidate and validates all bindings while treating version preview metadata as informational", async () => {
     const before = inventory();
     const after = inventory({ versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: false })] });
     let index = 0;
@@ -679,14 +688,29 @@ describe("production canary upload", () => {
 
     const preview = inventory({ versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: true })] });
     index = 0;
-    await expect(runProductionCanaryUpload(input({
+    const previewResult = await runProductionCanaryUpload(input({
       execute: true,
       buildImplementation: async () => {},
       uploadImplementation: async () => {},
       inventoryImplementation: async () => [before, before, preview][index++],
       versionViewImplementation: async () => candidateView(),
+      writeReportImplementation: async () => "preview-report.json",
       tag: "canary-20260730",
-    }))).rejects.toThrow("production_canary_preview_url_enabled");
+    }));
+    expect(previewResult.report.candidateHasPreview).toBe(true);
+
+    const metadataMissing = inventory({ versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION)] });
+    index = 0;
+    const metadataMissingResult = await runProductionCanaryUpload(input({
+      execute: true,
+      buildImplementation: async () => {},
+      uploadImplementation: async () => {},
+      inventoryImplementation: async () => [before, before, metadataMissing][index++],
+      versionViewImplementation: async () => ({ ...candidateView(), metadata: {} }),
+      writeReportImplementation: async () => "metadata-missing-report.json",
+      tag: "canary-20260730",
+    }));
+    expect(metadataMissingResult.report.candidateHasPreview).toBe(null);
 
     index = 0;
     await expect(runProductionCanaryUpload(input({
@@ -708,6 +732,28 @@ describe("production canary upload", () => {
       versionViewImplementation: async () => candidateView(),
       tag: "canary-20260730",
     }))).rejects.toThrow("production_canary_candidate_capture_invalid");
+  });
+
+  it("fails closed if the Worker subdomain or preview setting changes during upload", async () => {
+    const before = inventory();
+    for (const workerSubdomain of [
+      { enabled: true, previews_enabled: false },
+      { enabled: false, previews_enabled: true },
+    ]) {
+      const changed = inventory({
+        versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: true })],
+        workerSubdomain,
+      });
+      let index = 0;
+      await expect(runProductionCanaryUpload(input({
+        execute: true,
+        buildImplementation: async () => {},
+        uploadImplementation: async () => {},
+        inventoryImplementation: async () => [before, before, changed][index++],
+        versionViewImplementation: async () => candidateView(),
+        writeReportImplementation: vi.fn(),
+      }))).rejects.toThrow("production_canary_worker_subdomain_enabled");
+    }
   });
 
   it("advances from reviewed null-candidate evidence to candidate-bound apply evidence", async () => {
@@ -995,6 +1041,51 @@ describe("production canary apply and rollback", () => {
       deployVersionImplementation: vi.fn(),
       createRouteImplementation: vi.fn(),
     }))).rejects.toThrow("production_canary_candidate_missing");
+  });
+
+  it("blocks apply and rollback before mutation when the Worker subdomain is enabled", async () => {
+    const report = await uploadReport();
+    const versions = [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: true })];
+    const applyInventory = inventory({
+      versions,
+      workerSubdomain: { enabled: false, previews_enabled: true },
+    });
+    const deploy = vi.fn();
+    const createRoute = vi.fn();
+    await expect(runProductionCanaryApply(input({
+      execute: true,
+      evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
+      uploadReport: report,
+      inventoryImplementation: async () => applyInventory,
+      deployVersionImplementation: deploy,
+      createRouteImplementation: createRoute,
+    }))).rejects.toThrow("production_canary_worker_subdomain_enabled");
+    expect(deploy).not.toHaveBeenCalled();
+    expect(createRoute).not.toHaveBeenCalled();
+
+    const withRoute = inventory({
+      activeVersionId: CANDIDATE_VERSION,
+      routes: [...baseRoutes(), { id: ROUTE_ID, pattern: "canary.selinow.com/*", script: productionSpec.workerName }],
+      versions,
+      workerSubdomain: { enabled: true, previews_enabled: false },
+    });
+    const deleteRoute = vi.fn();
+    await expect(runProductionCanaryRollback(input({
+      execute: true,
+      evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
+      canaryState: {
+        schemaVersion: 1, mode: "applied", environment: "production", accountId: ACCOUNT_ID, zoneId: ZONE_ID,
+        planSha256: fingerprint(canaryPlan()),
+        workerName: productionSpec.workerName, ceremonyId: "bootstrap_20260730_reviewed", candidateVersionId: CANDIDATE_VERSION, controlVersionId: CONTROL_VERSION,
+        canaryRoute: { id: ROUTE_ID, pattern: "canary.selinow.com/*", script: productionSpec.workerName },
+        routesBefore: sortedRoutes(), routesAfter: sortedRoutes(withRoute.routes),
+      },
+      inventoryImplementation: async () => withRoute,
+      deleteRouteImplementation: deleteRoute,
+      deployVersionImplementation: deploy,
+    }))).rejects.toThrow("production_canary_worker_subdomain_enabled");
+    expect(deleteRoute).not.toHaveBeenCalled();
+    expect(deploy).not.toHaveBeenCalled();
   });
 
   it("deletes only the canary route before restoring the control version", async () => {

@@ -492,6 +492,20 @@ function normalizeDeployments(value) {
   }).sort((left, right) => Date.parse(right.createdOn) - Date.parse(left.createdOn));
 }
 
+function normalizeWorkerSubdomain(value) {
+  const previewsEnabled = value?.previewsEnabled ?? value?.previews_enabled;
+  if (
+    typeof value?.enabled !== "boolean"
+    || typeof previewsEnabled !== "boolean"
+    || (value?.previewsEnabled !== undefined
+      && value?.previews_enabled !== undefined
+      && value.previewsEnabled !== value.previews_enabled)
+  ) {
+    throw new Error("production_canary_worker_subdomain_inventory_invalid");
+  }
+  return { enabled: value.enabled, previewsEnabled };
+}
+
 function normalizeSchedules(value) {
   if (!Array.isArray(value)) throw new Error("production_canary_schedule_inventory_invalid");
   return value.map((schedule) => {
@@ -557,7 +571,7 @@ export async function discoverProductionCanaryInventory(input) {
   assertDatabaseIdentity(d1Output, input.databaseId, spec.resources.d1);
   const secretNames = parseSecretNames(run(["secret", "list", "--name", spec.workerName]));
 
-  const [routes, domains, schedulesResult, deploymentsResult] = await Promise.all([
+  const [routes, domains, schedulesResult, deploymentsResult, workerSubdomain] = await Promise.all([
     cloudflareApiRequest(input.auditToken, `/zones/${spec.zoneId}/workers/routes`, {
       fetchImplementation: input.fetchImplementation,
     }),
@@ -568,6 +582,9 @@ export async function discoverProductionCanaryInventory(input) {
       fetchImplementation: input.fetchImplementation,
     }),
     cloudflareApiRequest(input.auditToken, `/accounts/${spec.accountId}/workers/scripts/${encodeURIComponent(spec.workerName)}/deployments`, {
+      fetchImplementation: input.fetchImplementation,
+    }),
+    cloudflareApiRequest(input.auditToken, `/accounts/${spec.accountId}/workers/scripts/${encodeURIComponent(spec.workerName)}/subdomain`, {
       fetchImplementation: input.fetchImplementation,
     }),
   ]);
@@ -597,6 +614,7 @@ export async function discoverProductionCanaryInventory(input) {
     secretNames,
     versions,
     workerName: spec.workerName,
+    workerSubdomain,
     zoneId: spec.zoneId,
     zoneName: spec.zoneName,
   });
@@ -649,6 +667,7 @@ export function normalizeCanaryInventory(input) {
     }))].sort(),
     versions: normalizeVersions(input.versions),
     workerName: input.workerName,
+    workerSubdomain: normalizeWorkerSubdomain(input.workerSubdomain),
     zoneId: input.zoneId,
     zoneName: input.zoneName.toLowerCase(),
   };
@@ -695,6 +714,15 @@ function assertRuntimeSecrets(inventory) {
   const names = new Set(inventory.secretNames);
   const missing = REQUIRED_WORKER_SECRET_NAMES.find((name) => !names.has(name));
   if (missing !== undefined) throw new Error(`production_canary_worker_secret_missing:${missing}`);
+}
+
+function assertWorkerSubdomainDisabled(inventory) {
+  if (
+    inventory.workerSubdomain.enabled !== false
+    || inventory.workerSubdomain.previewsEnabled !== false
+  ) {
+    throw new Error("production_canary_worker_subdomain_enabled");
+  }
 }
 
 function assertTargetIdentity(inventory, input) {
@@ -797,6 +825,7 @@ function assertBaseInventory(input, inventory) {
   assertSavedTrafficSnapshot(inventory, input.trafficSnapshot);
   assertIdleProductionTriggers(inventory);
   assertRuntimeSecrets(inventory);
+  assertWorkerSubdomainDisabled(inventory);
   if (
     input.plan?.safeguards?.secretNamesFingerprintSha256 !== undefined
     && input.plan.safeguards.secretNamesFingerprintSha256 !== fingerprint(inventory.secretNames)
@@ -824,6 +853,7 @@ function invariantInventory(inventory) {
     schedules: inventory.schedules,
     secretNames: inventory.secretNames,
     workerName: inventory.workerName,
+    workerSubdomain: inventory.workerSubdomain,
     zoneId: inventory.zoneId,
     zoneName: inventory.zoneName,
   };
@@ -849,7 +879,6 @@ function candidateFromInventories(before, after) {
   const beforeIds = new Set(before.versions.map((version) => version.id));
   const added = after.versions.filter((version) => !beforeIds.has(version.id));
   if (added.length !== 1) throw new Error("production_canary_candidate_capture_invalid");
-  if (added[0].metadata?.has_preview !== false) throw new Error("production_canary_preview_url_enabled");
   return added[0];
 }
 
@@ -902,7 +931,6 @@ function candidateBindingContract(input) {
 export function validateCandidateVersionView(view, candidateVersionId, input) {
   if (
     view?.id !== candidateVersionId
-    || view?.metadata?.has_preview !== false
     || !Array.isArray(view?.resources?.bindings)
     || !Array.isArray(view?.resources?.script?.handlers)
     || !view.resources.script.handlers.includes("fetch")
@@ -971,6 +999,7 @@ export async function runProductionCanaryUpload(input) {
   }
   await input.uploadImplementation(activeVersionId(admitted));
   const after = normalizeCanaryInventory(await input.inventoryImplementation());
+  assertWorkerSubdomainDisabled(after);
   assertUploadRouteNeutral(admitted, after);
   const candidate = candidateFromInventories(admitted, after);
   const versionView = await input.versionViewImplementation(candidate.id);
@@ -982,6 +1011,9 @@ export async function runProductionCanaryUpload(input) {
   const report = {
     accountId: after.accountId,
     bindingNames,
+    candidateHasPreview: typeof candidate.metadata?.has_preview === "boolean"
+      ? candidate.metadata.has_preview
+      : null,
     candidateVersionId: candidate.id,
     ceremonyId: input.evidence.ceremonyId,
     controlVersionId: activeVersionId(admitted),
@@ -1062,6 +1094,7 @@ function assertNonDeploymentInventoryUnchanged(before, after, code) {
     || !isDeepStrictEqual(before.queueConsumers, after.queueConsumers)
     || !isDeepStrictEqual(before.schedules, after.schedules)
     || !isDeepStrictEqual(before.secretNames, after.secretNames)
+    || !isDeepStrictEqual(before.workerSubdomain, after.workerSubdomain)
   ) {
     throw new Error(code);
   }
@@ -1084,6 +1117,7 @@ function assertCanaryRouteApplied(before, after, pattern, workerName, routeId) {
     !isDeepStrictEqual(before.domains, after.domains)
     || !isDeepStrictEqual(before.queueConsumers, after.queueConsumers)
     || !isDeepStrictEqual(before.schedules, after.schedules)
+    || !isDeepStrictEqual(before.workerSubdomain, after.workerSubdomain)
   ) {
     throw new Error("production_canary_route_apply_changed_unapproved_state");
   }
@@ -1101,6 +1135,7 @@ async function compensateCanaryApply(input, initial, report, originalError, crea
   let current;
   try {
     current = normalizeCanaryInventory(await input.inventoryImplementation());
+    assertWorkerSubdomainDisabled(current);
   } catch (error) {
     throw new Error("production_canary_apply_compensation_failed", { cause: error });
   }
@@ -1131,6 +1166,7 @@ async function compensateCanaryApply(input, initial, report, originalError, crea
       || !isDeepStrictEqual(withoutRoute.queueConsumers, initial.queueConsumers)
       || !isDeepStrictEqual(withoutRoute.schedules, initial.schedules)
       || !isDeepStrictEqual(withoutRoute.secretNames, initial.secretNames)
+      || !isDeepStrictEqual(withoutRoute.workerSubdomain, initial.workerSubdomain)
     ) {
       throw new Error("production_canary_route_compensation_drift");
     }
@@ -1164,6 +1200,7 @@ async function compensateCanaryApply(input, initial, report, originalError, crea
   }
   try {
     const restored = normalizeCanaryInventory(await input.inventoryImplementation());
+    assertWorkerSubdomainDisabled(restored);
     if (
       !isDeepStrictEqual(nonDeploymentInvariantInventory(initial), nonDeploymentInvariantInventory(restored))
       || activeVersionId(restored) !== report.controlVersionId
@@ -1221,6 +1258,7 @@ export async function runProductionCanaryApply(input) {
       deployError = error;
     }
     const deployed = normalizeCanaryInventory(await input.inventoryImplementation());
+    assertWorkerSubdomainDisabled(deployed);
     assertNonDeploymentInventoryUnchanged(initial, deployed, "production_canary_deploy_changed_live_state");
     assertIdleProductionTriggers(deployed);
     if (deployError !== null && activeVersionId(deployed) === report.controlVersionId) throw deployError;
@@ -1247,6 +1285,7 @@ export async function runProductionCanaryApply(input) {
     }
     createdRouteId = createdRoute.id;
     const after = normalizeCanaryInventory(await input.inventoryImplementation());
+    assertWorkerSubdomainDisabled(after);
     assertCandidateActive(after, report.candidateVersionId);
     assertCanaryRouteApplied(deployed, after, routePattern, workerName, createdRoute.id);
     const state = {
@@ -1339,6 +1378,7 @@ export async function runProductionCanaryRollback(input) {
   validateCommonMutationFlags(input);
   const state = assertCanaryState(input);
   const initial = normalizeCanaryInventory(await input.inventoryImplementation());
+  assertWorkerSubdomainDisabled(initial);
   assertCandidateActive(initial, state.candidateVersionId);
   assertRouteSnapshot(initial, state.routesAfter, "production_canary_rollback_route_drift");
   assertIdleProductionTriggers(initial);
@@ -1361,6 +1401,7 @@ export async function runProductionCanaryRollback(input) {
     deleteError = error;
   }
   const routeRestored = normalizeCanaryInventory(await input.inventoryImplementation());
+  assertWorkerSubdomainDisabled(routeRestored);
   try {
     assertRouteSnapshot(routeRestored, state.routesBefore, "production_canary_rollback_routes_not_restored");
   } catch (error) {
@@ -1375,6 +1416,7 @@ export async function runProductionCanaryRollback(input) {
     deployError = error;
   }
   const final = normalizeCanaryInventory(await input.inventoryImplementation());
+  assertWorkerSubdomainDisabled(final);
   assertRouteSnapshot(final, state.routesBefore, "production_canary_rollback_final_route_drift");
   assertIdleProductionTriggers(final);
   if (activeVersionId(final) !== state.controlVersionId) {

@@ -35,7 +35,7 @@ const stagingSpec = {
     "coming-soon.staging.selinow.com",
     "paused.staging.selinow.com",
   ],
-  sharedZoneDisabledRoutes: [],
+  sharedZoneDisabledRoutes: [] as string[],
   wildcardRoute: "*.staging.selinow.com/*",
   workerName: "selinow-com-staging",
   workerRoutes: [

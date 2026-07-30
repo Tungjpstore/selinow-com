@@ -108,7 +108,7 @@ npm run release:production:canary -- \
   --json
 ```
 
-The upload phase builds without operator credentials and invokes only `wrangler versions upload --env production --strict`; it never invokes `wrangler deploy`, writes a route or changes triggers. It then requires exactly one new preview-disabled Worker version, inspects the candidate bindings and proves that routes, Worker Domains, deployments, queue consumers and cron schedules did not drift. The private report is written mode `0600` at `.wrangler/bootstrap/<ceremony-id>/canary-upload.json`. Record its `candidateVersionId` as `candidateWorkerVersion` in the private bootstrap evidence before apply.
+The upload phase builds without operator credentials and invokes only `wrangler versions upload --env production --strict`; it never invokes `wrangler deploy`, writes a route or changes triggers. It then requires exactly one new Worker version, treats that version's `metadata.has_preview` value as informational, verifies the live Worker subdomain configuration remains `enabled=false` and `previews_enabled=false`, inspects the candidate bindings and proves that routes, Worker Domains, deployments, queue consumers and cron schedules did not drift. The private report is written mode `0600` at `.wrangler/bootstrap/<ceremony-id>/canary-upload.json`. Record its `candidateVersionId` as `candidateWorkerVersion` in the private bootstrap evidence before apply.
 
 Apply the candidate only from that exact upload report:
 
@@ -124,7 +124,7 @@ npm run release:production:canary -- \
   --json
 ```
 
-Apply first performs a read-only public DNS admission for the exact `canary.selinow.com` hostname. The hostname must resolve to at least one address and every returned A/AAAA address must be in Cloudflare's published anycast ranges; an empty answer, non-Cloudflare answer or resolver failure stops before the candidate deploy. The check is repeated after candidate deployment immediately before the route mutation, so DNS drift fails closed and triggers the existing compensation path. Apply then runs `wrangler versions deploy <candidate-version>@100%`, verifies that the captured route/domain/queue/cron inventory is unchanged, and only then creates exactly `canary.selinow.com/* -> selinow-com-production` with a single route `POST`. It does not add a Worker Custom Domain and does not hand off `selinow.com`, `*.selinow.com` or `*/*`. The captured route ID, control version, DNS admission addresses and before/after route snapshots are stored at `.wrangler/bootstrap/<ceremony-id>/canary-applied.json`.
+Apply first performs a read-only public DNS admission for the exact `canary.selinow.com` hostname. The hostname must resolve to at least one address and every returned A/AAAA address must be in Cloudflare's published anycast ranges; an empty answer, non-Cloudflare answer or resolver failure stops before the candidate deploy. The live inventory also reads the production Worker's subdomain configuration and requires both `enabled=false` and `previews_enabled=false`; this is the authoritative preview gate because Wrangler version metadata `has_preview` is informational and may remain true when the Worker subdomain is disabled. The DNS and subdomain checks are repeated after candidate deployment immediately before the route mutation, so drift fails closed and triggers the existing compensation path. Apply then runs `wrangler versions deploy <candidate-version>@100%`, verifies that the captured route/domain/subdomain/queue/cron inventory is unchanged, and only then creates exactly `canary.selinow.com/* -> selinow-com-production` with a single route `POST`. It does not add a Worker Custom Domain and does not hand off `selinow.com`, `*.selinow.com` or `*/*`. The captured route ID, control version, DNS admission addresses and before/after route snapshots are stored at `.wrangler/bootstrap/<ceremony-id>/canary-applied.json`.
 
 If canary acceptance fails, rollback from the captured state rather than rediscovering or guessing a route ID:
 
@@ -140,7 +140,7 @@ npm run release:production:canary -- \
   --json
 ```
 
-Rollback verifies that the candidate and exact post-apply route snapshot are still active, deletes only the captured canary route ID, verifies the original routes are restored, and then deploys the exact captured control version at 100%. The final private report is `.wrangler/bootstrap/<ceremony-id>/canary-rollback.json`. Any route, version, domain, queue or cron drift fails closed for operator review; the tool never repairs drift with a full route replacement.
+Rollback verifies that the candidate, disabled Worker subdomain and exact post-apply route snapshot are still active, deletes only the captured canary route ID, verifies the original routes and disabled subdomain state are restored, and then deploys the exact captured control version at 100%. The final private report is `.wrangler/bootstrap/<ceremony-id>/canary-rollback.json`. Any route, version, domain, subdomain, queue or cron drift fails closed for operator review; the tool never repairs drift with a full route replacement.
 
 Worker rollback does **not** roll back D1. Production migrations remain forward-only: fix forward when possible, or follow the separately approved backup/isolated-restore and controlled database cutover procedure. Never run a down migration as part of canary rollback.
 
@@ -168,6 +168,8 @@ npm run release:production:bootstrap -- \
 ```
 
 The write command produces `.wrangler/bootstrap/<ceremony-id>/promote-plan.json`. Do not substitute the pre-canary resource inventory: the executor requires the exact post-canary route/domain/trigger snapshot whose fingerprint is stored in this plan.
+
+`--phase promote` is pinned to `infra/release/production-promotion-staging.json`. That checked-in release contract must remain an exact derivation of `infra/environments/staging.json` with only `sharedZoneDisabledRoutes` changed to an empty array. Both the planner and executor verify this relationship before admission and reject a `--staging-spec` override that differs from the canonical promotion contract. Do not remove the apex/wildcard guards from the normal staging spec: staging doctor, preflight, provisioning and deploy continue to require them.
 
 The executor recomputes cutover blockers, requires a fresh live route/domain/trigger inventory to match the saved canary state, and rejects every route pattern outside `buildProductionRouteHandoff`. In the current platform-only mode, the initial `*/*` route must already point to `selinow-com-staging`; the executor fails closed on fallback drift and leaves that route untouched. It changes only the production apex and platform wildcard to `selinow-com-production` while preserving the exact staging exceptions. Creates use one-route `POST`, replacements use ID-bound per-route `PUT`, and deletions use captured-ID `DELETE`; it never sends a zone-wide Worker Routes replacement and never changes Worker Domains, DNS, queues, cron, versions, secrets or D1:
 

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 import { resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { writeOutput } from "./lib/cli.mjs";
 import {
@@ -10,6 +11,13 @@ import {
 } from "./lib/production-bootstrap.mjs";
 import { listMigrationNames, readOptionalJson } from "./lib/release.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
+import { assertProductionPromotionStagingContract } from "./lib/production-promotion-staging.mjs";
+
+const DEFAULT_STAGING_SPEC_PATH = resolve(repositoryRoot, "infra/environments/staging.json");
+const DEFAULT_PROMOTION_STAGING_SPEC_PATH = resolve(
+  repositoryRoot,
+  "infra/release/production-promotion-staging.json",
+);
 
 function parseArguments(argv) {
   const options = {
@@ -21,7 +29,7 @@ function parseArguments(argv) {
     phase: "resources",
     secretNamesPath: null,
     specPath: resolve(repositoryRoot, "infra/environments/production.json"),
-    stagingSpecPath: resolve(repositoryRoot, "infra/environments/staging.json"),
+    stagingSpecPath: null,
     write: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -37,6 +45,11 @@ function parseArguments(argv) {
     else if (argument === "--spec") options.specPath = resolve(repositoryRoot, argv[++index] ?? "");
     else if (argument === "--staging-spec") options.stagingSpecPath = resolve(repositoryRoot, argv[++index] ?? "");
     else throw new Error(`unknown_argument:${argument}`);
+  }
+  if (options.stagingSpecPath === null) {
+    options.stagingSpecPath = options.phase === "promote"
+      ? DEFAULT_PROMOTION_STAGING_SPEC_PATH
+      : DEFAULT_STAGING_SPEC_PATH;
   }
   return options;
 }
@@ -67,9 +80,11 @@ async function loadSecretNames(path) {
 }
 
 async function loadAdmissionInput(options, now) {
-  const [productionSpec, stagingSpec, evidence, inventory, secretNames, migrationNames] = await Promise.all([
+  const [productionSpec, stagingSpec, canonicalStagingSpec, canonicalPromotionStagingSpec, evidence, inventory, secretNames, migrationNames] = await Promise.all([
     readOptionalJson(options.specPath),
     readOptionalJson(options.stagingSpecPath),
+    readOptionalJson(DEFAULT_STAGING_SPEC_PATH),
+    readOptionalJson(DEFAULT_PROMOTION_STAGING_SPEC_PATH),
     readOptionalJson(options.evidencePath),
     readOptionalJson(options.inventoryPath),
     loadSecretNames(options.secretNamesPath),
@@ -77,6 +92,13 @@ async function loadAdmissionInput(options, now) {
   ]);
   if (productionSpec === null) throw new Error("production_spec_missing");
   if (stagingSpec === null) throw new Error("staging_spec_missing");
+  if (canonicalStagingSpec === null || canonicalPromotionStagingSpec === null) {
+    throw new Error("production_promotion_staging_contract_missing");
+  }
+  assertProductionPromotionStagingContract(canonicalStagingSpec, canonicalPromotionStagingSpec);
+  if (options.phase === "promote" && !isDeepStrictEqual(stagingSpec, canonicalPromotionStagingSpec)) {
+    throw new Error("production_promotion_staging_contract_invalid");
+  }
   if (evidence === null) throw new Error("production_bootstrap_evidence_missing");
   if (inventory === null) throw new Error("production_bootstrap_inventory_missing");
   return {
