@@ -372,13 +372,19 @@ export function requireCanaryWorkerToken(environment) {
 
 export function isFirstProductionPlaceholderVersionView(view) {
   const bindings = view?.resources?.bindings;
-  if (!Array.isArray(bindings) || view?.resources?.assets !== null || view?.bindings !== null) return false;
-  const names = bindings
-    .filter((binding) => binding?.type === "secret_text" && typeof binding?.name === "string")
-    .map((binding) => binding.name)
-    .sort();
-  return names.length === REQUIRED_WORKER_SECRET_NAMES.length
-    && names.every((name, index) => name === [...REQUIRED_WORKER_SECRET_NAMES].sort()[index]);
+  if (
+    !Array.isArray(bindings)
+    || view?.resources?.assets != null
+    || view?.bindings != null
+    || bindings.length !== REQUIRED_WORKER_SECRET_NAMES.length
+  ) return false;
+  const names = [];
+  for (const binding of bindings) {
+    if (binding?.type !== "secret_text" || typeof binding?.name !== "string") return false;
+    names.push(binding.name);
+  }
+  const expectedNames = [...REQUIRED_WORKER_SECRET_NAMES].sort();
+  return names.sort().every((name, index) => name === expectedNames[index]);
 }
 
 export function buildCanaryWranglerEnvironment(environment, accountId, token) {

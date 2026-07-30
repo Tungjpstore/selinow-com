@@ -384,12 +384,26 @@ describe("production canary candidate binding contract", () => {
     };
     expect(isFirstProductionPlaceholderVersionView(placeholder)).toBe(true);
     expect(isFirstProductionPlaceholderVersionView({
+      resources: { bindings: placeholder.resources.bindings },
+    })).toBe(true);
+    expect(isFirstProductionPlaceholderVersionView({
       ...placeholder,
       resources: { ...placeholder.resources, assets: { config: {} } },
     })).toBe(false);
     expect(isFirstProductionPlaceholderVersionView({
       ...placeholder,
+      bindings: [],
+    })).toBe(false);
+    expect(isFirstProductionPlaceholderVersionView({
+      ...placeholder,
       resources: { ...placeholder.resources, bindings: placeholder.resources.bindings.slice(1) },
+    })).toBe(false);
+    expect(isFirstProductionPlaceholderVersionView({
+      ...placeholder,
+      resources: {
+        ...placeholder.resources,
+        bindings: [...placeholder.resources.bindings, { name: "PLATFORM_DB", type: "d1" }],
+      },
     })).toBe(false);
   });
 
