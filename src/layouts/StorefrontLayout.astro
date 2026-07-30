@@ -1,0 +1,171 @@
+---
+import type { StorefrontShop } from "../lib/storefront/store";
+import { getBindings } from "../lib/platform/bindings";
+import { directionForLocale, normalizeSupportedLocale } from "../lib/i18n/locale";
+import { createStorefrontTranslator } from "../lib/i18n/catalogs/storefront";
+import { resolveTurnstileConfiguration } from "../lib/storefront/turnstile";
+import "../styles/selinow-tokens.css";
+import "../styles/base.css";
+import "../styles/primitives.css";
+import "../styles/selinow-a11y.css";
+import "../styles/storefront.css";
+
+interface Props {
+  abuseReportProductSlug?: string | undefined;
+  description?: string;
+  noindex?: boolean;
+  shop: StorefrontShop;
+  title: string;
+}
+
+const { abuseReportProductSlug, description, noindex = false, shop, title } = Astro.props;
+const turnstileSiteKey = resolveTurnstileConfiguration(getBindings())?.siteKey ?? null;
+const style = `--merchant-brand:${shop.theme.brand};--merchant-brand-ink:${shop.theme.brandInk};--merchant-accent:${shop.theme.accent};--merchant-accent-ink:${shop.theme.accentInk}`;
+const canonicalUrl = new URL(Astro.url.pathname, `https://${shop.currentHostname}`).toString();
+const metaDescription = description ?? shop.content.seoDescription;
+const { publicDetails } = shop;
+// Keep the rendered language aligned with the locale dimension used by the
+// storefront cache; the shop default remains the safe SSR fallback in tests.
+const documentLocale = Astro.locals.locale ?? normalizeSupportedLocale(shop.defaultLocale);
+const t = createStorefrontTranslator(documentLocale);
+const policyLinks = [
+  publicDetails.refundPolicyUrl === null ? null : { href: publicDetails.refundPolicyUrl, label: t("storefront.policy.refund") },
+  publicDetails.termsUrl === null ? null : { href: publicDetails.termsUrl, label: t("storefront.policy.terms") },
+  publicDetails.privacyUrl === null ? null : { href: publicDetails.privacyUrl, label: t("storefront.policy.privacy") },
+].filter((link): link is { href: string; label: string } => link !== null);
+---
+
+<!doctype html>
+<html lang={documentLocale} dir={directionForLocale(documentLocale)} style={style}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={metaDescription} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={metaDescription} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta name="twitter:card" content="summary" />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    <meta name="theme-color" content="#F8FAFC" />
+    <link rel="canonical" href={canonicalUrl} />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/brand/logo/selinow-app-icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/selinow-180.png" />
+    <title>{title}</title>
+  </head>
+  <body
+    data-shop-host={shop.currentHostname}
+    data-storefront-surface
+    data-cart-count-template={t("storefront.cart_count", { count: "{count}" })}
+    data-cart-added-label={t("storefront.product.added")}
+  >
+    <a class="store-skip-link" href="#store-content">{t("storefront.skip")}</a>
+    {shop.content.announcement && <div class="store-announcement">{shop.content.announcement}</div>}
+    <header class="store-header">
+      <a class="store-brand" href="/" aria-label={t("storefront.home_aria", { shop: shop.name })}>
+        {shop.theme.logoUrl ? <img src={shop.theme.logoUrl} alt="" width="44" height="44" /> : <span aria-hidden="true">{shop.name.slice(0, 1).toUpperCase()}</span>}
+        <strong>{shop.name}</strong>
+      </a>
+      <nav aria-label={t("storefront.nav_aria")}>
+        <a href="/#products">{t("storefront.nav.products")}</a>
+        <a class="support-link" href="#store-support">{t("storefront.nav.support")}</a>
+        <a class="cart-link" href="/cart">
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20"><path d="M3 4h2l2 11h10l2-8H6M9 20h.01M17 20h.01" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          <span class="cart-link-label">{t("storefront.nav.cart")}</span>
+          <span data-cart-count aria-label={t("storefront.cart_count", { count: 0 })}>0</span>
+        </a>
+      </nav>
+    </header>
+    <main id="store-content">
+      <slot />
+    </main>
+    <aside id="store-support" class="store-support-rail" aria-label={t("storefront.support_aria")}>
+      <span class="store-support-icon" aria-hidden="true">?</span>
+      <span><strong>{t("storefront.support_prompt")}</strong><small>{publicDetails.support.label}</small></span>
+      {publicDetails.support.href && <a class="store-button store-support-action" href={publicDetails.support.href} rel={publicDetails.support.href.startsWith("https://") ? "noreferrer" : undefined}>{t("storefront.contact")}</a>}
+    </aside>
+    <footer class="store-footer">
+      <div>
+        <p>{shop.content.footerText}</p>
+        <p class="store-support">
+          {publicDetails.support.href ? <a href={publicDetails.support.href} rel={publicDetails.support.href.startsWith("https://") ? "noreferrer" : undefined}>{publicDetails.support.label}</a> : <span>{publicDetails.support.label}</span>}
+        </p>
+        {policyLinks.length > 0 && <nav class="store-policy-links" aria-label={t("storefront.policy.nav_aria")}>
+          {policyLinks.map((link) => <a href={link.href} rel="noreferrer">{link.label}</a>)}
+        </nav>}
+        <button class="store-report-link" type="button" data-abuse-report-open>{t("storefront.report.open")}</button>
+      </div>
+      <a class="powered-by-selinow" href="https://selinow.com" rel="noreferrer">
+        <img src="/brand/logo/selinow-mark-gradient.svg" alt="" width="22" height="22" />
+        <span>{t("storefront.powered_by")} <strong>Selinow</strong></span>
+      </a>
+    </footer>
+    <dialog class="store-report-dialog" data-abuse-report-dialog aria-labelledby="store-report-title">
+      <form
+        class="store-report-form"
+        data-abuse-report-form
+        data-product-slug={abuseReportProductSlug}
+        data-submit-label={t("storefront.report.submit")}
+        data-submitting-label={t("storefront.report.submitting")}
+        data-sent-label={t("storefront.report.sent")}
+        data-receiving-message={t("storefront.report.receiving")}
+        data-received-message={t("storefront.report.received")}
+        data-received-tracking-message={t("storefront.report.received_tracking", { id: "{id}" })}
+        data-network-error={t("storefront.report.error.network")}
+        data-generic-error={t("storefront.report.error.generic")}
+        data-support-code={t("storefront.report.support_code", { requestId: "{requestId}" })}
+        data-error-idempotency-conflict={t("storefront.report.error.idempotency_conflict")}
+        data-error-rate-limited={t("storefront.report.error.rate_limited")}
+        data-error-resource-not-found={t("storefront.report.error.resource_not_found")}
+        data-error-turnstile-invalid={t("storefront.report.error.turnstile_invalid")}
+        data-error-turnstile-required={t("storefront.report.error.turnstile_required")}
+        data-error-turnstile-unavailable={t("storefront.report.error.turnstile_unavailable")}
+        data-error-validation-failed={t("storefront.report.error.validation_failed")}
+      >
+        <button class="store-report-close" type="button" aria-label={t("storefront.report.close")} data-abuse-report-close>×</button>
+        <div>
+          <p class="store-report-kicker">{t("storefront.report.kicker")}</p>
+          <h2 id="store-report-title">{t("storefront.report.title")}</h2>
+          <p>{t("storefront.report.detail")}</p>
+        </div>
+        <label>
+          {t("storefront.report.target")}
+          <select name="targetKind" required>
+            <option value="shop">{t("storefront.report.target.shop")}</option>
+            <option value="domain">{t("storefront.report.target.domain")}</option>
+            {abuseReportProductSlug && <option value="product">{t("storefront.report.target.product")}</option>}
+          </select>
+        </label>
+        <label>
+          {t("storefront.report.category")}
+          <select name="category" required>
+            <option value="copyright">{t("storefront.report.category.copyright")}</option>
+            <option value="fraud">{t("storefront.report.category.fraud")}</option>
+            <option value="malware">{t("storefront.report.category.malware")}</option>
+            <option value="privacy">{t("storefront.report.category.privacy")}</option>
+            <option value="prohibited_content">{t("storefront.report.category.prohibited")}</option>
+            <option value="other">{t("storefront.report.category.other")}</option>
+          </select>
+        </label>
+        <label>
+          {t("storefront.report.summary")}
+          <textarea name="summary" minlength="20" maxlength="2000" rows="6" required placeholder={t("storefront.report.summary_placeholder")}></textarea>
+        </label>
+        <label>
+          {t("storefront.report.contact")} <span>{t("storefront.report.optional")}</span>
+          <input name="reporterContact" type="email" autocomplete="email" maxlength="254" placeholder="ban@example.com" />
+        </label>
+        {turnstileSiteKey && <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-action="report_abuse" data-theme="light" data-size="flexible"></div>}
+        <p class="store-report-feedback" role="status" aria-live="polite" aria-atomic="true" data-abuse-report-feedback></p>
+        <div class="store-report-actions">
+          <button class="store-button store-report-cancel" type="button" data-abuse-report-close>{t("storefront.report.cancel")}</button>
+          <button class="store-button" type="submit" data-abuse-report-submit>{t("storefront.report.submit")}</button>
+        </div>
+      </form>
+    </dialog>
+    {turnstileSiteKey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
+    <script src="../scripts/storefront/abuse-report.ts"></script>
+    <script src="../scripts/storefront/cart-count.ts"></script>
+  </body>
+</html>

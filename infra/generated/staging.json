@@ -1,0 +1,41 @@
+{
+  "accountId": "ef250a88911fd24073cb73d1c07e0218",
+  "environment": "staging",
+  "resources": {
+    "d1": {
+      "id": "c86d76a0-7407-42b6-ba92-f9f9623d0730",
+      "name": "selinow-staging"
+    },
+    "deadLetterQueue": {
+      "name": "selinow-dlq-staging"
+    },
+    "integrationQueue": {
+      "name": "selinow-integration-staging"
+    },
+    "notificationQueue": {
+      "name": "selinow-notification-staging"
+    },
+    "platformCacheKv": {
+      "id": "91cfb785ea6546289a3a47763a020d54",
+      "name": "selinow-cache-staging"
+    },
+    "privateExports": {
+      "name": "selinow-private-exports-staging"
+    },
+    "r2": {
+      "name": "selinow-media-staging"
+    },
+    "sessionKv": {
+      "id": "daf6b5590ea94e67bc982239b2725e14",
+      "name": "selinow-session-staging"
+    }
+  },
+  "saas": {
+    "cnameTarget": "customers.selinow.com",
+    "fallbackOrigin": "proxy-fallback.selinow.com"
+  },
+  "workerName": "selinow-com-staging",
+  "zoneId": "ce1536fca500680c544662e361ed869b",
+  "zoneName": "selinow.com",
+  "version": "d979abe2b8dad825"
+}

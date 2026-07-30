@@ -1,0 +1,111 @@
+---
+import "../styles/selinow-tokens.css";
+import "../styles/base.css";
+import "../styles/primitives.css";
+import "../styles/selinow-a11y.css";
+import "../styles/admin.css";
+import { createAdminTranslator } from "../lib/i18n/catalogs/admin";
+import { resolvePresentationLocale } from "../lib/i18n/catalogs/system";
+import { directionForLocale } from "../lib/i18n/locale";
+
+interface Props {
+  activePath?: string;
+  email: string;
+  role: string | null;
+  title: string;
+}
+
+type AdminNavItem = {
+  detail?: string;
+  icon: string;
+  label: string;
+  path?: string;
+};
+
+const {
+  activePath = Astro.url.pathname,
+  email,
+  role,
+  title,
+} = Astro.props;
+const locale = resolvePresentationLocale(Astro.locals.locale);
+const t = createAdminTranslator(locale);
+
+const navItems: readonly AdminNavItem[] = [
+  { icon: "overview", label: t("admin.layout.nav.overview"), path: "/admin" },
+  { detail: t("admin.layout.nav.detail.directory"), icon: "shops", label: t("admin.layout.nav.shops"), path: "/admin/shops" },
+  { icon: "reports", label: t("admin.layout.nav.reports"), path: "/admin#reports" },
+  { detail: t("admin.layout.nav.detail.no_investigation_api"), icon: "payments", label: t("admin.layout.nav.orders") },
+  { detail: t("admin.layout.nav.detail.no_queue_api"), icon: "appeals", label: t("admin.layout.nav.appeals") },
+  { icon: "systems", label: t("admin.layout.nav.operations"), path: "/admin/operations" },
+  { detail: t("admin.layout.nav.detail.audit"), icon: "audit", label: t("admin.layout.nav.audit"), path: "/admin#ledger" },
+] as const;
+
+const icons: Record<string, string> = {
+  appeals: '<path d="M7 7h10v10H7z"/><path d="m9 12 2 2 4-4"/><path d="M4 12a8 8 0 1 0 2.3-5.7"/>',
+  audit: '<path d="M6 3h12v18H6z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
+  overview: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
+  payments: '<path d="M4 6h16v12H4z"/><path d="M4 10h16M8 15h3"/>',
+  reports: '<path d="M12 3 4 6v5c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-3Z"/><path d="M12 8v5M12 17h.01"/>',
+  shops: '<path d="M4 10v10h16V10"/><path d="M3 10 5 4h14l2 6"/><path d="M3 10c0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0"/>',
+  systems: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4H21a1.7 1.7 0 0 0-1.6 1Z"/>',
+};
+
+const isCurrent = (path: string): boolean => path === "/admin"
+  ? activePath === "/admin"
+  : activePath.startsWith(path.split("#")[0] ?? path);
+const roleLabel = role === null ? t("admin.layout.role.unverified") : t(`admin.layout.role.${role}`);
+---
+
+<!doctype html>
+<html lang={locale} dir={directionForLocale(locale)} data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#080b14" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/selinow-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/selinow-180.png" />
+    <title>{title} — Selinow</title>
+  </head>
+  <body>
+    <a class="admin-skip-link selinow-skip-link" href="#admin-content">{t("admin.layout.skip")}</a>
+    <div class="admin-shell">
+      <aside class="admin-sidebar" aria-label={t("admin.layout.sidebar_aria")}>
+        <a class="admin-brand" href="/admin" aria-label={t("admin.layout.brand_aria")}>
+          <img src="/brand/logo/selinow-logo-reversed.svg" alt="Selinow" width="126" height="34" />
+          <span>{t("admin.layout.brand_label")}</span>
+        </a>
+
+        <nav class="admin-nav" aria-label={t("admin.layout.nav_aria")}>
+          {navItems.map((item) => item.path === undefined ? (
+            <span class="admin-nav-item admin-nav-unavailable" aria-disabled="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
+              <span><strong>{item.label}</strong><small>{item.detail}</small></span>
+            </span>
+          ) : (
+            <a class="admin-nav-item" href={item.path} aria-current={isCurrent(item.path) ? "page" : undefined}>
+              <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
+              <span><strong>{item.label}</strong>{item.detail && <small>{item.detail}</small>}</span>
+            </a>
+          ))}
+        </nav>
+
+        <div class="admin-identity">
+          <span class="admin-identity-mark" aria-hidden="true">{roleLabel.slice(0, 1).toUpperCase()}</span>
+          <span><small>{t("admin.layout.scope", { role: roleLabel })}</small><strong>{email}</strong></span>
+        </div>
+      </aside>
+
+      <div class="admin-workspace">
+        <header class="admin-topbar">
+          <div><small>{t("admin.layout.topbar_scope")}</small><strong>{t("admin.layout.sensitive_filtered")}</strong></div>
+          <span class="admin-session-state"><i aria-hidden="true"></i> {t("admin.layout.private_session")}</span>
+        </header>
+        <main id="admin-content" class="admin-main selinow-focus-target" tabindex="-1">
+          <slot />
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

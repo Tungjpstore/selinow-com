@@ -1,0 +1,59 @@
+{
+  "brand": {
+    "name": "Selinow",
+    "tagline": "Turn conversations into sales.",
+    "descriptor": "Telegram commerce, automated."
+  },
+  "marketing": {
+    "eyebrow": "NỀN TẢNG THƯƠNG MẠI CHO SẢN PHẨM SỐ",
+    "hero_title": "Bán sản phẩm số ngay trong cuộc trò chuyện.",
+    "hero_body": "Tạo storefront, kết nối Telegram và PayOS, quản lý đơn hàng, kho mã và tự động giao sản phẩm từ một hệ thống duy nhất.",
+    "primary_cta": "Bắt đầu xây cửa hàng",
+    "secondary_cta": "Xem quy trình",
+    "workflow_title": "Một commerce core cho mọi kênh bán",
+    "final_title": "Sẵn sàng biến cuộc trò chuyện thành đơn hàng?"
+  },
+  "navigation": {
+    "overview": "Tổng quan",
+    "products": "Sản phẩm",
+    "inventory": "Kho mã",
+    "orders": "Đơn hàng",
+    "customers": "Khách hàng",
+    "channels": "Kênh bán",
+    "integrations": "Tích hợp",
+    "domains": "Tên miền",
+    "readiness": "Kiểm tra sẵn sàng",
+    "members": "Thành viên",
+    "billing": "Gói dịch vụ",
+    "audit": "Audit & dữ liệu"
+  },
+  "states": {
+    "loading": "Đang tải dữ liệu…",
+    "empty": "Chưa có dữ liệu",
+    "success": "Đã hoàn tất",
+    "warning": "Cần chú ý",
+    "blocked": "Đang bị chặn",
+    "waiting_user": "Cần bạn thực hiện",
+    "waiting_provider": "Đang chờ nhà cung cấp",
+    "retry": "Thử lại",
+    "forbidden": "Bạn không có quyền thực hiện hành động này",
+    "plan_limited": "Tính năng này không có trong gói hiện tại",
+    "suspended": "Cửa hàng đang bị tạm ngưng"
+  },
+  "payment": {
+    "pending": "Chờ thanh toán",
+    "verifying": "Đang xác minh thanh toán",
+    "verified": "Đã xác nhận thanh toán",
+    "failed": "Thanh toán không thành công",
+    "expired": "Thanh toán đã hết hạn",
+    "canceled": "Thanh toán đã hủy"
+  },
+  "fulfillment": {
+    "not_started": "Chưa giao hàng",
+    "processing": "Đang xử lý giao hàng",
+    "fulfilled": "Đã giao hàng",
+    "failed": "Giao hàng không thành công",
+    "manual_review": "Cần xử lý thủ công",
+    "canceled": "Đã hủy giao hàng"
+  }
+}

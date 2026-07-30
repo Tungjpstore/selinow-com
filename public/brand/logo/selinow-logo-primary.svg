@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="160" viewBox="0 0 760 160" role="img" aria-label="Selinow logo">
+      <defs>
+        <linearGradient id="selinowGradient" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#7C3AED"/>
+          <stop offset="48%" stop-color="#5B5CEB"/>
+          <stop offset="100%" stop-color="#3B82F6"/>
+        </linearGradient>
+        </defs>
+      
+      <g transform="translate(8,16) scale(1.0)">
+        
+        <path d="M31 36 C31 24 41 18 54 18 H83 C92 18 99 25 99 34 C99 43 92 50 83 50 H50 C39 50 31 58 31 69 C31 80 39 88 50 88 H80 C91 88 99 96 99 107"
+          fill="none" stroke="url(#selinowGradient)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M90 99 L99 108 L108 99" fill="none" stroke="url(#selinowGradient)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      
+      <text x="168" y="103" fill="#0B1020"
+        font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
+        font-size="72" font-weight="750" letter-spacing="-3">Selinow</text>
+    
+    </svg>

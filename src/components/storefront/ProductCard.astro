@@ -1,0 +1,37 @@
+---
+import type { StorefrontProduct } from "../../lib/storefront/store";
+import { formatMoney, stockLabel } from "../../lib/storefront/view";
+import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+
+interface Props {
+  index: number;
+  locale?: string;
+  product: StorefrontProduct;
+}
+
+const { index, locale = "en", product } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const firstVariant = product.variants[0];
+const purchasableVariant = product.variants.find((variant) => variant.stockState !== "out_of_stock") ?? firstVariant;
+const soldOut = purchasableVariant === undefined || purchasableVariant.stockState === "out_of_stock";
+---
+
+<article class="product-card" data-product-card data-category-id={product.categoryId ?? ""} data-search-text={`${product.title} ${product.description} ${product.variants.map((variant) => variant.title).join(" ")}`}>
+  <a class="product-visual" href={`/products/${product.slug}`} aria-hidden="true" tabindex="-1">
+    <span>{String(index + 1).padStart(2, "0")}</span>
+    <strong>{product.title.slice(0, 1).toUpperCase()}</strong>
+  </a>
+  <div class="product-copy">
+    <p class:list={["stock", purchasableVariant?.stockState]}>{purchasableVariant ? stockLabel(purchasableVariant.stockState, purchasableVariant.availableStock, locale) : t("storefront.product.no_variant")}</p>
+    <h2><a href={`/products/${product.slug}`}>{product.title}</a></h2>
+    <p>{product.description || t("storefront.product.description_fallback")}</p>
+    {product.variants.length > 1 && <p class="product-variant-count">{t("storefront.product.variant_count", { count: product.variants.length })}</p>}
+    <div class="product-buy-row">
+      <div>
+        {purchasableVariant?.compareAtMinor && <del>{formatMoney(purchasableVariant.compareAtMinor, purchasableVariant.currency, locale)}</del>}
+        <strong>{purchasableVariant ? formatMoney(purchasableVariant.priceMinor, purchasableVariant.currency, locale) : t("storefront.product.contact")}</strong>
+      </div>
+      {purchasableVariant && <button type="button" data-cart-add data-variant-id={purchasableVariant.id} data-max-quantity={purchasableVariant.maxPerOrder} disabled={soldOut} aria-label={`${soldOut ? t("storefront.product.sold_out") : t("storefront.product.add")}: ${product.title}`}>{soldOut ? t("storefront.product.sold_out") : t("storefront.product.add")}</button>}
+    </div>
+  </div>
+</article>

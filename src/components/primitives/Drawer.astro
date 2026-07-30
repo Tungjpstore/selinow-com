@@ -1,0 +1,48 @@
+---
+interface Props {
+  closeLabel?: string;
+  drawerId: string;
+  title: string;
+  triggerLabel: string;
+}
+
+const { closeLabel = "Close navigation panel", drawerId, title, triggerLabel } = Astro.props;
+const titleId = `${drawerId}-title`;
+---
+
+<div data-sln-drawer-root>
+  <button class="sln-button" data-size="md" data-variant="secondary" type="button" data-sln-drawer-trigger>{triggerLabel}</button>
+  <dialog class="sln-drawer" id={drawerId} aria-labelledby={titleId} data-sln-drawer>
+    <header class="sln-drawer__header">
+      <h2 id={titleId}>{title}</h2>
+      <button class="sln-icon-button" data-sln-drawer-close data-variant="quiet" type="button" aria-label={closeLabel} title={closeLabel}>
+        <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+      </button>
+    </header>
+    <div class="sln-drawer__content"><slot /></div>
+  </dialog>
+</div>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>("[data-sln-drawer-root]")) {
+    if (root.dataset.slnReady === "true") continue;
+    root.dataset.slnReady = "true";
+    const trigger = root.querySelector<HTMLButtonElement>("[data-sln-drawer-trigger]");
+    const drawer = root.querySelector<HTMLDialogElement>("[data-sln-drawer]");
+    const close = root.querySelector<HTMLButtonElement>("[data-sln-drawer-close]");
+    if (trigger === null || drawer === null || close === null) continue;
+    trigger.addEventListener("click", () => {
+      drawer.showModal();
+      document.documentElement.dataset.slnScrollLock = "true";
+      close.focus();
+    });
+    close.addEventListener("click", () => drawer.close());
+    drawer.addEventListener("click", (event) => {
+      if (event.target === drawer) drawer.close();
+    });
+    drawer.addEventListener("close", () => {
+      delete document.documentElement.dataset.slnScrollLock;
+      trigger.focus();
+    });
+  }
+</script>

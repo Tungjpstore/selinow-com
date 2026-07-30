@@ -1,0 +1,70 @@
+---
+import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+
+interface Props {
+  description?: string;
+  keyValue?: string;
+  locale?: string;
+  state: "blocked" | "hidden" | "revealed";
+  title?: string;
+}
+
+const {
+  description,
+  keyValue,
+  locale = "en",
+  state,
+  title,
+} = Astro.props;
+const t = createStorefrontTranslator(locale);
+const stateLabels = {
+  blocked: t("storefront.fulfillment.key_state.blocked"),
+  hidden: t("storefront.fulfillment.key_state.hidden"),
+  revealed: t("storefront.fulfillment.key_state.revealed"),
+} as const;
+const canRenderValue = state === "revealed" && typeof keyValue === "string" && keyValue.length > 0;
+---
+
+<section class="sln-key-reveal" data-key-state={state} data-key-copy-success={t("storefront.fulfillment.key_copy_success")} data-key-copy-failed={t("storefront.fulfillment.key_copy_failed")}>
+  <header><div><p>{t("storefront.fulfillment.private_information")}</p><h2>{title ?? t("storefront.fulfillment.key_title")}</h2></div><span>{stateLabels[state]}</span></header>
+  <p>{description ?? t("storefront.fulfillment.key_description")}</p>
+  {canRenderValue ? <div class="sln-key-reveal__value"><code data-key-value>{keyValue}</code><button class="sln-button" data-inline="true" data-key-copy data-variant="secondary" type="button">{t("storefront.order.copy")}</button></div> : <div class="sln-key-reveal__placeholder" aria-hidden="true">•••• •••• •••• ••••</div>}
+  <p class="sln-key-reveal__feedback" data-key-feedback aria-live="polite"></p>
+</section>
+
+<style>
+  .sln-key-reveal { padding: var(--sln-space-5); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .sln-key-reveal header { display: flex; align-items: start; justify-content: space-between; gap: var(--sln-space-4); }
+  .sln-key-reveal header p { margin: 0 0 var(--sln-space-1); color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .sln-key-reveal h2 { margin: 0; font: var(--sln-font-h4); }
+  .sln-key-reveal header > span { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .sln-key-reveal > p { margin: var(--sln-space-3) 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .sln-key-reveal__value { display: flex; align-items: center; justify-content: space-between; gap: var(--sln-space-4); margin-top: var(--sln-space-4); border-radius: var(--sln-radius-md); padding: var(--sln-space-4); background: var(--sln-bg-inverse); color: var(--sln-text-inverse); }
+  .sln-key-reveal__value code { min-width: 0; overflow-wrap: anywhere; font: var(--sln-font-body-sm); }
+  .sln-key-reveal__placeholder { margin-top: var(--sln-space-4); border-radius: var(--sln-radius-md); padding: var(--sln-space-4); background: var(--sln-bg-subtle); color: var(--sln-text-muted); font-family: var(--sln-font-mono); letter-spacing: .08em; }
+  .sln-key-reveal .sln-key-reveal__feedback { min-height: 18px; color: var(--selinow-success-text); font: var(--sln-font-caption); }
+  @media (max-width: 520px) { .sln-key-reveal__value { align-items: stretch; flex-direction: column; } }
+</style>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-key-copy]")) {
+    if (button.dataset.slnReady === "true") continue;
+    button.dataset.slnReady = "true";
+    button.addEventListener("click", async () => {
+      const card = button.closest<HTMLElement>("[data-key-state='revealed']");
+      const value = card?.querySelector<HTMLElement>("[data-key-value]")?.textContent;
+      const feedback = card?.querySelector<HTMLElement>("[data-key-feedback]");
+      if (value === undefined || feedback === null || feedback === undefined) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        const successMessage = card?.dataset.keyCopySuccess;
+        if (successMessage !== undefined) {
+          feedback.textContent = successMessage;
+          window.setTimeout(() => { feedback.textContent = ""; }, 2_500);
+        }
+      } catch {
+        feedback.textContent = card?.dataset.keyCopyFailed ?? "";
+      }
+    });
+  }
+</script>

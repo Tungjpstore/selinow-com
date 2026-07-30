@@ -1,0 +1,31 @@
+---
+import StatusBadge from "../primitives/StatusBadge.astro";
+import { createSystemTranslator } from "../../lib/i18n";
+
+interface Props { locale?: unknown; value: string; }
+const { locale = Astro.locals.locale, value } = Astro.props;
+const map: Record<string, { key: string; tone: "danger" | "info" | "neutral" | "success" | "warning" }> = {
+  unpaid: { key: "status.payment.unpaid", tone: "warning" },
+  pending: { key: "status.payment.pending", tone: "info" },
+  verifying: { key: "status.payment.verifying", tone: "info" },
+  creating: { key: "status.payment.creating", tone: "info" },
+  paid_exact: { key: "status.payment.paid_exact", tone: "success" },
+  paid: { key: "status.payment.paid", tone: "success" },
+  verified: { key: "status.payment.verified", tone: "success" },
+  partial: { key: "status.payment.partial", tone: "danger" },
+  overpaid: { key: "status.payment.overpaid", tone: "danger" },
+  late: { key: "status.payment.late", tone: "danger" },
+  identity_mismatch: { key: "status.payment.identity_mismatch", tone: "danger" },
+  inconsistent: { key: "status.payment.inconsistent", tone: "danger" },
+  terminal_unpaid: { key: "status.payment.terminal_unpaid", tone: "warning" },
+  error: { key: "status.payment.error", tone: "danger" },
+  failed: { key: "status.payment.failed", tone: "danger" },
+  expired: { key: "status.payment.expired", tone: "neutral" },
+  canceled: { key: "status.payment.canceled", tone: "danger" },
+  refunded: { key: "status.payment.refunded", tone: "neutral" },
+};
+const entry = map[value] ?? { key: "status.payment.unknown", tone: "neutral" as const };
+const state = { label: createSystemTranslator(locale)(entry.key), tone: entry.tone };
+---
+
+<StatusBadge label={state.label} tone={state.tone} />

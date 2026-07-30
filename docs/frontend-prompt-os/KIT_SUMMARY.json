@@ -1,0 +1,15 @@
+{
+  "name": "Selinow Frontend Prompt OS Professional",
+  "version": "1.0.0",
+  "generated": "2026-07-28",
+  "source_brief": "FRONTEND_REDESIGN_BRIEF_VI.md",
+  "source_brand_os": "Selinow Brand OS Ultimate v2.0",
+  "framework": "Astro 7 + TypeScript strict + Cloudflare",
+  "primary_locale": "vi-VN",
+  "primary_viewports": [
+    "390x844",
+    "768x1024",
+    "1440x1024"
+  ],
+  "principle": "Soft Precision Commerce"
+}

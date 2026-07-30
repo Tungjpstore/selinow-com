@@ -1,0 +1,20 @@
+{
+  "bg.canvas": "#F8FAFC",
+  "bg.surface": "#FFFFFF",
+  "bg.subtle": "#F1F5F9",
+  "bg.inverse": "#080B14",
+  "text.primary": "#0B1020",
+  "text.secondary": "#475569",
+  "text.muted": "#64748B",
+  "text.inverse": "#FFFFFF",
+  "border.default": "#E2E8F0",
+  "border.strong": "#CBD5E1",
+  "action.primary": "#5B5CEB",
+  "action.primary_hover": "#4F46E5",
+  "action.secondary": "#0B1020",
+  "focus.ring": "#3B82F6",
+  "state.success": "#059669",
+  "state.warning": "#D97706",
+  "state.danger": "#DC2626",
+  "state.info": "#2563EB"
+}

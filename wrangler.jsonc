@@ -1,0 +1,417 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "selinow-com",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-07-25",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist",
+    "run_worker_first": false
+  },
+  "d1_databases": [
+    {
+      "binding": "PLATFORM_DB",
+      "database_name": "selinow-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "selinow-media-local"
+    },
+    {
+      "binding": "PRIVATE_EXPORTS",
+      "bucket_name": "selinow-private-exports-local"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "PLATFORM_CACHE",
+      "id": "00000000000000000000000000000000"
+    },
+    {
+      "binding": "SESSION",
+      "id": "11111111111111111111111111111111"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "INTEGRATION_QUEUE",
+        "queue": "selinow-integration-local"
+      },
+      {
+        "binding": "NOTIFICATION_QUEUE",
+        "queue": "selinow-notification-local"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "selinow-integration-local",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "selinow-dlq-local",
+        "retry_delay": 60
+      },
+      {
+        "queue": "selinow-notification-local",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "selinow-dlq-local",
+        "retry_delay": 60
+      },
+      {
+        "queue": "selinow-dlq-local",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 100
+      }
+    ]
+  },
+  "triggers": {
+    "crons": [
+      "*/15 * * * *"
+    ]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "APP_ENV": "local",
+    "CLOUDFLARE_ZONE_ID": "00000000000000000000000000000000",
+    "PLATFORM_NAME": "Selinow",
+    "PLATFORM_BASE_DOMAIN": "localhost",
+    "PLATFORM_ORIGIN": "http://localhost:4321",
+    "DASHBOARD_ORIGIN": "http://app.localhost:4321",
+    "API_ORIGIN": "http://api.localhost:4321",
+    "DEFAULT_LOCALE": "en",
+    "DEFAULT_CURRENCY": "VND",
+    "DEFAULT_TIMEZONE": "Asia/Ho_Chi_Minh",
+    "ACTIVE_CREDENTIAL_KEY_VERSION": "v1",
+    "ACTIVE_INVENTORY_KEY_VERSION": "v1",
+    "CREDENTIAL_KEY_VERSION": "v1",
+    "EXPORT_KEY_VERSION": "v1",
+    "INVENTORY_KEY_VERSION": "v1",
+    "SESSION_COOKIE_NAME": "selinow_session",
+    "MAGIC_LINK_GLOBAL_RATE_LIMIT": "200",
+    "MAGIC_LINK_REQUESTER_RATE_LIMIT": "20",
+    "MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS": "900",
+    "STOREFRONT_CART_RATE_LIMIT": "30",
+    "STOREFRONT_CHECKOUT_RATE_LIMIT": "8",
+    "STOREFRONT_RATE_LIMIT_WINDOW_SECONDS": "600",
+    "STOREFRONT_TURNSTILE_THRESHOLD": "3",
+    "TELEGRAM_WEBHOOK_MAX_CONNECTIONS": "20",
+    "LOG_LEVEL": "info",
+    "RESOURCE_MANIFEST_VERSION": "unprovisioned",
+    "SAAS_CNAME_TARGET": "customers.localhost"
+  },
+  "env": {
+    "production": {
+      "name": "selinow-com-production",
+      "workers_dev": false,
+      "routes": [
+        {
+          "custom_domain": true,
+          "pattern": "selinow.com"
+        },
+        {
+          "custom_domain": true,
+          "pattern": "app.selinow.com"
+        },
+        {
+          "custom_domain": true,
+          "pattern": "api.selinow.com"
+        }
+      ],
+      "assets": {
+        "binding": "ASSETS",
+        "directory": "./dist",
+        "run_worker_first": false
+      },
+      "send_email": [
+        {
+          "name": "EMAIL",
+          "remote": true,
+          "allowed_sender_addresses": [
+            "no-reply@selinow.com"
+          ]
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "PLATFORM_DB",
+          "database_id": "75102e37-45f6-40ed-a32a-9e700fd184db",
+          "database_name": "selinow-production",
+          "migrations_dir": "./migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "selinow-media-production"
+        },
+        {
+          "binding": "PRIVATE_EXPORTS",
+          "bucket_name": "selinow-private-exports-production"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "PLATFORM_CACHE",
+          "id": "d71da2b8c16641c4a97b7c82b52a9931"
+        },
+        {
+          "binding": "SESSION",
+          "id": "3e1d1a21691a40d0930a7ac77628da2e"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "INTEGRATION_QUEUE",
+            "queue": "selinow-integration-production"
+          },
+          {
+            "binding": "NOTIFICATION_QUEUE",
+            "queue": "selinow-notification-production"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "selinow-integration-production",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 5,
+            "dead_letter_queue": "selinow-dlq-production",
+            "retry_delay": 60
+          },
+          {
+            "queue": "selinow-notification-production",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 5,
+            "dead_letter_queue": "selinow-dlq-production",
+            "retry_delay": 60
+          },
+          {
+            "queue": "selinow-dlq-production",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 100
+          }
+        ]
+      },
+      "triggers": {
+        "crons": [
+          "*/15 * * * *"
+        ]
+      },
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1
+      },
+      "vars": {
+        "APP_ENV": "production",
+        "PLATFORM_NAME": "Selinow",
+        "PLATFORM_BASE_DOMAIN": "selinow.com",
+        "PLATFORM_ORIGIN": "https://selinow.com",
+        "DASHBOARD_ORIGIN": "https://app.selinow.com",
+        "API_ORIGIN": "https://api.selinow.com",
+        "MEDIA_PUBLIC_BASE_URL": "https://media.selinow.com",
+        "CLOUDFLARE_ZONE_ID": "ce1536fca500680c544662e361ed869b",
+        "SAAS_CNAME_TARGET": "customers.selinow.com",
+        "DEFAULT_LOCALE": "en",
+        "DEFAULT_CURRENCY": "VND",
+        "DEFAULT_TIMEZONE": "Asia/Ho_Chi_Minh",
+        "EMAIL_FROM_ADDRESS": "no-reply@selinow.com",
+        "EMAIL_FROM_NAME": "Selinow",
+        "ACTIVE_CREDENTIAL_KEY_VERSION": "v1",
+        "ACTIVE_INVENTORY_KEY_VERSION": "v1",
+        "CREDENTIAL_KEY_VERSION": "v1",
+        "EXPORT_KEY_VERSION": "v1",
+        "INVENTORY_KEY_VERSION": "v1",
+        "SESSION_COOKIE_NAME": "selinow_session",
+        "MAGIC_LINK_GLOBAL_RATE_LIMIT": "200",
+        "MAGIC_LINK_REQUESTER_RATE_LIMIT": "20",
+        "MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS": "900",
+        "STOREFRONT_CART_RATE_LIMIT": "30",
+        "STOREFRONT_CHECKOUT_RATE_LIMIT": "8",
+        "STOREFRONT_RATE_LIMIT_WINDOW_SECONDS": "600",
+        "STOREFRONT_TURNSTILE_THRESHOLD": "3",
+        "TELEGRAM_WEBHOOK_MAX_CONNECTIONS": "20",
+        "TURNSTILE_SITE_KEY": "0x4AAAAAAEB0yAX3f8V_tuuB",
+        "LOG_LEVEL": "info",
+        "RESOURCE_MANIFEST_VERSION": "50f70b5afe2bcbb6"
+      }
+    },
+    "staging": {
+      "name": "selinow-com-staging",
+      "workers_dev": true,
+      "routes": [
+        {
+          "custom_domain": true,
+          "pattern": "staging.selinow.com"
+        },
+        {
+          "custom_domain": true,
+          "pattern": "app-staging.selinow.com"
+        },
+        {
+          "custom_domain": true,
+          "pattern": "api-staging.selinow.com"
+        },
+        {
+          "custom_domain": true,
+          "pattern": "signal.staging.selinow.com"
+        },
+        {
+          "custom_domain": true,
+          "pattern": "canvas.staging.selinow.com"
+        },
+        {
+          "custom_domain": true,
+          "pattern": "coming-soon.staging.selinow.com"
+        },
+        {
+          "custom_domain": true,
+          "pattern": "paused.staging.selinow.com"
+        },
+        {
+          "pattern": "*.staging.selinow.com/*",
+          "zone_name": "selinow.com"
+        },
+        {
+          "pattern": "*/*",
+          "zone_name": "selinow.com"
+        }
+      ],
+      "assets": {
+        "binding": "ASSETS",
+        "directory": "./dist",
+        "run_worker_first": false
+      },
+      "send_email": [
+        {
+          "name": "EMAIL",
+          "remote": true,
+          "allowed_sender_addresses": [
+            "no-reply@selinow.com"
+          ]
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "PLATFORM_DB",
+          "database_id": "c86d76a0-7407-42b6-ba92-f9f9623d0730",
+          "database_name": "selinow-staging",
+          "migrations_dir": "./migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "selinow-media-staging"
+        },
+        {
+          "binding": "PRIVATE_EXPORTS",
+          "bucket_name": "selinow-private-exports-staging"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "PLATFORM_CACHE",
+          "id": "91cfb785ea6546289a3a47763a020d54"
+        },
+        {
+          "binding": "SESSION",
+          "id": "daf6b5590ea94e67bc982239b2725e14"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "INTEGRATION_QUEUE",
+            "queue": "selinow-integration-staging"
+          },
+          {
+            "binding": "NOTIFICATION_QUEUE",
+            "queue": "selinow-notification-staging"
+          }
+        ],
+        "consumers": [
+          {
+            "dead_letter_queue": "selinow-dlq-staging",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 5,
+            "queue": "selinow-integration-staging",
+            "retry_delay": 60
+          },
+          {
+            "dead_letter_queue": "selinow-dlq-staging",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 5,
+            "queue": "selinow-notification-staging",
+            "retry_delay": 60
+          },
+          {
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 100,
+            "queue": "selinow-dlq-staging"
+          }
+        ]
+      },
+      "triggers": {
+        "crons": [
+          "* * * * *"
+        ]
+      },
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1
+      },
+      "vars": {
+        "API_ORIGIN": "https://api-staging.selinow.com",
+        "APP_ENV": "staging",
+        "CLOUDFLARE_ZONE_ID": "ce1536fca500680c544662e361ed869b",
+        "ACTIVE_CREDENTIAL_KEY_VERSION": "v1",
+        "ACTIVE_INVENTORY_KEY_VERSION": "v1",
+        "CREDENTIAL_KEY_VERSION": "v1",
+        "DASHBOARD_ORIGIN": "https://app-staging.selinow.com",
+        "DEFAULT_CURRENCY": "VND",
+        "DEFAULT_LOCALE": "en",
+        "DEFAULT_TIMEZONE": "Asia/Ho_Chi_Minh",
+        "EMAIL_FROM_ADDRESS": "no-reply@selinow.com",
+        "EMAIL_FROM_NAME": "Selinow",
+        "EXPORT_KEY_VERSION": "v1",
+        "INVENTORY_KEY_VERSION": "v1",
+        "LOG_LEVEL": "info",
+        "PLATFORM_BASE_DOMAIN": "staging.selinow.com",
+        "PLATFORM_NAME": "Selinow Staging",
+        "PLATFORM_ORIGIN": "https://staging.selinow.com",
+        "RESOURCE_MANIFEST_VERSION": "d979abe2b8dad825",
+        "SAAS_CNAME_TARGET": "customers.selinow.com",
+        "SESSION_COOKIE_NAME": "selinow_staging_session",
+        "MAGIC_LINK_GLOBAL_RATE_LIMIT": "200",
+        "MAGIC_LINK_REQUESTER_RATE_LIMIT": "20",
+        "MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS": "900",
+        "STOREFRONT_CART_RATE_LIMIT": "30",
+        "STOREFRONT_CHECKOUT_RATE_LIMIT": "8",
+        "STOREFRONT_RATE_LIMIT_WINDOW_SECONDS": "600",
+        "STOREFRONT_TURNSTILE_THRESHOLD": "3",
+        "TELEGRAM_WEBHOOK_MAX_CONNECTIONS": "20",
+        "TURNSTILE_SITE_KEY": "0x4AAAAAAD9p5jsgPyCjDgSw"
+      }
+    }
+  }
+}

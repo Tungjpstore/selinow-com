@@ -1,0 +1,21 @@
+# Checklist trước khi bàn giao
+
+- [ ] Đúng surface và tenant context.
+- [ ] Đúng route/API hiện tại.
+- [ ] Dùng token chuẩn.
+- [ ] Không hard-code dữ liệu runtime.
+- [ ] Payment/fulfillment tách riêng.
+- [ ] Không lộ secret/key/token.
+- [ ] Desktop 1440px đạt spec.
+- [ ] Mobile 390px đạt spec.
+- [ ] Không overflow ở 320px.
+- [ ] Keyboard complete.
+- [ ] Focus visible.
+- [ ] Reduced motion.
+- [ ] Loading/empty/blocked/error states.
+- [ ] `npm run check` pass.
+- [ ] `npm run lint` pass.
+- [ ] relevant tests pass.
+- [ ] `npm run build` pass.
+- [ ] Visual screenshots đã lưu.
+- [ ] Implementation report hoàn tất.

@@ -1,0 +1,284 @@
+---
+import AdminState from "../../components/admin/AdminState.astro";
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { isAppError } from "../../lib/core/errors";
+import {
+  listAdminShopDirectory,
+  parseAdminShopStatus,
+  parseAdminSubscriptionState,
+  type AdminShopDirectoryItem,
+} from "../../lib/operations/admin-shop-directory";
+import { getBindings } from "../../lib/platform/bindings";
+import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
+import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
+
+const env = getBindings();
+const locale = resolvePresentationLocale(Astro.locals.locale);
+const t = createAdminTranslator(locale);
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("Pragma", "no-cache");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+Astro.response.headers.set("Referrer-Policy", "no-referrer");
+
+let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let roleLookupFailed = false;
+try {
+  adminRole = await getPlatformAdminRole({ env, userId: auth.userId });
+} catch {
+  roleLookupFailed = true;
+}
+
+if (roleLookupFailed) Astro.response.status = 503;
+else if (adminRole === null) Astro.response.status = 403;
+
+const queryValue = Astro.url.searchParams.get("q") ?? "";
+const statusValue = Astro.url.searchParams.get("status") ?? "";
+const subscriptionValue = Astro.url.searchParams.get("subscription") ?? "";
+const cursorValue = Astro.url.searchParams.get("cursor");
+
+let shops: AdminShopDirectoryItem[] = [];
+let nextCursor: string | null = null;
+let invalidFilter = false;
+let dataUnavailable = false;
+if (adminRole !== null) {
+  try {
+    const result = await listAdminShopDirectory({
+      env,
+      filters: {
+        cursor: cursorValue,
+        query: queryValue,
+        shopStatus: parseAdminShopStatus(statusValue),
+        subscriptionState: parseAdminSubscriptionState(subscriptionValue),
+      },
+      userId: auth.userId,
+    });
+    shops = result.shops;
+    nextCursor = result.nextCursor;
+  } catch (error) {
+    if (isAppError(error) && error.status === 400) {
+      invalidFilter = true;
+      Astro.response.status = 400;
+    } else if (isAppError(error) && error.status === 403) {
+      adminRole = null;
+      Astro.response.status = 403;
+    } else {
+      dataUnavailable = true;
+      Astro.response.status = 503;
+    }
+  }
+}
+
+const statusLabels = {
+  active: { label: t("admin.shops.status.active"), tone: "success" },
+  archived: { label: t("admin.shops.status.archived"), tone: "neutral" },
+  draft: { label: t("admin.shops.status.draft"), tone: "info" },
+  suspended: { label: t("admin.shops.status.suspended"), tone: "danger" },
+} as const;
+const subscriptionLabels = {
+  active: { label: t("admin.shops.subscription.active"), tone: "success" },
+  canceled: { label: t("admin.shops.subscription.canceled"), tone: "neutral" },
+  grace_period: { label: t("admin.shops.subscription.grace_period"), tone: "warning" },
+  past_due: { label: t("admin.shops.subscription.past_due"), tone: "warning" },
+  suspended: { label: t("admin.shops.subscription.suspended"), tone: "danger" },
+  trialing: { label: t("admin.shops.subscription.trialing"), tone: "info" },
+} as const;
+
+const formatTime = (value: string): string => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return t("admin.common.unknown");
+  return parsed.toLocaleString(locale, { dateStyle: "short", timeStyle: "short" });
+};
+
+const activeShops = shops.filter((shop) => shop.status === "active").length;
+const degradedShops = shops.filter((shop) => shop.degradedConnectionCount > 0).length;
+const ownerlessShops = shops.filter((shop) => shop.activeOwnerCount === 0).length;
+
+const buildHref = (cursor: string | null): string => {
+  const parameters = new URLSearchParams();
+  if (queryValue !== "") parameters.set("q", queryValue);
+  if (statusValue !== "") parameters.set("status", statusValue);
+  if (subscriptionValue !== "") parameters.set("subscription", subscriptionValue);
+  if (cursor !== null) parameters.set("cursor", cursor);
+  const query = parameters.toString();
+  return query.length === 0 ? "/admin/shops" : `/admin/shops?${query}`;
+};
+---
+
+<AdminLayout activePath="/admin/shops" email={auth.email} role={adminRole} title={t("admin.shops.title")}>
+  {roleLookupFailed ? (
+    <AdminState
+      tone="danger"
+      eyebrow={t("admin.shops.permission.eyebrow")}
+      title={t("admin.shops.permission.title")}
+      description={t("admin.shops.permission.description")}
+      code={t("admin.common.request", { requestId: Astro.locals.requestId })}
+      actionHref="/admin/shops"
+      actionLabel={t("admin.common.reload")}
+    />
+  ) : adminRole === null ? (
+    <AdminState
+      tone="warning"
+      eyebrow={t("admin.shops.forbidden.eyebrow")}
+      title={t("admin.shops.forbidden.title")}
+      description={t("admin.shops.forbidden.description")}
+      code="authorization_denied"
+      actionHref="/app"
+      actionLabel={t("admin.common.back_workspace")}
+    />
+  ) : invalidFilter ? (
+    <AdminState
+      tone="warning"
+      eyebrow={t("admin.shops.invalid.eyebrow")}
+      title={t("admin.shops.invalid.title")}
+      description={t("admin.shops.invalid.description")}
+      code="validation_failed"
+      actionHref="/admin/shops"
+      actionLabel={t("admin.shops.filter.clear")}
+    />
+  ) : dataUnavailable ? (
+    <AdminState
+      tone="danger"
+      eyebrow={t("admin.shops.data.eyebrow")}
+      title={t("admin.shops.data.title")}
+      description={t("admin.shops.data.description")}
+      code={t("admin.common.request", { requestId: Astro.locals.requestId })}
+      actionHref={buildHref(cursorValue)}
+      actionLabel={t("admin.common.reload")}
+    />
+  ) : (
+    <div data-admin-shop-directory>
+      <header class="admin-page-header">
+        <div>
+          <p class="admin-eyebrow">{t("admin.shops.header.eyebrow")}</p>
+          <h1>{t("admin.shops.title")}</h1>
+          <p>{t("admin.shops.header.description")}</p>
+        </div>
+        <div class="admin-summary" aria-label={t("admin.shops.summary.aria")}>
+          <div><span>{t("admin.shops.summary.current")}</span><strong>{shops.length}</strong></div>
+          <div><span>{t("admin.shops.summary.active")}</span><strong>{activeShops}</strong></div>
+          <div><span>{t("admin.shops.summary.attention")}</span><strong>{degradedShops + ownerlessShops}</strong></div>
+        </div>
+      </header>
+
+      <section class="admin-section" aria-labelledby="directory-filter-title">
+        <div class="admin-section-heading">
+          <div>
+            <h2 id="directory-filter-title">{t("admin.shops.filter.title")}</h2>
+            <p>{t("admin.shops.filter.description")}</p>
+          </div>
+          <span>{t("admin.shops.pagination.cursor")}</span>
+        </div>
+        <div class="admin-form-panel">
+          <form class="admin-form admin-directory-filters" method="get" action="/admin/shops">
+            <label>
+              {t("admin.shops.filter.shop_query")}
+              <input name="q" type="search" value={queryValue} maxlength="64" autocomplete="off" placeholder={t("admin.shops.filter.placeholder")} />
+            </label>
+            <label>
+              {t("admin.shops.filter.shop_state")}
+              <select name="status">
+                <option value="" selected={statusValue === ""}>{t("admin.shops.option.all")}</option>
+                <option value="draft" selected={statusValue === "draft"}>{t("admin.shops.status.draft")}</option>
+                <option value="active" selected={statusValue === "active"}>{t("admin.shops.status.active")}</option>
+                <option value="suspended" selected={statusValue === "suspended"}>{t("admin.shops.status.suspended")}</option>
+                <option value="archived" selected={statusValue === "archived"}>{t("admin.shops.status.archived")}</option>
+              </select>
+            </label>
+            <label>
+              {t("admin.shops.filter.subscription")}
+              <select name="subscription">
+                <option value="" selected={subscriptionValue === ""}>{t("admin.shops.option.all")}</option>
+                <option value="trialing" selected={subscriptionValue === "trialing"}>{t("admin.shops.subscription.trialing")}</option>
+                <option value="active" selected={subscriptionValue === "active"}>{t("admin.shops.subscription.active")}</option>
+                <option value="past_due" selected={subscriptionValue === "past_due"}>{t("admin.shops.subscription.past_due")}</option>
+                <option value="grace_period" selected={subscriptionValue === "grace_period"}>{t("admin.shops.subscription.grace_period")}</option>
+                <option value="suspended" selected={subscriptionValue === "suspended"}>{t("admin.shops.subscription.suspended")}</option>
+                <option value="canceled" selected={subscriptionValue === "canceled"}>{t("admin.shops.subscription.canceled")}</option>
+              </select>
+            </label>
+            <div class="admin-form-actions">
+              <a class="admin-button" href="/admin/shops">{t("admin.shops.filter.clear")}</a>
+              <button type="submit">{t("admin.shops.filter.apply")}</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="admin-section" aria-labelledby="directory-title">
+        <div class="admin-section-heading">
+          <div>
+            <h2 id="directory-title">{t("admin.shops.ledger.title")}</h2>
+            <p>{t("admin.shops.ledger.description")}</p>
+          </div>
+          <span>{t("admin.shops.ledger.count", { count: shops.length })}</span>
+        </div>
+
+        {shops.length === 0 ? (
+          <div class="admin-empty" role="status">
+            <strong>{t("admin.shops.empty.title")}</strong>
+            <span>{t("admin.shops.empty.description")}</span>
+          </div>
+        ) : (
+          <div class="admin-records" role="list" aria-label={t("admin.shops.list_aria")}>
+            <div class="admin-record-header" aria-hidden="true">
+              <span>{t("admin.shops.column.state")}</span><span>{t("admin.shops.column.shop")}</span><span>{t("admin.shops.column.subscription")}</span><span>{t("admin.shops.column.sellers")}</span><span>{t("admin.shops.column.channels")}</span><span>{t("admin.shops.column.products")}</span><span>{t("admin.shops.column.updated")}</span>
+            </div>
+            {shops.map((shop) => {
+              const shopState = statusLabels[shop.status];
+              const subscription = shop.subscriptionState === null
+                ? { label: t("admin.shops.subscription.none"), tone: "neutral" as const }
+                : subscriptionLabels[shop.subscriptionState];
+              const ownerTone = shop.activeOwnerCount === 0 ? "warning" : "neutral";
+              const channelTone = shop.degradedConnectionCount > 0 ? "warning" : shop.openConnectionCount > 0 ? "success" : "neutral";
+              return (
+                <article class="admin-record" role="listitem">
+                  <div class="admin-record-summary">
+                    <div><small class="admin-cell-label">{t("admin.shops.column.state")}</small><span class="admin-badge" data-tone={shopState.tone}>{shopState.label}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.shops.column.shop")}</small><strong>{shop.name}</strong><span>{shop.slug}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.shops.column.subscription")}</small><span class="admin-badge" data-tone={subscription.tone}>{subscription.label}</span><span>{shop.planCode ?? t("admin.common.no_plan")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.shops.column.sellers")}</small><span class="admin-badge" data-tone={ownerTone}>{t("admin.shops.sellers.count", { active: shop.activeMemberCount, owners: shop.activeOwnerCount })}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.shops.column.channels")}</small><span class="admin-badge" data-tone={channelTone}>{t("admin.shops.channels.following", { count: shop.openConnectionCount, degraded: shop.degradedConnectionCount })}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.shops.column.products")}</small><span>{t("admin.shops.products.active", { count: shop.activeProductCount })}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.shops.column.updated")}</small><span>{formatTime(shop.updatedAt)}</span></div>
+                  </div>
+                  <details>
+                    <summary>{t("admin.shops.detail.summary")}</summary>
+                    <div class="admin-record-detail admin-directory-detail">
+                      <div>
+                        <p>{t("admin.shops.detail.description")}</p>
+                        <dl class="admin-safe-facts">
+                          <div><dt>{t("admin.shops.detail.public_id")}</dt><dd><code>{shop.publicId}</code></dd></div>
+                          <div><dt>{t("admin.shops.detail.storefront_slug")}</dt><dd><code>{shop.slug}</code></dd></div>
+                          <div><dt>{t("admin.shops.detail.locale_currency")}</dt><dd>{shop.defaultLocale} · {shop.currency}</dd></div>
+                          <div><dt>{t("admin.shops.detail.created")}</dt><dd>{formatTime(shop.createdAt)}</dd></div>
+                          <div><dt>{t("admin.shops.detail.updated")}</dt><dd>{formatTime(shop.updatedAt)}</dd></div>
+                        </dl>
+                      </div>
+                      <div class="admin-readonly-note" role="note">
+                        <strong>{t("admin.shops.detail.readonly")}</strong>
+                        <span>{t("admin.shops.detail.readonly_description")}</span>
+                      </div>
+                    </div>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        <nav class="admin-pagination" aria-label={t("admin.shops.pagination.aria")}>
+          <span>{t("admin.shops.pagination.description")}</span>
+          <div>
+            {cursorValue !== null && <a class="admin-button" href={buildHref(null)}>{t("admin.shops.pagination.first")}</a>}
+            {nextCursor !== null && <a class="admin-button admin-button-primary" href={buildHref(nextCursor)}>{t("admin.shops.pagination.next")}</a>}
+          </div>
+        </nav>
+      </section>
+    </div>
+  )}
+</AdminLayout>

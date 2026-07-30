@@ -1,0 +1,90 @@
+@layer reset, base;
+
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    min-width: 320px;
+    min-height: 100%;
+    background: var(--sln-bg-canvas);
+    text-size-adjust: 100%;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100%;
+    margin: 0;
+    overflow-x: clip;
+  }
+
+  :where(button, input, select, textarea) {
+    font: inherit;
+  }
+
+  :where(button, select) {
+    text-transform: none;
+  }
+
+  :where(img, svg, video) {
+    display: block;
+    max-width: 100%;
+  }
+
+  :where(a) {
+    color: inherit;
+  }
+
+  :where(h1, h2, h3, h4, p, figure, blockquote, dl, dd) {
+    margin-block: 0;
+  }
+
+  :where(ul, ol) {
+    margin-block: 0;
+    padding-inline-start: 1.25rem;
+  }
+}
+
+@layer base {
+  body {
+    background: var(--sln-bg-canvas);
+    color: var(--sln-text-primary);
+    font: var(--sln-font-body);
+    font-family: var(--sln-font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  :where(h1, h2, h3, h4) {
+    color: var(--sln-text-primary);
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+
+  :where(p, li, dd) {
+    text-wrap: pretty;
+  }
+
+  :where(code, kbd, samp, time) {
+    font-family: var(--sln-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  :where(button, a, input, select, textarea, summary):focus-visible {
+    outline: 3px solid var(--sln-focus-ring);
+    outline-offset: 3px;
+  }
+
+  :where(button, input, select, textarea):disabled,
+  :where([aria-disabled="true"]) {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background: var(--sln-tint-indigo);
+    color: var(--sln-text-primary);
+  }
+}

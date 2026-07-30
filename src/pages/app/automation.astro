@@ -1,0 +1,70 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import AutomationLedger from "../../components/dashboard/AutomationLedger.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { isAppError } from "../../lib/core/errors";
+import { listAutomationTasks } from "../../lib/automation/api-service";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { parseAutomationTasks, type AutomationTaskView } from "../../lib/dashboard/automation-ui";
+import { createDashboardTranslator } from "../../lib/i18n";
+import { getBindings } from "../../lib/platform/bindings";
+import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+
+let shops: ShopView[] = [];
+let state: "ready" | "unavailable" | "forbidden" = "ready";
+try {
+  shops = await listShopsForMember({ env, userId: auth.userId });
+} catch {
+  state = "unavailable";
+}
+
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+let tasks: AutomationTaskView[] = [];
+if (shop !== undefined && state === "ready") {
+  try {
+    const result = await listAutomationTasks({ env, shopPublicId: shop.publicId, userId: auth.userId });
+    tasks = parseAutomationTasks(result);
+  } catch (error) {
+    state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
+  }
+}
+if (state === "forbidden") Astro.response.status = 403;
+if (state === "unavailable") Astro.response.status = 503;
+
+const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+---
+
+<AppLayout activePath="/app/automation" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.automation.title")}>
+  <PageHeader eyebrow={t("dashboard.automation.eyebrow")} title={t("dashboard.automation.title")} description={t("dashboard.automation.description")}>
+    {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/onboarding#readiness")}>{t("dashboard.automation.open_readiness")} <span aria-hidden="true">↗</span></a>}
+  </PageHeader>
+
+  {state === "unavailable" ? (
+    <div class="state-space"><WorkspaceState eyebrow={t("dashboard.automation.unavailable.eyebrow")} title={t("dashboard.automation.unavailable.title")} description={t("dashboard.automation.unavailable.description")} actionHref={workspaceHref("/app/automation")} actionLabel={t("dashboard.state.error.retry")} tone="danger" /></div>
+  ) : shop === undefined ? (
+    <div class="state-space"><WorkspaceState title={t("dashboard.automation.no_store.title")} description={t("dashboard.automation.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.automation.no_store.action")} tone="info" /></div>
+  ) : state === "forbidden" ? (
+    <div class="state-space"><WorkspaceState eyebrow={t("dashboard.automation.forbidden.eyebrow")} title={t("dashboard.automation.forbidden.title")} description={t("dashboard.automation.forbidden.description")} tone="warning" /></div>
+  ) : (
+    <AutomationLedger csrfCookieName={`${env.SESSION_COOKIE_NAME}_csrf`} locale={locale ?? shop.defaultLocale} selectedShopPublicId={shop.publicId} shopName={shop.name} shopRole={shop.role} tasks={tasks} timeZone={shop.timezone} />
+  )}
+</AppLayout>
+
+{state === "ready" && shop !== undefined && <script>
+  import "../../scripts/dashboard/automation";
+</script>}
+
+<style>
+  .state-space { margin-top:var(--sln-space-8); }
+  .sln-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:10px 16px; font:var(--sln-font-label); text-decoration:none; }
+  .sln-button-secondary { border-color:var(--sln-border-strong); background:var(--sln-bg-surface); color:var(--sln-text-primary); }
+</style>

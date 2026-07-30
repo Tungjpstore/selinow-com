@@ -1,0 +1,12 @@
+state,required_ui,constraint
+loading,skeleton/readable progress,no blank screen
+empty,reason and next action,not generic
+success,explicit confirmation,not color only
+warning,impact and deadline,semantic icon
+blocked,blocking reason and remediation,safe code optional
+waiting_user,single clear action,external step clearly named
+waiting_provider,last check and retry,no false error
+error_retry,safe message and request ID,retry idempotent
+forbidden,role explanation,no object leak
+plan_limited,capability and plan path,not technical error
+suspended,mutations blocked and history/export explained,no data leak

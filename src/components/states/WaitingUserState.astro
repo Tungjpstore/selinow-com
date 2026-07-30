@@ -1,0 +1,7 @@
+---
+import StatePanel from "./StatePanel.astro";
+
+interface Props { actionHref?: string; actionLabel?: string; description: string; title: string; }
+const { actionHref, actionLabel, description, title } = Astro.props;
+---
+<StatePanel actionHref={actionHref} actionLabel={actionLabel} description={description} state="waiting_user" title={title} />

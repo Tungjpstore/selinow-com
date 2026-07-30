@@ -1,0 +1,88 @@
+---
+import "../styles/selinow-tokens.css";
+import "../styles/selinow-a11y.css";
+import { authenticateRequest } from "../lib/auth/session";
+import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
+import { getBindings } from "../lib/platform/bindings";
+
+try {
+  await authenticateRequest(Astro.request, getBindings());
+  return Astro.redirect("/app");
+} catch {
+  // Anonymous visitors continue to the login form.
+}
+
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+const locale = resolvePresentationLocale(Astro.locals.locale ?? DEFAULT_LOCALE);
+const t = createSystemTranslator(locale);
+---
+
+<!doctype html>
+<html lang={locale} dir={directionForLocale(locale)}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#F8FAFC" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/selinow-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/selinow-180.png" />
+    <title>{t("auth.login.title")}</title>
+  </head>
+  <body>
+    <a class="selinow-skip-link" href="#main-content">{t("auth.login.skip")}</a>
+    <main id="main-content" class="selinow-focus-target" tabindex="-1">
+      <a class="brand" href="/" aria-label={t("auth.login.brand_aria")}><img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="152" height="40" /></a>
+      <section class="login-panel" aria-labelledby="login-title">
+        <div class="login-heading"><p class="eyebrow">{t("auth.login.eyebrow")}</p><h1 id="login-title">{t("auth.login.heading")}</h1><p>{t("auth.login.intro")}</p></div>
+        <form id="login-form" data-login-form>
+          <label for="email">{t("auth.login.email_label")}</label>
+          <input id="email" name="email" type="email" inputmode="email" autocomplete="email" required maxlength="254" aria-describedby="email-help status" data-login-email />
+          <p class="field-help" id="email-help">{t("auth.login.email_help")}</p>
+          <label for="display-name">{t("auth.login.display_name_label")} <span>{t("auth.login.optional")}</span></label>
+          <input id="display-name" name="displayName" autocomplete="name" maxlength="80" data-login-display-name />
+          <button type="submit" data-login-submit><span data-login-submit-label>{t("auth.login.submit")}</span><span aria-hidden="true">→</span></button>
+          <p id="status" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
+        </form>
+        <div class="login-help"><a href="/#faq">{t("auth.login.help")}</a><span>{t("auth.login.privacy")}</span></div>
+      </section>
+    </main>
+    <script>
+      import "../scripts/marketing/login";
+    </script>
+  </body>
+</html>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  :global(body) { margin: 0; min-width: 320px; min-height: 100vh; background: var(--sln-bg-canvas); color: var(--sln-text-primary); font-family: var(--sln-font-sans); }
+  main { width: min(calc(100% - 40px), 1120px); margin-inline: auto; padding: 24px 0 64px; }
+  .brand { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
+  .brand img { display: block; width: 132px; height: auto; }
+  .login-panel { width: min(100%, 420px); margin: clamp(64px, 10vw, 112px) auto 0; padding: 32px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-xl); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-sm); }
+  .login-heading { margin-bottom: 28px; text-align: center; }
+  .eyebrow { margin: 0 0 12px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .09em; }
+  h1 { margin: 0; font: var(--sln-font-h2); letter-spacing: -.035em; }
+  .login-heading > p:last-child { margin: 12px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  form { display: grid; }
+  label { margin: 0 0 8px; color: var(--sln-text-primary); font: var(--sln-font-label); }
+  label:not(:first-child) { margin-top: 20px; }
+  label span { color: var(--sln-text-muted); font-weight: 500; }
+  input { width: 100%; min-height: 48px; border: 1px solid var(--selinow-border-control); border-radius: var(--sln-radius-md); padding: 12px 14px; background: var(--sln-bg-surface); color: var(--sln-text-primary); outline: none; }
+  input:focus { border-color: var(--sln-focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 22%, transparent); }
+  .field-help { margin: 8px 0 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  button { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 50px; margin-top: 24px; border: 1px solid var(--sln-action-primary); border-radius: var(--sln-radius-md); padding: 12px 20px; background: var(--sln-action-primary); color: var(--sln-white); font: var(--sln-font-label); cursor: pointer; }
+  button:hover { background: var(--sln-action-primary-hover); }
+  button:disabled { cursor: wait; opacity: .68; }
+  #status { min-height: 44px; margin: 14px 0 0; padding: 10px 12px; border-radius: var(--sln-radius-sm); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  #status:empty { padding: 0; }
+  #status[data-tone="pending"] { background: var(--sln-tint-info); color: var(--sln-state-info); }
+  #status[data-tone="success"] { background: var(--sln-tint-success); color: var(--selinow-success-text); }
+  #status[data-tone="error"] { background: var(--sln-tint-danger); color: var(--selinow-danger-text); }
+  #status :global(a) { color: inherit; font-weight: 750; }
+  .login-help { display: grid; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--sln-border-default); color: var(--sln-text-muted); font: var(--sln-font-caption); text-align: center; }
+  .login-help a { color: var(--sln-action-primary); font-weight: 700; }
+  :global(:focus-visible) { outline: 3px solid var(--sln-focus-ring); outline-offset: 3px; }
+  @media (max-width: 480px) { main { padding-top: 16px; } .login-panel { margin-top: 48px; padding: 24px 20px; } }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+</style>

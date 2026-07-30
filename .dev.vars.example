@@ -1,0 +1,29 @@
+# Copy to .dev.vars for local development. Never commit real values.
+SESSION_SECRET=replace-with-local-random-secret
+MAGIC_LINK_SECRET=replace-with-local-random-secret
+CREDENTIAL_KEK_V1=replace-with-32-byte-base64url
+CREDENTIAL_KEK_V2=optional-replace-with-next-32-byte-base64url
+INVENTORY_KEK_V1=replace-with-32-byte-base64url
+INVENTORY_KEK_V2=optional-replace-with-next-32-byte-base64url
+EXPORT_KEK_V1=replace-with-dedicated-32-byte-base64url
+IDENTIFIER_HMAC_SECRET=replace-with-local-random-secret
+TURNSTILE_SECRET_KEY=replace-me
+
+# Public, non-secret local configuration.
+TURNSTILE_SITE_KEY=replace-me
+ACTIVE_CREDENTIAL_KEY_VERSION=v1
+ACTIVE_INVENTORY_KEY_VERSION=v1
+EXPORT_KEY_VERSION=v1
+MAGIC_LINK_GLOBAL_RATE_LIMIT=200
+MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS=900
+MAGIC_LINK_REQUESTER_RATE_LIMIT=20
+STOREFRONT_CART_RATE_LIMIT=30
+STOREFRONT_CHECKOUT_RATE_LIMIT=8
+STOREFRONT_RATE_LIMIT_WINDOW_SECONDS=600
+STOREFRONT_TURNSTILE_THRESHOLD=3
+EMAIL_FROM_ADDRESS=no-reply@selinow.com
+EMAIL_FROM_NAME=Selinow
+
+# Local placeholders only. Never use a production zone or SaaS API token locally.
+CLOUDFLARE_ZONE_ID=00000000000000000000000000000000
+SAAS_CNAME_TARGET=customers.localhost

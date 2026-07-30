@@ -1,0 +1,74 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { isAppError } from "../../lib/core/errors";
+import { getBindings } from "../../lib/platform/bindings";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { createDashboardTranslator } from "../../lib/i18n";
+import { listSellerMembers, type SellerMemberView } from "../../lib/tenants/seller-management";
+import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+let shops: ShopView[] = [];
+let state: "ready" | "unavailable" | "forbidden" = "ready";
+try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { state = "unavailable"; }
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+let members: SellerMemberView[] = [];
+if (shop !== undefined && state === "ready") {
+  try { members = await listSellerMembers({ env, shopPublicId: shop.publicId, userId: auth.userId }); }
+  catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; }
+}
+if (state === "forbidden") Astro.response.status = 403;
+if (state === "unavailable") Astro.response.status = 503;
+const roleLabel = (role: string): string => {
+  const key = role === "owner" || role === "manager" || role === "support" || role === "viewer" ? `dashboard.role.${role}` : "dashboard.members.role.unknown";
+  return t(key);
+};
+const statusLabel = (status: string): string => status === "active"
+  ? t("dashboard.members.status.active")
+  : status === "suspended" ? t("dashboard.members.status.suspended") : t("dashboard.members.status.unknown");
+---
+
+<AppLayout activePath="/app/members" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.members.title")}>
+  <PageHeader eyebrow={t("dashboard.members.eyebrow")} title={t("dashboard.members.title")} description={t("dashboard.members.description")}>
+    <span slot="actions" class="sln-badge">{t("dashboard.members.invite_unavailable")}</span>
+  </PageHeader>
+  {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.members.unavailable.title")} description={t("dashboard.members.unavailable.description")} actionHref={workspaceHref("/app/members")} actionLabel={t("dashboard.members.retry")} tone="danger" /></div>
+    : shop === undefined ? <div class="state-space"><WorkspaceState title={t("dashboard.members.no_store.title")} description={t("dashboard.members.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.members.no_store.action")} tone="info" /></div>
+    : state === "forbidden" ? <div class="state-space"><WorkspaceState title={t("dashboard.members.forbidden.title")} description={t("dashboard.members.forbidden.description")} tone="warning" /></div>
+    : <section class="member-panel" aria-labelledby="member-ledger-title">
+      <header><div><p class="eyebrow">{t("dashboard.members.ledger.eyebrow")}</p><h2 id="member-ledger-title">{shop.name}</h2></div><span>{t("dashboard.members.ledger.count", { count: members.length })}</span></header>
+      {members.length === 0 ? <WorkspaceState title={t("dashboard.members.empty.title")} description={t("dashboard.members.empty.description")} tone="info" /> : <div class="member-ledger" role="list" aria-label={t("dashboard.members.ledger.aria")}>
+        {members.map((member) => <article role="listitem"><div class="member-mark" aria-hidden="true">{member.displayName.slice(0,1).toUpperCase()}</div><div><strong>{member.displayName}</strong><span>{member.emailMasked}</span></div><span class="role-badge">{roleLabel(member.role)}</span><span class={`status-badge status-${member.status}`}>{statusLabel(member.status)}</span></article>)}
+      </div>}
+      <p class="scope-note">{t("dashboard.members.scope")}</p>
+    </section>}
+</AppLayout>
+
+<style>
+  .sln-badge { display:inline-flex; align-items:center; min-height:36px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-pill); padding:7px 12px; color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .state-space { margin-top:var(--sln-space-8); }
+  .member-panel { display:grid; gap:20px; margin-top:var(--sln-space-8); border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); padding:var(--sln-space-6); background:var(--sln-bg-surface); }
+  .member-panel > header { display:flex; align-items:end; justify-content:space-between; gap:16px; padding-bottom:16px; border-bottom:1px solid var(--sln-border-default); }
+  .member-panel h2 { margin:0; font:var(--sln-font-h3); letter-spacing:-.035em; }
+  .member-panel header > span, .member-panel span, .scope-note { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
+  .member-ledger { display:grid; overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); }
+  .member-ledger article { display:grid; grid-template-columns:40px minmax(0,1fr) auto auto; gap:14px; align-items:center; min-height:74px; padding:14px 16px; border-top:1px solid var(--sln-border-default); }
+  .member-ledger article:first-child { border-top:0; }
+  .member-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:var(--sln-tint-indigo); color:var(--sln-action-primary); font-weight:800; }
+  .member-ledger article > div:not(.member-mark) { display:grid; gap:4px; min-width:0; }
+  .member-ledger strong { overflow:hidden; color:var(--sln-text-primary); font:var(--sln-font-label); text-overflow:ellipsis; white-space:nowrap; }
+  .role-badge, .status-badge { border-radius:var(--sln-radius-pill); padding:6px 9px; background:var(--sln-tint-indigo); color:#3730a3 !important; white-space:nowrap; }
+  .status-active { background:var(--sln-tint-success); color:var(--selinow-success-text) !important; }
+  .status-suspended { background:var(--sln-tint-danger); color:var(--selinow-danger-text) !important; }
+  .scope-note { margin:0; }
+  @media (max-width:600px) { .member-panel { padding:16px; } .member-panel > header { align-items:start; flex-direction:column; } .member-ledger article { grid-template-columns:40px minmax(0,1fr); gap:10px; } .role-badge, .status-badge { justify-self:start; } .member-ledger article > .role-badge { grid-column:2; } .member-ledger article > .status-badge { grid-column:2; } }
+</style>

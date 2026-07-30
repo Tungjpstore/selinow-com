@@ -1,0 +1,467 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { isAppError } from "../../lib/core/errors";
+import { listDataExports, type DataExportView } from "../../lib/operations/exports";
+import { getShopDeletion, type ShopDeletionView } from "../../lib/operations/deletion";
+import { listOwnerAbuseReports, type AbuseReportView } from "../../lib/operations/abuse";
+import { listSellerAuditEntries, type SellerAuditEntry } from "../../lib/operations/seller-audit";
+import { getBindings } from "../../lib/platform/bindings";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+
+let shops: ShopView[] = [];
+let shopLoadState: "ready" | "unavailable" = "ready";
+try {
+  shops = await listShopsForMember({ env, userId: auth.userId });
+} catch {
+  shopLoadState = "unavailable";
+}
+
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+let exports: DataExportView[] = [];
+let deletion: ShopDeletionView | null = null;
+let auditEntries: SellerAuditEntry[] = [];
+let abuseReports: AbuseReportView[] = [];
+let exportState: "forbidden" | "ready" | "unavailable" = "ready";
+let deletionState: "forbidden" | "ready" | "unavailable" = "ready";
+let auditState: "forbidden" | "ready" | "unavailable" = "ready";
+let abuseState: "forbidden" | "ready" | "unavailable" = "ready";
+
+if (shop !== undefined && shop.role === "owner") {
+  const [exportsResult, deletionResult, auditResult, abuseResult] = await Promise.allSettled([
+    listDataExports({ env, shopPublicId: shop.publicId, userId: auth.userId }),
+    getShopDeletion({ env, shopPublicId: shop.publicId, userId: auth.userId }),
+    listSellerAuditEntries({ env, shopPublicId: shop.publicId, userId: auth.userId }),
+    listOwnerAbuseReports({ cursor: null, env, limit: 50, shopPublicId: shop.publicId, status: null, userId: auth.userId }),
+  ]);
+
+  if (exportsResult.status === "fulfilled") exports = exportsResult.value;
+  else exportState = isAppError(exportsResult.reason) && exportsResult.reason.status === 403 ? "forbidden" : "unavailable";
+
+  if (deletionResult.status === "fulfilled") deletion = deletionResult.value;
+  else deletionState = isAppError(deletionResult.reason) && deletionResult.reason.status === 403 ? "forbidden" : "unavailable";
+
+  if (auditResult.status === "fulfilled") auditEntries = auditResult.value;
+  else auditState = isAppError(auditResult.reason) && auditResult.reason.status === 403 ? "forbidden" : "unavailable";
+
+  if (abuseResult.status === "fulfilled") abuseReports = abuseResult.value.reports;
+  else abuseState = isAppError(abuseResult.reason) && abuseResult.reason.status === 403 ? "forbidden" : "unavailable";
+} else if (shop !== undefined) {
+  exportState = "forbidden";
+  deletionState = "forbidden";
+  auditState = "forbidden";
+  abuseState = "forbidden";
+}
+
+const dateFormatter = new Intl.DateTimeFormat(locale ?? "en", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh",
+});
+const formatDate = (value: string | null): string => value === null ? t("dashboard.data.common.not_recorded") : dateFormatter.format(new Date(value));
+
+const exportKindLabel = (value: DataExportView["kind"]): string => value === "standard"
+  ? t("dashboard.data.export.kind.standard")
+  : t("dashboard.data.export.kind.plaintext");
+const exportStatusLabel = (value: string): string => ({
+  available: t("dashboard.data.export.status.available"),
+  completed: t("dashboard.data.export.status.completed"),
+  consumed: t("dashboard.data.export.status.consumed"),
+  failed: t("dashboard.data.export.status.failed"),
+  processing: t("dashboard.data.export.status.processing"),
+}[value] ?? t("dashboard.data.export.status.unknown"));
+const deletionStatusLabel = (value: string): string => ({
+  blocked: t("dashboard.data.deletion.status.blocked"),
+  canceled: t("dashboard.data.deletion.status.canceled"),
+  completed: t("dashboard.data.deletion.status.completed"),
+  failed: t("dashboard.data.deletion.status.failed"),
+  processing: t("dashboard.data.deletion.status.processing"),
+  retention_hold: t("dashboard.data.deletion.status.retention_hold"),
+}[value] ?? t("dashboard.data.deletion.status.unknown"));
+const deletionStepLabel = (value: string): string => ({
+  active_payment_drain: t("dashboard.data.deletion.step.active_payment_drain"),
+  checkout_block: t("dashboard.data.deletion.step.checkout_block"),
+  crypto_shred: t("dashboard.data.deletion.step.crypto_shred"),
+  custom_domain_cleanup: t("dashboard.data.deletion.step.custom_domain_cleanup"),
+  finalize: t("dashboard.data.deletion.step.finalize"),
+  grace_wait: t("dashboard.data.deletion.step.grace_wait"),
+  payment_cleanup: t("dashboard.data.deletion.step.payment_cleanup"),
+  routing_remove: t("dashboard.data.deletion.step.routing_remove"),
+  telegram_cleanup: t("dashboard.data.deletion.step.telegram_cleanup"),
+}[value] ?? value);
+const deletionStepStatusLabel = (value: string): string => ({
+  blocked: t("dashboard.data.deletion.step_status.blocked"),
+  completed: t("dashboard.data.deletion.step_status.completed"),
+  failed: t("dashboard.data.deletion.step_status.failed"),
+  pending: t("dashboard.data.deletion.step_status.pending"),
+  processing: t("dashboard.data.deletion.step_status.processing"),
+}[value] ?? t("dashboard.data.deletion.step_status.unknown"));
+const abuseCategoryLabel = (value: string): string => ({
+  copyright: t("dashboard.data.abuse.category.copyright"),
+  fraud: t("dashboard.data.abuse.category.fraud"),
+  malware: t("dashboard.data.abuse.category.malware"),
+  other: t("dashboard.data.abuse.category.other"),
+  privacy: t("dashboard.data.abuse.category.privacy"),
+  prohibited_content: t("dashboard.data.abuse.category.prohibited_content"),
+}[value] ?? t("dashboard.data.abuse.category.unknown"));
+const abuseStatusLabel = (value: string): string => ({
+  actioned: t("dashboard.data.abuse.status.actioned"),
+  closed: t("dashboard.data.abuse.status.closed"),
+  dismissed: t("dashboard.data.abuse.status.dismissed"),
+  investigating: t("dashboard.data.abuse.status.investigating"),
+  received: t("dashboard.data.abuse.status.received"),
+  triaged: t("dashboard.data.abuse.status.triaged"),
+}[value] ?? t("dashboard.data.abuse.status.unknown"));
+const moderationTargetStatusLabel = (value: string | null): string => ({
+  active: t("dashboard.data.abuse.target_status.active"),
+  archived: t("dashboard.data.abuse.target_status.archived"),
+  draft: t("dashboard.data.abuse.target_status.draft"),
+  suspended: t("dashboard.data.abuse.target_status.suspended"),
+}[value ?? ""] ?? t("dashboard.data.abuse.target_status.unknown"));
+const abuseTargetLabel = (report: AbuseReportView): string => {
+  if (report.targetKind === "product") return moderationTargetStatusLabel(report.targetStatus);
+  if (report.targetKind === "domain") return t("dashboard.data.abuse.target.domain");
+  if (report.targetKind === "shop") return t("dashboard.data.abuse.target.shop");
+  return t("dashboard.data.abuse.target.other");
+};
+const abuseTargetKindLabel = (value: string): string => ({
+  domain: t("dashboard.data.abuse.kind.domain"),
+  product: t("dashboard.data.abuse.kind.product"),
+  shop: t("dashboard.data.abuse.kind.shop"),
+}[value] ?? t("dashboard.data.abuse.kind.unknown"));
+const canCancelDeletion = deletion !== null
+  && !new Set(["canceled", "completed"]).has(deletion.status)
+  && deletion.providerCleanupCompletedAt === null
+  && deletion.secretMaterialDestroyedAt === null;
+const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "retention_hold"]).has(deletion.status);
+---
+
+<AppLayout activePath="/app/data" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.data.title")}>
+  <PageHeader eyebrow={t("dashboard.data.eyebrow")} title={t("dashboard.data.title")} description={t("dashboard.data.description")}>
+    {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app")}>{t("dashboard.data.back")}</a>}
+  </PageHeader>
+
+  {shopLoadState === "unavailable" ? (
+    <div class="state-space">
+      <WorkspaceState eyebrow={t("dashboard.data.state.workspace_unavailable.eyebrow")} title={t("dashboard.data.state.workspace_unavailable.title")} description={t("dashboard.data.state.workspace_unavailable.description")} actionHref={workspaceHref("/app/data")} actionLabel={t("dashboard.data.state.workspace_unavailable.action")} tone="danger" />
+    </div>
+  ) : shop === undefined ? (
+    <div class="state-space">
+      <WorkspaceState title={t("dashboard.data.state.no_store.title")} description={t("dashboard.data.state.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.data.state.no_store.action")} tone="info" />
+    </div>
+  ) : shop.role !== "owner" ? (
+    <div class="state-space">
+      <WorkspaceState eyebrow={t("dashboard.data.state.owner_only.eyebrow")} title={t("dashboard.data.state.owner_only.title")} description={t("dashboard.data.state.owner_only.description", { role: shop.role })} tone="warning" />
+    </div>
+  ) : (
+    <div class="data-workspace" data-data-lifecycle-root data-locale={locale ?? "en"} data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`}>
+      <p class="action-feedback" role="status" aria-live="polite" tabindex="-1" data-action-feedback hidden></p>
+      <button class="retry-download" type="button" data-retry-download hidden>{t("dashboard.data.client.export.retry")}</button>
+
+      <section class="data-panel" aria-labelledby="exports-title">
+        <header class="panel-heading">
+          <div><p class="eyebrow">{t("dashboard.data.exports.eyebrow")}</p><h2 id="exports-title">{t("dashboard.data.exports.title")}</h2></div>
+          <span>{t("dashboard.data.exports.count", { count: exports.length })}</span>
+        </header>
+
+        <div class="export-options">
+          <article>
+            <div><strong>{t("dashboard.data.exports.standard.title")}</strong><p>{t("dashboard.data.exports.standard.description")}</p></div>
+            <button class="sln-button sln-button-primary" type="button" data-create-export="standard">{t("dashboard.data.exports.standard.action")}</button>
+          </article>
+          <article class="risk-option">
+            <div><strong>{t("dashboard.data.exports.plaintext.title")}</strong><p>{t("dashboard.data.exports.plaintext.description")}</p></div>
+            <details>
+              <summary>{t("dashboard.data.exports.plaintext.summary")}</summary>
+              <label><input type="checkbox" data-plaintext-ack /> {t("dashboard.data.exports.plaintext.ack")}</label>
+              <button class="sln-button sln-button-danger" type="button" data-create-export="inventory_keys_plaintext">{t("dashboard.data.exports.plaintext.action")}</button>
+            </details>
+          </article>
+        </div>
+
+        {exportState === "unavailable" ? (
+          <WorkspaceState eyebrow={t("dashboard.data.exports.state.unavailable.eyebrow")} title={t("dashboard.data.exports.state.unavailable.title")} description={t("dashboard.data.exports.state.unavailable.description")} actionHref={workspaceHref("/app/data")} actionLabel={t("dashboard.data.exports.state.unavailable.action")} tone="danger" />
+        ) : exportState === "forbidden" ? (
+          <WorkspaceState title={t("dashboard.data.exports.state.forbidden.title")} description={t("dashboard.data.exports.state.forbidden.description")} tone="warning" />
+        ) : exports.length === 0 ? (
+          <WorkspaceState eyebrow={t("dashboard.data.exports.state.empty.eyebrow")} title={t("dashboard.data.exports.state.empty.title")} description={t("dashboard.data.exports.state.empty.description")} tone="neutral" />
+        ) : (
+          <div class="export-ledger" role="list" aria-label={t("dashboard.data.exports.aria")}>
+            {exports.map((item) => (
+              <article role="listitem">
+                <div class="record-mark" aria-hidden="true">{item.includesPlaintextKeys ? "!" : "↓"}</div>
+                <div><strong>{exportKindLabel(item.kind)}</strong><code>{item.id}</code></div>
+                <div><span>{t("dashboard.data.common.status")}</span><strong>{exportStatusLabel(item.status)}</strong></div>
+                <div><span>{t("dashboard.data.common.created_at")}</span><time datetime={item.createdAt}>{formatDate(item.createdAt)}</time></div>
+                <div><span>{t("dashboard.data.common.retained_until")}</span><time datetime={item.retainUntil}>{formatDate(item.retainUntil)}</time></div>
+                <div><span>{t("dashboard.data.common.downloaded_at")}</span><strong>{item.downloadedAt === null ? t("dashboard.data.common.not_downloaded") : formatDate(item.downloadedAt)}</strong></div>
+                {item.lastSafeErrorCode !== null && <p class="record-error">{t("dashboard.data.common.safe_error_code")}: <code>{item.lastSafeErrorCode}</code></p>}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section class="data-panel abuse-panel" aria-labelledby="abuse-title">
+        <header class="panel-heading">
+          <div><p class="eyebrow eyebrow-danger">{t("dashboard.data.abuse.eyebrow")}</p><h2 id="abuse-title">{t("dashboard.data.abuse.title")}</h2></div>
+          <span>{t("dashboard.data.abuse.count", { count: abuseReports.length })}</span>
+        </header>
+        {abuseState === "unavailable" ? (
+          <WorkspaceState eyebrow={t("dashboard.data.abuse.state.unavailable.eyebrow")} title={t("dashboard.data.abuse.state.unavailable.title")} description={t("dashboard.data.abuse.state.unavailable.description")} actionHref={workspaceHref("/app/data")} actionLabel={t("dashboard.data.abuse.state.unavailable.action")} tone="danger" />
+        ) : abuseState === "forbidden" ? (
+          <WorkspaceState title={t("dashboard.data.abuse.state.forbidden.title")} description={t("dashboard.data.abuse.state.forbidden.description")} tone="warning" />
+        ) : abuseReports.length === 0 ? (
+          <WorkspaceState eyebrow={t("dashboard.data.abuse.state.empty.eyebrow")} title={t("dashboard.data.abuse.state.empty.title")} description={t("dashboard.data.abuse.state.empty.description")} tone="neutral" />
+        ) : (
+          <div class="abuse-ledger" role="list" aria-label={t("dashboard.data.abuse.aria")}>
+            {abuseReports.map((report) => {
+              const canSuspend = report.targetKind === "product"
+                && new Set(["active", "draft"]).has(report.targetStatus ?? "")
+                && !new Set(["actioned", "closed", "dismissed"]).has(report.status);
+              const canRestore = report.targetKind === "product"
+                && report.targetStatus === "suspended"
+                && report.ownerRestoreEligible;
+              return (
+                <article role="listitem" data-moderation-report-row data-target-status={report.targetStatus ?? "unavailable"}>
+                  <span class="report-severity" aria-hidden="true">!</span>
+                  <div class="report-copy"><strong>{abuseCategoryLabel(report.category)}</strong><p>{report.summary}</p><small>{abuseTargetKindLabel(report.targetKind)} · {report.targetRef}</small></div>
+                  <div><span>{t("dashboard.data.abuse.report_target")}</span><strong>{abuseStatusLabel(report.status)} · {abuseTargetLabel(report)}</strong></div>
+                  <time datetime={report.createdAt}>{formatDate(report.createdAt)}</time>
+                  {(canSuspend || canRestore) && (
+                    <details>
+                      <summary>{t("dashboard.data.abuse.moderation.summary")}</summary>
+                      <p>{canRestore
+                        ? t("dashboard.data.abuse.moderation.restore_detail")
+                        : t("dashboard.data.abuse.moderation.suspend_detail")}</p>
+                      <button
+                        class:list={["sln-button", canRestore ? "sln-button-secondary" : "sln-button-danger"]}
+                        type="button"
+                        data-moderation-action={canRestore ? "product_restore" : "product_suspend"}
+                        data-moderation-report={report.publicId}
+                        data-target-id={report.targetRef}
+                      >{canRestore ? t("dashboard.data.abuse.moderation.restore_action") : t("dashboard.data.abuse.moderation.suspend_action")}</button>
+                    </details>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section class="data-panel deletion-panel" aria-labelledby="deletion-title">
+        <header class="panel-heading">
+          <div><p class="eyebrow eyebrow-danger">{t("dashboard.data.deletion.eyebrow")}</p><h2 id="deletion-title">{t("dashboard.data.deletion.title")}</h2></div>
+          <span>{t("dashboard.data.deletion.cascade_note")}</span>
+        </header>
+
+        {deletionState === "unavailable" ? (
+          <WorkspaceState eyebrow={t("dashboard.data.deletion.state.unavailable.eyebrow")} title={t("dashboard.data.deletion.state.unavailable.title")} description={t("dashboard.data.deletion.state.unavailable.description")} actionHref={workspaceHref("/app/data")} actionLabel={t("dashboard.data.deletion.state.unavailable.action")} tone="danger" />
+        ) : deletionState === "forbidden" ? (
+          <WorkspaceState title={t("dashboard.data.deletion.state.forbidden.title")} description={t("dashboard.data.deletion.state.forbidden.description")} tone="warning" />
+        ) : deletion === null ? (
+          <div class="deletion-start">
+            <div class="impact-copy">
+              <strong>{t("dashboard.data.deletion.start.impact")}</strong>
+              <p>{t("dashboard.data.deletion.start.description")}</p>
+            </div>
+            <form data-deletion-request-form>
+              <label>{t("dashboard.data.deletion.start.reason")}
+                <select name="reasonCode">
+                  <option value="seller_request">{t("dashboard.data.deletion.start.reason.seller_request")}</option>
+                  <option value="business_closed">{t("dashboard.data.deletion.start.reason.business_closed")}</option>
+                  <option value="platform_migration">{t("dashboard.data.deletion.start.reason.platform_migration")}</option>
+                  <option value="other">{t("dashboard.data.deletion.start.reason.other")}</option>
+                </select>
+              </label>
+              <label>{t("dashboard.data.deletion.start.confirm")} <code>DELETE SHOP</code>
+                <input name="confirmation" autocomplete="off" required pattern="DELETE SHOP" />
+              </label>
+              <button class="sln-button sln-button-danger" type="submit">{t("dashboard.data.deletion.start.action")}</button>
+            </form>
+          </div>
+        ) : (
+          <div class="deletion-status" data-deletion-id={deletion.id} data-deletion-version={deletion.version}>
+            <div class="deletion-summary">
+              <div><span>{t("dashboard.data.common.status")}</span><strong>{deletionStatusLabel(deletion.status)}</strong></div>
+              <div><span>{t("dashboard.data.deletion.summary.grace_ends")}</span><time datetime={deletion.graceEndsAt}>{formatDate(deletion.graceEndsAt)}</time></div>
+              <div><span>{t("dashboard.data.deletion.summary.financial_retain_until")}</span><time datetime={deletion.financialRecordsRetainUntil}>{formatDate(deletion.financialRecordsRetainUntil)}</time></div>
+              <div><span>{t("dashboard.data.deletion.summary.version")}</span><strong>{deletion.version}</strong></div>
+            </div>
+
+            {deletion.legalHoldUntil !== null && <p class="hold-note">{t("dashboard.data.deletion.legal_hold", { time: formatDate(deletion.legalHoldUntil) })}</p>}
+            {deletion.lastSafeErrorCode !== null && <p class="record-error">{t("dashboard.data.deletion.workflow_attention")}: <code>{deletion.lastSafeErrorCode}</code></p>}
+
+            <ol class="step-ledger">
+              {deletion.steps.map((step) => (
+                <li data-step-status={step.status}>
+                  <span aria-hidden="true"></span>
+                  <div><strong>{deletionStepLabel(step.code)}</strong><small>{deletionStepStatusLabel(step.status)} · {t("dashboard.data.common.attempts", { count: step.attempts })}</small></div>
+                  <time datetime={step.updatedAt}>{formatDate(step.updatedAt)}</time>
+                </li>
+              ))}
+            </ol>
+
+            {(canResumeDeletion || canCancelDeletion) && (
+              <div class="deletion-actions">
+                {canResumeDeletion && <button class="sln-button sln-button-primary" type="button" data-deletion-resume>{t("dashboard.data.deletion.action.resume")}</button>}
+                {canCancelDeletion && <button class="sln-button sln-button-secondary" type="button" data-deletion-cancel>{t("dashboard.data.deletion.action.cancel")}</button>}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section class="data-panel audit-panel" aria-labelledby="audit-title">
+        <header class="panel-heading">
+          <div><p class="eyebrow">{t("dashboard.data.audit.eyebrow")}</p><h2 id="audit-title">{t("dashboard.data.audit.title")}</h2></div>
+          <span>{t("dashboard.data.audit.count", { count: auditEntries.length })}</span>
+        </header>
+        {auditState === "unavailable" ? (
+          <WorkspaceState eyebrow={t("dashboard.data.audit.state.unavailable.eyebrow")} title={t("dashboard.data.audit.state.unavailable.title")} description={t("dashboard.data.audit.state.unavailable.description")} actionHref={workspaceHref("/app/data")} actionLabel={t("dashboard.data.audit.state.unavailable.action")} tone="danger" />
+        ) : auditState === "forbidden" ? (
+          <WorkspaceState title={t("dashboard.data.audit.state.forbidden.title")} description={t("dashboard.data.audit.state.forbidden.description")} tone="warning" />
+        ) : auditEntries.length === 0 ? (
+          <WorkspaceState eyebrow={t("dashboard.data.audit.state.empty.eyebrow")} title={t("dashboard.data.audit.state.empty.title")} description={t("dashboard.data.audit.state.empty.description")} tone="neutral" />
+        ) : (
+          <div class="audit-ledger" role="list" aria-label={t("dashboard.data.audit.aria")}>
+            {auditEntries.map((entry) => (
+              <article role="listitem">
+                <time datetime={entry.createdAt}>{formatDate(entry.createdAt)}</time>
+                <div><strong>{entry.action}</strong><span>{entry.resourceType}{entry.resourceId === null ? "" : ` · ${entry.resourceId}`}</span></div>
+                <div><span>{t("dashboard.data.common.source")}</span><strong>{entry.sourceKind}</strong></div>
+                <div><span>{t("dashboard.data.common.request")}</span><code>{entry.requestId}</code></div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  )}
+</AppLayout>
+
+{shop !== undefined && shop.role === "owner" && <script src="../../scripts/dashboard/data-lifecycle.ts"></script>}
+
+<style>
+  .sln-button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); text-decoration: none; cursor: pointer; }
+  .sln-button:disabled { cursor: wait; opacity: .62; }
+  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
+  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .sln-button-danger { background: var(--sln-state-danger); color: var(--sln-white); }
+  .state-space, .data-workspace { margin-top: var(--sln-space-8); }
+  .data-workspace { display: grid; gap: var(--sln-space-8); }
+  .action-feedback { position: sticky; top: calc(var(--sln-topbar-height) + 12px); z-index: var(--sln-z-sticky); margin: 0; border: 1px solid color-mix(in srgb, var(--sln-state-info) 28%, transparent); border-radius: var(--sln-radius-md); padding: 12px 16px; background: var(--sln-tint-info); color: var(--sln-text-primary); font: var(--sln-font-body-sm); box-shadow: var(--sln-shadow-sm); }
+  .action-feedback[data-tone="danger"] { border-color: color-mix(in srgb, var(--sln-state-danger) 32%, transparent); background: var(--sln-tint-danger); }
+  .action-feedback[hidden], .retry-download[hidden] { display: none; }
+  .retry-download { justify-self: start; min-height: 44px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 8px 14px; background: var(--sln-bg-surface); color: var(--sln-action-primary); font: var(--sln-font-label); cursor: pointer; }
+  .data-panel { display: grid; gap: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); padding: var(--sln-space-6); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+  .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding-bottom: var(--sln-space-4); border-bottom: 1px solid var(--sln-border-default); }
+  .panel-heading h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .panel-heading > span { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .eyebrow { margin: 0 0 7px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+  .eyebrow-danger { color: var(--sln-state-danger); }
+  .export-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sln-space-4); }
+  .export-options > article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 18px; background: var(--sln-bg-canvas); }
+  .export-options strong, .impact-copy strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .export-options p, .impact-copy p { margin: 5px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .risk-option { border-color: color-mix(in srgb, var(--sln-state-danger) 28%, var(--sln-border-default)) !important; background: var(--sln-tint-danger) !important; }
+  .risk-option details { grid-column: 1 / -1; border-top: 1px solid color-mix(in srgb, var(--sln-state-danger) 24%, transparent); padding-top: 12px; }
+  .risk-option summary { min-height: 44px; color: var(--selinow-danger-text); font: var(--sln-font-label); cursor: pointer; }
+  .risk-option label { display: flex; gap: 10px; align-items: start; margin: 10px 0 14px; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .risk-option input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--sln-state-danger); }
+  .export-ledger { display: grid; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); overflow: hidden; }
+  .export-ledger article { display: grid; grid-template-columns: 42px minmax(180px, 1.3fr) repeat(4, minmax(115px, .8fr)); gap: 14px; align-items: center; min-height: 82px; padding: 14px 16px; border-top: 1px solid var(--sln-border-default); }
+  .export-ledger article:first-child { border-top: 0; }
+  .record-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--sln-tint-indigo); color: var(--sln-action-primary); font-weight: 800; }
+  .export-ledger article:has(.record-mark:first-child:nth-last-child(n)) .record-mark { flex: none; }
+  .export-ledger article > div:not(.record-mark) { display: grid; gap: 3px; min-width: 0; }
+  .export-ledger span, .export-ledger time, .export-ledger code { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
+  .export-ledger strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .export-ledger code { font-family: var(--sln-font-mono); font-size: 10px; }
+  .record-error, .hold-note { grid-column: 1 / -1; margin: 0; border-radius: var(--sln-radius-sm); padding: 10px 12px; background: var(--sln-tint-warning); color: #7c3e02; font: var(--sln-font-body-sm); }
+  .record-error code { font-family: var(--sln-font-mono); }
+  .deletion-start { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr); gap: var(--sln-space-6); align-items: start; }
+  .impact-copy { border-left: 3px solid var(--sln-state-danger); padding: 4px 0 4px 18px; }
+  .deletion-start form { display: grid; gap: 14px; border: 1px solid color-mix(in srgb, var(--sln-state-danger) 28%, var(--sln-border-default)); border-radius: var(--sln-radius-md); padding: 18px; background: var(--sln-tint-danger); }
+  .deletion-start label { display: grid; gap: 7px; color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .deletion-start input, .deletion-start select { width: 100%; min-height: 44px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 11px; background: var(--sln-bg-surface); color: var(--sln-text-primary); font: var(--sln-font-body-sm); }
+  .deletion-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--sln-border-default); }
+  .deletion-summary > div { display: grid; gap: 5px; padding: 16px; border-right: 1px solid var(--sln-border-default); }
+  .deletion-summary > div:last-child { border-right: 0; }
+  .deletion-summary span, .deletion-summary time { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .deletion-summary strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .step-ledger { display: grid; margin: 20px 0 0; padding: 0; list-style: none; }
+  .step-ledger li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 58px; border-top: 1px solid var(--sln-border-default); }
+  .step-ledger li:first-child { border-top: 0; }
+  .step-ledger li > span { width: 12px; height: 12px; border: 2px solid var(--sln-border-strong); border-radius: 50%; background: var(--sln-bg-surface); }
+  .step-ledger li[data-step-status="completed"] > span { border-color: var(--sln-state-success); background: var(--sln-state-success); box-shadow: inset 0 0 0 2px var(--sln-bg-surface); }
+  .step-ledger li[data-step-status="blocked"] > span, .step-ledger li[data-step-status="failed"] > span { border-color: var(--sln-state-danger); background: var(--sln-state-danger); }
+  .step-ledger div { display: grid; gap: 2px; }
+  .step-ledger strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .step-ledger small, .step-ledger time { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .deletion-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--sln-border-default); }
+  .audit-ledger { display: grid; overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
+  .audit-ledger article { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(220px, 1.4fr) minmax(100px, .6fr) minmax(150px, .8fr); gap: 14px; align-items: center; min-height: 68px; padding: 12px 16px; border-top: 1px solid var(--sln-border-default); }
+  .audit-ledger article:first-child { border-top: 0; }
+  .audit-ledger article > div { display: grid; gap: 3px; min-width: 0; }
+  .audit-ledger strong { overflow: hidden; color: var(--sln-text-primary); font: var(--sln-font-label); text-overflow: ellipsis; white-space: nowrap; }
+  .audit-ledger span, .audit-ledger time, .audit-ledger code { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
+  .audit-ledger code { font-family: var(--sln-font-mono); font-size: 10px; }
+  .abuse-ledger { display: grid; overflow: hidden; border: 1px solid color-mix(in srgb, var(--sln-state-danger) 25%, var(--sln-border-default)); border-radius: var(--sln-radius-md); }
+  .abuse-ledger article { display: grid; grid-template-columns: 34px minmax(0, 1.4fr) minmax(110px, .6fr) minmax(135px, .7fr); gap: 14px; align-items: start; padding: 16px; border-top: 1px solid var(--sln-border-default); }
+  .abuse-ledger article:first-child { border-top: 0; }
+  .report-severity { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--sln-tint-danger); color: var(--sln-state-danger); font-weight: 800; }
+  .report-copy { display: grid; gap: 4px; min-width: 0; }
+  .report-copy strong, .abuse-ledger article > div:not(.report-copy) strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .report-copy p { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .report-copy small, .abuse-ledger article > div:not(.report-copy) span, .abuse-ledger time { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .abuse-ledger article > div:not(.report-copy) { display: grid; gap: 4px; }
+  .abuse-ledger details { grid-column: 2 / -1; border-top: 1px solid var(--sln-border-default); padding-top: 12px; }
+  .abuse-ledger summary { min-height: 44px; color: var(--selinow-danger-text); font: var(--sln-font-label); cursor: pointer; }
+  .abuse-ledger details p { margin: 0 0 12px; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  @media (max-width: 1080px) {
+    .export-options, .deletion-start { grid-template-columns: 1fr; }
+    .export-ledger article { grid-template-columns: 42px minmax(0, 1fr) repeat(2, minmax(110px, .7fr)); }
+    .export-ledger article > div:nth-of-type(n + 5) { grid-column: span 2; }
+    .audit-ledger article { grid-template-columns: minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(120px, .7fr); }
+    .audit-ledger article > div:last-child { grid-column: 2 / -1; }
+  }
+  @media (max-width: 700px) {
+    .data-panel { padding: 16px; }
+    .panel-heading { align-items: start; flex-direction: column; }
+    .export-options > article { grid-template-columns: 1fr; }
+    .export-options .sln-button { width: 100%; }
+    .export-ledger article { grid-template-columns: 36px minmax(0, 1fr); gap: 10px; padding: 16px; }
+    .export-ledger article > div:not(.record-mark) { grid-column: 2; }
+    .export-ledger article > div:not(.record-mark):not(:nth-of-type(2)) { grid-template-columns: 88px minmax(0, 1fr); }
+    .export-ledger article > div:nth-of-type(n + 5) { grid-column: 2; }
+    .deletion-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .deletion-summary > div:nth-child(2) { border-right: 0; }
+    .deletion-summary > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); }
+    .step-ledger li { grid-template-columns: 18px minmax(0, 1fr); padding-block: 10px; }
+    .step-ledger time { grid-column: 2; }
+    .deletion-actions .sln-button { width: 100%; }
+    .audit-ledger article { grid-template-columns: 1fr; gap: 6px; padding: 16px; }
+    .audit-ledger article > div:last-child { grid-column: auto; }
+    .abuse-ledger article { grid-template-columns: 34px minmax(0, 1fr); }
+    .abuse-ledger article > div:not(.report-copy), .abuse-ledger time { grid-column: 2; }
+    .abuse-ledger details { grid-column: 2; }
+  }
+  @media (max-width: 380px) {
+    .deletion-summary { grid-template-columns: 1fr; }
+    .deletion-summary > div { border-right: 0; border-top: 1px solid var(--sln-border-default); }
+    .deletion-summary > div:first-child { border-top: 0; }
+  }
+</style>

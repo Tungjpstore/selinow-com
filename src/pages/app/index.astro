@@ -1,0 +1,568 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import FulfillmentState from "../../components/commerce/FulfillmentState.astro";
+import Money from "../../components/commerce/Money.astro";
+import PaymentState from "../../components/commerce/PaymentState.astro";
+import StatusBadge from "../../components/primitives/StatusBadge.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { listSellerCatalog } from "../../lib/catalog/store";
+import { listSellerOrders, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
+import { isAppError } from "../../lib/core/errors";
+import { getBindings } from "../../lib/platform/bindings";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { createDashboardTranslator } from "../../lib/i18n";
+import { getShopReadiness, type ReadinessCheck, type ReadinessResult } from "../../lib/tenants/readiness";
+import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
+
+type LoadState = "forbidden" | "ready" | "unavailable";
+type LoadResult<T> = { state: LoadState; value: T };
+type Tone = "danger" | "info" | "neutral" | "success" | "warning";
+type CatalogRecord = Record<string, unknown>;
+type HealthItem = {
+  actionLabel: string;
+  actionUrl: string;
+  evidence: string;
+  label: string;
+  state: string;
+  tone: Tone;
+};
+type ActionItem = {
+  actionLabel: string;
+  actionUrl: string;
+  count?: number;
+  evidence: string;
+  impact: string;
+  severity: "blocked" | "warning";
+  title: string;
+};
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+
+async function loadTenantData<T>(operation: () => Promise<T>, fallback: T): Promise<LoadResult<T>> {
+  try {
+    return { state: "ready", value: await operation() };
+  } catch (error) {
+    return {
+      state: isAppError(error) && error.status === 403 ? "forbidden" : "unavailable",
+      value: fallback,
+    };
+  }
+}
+
+const workspaceLoad: LoadResult<ShopView[]> = await listShopsForMember({ env, userId: auth.userId })
+  .then((value) => ({ state: "ready" as const, value }))
+  .catch(() => ({ state: "unavailable" as const, value: [] }));
+const shops = workspaceLoad.value;
+const workspaceState = workspaceLoad.state;
+
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const emptyCatalog = (): { products: CatalogRecord[]; variants: CatalogRecord[] } => ({ products: [], variants: [] });
+const canReadCatalog = shop !== undefined && new Set(["owner", "manager"]).has(shop.role);
+const noOrders: LoadResult<SellerOrderSummary[]> = { state: "ready", value: [] };
+const noReadiness: LoadResult<ReadinessResult | null> = { state: "forbidden", value: null };
+const noCatalog: LoadResult<{ products: CatalogRecord[]; variants: CatalogRecord[] }> = {
+  state: canReadCatalog ? "ready" : "forbidden",
+  value: emptyCatalog(),
+};
+
+const [ordersLoad, readinessLoad, catalogLoad] = shop !== undefined && workspaceState === "ready"
+  ? await Promise.all([
+      loadTenantData(
+        () => listSellerOrders({ env, shopPublicId: shop.publicId, userId: auth.userId }),
+        [],
+      ),
+      shop.role === "owner"
+        ? loadTenantData(
+            () => getShopReadiness({ env, shopPublicId: shop.publicId, userId: auth.userId }),
+            null,
+          )
+        : Promise.resolve(noReadiness),
+      canReadCatalog
+        ? loadTenantData(
+            async () => {
+              const value = await listSellerCatalog({ env, shopPublicId: shop.publicId, userId: auth.userId });
+              return {
+                products: value.products as CatalogRecord[],
+                variants: value.variants as CatalogRecord[],
+              };
+            },
+            emptyCatalog(),
+          )
+        : Promise.resolve(noCatalog),
+    ])
+  : [noOrders, noReadiness, noCatalog];
+
+const orders = ordersLoad.value;
+const ordersState = ordersLoad.state;
+const readiness = readinessLoad.value;
+const readinessState = readinessLoad.state;
+const catalog = catalogLoad.value;
+const catalogState = catalogLoad.state;
+
+const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+const storefrontUrl = shop === undefined ? null : `https://${shop.slug}.${env.PLATFORM_BASE_DOMAIN}`;
+const shopTone: Tone = shop?.status === "active" ? "success" : shop?.status === "suspended" ? "danger" : "warning";
+const shopStatus = shop?.status === "active"
+  ? t("dashboard.overview.shop_status.active.title")
+  : shop?.status === "suspended"
+    ? t("dashboard.overview.shop_status.suspended.title")
+    : t("dashboard.overview.shop_status.setup.title");
+const shopSummary = shop?.status === "active"
+  ? t("dashboard.overview.shop_status.active.summary")
+  : shop?.status === "suspended"
+    ? t("dashboard.overview.shop_status.suspended.summary")
+    : t("dashboard.overview.shop_status.setup.summary");
+
+const dateFormatter = new Intl.DateTimeFormat(typeof locale === "string" ? locale : "en", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh",
+});
+const dayFormatter = new Intl.DateTimeFormat(typeof locale === "string" ? locale : "en", {
+  dateStyle: "full",
+  timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh",
+});
+const formatDate = (value: string): string => dateFormatter.format(new Date(value));
+const todayLabel = dayFormatter.format(new Date());
+const readinessEvidence = readiness === null
+  ? t("dashboard.overview.readiness.none")
+  : t("dashboard.overview.readiness.checked", { time: formatDate(readiness.checkedAt) });
+const readinessChecks = new Map<string, ReadinessCheck>(
+  (readiness?.checks ?? []).map((check) => [check.code, check]),
+);
+const toneForCheck = (check: ReadinessCheck | undefined): Tone => check?.status === "pass"
+  ? "success"
+  : check?.status === "warning"
+    ? "warning"
+    : check?.status === "fail"
+      ? "danger"
+      : "neutral";
+
+function healthFromCheck(input: {
+  actionLabel: string;
+  code: string;
+  label: string;
+  passLabel: string;
+  skippedLabel?: string;
+}): HealthItem {
+  const check = readinessChecks.get(input.code);
+  const skipped = check?.messageKey.endsWith(".skipped") ?? false;
+  return {
+    actionLabel: input.actionLabel,
+    actionUrl: workspaceHref(check?.actionUrl ?? "/onboarding#readiness"),
+    evidence: readinessEvidence,
+    label: input.label,
+    state: check === undefined
+      ? readinessState === "forbidden" ? t("dashboard.overview.health.owner_only") : t("dashboard.overview.health.no_data")
+      : skipped ? input.skippedLabel ?? t("dashboard.overview.health.state.unverified")
+        : check.status === "pass" ? input.passLabel
+          : check.status === "warning" ? t("dashboard.overview.health.state.attention") : t("dashboard.overview.health.state.setup_required"),
+    tone: skipped ? "neutral" : toneForCheck(check),
+  };
+}
+
+const platformDomainCheck = readinessChecks.get("platform_domain_ready");
+const customDomainCheck = readinessChecks.get("custom_domain_ready");
+const domainCheck = platformDomainCheck?.status === "fail" ? platformDomainCheck : customDomainCheck;
+const healthItems: HealthItem[] = [
+  healthFromCheck({ actionLabel: t("dashboard.overview.action.open_settings"), code: "storefront_ready", label: t("dashboard.overview.health.website"), passLabel: t("dashboard.overview.health.state.stable"), skippedLabel: t("dashboard.overview.health.state.unverified") }),
+  healthFromCheck({ actionLabel: t("dashboard.overview.health.action.telegram"), code: "telegram_ready", label: t("dashboard.overview.health.telegram"), passLabel: t("dashboard.overview.health.state.stable"), skippedLabel: t("dashboard.overview.health.state.unverified") }),
+  healthFromCheck({ actionLabel: t("dashboard.overview.health.action.payos"), code: "payos_ready", label: t("dashboard.overview.health.payos"), passLabel: t("dashboard.overview.health.state.verified") }),
+  healthFromCheck({ actionLabel: t("dashboard.overview.action.open_inventory"), code: "fulfillment_ready", label: t("dashboard.overview.health.fulfillment"), passLabel: t("dashboard.overview.health.state.delivery_ready") }),
+  {
+    actionLabel: t("dashboard.overview.health.action.domain"),
+    actionUrl: workspaceHref(domainCheck?.actionUrl ?? "/app/domains"),
+    evidence: readinessEvidence,
+    label: t("dashboard.overview.health.domain"),
+    state: domainCheck === undefined
+      ? readinessState === "forbidden" ? t("dashboard.overview.health.owner_only") : t("dashboard.overview.health.no_data")
+      : domainCheck.status === "pass" ? t("dashboard.overview.health.state.active")
+        : domainCheck.status === "warning" ? t("dashboard.overview.health.domain_custom_not_ready") : t("dashboard.overview.health.domain_platform_not_ready"),
+    tone: toneForCheck(domainCheck),
+  },
+  {
+    actionLabel: t("dashboard.overview.action.view_readiness"),
+    actionUrl: workspaceHref(readinessChecks.get("subscription_publishable")?.actionUrl ?? "/onboarding#readiness"),
+    evidence: shop === undefined ? t("dashboard.overview.readiness.none") : t("dashboard.overview.health.subscription_evidence", { status: shop.subscriptionState }),
+    label: t("dashboard.overview.health.subscription"),
+    state: shop?.subscriptionState === "active" ? t("dashboard.overview.health.state.active")
+      : shop?.subscriptionState === "trialing" ? t("dashboard.overview.health.state.trialing")
+        : shop?.subscriptionState === "past_due" ? t("dashboard.overview.health.state.unpaid")
+          : shop === undefined ? t("dashboard.overview.health.no_data") : t("dashboard.overview.health.state.restricted"),
+    tone: shop?.subscriptionState === "active" || shop?.subscriptionState === "trialing"
+      ? "success" : shop?.subscriptionState === "past_due" ? "warning" : "danger",
+  },
+];
+
+const readinessCopy: Record<string, { impact: string; title: string }> = Object.fromEntries([
+  "shop_state_publishable", "subscription_publishable", "channel_selected", "channel_entitlements", "platform_domain_ready",
+  "catalog_ready", "fulfillment_ready", "payos_ready", "telegram_ready", "storefront_ready", "policies_ready",
+  "integration_health", "custom_domain_ready",
+].map((code) => [code, {
+  impact: t(`dashboard.overview.readiness_check.${code}.impact`),
+  title: t(`dashboard.overview.readiness_check.${code}.title`),
+}])) as Record<string, { impact: string; title: string }>;
+
+const actionItems: ActionItem[] = (readiness?.checks ?? [])
+  .filter((check) => check.status !== "pass")
+  .map((check) => ({
+    actionLabel: t("dashboard.overview.readiness_action.open"),
+    actionUrl: workspaceHref(check.actionUrl ?? "/onboarding#readiness"),
+    evidence: t("dashboard.overview.readiness_action.recorded", { time: formatDate(check.checkedAt) }),
+    impact: readinessCopy[check.code]?.impact ?? t("dashboard.overview.readiness_action.default_impact"),
+    severity: check.status === "fail" ? "blocked" : "warning",
+    title: readinessCopy[check.code]?.title ?? check.code,
+  }));
+
+const paymentExceptions = new Set(["partial", "overpaid", "failed"]);
+const fulfillmentExceptions = new Set(["failed", "manual_review"]);
+const paymentExceptionOrders = orders.filter((order) => paymentExceptions.has(order.paymentStatus));
+const fulfillmentExceptionOrders = orders.filter((order) => fulfillmentExceptions.has(order.fulfillmentStatus));
+if (ordersState === "ready" && paymentExceptionOrders.length > 0) {
+  const latestPaymentException = paymentExceptionOrders[0];
+  if (latestPaymentException === undefined) throw new Error("Payment exception collection became empty");
+  actionItems.push({
+    actionLabel: t("dashboard.overview.action.open_order_ledger"),
+    actionUrl: workspaceHref("/app/orders"),
+    count: paymentExceptionOrders.length,
+    evidence: t("dashboard.overview.exception.payment.evidence", { time: formatDate(latestPaymentException.updatedAt) }),
+    impact: t("dashboard.overview.exception.payment.impact"),
+    severity: "blocked",
+    title: t("dashboard.overview.exception.payment.title"),
+  });
+}
+if (ordersState === "ready" && fulfillmentExceptionOrders.length > 0) {
+  const latestFulfillmentException = fulfillmentExceptionOrders[0];
+  if (latestFulfillmentException === undefined) throw new Error("Fulfillment exception collection became empty");
+  actionItems.push({
+    actionLabel: t("dashboard.overview.action.open_order_ledger"),
+    actionUrl: workspaceHref("/app/orders"),
+    count: fulfillmentExceptionOrders.length,
+    evidence: t("dashboard.overview.exception.fulfillment.evidence", { time: formatDate(latestFulfillmentException.updatedAt) }),
+    impact: t("dashboard.overview.exception.fulfillment.impact"),
+    severity: "blocked",
+    title: t("dashboard.overview.exception.fulfillment.title"),
+  });
+}
+
+const activeProducts = new Map(
+  catalog.products
+    .filter((product) => product.status === "active")
+    .map((product) => [String(product.id), product]),
+);
+const stockoutVariants = catalog.variants.filter((variant) => {
+  const product = activeProducts.get(String(variant.productId));
+  return variant.status === "active"
+    && product?.fulfillmentType === "license_key"
+    && Number(variant.availableStock ?? 0) <= 0;
+});
+if (catalogState === "ready" && stockoutVariants.length > 0) {
+  actionItems.push({
+    actionLabel: t("dashboard.overview.action.open_inventory"),
+    actionUrl: workspaceHref("/app/inventory"),
+    count: stockoutVariants.length,
+    evidence: t("dashboard.overview.stockout.count_only"),
+    impact: t("dashboard.overview.stockout.impact"),
+    severity: "warning",
+    title: t("dashboard.overview.stockout.title"),
+  });
+}
+
+const paidOrders = orders.filter((order) => order.paymentStatus === "paid");
+const fulfilledOrders = paidOrders.filter((order) => order.fulfillmentStatus === "fulfilled");
+const verifiedValue = paidOrders.reduce((sum, order) => sum + order.totalMinor, 0);
+const percentFormatter = new Intl.NumberFormat(typeof locale === "string" ? locale : "en", { maximumFractionDigits: 1, style: "percent" });
+const paymentRate = orders.length === 0 ? null : paidOrders.length / orders.length;
+const fulfillmentRate = paidOrders.length === 0 ? null : fulfilledOrders.length / paidOrders.length;
+const recentOrders = orders.slice(0, 6);
+const channelRows = Array.from(orders.reduce((channels, order) => {
+  const current = channels.get(order.sourceChannel) ?? { count: 0, fulfilled: 0, paidValue: 0 };
+  current.count += 1;
+  if (order.paymentStatus === "paid") current.paidValue += order.totalMinor;
+  if (order.paymentStatus === "paid" && order.fulfillmentStatus === "fulfilled") current.fulfilled += 1;
+  channels.set(order.sourceChannel, current);
+  return channels;
+}, new Map<string, { count: number; fulfilled: number; paidValue: number }>()).entries());
+const channelLabel = (value: string): string => value === "telegram" ? "Telegram" : value === "web" ? "Website" : value;
+---
+
+<AppLayout activePath="/app" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.overview.title")}>
+  <PageHeader
+    eyebrow={t("dashboard.overview.eyebrow")}
+    title={shop?.name ?? t("dashboard.overview.workspace_title")}
+    description={shop === undefined ? t("dashboard.overview.description.no_store") : t("dashboard.overview.description.shop", { today: todayLabel })}
+    descriptionId={shop === undefined ? undefined : "dashboard-overview-date"}
+  >
+    {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/onboarding")}>{t("dashboard.overview.action.view_readiness")}</a>}
+    {shop?.status === "active" && storefrontUrl !== null && <a slot="actions" class="sln-button sln-button-primary" href={storefrontUrl}>{t("dashboard.overview.action.open_storefront")} <span aria-hidden="true">↗</span></a>}
+  </PageHeader>
+
+  {workspaceState === "unavailable" ? (
+    <div class="state-space">
+      <WorkspaceState eyebrow={t("dashboard.overview.workspace_unavailable.eyebrow")} title={t("dashboard.overview.workspace_unavailable.title")} description={t("dashboard.overview.workspace_unavailable.description")} actionHref={workspaceHref("/app")} actionLabel={t("dashboard.overview.workspace_unavailable.action")} tone="danger" />
+    </div>
+  ) : shop === undefined ? (
+    <div class="state-space">
+      <WorkspaceState eyebrow={t("dashboard.overview.no_shop.eyebrow")} title={t("dashboard.overview.no_shop.title")} description={t("dashboard.overview.no_shop.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.overview.no_shop.action")} tone="info" />
+    </div>
+  ) : (
+    <>
+      <section class="store-status" data-tone={shopTone} aria-labelledby="store-status-title">
+        <div class="status-signal" aria-hidden="true"><span></span></div>
+        <div>
+          <p>{t("dashboard.overview.shop_status.eyebrow")}</p>
+          <h2 id="store-status-title">{shopStatus}</h2>
+          <span>{shopSummary}</span>
+        </div>
+        <div class="store-address">
+          <span>{t("dashboard.overview.platform_address")}</span>
+          <code>{shop.slug}.{env.PLATFORM_BASE_DOMAIN}</code>
+          {shop.status === "active" ? <a href={storefrontUrl}>{t("dashboard.overview.action.open_address")} <span aria-hidden="true">↗</span></a> : <a href={workspaceHref("/onboarding#readiness")}>{t("dashboard.overview.action.finish_publish")} <span aria-hidden="true">→</span></a>}
+        </div>
+      </section>
+
+      <section class="overview-section" aria-labelledby="health-title">
+        <div class="section-heading">
+          <div><p>{t("dashboard.overview.health.eyebrow")}</p><h2 id="health-title">{t("dashboard.overview.health.title")}</h2></div>
+          {readiness !== null && <StatusBadge label={readiness.ready ? t("dashboard.overview.health.ready") : t("dashboard.overview.health.not_ready")} tone={readiness.ready ? "success" : "warning"} />}
+        </div>
+
+        {readinessState === "unavailable" ? (
+          <WorkspaceState eyebrow={t("dashboard.overview.health.unavailable.eyebrow")} title={t("dashboard.overview.health.unavailable.title")} description={t("dashboard.overview.health.unavailable.description")} actionHref={workspaceHref("/onboarding#readiness")} actionLabel={t("dashboard.overview.health.unavailable.action")} tone="warning" />
+        ) : (
+          <div class="health-rail">
+            {healthItems.map((item) => (
+              <article>
+                <div class="health-name"><span aria-hidden="true" data-tone={item.tone}></span><strong>{item.label}</strong></div>
+                <StatusBadge label={item.state} tone={item.tone} />
+                <small data-visual-dynamic>{item.evidence}</small>
+                <a href={item.actionUrl}>{item.actionLabel} <span aria-hidden="true">→</span></a>
+              </article>
+            ))}
+          </div>
+        )}
+
+        {readinessState === "forbidden" && (
+          <p class="permission-note">{t("dashboard.overview.health.permission_note", { role: shop.role })}</p>
+        )}
+      </section>
+
+      <section class="overview-section" aria-labelledby="actions-title">
+        <div class="section-heading">
+          <div><p>{t("dashboard.overview.actions.eyebrow")}</p><h2 id="actions-title">{t("dashboard.overview.actions.title")}</h2></div>
+          <span class="section-count">{t("dashboard.overview.actions.count", { count: actionItems.length })}</span>
+        </div>
+
+        {actionItems.length === 0 ? (
+          <div class="queue-clear">
+            <span aria-hidden="true">✓</span>
+            <div><strong>{t("dashboard.overview.actions.empty_title")}</strong><p>{t("dashboard.overview.actions.empty_description")}</p></div>
+          </div>
+        ) : (
+          <div class="action-queue">
+            {actionItems.map((item) => (
+              <article data-severity={item.severity}>
+                <span class="severity-mark" aria-hidden="true">{item.severity === "blocked" ? "!" : "·"}</span>
+                <div><strong>{item.title}</strong><p>{item.impact}</p></div>
+                <small data-visual-dynamic>{item.evidence}</small>
+                {item.count !== undefined && <span class="queue-count" aria-label={t("dashboard.overview.actions.record_count_aria", { count: item.count })}>{item.count}</span>}
+                <a href={item.actionUrl}>{item.actionLabel} <span aria-hidden="true">→</span></a>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div class="operations-grid">
+        <section class="overview-section activity-section" aria-labelledby="activity-title">
+          <div class="section-heading">
+            <div><p>{t("dashboard.overview.activity.eyebrow")}</p><h2 id="activity-title">{t("dashboard.overview.activity.title")}</h2></div>
+            {ordersState === "ready" && <a href={workspaceHref("/app/orders")}>{t("dashboard.overview.action.view_all_orders")} <span aria-hidden="true">→</span></a>}
+          </div>
+
+          {ordersState === "unavailable" ? (
+            <WorkspaceState eyebrow={t("dashboard.overview.activity.unavailable.eyebrow")} title={t("dashboard.overview.activity.unavailable.title")} description={t("dashboard.overview.activity.unavailable.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.overview.action.open_order_ledger")} tone="warning" />
+          ) : ordersState === "forbidden" ? (
+            <WorkspaceState eyebrow={t("dashboard.overview.activity.forbidden.eyebrow")} title={t("dashboard.overview.activity.forbidden.title")} description={t("dashboard.overview.activity.forbidden.description")} tone="warning" />
+          ) : recentOrders.length === 0 ? (
+            <div class="ledger-empty"><strong>{t("dashboard.overview.activity.empty_title")}</strong><p>{t("dashboard.overview.activity.empty_description")}</p><a href={workspaceHref("/app/products")}>{t("dashboard.overview.action.open_catalog")} <span aria-hidden="true">→</span></a></div>
+          ) : (
+            <ol class="activity-ledger">
+              {recentOrders.map((order) => (
+                <li>
+                  <time datetime={order.createdAt} data-visual-dynamic>{formatDate(order.createdAt)}</time>
+                  <div><strong>{t("dashboard.overview.activity.order", { number: order.orderNumber })}</strong><span>{channelLabel(order.sourceChannel)} · {t("dashboard.overview.activity.item_count", { count: order.itemCount })}</span></div>
+                  <PaymentState locale={locale ?? shop.defaultLocale} value={order.paymentStatus} />
+                  <FulfillmentState locale={locale ?? shop.defaultLocale} value={order.fulfillmentStatus} />
+                  <a href={workspaceHref(`/app/orders/${order.orderId}`)} aria-label={t("dashboard.overview.activity.open_detail_aria", { number: order.orderNumber })}>{t("dashboard.overview.action.view_details")} <span aria-hidden="true">→</span></a>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+
+        <section class="overview-section commerce-section" aria-labelledby="commerce-title">
+          <div class="section-heading">
+            <div><p>{t("dashboard.overview.commerce.eyebrow")}</p><h2 id="commerce-title">{t("dashboard.overview.commerce.title")}</h2></div>
+          </div>
+
+          {ordersState === "ready" ? (
+            <>
+              <p class="scope-note">{t("dashboard.overview.commerce.scope", { count: orders.length })}</p>
+              <dl class="commerce-summary">
+                <div><dt>{t("dashboard.overview.commerce.verified_value.label")}</dt><dd><span><Money value={verifiedValue} currency={shop.currency} locale={locale ?? "en"} /></span><small>{t("dashboard.overview.commerce.verified_value.caption")}</small></dd></div>
+                <div><dt>{t("dashboard.overview.commerce.paid_count.label")}</dt><dd><span>{paidOrders.length}</span><small>{t("dashboard.overview.commerce.paid_count.caption", { count: orders.length })}</small></dd></div>
+                <div><dt>{t("dashboard.overview.commerce.payment_rate.label")}</dt><dd><span>{paymentRate === null ? "—" : percentFormatter.format(paymentRate)}</span><small>{t("dashboard.overview.commerce.payment_rate.caption")}</small></dd></div>
+                <div><dt>{t("dashboard.overview.commerce.fulfillment_rate.label")}</dt><dd><span>{fulfillmentRate === null ? "—" : percentFormatter.format(fulfillmentRate)}</span><small>{t("dashboard.overview.commerce.fulfillment_rate.caption")}</small></dd></div>
+              </dl>
+            </>
+          ) : (
+            <p class="scope-note">{t("dashboard.overview.commerce.unavailable")}</p>
+          )}
+        </section>
+      </div>
+
+      {ordersState === "ready" && channelRows.length > 0 && (
+        <section class="overview-section" aria-labelledby="channel-title">
+          <div class="section-heading">
+            <div><p>{t("dashboard.overview.channels.eyebrow")}</p><h2 id="channel-title">{t("dashboard.overview.channels.title")}</h2></div>
+            <span class="section-count">{t("dashboard.overview.channels.scope")}</span>
+          </div>
+          <div class="channel-ledger" role="table" aria-label={t("dashboard.overview.channels.aria")}>
+            <div class="channel-head" role="row"><span role="columnheader">{t("dashboard.overview.channels.channel")}</span><span role="columnheader">{t("dashboard.overview.channels.count")}</span><span role="columnheader">{t("dashboard.overview.channels.delivered")}</span><span role="columnheader">{t("dashboard.overview.channels.paid_value")}</span></div>
+            {channelRows.map(([channel, summary]) => (
+              <div class="channel-row" role="row">
+                <strong role="cell">{channelLabel(channel)}</strong>
+                <span role="cell">{summary.count}</span>
+                <span role="cell">{summary.fulfilled}</span>
+                <span role="cell"><Money value={summary.paidValue} currency={shop.currency} locale={locale ?? "en"} /></span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  )}
+</AppLayout>
+
+<style>
+  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); text-decoration: none; }
+  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
+  .sln-button-primary:hover { background: var(--sln-action-primary-hover); }
+  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .state-space { margin-top: var(--sln-space-8); }
+  .store-status { display: grid; grid-template-columns: 48px minmax(0, 1.2fr) minmax(250px, .8fr); gap: var(--sln-space-5); align-items: center; margin-top: var(--sln-space-8); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-left: 4px solid var(--sln-state-warning); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+  .store-status[data-tone="success"] { border-left-color: var(--sln-state-success); }
+  .store-status[data-tone="danger"] { border-left-color: var(--sln-state-danger); }
+  .status-signal { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--sln-tint-warning); }
+  .store-status[data-tone="success"] .status-signal { background: var(--sln-tint-success); }
+  .store-status[data-tone="danger"] .status-signal { background: var(--sln-tint-danger); }
+  .status-signal span { width: 11px; height: 11px; border-radius: 50%; background: var(--sln-state-warning); box-shadow: 0 0 0 6px color-mix(in srgb, var(--sln-state-warning) 14%, transparent); }
+  .store-status[data-tone="success"] .status-signal span { background: var(--sln-state-success); box-shadow: 0 0 0 6px color-mix(in srgb, var(--sln-state-success) 14%, transparent); }
+  .store-status[data-tone="danger"] .status-signal span { background: var(--sln-state-danger); box-shadow: 0 0 0 6px color-mix(in srgb, var(--sln-state-danger) 14%, transparent); }
+  .store-status p, .section-heading p { margin: 0 0 5px; color: var(--sln-text-muted); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .store-status h2 { margin: 0; font: var(--sln-font-h4); letter-spacing: -.025em; }
+  .store-status h2 + span { display: block; margin-top: 4px; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .store-address { display: grid; justify-items: end; gap: 5px; min-width: 0; text-align: right; }
+  .store-address > span { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .store-address code { max-width: 100%; overflow: hidden; color: var(--sln-text-primary); font: var(--sln-font-mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .store-address a, .section-heading > a, .ledger-empty a { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .overview-section { margin-top: var(--sln-space-12); }
+  .section-heading { display: flex; align-items: end; justify-content: space-between; gap: var(--sln-space-5); margin-bottom: var(--sln-space-5); }
+  .section-heading h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .section-count { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .health-rail { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+  .health-rail article { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(155px, .8fr) minmax(190px, 1.25fr) auto; gap: var(--sln-space-5); align-items: center; min-height: 72px; padding: 13px var(--sln-space-5); border-top: 1px solid var(--sln-border-default); }
+  .health-rail article:first-child { border-top: 0; }
+  .health-name { display: flex; align-items: center; gap: 10px; }
+  .health-name > span { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--sln-text-muted); }
+  .health-name > span[data-tone="success"] { background: var(--sln-state-success); }
+  .health-name > span[data-tone="warning"] { background: var(--sln-state-warning); }
+  .health-name > span[data-tone="danger"] { background: var(--sln-state-danger); }
+  .health-name strong { font: var(--sln-font-label); }
+  .health-rail small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .health-rail a { display: inline-flex; align-items: center; justify-content: end; gap: 7px; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; white-space: nowrap; }
+  .permission-note, .scope-note { margin: 12px 0 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .action-queue { border-top: 1px solid var(--sln-border-strong); }
+  .action-queue article { display: grid; grid-template-columns: 28px minmax(0, 1.45fr) minmax(140px, .65fr) auto auto; gap: var(--sln-space-4); align-items: center; padding: 17px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .severity-mark { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--sln-tint-warning); color: #9a5004; font-size: 13px; font-weight: 800; }
+  .action-queue article[data-severity="blocked"] .severity-mark { background: var(--sln-tint-danger); color: var(--sln-state-danger); }
+  .action-queue article > div { min-width: 0; }
+  .action-queue strong { font: var(--sln-font-label); }
+  .action-queue p { margin: 3px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .action-queue small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .queue-count { min-width: 30px; padding: 4px 8px; border-radius: var(--sln-radius-pill); background: var(--sln-bg-subtle); font: var(--sln-font-caption); font-weight: 750; text-align: center; }
+  .action-queue a { display: inline-flex; align-items: center; justify-content: end; gap: 7px; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; white-space: nowrap; }
+  .queue-clear { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: var(--sln-space-4); align-items: center; padding: var(--sln-space-5); border: 1px solid color-mix(in srgb, var(--sln-state-success) 20%, var(--sln-border-default)); border-radius: var(--sln-radius-lg); background: var(--sln-tint-success); }
+  .queue-clear > span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--sln-state-success); color: var(--sln-white); font-weight: 800; }
+  .queue-clear strong { font: var(--sln-font-label); }
+  .queue-clear p { margin: 3px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .operations-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: var(--sln-space-8); }
+  .activity-ledger { margin: 0; padding: 0; border-top: 1px solid var(--sln-border-strong); list-style: none; }
+  .activity-ledger li { display: grid; grid-template-columns: minmax(132px, .8fr) minmax(130px, 1fr) auto auto auto; gap: 12px; align-items: center; min-height: 76px; padding: 12px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .activity-ledger time { color: var(--sln-text-muted); font: var(--sln-font-mono); font-size: 10px; }
+  .activity-ledger li > div { display: grid; gap: 3px; min-width: 0; }
+  .activity-ledger li > div strong { overflow: hidden; font: var(--sln-font-label); text-overflow: ellipsis; white-space: nowrap; }
+  .activity-ledger li > div span { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .activity-ledger li > a { display: inline-flex; align-items: center; justify-content: end; gap: 6px; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .ledger-empty { padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .ledger-empty strong { font: var(--sln-font-h4); }
+  .ledger-empty p { margin: 7px 0 8px; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .commerce-section { padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+  .commerce-section .section-heading { margin-bottom: var(--sln-space-4); }
+  .commerce-summary { margin: var(--sln-space-5) 0 0; }
+  .commerce-summary > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 14px 0; border-top: 1px solid var(--sln-border-default); }
+  .commerce-summary dt { color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .commerce-summary dd { display: grid; justify-items: end; gap: 3px; margin: 0; color: var(--sln-text-primary); text-align: right; font-variant-numeric: tabular-nums; }
+  .commerce-summary dd > span { font-size: 22px; font-weight: 750; line-height: 1.2; letter-spacing: -.03em; }
+  .commerce-summary small { color: var(--sln-text-muted); font: var(--sln-font-caption); font-weight: 500; }
+  .channel-ledger { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .channel-head, .channel-row { display: grid; grid-template-columns: minmax(150px, 1.4fr) repeat(3, minmax(110px, .65fr)); gap: var(--sln-space-5); align-items: center; padding: 14px var(--sln-space-5); }
+  .channel-head { background: var(--sln-bg-subtle); color: var(--sln-text-muted); font: var(--sln-font-caption); font-weight: 700; }
+  .channel-row { border-top: 1px solid var(--sln-border-default); font: var(--sln-font-body-sm); font-variant-numeric: tabular-nums; }
+  .channel-row strong { font: var(--sln-font-label); }
+  @media (max-width: 1100px) {
+    .operations-grid { grid-template-columns: 1fr; }
+    .commerce-section { padding: var(--sln-space-5); }
+  }
+  @media (max-width: 820px) {
+    .store-status { grid-template-columns: 44px minmax(0, 1fr); }
+    .store-address { grid-column: 2; justify-items: start; text-align: left; }
+    .health-rail article { grid-template-columns: minmax(120px, 1fr) auto; gap: 8px 14px; }
+    .health-rail small { grid-column: 1; }
+    .health-rail a { grid-column: 2; grid-row: 2; }
+    .action-queue article { grid-template-columns: 28px minmax(0, 1fr) auto; }
+    .action-queue small { grid-column: 2; }
+    .queue-count { grid-column: 3; grid-row: 1 / span 2; }
+    .action-queue a { grid-column: 2 / -1; justify-content: start; }
+    .activity-ledger li { grid-template-columns: minmax(124px, .8fr) minmax(120px, 1fr) auto; }
+    .activity-ledger li > :global(.sln-status):nth-of-type(2) { grid-column: 3; }
+    .activity-ledger li > a { grid-column: 2; justify-content: start; }
+  }
+  @media (max-width: 620px) {
+    .store-status { grid-template-columns: 36px minmax(0, 1fr); padding: 18px 16px; }
+    .status-signal { width: 34px; height: 34px; }
+    .section-heading { align-items: start; flex-direction: column; }
+    .health-rail article { grid-template-columns: 1fr; padding: 16px; }
+    .health-rail small, .health-rail a { grid-column: 1; grid-row: auto; }
+    .health-rail a { justify-content: start; }
+    .action-queue article { grid-template-columns: 26px minmax(0, 1fr); }
+    .action-queue small, .action-queue a { grid-column: 2; }
+    .queue-count { grid-column: 2; grid-row: auto; justify-self: start; }
+    .activity-ledger li { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 15px 0; }
+    .activity-ledger time { grid-column: 1 / -1; }
+    .activity-ledger li > div { grid-column: 1 / -1; }
+    .activity-ledger li > :global(.sln-status):nth-of-type(2) { grid-column: 2; }
+    .activity-ledger li > a { grid-column: 1 / -1; justify-content: start; }
+    .channel-head { display: none; }
+    .channel-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; padding: 16px; }
+    .channel-row strong { grid-column: 1 / -1; }
+  }
+</style>

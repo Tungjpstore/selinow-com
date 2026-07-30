@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "environment": "production",
+  "phase": "resources",
+  "ceremonyId": "bootstrap_20260730_reviewed",
+  "reviewedCommitSha": "replace-with-reviewed-git-sha",
+  "reviewedTreeSha": "replace-with-reviewed-git-tree-sha",
+  "preBootstrapTrafficSnapshotRef": "replace-with-private-read-only-traffic-inventory-reference",
+  "resourceManifestRef": null,
+  "approvals": {
+    "releaseOwner": "replace-with-release-owner",
+    "supportOwner": "replace-with-support-owner"
+  },
+  "backup": {
+    "snapshotReportRef": null,
+    "completedAt": null,
+    "providerBookmarkRecorded": false,
+    "emptyDatabaseBaselineVerified": false,
+    "restoreDrillReportRef": null,
+    "restoreDrillCompletedAt": null,
+    "restoreDrillPassed": false
+  },
+  "migrations": {
+    "direction": "forward_only",
+    "appliedAt": null,
+    "names": []
+  },
+  "previousWorkerVersion": null,
+  "candidateWorkerVersion": null,
+  "rollback": {
+    "strategy": "restore_pre_bootstrap_traffic_inventory",
+    "snapshotRef": "replace-with-private-read-only-traffic-inventory-reference"
+  },
+  "canary": {
+    "accepted": false,
+    "acceptedAt": null,
+    "workerVersion": null,
+    "smokeReportRef": null,
+    "stagingRoutesPreserved": false
+  },
+  "monitoring": {
+    "dashboardReady": false,
+    "alertsReady": false
+  }
+}

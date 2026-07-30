@@ -1,0 +1,23 @@
+---
+import type { StorefrontProduct } from "../../lib/storefront/store";
+
+interface Props { products: StorefrontProduct[] }
+const { products } = Astro.props;
+---
+
+<template id="catalog-data">
+  {products.flatMap((product) => product.variants.map((variant) => (
+    <i
+      data-catalog-variant
+      data-variant-id={variant.id}
+      data-product-title={product.title}
+      data-variant-title={variant.title}
+      data-price-minor={variant.priceMinor}
+      data-currency={variant.currency}
+      data-version={variant.version}
+      data-min-quantity={variant.minPerOrder}
+      data-max-quantity={variant.maxPerOrder}
+      data-stock-state={variant.stockState}
+    ></i>
+  )))}
+</template>

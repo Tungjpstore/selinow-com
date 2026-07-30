@@ -1,0 +1,80 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { isAppError } from "../../lib/core/errors";
+import { subscriptionStatePresentation } from "../../lib/dashboard/billing-ui";
+import { createDashboardTranslator } from "../../lib/i18n";
+import { getBindings } from "../../lib/platform/bindings";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { getSellerBilling, type SellerBillingView } from "../../lib/tenants/seller-management";
+import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+let shops: ShopView[] = [];
+let state: "ready" | "unavailable" | "forbidden" = "ready";
+try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { state = "unavailable"; }
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+let billing: SellerBillingView | null = null;
+if (shop !== undefined && state === "ready") {
+  try { billing = await getSellerBilling({ env, shopPublicId: shop.publicId, userId: auth.userId }); }
+  catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; }
+}
+if (state === "forbidden") Astro.response.status = 403;
+if (state === "unavailable") Astro.response.status = 503;
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+const formatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
+const date = (value: string | null): string => value === null ? t("dashboard.billing.not_configured") : formatter.format(new Date(value));
+const subscriptionState = billing === null ? null : subscriptionStatePresentation(billing.state, locale);
+---
+
+<AppLayout activePath="/app/billing" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.billing.title")}>
+  <PageHeader eyebrow={t("dashboard.billing.eyebrow")} title={t("dashboard.billing.title")} description={t("dashboard.billing.description")}>
+    <span slot="actions" class="sln-badge">{t("dashboard.billing.read_only")}</span>
+  </PageHeader>
+  {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.unavailable.title")} description={t("dashboard.billing.unavailable.description")} actionHref={workspaceHref("/app/billing")} actionLabel={t("dashboard.billing.retry")} tone="danger" /></div>
+    : shop === undefined ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.no_store.title")} description={t("dashboard.billing.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.billing.no_store.action")} tone="info" /></div>
+    : state === "forbidden" || billing === null ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.forbidden.title")} description={t("dashboard.billing.forbidden.description")} tone="warning" /></div>
+    : <div class="billing-workspace">
+      <section class="plan-hero" aria-labelledby="plan-title" data-tone={subscriptionState?.tone ?? "neutral"}><div><p class="eyebrow">{t("dashboard.billing.current_subscription")}</p><h2 id="plan-title">{billing.planName}</h2><p>{t("dashboard.billing.plan_metadata", { code: billing.planCode, version: billing.planVersion })}</p><p class="subscription-impact">{subscriptionState?.impact}</p></div><span class="subscription-state">{subscriptionState?.label}</span></section>
+      <section class="billing-grid"><article><span>{t("dashboard.billing.trial_ends")}</span><strong>{date(billing.trialEndsAt)}</strong></article><article><span>{t("dashboard.billing.current_period")}</span><strong>{date(billing.currentPeriodEnd)}</strong></article><article><span>{t("dashboard.billing.grace_ends")}</span><strong>{date(billing.graceEndsAt)}</strong></article><article><span>{t("dashboard.billing.canceled_at")}</span><strong>{date(billing.canceledAt)}</strong></article></section>
+      <section class="billing-panel" aria-labelledby="limits-title"><header><div><p class="eyebrow">{t("dashboard.billing.entitlements.eyebrow")}</p><h2 id="limits-title">{t("dashboard.billing.entitlements.title")}</h2></div></header><div class="kv-ledger">{Object.entries(billing.limits).length === 0 ? <WorkspaceState title={t("dashboard.billing.entitlements.empty_title")} description={t("dashboard.billing.entitlements.empty_description")} tone="neutral" /> : Object.entries(billing.limits).map(([key, value]) => <div><span>{key}</span><strong>{typeof value === "string" || typeof value === "number" ? value : value === true ? t("dashboard.billing.value.yes") : value === false ? t("dashboard.billing.value.no") : t("dashboard.billing.value.configured")}</strong></div>)}</div></section>
+      <section class="billing-panel" aria-labelledby="usage-title"><header><div><p class="eyebrow">{t("dashboard.billing.usage.eyebrow")}</p><h2 id="usage-title">{t("dashboard.billing.usage.title")}</h2></div></header>{billing.usage.length === 0 ? <WorkspaceState title={t("dashboard.billing.usage.empty_title")} description={t("dashboard.billing.usage.empty_description")} tone="neutral" /> : <div class="kv-ledger">{billing.usage.map((item) => <div><span>{item.metric} · {item.periodKey}</span><strong>{item.value}</strong><small>{date(item.updatedAt)}</small></div>)}</div>}</section>
+      <p class="scope-note">{t("dashboard.billing.scope")}</p>
+    </div>}
+</AppLayout>
+
+<style>
+  .sln-badge { display:inline-flex; align-items:center; min-height:36px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-pill); padding:7px 12px; color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .state-space { margin-top:var(--sln-space-8); }
+  .billing-workspace { display:grid; gap:var(--sln-space-6); margin-top:var(--sln-space-8); }
+  .plan-hero { display:flex; align-items:center; justify-content:space-between; gap:20px; border:1px solid color-mix(in srgb,var(--sln-action-primary) 25%,var(--sln-border-default)); border-radius:var(--sln-radius-lg); padding:var(--sln-space-8); background:linear-gradient(135deg,var(--sln-tint-indigo),var(--sln-bg-surface)); }
+  .plan-hero h2, .billing-panel h2 { margin:0; font:var(--sln-font-h3); letter-spacing:-.035em; }
+  .plan-hero p { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .plan-hero code { font-family:var(--sln-font-mono); font-size:11px; }
+  .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
+  .subscription-impact { max-width:70ch; }
+  .subscription-state { border-radius:var(--sln-radius-pill); padding:8px 12px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-label); white-space:nowrap; }
+  .plan-hero[data-tone="success"] .subscription-state { background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .plan-hero[data-tone="info"] .subscription-state { background:var(--sln-tint-info); color:var(--sln-state-info); }
+  .plan-hero[data-tone="warning"] .subscription-state { background:var(--sln-tint-warning); color:#9a5004; }
+  .plan-hero[data-tone="danger"] .subscription-state { background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .billing-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border-block:1px solid var(--sln-border-default); }
+  .billing-grid article { display:grid; gap:5px; padding:16px; border-right:1px solid var(--sln-border-default); }
+  .billing-grid article:last-child { border-right:0; }
+  .billing-grid span, .billing-grid strong, .scope-note { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .billing-grid strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .billing-panel { display:grid; gap:18px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); padding:var(--sln-space-6); background:var(--sln-bg-surface); }
+  .billing-panel header { padding-bottom:14px; border-bottom:1px solid var(--sln-border-default); }
+  .kv-ledger { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .kv-ledger > div { display:grid; gap:5px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:14px; background:var(--sln-bg-canvas); }
+  .kv-ledger span, .kv-ledger small { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .kv-ledger strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .scope-note { margin:0; }
+  @media (max-width:760px) { .plan-hero { align-items:start; flex-direction:column; padding:24px; } .billing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .billing-grid article:nth-child(2) { border-right:0; } .billing-grid article:nth-child(n+3) { border-top:1px solid var(--sln-border-default); } .kv-ledger { grid-template-columns:1fr; } }
+</style>

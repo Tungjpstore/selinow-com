@@ -1,0 +1,63 @@
+---
+type Severity = "danger" | "info" | "warning";
+type Action = { age: string; count?: number; href: string; impact: string; label: string; severity: Severity; title: string };
+
+interface Props {
+  actions: readonly Action[];
+  emptyLabel?: string;
+  eyebrow?: string;
+  itemCountLabel?: string;
+  severityLabels?: Partial<Record<Severity, string>>;
+  title?: string;
+}
+
+const {
+  actions,
+  emptyLabel = "No actions require attention right now.",
+  eyebrow = "Operations",
+  itemCountLabel = "items",
+  severityLabels,
+  title = "Action queue",
+} = Astro.props;
+const resolvedSeverityLabels: Record<Severity, string> = {
+  danger: "High priority",
+  info: "Information",
+  warning: "Needs attention",
+  ...severityLabels,
+};
+---
+
+<section class="sln-action-queue" aria-labelledby="sln-action-queue-title">
+  <header><div><p class="sln-eyebrow">{eyebrow}</p><h2 id="sln-action-queue-title">{title}</h2></div><span>{actions.length} {itemCountLabel}</span></header>
+  {actions.length === 0 ? <p class="sln-action-queue__empty">{emptyLabel}</p> : <ol>
+    {actions.map((action) => <li data-severity={action.severity}>
+      <span class="sln-action-queue__signal" aria-label={resolvedSeverityLabels[action.severity]}>{action.severity === "danger" ? "!" : action.severity === "warning" ? "~" : "i"}</span>
+      <div class="sln-action-queue__copy"><strong>{action.title}</strong><p>{action.impact}</p></div>
+      <time>{action.age}</time>
+      {action.count !== undefined && <span class="sln-action-queue__count">{action.count}</span>}
+      <a href={action.href}>{action.label}<span aria-hidden="true"> →</span></a>
+    </li>)}
+  </ol>}
+</section>
+
+<style>
+  .sln-action-queue { border-block: 1px solid var(--sln-border-default); }
+  .sln-action-queue header { display: flex; align-items: end; justify-content: space-between; gap: var(--sln-space-4); padding: var(--sln-space-5) 0; }
+  .sln-action-queue header h2 { margin: 0; font: var(--sln-font-h4); }
+  .sln-action-queue header > span { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .sln-eyebrow { margin: 0 0 var(--sln-space-1); color: var(--sln-action-primary); font: var(--sln-font-caption); letter-spacing: .1em; text-transform: uppercase; }
+  .sln-action-queue ol { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+  .sln-action-queue li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto auto; gap: var(--sln-space-3); align-items: center; min-width: 0; padding: var(--sln-space-4) 0; border-top: 1px solid var(--sln-border-default); }
+  .sln-action-queue__signal { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--sln-tint-info); color: var(--sln-state-info); font: var(--sln-font-label); }
+  .sln-action-queue li[data-severity="warning"] .sln-action-queue__signal { background: var(--sln-tint-warning); color: var(--selinow-warning-text); }
+  .sln-action-queue li[data-severity="danger"] .sln-action-queue__signal { background: var(--sln-tint-danger); color: var(--sln-state-danger); }
+  .sln-action-queue__copy { min-width: 0; }
+  .sln-action-queue__copy strong { display: block; color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .sln-action-queue__copy p { overflow: hidden; margin: var(--sln-space-1) 0 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
+  .sln-action-queue time, .sln-action-queue__count { color: var(--sln-text-muted); font: var(--sln-font-caption); white-space: nowrap; }
+  .sln-action-queue__count { min-width: 24px; padding: 2px 6px; border-radius: var(--sln-radius-pill); background: var(--sln-bg-subtle); text-align: center; }
+  .sln-action-queue a { color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; white-space: nowrap; }
+  .sln-action-queue a:hover { text-decoration: underline; }
+  .sln-action-queue__empty { margin: 0; padding: var(--sln-space-5) 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  @media (max-width: 680px) { .sln-action-queue li { grid-template-columns: 28px minmax(0, 1fr) auto; } .sln-action-queue time, .sln-action-queue__count { display: none; } .sln-action-queue a { grid-column: 2 / -1; } }
+</style>

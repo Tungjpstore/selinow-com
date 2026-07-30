@@ -1,0 +1,16 @@
+---
+interface Props {
+  className?: string;
+  disabled?: boolean;
+  label: string;
+  type?: "button" | "reset" | "submit";
+  variant?: "danger" | "default" | "quiet";
+}
+
+const { className, disabled = false, label, type = "button", variant = "default" } = Astro.props;
+const classes = ["sln-icon-button", className].filter(Boolean).join(" ");
+---
+
+<button aria-label={label} class={classes} data-variant={variant} disabled={disabled} title={label} type={type}>
+  <slot />
+</button>

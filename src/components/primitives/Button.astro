@@ -1,0 +1,51 @@
+---
+interface Props {
+  ariaLabel?: string;
+  className?: string;
+  disabled?: boolean;
+  form?: string;
+  id?: string;
+  inline?: boolean;
+  loading?: boolean;
+  name?: string;
+  size?: "lg" | "md" | "sm";
+  type?: "button" | "reset" | "submit";
+  value?: string;
+  variant?: "danger" | "primary" | "quiet" | "secondary";
+}
+
+const {
+  ariaLabel,
+  className,
+  disabled = false,
+  form,
+  id,
+  inline = false,
+  loading = false,
+  name,
+  size = "md",
+  type = "button",
+  value,
+  variant = "primary",
+} = Astro.props;
+const classes = ["sln-button", className].filter(Boolean).join(" ");
+---
+
+<button
+  aria-busy={loading ? "true" : undefined}
+  aria-label={ariaLabel}
+  class={classes}
+  data-inline={inline ? "true" : undefined}
+  data-loading={loading ? "true" : "false"}
+  data-size={size}
+  data-variant={variant}
+  disabled={disabled || loading}
+  form={form}
+  id={id}
+  name={name}
+  type={type}
+  value={value}
+>
+  {loading && <span class="sln-button__loader" aria-hidden="true"></span>}
+  <span class="sln-button__content"><slot /></span>
+</button>

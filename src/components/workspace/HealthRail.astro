@@ -1,0 +1,51 @@
+---
+type Health = "degraded" | "failed" | "healthy" | "unknown" | "waiting_provider" | "waiting_user";
+type HealthItem = { actionHref?: string; actionLabel?: string; evidence: string; label: string; name: string; status: Health };
+
+interface Props {
+  eyebrow?: string;
+  items: readonly HealthItem[];
+  statusLabels?: Partial<Record<Health, string>>;
+  title?: string;
+}
+const { eyebrow = "Health rail", items, statusLabels, title = "Operational health" } = Astro.props;
+const resolvedStatusLabels: Record<Health, string> = {
+  degraded: "Degraded",
+  failed: "Needs action",
+  healthy: "Healthy",
+  unknown: "Unknown",
+  waiting_provider: "Waiting for provider",
+  waiting_user: "Action required",
+  ...statusLabels,
+};
+---
+
+<section class="sln-health-rail" aria-labelledby="sln-health-rail-title">
+  <header><p class="sln-eyebrow">{eyebrow}</p><h2 id="sln-health-rail-title">{title}</h2></header>
+  <ul>
+    {items.map((item) => <li data-health={item.status}>
+      <span class="sln-health-rail__dot" aria-hidden="true"></span>
+      <div><strong>{item.name}</strong><p>{resolvedStatusLabels[item.status]} · {item.label}</p><small>{item.evidence}</small></div>
+      {item.actionHref && item.actionLabel && <a href={item.actionHref}>{item.actionLabel}<span aria-hidden="true"> →</span></a>}
+    </li>)}
+  </ul>
+</section>
+
+<style>
+  .sln-health-rail { padding: var(--sln-space-5); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .sln-health-rail header { padding-bottom: var(--sln-space-4); border-bottom: 1px solid var(--sln-border-default); }
+  .sln-health-rail h2 { margin: 0; font: var(--sln-font-h4); }
+  .sln-health-rail ul { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .sln-health-rail li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: var(--sln-space-3); align-items: start; padding: var(--sln-space-4) 0; border-bottom: 1px solid var(--sln-border-default); }
+  .sln-health-rail li:last-child { border-bottom: 0; padding-bottom: 0; }
+  .sln-health-rail__dot { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--sln-text-muted); }
+  .sln-health-rail li[data-health="healthy"] .sln-health-rail__dot { background: var(--sln-state-success); }
+  .sln-health-rail li[data-health="waiting_user"] .sln-health-rail__dot, .sln-health-rail li[data-health="waiting_provider"] .sln-health-rail__dot, .sln-health-rail li[data-health="degraded"] .sln-health-rail__dot { background: var(--sln-state-warning); }
+  .sln-health-rail li[data-health="failed"] .sln-health-rail__dot { background: var(--sln-state-danger); }
+  .sln-health-rail strong { font: var(--sln-font-label); }
+  .sln-health-rail p, .sln-health-rail small { display: block; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .sln-health-rail p { margin: var(--sln-space-1) 0; }
+  .sln-health-rail small { color: var(--sln-text-muted); }
+  .sln-health-rail a { color: var(--sln-action-primary); font: var(--sln-font-caption); text-decoration: none; white-space: nowrap; }
+  @media (max-width: 560px) { .sln-health-rail li { grid-template-columns: 10px minmax(0, 1fr); } .sln-health-rail a { grid-column: 2; } }
+</style>

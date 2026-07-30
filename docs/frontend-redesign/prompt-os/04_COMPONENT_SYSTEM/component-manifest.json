@@ -1,0 +1,224 @@
+{
+  "primitives": [
+    {
+      "name": "Button",
+      "variants": [
+        "primary",
+        "secondary",
+        "quiet",
+        "danger"
+      ],
+      "sizes": [
+        "sm",
+        "md",
+        "lg"
+      ],
+      "states": [
+        "idle",
+        "hover",
+        "focus",
+        "disabled",
+        "loading"
+      ]
+    },
+    {
+      "name": "IconButton",
+      "variants": [
+        "default",
+        "quiet",
+        "danger"
+      ],
+      "requirements": [
+        "accessible name",
+        "44px touch target on mobile"
+      ]
+    },
+    {
+      "name": "LinkButton",
+      "variants": [
+        "primary",
+        "secondary",
+        "inline"
+      ]
+    },
+    {
+      "name": "StatusBadge",
+      "variants": [
+        "success",
+        "warning",
+        "danger",
+        "info",
+        "neutral"
+      ],
+      "requirements": [
+        "icon or text signal in addition to color"
+      ]
+    },
+    {
+      "name": "Field",
+      "states": [
+        "default",
+        "focus",
+        "error",
+        "disabled",
+        "readonly"
+      ]
+    },
+    {
+      "name": "SecretField",
+      "requirements": [
+        "never prefill stored secret",
+        "clear after success",
+        "show saved state without value"
+      ]
+    },
+    {
+      "name": "Alert",
+      "variants": [
+        "info",
+        "success",
+        "warning",
+        "danger"
+      ]
+    },
+    {
+      "name": "ConfirmDialog",
+      "requirements": [
+        "focus trap",
+        "return focus",
+        "impact message",
+        "explicit action label"
+      ]
+    },
+    {
+      "name": "Drawer",
+      "requirements": [
+        "focus management",
+        "body scroll lock",
+        "safe close"
+      ]
+    },
+    {
+      "name": "ToastRegion",
+      "requirements": [
+        "aria-live polite by default",
+        "no duplicate retry toast spam"
+      ]
+    }
+  ],
+  "operational": [
+    {
+      "name": "ShopSwitcher",
+      "requirements": [
+        "persistent",
+        "tenant context visually distinct",
+        "role aware"
+      ]
+    },
+    {
+      "name": "HealthIndicator",
+      "states": [
+        "healthy",
+        "degraded",
+        "waiting_user",
+        "waiting_provider",
+        "failed",
+        "unknown"
+      ]
+    },
+    {
+      "name": "ActionQueue",
+      "requirements": [
+        "severity",
+        "impact",
+        "time",
+        "remediation route"
+      ]
+    },
+    {
+      "name": "ActivityLedger",
+      "requirements": [
+        "timestamp",
+        "event",
+        "entity reference",
+        "result"
+      ]
+    },
+    {
+      "name": "ReadinessRail",
+      "requirements": [
+        "server state",
+        "resume",
+        "retry",
+        "optional step skip"
+      ]
+    },
+    {
+      "name": "DataTable",
+      "requirements": [
+        "responsive record-list fallback",
+        "sorting only if real",
+        "row action keyboard accessible"
+      ]
+    }
+  ],
+  "commerce": [
+    {
+      "name": "Money",
+      "requirements": [
+        "locale aware",
+        "currency explicit",
+        "tabular numerals"
+      ]
+    },
+    {
+      "name": "ProductCard",
+      "requirements": [
+        "title",
+        "short description",
+        "variant/stock",
+        "price",
+        "semantic link"
+      ]
+    },
+    {
+      "name": "PaymentState",
+      "states": [
+        "pending",
+        "verifying",
+        "verified",
+        "failed",
+        "expired",
+        "canceled",
+        "unknown"
+      ]
+    },
+    {
+      "name": "FulfillmentState",
+      "states": [
+        "not_started",
+        "processing",
+        "fulfilled",
+        "failed",
+        "manual_review",
+        "canceled"
+      ]
+    },
+    {
+      "name": "OrderTimeline",
+      "requirements": [
+        "payment and fulfillment remain separate"
+      ]
+    },
+    {
+      "name": "KeyRevealCard",
+      "requirements": [
+        "valid access",
+        "verified payment",
+        "fulfilled",
+        "copy feedback",
+        "no analytics plaintext"
+      ]
+    }
+  ]
+}

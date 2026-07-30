@@ -1,0 +1,15 @@
+---
+import { createDashboardTranslator } from "../../lib/i18n/catalogs/dashboard";
+import StatePanel from "./StatePanel.astro";
+
+interface Props { description?: string; roleLabel?: string; title?: string; }
+const t = createDashboardTranslator(Astro.locals.locale);
+const {
+  description = t("dashboard.state.permission.description"),
+  roleLabel,
+  title = t("dashboard.state.permission.title"),
+} = Astro.props;
+---
+<StatePanel description={description} role="alert" state="forbidden" title={title}>
+  {roleLabel && <span slot="meta">{t("dashboard.state.permission.meta_role", { role: roleLabel })}</span>}
+</StatePanel>

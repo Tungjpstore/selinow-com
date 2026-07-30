@@ -1,0 +1,7 @@
+---
+// Telegram management already lives in the shared provider workspace.
+const destination = new URL("/app/integrations?focus=telegram", Astro.url);
+const shopPublicId = Astro.url.searchParams.get("shop");
+if (shopPublicId !== null) destination.searchParams.set("shop", shopPublicId);
+return Astro.redirect(`${destination.pathname}${destination.search}#telegram`, 307);
+---

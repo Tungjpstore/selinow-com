@@ -1,0 +1,53 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import DomainManager from "../../components/dashboard/DomainManager.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { listShopDomains, type DomainView } from "../../lib/domains/store";
+import { getBindings } from "../../lib/platform/bindings";
+import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const requestedShopPublicId = Astro.url.searchParams.get("shop");
+const selectedShop = selectShopForMember(shops, requestedShopPublicId);
+let initialDomains: DomainView[] = [];
+let initialLoadFailed = false;
+if (selectedShop?.role === "owner") {
+  try {
+    initialDomains = await listShopDomains({ env, shopPublicId: selectedShop.publicId, userId: auth.userId });
+  } catch {
+    initialLoadFailed = true;
+  }
+}
+const t = createDashboardTranslator(Astro.locals.locale);
+const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+---
+
+<AppLayout activePath="/app/domains" displayName={displayName} email={auth.email} selectedShopName={selectedShop?.name} selectedShopPublicId={selectedShop?.publicId} shops={shops} title={t("dashboard.domains.title")}>
+  <div class="domain-surface">
+    <DomainManager
+      csrfCookieName={`${env.SESSION_COOKIE_NAME}_csrf`}
+      initialDomains={initialDomains}
+      initialLoadFailed={initialLoadFailed}
+      platformBaseDomain={env.PLATFORM_BASE_DOMAIN}
+      shop={selectedShop}
+    />
+  </div>
+</AppLayout>
+
+<style>
+  .domain-surface {
+    overflow: hidden;
+    padding: 0 clamp(20px, 4vw, 48px) 64px;
+    border-radius: var(--selinow-radius-xl);
+    background: var(--selinow-bg-canvas);
+    color: var(--selinow-text-primary);
+  }
+
+  @media (max-width: 560px) {
+    .domain-surface { padding: 0 16px 40px; }
+  }
+</style>

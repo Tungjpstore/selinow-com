@@ -1,0 +1,162 @@
+---
+import {
+  automationTaskImpact,
+  automationTaskLabel,
+  automationStatusLabel,
+  automationStatusTone,
+  canManageAutomationTask,
+  canResumeAutomationTask,
+  formatAutomationTime,
+  type AutomationTaskView,
+} from "../../lib/dashboard/automation-ui";
+import { createDashboardTranslator } from "../../lib/i18n";
+import type { ShopRole } from "../../lib/tenants/policy";
+
+interface Props {
+  csrfCookieName: string;
+  locale?: unknown;
+  selectedShopPublicId: string;
+  shopName: string;
+  shopRole: ShopRole;
+  tasks: readonly AutomationTaskView[];
+  timeZone: string;
+}
+
+const { csrfCookieName, locale = Astro.locals.locale, selectedShopPublicId, shopName, shopRole, tasks, timeZone } = Astro.props;
+const t = createDashboardTranslator(locale);
+const actionHref = (task: AutomationTaskView): string | null => {
+  try {
+    const target = new URL(task.actionUrl, Astro.url);
+    if (target.origin !== Astro.url.origin) return null;
+    target.searchParams.set("shop", selectedShopPublicId);
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return null;
+  }
+};
+---
+
+<section
+  class="automation-ledger"
+  data-automation-root
+  data-csrf-cookie-name={csrfCookieName}
+  data-shop-public-id={selectedShopPublicId}
+  data-shop-role={shopRole}
+  data-time-zone={timeZone}
+  data-locale={typeof locale === "string" ? locale : undefined}
+  data-copy-count={t("dashboard.automation.ledger.count", { count: "{count}" })}
+  data-copy-empty-title={t("dashboard.automation.ledger.empty_title")}
+  data-copy-empty-description={t("dashboard.automation.ledger.empty_description")}
+  data-copy-safe-error={t("dashboard.automation.ledger.safe_error", { code: "{code}" })}
+  data-copy-open-related={t("dashboard.automation.action.open_related")}
+  data-copy-resume={t("dashboard.automation.action.resume")}
+  data-copy-resume-provider={t("dashboard.automation.action.resume_provider")}
+  data-copy-cancel={t("dashboard.automation.action.cancel")}
+  data-copy-connection-error={t("dashboard.automation.client.connection_error")}
+  data-copy-invalid-projection={t("dashboard.automation.client.invalid_projection")}
+  data-copy-cancel-confirm={t("dashboard.automation.client.cancel_confirm")}
+  data-copy-refresh-pending={t("dashboard.automation.client.refresh_pending")}
+  data-copy-refresh-success={t("dashboard.automation.client.refresh_success")}
+  data-copy-cancel-pending={t("dashboard.automation.client.cancel_pending")}
+  data-copy-resume-pending={t("dashboard.automation.client.resume_pending")}
+  data-copy-mutation-success={t("dashboard.automation.client.mutation_success")}
+  data-copy-support-code={t("dashboard.automation.client.support_code", { requestId: "{requestId}" })}
+  aria-labelledby="automation-ledger-title"
+>
+  <header class="automation-ledger__header">
+    <div>
+      <p class="eyebrow">{t("dashboard.automation.ledger.eyebrow")}</p>
+      <h2 id="automation-ledger-title">{t("dashboard.automation.ledger.title", { shop: shopName })}</h2>
+      <p>{t("dashboard.automation.ledger.description")}</p>
+    </div>
+    <div class="automation-ledger__header-actions">
+      <span class="automation-count" data-automation-count>{t("dashboard.automation.ledger.count", { count: tasks.length })}</span>
+      <button class="sln-button sln-button-secondary" type="button" data-automation-refresh>{t("dashboard.automation.ledger.refresh")}</button>
+    </div>
+  </header>
+
+  <p class="automation-feedback" data-automation-feedback role="status" aria-live="polite" aria-atomic="true" hidden></p>
+
+  <div class="automation-list" data-automation-list aria-live="polite" aria-busy="false">
+    {tasks.length === 0 ? (
+      <div class="automation-empty" data-automation-empty>
+        <strong>{t("dashboard.automation.ledger.empty_title")}</strong>
+        <p>{t("dashboard.automation.ledger.empty_description")}</p>
+      </div>
+    ) : tasks.map((task) => {
+      const status = automationStatusTone(task.status);
+      const taskActionHref = actionHref(task);
+      const resumeAllowed = canResumeAutomationTask(task);
+      const canManage = canManageAutomationTask(task, shopRole);
+      return <article class="automation-task" data-automation-task data-task-id={task.id} data-task-version={task.version}>
+        <div class="automation-task__status">
+          <span class="automation-status" data-tone={status} data-task-status>{automationStatusLabel(task.status, locale)}</span>
+          <time data-task-updated datetime={task.updatedAt}>{formatAutomationTime(task.updatedAt, timeZone, locale)}</time>
+        </div>
+        <div class="automation-task__copy">
+          <strong data-task-label>{automationTaskLabel(task, locale)}</strong>
+          <p data-task-impact>{automationTaskImpact(task, locale)}</p>
+          <code>{task.capabilityCode}</code>
+          {task.lastSafeErrorCode && <small class="automation-safe-error">{t("dashboard.automation.ledger.safe_error", { code: task.lastSafeErrorCode })}</small>}
+        </div>
+        <div class="automation-actions" data-task-actions>
+          {taskActionHref && <a class="automation-action-link" href={taskActionHref} data-task-action-link>{t("dashboard.automation.action.open_related")} <span aria-hidden="true">↗</span></a>}
+          {canManage && resumeAllowed && <button class="sln-button sln-button-primary automation-control" type="button" data-automation-action="resume" data-task-version={task.version}>
+            {task.continuation?.kind === "provider_check" ? t("dashboard.automation.action.resume_provider") : t("dashboard.automation.action.resume")}
+          </button>}
+          {canManage && task.canCancel && <button class="sln-button sln-button-danger automation-control" type="button" data-automation-action="cancel" data-task-version={task.version}>{t("dashboard.automation.action.cancel")}</button>}
+        </div>
+      </article>;
+    })}
+  </div>
+
+  <p class="automation-scope-note">{t("dashboard.automation.ledger.scope")}</p>
+</section>
+
+<style>
+  .automation-ledger { display:grid; gap:var(--sln-space-5); margin-top:var(--sln-space-8); overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); background:var(--sln-bg-surface); box-shadow:var(--sln-shadow-xs); }
+  .automation-ledger__header { display:flex; align-items:end; justify-content:space-between; gap:24px; padding:var(--sln-space-6); border-bottom:1px solid var(--sln-border-default); }
+  .automation-ledger__header > div:first-child { min-width:0; }
+  .automation-ledger h2 { margin:0; color:var(--sln-text-primary); font:var(--sln-font-h3); letter-spacing:-.035em; }
+  .automation-ledger__header p:last-child { max-width:720px; margin:var(--sln-space-3) 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .automation-ledger__header-actions { display:grid; justify-items:end; gap:var(--sln-space-3); min-width:180px; }
+  .automation-count { color:var(--sln-text-muted); font:var(--sln-font-caption); white-space:nowrap; }
+  .automation-feedback { margin:0 var(--sln-space-6); border-left:3px solid var(--sln-state-info); border-radius:var(--sln-radius-sm); padding:var(--sln-space-3) var(--sln-space-4); background:var(--sln-tint-info); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .automation-feedback[data-tone="danger"] { border-left-color:var(--sln-state-danger); background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .automation-feedback[data-tone="success"] { border-left-color:var(--sln-state-success); background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .automation-list { display:grid; overflow:hidden; margin:0 var(--sln-space-6); border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); }
+  .automation-task { display:grid; grid-template-columns:minmax(142px,.35fr) minmax(0,1fr) minmax(190px,.55fr); gap:20px; align-items:center; padding:var(--sln-space-5); border-top:1px solid var(--sln-border-default); }
+  .automation-task:first-child { border-top:0; }
+  .automation-task__status, .automation-task__copy, .automation-actions { display:grid; gap:var(--sln-space-2); min-width:0; }
+  .automation-task__status { align-content:start; }
+  .automation-status { display:inline-flex; align-items:center; gap:7px; width:fit-content; border-radius:var(--sln-radius-pill); padding:6px 10px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-caption); font-weight:750; }
+  .automation-status::before { width:7px; height:7px; border-radius:50%; background:currentColor; content:""; }
+  .automation-status[data-tone="success"] { background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .automation-status[data-tone="warning"] { background:var(--sln-tint-warning); color:var(--selinow-warning-text); }
+  .automation-status[data-tone="danger"] { background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .automation-status[data-tone="info"] { background:var(--sln-tint-info); color:var(--selinow-info-text); }
+  .automation-task__status :where(small, time), .automation-safe-error { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .automation-task__copy strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .automation-task__copy p { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .automation-task__copy code { width:fit-content; max-width:100%; overflow:hidden; color:var(--sln-text-muted); font:var(--sln-font-caption); text-overflow:ellipsis; white-space:nowrap; }
+  .automation-actions { justify-items:stretch; }
+  .automation-actions .automation-action-link { min-height:36px; color:var(--sln-action-primary); font:var(--sln-font-label); text-align:center; text-underline-offset:3px; }
+  .automation-actions .automation-control { width:100%; }
+  .automation-empty { padding:var(--sln-space-6); }
+  .automation-empty strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .automation-empty p, .automation-scope-note { margin:var(--sln-space-2) 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .automation-scope-note { margin:0; padding:0 var(--sln-space-6) var(--sln-space-6); color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .sln-button-primary { border-color:var(--sln-action-primary); background:var(--sln-action-primary); color:var(--sln-white); }
+  .sln-button-primary:hover:not(:disabled) { background:var(--sln-action-primary-hover); }
+  .sln-button-danger { border-color:color-mix(in srgb,var(--sln-state-danger) 30%,var(--sln-border-default)); background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .sln-button-danger:hover:not(:disabled) { border-color:var(--sln-state-danger); }
+  @media (max-width:760px) {
+    .automation-ledger__header { align-items:start; flex-direction:column; }
+    .automation-ledger__header-actions { align-items:stretch; justify-items:stretch; width:100%; }
+    .automation-count { text-align:left; }
+    .automation-list { margin-inline:var(--sln-space-4); }
+    .automation-task { grid-template-columns:1fr; gap:var(--sln-space-3); padding:var(--sln-space-4); }
+    .automation-actions { grid-template-columns:1fr; }
+    .automation-scope-note { padding-inline:var(--sln-space-4); }
+  }
+</style>

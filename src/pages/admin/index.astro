@@ -1,0 +1,320 @@
+---
+import AdminState from "../../components/admin/AdminState.astro";
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { listAdminAbuseReports, listRecentModerationActions } from "../../lib/operations/abuse";
+import { getBindings } from "../../lib/platform/bindings";
+import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
+import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
+
+const env = getBindings();
+const locale = resolvePresentationLocale(Astro.locals.locale);
+const t = createAdminTranslator(locale);
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("Pragma", "no-cache");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+Astro.response.headers.set("Referrer-Policy", "no-referrer");
+
+let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let roleLookupFailed = false;
+try {
+  adminRole = await getPlatformAdminRole({ env, userId: auth.userId });
+} catch {
+  roleLookupFailed = true;
+}
+
+if (roleLookupFailed) Astro.response.status = 503;
+else if (adminRole === null) Astro.response.status = 403;
+
+let reports: Awaited<ReturnType<typeof listAdminAbuseReports>>["reports"] = [];
+let actions: Awaited<ReturnType<typeof listRecentModerationActions>> = [];
+let dataUnavailable = false;
+if (adminRole !== null) {
+  try {
+    const [reportResult, recentActions] = await Promise.all([
+      listAdminAbuseReports({ cursor: null, env, limit: 30, status: null, userId: auth.userId }),
+      listRecentModerationActions({ env, limit: 12, userId: auth.userId }),
+    ]);
+    reports = reportResult.reports;
+    actions = recentActions;
+  } catch {
+    dataUnavailable = true;
+    Astro.response.status = 503;
+  }
+}
+
+const canMakeRiskDecisions = adminRole === "owner" || adminRole === "risk";
+const openReports = reports.filter((report) => !["closed", "dismissed"].includes(report.status));
+const unassignedReports = openReports.filter((report) => !report.assigned);
+
+const reportStatusLabels: Record<string, { label: string; tone: "danger" | "info" | "neutral" | "success" | "warning" }> = {
+  actioned: { label: t("admin.overview.status.actioned"), tone: "danger" },
+  closed: { label: t("admin.overview.status.closed"), tone: "success" },
+  dismissed: { label: t("admin.overview.status.dismissed"), tone: "neutral" },
+  investigating: { label: t("admin.overview.status.investigating"), tone: "warning" },
+  received: { label: t("admin.overview.status.received"), tone: "warning" },
+  triaged: { label: t("admin.overview.status.triaged"), tone: "info" },
+};
+
+const categoryLabels: Record<string, string> = {
+  copyright: t("admin.overview.category.copyright"),
+  fraud: t("admin.overview.category.fraud"),
+  malware: t("admin.overview.category.malware"),
+  other: t("admin.overview.category.other"),
+  privacy: t("admin.overview.category.privacy"),
+  prohibited_content: t("admin.overview.category.prohibited_content"),
+};
+
+const targetLabels: Record<string, string> = {
+  domain: t("admin.overview.target.domain"),
+  order: t("admin.overview.target.order"),
+  other: t("admin.overview.target.other"),
+  product: t("admin.overview.target.product"),
+  shop: t("admin.overview.target.shop"),
+};
+
+const actionLabels: Record<string, string> = {
+  product_restore: t("admin.overview.action.product_restore"),
+  product_suspend: t("admin.overview.action.product_suspend"),
+  shop_restore: t("admin.overview.action.shop_restore"),
+  shop_suspend: t("admin.overview.action.shop_suspend"),
+};
+
+const clientCopy = {
+  "admin.overview.client.confirm.suspend_target": t("admin.overview.client.confirm.suspend_target"),
+  "admin.overview.client.error.authorization_denied": t("admin.overview.client.error.authorization_denied"),
+  "admin.overview.client.error.csrf_missing": t("admin.overview.client.error.csrf_missing"),
+  "admin.overview.client.error.generic": t("admin.overview.client.error.generic"),
+  "admin.overview.client.error.moderation_state_conflict": t("admin.overview.client.error.moderation_state_conflict"),
+  "admin.overview.client.error.recent_auth_required": t("admin.overview.client.error.recent_auth_required"),
+  "admin.overview.client.feedback.applied": t("admin.overview.client.feedback.applied"),
+  "admin.overview.client.feedback.applying": t("admin.overview.client.feedback.applying"),
+  "admin.overview.client.manual.confirm": t("admin.overview.client.manual.confirm"),
+  "admin.overview.client.manual.error.generic": t("admin.overview.client.manual.error.generic"),
+  "admin.overview.client.manual.error.moderation_state_conflict": t("admin.overview.client.manual.error.moderation_state_conflict"),
+  "admin.overview.client.manual.error.recent_auth_required": t("admin.overview.client.manual.error.recent_auth_required"),
+  "admin.overview.client.manual.feedback.applied": t("admin.overview.client.manual.feedback.applied"),
+  "admin.overview.client.manual.feedback.verifying": t("admin.overview.client.manual.feedback.verifying"),
+  "admin.overview.client.manual.product_id_required": t("admin.overview.client.manual.product_id_required"),
+  "admin.overview.client.reference.code": t("admin.overview.client.reference.code"),
+  "admin.overview.client.reference.request": t("admin.overview.client.reference.request"),
+};
+
+const safeDate = (value: string): Date | null => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+const formatTime = (value: string): string => safeDate(value)?.toLocaleString(locale, {
+  dateStyle: "short",
+  timeStyle: "short",
+}) ?? t("admin.common.unknown");
+const age = (value: string): string => {
+  const parsed = safeDate(value);
+  if (parsed === null) return t("admin.common.unknown");
+  const minutes = Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 60_000));
+  if (minutes < 1) return t("admin.common.just_now");
+  if (minutes < 60) return t("admin.common.minutes", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return t("admin.common.hours", { count: hours });
+  return t("admin.common.days", { count: Math.floor(hours / 24) });
+};
+---
+
+<AdminLayout activePath="/admin" email={auth.email} role={adminRole} title={t("admin.overview.title")}>
+  {roleLookupFailed ? (
+    <AdminState
+      tone="danger"
+      eyebrow={t("admin.overview.permission.eyebrow")}
+      title={t("admin.overview.permission.title")}
+      description={t("admin.overview.permission.description")}
+      code={t("admin.common.request", { requestId: Astro.locals.requestId })}
+      actionHref="/admin"
+      actionLabel={t("admin.common.reload")}
+    />
+  ) : adminRole === null ? (
+    <AdminState
+      tone="warning"
+      eyebrow={t("admin.overview.forbidden.eyebrow")}
+      title={t("admin.overview.forbidden.title")}
+      description={t("admin.overview.forbidden.description")}
+      code="authorization_denied"
+      actionHref="/app"
+      actionLabel={t("admin.common.back_workspace")}
+    />
+  ) : dataUnavailable ? (
+    <AdminState
+      tone="danger"
+      eyebrow={t("admin.overview.data.eyebrow")}
+      title={t("admin.overview.data.title")}
+      description={t("admin.overview.data.description")}
+      code={t("admin.common.request", { requestId: Astro.locals.requestId })}
+      actionHref="/admin"
+      actionLabel={t("admin.common.reload")}
+    />
+  ) : (
+    <div
+      data-admin-operations
+      data-copy={JSON.stringify(clientCopy)}
+      data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`}
+      aria-busy="false"
+    >
+      <header class="admin-page-header" id="overview">
+        <div>
+          <p class="admin-eyebrow">{t("admin.overview.eyebrow")}</p>
+          <h1>{t("admin.overview.header.title")}</h1>
+          <p>{t("admin.overview.header.description")}</p>
+        </div>
+        <div class="admin-summary" aria-label={t("admin.overview.reports.summary_aria")}>
+          <div><span>{t("admin.overview.reports.summary_open")}</span><strong>{openReports.length}</strong></div>
+          <div><span>{t("admin.overview.reports.summary_unassigned")}</span><strong>{unassignedReports.length}</strong></div>
+          <div><span>{t("admin.overview.reports.summary_recent")}</span><strong>{actions.length}</strong></div>
+        </div>
+      </header>
+
+      <p class="admin-feedback" data-operations-status data-tone="neutral" role="status" aria-live="polite" aria-atomic="true">
+        {t("admin.overview.feedback")}
+      </p>
+
+      <section class="admin-section" id="reports" aria-labelledby="reports-title">
+        <div class="admin-section-heading">
+          <div>
+            <h2 id="reports-title">{t("admin.overview.reports.title")}</h2>
+            <p>{t("admin.overview.reports.unclassified_help")}</p>
+          </div>
+          <span>{reports.length} · {t("admin.overview.reports.limit", { count: 30 })}</span>
+        </div>
+
+        {reports.length === 0 ? (
+          <div class="admin-empty" role="status">
+            <strong>{t("admin.overview.reports.empty_title")}</strong>
+            <span>{t("admin.overview.reports.empty_description")}</span>
+          </div>
+        ) : (
+          <div class="admin-records" role="list" aria-label={t("admin.overview.reports.list_aria")}>
+            <div class="admin-record-header" aria-hidden="true">
+              <span>{t("admin.overview.reports.column.severity")}</span><span>{t("admin.overview.reports.column.entity")}</span><span>{t("admin.overview.reports.column.safe_code")}</span><span>{t("admin.overview.reports.column.evidence")}</span><span>{t("admin.overview.reports.column.age")}</span><span>{t("admin.overview.reports.assignee")}</span><span>{t("admin.overview.reports.column.state")}</span>
+            </div>
+            {reports.map((report) => {
+              const state = reportStatusLabels[report.status] ?? { label: t("admin.common.safe_state"), tone: "neutral" as const };
+              const hasRiskAction = canMakeRiskDecisions
+                && report.shopPublicId !== null
+                && ["product", "shop"].includes(report.targetKind)
+                && !["closed", "dismissed"].includes(report.status);
+              const hasWorkflowAction = report.status === "received" || (canMakeRiskDecisions && !["closed", "dismissed"].includes(report.status));
+              return (
+                <article
+                  class="admin-record"
+                  role="listitem"
+                  data-report-public-id={report.publicId}
+                  data-shop-public-id={report.shopPublicId ?? ""}
+                  data-target-kind={report.targetKind}
+                  data-target-ref={report.targetRef}
+                >
+                  <div class="admin-record-summary">
+                    <div><small class="admin-cell-label">{t("admin.overview.reports.column.severity")}</small><span class="admin-badge">{t("admin.common.unclassified")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.overview.reports.column.entity")}</small><strong>{report.shopName ?? t("admin.overview.reports.entity_unknown")}</strong></div>
+                    <div><small class="admin-cell-label">{t("admin.overview.reports.column.safe_code")}</small><span>{categoryLabels[report.category] ?? t("admin.overview.category.other")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.overview.reports.column.evidence")}</small><code>{report.publicId}</code></div>
+                    <div><small class="admin-cell-label">{t("admin.overview.reports.column.age")}</small><span title={formatTime(report.createdAt)}>{age(report.createdAt)}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.overview.reports.assignee")}</small><span>{report.assigned ? t("admin.common.assigned") : t("admin.common.unassigned")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.overview.reports.column.state")}</small><span class="admin-badge" data-tone={state.tone}>{state.label}</span></div>
+                  </div>
+                  <details>
+                    <summary>{t("admin.overview.reports.details")}</summary>
+                    <div class="admin-record-detail">
+                      <div>
+                        <p>{report.summary}</p>
+                        <dl class="admin-safe-facts">
+                          <div><dt>{t("admin.overview.reports.target")}</dt><dd>{targetLabels[report.targetKind] ?? t("admin.overview.target.other")} · <code>{report.targetRef}</code></dd></div>
+                          <div><dt>{t("admin.overview.reports.shop_public_id")}</dt><dd><code>{report.shopPublicId ?? t("admin.common.no_shop")}</code></dd></div>
+                          <div><dt>{t("admin.overview.reports.updated")}</dt><dd>{formatTime(report.updatedAt)}</dd></div>
+                        </dl>
+                      </div>
+                      <div class="admin-actions" aria-label={t("admin.overview.reports.actions_aria", { reportId: report.publicId })}>
+                        {report.status === "received" && <button type="button" data-report-status="triaged">{t("admin.overview.action.triage")}</button>}
+                        {canMakeRiskDecisions && !["closed", "dismissed"].includes(report.status) && <button type="button" data-report-status="investigating">{t("admin.overview.action.investigate")}</button>}
+                        {canMakeRiskDecisions && !["closed", "dismissed"].includes(report.status) && <button type="button" data-report-status="dismissed">{t("admin.overview.action.dismiss")}</button>}
+                        {canMakeRiskDecisions && ["actioned", "dismissed", "investigating", "triaged"].includes(report.status) && <button type="button" data-report-status="closed">{t("admin.overview.action.close")}</button>}
+                        {hasRiskAction && <button class="danger" type="button" data-action-kind={`${report.targetKind}_suspend`}>{t("admin.overview.action.suspend_target")}</button>}
+                        {!hasWorkflowAction && !hasRiskAction && <span>{t("admin.overview.action.no_access")}</span>}
+                      </div>
+                    </div>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section class="admin-section admin-split">
+        <div aria-labelledby="manual-title">
+          <div class="admin-section-heading">
+            <div><h2 id="manual-title">{t("admin.overview.manual.title")}</h2><p>{t("admin.overview.manual.description")}</p></div>
+          </div>
+          {canMakeRiskDecisions ? (
+            <div class="admin-form-panel" data-risk="high">
+              <p>{t("admin.overview.manual.intro")}</p>
+              <form class="admin-form" data-manual-action-form>
+                <label>{t("admin.overview.manual.label.action")}<select name="actionKind" required><option value="shop_suspend">{t("admin.overview.action.shop_suspend")}</option><option value="shop_restore">{t("admin.overview.action.shop_restore")}</option><option value="product_suspend">{t("admin.overview.action.product_suspend")}</option><option value="product_restore">{t("admin.overview.action.product_restore")}</option></select></label>
+                <label>{t("admin.overview.manual.label.shop_public_id")}<input name="shopPublicId" autocomplete="off" required placeholder={t("admin.overview.manual.placeholder.shop_public_id")} maxlength="128" /></label>
+                <label>{t("admin.overview.manual.label.product_optional")}<input name="targetId" autocomplete="off" placeholder={t("admin.overview.manual.placeholder.product_id")} maxlength="128" /><small>{t("admin.overview.manual.help")}</small></label>
+                <label>{t("admin.overview.manual.label.reason")}<input name="reasonCode" autocomplete="off" required value="policy_violation" pattern="[a-z][a-z0-9_]{2,63}" maxlength="64" /></label>
+                <div class="admin-form-actions"><button type="submit">{t("admin.overview.manual.apply")}</button></div>
+              </form>
+            </div>
+          ) : (
+            <AdminState
+              tone="info"
+              eyebrow={t("admin.overview.support.eyebrow")}
+              headingLevel="h2"
+              title={t("admin.overview.support.title")}
+              description={t("admin.overview.support.description")}
+            />
+          )}
+        </div>
+
+        <div id="ledger" aria-labelledby="ledger-title">
+          <div class="admin-section-heading">
+            <div><h2 id="ledger-title">{t("admin.overview.ledger.title")}</h2><p>{t("admin.overview.ledger.description")}</p></div>
+          </div>
+          {actions.length === 0 ? (
+            <div class="admin-empty"><strong>{t("admin.overview.ledger.empty_title")}</strong><span>{t("admin.overview.ledger.empty_description")}</span></div>
+          ) : (
+            <ol class="admin-ledger">
+              {actions.map((action) => (
+                <li>
+                  <code>{actionLabels[action.actionKind] ?? action.actionKind}</code>
+                  <strong>{action.shopName ?? action.shopPublicId ?? t("admin.common.platform")}</strong>
+                  <time datetime={action.createdAt}>{formatTime(action.createdAt)}</time>
+                  <small>{action.reasonCode} · {action.status}</small>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </section>
+
+      <section class="admin-section" aria-labelledby="coverage-title">
+        <div class="admin-section-heading">
+          <div><h2 id="coverage-title">{t("admin.overview.coverage.title")}</h2><p>{t("admin.overview.coverage.description")}</p></div>
+        </div>
+        <div class="admin-records">
+          <ul class="admin-contract-list">
+            <li><span>{t("admin.overview.coverage.moderation")}</span><span class="admin-badge" data-tone="success">{t("admin.overview.coverage.connected")}</span></li>
+            <li><span>{t("admin.overview.coverage.operations")}</span><a class="admin-button" href="/admin/operations">{t("admin.overview.coverage.open_systems")}</a></li>
+            <li><span>{t("admin.overview.coverage.missing_surfaces")}</span><span class="admin-badge">{t("admin.common.read_api_unavailable")}</span></li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  )}
+</AdminLayout>
+
+<script>
+  import "../../scripts/dashboard/admin-operations";
+</script>

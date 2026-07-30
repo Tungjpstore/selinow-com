@@ -1,0 +1,61 @@
+{
+  "accountId": "replace-with-cloudflare-account-id",
+  "zoneId": "replace-with-cloudflare-zone-id",
+  "zoneName": "selinow.com",
+  "resources": {
+    "d1": [],
+    "r2": [],
+    "kv": [],
+    "queue": []
+  },
+  "routes": [
+    { "pattern": "selinow.com/*", "script": null },
+    { "pattern": "*.selinow.com/*", "script": null },
+    { "pattern": "*.staging.selinow.com/*", "script": "selinow-com-staging" },
+    { "pattern": "*/*", "script": "selinow-com-staging" }
+  ],
+  "domains": [
+    {
+      "hostname": "staging.selinow.com",
+      "service": "selinow-com-staging",
+      "zoneId": "replace-with-cloudflare-zone-id",
+      "zoneName": "selinow.com"
+    },
+    {
+      "hostname": "app-staging.selinow.com",
+      "service": "selinow-com-staging",
+      "zoneId": "replace-with-cloudflare-zone-id",
+      "zoneName": "selinow.com"
+    },
+    {
+      "hostname": "api-staging.selinow.com",
+      "service": "selinow-com-staging",
+      "zoneId": "replace-with-cloudflare-zone-id",
+      "zoneName": "selinow.com"
+    },
+    {
+      "hostname": "signal.staging.selinow.com",
+      "service": "selinow-com-staging",
+      "zoneId": "replace-with-cloudflare-zone-id",
+      "zoneName": "selinow.com"
+    },
+    {
+      "hostname": "canvas.staging.selinow.com",
+      "service": "selinow-com-staging",
+      "zoneId": "replace-with-cloudflare-zone-id",
+      "zoneName": "selinow.com"
+    },
+    {
+      "hostname": "coming-soon.staging.selinow.com",
+      "service": "selinow-com-staging",
+      "zoneId": "replace-with-cloudflare-zone-id",
+      "zoneName": "selinow.com"
+    },
+    {
+      "hostname": "paused.staging.selinow.com",
+      "service": "selinow-com-staging",
+      "zoneId": "replace-with-cloudflare-zone-id",
+      "zoneName": "selinow.com"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+---
+import StatusBadge from "../primitives/StatusBadge.astro";
+import { createSystemTranslator } from "../../lib/i18n";
+
+interface Props { locale?: unknown; value: string; }
+const { locale = Astro.locals.locale, value } = Astro.props;
+const map: Record<string, { key: string; tone: "danger" | "info" | "neutral" | "success" | "warning" }> = {
+  unfulfilled: { key: "status.fulfillment.unfulfilled", tone: "neutral" },
+  not_started: { key: "status.fulfillment.not_started", tone: "neutral" },
+  pending: { key: "status.fulfillment.pending", tone: "info" },
+  reserved: { key: "status.fulfillment.reserved", tone: "info" },
+  processing: { key: "status.fulfillment.processing", tone: "info" },
+  fulfilled: { key: "status.fulfillment.fulfilled", tone: "success" },
+  failed: { key: "status.fulfillment.failed", tone: "danger" },
+  manual_review: { key: "status.fulfillment.manual_review", tone: "warning" },
+  canceled: { key: "status.fulfillment.canceled", tone: "danger" },
+};
+const entry = map[value] ?? { key: "status.fulfillment.unknown", tone: "neutral" as const };
+const state = { label: createSystemTranslator(locale)(entry.key), tone: entry.tone };
+---
+
+<StatusBadge label={state.label} tone={state.tone} />

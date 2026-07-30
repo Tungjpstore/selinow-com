@@ -1,0 +1,107 @@
+---
+interface Props {
+  cancelLabel?: string;
+  confirmLabel: string;
+  dialogId: string;
+  impact: string;
+  pendingLabel?: string;
+  title: string;
+  triggerLabel: string;
+  variant?: "danger" | "primary";
+}
+
+const {
+  cancelLabel = "Cancel",
+  confirmLabel,
+  dialogId,
+  impact,
+  pendingLabel = "Processing…",
+  title,
+  triggerLabel,
+  variant = "danger",
+} = Astro.props;
+const titleId = `${dialogId}-title`;
+const impactId = `${dialogId}-impact`;
+---
+
+<div data-sln-dialog-root data-sln-pending-label={pendingLabel}>
+  <button class="sln-button" data-sln-dialog-trigger data-variant={variant} type="button">{triggerLabel}</button>
+  <dialog class="sln-dialog" id={dialogId} aria-describedby={impactId} aria-labelledby={titleId} data-sln-dialog>
+    <div class="sln-dialog__body">
+      <h2 id={titleId}>{title}</h2>
+      <p id={impactId}>{impact}</p>
+      <slot />
+    </div>
+    <form class="sln-dialog__actions" method="dialog" data-sln-dialog-form>
+      <button class="sln-button" data-sln-dialog-cancel data-variant="secondary" type="submit" value="cancel">{cancelLabel}</button>
+      <button class="sln-button" data-sln-dialog-confirm data-variant={variant} type="submit" value="confirm">{confirmLabel}</button>
+    </form>
+  </dialog>
+</div>
+
+<script>
+  type ConfirmDetail = { complete: () => void; fail: () => void };
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-sln-dialog-root]")) {
+    if (root.dataset.slnReady === "true") continue;
+    root.dataset.slnReady = "true";
+    const trigger = root.querySelector<HTMLButtonElement>("[data-sln-dialog-trigger]");
+    const dialog = root.querySelector<HTMLDialogElement>("[data-sln-dialog]");
+    const form = root.querySelector<HTMLFormElement>("[data-sln-dialog-form]");
+    const cancel = root.querySelector<HTMLButtonElement>("[data-sln-dialog-cancel]");
+    const confirm = root.querySelector<HTMLButtonElement>("[data-sln-dialog-confirm]");
+    if (trigger === null || dialog === null || form === null || cancel === null || confirm === null) continue;
+    const confirmLabel = confirm.textContent ?? "Confirm";
+    const pendingLabel = root.dataset.slnPendingLabel ?? "Processing…";
+    let pending = false;
+    const setPending = (value: boolean): void => {
+      pending = value;
+      root.dataset.slnPending = String(value);
+      dialog.setAttribute("aria-busy", String(value));
+      trigger.disabled = value;
+      cancel.disabled = value;
+      confirm.disabled = value;
+      confirm.dataset.loading = String(value);
+      confirm.textContent = value ? pendingLabel : confirmLabel;
+    };
+    trigger.addEventListener("click", () => dialog.showModal());
+    dialog.addEventListener("click", (event) => {
+      if (!pending && event.target === dialog) dialog.close("cancel");
+    });
+    dialog.addEventListener("cancel", (event) => {
+      if (pending) event.preventDefault();
+    });
+    form.addEventListener("submit", (event) => {
+      const submitter = event.submitter;
+      if (!(submitter instanceof HTMLButtonElement) || submitter.value !== "confirm") return;
+      event.preventDefault();
+      if (pending) return;
+      setPending(true);
+
+      let settled = false;
+      const complete = (): void => {
+        if (settled) return;
+        settled = true;
+        setPending(false);
+        dialog.close("confirm");
+      };
+      const fail = (): void => {
+        if (settled) return;
+        settled = true;
+        setPending(false);
+        confirm.focus();
+      };
+      // Async consumers prevent the default event and settle through these callbacks.
+      const confirmEvent = new CustomEvent<ConfirmDetail>("sln:confirm", {
+        bubbles: true,
+        cancelable: true,
+        detail: { complete, fail },
+      });
+      if (root.dispatchEvent(confirmEvent)) complete();
+    });
+    dialog.addEventListener("close", () => {
+      setPending(false);
+      trigger.focus();
+    });
+  }
+</script>

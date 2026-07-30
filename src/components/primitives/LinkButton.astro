@@ -1,0 +1,15 @@
+---
+interface Props {
+  ariaLabel?: string;
+  className?: string;
+  href: string;
+  rel?: string;
+  target?: "_blank" | "_self";
+  variant?: "inline" | "primary" | "secondary";
+}
+
+const { ariaLabel, className, href, rel, target, variant = "primary" } = Astro.props;
+const classes = ["sln-link-button", className].filter(Boolean).join(" ");
+---
+
+<a aria-label={ariaLabel} class={classes} data-variant={variant} href={href} rel={rel} target={target}><slot /></a>

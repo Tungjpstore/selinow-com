@@ -1,0 +1,285 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import StatusBadge from "../../components/primitives/StatusBadge.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import Money from "../../components/commerce/Money.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { listSellerCatalog } from "../../lib/catalog/store";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { getBindings } from "../../lib/platform/bindings";
+import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+import { currencyInputStep, formatMinorAmountForInput } from "../../lib/i18n/currency";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+let catalog: { categories: unknown[]; products: unknown[]; variants: unknown[] } = { categories: [], products: [], variants: [] };
+let canManage = false;
+if (shop !== undefined && (shop.role === "owner" || shop.role === "manager")) {
+  canManage = true;
+  catalog = await listSellerCatalog({ env, shopPublicId: shop.publicId, userId: auth.userId }).catch(() => catalog);
+}
+const products = catalog.products as Array<Record<string, unknown>>;
+const categories = catalog.categories as Array<Record<string, unknown>>;
+const variants = catalog.variants as Array<Record<string, unknown>>;
+const productVariants = new Map<string, Array<Record<string, unknown>>>();
+for (const variant of variants) {
+  const productId = typeof variant.productId === "string" ? variant.productId : "";
+  const list = productVariants.get(productId) ?? [];
+  list.push(variant);
+  productVariants.set(productId, list);
+}
+const labelForStatus: Record<string, string> = { active: t("dashboard.products.status.active"), archived: t("dashboard.products.status.archived"), draft: t("dashboard.products.status.draft"), suspended: t("dashboard.products.status.suspended") };
+const toneForStatus = (status: unknown): "danger" | "neutral" | "success" | "warning" => status === "active" ? "success" : status === "suspended" ? "danger" : status === "draft" ? "warning" : "neutral";
+const updatedAtFormatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeStyle: "short", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
+const productRows = products.map((product, index) => {
+  const productId = String(product.id ?? "");
+  const rows = productVariants.get(productId) ?? [];
+  const lowest = rows.reduce<number | null>((current, row) => {
+    const value = typeof row.priceMinor === "number" ? row.priceMinor : null;
+    return value === null ? current : current === null ? value : Math.min(current, value);
+  }, null);
+  const stock = rows.reduce((sum, row) => sum + (typeof row.availableStock === "number" ? row.availableStock : Number(row.availableStock ?? 0)), 0);
+  const projectedUpdatedAt = typeof product.updatedAt === "string" ? product.updatedAt : "";
+  const updatedDate = new Date(projectedUpdatedAt);
+  const updatedAt = projectedUpdatedAt !== "" && !Number.isNaN(updatedDate.getTime()) ? projectedUpdatedAt : "";
+  const updatedLabel = updatedAt === "" ? t("dashboard.commerce.not_recorded") : updatedAtFormatter.format(updatedDate);
+  return { product, productId, rows, lowest, stock, index, updatedAt, updatedLabel };
+});
+const selectedProductId = Astro.url.searchParams.get("product");
+const selectedProduct = selectedProductId === null ? undefined : products.find((product) => product.id === selectedProductId);
+const selectedVariants = selectedProduct === undefined ? [] : productVariants.get(String(selectedProduct.id)) ?? [];
+---
+
+<AppLayout activePath="/app/products" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.products.title")}>
+  <PageHeader eyebrow={t("dashboard.products.eyebrow")} title={t("dashboard.products.title")} description={t("dashboard.products.description")}>
+    {canManage && <div slot="actions" class="header-actions"><button class="sln-button sln-button-secondary" type="button" data-open-category-form>{t("dashboard.products.action.add_category")}</button><button class="sln-button sln-button-primary" type="button" data-open-product-form>{t("dashboard.products.action.add_product")} <span aria-hidden="true">+</span></button></div>}
+  </PageHeader>
+
+  {shop === undefined ? (
+    <WorkspaceState title={t("dashboard.products.no_store.title")} description={t("dashboard.products.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.products.no_store.action")} tone="info" />
+  ) : !canManage ? (
+    <WorkspaceState title={t("dashboard.products.forbidden.title")} description={t("dashboard.products.forbidden.description")} tone="warning" />
+  ) : (
+    <>
+      <section class="catalog-summary" aria-label={t("dashboard.products.summary.aria")}>
+        <div><span>{t("dashboard.products.summary.products")}</span><strong>{products.length}</strong><small>{t("dashboard.products.summary.products_caption")}</small></div>
+        <div><span>{t("dashboard.products.summary.variants")}</span><strong>{variants.length}</strong><small>{t("dashboard.products.summary.variants_caption")}</small></div>
+        <div><span>{t("dashboard.products.summary.active")}</span><strong>{products.filter((product) => product.status === "active").length}</strong><small>{t("dashboard.products.summary.active_caption")}</small></div>
+        <div><span>{t("dashboard.products.summary.low_stock")}</span><strong class="warn">{variants.filter((variant) => Number(variant.availableStock ?? 0) < 5).length}</strong><small>{t("dashboard.products.summary.low_stock_caption")}</small></div>
+      </section>
+
+      <section class="category-panel" aria-labelledby="category-ledger-title" data-category-manager data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`}>
+        <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.products.category.eyebrow")}</p><h2 id="category-ledger-title">{t("dashboard.products.category.title")}</h2></div><span class="record-count">{t("dashboard.products.category.count", { count: categories.length })}</span></div>
+        {categories.length === 0 ? (
+          <p class="category-empty">{t("dashboard.products.category.empty")}</p>
+        ) : (
+          <div class="category-list">
+            {categories.map((category) => <article class="category-row" data-category-editor data-category-id={String(category.id)}>
+              <div class="category-fields">
+                <label>{t("dashboard.products.category.field.name")}<input name="name" required minlength="2" maxlength="120" value={String(category.name ?? "")} /></label>
+                <label>{t("dashboard.products.category.field.slug")}<input name="slug" required minlength="2" maxlength="80" pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" value={String(category.slug ?? "")} /></label>
+                <label>{t("dashboard.products.category.field.sort_order")}<input name="sortOrder" type="number" min="-10000" max="10000" step="1" value={String(category.sortOrder ?? 0)} /></label>
+                <label>{t("dashboard.products.category.field.status")}<select name="status"><option value="active" selected={category.status === "active"}>{t("dashboard.products.category.status.active")}</option><option value="draft" selected={category.status === "draft"}>{t("dashboard.products.category.status.draft")}</option>{category.status === "archived" && <option value="archived" selected>{t("dashboard.products.category.status.archived")}</option>}</select></label>
+                <label class="category-description">{t("dashboard.products.category.field.description")}<textarea name="description" rows="2" maxlength="10000">{String(category.description ?? "")}</textarea></label>
+              </div>
+              <div class="category-actions"><button class="sln-button sln-button-secondary" type="button" data-save-category>{t("dashboard.products.category.action.save")}</button><button class="sln-button sln-button-secondary" type="button" data-request-category-archive aria-controls={`category-archive-${String(category.id)}`} aria-expanded="false" disabled={category.status === "archived"}>{t("dashboard.products.category.action.archive")}</button></div>
+              <div id={`category-archive-${String(category.id)}`} class="archive-confirmation" data-category-archive-confirm hidden role="alert"><p>{t("dashboard.products.category.archive.description")}</p><div><button class="sln-button sln-button-secondary" type="button" data-cancel-category-archive>{t("dashboard.products.category.action.cancel_archive")}</button><button class="sln-button sln-button-danger" type="button" data-confirm-category-archive>{t("dashboard.products.category.action.confirm_archive")}</button></div></div>
+              <p class="form-feedback" data-category-editor-feedback role="status" aria-live="polite"></p>
+            </article>)}
+          </div>
+        )}
+      </section>
+
+      <section class="ledger-panel" aria-labelledby="product-ledger-title">
+        <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.products.ledger.eyebrow")}</p><h2 id="product-ledger-title">{t("dashboard.products.ledger.title")}</h2></div><span class="record-count">{t("dashboard.products.ledger.count", { count: products.length })}</span></div>
+        {products.length === 0 ? (
+          <WorkspaceState title={t("dashboard.products.ledger.empty.title")} description={t("dashboard.products.ledger.empty.description")} tone="info" />
+        ) : (
+          <><div class="catalog-toolbar">
+            <label>{t("dashboard.products.search.label")}<input type="search" placeholder={t("dashboard.products.search.placeholder")} data-product-search /></label>
+            <label>{t("dashboard.products.filter.status_label")}<select data-product-status><option value="">{t("dashboard.products.filter.all")}</option><option value="active">{t("dashboard.products.filter.active")}</option><option value="draft">{t("dashboard.products.filter.draft")}</option><option value="suspended">{t("dashboard.products.filter.suspended")}</option><option value="archived">{t("dashboard.products.filter.archived")}</option><option value="out_of_stock">{t("dashboard.products.filter.out_of_stock")}</option></select></label>
+          </div><div class="product-table" role="table" aria-label={t("dashboard.products.table.aria")}>
+            <div class="table-head" role="row"><span>{t("dashboard.products.table.product")}</span><span>{t("dashboard.products.table.price_variant")}</span><span>{t("dashboard.products.table.stock")}</span><span>{t("dashboard.products.table.status")}</span><span>{t("dashboard.products.table.updated")}</span><span>{t("dashboard.products.table.actions")}</span></div>
+            {productRows.map(({ product, productId, rows, lowest, stock, index, updatedAt, updatedLabel }) => (
+              <article class="table-row" role="row" data-product-row data-product-status={String(product.status ?? "")} data-product-stock={stock === 0 ? "out_of_stock" : "available"} data-product-search-text={`${String(product.title ?? "")} ${String(product.slug ?? "")} ${rows.map((row) => `${String(row.sku ?? "")} ${String(row.title ?? "")}`).join(" ")}`}>
+                <div class="product-cell"><span class="product-index">{String(index + 1).padStart(2, "0")}</span><div><strong>{String(product.title ?? t("dashboard.products.product.untitled"))}</strong><small>/{String(product.slug ?? "")}</small></div></div>
+                <div class="price-cell">{lowest === null ? <span>{t("dashboard.products.price.none")}</span> : <Money value={lowest} currency={shop.currency} locale={locale ?? "en"} />}<small>{t("dashboard.products.variant.count", { count: rows.length })}</small></div>
+                <div class="stock-cell"><strong>{stock}</strong><small>{stock === 0 ? t("dashboard.products.stock.out") : stock < 5 ? t("dashboard.products.stock.low") : t("dashboard.products.stock.available")}</small></div>
+                <div><StatusBadge label={labelForStatus[String(product.status)] ?? t("dashboard.products.status.unknown")} tone={toneForStatus(product.status)} /></div>
+                <div class="updated-cell">{updatedAt === "" ? <span>{updatedLabel}</span> : <time datetime={updatedAt}>{updatedLabel}</time>}<small>{t("dashboard.products.updated.record")}</small></div>
+                <div class="row-action"><a href={workspaceHref(`/app/products?product=${encodeURIComponent(productId)}`)} aria-label={t("dashboard.products.row.open_aria", { product: String(product.title ?? t("dashboard.products.product.untitled")) })}>{t("dashboard.products.row.open")} <span aria-hidden="true">→</span></a></div>
+              </article>
+            ))}
+          </div><p class="catalog-no-results" data-product-no-results hidden>{t("dashboard.products.no_results")}</p></>
+        )}
+      </section>
+
+      <dialog class="product-dialog" data-product-dialog data-shop-public-id={shop.publicId} data-default-currency={shop.currency} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-labelledby="product-dialog-title">
+        <form method="dialog" class="dialog-card" data-product-form>
+          <button class="dialog-close" type="submit" aria-label={t("dashboard.products.dialog.actions.close")}>×</button>
+          <p class="eyebrow">{t("dashboard.products.dialog.product_create.eyebrow")}</p><h2 id="product-dialog-title">{t("dashboard.products.dialog.product_create.title")}</h2>
+          <p class="dialog-copy">{t("dashboard.products.dialog.product_create.description")}</p>
+          <label>{t("dashboard.products.dialog.product_create.field.title")}<input name="title" required minlength="2" maxlength="120" placeholder={t("dashboard.products.dialog.product_create.placeholder.title")} /></label>
+          <label>{t("dashboard.products.dialog.product_create.field.slug")}<input name="slug" required minlength="2" maxlength="80" pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" placeholder={t("dashboard.products.dialog.product_create.placeholder.slug")} /></label>
+          <label>{t("dashboard.products.dialog.product_create.field.category")}<select name="categoryId"><option value="">{t("dashboard.products.dialog.product_create.field.uncategorized")}</option>{categories.map((category) => <option value={String(category.id)}>{String(category.name ?? t("dashboard.products.product.category_fallback"))}</option>)}</select></label>
+          <label>{t("dashboard.products.dialog.product_create.field.description")}<textarea name="description" rows="3" maxlength="10000" placeholder={t("dashboard.products.dialog.product_create.placeholder.description")}></textarea></label>
+          <label>{t("dashboard.products.dialog.product_create.field.first_sku")}<input name="sku" required maxlength="64" placeholder={t("dashboard.products.dialog.product_create.placeholder.first_sku")} /></label>
+           <label>{t("dashboard.products.dialog.product_create.field.variant_title")}<input name="variantTitle" required maxlength="120" value={t("dashboard.products.dialog.product_create.default_variant_title")} /></label>
+          <label>{t("dashboard.products.dialog.product_create.field.price", { currency: shop.currency })}<input name="priceMajor" type="number" inputmode="decimal" min="0" step={currencyInputStep(shop.currency)} required placeholder={formatMinorAmountForInput(199000, shop.currency)} /></label>
+          <div class="dialog-actions"><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.products.dialog.actions.cancel")}</button><button class="sln-button sln-button-primary" type="button" data-create-product>{t("dashboard.products.dialog.actions.create_draft")}</button></div>
+          <p class="form-feedback" data-form-feedback role="status" aria-live="polite"></p>
+        </form>
+      </dialog>
+      <dialog class="product-dialog" data-category-dialog data-shop-public-id={shop.publicId} data-default-currency={shop.currency} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-labelledby="category-dialog-title">
+        <form method="dialog" class="dialog-card" data-category-form>
+          <button class="dialog-close" type="submit" aria-label={t("dashboard.products.dialog.actions.close")}>×</button>
+          <p class="eyebrow">{t("dashboard.products.dialog.category_create.eyebrow")}</p><h2 id="category-dialog-title">{t("dashboard.products.dialog.category_create.title")}</h2>
+          <p class="dialog-copy">{t("dashboard.products.dialog.category_create.description")}</p>
+          <label>{t("dashboard.products.dialog.category_create.field.name")}<input name="name" required minlength="2" maxlength="120" placeholder={t("dashboard.products.dialog.category_create.placeholder.name")} /></label>
+          <label>{t("dashboard.products.dialog.category_create.field.slug")}<input name="slug" required minlength="2" maxlength="80" pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" placeholder={t("dashboard.products.dialog.category_create.placeholder.slug")} /></label>
+          <label>{t("dashboard.products.dialog.category_create.field.description")}<textarea name="description" rows="3" maxlength="10000" placeholder={t("dashboard.products.dialog.category_create.placeholder.description")}></textarea></label>
+          <label>{t("dashboard.products.dialog.category_create.field.status")}<select name="status"><option value="active">{t("dashboard.products.category.status.active")}</option><option value="draft">{t("dashboard.products.category.status.draft")}</option></select></label>
+          <div class="dialog-actions"><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.products.dialog.actions.cancel")}</button><button class="sln-button sln-button-primary" type="button" data-create-category>{t("dashboard.products.dialog.actions.create_category")}</button></div>
+          <p class="form-feedback" data-category-feedback role="status" aria-live="polite"></p>
+        </form>
+      </dialog>
+      {selectedProduct !== undefined && <dialog class="product-dialog" open data-product-editor data-product-id={String(selectedProduct.id)} data-shop-public-id={shop.publicId} data-default-currency={shop.currency} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-labelledby="product-editor-title">
+        <form method="dialog" class="dialog-card" data-product-editor-form>
+          <a class="dialog-close" href={`/app/products?shop=${encodeURIComponent(shop.publicId)}`} aria-label={t("dashboard.products.dialog.actions.close")}>×</a>
+          <p class="eyebrow">{t("dashboard.products.dialog.product_editor.eyebrow")}</p><h2 id="product-editor-title">{t("dashboard.products.dialog.product_editor.title")}</h2>
+          <p class="dialog-copy">{t("dashboard.products.dialog.product_editor.description")}</p>
+          <label>{t("dashboard.products.dialog.product_editor.field.title")}<input name="title" required minlength="2" maxlength="120" value={String(selectedProduct.title ?? "")} /></label>
+          <label>{t("dashboard.products.dialog.product_editor.field.slug")}<input name="slug" required minlength="2" maxlength="80" pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" value={String(selectedProduct.slug ?? "")} /></label>
+          <label>{t("dashboard.products.dialog.product_editor.field.category")}<select name="categoryId"><option value="">{t("dashboard.products.dialog.product_editor.field.uncategorized")}</option>{categories.map((category) => <option value={String(category.id)} selected={category.id === selectedProduct.categoryId}>{String(category.name ?? t("dashboard.products.product.category_fallback"))}</option>)}</select></label>
+          <label>{t("dashboard.products.dialog.product_editor.field.description")}<textarea name="description" rows="3" maxlength="10000">{String(selectedProduct.description ?? "")}</textarea></label>
+          <label>{t("dashboard.products.dialog.product_editor.field.fulfillment_type")}<select name="fulfillmentType"><option value="license_key" selected={selectedProduct.fulfillmentType === "license_key"}>{t("dashboard.products.dialog.product_editor.fulfillment.license_key")}</option><option value="manual" selected={selectedProduct.fulfillmentType === "manual"}>{t("dashboard.products.dialog.product_editor.fulfillment.manual")}</option></select></label>
+          <label>{t("dashboard.products.dialog.product_editor.field.status")}<select name="status"><option value="draft" selected={selectedProduct.status === "draft"}>{t("dashboard.products.status.draft")}</option><option value="active" selected={selectedProduct.status === "active"}>{t("dashboard.products.status.active")}</option>{selectedProduct.status === "archived" && <option value="archived" selected>{t("dashboard.products.status.archived")}</option>}<option value="suspended" selected={selectedProduct.status === "suspended"}>{t("dashboard.products.status.suspended")}</option></select></label>
+          <fieldset class="private-file-controls" data-private-file-controls hidden={selectedProduct.fulfillmentType !== "manual"}>
+            <legend>{t("dashboard.products.dialog.private_file.title")}</legend>
+            <p class="dialog-copy">{t("dashboard.products.dialog.private_file.description")}</p>
+            <label>{t("dashboard.products.dialog.private_file.file_label")}<input type="file" data-private-file-input /></label>
+            <div class="private-file-grid">
+              <label>{t("dashboard.products.dialog.private_file.max_downloads")}<input type="number" min="1" max="100" step="1" value="3" data-private-file-max-downloads /></label>
+              <label>{t("dashboard.products.dialog.private_file.grant_ttl")}<input type="number" min="60" max="86400" step="1" value="600" data-private-file-grant-ttl /></label>
+              <label>{t("dashboard.products.dialog.private_file.entitlement_ttl")}<input type="number" min="300" max="31536000" step="1" placeholder={t("dashboard.products.dialog.private_file.entitlement_ttl_placeholder")} data-private-file-entitlement-ttl /></label>
+            </div>
+            <div class="private-file-actions"><button class="sln-button sln-button-secondary" type="button" data-upload-private-file>{t("dashboard.products.dialog.private_file.upload")}</button><button class="sln-button sln-button-primary" type="button" data-save-private-file-policy disabled>{t("dashboard.products.dialog.private_file.activate")}</button></div>
+            <p class="private-file-metadata" data-private-file-metadata hidden></p>
+            <p class="form-feedback" data-private-file-feedback role="status" aria-live="polite"></p>
+          </fieldset>
+          <div class="variant-editor-list">
+            <p class="eyebrow">{t("dashboard.products.dialog.variants.eyebrow")}</p>
+            {selectedVariants.map((variant) => <fieldset data-variant-editor data-variant-id={String(variant.id)}>
+              <legend>{String(variant.title ?? t("dashboard.products.dialog.variants.fallback_title"))}</legend>
+              <label>{t("dashboard.products.dialog.variants.field.sku")}<input name="sku" required maxlength="64" value={String(variant.sku ?? "")} /></label>
+              <label>{t("dashboard.products.dialog.variants.field.title")}<input name="title" required maxlength="120" value={String(variant.title ?? "")} /></label>
+              <label>{t("dashboard.products.dialog.variants.field.price", { currency: shop.currency })}<input name="priceMajor" type="number" inputmode="decimal" min="0" step={currencyInputStep(shop.currency)} required value={formatMinorAmountForInput(Number(variant.priceMinor ?? 0), shop.currency)} /></label>
+              <label>{t("dashboard.products.dialog.variants.field.min_per_order")}<input name="minPerOrder" type="number" min="1" max="1000" required value={String(variant.minPerOrder ?? 1)} /></label>
+              <label>{t("dashboard.products.dialog.variants.field.max_per_order")}<input name="maxPerOrder" type="number" min="1" max="1000" required value={String(variant.maxPerOrder ?? 10)} /></label>
+              <input name="currency" type="hidden" aria-label={t("dashboard.products.dialog.variants.field.currency")} value={String(variant.currency ?? shop.currency)} />
+              <input name="compareAtMinor" type="hidden" aria-label={t("dashboard.products.dialog.variants.field.compare_at")} value={variant.compareAtMinor === null || variant.compareAtMinor === undefined ? "" : String(variant.compareAtMinor)} />
+              <input name="optionsJson" type="hidden" aria-label={t("dashboard.products.dialog.variants.field.options")} value={String(variant.optionsJson ?? "{}")} />
+              <label>{t("dashboard.products.dialog.product_editor.field.status")}<select name="status"><option value="active" selected={variant.status === "active"}>{t("dashboard.products.status.active")}</option><option value="archived" selected={variant.status === "archived"}>{t("dashboard.products.status.archived")}</option><option value="suspended" selected={variant.status === "suspended"}>{t("dashboard.products.status.suspended")}</option></select></label>
+            </fieldset>)}
+            <fieldset class="new-variant-fieldset" data-new-variant>
+              <legend>{t("dashboard.products.dialog.variants.new.title")}</legend>
+              <p class="dialog-copy">{t("dashboard.products.dialog.variants.new.description")}</p>
+              <label>{t("dashboard.products.dialog.variants.new.field.sku")}<input name="newVariantSku" maxlength="64" placeholder="WIN11-PRO-2PC" /></label>
+              <label>{t("dashboard.products.dialog.variants.new.field.title")}<input name="newVariantTitle" maxlength="120" placeholder={t("dashboard.products.dialog.variants.new.placeholder.title")} /></label>
+              <label>{t("dashboard.products.dialog.variants.new.field.price", { currency: shop.currency })}<input name="newVariantPriceMajor" type="number" min="0" step={currencyInputStep(shop.currency)} inputmode="decimal" placeholder={formatMinorAmountForInput(299000, shop.currency)} /></label>
+              <div class="variant-number-grid"><label>{t("dashboard.products.dialog.variants.new.field.min_per_order")}<input name="newVariantMinPerOrder" type="number" min="1" max="1000" value="1" /></label><label>{t("dashboard.products.dialog.variants.new.field.max_per_order")}<input name="newVariantMaxPerOrder" type="number" min="1" max="1000" value="10" /></label></div>
+              <label>{t("dashboard.products.dialog.variants.new.field.status")}<select name="newVariantStatus"><option value="active">{t("dashboard.products.status.active")}</option><option value="archived">{t("dashboard.products.status.archived")}</option></select></label>
+            </fieldset>
+          </div>
+          <div class="dialog-actions"><a class="sln-button sln-button-secondary" href={`/app/products?shop=${encodeURIComponent(shop.publicId)}`}>{t("dashboard.products.dialog.actions.cancel")}</a><button class="sln-button sln-button-secondary" type="button" data-archive-product aria-controls="product-archive-confirmation" aria-expanded="false" disabled={selectedProduct.status === "archived"}>{t("dashboard.products.dialog.actions.archive_product")}</button><button class="sln-button sln-button-primary" type="button" data-save-product>{t("dashboard.products.dialog.actions.save_changes")}</button></div>
+          <div id="product-archive-confirmation" class="archive-confirmation" data-product-archive-confirm hidden role="alert"><p>{t("dashboard.products.dialog.archive_product.description")}</p><div><button class="sln-button sln-button-secondary" type="button" data-cancel-product-archive>{t("dashboard.products.category.action.cancel_archive")}</button><button class="sln-button sln-button-danger" type="button" data-confirm-product-archive>{t("dashboard.products.category.action.confirm_archive")}</button></div></div>
+          <p class="form-feedback" data-editor-feedback role="status" aria-live="polite"></p>
+        </form>
+      </dialog>}
+    </>
+  )}
+</AppLayout>
+
+<script src="../../scripts/dashboard/products.ts"></script>
+
+<style>
+  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); cursor: pointer; }
+  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
+  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .sln-button-danger { background: var(--sln-state-danger); color: var(--sln-white); }
+  .header-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  .catalog-summary { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: var(--sln-space-8); border-block: 1px solid var(--sln-border-default); }
+  .catalog-summary > div { display: grid; gap: 5px; min-width: 0; padding: 18px 20px; border-right: 1px solid var(--sln-border-default); }
+  .catalog-summary > div:last-child { border-right: 0; }
+  .catalog-summary span, .catalog-summary small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .catalog-summary strong { font-size: 30px; line-height: 1; letter-spacing: -.04em; }
+  .catalog-summary strong.warn { color: var(--sln-state-warning); }
+  .category-panel { margin-top: var(--sln-space-8); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .category-list { display: grid; gap: 12px; }
+  .category-row { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-canvas); }
+  .category-fields { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(140px, 1fr) 100px 130px; gap: 12px; }
+  .category-fields label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
+  .category-fields input, .category-fields select, .category-fields textarea { width: 100%; min-height: 40px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 10px; background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .category-description { grid-column: 1 / -1; }
+  .category-actions { display: flex; justify-content: end; gap: 8px; }
+  .category-empty { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .archive-confirmation { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px; border: 1px solid color-mix(in srgb, var(--sln-state-danger) 35%, var(--sln-border-default)); border-radius: var(--sln-radius-md); background: var(--sln-tint-danger); }
+  .archive-confirmation[hidden] { display: none; }
+  .archive-confirmation p { margin: 0; color: var(--selinow-danger-text); font: var(--sln-font-body-sm); }
+  .archive-confirmation > div { display: flex; flex: 0 0 auto; gap: 8px; }
+  .ledger-panel { margin-top: var(--sln-space-10); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: var(--sln-space-6); }
+  .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .record-count { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .product-table { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
+  .catalog-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; margin-bottom: 16px; }
+  .catalog-toolbar label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
+  .catalog-toolbar input, .catalog-toolbar select { width: 100%; min-height: 42px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
+  .catalog-no-results { margin: 16px 0 0; padding: 20px; border: 1px dashed var(--sln-border-strong); border-radius: var(--sln-radius-md); color: var(--sln-text-secondary); }
+  .table-head, .table-row { display: grid; grid-template-columns: minmax(210px, 1.8fr) minmax(120px, .9fr) minmax(80px, .6fr) minmax(120px, .8fr) minmax(130px, .9fr) minmax(120px, .7fr); gap: 18px; align-items: center; padding: 15px 18px; }
+  .table-head { background: var(--sln-bg-subtle); color: var(--sln-text-muted); font: var(--sln-font-caption); font-weight: 700; }
+  .table-row { min-height: 78px; border-top: 1px solid var(--sln-border-default); }
+  .product-cell, .price-cell, .stock-cell { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .product-cell > div, .price-cell, .stock-cell, .updated-cell { display: grid; gap: 3px; }
+  .product-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .product-cell small, .price-cell small, .stock-cell small, .updated-cell small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .updated-cell { min-width: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .product-index { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; }
+  .stock-cell strong { font-variant-numeric: tabular-nums; }
+  .row-action a { color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .product-dialog { width: min(100% - 32px, 480px); border: 0; border-radius: var(--sln-radius-xl); padding: 0; background: transparent; }
+  .product-dialog[open] { position: fixed; inset: 16px; z-index: var(--sln-z-dialog); max-height: calc(100dvh - 32px); margin: auto; overflow-y: auto; box-shadow: 0 0 0 100vmax rgb(8 11 20 / 52%); }
+  .product-dialog::backdrop { background: rgb(8 11 20 / 52%); backdrop-filter: blur(4px); }
+  .dialog-card { position: relative; display: grid; gap: 14px; padding: 28px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-xl); background: var(--sln-bg-surface); color: var(--sln-text-primary); box-shadow: var(--sln-shadow-lg); }
+  .dialog-close { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font-size: 22px; cursor: pointer; }
+  .dialog-copy, .form-feedback { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .dialog-card label { display: grid; gap: 7px; color: var(--sln-text-secondary); font: var(--sln-font-label); }
+  .dialog-card input, .dialog-card textarea { width: 100%; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 10px 12px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
+  .dialog-card select { width: 100%; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 10px 12px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
+  .private-file-controls { display: grid; gap: 12px; margin: 4px 0 0; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 14px; background: var(--sln-tint-info); }
+  .private-file-controls[hidden] { display: none; }
+  .private-file-controls legend { padding-inline: 6px; color: var(--sln-text-primary); font: var(--sln-font-label); font-weight: 750; }
+  .private-file-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .private-file-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+  .private-file-metadata { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .private-file-metadata[hidden] { display: none; }
+  .variant-editor-list { display: grid; gap: 12px; margin-top: 4px; }
+  .variant-editor-list > .eyebrow { margin-bottom: 0; }
+  .variant-editor-list fieldset { display: grid; gap: 12px; margin: 0; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 14px; }
+  .variant-editor-list legend { padding-inline: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
+  .variant-editor-list .new-variant-fieldset { border-style: dashed; background: var(--sln-bg-subtle); }
+  .variant-number-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .dialog-actions { display: flex; justify-content: end; gap: 10px; margin-top: 6px; }
+  @media (max-width: 760px) { .catalog-summary { grid-template-columns: repeat(2, 1fr); } .catalog-summary > div:nth-child(2) { border-right: 0; } .catalog-summary > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); } .category-panel { padding: 16px; } .category-fields { grid-template-columns: 1fr 1fr; } .category-description { grid-column: 1 / -1; } .archive-confirmation { align-items: stretch; flex-direction: column; } .archive-confirmation > div { justify-content: end; } .table-head { display: none; } .table-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 16px; } .table-row > div:nth-child(2), .table-row > div:nth-child(3), .table-row > div:nth-child(4), .table-row > div:nth-child(5) { grid-column: 1; } .table-row > div:nth-child(6) { grid-column: 2; grid-row: 2 / span 4; } .price-cell, .stock-cell { display: flex; } .product-cell { grid-column: 1 / -1; } .ledger-panel { padding: 16px; } .catalog-toolbar { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { .private-file-grid { grid-template-columns: 1fr; } .private-file-actions { justify-content: stretch; } .private-file-actions .sln-button { flex: 1; } }
+  @media (max-width: 440px) { .catalog-summary strong { font-size: 24px; } .panel-heading { align-items: start; flex-direction: column; } .category-fields { grid-template-columns: 1fr; } .category-description { grid-column: auto; } .category-actions, .archive-confirmation > div { flex-direction: column; } .variant-number-grid { grid-template-columns: 1fr; } }
+</style>

@@ -1,0 +1,40 @@
+---
+import { createDashboardTranslator } from "../../lib/i18n/catalogs/dashboard";
+import StatePanel from "./StatePanel.astro";
+
+type State =
+  | "blocked"
+  | "empty"
+  | "error"
+  | "forbidden"
+  | "loading"
+  | "plan_limited"
+  | "success"
+  | "suspended"
+  | "waiting_provider"
+  | "waiting_user"
+  | "warning";
+
+interface Props {
+  actionHref?: string;
+  actionLabel?: string;
+  description: string;
+  eyebrow?: string;
+  role?: "alert" | "status";
+  state?: State;
+  title: string;
+  tone?: "danger" | "info" | "neutral" | "warning";
+}
+
+const t = createDashboardTranslator(Astro.locals.locale);
+const { actionHref, actionLabel, description, eyebrow = t("dashboard.state.eyebrow"), role, title, tone = "neutral" } = Astro.props;
+const legacyState: Record<NonNullable<Props["tone"]>, State> = {
+  danger: "error",
+  info: "empty",
+  neutral: "empty",
+  warning: "warning",
+};
+const state = Astro.props.state ?? legacyState[tone];
+---
+
+<StatePanel actionHref={actionHref} actionLabel={actionLabel} description={description} eyebrow={eyebrow} role={role} state={state} title={title} />

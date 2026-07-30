@@ -1,0 +1,65 @@
+routes:
+  marketing:
+    - path: /
+      source: src/pages/index.astro
+      status: existing
+      spec: 05_SCREEN_SPECS/MARKETING/LANDING_PAGE.md
+    - path: /pricing
+      source: src/pages/pricing.astro
+      status: existing
+      spec: 05_SCREEN_SPECS/MARKETING/PRICING.md
+    - path: /login
+      source: src/pages/login.astro
+      status: existing
+      spec: 05_SCREEN_SPECS/MARKETING/LOGIN.md
+  workspace:
+    - path: /app
+      source: src/pages/app/index.astro
+      spec: 05_SCREEN_SPECS/WORKSPACE/OVERVIEW.md
+    - path: /onboarding
+      source: src/pages/onboarding.astro
+      spec: 05_SCREEN_SPECS/WORKSPACE/ONBOARDING_READINESS.md
+    - path: /app/domains
+      source: src/pages/app/domains.astro
+      spec: 05_SCREEN_SPECS/WORKSPACE/DOMAIN_MANAGER.md
+    - path: /app/products
+      status: verify-existing-or-shell
+      spec: 05_SCREEN_SPECS/WORKSPACE/PRODUCTS.md
+    - path: /app/inventory
+      status: verify-existing-or-shell
+      spec: 05_SCREEN_SPECS/WORKSPACE/INVENTORY.md
+    - path: /app/orders
+      status: verify-existing-or-shell
+      spec: 05_SCREEN_SPECS/WORKSPACE/ORDERS.md
+    - path: /app/orders/:id
+      status: verify-existing-or-shell
+      spec: 05_SCREEN_SPECS/WORKSPACE/ORDER_DETAIL.md
+    - path: /app/integrations
+      status: verify-existing-or-shell
+      spec: 05_SCREEN_SPECS/WORKSPACE/INTEGRATIONS.md
+    - path: /app/store
+      status: verify-existing-or-shell
+      spec: 05_SCREEN_SPECS/WORKSPACE/STORE_BUILDER.md
+  storefront:
+    - path: /
+      source: src/pages/index.astro by hostname
+      spec: 05_SCREEN_SPECS/STOREFRONT/HOME.md
+    - path: /products/:slug
+      source: src/pages/products/[slug].astro
+      spec: 05_SCREEN_SPECS/STOREFRONT/PRODUCT_DETAIL.md
+    - path: /cart
+      source: src/pages/cart.astro
+      spec: 05_SCREEN_SPECS/STOREFRONT/CART.md
+    - path: /checkout
+      source: src/pages/checkout.astro
+      spec: 05_SCREEN_SPECS/STOREFRONT/CHECKOUT.md
+    - path: /orders/:orderPublicId
+      source: src/pages/orders/[orderPublicId].astro
+      spec: 05_SCREEN_SPECS/STOREFRONT/ORDER_STATUS.md
+  admin:
+    - path: /admin
+      source: src/pages/admin/index.astro
+      spec: 05_SCREEN_SPECS/ADMIN/OPERATIONS.md
+    - path: /admin/operations
+      source: src/pages/admin/operations.astro
+      spec: 05_SCREEN_SPECS/ADMIN/OPERATIONS.md

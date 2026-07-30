@@ -1,0 +1,372 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import FulfillmentState from "../../components/commerce/FulfillmentState.astro";
+import Money from "../../components/commerce/Money.astro";
+import PaymentState from "../../components/commerce/PaymentState.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { listSellerOrders, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
+import { isAppError } from "../../lib/core/errors";
+import { listPaymentExceptions, parsePaymentExceptionEvidence, type PaymentExceptionEvidence, type PaymentExceptionView } from "../../lib/payments/reconciliation";
+import { getBindings } from "../../lib/platform/bindings";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { getShopForMember, listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+
+let shops: ShopView[] = [];
+let loadState: "forbidden" | "ready" | "unavailable" = "ready";
+try {
+  shops = await listShopsForMember({ env, userId: auth.userId });
+} catch {
+  loadState = "unavailable";
+}
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+let orders: SellerOrderSummary[] = [];
+let paymentExceptions: PaymentExceptionView[] = [];
+let paymentExceptionState: "forbidden" | "ready" | "unavailable" = "ready";
+
+if (shop !== undefined && loadState === "ready") {
+  try {
+    orders = await listSellerOrders({ env, shopPublicId: shop.publicId, userId: auth.userId });
+  } catch (error) {
+    loadState = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
+  }
+  try {
+    const member = await getShopForMember({ capability: "payments:manage", env, shopPublicId: shop.publicId, userId: auth.userId });
+    paymentExceptions = await listPaymentExceptions({ env, shopId: member.row.shop_id });
+  } catch (error) {
+    paymentExceptionState = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
+  }
+}
+
+const paymentPending = new Set(["unpaid", "pending"]);
+const exceptionPayments = new Set(["partial", "overpaid", "failed"]);
+const exceptionFulfillments = new Set(["failed", "manual_review"]);
+const isException = (order: SellerOrderSummary): boolean => order.status === "exception"
+  || exceptionPayments.has(order.paymentStatus)
+  || exceptionFulfillments.has(order.fulfillmentStatus);
+const isFulfillmentProcessing = (order: SellerOrderSummary): boolean => order.paymentStatus === "paid"
+  && new Set(["reserved", "unfulfilled"]).has(order.fulfillmentStatus);
+const isFulfilled = (order: SellerOrderSummary): boolean => order.paymentStatus === "paid"
+  && order.fulfillmentStatus === "fulfilled";
+
+const pendingCount = orders.filter((order) => paymentPending.has(order.paymentStatus)).length;
+const verifiedCount = orders.filter((order) => order.paymentStatus === "paid").length;
+const exceptionCount = orders.filter(isException).length;
+const dateFormatter = new Intl.DateTimeFormat(locale ?? "en", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh",
+});
+const formatDate = (value: string | null | undefined): string => {
+  if (value === null || value === undefined || value === "") return t("dashboard.commerce.not_recorded");
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? t("dashboard.commerce.not_recorded") : dateFormatter.format(date);
+};
+const exceptionTypeLabel = (value: string): string => t(
+  `dashboard.orders.exception.type.${["identity_mismatch", "inconsistent", "late", "manual_review", "overpaid", "partial", "failed"].includes(value) ? value : "default"}`,
+);
+const paymentExceptionImpact = (type: string, evidence: PaymentExceptionEvidence): string => {
+  if (type === "partial") return t("dashboard.orders.exception.impact.partial");
+  if (type === "overpaid") return t("dashboard.orders.exception.impact.overpaid");
+  if (type === "late") return t("dashboard.orders.exception.impact.late");
+  if (type === "identity_mismatch") return t("dashboard.orders.exception.impact.identity_mismatch");
+  if (type === "inconsistent") {
+    if (evidence.expectedKeys !== null && evidence.reservedKeys !== null && evidence.expectedKeys !== evidence.reservedKeys) return t("dashboard.orders.exception.impact.inconsistent_mismatch");
+    return t("dashboard.orders.exception.impact.inconsistent");
+  }
+  if (type === "failed") return t("dashboard.orders.exception.impact.failed");
+  return t("dashboard.orders.exception.impact.default");
+};
+const paymentExceptionRecords = paymentExceptions.map(({ safeEvidenceJson, ...exception }) => ({
+  evidence: parsePaymentExceptionEvidence(safeEvidenceJson),
+  exception,
+}));
+const channelLabel = (value: string): string => value === "telegram" ? "Telegram" : value === "web" ? "Website" : value;
+const filterTags = (order: SellerOrderSummary): string => [
+  "all",
+  paymentPending.has(order.paymentStatus) ? "payment-pending" : "",
+  order.paymentStatus === "paid" ? "payment-paid" : "",
+  isFulfillmentProcessing(order) ? "fulfillment-processing" : "",
+  isFulfilled(order) ? "fulfilled" : "",
+  isException(order) ? "exception" : "",
+].filter(Boolean).join(" ");
+---
+
+<AppLayout activePath="/app/orders" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.orders.title")}>
+  <PageHeader eyebrow={t("dashboard.orders.eyebrow")} title={t("dashboard.orders.title")} description={t("dashboard.orders.description")}>
+    {shop !== undefined && loadState === "ready" && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app/integrations")}>{t("dashboard.orders.check_channels")} <span aria-hidden="true">↗</span></a>}
+  </PageHeader>
+
+  {loadState === "unavailable" ? (
+    <div class="state-space">
+      <WorkspaceState eyebrow={t("dashboard.orders.unavailable.eyebrow")} title={t("dashboard.orders.unavailable.title")} description={t("dashboard.orders.unavailable.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.orders.retry")} tone="danger" />
+    </div>
+  ) : shop === undefined ? (
+    <div class="state-space">
+      <WorkspaceState title={t("dashboard.orders.no_store.title")} description={t("dashboard.orders.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.orders.no_store.action")} tone="info" />
+    </div>
+  ) : loadState === "forbidden" ? (
+    <div class="state-space">
+      <WorkspaceState eyebrow={t("dashboard.orders.forbidden.eyebrow")} title={t("dashboard.orders.forbidden.title")} description={t("dashboard.orders.forbidden.description")} tone="warning" />
+    </div>
+  ) : (
+    <>
+      <section class="order-rail" aria-label={t("dashboard.orders.summary.aria")}>
+        <div><span>{t("dashboard.orders.summary.recent")}</span><strong>{orders.length}</strong><small>{t("dashboard.orders.summary.recent_caption")}</small></div>
+        <div><span>{t("dashboard.orders.summary.pending")}</span><strong class="warning">{pendingCount}</strong><small>{t("dashboard.orders.summary.pending_caption")}</small></div>
+        <div><span>{t("dashboard.orders.summary.paid")}</span><strong class="success">{verifiedCount}</strong><small>{t("dashboard.orders.summary.paid_caption")}</small></div>
+        <div><span>{t("dashboard.orders.summary.exceptions")}</span><strong class={exceptionCount > 0 ? "danger" : undefined}>{exceptionCount}</strong><small>{t("dashboard.orders.summary.exceptions_caption")}</small></div>
+      </section>
+
+      {paymentExceptionState === "ready" && paymentExceptions.length > 0 && (
+        <section class="exception-panel" aria-labelledby="payment-exceptions-title">
+          <div class="panel-heading">
+            <div><p class="eyebrow eyebrow-danger">{t("dashboard.orders.exceptions.eyebrow")}</p><h2 id="payment-exceptions-title">{t("dashboard.orders.exceptions.title")}</h2></div>
+            <span class="record-count">{t("dashboard.orders.exceptions.count", { count: paymentExceptions.length })}</span>
+          </div>
+          <p class="exception-intro">{t("dashboard.orders.exceptions.intro")}</p>
+          <div class="exception-list" role="list">
+            {paymentExceptionRecords.map(({ evidence, exception }) => (
+              <article class="exception-record" role="listitem">
+                <span class="exception-icon" aria-hidden="true">!</span>
+                <div class="exception-record-main">
+                  <div class="exception-title"><strong>{exceptionTypeLabel(exception.type)}</strong><small>{exception.status === "open" ? t("dashboard.orders.exceptions.open") : t("dashboard.orders.exceptions.recorded")} · {formatDate(exception.createdAt)}</small></div>
+                  <p class="exception-impact">{paymentExceptionImpact(exception.type, evidence)}</p>
+                  <dl class="exception-evidence">
+                    {evidence.expectedAmount !== null && <div><dt>{t("dashboard.orders.exceptions.expected_amount")}</dt><dd><Money value={evidence.expectedAmount} currency={exception.currency} locale={locale ?? "en"} /></dd></div>}
+                    {evidence.receivedAmount !== null && <div><dt>{t("dashboard.orders.exceptions.received_amount")}</dt><dd><Money value={evidence.receivedAmount} currency={exception.currency} locale={locale ?? "en"} /></dd></div>}
+                    {evidence.occurredAt !== null && <div><dt>{t("dashboard.orders.exceptions.occurred_at")}</dt><dd>{formatDate(evidence.occurredAt)}</dd></div>}
+                    {evidence.expectedKeys !== null && <div><dt>{t("dashboard.orders.exceptions.expected_keys")}</dt><dd>{evidence.expectedKeys}</dd></div>}
+                    {evidence.reservedKeys !== null && <div><dt>{t("dashboard.orders.exceptions.reserved_keys")}</dt><dd>{evidence.reservedKeys}</dd></div>}
+                  </dl>
+                </div>
+                <div class="exception-reference"><span>{t("dashboard.orders.exceptions.order")}</span>{exception.orderPublicId !== null ? <a href={`/app/orders/${encodeURIComponent(exception.orderPublicId)}?shop=${encodeURIComponent(shop.publicId)}`}>{exception.orderPublicId}</a> : <small>{t("dashboard.orders.exceptions.no_safe_link")}</small>}</div>
+                <div class="exception-reference"><span>{t("dashboard.orders.exceptions.payment_attempt")}</span><code>{exception.paymentAttemptId}</code></div>
+              </article>
+            ))}
+          </div>
+          <p class="exception-footnote">{t("dashboard.orders.exceptions.footnote")}</p>
+        </section>
+      )}
+
+      {orders.length === 0 ? (
+        <div class="state-space state-space-ledger">
+          <WorkspaceState eyebrow={t("dashboard.orders.empty.eyebrow")} title={t("dashboard.orders.empty.title")} description={t("dashboard.orders.empty.description")} actionHref={workspaceHref("/app/products")} actionLabel={t("dashboard.orders.empty.action")} tone="info" />
+        </div>
+      ) : (
+        <section class="ledger-panel" aria-labelledby="order-ledger-title" data-order-ledger data-locale={locale ?? "en"}>
+          <div class="panel-heading">
+            <div><p class="eyebrow">{t("dashboard.orders.ledger.eyebrow")}</p><h2 id="order-ledger-title">{t("dashboard.orders.ledger.title")}</h2></div>
+            <span class="record-count" data-record-count data-record-template={t("dashboard.orders.record_count", { count: "__COUNT__" })}>{t("dashboard.orders.record_count", { count: orders.length })}</span>
+          </div>
+
+          <div class="order-controls" aria-label={t("dashboard.orders.filters.aria")}>
+            <div class="order-filters" role="group" aria-label={t("dashboard.orders.filters.status_aria")}>
+              {[
+                ["all", t("dashboard.orders.filters.all")],
+                ["payment-pending", t("dashboard.orders.filters.payment_pending")],
+                ["payment-paid", t("dashboard.orders.filters.payment_paid")],
+                ["fulfillment-processing", t("dashboard.orders.filters.fulfillment_processing")],
+                ["fulfilled", t("dashboard.orders.filters.fulfilled")],
+                ["exception", t("dashboard.orders.filters.exception")],
+              ].map(([value, label], index) => <button type="button" data-order-filter={value} aria-pressed={index === 0 ? "true" : "false"}>{label}</button>)}
+            </div>
+            <label class="order-search">
+              <span class="sr-only">{t("dashboard.orders.search.label")}</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
+              <input type="search" placeholder={t("dashboard.orders.search.placeholder")} autocomplete="off" data-order-search />
+            </label>
+          </div>
+
+          <p class="scope-note">{t("dashboard.orders.scope", { count: orders.length })}</p>
+
+          <p class="filter-loading" data-filter-loading role="status" aria-live="polite" hidden>{t("dashboard.orders.filter_loading")}</p>
+
+          <div class="order-table" role="table" aria-label={t("dashboard.orders.table.aria")} data-order-table>
+            <div class="table-head" role="row">
+              <span role="columnheader">{t("dashboard.orders.table.order")}</span><span role="columnheader">{t("dashboard.orders.table.customer_product")}</span><span role="columnheader">{t("dashboard.orders.table.total")}</span><span role="columnheader">{t("dashboard.orders.table.payment")}</span><span role="columnheader">{t("dashboard.orders.table.fulfillment")}</span><span role="columnheader">{t("dashboard.orders.table.channel_time")}</span><span role="columnheader">{t("dashboard.orders.table.actions")}</span>
+            </div>
+            {orders.map((order) => (
+              <article
+                class="order-row"
+                role="row"
+                data-order-row
+                data-order-tags={filterTags(order)}
+                data-order-search-value={`${order.orderNumber} ${order.orderId} ${order.customerEmail ?? ""} ${order.primaryItem ?? ""}`.toLocaleLowerCase(locale ?? "en")}
+              >
+                <div class="order-id-cell" role="cell"><strong>#{order.orderNumber}</strong><code>{order.orderId}</code></div>
+                <div class="order-subject-cell" role="cell"><strong>{order.customerEmail ?? t("dashboard.orders.unknown_customer")}</strong><span>{order.primaryItem ?? t("dashboard.orders.unknown_product")}{order.itemCount > 1 ? ` +${order.itemCount - 1} ${t("dashboard.orders.items")}` : ""}</span></div>
+                <div class="order-total-cell" role="cell"><Money value={order.totalMinor} currency={order.currency} locale={locale ?? "en"} /><small>{order.itemCount} {t("dashboard.orders.items")}</small></div>
+                <div role="cell"><PaymentState locale={locale} value={order.paymentStatus} /></div>
+                <div role="cell"><FulfillmentState locale={locale} value={order.fulfillmentStatus} /></div>
+                <div class="order-channel-cell" role="cell"><strong>{channelLabel(order.sourceChannel)}</strong><time datetime={order.createdAt}>{formatDate(order.createdAt)}</time></div>
+                <div class="order-action" role="cell"><a href={workspaceHref(`/app/orders/${order.orderId}`)} aria-label={t("dashboard.orders.open_detail_aria", { number: order.orderNumber })}>{t("dashboard.orders.open_detail")} <span aria-hidden="true">→</span></a></div>
+              </article>
+            ))}
+          </div>
+
+          <div class="no-results" data-no-results hidden aria-live="polite">
+            <WorkspaceState eyebrow={t("dashboard.orders.no_results.eyebrow")} title={t("dashboard.orders.no_results.title")} description={t("dashboard.orders.no_results.description")} tone="neutral" />
+          </div>
+        </section>
+      )}
+    </>
+  )}
+</AppLayout>
+
+{orders.length > 0 && <script>
+  const ledger = document.querySelector<HTMLElement>("[data-order-ledger]");
+  const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-order-row]"));
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-order-filter]"));
+  const search = document.querySelector<HTMLInputElement>("[data-order-search]");
+  const count = document.querySelector<HTMLElement>("[data-record-count]");
+  const noResults = document.querySelector<HTMLElement>("[data-no-results]");
+  const table = document.querySelector<HTMLElement>("[data-order-table]");
+  const loading = document.querySelector<HTMLElement>("[data-filter-loading]");
+  let activeFilter = "all";
+
+  const normalize = (value: string): string => value.trim().toLocaleLowerCase(ledger?.dataset.locale ?? "en");
+  const applyFilters = () => {
+    if (ledger) ledger.setAttribute("aria-busy", "true");
+    if (loading) loading.hidden = false;
+    const query = normalize(search?.value ?? "");
+    window.requestAnimationFrame(() => {
+      let visible = 0;
+      for (const row of rows) {
+        const tags = new Set((row.dataset.orderTags ?? "").split(" "));
+        const matchesState = tags.has(activeFilter);
+        const matchesQuery = query.length === 0 || (row.dataset.orderSearchValue ?? "").includes(query);
+        row.hidden = !(matchesState && matchesQuery);
+        if (!row.hidden) visible += 1;
+      }
+      if (count) count.textContent = (count.dataset.recordTemplate ?? "__COUNT__").replace("__COUNT__", String(visible));
+      if (noResults) noResults.hidden = visible !== 0;
+      if (table) table.hidden = visible === 0;
+      if (loading) loading.hidden = true;
+      if (ledger) ledger.setAttribute("aria-busy", "false");
+    });
+  };
+
+  for (const button of buttons) {
+    button.addEventListener("click", () => {
+      activeFilter = button.dataset.orderFilter ?? "all";
+      for (const candidate of buttons) candidate.setAttribute("aria-pressed", candidate === button ? "true" : "false");
+      applyFilters();
+    });
+  }
+  search?.addEventListener("input", applyFilters);
+</script>}
+
+<style>
+  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); text-decoration: none; }
+  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .state-space { margin-top: var(--sln-space-8); }
+  .state-space-ledger { margin-top: var(--sln-space-10); }
+  .order-rail { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: var(--sln-space-8); border-block: 1px solid var(--sln-border-default); }
+  .order-rail > div { display: grid; gap: 5px; min-width: 0; padding: 18px 20px; border-right: 1px solid var(--sln-border-default); }
+  .order-rail > div:last-child { border-right: 0; }
+  .order-rail span, .order-rail small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .order-rail strong { font-size: 30px; line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+  .order-rail strong.warning { color: #9a5004; }
+  .order-rail strong.success { color: var(--sln-state-success); }
+  .order-rail strong.danger { color: var(--sln-state-danger); }
+  .exception-panel { display: grid; gap: 14px; margin-top: var(--sln-space-8); border: 1px solid color-mix(in srgb, var(--sln-state-warning) 32%, var(--sln-border-default)); border-radius: var(--sln-radius-lg); padding: var(--sln-space-6); background: var(--sln-tint-warning); }
+  .eyebrow-danger { color: var(--sln-state-danger); }
+  .exception-intro { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .exception-list { display: grid; overflow: hidden; border: 1px solid color-mix(in srgb, var(--sln-state-warning) 25%, var(--sln-border-default)); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); }
+  .exception-list article { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(120px, .65fr) minmax(150px, .8fr); gap: 14px; align-items: center; padding: 14px 16px; border-top: 1px solid var(--sln-border-default); }
+  .exception-list article:first-child { border-top: 0; }
+  .exception-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--sln-tint-danger); color: var(--sln-state-danger); font-weight: 800; }
+  .exception-list article > div { display: grid; gap: 3px; min-width: 0; }
+  .exception-record-main { align-self: stretch; gap: 8px !important; }
+  .exception-title { display: grid; gap: 3px; min-width: 0; }
+  .exception-list strong { overflow: hidden; color: var(--sln-text-primary); font: var(--sln-font-label); text-overflow: ellipsis; white-space: nowrap; }
+  .exception-list span, .exception-list small, .exception-list code { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
+  .exception-list code { font-family: var(--sln-font-mono); font-size: 10px; }
+  .exception-impact { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .exception-evidence { display: flex; flex-wrap: wrap; gap: 9px 18px; margin: 0; }
+  .exception-evidence div { display: grid; gap: 2px; min-width: 120px; }
+  .exception-evidence dt { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .exception-evidence dd { margin: 0; color: var(--sln-text-primary); font: var(--sln-font-label); font-variant-numeric: tabular-nums; }
+  .exception-reference { align-content: center; }
+  .exception-reference a { overflow-wrap: anywhere; color: var(--sln-action-primary); font: var(--sln-font-mono); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+  .exception-footnote { margin: 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .ledger-panel { margin-top: var(--sln-space-10); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+  .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+  .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .record-count { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .order-controls { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: var(--sln-space-6); padding-block: 14px; border-block: 1px solid var(--sln-border-default); }
+  .order-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+  .order-filters button { min-height: 38px; border: 1px solid transparent; border-radius: var(--sln-radius-pill); padding: 7px 12px; background: transparent; color: var(--sln-text-secondary); font: var(--sln-font-label); cursor: pointer; }
+  .order-filters button:hover { background: var(--sln-bg-subtle); color: var(--sln-text-primary); }
+  .order-filters button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--sln-action-primary) 24%, transparent); background: var(--sln-tint-indigo); color: var(--sln-action-primary); }
+  .order-search { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: center; width: min(100%, 290px); min-height: 42px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 0 12px; background: var(--sln-bg-canvas); color: var(--sln-text-muted); }
+  .order-search:focus-within { border-color: var(--sln-action-primary); box-shadow: 0 0 0 3px var(--sln-focus-ring); }
+  .order-search svg { width: 18px; height: 18px; stroke: currentcolor; stroke-width: 1.8; fill: none; }
+  .order-search input { min-width: 0; height: 40px; border: 0; outline: 0; background: transparent; color: var(--sln-text-primary); font: var(--sln-font-body-sm); }
+  .order-search input::placeholder { color: var(--sln-text-muted); }
+  .scope-note { margin: 12px 0 18px; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .filter-loading { margin: 0 0 14px; color: var(--sln-action-primary); font: var(--sln-font-caption); }
+  .filter-loading[hidden] { display: none; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .order-table { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
+  .table-head, .order-row { display: grid; grid-template-columns: minmax(150px, 1.05fr) minmax(180px, 1.35fr) minmax(100px, .75fr) minmax(130px, 1fr) minmax(120px, .95fr) minmax(120px, .8fr) minmax(95px, .65fr); gap: 14px; align-items: center; padding: 14px 16px; }
+  .table-head { background: var(--sln-bg-subtle); color: var(--sln-text-muted); font: var(--sln-font-caption); font-weight: 700; }
+  .order-row { min-height: 86px; border-top: 1px solid var(--sln-border-default); }
+  .order-row[hidden] { display: none; }
+  .order-row:hover { background: color-mix(in srgb, var(--sln-tint-indigo) 32%, var(--sln-bg-surface)); }
+  .order-id-cell, .order-subject-cell, .order-total-cell, .order-channel-cell { display: grid; gap: 4px; min-width: 0; }
+  .order-id-cell strong, .order-subject-cell strong, .order-channel-cell strong { overflow: hidden; color: var(--sln-text-primary); font: var(--sln-font-label); text-overflow: ellipsis; white-space: nowrap; }
+  .order-id-cell code { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .order-subject-cell span, .order-total-cell small, .order-channel-cell time { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
+  .order-total-cell :global(.sln-money) { color: var(--sln-text-primary); font-weight: 750; }
+  .order-action { text-align: right; }
+  .order-action a { display: inline-flex; align-items: center; justify-content: end; gap: 7px; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .no-results { margin-top: 18px; }
+  .no-results[hidden] { display: none; }
+  @media (max-width: 1140px) {
+    .table-head { display: none; }
+    .order-row { grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.3fr) minmax(100px, .8fr) minmax(120px, .9fr); }
+    .order-row > div:nth-child(4), .order-row > div:nth-child(5) { grid-row: 2; }
+    .order-row > div:nth-child(6) { grid-column: 3; grid-row: 2; }
+    .order-row > div:nth-child(7) { grid-column: 4; grid-row: 1 / span 2; }
+  }
+  @media (max-width: 760px) {
+    .order-rail { grid-template-columns: repeat(2, 1fr); }
+    .order-rail > div:nth-child(2) { border-right: 0; }
+    .order-rail > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); }
+    .ledger-panel { padding: 16px; }
+    .panel-heading { align-items: start; }
+    .order-controls { align-items: stretch; flex-direction: column; }
+    .order-filters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
+    .order-filters button { flex: 0 0 auto; min-height: 44px; }
+    .order-search { width: 100%; }
+    .exception-panel { padding: 16px; }
+    .exception-list article { grid-template-columns: 34px minmax(0, 1fr); gap: 10px; }
+    .exception-list article > div:nth-of-type(n + 2) { grid-column: 2; grid-template-columns: 100px minmax(0, 1fr); }
+    .order-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 16px; }
+    .order-row > div:nth-child(1), .order-row > div:nth-child(2), .order-row > div:nth-child(3), .order-row > div:nth-child(4), .order-row > div:nth-child(5), .order-row > div:nth-child(6) { grid-column: 1; grid-row: auto; }
+    .order-row > div:nth-child(4), .order-row > div:nth-child(5) { display: inline-flex; }
+    .order-row > div:nth-child(7) { grid-column: 2; grid-row: 1 / span 6; align-self: center; }
+    .order-subject-cell { padding-bottom: 4px; border-bottom: 1px solid var(--sln-border-default); }
+    .order-total-cell { display: flex; align-items: baseline; gap: 8px; }
+    .order-channel-cell { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+    .order-action a { width: 44px; overflow: hidden; color: transparent; white-space: nowrap; }
+    .order-action a span { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--sln-border-default); border-radius: 50%; color: var(--sln-action-primary); font-size: 18px; }
+  }
+  @media (max-width: 440px) {
+    .order-rail strong { font-size: 24px; }
+    .panel-heading { flex-direction: column; }
+    .order-id-cell code { max-width: 220px; }
+  }
+</style>

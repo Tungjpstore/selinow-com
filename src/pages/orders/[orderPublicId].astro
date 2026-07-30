@@ -1,0 +1,49 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import StorefrontLayout from "../../layouts/StorefrontLayout.astro";
+import { isAppError } from "../../lib/core/errors";
+import { getBindings } from "../../lib/platform/bindings";
+import { resolveStorefrontShop, type StorefrontShop } from "../../lib/storefront/store";
+import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+const env = getBindings();
+let shop: StorefrontShop | null = null;
+try { shop = await resolveStorefrontShop(Astro.request, env); } catch (error) { if (!isAppError(error)) throw error; }
+const orderPublicId = Astro.params.orderPublicId ?? "";
+const validOrderId = /^order_[0-9a-f-]{36}$/u.test(orderPublicId);
+if (shop === null || !validOrderId) Astro.response.status = 404;
+const locale = Astro.locals.locale ?? normalizeSupportedLocale(shop?.defaultLocale ?? env.DEFAULT_LOCALE);
+const t = createStorefrontTranslator(locale);
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("Pragma", "no-cache");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+---
+
+{shop && validOrderId && <StorefrontLayout shop={shop} title={t("storefront.order.title", { shop: shop.name })} noindex>
+  <section class="order-panel" data-order-id={orderPublicId}>
+    <a class="back-link" href="/">{t("storefront.order.back")}</a>
+    <p class="order-kicker">{t("storefront.order.kicker")}</p>
+    <h1>{t("storefront.order.heading")}</h1>
+    <p class="order-lead">{t("storefront.order.lead")}</p>
+    <div id="order-status" class="order-status" aria-live="polite"><p>{t("storefront.order.loading")}</p></div>
+    <div id="order-actions" class="order-actions" hidden>
+      <button id="payment-button" class="store-button" type="button" hidden>{t("storefront.order.open_payment")}</button>
+      <button id="refresh-button" class="store-button secondary" type="button">{t("storefront.order.refresh")}</button>
+      <button id="reveal-button" class="store-button" type="button" hidden>{t("storefront.order.reveal")}</button>
+      <a id="order-support" class="store-button secondary" href={shop.publicDetails.support.href ?? "#store-support"} rel={shop.publicDetails.support.href?.startsWith("https://") ? "noreferrer" : undefined}>{t("storefront.contact")}</a>
+    </div>
+    <p id="order-action-status" class="form-status" aria-live="polite"></p>
+    <div id="key-list" class="key-list"></div>
+    <section id="download-section" class="download-section" aria-labelledby="download-title" hidden>
+      <div class="download-heading"><div><p>{t("storefront.order.downloads.kicker")}</p><h2 id="download-title">{t("storefront.order.downloads.title")}</h2></div><span>{t("storefront.order.downloads.private")}</span></div>
+      <p class="download-copy">{t("storefront.order.downloads.description")}</p>
+      <div id="download-list" class="download-list"></div>
+      <p id="download-status" class="form-status" aria-live="polite"></p>
+      <button id="download-retry" class="store-button secondary" type="button" hidden>{t("storefront.order.downloads.retry")}</button>
+    </section>
+  </section>
+  <script src="../../scripts/storefront/order.ts"></script>
+</StorefrontLayout>}
+
+{(shop === null || !validOrderId) && <PlatformLayout title={t("storefront.order.not_found_title")} noindex><main class="platform-shell error-page"><div><h1>404</h1><p>{t("storefront.order.not_found_detail")}</p></div></main></PlatformLayout>}

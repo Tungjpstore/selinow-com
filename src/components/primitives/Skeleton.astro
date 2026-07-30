@@ -1,0 +1,15 @@
+---
+interface Props {
+  height?: string;
+  label?: string;
+  shape?: "block" | "circle" | "line";
+  width?: string;
+}
+
+const { height, label = "Loading", shape = "line", width } = Astro.props;
+const style = [width ? `width:${width}` : "", height ? `height:${height}` : ""].filter(Boolean).join(";");
+---
+
+<span class="sln-skeleton" data-shape={shape} style={style || undefined} role="status">
+  <span class="selinow-sr-only">{label}</span>
+</span>

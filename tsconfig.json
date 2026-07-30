@@ -1,0 +1,15 @@
+{
+  "extends": "astro/tsconfigs/strictest",
+  "compilerOptions": {
+    "allowJs": false,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": [".astro/types.d.ts", "worker-configuration.d.ts", "*.config.ts", "src/**/*.astro", "src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["dist", ".wrangler"]
+}

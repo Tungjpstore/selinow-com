@@ -1,0 +1,172 @@
+[
+  {
+    "path": "13_REFERENCE_ASSETS/REFERENCE_INDEX.md",
+    "bytes": 969,
+    "sha256": "2916507aab86ca183822cbdd6c7e88b459bbab1f0d303a328ca32bca169a8ecc"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/favicon/favicon.ico",
+    "bytes": 624,
+    "sha256": "07c74e33fe8c01e21bc3ef1f6ed4302b34ff3ac8c0257957fd0b9aedc11caa8a"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/favicon/selinow-180.png",
+    "bytes": 7642,
+    "sha256": "0429f4722bdef8b91ce2c1c745aa7ca1c79f5bfc179f3e0acabb5d8d689edb20"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/favicon/selinow-192.png",
+    "bytes": 8014,
+    "sha256": "d4d5628467f03d44526a093844b66dd0ee1fd06c09de689b9a22165d637d45fc"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/favicon/selinow-512.png",
+    "bytes": 25687,
+    "sha256": "aa148edb5ce128dcd5b125bf8073bf679cc88eaf1ed305a7abd12d7a369ff5b2"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/png/selinow-app-icon@2x.png",
+    "bytes": 25687,
+    "sha256": "aa148edb5ce128dcd5b125bf8073bf679cc88eaf1ed305a7abd12d7a369ff5b2"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/png/selinow-logo-primary@2x.png",
+    "bytes": 17399,
+    "sha256": "4e79d05c4de810b392852fe6dbfdd7bfa8db8595b174a84f1d06316fca3b2f21"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/png/selinow-logo-reversed@2x.png",
+    "bytes": 18524,
+    "sha256": "e215a45a3e9208813552060af1d27894b30fec4bc69d9f7727e22b5dfa433672"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/svg/selinow-logo-black.svg",
+    "bytes": 849,
+    "sha256": "a2a05aa2419e5dd3a19366f56ff6eaf065435889c5fbce800fd3d6c23a0d7707"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/svg/selinow-logo-primary.svg",
+    "bytes": 1142,
+    "sha256": "a75a751cd748812b777e1f3f2f542920bc8da12af59211e1dc3531ae58c3370f"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/svg/selinow-logo-reversed.svg",
+    "bytes": 1191,
+    "sha256": "c9c10ff49813484841b7d8d8b08bb20f922dfff02b6013e8f9e1792c1bd06861"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/svg/selinow-logo-white.svg",
+    "bytes": 898,
+    "sha256": "aa597395e21aa9dd99170124db0a00db832ca5fb3f8928ad4f8ee6cd06ac72c1"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/svg/selinow-mark-black.svg",
+    "bytes": 633,
+    "sha256": "a5d655c3af82a646be009739e71b93601be235cea72fa681f90e4d9d24ecb694"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/svg/selinow-mark-gradient.svg",
+    "bytes": 926,
+    "sha256": "2c701db72bb4619fbe0af82f3ed0941e43868a4b0561edc09b4813dd2d31123d"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/02_LOGO_SYSTEM/svg/selinow-mark-white.svg",
+    "bytes": 682,
+    "sha256": "e75297eb7f9c51a08112f9fa368b1cbe8d1ac9b9f7c6b5c578aaf5ff8c8b6787"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/08_VISUAL_ASSETS/png/selinow-brand-board.png",
+    "bytes": 53598,
+    "sha256": "32d5d9a7ed8b504d72728240ad98133f5493eeb017ef23833047d7031ee8e777"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/08_VISUAL_ASSETS/png/selinow-og-cover.png",
+    "bytes": 27339,
+    "sha256": "ec8ff9d634c8f1098334ae519aaeb666ac4ce89b370f4e9ab9c82d1fce7eecad"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/08_VISUAL_ASSETS/svg/conversation-to-sale-flow.svg",
+    "bytes": 1153,
+    "sha256": "395f6f07745f1b0eb8b3d4de934a04da7117ea4c902cc5c767065b17128d647a"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/08_VISUAL_ASSETS/svg/selinow-pattern-dark.svg",
+    "bytes": 958,
+    "sha256": "61a136cdb23f3cff0a742e6b3fcf52c69a6194bd1da13c203ed20d40944f5dad"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/08_VISUAL_ASSETS/svg/selinow-pattern-light.svg",
+    "bytes": 958,
+    "sha256": "d0705b56ab2c424c4d23d0bd3360b847eb230515e7ca08a3ac490f527bd0c19b"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/15_DEVELOPER_KIT/css/selinow-tokens.css",
+    "bytes": 964,
+    "sha256": "fee1887b188380c33937610f91f9dcdbebaf983ee36343dfad7caab480dcd1df"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/brand/15_DEVELOPER_KIT/json/design-tokens.json",
+    "bytes": 4074,
+    "sha256": "1dcef029db478f51897e43826d33fa1ffa2771feda63aa8ac20c22394ddcf7dc"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/brand-contact-sheet.jpg",
+    "bytes": 259935,
+    "sha256": "27a931acb80b0debb32142736747303243a1313a477b0751a93b7df40ca34639"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/crops/01-landing-top.png",
+    "bytes": 280680,
+    "sha256": "46587544c9030b2f3cffff2035becc7471153b831bb21a421de8d12cda08a8b5"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/crops/02-dashboard-top.png",
+    "bytes": 348361,
+    "sha256": "efbfceccd94fbe24c54e60f987163b04f52d4cd9cbbc4a15cc64d053943614a8"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/crops/03-storefront-top.png",
+    "bytes": 109329,
+    "sha256": "d6543b6c82b88ec730e70be6470aa936f92420253aacaf08501242d73c744638"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/crops/04-lower-screens-grid.png",
+    "bytes": 623487,
+    "sha256": "219aa8e93e01f23605690ce1ce59db9b4413ea396fd2d2d1237f9d3bee39e800"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/crops/05-products-orders-inventory.png",
+    "bytes": 182277,
+    "sha256": "71ac227d3d57c3b0b8b9d19161adae267c1c5ca61ff035c5a92d066499b9c189"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/crops/06-domain-store-login-checkout.png",
+    "bytes": 256561,
+    "sha256": "e97a583bd5bab4fc3ab736114e0475611be3be583090d1e6cbaff8c099f343d8"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/crops/07-admin-operations.png",
+    "bytes": 56137,
+    "sha256": "6be0623dfcef80cbd835aacb1cbcf552d0af5f712e69570256f57cb218611323"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/frontend-all-screens-reference.png",
+    "bytes": 1579767,
+    "sha256": "c486ba02427e681223254435caec3398f474a714180f70a1361cd75dd18996d4"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/frontend-surfaces-control-room-reference.png",
+    "bytes": 1632446,
+    "sha256": "128362440626660373e44c71de3c34ca005d2db794b6bfada880a6924d1157dc"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/frontend-system-master-reference.png",
+    "bytes": 1570921,
+    "sha256": "0433e998024a2fbe5aa3e9592821b1714ec740f8174eccbc997180da3ef2d2e2"
+  },
+  {
+    "path": "13_REFERENCE_ASSETS/visual/landing-page-soft-reference.png",
+    "bytes": 1473618,
+    "sha256": "ccbbfe0df8e78d377867d7cba94bde6a6ad3918fb9a6342752566c83edc25d4b"
+  }
+]

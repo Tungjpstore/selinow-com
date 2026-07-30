@@ -1,0 +1,31 @@
+{
+  "environment": "production",
+  "accountId": "ef250a88911fd24073cb73d1c07e0218",
+  "zoneId": "ce1536fca500680c544662e361ed869b",
+  "zoneName": "selinow.com",
+  "workerName": "selinow-com-production",
+  "resources": {
+    "d1": "selinow-production",
+    "r2": "selinow-media-production",
+    "privateExports": "selinow-private-exports-production",
+    "platformCacheKv": "selinow-cache-production",
+    "sessionKv": "selinow-session-production",
+    "integrationQueue": "selinow-integration-production",
+    "notificationQueue": "selinow-notification-production",
+    "deadLetterQueue": "selinow-dlq-production"
+  },
+  "hostnames": {
+    "marketing": "selinow.com",
+    "dashboard": "app.selinow.com",
+    "api": "api.selinow.com"
+  },
+  "bootstrap": {
+    "canaryHostname": "canary.selinow.com",
+    "firstVersionRollback": "restore_pre_bootstrap_traffic_inventory",
+    "promotionStrategy": "canary_then_stable_domains"
+  },
+  "saas": {
+    "fallbackOrigin": "proxy-fallback.selinow.com",
+    "cnameTarget": "customers.selinow.com"
+  }
+}

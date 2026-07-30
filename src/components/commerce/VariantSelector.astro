@@ -1,0 +1,33 @@
+---
+import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+
+type Variant = { disabled?: boolean; id: string; label: string; priceLabel?: string };
+
+interface Props { legend?: string; locale?: string; name?: string; selectedId?: string; variants: readonly Variant[]; }
+const { legend, locale = "en", name = "variantId", selectedId, variants } = Astro.props;
+const t = createStorefrontTranslator(locale);
+---
+
+<fieldset class="sln-variant-selector">
+  <legend>{legend ?? t("storefront.product.variant_aria")}</legend>
+  <div>
+    {variants.map((variant, index) => <label data-disabled={variant.disabled ? "true" : undefined}>
+      <input checked={variant.id === selectedId || (selectedId === undefined && index === 0)} disabled={variant.disabled} name={name} type="radio" value={variant.id} />
+      <span><strong>{variant.label}</strong>{variant.priceLabel && <small>{variant.priceLabel}</small>}</span>
+    </label>)}
+  </div>
+</fieldset>
+
+<style>
+  .sln-variant-selector { min-width: 0; margin: 0; border: 0; padding: 0; }
+  .sln-variant-selector legend { margin-bottom: var(--sln-space-3); font: var(--sln-font-label); }
+  .sln-variant-selector > div { display: flex; flex-wrap: wrap; gap: var(--sln-space-2); }
+  .sln-variant-selector label { position: relative; min-width: 120px; cursor: pointer; }
+  .sln-variant-selector input { position: absolute; opacity: 0; pointer-events: none; }
+  .sln-variant-selector label > span { display: grid; gap: var(--sln-space-1); min-height: 44px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: var(--sln-space-3); background: var(--sln-bg-surface); }
+  .sln-variant-selector strong { font: var(--sln-font-label); }
+  .sln-variant-selector small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .sln-variant-selector input:checked + span { border-color: var(--sln-action-primary); background: var(--sln-tint-indigo); box-shadow: inset 0 0 0 1px var(--sln-action-primary); }
+  .sln-variant-selector input:focus-visible + span { outline: 3px solid var(--sln-focus-ring); outline-offset: 3px; }
+  .sln-variant-selector label[data-disabled="true"] { cursor: not-allowed; opacity: .62; }
+</style>

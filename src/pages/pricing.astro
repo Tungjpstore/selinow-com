@@ -1,0 +1,103 @@
+---
+import PlatformLayout from "../layouts/PlatformLayout.astro";
+import MarketingHeader from "../components/marketing/MarketingHeader.astro";
+import { loggerFor } from "../lib/operations/logger";
+import { getBindings } from "../lib/platform/bindings";
+import { getMarketingPlans, planFeatureList, type MarketingPlan } from "../lib/storefront/marketing";
+import { classifyPlatformHost } from "../lib/storefront/routing";
+import { createMarketingTranslator } from "../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../lib/i18n/locale";
+
+const env = getBindings();
+const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
+const t = createMarketingTranslator(locale);
+const validHost = classifyPlatformHost(new URL(Astro.request.url).hostname, env) === "marketing";
+if (!validHost) {
+  Astro.response.status = 404;
+  Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+}
+let plans: MarketingPlan[] = [];
+let pricingState: "ready" | "unavailable" = "unavailable";
+if (validHost) {
+  try {
+    plans = await getMarketingPlans(env);
+    pricingState = plans.length > 0 ? "ready" : "unavailable";
+  } catch {
+    loggerFor(env).warn({ event: "marketing.pricing_unavailable", errorCode: "marketing_plans_unavailable", requestId: Astro.locals.requestId, source: "http", status: 503 });
+  }
+}
+
+const capability = (value: unknown): string => value === true
+  ? t("marketing.pricing.capability.yes")
+  : value === false
+    ? t("marketing.pricing.capability.no")
+    : value === "addon"
+      ? t("marketing.pricing.capability.addon")
+      : t("marketing.pricing.capability.unpublished");
+const limit = (plan: MarketingPlan, key: string, translationKey: string): string => {
+  const value = plan.limits[key];
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? t(translationKey, { value: value.toLocaleString(locale) })
+    : t("marketing.pricing.capability.unpublished");
+};
+const comparisonGroups = [
+  { label: t("marketing.pricing.group.store"), rows: [
+    { label: t("marketing.pricing.row.storefront"), value: (plan: MarketingPlan) => capability(plan.features.storefront) },
+    { label: t("marketing.pricing.row.products"), value: (plan: MarketingPlan) => limit(plan, "products", "marketing.pricing.limit.products") },
+  ] },
+  { label: t("marketing.pricing.group.orders"), rows: [
+    { label: t("marketing.pricing.row.orders"), value: (plan: MarketingPlan) => limit(plan, "ordersPerMonth", "marketing.pricing.limit.orders") },
+  ] },
+  { label: t("marketing.pricing.group.domains"), rows: [
+    { label: t("marketing.pricing.row.custom_domain"), value: (plan: MarketingPlan) => capability(plan.features.customDomain) },
+    { label: t("marketing.pricing.row.domain_count"), value: (plan: MarketingPlan) => limit(plan, "customDomains", "marketing.pricing.limit.domains") },
+  ] },
+  { label: t("marketing.pricing.group.telegram"), rows: [
+    { label: t("marketing.pricing.row.telegram_bot"), value: (plan: MarketingPlan) => capability(plan.features.telegram) },
+  ] },
+  { label: t("marketing.pricing.group.team"), rows: [
+    { label: t("marketing.pricing.row.staff"), value: (plan: MarketingPlan) => limit(plan, "staffSeats", "marketing.pricing.limit.staff") },
+  ] },
+  { label: t("marketing.pricing.group.automation"), rows: [
+    { label: t("marketing.pricing.row.automation"), value: (plan: MarketingPlan) => capability(plan.features.automation) },
+  ] },
+  { label: t("marketing.pricing.group.audit"), rows: [
+    { label: t("marketing.pricing.row.audit"), value: (plan: MarketingPlan) => capability(plan.features.audit) },
+    { label: t("marketing.pricing.row.export"), value: (plan: MarketingPlan) => capability(plan.features.dataExport) },
+  ] },
+];
+---
+
+<PlatformLayout
+  title={validHost ? t("marketing.pricing.seo_title") : t("marketing.pricing.not_found")}
+  description={t("marketing.pricing.seo_description")}
+  locale={locale}
+  canonical="https://selinow.com/pricing"
+  noindex={!validHost}
+>
+  {validHost ? <>
+    <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+    <main id="main-content">
+      <section class="platform-shell pricing-page">
+        <div class="pricing-intro">
+        <div><p class="section-kicker">{t("marketing.pricing.intro.kicker")}</p><h1>{t("marketing.pricing.intro.title")}</h1></div>
+        <p>{t("marketing.pricing.intro.description")}</p>
+        </div>
+      {pricingState === "ready" ? <section class="plan-grid" aria-label={t("marketing.pricing.plans_aria")} data-pricing-state="ready">
+        {plans.map((plan) => <article class="plan">
+          <h3>{plan.name}</h3>
+          <ul>{planFeatureList(plan, locale).map((feature) => <li>{feature}</li>)}</ul>
+          <a class="button secondary" href={`${env.DASHBOARD_ORIGIN}/login`}>{t("marketing.pricing.cta")}</a>
+        </article>)}
+      </section> : <section class="pricing-unavailable" data-pricing-state="unavailable" aria-labelledby="pricing-unavailable-title"><h2 id="pricing-unavailable-title">{t("marketing.pricing.unavailable.title")}</h2><p>{t("marketing.pricing.unavailable.description")}</p></section>}
+      <p class="pricing-note">{t("marketing.pricing.note")}</p>
+      </section>
+      {pricingState === "ready" && <section class="platform-shell comparison-section" aria-labelledby="comparison-title">
+        <div class="comparison-intro"><div><p class="section-kicker">{t("marketing.pricing.comparison.kicker")}</p><h2 id="comparison-title">{t("marketing.pricing.comparison.title")}</h2></div><p>{t("marketing.pricing.comparison.description")}</p></div>
+        <div class="comparison-table-wrap"><table class="comparison-table"><thead><tr><th scope="col">{t("marketing.pricing.comparison.capability")}</th>{plans.map((plan) => <th scope="col">{plan.name}</th>)}</tr></thead><tbody>{comparisonGroups.map((group) => <><tr class="comparison-group"><th scope="rowgroup" colspan={plans.length + 1}>{group.label}</th></tr>{group.rows.map((row) => <tr><th scope="row">{row.label}</th>{plans.map((plan) => <td data-plan={plan.name}>{row.value(plan)}</td>)}</tr>)}</>)}</tbody></table></div>
+      </section>}
+      <section class="platform-shell faq-section" id="faq"><div><p class="section-kicker">{t("marketing.pricing.faq.kicker")}</p><h2>{t("marketing.pricing.faq.title")}</h2></div><div class="faq-list"><details><summary>{t("marketing.pricing.faq.money.question")}</summary><p>{t("marketing.pricing.faq.money.answer")}</p></details><details><summary>{t("marketing.pricing.faq.limits.question")}</summary><p>{t("marketing.pricing.faq.limits.answer")}</p></details><details><summary>{t("marketing.pricing.faq.domain.question")}</summary><p>{t("marketing.pricing.faq.domain.answer")}</p></details></div></section>
+    </main>
+    <footer class="platform-shell platform-footer"><img src="/brand/logo/selinow-logo-black.svg" alt="Selinow" width="128" height="34" /><p>{t("marketing.footer.tagline")}</p><p>© {new Date().getFullYear()} Selinow.</p></footer>
+  </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{t("marketing.pricing.host_only")}</p></div></main>}
+</PlatformLayout>

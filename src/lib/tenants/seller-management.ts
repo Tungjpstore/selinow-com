@@ -1,0 +1,140 @@
+import { AppError } from "../core/errors";
+import type { AppBindings } from "../platform/bindings";
+import { getShopForMember } from "./store";
+
+export type SellerCustomerView = {
+  createdAt: string;
+  displayName: string | null;
+  emailMasked: string | null;
+  lastOrderAt: string | null;
+  locale: string;
+  orderCount: number;
+  status: string;
+};
+
+export type SellerMemberView = {
+  createdAt: string;
+  displayName: string;
+  emailMasked: string;
+  role: string;
+  status: string;
+};
+
+export type SellerBillingView = {
+  canceledAt: string | null;
+  currentPeriodEnd: string | null;
+  currentPeriodStart: string | null;
+  features: Record<string, unknown>;
+  graceEndsAt: string | null;
+  limits: Record<string, unknown>;
+  planCode: string;
+  planName: string;
+  planVersion: number;
+  state: string;
+  trialEndsAt: string | null;
+  usage: Array<{ metric: string; periodKey: string; updatedAt: string; value: number }>;
+};
+
+function maskEmail(value: string | null): string | null {
+  if (value === null || value.length === 0) return null;
+  const [local, domain] = value.split("@");
+  if (local === undefined || local.length === 0 || domain === undefined) return "***";
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${"*".repeat(Math.max(1, local.length - visible.length))}@${domain}`;
+}
+
+function parseObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function listSellerCustomers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerCustomerView[]> {
+  const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const rows = await input.env.PLATFORM_DB.prepare(`
+    SELECT shop_customers.id, shop_customers.display_name AS displayName,
+      shop_customers.email_normalized AS email,
+      shop_customers.locale, shop_customers.status,
+      shop_customers.created_at AS createdAt,
+      COUNT(orders.id) AS orderCount,
+      MAX(orders.created_at) AS lastOrderAt
+    FROM shop_customers
+    LEFT JOIN orders ON orders.customer_id = shop_customers.id AND orders.shop_id = shop_customers.shop_id
+    WHERE shop_customers.shop_id = ?
+    GROUP BY shop_customers.id
+    ORDER BY lastOrderAt DESC, shop_customers.created_at DESC, shop_customers.id DESC
+    LIMIT 200
+  `).bind(member.row.shop_id).all<{ createdAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; status: string }>();
+  return rows.results.map((row) => ({
+    createdAt: row.createdAt,
+    displayName: row.displayName,
+    emailMasked: maskEmail(row.email),
+    lastOrderAt: row.lastOrderAt,
+    locale: row.locale,
+    orderCount: row.orderCount,
+    status: row.status,
+  }));
+}
+
+export async function listSellerMembers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerMemberView[]> {
+  const member = await getShopForMember({ capability: "team:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const rows = await input.env.PLATFORM_DB.prepare(`
+    SELECT shop_members.user_id AS userId, platform_users.display_name AS displayName,
+      platform_users.email_normalized AS email, shop_members.role, shop_members.status,
+      shop_members.created_at AS createdAt
+    FROM shop_members
+    INNER JOIN platform_users ON platform_users.id = shop_members.user_id
+    WHERE shop_members.shop_id = ?
+    ORDER BY CASE shop_members.role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 WHEN 'support' THEN 2 ELSE 3 END,
+      shop_members.created_at, shop_members.user_id
+  `).bind(member.row.shop_id).all<{ createdAt: string; displayName: string; email: string; role: string; status: string; userId: string }>();
+  return rows.results.map((row) => ({
+    createdAt: row.createdAt,
+    displayName: row.displayName,
+    emailMasked: maskEmail(row.email) ?? "***",
+    role: row.role,
+    status: row.status,
+  }));
+}
+
+export async function getSellerBilling(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerBillingView> {
+  const member = await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const row = await input.env.PLATFORM_DB.prepare(`
+    SELECT plans.code AS planCode, plans.name AS planName, plans.version AS planVersion,
+      plans.feature_flags_json AS featuresJson, plans.limits_json AS limitsJson,
+      shop_subscriptions.state, shop_subscriptions.trial_ends_at AS trialEndsAt,
+      shop_subscriptions.current_period_start AS currentPeriodStart,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
+      shop_subscriptions.grace_ends_at AS graceEndsAt, shop_subscriptions.canceled_at AS canceledAt
+    FROM shop_subscriptions
+    INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
+    WHERE shop_subscriptions.shop_id = ?
+    ORDER BY shop_subscriptions.created_at DESC, shop_subscriptions.id DESC
+    LIMIT 1
+  `).bind(member.row.shop_id).first<{ canceledAt: string | null; currentPeriodEnd: string | null; currentPeriodStart: string | null; featuresJson: string; graceEndsAt: string | null; limitsJson: string; planCode: string; planName: string; planVersion: number; state: string; trialEndsAt: string | null }>();
+  if (row === null) throw new AppError("subscription_required", 409);
+  const usage = await input.env.PLATFORM_DB.prepare(`
+    SELECT metric, period_key AS periodKey, value, updated_at AS updatedAt
+    FROM usage_counters
+    WHERE shop_id = ?
+    ORDER BY updated_at DESC, metric, period_key
+    LIMIT 100
+  `).bind(member.row.shop_id).all<SellerBillingView["usage"][number]>();
+  return {
+    canceledAt: row.canceledAt,
+    currentPeriodEnd: row.currentPeriodEnd,
+    currentPeriodStart: row.currentPeriodStart,
+    features: parseObject(row.featuresJson),
+    graceEndsAt: row.graceEndsAt,
+    limits: parseObject(row.limitsJson),
+    planCode: row.planCode,
+    planName: row.planName,
+    planVersion: row.planVersion,
+    state: row.state,
+    trialEndsAt: row.trialEndsAt,
+    usage: usage.results,
+  };
+}

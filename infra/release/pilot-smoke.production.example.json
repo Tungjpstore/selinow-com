@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "environment": "production",
+  "releaseId": "replace-with-release-id",
+  "checks": [
+    {
+      "name": "marketing_home",
+      "kind": "marketing",
+      "url": "https://selinow.com/",
+      "expectedStatus": 200,
+      "requiredHeaders": ["x-request-id", "x-content-type-options"],
+      "bodyMarker": "Selinow"
+    },
+    {
+      "name": "api_health",
+      "kind": "health",
+      "url": "https://api.selinow.com/api/health",
+      "expectedStatus": 200,
+      "requiredHeaders": ["x-request-id", "cache-control"]
+    },
+    {
+      "name": "pilot_storefront_one",
+      "kind": "pilot_storefront",
+      "url": "https://replace-with-pilot-one-host/",
+      "expectedStatus": 200,
+      "requiredHeaders": ["x-request-id"]
+    },
+    {
+      "name": "pilot_storefront_two",
+      "kind": "pilot_storefront",
+      "url": "https://replace-with-pilot-two-host/",
+      "expectedStatus": 200,
+      "requiredHeaders": ["x-request-id"]
+    },
+    {
+      "name": "custom_domain",
+      "kind": "custom_domain",
+      "url": "https://replace-with-controlled-custom-domain/",
+      "expectedStatus": 200,
+      "requiredHeaders": ["x-request-id"]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "environment": "production",
+  "accountId": "replace-with-cloudflare-account-id",
+  "zoneId": "replace-with-cloudflare-zone-id",
+  "zoneName": "selinow.com",
+  "workerName": "selinow-com-production",
+  "bootstrap": {
+    "canaryHostname": "canary.selinow.com",
+    "promotionStrategy": "canary_then_stable_domains",
+    "firstVersionRollback": "restore_pre_bootstrap_traffic_inventory"
+  },
+  "routing": {
+    "platformStorefrontWildcard": "*.selinow.com/*",
+    "externalCustomDomainStrategy": "not_admitted_until_staging_catch_all_is_retired"
+  },
+  "turnstile": {
+    "externalCustomDomainStrategy": "not_admitted"
+  },
+  "resources": {
+    "d1": "selinow-production",
+    "r2": "selinow-media-production",
+    "privateExports": "selinow-private-exports-production",
+    "platformCacheKv": "selinow-cache-production",
+    "sessionKv": "selinow-session-production",
+    "integrationQueue": "selinow-integration-production",
+    "notificationQueue": "selinow-notification-production",
+    "deadLetterQueue": "selinow-dlq-production"
+  },
+  "hostnames": {
+    "marketing": "selinow.com",
+    "dashboard": "app.selinow.com",
+    "api": "api.selinow.com"
+  },
+  "saas": {
+    "fallbackOrigin": "proxy-fallback.selinow.com",
+    "cnameTarget": "customers.selinow.com"
+  }
+}

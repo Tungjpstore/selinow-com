@@ -1,0 +1,59 @@
+# Astro component tree
+
+```text
+src/components/
+  primitives/
+    Button.astro
+    IconButton.astro
+    LinkButton.astro
+    StatusBadge.astro
+    Input.astro
+    SecretField.astro
+    SelectField.astro
+    Alert.astro
+    ConfirmDialog.astro
+    Drawer.astro
+    ToastRegion.astro
+    Skeleton.astro
+  states/
+    LoadingState.astro
+    EmptyState.astro
+    ErrorState.astro
+    BlockedState.astro
+    PermissionState.astro
+    PlanLimitState.astro
+    WaitingProviderState.astro
+  workspace/
+    WorkspaceNav.astro
+    MobileWorkspaceNav.astro
+    ShopSwitcher.astro
+    PageHeader.astro
+    ActionQueue.astro
+    ActivityLedger.astro
+    HealthRail.astro
+    ReadinessRail.astro
+  commerce/
+    Money.astro
+    ProductCard.astro
+    VariantSelector.astro
+    StockLabel.astro
+    PaymentState.astro
+    FulfillmentState.astro
+    OrderTimeline.astro
+    KeyRevealCard.astro
+  integrations/
+    IntegrationStatusRow.astro
+    ProviderHealth.astro
+    DomainLifecycle.astro
+  storefront/
+    StoreHeader.astro
+    CatalogGrid.astro
+    CartSummary.astro
+    CheckoutSummary.astro
+    OrderAccessPanel.astro
+  admin/
+    SeverityBadge.astro
+    EvidenceLink.astro
+    OperationsLedger.astro
+    DestructiveActionPanel.astro
+```

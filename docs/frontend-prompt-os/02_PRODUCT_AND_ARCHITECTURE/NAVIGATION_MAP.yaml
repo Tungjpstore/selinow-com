@@ -1,0 +1,29 @@
+workspace_navigation:
+  overview:
+    label: Tổng quan
+    icon: home
+  operations:
+    label: Vận hành
+    items:
+      - {label: Sản phẩm, route: /app/products, icon: package}
+      - {label: Kho mã, route: /app/inventory, icon: database}
+      - {label: Đơn hàng, route: /app/orders, icon: receipt}
+      - {label: Khách hàng, route: /app/customers, icon: users}
+  channels:
+    label: Kênh bán
+    items:
+      - {label: Website, route: /app/store, icon: storefront}
+      - {label: Telegram, route: /app/telegram, icon: telegram}
+      - {label: Tích hợp, route: /app/integrations, icon: plug}
+  configuration:
+    label: Cấu hình
+    items:
+      - {label: Kiểm tra sẵn sàng, route: /onboarding, icon: checklist}
+      - {label: Tên miền, route: /app/domains, icon: globe}
+      - {label: Cửa hàng & thương hiệu, route: /app/store/settings, icon: palette}
+  management:
+    label: Quản trị
+    items:
+      - {label: Thành viên, route: /app/members, icon: user-cog}
+      - {label: Gói dịch vụ, route: /app/billing, icon: credit-card}
+      - {label: Audit & dữ liệu, route: /app/data, icon: shield}

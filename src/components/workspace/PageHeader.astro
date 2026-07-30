@@ -1,0 +1,31 @@
+---
+interface Props {
+  description?: string;
+  descriptionId?: string | undefined;
+  eyebrow?: string;
+  title: string;
+}
+
+const { description, descriptionId, eyebrow = "Workspace", title } = Astro.props;
+const hasActions = Astro.slots.has("actions");
+---
+
+<header class="sln-page-header">
+  <div>
+    <p>{eyebrow}</p>
+    <h1>{title}</h1>
+    {description && <div class="description" id={descriptionId}>{description}</div>}
+  </div>
+  {hasActions && <div class="actions"><slot name="actions" /></div>}
+</header>
+
+<style>
+  .sln-page-header { display: flex; align-items: end; justify-content: space-between; gap: var(--sln-space-8); padding-bottom: var(--sln-space-8); border-bottom: 1px solid var(--sln-border-default); }
+  .sln-page-header > div:first-child { min-width: 0; max-width: 760px; }
+  p { margin: 0 0 var(--sln-space-3); color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { margin: 0; overflow-wrap: anywhere; color: var(--sln-text-primary); font: var(--sln-font-h1); letter-spacing: -.045em; }
+  .description { margin-top: var(--sln-space-4); overflow-wrap: anywhere; color: var(--sln-text-secondary); font: var(--sln-font-body); }
+  .actions { display: flex; flex-wrap: wrap; justify-content: end; gap: var(--sln-space-3); min-width: 0; max-width: 100%; }
+  .actions :global(*) { min-width: 0; max-width: 100%; }
+  @media (max-width: 720px) { .sln-page-header { align-items: start; flex-direction: column; } .actions { justify-content: start; width: 100%; } }
+</style>

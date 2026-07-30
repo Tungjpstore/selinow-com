@@ -1,0 +1,41 @@
+---
+import OnboardingWizard from "../components/dashboard/OnboardingWizard.astro";
+import AppLayout from "../layouts/AppLayout.astro";
+import { authenticateRequest } from "../lib/auth/session";
+import { createOnboardingTranslator } from "../lib/i18n/catalogs/onboarding";
+import { getBindings } from "../lib/platform/bindings";
+import { listShopsForMember, selectShopForMember } from "../lib/tenants/store";
+
+const env = getBindings();
+const locale = Astro.locals.locale;
+const t = createOnboardingTranslator(locale);
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) {
+  return Astro.redirect("/login");
+}
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const requestedShopPublicId = Astro.url.searchParams.get("shop");
+const selectedShop = selectShopForMember(shops, requestedShopPublicId);
+const orderedShops = selectedShop === undefined
+  ? requestedShopPublicId === null ? shops : []
+  : [selectedShop, ...shops.filter((shop) => shop.publicId !== selectedShop.publicId)];
+---
+
+<AppLayout
+  activePath="/onboarding"
+  displayName={auth.displayName.trim() || t("onboarding.user_fallback")}
+  email={auth.email}
+  selectedShopName={selectedShop?.name}
+  selectedShopPublicId={selectedShop?.publicId}
+  shops={shops}
+  title={t("onboarding.shop.page_title")}
+>
+  <OnboardingWizard
+    csrfCookieName={`${env.SESSION_COOKIE_NAME}_csrf`}
+    defaultCurrency={env.DEFAULT_CURRENCY}
+    defaultLocale={env.DEFAULT_LOCALE}
+    platformBaseDomain={env.PLATFORM_BASE_DOMAIN}
+    shops={orderedShops}
+    locale={locale}
+  />
+</AppLayout>

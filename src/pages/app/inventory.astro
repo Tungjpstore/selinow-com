@@ -1,0 +1,146 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import StatusBadge from "../../components/primitives/StatusBadge.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { listSellerCatalog } from "../../lib/catalog/store";
+import { getBindings } from "../../lib/platform/bindings";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+let catalog: { products: unknown[]; variants: unknown[] } = { products: [], variants: [] };
+let canManage = false;
+if (shop !== undefined && (shop.role === "owner" || shop.role === "manager")) {
+  canManage = true;
+  const loaded = await listSellerCatalog({ env, shopPublicId: shop.publicId, userId: auth.userId }).catch(() => null);
+  if (loaded !== null) catalog = loaded;
+}
+const products = catalog.products as Array<Record<string, unknown>>;
+const variants = catalog.variants as Array<Record<string, unknown>>;
+const productNames = new Map(products.map((product) => [String(product.id), String(product.title ?? t("dashboard.inventory.row.product_fallback"))]));
+const stockOf = (variant: Record<string, unknown>) => Number(variant.availableStock ?? 0);
+const reservedOf = (variant: Record<string, unknown>) => Number(variant.reservedStock ?? 0);
+const deliveredOf = (variant: Record<string, unknown>) => Number(variant.deliveredStock ?? 0);
+const thresholdOf = (variant: Record<string, unknown>) => Math.max(0, Number(variant.lowStockThreshold ?? 0));
+const distinctThresholds = [...new Set(variants.map(thresholdOf))];
+const thresholdSummary = distinctThresholds.length === 1 ? String(distinctThresholds[0] ?? 0) : t("dashboard.inventory.rail.threshold_per_variant");
+const healthOf = (variant: Record<string, unknown>): "healthy" | "low" | "out" => {
+  const stock = stockOf(variant);
+  if (stock === 0) return "out";
+  return stock <= thresholdOf(variant) ? "low" : "healthy";
+};
+---
+
+<AppLayout activePath="/app/inventory" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.inventory.title")}>
+  <PageHeader eyebrow={t("dashboard.inventory.eyebrow")} title={t("dashboard.inventory.title")} description={t("dashboard.inventory.description")}>
+    {canManage && <button slot="actions" class="sln-button sln-button-primary" type="button" data-open-import>{t("dashboard.inventory.action.import")} <span aria-hidden="true">+</span></button>}
+  </PageHeader>
+
+  {shop === undefined ? (
+    <WorkspaceState title={t("dashboard.inventory.no_store.title")} description={t("dashboard.inventory.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.inventory.no_store.action")} tone="info" />
+  ) : !canManage ? (
+    <WorkspaceState title={t("dashboard.inventory.forbidden.title")} description={t("dashboard.inventory.forbidden.description")} tone="warning" />
+  ) : (
+    <>
+      <section class="inventory-rail" aria-label={t("dashboard.inventory.rail.aria")}>
+        <div><span>{t("dashboard.inventory.rail.total_variants")}</span><strong>{variants.length}</strong><small>{t("dashboard.inventory.rail.total_variants_caption")}</small></div>
+        <div><span>{t("dashboard.inventory.rail.available")}</span><strong>{variants.reduce((sum, variant) => sum + stockOf(variant), 0)}</strong><small>{t("dashboard.inventory.rail.available_caption")}</small></div>
+        <div><span>{t("dashboard.inventory.rail.reserved")}</span><strong>{variants.reduce((sum, variant) => sum + reservedOf(variant), 0)}</strong><small>{t("dashboard.inventory.rail.reserved_caption")}</small></div>
+        <div><span>{t("dashboard.inventory.rail.delivered")}</span><strong>{variants.reduce((sum, variant) => sum + deliveredOf(variant), 0)}</strong><small>{t("dashboard.inventory.rail.delivered_caption")}</small></div>
+        <div><span>{t("dashboard.inventory.rail.low_or_out")}</span><strong class="warning">{variants.filter((variant) => healthOf(variant) !== "healthy").length}</strong><small>{t("dashboard.inventory.rail.low_or_out_caption", { threshold: thresholdSummary })}</small></div>
+      </section>
+
+      <section class="ledger-panel" aria-labelledby="inventory-ledger-title">
+        <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.inventory.ledger.eyebrow")}</p><h2 id="inventory-ledger-title">{t("dashboard.inventory.ledger.title")}</h2></div><span class="record-count">{t("dashboard.inventory.ledger.record_count")}</span></div>
+        {variants.length === 0 ? (
+          <WorkspaceState title={t("dashboard.inventory.empty.title")} description={t("dashboard.inventory.empty.description")} actionHref={workspaceHref("/app/products")} actionLabel={t("dashboard.inventory.empty.action")} tone="info" />
+        ) : (
+          <>
+            <div class="inventory-filters" role="group" aria-label={t("dashboard.inventory.filters.aria")}>
+              <button type="button" aria-pressed="true" data-inventory-filter="all">{t("dashboard.inventory.filters.all")} <span>{variants.length}</span></button>
+              <button type="button" aria-pressed="false" data-inventory-filter="low">{t("dashboard.inventory.filters.low")} <span>{variants.filter((variant) => healthOf(variant) === "low").length}</span></button>
+              <button type="button" aria-pressed="false" data-inventory-filter="out">{t("dashboard.inventory.filters.out")} <span>{variants.filter((variant) => healthOf(variant) === "out").length}</span></button>
+            </div>
+            <div class="inventory-list">
+              {variants.map((variant, index) => {
+                const stock = stockOf(variant);
+                const health = healthOf(variant);
+                const tone = health === "out" ? "danger" : health === "low" ? "warning" : "success";
+                const label = health === "out" ? t("dashboard.inventory.status.out") : health === "low" ? t("dashboard.inventory.status.low") : t("dashboard.inventory.status.healthy");
+                const lastImport = typeof variant.lastImportAt === "string" ? new Date(variant.lastImportAt).toLocaleString(locale ?? "en") : t("dashboard.inventory.row.last_import_never");
+                return <article class="inventory-row" data-inventory-health={health}>
+                  <div class="variant-mark">{String(index + 1).padStart(2, "0")}</div>
+                  <div class="variant-info"><strong>{productNames.get(String(variant.productId)) ?? t("dashboard.inventory.row.product_fallback")}</strong><span>{String(variant.title ?? t("dashboard.inventory.row.variant_fallback"))} · <code>{String(variant.sku ?? t("dashboard.inventory.row.sku_fallback"))}</code></span><small>{t("dashboard.inventory.row.last_import", { time: lastImport })}</small></div>
+                  <div class="inventory-count"><strong>{stock}</strong><small>{t("dashboard.inventory.row.available")} · {t("dashboard.inventory.row.reserved", { count: reservedOf(variant) })} · {t("dashboard.inventory.row.delivered", { count: deliveredOf(variant) })}</small></div>
+                  <div class="inventory-threshold"><strong>{thresholdOf(variant)}</strong><small>{t("dashboard.inventory.row.threshold")}</small></div>
+                  <StatusBadge label={label} tone={tone} />
+                  <button class="row-link" type="button" data-import-variant={String(variant.id)}>{t("dashboard.inventory.row.import")} <span aria-hidden="true">→</span></button>
+                </article>;
+              })}
+            </div>
+            <p class="inventory-no-results" data-inventory-no-results role="status" hidden>{t("dashboard.inventory.no_results")}</p>
+          </>
+        )}
+      </section>
+
+      <section class="inventory-note"><strong>{t("dashboard.inventory.note.title")}</strong><span>{t("dashboard.inventory.note.body")}</span></section>
+
+      <dialog class="import-dialog" data-import-dialog data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-labelledby="import-dialog-title">
+        <form class="dialog-card" data-import-form aria-busy="false">
+          <button class="dialog-close" type="button" data-close-import aria-label={t("dashboard.inventory.dialog.close")}>×</button>
+          <p class="eyebrow">{t("dashboard.inventory.dialog.eyebrow")}</p><h2 id="import-dialog-title">{t("dashboard.inventory.dialog.title")}</h2>
+          <label>{t("dashboard.inventory.dialog.variant_label")}<select name="variantId" required data-import-variant-select><option value="">{t("dashboard.inventory.dialog.variant_placeholder")}</option>{variants.map((variant) => <option value={String(variant.id)}>{productNames.get(String(variant.productId)) ?? t("dashboard.inventory.row.product_fallback")} · {String(variant.title ?? t("dashboard.inventory.row.variant_fallback"))}</option>)}</select></label>
+          <label>{t("dashboard.inventory.dialog.source_label")}<select name="source"><option value="paste">{t("dashboard.inventory.dialog.source.lines")}</option><option value="csv">{t("dashboard.inventory.dialog.source.csv")}</option></select></label>
+          <label>{t("dashboard.inventory.dialog.data_label")}<textarea name="data" rows="8" autocomplete="off" spellcheck="false" required placeholder={t("dashboard.inventory.dialog.data_placeholder")}></textarea></label>
+          <div class="preview-grid"><div><span>{t("dashboard.inventory.dialog.preview.total")}</span><strong data-preview="total">0</strong></div><div><span>{t("dashboard.inventory.dialog.preview.accepted")}</span><strong data-preview="accepted">0</strong></div><div><span>{t("dashboard.inventory.dialog.preview.duplicate")}</span><strong data-preview="duplicate">0</strong></div><div><span>{t("dashboard.inventory.dialog.preview.rejected")}</span><strong data-preview="rejected">0</strong></div></div>
+          <p class="form-feedback" data-import-feedback role="status" aria-live="polite"></p>
+          <div class="dialog-actions"><button class="sln-button sln-button-secondary" type="button" data-preview-import>{t("dashboard.inventory.dialog.action.preview")}</button><button class="sln-button sln-button-primary" type="button" data-confirm-import disabled>{t("dashboard.inventory.dialog.action.confirm")}</button></div>
+        </form>
+      </dialog>
+    </>
+  )}
+</AppLayout>
+
+<script src="../../scripts/dashboard/inventory.ts"></script>
+
+<style>
+  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); cursor: pointer; }
+  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
+  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .inventory-rail { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: var(--sln-space-8); border-block: 1px solid var(--sln-border-default); }
+  .inventory-rail > div { display: grid; gap: 5px; padding: 18px 20px; border-right: 1px solid var(--sln-border-default); }
+  .inventory-rail > div:last-child { border-right: 0; }
+  .inventory-rail span, .inventory-rail small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .inventory-rail strong { font-size: 30px; line-height: 1; letter-spacing: -.04em; }
+  .inventory-rail strong.warning { color: var(--sln-state-warning); }.inventory-rail strong.danger { color: var(--sln-state-danger); }
+  .ledger-panel { margin-top: var(--sln-space-10); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: var(--sln-space-6); }
+  .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }.record-count { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .inventory-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .inventory-filters button { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-pill); padding: 7px 12px; background: var(--sln-bg-surface); color: var(--sln-text-secondary); font: var(--sln-font-label); cursor: pointer; }
+  .inventory-filters button[aria-pressed="true"] { border-color: var(--sln-action-primary); background: var(--sln-tint-indigo); color: var(--sln-action-primary); }
+  .inventory-filters span { display: grid; min-width: 22px; height: 22px; place-items: center; border-radius: var(--sln-radius-pill); background: var(--sln-bg-subtle); color: inherit; font: var(--sln-font-caption); font-weight: 750; }
+  .inventory-list { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
+  .inventory-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 100px 74px 120px 120px; gap: 16px; align-items: center; min-height: 78px; padding: 14px 18px; border-top: 1px solid var(--sln-border-default); }.inventory-row:first-child { border-top: 0; }
+  .variant-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; }
+  .variant-info { display: grid; gap: 4px; min-width: 0; }.variant-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.variant-info span, .variant-info small { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }.variant-info code { color: var(--sln-text-secondary); }
+  .inventory-count { display: grid; gap: 2px; }.inventory-count strong { font-size: 21px; font-variant-numeric: tabular-nums; }.inventory-count small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .inventory-threshold { display: grid; gap: 2px; }.inventory-threshold strong { font-size: 18px; font-variant-numeric: tabular-nums; }.inventory-threshold small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .inventory-no-results { margin: 16px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .row-link { border: 0; background: transparent; color: var(--sln-action-primary); font: var(--sln-font-label); cursor: pointer; text-align: right; }
+  .inventory-note { display: flex; gap: 10px; margin-top: 16px; padding: 14px 16px; border-left: 3px solid var(--sln-state-info); background: var(--sln-tint-info); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }.inventory-note strong { color: var(--sln-text-primary); }
+  .import-dialog { width: min(100% - 32px, 520px); border: 0; border-radius: var(--sln-radius-xl); padding: 0; background: transparent; }.import-dialog::backdrop { background: rgb(8 11 20 / 52%); backdrop-filter: blur(4px); }
+  .dialog-card { position: relative; display: grid; gap: 14px; padding: 28px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-xl); background: var(--sln-bg-surface); color: var(--sln-text-primary); box-shadow: var(--sln-shadow-lg); }.dialog-close { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font-size: 22px; cursor: pointer; }.dialog-card label { display: grid; gap: 7px; color: var(--sln-text-secondary); font: var(--sln-font-label); }.dialog-card input, .dialog-card textarea, .dialog-card select { width: 100%; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 10px 12px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }.dialog-card textarea { resize: vertical; }.preview-grid { display: grid; grid-template-columns: repeat(4, 1fr); border-block: 1px solid var(--sln-border-default); }.preview-grid > div { display: grid; gap: 4px; padding: 10px; border-right: 1px solid var(--sln-border-default); }.preview-grid > div:last-child { border-right: 0; }.preview-grid span { color: var(--sln-text-muted); font: var(--sln-font-caption); }.preview-grid strong { font-size: 20px; font-variant-numeric: tabular-nums; }.form-feedback { min-height: 22px; margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }.dialog-actions { display: flex; justify-content: end; gap: 10px; }
+  @media (max-width: 760px) { .inventory-rail { grid-template-columns: repeat(2, 1fr); }.inventory-rail > div:nth-child(even) { border-right: 0; }.inventory-rail > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); }.inventory-row { grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px; padding: 15px; }.inventory-row > .sln-status { grid-column: 2; }.row-link { grid-column: 3; grid-row: 1 / span 3; }.inventory-count { grid-column: 2; display: flex; align-items: baseline; gap: 6px; }.inventory-threshold { grid-column: 2; display: flex; align-items: baseline; gap: 6px; }.ledger-panel { padding: 16px; }.inventory-note { display: grid; gap: 5px; } }
+</style>

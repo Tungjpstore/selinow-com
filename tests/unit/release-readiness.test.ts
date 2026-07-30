@@ -1,0 +1,474 @@
+import { execFileSync } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  assertProductionDeployAdmission,
+  assertProductionWorkerDeployAdmission,
+  buildReleaseArtifacts,
+  evaluateBackupPrerequisites,
+  inspectProductionReadiness,
+  REQUIRED_PRODUCTION_VARS,
+  REQUIRED_WORKER_SECRET_NAMES,
+  runPilotSmoke,
+  validateProductionDeployAdmission,
+  validatePilotSmokePlan,
+} from "../../scripts/lib/release.mjs";
+
+const now = new Date("2026-07-26T03:00:00.000Z");
+
+function readyWranglerConfig(): Record<string, unknown> {
+  const vars = Object.fromEntries(REQUIRED_PRODUCTION_VARS.map((name) => [name, name === "APP_ENV" ? "production" : `configured-${name.toLowerCase()}`]));
+  Object.assign(vars, {
+    API_ORIGIN: "https://api.selinow.com",
+    CLOUDFLARE_ZONE_ID: "0123456789abcdef0123456789abcdef",
+    DASHBOARD_ORIGIN: "https://app.selinow.com",
+    EMAIL_FROM_ADDRESS: "no-reply@selinow.com",
+    EMAIL_FROM_NAME: "Selinow",
+    MEDIA_PUBLIC_BASE_URL: "https://media.selinow.com",
+    PLATFORM_BASE_DOMAIN: "selinow.com",
+    PLATFORM_ORIGIN: "https://selinow.com",
+    RESOURCE_MANIFEST_VERSION: "0123456789abcdef",
+    SAAS_CNAME_TARGET: "customers.selinow.com",
+    SESSION_COOKIE_NAME: "selinow_session",
+  });
+  return {
+    env: {
+      production: {
+        assets: { binding: "ASSETS", directory: "./dist" },
+        d1_databases: [{ binding: "PLATFORM_DB", database_id: "configured", database_name: "selinow-production" }],
+        send_email: [{
+          allowed_sender_addresses: ["no-reply@selinow.com"],
+          name: "EMAIL",
+          remote: true,
+        }],
+        kv_namespaces: [
+          { binding: "PLATFORM_CACHE", id: "configured" },
+          { binding: "SESSION", id: "configured" },
+        ],
+        name: "selinow-com-production",
+        observability: { enabled: true },
+        queues: {
+          consumers: [{ queue: "selinow-integration-production" }, { queue: "selinow-notification-production" }],
+          producers: [
+            { binding: "INTEGRATION_QUEUE", queue: "selinow-integration-production" },
+            { binding: "NOTIFICATION_QUEUE", queue: "selinow-notification-production" },
+          ],
+        },
+        r2_buckets: [
+          { binding: "MEDIA", bucket_name: "selinow-media-production" },
+          { binding: "PRIVATE_EXPORTS", bucket_name: "selinow-private-exports-production" },
+        ],
+        routes: [
+          { pattern: "selinow.com" },
+          { pattern: "app.selinow.com" },
+          { pattern: "api.selinow.com" },
+        ],
+        triggers: { crons: ["*/15 * * * *"] },
+        vars,
+        workers_dev: false,
+      },
+    },
+  };
+}
+
+function readyProductionSpec(): Record<string, unknown> {
+  return {
+    accountId: "abcdef0123456789abcdef0123456789",
+    environment: "production",
+    hostnames: {
+      api: "api.selinow.com",
+      dashboard: "app.selinow.com",
+      marketing: "selinow.com",
+    },
+    resources: {
+      d1: "selinow-production",
+      deadLetterQueue: "selinow-dlq-production",
+      integrationQueue: "selinow-integration-production",
+      notificationQueue: "selinow-notification-production",
+      platformCacheKv: "selinow-cache-production",
+      privateExports: "selinow-private-exports-production",
+      r2: "selinow-media-production",
+      sessionKv: "selinow-session-production",
+    },
+    saas: {
+      cnameTarget: "customers.selinow.com",
+      fallbackOrigin: "proxy-fallback.selinow.com",
+    },
+    workerName: "selinow-com-production",
+    zoneId: "0123456789abcdef0123456789abcdef",
+    zoneName: "selinow.com",
+  };
+}
+
+function readyEvidence(): Record<string, unknown> {
+  return {
+    approvals: { releaseOwner: "release-team", supportOwner: "support-team" },
+    backup: {
+      completedAt: "2026-07-26T02:30:00.000Z",
+      providerBookmarkRecorded: true,
+      restoreDrillCompletedAt: "2026-07-20T02:30:00.000Z",
+      restoreDrillPassed: true,
+      restoreDrillReportRef: "private-restore-report",
+      snapshotReportRef: "private-backup-report",
+    },
+    candidateWorkerVersion: "worker-candidate",
+    commitSha: "0123456789abcdef0123456789abcdef01234567",
+    manualAcceptance: { customDomain: true, paymentSignedEvent: true, telegram: true, website: true },
+    monitoring: { alertsReady: true, budgetAlertsReady: true, dashboardReady: true },
+    pilot: { shopCount: 2 },
+    previousWorkerVersion: "worker-current",
+    quality: { build: true, check: true, deployDryRun: true, lint: true, test: true },
+    releaseId: "release_20260726_abcdef12",
+    security: { criticalOpen: 0, highOpen: 0 },
+    staging: { accepted: true, acceptedAt: "2026-07-26T01:00:00.000Z" },
+  };
+}
+
+function smokePlan(): Record<string, unknown> {
+  return {
+    checks: [
+      {
+        bodyMarker: "Selinow",
+        expectedStatus: 200,
+        kind: "pilot_storefront",
+        name: "pilot_one",
+        requiredHeaders: ["x-request-id"],
+        url: "https://pilot-one.selinow.com/",
+      },
+      {
+        expectedStatus: 200,
+        kind: "pilot_storefront",
+        name: "pilot_two",
+        requiredHeaders: ["x-request-id"],
+        url: "https://pilot-two.selinow.com/",
+      },
+    ],
+    environment: "production",
+    releaseId: "release_20260726_abcdef12",
+  };
+}
+
+describe("production release readiness", () => {
+  it("passes only when config, secret names and release evidence are complete", () => {
+    const result = inspectProductionReadiness({
+      evidence: readyEvidence(),
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.missing).toEqual([]);
+  });
+
+  it("reports missing names without echoing configuration values", () => {
+    const config = readyWranglerConfig();
+    const production = (config.env as { production: { vars: Record<string, string> } }).production;
+    production.vars.CLOUDFLARE_ZONE_ID = "top-secret-looking-value";
+    delete production.vars.EMAIL_FROM_ADDRESS;
+
+    const result = inspectProductionReadiness({
+      evidence: null,
+      now,
+      productionSpec: null,
+      workerSecretNames: [],
+      wranglerConfig: config,
+    });
+    const output = JSON.stringify(result);
+
+    expect(result.ok).toBe(false);
+    expect(result.missing).toContain("var.EMAIL_FROM_ADDRESS");
+    expect(output).not.toContain("top-secret-looking-value");
+  });
+
+  it("fails stale backup and restore evidence closed", () => {
+    const evidence = readyEvidence();
+    const backup = evidence.backup as Record<string, unknown>;
+    backup.completedAt = "2026-07-24T00:00:00.000Z";
+    backup.restoreDrillCompletedAt = "2026-05-01T00:00:00.000Z";
+
+    const checks = evaluateBackupPrerequisites(evidence, now);
+
+    expect(checks.find((check) => check.name === "backup.completedAt")?.ok).toBe(false);
+    expect(checks.find((check) => check.name === "backup.restoreDrillCompletedAt")?.ok).toBe(false);
+  });
+
+  it("builds a value-safe manifest and rollback matrix after readiness passes", () => {
+    const result = buildReleaseArtifacts({
+      evidence: readyEvidence(),
+      migrationNames: ["0002_second.sql", "0001_first.sql"],
+      now,
+      packageVersion: "0.0.0",
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.manifest.releaseId).toBe("release_20260726_abcdef12");
+    expect(result.manifest.migrationNames).toEqual(["0001_first.sql", "0002_second.sql"]);
+    expect(result.manifest.schemaVersion).toBe(2);
+    expect(result.manifest.releaseEvidenceFingerprintSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(result.rollbackMatrix).toHaveLength(6);
+    expect(JSON.stringify(result)).not.toContain("snapshotReportRef");
+  });
+
+  it("admits only a clean source tree matching the reviewed release manifest", () => {
+    const evidence = readyEvidence();
+    const migrationNames = ["0001_first.sql", "0002_second.sql"];
+    const wranglerConfig = readyWranglerConfig();
+    const productionSpec = readyProductionSpec();
+    const manifest = buildReleaseArtifacts({
+      evidence,
+      migrationNames,
+      now,
+      packageVersion: "0.0.0",
+      productionSpec,
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig,
+    }).manifest;
+
+    expect(validateProductionDeployAdmission({
+      evidence,
+      manifest,
+      migrationNames,
+      now,
+      packageVersion: "0.0.0",
+      productionSpec,
+      repositoryClean: true,
+      repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig,
+    })).toEqual({
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      releaseId: "release_20260726_abcdef12",
+    });
+
+    expect(() => validateProductionDeployAdmission({
+      evidence,
+      manifest,
+      migrationNames,
+      now,
+      packageVersion: "0.0.0",
+      productionSpec,
+      repositoryClean: false,
+      repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig,
+    })).toThrow("production_release_source_dirty");
+  });
+
+  it("rejects a manifest when reviewed evidence or repository identity drifts", () => {
+    const evidence = readyEvidence();
+    const migrationNames = ["0001_first.sql", "0002_second.sql"];
+    const wranglerConfig = readyWranglerConfig();
+    const productionSpec = readyProductionSpec();
+    const manifest = buildReleaseArtifacts({
+      evidence,
+      migrationNames,
+      now,
+      packageVersion: "0.0.0",
+      productionSpec,
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig,
+    }).manifest;
+    const changedEvidence = structuredClone(evidence);
+    (changedEvidence.approvals as Record<string, unknown>).releaseOwner = "different-release-team";
+
+    const input = {
+      evidence: changedEvidence,
+      manifest,
+      migrationNames,
+      now,
+      packageVersion: "0.0.0",
+      productionSpec,
+      repositoryClean: true,
+      repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig,
+    };
+    expect(() => validateProductionDeployAdmission(input))
+      .toThrow("production_release_manifest_mismatch:releaseEvidenceFingerprintSha256");
+    expect(() => validateProductionDeployAdmission({
+      ...input,
+      evidence,
+      repositoryCommitSha: "abcdef0123456789abcdef0123456789abcdef01",
+    })).toThrow("production_release_evidence_commit_mismatch");
+    expect(() => validateProductionDeployAdmission({
+      ...input,
+      evidence,
+      migrationNames: [...migrationNames, "0003_new.sql"],
+    })).toThrow("production_release_manifest_mismatch:migrationNames");
+    const changedConfig = structuredClone(wranglerConfig);
+    ((changedConfig.env as Record<string, unknown>).production as {
+      vars: Record<string, string>;
+    }).vars.LOG_LEVEL = "info";
+    expect(() => validateProductionDeployAdmission({
+      ...input,
+      evidence,
+      wranglerConfig: changedConfig,
+    })).toThrow("production_release_manifest_mismatch:configFingerprintSha256");
+  });
+
+  it("checks the canonical private manifest and clean Git identity at deploy admission", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-release-admission-"));
+    try {
+      const releaseId = "release_20260726_abcdef12";
+      await Promise.all([
+        mkdir(join(root, "infra/environments"), { recursive: true }),
+        mkdir(join(root, "migrations"), { recursive: true }),
+        mkdir(join(root, ".wrangler/release"), { recursive: true }),
+        mkdir(join(root, ".wrangler/releases", releaseId), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(join(root, ".gitignore"), ".wrangler/\n"),
+        writeFile(join(root, "package.json"), JSON.stringify({ version: "0.0.0" })),
+        writeFile(join(root, "wrangler.jsonc"), JSON.stringify(readyWranglerConfig())),
+        writeFile(join(root, "infra/environments/production.json"), JSON.stringify(readyProductionSpec())),
+        writeFile(join(root, "migrations/0001_first.sql"), "SELECT 1;\n"),
+      ]);
+      execFileSync("git", ["init", "--quiet"], { cwd: root });
+      execFileSync("git", ["config", "user.email", "release-test@selinow.invalid"], { cwd: root });
+      execFileSync("git", ["config", "user.name", "Selinow Release Test"], { cwd: root });
+      execFileSync("git", ["add", "."], { cwd: root });
+      execFileSync("git", ["commit", "--quiet", "-m", "release fixture"], { cwd: root });
+      const commitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+      const evidence = readyEvidence();
+      evidence.commitSha = commitSha;
+      const manifest = buildReleaseArtifacts({
+        evidence,
+        migrationNames: ["0001_first.sql"],
+        now,
+        packageVersion: "0.0.0",
+        productionSpec: readyProductionSpec(),
+        workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+        wranglerConfig: readyWranglerConfig(),
+      }).manifest;
+      const evidencePath = join(root, ".wrangler/release/production-evidence.json");
+      const manifestPath = join(root, ".wrangler/releases", releaseId, "release-manifest.json");
+      await writeFile(evidencePath, JSON.stringify(evidence), { mode: 0o600 });
+      await writeFile(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
+
+      await expect(assertProductionDeployAdmission({
+        manifestPath,
+        now,
+        repositoryRoot: root,
+        workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      })).resolves.toEqual({ commitSha, releaseId });
+
+      await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.0.1" }));
+      await expect(assertProductionDeployAdmission({
+        manifestPath,
+        now,
+        repositoryRoot: root,
+        workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      })).rejects.toThrow("production_release_source_dirty");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("combines reviewed release evidence with the exact live production target", async () => {
+    const releaseAdmission = vi.fn(() => Promise.resolve({
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      releaseId: "release_20260726_abcdef12",
+    }));
+    const workerIdentity = vi.fn(() => Promise.resolve({
+      accountId: "abcdef0123456789abcdef0123456789",
+      databaseId: "17ea8f2f-4c97-4337-8989-28b25a58ddeb",
+      databaseName: "selinow-production",
+      workerName: "selinow-com-production",
+      zoneId: "0123456789abcdef0123456789abcdef",
+      zoneName: "selinow.com",
+    }));
+
+    await expect(assertProductionWorkerDeployAdmission({
+      assertReleaseAdmissionImplementation: releaseAdmission,
+      environment: { CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token" },
+      manifestPath: ".wrangler/releases/release_20260726_abcdef12/release-manifest.json",
+      productionSpec: readyProductionSpec(),
+      repositoryRoot: process.cwd(),
+      stagingSpec: { environment: "staging" },
+      workerIdentityImplementation: workerIdentity,
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    })).resolves.toEqual({
+      accountId: "abcdef0123456789abcdef0123456789",
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      databaseId: "17ea8f2f-4c97-4337-8989-28b25a58ddeb",
+      databaseName: "selinow-production",
+      releaseId: "release_20260726_abcdef12",
+      workerName: "selinow-com-production",
+      zoneId: "0123456789abcdef0123456789abcdef",
+      zoneName: "selinow.com",
+    });
+    expect(releaseAdmission).toHaveBeenCalledTimes(1);
+    expect(workerIdentity).toHaveBeenCalledWith(expect.objectContaining({
+      productionSpec: readyProductionSpec(),
+      token: undefined,
+      wranglerConfig: readyWranglerConfig(),
+    }));
+  });
+
+  it("keeps pilot smoke in plan mode without network access by default", async () => {
+    const fetchImplementation = vi.fn();
+
+    const result = await runPilotSmoke({
+      confirmProduction: false,
+      execute: false,
+      fetchImplementation,
+      plan: smokePlan(),
+    });
+
+    expect(result.executed).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit production confirmation before smoke network calls", async () => {
+    await expect(runPilotSmoke({
+      confirmProduction: false,
+      execute: true,
+      plan: smokePlan(),
+    })).rejects.toThrow("pilot_production_confirmation_required");
+  });
+
+  it("runs bounded GET-only smoke checks without returning response bodies", async () => {
+    const fetchImplementation = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe("GET");
+      return Promise.resolve(new Response("Selinow storefront", {
+        headers: { "X-Request-Id": "request-safe" },
+        status: 200,
+      }));
+    }) as unknown as typeof fetch;
+
+    const result = await runPilotSmoke({
+      confirmProduction: true,
+      execute: true,
+      fetchImplementation,
+      plan: smokePlan(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(result)).not.toContain("Selinow storefront");
+  });
+
+  it("rejects query-bearing URLs and plans without two pilot hosts", () => {
+    const queryPlan = smokePlan();
+    ((queryPlan.checks as Array<Record<string, unknown>>)[0] as Record<string, unknown>).url = "https://pilot-one.selinow.com/?token=unsafe";
+    expect(() => validatePilotSmokePlan(queryPlan)).toThrow("pilot_check_url_invalid:pilot_one");
+
+    const oneHostPlan = smokePlan();
+    ((oneHostPlan.checks as Array<Record<string, unknown>>)[1] as Record<string, unknown>).url = "https://pilot-one.selinow.com/other";
+    expect(() => validatePilotSmokePlan(oneHostPlan)).toThrow("pilot_plan_two_shop_hosts_required");
+
+    const placeholderPlan = smokePlan();
+    placeholderPlan.releaseId = "replace-with-release-id";
+    expect(() => validatePilotSmokePlan(placeholderPlan)).toThrow("pilot_plan_release_id_invalid");
+  });
+});

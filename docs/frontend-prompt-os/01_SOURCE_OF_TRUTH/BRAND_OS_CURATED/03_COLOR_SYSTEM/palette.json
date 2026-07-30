@@ -1,0 +1,22 @@
+{
+  "brand_indigo": "#5B5CEB",
+  "brand_blue": "#3B82F6",
+  "brand_violet": "#7C3AED",
+  "brand_teal": "#14B8A6",
+  "ink_950": "#080B14",
+  "ink_900": "#0B1020",
+  "ink_800": "#151B2E",
+  "ink_700": "#252C43",
+  "slate_600": "#475569",
+  "slate_500": "#64748B",
+  "slate_400": "#94A3B8",
+  "slate_300": "#CBD5E1",
+  "slate_200": "#E2E8F0",
+  "slate_100": "#F1F5F9",
+  "cloud_50": "#F8FAFC",
+  "white": "#FFFFFF",
+  "success": "#059669",
+  "warning": "#D97706",
+  "danger": "#DC2626",
+  "info": "#2563EB"
+}

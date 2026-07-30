@@ -1,0 +1,260 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import StatusBadge from "../../components/primitives/StatusBadge.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { domainState, loadErrorState, unavailableState, paymentState, telegramState } from "../../lib/dashboard/integrations-view";
+import { listShopDomains, type DomainView } from "../../lib/domains/store";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { getBindings } from "../../lib/platform/bindings";
+import { getPaymentIntegration, type PaymentIntegrationView } from "../../lib/payments/integrations";
+import { getTelegramIntegration, type TelegramIntegrationView } from "../../lib/telegram/integrations";
+import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const canManageProviders = shop?.role === "owner" || shop?.role === "manager";
+const canManageDomains = shop?.role === "owner";
+const canRefreshPayos = shop?.role === "owner";
+
+let telegram: TelegramIntegrationView | null = null;
+let telegramError: unknown = null;
+let payos: PaymentIntegrationView | null = null;
+let payosError: unknown = null;
+let domains: DomainView[] = [];
+let domainsError: unknown = null;
+
+if (shop !== undefined && canManageProviders) {
+  try { telegram = await getTelegramIntegration({ env, shopPublicId: shop.publicId, userId: auth.userId }); } catch (error) { telegramError = error; }
+  try { payos = await getPaymentIntegration({ env, shopPublicId: shop.publicId, userId: auth.userId }); } catch (error) { payosError = error; }
+}
+if (shop !== undefined && canManageDomains) {
+  try { domains = await listShopDomains({ env, shopPublicId: shop.publicId, userId: auth.userId }); } catch (error) { domainsError = error; }
+}
+
+const timeZone = shop?.timezone ?? "Asia/Ho_Chi_Minh";
+const locale = Astro.locals.locale ?? shop?.defaultLocale;
+const t = createDashboardTranslator(locale);
+const telegramView = telegramError === null
+  ? telegramState(telegram, timeZone, locale)
+  : loadErrorState("Telegram", telegramError, locale);
+const payosView = payosError === null
+  ? paymentState(payos, timeZone, locale)
+  : loadErrorState("PayOS", payosError, locale);
+const domainsView = domainsError === null
+  ? domainState(domains, timeZone, locale)
+  : loadErrorState("domain", domainsError, locale);
+const unavailableTelegram = unavailableState("Telegram", locale);
+const unavailablePayos = unavailableState("PayOS", locale);
+const unavailableDomains = unavailableState("domain", locale);
+const telegramConnected = telegram !== null && telegram.status !== "disabled" && telegram.status !== "disconnected";
+const payosConnected = payos !== null && payos.status !== "disabled" && payos.status !== "disconnected";
+const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+const csrfCookieName = `${env.SESSION_COOKIE_NAME}_csrf`;
+const integrationClientCopy = {
+  refresh: t("dashboard.integrations.refresh"),
+  refreshing: t("dashboard.integrations.runtime.refreshing"),
+  reading: t("dashboard.integrations.runtime.reading"),
+  partial: t("dashboard.integrations.runtime.partial"),
+  refreshed: t("dashboard.integrations.runtime.refreshed"),
+  connectTelegram: t("dashboard.integrations.runtime.connect.telegram"),
+  connectPayos: t("dashboard.integrations.runtime.connect.payos"),
+  verifying: t("dashboard.integrations.runtime.verifying"),
+  sending: t("dashboard.integrations.runtime.sending"),
+  updated: t("dashboard.integrations.runtime.updated"),
+  checking: t("dashboard.integrations.runtime.checking"),
+  healthUpdated: t("dashboard.integrations.runtime.health_updated"),
+  disconnecting: t("dashboard.integrations.runtime.disconnecting"),
+  disconnected: t("dashboard.integrations.runtime.disconnected"),
+  disconnectTitle: t("dashboard.integrations.disconnect.title"),
+  disconnectConfirm: t("dashboard.integrations.disconnect.confirm"),
+  disconnectTelegram: t("dashboard.integrations.disconnect.telegram"),
+  disconnectPayos: t("dashboard.integrations.disconnect.payos"),
+  health: t("dashboard.integrations.provider.health"),
+  connect: t("dashboard.integrations.provider.connect"),
+  update: t("dashboard.integrations.provider.update"),
+  disconnect: t("dashboard.integrations.provider.disconnect"),
+};
+---
+
+<AppLayout activePath="/app/integrations" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.integrations.title")}>
+  <div
+    class="integrations-page"
+    data-integrations-workspace
+    data-csrf-cookie-name={csrfCookieName}
+    data-shop-public-id={shop?.publicId}
+    data-shop-role={shop?.role}
+    data-time-zone={timeZone}
+    data-locale={locale ?? "en"}
+    data-copy={JSON.stringify(integrationClientCopy)}
+    data-can-manage-providers={canManageProviders ? "true" : "false"}
+    data-can-manage-domains={canManageDomains ? "true" : "false"}
+    data-can-refresh-payos={canRefreshPayos ? "true" : "false"}
+  >
+    <PageHeader
+      eyebrow={t("dashboard.integrations.eyebrow")}
+      title={t("dashboard.integrations.title")}
+      description={t("dashboard.integrations.description")}
+    >
+      <div slot="actions" class="header-actions">
+        <button class="app-button app-button-secondary" type="button" data-refresh-all disabled={shop === undefined || (!canManageProviders && !canManageDomains)}>{t("dashboard.integrations.refresh")}</button>
+      </div>
+    </PageHeader>
+
+    {shop === undefined ? (
+      <WorkspaceState
+        title={t("dashboard.integrations.no_store.title")}
+        description={t("dashboard.integrations.no_store.description")}
+        actionHref={workspaceHref("/onboarding")}
+        actionLabel={t("dashboard.integrations.no_store.action")}
+        tone="info"
+      />
+    ) : (
+      <>
+        <div class="workspace-feedback" data-workspace-feedback role="status" aria-live="polite" hidden></div>
+        <div id="integration-panels" class="integration-panels" data-integration-panels>
+          <section class="integration-group" aria-labelledby="channels-title">
+            <header class="group-heading">
+              <div><p>{t("dashboard.integrations.group.channels.eyebrow")}</p><h2 id="channels-title">{t("dashboard.integrations.group.channels.title")}</h2></div>
+              <span>{t("dashboard.integrations.group.channels.description")}</span>
+            </header>
+            <article id="telegram" class="integration-row" data-provider-row="telegram" data-readable={canManageProviders && telegramError === null ? "true" : "false"}>
+              <div class="provider-mark provider-mark-telegram" aria-hidden="true">TG</div>
+              <div class="provider-copy"><h3>Telegram</h3><p class="provider-summary" data-summary>{canManageProviders ? telegramView.summary : unavailableTelegram.summary}</p><p class="provider-check" data-last-check>{canManageProviders ? telegramView.checked : unavailableTelegram.checked}</p></div>
+              <StatusBadge label={canManageProviders ? telegramView.label : unavailableTelegram.label} tone={canManageProviders ? telegramView.tone : unavailableTelegram.tone} />
+              <div class="provider-actions">
+                {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{telegram === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}
+                {canManageProviders && telegram !== null && telegramError === null && <button class="text-action" type="button" data-action="health">{t("dashboard.integrations.provider.health")}</button>}
+                {canManageProviders && telegramConnected && telegramError === null && <button class="text-action danger-text" type="button" data-action="disconnect">{t("dashboard.integrations.provider.disconnect")}</button>}
+              </div>
+              <p class="provider-error" data-error hidden={!canManageProviders || telegramView.error === null}>{canManageProviders ? telegramView.error : ""}</p>
+            </article>
+          </section>
+
+          <section class="integration-group" aria-labelledby="payments-title">
+            <header class="group-heading">
+              <div><p>{t("dashboard.integrations.group.payments.eyebrow")}</p><h2 id="payments-title">{t("dashboard.integrations.group.payments.title")}</h2></div>
+              <span>{t("dashboard.integrations.group.payments.description")}</span>
+            </header>
+            <article class="integration-row" data-provider-row="payos" data-readable={canManageProviders && payosError === null ? "true" : "false"}>
+              <div class="provider-mark provider-mark-payos" aria-hidden="true">PO</div>
+              <div class="provider-copy"><h3>PayOS</h3><p class="provider-summary" data-summary>{canManageProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canManageProviders ? payosView.checked : unavailablePayos.checked}</p></div>
+              <StatusBadge label={canManageProviders ? payosView.label : unavailablePayos.label} tone={canManageProviders ? payosView.tone : unavailablePayos.tone} />
+              <div class="provider-actions">
+                {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{payos === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}
+                {canRefreshPayos && payos !== null && payosError === null && <button class="text-action" type="button" data-action="health">{t("dashboard.integrations.provider.health")}</button>}
+                {canManageProviders && payosConnected && payosError === null && <button class="text-action danger-text" type="button" data-action="disconnect">{t("dashboard.integrations.provider.disconnect")}</button>}
+              </div>
+              <p class="provider-error" data-error hidden={!canManageProviders || payosView.error === null}>{canManageProviders ? payosView.error : ""}</p>
+            </article>
+          </section>
+
+          <section class="integration-group" aria-labelledby="infrastructure-title">
+            <header class="group-heading">
+              <div><p>{t("dashboard.integrations.group.infrastructure.eyebrow")}</p><h2 id="infrastructure-title">{t("dashboard.integrations.group.infrastructure.title")}</h2></div>
+              <span>{t("dashboard.integrations.group.infrastructure.description")}</span>
+            </header>
+            <article class="integration-row" data-provider-row="domains" data-readable={canManageDomains && domainsError === null ? "true" : "false"}>
+              <div class="provider-mark provider-mark-domain" aria-hidden="true">DNS</div>
+              <div class="provider-copy"><h3>{t("dashboard.integrations.provider.domain")}</h3><p class="provider-summary" data-summary>{canManageDomains ? domainsView.summary : unavailableDomains.summary}</p><p class="provider-check" data-last-check>{canManageDomains ? domainsView.checked : unavailableDomains.checked}</p></div>
+              <StatusBadge label={canManageDomains ? domainsView.label : unavailableDomains.label} tone={canManageDomains ? domainsView.tone : unavailableDomains.tone} />
+              <div class="provider-actions">{canManageDomains ? <a class="app-button app-button-secondary" href={workspaceHref("/app/domains")}>{t("dashboard.integrations.provider.manage_domains")}</a> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}</div>
+              <p class="provider-error" data-error hidden={!canManageDomains || domainsView.error === null}>{canManageDomains ? domainsView.error : ""}</p>
+            </article>
+          </section>
+
+          {canManageProviders && (
+            <section class="secure-panel" data-config-panel hidden aria-labelledby="config-title">
+              <div class="secure-panel-head"><div><p class="secure-kicker">{t("dashboard.integrations.config.eyebrow")}</p><h2 id="config-title">{t("dashboard.integrations.config.title")}</h2><p>{t("dashboard.integrations.config.description")}</p></div><button class="text-action" type="button" data-action="close-config">{t("dashboard.integrations.config.close")}</button></div>
+              <div class="workspace-feedback" data-config-feedback role="status" aria-live="polite" hidden></div>
+              <form class="credential-form" data-credential-form="telegram" hidden novalidate>
+                <div class="form-heading"><div><h3>{t("dashboard.integrations.telegram.title")}</h3><p>{t("dashboard.integrations.telegram.description")}</p></div><a href="https://t.me/BotFather" target="_blank" rel="noreferrer">{t("dashboard.integrations.telegram.open")}</a></div>
+                <label for="telegram-bot-token">{t("dashboard.integrations.field.bot_token")}</label>
+                <input id="telegram-bot-token" name="botToken" type="password" autocomplete="new-password" spellcheck="false" inputmode="text" maxlength="150" required placeholder="123456789:…" />
+                <label class="checkbox-line"><input type="checkbox" name="replaceBot" /> <span>{t("dashboard.integrations.telegram.replace")}</span></label>
+                <p class="field-help" set:html={t("dashboard.integrations.telegram.help")}></p>
+                <button class="app-button app-button-primary" type="submit">{t("dashboard.integrations.telegram.submit")}</button>
+              </form>
+              <form class="credential-form" data-credential-form="payos" hidden novalidate>
+                <div class="form-heading"><div><h3>{t("dashboard.integrations.payos.title")}</h3><p>{t("dashboard.integrations.payos.description")}</p></div><a href="https://payos.vn" target="_blank" rel="noreferrer">{t("dashboard.integrations.payos.open")}</a></div>
+                <label for="payos-client-id">{t("dashboard.integrations.field.client_id")}</label>
+                <input id="payos-client-id" name="clientId" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" required />
+                <label for="payos-api-key">{t("dashboard.integrations.field.api_key")}</label>
+                <input id="payos-api-key" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" required />
+                <label for="payos-checksum-key">{t("dashboard.integrations.field.checksum_key")}</label>
+                <input id="payos-checksum-key" name="checksumKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" required />
+                <p class="field-help">{t("dashboard.integrations.payos.help")}</p>
+                <button class="app-button app-button-primary" type="submit">{t("dashboard.integrations.payos.submit")}</button>
+              </form>
+              <div class="disconnect-panel" data-disconnect-panel hidden><h3>{t("dashboard.integrations.disconnect.title")}</h3><p data-disconnect-copy></p><button class="app-button app-button-danger" type="button" data-action="confirm-disconnect">{t("dashboard.integrations.disconnect.confirm")}</button></div>
+            </section>
+          )}
+        </div>
+      </>
+    )}
+  </div>
+</AppLayout>
+
+<script src="../../scripts/dashboard/integrations.ts"></script>
+
+<style>
+  [hidden] { display: none !important; }
+  .integrations-page { display: grid; gap: var(--sln-space-8); }
+  .header-actions { display: flex; align-items: center; }
+  .workspace-feedback { padding: 12px 16px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .workspace-feedback[data-tone="success"] { border-color: color-mix(in srgb, var(--sln-state-success) 28%, var(--sln-border-default)); background: var(--sln-tint-success); color: #047857; }
+  .workspace-feedback[data-tone="warning"] { border-color: color-mix(in srgb, var(--sln-state-warning) 28%, var(--sln-border-default)); background: var(--sln-tint-warning); color: #9a5004; }
+  .workspace-feedback[data-tone="danger"] { border-color: color-mix(in srgb, var(--sln-state-danger) 28%, var(--sln-border-default)); background: var(--sln-tint-danger); color: #b91c1c; }
+  .integration-panels { display: grid; gap: var(--sln-space-12); }
+  .integration-group { display: grid; gap: 0; }
+  .group-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--sln-border-strong); }
+  .group-heading p, .secure-kicker { margin: 0 0 6px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+  .group-heading h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .group-heading > span { max-width: 360px; color: var(--sln-text-muted); font: var(--sln-font-body-sm); text-align: right; }
+  .integration-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) minmax(130px, auto) auto; gap: 16px; align-items: center; min-width: 0; padding: 20px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .provider-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; font: 800 11px/1 var(--sln-font-mono); letter-spacing: -.03em; }
+  .provider-mark-telegram { background: #e9f4ff; color: #0f6aa8; }
+  .provider-mark-payos { background: var(--sln-tint-indigo); color: #4338ca; }
+  .provider-mark-domain { background: var(--sln-tint-teal); color: #0f766e; }
+  .provider-copy { min-width: 0; }
+  .provider-copy h3 { margin: 0; font: var(--sln-font-h4); letter-spacing: -.025em; }
+  .provider-summary, .provider-check { overflow: hidden; margin: 3px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); text-overflow: ellipsis; white-space: nowrap; }
+  .provider-check { color: var(--sln-text-secondary); font-size: 12px; }
+  .provider-actions { display: flex; align-items: center; justify-content: end; gap: 12px; min-width: 0; }
+  .provider-actions .app-button { min-height: 40px; padding: 9px 13px; }
+  .provider-actions .text-action { white-space: nowrap; }
+  .provider-note { color: #334155; font: var(--sln-font-caption); text-align: right; }
+  .provider-error { grid-column: 2 / -1; margin: 0; color: var(--sln-state-danger); font: var(--sln-font-body-sm); }
+  .text-action { min-height: 36px; padding: 6px 0; border: 0; background: transparent; color: var(--sln-action-primary); font: var(--sln-font-label); cursor: pointer; text-decoration: none; }
+  .text-action:hover { color: var(--sln-action-primary-hover); text-decoration: underline; text-underline-offset: 3px; }
+  .danger-text { color: var(--sln-state-danger); }
+  .danger-text:hover { color: #b91c1c; }
+  .app-button-danger { background: var(--sln-state-danger); color: var(--sln-white); }
+  .app-button-danger:hover { background: #b91c1c; }
+  .secure-panel { display: grid; gap: 22px; padding: clamp(20px, 4vw, 32px); border: 1px solid color-mix(in srgb, var(--sln-action-primary) 26%, var(--sln-border-default)); border-radius: var(--sln-radius-lg); background: linear-gradient(135deg, var(--sln-tint-indigo), var(--sln-bg-surface) 54%); box-shadow: var(--sln-shadow-sm); scroll-margin-top: 88px; }
+  .secure-panel-head { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+  .secure-panel-head h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .secure-panel-head p:not(.secure-kicker) { max-width: 680px; margin: 8px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .credential-form { display: grid; gap: 12px; max-width: 720px; padding-top: 10px; border-top: 1px solid color-mix(in srgb, var(--sln-action-primary) 18%, var(--sln-border-default)); }
+  .form-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 4px; }
+  .form-heading h3, .disconnect-panel h3 { margin: 0; font: var(--sln-font-h4); }
+  .form-heading p, .disconnect-panel p { margin: 5px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .form-heading a { color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; white-space: nowrap; }
+  .credential-form label:not(.checkbox-line) { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .credential-form input[type=password] { width: 100%; min-height: 46px; padding: 10px 13px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); color: var(--sln-text-primary); font: 14px/22px var(--sln-font-mono); }
+  .credential-form input[type=password]:focus { border-color: var(--sln-focus-ring); box-shadow: 0 0 0 3px rgb(59 130 246 / 20%); outline: none; }
+  .checkbox-line { display: flex; align-items: start; gap: 10px; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .checkbox-line input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--sln-action-primary); }
+  .field-help { margin: 0 0 6px; color: var(--sln-text-muted); font: var(--sln-font-body-sm); }
+  .field-help code { padding: 2px 5px; border-radius: 5px; background: var(--sln-bg-subtle); font: 12px/1.4 var(--sln-font-mono); }
+  .disconnect-panel { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--sln-state-danger) 22%, var(--sln-border-default)); }
+  .disconnect-panel .app-button { margin-top: 14px; }
+  @media (max-width: 900px) { .group-heading { align-items: start; flex-direction: column; gap: 8px; } .group-heading > span { max-width: 560px; text-align: left; } .integration-row { grid-template-columns: 44px minmax(0, 1fr) auto; } .integration-row > .sln-status { grid-column: 3; grid-row: 1; } .provider-actions { grid-column: 2 / -1; justify-content: start; } .provider-error { grid-column: 1 / -1; } }
+  @media (max-width: 560px) { .header-actions, .header-actions .app-button { width: 100%; } .integration-row { gap: 12px; padding: 18px 0; } .provider-copy h3 { font-size: 18px; } .provider-summary { white-space: normal; } .provider-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; } .provider-actions .app-button { width: 100%; } .provider-actions .text-action { justify-self: start; } .provider-note { text-align: left; } .secure-panel-head, .form-heading { flex-direction: column; } .form-heading a { min-height: 40px; } }
+</style>

@@ -1,0 +1,38 @@
+---
+type Entry = { entity?: string; event: string; result: string; timestamp: string };
+
+interface Props {
+  emptyLabel?: string;
+  entries: readonly Entry[];
+  eyebrow?: string;
+  title?: string;
+}
+const {
+  emptyLabel = "No activity in this scope yet.",
+  entries,
+  eyebrow = "Audit trail",
+  title = "Recent activity",
+} = Astro.props;
+---
+
+<section class="sln-activity-ledger" aria-labelledby="sln-activity-ledger-title">
+  <header><p class="sln-eyebrow">{eyebrow}</p><h2 id="sln-activity-ledger-title">{title}</h2></header>
+  {entries.length === 0 ? <p class="sln-activity-ledger__empty">{emptyLabel}</p> : <ol>
+    {entries.map((entry) => <li><time datetime={entry.timestamp}>{entry.timestamp}</time><div><strong>{entry.event}</strong>{entry.entity && <code>{entry.entity}</code>}<p>{entry.result}</p></div></li>)}
+  </ol>}
+</section>
+
+<style>
+  .sln-activity-ledger { padding: var(--sln-space-5); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .sln-activity-ledger header { padding-bottom: var(--sln-space-4); border-bottom: 1px solid var(--sln-border-default); }
+  .sln-activity-ledger h2 { margin: 0; font: var(--sln-font-h4); }
+  .sln-activity-ledger ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .sln-activity-ledger li { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: var(--sln-space-4); padding: var(--sln-space-4) 0; border-bottom: 1px solid var(--sln-border-default); }
+  .sln-activity-ledger li:last-child { border-bottom: 0; }
+  .sln-activity-ledger time, .sln-activity-ledger code { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .sln-activity-ledger code { margin-left: var(--sln-space-2); }
+  .sln-activity-ledger strong { font: var(--sln-font-label); }
+  .sln-activity-ledger p { margin-top: var(--sln-space-1); color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .sln-activity-ledger__empty { margin: 0; padding-top: var(--sln-space-4); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  @media (max-width: 560px) { .sln-activity-ledger li { grid-template-columns: 1fr; gap: var(--sln-space-1); } }
+</style>

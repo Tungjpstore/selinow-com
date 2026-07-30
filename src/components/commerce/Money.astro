@@ -1,0 +1,16 @@
+---
+import { formatMoney } from "../../lib/i18n/currency";
+
+interface Props {
+  currency: string;
+  locale?: string;
+  value: number;
+}
+
+const { currency, locale = "en", value } = Astro.props;
+const formatted = formatMoney(value, currency, locale);
+---
+
+<span class="sln-money">{formatted}</span>
+
+<style>.sln-money { font-variant-numeric: tabular-nums; white-space: nowrap; }</style>

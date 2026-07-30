@@ -1,0 +1,870 @@
+---
+import { WIZARD_STEPS } from "../../lib/dashboard/onboarding-ui";
+import { currencyInputStep, formatMinorAmountForInput, SUPPORTED_CURRENCY_CODES } from "../../lib/i18n/currency";
+import { createOnboardingTranslator, getOnboardingClientCopy } from "../../lib/i18n/catalogs/onboarding";
+import type { ShopView } from "../../lib/tenants/store";
+
+type Props = {
+  csrfCookieName: string;
+  defaultCurrency: string;
+  defaultLocale: string;
+  locale?: string | undefined;
+  platformBaseDomain: string;
+  shops: ShopView[];
+};
+
+const { csrfCookieName, defaultCurrency, defaultLocale, locale, platformBaseDomain, shops } = Astro.props;
+const t = createOnboardingTranslator(locale);
+const clientCopy = getOnboardingClientCopy(locale);
+const wizardSteps = WIZARD_STEPS.map((step) => ({ ...step, label: t(step.labelKey) }));
+const initialShop = shops[0];
+---
+
+<div
+  class="onboarding-shell"
+  data-onboarding-root
+  data-csrf-cookie-name={csrfCookieName}
+  data-copy={JSON.stringify(clientCopy)}
+  data-default-currency={defaultCurrency}
+  data-default-locale={defaultLocale}
+  data-locale={locale ?? "en"}
+  data-platform-base-domain={platformBaseDomain}
+  data-shops={JSON.stringify(shops)}
+>
+  <section class="onboarding-intro" aria-labelledby="onboarding-title">
+    <div>
+      <p class="eyebrow">{t("onboarding.intro.eyebrow")}</p>
+      <h1 id="onboarding-title">{t("onboarding.intro.heading_line1")}<br />{t("onboarding.intro.heading_line2")}</h1>
+      <p class="intro-copy">{t("onboarding.intro.copy")}</p>
+    </div>
+    <div class="progress-poster" role="progressbar" aria-label={t("onboarding.aria.progress")} aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-progress-poster>
+      <p>{t("onboarding.progress.current")}</p>
+      <strong data-progress-percent>0%</strong>
+      <div class="progress-track" aria-hidden="true"><span data-progress-bar></span></div>
+      <small data-progress-copy>{t("onboarding.progress.reading")}</small>
+    </div>
+  </section>
+
+  <div id="onboarding-global-feedback" class="global-feedback" data-global-feedback role="status" aria-live="polite" aria-atomic="true" hidden></div>
+
+  <section class="wizard-frame" aria-label={t("onboarding.aria.steps")}>
+    <div class="mobile-step-summary">
+      <div class="mobile-step-heading">
+        <div>
+          <p>{t("onboarding.progress.setup")}</p>
+          <strong><span data-mobile-progress-completed>0</span>{t("onboarding.progress.mobile_suffix", { total: WIZARD_STEPS.length })}</strong>
+        </div>
+        <span class="mobile-step-status" data-mobile-step-status data-status="not_started">{t("onboarding.progress.not_started")}</span>
+      </div>
+      <p class="mobile-current-step"><span data-mobile-current-number>01</span> · <strong data-mobile-current-label>{wizardSteps[0]?.label}</strong></p>
+      <details class="mobile-step-selector" data-mobile-step-selector>
+        <summary>{t("onboarding.aria.steps")} <span aria-hidden="true">⌄</span></summary>
+        <ol>
+          {wizardSteps.map((step, index) => (
+            <li>
+              <button
+                type="button"
+                data-step-button={step.code}
+                data-mobile-step-button
+                aria-controls={`onboarding-step-${step.code}`}
+                aria-current={index === 0 ? "step" : undefined}
+              >
+                <span>{step.number}</span>
+                <strong>{step.label}</strong>
+                <i data-step-indicator aria-hidden="true"></i>
+              </button>
+            </li>
+          ))}
+        </ol>
+      </details>
+    </div>
+
+    <nav class="step-rail" id="onboarding-step-list" aria-label={t("onboarding.aria.progress")}>
+      <ol>
+        {wizardSteps.map((step, index) => (
+          <li>
+            <button
+              type="button"
+              id={`onboarding-step-trigger-${step.code}`}
+              data-step-button={step.code}
+              aria-controls={`onboarding-step-${step.code}`}
+              aria-current={index === 0 ? "step" : undefined}
+            >
+              <span>{step.number}</span>
+              <strong>{step.label}</strong>
+              <i data-step-indicator aria-hidden="true"></i>
+            </button>
+          </li>
+        ))}
+      </ol>
+      <div class="rail-note">
+        <strong>{t("onboarding.rail.note_title")}</strong>
+        <p>{t("onboarding.rail.note_copy")}</p>
+      </div>
+    </nav>
+
+    <div class="step-stage">
+      <article class="step-panel" id="onboarding-step-shop" role="region" aria-labelledby="onboarding-step-trigger-shop" data-step-panel="shop">
+        <header class="panel-heading">
+          <p><span>{wizardSteps[0]?.number}</span> {t("onboarding.step.shop")}</p>
+          <h2>{t("onboarding.shop.title")}</h2>
+          <p>{t("onboarding.shop.description")}</p>
+        </header>
+
+        <div class="existing-shop" data-existing-shop-block hidden={shops.length === 0}>
+          <label for="onboarding-shop-select">{t("onboarding.shop.existing")}</label>
+          <div class="select-row">
+            <select id="onboarding-shop-select" data-shop-select>
+              {shops.map((shop) => <option value={shop.publicId}>{shop.name} — {shop.slug}</option>)}
+            </select>
+            <button type="button" class="secondary-action" data-refresh-shop>{t("onboarding.button.refresh")}</button>
+          </div>
+          <p class="selection-summary" data-shop-summary>{initialShop === undefined ? "" : `${initialShop.slug}.${platformBaseDomain} · ${initialShop.planCode}`}</p>
+          <form class="shop-rename-form" data-shop-rename-form hidden novalidate>
+            <label for="onboarding-shop-name">{t("onboarding.form.rename_label")}</label>
+            <div class="select-row">
+              <input id="onboarding-shop-name" name="name" type="text" autocomplete="organization" minlength="2" maxlength="80" required data-shop-rename-name />
+              <button type="submit" class="secondary-action" data-shop-rename-submit>{t("onboarding.button.save_name")}</button>
+            </div>
+            <small>{t("onboarding.form.rename_note")}</small>
+          </form>
+        </div>
+
+        <details class="create-shop-box" open={shops.length === 0} data-create-shop-box>
+          <summary>{shops.length === 0 ? t("onboarding.shop.create_first") : t("onboarding.shop.create_more")}</summary>
+          <form class="form-grid" data-shop-form novalidate>
+            <label class="field field-wide">
+              <span>{t("onboarding.form.name_label")}</span>
+              <input name="name" type="text" autocomplete="organization" minlength="2" maxlength="80" placeholder={t("onboarding.form.name_placeholder")} required data-shop-name />
+            </label>
+            <label class="field">
+              <span>{t("onboarding.form.slug_label")}</span>
+              <input name="slug" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" minlength="3" maxlength="48" pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" placeholder={t("onboarding.form.slug_placeholder")} required data-shop-slug />
+              <small data-slug-preview>slug.{platformBaseDomain}</small>
+            </label>
+            <label class="field">
+              <span>{t("onboarding.form.plan_label")}</span>
+              <select name="planCode" data-shop-plan>
+                <option value="store">{t("onboarding.form.plan_store")}</option>
+                <option value="bot">{t("onboarding.form.plan_bot")}</option>
+                <option value="business">{t("onboarding.form.plan_business")}</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>{t("onboarding.form.merchant_country")}</span>
+              <input name="merchantCountry" type="text" inputmode="text" autocapitalize="characters" maxlength="2" pattern="[A-Za-z]{2}" placeholder="US" data-shop-merchant-country />
+              <small>{t("onboarding.form.country_note")}</small>
+            </label>
+            <label class="field">
+              <span>{t("onboarding.form.business_country")}</span>
+              <input name="businessCountry" type="text" inputmode="text" autocapitalize="characters" maxlength="2" pattern="[A-Za-z]{2}" placeholder="US" data-shop-business-country />
+            </label>
+            <label class="field">
+              <span>{t("onboarding.form.currency")}</span>
+              <select name="currency" data-shop-currency>
+                {SUPPORTED_CURRENCY_CODES.map((code) => <option value={code} selected={code === (initialShop?.currency ?? defaultCurrency)}>{code}</option>)}
+              </select>
+            </label>
+            <label class="field">
+              <span>{t("onboarding.form.default_locale")}</span>
+              <select name="defaultLocale" data-shop-default-locale>
+                <option value="en" selected={(initialShop?.defaultLocale ?? defaultLocale) === "en"}>English</option>
+                <option value="vi-VN" selected={(initialShop?.defaultLocale ?? defaultLocale) === "vi-VN"}>Tiếng Việt</option>
+              </select>
+            </label>
+            <div class="form-actions field-wide">
+              <p>{t("onboarding.form.slug_reserved")}</p>
+              <button type="submit" class="primary-action" data-shop-submit>{t("onboarding.button.create_shop")}</button>
+            </div>
+          </form>
+        </details>
+        <footer class="panel-footer"><button type="button" class="next-action" data-next-step="channels">{t("onboarding.button.next_channels")} <span>→</span></button></footer>
+      </article>
+
+      <article class="step-panel" id="onboarding-step-channels" role="region" aria-labelledby="onboarding-step-trigger-channels" data-step-panel="channels" hidden>
+        <header class="panel-heading">
+          <p><span>{wizardSteps[1]?.number}</span> {t("onboarding.step.channels")}</p>
+          <h2>{t("onboarding.channels.title")}</h2>
+          <p>{t("onboarding.channels.description")}</p>
+        </header>
+        <form data-channels-form novalidate>
+          <fieldset class="choice-grid">
+            <legend class="sr-only">{t("onboarding.channels.legend")}</legend>
+            <label class="choice-card">
+              <input type="checkbox" name="websiteEnabled" data-channel-website />
+              <span class="choice-number">WEB</span>
+              <strong>{t("onboarding.channels.website")}</strong>
+              <small>{t("onboarding.channels.website_copy")}</small>
+            </label>
+            <label class="choice-card">
+              <input type="checkbox" name="telegramEnabled" data-channel-telegram />
+              <span class="choice-number">BOT</span>
+              <strong>{t("onboarding.channels.telegram")}</strong>
+              <small>{t("onboarding.channels.telegram_copy")}</small>
+            </label>
+          </fieldset>
+          <label class="field domain-preference">
+            <span>{t("onboarding.channels.domain_label")}</span>
+            <select name="customDomainPreference" data-domain-preference>
+              <option value="later">{t("onboarding.channels.domain_later")}</option>
+              <option value="connect">{t("onboarding.channels.domain_connect")}</option>
+              <option value="skip">{t("onboarding.channels.domain_skip")}</option>
+            </select>
+          </label>
+          <div class="form-actions">
+            <p data-channel-entitlement>{t("onboarding.channels.entitlement")}</p>
+            <button type="submit" class="primary-action" data-channels-submit>{t("onboarding.button.save_channels")}</button>
+          </div>
+        </form>
+        <footer class="panel-footer"><button type="button" class="next-action" data-next-step="catalog">{t("onboarding.button.next_catalog")} <span>→</span></button></footer>
+      </article>
+
+      <article class="step-panel" id="onboarding-step-catalog" role="region" aria-labelledby="onboarding-step-trigger-catalog" data-step-panel="catalog" hidden>
+        <header class="panel-heading">
+          <p><span>{wizardSteps[2]?.number}</span> {t("onboarding.step.catalog")}</p>
+          <h2>{t("onboarding.catalog.title")}</h2>
+          <p>{t("onboarding.catalog.description")}</p>
+        </header>
+        <div class="catalog-summary" data-catalog-summary>
+          <p>{t("onboarding.catalog.summary_loading")}</p>
+        </div>
+        <form class="form-grid" data-product-form novalidate>
+          <label class="field field-wide">
+            <span>{t("onboarding.catalog.product_label")}</span>
+            <input name="title" type="text" minlength="2" maxlength="120" placeholder="Windows 11 Pro" required data-product-title />
+          </label>
+          <label class="field">
+            <span>{t("onboarding.catalog.product_slug_label")}</span>
+            <input name="productSlug" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" minlength="2" maxlength="80" pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" placeholder="windows-11-pro" required data-product-slug />
+          </label>
+          <label class="field">
+            <span>{t("onboarding.catalog.fulfillment_label")}</span>
+            <select name="fulfillmentType" data-fulfillment-type>
+              <option value="license_key">{t("onboarding.catalog.fulfillment_license")}</option>
+              <option value="manual">{t("onboarding.catalog.fulfillment_manual")}</option>
+            </select>
+          </label>
+          <label class="field field-wide">
+            <span>{t("onboarding.catalog.description_label")}</span>
+            <textarea name="description" rows="3" maxlength="10000" placeholder={t("onboarding.catalog.description_placeholder")} data-product-description></textarea>
+          </label>
+          <label class="field">
+            <span>SKU</span>
+            <input name="sku" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" placeholder="WIN11-PRO" required data-product-sku />
+          </label>
+          <label class="field">
+            <span>{t("onboarding.catalog.variant_label")}</span>
+            <input name="variantTitle" type="text" minlength="2" maxlength="120" value={t("onboarding.catalog.variant_default")} required data-variant-title />
+          </label>
+          <label class="field">
+            <span data-product-price-label>{t("onboarding.catalog.price_label", { currency: initialShop?.currency ?? "—" })}</span>
+            <input name="priceMajor" type="number" inputmode="decimal" min="0" step={initialShop === undefined ? "1" : currencyInputStep(initialShop.currency)} placeholder={initialShop === undefined ? "0" : formatMinorAmountForInput(199000, initialShop.currency)} required data-product-price />
+          </label>
+          <div class="form-actions field-wide">
+            <p>{t("onboarding.catalog.price_note")}</p>
+            <button type="submit" class="primary-action" data-product-submit>{t("onboarding.button.create_product")}</button>
+          </div>
+        </form>
+        <footer class="panel-footer"><button type="button" class="next-action" data-next-step="inventory">{t("onboarding.button.next_inventory")} <span>→</span></button></footer>
+      </article>
+
+      <article class="step-panel" id="onboarding-step-inventory" role="region" aria-labelledby="onboarding-step-trigger-inventory" data-step-panel="inventory" hidden>
+        <header class="panel-heading">
+          <p><span>{wizardSteps[3]?.number}</span> {t("onboarding.step.inventory")}</p>
+          <h2>{t("onboarding.inventory.title")}</h2>
+          <p>{t("onboarding.inventory.description")}</p>
+        </header>
+        <form data-inventory-form novalidate>
+          <div class="form-grid">
+            <label class="field">
+              <span>{t("onboarding.form.inventory_variant")}</span>
+              <select name="variantId" required data-inventory-variant><option value="">{t("onboarding.catalog.select_variant")}</option></select>
+            </label>
+            <label class="field">
+              <span>{t("onboarding.form.inventory_source")}</span>
+              <select name="source" data-inventory-source><option value="paste">{t("onboarding.form.inventory_paste")}</option><option value="csv">{t("onboarding.form.inventory_csv")}</option></select>
+            </label>
+            <label class="field field-wide secret-area">
+              <span>{t("onboarding.form.inventory_data")}</span>
+              <textarea name="data" rows="8" spellcheck="false" autocomplete="off" placeholder={t("onboarding.form.inventory_placeholder")} required data-inventory-data></textarea>
+              <small>{t("onboarding.form.inventory_note")}</small>
+            </label>
+          </div>
+          <div class="preview-strip" data-inventory-preview aria-live="polite" aria-atomic="true">
+            <div><span>{t("onboarding.form.preview_total")}</span><strong data-preview-total>0</strong></div>
+            <div><span>{t("onboarding.form.preview_accepted")}</span><strong data-preview-accepted>0</strong></div>
+            <div><span>{t("onboarding.form.preview_duplicate")}</span><strong data-preview-duplicate>0</strong></div>
+            <div><span>{t("onboarding.form.preview_rejected")}</span><strong data-preview-rejected>0</strong></div>
+          </div>
+          <div class="form-actions split-actions">
+            <p data-preview-expiry>{t("onboarding.inventory.preview_not_created")}</p>
+            <div><button type="button" class="secondary-action" data-inventory-preview-button>{t("onboarding.button.preview")}</button><button type="submit" class="primary-action" data-inventory-confirm disabled>{t("onboarding.button.confirm_import")}</button></div>
+          </div>
+        </form>
+        <footer class="panel-footer"><button type="button" class="next-action" data-next-step="telegram">{t("onboarding.button.next_telegram")} <span>→</span></button></footer>
+      </article>
+
+      <article class="step-panel" id="onboarding-step-telegram" role="region" aria-labelledby="onboarding-step-trigger-telegram" data-step-panel="telegram" hidden>
+        <header class="panel-heading">
+          <p><span>{wizardSteps[4]?.number}</span> {t("onboarding.step.telegram")}</p>
+          <h2>{t("onboarding.telegram.title")}</h2>
+          <p>{t("onboarding.telegram.description")}</p>
+        </header>
+        <div class="integration-card" data-telegram-status><p>{t("onboarding.integration.telegram.loading")}</p></div>
+        <form class="credential-form" data-telegram-form novalidate>
+          <label class="field secret-area">
+            <span>{t("onboarding.form.telegram_token")}</span>
+            <input name="botToken" type="password" autocomplete="new-password" spellcheck="false" placeholder={t("onboarding.form.telegram_placeholder")} required data-telegram-token />
+          </label>
+          <div class="form-actions">
+            <p>{t("onboarding.form.telegram_note")}</p>
+            <button type="submit" class="primary-action" data-telegram-submit>{t("onboarding.button.connect_bot")}</button>
+          </div>
+        </form>
+        <div class="health-action"><button type="button" class="secondary-action" data-telegram-health>{t("onboarding.button.check_connection")}</button><p>{t("onboarding.form.telegram_health_note")}</p></div>
+        <footer class="panel-footer"><button type="button" class="next-action" data-next-step="payos">{t("onboarding.button.next_payos")} <span>→</span></button></footer>
+      </article>
+
+      <article class="step-panel" id="onboarding-step-payos" role="region" aria-labelledby="onboarding-step-trigger-payos" data-step-panel="payos" hidden>
+        <header class="panel-heading">
+          <p><span>{wizardSteps[5]?.number}</span> {t("onboarding.step.payos")}</p>
+          <h2>{t("onboarding.payos.title")}</h2>
+          <p>{t("onboarding.payos.description")}</p>
+        </header>
+        <div class="integration-card" data-payos-status><p>{t("onboarding.integration.payos.loading")}</p></div>
+        <form class="credential-form" data-payos-form novalidate>
+          <div class="form-grid">
+            <label class="field field-wide secret-area"><span>{t("onboarding.form.payos_client")}</span><input name="clientId" type="password" autocomplete="new-password" required data-payos-client-id /></label>
+            <label class="field secret-area"><span>{t("onboarding.form.payos_api")}</span><input name="apiKey" type="password" autocomplete="new-password" required data-payos-api-key /></label>
+            <label class="field secret-area"><span>{t("onboarding.form.payos_checksum")}</span><input name="checksumKey" type="password" autocomplete="new-password" required data-payos-checksum-key /></label>
+          </div>
+          <div class="provider-warning"><strong>{t("onboarding.form.payos_warning_title")}</strong><p>{t("onboarding.form.payos_warning_copy")}</p></div>
+          <div class="form-actions"><p>{t("onboarding.form.payos_note")}</p><button type="submit" class="primary-action" data-payos-submit>{t("onboarding.button.verify_connect")}</button></div>
+        </form>
+        <div class="health-action"><button type="button" class="secondary-action" data-payos-health>{t("onboarding.button.check_payos")}</button><p data-payos-health-copy>{t("onboarding.form.payos_health_note")}</p></div>
+        <footer class="panel-footer"><button type="button" class="next-action" data-next-step="settings">{t("onboarding.button.next_settings")} <span>→</span></button></footer>
+      </article>
+
+      <article class="step-panel" id="onboarding-step-settings" role="region" aria-labelledby="onboarding-step-trigger-settings" data-step-panel="settings" hidden>
+        <header class="panel-heading">
+          <p><span>{wizardSteps[6]?.number}</span> {t("onboarding.step.settings")}</p>
+          <h2>{t("onboarding.settings.title")}</h2>
+          <p>{t("onboarding.settings.description")}</p>
+        </header>
+        <form class="form-grid" data-settings-form novalidate>
+          <fieldset class="field-wide settings-globalization">
+            <legend>{t("onboarding.form.globalization_legend")}</legend>
+            <div class="form-grid">
+              <label class="field"><span>{t("onboarding.form.merchant_country")}</span><input name="merchantCountry" type="text" inputmode="text" autocapitalize="characters" maxlength="2" pattern="[A-Za-z]{2}" data-settings-merchant-country /><small>{t("onboarding.form.country_note")}</small></label>
+              <label class="field"><span>{t("onboarding.form.business_country")}</span><input name="businessCountry" type="text" inputmode="text" autocapitalize="characters" maxlength="2" pattern="[A-Za-z]{2}" data-settings-business-country /></label>
+              <label class="field"><span>{t("onboarding.form.currency")}</span><select name="currency" data-settings-currency>{SUPPORTED_CURRENCY_CODES.map((code) => <option value={code}>{code}</option>)}</select></label>
+              <label class="field"><span>{t("onboarding.form.default_locale")}</span><select name="defaultLocale" data-settings-default-locale><option value="en">English</option><option value="vi-VN">Tiếng Việt</option></select></label>
+            </div>
+          </fieldset>
+          <label class="field field-wide"><span>{t("onboarding.form.support")}</span><input name="supportContact" type="text" minlength="3" maxlength="180" placeholder={t("onboarding.form.support_placeholder")} required data-support-contact /></label>
+          <label class="field"><span>{t("onboarding.form.terms")}</span><input name="termsUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/terms" required data-terms-url /></label>
+          <label class="field"><span>{t("onboarding.form.privacy")}</span><input name="privacyUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/privacy" required data-privacy-url /></label>
+          <label class="field field-wide"><span>{t("onboarding.form.refund")}</span><input name="refundPolicyUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/refund" required data-refund-url /></label>
+          <label class="attestation field-wide"><input name="attestationAccepted" type="checkbox" required data-attestation /><span>{t("onboarding.form.attestation")}</span></label>
+          <div class="domain-callout field-wide">
+            <div><strong>{t("onboarding.form.domain_optional_title")}</strong><p>{t("onboarding.form.domain_optional_copy")}</p></div>
+            <a href={initialShop === undefined ? "/app/domains" : `/app/domains?shop=${encodeURIComponent(initialShop.publicId)}`} data-domain-management-link>{t("onboarding.form.domain_link")}</a>
+          </div>
+          <div class="form-actions field-wide"><p>{t("onboarding.form.audit_note")}</p><button type="submit" class="primary-action" data-settings-submit>{t("onboarding.button.save_settings")}</button></div>
+        </form>
+        <footer class="panel-footer"><button type="button" class="next-action" data-next-step="readiness">{t("onboarding.button.next_readiness")} <span>→</span></button></footer>
+      </article>
+
+      <article class="step-panel readiness-panel" id="onboarding-step-readiness" role="region" aria-labelledby="onboarding-step-trigger-readiness" data-step-panel="readiness" hidden>
+        <header class="panel-heading">
+          <p><span>{wizardSteps[7]?.number}</span> {t("onboarding.readiness.eyebrow")}</p>
+          <h2>{t("onboarding.readiness.title")}</h2>
+          <p>{t("onboarding.readiness.description")}</p>
+        </header>
+        <div class="readiness-command">
+          <div><strong data-readiness-title>{t("onboarding.readiness.not_run")}</strong><p data-readiness-meta>{t("onboarding.readiness.choose_shop")}</p></div>
+          <button type="button" class="primary-action" data-readiness-run>{t("onboarding.button.run_checks")}</button>
+        </div>
+        <div class="readiness-list" data-readiness-list aria-live="polite" aria-atomic="true"></div>
+        <section class="automation-ledger" aria-labelledby="automation-title">
+          <header>
+            <div>
+              <p class="eyebrow">{t("onboarding.automation.ledger")}</p>
+              <h3 id="automation-title">{t("onboarding.readiness.automation_title")}</h3>
+              <p>{t("onboarding.readiness.automation_copy")}</p>
+            </div>
+            <button type="button" class="secondary-action" data-automation-refresh>{t("onboarding.automation.refresh")}</button>
+          </header>
+          <div class="automation-list" data-automation-list aria-live="polite" aria-busy="true">
+            <div class="automation-empty"><strong>{t("onboarding.automation.loading")}</strong><p>{t("onboarding.automation.syncing")}</p></div>
+          </div>
+        </section>
+        <section class="test-order-card" aria-labelledby="test-order-title">
+          <div>
+            <p class="eyebrow">{t("onboarding.readiness.test_eyebrow")}</p>
+            <h3 id="test-order-title">{t("onboarding.readiness.test_title")}</h3>
+            <p>{t("onboarding.readiness.test_copy")}</p>
+          </div>
+          <form class="test-order-form" data-test-order-form novalidate>
+            <label class="field">
+              <span>{t("onboarding.readiness.test_variant")}</span>
+              <select name="variantId" data-test-order-variant><option value="">{t("onboarding.catalog.test_variant")}</option></select>
+            </label>
+            <label class="field">
+              <span>{t("onboarding.readiness.test_quantity")}</span>
+              <input name="quantity" type="number" inputmode="numeric" min="1" max="100" step="1" value="1" required data-test-order-quantity />
+            </label>
+            <button type="submit" class="secondary-action" data-test-order-submit>{t("onboarding.button.safe_test_order")}</button>
+          </form>
+          <div class="test-order-result" data-test-order-result role="status" aria-live="polite" aria-atomic="true" hidden></div>
+        </section>
+        <div class="publish-box">
+          <div>
+            <p class="eyebrow">{t("onboarding.readiness.publish_eyebrow")}</p>
+            <h3 data-publish-title>{t("onboarding.readiness.publish_pending_title")}</h3>
+            <p data-publish-copy>{t("onboarding.readiness.publish_copy")}</p>
+          </div>
+            <button type="button" class="publish-action" data-publish-button disabled>{t("onboarding.button.publish")}</button>
+        </div>
+        <div class="published-result" data-published-result hidden>
+          <p>{t("onboarding.readiness.published")}</p>
+          <a href={initialShop === undefined ? "#" : `https://${initialShop.slug}.${platformBaseDomain}`} target="_blank" rel="noreferrer" data-storefront-link>{t("onboarding.readiness.open_store")} <span>↗</span></a>
+        </div>
+      </article>
+    </div>
+  </section>
+</div>
+
+<script>
+  import "../../scripts/dashboard/onboarding";
+  import { WIZARD_STEPS } from "../../lib/dashboard/onboarding-ui";
+
+  const onboardingRoot = document.querySelector<HTMLElement>("[data-onboarding-root]");
+  function readCopy(): Readonly<Record<string, string>> {
+    try {
+      const value = JSON.parse(onboardingRoot?.dataset.copy ?? "null") as unknown;
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+      return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+    } catch {
+      return {};
+    }
+  }
+  const onboardingCopy = readCopy();
+  const copy = (key: string, fallback: string): string => onboardingCopy[key] ?? fallback;
+  const mobileStatusLabels: Record<string, string> = {
+    blocked: copy("onboarding.progress.blocked", "Blocked"),
+    in_progress: copy("onboarding.progress.in_progress", "In progress"),
+    not_started: copy("onboarding.progress.not_started", "Not started"),
+    ready: copy("onboarding.progress.ready", "Complete"),
+    warning: copy("onboarding.progress.warning", "Safely skipped"),
+  };
+
+  function syncMobileStepSummary(): void {
+    if (onboardingRoot === null) return;
+    for (const step of WIZARD_STEPS) {
+      const buttons = [...onboardingRoot.querySelectorAll<HTMLButtonElement>(`[data-step-button="${step.code}"]`)];
+      const status = buttons.find((button) => button.dataset.status !== undefined)?.dataset.status ?? "not_started";
+      const label = mobileStatusLabels[status] ?? mobileStatusLabels.not_started ?? "Not started";
+      const stepLabel = copy(step.labelKey, step.label);
+      for (const button of buttons) {
+        if (button.dataset.status !== status) button.dataset.status = status;
+        const ariaLabel = `${stepLabel}: ${label}`;
+        if (button.getAttribute("aria-label") !== ariaLabel) button.setAttribute("aria-label", ariaLabel);
+      }
+      if (!buttons.some((button) => button.getAttribute("aria-current") === "step")) continue;
+      const number = onboardingRoot.querySelector<HTMLElement>("[data-mobile-current-number]");
+      const currentLabel = onboardingRoot.querySelector<HTMLElement>("[data-mobile-current-label]");
+      const chip = onboardingRoot.querySelector<HTMLElement>("[data-mobile-step-status]");
+      if (number !== null && number.textContent !== step.number) number.textContent = step.number;
+      if (currentLabel !== null && currentLabel.textContent !== stepLabel) currentLabel.textContent = stepLabel;
+      if (chip !== null) {
+        if (chip.dataset.status !== status) chip.dataset.status = status;
+        if (chip.textContent !== label) chip.textContent = label;
+      }
+    }
+
+    const progressCopy = onboardingRoot.querySelector<HTMLElement>("[data-progress-copy]")?.textContent ?? "";
+    const completed = /^(\d+)\/(\d+)/u.exec(progressCopy)?.[1];
+    const mobileCompleted = onboardingRoot.querySelector<HTMLElement>("[data-mobile-progress-completed]");
+    if (completed !== undefined && mobileCompleted !== null && mobileCompleted.textContent !== completed) {
+      mobileCompleted.textContent = completed;
+    }
+  }
+
+  if (onboardingRoot !== null) {
+    const observer = new MutationObserver(syncMobileStepSummary);
+    observer.observe(onboardingRoot, {
+      attributeFilter: ["aria-current", "data-status"],
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    for (const button of onboardingRoot.querySelectorAll<HTMLButtonElement>("[data-mobile-step-button]")) {
+      button.addEventListener("click", () => {
+        const selector = button.closest<HTMLDetailsElement>("[data-mobile-step-selector]");
+        if (selector !== null) selector.open = false;
+      });
+    }
+    syncMobileStepSummary();
+  }
+</script>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  :global(html) { background: var(--selinow-bg-inverse); scroll-behavior: smooth; }
+  :global(body) { margin: 0; min-width: 320px; min-height: 100vh; background: var(--selinow-bg-inverse); color: var(--selinow-white); font-family: var(--selinow-font-sans); }
+  :global(button), :global(input), :global(select), :global(textarea) { font: inherit; }
+  :global(:focus-visible) { outline: 3px solid var(--selinow-focus-ring); outline-offset: 3px; }
+  [hidden] { display: none !important; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .onboarding-shell { --selinow-onboarding-accent: #a5b4fc; width: min(100% - 2rem, 1312px); margin-inline: auto; padding-bottom: 96px; }
+  .workspace-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 76px; border-bottom: 1px solid var(--selinow-ink-700); }
+  .brand { display: inline-flex; align-items: center; gap: 16px; min-height: 44px; color: inherit; text-decoration: none; }
+  .brand img { display: block; width: 118px; height: auto; }
+  .brand strong { padding-left: 16px; border-left: 1px solid var(--selinow-ink-700); }
+  .brand strong, .account span { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .account { display: grid; justify-items: end; gap: .2rem; }
+  .account small { color: var(--selinow-slate-300); }
+  .onboarding-intro { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); gap: clamp(40px, 8vw, 96px); align-items: end; padding: clamp(72px, 9vw, 112px) 0; }
+  .eyebrow { margin: 0; color: var(--selinow-onboarding-accent); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { max-width: 11ch; margin: 16px 0 0; font-size: clamp(48px, 8vw, 88px); font-weight: 750; line-height: 1; letter-spacing: -.04em; }
+  .intro-copy { max-width: 680px; margin: 24px 0 0; color: var(--selinow-slate-300); font-size: 18px; line-height: 1.65; }
+  .progress-poster { position: relative; overflow: hidden; padding: 24px; border: 1px solid var(--selinow-ink-700); border-radius: var(--selinow-radius-lg); background: var(--selinow-ink-900); box-shadow: var(--selinow-shadow-lg); }
+  .progress-poster::before { content: "08"; position: absolute; top: 8px; right: 16px; color: rgb(255 255 255 / 4%); font-size: 96px; font-weight: 750; line-height: 1; }
+  .progress-poster p { margin: 0; color: var(--selinow-slate-300); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  .progress-poster strong { position: relative; display: block; margin: 40px 0 16px; font-size: 64px; font-weight: 750; line-height: 1; letter-spacing: -.04em; }
+  .progress-track { height: 6px; overflow: hidden; border-radius: var(--selinow-radius-pill); background: var(--selinow-ink-700); }
+  .progress-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--selinow-gradient); transition: width var(--selinow-motion-slow) var(--selinow-ease); }
+  .progress-poster small { display: block; margin-top: 16px; color: var(--selinow-slate-300); line-height: 1.5; }
+  .global-feedback { position: sticky; top: 12px; z-index: 20; margin-bottom: 16px; padding: 16px 20px; border: 1px solid var(--selinow-info); border-radius: var(--selinow-radius-md); background: rgb(11 16 32 / 96%); box-shadow: var(--selinow-shadow-md); line-height: 1.5; }
+  .global-feedback[data-tone="error"] { border-color: var(--selinow-danger); }
+  .global-feedback[data-tone="success"] { border-color: var(--selinow-success); }
+  .wizard-frame { display: grid; grid-template-columns: minmax(224px, .35fr) minmax(0, 1.65fr); overflow: hidden; border: 1px solid var(--selinow-ink-700); border-radius: var(--selinow-radius-xl); background: var(--selinow-ink-900); box-shadow: var(--selinow-shadow-lg); }
+  .mobile-step-summary { display: none; }
+  .step-rail { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--selinow-ink-700); background: var(--selinow-ink-950); }
+  .step-rail ol { margin: 0; padding: 0; list-style: none; }
+  .step-rail li { border-bottom: 1px solid var(--selinow-ink-700); }
+  .step-rail button { display: grid; grid-template-columns: 32px minmax(0, 1fr) 12px; gap: 12px; align-items: center; width: 100%; min-height: 72px; border: 0; padding: 12px 16px; background: transparent; color: var(--selinow-slate-300); text-align: left; cursor: pointer; }
+  .step-rail button:hover { background: var(--selinow-ink-800); color: var(--selinow-white); }
+  .step-rail button[aria-current="step"] { background: rgb(91 92 235 / 16%); color: var(--selinow-white); box-shadow: inset 3px 0 0 var(--selinow-brand-indigo); }
+  .step-rail button > span { color: var(--selinow-onboarding-accent); font-family: var(--selinow-font-mono); font-size: 12px; }
+  .step-rail button strong { overflow: hidden; font-size: 12px; letter-spacing: .06em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+  .step-rail i { width: 10px; height: 10px; border: 1px solid currentColor; border-radius: 50%; }
+  .step-rail button[data-status="ready"] i { background: var(--selinow-success); border-color: var(--selinow-success); }
+  .step-rail button[data-status="warning"] i { background: var(--selinow-warning); border-color: var(--selinow-warning); }
+  .step-rail button[data-status="blocked"] i { opacity: .35; }
+  .rail-note { margin-top: auto; padding: 20px; color: var(--selinow-slate-300); }
+  .rail-note strong { color: var(--selinow-onboarding-accent); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  .rail-note p { margin: 10px 0 0; font-size: 12px; line-height: 1.55; }
+  .step-stage { min-width: 0; }
+  .step-panel { min-height: 704px; padding: clamp(24px, 4vw, 52px); animation: panel-in var(--selinow-motion-panel) var(--selinow-ease) both; }
+  .panel-heading { max-width: 760px; padding-bottom: 32px; border-bottom: 1px solid var(--selinow-ink-700); }
+  .panel-heading > p:first-child { margin: 0; color: var(--selinow-onboarding-accent); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  .panel-heading > p:first-child span { margin-right: 12px; font-family: var(--selinow-font-mono); }
+  .panel-heading h2 { margin: 18px 0 12px; font-size: clamp(36px, 5vw, 56px); font-weight: 720; line-height: 1.08; letter-spacing: -.035em; }
+  .panel-heading > p:last-child { max-width: 688px; margin: 0; color: var(--selinow-slate-300); line-height: 1.65; }
+  .existing-shop, .create-shop-box, .catalog-summary, .integration-card, .readiness-command, .test-order-card, .publish-box, .published-result { margin-top: 24px; border: 1px solid var(--selinow-ink-700); border-radius: var(--selinow-radius-lg); }
+  .existing-shop { padding: 20px; }
+  .existing-shop > label, .field > span { display: block; margin-bottom: 8px; color: var(--selinow-slate-300); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .select-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+  .selection-summary { margin: 12px 0 0; color: var(--selinow-slate-300); font-family: var(--selinow-font-mono); font-size: 12px; }
+  .shop-rename-form { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--selinow-ink-700); }
+  .shop-rename-form > label { display: block; margin-bottom: 8px; color: var(--selinow-slate-300); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .shop-rename-form small { display: block; margin-top: 8px; color: var(--selinow-slate-400); font-size: 12px; line-height: 1.5; }
+  .create-shop-box summary { display: flex; align-items: center; min-height: 56px; padding: 12px 20px; color: var(--selinow-onboarding-accent); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+  .create-shop-box[open] summary { border-bottom: 1px solid var(--selinow-ink-700); }
+  .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-top: 24px; }
+  .create-shop-box .form-grid { padding: 20px; }
+  .field { display: block; min-width: 0; }
+  .field-wide { grid-column: 1 / -1; }
+  .settings-globalization { margin: 0; border: 1px solid var(--selinow-ink-700); border-radius: var(--selinow-radius-lg); padding: 18px; }
+  .settings-globalization legend { padding: 0 8px; color: var(--selinow-onboarding-accent); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .settings-globalization .form-grid { padding-top: 4px; }
+  input, select, textarea { width: 100%; border: 1px solid var(--selinow-border-control); border-radius: var(--selinow-radius-md); padding: 12px 14px; background: var(--selinow-ink-950); color: var(--selinow-white); outline: none; }
+  input, select { min-height: 48px; }
+  textarea { resize: vertical; line-height: 1.5; }
+  input::placeholder, textarea::placeholder { color: var(--selinow-slate-400); opacity: 1; }
+  input:focus, select:focus, textarea:focus { border-color: var(--selinow-focus-ring); box-shadow: 0 0 0 3px rgb(59 130 246 / 22%); }
+  input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--selinow-danger); }
+  .field small { display: block; margin-top: 8px; color: var(--selinow-slate-300); font-size: 12px; line-height: 1.5; }
+  .secret-area textarea, .secret-area input { font-family: var(--selinow-font-mono); }
+  .form-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 24px; }
+  .form-actions p { max-width: 608px; margin: 0; color: var(--selinow-slate-300); font-size: 12px; line-height: 1.5; }
+  .primary-action, .secondary-action, .next-action, .publish-action { min-height: 44px; border: 1px solid transparent; border-radius: var(--selinow-radius-pill); padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .primary-action { flex: 0 0 auto; background: var(--selinow-brand-indigo); color: var(--selinow-white); }
+  .secondary-action { border-color: var(--selinow-border-control); background: transparent; color: var(--selinow-slate-200); }
+  .primary-action:hover, .publish-action:hover { box-shadow: 0 10px 28px rgb(59 130 246 / 18%); }
+  .secondary-action:hover { background: var(--selinow-ink-800); }
+  button:disabled { border-color: var(--selinow-border-control); background: var(--selinow-disabled-bg); color: var(--selinow-disabled-ink); cursor: not-allowed; opacity: 1; }
+  button[data-busy="true"] { cursor: wait; }
+  .panel-footer { display: flex; justify-content: end; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--selinow-ink-700); }
+  .next-action { border: 0; background: transparent; color: var(--selinow-onboarding-accent); }
+  .next-action span { margin-left: 8px; font-size: 18px; }
+  .choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 24px 0; padding: 0; border: 0; }
+  .choice-card { position: relative; display: grid; align-content: start; min-height: 224px; padding: 24px; border: 1px solid var(--selinow-border-control); border-radius: var(--selinow-radius-lg); background: var(--selinow-ink-950); cursor: pointer; }
+  .choice-card:has(input:checked) { border-color: var(--selinow-brand-indigo); background: rgb(91 92 235 / 14%); box-shadow: inset 0 0 0 1px var(--selinow-brand-indigo); }
+  .choice-card:has(input:focus-visible), .attestation:has(input:focus-visible) { outline: 3px solid var(--selinow-focus-ring); outline-offset: 3px; }
+  .choice-card input { position: absolute; top: 20px; right: 20px; width: 20px; min-height: 20px; accent-color: var(--selinow-brand-indigo); }
+  .choice-number { margin-bottom: 56px; color: var(--selinow-onboarding-accent); font-family: var(--selinow-font-mono); font-size: 20px; }
+  .choice-card strong { font-size: 24px; line-height: 1.2; }
+  .choice-card small { margin-top: 12px; color: var(--selinow-slate-300); line-height: 1.55; }
+  .domain-preference { max-width: 35rem; }
+  .catalog-summary { padding: 16px 20px; background: var(--selinow-ink-950); }
+  .catalog-summary p { margin: 0; color: var(--selinow-slate-300); line-height: 1.55; }
+  .catalog-summary strong { color: var(--selinow-white); }
+  .preview-strip { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 24px; border: 1px solid var(--selinow-ink-700); border-radius: var(--selinow-radius-lg); }
+  .preview-strip > div { padding: 16px; border-right: 1px solid var(--selinow-ink-700); }
+  .preview-strip > div:last-child { border-right: 0; }
+  .preview-strip span, .preview-strip strong { display: block; }
+  .preview-strip span { color: var(--selinow-slate-400); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .preview-strip strong { margin-top: 6px; font-size: 28px; line-height: 1; }
+  .split-actions > div { display: flex; gap: 10px; }
+  .integration-card { padding: 20px; background: var(--selinow-ink-950); }
+  .integration-card p { margin: 0; color: var(--selinow-slate-300); line-height: 1.55; }
+  .integration-card strong { color: var(--selinow-white); }
+  .credential-form { margin-top: 24px; }
+  .health-action { display: flex; align-items: center; gap: 16px; margin-top: 16px; }
+  .health-action p { margin: 0; color: var(--selinow-slate-300); font-size: 12px; line-height: 1.5; }
+  .provider-warning, .domain-callout { display: flex; justify-content: space-between; gap: 16px; margin-top: 24px; padding: 16px; border-left: 3px solid var(--selinow-warning); border-radius: 0 var(--selinow-radius-md) var(--selinow-radius-md) 0; background: rgb(217 119 6 / 8%); }
+  .provider-warning p, .domain-callout p { margin: 6px 0 0; color: var(--selinow-slate-300); line-height: 1.5; }
+  .domain-callout a { align-self: center; flex: 0 0 auto; min-height: 44px; color: var(--selinow-onboarding-accent); font-size: 12px; font-weight: 700; text-underline-offset: 4px; }
+  .attestation { display: flex; gap: 12px; align-items: start; padding: 16px; border: 1px solid var(--selinow-border-control); border-radius: var(--selinow-radius-md); cursor: pointer; }
+  .attestation input { flex: 0 0 auto; width: 20px; min-height: 20px; margin: 2px 0 0; accent-color: var(--selinow-brand-indigo); }
+  .attestation span { color: var(--selinow-slate-200); line-height: 1.55; }
+  .readiness-command { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px; }
+  .readiness-command p { margin: 6px 0 0; color: var(--selinow-slate-300); }
+  .readiness-list { display: grid; margin-top: 16px; border-top: 1px solid var(--selinow-ink-700); }
+  .readiness-empty { margin: 16px 0 0; color: var(--selinow-slate-300); line-height: 1.55; }
+  .readiness-check { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 68px; padding: 12px 0; border-bottom: 1px solid var(--selinow-ink-700); }
+  .readiness-check i { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--selinow-ink-700); border-radius: 50%; font-style: normal; font-weight: 700; }
+  .readiness-check[data-tone="pass"] i { border-color: var(--selinow-success); color: var(--selinow-success); }
+  .readiness-check[data-tone="warning"] i { border-color: var(--selinow-warning); color: var(--selinow-warning); }
+  .readiness-check[data-tone="fail"] i { border-color: var(--selinow-danger); color: var(--selinow-danger); }
+  .readiness-check strong, .readiness-check small { display: block; }
+  .readiness-check small { margin-top: 3px; color: var(--selinow-slate-300); }
+  .readiness-check a { min-height: 44px; color: var(--selinow-onboarding-accent); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .test-order-card { padding: clamp(20px, 3vw, 32px); background: var(--selinow-ink-950); }
+  .test-order-card h3 { margin: 10px 0; font-size: clamp(26px, 3vw, 38px); line-height: 1.12; }
+  .test-order-card > div:first-child > p:last-child { max-width: 768px; margin: 0; color: var(--selinow-slate-300); line-height: 1.6; }
+  .test-order-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(112px, .3fr) auto; gap: 12px; align-items: end; margin-top: 22px; }
+  .test-order-result { margin-top: 16px; padding: 16px; border-left: 3px solid var(--selinow-info); border-radius: 0 var(--selinow-radius-md) var(--selinow-radius-md) 0; background: var(--selinow-ink-900); }
+  .test-order-result[data-tone="success"] { border-color: var(--selinow-success); }
+  .test-order-result[data-tone="error"] { border-color: var(--selinow-danger); }
+  .test-order-result h4 { margin: 0 0 12px; font-size: 20px; line-height: 1.2; }
+  .test-order-result p { margin: 0; color: var(--selinow-slate-300); line-height: 1.55; }
+  .test-order-result dl { display: grid; grid-template-columns: minmax(128px, .45fr) minmax(0, 1fr); gap: 9px 16px; margin: 16px 0 0; }
+  .test-order-result dt { color: var(--selinow-slate-400); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+  .test-order-result dd { margin: 0; color: var(--selinow-white); }
+  .publish-box { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px; align-items: end; padding: clamp(24px, 4vw, 40px); background: linear-gradient(145deg, var(--selinow-ink-950), var(--selinow-ink-800)); box-shadow: var(--selinow-shadow-md); }
+  .publish-box h3 { margin: 10px 0; font-size: clamp(32px, 4vw, 48px); line-height: 1.05; letter-spacing: -.03em; }
+  .publish-box > div > p:last-child { max-width: 640px; margin: 0; color: var(--selinow-slate-300); line-height: 1.55; }
+  .publish-action { min-width: 176px; min-height: 52px; background: var(--selinow-brand-indigo); color: var(--selinow-white); }
+  .published-result { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px; border-color: var(--selinow-success); background: rgb(5 150 105 / 8%); }
+  .published-result p { margin: 0; font-weight: 700; }
+  .published-result a { min-height: 44px; color: var(--selinow-success); font-weight: 700; text-underline-offset: 4px; }
+  code { color: var(--selinow-onboarding-accent); font-family: var(--selinow-font-mono); }
+  @keyframes panel-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @media (max-width: 900px) {
+    .onboarding-intro { grid-template-columns: 1fr; }
+    .progress-poster { max-width: 28rem; margin-right: 1rem; }
+    .wizard-frame { grid-template-columns: 1fr; }
+    .step-rail { display: none; }
+    .mobile-step-summary { display: grid; gap: 16px; padding: 20px; border-bottom: 1px solid var(--selinow-ink-700); background: var(--selinow-ink-950); }
+    .mobile-step-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .mobile-step-heading > div { display: grid; gap: 4px; }
+    .mobile-step-heading p, .mobile-current-step { margin: 0; }
+    .mobile-step-heading p { color: var(--selinow-slate-400); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    .mobile-step-heading strong { font-size: 22px; line-height: 1.2; }
+    .mobile-step-status { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 5px 10px; border-radius: var(--selinow-radius-pill); background: var(--selinow-ink-800); color: var(--selinow-slate-200); font-size: 11px; font-weight: 700; }
+    .mobile-step-status::before { width: 7px; height: 7px; border-radius: 50%; background: currentcolor; content: ""; }
+    .mobile-step-status[data-status="ready"] { background: rgb(5 150 105 / 14%); color: #6ee7b7; }
+    .mobile-step-status[data-status="warning"] { background: rgb(217 119 6 / 14%); color: #fdba74; }
+    .mobile-step-status[data-status="blocked"] { background: rgb(220 38 38 / 14%); color: #fca5a5; }
+    .mobile-step-status[data-status="in_progress"] { background: rgb(91 92 235 / 18%); color: var(--selinow-onboarding-accent); }
+    .mobile-current-step { color: var(--selinow-slate-300); font-size: 13px; }
+    .mobile-current-step > span { color: var(--selinow-onboarding-accent); font-family: var(--selinow-font-mono); }
+    .mobile-current-step strong { color: var(--selinow-white); }
+    .mobile-step-selector { border: 1px solid var(--selinow-ink-700); border-radius: var(--selinow-radius-md); background: var(--selinow-ink-900); }
+    .mobile-step-selector summary { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 10px 14px; color: var(--selinow-white); font-size: 13px; font-weight: 700; cursor: pointer; list-style: none; }
+    .mobile-step-selector summary::-webkit-details-marker { display: none; }
+    .mobile-step-selector summary span { color: var(--selinow-onboarding-accent); font-size: 18px; transition: transform var(--selinow-motion-fast) var(--selinow-ease); }
+    .mobile-step-selector[open] summary { border-bottom: 1px solid var(--selinow-ink-700); }
+    .mobile-step-selector[open] summary span { transform: rotate(180deg); }
+    .mobile-step-selector ol { margin: 0; padding: 0; list-style: none; }
+    .mobile-step-selector li + li { border-top: 1px solid var(--selinow-ink-700); }
+    .mobile-step-selector button { display: grid; grid-template-columns: 32px minmax(0, 1fr) 12px; gap: 12px; align-items: center; width: 100%; min-height: 56px; border: 0; padding: 10px 14px; background: transparent; color: var(--selinow-slate-300); text-align: left; cursor: pointer; }
+    .mobile-step-selector button[aria-current="step"] { background: rgb(91 92 235 / 16%); color: var(--selinow-white); box-shadow: inset 3px 0 0 var(--selinow-brand-indigo); }
+    .mobile-step-selector button > span { color: var(--selinow-onboarding-accent); font-family: var(--selinow-font-mono); font-size: 12px; }
+    .mobile-step-selector button strong { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; }
+    .mobile-step-selector i { width: 10px; height: 10px; border: 1px solid currentColor; border-radius: 50%; }
+    .mobile-step-selector button[data-status="ready"] i { background: var(--selinow-success); border-color: var(--selinow-success); }
+    .mobile-step-selector button[data-status="warning"] i { background: var(--selinow-warning); border-color: var(--selinow-warning); }
+    .mobile-step-selector button[data-status="blocked"] i { opacity: .35; }
+  }
+  @media (max-width: 650px) {
+    .onboarding-shell { width: min(100% - 1.25rem, 1312px); }
+    .workspace-bar { min-height: 68px; }
+    .brand strong, .account span { display: none; }
+    .account small { max-width: 192px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .onboarding-intro { padding: 56px 8px 64px; }
+    h1 { font-size: clamp(44px, 15vw, 64px); }
+    .progress-poster { margin-right: 0; }
+    .step-panel { min-height: 0; padding: 20px; }
+    .form-grid, .choice-grid { grid-template-columns: 1fr; }
+    .field-wide { grid-column: 1; }
+    .select-row, .publish-box { grid-template-columns: 1fr; }
+    .test-order-form { grid-template-columns: 1fr; }
+    .form-actions, .provider-warning, .domain-callout, .readiness-command, .published-result { align-items: stretch; flex-direction: column; }
+    .form-actions { display: grid; }
+    .primary-action, .secondary-action, .publish-action { width: 100%; min-height: 48px; }
+    .split-actions > div { display: grid; width: 100%; }
+    .preview-strip { grid-template-columns: repeat(2, 1fr); }
+    .preview-strip > div:nth-child(2) { border-right: 0; }
+    .preview-strip > div:nth-child(-n + 2) { border-bottom: 1px solid var(--selinow-ink-700); }
+    .health-action { display: grid; }
+    .readiness-check { grid-template-columns: 2rem minmax(0, 1fr); }
+    .readiness-check a { grid-column: 2; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(html) { scroll-behavior: auto; }
+    .step-panel { animation: none; }
+    .progress-track span { transition: none; }
+  }
+</style>
+
+<style>
+  :global(html), :global(body) { background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
+  .onboarding-shell { --selinow-onboarding-accent: var(--sln-action-primary); width: 100%; margin: 0; padding: 0; color: var(--sln-text-primary); }
+  .onboarding-intro { grid-template-columns: minmax(0, 1.45fr) minmax(260px, .55fr); gap: clamp(32px, 6vw, 72px); align-items: end; padding: 0 0 clamp(32px, 5vw, 56px); }
+  .eyebrow { color: var(--sln-action-primary); }
+  h1 { max-width: 15ch; margin-top: 12px; color: var(--sln-text-primary); font-size: clamp(42px, 6vw, 68px); line-height: .98; }
+  .intro-copy { max-width: 720px; margin-top: 20px; color: var(--sln-text-secondary); font-size: 17px; }
+  .progress-poster { border-color: var(--sln-border-default); border-top: 3px solid var(--sln-action-primary); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-sm); }
+  .progress-poster::before { color: rgb(91 92 235 / 7%); }
+  .progress-poster p, .progress-poster small { color: var(--sln-text-muted); }
+  .progress-poster strong { color: var(--sln-text-primary); }
+  .progress-track { background: var(--sln-bg-subtle); }
+  .progress-track span { background: var(--sln-action-primary); }
+  .global-feedback { top: calc(var(--sln-topbar-height) + 12px); border-color: var(--sln-state-info); background: var(--sln-bg-surface); color: var(--sln-text-primary); box-shadow: var(--sln-shadow-sm); }
+  .global-feedback[data-tone="error"] { border-color: var(--sln-state-danger); background: var(--sln-tint-danger); }
+  .global-feedback[data-tone="success"] { border-color: var(--sln-state-success); background: var(--sln-tint-success); }
+  .wizard-frame { grid-template-columns: minmax(248px, 280px) minmax(0, 1fr); border-color: var(--sln-border-default); border-radius: var(--sln-radius-xl); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-sm); }
+  .step-rail { border-color: var(--sln-border-default); background: var(--sln-bg-subtle); }
+  .step-rail li { border-color: var(--sln-border-default); }
+  .step-rail button { color: var(--sln-text-secondary); }
+  .step-rail button:hover { background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .step-rail button[aria-current="step"] { background: var(--sln-tint-indigo); color: var(--sln-text-primary); }
+  .step-rail button > span { color: var(--sln-action-primary-hover); }
+  .rail-note { color: var(--sln-text-secondary); }
+  .rail-note strong { color: var(--sln-action-primary); }
+  .step-panel { min-height: 680px; background: var(--sln-bg-surface); }
+  .panel-heading { border-color: var(--sln-border-default); }
+  .panel-heading > p:first-child { color: var(--sln-action-primary); }
+  .panel-heading h2 { color: var(--sln-text-primary); font-size: clamp(34px, 4vw, 52px); }
+  .panel-heading > p:last-child { color: var(--sln-text-secondary); }
+  .existing-shop, .create-shop-box, .catalog-summary, .integration-card, .readiness-command, .test-order-card, .publish-box, .published-result, .automation-ledger { border-color: var(--sln-border-default); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+  .existing-shop > label, .field > span { color: var(--sln-text-muted); }
+  .selection-summary { color: var(--sln-text-secondary); }
+  .shop-rename-form { border-color: var(--sln-border-default); }
+  .shop-rename-form > label { color: var(--sln-text-muted); }
+  .shop-rename-form small { color: var(--sln-text-secondary); }
+  .create-shop-box summary { color: var(--sln-action-primary); }
+  .create-shop-box[open] summary { border-color: var(--sln-border-default); }
+  input, select, textarea { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  input::placeholder, textarea::placeholder { color: var(--sln-text-muted); }
+  .field small, .form-actions p, .choice-card small, .catalog-summary p, .integration-card p, .health-action p, .provider-warning p, .domain-callout p, .readiness-command p, .test-order-card > div:first-child > p:last-child, .publish-box > div > p:last-child { color: var(--sln-text-secondary); }
+  .primary-action, .secondary-action, .next-action, .publish-action, .automation-cancel { border-radius: var(--sln-radius-md); }
+  .primary-action, .publish-action { background: var(--sln-action-primary); color: var(--sln-white); }
+  .primary-action:hover, .publish-action:hover { background: var(--sln-action-primary-hover); box-shadow: var(--sln-shadow-sm); }
+  .secondary-action { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .secondary-action:hover { background: var(--sln-bg-subtle); }
+  button:disabled { border-color: var(--sln-border-default); background: var(--sln-bg-subtle); color: var(--sln-text-muted); }
+  .panel-footer { border-color: var(--sln-border-default); }
+  .next-action { color: var(--sln-action-primary); }
+  .choice-card { min-height: 212px; border-color: var(--sln-border-default); background: var(--sln-bg-subtle); }
+  .choice-card:has(input:checked) { border-color: var(--sln-action-primary); background: var(--sln-tint-indigo); box-shadow: inset 0 0 0 1px var(--sln-action-primary); }
+  .choice-number { color: var(--sln-action-primary-hover); }
+  .choice-card strong { color: var(--sln-text-primary); }
+  .catalog-summary, .integration-card { background: var(--sln-bg-subtle); }
+  .catalog-summary strong, .integration-card strong { color: var(--sln-text-primary); }
+  .preview-strip { border-color: var(--sln-border-default); background: var(--sln-bg-subtle); }
+  .preview-strip > div { border-color: var(--sln-border-default); }
+  .preview-strip span { color: var(--sln-text-muted); }
+  .preview-strip strong { color: var(--sln-text-primary); }
+  .provider-warning, .domain-callout { background: var(--sln-tint-warning); }
+  .domain-callout a { color: var(--sln-action-primary); }
+  .attestation { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); }
+  .attestation span { color: var(--sln-text-secondary); }
+  .readiness-list { border-color: var(--sln-border-default); }
+  .readiness-empty { color: var(--sln-text-secondary); }
+  .readiness-check { border-color: var(--sln-border-default); }
+  .readiness-check i { border-color: var(--sln-border-strong); }
+  .readiness-check small { color: var(--sln-text-secondary); }
+  .readiness-check a { color: var(--sln-action-primary); }
+  .test-order-card { background: var(--sln-bg-subtle); }
+  .test-order-card h3, .test-order-result h4 { color: var(--sln-text-primary); }
+  .test-order-result { background: var(--sln-bg-surface); }
+  .test-order-result p { color: var(--sln-text-secondary); }
+  .test-order-result dt { color: var(--sln-text-muted); }
+  .test-order-result dd { color: var(--sln-text-primary); }
+  .publish-box { background: var(--sln-ink-950); color: var(--sln-white); box-shadow: var(--sln-shadow-sm); }
+  .publish-box .eyebrow { color: #c7d2fe; }
+  .publish-box > div > p:last-child { color: var(--sln-slate-300); }
+  .published-result { border-color: var(--sln-state-success); background: var(--sln-tint-success); }
+  .published-result a { color: var(--selinow-success-text); }
+  code { color: var(--sln-action-primary); }
+  .automation-ledger { margin-top: 24px; overflow: hidden; }
+  .automation-ledger > header { display: flex; align-items: start; justify-content: space-between; gap: 24px; padding: 24px; border-bottom: 1px solid var(--sln-border-default); }
+  .automation-ledger h3 { margin: 8px 0; color: var(--sln-text-primary); font-size: 24px; line-height: 1.2; }
+  .automation-ledger header p:last-child { max-width: 720px; margin: 0; color: var(--sln-text-secondary); line-height: 1.55; }
+  .automation-list { display: grid; }
+  .automation-task { display: grid; grid-template-columns: minmax(132px, auto) minmax(0, 1fr) minmax(150px, auto); gap: 20px; align-items: center; padding: 20px 24px; border-bottom: 1px solid var(--sln-border-default); }
+  .automation-task:last-child { border-bottom: 0; }
+  .automation-status { display: inline-flex; align-items: center; gap: 7px; width: fit-content; min-height: 30px; padding: 5px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font-size: 11px; font-weight: 700; }
+  .automation-status::before { width: 7px; height: 7px; border-radius: 50%; background: currentcolor; content: ""; }
+  .automation-status[data-tone="success"] { background: var(--sln-tint-success); color: var(--selinow-success-text); }
+  .automation-status[data-tone="warning"] { background: var(--sln-tint-warning); color: var(--selinow-warning-text); }
+  .automation-status[data-tone="danger"] { background: var(--sln-tint-danger); color: var(--selinow-danger-text); }
+  .automation-status[data-tone="info"] { background: var(--sln-tint-info); color: var(--selinow-info-text); }
+  .automation-copy { min-width: 0; }
+  .automation-copy strong, .automation-copy small, .automation-copy code { display: block; }
+  .automation-copy p { margin: 5px 0; color: var(--sln-text-secondary); line-height: 1.5; }
+  .automation-copy small { color: var(--sln-text-muted); }
+  .automation-copy code { width: fit-content; margin-top: 7px; font-size: 11px; }
+  .automation-actions { display: grid; gap: 8px; justify-items: stretch; }
+  .automation-actions a, .automation-cancel { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 9px 12px; font-size: 12px; font-weight: 700; text-align: center; }
+  .automation-actions a { color: var(--sln-action-primary); text-underline-offset: 3px; }
+  .automation-cancel { border: 1px solid var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--selinow-danger-text); cursor: pointer; }
+  .automation-empty { padding: 24px; }
+  .automation-empty p { margin: 6px 0 0; color: var(--sln-text-secondary); }
+  .automation-error { border-left: 3px solid var(--sln-state-danger); background: var(--sln-tint-danger); }
+  @media (max-width: 900px) {
+    .onboarding-intro { grid-template-columns: 1fr; }
+    .wizard-frame { grid-template-columns: 1fr; }
+    .mobile-step-summary { border-color: var(--sln-border-default); background: var(--sln-bg-subtle); }
+    .mobile-step-heading p, .mobile-current-step { color: var(--sln-text-secondary); }
+    .mobile-step-heading strong, .mobile-current-step strong { color: var(--sln-text-primary); }
+    .mobile-step-status { background: var(--sln-bg-surface); color: var(--sln-text-secondary); }
+    .mobile-step-status[data-status="ready"] { background: var(--sln-tint-success); color: var(--selinow-success-text); }
+    .mobile-step-status[data-status="warning"] { background: var(--sln-tint-warning); color: var(--selinow-warning-text); }
+    .mobile-step-status[data-status="blocked"] { background: var(--sln-tint-danger); color: var(--selinow-danger-text); }
+    .mobile-step-status[data-status="in_progress"] { background: var(--sln-tint-indigo); color: var(--sln-action-primary-hover); }
+    .mobile-current-step > span { color: var(--sln-action-primary); }
+    .mobile-step-selector { border-color: var(--sln-border-default); background: var(--sln-bg-surface); }
+    .mobile-step-selector summary { color: var(--sln-text-primary); }
+    .mobile-step-selector[open] summary, .mobile-step-selector li + li { border-color: var(--sln-border-default); }
+    .mobile-step-selector button { color: var(--sln-text-secondary); }
+    .mobile-step-selector button[aria-current="step"] { background: var(--sln-tint-indigo); color: var(--sln-text-primary); }
+    .mobile-step-selector button > span { color: var(--sln-action-primary-hover); }
+  }
+  @media (max-width: 650px) {
+    .onboarding-intro { padding: 0 0 32px; }
+    h1 { font-size: clamp(38px, 12vw, 54px); }
+    .automation-ledger > header { display: grid; }
+    .automation-ledger > header .secondary-action { width: 100%; }
+    .automation-task { grid-template-columns: 1fr; gap: 12px; padding: 18px; }
+    .automation-actions { grid-template-columns: 1fr; }
+    .preview-strip > div:nth-child(-n + 2) { border-color: var(--sln-border-default); }
+  }
+</style>

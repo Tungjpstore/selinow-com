@@ -1,0 +1,7 @@
+---
+// Brand and storefront settings share the authoritative store-builder contract.
+const destination = new URL("/app/store?focus=settings", Astro.url);
+const shopPublicId = Astro.url.searchParams.get("shop");
+if (shopPublicId !== null) destination.searchParams.set("shop", shopPublicId);
+return Astro.redirect(`${destination.pathname}${destination.search}#store-settings`, 307);
+---

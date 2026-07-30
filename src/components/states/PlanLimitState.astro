@@ -1,0 +1,14 @@
+---
+import { createDashboardTranslator } from "../../lib/i18n/catalogs/dashboard";
+import StatePanel from "./StatePanel.astro";
+
+interface Props { actionHref?: string; actionLabel?: string; description: string; title?: string; }
+const t = createDashboardTranslator(Astro.locals.locale);
+const {
+  actionHref,
+  actionLabel = t("dashboard.state.plan_limit.action"),
+  description,
+  title = t("dashboard.state.plan_limit.title"),
+} = Astro.props;
+---
+<StatePanel actionHref={actionHref} actionLabel={actionLabel} description={description} state="plan_limited" title={title} />

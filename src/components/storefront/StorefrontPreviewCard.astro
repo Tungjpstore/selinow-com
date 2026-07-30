@@ -1,0 +1,53 @@
+---
+import type { SellerPreviewProduct } from "../../lib/storefront/preview";
+import { formatMoney, stockLabel } from "../../lib/storefront/view";
+import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+
+interface Props {
+  index: number;
+  locale?: string;
+  product: SellerPreviewProduct;
+  showExactStock: boolean;
+}
+
+const { index, locale = "en", product, showExactStock } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const firstVariant = product.variants[0];
+const purchasableVariant = product.variants.find((variant) => variant.stockState !== "out_of_stock") ?? firstVariant;
+const exactStock = showExactStock && product.fulfillmentType === "license_key" ? purchasableVariant?.availableStock : undefined;
+---
+
+<article class="storefront-preview-card">
+  <div class="storefront-preview-art" data-preview-brand>
+    <span>{String(index + 1).padStart(2, "0")}</span>
+    <strong>{product.title.slice(0, 1).toUpperCase()}</strong>
+  </div>
+  <div class="storefront-preview-copy">
+    <p class:list={["storefront-preview-stock", purchasableVariant?.stockState]} data-preview-stock data-stock-state={purchasableVariant?.stockState} data-available-stock={purchasableVariant?.availableStock}>{purchasableVariant ? stockLabel(purchasableVariant.stockState, exactStock, locale) : t("storefront.product.no_variant")}</p>
+    <h3>{product.title}</h3>
+    <p>{product.description || t("storefront.product.description_fallback")}</p>
+    {product.variants.length > 1 && <p class="storefront-preview-variants">{t("storefront.product.variant_count", { count: product.variants.length })}</p>}
+    <div class="storefront-preview-price">
+      {purchasableVariant?.compareAtMinor && <del>{formatMoney(purchasableVariant.compareAtMinor, purchasableVariant.currency, locale)}</del>}
+      <strong>{purchasableVariant ? formatMoney(purchasableVariant.priceMinor, purchasableVariant.currency, locale) : t("storefront.product.contact")}</strong>
+    </div>
+  </div>
+</article>
+
+<style>
+  .storefront-preview-card { overflow: hidden; border: 1px solid var(--preview-border-subtle, var(--sln-preview-border-subtle)); border-radius: 13px; background: var(--preview-surface, var(--sln-preview-surface)); }
+  .storefront-preview-art { display: flex; align-items: start; justify-content: space-between; min-height: 100px; padding: 12px; background: linear-gradient(135deg, color-mix(in srgb, var(--preview-brand) 80%, white), color-mix(in srgb, var(--preview-brand) 30%, white)); color: var(--preview-brand-ink); }
+  .storefront-preview-art span { font-size: 10px; font-weight: 800; }
+  .storefront-preview-art strong { align-self: end; font-size: 30px; line-height: 1; }
+  .storefront-preview-copy { display: grid; gap: 5px; padding: 12px; }
+  .storefront-preview-copy h3, .storefront-preview-copy p { margin: 0; }
+  .storefront-preview-copy h3 { color: var(--preview-text-primary, var(--sln-preview-text-primary)); font-size: 14px; line-height: 1.3; }
+  .storefront-preview-copy > p:not(.storefront-preview-stock, .storefront-preview-variants) { display: -webkit-box; overflow: hidden; color: var(--preview-text-muted, var(--sln-preview-text-muted)); font-size: 10px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .storefront-preview-stock { color: var(--preview-success-text, var(--sln-preview-stock-success)); font-size: 10px; font-weight: 800; }
+  .storefront-preview-stock.low_stock { color: var(--preview-warning-text, var(--sln-preview-stock-warning)); }
+  .storefront-preview-stock.out_of_stock { color: var(--preview-danger-text, var(--sln-preview-stock-danger)); }
+  .storefront-preview-variants { color: var(--preview-text-muted, var(--sln-preview-text-muted)); font-size: 10px; }
+  .storefront-preview-price { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 4px; }
+  .storefront-preview-price del { color: var(--sln-preview-slate); font-size: 9px; }
+  .storefront-preview-price strong { color: var(--preview-brand); font-size: 11px; }
+</style>

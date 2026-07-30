@@ -1,0 +1,185 @@
+import { AppError } from "../core/errors";
+import type { AppBindings } from "../platform/bindings";
+import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, type StorefrontTheme } from "../storefront/theme";
+import { publishReadyStorefront } from "./readiness";
+import { getShopForMember } from "./store";
+
+export type StorefrontPublicationState = "never_published" | "published" | "unpublished_changes";
+
+export type SellerStorefrontSettings = {
+  content: StorefrontContent;
+  hasUnpublishedChanges: boolean;
+  publicationState: StorefrontPublicationState;
+  publishedAt: string | null;
+  publishedVersion: number;
+  shopName: string;
+  theme: StorefrontTheme;
+  version: number;
+};
+
+type SettingsRow = {
+  brandingJson: string;
+  publishedAt: string | null;
+  publishedVersion: number;
+  storefrontJson: string;
+  version: number;
+};
+
+function objectJson(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function text(value: unknown, maximum: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  if (normalized.length === 0 || normalized.length > maximum) throw new AppError("validation_failed", 400, ["storefront_text_invalid"]);
+  return normalized;
+}
+
+function optionalText(value: unknown, maximum: number): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || (typeof value === "string" && value.trim().length === 0)) return null;
+  return text(value, maximum) ?? null;
+}
+
+function hex(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^#[0-9a-f]{6}$/iu.test(value.trim())) throw new AppError("validation_failed", 400, ["storefront_color_invalid"]);
+  return value.trim().toUpperCase();
+}
+
+function httpsUrl(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length > 500) throw new AppError("validation_failed", 400, ["storefront_logo_invalid"]);
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") throw new Error("protocol");
+    return url.toString();
+  } catch {
+    throw new AppError("validation_failed", 400, ["storefront_logo_invalid"]);
+  }
+}
+
+function expectedVersion(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new AppError("validation_failed", 400, ["storefront_version_invalid"]);
+  }
+  return value;
+}
+
+function publicationState(row: SettingsRow): StorefrontPublicationState {
+  if (row.publishedVersion < 1 || row.publishedAt === null) return "never_published";
+  return row.publishedVersion === row.version ? "published" : "unpublished_changes";
+}
+
+async function readSettings(env: AppBindings, shopId: string, shopName: string, locale: unknown): Promise<SellerStorefrontSettings> {
+  const row = await env.PLATFORM_DB.prepare(`
+    SELECT branding_json AS brandingJson, storefront_json AS storefrontJson, version,
+      published_version AS publishedVersion, published_at AS publishedAt
+    FROM shop_settings
+    WHERE shop_id = ?
+    LIMIT 1
+  `).bind(shopId).first<SettingsRow>();
+  if (row === null) throw new AppError("resource_not_found", 404);
+  const state = publicationState(row);
+  return {
+    content: parseStorefrontContent(row.storefrontJson, shopName, locale),
+    hasUnpublishedChanges: state !== "published",
+    publicationState: state,
+    publishedAt: row.publishedAt,
+    publishedVersion: row.publishedVersion,
+    shopName,
+    theme: parseStorefrontTheme(row.brandingJson),
+    version: row.version,
+  };
+}
+
+export async function getSellerStorefrontSettings(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerStorefrontSettings> {
+  const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+}
+
+export async function updateSellerStorefrontSettings(input: {
+  data: Record<string, unknown>;
+  env: AppBindings;
+  expectedVersion: unknown;
+  shopPublicId: string;
+  userId: string;
+}): Promise<SellerStorefrontSettings> {
+  const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const version = expectedVersion(input.expectedVersion);
+  const existing = await input.env.PLATFORM_DB.prepare(`
+    SELECT branding_json AS brandingJson, storefront_json AS storefrontJson, version,
+      published_version AS publishedVersion, published_at AS publishedAt
+    FROM shop_settings
+    WHERE shop_id = ?
+    LIMIT 1
+  `).bind(member.row.shop_id).first<SettingsRow>();
+  if (existing === null) throw new AppError("resource_not_found", 404);
+  if (existing.version !== version) throw new AppError("resource_conflict", 409, ["storefront_draft_stale"]);
+  const branding = objectJson(existing.brandingJson);
+  const storefront = objectJson(existing.storefrontJson);
+  const primaryColor = hex(input.data.primaryColor);
+  const accentColor = hex(input.data.accentColor);
+  const logoUrl = httpsUrl(input.data.logoUrl);
+  const fields: Array<[keyof typeof storefront, number]> = [["headline", 120], ["description", 240], ["deliveryText", 240], ["supportText", 180], ["footerText", 160]];
+  for (const [field, maximum] of fields) {
+    const value = text(input.data[field], maximum);
+    if (value !== undefined) storefront[field] = value;
+  }
+  const seoTitle = optionalText(input.data.seoTitle, 60);
+  const seoDescription = optionalText(input.data.seoDescription, 160);
+  if (seoTitle !== undefined) {
+    if (seoTitle === null) delete storefront.seoTitle;
+    else storefront.seoTitle = seoTitle;
+  }
+  if (seoDescription !== undefined) {
+    if (seoDescription === null) delete storefront.seoDescription;
+    else storefront.seoDescription = seoDescription;
+  }
+  if (input.data.announcement !== undefined) {
+    if (input.data.announcement === null || input.data.announcement === "") delete storefront.announcement;
+    else storefront.announcement = text(input.data.announcement, 140);
+  }
+  if (input.data.showExactStock !== undefined) {
+    if (typeof input.data.showExactStock !== "boolean") throw new AppError("validation_failed", 400, ["show_exact_stock_invalid"]);
+    storefront.showExactStock = input.data.showExactStock;
+  }
+  if (primaryColor !== undefined) branding.primaryColor = primaryColor;
+  if (accentColor !== undefined) branding.accentColor = accentColor;
+  if (logoUrl !== undefined) branding.logoUrl = logoUrl;
+  const now = new Date().toISOString();
+  const updated = await input.env.PLATFORM_DB.prepare(`UPDATE shop_settings SET branding_json = ?, storefront_json = ?, version = version + 1, updated_at = ? WHERE shop_id = ? AND version = ? RETURNING version`).bind(JSON.stringify(branding), JSON.stringify(storefront), now, member.row.shop_id, version).first<{ version: number }>();
+  if (updated === null) throw new AppError("resource_conflict", 409);
+  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+}
+
+export async function publishSellerStorefrontSettings(input: {
+  env: AppBindings;
+  expectedVersion: unknown;
+  requestId: string;
+  shopPublicId: string;
+  userId: string;
+}): Promise<SellerStorefrontSettings> {
+  const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  if (member.row.role !== "owner") throw new AppError("authorization_denied", 403);
+  const version = expectedVersion(input.expectedVersion);
+  const current = await input.env.PLATFORM_DB.prepare("SELECT version FROM shop_settings WHERE shop_id = ? LIMIT 1")
+    .bind(member.row.shop_id).first<{ version: number }>();
+  if (current === null) throw new AppError("resource_not_found", 404);
+  if (current.version !== version) throw new AppError("resource_conflict", 409, ["storefront_draft_stale"]);
+  await publishReadyStorefront({
+    env: input.env,
+    expectedStorefrontVersion: version,
+    requestId: input.requestId,
+    shopPublicId: input.shopPublicId,
+    userId: input.userId,
+  });
+  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+}

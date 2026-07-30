@@ -1,0 +1,211 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "color": {
+    "brand": {
+      "indigo": {
+        "$type": "color",
+        "$value": "#5B5CEB"
+      },
+      "blue": {
+        "$type": "color",
+        "$value": "#3B82F6"
+      },
+      "violet": {
+        "$type": "color",
+        "$value": "#7C3AED"
+      }
+    },
+    "semantic": {
+      "bg_canvas": {
+        "$type": "color",
+        "$value": "#F8FAFC"
+      },
+      "bg_surface": {
+        "$type": "color",
+        "$value": "#FFFFFF"
+      },
+      "bg_subtle": {
+        "$type": "color",
+        "$value": "#F1F5F9"
+      },
+      "bg_inverse": {
+        "$type": "color",
+        "$value": "#080B14"
+      },
+      "text_primary": {
+        "$type": "color",
+        "$value": "#0B1020"
+      },
+      "text_secondary": {
+        "$type": "color",
+        "$value": "#475569"
+      },
+      "text_muted": {
+        "$type": "color",
+        "$value": "#64748B"
+      },
+      "text_inverse": {
+        "$type": "color",
+        "$value": "#FFFFFF"
+      },
+      "border_default": {
+        "$type": "color",
+        "$value": "#E2E8F0"
+      },
+      "border_strong": {
+        "$type": "color",
+        "$value": "#CBD5E1"
+      },
+      "action_primary": {
+        "$type": "color",
+        "$value": "#5B5CEB"
+      },
+      "action_primary_hover": {
+        "$type": "color",
+        "$value": "#4F46E5"
+      },
+      "action_secondary": {
+        "$type": "color",
+        "$value": "#0B1020"
+      },
+      "focus_ring": {
+        "$type": "color",
+        "$value": "#3B82F6"
+      },
+      "state_success": {
+        "$type": "color",
+        "$value": "#059669"
+      },
+      "state_warning": {
+        "$type": "color",
+        "$value": "#D97706"
+      },
+      "state_danger": {
+        "$type": "color",
+        "$value": "#DC2626"
+      },
+      "state_info": {
+        "$type": "color",
+        "$value": "#2563EB"
+      }
+    }
+  },
+  "dimension": {
+    "radius": {
+      "sm": {
+        "$type": "dimension",
+        "$value": {
+          "value": 8,
+          "unit": "px"
+        }
+      },
+      "md": {
+        "$type": "dimension",
+        "$value": {
+          "value": 12,
+          "unit": "px"
+        }
+      },
+      "lg": {
+        "$type": "dimension",
+        "$value": {
+          "value": 16,
+          "unit": "px"
+        }
+      },
+      "xl": {
+        "$type": "dimension",
+        "$value": {
+          "value": 24,
+          "unit": "px"
+        }
+      }
+    },
+    "spacing": {
+      "4": {
+        "$type": "dimension",
+        "$value": {
+          "value": 4,
+          "unit": "px"
+        }
+      },
+      "8": {
+        "$type": "dimension",
+        "$value": {
+          "value": 8,
+          "unit": "px"
+        }
+      },
+      "12": {
+        "$type": "dimension",
+        "$value": {
+          "value": 12,
+          "unit": "px"
+        }
+      },
+      "16": {
+        "$type": "dimension",
+        "$value": {
+          "value": 16,
+          "unit": "px"
+        }
+      },
+      "20": {
+        "$type": "dimension",
+        "$value": {
+          "value": 20,
+          "unit": "px"
+        }
+      },
+      "24": {
+        "$type": "dimension",
+        "$value": {
+          "value": 24,
+          "unit": "px"
+        }
+      },
+      "32": {
+        "$type": "dimension",
+        "$value": {
+          "value": 32,
+          "unit": "px"
+        }
+      },
+      "40": {
+        "$type": "dimension",
+        "$value": {
+          "value": 40,
+          "unit": "px"
+        }
+      },
+      "48": {
+        "$type": "dimension",
+        "$value": {
+          "value": 48,
+          "unit": "px"
+        }
+      },
+      "64": {
+        "$type": "dimension",
+        "$value": {
+          "value": 64,
+          "unit": "px"
+        }
+      },
+      "80": {
+        "$type": "dimension",
+        "$value": {
+          "value": 80,
+          "unit": "px"
+        }
+      },
+      "96": {
+        "$type": "dimension",
+        "$value": {
+          "value": 96,
+          "unit": "px"
+        }
+      }
+    }
+  }
+}

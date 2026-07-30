@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "environment": "production",
+  "releaseId": "replace-with-release-id",
+  "commitSha": "replace-with-reviewed-git-sha",
+  "previousWorkerVersion": "replace-with-current-worker-version",
+  "candidateWorkerVersion": "replace-with-candidate-worker-version",
+  "approvals": {
+    "releaseOwner": "replace-with-release-owner",
+    "supportOwner": "replace-with-support-owner"
+  },
+  "quality": {
+    "check": false,
+    "lint": false,
+    "test": false,
+    "build": false,
+    "deployDryRun": false
+  },
+  "backup": {
+    "snapshotReportRef": "replace-with-private-backup-report-reference",
+    "completedAt": null,
+    "providerBookmarkRecorded": false,
+    "restoreDrillReportRef": "replace-with-private-restore-report-reference",
+    "restoreDrillCompletedAt": null,
+    "restoreDrillPassed": false
+  },
+  "staging": {
+    "accepted": false,
+    "acceptedAt": null
+  },
+  "security": {
+    "criticalOpen": 0,
+    "highOpen": 0
+  },
+  "pilot": {
+    "shopCount": 0
+  },
+  "manualAcceptance": {
+    "website": false,
+    "telegram": false,
+    "paymentSignedEvent": false,
+    "customDomain": false
+  },
+  "monitoring": {
+    "dashboardReady": false,
+    "alertsReady": false,
+    "budgetAlertsReady": false
+  }
+}

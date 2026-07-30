@@ -1,0 +1,7 @@
+---
+import StatePanel from "./StatePanel.astro";
+
+interface Props { description: string; title: string; }
+const { description, title } = Astro.props;
+---
+<StatePanel description={description} state="success" title={title} />

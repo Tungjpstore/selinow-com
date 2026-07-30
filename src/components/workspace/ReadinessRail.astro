@@ -1,0 +1,52 @@
+---
+type StepStatus = "blocked" | "in_progress" | "not_started" | "ready" | "warning" | "waiting_provider" | "waiting_user";
+type Step = { actionHref?: string; actionLabel?: string; label: string; status: StepStatus; summary?: string };
+
+interface Props {
+  completed?: number;
+  eyebrow?: string;
+  statusLabels?: Partial<Record<StepStatus, string>>;
+  steps: readonly Step[];
+  title?: string;
+}
+const { eyebrow = "Readiness rail", statusLabels, steps, title = "Readiness check" } = Astro.props;
+const completed = Astro.props.completed ?? steps.filter((step) => step.status === "ready").length;
+const statusLabel: Record<StepStatus, string> = {
+  blocked: "Blocked",
+  in_progress: "In progress",
+  not_started: "Not started",
+  ready: "Ready",
+  warning: "Needs attention",
+  waiting_provider: "Waiting for provider",
+  waiting_user: "Action required",
+  ...statusLabels,
+};
+---
+
+<section class="sln-readiness-rail" aria-labelledby="sln-readiness-rail-title">
+  <header><div><p class="sln-eyebrow">{eyebrow}</p><h2 id="sln-readiness-rail-title">{title}</h2></div><strong>{completed}/{steps.length}</strong></header>
+  <ol>
+    {steps.map((step, index) => <li data-status={step.status}>
+      <span class="sln-readiness-rail__index" aria-hidden="true">{step.status === "ready" ? "✓" : index + 1}</span>
+      <div><strong>{step.label}</strong><p>{statusLabel[step.status]}{step.summary ? ` · ${step.summary}` : ""}</p></div>
+      {step.actionHref && step.actionLabel && <a href={step.actionHref}>{step.actionLabel}<span aria-hidden="true"> →</span></a>}
+    </li>)}
+  </ol>
+</section>
+
+<style>
+  .sln-readiness-rail { padding: var(--sln-space-5); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .sln-readiness-rail header { display: flex; align-items: end; justify-content: space-between; gap: var(--sln-space-4); padding-bottom: var(--sln-space-4); border-bottom: 1px solid var(--sln-border-default); }
+  .sln-readiness-rail h2 { margin: 0; font: var(--sln-font-h4); }
+  .sln-readiness-rail header > strong { color: var(--sln-action-primary); font: var(--sln-font-label); }
+  .sln-readiness-rail ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .sln-readiness-rail li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--sln-space-3); align-items: center; padding: var(--sln-space-4) 0; border-bottom: 1px solid var(--sln-border-default); }
+  .sln-readiness-rail li:last-child { border-bottom: 0; padding-bottom: 0; }
+  .sln-readiness-rail__index { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--sln-border-strong); border-radius: 50%; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .sln-readiness-rail li[data-status="ready"] .sln-readiness-rail__index { border-color: var(--sln-state-success); background: var(--sln-tint-success); color: var(--selinow-success-text); }
+  .sln-readiness-rail li[data-status="blocked"] .sln-readiness-rail__index { border-color: var(--sln-state-danger); background: var(--sln-tint-danger); color: var(--sln-state-danger); }
+  .sln-readiness-rail strong { font: var(--sln-font-label); }
+  .sln-readiness-rail p { margin: var(--sln-space-1) 0 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .sln-readiness-rail a { color: var(--sln-action-primary); font: var(--sln-font-caption); text-decoration: none; white-space: nowrap; }
+  @media (max-width: 560px) { .sln-readiness-rail li { grid-template-columns: 28px minmax(0, 1fr); } .sln-readiness-rail a { grid-column: 2; } }
+</style>

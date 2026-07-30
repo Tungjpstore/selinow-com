@@ -1,0 +1,25 @@
+---
+interface Props {
+  role?: "alert" | "status";
+  title: string;
+  tone?: "danger" | "info" | "success" | "warning";
+}
+
+const { role, title, tone = "info" } = Astro.props;
+const computedRole = role ?? (tone === "danger" ? "alert" : "status");
+const icons: Record<typeof tone, string> = {
+  danger: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 17h.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',
+  success: '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/>',
+  warning: '<path d="m12 3 9 17H3L12 3Z"/><path d="M12 9v5M12 17h.01"/>',
+};
+---
+
+<aside class="sln-alert" data-tone={tone} role={computedRole} aria-atomic="true">
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" set:html={icons[tone]}></svg>
+  <div class="sln-alert__copy">
+    <strong>{title}</strong>
+    <div><slot /></div>
+    <div class="sln-alert__actions"><slot name="actions" /></div>
+  </div>
+</aside>

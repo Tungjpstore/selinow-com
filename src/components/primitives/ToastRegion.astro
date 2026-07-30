@@ -1,0 +1,12 @@
+---
+interface Props {
+  label?: string;
+  politeness?: "assertive" | "polite";
+}
+
+const { label = "Notifications", politeness = "polite" } = Astro.props;
+---
+
+<section class="sln-toast-region" aria-label={label} aria-live={politeness} aria-relevant="additions text" data-sln-toast-region>
+  <slot />
+</section>

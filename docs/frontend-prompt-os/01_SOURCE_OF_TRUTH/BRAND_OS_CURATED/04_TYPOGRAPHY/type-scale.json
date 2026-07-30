@@ -1,0 +1,68 @@
+{
+  "display-xl": {
+    "size": 72,
+    "line_height": 76,
+    "weight": 750,
+    "tracking": -0.04
+  },
+  "display-lg": {
+    "size": 56,
+    "line_height": 60,
+    "weight": 750,
+    "tracking": -0.035
+  },
+  "h1": {
+    "size": 48,
+    "line_height": 56,
+    "weight": 720,
+    "tracking": -0.03
+  },
+  "h2": {
+    "size": 36,
+    "line_height": 44,
+    "weight": 700,
+    "tracking": -0.025
+  },
+  "h3": {
+    "size": 28,
+    "line_height": 36,
+    "weight": 680,
+    "tracking": -0.018
+  },
+  "h4": {
+    "size": 22,
+    "line_height": 30,
+    "weight": 650,
+    "tracking": -0.012
+  },
+  "body-lg": {
+    "size": 18,
+    "line_height": 30,
+    "weight": 400,
+    "tracking": 0
+  },
+  "body": {
+    "size": 16,
+    "line_height": 26,
+    "weight": 400,
+    "tracking": 0
+  },
+  "body-sm": {
+    "size": 14,
+    "line_height": 22,
+    "weight": 400,
+    "tracking": 0
+  },
+  "label": {
+    "size": 14,
+    "line_height": 20,
+    "weight": 600,
+    "tracking": 0
+  },
+  "caption": {
+    "size": 12,
+    "line_height": 18,
+    "weight": 500,
+    "tracking": 0.01
+  }
+}

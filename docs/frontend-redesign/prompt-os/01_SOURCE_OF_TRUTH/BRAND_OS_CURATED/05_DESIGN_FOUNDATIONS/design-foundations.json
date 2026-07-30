@@ -1,0 +1,42 @@
+{
+  "spacing_px": [
+    0,
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    80,
+    96,
+    128
+  ],
+  "radius_px": {
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "pill": 999
+  },
+  "motion_ms": {
+    "fast": 120,
+    "default": 180,
+    "panel": 240,
+    "slow": 400
+  },
+  "breakpoints_px": {
+    "sm": 640,
+    "md": 768,
+    "lg": 1024,
+    "xl": 1280,
+    "2xl": 1536
+  },
+  "container_px": {
+    "reading": 760,
+    "marketing": 1200
+  }
+}

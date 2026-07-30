@@ -1,0 +1,271 @@
+---
+import AppLayout from "../../../layouts/AppLayout.astro";
+import PageHeader from "../../../components/workspace/PageHeader.astro";
+import WorkspaceState from "../../../components/states/WorkspaceState.astro";
+import StatusBadge from "../../../components/primitives/StatusBadge.astro";
+import Money from "../../../components/commerce/Money.astro";
+import PaymentState from "../../../components/commerce/PaymentState.astro";
+import FulfillmentState from "../../../components/commerce/FulfillmentState.astro";
+import { isAppError } from "../../../lib/core/errors";
+import { requireResourceId } from "../../../lib/catalog/policy";
+import { getSellerOrder, type SellerOrderDetail } from "../../../lib/commerce/seller-orders";
+import { authenticateRequest } from "../../../lib/auth/session";
+import { getBindings } from "../../../lib/platform/bindings";
+import { withSelectedShop } from "../../../lib/dashboard/shop-navigation";
+import { createDashboardTranslator, createSystemTranslator } from "../../../lib/i18n";
+import { listShopsForMember, selectShopForMember } from "../../../lib/tenants/store";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+const systemT = createSystemTranslator(locale);
+const orderParam = Astro.params.id;
+let order: SellerOrderDetail | null = null;
+let state: "ready" | "not_found" | "forbidden" | "error" = "ready";
+
+if (shop === undefined) {
+  state = "not_found";
+} else {
+  try {
+    const orderPublicId = requireResourceId(orderParam, "order");
+    order = await getSellerOrder({ env, orderPublicId, shopPublicId: shop.publicId, userId: auth.userId });
+  } catch (error) {
+    if (!isAppError(error)) throw error;
+    state = error.status === 403 || error.code === "authorization_denied" ? "forbidden" : error.status === 404 ? "not_found" : "error";
+  }
+}
+
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("Pragma", "no-cache");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+if (state === "not_found") Astro.response.status = 404;
+if (state === "forbidden") Astro.response.status = 403;
+
+const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+
+const orderStatusLabels: Record<string, string> = {
+  completed: t("dashboard.order_detail.status.completed"),
+  exception: t("dashboard.order_detail.status.exception"),
+  expired: t("dashboard.order_detail.status.expired"),
+  pending_payment: t("dashboard.order_detail.status.pending_payment"),
+  processing: t("dashboard.order_detail.status.processing"),
+  cancelled: t("dashboard.order_detail.status.cancelled"),
+};
+const orderStatusTone = (value: string): "danger" | "info" | "neutral" | "success" | "warning" => {
+  if (value === "completed") return "success";
+  if (value === "exception" || value === "cancelled") return "danger";
+  if (value === "pending_payment" || value === "expired") return "warning";
+  if (value === "processing") return "info";
+  return "neutral";
+};
+const knownPaymentStates = new Set([
+  "creating", "pending", "paid_exact", "paid", "failed", "error", "expired", "partial",
+  "overpaid", "late", "identity_mismatch", "inconsistent", "terminal_unpaid", "refunded",
+]);
+const paymentAttemptLabel = (value: string): string => value === "created"
+  ? t("dashboard.order_detail.payment.created")
+  : systemT(`status.payment.${knownPaymentStates.has(value) ? value : "unknown"}`);
+const paymentAttemptTone = (value: string): "danger" | "info" | "neutral" | "success" | "warning" => {
+  if (value === "paid" || value === "paid_exact") return "success";
+  if (value === "pending" || value === "created" || value === "creating") return "info";
+  if (["partial", "overpaid", "failed", "error", "late", "identity_mismatch", "inconsistent"].includes(value)) return "danger";
+  if (value === "expired" || value === "terminal_unpaid") return "warning";
+  return "neutral";
+};
+const sourceLabels: Record<string, string> = { web: "Website", website: "Website", telegram: "Telegram", api: "API" };
+const fulfillmentTypeLabels: Record<string, string> = {
+  digital_keys: t("dashboard.order_detail.fulfillment_type.license"),
+  license_key: t("dashboard.order_detail.fulfillment_type.license"),
+  manual: t("dashboard.order_detail.fulfillment_type.manual"),
+  download: t("dashboard.order_detail.fulfillment_type.download"),
+};
+const dateFormatter = new Intl.DateTimeFormat(locale ?? "en", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh",
+});
+const formatDate = (value: string | null | undefined): string => {
+  if (value === null || value === undefined || value === "") return t("dashboard.commerce.not_recorded");
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? t("dashboard.commerce.not_recorded") : dateFormatter.format(date);
+};
+const formatShortId = (value: string): string => value.replace(/^order_/u, "").slice(0, 8).toUpperCase();
+---
+
+<AppLayout activePath="/app/orders" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={order ? t("dashboard.order_detail.order_title", { number: order.orderNumber }) : t("dashboard.order_detail.title")}>
+  {state === "not_found" && <WorkspaceState eyebrow={t("dashboard.order_detail.not_found.eyebrow")} title={t("dashboard.order_detail.not_found.title")} description={t("dashboard.order_detail.not_found.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.back")} tone="warning" />}
+  {state === "forbidden" && <WorkspaceState eyebrow={t("dashboard.order_detail.forbidden.eyebrow")} title={t("dashboard.order_detail.forbidden.title")} description={t("dashboard.order_detail.forbidden.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.back")} tone="danger" />}
+  {state === "error" && <WorkspaceState eyebrow={t("dashboard.order_detail.error.eyebrow")} title={t("dashboard.order_detail.error.title")} description={t("dashboard.order_detail.error.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.error.action")} tone="danger" />}
+
+  {state === "ready" && order !== null && shop !== undefined && <>
+    <PageHeader eyebrow={t("dashboard.order_detail.header.eyebrow", { id: formatShortId(order.orderId) })} title={t("dashboard.order_detail.order_title", { number: order.orderNumber })} description={t("dashboard.order_detail.header.description")}>
+      <div slot="actions" class="header-actions">
+        <a class="sln-button sln-button-secondary" href={workspaceHref("/app/orders")}>← {t("dashboard.order_detail.order_list")}</a>
+        <a class="sln-button sln-button-primary" href={`https://${shop.slug}.${env.PLATFORM_BASE_DOMAIN}`}>{t("dashboard.order_detail.open_storefront")} <span aria-hidden="true">↗</span></a>
+      </div>
+    </PageHeader>
+
+    <section class="order-status-rail" aria-label={t("dashboard.order_detail.summary_aria")}>
+      <div><span>{t("dashboard.order_detail.order_number")}</span><strong>{order.orderNumber}</strong><small>{formatShortId(order.orderId)}</small></div>
+      <div><span>{t("dashboard.order_detail.status")}</span><StatusBadge label={orderStatusLabels[order.status] ?? t("dashboard.order_detail.status.unknown")} tone={orderStatusTone(order.status)} /><small>{t("dashboard.order_detail.last_updated", { time: formatDate(order.updatedAt) })}</small></div>
+      <div><span>{t("dashboard.order_detail.payment")}</span><PaymentState locale={locale} value={order.paymentStatus} /><small>{order.paidAt ? t("dashboard.order_detail.verified_at", { time: formatDate(order.paidAt) }) : t("dashboard.order_detail.not_verified")}</small></div>
+      <div><span>{t("dashboard.order_detail.fulfillment")}</span><FulfillmentState locale={locale} value={order.fulfillmentStatus} /><small>{order.fulfilledAt ? t("dashboard.order_detail.fulfilled_at", { time: formatDate(order.fulfilledAt) }) : t("dashboard.order_detail.not_fulfilled")}</small></div>
+      <div><span>{t("dashboard.order_detail.total")}</span><strong class="rail-total"><Money value={order.totalMinor} currency={order.currency} locale={locale ?? "en"} /></strong><small>{sourceLabels[order.sourceChannel] ?? order.sourceChannel}</small></div>
+    </section>
+
+    <div class="order-layout">
+      <div class="order-main">
+        <section class="ledger-panel" aria-labelledby="customer-title">
+          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.customer.eyebrow")}</p><h2 id="customer-title">{t("dashboard.order_detail.customer.title")}</h2></div><span class="safe-note">{t("dashboard.order_detail.masked")}</span></div>
+          <dl class="customer-grid">
+            <div><dt>{t("dashboard.order_detail.customer.email")}</dt><dd>{order.customerEmail ?? t("dashboard.order_detail.no_email")}</dd></div>
+            <div><dt>{t("dashboard.order_detail.customer.source")}</dt><dd>{sourceLabels[order.sourceChannel] ?? order.sourceChannel}</dd></div>
+            <div><dt>{t("dashboard.order_detail.customer.created")}</dt><dd>{formatDate(order.createdAt)}</dd></div>
+            <div><dt>{t("dashboard.order_detail.customer.expires")}</dt><dd>{formatDate(order.expiresAt)}</dd></div>
+          </dl>
+          <p class="privacy-copy">{t("dashboard.order_detail.customer.privacy")}</p>
+        </section>
+
+        <section class="ledger-panel" aria-labelledby="items-title">
+          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.items.eyebrow")}</p><h2 id="items-title">{t("dashboard.order_detail.items.title")}</h2></div><span class="record-count">{t("dashboard.order_detail.items.count", { count: order.itemCount })}</span></div>
+          {order.items.length === 0 ? <WorkspaceState title={t("dashboard.order_detail.items.empty_title")} description={t("dashboard.order_detail.items.empty_description")} tone="warning" /> : <div class="item-ledger">
+            {order.items.map((item, index) => <article class="item-row">
+              <span class="item-index">{String(index + 1).padStart(2, "0")}</span>
+              <div class="item-copy"><strong>{item.productTitle}</strong><span>{item.variantTitle} · <code>{item.sku}</code></span><small>{fulfillmentTypeLabels[item.fulfillmentType] ?? item.fulfillmentType} · {t("dashboard.order_detail.quantity", { count: item.quantity })}</small>{item.privateDownload !== null && <span class="private-download-state"><strong>{t("dashboard.order_detail.private_download.title")}</strong><span>{item.privateDownload.filename}</span><small>{item.privateDownload.entitlementStatus === "active" ? t("dashboard.order_detail.private_download.remaining", { count: item.privateDownload.remainingDownloads }) : item.privateDownload.entitlementStatus === "exhausted" ? t("dashboard.order_detail.private_download.exhausted") : t("dashboard.order_detail.private_download.waiting")}</small></span>}</div>
+              <div class="item-price"><strong><Money value={item.lineTotalMinor} currency={order.currency} locale={locale ?? "en"} /></strong><small><Money value={item.unitPriceMinor} currency={order.currency} locale={locale ?? "en"} /> / {t("dashboard.order_detail.unit")}</small></div>
+            </article>)}
+            <div class="item-total"><span>{t("dashboard.order_detail.total")}</span><strong><Money value={order.totalMinor} currency={order.currency} locale={locale ?? "en"} /></strong></div>
+          </div>}
+        </section>
+
+        <div class="timeline-grid">
+          <section class="ledger-panel timeline-panel" aria-labelledby="payment-title">
+            <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.payment_timeline.eyebrow")}</p><h2 id="payment-title">{t("dashboard.order_detail.payment")}</h2></div><PaymentState locale={locale} value={order.paymentStatus} /></div>
+            {order.payments.length === 0 ? <WorkspaceState title={t("dashboard.order_detail.payment_timeline.empty_title")} description={t("dashboard.order_detail.payment_timeline.empty_description")} tone="info" /> : <ol class="timeline-list">
+              {order.payments.map((payment) => <li>
+                <span class="timeline-marker" aria-hidden="true"></span>
+                <div class="timeline-entry"><div class="timeline-top"><strong>{paymentAttemptLabel(payment.state)}</strong><StatusBadge label={paymentAttemptLabel(payment.state)} tone={paymentAttemptTone(payment.state)} /></div><p>{payment.provider ? t("dashboard.order_detail.payment_channel", { provider: payment.provider }) : t("dashboard.order_detail.internal_payment")} · {t("dashboard.order_detail.expected_amount")} <Money value={payment.expectedAmountMinor} currency={order.currency} locale={locale ?? "en"} /></p><small>{formatDate(payment.createdAt)} · {t("dashboard.order_detail.expires_at")} {formatDate(payment.expiresAt)}</small>{payment.lastSafeErrorCode && <code class="safe-error">{t("dashboard.order_detail.safe_error", { code: payment.lastSafeErrorCode })}</code>}</div>
+              </li>)}
+            </ol>}
+          </section>
+
+          <section class="ledger-panel timeline-panel" aria-labelledby="fulfillment-title">
+            <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.fulfillment_timeline.eyebrow")}</p><h2 id="fulfillment-title">{t("dashboard.order_detail.fulfillment")}</h2></div><FulfillmentState locale={locale} value={order.fulfillmentStatus} /></div>
+            {order.fulfillment.length === 0 ? <WorkspaceState title={t("dashboard.order_detail.fulfillment_timeline.empty_title")} description={t("dashboard.order_detail.fulfillment_timeline.empty_description")} tone="info" /> : <ol class="timeline-list">
+              {order.fulfillment.map((entry) => <li>
+                <span class="timeline-marker" aria-hidden="true"></span>
+                <div class="timeline-entry"><div class="timeline-top"><strong>{fulfillmentTypeLabels[entry.type] ?? entry.type}</strong><FulfillmentState locale={locale} value={entry.state} /></div><p>{entry.state === "fulfilled" ? t("dashboard.order_detail.fulfillment_done", { time: formatDate(entry.fulfilledAt) }) : entry.state === "failed" ? t("dashboard.order_detail.fulfillment_failed", { time: formatDate(entry.failedAt) }) : t("dashboard.order_detail.fulfillment_waiting")}</p><small>{t("dashboard.order_detail.started_at", { time: formatDate(entry.createdAt) })}</small></div>
+              </li>)}
+            </ol>}
+          </section>
+        </div>
+
+        <section class="ledger-panel" aria-labelledby="messages-title">
+          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.messages.eyebrow")}</p><h2 id="messages-title">{t("dashboard.order_detail.messages.title")}</h2></div><span class="safe-note">{t("dashboard.order_detail.not_connected")}</span></div>
+          <WorkspaceState title={t("dashboard.order_detail.messages.empty_title")} description={t("dashboard.order_detail.messages.empty_description")} tone="info" />
+        </section>
+
+        <section class="ledger-panel" aria-labelledby="notes-title">
+          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.notes.eyebrow")}</p><h2 id="notes-title">{t("dashboard.order_detail.notes.title")}</h2></div><span class="safe-note">{t("dashboard.order_detail.read_only")}</span></div>
+          <WorkspaceState title={t("dashboard.order_detail.notes.empty_title")} description={t("dashboard.order_detail.notes.empty_description")} tone="info" />
+        </section>
+      </div>
+
+      <aside class="order-side" aria-label={t("dashboard.order_detail.side_aria")}>
+        <section class="side-panel" aria-labelledby="summary-title">
+          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.summary.eyebrow")}</p><h2 id="summary-title">{t("dashboard.order_detail.summary.title")}</h2></div></div>
+          <dl class="summary-list">
+            <div><dt>{t("dashboard.order_detail.summary.source")}</dt><dd>{sourceLabels[order.sourceChannel] ?? order.sourceChannel}</dd></div>
+            <div><dt>{t("dashboard.order_detail.summary.lines")}</dt><dd>{order.itemCount}</dd></div>
+            <div><dt>{t("dashboard.order_detail.summary.paid_at")}</dt><dd>{formatDate(order.paidAt)}</dd></div>
+            <div><dt>{t("dashboard.order_detail.summary.fulfilled_at")}</dt><dd>{formatDate(order.fulfilledAt)}</dd></div>
+          </dl>
+          <div class="safe-callout"><strong>{t("dashboard.order_detail.summary.no_override")}</strong><span>{t("dashboard.order_detail.summary.no_override_description")}</span></div>
+        </section>
+
+        <section class="side-panel" aria-labelledby="audit-title">
+          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.audit.eyebrow")}</p><h2 id="audit-title">{t("dashboard.order_detail.audit.title")}</h2></div><span class="record-count">{t("dashboard.order_detail.audit.count", { count: order.audit.length })}</span></div>
+          {order.audit.length === 0 ? <WorkspaceState title={t("dashboard.order_detail.audit.empty_title")} description={t("dashboard.order_detail.audit.empty_description")} tone="info" /> : <ol class="audit-list">
+            {order.audit.map((entry) => <li><span class="audit-dot" aria-hidden="true"></span><div><strong>{entry.action}</strong><small>{formatDate(entry.createdAt)}</small></div></li>)}
+          </ol>}
+        </section>
+      </aside>
+    </div>
+  </>}
+</AppLayout>
+
+<style>
+  .header-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 10px; }
+  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); text-decoration: none; }
+  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
+  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .order-status-rail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: var(--sln-space-8); border-block: 1px solid var(--sln-border-default); }
+  .order-status-rail > div { display: grid; gap: 6px; min-width: 0; padding: 18px 18px; border-right: 1px solid var(--sln-border-default); }
+  .order-status-rail > div:last-child { border-right: 0; }
+  .order-status-rail > div > span, .order-status-rail small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .order-status-rail strong { overflow: hidden; font-size: 18px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+  .order-status-rail .rail-total { font-size: 20px; }
+  .order-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); gap: var(--sln-space-8); margin-top: var(--sln-space-10); align-items: start; }
+  .order-main { display: grid; gap: var(--sln-space-8); min-width: 0; }
+  .order-side { position: sticky; top: calc(var(--sln-topbar-height) + 24px); display: grid; gap: var(--sln-space-8); min-width: 0; }
+  .ledger-panel, .side-panel { min-width: 0; padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+  .side-panel { padding: 20px; }
+  .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: var(--sln-space-6); }
+  .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .record-count, .safe-note { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .safe-note { color: var(--sln-state-info); }
+  .customer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--sln-border-default); }
+  .customer-grid > div { display: grid; gap: 6px; padding: 16px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .customer-grid > div:nth-child(odd) { margin-right: 20px; }
+  .customer-grid dt, .summary-list dt { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .customer-grid dd, .summary-list dd { overflow-wrap: anywhere; margin: 0; color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .privacy-copy { margin: 16px 0 0; color: var(--sln-text-muted); font: var(--sln-font-body-sm); }
+  .item-ledger { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
+  .item-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(130px, auto); gap: 14px; align-items: center; min-height: 78px; padding: 14px 16px; border-top: 1px solid var(--sln-border-default); }
+  .item-row:first-child { border-top: 0; }
+  .item-index { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; }
+  .item-copy { display: grid; gap: 4px; min-width: 0; }
+  .item-copy strong, .item-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-copy span, .item-copy small, .item-price small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .item-copy code { color: var(--sln-text-secondary); }
+  .item-copy .private-download-state { display: grid; gap: 3px; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 3px solid var(--sln-state-info); background: var(--sln-tint-info); color: var(--sln-text-secondary); white-space: normal; }
+  .private-download-state strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .private-download-state span, .private-download-state small { overflow-wrap: anywhere; white-space: normal; }
+  .item-price { display: grid; gap: 3px; justify-items: end; text-align: right; }
+  .item-price strong { font-variant-numeric: tabular-nums; }
+  .item-total { display: flex; justify-content: space-between; gap: 16px; padding: 16px; border-top: 1px solid var(--sln-border-default); background: var(--sln-bg-subtle); font: var(--sln-font-label); }
+  .item-total strong { font-size: 18px; }
+  .timeline-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sln-space-8); }
+  .timeline-panel { min-width: 0; }
+  .timeline-list, .audit-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .timeline-list > li { position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 13px; padding: 0 0 22px; }
+  .timeline-list > li:last-child { padding-bottom: 0; }
+  .timeline-list > li:not(:last-child)::after { position: absolute; top: 15px; bottom: 0; left: 6px; width: 1px; background: var(--sln-border-default); content: ""; }
+  .timeline-marker { position: relative; z-index: 1; width: 13px; height: 13px; margin-top: 5px; border: 3px solid var(--sln-bg-surface); border-radius: 50%; background: var(--sln-action-primary); box-shadow: 0 0 0 1px var(--sln-action-primary); }
+  .timeline-entry { display: grid; gap: 5px; min-width: 0; }
+  .timeline-top { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+  .timeline-top strong { font-size: 14px; }
+  .timeline-entry p { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .timeline-entry small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .safe-error { width: fit-content; max-width: 100%; overflow-wrap: anywhere; color: var(--sln-state-danger); font: var(--sln-font-caption); }
+  .summary-list { display: grid; margin: 0; border-top: 1px solid var(--sln-border-default); }
+  .summary-list > div { display: grid; gap: 5px; padding: 14px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .safe-callout { display: grid; gap: 5px; margin-top: 18px; padding: 14px; border-left: 3px solid var(--sln-state-warning); background: var(--sln-tint-warning); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .safe-callout strong { color: var(--sln-text-primary); }
+  .audit-list > li { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .audit-list > li:last-child { border-bottom: 0; }
+  .audit-dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--sln-state-info); }
+  .audit-list > li > div { display: grid; gap: 4px; min-width: 0; }
+  .audit-list strong { overflow-wrap: anywhere; font: var(--sln-font-label); }
+  .audit-list small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  @media (max-width: 980px) { .order-layout { grid-template-columns: 1fr; }.order-side { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+  @media (max-width: 760px) { .order-status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }.order-status-rail > div:nth-child(2n) { border-right: 0; }.order-status-rail > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); }.timeline-grid, .order-side { grid-template-columns: 1fr; }.ledger-panel { padding: 18px; }.customer-grid { grid-template-columns: 1fr; }.customer-grid > div:nth-child(odd) { margin-right: 0; }.item-row { grid-template-columns: 30px minmax(0, 1fr); }.item-price { grid-column: 2; display: flex; align-items: baseline; justify-content: space-between; justify-items: initial; text-align: left; }.item-total { padding: 14px; } }
+  @media (max-width: 470px) { .header-actions { width: 100%; }.header-actions .sln-button { flex: 1; }.order-status-rail > div { padding: 14px 12px; }.order-status-rail strong, .order-status-rail .rail-total { font-size: 16px; }.panel-heading { align-items: start; flex-direction: column; gap: 8px; }.timeline-top { align-items: start; flex-direction: column; }.timeline-top .sln-status { order: 2; } }
+</style>

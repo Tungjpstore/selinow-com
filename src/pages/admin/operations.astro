@@ -1,0 +1,486 @@
+---
+import AdminState from "../../components/admin/AdminState.astro";
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { listActiveDeadLetters } from "../../lib/operations/dead-letters";
+import { listActiveDeletionRequests } from "../../lib/operations/deletion";
+import { listActiveIncidents } from "../../lib/operations/incidents";
+import { listEncryptionRotationRuns } from "../../lib/operations/rotation-operator";
+import { getBindings } from "../../lib/platform/bindings";
+import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
+import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
+
+const env = getBindings();
+const locale = resolvePresentationLocale(Astro.locals.locale);
+const t = createAdminTranslator(locale);
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("Pragma", "no-cache");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+Astro.response.headers.set("Referrer-Policy", "no-referrer");
+
+let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let roleLookupFailed = false;
+try {
+  adminRole = await getPlatformAdminRole({ env, userId: auth.userId });
+} catch {
+  roleLookupFailed = true;
+}
+
+if (roleLookupFailed) Astro.response.status = 503;
+else if (adminRole === null) Astro.response.status = 403;
+
+let deadLetters: Awaited<ReturnType<typeof listActiveDeadLetters>> = [];
+let deletionOverview: Awaited<ReturnType<typeof listActiveDeletionRequests>> = { canOperate: false, requests: [] };
+let incidents: Awaited<ReturnType<typeof listActiveIncidents>> = [];
+let rotationOverview: Awaited<ReturnType<typeof listEncryptionRotationRuns>> = { canOperate: false, runs: [] };
+let dataUnavailable = false;
+if (adminRole !== null) {
+  try {
+    [deadLetters, deletionOverview, incidents, rotationOverview] = await Promise.all([
+      listActiveDeadLetters({ env }),
+      listActiveDeletionRequests({ env, userId: auth.userId }),
+      listActiveIncidents({ env }),
+      listEncryptionRotationRuns({ env, userId: auth.userId }),
+    ]);
+  } catch {
+    dataUnavailable = true;
+    Astro.response.status = 503;
+  }
+}
+
+const canReplayDeadLetters = adminRole === "owner" || adminRole === "risk";
+const providerIncidents = incidents.filter((item) => ["provider_degraded", "outbox_failure"].includes(item.category));
+const safeDate = (value: string): Date | null => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+const formatTime = (value: string): string => safeDate(value)?.toLocaleString(locale, {
+  dateStyle: "short",
+  timeStyle: "short",
+}) ?? t("admin.common.unknown");
+const age = (value: string): string => {
+  const parsed = safeDate(value);
+  if (parsed === null) return t("admin.common.unknown");
+  const minutes = Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 60_000));
+  if (minutes < 1) return t("admin.common.just_now");
+  if (minutes < 60) return t("admin.common.minutes", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return t("admin.common.hours", { count: hours });
+  return t("admin.common.days", { count: Math.floor(hours / 24) });
+};
+
+const incidentCategoryLabels: Record<string, string> = {
+  backup_failure: t("admin.operations.incident.category.backup_failure"),
+  encryption_rotation: t("admin.operations.incident.category.encryption_rotation"),
+  outbox_failure: t("admin.operations.incident.category.outbox_failure"),
+  provider_degraded: t("admin.operations.incident.category.provider_degraded"),
+  queue_dead_letter: t("admin.operations.incident.category.queue_dead_letter"),
+  restore_failure: t("admin.operations.incident.category.restore_failure"),
+  security_limit: t("admin.operations.incident.category.security_limit"),
+  system_health: t("admin.operations.incident.category.system_health"),
+};
+const incidentStatusLabels: Record<string, { label: string; tone: "danger" | "info" | "neutral" | "success" | "warning" }> = {
+  acknowledged: { label: t("admin.operations.status.acknowledged"), tone: "info" },
+  open: { label: t("admin.operations.status.open"), tone: "warning" },
+  resolved: { label: t("admin.operations.status.resolved"), tone: "success" },
+};
+const deadLetterStatusLabels: Record<string, { label: string; tone: "danger" | "info" | "neutral" | "success" | "warning" }> = {
+  acknowledged: { label: t("admin.operations.status.acknowledged"), tone: "info" },
+  open: { label: t("admin.operations.status.open"), tone: "warning" },
+  resolved: { label: t("admin.operations.status.resolved"), tone: "success" },
+  retry_requested: { label: t("admin.operations.status.retry_requested"), tone: "warning" },
+};
+const rotationStatusLabels: Record<string, { label: string; tone: "danger" | "info" | "neutral" | "success" | "warning" }> = {
+  canceled: { label: t("admin.operations.status.canceled"), tone: "neutral" },
+  completed: { label: t("admin.operations.status.completed"), tone: "success" },
+  failed: { label: t("admin.operations.status.failed"), tone: "danger" },
+  paused: { label: t("admin.operations.status.paused"), tone: "warning" },
+  planned: { label: t("admin.operations.status.planned"), tone: "info" },
+  running: { label: t("admin.operations.status.running"), tone: "warning" },
+};
+const deletionStatusLabels: Record<string, { label: string; tone: "danger" | "info" | "neutral" | "success" | "warning" }> = {
+  blocked: { label: t("admin.operations.status.blocked"), tone: "warning" },
+  failed: { label: t("admin.operations.status.investigate"), tone: "danger" },
+  processing: { label: t("admin.operations.status.processing"), tone: "info" },
+  retention_hold: { label: t("admin.operations.status.legal_hold"), tone: "warning" },
+};
+const deletionReasonLabels: Record<string, string> = {
+  business_closed: t("admin.operations.deletion.reason.business_closed"),
+  other: t("admin.operations.deletion.reason.other"),
+  platform_migration: t("admin.operations.deletion.reason.platform_migration"),
+  seller_request: t("admin.operations.deletion.reason.seller_request"),
+};
+const severityLabels: Record<string, string> = {
+  critical: t("admin.operations.severity.critical"),
+  high: t("admin.operations.severity.high"),
+  low: t("admin.operations.severity.low"),
+  medium: t("admin.operations.severity.medium"),
+};
+const rotationKeyFamilyLabels: Record<string, string> = {
+  generated_license_artifacts: t("admin.operations.rotation.key_family.generated_license_artifacts"),
+  generated_license_credentials: t("admin.operations.rotation.key_family.generated_license_credentials"),
+  inventory: t("admin.operations.rotation.key_family.inventory"),
+  payment_credentials: t("admin.operations.rotation.key_family.payment_credentials"),
+  telegram_credentials: t("admin.operations.rotation.key_family.telegram_credentials"),
+  telegram_recipient_ids: t("admin.operations.rotation.key_family.telegram_recipient_ids"),
+};
+const operationsClientCopy = {
+  "deletion.action_invalid": t("admin.operations.client.deletion.action_invalid"),
+  "deletion.confirm_release": t("admin.operations.client.deletion.confirm_release"),
+  "deletion.confirm_set": t("admin.operations.client.deletion.confirm_set"),
+  "deletion.confirmation_invalid": t("admin.operations.client.deletion.confirmation_invalid"),
+  "deletion.hold_released": t("admin.operations.client.deletion.hold_released"),
+  "deletion.hold_releasing": t("admin.operations.client.deletion.hold_releasing"),
+  "deletion.hold_set": t("admin.operations.client.deletion.hold_set"),
+  "deletion.hold_setting": t("admin.operations.client.deletion.hold_setting"),
+  "deletion.hold_until_invalid": t("admin.operations.client.deletion.hold_until_invalid"),
+  "deletion.version_invalid": t("admin.operations.client.deletion.version_invalid"),
+  "error.authentication_required": t("admin.operations.client.error.authentication_required"),
+  "error.authorization_denied": t("admin.operations.client.error.authorization_denied"),
+  "error.csrf_invalid": t("admin.operations.client.error.csrf_invalid"),
+  "error.csrf_missing": t("admin.operations.client.error.csrf_missing"),
+  "error.generic": t("admin.operations.client.error.generic"),
+  "error.idempotency_conflict": t("admin.operations.client.error.idempotency_conflict"),
+  "error.operations_incident_conflict": t("admin.operations.client.error.operations_incident_conflict"),
+  "error.operations_state_conflict": t("admin.operations.client.error.operations_state_conflict"),
+  "error.operations_validation_failed": t("admin.operations.client.error.operations_validation_failed"),
+  "error.recent_auth_required": t("admin.operations.client.error.recent_auth_required"),
+  "error.reference_code": t("admin.operations.client.error.reference_code"),
+  "error.reference_request": t("admin.operations.client.error.reference_request"),
+  "error.resource_not_found": t("admin.operations.client.error.resource_not_found"),
+  "error.rotation_operation_pending": t("admin.operations.client.error.rotation_operation_pending"),
+  "error.rotation_state_conflict": t("admin.operations.client.error.rotation_state_conflict"),
+  "error.shop_deletion_legal_hold_conflict": t("admin.operations.client.error.shop_deletion_legal_hold_conflict"),
+  "error.shop_deletion_not_found": t("admin.operations.client.error.shop_deletion_not_found"),
+  "error.validation_failed": t("admin.operations.client.error.validation_failed"),
+  "operation.confirm_replay": t("admin.operations.client.operation.confirm_replay"),
+  "operation.confirm_resolve": t("admin.operations.client.operation.confirm_resolve"),
+  "operation.replaying": t("admin.operations.client.operation.replaying"),
+  "operation.updated": t("admin.operations.client.operation.updated"),
+  "operation.updating": t("admin.operations.client.operation.updating"),
+  "rotation.batch_invalid": t("admin.operations.client.rotation.batch_invalid"),
+  "rotation.confirm_global": t("admin.operations.client.rotation.confirm_global"),
+  "rotation.confirm_live": t("admin.operations.client.rotation.confirm_live"),
+  "rotation.created": t("admin.operations.client.rotation.created"),
+  "rotation.creating": t("admin.operations.client.rotation.creating"),
+  "rotation.processed": t("admin.operations.client.rotation.processed"),
+  "rotation.processing": t("admin.operations.client.rotation.processing"),
+  "rotation.shop_required": t("admin.operations.client.rotation.shop_required"),
+};
+---
+
+<AdminLayout activePath="/admin/operations" email={auth.email} role={adminRole} title={t("admin.operations.title")}>
+  {roleLookupFailed ? (
+    <AdminState
+      tone="danger"
+      eyebrow={t("admin.operations.permission.eyebrow")}
+      title={t("admin.operations.permission.title")}
+      description={t("admin.operations.permission.description")}
+      code={t("admin.common.request", { requestId: Astro.locals.requestId })}
+      actionHref="/admin/operations"
+      actionLabel={t("admin.common.reload")}
+    />
+  ) : adminRole === null ? (
+    <AdminState
+      tone="warning"
+      eyebrow={t("admin.operations.forbidden.eyebrow")}
+      title={t("admin.operations.forbidden.title")}
+      description={t("admin.operations.forbidden.description")}
+      code="authorization_denied"
+      actionHref="/app"
+      actionLabel={t("admin.common.back_workspace")}
+    />
+  ) : dataUnavailable ? (
+    <AdminState
+      tone="danger"
+      eyebrow={t("admin.operations.data.eyebrow")}
+      title={t("admin.operations.data.title")}
+      description={t("admin.operations.data.description")}
+      code={t("admin.common.request", { requestId: Astro.locals.requestId })}
+      actionHref="/admin/operations"
+      actionLabel={t("admin.common.reload")}
+    />
+  ) : (
+    <div data-operations-root data-copy={JSON.stringify(operationsClientCopy)} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-busy="false">
+      <header class="admin-page-header">
+        <div>
+          <p class="admin-eyebrow">{t("admin.operations.header.eyebrow")}</p>
+          <h1>{t("admin.operations.header.title")}</h1>
+          <p>{t("admin.operations.header.description")}</p>
+        </div>
+        <div class="admin-summary" aria-label={t("admin.operations.header.summary_aria")}>
+          <div><span>{t("admin.operations.summary.dead_letter")}</span><strong>{deadLetters.length}</strong></div>
+          <div><span>{t("admin.operations.summary.incident")}</span><strong>{incidents.length}</strong></div>
+          <div><span>{t("admin.operations.summary.deletion_active")}</span><strong>{deletionOverview.requests.length}</strong></div>
+        </div>
+      </header>
+
+      {providerIncidents.length > 0 && (
+        <div class="admin-feedback" data-tone="error" role="alert" aria-live="polite" aria-atomic="true">
+          {t("admin.operations.alert.provider", { count: providerIncidents.length })}
+        </div>
+      )}
+      <p class="admin-feedback" data-feedback role="status" aria-live="polite" aria-atomic="true">{t("admin.operations.feedback")}</p>
+
+      <section class="admin-section" aria-labelledby="integration-title">
+        <div class="admin-section-heading">
+          <div><h2 id="integration-title">{t("admin.operations.title")}</h2><p>{t("admin.operations.contract.description")}</p></div>
+          <span>{t("admin.operations.records", { count: incidents.length + deadLetters.length + deletionOverview.requests.length })}</span>
+        </div>
+        <div class="admin-records">
+          <ul class="admin-contract-list">
+            <li><span>{t("admin.operations.contract.provider")}</span><span class="admin-badge" data-tone={providerIncidents.length > 0 ? "danger" : "success"}>{providerIncidents.length > 0 ? t("admin.operations.contract.alerts") : t("admin.operations.contract.no_alerts")}</span></li>
+            <li><span>{t("admin.operations.contract.deletion")}</span><span class="admin-badge" data-tone={deletionOverview.canOperate ? "warning" : "info"}>{deletionOverview.canOperate ? t("admin.operations.contract.owner_risk_control") : t("admin.common.read_only")}</span></li>
+            <li><span>{t("admin.operations.contract.rotation_operator")}</span><span class="admin-badge" data-tone="info">{rotationOverview.canOperate ? t("admin.operations.contract.owner_control") : t("admin.common.read_only")}</span></li>
+            <li><span>{t("admin.operations.contract.health")}</span><span class="admin-badge">{t("admin.common.read_api_unavailable")}</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="admin-section" aria-labelledby="deletion-title">
+        <div class="admin-section-heading">
+          <div><h2 id="deletion-title">{t("admin.operations.deletion.title")}</h2><p>{t("admin.operations.deletion.description")}</p></div>
+          <span>{t("admin.operations.deletion.count", { count: deletionOverview.requests.length })}</span>
+        </div>
+        {deletionOverview.requests.length === 0 ? (
+          <div class="admin-empty"><strong>{t("admin.operations.deletion.empty_title")}</strong><span>{t("admin.operations.deletion.empty_description")}</span></div>
+        ) : (
+          <div class="admin-records" role="list" aria-label={t("admin.operations.deletion.list_aria")}>
+            <div class="admin-record-header" aria-hidden="true"><span>{t("admin.operations.column.impact")}</span><span>{t("admin.operations.column.shop")}</span><span>{t("admin.operations.column.safe_code")}</span><span>{t("admin.operations.column.evidence")}</span><span>{t("admin.operations.column.age")}</span><span>{t("admin.operations.column.control")}</span><span>{t("admin.operations.column.state")}</span></div>
+            {deletionOverview.requests.map((item) => {
+              const state = deletionStatusLabels[item.status] ?? { label: t("admin.common.safe_state"), tone: "neutral" as const };
+              const hasLegalHold = item.legalHoldUntil !== null;
+              const action = hasLegalHold ? "release" : "set";
+              return (
+                <article class="admin-record" role="listitem" data-deletion-request={item.deletionRequestId}>
+                  <div class="admin-record-summary">
+                    <div><small class="admin-cell-label">{t("admin.operations.column.impact")}</small><span class="admin-badge" data-tone={item.status === "failed" ? "danger" : "warning"}>{t("admin.operations.deletion.high_risk")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.shop")}</small><strong>{item.shopName}</strong><span>{item.shopPublicId}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.safe_code")}</small><code>{item.lastSafeErrorCode ?? item.reasonCode}</code></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.evidence")}</small><span title={formatTime(item.graceEndsAt)}>{t("admin.operations.deletion.grace", { time: formatTime(item.graceEndsAt) })}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.age")}</small><span title={formatTime(item.createdAt)}>{age(item.createdAt)}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.control")}</small><span>{deletionOverview.canOperate ? (hasLegalHold ? t("admin.operations.deletion.can_release") : t("admin.operations.deletion.can_set")) : t("admin.common.read_only")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.state")}</small><span class="admin-badge" data-tone={state.tone}>{state.label}</span></div>
+                  </div>
+                  <details>
+                    <summary>{t("admin.operations.deletion.details")}</summary>
+                    <div class="admin-record-detail">
+                      <div>
+                        <p>{hasLegalHold ? t("admin.operations.deletion.hold_active") : t("admin.operations.deletion.hold_none")}</p>
+                        <dl class="admin-safe-facts">
+                          <div><dt>{t("admin.operations.deletion.detail.reference")}</dt><dd><code>{item.deletionRequestId}</code></dd></div>
+                          <div><dt>{t("admin.operations.deletion.detail.reason")}</dt><dd>{deletionReasonLabels[item.reasonCode] ?? item.reasonCode}</dd></div>
+                          <div><dt>{t("admin.operations.deletion.detail.grace_ends")}</dt><dd>{formatTime(item.graceEndsAt)}</dd></div>
+                          <div><dt>{t("admin.operations.deletion.detail.financial_retention")}</dt><dd>{formatTime(item.financialRecordsRetainUntil)}</dd></div>
+                          <div><dt>{t("admin.operations.deletion.detail.legal_hold")}</dt><dd>{item.legalHoldUntil === null ? t("admin.common.none") : formatTime(item.legalHoldUntil)}</dd></div>
+                          <div><dt>{t("admin.operations.deletion.detail.lifecycle_locks")}</dt><dd>{t("admin.operations.deletion.detail.lifecycle_values", { checkout: formatTime(item.checkoutBlockedAt), routing: formatTime(item.routingRemovedAt) })}</dd></div>
+                          <div><dt>{t("admin.operations.field.version")}</dt><dd><code>{item.version}</code></dd></div>
+                        </dl>
+                      </div>
+                      {deletionOverview.canOperate ? (
+                        <form
+                          class="admin-form"
+                          data-deletion-legal-hold-form
+                          data-action={action}
+                          data-endpoint={`/api/admin/operations/deletions/${encodeURIComponent(item.deletionRequestId)}/legal-hold`}
+                          data-shop-public-id={item.shopPublicId}
+                          data-version={item.version}
+                        >
+                          {action === "set" && <label>{t("admin.operations.deletion.form.hold_until")}<input name="holdUntil" type="datetime-local" required /></label>}
+                          <label>{t("admin.operations.deletion.form.reason_code")}<input name="reasonCode" value={action === "set" ? "legal_preservation" : "legal_clearance"} required pattern="[a-z][a-z0-9_]{2,63}" maxlength="64" /></label>
+                          <label>{t("admin.operations.deletion.form.evidence_reference")}<input name="evidenceReference" autocomplete="off" placeholder={t("admin.operations.deletion.form.evidence_placeholder")} pattern="[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}" maxlength="128" /></label>
+                          <label>{t("admin.operations.deletion.form.impact_confirmation")}<input name="confirmation" autocomplete="off" required value="" placeholder={action === "set" ? "LEGAL_HOLD" : "RELEASE_HOLD"} /><small>{action === "set" ? t("admin.operations.deletion.impact_help_set") : t("admin.operations.deletion.impact_help_release")}</small></label>
+                          <div class="admin-form-actions"><button class:list={[action === "release" && "danger"]} type="submit">{action === "set" ? t("admin.operations.deletion.hold_set") : t("admin.operations.deletion.hold_release")}</button></div>
+                        </form>
+                      ) : (
+                        <p>{t("admin.operations.deletion.support")}</p>
+                      )}
+                    </div>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section class="admin-section" aria-labelledby="rotation-title">
+        <div class="admin-section-heading">
+          <div><h2 id="rotation-title">{t("admin.operations.rotation.title")}</h2><p>{t("admin.operations.rotation.description")}</p></div>
+          <span>{t("admin.operations.rotation.count", { count: rotationOverview.runs.length })}</span>
+        </div>
+        {rotationOverview.canOperate && (
+          <div class="admin-form-panel" data-risk="high">
+            <form class="admin-form" data-rotation-create-form>
+              <label>{t("admin.operations.rotation.form.key_family")}<select name="keyFamily" required><option value="inventory">{t("admin.operations.rotation.key_family.inventory")}</option><option value="generated_license_artifacts">{t("admin.operations.rotation.key_family.generated_license_artifacts")}</option><option value="payment_credentials">{t("admin.operations.rotation.key_family.payment_credentials")}</option><option value="generated_license_credentials">{t("admin.operations.rotation.key_family.generated_license_credentials")}</option><option value="telegram_credentials">{t("admin.operations.rotation.key_family.telegram_credentials")}</option><option value="telegram_recipient_ids">{t("admin.operations.rotation.key_family.telegram_recipient_ids")}</option></select></label>
+              <label>{t("admin.operations.rotation.form.mode")}<select name="mode" required><option value="dry">{t("admin.operations.rotation.mode.dry")}</option><option value="live">{t("admin.operations.rotation.mode.live")}</option></select></label>
+              <label>{t("admin.operations.rotation.form.scope")}<select name="scope" required><option value="shop">{t("admin.operations.rotation.option.scope_shop")}</option><option value="global">{t("admin.operations.rotation.option.scope_global")}</option></select></label>
+              <label>{t("admin.operations.rotation.form.shop_public_id")}<input name="shopPublicId" autocomplete="off" placeholder="shop_..." maxlength="128" /><small>{t("admin.operations.rotation.one_shop_required")}</small></label>
+              <label>{t("admin.operations.rotation.form.source_version")}<input name="sourceKeyVersion" required value="v1" pattern="v[1-9][0-9]{0,3}" maxlength="5" /></label>
+              <label>{t("admin.operations.rotation.form.target_version")}<input name="targetKeyVersion" required value="v2" pattern="v[1-9][0-9]{0,3}" maxlength="5" /></label>
+              <label>{t("admin.operations.rotation.form.global_confirmation")}<input name="globalConfirmation" autocomplete="off" placeholder="ROTATE_GLOBAL" maxlength="32" /></label>
+              <label>{t("admin.operations.rotation.form.live_confirmation")}<input name="liveConfirmation" autocomplete="off" placeholder="ROTATE_LIVE" maxlength="32" /></label>
+              <div class="admin-form-actions"><button type="submit">{t("admin.operations.rotation.create")}</button></div>
+            </form>
+          </div>
+        )}
+        {rotationOverview.runs.length === 0 ? (
+          <div class="admin-empty"><strong>{t("admin.operations.rotation.empty_title")}</strong><span>{t("admin.operations.rotation.empty_description")}</span></div>
+        ) : (
+          <div class="admin-records" role="list" aria-label={t("admin.operations.rotation.list_aria")}>
+            <div class="admin-record-header" aria-hidden="true"><span>{t("admin.operations.column.state")}</span><span>{t("admin.operations.column.key_family")}</span><span>{t("admin.operations.column.scope")}</span><span>{t("admin.operations.column.progress")}</span><span>{t("admin.operations.column.age")}</span><span>{t("admin.operations.column.errors")}</span><span>{t("admin.operations.column.action")}</span></div>
+            {rotationOverview.runs.map((run) => {
+              const state = rotationStatusLabels[run.status] ?? { label: t("admin.common.safe_state"), tone: "neutral" as const };
+              const progress = run.totalItems === 0 ? t("admin.operations.rotation.no_records") : `${run.processedItems}/${run.totalItems}`;
+              return (
+                <article class="admin-record" role="listitem" data-rotation-run={run.id}>
+                  <div class="admin-record-summary">
+                    <div><small class="admin-cell-label">{t("admin.operations.column.state")}</small><span class="admin-badge" data-tone={state.tone}>{state.label}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.key_family")}</small><strong>{rotationKeyFamilyLabels[run.keyFamily] ?? run.keyFamily}</strong></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.scope")}</small><span>{run.scope === "global" ? t("admin.operations.rotation.scope_global") : run.shopPublicId ?? t("admin.operations.rotation.scope_shop")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.progress")}</small><span>{progress}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.age")}</small><span title={formatTime(run.updatedAt)}>{age(run.updatedAt)}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.errors")}</small><span>{run.failedItems}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.action")}</small><span>{rotationOverview.canOperate && !run.dryRun && !["completed", "canceled"].includes(run.status) ? t("admin.common.can_continue") : t("admin.common.read_only")}</span></div>
+                  </div>
+                  <details>
+                    <summary>{t("admin.operations.rotation.details")}</summary>
+                    <div class="admin-record-detail">
+                      <div>
+                        <p>{t("admin.operations.rotation.safe_description")}</p>
+                        <dl class="admin-safe-facts">
+                          <div><dt>{t("admin.operations.rotation.detail.run_id")}</dt><dd><code>{run.id}</code></dd></div>
+                          <div><dt>{t("admin.operations.field.version")}</dt><dd><code>{run.sourceKeyVersion}</code> → <code>{run.targetKeyVersion}</code></dd></div>
+                          <div><dt>{t("admin.operations.updated")}</dt><dd>{formatTime(run.updatedAt)}</dd></div>
+                          {run.lastSafeErrorCode !== null && <div><dt>{t("admin.operations.rotation.detail.safe_error")}</dt><dd><code>{run.lastSafeErrorCode}</code></dd></div>}
+                        </dl>
+                      </div>
+                      {rotationOverview.canOperate && !run.dryRun && !["completed", "canceled"].includes(run.status) && (
+                        <div class="admin-actions">
+                          <label>{t("admin.operations.rotation.form.batch_size")}<input data-rotation-limit type="number" min="1" max="100" value="25" /></label>
+                          <button type="button" data-rotation-process>{t("admin.operations.rotation.process_resume")}</button>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section class="admin-section" aria-labelledby="dead-letter-title">
+        <div class="admin-section-heading">
+          <div><h2 id="dead-letter-title">{t("admin.operations.dead_letter.title")}</h2><p>{t("admin.operations.dead_letter.description")}</p></div>
+          <span>{t("admin.operations.dead_letter.count", { count: deadLetters.length })}</span>
+        </div>
+        {deadLetters.length === 0 ? (
+          <div class="admin-empty"><strong>{t("admin.operations.dead_letter.empty_title")}</strong><span>{t("admin.operations.dead_letter.empty_description")}</span></div>
+        ) : (
+          <div class="admin-records" role="list" aria-label={t("admin.operations.dead_letter.title")}>
+            <div class="admin-record-header" aria-hidden="true"><span>{t("admin.operations.column.class")}</span><span>{t("admin.operations.column.message")}</span><span>{t("admin.operations.column.safe_code")}</span><span>{t("admin.operations.column.evidence")}</span><span>{t("admin.operations.column.age")}</span><span>{t("admin.operations.column.assignee")}</span><span>{t("admin.operations.column.state")}</span></div>
+            {deadLetters.map((item) => {
+              const state = deadLetterStatusLabels[item.status] ?? { label: t("admin.common.safe_state"), tone: "neutral" as const };
+              return (
+                <article class="admin-record" role="listitem">
+                  <div class="admin-record-summary">
+                    <div><small class="admin-cell-label">{t("admin.operations.column.class")}</small><span class="admin-badge">{t("admin.operations.dead_letter.queue")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.message")}</small><strong>{item.messageKind}</strong></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.safe_code")}</small><code>{item.failureCode}</code></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.evidence")}</small><span>{item.referenceType === "none" ? t("admin.operations.dead_letter.no_reference") : `${item.referenceType}:${item.referenceId ?? "-"}`}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.age")}</small><span title={formatTime(item.lastSeenAt)}>{age(item.lastSeenAt)}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.assignee")}</small><span>{item.acknowledgedAt === null ? t("admin.common.unacknowledged") : t("admin.common.acknowledged")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.state")}</small><span class="admin-badge" data-tone={state.tone}>{state.label}</span></div>
+                  </div>
+                  <details>
+                    <summary>{t("admin.operations.dead_letter.details")}</summary>
+                    <div class="admin-record-detail">
+                      <div>
+                        <p>{t("admin.operations.dead_letter.safe_reference")}</p>
+                        <dl class="admin-safe-facts">
+                          <div><dt>{t("admin.operations.dead_letter.queue")}</dt><dd><code>{item.queueName}</code></dd></div>
+                          <div><dt>{t("admin.operations.dead_letter.detail.message_id")}</dt><dd><code>{item.messageId}</code></dd></div>
+                          <div><dt>{t("admin.operations.dead_letter.detail.replay_target")}</dt><dd>{item.replayTargetKind === null ? t("admin.operations.dead_letter.unlinked") : t("admin.operations.dead_letter.replay_target_value", { kind: item.replayTargetKind, status: item.replayStatus ?? t("admin.common.unknown") })}</dd></div>
+                          <div><dt>{t("admin.operations.field.occurrences")}</dt><dd>{t("admin.operations.dead_letter.occurrence_summary", { count: item.occurrenceCount, attempts: item.providerAttempts })}</dd></div>
+                        </dl>
+                      </div>
+                      <div>
+                        <label>{t("admin.operations.form.resolution_code")}<input data-resolution-code value="manually_resolved" maxlength="128" /></label>
+                        <div class="admin-actions" data-operation-actions data-endpoint={`/api/admin/operations/dead-letters/${encodeURIComponent(item.id)}`} data-shop-id={item.shopId ?? ""} data-version={item.version}>
+                          {item.status === "open" && <button type="button" data-action="acknowledge">{t("admin.operations.dead_letter.acknowledge")}</button>}
+                          {item.replayTargetKind === null && item.status !== "retry_requested" && <button type="button" data-action="request_retry">{t("admin.operations.dead_letter.request_retry")}</button>}
+                          {canReplayDeadLetters && item.shopId !== null && item.replayTargetKind !== null && ["open", "acknowledged"].includes(item.status) && ["idle", "failed", "completed"].includes(item.replayStatus ?? "") && <button type="button" data-action="replay">{t("admin.operations.dead_letter.replay_target")}</button>}
+                          <button class="danger" type="button" data-action="resolve">{t("admin.operations.dead_letter.resolve")}</button>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section class="admin-section" aria-labelledby="incident-title">
+        <div class="admin-section-heading">
+          <div><h2 id="incident-title">{t("admin.operations.incident.title")}</h2><p>{t("admin.operations.incident.description")}</p></div>
+          <span>{t("admin.operations.incident.count", { count: incidents.length })}</span>
+        </div>
+        {incidents.length === 0 ? (
+          <div class="admin-empty"><strong>{t("admin.operations.incident.empty_title")}</strong><span>{t("admin.operations.incident.empty_description")}</span></div>
+        ) : (
+          <div class="admin-records" role="list" aria-label={t("admin.operations.incident.title")}>
+            <div class="admin-record-header" aria-hidden="true"><span>{t("admin.operations.column.severity")}</span><span>{t("admin.operations.column.entity")}</span><span>{t("admin.operations.column.safe_code")}</span><span>{t("admin.operations.column.evidence")}</span><span>{t("admin.operations.column.age")}</span><span>{t("admin.operations.column.assignee")}</span><span>{t("admin.operations.column.state")}</span></div>
+            {incidents.map((item) => {
+              const state = incidentStatusLabels[item.status] ?? { label: t("admin.common.safe_state"), tone: "neutral" as const };
+              return (
+                <article class="admin-record" role="listitem">
+                  <div class="admin-record-summary">
+                    <div><small class="admin-cell-label">{t("admin.operations.column.severity")}</small><span class="admin-badge" data-tone={item.severity === "critical" ? "danger" : item.severity === "high" ? "warning" : "info"}>{severityLabels[item.severity] ?? t("admin.common.unclassified")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.entity")}</small><strong>{incidentCategoryLabels[item.category] ?? t("admin.operations.incident.category.fallback")}</strong></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.safe_code")}</small><code>{item.sourceKind}</code></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.evidence")}</small><span>{item.sourceRef}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.age")}</small><span title={formatTime(item.lastSeenAt)}>{age(item.lastSeenAt)}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.assignee")}</small><span>{item.acknowledgedAt === null ? t("admin.common.unacknowledged") : t("admin.common.acknowledged")}</span></div>
+                    <div><small class="admin-cell-label">{t("admin.operations.column.state")}</small><span class="admin-badge" data-tone={state.tone}>{state.label}</span></div>
+                  </div>
+                  <details>
+                    <summary>{t("admin.operations.incident.details")}</summary>
+                    <div class="admin-record-detail">
+                      <div>
+                        <p>{t("admin.operations.incident.aggregate", { category: incidentCategoryLabels[item.category] ?? t("admin.operations.incident.category.fallback") })}</p>
+                        <dl class="admin-safe-facts">
+                          <div><dt>{t("admin.operations.incident.detail.id")}</dt><dd><code>{item.id}</code></dd></div>
+                          <div><dt>{t("admin.operations.field.occurrences")}</dt><dd>{item.occurrenceCount}</dd></div>
+                          <div><dt>{t("admin.operations.incident.detail.last_seen")}</dt><dd>{formatTime(item.lastSeenAt)}</dd></div>
+                          <div><dt>{t("admin.operations.incident.detail.shop_scope")}</dt><dd>{item.shopId === null ? t("admin.operations.incident.scope_platform") : t("admin.operations.incident.scope_shop")}</dd></div>
+                        </dl>
+                      </div>
+                      <div>
+                        <label>{t("admin.operations.form.resolution_code")}<input data-resolution-code value="incident_contained" maxlength="128" /></label>
+                        <div class="admin-actions" data-operation-actions data-endpoint={`/api/admin/operations/incidents/${encodeURIComponent(item.id)}`} data-shop-id={item.shopId ?? ""} data-version={item.version}>
+                          {item.status === "open" && <button type="button" data-action="acknowledge">{t("admin.operations.incident.acknowledge")}</button>}
+                          <button class="danger" type="button" data-action="resolve">{t("admin.operations.incident.resolve")}</button>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </div>
+  )}
+</AdminLayout>
+
+<script>
+  import "../../scripts/dashboard/system-operations";
+</script>

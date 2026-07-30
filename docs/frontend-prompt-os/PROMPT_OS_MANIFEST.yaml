@@ -1,0 +1,64 @@
+version: 1.0.0
+product: Selinow
+kit_type: frontend_prompt_operating_system
+locale_primary: vi-VN
+locale_ready: en
+framework:
+  name: Astro
+  major: 7
+  language: TypeScript strict
+  adapter: Cloudflare
+  rendering: SSR/static-first
+  client_runtime_default: none
+
+entrypoints:
+  human: README_FIRST.md
+  agent: AGENTS.md
+  one_shot: 00_START_HERE/ONE_SHOT_AGENT_PROMPT.md
+  source_precedence: 01_SOURCE_OF_TRUTH/SOURCE_PRECEDENCE.md
+
+surfaces:
+  marketing:
+    host: selinow.com
+    layout: src/layouts/PlatformLayout.astro
+    skill: selinow-marketing-frontend
+  workspace:
+    host: app.selinow.com
+    layout: src/layouts/AppLayout.astro
+    skill: selinow-seller-workspace
+  storefront:
+    host: tenant hostname or custom domain
+    layout: src/layouts/StorefrontLayout.astro
+    skill: selinow-storefront
+  admin:
+    host: protected admin route
+    layout: dedicated admin shell
+    skill: selinow-admin-operations
+
+always_read:
+  - 00_START_HERE/NON_NEGOTIABLES.md
+  - 01_SOURCE_OF_TRUTH/SOURCE_PRECEDENCE.md
+  - 02_PRODUCT_AND_ARCHITECTURE/PRODUCT_BOUNDARY.md
+  - 03_DESIGN_SYSTEM/DESIGN_DIRECTION.md
+  - 03_DESIGN_SYSTEM/selinow-frontend-tokens.css
+
+forbidden_default_actions:
+  - change API URLs or payloads for visual convenience
+  - add buyer accounts to MVP
+  - add React or Vue without measured justification
+  - render sensitive secrets or plaintext keys
+  - treat return URL as payment verification
+  - merge payment and fulfillment states
+  - create a marketplace-wide catalog
+  - hard-code pricing limits that come from runtime data
+  - trust client supplied tenant or role authority
+
+validation:
+  commands:
+    - npm run check
+    - npm run lint
+    - npm run test
+    - npm run build
+  visual:
+    viewports: [390x844, 768x1024, 1440x1024]
+    protocol: 09_QA/PIXEL_PARITY_PROTOCOL.md
