@@ -52,6 +52,7 @@ function readyWranglerConfig(): Record<string, unknown> {
         ],
         name: "selinow-com-production",
         observability: { enabled: true },
+        preview_urls: false,
         queues: {
           consumers: [{ queue: "selinow-integration-production" }, { queue: "selinow-notification-production" }],
           producers: [

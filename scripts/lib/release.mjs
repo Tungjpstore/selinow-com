@@ -230,6 +230,7 @@ export function inspectProductionReadiness(input) {
     makeCheck("wrangler.env.production", typeof production === "object" && production !== null),
     makeCheck("wrangler.env.production.name", isConfigured(production?.name)),
     makeCheck("wrangler.env.production.workers_dev", production?.workers_dev === false),
+    makeCheck("wrangler.env.production.preview_urls", production?.preview_urls === false),
     makeCheck("wrangler.env.production.routes", Array.isArray(production?.routes) && production.routes.length >= 3),
     makeCheck("wrangler.env.production.assets.ASSETS", production?.assets?.binding === "ASSETS"),
   ];

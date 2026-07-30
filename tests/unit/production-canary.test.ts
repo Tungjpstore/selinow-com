@@ -98,6 +98,7 @@ const wranglerConfig = {
   env: {
     production: {
       name: productionSpec.workerName,
+      preview_urls: false,
       send_email: [{ name: "EMAIL", allowed_sender_addresses: ["no-reply@selinow.com"] }],
       vars: productionVars,
     },
@@ -415,6 +416,13 @@ describe("production canary candidate binding contract", () => {
 
   it("requires exact binding types, IDs, resource names, and plain variable values", () => {
     expect(validateCandidateVersionView(candidateView(), CANDIDATE_VERSION, contract)).toContain("PLATFORM_DB");
+    expect(() => validateCandidateVersionView(candidateView(), CANDIDATE_VERSION, {
+      ...contract,
+      wranglerConfig: {
+        ...wranglerConfig,
+        env: { production: { ...wranglerConfig.env.production, preview_urls: true } },
+      },
+    })).toThrow("production_canary_candidate_contract_invalid");
     expect(() => validateCandidateVersionView(
       candidateView(replaceBinding("MEDIA", { type: "kv_namespace" })),
       CANDIDATE_VERSION,

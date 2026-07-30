@@ -866,6 +866,7 @@ function candidateBindingContract(input) {
   const manifest = input.generatedManifest;
   if (
     production?.name !== spec?.workerName
+    || production?.preview_urls !== false
     || manifest?.accountId !== spec?.accountId
     || manifest?.zoneId !== spec?.zoneId
     || manifest?.workerName !== spec?.workerName
