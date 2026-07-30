@@ -126,6 +126,7 @@ function stagingAdmissionRunner(args: string[]) {
 function productionSpec() {
   return {
     accountId: stagingSpec.accountId,
+    bootstrap: { canaryHostname: "canary.selinow.com" },
     environment: "production",
     hostnames: {
       api: "api.selinow.com",
@@ -169,9 +170,9 @@ function exactSharedZoneRouteInventory() {
   ];
 }
 
-function exactSharedZoneDomainInventory() {
+function exactSharedZoneDomainInventory(includeCanaryCarrier = false) {
   const production = productionSpec();
-  return [
+  const domains = [
     ...stagingSpec.hostnames.map((hostname) => ({
       hostname,
       service: stagingSpec.workerName,
@@ -185,6 +186,15 @@ function exactSharedZoneDomainInventory() {
       zone_name: production.zoneName,
     })),
   ];
+  if (includeCanaryCarrier) {
+    domains.push({
+      hostname: production.bootstrap.canaryHostname,
+      service: stagingSpec.workerName,
+      zone_id: production.zoneId,
+      zone_name: production.zoneName,
+    });
+  }
+  return domains;
 }
 
 describe("platform CLI flags", () => {
@@ -409,6 +419,25 @@ describe("Cloudflare for SaaS platform configuration", () => {
         ok: true,
       }),
     ]));
+
+    expect(validateProductionWorkerRouteInventory(
+      productionSpec(),
+      stagingSpec,
+      productionWranglerConfig(),
+      exactSharedZoneRouteInventory(),
+      exactSharedZoneDomainInventory(true),
+    )).toMatchObject({ ok: true });
+    expect(validateProductionWorkerRouteInventory(
+      productionSpec(),
+      stagingSpec,
+      productionWranglerConfig(),
+      exactSharedZoneRouteInventory(),
+      exactSharedZoneDomainInventory(true).map((domain) => (
+        domain.hostname === "canary.selinow.com"
+          ? { ...domain, service: "selinow-com-production" }
+          : domain
+      )),
+    ).ok).toBe(false);
 
     expect(validateProductionWorkerRouteInventory(
       productionSpec(),

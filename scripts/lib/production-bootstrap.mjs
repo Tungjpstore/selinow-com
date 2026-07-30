@@ -91,6 +91,9 @@ function assertProductionSpecContract(productionSpec) {
     ["api", "dashboard", "marketing"],
     "production_bootstrap_hostname_contract_invalid",
   );
+  const platformOnlyRouteMode = productionSpec.routing.externalCustomDomainStrategy === "platform_only_staging_fallback";
+  const fullRouteMode = productionSpec.routing.externalCustomDomainStrategy
+    === "production_fallback_with_platform_staging_exceptions";
   if (
     productionSpec.hostnames.marketing !== zoneName
     || productionSpec.hostnames.dashboard !== `app.${zoneName}`
@@ -129,10 +132,12 @@ function assertProductionSpecContract(productionSpec) {
   if (
     productionSpec.routing.canaryOverrideRoute !== `canary.${zoneName}/*`
     || productionSpec.routing.externalCustomDomainFallbackRoute !== "*/*"
-    || productionSpec.routing.externalCustomDomainStrategy !== "production_fallback_with_platform_staging_exceptions"
+    || (!platformOnlyRouteMode && !fullRouteMode)
     || productionSpec.routing.platformApexRoute !== `${zoneName}/*`
     || productionSpec.routing.platformStorefrontWildcard !== `*.${zoneName}/*`
-    || productionSpec.routing.routeHandoff !== "atomic_shared_zone_route_replacement"
+    || productionSpec.routing.routeHandoff !== (
+      platformOnlyRouteMode ? "atomic_platform_route_replacement" : "atomic_shared_zone_route_replacement"
+    )
     || !new Set(["pending_inventory", "verified_none_active"]).has(
       productionSpec.routing.stagingExternalCustomDomainInventory,
     )
@@ -279,8 +284,17 @@ function domainIdentity(domain) {
   };
 }
 
-function expectedStagingDomains(stagingSpec) {
-  return new Map(stagingSpec.hostnames.map((hostname) => [hostname, stagingSpec.workerName]));
+function expectedStagingDomains(productionSpec, stagingSpec) {
+  const expected = new Map(stagingSpec.hostnames.map((hostname) => [hostname, stagingSpec.workerName]));
+  const canaryHostname = productionSpec?.bootstrap?.canaryHostname;
+  if (typeof canaryHostname === "string" && !expected.has(canaryHostname)) {
+    // A pre-created staging Custom Domain may provide the canary DNS carrier.
+    expected.set(canaryHostname, stagingSpec.workerName);
+  }
+  return {
+    expected,
+    optional: new Set([canaryHostname]),
+  };
 }
 
 function planTraffic(phase, productionSpec, stagingSpec, inventory) {
@@ -311,7 +325,7 @@ function planTraffic(phase, productionSpec, stagingSpec, inventory) {
     observed.set(domain.hostname, domain.service);
   }
 
-  const expected = expectedStagingDomains(stagingSpec);
+  const { expected, optional } = expectedStagingDomains(productionSpec, stagingSpec);
   if (phase === "promote") {
     for (const hostname of Object.values(productionSpec.hostnames)) {
       const service = observed.get(hostname);
@@ -329,6 +343,7 @@ function planTraffic(phase, productionSpec, stagingSpec, inventory) {
     }
   }
   for (const [hostname, service] of expected) {
+    if (observed.get(hostname) === undefined && optional.has(hostname)) continue;
     if (observed.get(hostname) !== service) {
       throw new Error(`production_bootstrap_domain_missing:${hostname}`);
     }
@@ -479,8 +494,14 @@ export function inspectProductionBootstrapCutoverBlockers(input) {
   if (input.productionSpec?.routing?.canaryOverrideRoute !== `canary.${zoneName}/*`) {
     blockers.push("production_canary_override_route_missing");
   }
+  const platformOnlyRouteMode = input.productionSpec?.routing?.externalCustomDomainStrategy
+    === "platform_only_staging_fallback";
+  const fullRouteMode = input.productionSpec?.routing?.externalCustomDomainStrategy
+    === "production_fallback_with_platform_staging_exceptions";
   if (
-    input.productionSpec?.routing?.routeHandoff !== "atomic_shared_zone_route_replacement"
+    input.productionSpec?.routing?.routeHandoff !== (
+      platformOnlyRouteMode ? "atomic_platform_route_replacement" : "atomic_shared_zone_route_replacement"
+    )
     || !isDeepStrictEqual(input.productionSpec?.routing?.stagingRouteExceptions, stagingRouteExceptions)
   ) {
     blockers.push("staging_route_exceptions_not_declared");
@@ -494,26 +515,27 @@ export function inspectProductionBootstrapCutoverBlockers(input) {
   if (input.stagingSpec?.sharedZoneDisabledRoutes?.includes(platformApexRoute)) {
     blockers.push("platform_apex_route_disabled_by_staging_guard");
   }
-  if (input.stagingSpec?.workerRoutes?.some((route) => route?.pattern === "*/*")) {
+  if (!platformOnlyRouteMode && input.stagingSpec?.workerRoutes?.some((route) => route?.pattern === "*/*")) {
     blockers.push("external_custom_domains_captured_by_staging_catch_all");
   }
   if (
-    input.productionSpec?.routing?.externalCustomDomainStrategy
-      !== "production_fallback_with_platform_staging_exceptions"
+    !platformOnlyRouteMode && !fullRouteMode
   ) {
     blockers.push("external_custom_domain_route_strategy_missing");
   }
-  if (input.productionSpec?.routing?.stagingExternalCustomDomainInventory !== "verified_none_active") {
+  if (!platformOnlyRouteMode
+    && input.productionSpec?.routing?.stagingExternalCustomDomainInventory !== "verified_none_active") {
     blockers.push("staging_external_custom_domain_inventory_unverified");
   }
-  if (
+  if (!platformOnlyRouteMode && (
     input.productionSpec?.turnstile?.platformHostname !== zoneName
     || input.productionSpec?.turnstile?.externalCustomDomainStrategy
       !== "exact_hostname_admission_before_activation"
-  ) {
+  )) {
     blockers.push("turnstile_external_hostname_strategy_missing");
   }
-  if (input.productionSpec?.turnstile?.externalCustomDomainAdmission !== "verified_before_domain_activation") {
+  if (!platformOnlyRouteMode
+    && input.productionSpec?.turnstile?.externalCustomDomainAdmission !== "verified_before_domain_activation") {
     blockers.push("turnstile_external_hostname_admission_unverified");
   }
   return blockers;
@@ -528,6 +550,8 @@ export function buildProductionRouteHandoff(productionSpec, stagingSpec) {
   const zoneName = productionSpec?.zoneName;
   const productionWorker = productionSpec?.workerName;
   const stagingWorker = stagingSpec?.workerName;
+  const externalFallbackWorker = productionSpec?.routing?.externalCustomDomainStrategy
+    === "platform_only_staging_fallback" ? stagingWorker : productionWorker;
   if (typeof zoneName !== "string" || typeof productionWorker !== "string" || typeof stagingWorker !== "string") {
     throw new Error("production_bootstrap_route_strategy_invalid");
   }
@@ -548,7 +572,7 @@ export function buildProductionRouteHandoff(productionSpec, stagingSpec) {
       { pattern: `${zoneName}/*`, script: productionWorker },
       { pattern: `*.${zoneName}/*`, script: productionWorker },
       ...stagingExceptions.map((pattern) => ({ pattern, script: stagingWorker })),
-      { pattern: "*/*", script: productionWorker },
+      { pattern: "*/*", script: externalFallbackWorker },
     ],
     stagingExceptions,
   };

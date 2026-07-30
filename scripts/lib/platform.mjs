@@ -701,6 +701,7 @@ export async function auditStagingRouteInventory(
 function productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConfig) {
   const production = wranglerConfig?.env?.production;
   const productionHostnames = Object.values(productionSpec?.hostnames ?? {});
+  const canaryHostname = productionSpec?.bootstrap?.canaryHostname;
   const productionDatabases = Array.isArray(production?.d1_databases)
     ? production.d1_databases.filter((database) => database?.binding === "PLATFORM_DB")
     : [];
@@ -711,6 +712,7 @@ function productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConf
     || productionSpec?.accountId !== stagingSpec?.accountId
     || productionSpec?.zoneId !== stagingSpec?.zoneId
     || productionSpec?.zoneName !== stagingSpec?.zoneName
+    || canaryHostname !== `canary.${productionSpec?.zoneName}`
     || production?.name !== productionSpec?.workerName
     || !cloudflareAccountIdPattern.test(productionSpec?.accountId ?? "")
     || !cloudflareAccountIdPattern.test(productionSpec?.zoneId ?? "")
@@ -776,10 +778,15 @@ function productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConf
     ...customDomains,
     ...stagingCustomDomains,
   ];
-  if (new Set(stagingAndProductionDomains).size !== stagingAndProductionDomains.length) {
+  if (
+    new Set(stagingAndProductionDomains).size !== stagingAndProductionDomains.length
+    || customDomains.has(canaryHostname)
+    || stagingCustomDomains.has(canaryHostname)
+  ) {
     throw new Error("production_worker_route_contract_invalid");
   }
   return {
+    canaryDnsCarrier: { hostname: canaryHostname, service: stagingSpec.workerName },
     customDomains,
     databaseId: productionDatabase.database_id,
     databaseName: productionDatabase.database_name,
@@ -893,9 +900,13 @@ export function validateProductionWorkerRouteInventory(
       || domain.hostname === contract.zoneName
       || domain.hostname.endsWith(`.${contract.zoneName}`)
     ));
-  const allowedDomains = new Map([
+  const requiredDomains = new Map([
     ...[...contract.customDomains].map((hostname) => [hostname, contract.productionWorkerName]),
     ...[...contract.stagingCustomDomains].map((hostname) => [hostname, contract.stagingWorkerName]),
+  ]);
+  const allowedDomains = new Map([
+    ...requiredDomains,
+    [contract.canaryDnsCarrier.hostname, contract.canaryDnsCarrier.service],
   ]);
   const domainKeys = new Set();
   let domainInventoryOk = liveDomains.every((domain) => liveWorkerDomainIdentity(domain) !== null);
@@ -910,7 +921,7 @@ export function validateProductionWorkerRouteInventory(
       domainKeys.add(domain.hostname);
     }
   }
-  const requiredDomainsPresent = [...allowedDomains].every(([hostname, service]) => (
+  const requiredDomainsPresent = [...requiredDomains].every(([hostname, service]) => (
     domainsInZone.some((domain) => domain.hostname === hostname && domain.service === service)
   ));
 

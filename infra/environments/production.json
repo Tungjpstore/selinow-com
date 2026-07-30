@@ -27,10 +27,10 @@
   "routing": {
     "canaryOverrideRoute": "canary.selinow.com/*",
     "externalCustomDomainFallbackRoute": "*/*",
-    "externalCustomDomainStrategy": "production_fallback_with_platform_staging_exceptions",
+    "externalCustomDomainStrategy": "platform_only_staging_fallback",
     "platformApexRoute": "selinow.com/*",
     "platformStorefrontWildcard": "*.selinow.com/*",
-    "routeHandoff": "atomic_shared_zone_route_replacement",
+    "routeHandoff": "atomic_platform_route_replacement",
     "stagingExternalCustomDomainInventory": "pending_inventory",
     "stagingRouteExceptions": [
       "staging.selinow.com/*",

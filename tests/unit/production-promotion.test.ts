@@ -74,11 +74,11 @@ const productionSpec = {
   routing: {
     canaryOverrideRoute: "canary.selinow.com/*",
     externalCustomDomainFallbackRoute: "*/*",
-    externalCustomDomainStrategy: "production_fallback_with_platform_staging_exceptions",
+    externalCustomDomainStrategy: "platform_only_staging_fallback",
     platformApexRoute: "selinow.com/*",
     platformStorefrontWildcard: "*.selinow.com/*",
-    routeHandoff: "atomic_shared_zone_route_replacement",
-    stagingExternalCustomDomainInventory: "verified_none_active",
+    routeHandoff: "atomic_platform_route_replacement",
+    stagingExternalCustomDomainInventory: "pending_inventory",
     stagingRouteExceptions: [
       "staging.selinow.com/*",
       "app-staging.selinow.com/*",
@@ -87,7 +87,7 @@ const productionSpec = {
     ],
   },
   turnstile: {
-    externalCustomDomainAdmission: "verified_before_domain_activation",
+    externalCustomDomainAdmission: "pending_runtime_lifecycle",
     externalCustomDomainStrategy: "exact_hostname_admission_before_activation",
     platformHostname: "selinow.com",
   },
@@ -316,13 +316,13 @@ describe("first-production route promotion", () => {
 
   it("fails closed while any recomputed shared-zone cutover blocker remains", () => {
     const candidate = common();
-    candidate.productionSpec = {
-      ...productionSpec,
-      routing: { ...productionSpec.routing, stagingExternalCustomDomainInventory: "pending_inventory" },
+    candidate.stagingSpec = {
+      ...stagingSpec,
+      sharedZoneDisabledRoutes: ["*.selinow.com/*"],
     };
-    candidate.plan.fingerprints.specSha256 = fingerprint(candidate.productionSpec);
+    candidate.plan.fingerprints.stagingSpecSha256 = fingerprint(candidate.stagingSpec);
     expect(() => validateProductionPromotionPlan(candidate))
-      .toThrow("production_promotion_cutover_blocked:staging_external_custom_domain_inventory_unverified");
+      .toThrow("production_promotion_cutover_blocked:platform_storefront_wildcard_disabled_by_staging_guard");
   });
 
   it("plans explicit create/delete reconciliation without a broad route replacement", async () => {
@@ -336,8 +336,10 @@ describe("first-production route promotion", () => {
     expect(result.executed).toBe(false);
     expect(result.actions).toEqual(expect.arrayContaining([
       expect.objectContaining({ action: "create", detail: "staging.selinow.com/* -> selinow-com-staging" }),
-      expect.objectContaining({ action: "replace", detail: "*/* -> selinow-com-production" }),
       expect.objectContaining({ action: "delete", detail: "canary.selinow.com/* -> selinow-com-production" }),
+    ]));
+    expect(result.actions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ detail: "*/* -> selinow-com-production" }),
     ]));
     expect(api.create).not.toHaveBeenCalled();
     expect(api.delete).not.toHaveBeenCalled();
@@ -361,7 +363,7 @@ describe("first-production route promotion", () => {
     expect(result.ok).toBe(true);
     const appliedState = result.state as { routesBefore: unknown; changes: Array<{ before: unknown; after: unknown }> };
     expect(appliedState.routesBefore).toEqual(routesAfterCanary.slice().sort((left, right) => left.pattern.localeCompare(right.pattern)));
-    expect(appliedState.changes).toHaveLength(7);
+    expect(appliedState.changes).toHaveLength(6);
     expect(appliedState.changes.every((change) => (
       change.before !== undefined && change.after !== undefined
     ))).toBe(true);
@@ -370,6 +372,7 @@ describe("first-production route promotion", () => {
     expect(api.routes()).toEqual(expect.arrayContaining([
       expect.objectContaining({ pattern: "staging.selinow.com/*", script: "selinow-com-staging" }),
       expect.objectContaining({ pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" }),
+      expect.objectContaining({ pattern: "*/*", script: "selinow-com-staging" }),
     ]));
   });
 

@@ -77,10 +77,10 @@ const productionSpec = {
   routing: {
     canaryOverrideRoute: "canary.selinow.com/*",
     externalCustomDomainFallbackRoute: "*/*",
-    externalCustomDomainStrategy: "production_fallback_with_platform_staging_exceptions",
+    externalCustomDomainStrategy: "platform_only_staging_fallback",
     platformApexRoute: "selinow.com/*",
     platformStorefrontWildcard: "*.selinow.com/*",
-    routeHandoff: "atomic_shared_zone_route_replacement",
+    routeHandoff: "atomic_platform_route_replacement",
     stagingExternalCustomDomainInventory: "pending_inventory",
     stagingRouteExceptions: [
       "staging.selinow.com/*",
@@ -202,10 +202,10 @@ function input(phase: "resources" | "canary" | "promote"): ProductionBootstrapIn
     migrationNames: ["0001_platform.sql", "0002_orders.sql"],
     now: new Date("2026-07-30T04:00:00.000Z"),
     phase,
-    productionSpec,
+    productionSpec: structuredClone(productionSpec),
     repositoryState: { clean: true, commitSha: "a".repeat(40), treeSha: "b".repeat(40) },
     secretNames: [...REQUIRED_WORKER_SECRET_NAMES],
-    stagingSpec,
+    stagingSpec: structuredClone(stagingSpec),
   };
 }
 
@@ -223,8 +223,9 @@ describe("first-production bootstrap ceremony", () => {
       { pattern: "app-staging.selinow.com/*", script: "selinow-com-staging" },
       { pattern: "api-staging.selinow.com/*", script: "selinow-com-staging" },
       { pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" },
-      { pattern: "*/*", script: "selinow-com-production" },
+      { pattern: "*/*", script: "selinow-com-staging" },
     ]);
+    expect(handoff.stagingExceptions).not.toContain("canary.selinow.com/*");
   });
 
   it("plans only exact named resource creates and records name-only secret admission", () => {
@@ -236,9 +237,6 @@ describe("first-production bootstrap ceremony", () => {
       cutoverBlockers: [
         "platform_storefront_wildcard_disabled_by_staging_guard",
         "platform_apex_route_disabled_by_staging_guard",
-        "external_custom_domains_captured_by_staging_catch_all",
-        "staging_external_custom_domain_inventory_unverified",
-        "turnstile_external_hostname_admission_unverified",
       ],
       forwardOnlyMigrations: true,
       secretNameCount: REQUIRED_WORKER_SECRET_NAMES.length,
@@ -332,6 +330,32 @@ describe("first-production bootstrap ceremony", () => {
       .toThrow("production_bootstrap_canary_prerequisites_incomplete");
   });
 
+  it("admits only the staging-bound bootstrap canary DNS carrier", () => {
+    const candidate = input("canary");
+    candidate.inventory.domains = [
+      ...stagingDomains,
+      {
+        hostname: productionSpec.bootstrap.canaryHostname,
+        service: stagingSpec.workerName,
+        zoneId: ZONE_ID,
+        zoneName: productionSpec.zoneName,
+      },
+    ];
+
+    expect(buildProductionBootstrapPlan(candidate).actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "create",
+        code: "traffic.canary_route",
+        pattern: "canary.selinow.com/*",
+        script: productionSpec.workerName,
+      }),
+    ]));
+
+    candidate.inventory.domains[candidate.inventory.domains.length - 1].service = "unapproved-worker";
+    expect(() => buildProductionBootstrapPlan(candidate))
+      .toThrow("production_bootstrap_domain_drift:canary.selinow.com");
+  });
+
   it("keeps the reviewed canary plan stable across the upload evidence transition", () => {
     const beforeUpload = input("canary");
     const planBeforeUpload = buildProductionBootstrapPlan(beforeUpload);
@@ -357,6 +381,7 @@ describe("first-production bootstrap ceremony", () => {
       productionSpec: {
         ...productionSpec,
         routing: {
+          routeHandoff: "atomic_shared_zone_route_replacement",
           externalCustomDomainStrategy: "not_admitted",
           platformStorefrontWildcard: "*.selinow.com/*",
         },
@@ -370,6 +395,20 @@ describe("first-production bootstrap ceremony", () => {
       "external_custom_domain_route_strategy_missing",
       "turnstile_external_hostname_strategy_missing",
       "turnstile_external_hostname_admission_unverified",
+    ]));
+  });
+
+  it("keeps external custom-domain fallback on staging in platform-only mode", () => {
+    const platformOnly = input("promote");
+    platformOnly.productionSpec.routing.stagingExternalCustomDomainInventory = "pending_inventory";
+    platformOnly.stagingSpec.sharedZoneDisabledRoutes = [];
+    platformOnly.stagingSpec.workerRoutes = platformOnly.stagingSpec.workerRoutes.filter(
+      (route: { pattern?: string }) => route.pattern !== "*/*",
+    );
+    const plan = buildProductionBootstrapPlan(platformOnly);
+    expect(plan.safeguards.cutoverBlockers).toEqual([]);
+    expect(plan.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "traffic.shared_zone_route", pattern: "*/*", script: "selinow-com-staging" }),
     ]));
   });
 
