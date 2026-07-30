@@ -488,6 +488,10 @@ describe("production canary live inventory", () => {
       runWranglerImplementation: runner,
     });
     expect(discovered.schedules).toEqual([]);
+    await expect(runProductionCanaryUpload(input({
+      inventoryImplementation: async () => discovered,
+      trafficSnapshot: { domains: discovered.domains, routes: routeSnapshot(discovered.routes) },
+    }))).resolves.toMatchObject({ executed: false, ok: true });
     expect(commands.slice(0, 3).map((args) => args.slice(0, 2).join(" "))).toEqual(["whoami --json", "d1 list", "secret list"]);
     expect(commands.findIndex((args) => args[0] === "versions")).toBeGreaterThanOrEqual(3);
     expect(fetchCalls).toHaveLength(4);

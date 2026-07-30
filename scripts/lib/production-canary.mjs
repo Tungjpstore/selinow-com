@@ -451,22 +451,26 @@ function normalizeVersions(value) {
 function normalizeDeployments(value) {
   if (!Array.isArray(value) || value.length === 0) throw new Error("production_canary_deployments_invalid");
   return value.map((deployment) => {
+    const createdOn = deployment?.created_on ?? deployment?.createdOn;
+    const normalizedVersionId = deployment?.versionId;
+    const rawVersion = Array.isArray(deployment?.versions) && deployment.versions.length === 1
+      ? deployment.versions[0]
+      : null;
+    const versionId = normalizedVersionId ?? rawVersion?.version_id;
     if (
       typeof deployment?.id !== "string"
       || !UUID_PATTERN.test(deployment.id)
-      || safeDate(deployment.created_on) === null
-      || !Array.isArray(deployment.versions)
-      || deployment.versions.length !== 1
-      || typeof deployment.versions[0]?.version_id !== "string"
-      || !UUID_PATTERN.test(deployment.versions[0].version_id)
-      || deployment.versions[0].percentage !== 100
+      || safeDate(createdOn) === null
+      || typeof versionId !== "string"
+      || !UUID_PATTERN.test(versionId)
+      || (normalizedVersionId === undefined && rawVersion?.percentage !== 100)
     ) {
       throw new Error("production_canary_deployments_invalid");
     }
     return {
-      createdOn: deployment.created_on,
+      createdOn,
       id: deployment.id,
-      versionId: deployment.versions[0].version_id,
+      versionId,
     };
   }).sort((left, right) => Date.parse(right.createdOn) - Date.parse(left.createdOn));
 }
