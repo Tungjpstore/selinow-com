@@ -27,6 +27,7 @@ import { REQUIRED_PRODUCTION_VARS, REQUIRED_WORKER_SECRET_NAMES } from "../../sc
 
 const ACCOUNT_ID = "abcdef0123456789abcdef0123456789";
 const ZONE_ID = "1234567890abcdef1234567890abcdef";
+const STAGING_WORKER_NAME = "selinow-com-staging";
 const DATABASE_ID = "17ea8f2f-4c97-4337-8989-28b25a58ddeb";
 const CONTROL_VERSION = "11111111-1111-4111-8111-111111111111";
 const CANDIDATE_VERSION = "22222222-2222-4222-8222-222222222222";
@@ -220,6 +221,7 @@ function input(overrides: Record<string, unknown> = {}) {
     now: NOW,
     productionSpec,
     repositoryState,
+    stagingWorkerName: STAGING_WORKER_NAME,
     tag: "canary-20260730",
     trafficSnapshot: { domains: [], routes: routeSnapshot() },
     dnsAdmissionImplementation: async (hostname: string) => ({ hostname, addresses: ["104.16.0.1"] }),
@@ -430,6 +432,26 @@ describe("production canary candidate binding contract", () => {
 });
 
 describe("production canary live inventory", () => {
+  it("admits an absent canary carrier or the exact staging-bound carrier", async () => {
+    const carrier = {
+      hostname: productionSpec.bootstrap.canaryHostname,
+      service: STAGING_WORKER_NAME,
+      zone_id: ZONE_ID,
+    };
+    await expect(runProductionCanaryUpload(input({
+      inventoryImplementation: async () => inventory({ domains: [carrier] }),
+      trafficSnapshot: { domains: [carrier], routes: routeSnapshot() },
+    }))).resolves.toMatchObject({ executed: false, ok: true });
+
+    for (const service of [productionSpec.workerName, "unapproved-worker"]) {
+      const wrongCarrier = { ...carrier, service };
+      await expect(runProductionCanaryUpload(input({
+        inventoryImplementation: async () => inventory({ domains: [wrongCarrier] }),
+        trafficSnapshot: { domains: [wrongCarrier], routes: routeSnapshot() },
+      }))).rejects.toThrow(`production_canary_dns_carrier_drift:${carrier.hostname}`);
+    }
+  });
+
   it("checks account, D1, and secrets before mutable inventory commands and unwraps schedules", async () => {
     const commands: string[][] = [];
     const fetchCalls: Array<{ url: string; method: string; authorization: string }> = [];

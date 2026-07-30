@@ -87,9 +87,9 @@ Cloudflare applies the more specific disabled routes before the broad fallback r
 
 The staging environment specification validates the full reviewed contract. Wrangler owns and regenerates only the seven custom domains plus the active wildcard and `*/*` Worker routes; the two disabled null-script guards remain operator-managed because the Worker routes API does not accept them as script-owned routes. `platform:doctor` and every non-dry staging deploy now use a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` to require the exact two `script=null` guards and bind both `*.staging.selinow.com/*` and `*/*` to `selinow-com-staging`; a missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
 
-### Production handoff matrix (not live)
+### Production platform handoff matrix (not live)
 
-The reviewed production handoff intentionally differs from the current staging inventory and has not been applied. Cloudflare evaluates the most-specific route first, so the safe target is:
+The reviewed production platform-only handoff intentionally differs from the current staging inventory and has not been applied. Cloudflare evaluates the most-specific route first, so the safe target is:
 
 | Route | Worker |
 | --- | --- |
@@ -99,11 +99,11 @@ The reviewed production handoff intentionally differs from the current staging i
 | `app-staging.selinow.com/*` | `selinow-com-staging` |
 | `api-staging.selinow.com/*` | `selinow-com-staging` |
 | `*.staging.selinow.com/*` | `selinow-com-staging` |
-| `*/*` | `selinow-com-production` |
+| `*/*` | `selinow-com-staging` |
 
-The exact in-zone staging routes are required because a production wildcard route outranks a staging Custom Domain. Worker route patterns must belong to the zone, so an external staging custom hostname cannot be protected by assuming an exact route in `selinow.com`; the handoff requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher before such testing resumes. During first-production canary, add `canary.selinow.com/* -> selinow-com-production` as a temporary specificity override while the existing null wildcard is still present. This matrix is plan-only evidence until a fresh live inventory confirms that every entry and service binding matches.
+The exact in-zone staging routes are required because a production wildcard route outranks a staging Custom Domain. In this platform-only release, `*/*` intentionally remains on `selinow-com-staging`, so external custom-domain traffic remains on staging and no external-domain production cutover is claimed. Worker route patterns must belong to the zone; a future external cutover therefore requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher. During first-production canary, add `canary.selinow.com/* -> selinow-com-production` as a temporary specificity override while the existing null wildcard is still present. This matrix is plan-only evidence until a fresh live inventory confirms that every entry and service binding matches.
 
-The active fallback origin and deployed route matrix prove the shared-zone configuration exists. The accepted external customer-hostname lifecycle additionally proves resolution through `customers.selinow.com`, successful HTTPS, correct tenant rendering and removal that stops routing. Every future route or SaaS-contract change must repeat the relevant checks rather than relying only on this baseline.
+The active fallback origin and deployed route matrix prove the shared-zone configuration exists. The accepted external customer-hostname lifecycle additionally proves staging resolution through `customers.selinow.com`, successful HTTPS, correct tenant rendering and removal that stops routing; it does not prove production external-host admission or Turnstile lifecycle. Every future route or SaaS-contract change must repeat the relevant checks rather than relying only on this baseline.
 
 ## Customer readiness
 

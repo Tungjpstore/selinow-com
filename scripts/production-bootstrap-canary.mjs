@@ -25,6 +25,7 @@ import { repositoryRoot } from "./lib/platform.mjs";
 const DEFAULT_EVIDENCE_PATH = resolve(repositoryRoot, ".wrangler/bootstrap/production-evidence.json");
 const DEFAULT_MANIFEST_PATH = resolve(repositoryRoot, "infra/generated/production.json");
 const DEFAULT_SPEC_PATH = resolve(repositoryRoot, "infra/environments/production.json");
+const DEFAULT_STAGING_SPEC_PATH = resolve(repositoryRoot, "infra/environments/staging.json");
 const DEFAULT_TRAFFIC_PATH = resolve(repositoryRoot, ".wrangler/bootstrap/production-inventory.json");
 const DEFAULT_WRANGLER_PATH = resolve(repositoryRoot, "wrangler.jsonc");
 
@@ -117,11 +118,12 @@ function writeResult(result, json) {
 try {
   const options = parseArguments(process.argv.slice(2));
   const now = new Date();
-  const [productionSpec, manifest, canonicalProductionSpec, canonicalManifest, wranglerConfig, plan, evidence, trafficSnapshot, migrationNames, uploadReport, canaryState] = await Promise.all([
+  const [productionSpec, manifest, canonicalProductionSpec, canonicalManifest, canonicalStagingSpec, wranglerConfig, plan, evidence, trafficSnapshot, migrationNames, uploadReport, canaryState] = await Promise.all([
     requireJson(options.specPath, "production_spec_missing"),
     requireJson(options.manifestPath, "production_bootstrap_generated_manifest_missing"),
     requireJson(DEFAULT_SPEC_PATH, "production_spec_missing"),
     requireJson(DEFAULT_MANIFEST_PATH, "production_bootstrap_generated_manifest_missing"),
+    requireJson(DEFAULT_STAGING_SPEC_PATH, "staging_spec_missing"),
     requireJson(DEFAULT_WRANGLER_PATH, "wrangler_config_missing"),
     requireJson(options.planPath, "production_canary_plan_missing"),
     requireJson(options.evidencePath, "production_bootstrap_evidence_missing"),
@@ -149,6 +151,15 @@ try {
     || typeof databaseId !== "string"
   ) {
     throw new Error("production_canary_manifest_identity_mismatch");
+  }
+  if (
+    canonicalStagingSpec?.environment !== "staging"
+    || canonicalStagingSpec?.accountId !== productionSpec.accountId
+    || canonicalStagingSpec?.zoneId !== productionSpec.zoneId
+    || canonicalStagingSpec?.zoneName !== productionSpec.zoneName
+    || typeof canonicalStagingSpec?.workerName !== "string"
+  ) {
+    throw new Error("production_canary_staging_spec_identity_mismatch");
   }
 
   const operatorEnvironment = { ...process.env };
@@ -195,6 +206,7 @@ try {
     plan,
     productionSpec,
     repositoryState: repositoryState(),
+    stagingWorkerName: canonicalStagingSpec.workerName,
     trafficSnapshot,
     wranglerConfig,
     writeReportImplementation: reportWriter,

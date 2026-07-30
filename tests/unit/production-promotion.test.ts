@@ -345,6 +345,34 @@ describe("first-production route promotion", () => {
     expect(api.delete).not.toHaveBeenCalled();
   });
 
+  it("rejects a production-owned external fallback before any platform-only mutation", async () => {
+    const driftedRoutes = routesAfterCanary.map((route) => (
+      route.pattern === "*/*" ? { ...route, script: productionSpec.workerName } : route
+    ));
+    const candidate = common();
+    candidate.canaryState.routesAfter = structuredClone(driftedRoutes);
+    candidate.trafficSnapshot.routes = driftedRoutes.map(({ pattern, script }) => ({ pattern, script }));
+    candidate.acceptanceEvidence.canaryStateSha256 = fingerprint({
+      routesBefore: candidate.canaryState.routesBefore,
+      routesAfter: candidate.canaryState.routesAfter,
+    });
+    candidate.plan.fingerprints.inventorySha256 = fingerprint(candidate.trafficSnapshot);
+    const fallbackAction = candidate.plan.actions.find((action) => action.pattern === "*/*");
+    if (fallbackAction === undefined) throw new Error("fallback_action_missing");
+    fallbackAction.action = "reconcile";
+    const api = mutableRouteApi(driftedRoutes);
+
+    await expect(runProductionPromotion({
+      ...candidate,
+      execute: false,
+      inventoryImplementation: api.inventory,
+      savedInventory: liveInventory(driftedRoutes),
+    })).rejects.toThrow("production_promotion_external_fallback_drift");
+    expect(api.create).not.toHaveBeenCalled();
+    expect(api.delete).not.toHaveBeenCalled();
+    expect(api.update).not.toHaveBeenCalled();
+  });
+
   it("reconciles only the approved matrix, preserves staging, captures IDs, and verifies post-state", async () => {
     const api = mutableRouteApi();
     const result = await runProductionPromotion({
@@ -372,8 +400,13 @@ describe("first-production route promotion", () => {
     expect(api.routes()).toEqual(expect.arrayContaining([
       expect.objectContaining({ pattern: "staging.selinow.com/*", script: "selinow-com-staging" }),
       expect.objectContaining({ pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" }),
-      expect.objectContaining({ pattern: "*/*", script: "selinow-com-staging" }),
+      expect.objectContaining({ id: "route-fallback-0004", pattern: "*/*", script: "selinow-com-staging" }),
     ]));
+    expect(api.update).not.toHaveBeenCalledWith(
+      "route-fallback-0004",
+      expect.anything(),
+    );
+    expect(api.delete).not.toHaveBeenCalledWith("route-fallback-0004");
   });
 
   it("compensates completed changes from captured state when a later update fails", async () => {
@@ -490,6 +523,9 @@ describe("first-production route promotion", () => {
     expect(rolledBack.ok).toBe(true);
     expect(api.routes().map(({ pattern, script }) => ({ pattern, script })).sort((left, right) => left.pattern.localeCompare(right.pattern)))
       .toEqual(routesAfterCanary.map(({ pattern, script }) => ({ pattern, script })).sort((left, right) => left.pattern.localeCompare(right.pattern)));
+    expect(api.routes()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "route-fallback-0004", pattern: "*/*", script: "selinow-com-staging" }),
+    ]));
   });
 
   it("rejects evidence drift and a structurally tampered rollback state", async () => {

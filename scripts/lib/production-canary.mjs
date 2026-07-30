@@ -695,6 +695,17 @@ function assertNoProductionTraffic(inventory, productionSpec) {
   }
 }
 
+function assertCanaryDnsCarrier(inventory, productionSpec, stagingWorkerName) {
+  const hostname = normalizeCanaryHostname(productionSpec?.bootstrap?.canaryHostname);
+  if (typeof stagingWorkerName !== "string" || stagingWorkerName.length === 0) {
+    throw new Error("production_canary_staging_worker_invalid");
+  }
+  const carriers = inventory.domains.filter((domain) => domain.hostname === hostname);
+  if (carriers.length > 1 || carriers.some((domain) => domain.service !== stagingWorkerName)) {
+    throw new Error(`production_canary_dns_carrier_drift:${hostname}`);
+  }
+}
+
 function assertRepositoryState(repositoryState, evidence) {
   if (repositoryState?.clean !== true) throw new Error("production_canary_source_dirty");
   if (!GIT_OBJECT_PATTERN.test(repositoryState?.commitSha ?? "") || !GIT_OBJECT_PATTERN.test(repositoryState?.treeSha ?? "")) {
@@ -757,6 +768,7 @@ function activeVersionId(inventory) {
 
 function assertBaseInventory(input, inventory) {
   assertTargetIdentity(inventory, input);
+  assertCanaryDnsCarrier(inventory, input.productionSpec, input.stagingWorkerName);
   assertNoProductionTraffic(inventory, input.productionSpec);
   assertSavedTrafficSnapshot(inventory, input.trafficSnapshot);
   assertIdleProductionTriggers(inventory);

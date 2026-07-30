@@ -388,6 +388,7 @@ function assertLiveBase(input, inventory, savedInventory, canaryState, trafficSn
   if (!isDeepStrictEqual(inventory.routes, savedInventory.routes)) {
     throw new Error("production_promotion_live_inventory_drift");
   }
+  assertExternalFallbackBaseline(inventory.routes, input);
   if (!isDeepStrictEqual(domainShape(inventory.domains, inventory.zoneId, inventory.zoneName), trafficSnapshot.domains)) {
     throw new Error("production_promotion_live_domain_drift");
   }
@@ -426,6 +427,15 @@ function assertRouteInventoryEqual(actual, expected, code) {
 
 function routeByPattern(routes, pattern) {
   return routes.find((route) => route.pattern === pattern);
+}
+
+function assertExternalFallbackBaseline(routes, input) {
+  if (input.productionSpec?.routing?.externalCustomDomainStrategy !== "platform_only_staging_fallback") return;
+  const fallbackPattern = input.productionSpec?.routing?.externalCustomDomainFallbackRoute;
+  const fallback = routeByPattern(routes, fallbackPattern);
+  if (!fallback || fallback.script !== input.stagingSpec?.workerName) {
+    throw new Error("production_promotion_external_fallback_drift");
+  }
 }
 
 function buildOperations(initialRoutes, handoff, productionSpec) {
@@ -916,6 +926,7 @@ export async function runProductionPromotionRollback(input) {
   if (activeVersionId(initial) !== input.canaryState.candidateVersionId) {
     throw new Error("production_promotion_candidate_not_active");
   }
+  assertExternalFallbackBaseline(initial.routes, input);
   const checkpoint = findRollbackCheckpoint(initial.routes, state);
   const remainingChanges = checkpoint.reverseChanges.slice(checkpoint.completed);
   if (!input.execute) {
