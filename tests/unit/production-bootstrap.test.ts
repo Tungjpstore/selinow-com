@@ -155,7 +155,7 @@ function evidence(phase: "resources" | "canary" | "promote"): ProductionBootstra
       restoreDrillReportRef: "private/restore/report.json",
       snapshotReportRef: "private/backup/report.json",
     },
-    candidateWorkerVersion: "worker-version-candidate-001",
+    candidateWorkerVersion: phase === "promote" ? "worker-version-candidate-001" : null,
     canary: {
       accepted: phase === "promote",
       acceptedAt: phase === "promote" ? "2026-07-30T03:00:00.000Z" : null,
@@ -317,6 +317,7 @@ describe("first-production bootstrap ceremony", () => {
   it("requires a fresh empty-D1 baseline, restore evidence, and exact forward-only migrations", () => {
     const candidate = input("canary");
     const plan = buildProductionBootstrapPlan(candidate);
+    expect(candidate.evidence.candidateWorkerVersion).toBeNull();
     expect(plan.actions).toEqual(expect.arrayContaining([
       expect.objectContaining({ action: "create", code: "traffic.canary_route" }),
       expect.objectContaining({ action: "deploy", code: "worker.candidate_canary_only" }),
@@ -328,6 +329,19 @@ describe("first-production bootstrap ceremony", () => {
 
     candidate.evidence.migrations.direction = "down_then_up";
     expect(() => buildProductionBootstrapPlan(candidate))
+      .toThrow("production_bootstrap_canary_prerequisites_incomplete");
+  });
+
+  it("keeps the reviewed canary plan stable across the upload evidence transition", () => {
+    const beforeUpload = input("canary");
+    const planBeforeUpload = buildProductionBootstrapPlan(beforeUpload);
+
+    const afterUpload = input("canary");
+    afterUpload.evidence.candidateWorkerVersion = "worker-version-candidate-001";
+    expect(buildProductionBootstrapPlan(afterUpload)).toEqual(planBeforeUpload);
+
+    afterUpload.evidence.candidateWorkerVersion = "bad";
+    expect(() => buildProductionBootstrapPlan(afterUpload))
       .toThrow("production_bootstrap_canary_prerequisites_incomplete");
   });
 

@@ -37,7 +37,7 @@ This report distinguishes a backend contract that is genuinely missing from a ba
 ## Existing UI behavior that must be corrected
 
 - Inventory now projects the server threshold per variant, exposes low/out-of-stock filters and hardens import plaintext/preview lifecycle; the current authenticated local gate covers desktop/mobile behavior and the 1440/768/390/320px viewport matrix.
-- Store builder now renders a safe server-backed active-catalog preview projection (`src/lib/storefront/preview.ts`) with explicit empty/error/truncated states and no buyer mutation affordances. Its current local desktop/mobile baselines are part of the reviewed 28-snapshot authenticated set.
+- Store builder now renders a safe server-backed active-catalog preview projection (`src/lib/storefront/preview.ts`) with explicit empty/error/truncated states and no buyer mutation affordances. Its current local desktop/mobile baselines are part of the reviewed 42-snapshot authenticated set.
 - Product manager now creates the product, first variant, idempotency receipt and safe audit receipt in one tenant-scoped D1 batch; a variant failure rolls the product back, and retries return the original IDs. It also supports a second variant, preserves opaque options on update, exposes an out-of-stock filter and renders the server product update time in the shop timezone. Category and product archive retain linked commerce evidence. Channel visibility and a hidden state still lack backend contracts and remain unavailable.
 - Public abuse reporting is implemented across storefront, product, cart, checkout and order layouts through the sanitized Turnstile/idempotency API. The product target is now offered only when a reportable product resolved, so a product 404 cannot present an action the backend will reject as `resource_not_found`. Source/axe coverage remains authoritative for the dialog; the current public staging visual gate is 18/20 because both desktop and mobile cart checks stop before screenshot when the deployed Worker lacks the current hydration selector.
 - Order list/detail surfaces now show allowlisted expected/received amounts, evidence time and key-count mismatch impact; payment exception remediation remains read-only until the audited backend contract above lands.
@@ -63,16 +63,21 @@ No fake seller members, plan limits, refunds, payment remediation, provider heal
 
 ## Current verification boundary
 
-- Current source verification: `npm run check` passed with 0 errors and 3 existing
-  non-blocking hints; `npm run lint` passed; `npm test` passed with 184 files /
-  1,371 tests; `npm run build` and `npm run deploy:dry-run` passed without
-  deployment.
-- The authenticated Playwright contract enumerates 14 seller/admin routes with 28
-  desktop/mobile screenshot comparisons plus axe, overflow and console checks.
-  The isolated local gate passes 6/6 and all 28 current-source snapshots were
-  regenerated and manually reviewed at 1440x1024 and 390x844; runtime, axe,
-  overflow and console coverage also includes the 768px and 320px viewports. The
-  current staging public visual gate is 18/20: two cart tests
+- Latest completed frontend source verification checkpoint (before the current
+  production promotion/DNS test additions): `npm run check` passed with 0 errors
+  and 3 existing non-blocking hints; `npm run lint` passed; `npm test` passed with
+  189 files / 1,447 tests; `npm run build` and `npm run deploy:dry-run` passed
+  without deployment. Rerun the full repository gate before treating the test
+  total as current.
+- The authenticated Playwright contract covers 21 seller/admin surface IDs with 42
+  desktop/mobile screenshots plus axe, overflow and console checks. The isolated
+  local gate passes 7/7, and the public local gate passes 27/27 with 26 additional
+  route/state screenshots. All 68 current-source snapshots were regenerated and
+  manually reviewed at 1440x1024 and 390x844; runtime, axe, overflow and console
+  coverage also includes the 768px and 320px viewports. The active PromptOS
+  acceptance matrix remains 19 routes / 82 route-state pairs; unlisted variants
+  remain documented follow-up rather than claimed pixel parity. The current
+  staging public visual gate is 18/20: two cart tests
   fail closed before screenshot because the deployed staging Worker predates the
   hydrated-cart contract. The separate read-only 1440/768/390/320 viewport matrix
   passes 4/4; no snapshot, checkout or payment mutation occurred.

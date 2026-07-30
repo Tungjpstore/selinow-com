@@ -25,6 +25,10 @@ deployed staging Worker is older than the source contract and does not render
 `[data-cart-variant-id]` for the desktop/mobile cart checks. No staging
 deployment occurred and production remains `NO-GO`.
 
+The repository test/build totals in this report are a frontend checkpoint captured
+before the current production promotion/DNS test additions; rerun the full
+repository gate before treating those totals as the final current count.
+
 Phase B globalization is source/local-only. English (`en`) and Vietnamese
 (`vi-VN`) catalogs, locale-aware storefront/dashboard/Telegram/email surfaces,
 minor-unit money formatting, country/currency guards, source-level key/
@@ -200,7 +204,7 @@ race the same `dist/` output.
 
 - `npm run check` — pass (0 errors, 3 existing non-blocking hints).
 - `npm run lint` — pass across the final tree.
-- `npm run test` — pass, 188 files / 1,423 tests.
+- `npm run test` — pass, 189 files / 1,447 tests.
 - `npm run build` — pass.
 - `npm run build:staging` — pass without deployment.
 - `npm run deploy:dry-run` — pass without deployment.

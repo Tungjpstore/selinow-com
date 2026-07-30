@@ -38,6 +38,7 @@
     "release:production:bootstrap:migrate": "node scripts/production-bootstrap-execute.mjs",
     "release:production:bootstrap:empty-baseline": "node scripts/production-bootstrap-empty-baseline.mjs",
     "release:production:canary": "node scripts/production-bootstrap-canary.mjs",
+    "release:production:promote": "node scripts/production-bootstrap-promote.mjs",
     "release:production:plan": "node scripts/release-dry-run.mjs",
     "release:production:dry-run": "node scripts/release-dry-run.mjs --execute",
     "release:pilot:smoke": "node scripts/release-pilot-smoke.mjs",

@@ -22,11 +22,15 @@
 
 ## Bằng chứng hiện tại
 
-- Trạng thái Professional v1.0 source/local: **19/19 mục source-contract hoàn tất**;
-  đây không phải full route/state/pixel-parity acceptance matrix.
-- Source/local kiểm tra lại ngày 2026-07-30: `npm run check` (0 errors, 3 hints),
-  `npm run lint`, `npm run build`, `npm run deploy:dry-run`, PromptOS validator,
-  authenticated browser gate 7/7 và public browser gate 27/27 đều pass.
+- Trạng thái Professional v1.0 source/local: **19/19 mục source-contract hoàn tất**.
+  Active matrix có 19 routes / 82 route-state pairs; đây không phải tuyên bố full
+  pixel parity cho mọi degraded/loading/blocked variant chưa có fixture.
+- Frontend source/local checkpoint ngày 2026-07-30 (trước các test production
+  promotion/DNS hiện tại): `npm run check` (0 errors, 3 hints), `npm run lint`,
+  `npm run test` (189 files / 1,447 tests), `npm run build`,
+  `npm run deploy:dry-run`, PromptOS validator, authenticated browser gate 7/7
+  và public browser gate 27/27 đều pass. Cần chạy lại full repository gate trước
+  khi coi tổng test này là hiện tại.
 - Responsive/runtime/a11y/overflow: authenticated local gate bao phủ desktop/mobile
   và 1440/768/390/320px; không dùng staging hay production resource.
 - Visual: 42 authenticated current-source snapshots và 26 public current-source

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -19,6 +20,36 @@ const SAFE_TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{7,80}$/u;
 const CEREMONY_ID_PATTERN = /^bootstrap_[a-z0-9][a-z0-9._-]{7,72}$/u;
 const MIGRATION_PATTERN = /^\d{4}_[a-z0-9_]+\.sql$/u;
 const PLACEHOLDER_PATTERN = /(?:change-me|not-provisioned|placeholder|replace-with|<[^>]+>)/iu;
+const PUBLIC_DOH_ENDPOINTS = [
+  "https://cloudflare-dns.com/dns-query",
+  "https://dns.google/resolve",
+];
+const CLOUDFLARE_IPV4_RANGES = [
+  ["173.245.48.0", 20],
+  ["103.21.244.0", 22],
+  ["103.22.200.0", 22],
+  ["103.31.4.0", 22],
+  ["141.101.64.0", 18],
+  ["108.162.192.0", 18],
+  ["190.93.240.0", 20],
+  ["188.114.96.0", 20],
+  ["197.234.240.0", 22],
+  ["198.41.128.0", 17],
+  ["162.158.0.0", 15],
+  ["104.16.0.0", 13],
+  ["104.24.0.0", 14],
+  ["172.64.0.0", 13],
+  ["131.0.72.0", 22],
+].map(([address, prefix]) => ({ network: ipv4ToBigInt(address), mask: ipv4Mask(prefix) }));
+const CLOUDFLARE_IPV6_RANGES = [
+  ["2400:cb00::", 32],
+  ["2606:4700::", 32],
+  ["2803:f800::", 32],
+  ["2405:b500::", 32],
+  ["2405:8100::", 32],
+  ["2a06:98c0::", 29],
+  ["2c0f:f248::", 32],
+].map(([address, prefix]) => ({ network: ipv6ToBigInt(address), mask: ipv6Mask(prefix) }));
 const BUILD_ENVIRONMENT_ALLOWLIST = new Set([
   "CI",
   "COREPACK_HOME",
@@ -41,6 +72,68 @@ const BUILD_ENVIRONMENT_ALLOWLIST = new Set([
   "TMPDIR",
   "npm_config_cache",
 ]);
+
+function ipv4ToBigInt(address) {
+  const octets = address.split(".").map((octet) => Number(octet));
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    throw new Error("production_canary_cloudflare_range_invalid");
+  }
+  return octets.reduce((value, octet) => (value << 8n) | BigInt(octet), 0n);
+}
+
+function ipv4Mask(prefix) {
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) throw new Error("production_canary_cloudflare_range_invalid");
+  return prefix === 0 ? 0n : ((1n << 32n) - 1n) ^ ((1n << BigInt(32 - prefix)) - 1n);
+}
+
+function ipv6ToBigInt(address) {
+  const value = address.toLowerCase();
+  const pieces = value.split("::");
+  if (pieces.length > 2) throw new Error("production_canary_cloudflare_range_invalid");
+  const left = pieces[0] === "" ? [] : pieces[0].split(":");
+  const right = pieces.length === 2 && pieces[1] !== "" ? pieces[1].split(":") : [];
+  const groups = pieces.length === 2 ? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right] : left;
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/u.test(group))) {
+    throw new Error("production_canary_cloudflare_range_invalid");
+  }
+  return groups.reduce((result, group) => (result << 16n) | BigInt(parseInt(group, 16)), 0n);
+}
+
+function ipv6Mask(prefix) {
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 128) throw new Error("production_canary_cloudflare_range_invalid");
+  return prefix === 0 ? 0n : ((1n << 128n) - 1n) ^ ((1n << BigInt(128 - prefix)) - 1n);
+}
+
+function cloudflareAddress(address) {
+  const normalized = normalizeIpAddress(address);
+  const kind = isIP(normalized);
+  if (kind === 4) {
+    const value = ipv4ToBigInt(normalized);
+    return CLOUDFLARE_IPV4_RANGES.some(({ network, mask }) => (value & mask) === network);
+  }
+  if (kind === 6) {
+    const value = ipv6ToBigInt(normalized);
+    return CLOUDFLARE_IPV6_RANGES.some(({ network, mask }) => (value & mask) === network);
+  }
+  return false;
+}
+
+function normalizeIpAddress(address, expectedFamily = null) {
+  if (typeof address !== "string" || address.length === 0 || address !== address.trim()) {
+    throw new Error("production_canary_dns_lookup_invalid");
+  }
+  const mappedMatch = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/iu.exec(address);
+  const normalized = mappedMatch?.[1] ?? address.toLowerCase();
+  const family = isIP(normalized);
+  if (
+    family === 0
+    || (expectedFamily === 4 && family !== 4)
+    || (expectedFamily === 6 && family !== 6 && mappedMatch === null)
+  ) {
+    throw new Error("production_canary_dns_lookup_invalid");
+  }
+  return normalized;
+}
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -83,12 +176,14 @@ export function validateProductionCanaryPlan(input) {
   const plan = input.plan;
   const allowedMutations = ["production_candidate_worker_version", "production_canary_worker_route"];
   const routeAction = plan?.actions?.find((action) => action?.code === "traffic.canary_route");
+  const evidenceSha256 = fingerprint({ ...input.evidence, candidateWorkerVersion: null });
   if (
     plan?.schemaVersion !== 1
     || plan?.phase !== "canary"
     || plan?.environment !== "production"
     || plan?.ceremonyId !== input.evidence?.ceremonyId
     || !isDeepStrictEqual(plan?.safeguards?.allowedMutations, allowedMutations)
+    || plan?.fingerprints?.evidenceSha256 !== evidenceSha256
     || plan?.fingerprints?.inventorySha256 !== fingerprint(input.trafficSnapshot)
     || plan?.fingerprints?.sourceSha256 !== fingerprint(input.repositoryState)
     || plan?.fingerprints?.specSha256 !== fingerprint(input.productionSpec)
@@ -129,6 +224,138 @@ function requireToken(environment, name) {
   const value = typeof rawValue === "string" ? rawValue.trim() : "";
   if (!value) throw new Error(`${name.toLowerCase()}_missing`);
   return value;
+}
+
+function normalizeCanaryHostname(hostname) {
+  if (typeof hostname !== "string") throw new Error("production_canary_dns_hostname_invalid");
+  const normalized = hostname.trim().toLowerCase().replace(/\.$/u, "");
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/u.test(normalized)) {
+    throw new Error("production_canary_dns_hostname_invalid");
+  }
+  return normalized;
+}
+
+function normalizeResolverAddresses(value, family) {
+  if (!Array.isArray(value)) throw new Error("production_canary_dns_lookup_invalid");
+  return value.map((address) => normalizeIpAddress(address, family));
+}
+
+function dnsLookupError(error) {
+  return error && typeof error === "object" && ["ENODATA", "ENOTFOUND", "NODATA"].includes(error.code);
+}
+
+async function resolveAddressFamily(implementation, hostname, family) {
+  try {
+    const value = await implementation(hostname);
+    return normalizeResolverAddresses(value, family);
+  } catch (error) {
+    if (dnsLookupError(error)) return [];
+    if (error?.message === "production_canary_dns_lookup_invalid") throw error;
+    throw new Error("production_canary_dns_lookup_failed", { cause: error });
+  }
+}
+
+async function resolveDohEndpoint(fetchImplementation, endpoint, hostname, recordType, family) {
+  const url = new globalThis.URL(endpoint);
+  url.searchParams.set("name", hostname);
+  url.searchParams.set("type", recordType);
+  let response;
+  try {
+    response = await fetchImplementation(url, { headers: { accept: "application/dns-json" } });
+  } catch (error) {
+    throw new Error("production_canary_dns_lookup_failed", { cause: error });
+  }
+  if (!response?.ok) throw new Error("production_canary_dns_lookup_failed");
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw new Error("production_canary_dns_lookup_invalid", { cause: error });
+  }
+  if (
+    typeof payload !== "object"
+    || payload === null
+    || !Number.isInteger(payload.Status)
+    || (payload.Answer !== undefined && !Array.isArray(payload.Answer))
+  ) {
+    throw new Error("production_canary_dns_lookup_invalid");
+  }
+  if (payload.Status === 3) return [];
+  if (payload.Status !== 0) throw new Error("production_canary_dns_lookup_failed");
+  const answerType = family === 4 ? 1 : 28;
+  const answers = (payload.Answer ?? []).filter((answer) => answer?.type === answerType);
+  if (answers.some((answer) => typeof answer?.data !== "string")) {
+    throw new Error("production_canary_dns_lookup_invalid");
+  }
+  return normalizeResolverAddresses(answers.map((answer) => answer.data), family);
+}
+
+async function resolvePublicDohFamily(fetchImplementation, hostname, recordType, family) {
+  const results = await Promise.allSettled(PUBLIC_DOH_ENDPOINTS.map((endpoint) => (
+    resolveDohEndpoint(fetchImplementation, endpoint, hostname, recordType, family)
+  )));
+  const successful = results.filter((result) => result.status === "fulfilled");
+  if (successful.length === 0) {
+    if (results.some((result) => result.status === "rejected" && result.reason?.message === "production_canary_dns_lookup_invalid")) {
+      throw new Error("production_canary_dns_lookup_invalid");
+    }
+    throw new Error("production_canary_dns_lookup_failed");
+  }
+  return successful.flatMap((result) => result.value);
+}
+
+/**
+ * Resolve the exact canary host through public DNS and require Cloudflare anycast IPs.
+ * This is intentionally read-only; it does not inspect or mutate Cloudflare DNS records.
+ */
+export async function resolveProductionCanaryDns(input) {
+  const hostname = normalizeCanaryHostname(input?.hostname);
+  const customResolvers = input?.resolve4Implementation !== undefined || input?.resolve6Implementation !== undefined;
+  let ipv4;
+  let ipv6;
+  if (customResolvers) {
+    if (typeof input.resolve4Implementation !== "function" || typeof input.resolve6Implementation !== "function") {
+      throw new Error("production_canary_dns_resolver_missing");
+    }
+    [ipv4, ipv6] = await Promise.all([
+      resolveAddressFamily(input.resolve4Implementation, hostname, 4),
+      resolveAddressFamily(input.resolve6Implementation, hostname, 6),
+    ]);
+  } else {
+    const fetchImplementation = input?.fetchImplementation ?? globalThis.fetch;
+    if (typeof fetchImplementation !== "function") throw new Error("production_canary_dns_resolver_missing");
+    [ipv4, ipv6] = await Promise.all([
+      resolvePublicDohFamily(fetchImplementation, hostname, "A", 4),
+      resolvePublicDohFamily(fetchImplementation, hostname, "AAAA", 6),
+    ]);
+  }
+  const addresses = [...new Set([...ipv4, ...ipv6])];
+  if (addresses.length === 0) throw new Error("production_canary_dns_unresolved");
+  if (addresses.some((address) => !cloudflareAddress(address))) {
+    throw new Error("production_canary_dns_not_cloudflare");
+  }
+  return { addresses, hostname };
+}
+
+export function assertProductionCanaryDnsAdmission(admission, productionSpec) {
+  const expected = normalizeCanaryHostname(productionSpec?.bootstrap?.canaryHostname);
+  let addresses;
+  try {
+    addresses = admission?.addresses?.map((address) => normalizeIpAddress(address));
+  } catch {
+    throw new Error("production_canary_dns_admission_invalid");
+  }
+  if (
+    typeof admission !== "object"
+    || admission === null
+    || admission.hostname !== expected
+    || !Array.isArray(addresses)
+    || addresses.length === 0
+    || addresses.some((address) => !cloudflareAddress(address))
+  ) {
+    throw new Error("production_canary_dns_admission_invalid");
+  }
+  return { addresses: [...new Set(addresses)], hostname: expected };
 }
 
 export function requireCanaryAuditToken(environment) {
@@ -513,6 +740,17 @@ function assertUploadEvidence(evidence, migrationNames, now) {
   }
 }
 
+function assertCandidateEvidence(evidence, migrationNames, now, candidateVersionId, expectedFingerprint = null) {
+  if (evidence?.candidateWorkerVersion !== candidateVersionId) {
+    throw new Error("production_canary_candidate_evidence_mismatch");
+  }
+  const baseline = { ...evidence, candidateWorkerVersion: null };
+  assertUploadEvidence(baseline, migrationNames, now);
+  if (expectedFingerprint !== null && fingerprint(baseline) !== expectedFingerprint) {
+    throw new Error("production_canary_upload_evidence_drift");
+  }
+}
+
 function activeVersionId(inventory) {
   return inventory.deployments[0].versionId;
 }
@@ -555,6 +793,12 @@ function invariantInventory(inventory) {
   };
 }
 
+function nonDeploymentInvariantInventory(inventory) {
+  const { deployments, ...invariant } = invariantInventory(inventory);
+  void deployments;
+  return invariant;
+}
+
 function assertUploadRouteNeutral(before, after) {
   const beforeValue = invariantInventory(before);
   const afterValue = invariantInventory(after);
@@ -571,6 +815,13 @@ function candidateFromInventories(before, after) {
   if (added.length !== 1) throw new Error("production_canary_candidate_capture_invalid");
   if (added[0].metadata?.has_preview !== false) throw new Error("production_canary_preview_url_enabled");
   return added[0];
+}
+
+function buildCandidateEvidencePatch(evidence, candidateVersionId) {
+  if (evidence?.candidateWorkerVersion !== null || !UUID_PATTERN.test(candidateVersionId ?? "")) {
+    throw new Error("production_canary_evidence_transition_invalid");
+  }
+  return { candidateWorkerVersion: candidateVersionId };
 }
 
 function candidateBindingContract(input) {
@@ -699,6 +950,7 @@ export async function runProductionCanaryUpload(input) {
     controlVersionId: activeVersionId(admitted),
     createdAt: input.now.toISOString(),
     environment: "production",
+    evidencePrerequisitesSha256: fingerprint(input.evidence),
     mode: "upload",
     planSha256,
     reviewedCommitSha: input.repositoryState.commitSha,
@@ -719,6 +971,7 @@ export async function runProductionCanaryUpload(input) {
     ],
     candidateVersionId: candidate.id,
     environment: "production",
+    evidencePatch: buildCandidateEvidencePatch(input.evidence, candidate.id),
     executed: true,
     ok: true,
     report,
@@ -740,6 +993,7 @@ function assertUploadReport(input) {
     || report?.zoneId !== input.productionSpec?.zoneId
     || report?.workerName !== input.productionSpec?.workerName
     || report?.planSha256 !== planSha256
+    || !/^[a-f0-9]{64}$/u.test(report?.evidencePrerequisitesSha256 ?? "")
     || !UUID_PATTERN.test(report?.candidateVersionId ?? "")
     || !UUID_PATTERN.test(report?.controlVersionId ?? "")
     || report.candidateVersionId === report.controlVersionId
@@ -750,6 +1004,13 @@ function assertUploadReport(input) {
     throw new Error("production_canary_upload_report_invalid");
   }
   assertRepositoryState(input.repositoryState, input.evidence);
+  assertCandidateEvidence(
+    input.evidence,
+    input.migrationNames,
+    input.now,
+    report.candidateVersionId,
+    report.evidencePrerequisitesSha256,
+  );
   return report;
 }
 
@@ -791,6 +1052,96 @@ function assertCanaryRouteApplied(before, after, pattern, workerName, routeId) {
   }
 }
 
+function canaryRouteFromInventory(inventory, pattern, workerName) {
+  const matches = inventory.routes.filter((route) => route.pattern === pattern);
+  if (matches.length > 1) throw new Error("production_canary_route_compensation_duplicate");
+  if (matches.length === 0) return null;
+  if (matches[0].script !== workerName) throw new Error("production_canary_route_compensation_drift");
+  return matches[0];
+}
+
+async function compensateCanaryApply(input, initial, report, originalError, createdRouteId = null) {
+  let current;
+  try {
+    current = normalizeCanaryInventory(await input.inventoryImplementation());
+  } catch (error) {
+    throw new Error("production_canary_apply_compensation_failed", { cause: error });
+  }
+
+  const active = activeVersionId(current);
+  if (
+    active === report.controlVersionId
+    && isDeepStrictEqual(nonDeploymentInvariantInventory(initial), nonDeploymentInvariantInventory(current))
+  ) {
+    // The ambiguous deploy call did not change control; do not issue a redundant mutation.
+    throw originalError;
+  }
+  if (active !== report.candidateVersionId) {
+    throw new Error("production_canary_apply_compensation_failed", { cause: originalError });
+  }
+
+  let routeCompensationError = null;
+  try {
+    const route = canaryRouteFromInventory(
+      current,
+      input.productionSpec.routing.canaryOverrideRoute,
+      input.productionSpec.workerName,
+    );
+    const withoutRoute = { ...current, routes: current.routes.filter((candidate) => candidate.pattern !== input.productionSpec.routing.canaryOverrideRoute) };
+    if (
+      !isDeepStrictEqual(routeShape(withoutRoute.routes), routeShape(initial.routes))
+      || !isDeepStrictEqual(withoutRoute.domains, initial.domains)
+      || !isDeepStrictEqual(withoutRoute.queueConsumers, initial.queueConsumers)
+      || !isDeepStrictEqual(withoutRoute.schedules, initial.schedules)
+      || !isDeepStrictEqual(withoutRoute.secretNames, initial.secretNames)
+    ) {
+      throw new Error("production_canary_route_compensation_drift");
+    }
+    if (route !== null) {
+      if (createdRouteId === null || route.id !== createdRouteId) {
+        throw new Error("production_canary_route_compensation_ownership_unknown");
+      }
+      if (typeof input.deleteRouteImplementation !== "function") {
+        throw new Error("production_canary_route_compensation_unavailable");
+      }
+      let deleteError = null;
+      try {
+        await input.deleteRouteImplementation(route.id);
+      } catch (error) {
+        deleteError = error;
+      }
+      current = normalizeCanaryInventory(await input.inventoryImplementation());
+      if (!isDeepStrictEqual(current.routes, initial.routes)) {
+        throw deleteError ?? new Error("production_canary_route_compensation_state_drift");
+      }
+    }
+  } catch (error) {
+    routeCompensationError = error;
+  }
+
+  try {
+    await input.deployVersionImplementation(report.controlVersionId);
+  } catch (error) {
+    // A thrown mutation remains ambiguous until the following live inventory read.
+    void error;
+  }
+  try {
+    const restored = normalizeCanaryInventory(await input.inventoryImplementation());
+    if (
+      !isDeepStrictEqual(nonDeploymentInvariantInventory(initial), nonDeploymentInvariantInventory(restored))
+      || activeVersionId(restored) !== report.controlVersionId
+    ) {
+      throw new Error("production_canary_apply_compensation_state_drift");
+    }
+  } catch (error) {
+    throw new Error("production_canary_apply_compensation_failed", { cause: error });
+  }
+  if (routeCompensationError !== null) {
+    throw new Error("production_canary_apply_compensation_failed", { cause: routeCompensationError });
+  }
+  throw originalError;
+}
+
 export async function runProductionCanaryApply(input) {
   validateCommonMutationFlags(input);
   const report = assertUploadReport(input);
@@ -806,6 +1157,7 @@ export async function runProductionCanaryApply(input) {
   if (!input.execute) {
     return {
       actions: [
+        { code: "canary_dns_admission", detail: input.productionSpec.bootstrap.canaryHostname, ok: true },
         { code: "candidate_deployment", detail: report.candidateVersionId, ok: true },
         { code: "canary_route_create", detail: input.productionSpec.routing.canaryOverrideRoute, ok: true },
       ],
@@ -815,22 +1167,39 @@ export async function runProductionCanaryApply(input) {
     };
   }
 
+  if (typeof input.dnsAdmissionImplementation !== "function") {
+    throw new Error("production_canary_dns_admission_missing");
+  }
+  const dnsBeforeDeploy = assertProductionCanaryDnsAdmission(
+    await input.dnsAdmissionImplementation(input.productionSpec.bootstrap.canaryHostname),
+    input.productionSpec,
+  );
   let candidateDeployed = false;
   let createdRouteId = null;
   try {
-    await input.deployVersionImplementation(report.candidateVersionId);
-    candidateDeployed = true;
+    let deployError = null;
+    try {
+      await input.deployVersionImplementation(report.candidateVersionId);
+    } catch (error) {
+      deployError = error;
+    }
     const deployed = normalizeCanaryInventory(await input.inventoryImplementation());
     assertNonDeploymentInventoryUnchanged(initial, deployed, "production_canary_deploy_changed_live_state");
     assertIdleProductionTriggers(deployed);
+    if (deployError !== null && activeVersionId(deployed) === report.controlVersionId) throw deployError;
     assertCandidateActive(deployed, report.candidateVersionId);
+    candidateDeployed = true;
+    if (deployError !== null) throw deployError;
+    const dnsBeforeRoute = assertProductionCanaryDnsAdmission(
+      await input.dnsAdmissionImplementation(input.productionSpec.bootstrap.canaryHostname),
+      input.productionSpec,
+    );
     const routePattern = input.productionSpec.routing.canaryOverrideRoute;
     const workerName = input.productionSpec.workerName;
     const createdRoute = await input.createRouteImplementation({
       pattern: routePattern,
       script: workerName,
     });
-    createdRouteId = typeof createdRoute?.id === "string" ? createdRoute.id : null;
     if (
       typeof createdRoute?.id !== "string"
       || !SAFE_ID_PATTERN.test(createdRoute.id)
@@ -839,6 +1208,7 @@ export async function runProductionCanaryApply(input) {
     ) {
       throw new Error("production_canary_route_create_response_invalid");
     }
+    createdRouteId = createdRoute.id;
     const after = normalizeCanaryInventory(await input.inventoryImplementation());
     assertCandidateActive(after, report.candidateVersionId);
     assertCanaryRouteApplied(deployed, after, routePattern, workerName, createdRoute.id);
@@ -849,6 +1219,11 @@ export async function runProductionCanaryApply(input) {
       canaryRoute: { id: createdRoute.id, pattern: routePattern, script: workerName },
       ceremonyId: report.ceremonyId,
       controlVersionId: report.controlVersionId,
+      dnsAdmission: {
+        addressesBeforeDeploy: dnsBeforeDeploy.addresses,
+        addressesBeforeRoute: dnsBeforeRoute.addresses,
+        hostname: dnsBeforeRoute.hostname,
+      },
       environment: "production",
       mode: "applied",
       planSha256: report.planSha256,
@@ -863,6 +1238,7 @@ export async function runProductionCanaryApply(input) {
     return {
       actions: [
         { code: "candidate_deployed", detail: report.candidateVersionId, ok: true },
+        { code: "canary_dns_admitted", detail: input.productionSpec.bootstrap.canaryHostname, ok: true },
         { code: "canary_route_created", detail: routePattern, ok: true },
       ],
       environment: "production",
@@ -872,31 +1248,11 @@ export async function runProductionCanaryApply(input) {
       stateRef,
     };
   } catch (error) {
-    if (!candidateDeployed) throw error;
-    let compensationFailed = false;
-    if (createdRouteId !== null && typeof input.deleteRouteImplementation === "function") {
-      try {
-        await input.deleteRouteImplementation(createdRouteId);
-      } catch {
-        compensationFailed = true;
-      }
+    if (!candidateDeployed) {
+      // A deploy failure is ambiguous: inventory reconciliation decides whether mutation is needed.
+      return compensateCanaryApply(input, initial, report, error, createdRouteId);
     }
-    try {
-      await input.deployVersionImplementation(report.controlVersionId);
-    } catch {
-      compensationFailed = true;
-    }
-    try {
-      const restored = normalizeCanaryInventory(await input.inventoryImplementation());
-      assertNonDeploymentInventoryUnchanged(initial, restored, "production_canary_apply_compensation_state_drift");
-      if (activeVersionId(restored) !== report.controlVersionId) {
-        compensationFailed = true;
-      }
-    } catch {
-      compensationFailed = true;
-    }
-    if (compensationFailed) throw new Error("production_canary_apply_compensation_failed", { cause: error });
-    throw error;
+    return compensateCanaryApply(input, initial, report, error, createdRouteId);
   }
 }
 
@@ -961,17 +1317,31 @@ export async function runProductionCanaryRollback(input) {
     };
   }
 
-  await input.deleteRouteImplementation(state.canaryRoute.id);
+  let deleteError = null;
+  try {
+    await input.deleteRouteImplementation(state.canaryRoute.id);
+  } catch (error) {
+    deleteError = error;
+  }
   const routeRestored = normalizeCanaryInventory(await input.inventoryImplementation());
-  assertRouteSnapshot(routeRestored, state.routesBefore, "production_canary_rollback_routes_not_restored");
+  try {
+    assertRouteSnapshot(routeRestored, state.routesBefore, "production_canary_rollback_routes_not_restored");
+  } catch (error) {
+    throw deleteError ?? error;
+  }
   assertCandidateActive(routeRestored, state.candidateVersionId);
   assertIdleProductionTriggers(routeRestored);
-  await input.deployVersionImplementation(state.controlVersionId);
+  let deployError = null;
+  try {
+    await input.deployVersionImplementation(state.controlVersionId);
+  } catch (error) {
+    deployError = error;
+  }
   const final = normalizeCanaryInventory(await input.inventoryImplementation());
   assertRouteSnapshot(final, state.routesBefore, "production_canary_rollback_final_route_drift");
   assertIdleProductionTriggers(final);
   if (activeVersionId(final) !== state.controlVersionId) {
-    throw new Error("production_canary_control_version_not_restored");
+    throw deployError ?? new Error("production_canary_control_version_not_restored");
   }
   const report = {
     accountId: final.accountId,

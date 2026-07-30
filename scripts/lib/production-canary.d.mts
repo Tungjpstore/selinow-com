@@ -25,11 +25,26 @@ export interface ProductionCanaryInventory {
   zoneName: string;
 }
 
+export interface ProductionCanaryDnsAdmission {
+  addresses: string[];
+  hostname: string;
+}
+
 export function requireCanaryAuditToken(environment: NodeJS.ProcessEnv): string;
 export function requireCanaryRouteToken(environment: NodeJS.ProcessEnv): string;
 export function requireCanaryWorkerToken(environment: NodeJS.ProcessEnv): string;
 export function buildCanaryWranglerEnvironment(environment: NodeJS.ProcessEnv, accountId: string, token: string): NodeJS.ProcessEnv;
 export function buildCanaryBuildEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
+export function resolveProductionCanaryDns(input: {
+  fetchImplementation?: typeof fetch;
+  hostname: string;
+  resolve4Implementation?: (hostname: string) => Promise<string[]>;
+  resolve6Implementation?: (hostname: string) => Promise<string[]>;
+}): Promise<ProductionCanaryDnsAdmission>;
+export function assertProductionCanaryDnsAdmission(
+  admission: unknown,
+  productionSpec: Record<string, any>,
+): ProductionCanaryDnsAdmission;
 export function assertProductionCanaryStaticIdentity(input: {
   canonicalGeneratedManifest: Record<string, any>;
   canonicalProductionSpec: Record<string, any>;

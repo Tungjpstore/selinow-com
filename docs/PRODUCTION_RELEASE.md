@@ -4,6 +4,8 @@ Phase 10 uses a prepare, backup, deploy, verify, confirm-or-rollback sequence. R
 
 Phase 10 remains NO-GO. The named Cloudflare production resources, eight required Worker secrets, the production Turnstile widget, a protected empty-D1 backup and an isolated empty-baseline restore drill now exist. No production migration, Worker traffic deployment, route handoff, DNS cutover, payment or Telegram acceptance has been completed.
 
+Current dedicated production operator credentials are not admitted: existing canary tokens returned 401, newly generated Account/User token attempts failed verification, and the migration executor stopped at `production_bootstrap_empty_baseline_account_identity_unavailable` before any D1 mutation. Treat earlier live inventory as historical until every dedicated token is rotated and revalidated. Production D1 remains empty (0/52 migrations), the apex/wildcard routes remain unchanged and no production traffic is enabled.
+
 The planning commands in this document do not mutate Cloudflare. The explicitly confirmed backup/restore/migration commands are separate production actions and remain fail-closed behind exact target and evidence checks.
 
 ## Release artifacts
@@ -22,7 +24,7 @@ The first production Worker cannot honestly provide a previous Worker version. I
 
 1. `resources`: admit the exact account, zone, Git commit/tree, staging traffic inventory, production names and secret names; plan only create/reuse actions for the eight named production resources.
 2. `canary`: require the reconciled resource manifest, a fresh empty-D1 baseline backup/bookmark, a successful isolated restore drill and the exact forward-only migration list before the first Worker version may bind only `canary.selinow.com`.
-3. `promote`: require accepted canary smoke and monitoring evidence before any stable production Worker domain may be added. Before the first stable version exists, rollback means restoring the private pre-bootstrap traffic inventory, not naming a nonexistent previous Worker version. After successful promotion, the first stable version becomes the rollback baseline for normal releases.
+3. `promote`: require accepted canary smoke and monitoring evidence before the route-only shared-zone handoff may move the production apex, platform wildcard and external-host fallback to the accepted Worker version while preserving exact staging exceptions. This phase does not add or mutate a Worker Domain. Before the first stable version exists, rollback means restoring the private pre-bootstrap traffic inventory, not naming a nonexistent previous Worker version. After successful promotion, the first stable version becomes the rollback baseline for normal releases.
 
 Start from these additional non-secret templates:
 
@@ -122,7 +124,7 @@ npm run release:production:canary -- \
   --json
 ```
 
-Apply first runs `wrangler versions deploy <candidate-version>@100%`, verifies that the captured route/domain/queue/cron inventory is unchanged, and only then creates exactly `canary.selinow.com/* -> selinow-com-production` with a single route `POST`. It does not add a Worker Custom Domain and does not hand off `selinow.com`, `*.selinow.com` or `*/*`. The captured route ID, control version and before/after route snapshots are stored at `.wrangler/bootstrap/<ceremony-id>/canary-applied.json`.
+Apply first performs a read-only public DNS admission for the exact `canary.selinow.com` hostname. The hostname must resolve to at least one address and every returned A/AAAA address must be in Cloudflare's published anycast ranges; an empty answer, non-Cloudflare answer or resolver failure stops before the candidate deploy. The check is repeated after candidate deployment immediately before the route mutation, so DNS drift fails closed and triggers the existing compensation path. Apply then runs `wrangler versions deploy <candidate-version>@100%`, verifies that the captured route/domain/queue/cron inventory is unchanged, and only then creates exactly `canary.selinow.com/* -> selinow-com-production` with a single route `POST`. It does not add a Worker Custom Domain and does not hand off `selinow.com`, `*.selinow.com` or `*/*`. The captured route ID, control version, DNS admission addresses and before/after route snapshots are stored at `.wrangler/bootstrap/<ceremony-id>/canary-applied.json`.
 
 If canary acceptance fails, rollback from the captured state rather than rediscovering or guessing a route ID:
 
@@ -141,6 +143,58 @@ npm run release:production:canary -- \
 Rollback verifies that the candidate and exact post-apply route snapshot are still active, deletes only the captured canary route ID, verifies the original routes are restored, and then deploys the exact captured control version at 100%. The final private report is `.wrangler/bootstrap/<ceremony-id>/canary-rollback.json`. Any route, version, domain, queue or cron drift fails closed for operator review; the tool never repairs drift with a full route replacement.
 
 Worker rollback does **not** roll back D1. Production migrations remain forward-only: fix forward when possible, or follow the separately approved backup/isolated-restore and controlled database cutover procedure. Never run a down migration as part of canary rollback.
+
+### First-production shared-zone route promotion
+
+Stable promotion is a separate route-only ceremony. It consumes the reviewed `promote-plan.json`, the post-canary traffic snapshot used to fingerprint that plan, the exact `canary-applied.json` state, the complete repository migration ledger, and a private acceptance record based on the accepted candidate version and monitoring acknowledgements. The acceptance record must use schema `promotion_acceptance`, repeat the evidence file's candidate/smoke/accepted-at values, pin the canary-state hash, and include separate alert and dashboard evidence references. The checked-in shape is shown at `infra/release/production-promotion-acceptance.example.json`.
+
+First capture the normalized post-canary inventory at the exact private path used for the plan, then preview and write the fingerprint-bound promotion plan:
+
+```bash
+npm run release:production:bootstrap -- \
+  --phase promote \
+  --inventory .wrangler/bootstrap/<ceremony-id>/promote-inventory.json \
+  --secret-names .wrangler/bootstrap/production-secret-names.json \
+  --json
+
+npm run release:production:bootstrap -- \
+  --phase promote \
+  --inventory .wrangler/bootstrap/<ceremony-id>/promote-inventory.json \
+  --secret-names .wrangler/bootstrap/production-secret-names.json \
+  --write \
+  --confirm-production \
+  --confirm-first-production-bootstrap \
+  --json
+```
+
+The write command produces `.wrangler/bootstrap/<ceremony-id>/promote-plan.json`. Do not substitute the pre-canary resource inventory: the executor requires the exact post-canary route/domain/trigger snapshot whose fingerprint is stored in this plan.
+
+The executor recomputes cutover blockers, requires a fresh live route/domain/trigger inventory to match the saved canary state, and rejects every route pattern outside `buildProductionRouteHandoff`. It preserves the exact staging exceptions before switching the production apex, production wildcard and `*/*` fallback. Creates use one-route `POST`, replacements use ID-bound per-route `PUT`, and deletions use captured-ID `DELETE`; it never sends a zone-wide Worker Routes replacement and never changes Worker Domains, DNS, queues, cron, versions, secrets or D1:
+
+Use separate temporary tokens for this route-only ceremony:
+
+| Environment variable | Required permission and use |
+| --- | --- |
+| `CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN` | Read-only access to the approved production account, D1, Worker routes/domains, active versions/deployments, queue consumers and cron schedules. It is stripped to the minimal inventory environment and never authorizes a mutation. |
+| `CLOUDFLARE_PRODUCTION_PROMOTION_ROUTE_API_TOKEN` | Workers Routes edit access limited to the `selinow.com` zone. It is used only for exact approved per-route `POST` creates, ID-bound `PUT` replacements, and captured-route-ID `DELETE` operations during apply, compensation or rollback. |
+
+Neither token is a Worker secret, neither is passed to a build, and neither may be replaced with the runtime `CLOUDFLARE_API_TOKEN`, a canary token or a broad general-purpose operator token.
+
+```bash
+npm run release:production:promote -- \
+  --env production \
+  --mode apply \
+  --plan .wrangler/bootstrap/<ceremony-id>/promote-plan.json \
+  --traffic-snapshot .wrangler/bootstrap/<ceremony-id>/promote-inventory.json \
+  --canary-state .wrangler/bootstrap/<ceremony-id>/canary-applied.json \
+  --acceptance .wrangler/bootstrap/<ceremony-id>/promotion-acceptance.json \
+  --execute \
+  --confirm-production \
+  --confirm-first-production-bootstrap \
+  --json
+```
+
+The default mode is a read-only plan against a supplied saved live inventory (`--inventory`). On mutation, each route is re-inventoried before and after the explicit create/update/delete, route IDs and scripts are captured in `promotion-applied.json`, and any failure triggers compensating reverse operations. A successful compensation restores the exact route pattern/script matrix and preserves unaffected route IDs. Cloudflare does not expose a transaction for the complete multi-route handoff, and a deleted canary route cannot be recreated with its original ID, so the executor fails closed on ambiguous or unverifiable responses and requires operator review. The captured state can be explicitly reversed with `--mode rollback` and `--state .../promotion-applied.json`.
 
 ### Empty-baseline restore drill
 
@@ -167,7 +221,7 @@ The command has no migration, Worker deploy, route, DNS, seed, payment or Telegr
 
 The planner deliberately allows resource and canary preparation while listing stable-cutover blockers, but `promote` fails closed while any blocker remains:
 
-- Cloudflare Routes take precedence over Worker Custom Domains. The current null guards (`selinow.com/*` and `*.selinow.com/*`) therefore bypass a production Custom Domain and prevent the production canary/platform wildcard from receiving traffic.
+- Cloudflare Routes take precedence over Worker Custom Domains. The current null guards (`selinow.com/*` and `*.selinow.com/*`) therefore bypass production Custom Domains and block stable apex/platform-wildcard traffic. They do not block the exact `canary.selinow.com/*` override, which is more specific and is the only route authorized during canary.
 - The checked-in staging `*/*` route still sends otherwise unmatched external custom domains to `selinow-com-staging`. The reviewed handoff is an atomic shared-zone matrix: `selinow.com/*` and `*.selinow.com/*` point to `selinow-com-production`; exact in-zone staging exceptions (`staging.selinow.com/*`, `app-staging.selinow.com/*`, `api-staging.selinow.com/*`, and `*.staging.selinow.com/*`) point to `selinow-com-staging`; and the final `*/*` fallback points to production. Because Worker route patterns must belong to the zone, an external staging custom hostname cannot be made safe by assuming an exact `selinow.com` route; the handoff therefore requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher before such testing resumes.
 - The canary phase needs the exact `canary.selinow.com/* -> selinow-com-production` override while the old null wildcard is still present; the override is removed only after the production wildcard is active.
 - The production Turnstile widget is authorized for `selinow.com`, which covers its subdomains. Turnstile does not support wildcard hostnames; every external custom hostname must be admitted explicitly before activation (or the account must use Enterprise Any Hostname). The current application has no runtime hostname-admission lifecycle evidence, so external custom-domain checkout remains blocked.

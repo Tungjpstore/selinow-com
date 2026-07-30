@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "mode": "promotion_acceptance",
+  "environment": "production",
+  "ceremonyId": "bootstrap_20260730_reviewed",
+  "candidateVersionId": "00000000-0000-4000-8000-000000000000",
+  "acceptedAt": "2026-07-30T12:00:00.000Z",
+  "acceptedBy": "private/approvals/production-canary-owner.json",
+  "canaryStateRef": ".wrangler/bootstrap/bootstrap_20260730_reviewed/canary-applied.json",
+  "canaryStateSha256": "sha256-of-routes-before-and-after-object",
+  "smokeReportRef": "private/acceptance/production-canary-smoke.json",
+  "stagingRoutesPreserved": true,
+  "monitoring": {
+    "alertsReady": true,
+    "dashboardReady": true,
+    "alertsEvidenceRef": "private/acceptance/production-alert-ack.json",
+    "dashboardEvidenceRef": "private/acceptance/production-dashboard-ack.json",
+    "observedAt": "2026-07-30T12:05:00.000Z"
+  }
+}

@@ -289,15 +289,17 @@ function planTraffic(phase, productionSpec, stagingSpec, inventory) {
   if (canaryRoutes.length > 1 || canaryRoutes.some((route) => route.script !== productionSpec.workerName)) {
     throw new Error("production_bootstrap_canary_route_drift");
   }
-  const routeAudit = validateStagingRouteInventory(
-    stagingSpec,
-    phase === "resources"
-      ? inventory.routes
-      : inventory.routes.filter((route) => route?.pattern !== canaryPattern),
-  );
-  if (!routeAudit.ok) {
-    const failed = routeAudit.checks.find((check) => !check.ok)?.code ?? "unknown";
-    throw new Error(`production_bootstrap_staging_route_drift:${failed}`);
+  if (phase !== "promote") {
+    const routeAudit = validateStagingRouteInventory(
+      stagingSpec,
+      phase === "resources"
+        ? inventory.routes
+        : inventory.routes.filter((route) => route?.pattern !== canaryPattern),
+    );
+    if (!routeAudit.ok) {
+      const failed = routeAudit.checks.find((check) => !check.ok)?.code ?? "unknown";
+      throw new Error(`production_bootstrap_staging_route_drift:${failed}`);
+    }
   }
   if (!Array.isArray(inventory.domains)) throw new Error("production_bootstrap_domain_inventory_invalid");
   const domains = inventory.domains.map(domainIdentity).filter((domain) => (
@@ -342,12 +344,37 @@ function planTraffic(phase, productionSpec, stagingSpec, inventory) {
       workerName: productionSpec.workerName,
     }];
   }
-  return Object.values(productionSpec.hostnames).sort().map((hostname) => ({
-    action: observed.get(hostname) === productionSpec.workerName ? "reuse" : "create",
-    code: "traffic.stable_domain",
-    hostname,
-    workerName: productionSpec.workerName,
-  }));
+  if (canaryRoutes.length !== 1) throw new Error("production_bootstrap_canary_route_missing");
+  const handoff = buildProductionRouteHandoff(productionSpec, stagingSpec);
+  const approvedPatterns = new Set([
+    ...handoff.canary.map((route) => route.pattern),
+    ...handoff.promote.map((route) => route.pattern),
+  ]);
+  const unexpectedRoute = inventory.routes.find((route) => !approvedPatterns.has(route?.pattern));
+  if (unexpectedRoute !== undefined) {
+    throw new Error(`production_bootstrap_route_handoff_unapproved:${unexpectedRoute.pattern ?? "unknown"}`);
+  }
+  const routeMap = new Map(inventory.routes.map((route) => [route.pattern, route.script]));
+  for (const pattern of handoff.stagingExceptions) {
+    const script = routeMap.get(pattern);
+    if (script !== undefined && script !== stagingSpec.workerName) {
+      throw new Error(`production_bootstrap_staging_route_drift:${pattern}`);
+    }
+  }
+  return [
+    ...handoff.promote.map((route) => ({
+      action: routeMap.get(route.pattern) === route.script ? "reuse" : "reconcile",
+      code: "traffic.shared_zone_route",
+      pattern: route.pattern,
+      script: route.script,
+    })),
+    {
+      action: "delete",
+      code: "traffic.canary_route",
+      pattern: handoff.canary[0].pattern,
+      script: handoff.canary[0].script,
+    },
+  ];
 }
 
 function assertInventoryIdentity(productionSpec, inventory) {
@@ -379,7 +406,7 @@ function assertCommonEvidence(evidence, phase) {
   }
 }
 
-function assertCanaryPrerequisites(evidence, migrationNames, now) {
+function assertCanaryPrerequisites(evidence, migrationNames, now, { candidateRequired = false } = {}) {
   const completedAt = safeDate(evidence?.backup?.completedAt);
   const restoreCompletedAt = safeDate(evidence?.backup?.restoreDrillCompletedAt);
   const migratedAt = safeDate(evidence?.migrations?.appliedAt);
@@ -403,7 +430,11 @@ function assertCanaryPrerequisites(evidence, migrationNames, now) {
     || migratedAt < completedAt
     || !isDeepStrictEqual(evidence?.migrations?.names, migrationNames)
     || evidence?.previousWorkerVersion !== null
-    || !WORKER_VERSION_PATTERN.test(evidence?.candidateWorkerVersion ?? "")
+    || (
+      evidence?.candidateWorkerVersion !== null
+      && !WORKER_VERSION_PATTERN.test(evidence?.candidateWorkerVersion ?? "")
+    )
+    || (candidateRequired && evidence?.candidateWorkerVersion === null)
     || evidence?.rollback?.strategy !== "restore_pre_bootstrap_traffic_inventory"
     || evidence?.rollback?.snapshotRef !== evidence.preBootstrapTrafficSnapshotRef
   ) {
@@ -546,7 +577,9 @@ export function buildProductionBootstrapPlan(input) {
     throw new Error("production_bootstrap_migration_inventory_invalid");
   }
   if (input.phase !== "resources") {
-    assertCanaryPrerequisites(input.evidence, migrationNames, input.now);
+    assertCanaryPrerequisites(input.evidence, migrationNames, input.now, {
+      candidateRequired: input.phase === "promote",
+    });
   }
   const cutoverBlockers = inspectProductionBootstrapCutoverBlockers(input);
   if (input.phase === "promote" && cutoverBlockers.length > 0) {
@@ -582,9 +615,15 @@ export function buildProductionBootstrapPlan(input) {
     ceremonyId: input.evidence.ceremonyId,
     environment: "production",
     fingerprints: {
+      // The canary upload binds the candidate version after planning; keep the
+      // reviewed canary plan stable across that evidence transition.
+      evidenceSha256: fingerprint(input.phase === "canary"
+        ? { ...input.evidence, candidateWorkerVersion: null }
+        : input.evidence),
       inventorySha256: fingerprint(input.inventory),
       sourceSha256: fingerprint(input.repositoryState),
       specSha256: fingerprint(input.productionSpec),
+      stagingSpecSha256: fingerprint(input.stagingSpec),
     },
     firstVersionRollback: {
       previousWorkerVersion: null,
@@ -597,7 +636,7 @@ export function buildProductionBootstrapPlan(input) {
         ? ["named_production_resources"]
         : input.phase === "canary"
           ? ["production_candidate_worker_version", "production_canary_worker_route"]
-          : ["production_stable_worker_domains"],
+          : ["production_shared_zone_worker_routes"],
       cutoverBlockers,
       forwardOnlyMigrations: true,
       secretNameCount: secretNames.length,

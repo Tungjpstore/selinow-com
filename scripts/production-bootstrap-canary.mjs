@@ -13,6 +13,7 @@ import {
   requireCanaryAuditToken,
   requireCanaryRouteToken,
   requireCanaryWorkerToken,
+  resolveProductionCanaryDns,
   runProductionCanaryApply,
   runProductionCanaryRollback,
   runProductionCanaryUpload,
@@ -250,6 +251,7 @@ try {
         token: routeToken,
         zoneId: productionSpec.zoneId,
       }),
+      dnsAdmissionImplementation: (hostname) => resolveProductionCanaryDns({ hostname }),
       deployVersionImplementation: async (versionId) => {
         runWrangler([
           "versions", "deploy", `${versionId}@100%`, "--env", "production", "--yes",

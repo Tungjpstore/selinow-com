@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildCanaryBuildEnvironment,
   buildCanaryWranglerEnvironment,
+  assertProductionCanaryDnsAdmission,
   assertProductionCanaryStaticIdentity,
   createProductionCanaryRoute,
   deleteProductionCanaryRoute,
@@ -15,6 +16,7 @@ import {
   requireCanaryAuditToken,
   requireCanaryRouteToken,
   requireCanaryWorkerToken,
+  resolveProductionCanaryDns,
   runProductionCanaryApply,
   runProductionCanaryRollback,
   runProductionCanaryUpload,
@@ -180,6 +182,7 @@ function inventory(options: {
   queueConsumers?: Array<{ queueName: string; consumers: unknown[] }>;
   secretNames?: string[];
   versions?: Array<Record<string, unknown>>;
+  deployments?: Array<Record<string, unknown>>;
 } = {}) {
   const activeVersionId = options.activeVersionId ?? CONTROL_VERSION;
   const versions = options.versions ?? [version(CONTROL_VERSION)];
@@ -187,7 +190,7 @@ function inventory(options: {
     accountId: ACCOUNT_ID,
     databaseId: DATABASE_ID,
     databaseName: productionSpec.resources.d1,
-    deployments: [{ created_on: "2026-07-30T03:00:00.000Z", id: activeVersionId === CANDIDATE_VERSION ? CANDIDATE_DEPLOYMENT : CONTROL_DEPLOYMENT, versions: [{ percentage: 100, version_id: activeVersionId }] }],
+    deployments: options.deployments ?? [{ created_on: "2026-07-30T03:00:00.000Z", id: activeVersionId === CANDIDATE_VERSION ? CANDIDATE_DEPLOYMENT : CONTROL_DEPLOYMENT, versions: [{ percentage: 100, version_id: activeVersionId }] }],
     domains: options.domains ?? [],
     observedAt: NOW.toISOString(),
     queueConsumers: options.queueConsumers ?? [
@@ -219,6 +222,7 @@ function input(overrides: Record<string, unknown> = {}) {
     repositoryState,
     tag: "canary-20260730",
     trafficSnapshot: { domains: [], routes: routeSnapshot() },
+    dnsAdmissionImplementation: async (hostname: string) => ({ hostname, addresses: ["104.16.0.1"] }),
     inventoryImplementation: async () => inventory(),
     wranglerConfig,
     ...overrides,
@@ -252,6 +256,7 @@ function canaryPlan(values: {
     ceremonyId: evidence.ceremonyId,
     environment: "production",
     fingerprints: {
+      evidenceSha256: fingerprint({ ...evidence, candidateWorkerVersion: null }),
       inventorySha256: fingerprint(trafficSnapshot),
       sourceSha256: fingerprint(source),
       specSha256: fingerprint(spec),
@@ -354,6 +359,13 @@ describe("production canary static admission", () => {
           ? { ...action, pattern: "wrong.selinow.com/*" }
           : action),
       },
+    })).toThrow("production_canary_plan_invalid");
+
+    expect(() => validateProductionCanaryPlan({
+      ...values,
+      evidence: validEvidence({
+        backup: { ...validEvidence().backup, snapshotReportRef: "private/backup/drifted.json" },
+      }),
     })).toThrow("production_canary_plan_invalid");
   });
 });
@@ -488,6 +500,86 @@ describe("production canary live inventory", () => {
   });
 });
 
+describe("production canary DNS admission", () => {
+  it("accepts only the configured hostname with Cloudflare anycast addresses", () => {
+    expect(assertProductionCanaryDnsAdmission({
+      addresses: ["104.16.0.1", "2606:4700::1"],
+      hostname: "canary.selinow.com",
+    }, productionSpec)).toEqual({
+      addresses: ["104.16.0.1", "2606:4700::1"],
+      hostname: "canary.selinow.com",
+    });
+    expect(() => assertProductionCanaryDnsAdmission({
+      addresses: ["192.0.2.1"],
+      hostname: "canary.selinow.com",
+    }, productionSpec)).toThrow("production_canary_dns_admission_invalid");
+    expect(() => assertProductionCanaryDnsAdmission({
+      addresses: ["104.16.0.1"],
+      hostname: "other.selinow.com",
+    }, productionSpec)).toThrow("production_canary_dns_admission_invalid");
+  });
+
+  it("fails closed when DNS has no answer or returns a non-Cloudflare address", async () => {
+    const noAnswer = async () => {
+      const error = new Error("not found");
+      Object.assign(error, { code: "ENOTFOUND" });
+      throw error;
+    };
+    await expect(resolveProductionCanaryDns({
+      hostname: "canary.selinow.com.",
+      resolve4Implementation: async () => ["104.16.0.1"],
+      resolve6Implementation: async () => ["2606:4700::1"],
+    })).resolves.toEqual({
+      addresses: ["104.16.0.1", "2606:4700::1"],
+      hostname: "canary.selinow.com",
+    });
+    await expect(resolveProductionCanaryDns({
+      hostname: "canary.selinow.com",
+      resolve4Implementation: noAnswer,
+      resolve6Implementation: noAnswer,
+    })).rejects.toThrow("production_canary_dns_unresolved");
+    await expect(resolveProductionCanaryDns({
+      hostname: "canary.selinow.com",
+      resolve4Implementation: async () => ["192.0.2.1"],
+      resolve6Implementation: noAnswer,
+    })).rejects.toThrow("production_canary_dns_not_cloudflare");
+  });
+
+  it("normalizes IPv4-mapped IPv6 answers and validates public DoH payloads", async () => {
+    await expect(resolveProductionCanaryDns({
+      hostname: "canary.selinow.com",
+      resolve4Implementation: async () => [],
+      resolve6Implementation: async () => ["::ffff:104.16.0.1"],
+    })).resolves.toEqual({ addresses: ["104.16.0.1"], hostname: "canary.selinow.com" });
+
+    const fetchImplementation = vi.fn(async (request: RequestInfo | URL) => {
+      const requestUrl = typeof request === "string"
+        ? request
+        : request instanceof URL
+          ? request.href
+          : request.url;
+      const url = new URL(requestUrl);
+      const type = url.searchParams.get("type");
+      const answer = type === "A"
+        ? { type: 1, data: "104.16.0.1" }
+        : { type: 28, data: "2606:4700::1" };
+      return new Response(JSON.stringify({ Status: 0, Answer: [answer] }), {
+        headers: { "content-type": "application/dns-json" },
+      });
+    });
+    await expect(resolveProductionCanaryDns({ hostname: "canary.selinow.com", fetchImplementation })).resolves.toEqual({
+      addresses: ["104.16.0.1", "2606:4700::1"],
+      hostname: "canary.selinow.com",
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+
+    const malformedFetch = async () => new Response(JSON.stringify({ Status: 0, Answer: "not-an-array" }));
+    await expect(resolveProductionCanaryDns({ hostname: "canary.selinow.com", fetchImplementation: malformedFetch }))
+      .rejects.toThrow("production_canary_dns_lookup_invalid");
+  });
+
+});
+
 describe("production canary upload", () => {
   it("has a no-mutation dry-run and never needs a runner or fetch", async () => {
     const inventoryImplementation = vi.fn(async () => inventory());
@@ -549,6 +641,47 @@ describe("production canary upload", () => {
     }))).rejects.toThrow("production_canary_candidate_capture_invalid");
   });
 
+  it("advances from reviewed null-candidate evidence to candidate-bound apply evidence", async () => {
+    const before = inventory();
+    const withCandidate = inventory({
+      versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: false })],
+    });
+    const preUploadEvidence = validEvidence();
+    let index = 0;
+    const upload = await runProductionCanaryUpload(input({
+      evidence: preUploadEvidence,
+      execute: true,
+      buildImplementation: async () => {},
+      uploadImplementation: async () => {},
+      inventoryImplementation: async () => [before, before, withCandidate][index++],
+      versionViewImplementation: async () => candidateView(),
+      writeReportImplementation: async () => "upload-report.json",
+    }));
+
+    expect(upload.evidencePatch).toEqual({ candidateWorkerVersion: CANDIDATE_VERSION });
+    const applyInventory = vi.fn(async () => withCandidate);
+    await expect(runProductionCanaryApply(input({
+      evidence: preUploadEvidence,
+      uploadReport: upload.report,
+      inventoryImplementation: applyInventory,
+    }))).rejects.toThrow("production_canary_upload_report_invalid");
+    expect(applyInventory).not.toHaveBeenCalled();
+
+    const postUploadEvidence = { ...preUploadEvidence, ...upload.evidencePatch };
+    await expect(runProductionCanaryApply(input({
+      evidence: postUploadEvidence,
+      uploadReport: upload.report,
+      inventoryImplementation: async () => withCandidate,
+    }))).resolves.toMatchObject({ executed: false, ok: true });
+
+    const rejectedUploadInventory = vi.fn(async () => withCandidate);
+    await expect(runProductionCanaryUpload(input({
+      evidence: postUploadEvidence,
+      inventoryImplementation: rejectedUploadInventory,
+    }))).rejects.toThrow("production_canary_upload_evidence_incomplete");
+    expect(rejectedUploadInventory).not.toHaveBeenCalled();
+  });
+
   it("keeps the upload command route-neutral and forbids deploy/triggers", () => {
     const source = readFileSync("scripts/production-bootstrap-canary.mjs", "utf8");
     expect(source).toContain('"versions",\n          "upload"');
@@ -589,12 +722,101 @@ describe("production canary apply and rollback", () => {
       evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
       uploadReport: report,
       inventoryImplementation: async () => [initial, deployed, after][index++],
+      dnsAdmissionImplementation: async (hostname: string) => {
+        events.push("dns:admit");
+        return { hostname, addresses: ["104.16.0.1"] };
+      },
       deployVersionImplementation: async (id: string) => events.push(`deploy:${id}`),
       createRouteImplementation: async (route: Record<string, string>) => { events.push("route:create"); return { ...route, id: ROUTE_ID }; },
       writeReportImplementation: async () => "applied.json",
     }));
     expect(result.ok).toBe(true);
-    expect(events).toEqual([`deploy:${CANDIDATE_VERSION}`, "route:create"]);
+    expect(events).toEqual(["dns:admit", `deploy:${CANDIDATE_VERSION}`, "dns:admit", "route:create"]);
+    expect(result.state.dnsAdmission).toEqual({
+      addressesBeforeDeploy: ["104.16.0.1"],
+      addressesBeforeRoute: ["104.16.0.1"],
+      hostname: "canary.selinow.com",
+    });
+  });
+
+  it("requires DNS admission before deploying and compensates if it disappears before route apply", async () => {
+    const report = await uploadReport();
+    const initial = inventory({ versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: false })] });
+    const deployed = inventory({ activeVersionId: CANDIDATE_VERSION, versions: initial.versions });
+    const restoredControl = inventory({
+      activeVersionId: CONTROL_VERSION,
+      deployments: [
+        { created_on: "2026-07-30T03:20:00.000Z", id: CONTROL_DEPLOYMENT, versions: [{ percentage: 100, version_id: CONTROL_VERSION }] },
+        { created_on: "2026-07-30T03:10:00.000Z", id: CANDIDATE_DEPLOYMENT, versions: [{ percentage: 100, version_id: CANDIDATE_VERSION }] },
+      ],
+      versions: initial.versions,
+    });
+    const deploy = vi.fn(async () => {});
+    await expect(runProductionCanaryApply(input({
+      execute: true,
+      evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
+      uploadReport: report,
+      inventoryImplementation: async () => initial,
+      dnsAdmissionImplementation: undefined,
+      deployVersionImplementation: deploy,
+    }))).rejects.toThrow("production_canary_dns_admission_missing");
+    expect(deploy).not.toHaveBeenCalled();
+    await expect(runProductionCanaryApply(input({
+      execute: true,
+      evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
+      uploadReport: report,
+      inventoryImplementation: async () => initial,
+      dnsAdmissionImplementation: async (hostname: string) => ({ hostname, addresses: ["192.0.2.1"] }),
+      deployVersionImplementation: deploy,
+    }))).rejects.toThrow("production_canary_dns_admission_invalid");
+    expect(deploy).not.toHaveBeenCalled();
+
+    let inventoryIndex = 0;
+    let dnsIndex = 0;
+    await expect(runProductionCanaryApply(input({
+      execute: true,
+      evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
+      uploadReport: report,
+      inventoryImplementation: async () => [initial, deployed, restoredControl][inventoryIndex++],
+      dnsAdmissionImplementation: async (hostname: string) => {
+        if (dnsIndex++ === 0) return { hostname, addresses: ["104.16.0.1"] };
+        throw new Error("production_canary_dns_unresolved");
+      },
+      deployVersionImplementation: deploy,
+    }))).rejects.toThrow("production_canary_dns_unresolved");
+    expect(deploy).toHaveBeenNthCalledWith(1, CANDIDATE_VERSION);
+    expect(deploy).toHaveBeenCalledOnce();
+  });
+
+  it("reconciles an ambiguous deploy and avoids mutation when control is still active", async () => {
+    const report = await uploadReport();
+    const initial = inventory({ versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: false })] });
+    const candidate = inventory({ activeVersionId: CANDIDATE_VERSION, versions: initial.versions });
+    const control = inventory({ versions: initial.versions });
+    const deploy = vi.fn(async (versionId: string) => {
+      if (versionId === CANDIDATE_VERSION) throw new Error("deploy_ambiguous");
+    });
+    let index = 0;
+    await expect(runProductionCanaryApply(input({
+      execute: true,
+      evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
+      uploadReport: report,
+      inventoryImplementation: async () => [initial, candidate, candidate, control][index++],
+      deployVersionImplementation: deploy,
+    }))).rejects.toThrow("deploy_ambiguous");
+    expect(deploy).toHaveBeenNthCalledWith(1, CANDIDATE_VERSION);
+    expect(deploy).toHaveBeenNthCalledWith(2, CONTROL_VERSION);
+
+    index = 0;
+    const stillControl = vi.fn(async () => { throw new Error("deploy_ambiguous"); });
+    await expect(runProductionCanaryApply(input({
+      execute: true,
+      evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
+      uploadReport: report,
+      inventoryImplementation: async () => [initial, initial, initial][index++],
+      deployVersionImplementation: stillControl,
+    }))).rejects.toThrow("deploy_ambiguous");
+    expect(stillControl).toHaveBeenCalledOnce();
   });
 
   it("accepts an id-only route response and compensates if state persistence fails", async () => {
@@ -602,7 +824,40 @@ describe("production canary apply and rollback", () => {
     const initial = inventory({ versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: false })] });
     const deployed = inventory({ activeVersionId: CANDIDATE_VERSION, versions: initial.versions });
     const after = inventory({ activeVersionId: CANDIDATE_VERSION, routes: [...deployed.routes, { id: ROUTE_ID, pattern: "canary.selinow.com/*", script: productionSpec.workerName }], versions: initial.versions });
+    const routeRestoredCandidate = inventory({ activeVersionId: CANDIDATE_VERSION, versions: initial.versions });
     const restoredControl = inventory({ activeVersionId: CONTROL_VERSION, versions: initial.versions });
+    let index = 0;
+    const events: string[] = [];
+    await expect(runProductionCanaryApply(input({
+      execute: true,
+      evidence: validEvidence({ candidateWorkerVersion: CANDIDATE_VERSION }),
+      uploadReport: report,
+      inventoryImplementation: async () => [initial, deployed, after, after, routeRestoredCandidate, restoredControl][index++],
+      deployVersionImplementation: async (id: string) => events.push(`deploy:${id}`),
+      createRouteImplementation: async () => {
+        events.push("route:create");
+        return { id: ROUTE_ID };
+      },
+      deleteRouteImplementation: async (id: string) => {
+        events.push(`delete:${id}`);
+        throw new Error("delete_response_lost");
+      },
+      writeReportImplementation: async () => { throw new Error("state_write_failed"); },
+    }))).rejects.toThrow("state_write_failed");
+    expect(events).toEqual([
+      `deploy:${CANDIDATE_VERSION}`,
+      "route:create",
+      `delete:${ROUTE_ID}`,
+      `deploy:${CONTROL_VERSION}`,
+    ]);
+  });
+
+  it("restores control but never deletes a route from an ambiguous unowned POST", async () => {
+    const report = await uploadReport();
+    const initial = inventory({ versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: false })] });
+    const deployed = inventory({ activeVersionId: CANDIDATE_VERSION, versions: initial.versions });
+    const after = inventory({ activeVersionId: CANDIDATE_VERSION, routes: [...deployed.routes, { id: ROUTE_ID, pattern: "canary.selinow.com/*", script: productionSpec.workerName }], versions: initial.versions });
+    const restoredControl = inventory({ activeVersionId: CONTROL_VERSION, routes: after.routes, versions: initial.versions });
     let index = 0;
     const events: string[] = [];
     await expect(runProductionCanaryApply(input({
@@ -613,17 +868,34 @@ describe("production canary apply and rollback", () => {
       deployVersionImplementation: async (id: string) => events.push(`deploy:${id}`),
       createRouteImplementation: async () => {
         events.push("route:create");
-        return { id: ROUTE_ID };
+        throw new Error("route_post_ambiguous");
       },
       deleteRouteImplementation: async (id: string) => events.push(`delete:${id}`),
-      writeReportImplementation: async () => { throw new Error("state_write_failed"); },
-    }))).rejects.toThrow("state_write_failed");
+    }))).rejects.toThrow("production_canary_apply_compensation_failed");
     expect(events).toEqual([
       `deploy:${CANDIDATE_VERSION}`,
       "route:create",
-      `delete:${ROUTE_ID}`,
       `deploy:${CONTROL_VERSION}`,
     ]);
+  });
+
+  it("binds apply to the upload-time evidence prerequisites", async () => {
+    const report = await uploadReport();
+    const inventoryImplementation = vi.fn(async () => inventory({
+      versions: [version(CONTROL_VERSION), version(CANDIDATE_VERSION, { has_preview: false })],
+    }));
+    await expect(runProductionCanaryApply(input({
+      evidence: validEvidence({
+        backup: {
+          ...validEvidence().backup,
+          snapshotReportRef: "private/backup/changed-after-upload.json",
+        },
+        candidateWorkerVersion: CANDIDATE_VERSION,
+      }),
+      uploadReport: report,
+      inventoryImplementation,
+    }))).rejects.toThrow("production_canary_upload_report_invalid");
+    expect(inventoryImplementation).not.toHaveBeenCalled();
   });
 
   it("rejects route/control/candidate drift before mutation", async () => {
@@ -682,8 +954,14 @@ describe("production canary apply and rollback", () => {
         routesAfter: sortedRoutes(withRoute.routes),
       },
       inventoryImplementation: async () => [withRoute, restored, restoredControl][index++],
-      deleteRouteImplementation: async (id: string) => events.push(`delete:${id}`),
-      deployVersionImplementation: async (id: string) => events.push(`deploy:${id}`),
+      deleteRouteImplementation: async (id: string) => {
+        events.push(`delete:${id}`);
+        throw new Error("delete_response_lost");
+      },
+      deployVersionImplementation: async (id: string) => {
+        events.push(`deploy:${id}`);
+        throw new Error("deploy_response_lost");
+      },
       writeReportImplementation: async () => "rollback.json",
     }));
     expect(result.ok).toBe(true);

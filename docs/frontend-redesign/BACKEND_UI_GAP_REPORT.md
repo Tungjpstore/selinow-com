@@ -115,9 +115,11 @@ truthfully disabled instead of being simulated in the browser.
   work. The SSR/UI work does not replace those provider-backed gates.
 - **Authenticated visual evidence:** the automation workspace, buyer-bound
   controls and shell/static tenant-link changes are covered by source/unit
-  contracts. The isolated local Playwright gate passes 6/6 across desktop/mobile
-  and 1440/768/390/320px coverage; all 28 current-source authenticated snapshots
-  were regenerated and manually reviewed at 1440x1024 and 390x844.
+  contracts. The isolated local Playwright gate passes 7/7 across desktop/mobile
+  and 1440/768/390/320px coverage; all 42 current-source authenticated snapshots
+  for 21 surface IDs were regenerated and manually reviewed at 1440x1024 and
+  390x844. The public local gate passes 27/27 with 26 additional route/state
+  screenshots.
 - **Additional adapters:** managed shared channels, DNS-provider authorization,
   social/marketplace adapters and a second payment provider remain roadmap work.
 
@@ -128,16 +130,19 @@ state. D1 remains authoritative; cache/KV is never used to decide a commerce or
 subscription mutation. Production remains `NO-GO` until Phase 10 release gates,
 controlled provider pilots, operations evidence and ownership approvals pass.
 
-- Current source verification: `npm run check` passed with 0 errors and 3 existing
-  non-blocking hints; `npm run lint` passed; `npm test` passed with 184 files /
-  1,371 tests; `npm run build` and `npm run deploy:dry-run` passed without
-  deployment.
+- Latest completed frontend source verification checkpoint (before the current
+  production promotion/DNS test additions): `npm run check` passed with 0 errors
+  and 3 existing non-blocking hints; `npm run lint` passed; `npm test` passed with
+  189 files / 1,447 tests; `npm run build` and `npm run deploy:dry-run` passed
+  without deployment. Rerun the full repository gate before treating the test
+  total as current.
 
 All latest frontend slices remain local-only. No staging deployment or production
-mutation was performed. The authenticated Playwright contract defines 28
-screenshot/geometry comparisons plus axe, horizontal-overflow and console checks;
-the isolated local gate passes 6/6 and the complete current-source screenshot set
-has been reviewed at the exact desktop/mobile acceptance viewports.
+mutation was performed. The authenticated Playwright contract defines 21 surface
+IDs and 42 desktop/mobile screenshots plus axe, horizontal-overflow and console
+checks; the isolated local gate passes 7/7. The public gate passes 27/27 with 26
+route/state screenshots. The active PromptOS matrix remains 19 routes / 82
+route-state pairs, with unlisted variants retained as explicit follow-up.
 The public staging gate is 18/20 because desktop/mobile cart checks fail closed
 before screenshot on the older deployed hydration contract. The read-only
 1440/768/390/320 viewport matrix passes 4/4. The in-app Browser loopback refusal

@@ -81,6 +81,7 @@ export interface ProductionBootstrapPlan {
   ceremonyId: string;
   environment: "production";
   fingerprints: {
+    evidenceSha256: string;
     inventorySha256: string;
     sourceSha256: string;
     specSha256: string;
