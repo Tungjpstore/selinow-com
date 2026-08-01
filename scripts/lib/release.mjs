@@ -6,6 +6,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import {
   assertProductionWorkerIdentityAdmission,
+  cloudflareApiRequest,
+  requireCloudflareRouteAuditToken,
   repositoryRoot,
 } from "./platform.mjs";
 
@@ -85,6 +87,10 @@ const REQUIRED_EVIDENCE_PATHS = [
   "backup.restoreDrillPassed",
   "backup.restoreDrillReportRef",
   "backup.snapshotReportRef",
+  "candidateUpload.completedAt",
+  "candidateUpload.reportRef",
+  "candidateUpload.reportSha256",
+  "candidateUpload.reviewedCommitSha",
   "candidateWorkerVersion",
   "commitSha",
   "manualAcceptance.customDomain",
@@ -111,6 +117,7 @@ const REQUIRED_EVIDENCE_PATHS = [
 const PLACEHOLDER_PATTERN = /(?:change-me|not-provisioned|placeholder|replace-with|<[^>]+>)/iu;
 const RELEASE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{7,80}$/u;
 const SAFE_NAME_PATTERN = /^[a-z][a-z0-9._-]{2,80}$/u;
+const WORKER_VERSION_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const MAX_SMOKE_RESPONSE_BYTES = 256 * 1024;
 
 function getPath(value, path) {
@@ -199,10 +206,17 @@ function validEvidencePath(path, value) {
   if (path.startsWith("quality.") || path.startsWith("manualAcceptance.") || path.startsWith("monitoring.")) return value === true;
   if (path === "staging.accepted") return value === true;
   if (path === "staging.acceptedAt") return safeDate(value) !== null;
+  if (path === "candidateUpload.completedAt") return safeDate(value) !== null;
+  if (path === "candidateUpload.reportSha256") return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+  if (path === "candidateUpload.reviewedCommitSha" || path === "commitSha") {
+    return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
+  }
+  if (path === "candidateWorkerVersion" || path === "previousWorkerVersion") {
+    return typeof value === "string" && WORKER_VERSION_PATTERN.test(value);
+  }
   if (path === "security.criticalOpen" || path === "security.highOpen") return value === 0;
   if (path === "pilot.shopCount") return Number.isSafeInteger(value) && value >= 2;
   if (path === "releaseId") return typeof value === "string" && RELEASE_ID_PATTERN.test(value) && !PLACEHOLDER_PATTERN.test(value);
-  if (path === "commitSha") return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
   return isConfigured(value);
 }
 
@@ -276,9 +290,22 @@ export function inspectProductionReadiness(input) {
     const value = getPath(spec, path);
     checks.push(makeCheck(`productionSpec.${path}`, validSpecPath(path, value)));
   }
+  const candidatePending = input.candidatePending === true;
   for (const path of REQUIRED_EVIDENCE_PATHS) {
+    if (candidatePending && (path === "candidateWorkerVersion" || path.startsWith("candidateUpload."))) continue;
     const value = getPath(evidence, path);
     checks.push(makeCheck(`evidence.${path}`, validEvidencePath(path, value)));
+  }
+  if (candidatePending) {
+    checks.push(
+      makeCheck("evidence.candidateWorkerVersion.pending", evidence?.candidateWorkerVersion === null),
+      makeCheck("evidence.candidateUpload.pending", evidence?.candidateUpload == null),
+    );
+  } else {
+    checks.push(makeCheck(
+      "evidence.candidateUpload.commitAlignment",
+      evidence?.candidateUpload?.reviewedCommitSha === evidence?.commitSha,
+    ));
   }
   const routes = new Set(Array.isArray(production?.routes) ? production.routes.map((route) => route?.pattern).filter((value) => typeof value === "string") : []);
   const d1Database = Array.isArray(production?.d1_databases)
@@ -307,6 +334,12 @@ export function inspectProductionReadiness(input) {
     name: `evidence.${check.name}`,
     ok: check.ok,
   })));
+  if (!candidatePending) {
+    checks.push(makeCheck(
+      "evidence.workerVersion.transition",
+      evidence?.candidateWorkerVersion !== evidence?.previousWorkerVersion,
+    ));
+  }
 
   const unique = new Map(checks.map((check) => [check.name, check]));
   const result = [...unique.values()].sort((left, right) => left.name.localeCompare(right.name));
@@ -382,6 +415,11 @@ export function buildReleaseArtifacts(input) {
       restoreDrillCompletedAt: input.evidence.backup.restoreDrillCompletedAt,
       restoreDrillPassed: true,
     },
+    candidateUpload: {
+      completedAt: input.evidence.candidateUpload.completedAt,
+      reportRef: input.evidence.candidateUpload.reportRef,
+      reportSha256: input.evidence.candidateUpload.reportSha256,
+    },
     candidateWorkerVersion: input.evidence.candidateWorkerVersion,
     commitSha: input.evidence.commitSha,
     configFingerprintSha256: configFingerprint,
@@ -394,7 +432,7 @@ export function buildReleaseArtifacts(input) {
     previousWorkerVersion: input.evidence.previousWorkerVersion,
     releaseEvidenceFingerprintSha256: fingerprint(input.evidence),
     releaseId: input.evidence.releaseId,
-    schemaVersion: 2,
+    schemaVersion: 3,
   };
   return { manifest, rollbackMatrix: buildRollbackMatrix() };
 }
@@ -429,8 +467,287 @@ export function validateProductionDeployAdmission(input) {
     }
   }
   return {
+    candidateWorkerVersion: input.manifest.candidateWorkerVersion,
     commitSha: input.repositoryCommitSha,
+    previousWorkerVersion: input.manifest.previousWorkerVersion,
     releaseId: input.manifest.releaseId,
+  };
+}
+
+export function validateProductionCandidateUploadAdmission(input) {
+  if (input.repositoryClean !== true) throw new Error("production_candidate_source_dirty");
+  if (!/^[a-f0-9]{40}$/u.test(input.repositoryCommitSha ?? "")) {
+    throw new Error("production_candidate_commit_unavailable");
+  }
+  if (input.evidence?.commitSha !== input.repositoryCommitSha) {
+    throw new Error("production_candidate_evidence_commit_mismatch");
+  }
+  const readiness = inspectProductionReadiness({ ...input, candidatePending: true });
+  if (!readiness.ok) {
+    throw new Error(`production_candidate_prerequisites_incomplete:${readiness.missing[0] ?? "unknown"}`);
+  }
+  return {
+    commitSha: input.repositoryCommitSha,
+    previousWorkerVersion: input.evidence.previousWorkerVersion,
+    releaseId: input.evidence.releaseId,
+  };
+}
+
+function normalizeVersionIds(versions, code) {
+  if (!Array.isArray(versions)) throw new Error(code);
+  const ids = versions.map((version) => version?.id);
+  if (ids.some((id) => typeof id !== "string" || !WORKER_VERSION_PATTERN.test(id))) throw new Error(code);
+  if (new Set(ids).size !== ids.length) throw new Error(code);
+  return ids;
+}
+
+export function captureProductionCandidateVersion(input) {
+  const beforeIds = normalizeVersionIds(input.beforeVersions, "production_candidate_versions_before_invalid");
+  const afterIds = normalizeVersionIds(input.afterVersions, "production_candidate_versions_after_invalid");
+  const before = new Set(beforeIds);
+  if (beforeIds.some((id) => !afterIds.includes(id))) {
+    throw new Error("production_candidate_version_inventory_drift");
+  }
+  const added = afterIds.filter((id) => !before.has(id));
+  if (added.length !== 1 || added[0] === input.activeVersionId) {
+    throw new Error("production_candidate_capture_invalid");
+  }
+  if (!WORKER_VERSION_PATTERN.test(input.activeVersionId ?? "")) {
+    throw new Error("production_candidate_active_version_invalid");
+  }
+  return added[0];
+}
+
+export function productionDeploymentVersion(deployments) {
+  if (!Array.isArray(deployments) || deployments.length === 0) {
+    throw new Error("production_worker_deployments_invalid");
+  }
+  const normalized = deployments.map((deployment) => {
+    const createdOn = deployment?.created_on ?? deployment?.createdOn;
+    const version = Array.isArray(deployment?.versions) && deployment.versions.length === 1
+      ? deployment.versions[0]
+      : null;
+    if (
+      typeof createdOn !== "string"
+      || safeDate(createdOn) === null
+      || !WORKER_VERSION_PATTERN.test(version?.version_id ?? "")
+      || version?.percentage !== 100
+    ) {
+      throw new Error("production_worker_deployments_invalid");
+    }
+    return { createdOn, versionId: version.version_id };
+  }).sort((left, right) => Date.parse(right.createdOn) - Date.parse(left.createdOn));
+  return normalized[0].versionId;
+}
+
+async function hashUploadDirectory(directory, root, hash) {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    throw new Error("production_candidate_upload_inputs_missing");
+  }
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const path = resolve(directory, entry.name);
+    const relativePath = path.slice(root.length + 1);
+    if (entry.isDirectory()) {
+      await hashUploadDirectory(path, root, hash);
+      continue;
+    }
+    if (!entry.isFile()) throw new Error("production_candidate_upload_inputs_invalid");
+    const value = await readFile(path);
+    hash.update(`${relativePath.length}:${relativePath}:${value.byteLength}:`);
+    hash.update(value);
+  }
+}
+
+export async function fingerprintProductionUploadInputs(root = repositoryRoot) {
+  const hash = createHash("sha256");
+  const wranglerPath = resolve(root, "wrangler.jsonc");
+  let wranglerConfig;
+  try {
+    wranglerConfig = await readFile(wranglerPath);
+  } catch {
+    throw new Error("production_candidate_upload_inputs_missing");
+  }
+  hash.update(`wrangler.jsonc:${wranglerConfig.byteLength}:`);
+  hash.update(wranglerConfig);
+  await hashUploadDirectory(resolve(root, "dist"), resolve(root, "dist"), hash);
+  return hash.digest("hex");
+}
+
+function productionCandidateBindingContract(input) {
+  const production = input.wranglerConfig?.env?.production;
+  const spec = input.productionSpec;
+  const generated = input.generatedManifest;
+  if (
+    production?.name !== spec?.workerName
+    || production?.preview_urls !== false
+    || generated?.accountId !== spec?.accountId
+    || generated?.zoneId !== spec?.zoneId
+    || generated?.workerName !== spec?.workerName
+    || generated?.resources?.d1?.name !== spec?.resources?.d1
+  ) {
+    throw new Error("production_candidate_contract_invalid");
+  }
+  const expected = new Map();
+  for (const name of REQUIRED_PRODUCTION_VARS) {
+    const value = production?.vars?.[name];
+    if (typeof value !== "string") throw new Error("production_candidate_contract_invalid");
+    expected.set(name, { text: value, type: "plain_text" });
+  }
+  for (const name of REQUIRED_WORKER_SECRET_NAMES) expected.set(name, { type: "secret_text" });
+  expected.set("ASSETS", { type: "assets" });
+  expected.set("EMAIL", {
+    allowed_sender_addresses: production?.send_email?.find((binding) => binding?.name === "EMAIL")?.allowed_sender_addresses,
+    type: "send_email",
+  });
+  expected.set("INTEGRATION_QUEUE", { queue_name: spec.resources.integrationQueue, type: "queue" });
+  expected.set("NOTIFICATION_QUEUE", { queue_name: spec.resources.notificationQueue, type: "queue" });
+  expected.set("MEDIA", { bucket_name: spec.resources.r2, type: "r2_bucket" });
+  expected.set("PRIVATE_EXPORTS", { bucket_name: spec.resources.privateExports, type: "r2_bucket" });
+  expected.set("PLATFORM_CACHE", { namespace_id: generated?.resources?.platformCacheKv?.id, type: "kv_namespace" });
+  expected.set("SESSION", { namespace_id: generated?.resources?.sessionKv?.id, type: "kv_namespace" });
+  expected.set("PLATFORM_DB", {
+    database_id: generated?.resources?.d1?.id,
+    id: generated?.resources?.d1?.id,
+    type: "d1",
+  });
+  if ([...expected.values()].some((binding) => Object.values(binding).some((value) => value === undefined))) {
+    throw new Error("production_candidate_contract_invalid");
+  }
+  return expected;
+}
+
+export function validateProductionCandidateVersionView(view, candidateWorkerVersion, input) {
+  const requiredHandlers = ["fetch", "queue", "scheduled"];
+  if (
+    view?.id !== candidateWorkerVersion
+    || !WORKER_VERSION_PATTERN.test(candidateWorkerVersion ?? "")
+    || !Array.isArray(view?.resources?.bindings)
+    || !Array.isArray(view?.resources?.script?.handlers)
+    || !isDeepStrictEqual([...view.resources.script.handlers].sort(), requiredHandlers)
+  ) {
+    throw new Error("production_candidate_view_invalid");
+  }
+  const expected = productionCandidateBindingContract(input);
+  const observed = new Map();
+  for (const binding of view.resources.bindings) {
+    if (typeof binding?.name !== "string" || observed.has(binding.name)) {
+      throw new Error("production_candidate_binding_inventory_invalid");
+    }
+    observed.set(binding.name, binding);
+  }
+  const missing = [...expected.keys()].find((name) => !observed.has(name));
+  if (missing !== undefined) throw new Error(`production_candidate_binding_missing:${missing}`);
+  const unexpected = [...observed.keys()].find((name) => !expected.has(name));
+  if (unexpected !== undefined) throw new Error(`production_candidate_binding_unexpected:${unexpected}`);
+  for (const [name, expectedBinding] of expected) {
+    const observedBinding = observed.get(name);
+    for (const [field, expectedValue] of Object.entries(expectedBinding)) {
+      if (!isDeepStrictEqual(observedBinding?.[field], expectedValue)) {
+        throw new Error(`production_candidate_binding_mismatch:${name}:${field}`);
+      }
+    }
+  }
+  return [...observed.keys()].sort();
+}
+
+export function validateProductionCandidateVersionProvenance(view, input) {
+  if (
+    view?.annotations?.["workers/message"] !== `normal release candidate ${input.commitSha}`
+    || view?.annotations?.["workers/tag"] !== input.tag
+    || view?.annotations?.["workers/triggered_by"] !== "version_upload"
+    || view?.metadata?.source !== "wrangler"
+  ) {
+    throw new Error("production_candidate_provenance_invalid");
+  }
+  return {
+    message: view.annotations["workers/message"],
+    source: view.metadata.source,
+    tag: view.annotations["workers/tag"],
+    triggeredBy: view.annotations["workers/triggered_by"],
+  };
+}
+
+export function assertProductionPreActivationVersions(initialAdmission, finalAdmission = initialAdmission) {
+  if (initialAdmission?.activeWorkerVersion !== initialAdmission?.previousWorkerVersion) {
+    throw new Error("production_deploy_previous_version_mismatch");
+  }
+  if (
+    finalAdmission?.activeWorkerVersion !== finalAdmission?.previousWorkerVersion
+    || finalAdmission.activeWorkerVersion !== initialAdmission.activeWorkerVersion
+  ) {
+    throw new Error("production_deploy_active_version_changed");
+  }
+  return finalAdmission.activeWorkerVersion;
+}
+
+export function buildProductionReleaseAuditEnvironment(environment, accountId, auditToken) {
+  if (!/^[a-f0-9]{32}$/u.test(accountId ?? "") || typeof auditToken !== "string" || !auditToken.trim()) {
+    throw new Error("production_release_audit_environment_invalid");
+  }
+  const child = {
+    ...(environment ?? {}),
+    CI: "1",
+    CLOUDFLARE_ACCOUNT_ID: accountId,
+    CLOUDFLARE_API_TOKEN: auditToken.trim(),
+  };
+  for (const name of [
+    "CF_API_KEY",
+    "CF_API_TOKEN",
+    "CLOUDFLARE_API_KEY",
+    "CLOUDFLARE_API_USER_SERVICE_KEY",
+    "CLOUDFLARE_CANARY_AUDIT_API_TOKEN",
+    "CLOUDFLARE_CANARY_ROUTE_API_TOKEN",
+    "CLOUDFLARE_CANARY_WORKER_API_TOKEN",
+    "CLOUDFLARE_EMAIL",
+    "CLOUDFLARE_OAUTH_TOKEN",
+    "CLOUDFLARE_PLATFORM_API_TOKEN",
+    "CLOUDFLARE_RELEASE_WORKER_API_TOKEN",
+    "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN",
+  ]) delete child[name];
+  return child;
+}
+
+export async function writeProductionCandidateArtifacts(input) {
+  const evidence = input.evidence;
+  const report = input.report;
+  if (
+    evidence?.candidateWorkerVersion !== null
+    || evidence?.candidateUpload != null
+    || !RELEASE_ID_PATTERN.test(evidence?.releaseId ?? "")
+    || report?.releaseId !== evidence.releaseId
+    || report?.reviewedCommitSha !== evidence.commitSha
+    || !WORKER_VERSION_PATTERN.test(report?.candidateWorkerVersion ?? "")
+  ) {
+    throw new Error("production_candidate_evidence_transition_invalid");
+  }
+  const root = input.repositoryRoot ?? repositoryRoot;
+  const directory = resolve(root, ".wrangler", "releases", evidence.releaseId);
+  await mkdir(directory, { mode: 0o700, recursive: true });
+  const reportPath = resolve(directory, "candidate-upload.json");
+  const reportText = `${JSON.stringify(report, null, 2)}\n`;
+  const reportSha256 = createHash("sha256").update(reportText).digest("hex");
+  const updatedEvidence = {
+    ...evidence,
+    candidateUpload: {
+      completedAt: report.createdAt,
+      reportRef: `.wrangler/releases/${evidence.releaseId}/candidate-upload.json`,
+      reportSha256,
+      reviewedCommitSha: report.reviewedCommitSha,
+    },
+    candidateWorkerVersion: report.candidateWorkerVersion,
+  };
+  await writeFile(reportPath, reportText, { mode: 0o600 });
+  await chmod(reportPath, 0o600);
+  await writeFile(input.evidencePath, `${JSON.stringify(updatedEvidence, null, 2)}\n`, { mode: 0o600 });
+  await chmod(input.evidencePath, 0o600);
+  return {
+    candidateWorkerVersion: report.candidateWorkerVersion,
+    evidence: updatedEvidence,
+    reportRef: updatedEvidence.candidateUpload.reportRef,
   };
 }
 
@@ -449,10 +766,62 @@ function readRepositoryGitState(root) {
   if (status.error || status.status !== 0) {
     throw new Error("production_release_source_status_unavailable");
   }
+  const tree = spawnSync("git", ["rev-parse", "--verify", "HEAD^{tree}"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (tree.error || tree.status !== 0) {
+    throw new Error("production_release_tree_unavailable");
+  }
   return {
     commitSha: commit.stdout.trim(),
     clean: status.stdout.trim().length === 0,
+    treeSha: tree.stdout.trim(),
   };
+}
+
+async function assertProductionCandidateReport(root, evidence, treeSha) {
+  const expectedRef = `.wrangler/releases/${evidence?.releaseId ?? ""}/candidate-upload.json`;
+  if (evidence?.candidateUpload?.reportRef !== expectedRef) {
+    throw new Error("production_candidate_report_path_invalid");
+  }
+  const reportPath = resolve(root, expectedRef);
+  let reportStat;
+  let reportText;
+  try {
+    [reportStat, reportText] = await Promise.all([lstat(reportPath), readFile(reportPath, "utf8")]);
+  } catch {
+    throw new Error("production_candidate_report_missing");
+  }
+  if (!reportStat.isFile() || (reportStat.mode & 0o077) !== 0) {
+    throw new Error("production_candidate_report_permissions_invalid");
+  }
+  if (createHash("sha256").update(reportText).digest("hex") !== evidence.candidateUpload.reportSha256) {
+    throw new Error("production_candidate_report_fingerprint_mismatch");
+  }
+  let report;
+  try {
+    report = JSON.parse(reportText);
+  } catch {
+    throw new Error("production_candidate_report_invalid");
+  }
+  if (
+    report?.schemaVersion !== 1
+    || report?.mode !== "normal_release_candidate_upload"
+    || report?.environment !== "production"
+    || report?.releaseId !== evidence.releaseId
+    || report?.reviewedCommitSha !== evidence.commitSha
+    || report?.reviewedTreeSha !== treeSha
+    || report?.candidateWorkerVersion !== evidence.candidateWorkerVersion
+    || report?.previousWorkerVersion !== evidence.previousWorkerVersion
+    || report?.createdAt !== evidence.candidateUpload.completedAt
+    || !/^[a-f0-9]{64}$/u.test(report?.artifactSha256 ?? "")
+    || !Array.isArray(report?.bindingNames)
+    || typeof report?.tag !== "string"
+  ) {
+    throw new Error("production_candidate_report_invalid");
+  }
+  return report;
 }
 
 export async function assertProductionDeployAdmission(input) {
@@ -486,6 +855,7 @@ export async function assertProductionDeployAdmission(input) {
   if (evidence === null) throw new Error("production_evidence_missing");
   if (productionSpec === null) throw new Error("production_spec_missing");
   const gitState = readRepositoryGitState(root);
+  const candidateReport = await assertProductionCandidateReport(root, evidence, gitState.treeSha);
   const admission = validateProductionDeployAdmission({
     evidence,
     manifest,
@@ -508,7 +878,7 @@ export async function assertProductionDeployAdmission(input) {
   if (manifestPath !== canonicalManifestPath) {
     throw new Error("production_release_manifest_path_invalid");
   }
-  return admission;
+  return { ...admission, candidateReport };
 }
 
 export async function assertProductionWorkerDeployAdmission(input) {
@@ -521,7 +891,7 @@ export async function assertProductionWorkerDeployAdmission(input) {
     repositoryRoot: root,
     workerSecretNames: input.workerSecretNames,
   });
-  const [productionSpec, stagingSpec, wranglerConfig] = await Promise.all([
+  const [productionSpec, stagingSpec, wranglerConfig, generatedManifest] = await Promise.all([
     input.productionSpec === undefined
       ? readOptionalJson(resolve(root, "infra/environments/production.json"))
       : input.productionSpec,
@@ -531,13 +901,25 @@ export async function assertProductionWorkerDeployAdmission(input) {
     input.wranglerConfig === undefined
       ? readFile(resolve(root, "wrangler.jsonc"), "utf8").then((text) => JSON.parse(text))
       : input.wranglerConfig,
+    input.generatedManifest === undefined
+      ? readOptionalJson(resolve(root, "infra/generated/production.json"))
+      : input.generatedManifest,
   ]);
   if (productionSpec === null) throw new Error("production_spec_missing");
   if (stagingSpec === null) throw new Error("staging_spec_missing");
+  if (generatedManifest === null) throw new Error("production_generated_manifest_missing");
+  const auditToken = input.token === undefined
+    ? requireCloudflareRouteAuditToken(input.environment)
+    : requireCloudflareRouteAuditToken({ CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: input.token });
+  const auditEnvironment = buildProductionReleaseAuditEnvironment(
+    input.environment,
+    productionSpec.accountId,
+    auditToken,
+  );
   const workerAdmission = await (
     input.workerIdentityImplementation ?? assertProductionWorkerIdentityAdmission
   )({
-    environment: input.environment,
+    environment: auditEnvironment,
     fetchImplementation: input.fetchImplementation,
     productionSpec,
     repositoryRoot: root,
@@ -546,8 +928,62 @@ export async function assertProductionWorkerDeployAdmission(input) {
     token: input.token,
     wranglerConfig,
   });
+  const deploymentResult = await (
+    input.deploymentInventoryImplementation
+      ?? ((accountId, workerName) => cloudflareApiRequest(
+        auditToken,
+        `/accounts/${accountId}/workers/scripts/${encodeURIComponent(workerName)}/deployments`,
+        { fetchImplementation: input.fetchImplementation },
+      ))
+  )(workerAdmission.accountId, workerAdmission.workerName);
+  const deployments = Array.isArray(deploymentResult) ? deploymentResult : deploymentResult?.deployments;
+  const activeWorkerVersion = productionDeploymentVersion(deployments);
+  if (![releaseAdmission.previousWorkerVersion, releaseAdmission.candidateWorkerVersion].includes(activeWorkerVersion)) {
+    throw new Error("production_release_active_version_unapproved");
+  }
+  let candidateView;
+  try {
+    candidateView = await (
+      input.candidateVersionViewImplementation
+        ?? ((accountId, workerName, versionId) => cloudflareApiRequest(
+          auditToken,
+          `/accounts/${accountId}/workers/scripts/${encodeURIComponent(workerName)}/versions/${versionId}`,
+          { fetchImplementation: input.fetchImplementation },
+        ))
+    )(workerAdmission.accountId, workerAdmission.workerName, releaseAdmission.candidateWorkerVersion);
+  } catch {
+    throw new Error("production_candidate_version_unavailable");
+  }
+  const bindingNames = validateProductionCandidateVersionView(
+    candidateView,
+    releaseAdmission.candidateWorkerVersion,
+    { generatedManifest, productionSpec, wranglerConfig },
+  );
+  const report = releaseAdmission.candidateReport;
+  validateProductionCandidateVersionProvenance(candidateView, {
+    commitSha: releaseAdmission.commitSha,
+    tag: report?.tag,
+  });
+  if (
+    report?.accountId !== workerAdmission.accountId
+    || report?.workerName !== workerAdmission.workerName
+    || report?.zoneId !== workerAdmission.zoneId
+    || report?.previousWorkerVersion !== releaseAdmission.previousWorkerVersion
+    || report?.candidateWorkerVersion !== releaseAdmission.candidateWorkerVersion
+    || !isDeepStrictEqual(report?.bindingNames, bindingNames)
+  ) {
+    throw new Error("production_candidate_report_live_identity_mismatch");
+  }
+  if (input.verifyLocalArtifact === true) {
+    const artifactSha256 = await fingerprintProductionUploadInputs(root);
+    if (artifactSha256 !== report.artifactSha256) {
+      throw new Error("production_candidate_local_artifact_mismatch");
+    }
+  }
   return {
     ...releaseAdmission,
+    activeWorkerVersion,
+    bindingNames,
     accountId: workerAdmission.accountId,
     databaseId: workerAdmission.databaseId,
     databaseName: workerAdmission.databaseName,

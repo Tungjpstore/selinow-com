@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,20 +8,82 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertProductionDeployAdmission,
+  assertProductionPreActivationVersions,
   assertProductionWorkerDeployAdmission,
+  buildProductionReleaseAuditEnvironment,
   buildReleaseArtifacts,
+  captureProductionCandidateVersion,
   evaluateBackupPrerequisites,
+  fingerprintProductionUploadInputs,
   inspectProductionReadiness,
+  productionDeploymentVersion,
   REQUIRED_PRODUCTION_VARS,
   REQUIRED_WORKER_SECRET_NAMES,
   runPilotSmoke,
+  validateProductionCandidateUploadAdmission,
+  validateProductionCandidateVersionView,
   validateProductionDeployAdmission,
   validatePilotSmokePlan,
 } from "../../scripts/lib/release.mjs";
 
 const now = new Date("2026-07-26T03:00:00.000Z");
+const CANDIDATE_VERSION = "22222222-2222-4222-8222-222222222222";
+const PREVIOUS_VERSION = "11111111-1111-4111-8111-111111111111";
 
-function readyWranglerConfig(): Record<string, unknown> {
+type ProductionSpecFixture = {
+  accountId: string;
+  environment: string;
+  hostnames: { api: string; dashboard: string; marketing: string };
+  resources: {
+    d1: string;
+    deadLetterQueue: string;
+    integrationQueue: string;
+    notificationQueue: string;
+    platformCacheKv: string;
+    privateExports: string;
+    r2: string;
+    sessionKv: string;
+  };
+  saas: { cnameTarget: string; fallbackOrigin: string };
+  workerName: string;
+  zoneId: string;
+  zoneName: string;
+};
+
+type WranglerFixture = {
+  env: {
+    production: {
+      send_email: Array<{ allowed_sender_addresses: string[]; name: string; remote: boolean }>;
+      vars: Record<string, string>;
+      [key: string]: unknown;
+    };
+  };
+};
+
+type GeneratedManifestFixture = {
+  accountId: string;
+  environment: string;
+  resources: {
+    d1: { id: string; name: string };
+    platformCacheKv: { id: string; name: string };
+    sessionKv: { id: string; name: string };
+  };
+  workerName: string;
+  zoneId: string;
+  zoneName: string;
+};
+
+type CandidateViewFixture = {
+  annotations: Record<string, string>;
+  id: string;
+  metadata: Record<string, string>;
+  resources: {
+    bindings: Array<Record<string, unknown>>;
+    script: { handlers: string[] };
+  };
+};
+
+function readyWranglerConfig(): WranglerFixture {
   const vars = Object.fromEntries(REQUIRED_PRODUCTION_VARS.map((name) => [name, name === "APP_ENV" ? "production" : `configured-${name.toLowerCase()}`]));
   Object.assign(vars, {
     API_ORIGIN: "https://api.selinow.com",
@@ -77,7 +140,7 @@ function readyWranglerConfig(): Record<string, unknown> {
   };
 }
 
-function readyProductionSpec(): Record<string, unknown> {
+function readyProductionSpec(): ProductionSpecFixture {
   return {
     accountId: "abcdef0123456789abcdef0123456789",
     environment: "production",
@@ -106,6 +169,84 @@ function readyProductionSpec(): Record<string, unknown> {
   };
 }
 
+function readyGeneratedManifest(): GeneratedManifestFixture {
+  const spec = readyProductionSpec();
+  return {
+    accountId: spec.accountId,
+    environment: "production",
+    resources: {
+      d1: { id: "17ea8f2f-4c97-4337-8989-28b25a58ddeb", name: spec.resources.d1 },
+      platformCacheKv: { id: "a".repeat(32), name: spec.resources.platformCacheKv },
+      sessionKv: { id: "b".repeat(32), name: spec.resources.sessionKv },
+    },
+    workerName: spec.workerName,
+    zoneId: spec.zoneId,
+    zoneName: spec.zoneName,
+  };
+}
+
+function candidateBindings(): Array<Record<string, unknown>> {
+  const config = readyWranglerConfig();
+  const production = config.env.production;
+  const spec = readyProductionSpec();
+  const generated = readyGeneratedManifest();
+  return [
+    ...REQUIRED_PRODUCTION_VARS.map((name) => ({ name, text: production.vars[name], type: "plain_text" })),
+    ...REQUIRED_WORKER_SECRET_NAMES.map((name) => ({ name, type: "secret_text" })),
+    { name: "ASSETS", type: "assets" },
+    { allowed_sender_addresses: ["no-reply@selinow.com"], name: "EMAIL", type: "send_email" },
+    { name: "INTEGRATION_QUEUE", queue_name: spec.resources.integrationQueue, type: "queue" },
+    { name: "NOTIFICATION_QUEUE", queue_name: spec.resources.notificationQueue, type: "queue" },
+    { bucket_name: spec.resources.r2, name: "MEDIA", type: "r2_bucket" },
+    { bucket_name: spec.resources.privateExports, name: "PRIVATE_EXPORTS", type: "r2_bucket" },
+    { name: "PLATFORM_CACHE", namespace_id: generated.resources.platformCacheKv.id, type: "kv_namespace" },
+    { name: "SESSION", namespace_id: generated.resources.sessionKv.id, type: "kv_namespace" },
+    {
+      database_id: generated.resources.d1.id,
+      id: generated.resources.d1.id,
+      name: "PLATFORM_DB",
+      type: "d1",
+    },
+  ];
+}
+
+function candidateVersionView(overrides: Partial<CandidateViewFixture> = {}): CandidateViewFixture {
+  return {
+    annotations: {
+      "workers/message": "normal release candidate 0123456789abcdef0123456789abcdef01234567",
+      "workers/tag": "release_20260726_abcdef12",
+      "workers/triggered_by": "version_upload",
+    },
+    id: CANDIDATE_VERSION,
+    metadata: { source: "wrangler" },
+    resources: {
+      bindings: candidateBindings(),
+      script: { handlers: ["fetch", "queue", "scheduled"] },
+    },
+    ...overrides,
+  };
+}
+
+function liveCandidateReport(): Record<string, unknown> {
+  return {
+    accountId: "abcdef0123456789abcdef0123456789",
+    artifactSha256: "c".repeat(64),
+    bindingNames: candidateBindings().map((binding) => binding.name).sort(),
+    candidateWorkerVersion: CANDIDATE_VERSION,
+    createdAt: "2026-07-26T02:45:00.000Z",
+    environment: "production",
+    mode: "normal_release_candidate_upload",
+    previousWorkerVersion: PREVIOUS_VERSION,
+    releaseId: "release_20260726_abcdef12",
+    reviewedCommitSha: "0123456789abcdef0123456789abcdef01234567",
+    reviewedTreeSha: "a".repeat(40),
+    schemaVersion: 1,
+    tag: "release_20260726_abcdef12",
+    workerName: "selinow-com-production",
+    zoneId: "0123456789abcdef0123456789abcdef",
+  };
+}
+
 function readyEvidence(): Record<string, unknown> {
   return {
     approvals: { releaseOwner: "release-team", supportOwner: "support-team" },
@@ -117,12 +258,18 @@ function readyEvidence(): Record<string, unknown> {
       restoreDrillReportRef: "private-restore-report",
       snapshotReportRef: "private-backup-report",
     },
-    candidateWorkerVersion: "worker-candidate",
+    candidateUpload: {
+      completedAt: "2026-07-26T02:45:00.000Z",
+      reportRef: "private-candidate-upload-report",
+      reportSha256: "a".repeat(64),
+      reviewedCommitSha: "0123456789abcdef0123456789abcdef01234567",
+    },
+    candidateWorkerVersion: CANDIDATE_VERSION,
     commitSha: "0123456789abcdef0123456789abcdef01234567",
     manualAcceptance: { customDomain: true, paymentSignedEvent: true, telegram: true, website: true },
     monitoring: { alertsReady: true, budgetAlertsReady: true, dashboardReady: true },
     pilot: { shopCount: 2 },
-    previousWorkerVersion: "worker-current",
+    previousWorkerVersion: PREVIOUS_VERSION,
     quality: { build: true, check: true, deployDryRun: true, lint: true, test: true },
     releaseId: "release_20260726_abcdef12",
     security: { criticalOpen: 0, highOpen: 0 },
@@ -200,6 +347,141 @@ describe("production release readiness", () => {
     expect(checks.find((check) => check.name === "backup.restoreDrillCompletedAt")?.ok).toBe(false);
   });
 
+  it("admits a candidate upload only while the candidate fields are pending", () => {
+    const evidence = readyEvidence();
+    evidence.candidateWorkerVersion = null;
+    evidence.candidateUpload = null;
+
+    expect(validateProductionCandidateUploadAdmission({
+      evidence,
+      migrationNames: ["0001_first.sql"],
+      now,
+      packageVersion: "0.0.0",
+      productionSpec: readyProductionSpec(),
+      repositoryClean: true,
+      repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    })).toEqual({
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      previousWorkerVersion: PREVIOUS_VERSION,
+      releaseId: "release_20260726_abcdef12",
+    });
+
+    evidence.previousWorkerVersion = "worker-current";
+    expect(() => validateProductionCandidateUploadAdmission({
+      evidence,
+      migrationNames: ["0001_first.sql"],
+      now,
+      packageVersion: "0.0.0",
+      productionSpec: readyProductionSpec(),
+      repositoryClean: true,
+      repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    })).toThrow("production_candidate_prerequisites_incomplete:evidence.previousWorkerVersion");
+  });
+
+  it("captures exactly one new candidate without changing the active deployment", () => {
+    expect(captureProductionCandidateVersion({
+      activeVersionId: PREVIOUS_VERSION,
+      afterVersions: [{ id: PREVIOUS_VERSION }, { id: CANDIDATE_VERSION }],
+      beforeVersions: [{ id: PREVIOUS_VERSION }],
+    })).toBe(CANDIDATE_VERSION);
+    expect(() => captureProductionCandidateVersion({
+      activeVersionId: PREVIOUS_VERSION,
+      afterVersions: [
+        { id: PREVIOUS_VERSION },
+        { id: CANDIDATE_VERSION },
+        { id: "33333333-3333-4333-8333-333333333333" },
+      ],
+      beforeVersions: [{ id: PREVIOUS_VERSION }],
+    })).toThrow("production_candidate_capture_invalid");
+  });
+
+  it("requires the complete production handler and binding contract", () => {
+    expect(validateProductionCandidateVersionView(candidateVersionView(), CANDIDATE_VERSION, {
+      generatedManifest: readyGeneratedManifest(),
+      productionSpec: readyProductionSpec(),
+      wranglerConfig: readyWranglerConfig(),
+    })).toEqual(candidateBindings().map((binding) => binding.name).sort());
+    const mismatch = candidateVersionView();
+    const appEnvBinding = mismatch.resources.bindings.find((binding) => binding.name === "APP_ENV");
+    if (appEnvBinding === undefined) throw new Error("test_fixture_binding_missing");
+    appEnvBinding.text = "staging";
+    expect(() => validateProductionCandidateVersionView(mismatch, CANDIDATE_VERSION, {
+      generatedManifest: readyGeneratedManifest(),
+      productionSpec: readyProductionSpec(),
+      wranglerConfig: readyWranglerConfig(),
+    })).toThrow("production_candidate_binding_mismatch:APP_ENV:text");
+    const missingHandler = candidateVersionView();
+    missingHandler.resources.script.handlers = ["fetch", "queue"];
+    expect(() => validateProductionCandidateVersionView(missingHandler, CANDIDATE_VERSION, {
+      generatedManifest: readyGeneratedManifest(),
+      productionSpec: readyProductionSpec(),
+      wranglerConfig: readyWranglerConfig(),
+    })).toThrow("production_candidate_view_invalid");
+  });
+
+  it("rejects an already-active candidate and active-version drift before activation", () => {
+    const baseline = {
+      activeWorkerVersion: PREVIOUS_VERSION,
+      previousWorkerVersion: PREVIOUS_VERSION,
+    };
+    expect(assertProductionPreActivationVersions(baseline)).toBe(PREVIOUS_VERSION);
+    expect(() => assertProductionPreActivationVersions({
+      activeWorkerVersion: CANDIDATE_VERSION,
+      previousWorkerVersion: PREVIOUS_VERSION,
+    })).toThrow("production_deploy_previous_version_mismatch");
+    expect(() => assertProductionPreActivationVersions(baseline, {
+      activeWorkerVersion: CANDIDATE_VERSION,
+      previousWorkerVersion: PREVIOUS_VERSION,
+    })).toThrow("production_deploy_active_version_changed");
+  });
+
+  it("pins release audit subprocesses to the audit token and strips broader credentials", () => {
+    const environment = buildProductionReleaseAuditEnvironment({
+      CLOUDFLARE_OAUTH_TOKEN: "oauth-token",
+      CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+      CLOUDFLARE_RELEASE_WORKER_API_TOKEN: "edit-token",
+      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "audit-custom-token",
+    }, "abcdef0123456789abcdef0123456789", "audit-token");
+    expect(environment.CLOUDFLARE_API_TOKEN).toBe("audit-token");
+    expect(environment.CLOUDFLARE_ACCOUNT_ID).toBe("abcdef0123456789abcdef0123456789");
+    expect(environment.CLOUDFLARE_OAUTH_TOKEN).toBeUndefined();
+    expect(environment.CLOUDFLARE_RELEASE_WORKER_API_TOKEN).toBeUndefined();
+    expect(JSON.stringify(environment)).not.toContain("edit-token");
+    expect(JSON.stringify(environment)).not.toContain("oauth-token");
+  });
+
+  it("fingerprints all immutable upload inputs and detects post-build drift", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-upload-inputs-"));
+    try {
+      await mkdir(join(root, "dist/assets"), { recursive: true });
+      await writeFile(join(root, "wrangler.jsonc"), "{\"name\":\"candidate\"}\n");
+      await writeFile(join(root, "dist/_worker.js"), "export default {};\n");
+      await writeFile(join(root, "dist/assets/app.css"), "body{}\n");
+      const before = await fingerprintProductionUploadInputs(root);
+      await writeFile(join(root, "dist/assets/app.css"), "body{color:red}\n");
+      const after = await fingerprintProductionUploadInputs(root);
+      expect(before).toMatch(/^[a-f0-9]{64}$/u);
+      expect(after).not.toBe(before);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("requires one unambiguous 100 percent active deployment", () => {
+    expect(productionDeploymentVersion([{ created_on: now.toISOString(), versions: [{
+      percentage: 100,
+      version_id: PREVIOUS_VERSION,
+    }] }])).toBe(PREVIOUS_VERSION);
+    expect(() => productionDeploymentVersion([{ created_on: now.toISOString(), versions: [
+      { percentage: 50, version_id: PREVIOUS_VERSION },
+      { percentage: 50, version_id: CANDIDATE_VERSION },
+    ] }])).toThrow("production_worker_deployments_invalid");
+  });
+
   it("builds a value-safe manifest and rollback matrix after readiness passes", () => {
     const result = buildReleaseArtifacts({
       evidence: readyEvidence(),
@@ -213,7 +495,12 @@ describe("production release readiness", () => {
 
     expect(result.manifest.releaseId).toBe("release_20260726_abcdef12");
     expect(result.manifest.migrationNames).toEqual(["0001_first.sql", "0002_second.sql"]);
-    expect(result.manifest.schemaVersion).toBe(2);
+    expect(result.manifest.schemaVersion).toBe(3);
+    expect(result.manifest.candidateUpload).toEqual({
+      completedAt: "2026-07-26T02:45:00.000Z",
+      reportRef: "private-candidate-upload-report",
+      reportSha256: "a".repeat(64),
+    });
     expect(result.manifest.releaseEvidenceFingerprintSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(result.rollbackMatrix).toHaveLength(6);
     expect(JSON.stringify(result)).not.toContain("snapshotReportRef");
@@ -246,7 +533,9 @@ describe("production release readiness", () => {
       workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
       wranglerConfig,
     })).toEqual({
+      candidateWorkerVersion: CANDIDATE_VERSION,
       commitSha: "0123456789abcdef0123456789abcdef01234567",
+      previousWorkerVersion: PREVIOUS_VERSION,
       releaseId: "release_20260726_abcdef12",
     });
 
@@ -339,8 +628,33 @@ describe("production release readiness", () => {
       execFileSync("git", ["add", "."], { cwd: root });
       execFileSync("git", ["commit", "--quiet", "-m", "release fixture"], { cwd: root });
       const commitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+      const treeSha = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim();
       const evidence = readyEvidence();
       evidence.commitSha = commitSha;
+      const candidateReport = {
+        accountId: "abcdef0123456789abcdef0123456789",
+        artifactSha256: "c".repeat(64),
+        bindingNames: candidateBindings().map((binding) => binding.name).sort(),
+        candidateWorkerVersion: CANDIDATE_VERSION,
+        createdAt: "2026-07-26T02:45:00.000Z",
+        environment: "production",
+        mode: "normal_release_candidate_upload",
+        previousWorkerVersion: PREVIOUS_VERSION,
+        releaseId,
+        reviewedCommitSha: commitSha,
+        reviewedTreeSha: treeSha,
+        schemaVersion: 1,
+        tag: releaseId,
+        workerName: "selinow-com-production",
+        zoneId: "0123456789abcdef0123456789abcdef",
+      };
+      const candidateReportText = `${JSON.stringify(candidateReport, null, 2)}\n`;
+      evidence.candidateUpload = {
+        completedAt: candidateReport.createdAt,
+        reportRef: `.wrangler/releases/${releaseId}/candidate-upload.json`,
+        reportSha256: createHash("sha256").update(candidateReportText).digest("hex"),
+        reviewedCommitSha: commitSha,
+      };
       const manifest = buildReleaseArtifacts({
         evidence,
         migrationNames: ["0001_first.sql"],
@@ -352,6 +666,7 @@ describe("production release readiness", () => {
       }).manifest;
       const evidencePath = join(root, ".wrangler/release/production-evidence.json");
       const manifestPath = join(root, ".wrangler/releases", releaseId, "release-manifest.json");
+      await writeFile(join(root, ".wrangler/releases", releaseId, "candidate-upload.json"), candidateReportText, { mode: 0o600 });
       await writeFile(evidencePath, JSON.stringify(evidence), { mode: 0o600 });
       await writeFile(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
 
@@ -360,7 +675,13 @@ describe("production release readiness", () => {
         now,
         repositoryRoot: root,
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
-      })).resolves.toEqual({ commitSha, releaseId });
+      })).resolves.toMatchObject({
+        candidateReport,
+        candidateWorkerVersion: CANDIDATE_VERSION,
+        commitSha,
+        previousWorkerVersion: PREVIOUS_VERSION,
+        releaseId,
+      });
 
       await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.0.1" }));
       await expect(assertProductionDeployAdmission({
@@ -376,7 +697,10 @@ describe("production release readiness", () => {
 
   it("combines reviewed release evidence with the exact live production target", async () => {
     const releaseAdmission = vi.fn(() => Promise.resolve({
+      candidateReport: liveCandidateReport(),
+      candidateWorkerVersion: CANDIDATE_VERSION,
       commitSha: "0123456789abcdef0123456789abcdef01234567",
+      previousWorkerVersion: PREVIOUS_VERSION,
       releaseId: "release_20260726_abcdef12",
     }));
     const workerIdentity = vi.fn(() => Promise.resolve({
@@ -390,7 +714,15 @@ describe("production release readiness", () => {
 
     await expect(assertProductionWorkerDeployAdmission({
       assertReleaseAdmissionImplementation: releaseAdmission,
+      candidateVersionViewImplementation: vi.fn(() => Promise.resolve(candidateVersionView())),
+      deploymentInventoryImplementation: vi.fn(() => Promise.resolve({
+        deployments: [{
+          created_on: "2026-07-26T02:00:00.000Z",
+          versions: [{ percentage: 100, version_id: PREVIOUS_VERSION }],
+        }],
+      })),
       environment: { CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token" },
+      generatedManifest: readyGeneratedManifest(),
       manifestPath: ".wrangler/releases/release_20260726_abcdef12/release-manifest.json",
       productionSpec: readyProductionSpec(),
       repositoryRoot: process.cwd(),
@@ -400,9 +732,14 @@ describe("production release readiness", () => {
       wranglerConfig: readyWranglerConfig(),
     })).resolves.toEqual({
       accountId: "abcdef0123456789abcdef0123456789",
+      activeWorkerVersion: PREVIOUS_VERSION,
+      bindingNames: candidateBindings().map((binding) => binding.name).sort(),
+      candidateReport: liveCandidateReport(),
+      candidateWorkerVersion: CANDIDATE_VERSION,
       commitSha: "0123456789abcdef0123456789abcdef01234567",
       databaseId: "17ea8f2f-4c97-4337-8989-28b25a58ddeb",
       databaseName: "selinow-production",
+      previousWorkerVersion: PREVIOUS_VERSION,
       releaseId: "release_20260726_abcdef12",
       workerName: "selinow-com-production",
       zoneId: "0123456789abcdef0123456789abcdef",
@@ -414,6 +751,53 @@ describe("production release readiness", () => {
       token: undefined,
       wranglerConfig: readyWranglerConfig(),
     }));
+  });
+
+  it("rejects a missing or binding-mismatched live candidate version", async () => {
+    const releaseAdmission = vi.fn(() => Promise.resolve({
+      candidateReport: liveCandidateReport(),
+      candidateWorkerVersion: CANDIDATE_VERSION,
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      previousWorkerVersion: PREVIOUS_VERSION,
+      releaseId: "release_20260726_abcdef12",
+    }));
+    const common = {
+      assertReleaseAdmissionImplementation: releaseAdmission,
+      deploymentInventoryImplementation: vi.fn(() => Promise.resolve({
+        deployments: [{
+          created_on: "2026-07-26T02:00:00.000Z",
+          versions: [{ percentage: 100, version_id: PREVIOUS_VERSION }],
+        }],
+      })),
+      environment: { CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token" },
+      generatedManifest: readyGeneratedManifest(),
+      manifestPath: ".wrangler/releases/release_20260726_abcdef12/release-manifest.json",
+      productionSpec: readyProductionSpec(),
+      repositoryRoot: process.cwd(),
+      stagingSpec: { environment: "staging" },
+      workerIdentityImplementation: vi.fn(() => Promise.resolve({
+        accountId: "abcdef0123456789abcdef0123456789",
+        databaseId: "17ea8f2f-4c97-4337-8989-28b25a58ddeb",
+        databaseName: "selinow-production",
+        workerName: "selinow-com-production",
+        zoneId: "0123456789abcdef0123456789abcdef",
+        zoneName: "selinow.com",
+      })),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    };
+    await expect(assertProductionWorkerDeployAdmission({
+      ...common,
+      candidateVersionViewImplementation: vi.fn(() => Promise.reject(new Error("missing"))),
+    })).rejects.toThrow("production_candidate_version_unavailable");
+    const mismatch = candidateVersionView();
+    const appEnvBinding = mismatch.resources.bindings.find((binding) => binding.name === "APP_ENV");
+    if (appEnvBinding === undefined) throw new Error("test_fixture_binding_missing");
+    appEnvBinding.text = "staging";
+    await expect(assertProductionWorkerDeployAdmission({
+      ...common,
+      candidateVersionViewImplementation: vi.fn(() => Promise.resolve(mismatch)),
+    })).rejects.toThrow("production_candidate_binding_mismatch:APP_ENV:text");
   });
 
   it("keeps pilot smoke in plan mode without network access by default", async () => {

@@ -295,7 +295,7 @@ function candidateView(bindings: CandidateBinding[] = completeBindings()) {
   return {
     id: CANDIDATE_VERSION,
     metadata: { has_preview: false },
-    resources: { bindings, script: { handlers: ["fetch"] } },
+    resources: { bindings, script: { handlers: ["fetch", "queue", "scheduled"] } },
   };
 }
 
@@ -320,6 +320,7 @@ describe("production canary token boundaries", () => {
       CLOUDFLARE_OAUTH_TOKEN: "oauth-token",
       CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
       CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+      CLOUDFLARE_RELEASE_WORKER_API_TOKEN: "release-worker-token",
       CLOUDFLARE_CANARY_AUDIT_API_TOKEN: "audit-token",
       CLOUDFLARE_CANARY_ROUTE_API_TOKEN: "route-token",
       CLOUDFLARE_CANARY_WORKER_API_TOKEN: "worker-token",
@@ -331,7 +332,9 @@ describe("production canary token boundaries", () => {
     expect(wrangler.CLOUDFLARE_API_TOKEN).toBe("worker-token");
     expect(wrangler.CLOUDFLARE_ACCOUNT_ID).toBe(ACCOUNT_ID);
     expect(wrangler.CLOUDFLARE_CANARY_WORKER_API_TOKEN).toBeUndefined();
+    expect(wrangler.CLOUDFLARE_RELEASE_WORKER_API_TOKEN).toBeUndefined();
     expect(JSON.stringify(wrangler)).not.toContain("audit-token");
+    expect(JSON.stringify(wrangler)).not.toContain("release-worker-token");
   });
 });
 

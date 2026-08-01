@@ -273,7 +273,25 @@ The doctor checks metadata and freshness only. It does not read the exported dat
 
 Production mutation remains a separate operator-controlled procedure. The release owner must verify the exact database target before invoking any remote backup, migration or deploy command.
 
-## 3. Release manifest and rollback matrix
+## 3. Normal release candidate and manifest
+
+Keep `candidateWorkerVersion` and `candidateUpload` set to `null` while collecting the other release evidence. Validate the route-neutral candidate plan without network access:
+
+```bash
+npm run release:candidate -- --env production --json
+```
+
+The live upload requires a read-only route/script/D1 audit token and a separate Worker Scripts edit token. The audit token is pinned to every identity/version read and the edit token is pinned only to upload/activation; neither subprocess may fall back to OAuth or inherit the other token. The workflow builds with both credentials removed, rechecks the live account/D1/route/domain/deployment inventory, fingerprints `wrangler.jsonc` plus every built `dist` file immediately before and after the sink, invokes only `wrangler versions upload --strict`, requires exactly one new version, validates the complete fetch/queue/scheduled handler and binding contract, seals Wrangler upload provenance, and proves that the active deployment is still the recorded rollback version:
+
+```bash
+CLOUDFLARE_ROUTE_AUDIT_API_TOKEN=... \
+CLOUDFLARE_RELEASE_WORKER_API_TOKEN=... \
+npm run release:candidate -- --env production --execute --confirm-production --json
+```
+
+On success it writes `.wrangler/releases/<release-id>/candidate-upload.json` and advances the private evidence with the captured UUID and report fingerprint. It never runs `wrangler deploy`, activates a version, or mutates routes, domains, queues, schedules, D1, KV or R2.
+
+### Release manifest and rollback matrix
 
 Validate evidence without writing artifacts:
 
@@ -287,9 +305,14 @@ Write the private manifest and rollback matrix only after every prerequisite pas
 npm run release:manifest -- --write --json
 ```
 
-The manifest records the reviewed commit, previous/candidate Worker versions, migration filenames, config fingerprint, quality gates, backup timestamps and the count of pilot shops. It excludes credentials, bookmark values, customer identifiers and exported data.
+The manifest records the reviewed commit, previous/candidate Worker versions, candidate upload report fingerprint, migration filenames, config fingerprint, quality gates, backup timestamps and the count of pilot shops. It excludes credentials, bookmark values, customer identifiers and exported data.
 
-Before any real Worker deploy, temporarily provide the least-privilege `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`. The deploy admission runs only read operations: account-pinned `wrangler whoami --json`, production D1 inventory, the shared-zone Worker Routes inventory and the account Worker Domains inventory. It requires the exact reviewed production account, D1 name+UUID, Worker name and domains while explicitly preserving the checked-in staging route/guard contract in the same `selinow.com` zone. It repeats the full gate after build, rejects target drift, strips the audit token from child environments and pins the final Wrangler process with the admitted `CLOUDFLARE_ACCOUNT_ID`. Production dry-runs remain offline and do not require this token.
+Before a real Worker activation, temporarily provide the same read-only audit token and the separate `CLOUDFLARE_RELEASE_WORKER_API_TOKEN`. Both pre-activation admissions require the live version to remain exactly the rollback version, fetch the exact candidate from Cloudflare, and revalidate its bindings, handlers, upload annotations, report identity and local artifact fingerprint. It then activates only `<candidateWorkerVersion>@100%` through the repository-pinned no-install Wrangler helper; normal production release tooling never calls broad `wrangler deploy` or an install-capable `npx`. A final read-only admission must observe that exact candidate as active while the route/domain contract remains unchanged. Production dry-runs remain offline and do not require either token.
+
+```bash
+npm run deploy -- --env production --confirm-production \
+  --release-manifest .wrangler/releases/<release-id>/release-manifest.json
+```
 
 ## 4. Controlled pilot
 

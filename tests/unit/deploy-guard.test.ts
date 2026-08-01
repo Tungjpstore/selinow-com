@@ -128,7 +128,7 @@ describe("deploy command safety", () => {
     const build = source.indexOf('run("npm", ["run", "build"]');
     const secondAdmission = source.indexOf("await assertProductionWorkerDeployAdmission", firstAdmission + 1);
     const stableTargetGuard = source.indexOf("production_deploy_admission_changed", secondAdmission);
-    const deploySink = source.indexOf('const deployArgs = ["wrangler", "deploy"]');
+    const deploySink = source.indexOf('"versions", "deploy"');
 
     expect(firstAdmission).toBeGreaterThan(-1);
     expect(firstAdmission).toBeLessThan(build);
@@ -140,6 +140,12 @@ describe("deploy command safety", () => {
     expect(source).toContain("finalAdmission.databaseName !== productionAdmission.databaseName");
     expect(source).toContain("productionAdmission?.accountId");
     expect(source).toContain("buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId)");
+    expect(source).toContain("`${productionAdmission.candidateWorkerVersion}@100%`");
+    expect(source).toContain("CLOUDFLARE_RELEASE_WORKER_API_TOKEN");
+    expect(source).toContain("assertProductionPreActivationVersions(productionAdmission, finalAdmission)");
+    expect(source).toContain("finalAdmission.activeWorkerVersion !== productionAdmission.activeWorkerVersion");
+    expect(source).toContain("runWrangler(deployArgs");
+    expect(source).not.toContain('run("npx", deployArgs');
   });
 
   it("enforces backup evidence and final staging admission immediately before deploy", () => {
@@ -149,7 +155,7 @@ describe("deploy command safety", () => {
     const backup = source.indexOf("await assertFreshStagingBackupEvidence", build);
     const secondAdmission = source.indexOf("await assertStagingMutationAdmission", firstAdmission + 1);
     const stableTargetGuard = source.indexOf("staging_backup_admission_changed", secondAdmission);
-    const deploySink = source.indexOf('const deployArgs = ["wrangler", "deploy"]');
+    const deploySink = source.indexOf(': ["deploy"]');
 
     expect(firstAdmission).toBeGreaterThan(-1);
     expect(firstAdmission).toBeLessThan(build);
@@ -161,5 +167,13 @@ describe("deploy command safety", () => {
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN");
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
     expect(source).toContain("buildPinnedCloudflareEnvironment");
+  });
+
+  it("pins candidate identity reads to the audit token without OAuth fallback", () => {
+    const source = readFileSync("scripts/release-candidate.mjs", "utf8");
+    expect(source).toContain("identityEnvironment: auditEnvironment");
+    expect(source).not.toContain("identityEnvironment: operatorEnvironment");
+    expect(source).toContain("fingerprintProductionUploadInputs(repositoryRoot)");
+    expect(source).toContain("production_candidate_upload_inputs_changed_during_upload");
   });
 });
