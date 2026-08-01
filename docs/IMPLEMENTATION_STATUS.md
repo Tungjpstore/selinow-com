@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 ## Phase status
 
@@ -17,6 +17,16 @@ Last updated: 2026-08-01
 | 8 — Automated onboarding | In progress | Repository wizard, readiness, tenant automation API, durable task scheduling, guarded continuation evidence and Selinow-owned executors are live on staging; fresh-seller and external-provider acceptance remain pending |
 | 9 — Operations/security/platform extensibility | In progress | Operations runtime, channel-neutral connections, normalized order attribution, transactional domain events, generic queue fan-out/delivery, DLQ replay, accessibility gates, public-flow axe scans and read-only staging QA are accepted. Phase B globalization and the source/local Phase C entitlement, reversal and generated-license execution slices through migration `0052` are implemented locally. The current repository gate passes check/lint/TypeScript, 189 files / 1,447 tests, build, staging build, both deploy dry-runs, audit and an isolated 52-migration restore. The final-tree staging package checkpoint contains 203 modules and 2,653.38 KiB; no deployment occurred. Staging migration, current Worker visual acceptance and controlled external providers remain pending. The pre-remediation security scan bundle and manifest are retained with one disclosed pre-existing post-seal ledger mismatch, all three reportable findings and operator admission gaps have local fixes with regression coverage, and a post-fix targeted rescan is recorded |
 | 10 — Production release | LIMITED GO: frontend-only; normal release NO-GO | Production has live apex and platform-wildcard Worker routes on `selinow-com-production` with active rollback version `6ca9c890-ed04-44dc-ac32-44b36881f2dc`. The narrow `production_frontend_only_v1` lane may change only the reviewed landing/frontend and release-tooling allowlist after exact quality, browser, visual and security receipts pass; it preserves D1, migrations, routes, DNS, domains, queues, cron, KV, R2, secrets, payment, Telegram and fulfillment state. Normal commerce/schema/provider release remains NO-GO pending pilots, acceptance, monitoring/support/legal ownership and external-domain/Turnstile lifecycle evidence. |
+
+### Frontend-only release hardening (2026-08-02)
+
+| Artifact | Result |
+| --- | --- |
+| Release branch | `codex/landing-prod-release-safe-20260801`, commit `6335bc2623cb290366cfa580ed695e174159c0a1` |
+| Verification | `npm run check` (0 errors, 3 existing hints), `npm run lint`, `npm run test` (191 files / 1,489 tests), `npm run build`, and `npm run deploy:dry-run` passed; existing `INEFFECTIVE_DYNAMIC_IMPORT` build warning remains non-blocking |
+| Security delta | `22e3de5` -> `6335bc2`, 2/2 diff rows reviewed, 0 candidates, 0 HIGH/CRITICAL; canonical report is retained under `/private/var/folders/m4/1tyb0d41399gbt62vgxhhsph0000gn/T/codex-security-scans/selinow-landing-prod-safe/6335bc2623cb290366cfa580ed695e174159c0a1_20260801T225632Z/report.md` |
+| Live preflight | Staging route inventory stopped fail-closed with `cloudflare_route_audit_api_token_missing`; no live route read or mutation was performed |
+| Production status | `selinow.com` remains on the previous production version. Activation is not authorized until the exact Playwright/Axe receipt is available and separate scoped audit/worker tokens are supplied |
 
 ### Phase 9 workstream status
 
