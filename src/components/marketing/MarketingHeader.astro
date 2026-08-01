@@ -15,11 +15,11 @@ const t = createMarketingTranslator(locale ?? Astro.locals.locale);
     <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="152" height="40" />
   </a>
   <nav class="platform-nav-desktop" aria-label={t("marketing.header.nav_aria")}>
-    <a href="/#product-stage">{t("marketing.header.product")}</a>
+    <a href="/#channels">{t("marketing.header.product")}</a>
     <a href="/#use-cases">{t("marketing.header.solutions")}</a>
     <a href="/pricing">{t("marketing.header.pricing")}</a>
     <a href="/#faq">{t("marketing.header.resources")}</a>
-    <a href="/#trust">{t("marketing.header.partners")}</a>
+    <a href="/#architecture">{t("marketing.header.partners")}</a>
     <a href={`${dashboardOrigin}/login`}>{t("marketing.header.login")}</a>
     <a class="nav-cta" href={`${dashboardOrigin}/login`}>{t("marketing.header.cta")}</a>
   </nav>
@@ -34,11 +34,11 @@ const t = createMarketingTranslator(locale ?? Astro.locals.locale);
         data-marketing-menu-trigger
       ><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span></summary>
       <nav aria-label={t("marketing.header.mobile_nav_aria")}>
-        <a href="/#product-stage">{t("marketing.header.product")}</a>
+        <a href="/#channels">{t("marketing.header.product")}</a>
         <a href="/#use-cases">{t("marketing.header.solutions")}</a>
         <a href="/pricing">{t("marketing.header.pricing")}</a>
         <a href="/#faq">{t("marketing.header.resources")}</a>
-        <a href="/#trust">{t("marketing.header.partners")}</a>
+        <a href="/#architecture">{t("marketing.header.partners")}</a>
         <a class="nav-cta" href={`${dashboardOrigin}/login`}>{t("marketing.header.cta")}</a>
       </nav>
     </details>
