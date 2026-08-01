@@ -730,6 +730,16 @@ export function assertExactMigrationLedger(appliedMigrationNames, repositoryMigr
   }
 }
 
+export function resolvePendingMigrationNames(appliedMigrationNames, repositoryMigrationNames) {
+  if (
+    appliedMigrationNames.length > repositoryMigrationNames.length
+    || appliedMigrationNames.some((name, index) => repositoryMigrationNames[index] !== name)
+  ) {
+    throw new Error("restore_migrations_incomplete");
+  }
+  return repositoryMigrationNames.slice(appliedMigrationNames.length);
+}
+
 function insertIsolatedReportRecords(databasePath, snapshot, drill) {
   const database = new DatabaseSync(databasePath);
   try {
@@ -1113,10 +1123,38 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       "d1", "execute", targetName, "--remote", "--env", environment,
       "--file", sourceExport, "--yes",
     ], "restore_import_failed", runnerOptions);
-    safeRunner(runner, [
-      "d1", "migrations", "apply", targetName, "--remote", "--env", environment,
-    ], "restore_migration_failed", approvedRemoteRunnerOptions(approvedIdentity.accountId, { CI: "1" }));
     const repositoryMigrationNames = await expectedMigrationNames();
+    const initialMigrationRows = parseWranglerRows(remoteExecute(
+      runner,
+      targetName,
+      environment,
+      "SELECT name FROM d1_migrations ORDER BY name;",
+      "restore_migration_ledger_query_failed",
+      runnerOptions,
+    ), "restore_migration_ledger_invalid");
+    const initialMigrationNames = initialMigrationRows.map((row) => {
+      if (typeof row?.name !== "string") throw new Error("restore_migration_ledger_invalid");
+      return row.name;
+    });
+    const pendingMigrationNames = resolvePendingMigrationNames(
+      initialMigrationNames,
+      repositoryMigrationNames,
+    );
+    const migrationRunnerOptions = approvedRemoteRunnerOptions(approvedIdentity.accountId, { CI: "1" });
+    for (const migrationName of pendingMigrationNames) {
+      safeRunner(runner, [
+        "d1", "execute", targetName, "--remote", "--env", environment,
+        "--file", resolve(repositoryRoot, "migrations", migrationName), "--yes",
+      ], `restore_migration_failed:${migrationName}`, migrationRunnerOptions);
+      remoteExecute(
+        runner,
+        targetName,
+        environment,
+        `INSERT INTO d1_migrations (name) VALUES ('${migrationName}');`,
+        `restore_migration_ledger_write_failed:${migrationName}`,
+        migrationRunnerOptions,
+      );
+    }
     const appliedMigrationRows = parseWranglerRows(remoteExecute(
       runner,
       targetName,

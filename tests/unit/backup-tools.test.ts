@@ -17,6 +17,7 @@ import {
   cleanupRestoreTempDirectory,
   createBackup,
   resolveDatabaseTarget,
+  resolvePendingMigrationNames,
   restoreCountValidationTables,
   restoreValidationTables,
   runRestoreDrill,
@@ -168,6 +169,21 @@ describe("backup target safety", () => {
       assertDistinctRestoreTarget("selinow-staging", "unowned-restore-target", "staging");
     })
       .toThrow("restore_target_invalid");
+  });
+
+  it("derives pending restore migrations only from an exact ledger prefix", () => {
+    expect(resolvePendingMigrationNames(
+      ["0001_platform.sql"],
+      ["0001_platform.sql", "0002_catalog.sql"],
+    )).toEqual(["0002_catalog.sql"]);
+    expect(() => resolvePendingMigrationNames(
+      ["0002_catalog.sql"],
+      ["0001_platform.sql", "0002_catalog.sql"],
+    )).toThrow("restore_migrations_incomplete");
+    expect(() => resolvePendingMigrationNames(
+      ["0001_platform.sql", "0002_catalog.sql", "0003_extra.sql"],
+      ["0001_platform.sql", "0002_catalog.sql"],
+    )).toThrow("restore_migrations_incomplete");
   });
 
   it("cleans only a direct temp child carrying the matching tool marker", async () => {
@@ -832,6 +848,7 @@ describe("backup CLI dry runs", () => {
       args: string[];
       ci: string | undefined;
     }> = [];
+    let migrationLedgerQueries = 0;
     try {
       const result = await runRestoreDrill({
         config: CONFIG,
@@ -870,10 +887,17 @@ describe("backup CLI dry runs", () => {
           if (args[0] === "d1" && args[1] === "execute" && args.includes("--command")) {
             const sql = args[args.indexOf("--command") + 1] ?? "";
             if (sql.includes("FROM d1_migrations")) {
+              migrationLedgerQueries += 1;
               return {
                 stderr: "",
-                stdout: JSON.stringify([{ results: migrationNames.map((name) => ({ name })) }]),
+                stdout: JSON.stringify([{
+                  results: (migrationLedgerQueries === 1 ? migrationNames.slice(0, -1) : migrationNames)
+                    .map((name) => ({ name })),
+                }]),
               };
+            }
+            if (sql.startsWith("INSERT INTO d1_migrations")) {
+              return { stderr: "", stdout: JSON.stringify([{ results: [] }]) };
             }
             if (sql === "PRAGMA integrity_check;") {
               return {
@@ -933,10 +957,17 @@ describe("backup CLI dry runs", () => {
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "export")).toBe(true);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--file")))
         .toBe(true);
-      expect(commands.some(({ args, ci }) => args[0] === "d1" && args[1] === "migrations" && ci === "1"))
-        .toBe(true);
+      expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "migrations"))
+        .toBe(false);
+      expect(commands.some(({ args, ci }) => (
+        args[0] === "d1"
+        && args[1] === "execute"
+        && args.includes("--file")
+        && args.some((argument) => argument.endsWith("0052_generated_license_request_hardening.sql"))
+        && ci === "1"
+      ))).toBe(true);
       expect(commands.filter(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--command")))
-        .toHaveLength(7);
+        .toHaveLength(9);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "delete")).toBe(true);
     } finally {
       await rm(reportPath, { force: true });

@@ -95,6 +95,11 @@ export function assertExactMigrationLedger(
   repositoryMigrationNames: string[],
 ): void;
 
+export function resolvePendingMigrationNames(
+  appliedMigrationNames: string[],
+  repositoryMigrationNames: string[],
+): string[];
+
 export const restoreCountValidationTables: readonly string[];
 export const restoreValidationTables: readonly string[];
 
