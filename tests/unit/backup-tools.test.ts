@@ -899,15 +899,6 @@ describe("backup CLI dry runs", () => {
             if (sql.startsWith("INSERT INTO d1_migrations")) {
               return { stderr: "", stdout: JSON.stringify([{ results: [] }]) };
             }
-            if (sql === "PRAGMA integrity_check;") {
-              return {
-                stderr: "",
-                stdout: JSON.stringify([{ results: [{ integrity_check: "ok" }] }]),
-              };
-            }
-            if (sql === "PRAGMA foreign_key_check;") {
-              return { stderr: "", stdout: JSON.stringify([{ results: [] }]) };
-            }
             if (sql.includes("FROM sqlite_master")) {
               const source = args[2] === "selinow-staging";
               return {
@@ -967,7 +958,7 @@ describe("backup CLI dry runs", () => {
         && ci === "1"
       ))).toBe(true);
       expect(commands.filter(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--command")))
-        .toHaveLength(9);
+        .toHaveLength(7);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "delete")).toBe(true);
     } finally {
       await rm(reportPath, { force: true });

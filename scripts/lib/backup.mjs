@@ -677,6 +677,19 @@ function verifyLocalDatabase(databasePath, baselineCounts) {
   }
 }
 
+function verifyLocalIntegrity(databasePath) {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const integrityRows = database.prepare("PRAGMA integrity_check").all();
+    return {
+      foreignKeyViolationCount: database.prepare("PRAGMA foreign_key_check").all().length,
+      integrityOk: integrityRows.length === 1 && String(Object.values(integrityRows[0] ?? {})[0]) === "ok",
+    };
+  } finally {
+    database.close();
+  }
+}
+
 async function expectedMigrationNames() {
   return (await readdir(resolve(repositoryRoot, "migrations")))
     .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/u.test(name))
@@ -1079,6 +1092,8 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
   const tempDirectory = await mkdtemp(join(tmpdir(), RESTORE_TEMP_PREFIX));
   await writeFile(resolve(tempDirectory, RESTORE_MARKER), `${identifiers.drillId}\n`, { encoding: "utf8", mode: 0o600 });
   const sourceExport = resolve(tempDirectory, "source.sql");
+  const targetExport = resolve(tempDirectory, "target.sql");
+  const targetVerificationDatabase = resolve(tempDirectory, "target-verification.sqlite");
   let createdTarget = false;
   let cleanupFailure = false;
   let operationError = null;
@@ -1179,23 +1194,25 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     if (sourceCountTables.some((table) => sourceCounts[table] !== targetCounts[table])) {
       throw new Error("restore_count_mismatch");
     }
-    const integrityRows = parseWranglerRows(remoteExecute(
-      runner,
-      targetName,
-      environment,
-      "PRAGMA integrity_check;",
-      "restore_integrity_query_failed",
-      runnerOptions,
-    ), "restore_integrity_invalid");
-    const integrityOk = integrityRows.length === 1 && String(Object.values(integrityRows[0] ?? {})[0]) === "ok";
-    const foreignKeyViolationCount = parseWranglerRows(remoteExecute(
-      runner,
-      targetName,
-      environment,
-      "PRAGMA foreign_key_check;",
-      "restore_foreign_key_query_failed",
-      runnerOptions,
-    ), "restore_foreign_key_invalid").length;
+    safeRunner(runner, [
+      "d1", "export", targetName, "--remote", "--env", environment,
+      "--output", targetExport, "--skip-confirmation",
+    ], "restore_target_export_failed", runnerOptions);
+    await chmod(targetExport, 0o600);
+    const targetExportStat = await stat(targetExport);
+    if (!targetExportStat.isFile() || targetExportStat.size === 0) {
+      throw new Error("restore_target_export_empty");
+    }
+    const targetDatabase = new DatabaseSync(targetVerificationDatabase);
+    try {
+      targetDatabase.exec(await readFile(targetExport, "utf8"));
+    } catch (error) {
+      throw new Error("restore_target_export_invalid", { cause: error });
+    } finally {
+      targetDatabase.close();
+    }
+    await chmod(targetVerificationDatabase, 0o600);
+    const { foreignKeyViolationCount, integrityOk } = verifyLocalIntegrity(targetVerificationDatabase);
     const schemaRows = parseWranglerRows(remoteExecute(
       runner,
       targetName,
