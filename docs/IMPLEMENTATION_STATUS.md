@@ -24,7 +24,7 @@ Last updated: 2026-08-02
 | --- | --- |
 | Release branch | `codex/landing-prod-release-safe-20260801`, commit `6335bc2623cb290366cfa580ed695e174159c0a1` |
 | Verification | `npm run check` (0 errors, 3 existing hints), `npm run lint`, `npm run test` (191 files / 1,489 tests), `npm run build`, and `npm run deploy:dry-run` passed; existing `INEFFECTIVE_DYNAMIC_IMPORT` build warning remains non-blocking |
-| Security delta | `22e3de5` -> `6335bc2`, 2/2 diff rows reviewed, 0 candidates, 0 HIGH/CRITICAL; canonical report is retained under `/private/var/folders/m4/1tyb0d41399gbt62vgxhhsph0000gn/T/codex-security-scans/selinow-landing-prod-safe/6335bc2623cb290366cfa580ed695e174159c0a1_20260801T225632Z/report.md` |
+| Security delta | `22e3de5` -> `e5c2407`, 2/2 runtime diff rows reviewed, 0 candidates, 0 HIGH/CRITICAL; canonical report is retained under `/private/var/folders/m4/1tyb0d41399gbt62vgxhhsph0000gn/T/codex-security-scans/selinow-landing-prod-safe/e5c2407059803ba5ef02c8d1e25f949a5fdd1719_20260801T230327Z/report.md` |
 | Live preflight | Staging route inventory stopped fail-closed with `cloudflare_route_audit_api_token_missing`; no live route read or mutation was performed |
 | Production status | `selinow.com` remains on the previous production version. Activation is not authorized until the exact Playwright/Axe receipt is available and separate scoped audit/worker tokens are supplied |
 
