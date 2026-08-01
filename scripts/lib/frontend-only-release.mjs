@@ -190,6 +190,21 @@ export async function compensateFrontendOnlyActivation(input) {
   }
   let rollbackInvocationFailed = false;
   if (freshActiveVersion === input.candidateWorkerVersion) {
+    let preMutationActiveVersion;
+    try {
+      preMutationActiveVersion = activeVersion(await input.inventoryImplementation());
+    } catch {
+      throw new Error(
+        `production_frontend_only_automatic_rollback_admission_unavailable:${originalCode}`,
+        { cause: input.originalError },
+      );
+    }
+    if (preMutationActiveVersion !== input.candidateWorkerVersion) {
+      throw new Error(
+        `production_frontend_only_automatic_rollback_active_version_ambiguous:${originalCode}`,
+        { cause: input.originalError },
+      );
+    }
     try {
       await input.deployRollbackImplementation();
     } catch {
@@ -198,15 +213,13 @@ export async function compensateFrontendOnlyActivation(input) {
   }
 
   const [inventoryResult, ledgerResult] = await Promise.allSettled([
-    freshActiveVersion === FRONTEND_ONLY_ROLLBACK_VERSION
-      ? Promise.resolve(freshInventory)
-      : waitForFrontendOnlyActiveVersion({
-        allowedVersions: input.allowedVersions,
-        expectedVersion: FRONTEND_ONLY_ROLLBACK_VERSION,
-        inventoryImplementation: input.inventoryImplementation,
-        ...(input.attempts === undefined ? {} : { attempts: input.attempts }),
-        ...(input.delayImplementation === undefined ? {} : { delayImplementation: input.delayImplementation }),
-      }),
+    waitForFrontendOnlyActiveVersion({
+      allowedVersions: input.allowedVersions,
+      expectedVersion: FRONTEND_ONLY_ROLLBACK_VERSION,
+      inventoryImplementation: input.inventoryImplementation,
+      ...(input.attempts === undefined ? {} : { attempts: input.attempts }),
+      ...(input.delayImplementation === undefined ? {} : { delayImplementation: input.delayImplementation }),
+    }),
     Promise.resolve().then(() => input.migrationLedgerImplementation()),
   ]);
 

@@ -2,6 +2,7 @@ export type ReleaseCheck = { name: string; ok: boolean };
 export type ProductionWranglerToolchainAttestation = {
   cliPath: string;
   fingerprintSha256: string;
+  packageCount: number;
   packageVersion: string;
 };
 

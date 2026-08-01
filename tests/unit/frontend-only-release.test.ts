@@ -360,9 +360,11 @@ describe("production frontend-only release", () => {
       throw new Error("wrangler_transport_ambiguous");
     });
     let inventoryCall = 0;
-    const inventoryImplementation = vi.fn(() => Promise.resolve(
-      inventoryCall++ === 0 ? candidateActive : restored,
-    ));
+    const inventoryImplementation = vi.fn(() => Promise.resolve([
+      candidateActive,
+      candidateActive,
+      restored,
+    ][inventoryCall++] ?? restored));
     const migrationLedgerImplementation = vi.fn(() => Promise.resolve(restoredLedger));
     const verifyRestoredImplementation = vi.fn((observedInventory, observedLedger) => {
       expect(observedInventory).toEqual(restored);
@@ -384,7 +386,7 @@ describe("production frontend-only release", () => {
       message: "production_frontend_only_automatic_rollback_complete:production_frontend_only_monitor_drift",
     });
     expect(deployRollbackImplementation).toHaveBeenCalledOnce();
-    expect(inventoryImplementation).toHaveBeenCalledTimes(2);
+    expect(inventoryImplementation).toHaveBeenCalledTimes(3);
     expect(migrationLedgerImplementation).toHaveBeenCalledOnce();
     expect(verifyRestoredImplementation).toHaveBeenCalledOnce();
   });
@@ -427,6 +429,30 @@ describe("production frontend-only release", () => {
     })).rejects.toThrow("production_frontend_only_automatic_rollback_complete");
     expect(deployRollbackImplementation).not.toHaveBeenCalled();
     expect(migrationLedgerImplementation).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks the candidate immediately before rollback mutation", async () => {
+    const unrelated = "55555555-5555-4555-8555-555555555555";
+    const candidateActive = inventory({
+      deployments: [{ createdOn: "2026-08-01T00:01:00.000Z", id: deployment, versionId: candidate }],
+    });
+    const unrelatedActive = inventory({
+      deployments: [{ createdOn: "2026-08-01T00:02:00.000Z", id: deployment, versionId: unrelated }],
+    });
+    const deployRollbackImplementation = vi.fn();
+    const migrationLedgerImplementation = vi.fn();
+    let call = 0;
+    await expect(compensateFrontendOnlyActivation({
+      allowedVersions: new Set([candidate, FRONTEND_ONLY_ROLLBACK_VERSION]),
+      candidateWorkerVersion: candidate,
+      deployRollbackImplementation,
+      inventoryImplementation: () => Promise.resolve(call++ === 0 ? candidateActive : unrelatedActive),
+      migrationLedgerImplementation,
+      originalError: new Error("production_frontend_only_monitor_drift"),
+      verifyRestoredImplementation: vi.fn(),
+    })).rejects.toThrow("production_frontend_only_automatic_rollback_active_version_ambiguous");
+    expect(deployRollbackImplementation).not.toHaveBeenCalled();
+    expect(migrationLedgerImplementation).not.toHaveBeenCalled();
   });
 
   it("refuses to overwrite an unrelated active production version", async () => {

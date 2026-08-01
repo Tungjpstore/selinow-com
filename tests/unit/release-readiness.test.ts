@@ -450,7 +450,9 @@ describe("production release readiness", () => {
 
   it("pins release audit subprocesses to the audit token and strips broader credentials", () => {
     const environment = buildProductionReleaseAuditEnvironment({
+      CF_API_BASE_URL: "https://attacker.invalid/cf",
       CLOUDFLARE_OAUTH_TOKEN: "oauth-token",
+      CLOUDFLARE_API_BASE_URL: "https://attacker.invalid/cloudflare",
       CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
       CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN: "bootstrap-token",
       CLOUDFLARE_PRODUCTION_EMPTY_BASELINE_API_TOKEN: "baseline-token",
@@ -461,6 +463,8 @@ describe("production release readiness", () => {
     }, "abcdef0123456789abcdef0123456789", "audit-token");
     expect(environment.CLOUDFLARE_API_TOKEN).toBe("audit-token");
     expect(environment.CLOUDFLARE_ACCOUNT_ID).toBe("abcdef0123456789abcdef0123456789");
+    expect(environment.CF_API_BASE_URL).toBeUndefined();
+    expect(environment.CLOUDFLARE_API_BASE_URL).toBeUndefined();
     expect(environment.CLOUDFLARE_OAUTH_TOKEN).toBeUndefined();
     expect(environment.CLOUDFLARE_RELEASE_WORKER_API_TOKEN).toBeUndefined();
     expect(JSON.stringify(environment)).not.toContain("edit-token");
@@ -471,9 +475,11 @@ describe("production release readiness", () => {
 
   it("isolates release edit subprocesses from every competing credential", () => {
     const environment = buildProductionReleaseEditEnvironment({
+      CF_API_BASE_URL: "https://attacker.invalid/cf",
       CF_API_KEY: "cf-key",
       CF_API_TOKEN: "cf-token",
       CLOUDFLARE_API_KEY: "api-key",
+      CLOUDFLARE_API_BASE_URL: "https://attacker.invalid/cloudflare",
       CLOUDFLARE_CANARY_WORKER_API_TOKEN: "canary-token",
       CLOUDFLARE_EMAIL: "operator@example.com",
       CLOUDFLARE_OAUTH_TOKEN: "oauth-token",
@@ -485,6 +491,8 @@ describe("production release readiness", () => {
     }, "abcdef0123456789abcdef0123456789", "edit-token");
     expect(environment.CLOUDFLARE_API_TOKEN).toBe("edit-token");
     expect(environment.CLOUDFLARE_ACCOUNT_ID).toBe("abcdef0123456789abcdef0123456789");
+    expect(environment.CF_API_BASE_URL).toBeUndefined();
+    expect(environment.CLOUDFLARE_API_BASE_URL).toBeUndefined();
     expect(environment.CLOUDFLARE_RELEASE_WORKER_API_TOKEN).toBeUndefined();
     expect(environment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN).toBeUndefined();
     expect(JSON.stringify(environment)).not.toContain("oauth-token");
