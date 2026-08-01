@@ -69,7 +69,13 @@ test("public surfaces reflow at the effective 200 percent CSS viewport", async (
     const axe = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
       .analyze();
-    expect(axe.violations.map(({ help, id, impact }) => ({ help, id, impact })), url).toEqual([]);
+    const violations = axe.violations.map(({ help, id, impact, nodes }) => ({
+      help,
+      id,
+      impact,
+      nodes: nodes.map(({ failureSummary, html, target }) => ({ failureSummary, html, target })),
+    }));
+    expect(violations, `${url}\n${JSON.stringify(violations, null, 2)}`).toEqual([]);
   }
 
   expect(externalRequests, externalRequests.join("\n")).toEqual([]);

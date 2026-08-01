@@ -406,7 +406,12 @@ export function buildCanaryWranglerEnvironment(environment, accountId, token) {
   delete child[CANARY_ROUTE_TOKEN_NAME];
   delete child[CANARY_WORKER_TOKEN_NAME];
   delete child.CLOUDFLARE_PLATFORM_API_TOKEN;
+  delete child.CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN;
+  delete child.CLOUDFLARE_PRODUCTION_EMPTY_BASELINE_API_TOKEN;
+  delete child.CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN;
+  delete child.CLOUDFLARE_PRODUCTION_PROMOTION_ROUTE_API_TOKEN;
   delete child.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
+  delete child.CLOUDFLARE_RELEASE_WORKER_API_TOKEN;
   return child;
 }
 
@@ -929,11 +934,12 @@ function candidateBindingContract(input) {
 }
 
 export function validateCandidateVersionView(view, candidateVersionId, input) {
+  const requiredHandlers = ["fetch", "queue", "scheduled"];
   if (
     view?.id !== candidateVersionId
     || !Array.isArray(view?.resources?.bindings)
     || !Array.isArray(view?.resources?.script?.handlers)
-    || !view.resources.script.handlers.includes("fetch")
+    || !isDeepStrictEqual([...view.resources.script.handlers].sort(), requiredHandlers)
   ) {
     throw new Error("production_canary_candidate_view_invalid");
   }

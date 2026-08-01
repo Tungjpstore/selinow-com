@@ -1,26 +1,35 @@
 import process from "node:process";
 
-import { parseDeployFlags, run } from "./lib/cli.mjs";
+import { parseDeployFlags, run, runWrangler } from "./lib/cli.mjs";
 import { assertFreshStagingBackupEvidence } from "./lib/backup.mjs";
 import {
   assertStagingMutationAdmission,
   buildPinnedCloudflareEnvironment,
   repositoryRoot,
 } from "./lib/platform.mjs";
-import { assertProductionWorkerDeployAdmission } from "./lib/release.mjs";
+import { buildCanaryBuildEnvironment } from "./lib/production-canary.mjs";
+import {
+  assertProductionPreActivationVersions,
+  assertProductionWorkerDeployAdmission,
+  buildProductionReleaseEditEnvironment,
+} from "./lib/release.mjs";
 
 try {
   const flags = parseDeployFlags(process.argv.slice(2));
 
-  const buildEnvironment = { ...process.env };
-  if (flags.environment !== "local") {
+  const buildEnvironment = flags.environment === "production"
+    ? buildCanaryBuildEnvironment(process.env)
+    : { ...process.env };
+  if (flags.environment !== "local" && flags.environment !== "production") {
     buildEnvironment.CLOUDFLARE_ENV = flags.environment;
-  } else {
+  } else if (flags.environment === "local") {
     delete buildEnvironment.CLOUDFLARE_ENV;
   }
   // Keep the read-only admission credential outside the application build process.
   delete buildEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN;
   delete buildEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
+  delete buildEnvironment.CLOUDFLARE_RELEASE_WORKER_API_TOKEN;
+  delete buildEnvironment.CLOUDFLARE_API_TOKEN;
 
   const requiresProductionAdmission = flags.environment === "production"
     && !flags.dryRun
@@ -41,6 +50,7 @@ try {
       repositoryRoot,
       workerSecretNames,
     });
+    assertProductionPreActivationVersions(productionAdmission);
   }
   if (requiresStagingAdmission) {
     stagingAdmission = await assertStagingMutationAdmission();
@@ -53,6 +63,7 @@ try {
       environment: process.env,
       manifestPath: flags.releaseManifestPath,
       repositoryRoot,
+      verifyLocalArtifact: true,
       workerSecretNames,
     });
     if (
@@ -60,13 +71,17 @@ try {
       || finalAdmission.commitSha !== productionAdmission.commitSha
       || finalAdmission.databaseId !== productionAdmission.databaseId
       || finalAdmission.databaseName !== productionAdmission.databaseName
+      || finalAdmission.activeWorkerVersion !== productionAdmission.activeWorkerVersion
+      || finalAdmission.candidateWorkerVersion !== productionAdmission.candidateWorkerVersion
       || finalAdmission.releaseId !== productionAdmission.releaseId
+      || finalAdmission.previousWorkerVersion !== productionAdmission.previousWorkerVersion
       || finalAdmission.workerName !== productionAdmission.workerName
       || finalAdmission.zoneId !== productionAdmission.zoneId
       || finalAdmission.zoneName !== productionAdmission.zoneName
     ) {
       throw new Error("production_deploy_admission_changed");
     }
+    assertProductionPreActivationVersions(productionAdmission, finalAdmission);
     productionAdmission = finalAdmission;
   }
   if (requiresStagingAdmission) {
@@ -87,18 +102,49 @@ try {
     stagingAdmission = finalAdmission;
   }
   if (!flags.buildOnly) {
-    const deployArgs = ["wrangler", "deploy"];
-    if (flags.environment !== "local") {
-      deployArgs.push("--env", flags.environment);
-    }
-    if (flags.dryRun) {
+    const deployArgs = requiresProductionAdmission
+      ? [
+          "versions", "deploy",
+          `${productionAdmission.candidateWorkerVersion}@100%`,
+          "--env", "production", "--yes",
+          "--message", `release ${productionAdmission.releaseId}`,
+        ]
+      : ["deploy"];
+    if (!requiresProductionAdmission && flags.environment !== "local") deployArgs.push("--env", flags.environment);
+    if (!requiresProductionAdmission && flags.dryRun) {
       deployArgs.push("--dry-run", "--outdir", `.wrangler/dry-run-${flags.environment}`);
     }
     const admittedAccountId = stagingAdmission?.accountId ?? productionAdmission?.accountId;
-    const wranglerEnvironment = admittedAccountId === undefined
+    let wranglerEnvironment = admittedAccountId === undefined
       ? buildEnvironment
       : buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId);
-    run("npx", deployArgs, { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
+    if (requiresProductionAdmission) {
+      const releaseWorkerToken = process.env.CLOUDFLARE_RELEASE_WORKER_API_TOKEN?.trim();
+      if (!releaseWorkerToken) throw new Error("cloudflare_release_worker_api_token_missing");
+      wranglerEnvironment = buildProductionReleaseEditEnvironment(
+        buildEnvironment,
+        productionAdmission.accountId,
+        releaseWorkerToken,
+      );
+    }
+    runWrangler(deployArgs, { cwd: repositoryRoot, env: wranglerEnvironment });
+    if (requiresProductionAdmission) {
+      const deployedAdmission = await assertProductionWorkerDeployAdmission({
+        environment: process.env,
+        manifestPath: flags.releaseManifestPath,
+        repositoryRoot,
+        verifyLocalArtifact: true,
+        workerSecretNames,
+      });
+      if (
+        deployedAdmission.activeWorkerVersion !== productionAdmission.candidateWorkerVersion
+        || deployedAdmission.candidateWorkerVersion !== productionAdmission.candidateWorkerVersion
+        || deployedAdmission.commitSha !== productionAdmission.commitSha
+        || deployedAdmission.releaseId !== productionAdmission.releaseId
+      ) {
+        throw new Error("production_deploy_verification_failed");
+      }
+    }
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : "unknown_error";

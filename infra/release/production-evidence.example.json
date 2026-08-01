@@ -4,7 +4,8 @@
   "releaseId": "replace-with-release-id",
   "commitSha": "replace-with-reviewed-git-sha",
   "previousWorkerVersion": "replace-with-current-worker-version",
-  "candidateWorkerVersion": "replace-with-candidate-worker-version",
+  "candidateWorkerVersion": null,
+  "candidateUpload": null,
   "approvals": {
     "releaseOwner": "replace-with-release-owner",
     "supportOwner": "replace-with-support-owner"

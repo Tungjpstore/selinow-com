@@ -13,18 +13,42 @@ describe("PromptOS marketing surfaces", () => {
       readFile("src/components/marketing/MarketingHeader.astro", "utf8"),
     ]);
 
-    expect(landing).toContain('mt("marketing.home.hero.title")');
-    expect(landing).toContain('mt("marketing.home.hero.secondary")');
-    expect(landing).toContain('mt("marketing.home.flow.payment")');
-    expect(landing).toContain('mt("marketing.home.flow.payment_detail")');
-    expect(landing).toContain('mt("marketing.home.flow.delivery_detail")');
+    for (const section of ["channels", "use-cases", "workflow", "architecture", "pricing", "faq"]) {
+      expect(landing).toMatch(new RegExp(`<section[^>]+id="${section}"`));
+    }
+
     expect(landing).toContain('data-pricing-state={pricingState}');
     expect(landing).toContain("marketing.pricing_unavailable");
     expect(landing).not.toContain('plan.code === "store"');
+    expect(landing).toContain('data-channel="website" data-release-state="live"');
+    expect(landing).toContain('data-channel="telegram" data-release-state="pending-acceptance"');
+    expect(landing).toContain('data-capability="payos" data-release-state="pending-acceptance"');
+    expect(landing).toContain('data-capability="automated-fulfillment" data-release-state="pending-acceptance"');
+    expect(landing).toContain('data-release-state="roadmap"');
+    expect(landing).not.toContain("provider.telegram-card.png");
+    expect(landing).not.toContain("Telegram - Live");
+    expect(landing).not.toContain('mt("marketing.home.hero.title")');
+    expect(landing).toContain("landingNavigation");
     expect(header).toContain('class="platform-nav-mobile-login"');
     expect(header).toContain('data-marketing-menu-trigger');
     expect(header).toContain('aria-expanded="false"');
     expect(header).toContain('t("marketing.header.cta")');
+    expect(header).toContain('landingNavigation = false');
+    expect(header).toContain('landingNavigation ? "/#channels" : "/#product-stage"');
+    expect(header).toContain('landingNavigation ? "/#architecture" : "/#trust"');
+    expect(header).toContain('t("marketing.header.architecture")');
+    expect(header).toContain('t("marketing.header.partners")');
+  });
+
+  it("keeps pricing on shared header defaults while landing opts into its navigation", async () => {
+    const [landing, pricing] = await Promise.all([
+      readFile("src/pages/index.astro", "utf8"),
+      readFile("src/pages/pricing.astro", "utf8"),
+    ]);
+
+    expect(landing).toContain("<MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} landingNavigation />");
+    expect(pricing).toContain("<MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />");
+    expect(pricing).not.toContain("landingNavigation");
   });
 
   it("renders pricing comparison groups without inventing absent runtime entitlements", async () => {
@@ -91,6 +115,10 @@ describe("PromptOS marketing surfaces", () => {
     });
     expect(createMarketingTranslator("vi-VN")("marketing.header.pricing")).toBe("Bảng giá");
     expect(createMarketingTranslator("fr-FR")("marketing.header.pricing")).toBe("Pricing");
+    expect(createMarketingTranslator("en")("marketing.header.partners")).toBe("Partners");
+    expect(createMarketingTranslator("vi-VN")("marketing.header.partners")).toBe("Đối tác");
+    expect(createMarketingTranslator("en")("marketing.header.architecture")).toBe("Architecture");
+    expect(createMarketingTranslator("vi-VN")("marketing.header.architecture")).toBe("Kiến trúc");
     expect(createMarketingTranslator("en")("marketing.unknown")).toBe("");
   });
 });

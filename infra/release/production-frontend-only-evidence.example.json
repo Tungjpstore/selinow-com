@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "mode": "production_frontend_only_v1",
+  "environment": "production",
+  "releaseId": "release_20260801_replace000",
+  "baselineCommitSha": "3838b4724936ae1f9cafbd0df53a51a9adb3124b",
+  "rollbackWorkerVersion": "6ca9c890-ed04-44dc-ac32-44b36881f2dc",
+  "commitSha": "replace-with-reviewed-commit-sha",
+  "treeSha": "replace-with-reviewed-tree-sha",
+  "diffSha256": "replace-with-canonical-binary-diff-sha256",
+  "quality": {
+    "check": false,
+    "lint": false,
+    "test": false,
+    "build": false,
+    "deployDryRun": false,
+    "reportRef": ".wrangler/releases/release_20260801_replace000/quality-report.json",
+    "reportSha256": "replace-with-report-sha256"
+  },
+  "browser": {
+    "desktop": false,
+    "mobile": false,
+    "zoom200": false,
+    "axeViolations": null,
+    "consoleErrors": null,
+    "pageErrors": null,
+    "reportRef": ".wrangler/releases/release_20260801_replace000/browser-report.json",
+    "reportSha256": "replace-with-report-sha256"
+  },
+  "visual": {
+    "accepted": false,
+    "reportRef": ".wrangler/releases/release_20260801_replace000/visual-report.json",
+    "reportSha256": "replace-with-report-sha256"
+  },
+  "security": {
+    "criticalOpen": null,
+    "highOpen": null,
+    "reportRef": ".wrangler/releases/release_20260801_replace000/security-report.json",
+    "reportSha256": "replace-with-report-sha256"
+  }
+}

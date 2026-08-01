@@ -33,6 +33,8 @@
     "backup:create": "node scripts/backup.mjs",
     "restore:drill": "node scripts/restore-drill.mjs",
     "release:doctor": "node scripts/release-doctor.mjs",
+    "release:candidate": "node scripts/release-candidate.mjs",
+    "release:production:frontend-only": "node scripts/production-frontend-release.mjs",
     "release:manifest": "node scripts/release-manifest.mjs",
     "release:production:bootstrap": "node scripts/production-bootstrap.mjs",
     "release:production:bootstrap:migrate": "node scripts/production-bootstrap-execute.mjs",

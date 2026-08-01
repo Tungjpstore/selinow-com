@@ -2,9 +2,9 @@
 
 Phase 10 uses a prepare, backup, deploy, verify, confirm-or-rollback sequence. Repository tooling is fail-closed: production configuration, secret names, backup evidence, security status, monitoring ownership and pilot evidence must be complete before a release manifest can be written.
 
-Phase 10 remains NO-GO. The named Cloudflare production resources, eight required Worker secrets, the production Turnstile widget, a protected empty-D1 backup and an isolated empty-baseline restore drill now exist. No production migration, Worker traffic deployment, route handoff, DNS cutover, payment or Telegram acceptance has been completed.
+The normal Phase 10 release remains NO-GO for changes that depend on pilot, signed PayOS, Telegram, fulfillment or custom-domain acceptance. Production already has an active rollback Worker version and live apex/wildcard Worker routes; do not treat it as an empty first-production target. The narrow frontend-only lane below exists specifically to preserve that live runtime while changing reviewed landing assets and markup.
 
-Current dedicated production operator credentials are not admitted: existing canary tokens returned 401, newly generated Account/User token attempts failed verification, and the migration executor stopped at `production_bootstrap_empty_baseline_account_identity_unavailable` before any D1 mutation. Treat earlier live inventory as historical until every dedicated token is rotated and revalidated. Production D1 remains empty (0/52 migrations), the apex/wildcard routes remain unchanged and no production traffic is enabled.
+Treat every saved production inventory as historical until the operator lane refreshes it with short-lived read-only credentials. Never infer D1 migration state, route state or active version from the retired bootstrap notes: capture the live D1 ledger, routes, domains, queues, cron, deployments and complete paginated version inventory immediately before upload and activation.
 
 The planning commands in this document do not mutate Cloudflare. The explicitly confirmed backup/restore/migration commands are separate production actions and remain fail-closed behind exact target and evidence checks.
 
@@ -18,9 +18,49 @@ Start from these non-secret templates:
 
 Completed manifests are written with mode `0600` under `.wrangler/releases/<release-id>/` and must not be committed.
 
-## First-production bootstrap ceremony
+## Frontend-only production operator lane
 
-The first production Worker cannot honestly provide a previous Worker version. It therefore uses a separate, fail-closed three-phase ceremony instead of putting a fabricated rollback version into the normal release evidence:
+`production_frontend_only_v1` is a narrow, one-release operator lane for the reviewed landing-page change. It does not waive or fabricate the normal backup, pilot, PayOS, Telegram, fulfillment or custom-domain evidence. It is admitted only when the exact release diff is limited to the checked-in frontend/release-tooling allowlist and all normal runtime surfaces remain unchanged.
+
+The lane is bound in code to:
+
+- Baseline commit `3838b4724936ae1f9cafbd0df53a51a9adb3124b`.
+- Rollback Worker version `6ca9c890-ed04-44dc-ac32-44b36881f2dc`.
+- Mode `production_frontend_only_v1` and a clean, non-merge reviewed HEAD/tree/diff fingerprint.
+
+Start from `infra/release/production-frontend-only-evidence.example.json`. Store the completed evidence at `.wrangler/release/production-frontend-only-evidence.json` and four mode-`0600` receipts at the exact paths named by the template. The automated admission checks each receipt's permissions, content hash, `schemaVersion: 1`, exact mode/release/commit/tree identity, `section` name and `passed: true`. An operator must also review the section-specific fields before execution: full quality gates, desktop/mobile/200%-zoom browser checks, axe/console/page-error results, visual acceptance and the exact-commit security scan with zero open HIGH/CRITICAL findings.
+
+The source qualifier rejects deletes, renames, copies, mode changes, symlinks, submodules and every path outside its explicit allowlist. In particular it rejects `migrations/**`, `wrangler.jsonc`, lockfiles/dependency changes, API/commerce/tenant/runtime files, routes, DNS and Cloudflare resource configuration. `package.json` may differ from the baseline only by the two reviewed release-tooling script entries.
+
+Plan locally before any Cloudflare access:
+
+```bash
+npm run release:production:frontend-only -- --env production --mode plan --json
+```
+
+Upload requires separate short-lived credentials: `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` for read-only account/Worker/D1/route/domain/queue/cron/version inventory, and `CLOUDFLARE_RELEASE_WORKER_API_TOKEN` for Workers Scripts Edit only. Do not grant route, DNS, D1 write, queue write, domain write or account-wide edit permissions to the edit token.
+
+```bash
+npm run release:production:frontend-only -- \
+  --env production --mode upload --execute --confirm-production --json
+```
+
+Upload rebuilds without operator credentials, stages the generated complete module graph immutably, and invokes only `wrangler versions upload --strict`. It paginates the Worker Versions API rather than relying on Wrangler's 10-version display window, then proves that the D1 migration ledger and full live inventory are unchanged except for exactly one inactive candidate. It requires the rollback and candidate version views to have identical non-ASSETS bindings, handlers, named handlers, compatibility date/flags, limits, exports, migration tag and usage model. The private result is `.wrangler/releases/<release-id>/frontend-only-upload.json`.
+
+Activation invokes only `wrangler versions deploy <candidate>@100%`, repeats inventory and D1-ledger checks, runs fixed GET-only smoke checks for `/`, `/pricing`, `/login`, API health and the resolvable storefront rejection path `/products/frontend-release-invalid` (404), then repeats them after a minimum 15-minute monitor window:
+
+```bash
+npm run release:production:frontend-only -- \
+  --env production --mode activate --execute --confirm-production --json
+```
+
+Failures before the activation sink return without mutating production. From the moment candidate activation is invoked, every activation, propagation, smoke, monitor, inventory or ledger failure sends the exact rollback version at 100% unconditionally, then uses fresh inventory and D1-ledger reads to verify restoration; a failed or ambiguous rollback verification remains a fail-closed operator incident. Explicit `--mode rollback` is available only when the admitted candidate is active and its receipt, provenance, runtime parity, inventory and ledger checks still pass. Neither path changes D1, routes, DNS, Worker Domains, queues, cron, KV, R2 or secrets. Revoke both temporary tokens and remove token-bearing temporary files after the final receipt is captured.
+
+## Historical first-production bootstrap ceremony (retired)
+
+This section records the original first-production ceremony for audit history only. It is not the current production runbook: production now has live apex/wildcard Worker routes and rollback version `6ca9c890-ed04-44dc-ac32-44b36881f2dc`. Do not run these bootstrap commands for the frontend-only release.
+
+At the time of first bootstrap, the Worker could not honestly provide a previous version. The retired flow therefore used a separate, fail-closed three-phase ceremony instead of putting a fabricated rollback version into the normal release evidence:
 
 1. `resources`: admit the exact account, zone, Git commit/tree, staging traffic inventory, production names and secret names; plan only create/reuse actions for the eight named production resources.
 2. `canary`: require the reconciled resource manifest, a fresh empty-D1 baseline backup/bookmark, a successful isolated restore drill and the exact forward-only migration list before the first Worker version may bind only `canary.selinow.com`.
@@ -219,15 +259,15 @@ npm run release:production:bootstrap:empty-baseline -- --env production --dry-ru
 
 The command has no migration, Worker deploy, route, DNS, seed, payment or Telegram sink. Do not run it with a staging target or a regular non-empty restore artifact.
 
-### Current cutover blockers
+### Historical pre-promotion blockers
 
-The planner deliberately allows resource and canary preparation while listing stable-cutover blockers, but `promote` fails closed while any blocker remains:
+Before the completed platform route promotion, the planner allowed resource and canary preparation while listing stable-cutover blockers, and `promote` failed closed while any blocker remained. These notes describe that historical state; they do not override the live-inventory requirements of the current frontend-only lane.
 
-For this platform-only release, the active promotion blockers are the production apex/wildcard route guards, canary acceptance and the other explicit route-plan/evidence checks. The external-host inventory and Turnstile lifecycle items below remain mandatory gates for a future external-domain cutover, but are intentionally not represented as platform traffic admission.
+For that platform-only promotion, the active blockers were the production apex/wildcard route guards, canary acceptance and the other explicit route-plan/evidence checks. The external-host inventory and Turnstile lifecycle items below remain mandatory gates for a future external-domain cutover, but are intentionally not represented as platform traffic admission.
 
-- Cloudflare Routes take precedence over Worker Custom Domains. The current null guards (`selinow.com/*` and `*.selinow.com/*`) therefore bypass production Custom Domains and block stable apex/platform-wildcard traffic. They do not block the exact `canary.selinow.com/*` override, which is more specific and is the only route authorized during canary.
+- Cloudflare Routes take precedence over Worker Custom Domains. Before promotion, null guards (`selinow.com/*` and `*.selinow.com/*`) bypassed production Custom Domains and blocked stable apex/platform-wildcard traffic. They did not block the exact `canary.selinow.com/*` override, which was more specific and was the only route authorized during canary.
 - The checked-in staging `*/*` route intentionally sends otherwise unmatched external custom domains to `selinow-com-staging`. The current platform-only handoff is: `selinow.com/*` and `*.selinow.com/*` point to `selinow-com-production`; exact in-zone staging exceptions (`staging.selinow.com/*`, `app-staging.selinow.com/*`, `api-staging.selinow.com/*`, and `*.staging.selinow.com/*`) point to `selinow-com-staging`; and `*/*` remains on `selinow-com-staging`. External custom-domain traffic therefore remains on staging. Because Worker route patterns must belong to the zone, a future external cutover still requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher; that pending inventory is not silently treated as production admission in this platform-only release.
-- The canary phase needs the exact `canary.selinow.com/* -> selinow-com-production` override while the old null wildcard is still present; the override is removed only after the production wildcard is active.
+- The canary phase used the exact `canary.selinow.com/* -> selinow-com-production` override while the old null wildcard was still present; the override was removed only after the production wildcard became active.
 - The production Turnstile widget is authorized for `selinow.com`, which covers its subdomains. Turnstile does not support wildcard hostnames; every external custom hostname must be admitted explicitly before activation (or the account must use Enterprise Any Hostname). The current application has no runtime hostname-admission lifecycle evidence, so external custom-domain checkout remains blocked and no external-domain activation is claimed by the platform-only handoff.
 
 Do not remove these blockers by broadening a shared-zone wildcard without the exact in-zone staging exceptions, routing an external staging hostname through production, or disabling Turnstile. Keep the platform-only route contracts explicit, and before any future external-domain cutover capture a fresh read-only external-host inventory, rerun staging acceptance and add tenant-routing/Turnstile lifecycle evidence. The route handoff is documented in `buildProductionRouteHandoff`; it is a plan-only helper and performs no Cloudflare mutation.
@@ -273,7 +313,25 @@ The doctor checks metadata and freshness only. It does not read the exported dat
 
 Production mutation remains a separate operator-controlled procedure. The release owner must verify the exact database target before invoking any remote backup, migration or deploy command.
 
-## 3. Release manifest and rollback matrix
+## 3. Normal release candidate and manifest
+
+Keep `candidateWorkerVersion` and `candidateUpload` set to `null` while collecting the other release evidence. Validate the route-neutral candidate plan without network access:
+
+```bash
+npm run release:candidate -- --env production --json
+```
+
+The live upload requires a read-only route/script/D1 audit token and a separate Worker Scripts edit token. The audit token is pinned to every identity/version read and the edit token is pinned only to upload/activation; neither subprocess may fall back to OAuth or inherit the other token. The workflow builds with both credentials removed, rechecks the live account/D1/route/domain/deployment inventory, fingerprints `wrangler.jsonc` plus every built `dist` file immediately before and after the sink, invokes only `wrangler versions upload --strict`, requires exactly one new version, validates the complete fetch/queue/scheduled handler and binding contract, seals Wrangler upload provenance, and proves that the active deployment is still the recorded rollback version:
+
+```bash
+CLOUDFLARE_ROUTE_AUDIT_API_TOKEN=... \
+CLOUDFLARE_RELEASE_WORKER_API_TOKEN=... \
+npm run release:candidate -- --env production --execute --confirm-production --json
+```
+
+On success it writes `.wrangler/releases/<release-id>/candidate-upload.json` and advances the private evidence with the captured UUID and report fingerprint. It never runs `wrangler deploy`, activates a version, or mutates routes, domains, queues, schedules, D1, KV or R2.
+
+### Release manifest and rollback matrix
 
 Validate evidence without writing artifacts:
 
@@ -287,9 +345,14 @@ Write the private manifest and rollback matrix only after every prerequisite pas
 npm run release:manifest -- --write --json
 ```
 
-The manifest records the reviewed commit, previous/candidate Worker versions, migration filenames, config fingerprint, quality gates, backup timestamps and the count of pilot shops. It excludes credentials, bookmark values, customer identifiers and exported data.
+The manifest records the reviewed commit, previous/candidate Worker versions, candidate upload report fingerprint, migration filenames, config fingerprint, quality gates, backup timestamps and the count of pilot shops. It excludes credentials, bookmark values, customer identifiers and exported data.
 
-Before any real Worker deploy, temporarily provide the least-privilege `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`. The deploy admission runs only read operations: account-pinned `wrangler whoami --json`, production D1 inventory, the shared-zone Worker Routes inventory and the account Worker Domains inventory. It requires the exact reviewed production account, D1 name+UUID, Worker name and domains while explicitly preserving the checked-in staging route/guard contract in the same `selinow.com` zone. It repeats the full gate after build, rejects target drift, strips the audit token from child environments and pins the final Wrangler process with the admitted `CLOUDFLARE_ACCOUNT_ID`. Production dry-runs remain offline and do not require this token.
+Before a real Worker activation, temporarily provide the same read-only audit token and the separate `CLOUDFLARE_RELEASE_WORKER_API_TOKEN`. Both pre-activation admissions require the live version to remain exactly the rollback version, fetch the exact candidate from Cloudflare, and revalidate its bindings, handlers, upload annotations, report identity and local artifact fingerprint. It then activates only `<candidateWorkerVersion>@100%` through the repository-pinned no-install Wrangler helper; normal production release tooling never calls broad `wrangler deploy` or an install-capable `npx`. A final read-only admission must observe that exact candidate as active while the route/domain contract remains unchanged. Production dry-runs remain offline and do not require either token.
+
+```bash
+npm run deploy -- --env production --confirm-production \
+  --release-manifest .wrangler/releases/<release-id>/release-manifest.json
+```
 
 ## 4. Controlled pilot
 
