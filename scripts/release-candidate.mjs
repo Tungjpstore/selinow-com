@@ -1,21 +1,24 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 import { isDeepStrictEqual } from "node:util";
 
-import { run, runWrangler } from "./lib/cli.mjs";
+import { run } from "./lib/cli.mjs";
 import { buildCanaryBuildEnvironment } from "./lib/production-canary.mjs";
 import {
   buildProductionReleaseAuditEnvironment,
   buildProductionReleaseEditEnvironment,
+  assertProductionWranglerToolchain,
   captureProductionCandidateVersion,
+  createProductionWranglerToolchainAttestation,
   fingerprintProductionUploadInputs,
   listMigrationNames,
   productionDeploymentVersion,
   readOptionalJson,
   removeProductionUploadStage,
+  runAttestedProductionWrangler,
+  runProductionReleaseGit,
   stageProductionUploadInputs,
   validateProductionCandidateUploadAdmission,
   validateProductionCandidateVersionProvenance,
@@ -57,7 +60,7 @@ function parseArguments(argv) {
 }
 
 function gitValue(args, code) {
-  const result = spawnSync("git", args, { cwd: repositoryRoot, encoding: "utf8" });
+  const result = runProductionReleaseGit(args, { cwd: repositoryRoot });
   if (result.error || result.status !== 0) throw new Error(code);
   return result.stdout.trim();
 }
@@ -93,9 +96,9 @@ async function discoverLiveState(input) {
     token: input.auditToken,
     wranglerConfig: input.wranglerConfig,
   });
-  const versions = parseJson(runWrangler([
+  const versions = parseJson((await input.runWranglerImplementation([
     "versions", "list", "--env", "production", "--json",
-  ], { cwd: repositoryRoot, env: input.auditEnvironment }).stdout, "production_candidate_versions_invalid");
+  ], { cwd: repositoryRoot, env: input.auditEnvironment })).stdout, "production_candidate_versions_invalid");
   const deploymentResult = await cloudflareApiRequest(
     input.auditToken,
     `/accounts/${identity.accountId}/workers/scripts/${encodeURIComponent(identity.workerName)}/deployments`,
@@ -163,6 +166,12 @@ try {
     }, options.json);
   } else {
     const operatorEnvironment = { ...process.env };
+    const wranglerToolchain = await createProductionWranglerToolchainAttestation(repositoryRoot);
+    const attestedWrangler = (args, runOptions = {}) => runAttestedProductionWrangler(
+      wranglerToolchain,
+      args,
+      { ...runOptions, repositoryRoot },
+    );
     const auditToken = requireToken(operatorEnvironment, "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
     const workerToken = requireToken(operatorEnvironment, "CLOUDFLARE_RELEASE_WORKER_API_TOKEN");
     const auditEnvironment = buildProductionReleaseAuditEnvironment(
@@ -180,6 +189,7 @@ try {
       auditToken,
       identityEnvironment: auditEnvironment,
       productionSpec,
+      runWranglerImplementation: attestedWrangler,
       stagingSpec,
       wranglerConfig,
     };
@@ -200,6 +210,7 @@ try {
     ) {
       throw new Error("production_candidate_source_changed_after_build");
     }
+    await assertProductionWranglerToolchain(wranglerToolchain, repositoryRoot);
     const admitted = await discoverLiveState(liveInput);
     if (!sameAdmission(before, admitted)) throw new Error("production_candidate_admission_changed");
     const preUploadSource = repositoryState();
@@ -222,7 +233,7 @@ try {
     let bindingNames;
     let candidateWorkerVersion;
     try {
-      runWrangler([
+      await attestedWrangler([
         "versions", "upload",
         "dist/server/entry.mjs",
         "--config", "production-upload-wrangler.json",
@@ -232,6 +243,7 @@ try {
         "--tag", tag,
         "--message", `normal release candidate ${source.commitSha}`,
       ], { cwd: stageRoot, env: editEnvironment });
+      await assertProductionWranglerToolchain(wranglerToolchain, repositoryRoot);
       const postUploadSource = repositoryState();
       const [
         postUploadArtifactSha256,
@@ -263,9 +275,9 @@ try {
         afterVersions: after.versions,
         beforeVersions: admitted.versions,
       });
-      const candidateView = parseJson(runWrangler([
+      const candidateView = parseJson((await attestedWrangler([
         "versions", "view", candidateWorkerVersion, "--env", "production", "--json",
-      ], { cwd: repositoryRoot, env: auditEnvironment }).stdout, "production_candidate_view_invalid");
+      ], { cwd: repositoryRoot, env: auditEnvironment })).stdout, "production_candidate_view_invalid");
       bindingNames = validateProductionCandidateVersionView(candidateView, candidateWorkerVersion, {
         generatedManifest,
         productionSpec,
@@ -282,6 +294,7 @@ try {
       accountId: after.identity.accountId,
       artifactSha256,
       uploadConfigSha256,
+      wranglerToolchainSha256: wranglerToolchain.fingerprintSha256,
       bindingNames,
       candidateWorkerVersion,
       createdAt: now.toISOString(),

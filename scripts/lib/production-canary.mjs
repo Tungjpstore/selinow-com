@@ -559,7 +559,7 @@ export async function discoverProductionCanaryInventory(input) {
   if (typeof runner !== "function") throw new Error("production_canary_runner_missing");
   const cwd = input.repositoryRoot;
   const env = input.commandEnvironment;
-  const run = (args) => runner(args, { cwd, env }).stdout;
+  const run = async (args) => (await runner(args, { cwd, env })).stdout;
   const queueNames = [
     spec.resources?.integrationQueue,
     spec.resources?.notificationQueue,
@@ -568,13 +568,13 @@ export async function discoverProductionCanaryInventory(input) {
   if (queueNames.some((name) => typeof name !== "string")) throw new Error("production_canary_spec_invalid");
 
   // Establish CLI identity before making the broader live inventory calls.
-  const whoami = run(["whoami", "--json"]);
+  const whoami = await run(["whoami", "--json"]);
   if (!accountIdsFromWhoami(whoami).includes(spec.accountId.toLowerCase())) {
     throw new Error("production_canary_account_identity_mismatch");
   }
-  const d1Output = run(["d1", "list", "--env", "production", "--json"]);
+  const d1Output = await run(["d1", "list", "--env", "production", "--json"]);
   assertDatabaseIdentity(d1Output, input.databaseId, spec.resources.d1);
-  const secretNames = parseSecretNames(run(["secret", "list", "--name", spec.workerName]));
+  const secretNames = parseSecretNames(await run(["secret", "list", "--name", spec.workerName]));
 
   const [routes, domains, schedulesResult, deploymentsResult, workerSubdomain] = await Promise.all([
     cloudflareApiRequest(input.auditToken, `/zones/${spec.zoneId}/workers/routes`, {
@@ -599,13 +599,13 @@ export async function discoverProductionCanaryInventory(input) {
     : deploymentsResult?.deployments;
   if (!Array.isArray(deployments)) throw new Error("production_canary_deployments_invalid");
   const versions = parseJson(
-    run(["versions", "list", "--env", "production", "--json"]),
+    await run(["versions", "list", "--env", "production", "--json"]),
     "production_canary_versions_invalid",
   );
-  const queueOutputs = Object.fromEntries(queueNames.map((queueName) => [
+  const queueOutputs = Object.fromEntries(await Promise.all(queueNames.map(async (queueName) => [
     queueName,
-    run(["queues", "consumer", "list", queueName, "--json"]),
-  ]));
+    await run(["queues", "consumer", "list", queueName, "--json"]),
+  ])));
   return normalizeCanaryInventory({
     accountId: spec.accountId,
     databaseId: input.databaseId,

@@ -1,8 +1,9 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { relative, resolve, sep } from "node:path";
+import process from "node:process";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -11,6 +12,142 @@ import {
   requireCloudflareRouteAuditToken,
   repositoryRoot,
 } from "./platform.mjs";
+
+const PRODUCTION_RELEASE_GIT_MAX_BUFFER = 64 * 1024 * 1024;
+const WRANGLER_VERSION_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/u;
+
+export function buildProductionReleaseGitEnvironment(environment = process.env) {
+  const child = Object.fromEntries(Object.entries(environment).filter(([name]) => (
+    !name.startsWith("GIT_") && name !== "XDG_CONFIG_HOME"
+  )));
+  return {
+    ...child,
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    LC_ALL: "C",
+  };
+}
+
+export function runProductionReleaseGit(args, options = {}) {
+  return spawnSync("git", args, {
+    cwd: options.cwd ?? repositoryRoot,
+    encoding: options.encoding ?? "utf8",
+    env: buildProductionReleaseGitEnvironment(options.environment),
+    maxBuffer: PRODUCTION_RELEASE_GIT_MAX_BUFFER,
+  });
+}
+
+async function hashWranglerToolchainDirectory(directory, root, hash) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const path = resolve(directory, entry.name);
+    const relativePath = relative(root, path);
+    if (entry.isDirectory()) {
+      hash.update(`directory:${relativePath}:`);
+      await hashWranglerToolchainDirectory(path, root, hash);
+      continue;
+    }
+    if (!entry.isFile()) throw new Error("production_release_wrangler_toolchain_invalid");
+    const [metadata, value] = await Promise.all([lstat(path), readFile(path)]);
+    hash.update(`file:${relativePath}:${metadata.mode & 0o777}:${value.byteLength}:`);
+    hash.update(value);
+  }
+}
+
+export async function createProductionWranglerToolchainAttestation(root = repositoryRoot) {
+  const packageRoot = resolve(root, "node_modules", "wrangler");
+  const executablePath = resolve(root, "node_modules", ".bin", "wrangler");
+  let executableRealPath;
+  let installedPackage;
+  let lock;
+  let packageRootRealPath;
+  let rootPackage;
+  try {
+    [executableRealPath, installedPackage, lock, packageRootRealPath, rootPackage] = await Promise.all([
+      realpath(executablePath),
+      readFile(resolve(packageRoot, "package.json"), "utf8").then(JSON.parse),
+      readFile(resolve(root, "package-lock.json"), "utf8").then(JSON.parse),
+      realpath(packageRoot),
+      readFile(resolve(root, "package.json"), "utf8").then(JSON.parse),
+    ]);
+  } catch {
+    throw new Error("production_release_wrangler_toolchain_unavailable");
+  }
+  const pinnedVersion = rootPackage?.devDependencies?.wrangler ?? rootPackage?.dependencies?.wrangler;
+  const lockedPackage = lock?.packages?.["node_modules/wrangler"];
+  const declaredExecutable = typeof installedPackage?.bin === "string"
+    ? installedPackage.bin
+    : installedPackage?.bin?.wrangler;
+  const expectedExecutable = resolve(packageRootRealPath, declaredExecutable ?? "");
+  let cliPath;
+  let cliStat;
+  let packageStat;
+  try {
+    [cliPath, packageStat] = await Promise.all([
+      realpath(resolve(packageRoot, installedPackage?.main ?? "")),
+      lstat(packageRoot),
+    ]);
+    cliStat = await lstat(cliPath);
+  } catch {
+    throw new Error("production_release_wrangler_toolchain_invalid");
+  }
+  if (!WRANGLER_VERSION_PATTERN.test(pinnedVersion ?? "")
+    || installedPackage?.name !== "wrangler"
+    || installedPackage?.version !== pinnedVersion
+    || lockedPackage?.version !== pinnedVersion
+    || typeof lockedPackage?.integrity !== "string"
+    || !packageStat.isDirectory() || packageStat.isSymbolicLink()
+    || executableRealPath !== expectedExecutable
+    || !cliPath.startsWith(`${packageRootRealPath}${sep}`)
+    || !cliStat.isFile() || cliStat.isSymbolicLink()) {
+    throw new Error("production_release_wrangler_toolchain_invalid");
+  }
+  const hash = createHash("sha256");
+  hash.update(`wrangler:${pinnedVersion}:${lockedPackage.integrity}:${relative(packageRootRealPath, executableRealPath)}:${relative(packageRootRealPath, cliPath)}:`);
+  await hashWranglerToolchainDirectory(packageRoot, packageRoot, hash);
+  return {
+    cliPath,
+    fingerprintSha256: hash.digest("hex"),
+    packageVersion: pinnedVersion,
+  };
+}
+
+export async function fingerprintProductionWranglerToolchain(root = repositoryRoot) {
+  return (await createProductionWranglerToolchainAttestation(root)).fingerprintSha256;
+}
+
+export async function assertProductionWranglerToolchain(expected, root = repositoryRoot) {
+  const current = await createProductionWranglerToolchainAttestation(root);
+  if (!/^[a-f0-9]{64}$/u.test(expected?.fingerprintSha256 ?? "")
+    || current.cliPath !== expected.cliPath
+    || current.packageVersion !== expected.packageVersion
+    || current.fingerprintSha256 !== expected.fingerprintSha256) {
+    throw new Error("production_release_wrangler_toolchain_drift");
+  }
+  return expected;
+}
+
+export async function runAttestedProductionWrangler(attestation, args, options = {}) {
+  await assertProductionWranglerToolchain(attestation, options.repositoryRoot ?? repositoryRoot);
+  const environment = { ...(options.env ?? process.env) };
+  delete environment.NODE_OPTIONS;
+  delete environment.NODE_PATH;
+  const result = spawnSync(process.execPath, ["--no-warnings", attestation.cliPath, ...args], {
+    cwd: options.cwd,
+    encoding: "utf8",
+    env: environment,
+    maxBuffer: PRODUCTION_RELEASE_GIT_MAX_BUFFER,
+    stdio: options.capture === false ? "inherit" : "pipe",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const safeOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+    throw new Error(`command_failed:wrangler:${args[0] ?? "unknown"}:${safeOutput}`);
+  }
+  return { stderr: result.stderr ?? "", stdout: result.stdout ?? "" };
+}
 
 export const REQUIRED_PRODUCTION_VARS = [
   "ACTIVE_CREDENTIAL_KEY_VERSION",
@@ -563,6 +700,14 @@ async function hashUploadDirectory(directory, root, hash) {
   }
 }
 
+function assertProductionGeneratedUploadConfigNonExecutable(config) {
+  if (typeof config !== "object" || config === null
+    || Object.prototype.hasOwnProperty.call(config, "build")
+    || Object.prototype.hasOwnProperty.call(config, "build.command")) {
+    throw new Error("production_candidate_upload_config_executable_field_forbidden");
+  }
+}
+
 async function buildProductionUploadConfig(root) {
   const path = resolve(root, "dist/server/wrangler.json");
   let stat;
@@ -579,6 +724,7 @@ async function buildProductionUploadConfig(root) {
   } catch {
     throw new Error("production_candidate_upload_config_invalid");
   }
+  assertProductionGeneratedUploadConfigNonExecutable(config);
   const normalized = { ...config };
   delete normalized.configPath;
   delete normalized.userConfigPath;
@@ -589,6 +735,7 @@ async function buildProductionUploadConfig(root) {
 }
 
 export function validateProductionGeneratedUploadConfig(config, input) {
+  assertProductionGeneratedUploadConfigNonExecutable(config);
   const databases = Array.isArray(config?.d1_databases)
     ? config.d1_databases.filter((database) => database?.binding === "PLATFORM_DB")
     : [];
@@ -933,24 +1080,15 @@ export async function writeProductionCandidateArtifacts(input) {
 }
 
 function readRepositoryGitState(root) {
-  const commit = spawnSync("git", ["rev-parse", "--verify", "HEAD"], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const commit = runProductionReleaseGit(["rev-parse", "--verify", "HEAD"], { cwd: root });
   if (commit.error || commit.status !== 0) {
     throw new Error("production_release_commit_unavailable");
   }
-  const status = spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const status = runProductionReleaseGit(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root });
   if (status.error || status.status !== 0) {
     throw new Error("production_release_source_status_unavailable");
   }
-  const tree = spawnSync("git", ["rev-parse", "--verify", "HEAD^{tree}"], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const tree = runProductionReleaseGit(["rev-parse", "--verify", "HEAD^{tree}"], { cwd: root });
   if (tree.error || tree.status !== 0) {
     throw new Error("production_release_tree_unavailable");
   }

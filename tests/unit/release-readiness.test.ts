@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,11 +9,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assertProductionDeployAdmission,
   assertProductionPreActivationVersions,
+  assertProductionWranglerToolchain,
   assertProductionWorkerDeployAdmission,
+  buildProductionReleaseGitEnvironment,
   buildProductionReleaseAuditEnvironment,
   buildProductionReleaseEditEnvironment,
   buildReleaseArtifacts,
   captureProductionCandidateVersion,
+  createProductionWranglerToolchainAttestation,
   evaluateBackupPrerequisites,
   fingerprintProductionUploadInputs,
   inspectProductionReadiness,
@@ -22,6 +25,8 @@ import {
   REQUIRED_PRODUCTION_VARS,
   REQUIRED_WORKER_SECRET_NAMES,
   runPilotSmoke,
+  runAttestedProductionWrangler,
+  runProductionReleaseGit,
   stageProductionUploadInputs,
   validateProductionGeneratedUploadConfig,
   validateProductionCandidateUploadAdmission,
@@ -560,6 +565,165 @@ describe("production release readiness", () => {
     expect(() => validateProductionGeneratedUploadConfig({ ...config, rules: [] }, input)).toThrow(
       "production_candidate_upload_config_invalid",
     );
+    for (const executableConfig of [
+      { ...config, build: { command: "touch marker" } },
+      { ...config, build: {} },
+      { ...config, build: null },
+      { ...config, "build.command": "touch marker" },
+    ]) {
+      expect(() => validateProductionGeneratedUploadConfig(executableConfig, input)).toThrow(
+        "production_candidate_upload_config_executable_field_forbidden",
+      );
+    }
+  });
+
+  it("rejects generated Wrangler build commands before hashing or staging", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-upload-command-"));
+    try {
+      await mkdir(join(root, "dist/server"), { recursive: true });
+      await mkdir(join(root, "dist/client"), { recursive: true });
+      await writeFile(join(root, "wrangler.jsonc"), "{}\n");
+      await writeFile(join(root, "dist/server/entry.mjs"), "export default {};\n");
+      await writeFile(join(root, "dist/client/app.css"), "body{}\n");
+      await writeFile(join(root, "dist/server/wrangler.json"), JSON.stringify({
+        build: { command: "touch should-not-run" },
+        main: "entry.mjs",
+      }));
+      await expect(fingerprintProductionUploadInputs(root)).rejects.toThrow(
+        "production_candidate_upload_config_executable_field_forbidden",
+      );
+      await expect(stageProductionUploadInputs(root, "release_20260801_buildguard")).rejects.toThrow(
+        "production_candidate_upload_config_executable_field_forbidden",
+      );
+      await expect(readFile(join(root, ".wrangler/releases/release_20260801_buildguard"))).rejects.toThrow();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("sanitizes Git repository and config redirects for release checks", async () => {
+    const hostileEnvironment = {
+      ...process.env,
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: "/hostile/objects",
+      GIT_COMMON_DIR: "/hostile/common",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_GLOBAL: "/hostile/gitconfig",
+      GIT_CONFIG_KEY_0: "core.sshCommand",
+      GIT_CONFIG_SYSTEM: "/hostile/system",
+      GIT_CONFIG_VALUE_0: "hostile",
+      GIT_DIR: "/hostile/repo/.git",
+      GIT_EXEC_PATH: "/hostile/exec",
+      GIT_INDEX_FILE: "/hostile/index",
+      GIT_OBJECT_DIRECTORY: "/hostile/object-dir",
+      GIT_WORK_TREE: "/hostile/worktree",
+      XDG_CONFIG_HOME: "/hostile/xdg",
+    };
+    const sanitized = buildProductionReleaseGitEnvironment(hostileEnvironment);
+    expect(sanitized.GIT_DIR).toBeUndefined();
+    expect(sanitized.GIT_WORK_TREE).toBeUndefined();
+    expect(sanitized.GIT_INDEX_FILE).toBeUndefined();
+    expect(sanitized.GIT_OBJECT_DIRECTORY).toBeUndefined();
+    expect(sanitized.GIT_ALTERNATE_OBJECT_DIRECTORIES).toBeUndefined();
+    expect(sanitized.GIT_COMMON_DIR).toBeUndefined();
+    expect(sanitized.GIT_CONFIG_COUNT).toBeUndefined();
+    expect(sanitized.GIT_CONFIG_KEY_0).toBeUndefined();
+    expect(sanitized.GIT_CONFIG_VALUE_0).toBeUndefined();
+    expect(sanitized.GIT_EXEC_PATH).toBeUndefined();
+    expect(sanitized.XDG_CONFIG_HOME).toBeUndefined();
+    expect(sanitized.GIT_CONFIG_NOSYSTEM).toBe("1");
+    expect(sanitized.GIT_CONFIG_GLOBAL).toBe(process.platform === "win32" ? "NUL" : "/dev/null");
+
+    const root = await mkdtemp(join(tmpdir(), "selinow-git-env-"));
+    const repositoryA = join(root, "a");
+    const repositoryB = join(root, "b");
+    const initialize = async (repository: string, content: string) => {
+      await mkdir(repository);
+      execFileSync("git", ["init", "-q"], { cwd: repository, env: sanitized });
+      await writeFile(join(repository, "value.txt"), content);
+      execFileSync("git", ["add", "value.txt"], { cwd: repository, env: sanitized });
+      execFileSync("git", ["-c", "user.name=Selinow Test", "-c", "user.email=test@selinow.invalid", "commit", "-q", "-m", "fixture"], {
+        cwd: repository,
+        env: sanitized,
+      });
+    };
+    try {
+      await initialize(repositoryA, "a\n");
+      await initialize(repositoryB, "b\n");
+      const expected = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repositoryA,
+        encoding: "utf8",
+        env: sanitized,
+      }).trim();
+      const result = runProductionReleaseGit(["rev-parse", "HEAD"], {
+        cwd: repositoryA,
+        environment: {
+          ...hostileEnvironment,
+          GIT_DIR: join(repositoryB, ".git"),
+          GIT_WORK_TREE: repositoryB,
+        },
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe(expected);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("captures binary Git diffs larger than the Node default subprocess buffer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-git-buffer-"));
+    try {
+      await writeFile(join(root, "empty.bin"), Buffer.alloc(0));
+      await writeFile(join(root, "large.bin"), randomBytes(2 * 1024 * 1024));
+      const result = runProductionReleaseGit([
+        "diff", "--no-index", "--binary", "--", "empty.bin", "large.bin",
+      ], { cwd: root });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(Buffer.byteLength(result.stdout)).toBeGreaterThan(1024 * 1024);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("attests and directly executes the pinned Wrangler package without Node preload hooks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-wrangler-attestation-"));
+    try {
+      await mkdir(join(root, "node_modules/.bin"), { recursive: true });
+      await mkdir(join(root, "node_modules/wrangler/bin"), { recursive: true });
+      await mkdir(join(root, "node_modules/wrangler/wrangler-dist"), { recursive: true });
+      await writeFile(join(root, "package.json"), JSON.stringify({ devDependencies: { wrangler: "4.114.0" } }));
+      await writeFile(join(root, "package-lock.json"), JSON.stringify({
+        packages: { "node_modules/wrangler": { integrity: "sha512-fixture", version: "4.114.0" } },
+      }));
+      await writeFile(join(root, "node_modules/wrangler/package.json"), JSON.stringify({
+        bin: { wrangler: "./bin/wrangler.js" },
+        main: "wrangler-dist/cli.js",
+        name: "wrangler",
+        version: "4.114.0",
+      }));
+      await writeFile(join(root, "node_modules/wrangler/bin/wrangler.js"), "#!/usr/bin/env node\n");
+      await writeFile(join(root, "node_modules/wrangler/wrangler-dist/cli.js"), "process.stdout.write(`fixture:${process.argv.slice(2).join(',')}`);\n");
+      await symlink("../wrangler/bin/wrangler.js", join(root, "node_modules/.bin/wrangler"));
+      const attestation = await createProductionWranglerToolchainAttestation(root);
+      expect(attestation).toMatchObject({ packageVersion: "4.114.0" });
+      const marker = join(root, "node-preload-marker");
+      const preload = join(root, "preload.cjs");
+      await writeFile(preload, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "unsafe");\n`);
+      const result = await runAttestedProductionWrangler(attestation, ["versions", "list"], {
+        cwd: root,
+        env: { ...process.env, NODE_OPTIONS: `--require=${preload}`, NODE_PATH: root },
+        repositoryRoot: root,
+      });
+      expect(result.stdout).toBe("fixture:versions,list");
+      await expect(readFile(marker)).rejects.toThrow();
+      await writeFile(join(root, "node_modules/wrangler/wrangler-dist/cli.js"), "process.stdout.write('mutated');\n");
+      await expect(assertProductionWranglerToolchain(attestation, root)).rejects.toThrow(
+        "production_release_wrangler_toolchain_drift",
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
 

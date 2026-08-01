@@ -32,6 +32,8 @@ Start from `infra/release/production-frontend-only-evidence.example.json`. Store
 
 The source qualifier rejects deletes, renames, copies, mode changes, symlinks, submodules and every path outside its explicit allowlist. In particular it rejects `migrations/**`, `wrangler.jsonc`, lockfiles/dependency changes, API/commerce/tenant/runtime files, routes, DNS and Cloudflare resource configuration. `package.json` may differ from the baseline only by the two reviewed release-tooling script entries.
 
+This is a release-scope guarantee, not a non-executable-code guarantee. Astro runs in server mode, so reviewed `src/pages/index.astro` frontmatter and rendering code becomes part of the Worker module. The candidate source, the release scripts in that candidate and the local mode-`0600` receipts therefore remain trusted operator-reviewed inputs. Receipt hashes prove local file integrity and exact source identity; they are not an independent signature, external approval or cryptographic attestation by a separate trusted builder. The release lane fingerprints the exact pinned local Wrangler package, resolves its declared CLI directly instead of through `npx`/`PATH`, strips Node preload hooks and rechecks the fingerprint before privileged calls. This detects toolchain drift after initial admission but does not independently prove that the initially installed package was uncompromised.
+
 Plan locally before any Cloudflare access:
 
 ```bash
@@ -54,7 +56,7 @@ npm run release:production:frontend-only -- \
   --env production --mode activate --execute --confirm-production --json
 ```
 
-Failures before the activation sink return without mutating production. From the moment candidate activation is invoked, every activation, propagation, smoke, monitor, inventory or ledger failure sends the exact rollback version at 100% unconditionally, then uses fresh inventory and D1-ledger reads to verify restoration; a failed or ambiguous rollback verification remains a fail-closed operator incident. Explicit `--mode rollback` is available only when the admitted candidate is active and its receipt, provenance, runtime parity, inventory and ledger checks still pass. Neither path changes D1, routes, DNS, Worker Domains, queues, cron, KV, R2 or secrets. Revoke both temporary tokens and remove token-bearing temporary files after the final receipt is captured.
+Failures before the activation sink return without mutating production. From the moment candidate activation is invoked, every activation, propagation, smoke, monitor, inventory or ledger failure first refreshes the active Worker version. Automatic rollback deploys the exact rollback version at 100% only when the expected candidate is still active; if the rollback version is already active it verifies restoration without another mutation, and if any third version is active it fails closed without overwriting that concurrent operator change. Fresh inventory and D1-ledger reads must then verify restoration; a failed or ambiguous rollback verification remains a fail-closed operator incident. Explicit `--mode rollback` is available only when the admitted candidate is active and its receipt, provenance, runtime parity, inventory and ledger checks still pass. Neither path changes D1, routes, DNS, Worker Domains, queues, cron, KV, R2 or secrets. Revoke both temporary tokens and remove token-bearing temporary files after the final receipt is captured.
 
 ## Historical first-production bootstrap ceremony (retired)
 

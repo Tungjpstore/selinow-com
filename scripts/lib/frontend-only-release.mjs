@@ -37,6 +37,7 @@ const ALLOWED_PATHS = new Set([
   "scripts/production-frontend-release.mjs",
   "scripts/lib/frontend-only-release.d.mts",
   "scripts/lib/frontend-only-release.mjs",
+  "scripts/lib/production-canary.d.mts",
   "scripts/lib/production-canary.mjs",
   "scripts/lib/release.d.mts",
   "scripts/lib/release.mjs",
@@ -160,21 +161,52 @@ function safeFrontendOnlyErrorCode(error) {
 
 export async function compensateFrontendOnlyActivation(input) {
   const originalCode = safeFrontendOnlyErrorCode(input.originalError);
-  let rollbackInvocationFailed = false;
+  let freshInventory;
   try {
-    await input.deployRollbackImplementation();
+    freshInventory = await input.inventoryImplementation();
   } catch {
-    rollbackInvocationFailed = true;
+    throw new Error(
+      `production_frontend_only_automatic_rollback_admission_unavailable:${originalCode}`,
+      { cause: input.originalError },
+    );
+  }
+  let freshActiveVersion;
+  try {
+    freshActiveVersion = activeVersion(freshInventory);
+  } catch {
+    throw new Error(
+      `production_frontend_only_automatic_rollback_active_version_ambiguous:${originalCode}`,
+      { cause: input.originalError },
+    );
+  }
+  if (!UUID.test(input.candidateWorkerVersion ?? "")
+    || input.candidateWorkerVersion === FRONTEND_ONLY_ROLLBACK_VERSION
+    || (freshActiveVersion !== input.candidateWorkerVersion
+      && freshActiveVersion !== FRONTEND_ONLY_ROLLBACK_VERSION)) {
+    throw new Error(
+      `production_frontend_only_automatic_rollback_active_version_ambiguous:${originalCode}`,
+      { cause: input.originalError },
+    );
+  }
+  let rollbackInvocationFailed = false;
+  if (freshActiveVersion === input.candidateWorkerVersion) {
+    try {
+      await input.deployRollbackImplementation();
+    } catch {
+      rollbackInvocationFailed = true;
+    }
   }
 
   const [inventoryResult, ledgerResult] = await Promise.allSettled([
-    waitForFrontendOnlyActiveVersion({
-      allowedVersions: input.allowedVersions,
-      expectedVersion: FRONTEND_ONLY_ROLLBACK_VERSION,
-      inventoryImplementation: input.inventoryImplementation,
-      ...(input.attempts === undefined ? {} : { attempts: input.attempts }),
-      ...(input.delayImplementation === undefined ? {} : { delayImplementation: input.delayImplementation }),
-    }),
+    freshActiveVersion === FRONTEND_ONLY_ROLLBACK_VERSION
+      ? Promise.resolve(freshInventory)
+      : waitForFrontendOnlyActiveVersion({
+        allowedVersions: input.allowedVersions,
+        expectedVersion: FRONTEND_ONLY_ROLLBACK_VERSION,
+        inventoryImplementation: input.inventoryImplementation,
+        ...(input.attempts === undefined ? {} : { attempts: input.attempts }),
+        ...(input.delayImplementation === undefined ? {} : { delayImplementation: input.delayImplementation }),
+      }),
     Promise.resolve().then(() => input.migrationLedgerImplementation()),
   ]);
 

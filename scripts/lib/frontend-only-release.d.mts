@@ -35,6 +35,7 @@ export function waitForFrontendOnlyActiveVersion(input: {
 export function compensateFrontendOnlyActivation(input: {
   allowedVersions: Set<string>;
   attempts?: number;
+  candidateWorkerVersion: string;
   delayImplementation?: (milliseconds: number) => Promise<unknown>;
   deployRollbackImplementation: () => unknown | Promise<unknown>;
   inventoryImplementation: () => Promise<Record<string, any>>;

@@ -1,4 +1,39 @@
 export type ReleaseCheck = { name: string; ok: boolean };
+export type ProductionWranglerToolchainAttestation = {
+  cliPath: string;
+  fingerprintSha256: string;
+  packageVersion: string;
+};
+
+export function buildProductionReleaseGitEnvironment(
+  environment?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv;
+export function runProductionReleaseGit(
+  args: string[],
+  options?: {
+    cwd?: string;
+    encoding?: BufferEncoding;
+    environment?: NodeJS.ProcessEnv;
+  },
+): import("node:child_process").SpawnSyncReturns<string>;
+export function createProductionWranglerToolchainAttestation(
+  root?: string,
+): Promise<ProductionWranglerToolchainAttestation>;
+export function fingerprintProductionWranglerToolchain(root?: string): Promise<string>;
+export function assertProductionWranglerToolchain(
+  expected: ProductionWranglerToolchainAttestation,
+  root?: string,
+): Promise<ProductionWranglerToolchainAttestation>;
+export function runAttestedProductionWrangler(
+  attestation: ProductionWranglerToolchainAttestation,
+  args: string[],
+  options?: {
+    capture?: boolean;
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    repositoryRoot?: string;
+  },
+): Promise<{ stderr: string; stdout: string }>;
 
 export const REQUIRED_PRODUCTION_VARS: string[];
 export const REQUIRED_WORKER_SECRET_NAMES: string[];

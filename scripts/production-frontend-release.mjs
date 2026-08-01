@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import { chmod, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
 
-import { run, runWrangler } from "./lib/cli.mjs";
+import { run } from "./lib/cli.mjs";
 import {
   assertFrontendOnlyActivationTransition,
   assertFrontendOnlyControlInventory,
@@ -29,10 +28,14 @@ import {
   discoverProductionCanaryInventory,
 } from "./lib/production-canary.mjs";
 import {
+  assertProductionWranglerToolchain,
   buildProductionReleaseAuditEnvironment,
   buildProductionReleaseEditEnvironment,
+  createProductionWranglerToolchainAttestation,
   fingerprintProductionUploadInputs,
   removeProductionUploadStage,
+  runAttestedProductionWrangler,
+  runProductionReleaseGit,
   stageProductionUploadInputs,
 } from "./lib/release.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
@@ -81,7 +84,7 @@ function parseArguments(argv) {
 }
 
 function git(args, code, encoding = "utf8") {
-  const result = spawnSync("git", args, { cwd: repositoryRoot, encoding });
+  const result = runProductionReleaseGit(args, { cwd: repositoryRoot, encoding });
   if (result.error || result.status !== 0) throw new Error(code);
   return result.stdout;
 }
@@ -105,9 +108,16 @@ function repositoryState() {
   const diff = git(["diff", "--binary", "--full-index", FRONTEND_ONLY_BASELINE_COMMIT, "HEAD", "--"], "production_frontend_only_diff_unavailable");
   const baselineIndex = git(["show", `${FRONTEND_ONLY_BASELINE_COMMIT}:src/pages/index.astro`], "production_frontend_only_baseline_index_unavailable");
   const currentIndex = git(["show", "HEAD:src/pages/index.astro"], "production_frontend_only_index_unavailable");
+  const baselineAncestor = runProductionReleaseGit(
+    ["merge-base", "--is-ancestor", FRONTEND_ONLY_BASELINE_COMMIT, "HEAD"],
+    { cwd: repositoryRoot },
+  );
+  if (baselineAncestor.error || !new Set([0, 1]).has(baselineAncestor.status)) {
+    throw new Error("production_frontend_only_history_unavailable");
+  }
   return {
     baselineCommitSha: FRONTEND_ONLY_BASELINE_COMMIT,
-    baselineIsAncestor: spawnSync("git", ["merge-base", "--is-ancestor", FRONTEND_ONLY_BASELINE_COMMIT, "HEAD"], { cwd: repositoryRoot }).status === 0,
+    baselineIsAncestor: baselineAncestor.status === 0,
     changes: parseRawChanges(git(["diff", "--raw", "--no-abbrev", FRONTEND_ONLY_BASELINE_COMMIT, "HEAD", "--"], "production_frontend_only_changes_unavailable")),
     clean: git(["status", "--porcelain=v1", "--untracked-files=all"], "production_frontend_only_status_unavailable").trim() === "",
     commitSha: git(["rev-parse", "--verify", "HEAD"], "production_frontend_only_commit_unavailable").trim(),
@@ -188,7 +198,8 @@ function validateUploadReport(report, evidence) {
     || !UUID_PATTERN.test(report?.candidateWorkerVersion ?? "")
     || !/^[a-f0-9]{64}$/u.test(report?.migrationLedgerSha256 ?? "")
     || !/^[a-f0-9]{64}$/u.test(report?.inventoryInvariantSha256 ?? "")
-    || !/^[a-f0-9]{64}$/u.test(report?.runtimeSha256 ?? "")) {
+    || !/^[a-f0-9]{64}$/u.test(report?.runtimeSha256 ?? "")
+    || !/^[a-f0-9]{64}$/u.test(report?.wranglerToolchainSha256 ?? "")) {
     throw new Error("production_frontend_only_upload_report_invalid");
   }
   return report;
@@ -244,6 +255,12 @@ async function main() {
   }
 
   const operatorEnvironment = { ...process.env };
+  const wranglerToolchain = await createProductionWranglerToolchainAttestation(repositoryRoot);
+  const attestedWrangler = (args, runOptions = {}) => runAttestedProductionWrangler(
+    wranglerToolchain,
+    args,
+    { ...runOptions, repositoryRoot },
+  );
   const auditToken = requireToken(operatorEnvironment, "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
   const workerToken = requireToken(operatorEnvironment, "CLOUDFLARE_RELEASE_WORKER_API_TOKEN");
   const auditEnvironment = buildProductionReleaseAuditEnvironment(operatorEnvironment, productionSpec.accountId, auditToken);
@@ -260,20 +277,20 @@ async function main() {
     const [base, versions] = await Promise.all([
       discoverProductionCanaryInventory({
         auditToken, commandEnvironment: auditEnvironment, databaseId, now: new Date(),
-        productionSpec, repositoryRoot, runWranglerImplementation: runWrangler,
+        productionSpec, repositoryRoot, runWranglerImplementation: attestedWrangler,
       }),
       discoverFrontendOnlyWorkerVersions({ accountId: productionSpec.accountId, token: auditToken, workerName: productionSpec.workerName }),
     ]);
     return { ...base, versions };
   };
-  const migrationLedger = () => normalizeFrontendOnlyMigrationLedger(parseJson(runWrangler([
+  const migrationLedger = async () => normalizeFrontendOnlyMigrationLedger(parseJson((await attestedWrangler([
     "d1", "execute", "PLATFORM_DB", "--env", "production", "--remote",
     "--command", LEDGER_SQL, "--json",
-  ], { cwd: repositoryRoot, env: auditEnvironment }).stdout, "production_frontend_only_migration_ledger_invalid"));
-  const versionView = (versionId) => parseJson(runWrangler([
+  ], { cwd: repositoryRoot, env: auditEnvironment })).stdout, "production_frontend_only_migration_ledger_invalid"));
+  const versionView = async (versionId) => parseJson((await attestedWrangler([
     "versions", "view", versionId, "--env", "production", "--json",
-  ], { cwd: repositoryRoot, env: auditEnvironment }).stdout, "production_frontend_only_version_view_invalid");
-  const deployVersion = (versionId, message) => runWrangler([
+  ], { cwd: repositoryRoot, env: auditEnvironment })).stdout, "production_frontend_only_version_view_invalid");
+  const deployVersion = (versionId, message) => attestedWrangler([
     "versions", "deploy", `${versionId}@100%`, "--env", "production", "--yes", "--message", message,
   ], { cwd: repositoryRoot, env: editEnvironment });
 
@@ -285,6 +302,7 @@ async function main() {
       cwd: repositoryRoot,
       env: buildCanaryBuildEnvironment(operatorEnvironment),
     });
+    await assertProductionWranglerToolchain(wranglerToolchain, repositoryRoot);
     const rebuiltQualification = sourceAdmission(evidence, baselinePackage, currentPackage);
     if (!isDeepStrictEqual(qualification, rebuiltQualification)) throw new Error("production_frontend_only_source_changed_after_build");
     const [admitted, ledgerAdmitted] = await Promise.all([inventory(), migrationLedger()]);
@@ -294,13 +312,14 @@ async function main() {
     }
     const stage = await stageProductionUploadInputs(repositoryRoot, evidence.releaseId, { generatedManifest, productionSpec });
     try {
-      runWrangler([
+      await attestedWrangler([
         "versions", "upload", "dist/server/entry.mjs",
         "--config", "production-upload-wrangler.json",
         "--no-bundle", "--assets", "dist/client", "--strict",
         "--tag", evidence.releaseId,
         "--message", `frontend-only release ${evidence.commitSha}`,
       ], { cwd: stage.stageRoot, env: editEnvironment });
+      await assertProductionWranglerToolchain(wranglerToolchain, repositoryRoot);
       const [sourceArtifact, stagedArtifact, after, ledgerAfter] = await Promise.all([
         fingerprintProductionUploadInputs(repositoryRoot),
         fingerprintProductionUploadInputs(stage.stageRoot),
@@ -335,6 +354,7 @@ async function main() {
         schemaVersion: 1,
         treeSha: evidence.treeSha,
         uploadConfigSha256: stage.uploadConfigSha256,
+        wranglerToolchainSha256: wranglerToolchain.fingerprintSha256,
       };
       const reportRef = await writePrivateReport(evidence, "frontend-only-upload", report);
       return { candidateWorkerVersion, executed: true, ok: true, phase: "upload", reportRef };
@@ -348,6 +368,9 @@ async function main() {
     "production_frontend_only_upload_report_missing",
   ), evidence);
   const candidateWorkerVersion = uploadReport.candidateWorkerVersion;
+  if (uploadReport.wranglerToolchainSha256 !== wranglerToolchain.fingerprintSha256) {
+    throw new Error("production_frontend_only_wrangler_toolchain_receipt_drift");
+  }
   const [before, ledgerBefore, previousView, candidateView] = await Promise.all([
     inventory(), migrationLedger(), versionView(FRONTEND_ONLY_ROLLBACK_VERSION), versionView(candidateWorkerVersion),
   ]);
@@ -367,7 +390,7 @@ async function main() {
     if (before.deployments[0]?.versionId !== candidateWorkerVersion) {
       throw new Error("production_frontend_only_candidate_not_active_for_rollback");
     }
-    deployVersion(FRONTEND_ONLY_ROLLBACK_VERSION, `frontend-only rollback ${evidence.releaseId}`);
+    await deployVersion(FRONTEND_ONLY_ROLLBACK_VERSION, `frontend-only rollback ${evidence.releaseId}`);
     const restored = await waitForFrontendOnlyActiveVersion({
       allowedVersions: new Set([candidateWorkerVersion, FRONTEND_ONLY_ROLLBACK_VERSION]),
       expectedVersion: FRONTEND_ONLY_ROLLBACK_VERSION,
@@ -394,7 +417,7 @@ async function main() {
   let activationAttempted = false;
   try {
     activationAttempted = true;
-    deployVersion(candidateWorkerVersion, `frontend-only activate ${evidence.releaseId}`);
+    await deployVersion(candidateWorkerVersion, `frontend-only activate ${evidence.releaseId}`);
     const activated = await waitForFrontendOnlyActiveVersion({
       allowedVersions: new Set([candidateWorkerVersion, FRONTEND_ONLY_ROLLBACK_VERSION]),
       expectedVersion: candidateWorkerVersion,
@@ -428,6 +451,7 @@ async function main() {
     if (activationAttempted) {
       await compensateFrontendOnlyActivation({
         allowedVersions: new Set([candidateWorkerVersion, FRONTEND_ONLY_ROLLBACK_VERSION]),
+        candidateWorkerVersion,
         deployRollbackImplementation: () => deployVersion(
           FRONTEND_ONLY_ROLLBACK_VERSION,
           `frontend-only automatic rollback ${evidence.releaseId}`,

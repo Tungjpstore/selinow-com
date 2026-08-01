@@ -186,5 +186,17 @@ describe("deploy command safety", () => {
     expect(source).toContain("cwd: stageRoot");
     expect(source).not.toContain(".wrangler/deploy/config.json");
     expect(source).toContain("production_candidate_upload_inputs_changed_during_upload");
+    expect(source).toContain("runAttestedProductionWrangler(");
+    expect(source).not.toContain("runWrangler([");
+    expect(source).not.toContain('spawnSync("git"');
+  });
+
+  it("uses sanitized Git and attested Wrangler execution for the frontend-only lane", () => {
+    const source = readFileSync("scripts/production-frontend-release.mjs", "utf8");
+    expect(source).toContain("runProductionReleaseGit(");
+    expect(source).toContain("runAttestedProductionWrangler(");
+    expect(source).toContain("assertProductionWranglerToolchain(");
+    expect(source).not.toContain("runWrangler([");
+    expect(source).not.toContain('spawnSync("git"');
   });
 });

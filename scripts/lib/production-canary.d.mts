@@ -81,7 +81,7 @@ export function discoverProductionCanaryInventory(input: {
   runWranglerImplementation: (
     args: string[],
     options?: { cwd?: string; env?: NodeJS.ProcessEnv },
-  ) => { stderr: string; stdout: string };
+  ) => { stderr: string; stdout: string } | Promise<{ stderr: string; stdout: string }>;
 }): Promise<ProductionCanaryInventory>;
 
 export function runProductionCanaryUpload(input: Record<string, any>): Promise<Record<string, any>>;
