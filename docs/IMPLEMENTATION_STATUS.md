@@ -520,7 +520,7 @@ Backup schema/count validation includes all six generic tables, `payment_reversa
 - Added production-only `robots.txt` and hostname-aware `sitemap.xml`: platform sitemap covers `/` and `/pricing`, while a live tenant sitemap covers its published home/products. Local and staging robots disallow all crawling.
 - Added JSON-LD for marketing SoftwareApplication/FAQPage, pricing WebPage/BreadcrumbList, storefront OnlineStore/OfferCatalog and product Product/Offer data. Prices are derived from authoritative integer minor units; private checkout/order/API surfaces remain noindex.
 - Added an English/Vietnamese switcher to the marketing navigation and a reusable SEO helper/test contract in `src/lib/seo.ts` and `tests/unit/seo.test.ts` (6 tests passed).
-- Verification for this slice: focused SEO Vitest and targeted ESLint passed; the latest full `npm run check` passed with 0 errors and 3 existing hints, `npm run lint` passed, `npm run build` passed, and both local/staging deploy dry-runs passed. Full `npm test` currently has two unrelated failures in backup restore command assertions and seller-surface mock batching; no staging/production mutation was performed.
+- Verification recorded at the time of this historical slice: focused SEO Vitest and targeted ESLint passed; the later authoritative repository refresh supersedes the intermediate full-test failures noted here. No staging/production mutation was performed.
 - External follow-up: deploy the source, register production properties in Google Search Console/Bing Webmaster, submit the sitemap, validate rich results and Core Web Vitals, then publish the English intent/content clusters described in the strategy document.
 
 ## Global bilingual homepage refinement (2026-08-02)
@@ -555,7 +555,7 @@ Backup schema/count validation includes all six generic tables, `payment_reversa
 - Added the `/solutions` hub plus three dynamic detail routes. Pages are host-gated to the marketing hostname, use canonical/hreflang metadata, and publish CollectionPage/ItemList or WebPage/BreadcrumbList/FAQPage JSON-LD.
 - Added scoped responsive solution-page styling, localized internal links, and a production-only `/llms.txt` factual summary. Sitemap entries now include the hub and all three solution routes.
 - No production deployment or external mutation was performed. The live origin will continue returning the previous sitemap until the source is deployed.
-- Verification for this slice: focused solution content/SEO tests, targeted ESLint, `git diff --check`, and build/check should be rerun after the parallel members-thread import issue is resolved. Full repository check remains subject to that unrelated worktree blocker.
+- Verification recorded at the time of this historical slice: focused solution content/SEO tests passed while the parallel members-thread import issue was still open; the later authoritative repository refresh supersedes this intermediate blocker.
 
 ## Verification refresh after members surface merge (2026-08-02)
 
@@ -576,3 +576,10 @@ Backup schema/count validation includes all six generic tables, `payment_reversa
 - Final source gates pass: `npm run check` (0 errors, 3 existing hints), `npm run lint`, `npm test` (197 files / 1,489 tests), `npm run build`, `npm audit --audit-level=high` (0 vulnerabilities), `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, and `git diff --check`.
 - Final rendered gates pass sequentially: authenticated local browser gate 7/7 across desktop/mobile, 1440/768/390/320px and 200% geometry; public local browser gate 27/27 with axe, runtime, console, overflow and GET/HEAD-only checks.
 - `npm run release:doctor -- --json` remains intentionally fail-closed for missing release approvals, fresh backup/restore evidence, candidate/pilot/external acceptance records and runtime secret context. No staging or production mutation was performed; the live production sitemap remains pending deployment before GSC resubmission.
+
+## Continuation admission hardening (2026-08-02)
+
+- Added `assertFreshProductionContinuationEvidence` and `assertProductionContinuationDeployAdmission`. Normal production D1 migration and Worker deploy now fail closed unless the latest protected non-empty report-v2 backup is fresh, target-bound and checksum-valid, and the latest isolated restore report is passed, private, bound to the reviewed commit, linked to the backup export, integrity/FK clean and recorded with the complete current source migration ledger.
+- `scripts/restore-drill.mjs` now requires `--reviewed-commit <40-hex>` for non-dry-run production drills and records source identity, reviewed commit and migration names in the private report. Admission rechecks the evidence before and after provider identity/release revalidation and rejects evidence drift.
+- Verification: `npm test` passed 199 files / 1,493 tests; `npm run check` passed with 0 errors and 3 existing hints; `npm run lint`, `npx tsc --noEmit`, `npm run build`, `npm run build:staging`, `npm run deploy:dry-run`, `npm audit --audit-level=high` and `git diff --check` passed. No production migration, Worker deploy, route, DNS or provider mutation was performed.
+- Production remains `NO-GO`: remote D1 is still `0001`-`0052`, continuation migrations `0053`-`0056` remain unapplied, and external provider, pilot, monitoring, live-trigger and rollback evidence is still required.
