@@ -3,9 +3,11 @@ import { resolve } from "node:path";
 import process from "node:process";
 
 import {
+  assertProductionContinuationDeployAdmission,
   inspectProductionReadiness,
   readOptionalJson,
 } from "./lib/release.mjs";
+import { resolveDatabaseTarget } from "./lib/backup.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
 function parseArguments(argv) {
@@ -52,18 +54,46 @@ function writeResult(result, json) {
   for (const check of result.checks) process.stdout.write(`${check.ok ? "=" : "x"} ${check.name}\n`);
 }
 
+async function enforceContinuationEvidence(result, input) {
+  if (!result.ok) return result;
+  try {
+    const target = resolveDatabaseTarget(input.wranglerConfig, "production");
+    await assertProductionContinuationDeployAdmission({
+      accountId: input.productionSpec.accountId,
+      databaseId: target.databaseId,
+      databaseName: target.databaseName,
+      repositoryRoot,
+      reviewedCommitSha: input.evidence.commitSha,
+    });
+    return result;
+  } catch {
+    const checks = [...result.checks, { name: "evidence.continuationFiles", ok: false }]
+      .sort((left, right) => left.name.localeCompare(right.name));
+    return {
+      checks,
+      missing: [...result.missing, "evidence.continuationFiles"].sort(),
+      ok: false,
+    };
+  }
+}
+
 try {
   const options = parseArguments(process.argv.slice(2));
   const wranglerConfig = JSON.parse(await readFile(resolve(repositoryRoot, "wrangler.jsonc"), "utf8"));
+  const productionSpec = await readOptionalJson(options.specPath);
+  const evidence = await readOptionalJson(options.evidencePath);
   const result = inspectProductionReadiness({
-    evidence: await readOptionalJson(options.evidencePath),
+    evidence,
     now: new Date(),
-    productionSpec: await readOptionalJson(options.specPath),
+    productionSpec,
     workerSecretNames: await loadSecretNames(options.secretNamesPath),
     wranglerConfig,
   });
-  writeResult(result, options.json);
-  process.exitCode = result.ok ? 0 : 1;
+  const finalResult = productionSpec === null || evidence === null
+    ? result
+    : await enforceContinuationEvidence(result, { evidence, productionSpec, wranglerConfig });
+  writeResult(finalResult, options.json);
+  process.exitCode = finalResult.ok ? 0 : 1;
 } catch (error) {
   const code = error instanceof Error && /^[a-z0-9_:.-]{1,180}$/u.test(error.message)
     ? error.message
