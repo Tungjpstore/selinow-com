@@ -4,10 +4,12 @@ import process from "node:process";
 
 import {
   buildReleaseArtifacts,
+  assertProductionContinuationDeployAdmission,
   listMigrationNames,
   readOptionalJson,
   writeReleaseArtifacts,
 } from "./lib/release.mjs";
+import { resolveDatabaseTarget } from "./lib/backup.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
 function parseArguments(argv) {
@@ -39,6 +41,14 @@ try {
   ]);
   if (productionSpec === null) throw new Error("production_spec_missing");
   if (evidence === null) throw new Error("production_evidence_missing");
+  const target = resolveDatabaseTarget(wranglerConfig, "production");
+  await assertProductionContinuationDeployAdmission({
+    accountId: productionSpec.accountId,
+    databaseId: target.databaseId,
+    databaseName: target.databaseName,
+    repositoryRoot,
+    reviewedCommitSha: evidence.commitSha,
+  });
   const workerSecretNames = (process.env.SELINOW_WORKER_SECRET_NAMES ?? "")
     .split(",")
     .map((name) => name.trim())
