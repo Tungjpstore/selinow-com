@@ -569,3 +569,10 @@ Backup schema/count validation includes all six generic tables, `payment_reversa
 - Added `/admin/appeals` and connected it to the existing admin remediation list/review contracts. Owner and risk roles can record only `provider_pending` or `rejected`; provider completion, refund settlement and reversal evidence remain separate authoritative steps.
 - Added bilingual admin copy, guarded PATCH handling with CSRF/recent-auth/idempotency/optimistic-version checks, safe masked request fields, explicit empty/error/read-only states, and a protected navigation entry.
 - Updated the frontend gap report so Members, investigations/audit, and the bounded appeals review UI are recorded as implemented rather than unavailable.
+
+## Final verification refresh (2026-08-02)
+
+- Fixed the authenticated billing surface's last local accessibility regressions: dynamically rendered request rows now satisfy `role=list`/`role=listitem`, and success feedback uses the AA-safe semantic success text token.
+- Final source gates pass: `npm run check` (0 errors, 3 existing hints), `npm run lint`, `npm test` (197 files / 1,489 tests), `npm run build`, `npm audit --audit-level=high` (0 vulnerabilities), `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, and `git diff --check`.
+- Final rendered gates pass sequentially: authenticated local browser gate 7/7 across desktop/mobile, 1440/768/390/320px and 200% geometry; public local browser gate 27/27 with axe, runtime, console, overflow and GET/HEAD-only checks.
+- `npm run release:doctor -- --json` remains intentionally fail-closed for missing release approvals, fresh backup/restore evidence, candidate/pilot/external acceptance records and runtime secret context. No staging or production mutation was performed; the live production sitemap remains pending deployment before GSC resubmission.
