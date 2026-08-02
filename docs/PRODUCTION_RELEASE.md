@@ -76,6 +76,30 @@ npm run release:production:bootstrap:migrate -- --env production --dry-run --jso
 
 If backup, generated-manifest, Git, account, D1, migration-ledger or confirmation evidence changes between checks, the command stops before Wrangler. Record the migration completion timestamp and exact applied ledger in the private bootstrap evidence before moving to the canary phase.
 
+### Continuation migration admission (`0053`-`0056`)
+
+The first-production executor above is historical and must not be reused for the non-empty continuation. For migrations `0053`-`0056`, create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports:
+
+```bash
+npm run backup:create -- --env production --confirm-production --json
+npm run restore:drill -- \
+  --env production \
+  --confirm-production \
+  --reviewed-commit "$(git rev-parse HEAD)" \
+  --json
+```
+
+The normal production migration sink is then admitted only with a canonical release manifest pinned to the same clean commit:
+
+```bash
+npm run db:migrate -- \
+  --env production \
+  --confirm-production \
+  --release-manifest .wrangler/releases/<release-id>/release-manifest.json
+```
+
+The migration and normal Worker deploy admissions revalidate the exact account/D1 identity and require the latest non-empty report-v2 backup, protected artifact checksum/target/freshness, and the latest passed isolated restore report with matching reviewed commit, backup checksum/size, integrity/FK results and the complete current source migration ledger. Any evidence drift between the first and final checks fails closed before Wrangler. This path still requires a separately approved production mutation window; dry-runs and historical bootstrap evidence do not authorize applying or deploying the continuation.
+
 ### First-production Worker canary
 
 The first production Worker canary uses `npm run release:production:canary`. It is deliberately separate from the normal deploy path: **do not use `wrangler deploy --env production` for the first canary** because it can publish the script and configured routes/triggers as one broad operation. Do not use `wrangler triggers deploy` or a bulk Worker Routes `PUT` either; both can replace unrelated routes, schedules or queue consumers in the shared account/zone.

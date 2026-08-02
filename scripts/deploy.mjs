@@ -7,7 +7,10 @@ import {
   buildPinnedCloudflareEnvironment,
   repositoryRoot,
 } from "./lib/platform.mjs";
-import { assertProductionWorkerDeployAdmission } from "./lib/release.mjs";
+import {
+  assertProductionContinuationDeployAdmission,
+  assertProductionWorkerDeployAdmission,
+} from "./lib/release.mjs";
 
 try {
   const flags = parseDeployFlags(process.argv.slice(2));
@@ -33,6 +36,7 @@ try {
     .map((name) => name.trim())
     .filter(Boolean);
   let productionAdmission = null;
+  let productionContinuationAdmission = null;
   let stagingAdmission = null;
   if (requiresProductionAdmission) {
     productionAdmission = await assertProductionWorkerDeployAdmission({
@@ -40,6 +44,13 @@ try {
       manifestPath: flags.releaseManifestPath,
       repositoryRoot,
       workerSecretNames,
+    });
+    productionContinuationAdmission = await assertProductionContinuationDeployAdmission({
+      accountId: productionAdmission.accountId,
+      databaseId: productionAdmission.databaseId,
+      databaseName: productionAdmission.databaseName,
+      repositoryRoot,
+      reviewedCommitSha: productionAdmission.commitSha,
     });
   }
   if (requiresStagingAdmission) {
@@ -55,6 +66,13 @@ try {
       repositoryRoot,
       workerSecretNames,
     });
+    const finalContinuationAdmission = await assertProductionContinuationDeployAdmission({
+      accountId: finalAdmission.accountId,
+      databaseId: finalAdmission.databaseId,
+      databaseName: finalAdmission.databaseName,
+      repositoryRoot,
+      reviewedCommitSha: finalAdmission.commitSha,
+    });
     if (
       finalAdmission.accountId !== productionAdmission.accountId
       || finalAdmission.commitSha !== productionAdmission.commitSha
@@ -66,6 +84,16 @@ try {
       || finalAdmission.zoneName !== productionAdmission.zoneName
     ) {
       throw new Error("production_deploy_admission_changed");
+    }
+    if (
+      productionContinuationAdmission === null
+      || finalContinuationAdmission.backupSnapshotId !== productionContinuationAdmission.backupSnapshotId
+      || finalContinuationAdmission.backupChecksumSha256 !== productionContinuationAdmission.backupChecksumSha256
+      || finalContinuationAdmission.restoreReportRef !== productionContinuationAdmission.restoreReportRef
+      || finalContinuationAdmission.restoreSnapshotId !== productionContinuationAdmission.restoreSnapshotId
+      || finalContinuationAdmission.reviewedCommitSha !== productionContinuationAdmission.reviewedCommitSha
+    ) {
+      throw new Error("production_continuation_evidence_changed");
     }
     productionAdmission = finalAdmission;
   }

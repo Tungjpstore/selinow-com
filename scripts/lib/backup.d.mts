@@ -164,6 +164,34 @@ export function assertFreshProductionBootstrapBackupEvidence(options: {
   snapshotId: string;
 }>;
 
+export function assertFreshProductionContinuationEvidence(options: {
+  accountId: string;
+  backupRoot?: string;
+  databaseId: string;
+  databaseName: string;
+  now?: Date;
+  repositoryRoot?: string;
+  restoreRoot?: string;
+  reviewedCommitSha: string;
+}): Promise<{
+  backup: {
+    artifactPath: string;
+    completedAt: string;
+    checksumSha256: string;
+    providerBookmarkRecorded: true;
+    reportRef: string;
+    sizeBytes: number;
+    snapshotId: string;
+  };
+  reviewedCommitSha: string;
+  restore: {
+    completedAt: string;
+    reportRef: string;
+    snapshotId: string;
+    targetResourceRef: string;
+  };
+}>;
+
 export function assertProductionBackupAdmission(input: {
   environment?: NodeJS.ProcessEnv;
   identityImplementation?: ProductionIdentityImplementation;
@@ -188,6 +216,7 @@ export function runRestoreDrill(options: {
   dryRun: boolean;
   environment: BackupEnvironment;
   now?: Date;
+  reviewedCommitSha?: string;
   randomBytesImplementation?: (size: number) => Buffer;
   runner?: WranglerRunner;
 }): Promise<OperationResult>;

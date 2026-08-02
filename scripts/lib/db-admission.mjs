@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 
-import { resolveDatabaseTarget } from "./backup.mjs";
+import {
+  assertFreshProductionContinuationEvidence,
+  resolveDatabaseTarget,
+} from "./backup.mjs";
 import { parseFlags, runWrangler } from "./cli.mjs";
 import { buildPinnedCloudflareEnvironment, repositoryRoot } from "./platform.mjs";
 import { assertProductionDeployAdmission, readOptionalJson } from "./release.mjs";
@@ -120,6 +123,15 @@ export async function assertProductionMigrationAdmission(input) {
   ]);
   if (productionSpec === null) throw new Error("production_spec_missing");
   const approved = resolveApprovedProductionDatabaseTarget({ productionSpec, wranglerConfig });
+  const continuationEvidenceImplementation = input.assertContinuationEvidenceImplementation
+    ?? assertFreshProductionContinuationEvidence;
+  const initialContinuationEvidence = await continuationEvidenceImplementation({
+    accountId: approved.accountId,
+    databaseId: approved.target.databaseId,
+    databaseName: approved.target.databaseName,
+    repositoryRoot: root,
+    reviewedCommitSha: initialAdmission.commitSha,
+  });
   const runnerOptions = {
     cwd: root,
     env: buildPinnedCloudflareEnvironment(operatorEnvironment, approved.accountId),
@@ -145,6 +157,21 @@ export async function assertProductionMigrationAdmission(input) {
   if (initialAdmission.releaseId !== finalAdmission.releaseId
     || initialAdmission.commitSha !== finalAdmission.commitSha) {
     throw new Error("production_release_admission_changed");
+  }
+  const finalContinuationEvidence = await continuationEvidenceImplementation({
+    accountId: approved.accountId,
+    databaseId: approved.target.databaseId,
+    databaseName: approved.target.databaseName,
+    repositoryRoot: root,
+    reviewedCommitSha: finalAdmission.commitSha,
+  });
+  if (
+    initialContinuationEvidence.backup.snapshotId !== finalContinuationEvidence.backup.snapshotId
+    || initialContinuationEvidence.backup.checksumSha256 !== finalContinuationEvidence.backup.checksumSha256
+    || initialContinuationEvidence.restore.reportRef !== finalContinuationEvidence.restore.reportRef
+    || initialContinuationEvidence.restore.snapshotId !== finalContinuationEvidence.restore.snapshotId
+  ) {
+    throw new Error("production_continuation_evidence_changed");
   }
   return {
     accountId: approved.accountId,

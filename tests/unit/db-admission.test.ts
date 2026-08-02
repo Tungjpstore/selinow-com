@@ -38,6 +38,13 @@ function wranglerConfig(): Record<string, unknown> {
   };
 }
 
+function continuationEvidence() {
+  return {
+    backup: { checksumSha256: "a".repeat(64), snapshotId: "bkp_continuation" },
+    restore: { reportRef: "restore-report", snapshotId: "rdr_continuation" },
+  };
+}
+
 describe("production database migration admission", () => {
   it("preserves local, staging, dry-run, and read-only command behavior", () => {
     expect(parseDatabaseFlags(["--env", "local"])).toMatchObject({
@@ -225,6 +232,7 @@ describe("production database migration admission", () => {
         releaseId: "release_20260729_abcdef12",
       }),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
+      assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
       repositoryRoot: process.cwd(),
       runWranglerImplementation: () => {
@@ -242,6 +250,7 @@ describe("production database migration admission", () => {
         releaseId: "release_20260729_abcdef12",
       }),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
+      assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
       repositoryRoot: process.cwd(),
       runWranglerImplementation: (args) => {
@@ -276,6 +285,7 @@ describe("production database migration admission", () => {
     await expect(assertProductionMigrationAdmission({
       assertReleaseAdmissionImplementation: releaseAdmission,
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
+      assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
       repositoryRoot: process.cwd(),
       runWranglerImplementation: runner,

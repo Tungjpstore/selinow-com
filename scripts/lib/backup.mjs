@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -611,6 +612,130 @@ export async function assertFreshProductionBootstrapBackupEvidence(options) {
     reportRef: options.backupRoot === undefined ? relativeReportPath(reportPath) : reportPath,
     sizeBytes: record.size_bytes,
     snapshotId: record.id,
+  };
+}
+
+/**
+ * Continuation migrations use the non-empty production backup/restore path.
+ * The historical empty-baseline ceremony cannot prove that the current
+ * production schema and data survive a forward-only continuation.
+ */
+export async function assertFreshProductionContinuationEvidence(options) {
+  const reviewedCommitSha = options.reviewedCommitSha;
+  if (typeof reviewedCommitSha !== "string" || !/^[a-f0-9]{40}$/u.test(reviewedCommitSha)) {
+    throw new Error("production_continuation_reviewed_commit_invalid");
+  }
+
+  const root = resolve(options.repositoryRoot ?? repositoryRoot);
+  const backupRoot = options.backupRoot ?? resolve(root, ".wrangler/backups/production");
+  const restoreRoot = options.restoreRoot ?? resolve(root, ".wrangler/restore-drills/production");
+  const backup = await assertFreshProductionBootstrapBackupEvidence({
+    accountId: options.accountId,
+    backupRoot,
+    databaseId: options.databaseId,
+    databaseName: options.databaseName,
+    now: options.now,
+  });
+  let backupReportStat;
+  let backupArtifactStat;
+  try {
+    [backupReportStat, backupArtifactStat] = await Promise.all([
+      lstat(backup.reportRef),
+      lstat(backup.artifactPath),
+    ]);
+  } catch {
+    throw new Error("production_continuation_backup_evidence_invalid");
+  }
+  if (
+    !backupReportStat.isFile()
+    || (backupReportStat.mode & 0o077) !== 0
+    || !backupArtifactStat.isFile()
+    || (backupArtifactStat.mode & 0o077) !== 0
+  ) {
+    throw new Error("production_continuation_backup_permissions_invalid");
+  }
+
+  let entries;
+  try {
+    entries = await readdir(restoreRoot, { withFileTypes: true });
+  } catch {
+    throw new Error("production_continuation_restore_evidence_missing");
+  }
+  const latestReport = entries
+    .filter((entry) => entry.isFile() && /^rdr_\d{14}_[a-f0-9]{12}\.json$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .at(-1);
+  if (latestReport === undefined) throw new Error("production_continuation_restore_evidence_missing");
+
+  const reportPath = resolve(restoreRoot, latestReport);
+  let report;
+  let reportStat;
+  try {
+    [report, reportStat] = await Promise.all([
+      readFile(reportPath, "utf8").then((value) => JSON.parse(value)),
+      lstat(reportPath),
+    ]);
+  } catch {
+    throw new Error("production_continuation_restore_evidence_invalid");
+  }
+  if (!reportStat.isFile() || (reportStat.mode & 0o077) !== 0) {
+    throw new Error("production_continuation_restore_permissions_invalid");
+  }
+
+  const snapshots = report?.records?.backup_snapshots;
+  const drills = report?.records?.restore_drills;
+  const snapshot = Array.isArray(snapshots) && snapshots.length === 1 ? snapshots[0] : null;
+  const drill = Array.isArray(drills) && drills.length === 1 ? drills[0] : null;
+  const source = report?.source;
+  const repositoryMigrationNames = await expectedMigrationNames();
+  const updatedAt = new Date(drill?.updated_at ?? "");
+  const nowTimestamp = (options.now ?? new Date()).getTime();
+  const restoreAge = nowTimestamp - updatedAt.getTime();
+  const targetResourceRef = drill?.target_resource_ref;
+  const reportCommit = report?.reviewed_commit_sha;
+
+  if (
+    report?.report_version !== 1
+    || reportCommit !== reviewedCommitSha
+    || source?.account_id !== options.accountId
+    || source?.database_id !== options.databaseId
+    || source?.database_name !== options.databaseName
+    || source?.resource_ref !== `d1:${options.databaseName}`
+    || snapshot?.environment !== "production"
+    || snapshot?.resource_ref !== `d1:${options.databaseName}`
+    || snapshot?.status !== "available"
+    || snapshot?.checksum_sha256 !== backup.checksumSha256
+    || snapshot?.size_bytes !== backup.sizeBytes
+    || drill?.environment !== "isolated"
+    || drill?.status !== "passed"
+    || drill?.backup_snapshot_id !== snapshot?.id
+    || !/^d1:selinow-restore-drill-production-[a-f0-9]{12}$/u.test(targetResourceRef ?? "")
+    || targetResourceRef === `d1:${options.databaseName}`
+    || drill?.foreign_key_violation_count !== 0
+    || !Number.isSafeInteger(drill?.restored_item_count)
+    || drill.restored_item_count < 1
+    || report?.verification?.integrityOk !== true
+    || report?.verification?.foreignKeyViolationCount !== 0
+    || !Array.isArray(report?.verification?.migrationNames)
+    || report.verification.migrationNames.length !== repositoryMigrationNames.length
+    || report.verification.migrationNames.some((name, index) => name !== repositoryMigrationNames[index])
+    || !Number.isFinite(updatedAt.getTime())
+    || restoreAge < 0
+    || restoreAge > 30 * 24 * 60 * 60_000
+  ) {
+    throw new Error("production_continuation_restore_evidence_invalid");
+  }
+
+  return {
+    backup,
+    reviewedCommitSha,
+    restore: {
+      completedAt: updatedAt.toISOString(),
+      reportRef: reportPath,
+      snapshotId: snapshot.id,
+      targetResourceRef,
+    },
   };
 }
 
@@ -1255,7 +1380,21 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       targetResourceRef: `d1:${targetName}`,
       updatedAt: completedAt,
     });
-    outcome = { drillRecord, snapshotRecord, verification: { foreignKeyViolationCount, integrityOk } };
+    outcome = {
+      drillRecord,
+      snapshotRecord,
+      source: {
+        account_id: approvedIdentity.accountId,
+        database_id: approvedIdentity.databaseId,
+        database_name: approvedIdentity.databaseName,
+        resource_ref: target.resourceRef,
+      },
+      verification: {
+        foreignKeyViolationCount,
+        integrityOk,
+        migrationNames: appliedMigrationNames,
+      },
+    };
   } catch (error) {
     operationError = error;
   } finally {
@@ -1283,6 +1422,13 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
 export async function runRestoreDrill(options) {
   const environment = options.environment;
   const now = options.now ?? new Date();
+  if (
+    environment === "production"
+    && !options.dryRun
+    && !/^[a-f0-9]{40}$/u.test(options.reviewedCommitSha ?? "")
+  ) {
+    throw new Error("restore_reviewed_commit_required");
+  }
   const config = options.config ?? await loadWranglerConfig();
   const target = resolveDatabaseTarget(config, environment);
   if (options.dryRun) return restoreDryRun(environment, target);
@@ -1304,6 +1450,8 @@ export async function runRestoreDrill(options) {
         restore_drills: [result.drillRecord],
       },
       report_version: 1,
+      reviewed_commit_sha: options.reviewedCommitSha ?? null,
+      source: result.source ?? null,
       verification: result.verification,
     });
     return {

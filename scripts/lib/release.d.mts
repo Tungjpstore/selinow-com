@@ -79,6 +79,35 @@ export function assertProductionWorkerDeployAdmission(input: {
   zoneId: string;
   zoneName: string;
 }>;
+export function assertProductionContinuationDeployAdmission(input: {
+  accountId: string;
+  assertContinuationEvidenceImplementation?: (input: {
+    accountId: string;
+    backupRoot?: string;
+    databaseId: string;
+    databaseName: string;
+    now?: Date;
+    repositoryRoot: string;
+    restoreRoot?: string;
+    reviewedCommitSha: string;
+  }) => Promise<{
+    backup: { checksumSha256: string; snapshotId: string };
+    restore: { reportRef: string; snapshotId: string };
+  }>;
+  backupRoot?: string;
+  databaseId: string;
+  databaseName: string;
+  now?: Date;
+  repositoryRoot?: string;
+  restoreRoot?: string;
+  reviewedCommitSha: string;
+}): Promise<{
+  backupChecksumSha256: string;
+  backupSnapshotId: string;
+  restoreReportRef: string;
+  restoreSnapshotId: string;
+  reviewedCommitSha: string;
+}>;
 export function readOptionalJson(path: string): Promise<unknown | null>;
 export function listMigrationNames(root?: string): Promise<string[]>;
 export function writeReleaseArtifacts(artifacts: {

@@ -30,6 +30,22 @@ export function assertProductionDatabaseIdentity(
   databaseName: string,
 ): void;
 export function assertProductionMigrationAdmission(input: {
+  assertContinuationEvidenceImplementation?: (input: {
+    accountId: string;
+    databaseId: string;
+    databaseName: string;
+    repositoryRoot: string;
+    reviewedCommitSha: string;
+  }) => Promise<{
+    backup: {
+      checksumSha256: string;
+      snapshotId: string;
+    };
+    restore: {
+      reportRef: string;
+      snapshotId: string;
+    };
+  }>;
   assertReleaseAdmissionImplementation?: (input: {
     manifestPath: string;
     repositoryRoot: string;

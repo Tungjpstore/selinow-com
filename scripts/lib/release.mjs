@@ -8,6 +8,7 @@ import {
   assertProductionWorkerIdentityAdmission,
   repositoryRoot,
 } from "./platform.mjs";
+import { assertFreshProductionContinuationEvidence } from "./backup.mjs";
 
 export const REQUIRED_PRODUCTION_VARS = [
   "ACTIVE_CREDENTIAL_KEY_VERSION",
@@ -554,6 +555,53 @@ export async function assertProductionWorkerDeployAdmission(input) {
     workerName: workerAdmission.workerName,
     zoneId: workerAdmission.zoneId,
     zoneName: workerAdmission.zoneName,
+  };
+}
+
+/**
+ * Require a fresh, non-empty production backup and isolated restore before a
+ * normal Worker deploy.  Keep this as a separate admission so pure release
+ * validators can continue to operate on synthetic evidence fixtures.
+ */
+export async function assertProductionContinuationDeployAdmission(input) {
+  const accountId = input.accountId;
+  const databaseId = input.databaseId;
+  const databaseName = input.databaseName;
+  const reviewedCommitSha = input.reviewedCommitSha;
+  const implementation = input.assertContinuationEvidenceImplementation
+    ?? assertFreshProductionContinuationEvidence;
+  const evidence = await implementation({
+    accountId,
+    backupRoot: input.backupRoot,
+    databaseId,
+    databaseName,
+    now: input.now,
+    repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+    restoreRoot: input.restoreRoot,
+    reviewedCommitSha,
+  });
+  const backupSnapshotId = evidence?.backup?.snapshotId;
+  const backupChecksumSha256 = evidence?.backup?.checksumSha256;
+  const restoreReportRef = evidence?.restore?.reportRef;
+  const restoreSnapshotId = evidence?.restore?.snapshotId;
+  if (
+    typeof backupSnapshotId !== "string"
+    || !/^[a-z0-9][a-z0-9._-]{7,128}$/u.test(backupSnapshotId)
+    || typeof backupChecksumSha256 !== "string"
+    || !/^[a-f0-9]{64}$/u.test(backupChecksumSha256)
+    || typeof restoreReportRef !== "string"
+    || restoreReportRef.length === 0
+    || typeof restoreSnapshotId !== "string"
+    || !/^[a-z0-9][a-z0-9._-]{7,128}$/u.test(restoreSnapshotId)
+  ) {
+    throw new Error("production_continuation_evidence_invalid");
+  }
+  return {
+    backupChecksumSha256,
+    backupSnapshotId,
+    restoreReportRef,
+    restoreSnapshotId,
+    reviewedCommitSha,
   };
 }
 
