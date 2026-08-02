@@ -6,6 +6,7 @@ import { listActiveDeadLetters } from "../../lib/operations/dead-letters";
 import { listActiveDeletionRequests } from "../../lib/operations/deletion";
 import { listActiveIncidents } from "../../lib/operations/incidents";
 import { listEncryptionRotationRuns } from "../../lib/operations/rotation-operator";
+import { listAdminAuditEntries, listAdminOrderInvestigations } from "../../lib/operations/admin-investigations";
 import { getBindings } from "../../lib/platform/bindings";
 import { getPlatformAdminRole } from "../../lib/tenants/store";
 import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
@@ -38,6 +39,9 @@ let deletionOverview: Awaited<ReturnType<typeof listActiveDeletionRequests>> = {
 let incidents: Awaited<ReturnType<typeof listActiveIncidents>> = [];
 let rotationOverview: Awaited<ReturnType<typeof listEncryptionRotationRuns>> = { canOperate: false, runs: [] };
 let dataUnavailable = false;
+let investigationOrders: Awaited<ReturnType<typeof listAdminOrderInvestigations>> = { nextCursor: null, orders: [] };
+let investigationAudit: Awaited<ReturnType<typeof listAdminAuditEntries>> = { nextCursor: null, entries: [] };
+let investigationUnavailable = false;
 if (adminRole !== null) {
   try {
     [deadLetters, deletionOverview, incidents, rotationOverview] = await Promise.all([
@@ -49,6 +53,23 @@ if (adminRole !== null) {
   } catch {
     dataUnavailable = true;
     Astro.response.status = 503;
+  }
+  try {
+    [investigationOrders, investigationAudit] = await Promise.all([
+      listAdminOrderInvestigations({
+        env,
+        filters: { cursor: null, limit: 5, paymentStatus: null, query: null, shopPublicId: null },
+        userId: auth.userId,
+      }),
+      listAdminAuditEntries({
+        env,
+        filters: { action: null, cursor: null, limit: 5, resourceType: null, shopPublicId: null },
+        userId: auth.userId,
+      }),
+    ]);
+  } catch {
+    // Investigation data is an optional read-only bridge; preserve the systems queue if its tables are unavailable.
+    investigationUnavailable = true;
   }
 }
 
@@ -239,6 +260,57 @@ const operationsClientCopy = {
             <li><span>{t("admin.operations.contract.health")}</span><span class="admin-badge">{t("admin.common.read_api_unavailable")}</span></li>
           </ul>
         </div>
+      </section>
+
+      <section class="admin-section" aria-labelledby="investigation-title" data-admin-investigation-bridge>
+        <div class="admin-section-heading">
+          <div><h2 id="investigation-title">{t("admin.investigations.title")}</h2><p>{t("admin.investigations.description")}</p></div>
+          <div class="admin-section-links">
+            <a class="admin-inline-link" href="/admin/investigations?tab=orders">{t("admin.investigations.orders")}</a>
+            <a class="admin-inline-link" href="/admin/investigations?tab=audit">{t("admin.investigations.audit")}</a>
+          </div>
+        </div>
+        {investigationUnavailable ? (
+          <div class="admin-empty">
+            <strong>{t("admin.common.read_api_unavailable")}</strong>
+            <span>{t("admin.investigations.description")}</span>
+          </div>
+        ) : (
+          <div class="investigation-bridge-grid">
+            <article class="investigation-bridge-card">
+              <div class="admin-section-heading"><div><h3>{t("admin.investigations.orders")}</h3><p>{t("admin.investigations.orders_description")}</p></div><span>{investigationOrders.orders.length}</span></div>
+              {investigationOrders.orders.length === 0 ? (
+                <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div>
+              ) : (
+                <ul class="investigation-bridge-list">
+                  {investigationOrders.orders.map((order) => (
+                    <li>
+                      <div><strong>{order.orderNumber}</strong><span>{order.shopName}</span></div>
+                      <div><span>{order.paymentStatus} · {order.fulfillmentStatus}</span><small>{order.totalMinor} {order.currency}</small></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <a class="next-link" href="/admin/investigations?tab=orders">{t("admin.investigations.details")}</a>
+            </article>
+            <article class="investigation-bridge-card">
+              <div class="admin-section-heading"><div><h3>{t("admin.investigations.audit")}</h3><p>{t("admin.investigations.audit_description")}</p></div><span>{investigationAudit.entries.length}</span></div>
+              {investigationAudit.entries.length === 0 ? (
+                <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div>
+              ) : (
+                <ul class="investigation-bridge-list">
+                  {investigationAudit.entries.map((entry) => (
+                    <li>
+                      <div><strong>{entry.action}</strong><span>{entry.resourceType}{entry.shopName === null ? ` · ${t("admin.common.platform")}` : ` · ${entry.shopName}`}</span></div>
+                      <div><span>{entry.actorType}</span><small>{formatTime(entry.createdAt)}</small></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <a class="next-link" href="/admin/investigations?tab=audit">{t("admin.investigations.details")}</a>
+            </article>
+          </div>
+        )}
       </section>
 
       <section class="admin-section" aria-labelledby="deletion-title">
@@ -480,6 +552,27 @@ const operationsClientCopy = {
     </div>
   )}
 </AdminLayout>
+
+<style>
+  .admin-section-links { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+  .admin-inline-link { color:var(--sln-action-primary); font-size:13px; font-weight:600; text-decoration:none; }
+  .admin-inline-link:hover { text-decoration:underline; }
+  .investigation-bridge-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
+  .investigation-bridge-card { display:grid; gap:12px; min-width:0; padding:16px; border:1px solid var(--sln-border-default); border-radius:12px; background:var(--sln-bg-surface); }
+  .investigation-bridge-card h3 { margin:0; font-size:16px; }
+  .investigation-bridge-card .admin-section-heading { margin:0; }
+  .investigation-bridge-list { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+  .investigation-bridge-list li { display:flex; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--sln-border-default); }
+  .investigation-bridge-list li:last-child { border-bottom:0; }
+  .investigation-bridge-list li > div { display:grid; gap:3px; min-width:0; }
+  .investigation-bridge-list li > div:last-child { justify-items:end; text-align:right; }
+  .investigation-bridge-list strong, .investigation-bridge-list span, .investigation-bridge-list small { overflow-wrap:anywhere; }
+  .investigation-bridge-list span, .investigation-bridge-list small { color:var(--sln-text-muted); }
+  @media (max-width:760px) {
+    .investigation-bridge-grid { grid-template-columns:1fr; }
+    .admin-section-links { width:100%; }
+  }
+</style>
 
 <script>
   import "../../scripts/dashboard/system-operations";

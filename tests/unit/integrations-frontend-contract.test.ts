@@ -18,6 +18,11 @@ describe("integrations frontend contract", () => {
     expect(page).not.toContain('data-provider-row="webhooks"');
     expect(page).not.toContain('data-provider-row="email"');
     expect(page).toContain("unavailableState");
+    expect(page).toContain("data-can-manage-api-credentials");
+    expect(page).toContain("data-api-credentials-section");
+    expect(page).toContain("dashboard.integrations.api_credentials");
+    expect(page).toContain("data-channel-expansion-section");
+    expect(page).toContain("data-can-manage-channel-connectors");
   });
 
   it("keeps provider views safe and truthful for unavailable access", () => {
@@ -33,6 +38,13 @@ describe("integrations frontend contract", () => {
 
     expect(script).toContain("form.reset()");
     expect(script).toContain("credentials: \"same-origin\"");
+    expect(script).toContain("/api-credentials");
+    expect(script).toContain("Idempotency-Key");
+    expect(script).toContain("tokenAvailable");
+    expect(script).toContain("/channels");
+    expect(script).toContain("/catalog");
+    expect(script).toContain("/requests");
+    expect(script).toContain("inlineSecretDelivery");
     expect(script).not.toContain("console.log");
     expect(script).not.toContain("localStorage");
     expect(script).not.toContain("sessionStorage");

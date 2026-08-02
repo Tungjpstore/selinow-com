@@ -1,0 +1,134 @@
+---
+import AdminState from "../../components/admin/AdminState.astro";
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { getBindings } from "../../lib/platform/bindings";
+import { minorUnitFor } from "../../lib/i18n/currency";
+import { listAdminPaymentRemediationRequests, type AdminPaymentRemediationRequest } from "../../lib/payments/remediation";
+import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
+import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
+
+const env = getBindings();
+const locale = resolvePresentationLocale(Astro.locals.locale);
+const t = createAdminTranslator(locale);
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("Pragma", "no-cache");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+Astro.response.headers.set("Referrer-Policy", "no-referrer");
+
+let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let roleLookupFailed = false;
+try { adminRole = await getPlatformAdminRole({ env, userId: auth.userId }); } catch { roleLookupFailed = true; }
+if (roleLookupFailed) Astro.response.status = 503;
+else if (adminRole === null) Astro.response.status = 403;
+
+const requestedStatus = Astro.url.searchParams.get("status") ?? "";
+const allowedStatuses = new Set(["", "requested", "provider_pending", "rejected", "completed", "failed", "canceled"]);
+const status = allowedStatuses.has(requestedStatus) ? requestedStatus : "";
+let requests: AdminPaymentRemediationRequest[] = [];
+let dataUnavailable = false;
+if (adminRole !== null) {
+  try { requests = await listAdminPaymentRemediationRequests({ env, status, userId: auth.userId }); }
+  catch { dataUnavailable = true; Astro.response.status = 503; }
+}
+
+const statusLabels: Readonly<Record<string, string>> = {
+  canceled: t("admin.appeals.status.canceled"),
+  completed: t("admin.appeals.status.completed"),
+  failed: t("admin.appeals.status.failed"),
+  provider_pending: t("admin.appeals.status.provider_pending"),
+  rejected: t("admin.appeals.status.rejected"),
+  requested: t("admin.appeals.status.requested"),
+};
+const kindLabels: Readonly<Record<string, string>> = {
+  manual_review: t("admin.appeals.kind.manual_review"),
+  partial_refund: t("admin.appeals.kind.partial_refund"),
+  refund: t("admin.appeals.kind.refund"),
+};
+const statusLabel = (value: string): string => statusLabels[value] ?? t("admin.common.unknown");
+const kindLabel = (value: string): string => kindLabels[value] ?? t("admin.common.unknown");
+const formatAmount = (amountMinor: number, currency: string): string => {
+  if (!Number.isSafeInteger(amountMinor) || !/^[A-Z]{3}$/u.test(currency)) return t("admin.common.unknown");
+  try { return new Intl.NumberFormat(locale, { currency, style: "currency" }).format(amountMinor / (10 ** minorUnitFor(currency))); }
+  catch { return `${amountMinor} ${currency}`; }
+};
+const formatTime = (value: string): string => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? t("admin.common.unknown") : date.toLocaleString(locale, { dateStyle: "short", timeStyle: "short" });
+};
+const statusHref = (value: string): string => value === "" ? "/admin/appeals" : `/admin/appeals?status=${encodeURIComponent(value)}`;
+const canReview = adminRole === "owner" || adminRole === "risk";
+const clientCopy = {
+  approve: t("admin.appeals.approving"),
+  reject: t("admin.appeals.rejecting"),
+  approved: t("admin.appeals.approved"),
+  rejected: t("admin.appeals.rejected"),
+  confirmApprove: t("admin.appeals.confirm_approve"),
+  confirmReject: t("admin.appeals.confirm_reject"),
+  errorGeneric: t("admin.appeals.error_generic"),
+  errorCsrf: t("admin.appeals.error_csrf"),
+  errorRecentAuth: t("admin.appeals.error_recent_auth"),
+  errorConflict: t("admin.appeals.error_conflict"),
+  errorReference: t("admin.appeals.error_reference"),
+};
+---
+
+<AdminLayout activePath="/admin/appeals" email={auth.email} role={adminRole} title={t("admin.appeals.title")}>
+  {roleLookupFailed ? <AdminState tone="danger" eyebrow={t("admin.appeals.eyebrow")} title={t("admin.common.read_api_unavailable")} description={t("admin.appeals.error_generic")} code={t("admin.common.request", { requestId: Astro.locals.requestId })} actionHref="/admin/appeals" actionLabel={t("admin.common.reload")} />
+    : adminRole === null ? <AdminState tone="warning" eyebrow={t("admin.appeals.eyebrow")} title={t("admin.common.read_only")} description={t("admin.appeals.error_generic")} code="authorization_denied" actionHref="/admin" actionLabel={t("admin.common.back_workspace")} />
+    : dataUnavailable ? <AdminState tone="danger" eyebrow={t("admin.appeals.eyebrow")} title={t("admin.common.read_api_unavailable")} description={t("admin.appeals.error_generic")} code={t("admin.common.request", { requestId: Astro.locals.requestId })} actionHref="/admin/appeals" actionLabel={t("admin.common.reload")} />
+    : <div class="appeals-page" data-admin-appeals data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-copy={JSON.stringify(clientCopy)}>
+      <header class="admin-page-header"><div><p class="admin-eyebrow">{t("admin.appeals.eyebrow")}</p><h1>{t("admin.appeals.title")}</h1><p>{t("admin.appeals.description")}</p></div><span class="admin-read-only-note">{t("admin.appeals.read_only_note")}</span></header>
+      <nav class="appeals-filters" aria-label={t("admin.appeals.filter")}>
+        {(["", "requested", "provider_pending", "rejected", "completed", "failed", "canceled"] as const).map((value) => <a href={statusHref(value)} aria-current={status === value ? "page" : undefined}>{value === "" ? t("admin.appeals.filter_all") : statusLabel(value)}</a>)}
+      </nav>
+      <div class="appeals-feedback" data-appeals-feedback role="status" aria-live="polite" hidden></div>
+      {requests.length === 0 ? <section class="admin-section appeals-empty"><strong>{t("admin.appeals.empty_title")}</strong><span>{t("admin.appeals.empty_description")}</span></section>
+        : <section class="admin-section" aria-labelledby="appeals-list-title"><div class="admin-section-heading"><div><h2 id="appeals-list-title">{status === "" ? t("admin.appeals.filter_all") : statusLabel(status)}</h2></div><span>{requests.length}</span></div><div class="appeals-list" role="list">
+          {requests.map((request) => <article class="appeal-record" role="listitem" data-appeal-row data-request-public-id={request.requestPublicId} data-version={request.version}>
+            <div class="appeal-record-head"><div><small>{request.shopName} · {request.shopPublicId}</small><strong>{kindLabel(request.kind)}</strong><span>{request.orderPublicId}</span></div><span class={`appeal-status appeal-status-${request.status}`}>{statusLabel(request.status)}</span></div>
+            <dl><div><dt>{t("admin.appeals.kind.refund")}</dt><dd>{formatAmount(request.amountMinor, request.currency)}</dd></div><div><dt>{t("admin.appeals.filter")}</dt><dd>{request.reasonCode}</dd></div><div><dt>{t("admin.common.created")}</dt><dd>{formatTime(request.createdAt)}</dd></div></dl>
+            {canReview && request.status === "requested" && <div class="appeal-actions"><button type="button" data-appeal-decision="provider_pending">{t("admin.appeals.approve")}</button><button type="button" data-appeal-decision="rejected" class="danger-action">{t("admin.appeals.reject")}</button></div>}
+          </article>)}
+        </div></section>}
+    </div>}
+</AdminLayout>
+
+<script src="../../scripts/dashboard/admin-appeals.ts"></script>
+
+<style>
+  .appeals-page { display:grid; gap:24px; }
+  .admin-page-header { display:flex; align-items:end; justify-content:space-between; gap:24px; }
+  .admin-page-header h1 { margin:0; }
+  .admin-page-header p:last-child { max-width:720px; margin:8px 0 0; color:var(--sln-text-muted); }
+  .admin-read-only-note { max-width:300px; color:var(--sln-text-muted); font-size:12px; line-height:1.5; text-align:end; }
+  .appeals-filters { display:flex; flex-wrap:wrap; gap:8px; border-bottom:1px solid var(--sln-border-default); }
+  .appeals-filters a { padding:10px 12px; color:var(--sln-text-muted); text-decoration:none; }
+  .appeals-filters a[aria-current="page"] { border-bottom:2px solid var(--sln-action-primary); color:var(--sln-text-primary); }
+  .appeals-feedback { padding:12px 14px; border:1px solid var(--sln-border-default); border-radius:8px; }
+  .appeals-feedback[data-tone="error"] { color:var(--selinow-danger-text); }
+  .appeals-feedback[data-tone="success"] { color:var(--selinow-success-text); }
+  .appeals-list { display:grid; gap:12px; }
+  .appeal-record { display:grid; gap:16px; border:1px solid var(--sln-border-default); border-radius:10px; padding:18px; background:var(--sln-bg-surface); }
+  .appeal-record-head { display:flex; align-items:start; justify-content:space-between; gap:16px; }
+  .appeal-record-head div { display:grid; gap:5px; min-width:0; }
+  .appeal-record-head small, .appeal-record-head span, .appeal-record dt { color:var(--sln-text-muted); font-size:12px; overflow-wrap:anywhere; }
+  .appeal-record-head strong { font-size:16px; }
+  .appeal-status { padding:5px 8px; border-radius:999px; background:var(--sln-tint-warning); color:var(--sln-text-primary) !important; white-space:nowrap; }
+  .appeal-status-rejected, .appeal-status-failed { background:var(--sln-tint-danger); }
+  .appeal-status-provider_pending { background:var(--sln-tint-info); }
+  .appeal-status-completed { background:var(--sln-tint-success); }
+  .appeal-record dl { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; margin:0; }
+  .appeal-record dl div { display:grid; gap:5px; }
+  .appeal-record dd { margin:0; overflow-wrap:anywhere; }
+  .appeal-actions { display:flex; flex-wrap:wrap; gap:10px; }
+  .appeal-actions button { min-height:40px; border:1px solid var(--sln-action-primary); border-radius:7px; padding:8px 13px; background:var(--sln-action-primary); color:var(--sln-white); cursor:pointer; }
+  .appeal-actions button:disabled { cursor:wait; opacity:.6; }
+  .appeal-actions .danger-action { border-color:var(--sln-state-danger); background:transparent; color:var(--selinow-danger-text); }
+  .appeals-empty { display:grid; gap:8px; }
+  @media (max-width:760px) { .admin-page-header, .appeal-record-head { align-items:start; flex-direction:column; } .admin-read-only-note { max-width:none; text-align:start; } .appeal-record dl { grid-template-columns:1fr; } }
+</style>

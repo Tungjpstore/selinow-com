@@ -5,13 +5,15 @@ import "../styles/primitives.css";
 import "../styles/selinow-a11y.css";
 import "../styles/platform.css";
 import { createMarketingTranslator } from "../lib/i18n/catalogs/marketing";
-import { directionForLocale, normalizeSupportedLocale } from "../lib/i18n/locale";
+import { DEFAULT_LOCALE, directionForLocale, normalizeSupportedLocale, SUPPORTED_LOCALES } from "../lib/i18n/locale";
+import { alternateLocaleUrl, marketingLocaleAlternates, ogLocaleFor, serializeStructuredData, SITE_ORIGIN, type SeoStructuredData } from "../lib/seo";
 
 interface Props {
   canonical?: string;
   description?: string;
   locale?: unknown;
   noindex?: boolean;
+  structuredData?: SeoStructuredData | undefined;
   title: string;
 }
 
@@ -20,12 +22,22 @@ const {
   description,
   locale: requestedLocale = Astro.locals.locale,
   noindex = false,
+  structuredData,
   title,
 } = Astro.props;
 const locale = normalizeSupportedLocale(requestedLocale);
 const t = createMarketingTranslator(locale);
 const resolvedDescription = description === undefined ? t("marketing.layout.default_description") : description;
 const socialImage = "https://selinow.com/brand/selinow-og-cover.png";
+const pathname = Astro.url.pathname;
+const explicitLocale = Astro.url.searchParams.get("lang");
+const canonicalBase = canonical ?? `${SITE_ORIGIN}${pathname}`;
+const canonicalUrl = explicitLocale !== null && locale !== DEFAULT_LOCALE && normalizeSupportedLocale(explicitLocale) === locale
+  ? alternateLocaleUrl(pathname, locale, new URL(canonicalBase).origin)
+  : canonicalBase;
+const localeAlternates = marketingLocaleAlternates(pathname, new URL(canonicalBase).origin);
+Astro.response.headers.set("Content-Language", locale);
+Astro.response.headers.set("Vary", "Accept-Language, Cookie");
 ---
 
 <!doctype html>
@@ -35,24 +47,29 @@ const socialImage = "https://selinow.com/brand/selinow-og-cover.png";
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={resolvedDescription} />
     {noindex && <meta name="robots" content="noindex, nofollow" />}
-    {!noindex && <link rel="canonical" href={canonical} />}
+    {!noindex && <link rel="canonical" href={canonicalUrl} />}
+    {!noindex && localeAlternates.map((alternate) => <link rel="alternate" hreflang={alternate.hreflang} href={alternate.href} />)}
     <meta name="theme-color" content="#F8FAFC" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Selinow" />
+    <meta property="og:locale" content={ogLocaleFor(locale)} />
+    {SUPPORTED_LOCALES.filter((supportedLocale) => supportedLocale !== locale).map((supportedLocale) => <meta property="og:locale:alternate" content={ogLocaleFor(supportedLocale)} />)}
     <meta property="og:title" content={title} />
     <meta property="og:description" content={resolvedDescription} />
-    <meta property="og:url" content={canonical} />
+    <meta property="og:url" content={canonicalUrl} />
     <meta property="og:image" content={socialImage} />
     <meta property="og:image:alt" content={t("marketing.layout.social_image_alt")} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={resolvedDescription} />
     <meta name="twitter:image" content={socialImage} />
+    <meta name="twitter:image:alt" content={t("marketing.layout.social_image_alt")} />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/selinow-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/selinow-16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/selinow-180.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <title>{title}</title>
+    {structuredData && <script is:inline type="application/ld+json" set:html={serializeStructuredData(structuredData)}></script>}
   </head>
   <body>
     <a class="skip-link" href="#main-content">{t("marketing.layout.skip_link")}</a>

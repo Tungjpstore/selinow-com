@@ -90,5 +90,11 @@ describe("admin operations PromptOS surface", () => {
     expect(operations).toContain("expectedConfirmation");
     expect(operations).toContain("window.confirm");
     expect(operations).not.toMatch(/name="[^"]*(?:ciphertext|plaintext|license)[^"]*"/i);
+    expect(systems).toContain("listAdminOrderInvestigations");
+    expect(systems).toContain("listAdminAuditEntries");
+    expect(systems).toContain("data-admin-investigation-bridge");
+    expect(systems).toContain("/admin/investigations?tab=orders");
+    expect(systems).toContain("/admin/investigations?tab=audit");
+    expect(systems).toContain("investigationUnavailable");
   });
 });

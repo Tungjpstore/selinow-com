@@ -19,13 +19,8 @@ const stagingSpec = JSON.parse(
 const promotionStagingSpec = JSON.parse(
   readFileSync(new URL("../../infra/release/production-promotion-staging.json", import.meta.url), "utf8"),
   ) as StagingSpec;
-const derivePromotionSpec = deriveProductionPromotionStagingSpec as unknown as (
-  spec: StagingSpec,
-) => StagingSpec;
-const assertPromotionSpec = assertProductionPromotionStagingContract as unknown as (
-  staging: StagingSpec,
-  promotion: StagingSpec,
-) => StagingSpec;
+const derivePromotionSpec = deriveProductionPromotionStagingSpec;
+const assertPromotionSpec = assertProductionPromotionStagingContract;
 
 describe("production promotion staging contract", () => {
   it("derives the checked-in promotion spec without weakening normal staging guards", () => {

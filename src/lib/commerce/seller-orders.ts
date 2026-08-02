@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
+import type { SellerOrderNote } from "./order-notes";
 
 export type SellerOrderSummary = {
   createdAt: string;
@@ -41,6 +42,7 @@ export type SellerOrderDetail = SellerOrderSummary & {
       remainingDownloads: number;
     } | null;
   }>;
+  notes: SellerOrderNote[];
   paidAt: string | null;
   payments: Array<{ createdAt: string; expectedAmountMinor: number; expiresAt: string; lastSafeErrorCode: string | null; provider: string; state: string; updatedAt: string }>;
 };
@@ -54,9 +56,9 @@ type SellerPrivateDownloadRow = {
   orderItemId: string;
 };
 
-async function requireOrderActor(env: AppBindings, shopPublicId: string, userId: string): Promise<string> {
+async function requireOrderActor(env: AppBindings, shopPublicId: string, userId: string): Promise<{ canReadNotes: boolean; shopId: string }> {
   const member = await getShopForMember({ capability: "shop:read", env, shopPublicId, userId });
-  return member.row.shop_id;
+  return { canReadNotes: member.row.role === "owner" || member.row.role === "manager", shopId: member.row.shop_id };
 }
 
 async function listSellerPrivateDownloads(input: { env: AppBindings; orderId: string; shopId: string }): Promise<SellerPrivateDownloadRow[]> {
@@ -100,7 +102,7 @@ async function listSellerPrivateDownloads(input: { env: AppBindings; orderId: st
 }
 
 export async function listSellerOrders(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerOrderSummary[]> {
-  const shopId = await requireOrderActor(input.env, input.shopPublicId, input.userId);
+  const { shopId } = await requireOrderActor(input.env, input.shopPublicId, input.userId);
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT
       orders.public_id AS orderId,
@@ -129,7 +131,7 @@ export async function listSellerOrders(input: { env: AppBindings; shopPublicId: 
 }
 
 export async function getSellerOrder(input: { env: AppBindings; orderPublicId: string; shopPublicId: string; userId: string }): Promise<SellerOrderDetail> {
-  const shopId = await requireOrderActor(input.env, input.shopPublicId, input.userId);
+  const { canReadNotes, shopId } = await requireOrderActor(input.env, input.shopPublicId, input.userId);
   const row = await input.env.PLATFORM_DB.prepare(`
     SELECT
       orders.id AS internalId,
@@ -159,7 +161,7 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
   `).bind(shopId, input.orderPublicId).first<SellerOrderSummary & { expiresAt: string; fulfilledAt: string | null; internalId: string; paidAt: string | null }>();
   if (row === null) throw new AppError("order_not_found", 404);
 
-  const [items, payments, fulfillment, audit, privateDownloads] = await Promise.all([
+  const [items, payments, fulfillment, audit, notes, privateDownloads] = await Promise.all([
     input.env.PLATFORM_DB.prepare(`
       SELECT id, product_title AS productTitle, variant_title AS variantTitle, sku,
         unit_price_minor AS unitPriceMinor, quantity, line_total_minor AS lineTotalMinor,
@@ -191,6 +193,17 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
       ORDER BY created_at DESC, id DESC
       LIMIT 30
     `).bind(shopId, row.internalId).all<SellerOrderDetail["audit"][number]>(),
+    canReadNotes ? input.env.PLATFORM_DB.prepare(`
+      SELECT order_notes.id, order_notes.body, order_notes.status,
+        order_notes.redacted_at AS redactedAt, order_notes.created_at AS createdAt,
+        order_notes.updated_at AS updatedAt, order_notes.version,
+        platform_users.display_name AS authorDisplayName
+      FROM order_notes
+      INNER JOIN platform_users ON platform_users.id = order_notes.author_user_id
+      WHERE order_notes.shop_id = ? AND order_notes.order_id = ?
+      ORDER BY order_notes.created_at DESC, order_notes.id DESC
+      LIMIT 100
+    `).bind(shopId, row.internalId).all<SellerOrderNote & { id: string; authorDisplayName: string }>() : Promise.resolve({ results: [] as Array<SellerOrderNote & { id: string; authorDisplayName: string }> }),
     listSellerPrivateDownloads({ env: input.env, orderId: row.internalId, shopId }),
   ]);
 
@@ -211,6 +224,16 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
     audit: audit.results,
     fulfillment: fulfillment.results,
     items: items.results.map((item) => ({ ...item, privateDownload: privateDownloadByItem.get(item.id) ?? null })),
+    notes: notes.results.map((note) => ({
+      authorDisplayName: note.authorDisplayName,
+      body: note.status === "redacted" ? "" : note.body,
+      createdAt: note.createdAt,
+      notePublicId: note.id,
+      redactedAt: note.redactedAt,
+      status: note.status,
+      updatedAt: note.updatedAt,
+      version: note.version,
+    })),
     payments: payments.results,
   };
 }

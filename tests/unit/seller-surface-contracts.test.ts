@@ -52,7 +52,7 @@ class FakeDatabase {
               return Promise.resolve({ results: values[0] === "shop-a" ? [{ id: "customer-internal-a", displayName: "Khách A", email: "customer-a@example.test", locale: "vi", status: "active", createdAt: "2026-07-28T00:00:00.000Z", orderCount: 2, lastOrderAt: "2026-07-28T00:05:00.000Z" }] : [] });
             }
             if (sql.includes("FROM shop_members")) {
-              return Promise.resolve({ results: values[0] === "shop-a" ? [{ userId: "user-internal-a", displayName: "Owner A", email: "owner-a@example.test", role: "owner", status: "active", createdAt: "2026-07-28T00:00:00.000Z" }] : [] });
+              return Promise.resolve({ results: values[0] === "shop-a" ? [{ userId: "user-internal-a", displayName: "Owner A", email: "owner-a@example.test", memberPublicId: "mbr_00000000-0000-4000-8000-0000000000a1", role: "owner", status: "active", createdAt: "2026-07-28T00:00:00.000Z", version: 1 }] : [] });
             }
             if (sql.includes("FROM usage_counters")) {
               return Promise.resolve({ results: values[0] === "shop-a" ? [{ metric: "orders_month", periodKey: "2026-07", value: 12, updatedAt: "2026-07-28T00:00:00.000Z" }] : [] });
@@ -80,9 +80,16 @@ class FakeDatabase {
             }
             return Promise.resolve(null);
           },
+          run() {
+            return Promise.resolve({ meta: { changes: 1 } });
+          },
         } as unknown as D1PreparedStatement;
       },
     } as unknown as D1PreparedStatement;
+  }
+
+  batch(statements: D1PreparedStatement[]) {
+    return Promise.all(statements.map((statement) => statement.run()));
   }
 }
 
@@ -138,7 +145,9 @@ describe("seller surface contracts", () => {
       lastOrderAt: "2026-07-28T00:05:00.000Z",
       locale: "vi",
       orderCount: 2,
+      publicId: "customer-internal-a",
       status: "active",
+      version: 1,
     }]);
     expect(customers[0]).not.toHaveProperty("email");
     expect(customers[0]).not.toHaveProperty("id");
@@ -155,8 +164,10 @@ describe("seller surface contracts", () => {
       createdAt: "2026-07-28T00:00:00.000Z",
       displayName: "Owner A",
       emailMasked: "ow*****@example.test",
+      memberPublicId: "mbr_00000000-0000-4000-8000-0000000000a1",
       role: "owner",
       status: "active",
+      version: 1,
     }]);
     expect(membersResult[0]).not.toHaveProperty("email");
     expect(membersResult[0]).not.toHaveProperty("userId");
@@ -188,6 +199,11 @@ describe("seller surface contracts", () => {
       expect(page).toContain('if (state === "unavailable") Astro.response.status = 503;');
     }
     expect(membersPage).toContain('description={t("dashboard.members.forbidden.description")}');
+    expect(membersPage).toContain("listMemberInvitations");
+    expect(membersPage).toContain("data-member-save");
+    expect(customersPage).toContain("data-customer-open");
+    expect(customersPage).toContain("customers.detail");
+    expect(billingPage).toContain("data-billing-request-form");
     expect(sellerManagement).toContain('capability: "team:manage"');
     expect(membersPage).not.toContain("không còn quyền shop:read");
   });

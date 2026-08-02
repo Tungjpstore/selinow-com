@@ -1,0 +1,115 @@
+---
+import MarketingHeader from "../../components/marketing/MarketingHeader.astro";
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import { getBindings } from "../../lib/platform/bindings";
+import { getSolutionNotFound, getSolutionPage, getSolutionsHub, solutionSlugs } from "../../lib/content/solutions";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { classifyPlatformHost } from "../../lib/storefront/routing";
+
+const env = getBindings();
+const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
+const content = getSolutionsHub(locale);
+const notFound = getSolutionNotFound(locale);
+const validHost = classifyPlatformHost(new URL(Astro.request.url).hostname, env) === "marketing";
+const canonical = "https://selinow.com/solutions";
+const localizedPath = (pathname: string): string => locale === "en" ? pathname : `${pathname}?lang=${locale}`;
+const structuredData = !validHost ? undefined : {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "CollectionPage",
+      "@id": `${canonical}#collection`,
+      name: content.seoTitle,
+      description: content.seoDescription,
+      url: canonical,
+      inLanguage: locale,
+      isPartOf: { "@type": "WebSite", name: "Selinow", url: "https://selinow.com/" },
+    },
+    {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Selinow", item: "https://selinow.com/" },
+        { "@type": "ListItem", position: 2, name: content.eyebrow, item: canonical },
+      ],
+    },
+    {
+      "@type": "ItemList",
+      itemListElement: solutionSlugs.map((slug, index) => {
+        const solution = getSolutionPage(slug, locale);
+        return {
+          "@type": "ListItem",
+          position: index + 1,
+          name: solution?.title ?? slug,
+          url: `https://selinow.com/solutions/${slug}`,
+        };
+      }),
+    },
+  ],
+};
+
+if (!validHost) {
+  Astro.response.status = 404;
+  Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+}
+---
+
+<PlatformLayout
+  title={validHost ? content.seoTitle : notFound.title}
+  description={validHost ? content.seoDescription : notFound.description}
+  locale={locale}
+  canonical={canonical}
+  noindex={!validHost}
+  structuredData={structuredData}
+>
+  {validHost ? <>
+    <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+    <main id="main-content" class="solution-page solution-hub-page">
+      <section class="solution-hero platform-shell">
+        <div class="solution-hero-copy">
+          <a class="solution-breadcrumb" href={localizedPath("/")}>Selinow <span aria-hidden="true">/</span> {content.eyebrow}</a>
+          <p class="solution-eyebrow">{content.eyebrow}</p>
+          <h1>{content.title}</h1>
+          <p class="solution-lead">{content.lead}</p>
+          <div class="solution-actions">
+            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>{content.cta}<span aria-hidden="true">→</span></a>
+            <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
+          </div>
+        </div>
+        <aside class="solution-signal" aria-label={content.answerLabel}>
+          <span class="solution-signal-index" aria-hidden="true">00</span>
+          <p>{content.answerLabel}</p>
+          <strong>{content.answer}</strong>
+          <span class="solution-signal-line" aria-hidden="true"></span>
+          <small>Selinow OS / {content.solutionsLabel.toLowerCase()}</small>
+        </aside>
+      </section>
+
+      <section class="solution-catalog platform-shell" aria-labelledby="solution-catalog-title">
+        <div class="solution-section-heading solution-section-heading-wide">
+          <p class="solution-kicker">{content.cardLabel}</p>
+          <h2 id="solution-catalog-title">{content.cardTitle}</h2>
+          <p class="solution-section-description">{content.cardDescription}</p>
+        </div>
+        <div class="solution-catalog-grid">
+          {solutionSlugs.map((slug, index) => {
+            const solution = getSolutionPage(slug, locale);
+            return solution === null ? null : <a class="solution-catalog-card" href={localizedPath(`/solutions/${slug}`)}>
+              <span class="solution-card-index">{String(index + 1).padStart(2, "0")}</span>
+              <span class="solution-card-eyebrow">{solution.eyebrow}</span>
+              <strong>{solution.title}</strong>
+              <p>{solution.lead}</p>
+              <b aria-hidden="true">↗</b>
+            </a>;
+          })}
+        </div>
+      </section>
+
+      <section class="solution-hub-note platform-shell" aria-label={content.answerLabel}>
+        <span>SELINOW / 02</span>
+        <p>{content.answer}</p>
+        <a href={localizedPath("/")}>{content.homeCoreCta}<span aria-hidden="true">↗</span></a>
+      </section>
+    </main>
+    <footer class="platform-shell solution-footer"><img src="/brand/logo/selinow-logo-black.svg" alt="Selinow" width="128" height="34" /><p>{content.footerTagline} © {new Date().getFullYear()} Selinow.</p></footer>
+  </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
+</PlatformLayout>

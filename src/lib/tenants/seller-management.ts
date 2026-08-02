@@ -1,4 +1,5 @@
 import { AppError } from "../core/errors";
+import { createId } from "../core/ids";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "./store";
 
@@ -9,15 +10,19 @@ export type SellerCustomerView = {
   lastOrderAt: string | null;
   locale: string;
   orderCount: number;
+  publicId: string;
   status: string;
+  version: number;
 };
 
 export type SellerMemberView = {
   createdAt: string;
   displayName: string;
   emailMasked: string;
+  memberPublicId: string;
   role: string;
   status: string;
+  version: number;
 };
 
 export type SellerBillingView = {
@@ -31,6 +36,7 @@ export type SellerBillingView = {
   planName: string;
   planVersion: number;
   state: string;
+  subscriptionVersion: number;
   trialEndsAt: string | null;
   usage: Array<{ metric: string; periodKey: string; updatedAt: string; value: number }>;
 };
@@ -55,7 +61,8 @@ function parseObject(value: string): Record<string, unknown> {
 export async function listSellerCustomers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerCustomerView[]> {
   const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   const rows = await input.env.PLATFORM_DB.prepare(`
-    SELECT shop_customers.id, shop_customers.display_name AS displayName,
+    SELECT shop_customers.id, shop_customers.id AS publicId, shop_customers.version,
+      shop_customers.display_name AS displayName,
       shop_customers.email_normalized AS email,
       shop_customers.locale, shop_customers.status,
       shop_customers.created_at AS createdAt,
@@ -67,7 +74,7 @@ export async function listSellerCustomers(input: { env: AppBindings; shopPublicI
     GROUP BY shop_customers.id
     ORDER BY lastOrderAt DESC, shop_customers.created_at DESC, shop_customers.id DESC
     LIMIT 200
-  `).bind(member.row.shop_id).all<{ createdAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; status: string }>();
+  `).bind(member.row.shop_id).all<{ createdAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; publicId?: string; status: string; version?: number }>();
   return rows.results.map((row) => ({
     createdAt: row.createdAt,
     displayName: row.displayName,
@@ -75,28 +82,37 @@ export async function listSellerCustomers(input: { env: AppBindings; shopPublicI
     lastOrderAt: row.lastOrderAt,
     locale: row.locale,
     orderCount: row.orderCount,
+    publicId: row.publicId ?? row.id,
     status: row.status,
+    version: Number.isSafeInteger(row.version) && (row.version ?? 0) > 0 ? (row.version ?? 1) : 1,
   }));
 }
 
 export async function listSellerMembers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerMemberView[]> {
   const member = await getShopForMember({ capability: "team:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const missingRefs = await input.env.PLATFORM_DB.prepare("SELECT user_id AS userId FROM shop_members WHERE shop_id = ? AND member_public_id IS NULL").bind(member.row.shop_id).all<{ userId: string }>();
+  if (missingRefs.results.length > 0) {
+    await input.env.PLATFORM_DB.batch(missingRefs.results.map((row) => input.env.PLATFORM_DB.prepare("UPDATE shop_members SET member_public_id = ? WHERE shop_id = ? AND user_id = ? AND member_public_id IS NULL").bind(createId("mbr"), member.row.shop_id, row.userId)));
+  }
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT shop_members.user_id AS userId, platform_users.display_name AS displayName,
       platform_users.email_normalized AS email, shop_members.role, shop_members.status,
-      shop_members.created_at AS createdAt
+      shop_members.created_at AS createdAt, shop_members.member_public_id AS memberPublicId,
+      shop_members.version
     FROM shop_members
     INNER JOIN platform_users ON platform_users.id = shop_members.user_id
     WHERE shop_members.shop_id = ?
     ORDER BY CASE shop_members.role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 WHEN 'support' THEN 2 ELSE 3 END,
       shop_members.created_at, shop_members.user_id
-  `).bind(member.row.shop_id).all<{ createdAt: string; displayName: string; email: string; role: string; status: string; userId: string }>();
+  `).bind(member.row.shop_id).all<{ createdAt: string; displayName: string; email: string; memberPublicId: string; role: string; status: string; userId: string; version: number }>();
   return rows.results.map((row) => ({
     createdAt: row.createdAt,
     displayName: row.displayName,
     emailMasked: maskEmail(row.email) ?? "***",
+    memberPublicId: row.memberPublicId,
     role: row.role,
     status: row.status,
+    version: row.version,
   }));
 }
 
@@ -105,7 +121,7 @@ export async function getSellerBilling(input: { env: AppBindings; shopPublicId: 
   const row = await input.env.PLATFORM_DB.prepare(`
     SELECT plans.code AS planCode, plans.name AS planName, plans.version AS planVersion,
       plans.feature_flags_json AS featuresJson, plans.limits_json AS limitsJson,
-      shop_subscriptions.state, shop_subscriptions.trial_ends_at AS trialEndsAt,
+      shop_subscriptions.state, shop_subscriptions.version AS subscriptionVersion, shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.current_period_start AS currentPeriodStart,
       shop_subscriptions.current_period_end AS currentPeriodEnd,
       shop_subscriptions.grace_ends_at AS graceEndsAt, shop_subscriptions.canceled_at AS canceledAt
@@ -114,7 +130,7 @@ export async function getSellerBilling(input: { env: AppBindings; shopPublicId: 
     WHERE shop_subscriptions.shop_id = ?
     ORDER BY shop_subscriptions.created_at DESC, shop_subscriptions.id DESC
     LIMIT 1
-  `).bind(member.row.shop_id).first<{ canceledAt: string | null; currentPeriodEnd: string | null; currentPeriodStart: string | null; featuresJson: string; graceEndsAt: string | null; limitsJson: string; planCode: string; planName: string; planVersion: number; state: string; trialEndsAt: string | null }>();
+  `).bind(member.row.shop_id).first<{ canceledAt: string | null; currentPeriodEnd: string | null; currentPeriodStart: string | null; featuresJson: string; graceEndsAt: string | null; limitsJson: string; planCode: string; planName: string; planVersion: number; state: string; subscriptionVersion?: number; trialEndsAt: string | null }>();
   if (row === null) throw new AppError("subscription_required", 409);
   const usage = await input.env.PLATFORM_DB.prepare(`
     SELECT metric, period_key AS periodKey, value, updated_at AS updatedAt
@@ -134,6 +150,7 @@ export async function getSellerBilling(input: { env: AppBindings; shopPublicId: 
     planName: row.planName,
     planVersion: row.planVersion,
     state: row.state,
+    subscriptionVersion: Number.isSafeInteger(row.subscriptionVersion) && (row.subscriptionVersion ?? 0) > 0 ? (row.subscriptionVersion ?? 1) : 1,
     trialEndsAt: row.trialEndsAt,
     usage: usage.results,
   };

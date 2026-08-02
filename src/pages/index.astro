@@ -9,6 +9,7 @@ import { getMarketingPlans, planFeatureList } from "../lib/storefront/marketing"
 import { loggerFor } from "../lib/operations/logger";
 import { classifyPlatformHost, normalizeHostname } from "../lib/storefront/routing";
 import { canonicalRedirectFor, getStorefrontCatalog, resolveStorefrontShop, type StorefrontCategory, type StorefrontProduct, type StorefrontShop } from "../lib/storefront/store";
+import { createMarketingTranslator } from "../lib/i18n/catalogs/marketing";
 import { createStorefrontTranslator } from "../lib/i18n/catalogs/storefront";
 import { normalizeSupportedLocale } from "../lib/i18n/locale";
 
@@ -27,169 +28,134 @@ let plans = [] as Awaited<ReturnType<typeof getMarketingPlans>>;
 let pricingState: "ready" | "unavailable" = "unavailable";
 let locale = Astro.locals.locale ?? normalizeSupportedLocale(env.DEFAULT_LOCALE);
 let t = createStorefrontTranslator(locale);
+const mt = createMarketingTranslator(locale);
 
-const landingCopy = locale === "vi-VN" ? {
-  seoTitle: "Selinow OS - Xây bot, bán hàng, tự động hoá trên mọi kênh",
-  seoDescription: "Selinow OS kết nối website, Telegram và các kênh mở rộng trong một commerce core thống nhất để bán hàng, thanh toán và giao sản phẩm số an toàn.",
-  announcement: "Selinow Update: Website & Telegram đã sẵn sàng · WhatsApp, Zalo OA và Discord đang mở rộng theo lộ trình.",
-  announcementCta: "Xem chi tiết",
-  eyebrow: "NỀN TẢNG BOT & COMMERCE ĐA KÊNH",
-  heroTitle: ["Xây bot. Bán hàng.", "Tự động hoá trên", "mọi kênh."],
-  heroDescription: "Một lõi sản phẩm, đơn hàng, thanh toán và automation — kết nối Website, Telegram và các kênh tăng trưởng khác mà không phân mảnh vận hành.",
-  heroPrimary: "Dùng thử miễn phí",
-  heroSecondary: "Xem demo",
-  heroProof: ["Không cần thẻ tín dụng", "Thiết lập nhanh", "Hủy bất cứ lúc nào"],
+const landingCopy = {
+  seoTitle: mt("marketing.home.seo_title"),
+  seoDescription: mt("marketing.home.seo_description"),
+  announcement: mt("marketing.home.announcement"),
+  announcementCta: mt("marketing.home.announcement_cta"),
+  eyebrow: mt("marketing.home.hero.eyebrow"),
+  heroTitle: mt("marketing.home.hero.title"),
+  heroHighlight: mt("marketing.home.hero.highlight"),
+  heroDescription: mt("marketing.home.hero.lead"),
+  heroPrimary: mt("marketing.home.hero.primary"),
+  heroSecondary: mt("marketing.home.hero.secondary"),
+  heroProof: [
+    mt("marketing.home.hero.proof.no_card"),
+    mt("marketing.home.hero.proof.locales"),
+    mt("marketing.home.hero.proof.verify_before_delivery"),
+  ],
   trust: [
-    ["An toàn & bảo mật", "Mã hoá dữ liệu nhạy cảm và kiểm soát truy cập rõ ràng."],
-    ["Mở rộng linh hoạt", "Hạ tầng thống nhất, sẵn sàng mở rộng theo nhu cầu."],
-    ["Dữ liệu của bạn", "Bạn sở hữu dữ liệu, kiểm soát và xuất dữ liệu bất cứ lúc nào."],
-    ["Tự động hoá mạnh mẽ", "Workflow, trigger và AI giúp vận hành nhẹ hơn."]
+    [mt("marketing.home.trust.security.title"), mt("marketing.home.trust.security.description")],
+    [mt("marketing.home.trust.expansion.title"), mt("marketing.home.trust.expansion.description")],
+    [mt("marketing.home.trust.data.title"), mt("marketing.home.trust.data.description")],
+    [mt("marketing.home.trust.automation.title"), mt("marketing.home.trust.automation.description")],
   ],
-  channelsEyebrow: "CHANNEL-NEUTRAL BY DESIGN",
-  channelsTitle: "Một nền tảng cho mọi kênh khách hàng",
-  channelsDescription: "Bắt đầu với kênh đang hoạt động và mở rộng mà không phải xây lại commerce core.",
-  available: "Khả dụng ngay",
-  expanding: "Sắp mở rộng",
-  extensible: "Extensible",
-  channelStatus: { live: "Live", next: "Coming next", planned: "Planned", development: "Đang phát triển" },
-  useEyebrow: "NỀN TẢNG CHO MỌI MÔ HÌNH",
-  useTitle: "Selinow giúp bạn làm gì?",
-  useDescription: "Từ bot bán hàng đến fulfillment, mỗi tác vụ đều chạy trên cùng một luồng dữ liệu có thể kiểm soát.",
+  channelsEyebrow: mt("marketing.home.channels.eyebrow"),
+  channelsTitle: mt("marketing.home.channels.title"),
+  channelsDescription: mt("marketing.home.channels.description"),
+  available: mt("marketing.home.channels.available"),
+  expanding: mt("marketing.home.channels.expanding"),
+  extensible: mt("marketing.home.channels.extensible"),
+  channelStatus: {
+    live: mt("marketing.home.channels.status.live"),
+    next: mt("marketing.home.channels.status.next"),
+    planned: mt("marketing.home.channels.status.planned"),
+    development: mt("marketing.home.channels.status.development"),
+  },
+  useEyebrow: mt("marketing.home.use_cases.kicker"),
+  useTitle: mt("marketing.home.use_cases.title"),
+  useDescription: mt("marketing.home.use_cases.description"),
   uses: [
-    ["sales-bot", "Bot bán hàng", "Tạo trải nghiệm mua hàng trong hội thoại hoặc website.", "illustration.shopping-bag.png"],
-    ["support-bot", "Chatbot hỗ trợ", "Trả lời tự động 24/7, điều phối và chăm sóc khách hàng.", "illustration.bot.png"],
-    ["digital-delivery", "Giao file & license key", "Tự động giao file, tài liệu, license key và kích hoạt sau thanh toán.", "illustration.delivery-cloud.png"],
-    ["catalog", "Quản lý sản phẩm số", "Quản lý catalog, biến thể, giá và inventory an toàn.", "illustration.product-box.png"],
-    ["workflow", "Automation theo workflow", "Kết nối trigger, điều kiện và action trong một quy trình.", "decorative.network-nodes.png"],
-    ["notifications", "Thông báo & CSKH", "Gửi thông báo, nhắc hạn và chăm sóc khách hàng tự động.", "illustration.notification-bell.png"]
+    ["sales-bot", mt("marketing.home.use_cases.sales.title"), mt("marketing.home.use_cases.sales.description"), "global/global-shopping-bag.png"],
+    ["support-bot", mt("marketing.home.use_cases.support.title"), mt("marketing.home.use_cases.support.description"), "global/global-bot.png"],
+    ["digital-delivery", mt("marketing.home.use_cases.delivery.title"), mt("marketing.home.use_cases.delivery.description"), "global/global-delivery-cloud.png"],
+    ["catalog", mt("marketing.home.use_cases.catalog.title"), mt("marketing.home.use_cases.catalog.description"), "global/global-product-box.png"],
+    ["workflow", mt("marketing.home.use_cases.workflow.title"), mt("marketing.home.use_cases.workflow.description"), "global/global-network-nodes.png"],
+    ["notifications", mt("marketing.home.use_cases.notifications.title"), mt("marketing.home.use_cases.notifications.description"), "global/global-notification-bell.png"],
   ],
-  workflowEyebrow: "OPERATING WORKFLOW",
-  workflowTitle: "Cách Selinow hoạt động",
-  workflowDescription: "Một quy trình rõ ràng từ bot đầu tiên đến đơn hàng được giao tự động.",
+  workflowEyebrow: mt("marketing.home.workflow.kicker"),
+  workflowTitle: mt("marketing.home.workflow.title"),
+  workflowDescription: mt("marketing.home.workflow.description"),
   workflowSteps: [
-    ["Tạo bot", "Thiết lập quy trình, kịch bản và sản phẩm.", "illustration.bot.png"],
-    ["Kết nối kênh", "Kết nối Website, Telegram và các kênh được hỗ trợ.", "decorative.network-nodes.png"],
-    ["Nhận đơn & thanh toán", "Xử lý đơn hàng và xác minh thanh toán chính xác.", "illustration.payment-card.png"],
-    ["Tự động giao & chăm sóc", "Giao hàng, cấp quyền và tiếp tục workflow.", "illustration.delivery-cloud.png"]
+    [mt("marketing.home.workflow.step1.title"), mt("marketing.home.workflow.step1.description"), "global/global-bot.png"],
+    [mt("marketing.home.workflow.step2.title"), mt("marketing.home.workflow.step2.description"), "global/global-network-nodes.png"],
+    [mt("marketing.home.workflow.step3.title"), mt("marketing.home.workflow.step3.description"), "global/global-payment-card.png"],
+    [mt("marketing.home.workflow.step4.title"), mt("marketing.home.workflow.step4.description"), "global/global-delivery-cloud.png"],
   ],
-  architectureEyebrow: "ONE CORE, MANY EXPERIENCES",
-  architectureTitle: "Một lõi, nhiều trải nghiệm",
-  architectureDescription: "Kênh thay đổi, nhưng sản phẩm, hội thoại, đơn hàng, thanh toán, fulfillment và automation vẫn dùng chung một nguồn sự thật.",
-  architectureLeft: "Nguồn vào",
-  architectureRight: "Kênh đầu ra",
-  architectureCore: "Selinow Core",
-  architectureModules: ["AI agent", "Automation", "Workflow", "Analytics", "Security"],
+  architectureEyebrow: mt("marketing.home.architecture.eyebrow"),
+  architectureTitle: mt("marketing.home.architecture.title"),
+  architectureDescription: mt("marketing.home.architecture.description"),
+  architectureLeft: mt("marketing.home.architecture.sources"),
+  architectureRight: mt("marketing.home.architecture.destinations"),
+  architectureCore: mt("marketing.home.architecture.core"),
+  architectureModules: [
+    mt("marketing.home.architecture.module.ai"),
+    mt("marketing.home.architecture.module.automation"),
+    mt("marketing.home.architecture.module.workflow"),
+    mt("marketing.home.architecture.module.analytics"),
+    mt("marketing.home.architecture.module.security"),
+  ],
   architectureChannels: ["Website", "Telegram", "Zalo OA", "Discord", "API / Webhook"],
-  pricingEyebrow: "RUNTIME PRICING",
-  pricingTitle: "Bảng giá đơn giản, minh bạch",
-  pricingDescription: "Plan, giới hạn và quyền truy cập được đọc từ runtime. Không có giá giả hoặc giới hạn ẩn.",
-  pricingUnavailable: "Thông tin plan đang tạm thời chưa khả dụng.",
-  pricingUnavailableDetail: "Hệ thống chưa trả về cấu hình thương mại hiện tại. Vui lòng thử lại sau.",
-  planCta: "Dùng thử miễn phí",
-  pricingCompare: "Xem đầy đủ bảng giá",
-  faqEyebrow: "CÂU HỎI THƯỜNG GẶP",
-  faqTitle: "Những điều cần biết trước khi bắt đầu",
+  pricingEyebrow: mt("marketing.home.pricing.kicker"),
+  pricingTitle: mt("marketing.home.pricing.title"),
+  pricingDescription: mt("marketing.home.pricing.description"),
+  pricingUnavailable: mt("marketing.pricing.unavailable.title"),
+  pricingUnavailableDetail: mt("marketing.pricing.unavailable.description"),
+  planCta: mt("marketing.home.pricing.create"),
+  pricingCompare: mt("marketing.home.pricing.compare"),
+  faqEyebrow: mt("marketing.home.faq.kicker"),
+  faqTitle: mt("marketing.home.faq.title"),
   faq: [
-    ["Selinow có chỉ dành cho Telegram không?", "Không. Selinow bắt đầu từ Telegram nhưng dùng chung catalog, đơn hàng, thanh toán và fulfillment cho Website và các kênh mở rộng."],
-    ["Selinow có giữ tiền thanh toán không?", "Không. Nhà cung cấp thanh toán tiếp nhận và quyết toán theo điều khoản của họ. Selinow chỉ điều phối checkout và cập nhật trạng thái sau khi xác minh."],
-    ["Tôi có thể chạy thử trước khi xuất bản không?", "Có. Onboarding có readiness check và test mode để bạn kiểm tra luồng mà không tạo giao dịch thật hoặc tiêu hao inventory live."]
+    [mt("marketing.home.faq.telegram.question"), mt("marketing.home.faq.telegram.answer")],
+    [mt("marketing.home.faq.money.question"), mt("marketing.home.faq.money.answer")],
+    [mt("marketing.home.faq.test.question"), mt("marketing.home.faq.test.answer")],
   ],
-  finalEyebrow: "START AT YOUR PACE",
-  finalTitle: "Sẵn sàng tự động hoá kinh doanh của bạn?",
-  finalDescription: "Bắt đầu miễn phí với Website & Telegram ngay hôm nay.",
-  finalPrimary: "Bắt đầu với Selinow",
-  finalSecondary: "Xem demo",
-  footerTagline: "Nền tảng bot, automation và commerce đa kênh dành cho doanh nghiệp hiện đại.",
-  footer: { product: "Sản phẩm", solutions: "Giải pháp", resources: "Tài nguyên" }
-} : {
-  seoTitle: "Selinow OS - Build bots, sell, and automate across every channel",
-  seoDescription: "Selinow OS connects website, Telegram, and expanding channels through one commerce core for safer sales, payments, and digital fulfillment.",
-  announcement: "Selinow Update: Website & Telegram are ready · WhatsApp, Zalo OA, and Discord are expanding on the roadmap.",
-  announcementCta: "See details",
-  eyebrow: "MULTI-CHANNEL BOT & COMMERCE PLATFORM",
-  heroTitle: ["Build bots. Sell more.", "Automate across", "every channel."],
-  heroDescription: "One product, order, payment, and automation core — connecting Website, Telegram, and the next growth channels without fragmented operations.",
-  heroPrimary: "Start for free",
-  heroSecondary: "View demo",
-  heroProof: ["No credit card", "Fast setup", "Cancel anytime"],
-  trust: [
-    ["Safe & secure", "Sensitive data encryption and clear access controls."],
-    ["Built to expand", "A unified core ready to grow with your business."],
-    ["Your data", "You own your data with controlled export and storage."],
-    ["Powerful automation", "Workflows, triggers, and AI make operations lighter."]
-  ],
-  channelsEyebrow: "CHANNEL-NEUTRAL BY DESIGN",
-  channelsTitle: "One platform for every customer channel",
-  channelsDescription: "Start with the channels that work today and expand without rebuilding your commerce core.",
-  available: "Available now",
-  expanding: "Expanding next",
-  extensible: "Extensible",
-  channelStatus: { live: "Live", next: "Coming next", planned: "Planned", development: "In development" },
-  useEyebrow: "BUILT FOR YOUR MODEL",
-  useTitle: "What can Selinow help you do?",
-  useDescription: "From sales bots to fulfillment, every task runs on one observable, controlled data flow.",
-  uses: [
-    ["sales-bot", "Sales bot", "Create buying experiences inside conversations or on your website.", "illustration.shopping-bag.png"],
-    ["support-bot", "Support chatbot", "Answer, triage, and care for customers around the clock.", "illustration.bot.png"],
-    ["digital-delivery", "Files & license keys", "Deliver files, documents, license keys, and access after payment.", "illustration.delivery-cloud.png"],
-    ["catalog", "Digital catalog", "Manage products, variants, pricing, and inventory safely.", "illustration.product-box.png"],
-    ["workflow", "Workflow automation", "Connect triggers, conditions, and actions in one flow.", "decorative.network-nodes.png"],
-    ["notifications", "Notifications & care", "Send updates, reminders, and customer care automatically.", "illustration.notification-bell.png"]
-  ],
-  workflowEyebrow: "OPERATING WORKFLOW",
-  workflowTitle: "How Selinow works",
-  workflowDescription: "A clear path from your first bot to an order delivered automatically.",
-  workflowSteps: [
-    ["Create a bot", "Set up the flow, scripts, and products.", "illustration.bot.png"],
-    ["Connect channels", "Connect Website, Telegram, and supported channels.", "decorative.network-nodes.png"],
-    ["Receive & verify payment", "Process orders and confirm the exact payment.", "illustration.payment-card.png"],
-    ["Deliver & care", "Deliver access, content, and continue the workflow.", "illustration.delivery-cloud.png"]
-  ],
-  architectureEyebrow: "ONE CORE, MANY EXPERIENCES",
-  architectureTitle: "One core, many experiences",
-  architectureDescription: "Channels change, but products, conversations, orders, payments, fulfillment, and automation share one source of truth.",
-  architectureLeft: "Sources",
-  architectureRight: "Destinations",
-  architectureCore: "Selinow Core",
-  architectureModules: ["AI agent", "Automation", "Workflow", "Analytics", "Security"],
-  architectureChannels: ["Website", "Telegram", "Zalo OA", "Discord", "API / Webhook"],
-  pricingEyebrow: "RUNTIME PRICING",
-  pricingTitle: "Simple, transparent pricing",
-  pricingDescription: "Plans, limits, and entitlements come from runtime. No invented prices or hidden limits.",
-  pricingUnavailable: "Plan information is temporarily unavailable.",
-  pricingUnavailableDetail: "The system did not return the active commercial configuration. Please try again later.",
-  planCta: "Start for free",
-  pricingCompare: "See full pricing",
-  faqEyebrow: "FREQUENTLY ASKED QUESTIONS",
-  faqTitle: "What to know before you start",
-  faq: [
-    ["Does Selinow only work with Telegram?", "No. Selinow starts with Telegram while sharing catalog, order, payment, and fulfillment services with Website and expanding channels."],
-    ["Does Selinow hold payment funds?", "No. Your payment provider accepts and settles funds under its terms. Selinow orchestrates checkout and updates the order after verification."],
-    ["Can I test before publishing?", "Yes. Onboarding includes readiness checks and test mode so you can validate the flow without real transactions or live inventory consumption."]
-  ],
-  finalEyebrow: "START AT YOUR PACE",
-  finalTitle: "Ready to automate your business?",
-  finalDescription: "Start free with Website & Telegram today.",
-  finalPrimary: "Start with Selinow",
-  finalSecondary: "View demo",
-  footerTagline: "A bot, automation, and multi-channel commerce platform for modern teams.",
-  footer: { product: "Product", solutions: "Solutions", resources: "Resources" }
+  finalEyebrow: mt("marketing.home.final.kicker"),
+  finalTitle: mt("marketing.home.final.title"),
+  finalDescription: mt("marketing.home.final.description"),
+  finalPrimary: mt("marketing.home.final.cta"),
+  finalSecondary: mt("marketing.home.hero.secondary"),
+  footerTagline: mt("marketing.footer.tagline"),
+  footer: {
+    product: mt("marketing.header.product"),
+    solutions: mt("marketing.header.solutions"),
+    resources: mt("marketing.header.resources"),
+  },
 };
 
-/* Keep the established marketing surface contract discoverable while the
-   landing copy is now sourced from the kit blueprint. */
+// Keep the established marketing surface contract discoverable for static checks.
 // mt("marketing.home.hero.title") mt("marketing.home.hero.secondary") mt("marketing.home.flow.payment") mt("marketing.home.flow.payment_detail") mt("marketing.home.flow.delivery_detail") marketing.pricing_unavailable
 
 const landingStructuredData = {
   "@context": "https://schema.org",
   "@graph": [
     {
+      "@type": "Organization",
+      "@id": "https://selinow.com/#organization",
+      name: "Selinow",
+      url: "https://selinow.com/",
+      logo: "https://selinow.com/brand/logo/selinow-logo-primary.svg",
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://selinow.com/#website",
+      name: "Selinow",
+      url: "https://selinow.com/",
+      publisher: { "@id": "https://selinow.com/#organization" },
+      inLanguage: locale,
+    },
+    {
       "@type": "SoftwareApplication",
+      "@id": "https://selinow.com/#software",
       name: "Selinow OS",
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
       description: landingCopy.seoDescription,
-      url: "https://selinow.com/"
+      url: "https://selinow.com/",
+      publisher: { "@id": "https://selinow.com/#organization" },
+      inLanguage: locale,
     },
     {
       "@type": "FAQPage",
@@ -240,34 +206,53 @@ if (mode === "error") {
   Astro.response.status = 404;
   Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
 }
+
+const storefrontStructuredData = mode === "storefront" && shop?.access === "live" && shop !== null
+  ? {
+    "@context": "https://schema.org",
+    "@type": "OnlineStore",
+    name: shop.name,
+    url: `https://${shop.currentHostname}/`,
+    description: shop.content.seoDescription,
+    ...(shop.theme.logoUrl === null ? {} : { logo: shop.theme.logoUrl }),
+    hasOfferCatalog: {
+      "@type": "OfferCatalog",
+      name: shop.content.headline,
+      itemListElement: products.map((product) => ({
+        "@type": "OfferCatalog",
+        name: product.title,
+        url: `https://${shop.currentHostname}/products/${product.slug}`,
+      })),
+    },
+  }
+  : undefined;
 ---
 
 {mode === "marketing" && (
-  <PlatformLayout title={landingCopy.seoTitle} description={landingCopy.seoDescription} locale={locale}>
+  <PlatformLayout title={landingCopy.seoTitle} description={landingCopy.seoDescription} locale={locale} structuredData={landingStructuredData}>
     <div class="landing-page">
-      <script is:inline type="application/ld+json" set:html={JSON.stringify(landingStructuredData)}></script>
       <div class="announcement-bar" role="status"><div class="platform-shell announcement-inner"><span class="announcement-dot" aria-hidden="true"></span><span>{landingCopy.announcement}</span><a href="#channels">{landingCopy.announcementCta} <span aria-hidden="true">→</span></a></div></div>
       <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
       <main id="main-content">
         <section class="platform-shell landing-hero">
           <div class="landing-hero-copy">
             <p class="landing-eyebrow"><span aria-hidden="true">✦</span>{landingCopy.eyebrow}</p>
-            <h1 aria-label={landingCopy.heroTitle.join(" ")}>{landingCopy.heroTitle[0]}<br />{landingCopy.heroTitle[1]}<br /><strong>{landingCopy.heroTitle[2]}</strong></h1>
+            <h1><span>{landingCopy.heroTitle}</span> <strong>{landingCopy.heroHighlight}</strong></h1>
             <p class="landing-hero-description">{landingCopy.heroDescription}</p>
             <div class="landing-actions"><a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.heroPrimary}<span aria-hidden="true">→</span></a><a class="kit-button kit-button-ghost" href="#workflow">{landingCopy.heroSecondary}<span class="play-icon" aria-hidden="true">▶</span></a></div>
             <ul class="hero-proof" aria-label={landingCopy.heroProof.join(", ")}>
               {landingCopy.heroProof.map((proof) => <li><span aria-hidden="true">✓</span>{proof}</li>)}
             </ul>
           </div>
-          <div class="hero-orbit" aria-label="Selinow Core connecting Website, Telegram, WhatsApp, Zalo OA, Discord, and API">
+          <div class="hero-orbit" aria-label={mt("marketing.home.hero.orbit_aria")}>
             <div class="orbit-glow" aria-hidden="true"></div><div class="orbit-line orbit-line-one" aria-hidden="true"></div><div class="orbit-line orbit-line-two" aria-hidden="true"></div>
-            <img class="orbit-core" src="/brand/selinow-kit/hero.selinow-core.png" alt="Selinow Core" width="265" height="260" />
-            <img class="orbit-provider orbit-provider-website" src="/brand/selinow-kit/provider.website-card.png" alt="Website - Live" width="155" height="79" />
-            <img class="orbit-provider orbit-provider-telegram" src="/brand/selinow-kit/provider.telegram-card.png" alt="Telegram - Live" width="165" height="100" />
-            <img class="orbit-provider orbit-provider-whatsapp" src="/brand/selinow-kit/provider.whatsapp-card.png" alt="WhatsApp - Coming next" width="137" height="104" />
-            <img class="orbit-provider orbit-provider-zalo" src="/brand/selinow-kit/provider.zalo-card.png" alt="Zalo OA - Coming next" width="123" height="95" />
-            <img class="orbit-provider orbit-provider-discord" src="/brand/selinow-kit/provider.discord-card.png" alt="Discord - Planned" width="165" height="95" />
-            <img class="orbit-provider orbit-provider-api" src="/brand/selinow-kit/provider.api-card.png" alt="API - Planned" width="160" height="88" />
+            <img class="orbit-core" src="/brand/selinow-kit/hero.selinow-core.png" alt={mt("marketing.home.hero.core_alt")} width="265" height="260" />
+            <img class="orbit-provider orbit-provider-website" src="/brand/selinow-kit/provider.website-card.png" alt="" width="155" height="79" />
+            <img class="orbit-provider orbit-provider-telegram" src="/brand/selinow-kit/provider.telegram-card.png" alt="" width="165" height="100" />
+            <img class="orbit-provider orbit-provider-whatsapp" src="/brand/selinow-kit/provider.whatsapp-card.png" alt="" width="137" height="104" />
+            <img class="orbit-provider orbit-provider-zalo" src="/brand/selinow-kit/provider.zalo-card.png" alt="" width="123" height="95" />
+            <img class="orbit-provider orbit-provider-discord" src="/brand/selinow-kit/provider.discord-card.png" alt="" width="165" height="95" />
+            <img class="orbit-provider orbit-provider-api" src="/brand/selinow-kit/provider.api-card.png" alt="" width="160" height="88" />
           </div>
         </section>
 
@@ -292,7 +277,7 @@ if (mode === "error") {
 
         <section class="kit-section workflow-section" id="workflow"><div class="platform-shell"><div class="kit-section-heading kit-section-heading-centered"><div><p class="kit-kicker">{landingCopy.workflowEyebrow}</p><h2>{landingCopy.workflowTitle}</h2></div><p>{landingCopy.workflowDescription}</p></div><div class="workflow-track">{landingCopy.workflowSteps.map((step, index) => <article class="workflow-step"><span class="workflow-number">{index + 1}</span><div class="workflow-art"><img src={`/brand/selinow-kit/${step[2]}`} alt="" loading="lazy" /></div><h3>{step[0]}</h3><p>{step[1]}</p>{index < landingCopy.workflowSteps.length - 1 && <span class="workflow-arrow" aria-hidden="true">→</span>}</article>)}</div></div></section>
 
-        <section class="kit-section platform-shell architecture-section" id="architecture"><div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.architectureEyebrow}</p><h2>{landingCopy.architectureTitle}</h2></div><p>{landingCopy.architectureDescription}</p></div><div class="architecture-board"><div class="architecture-sources"><p>{landingCopy.architectureLeft}</p>{landingCopy.architectureModules.map((module) => <span><i aria-hidden="true">✦</i>{module}</span>)}</div><div class="architecture-core"><img src="/brand/selinow-kit/architecture.core.png" alt="" width="104" height="100" /><strong>{landingCopy.architectureCore}</strong><small>Product · Order · Payment · Fulfillment</small></div><div class="architecture-destinations"><p>{landingCopy.architectureRight}</p>{landingCopy.architectureChannels.map((channel, index) => <span><i aria-hidden="true">{index === 0 ? "◎" : index === 1 ? "◈" : index === 2 ? "◌" : index === 3 ? "✦" : "</>"}</i>{channel}</span>)}</div><div class="architecture-path architecture-path-one" aria-hidden="true"></div><div class="architecture-path architecture-path-two" aria-hidden="true"></div></div></section>
+        <section class="kit-section platform-shell architecture-section" id="architecture"><div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.architectureEyebrow}</p><h2>{landingCopy.architectureTitle}</h2></div><p>{landingCopy.architectureDescription}</p></div><div class="architecture-board"><div class="architecture-sources"><p>{landingCopy.architectureLeft}</p>{landingCopy.architectureModules.map((module) => <span><i aria-hidden="true">✦</i>{module}</span>)}</div><div class="architecture-core"><img src="/brand/selinow-kit/global/global-architecture-core.png" alt="" width="104" height="100" /><strong>{landingCopy.architectureCore}</strong><small>Product · Order · Payment · Fulfillment</small></div><div class="architecture-destinations"><p>{landingCopy.architectureRight}</p>{landingCopy.architectureChannels.map((channel, index) => <span><i aria-hidden="true">{index === 0 ? "◎" : index === 1 ? "◈" : index === 2 ? "◌" : index === 3 ? "✦" : "</>"}</i>{channel}</span>)}</div><div class="architecture-path architecture-path-one" aria-hidden="true"></div><div class="architecture-path architecture-path-two" aria-hidden="true"></div></div></section>
 
         <section class="kit-section platform-shell pricing-kit" id="pricing" data-pricing-state={pricingState}><div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.pricingEyebrow}</p><h2>{landingCopy.pricingTitle}</h2></div><p>{landingCopy.pricingDescription}</p></div>{pricingState === "ready" ? <><div class="runtime-plan-grid">{plans.map((plan, index) => <article class:list={["runtime-plan-card", index === 1 && "runtime-plan-card-featured"]}><div class="runtime-plan-head"><span>{index === 1 ? "Recommended" : `0${index + 1}`}</span><h3>{plan.name}</h3></div><p class="runtime-plan-source">Runtime plan · {plan.code}</p><ul>{planFeatureList(plan, locale).map((feature) => <li>{feature}</li>)}</ul><a class="kit-button kit-button-secondary" href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.planCta}<span aria-hidden="true">→</span></a></article>)}</div><a class="pricing-link" href="/pricing">{landingCopy.pricingCompare}<span aria-hidden="true">→</span></a></> : <div class="pricing-empty"><h3>{landingCopy.pricingUnavailable}</h3><p>{landingCopy.pricingUnavailableDetail}</p></div>}</section>
 
@@ -306,7 +291,7 @@ if (mode === "error") {
 )}
 
 {mode === "storefront" && shop && (
-  <StorefrontLayout shop={shop} title={shop.content.seoTitle} description={shop.content.seoDescription} noindex={shop.access !== "live"}>
+  <StorefrontLayout shop={shop} title={shop.content.seoTitle} description={shop.content.seoDescription} noindex={shop.access !== "live"} structuredData={storefrontStructuredData}>
     {shop.access === "live" ? (
       <>
         <section class="store-hero" data-mark={shop.name.slice(0, 1).toUpperCase()}>

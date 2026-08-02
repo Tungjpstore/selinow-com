@@ -842,6 +842,8 @@ describe("backup CLI dry runs", () => {
     const migrationNames = readdirSync(resolve(import.meta.dirname, "../../migrations"))
       .filter((name) => /^\d{4}_.+\.sql$/u.test(name))
       .sort();
+    const latestMigration = migrationNames.at(-1);
+    if (latestMigration === undefined) throw new Error("migration_ledger_empty");
     expect(migrationNames).toContain("0030_order_checkout_cart_reference.sql");
     const commands: Array<{
       accountId: string | undefined;
@@ -954,7 +956,7 @@ describe("backup CLI dry runs", () => {
         args[0] === "d1"
         && args[1] === "execute"
         && args.includes("--file")
-        && args.some((argument) => argument.endsWith("0052_generated_license_request_hardening.sql"))
+        && args.some((argument) => argument.endsWith(latestMigration))
         && ci === "1"
       ))).toBe(true);
       expect(commands.filter(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--command")))

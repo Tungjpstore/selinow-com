@@ -1,9 +1,10 @@
 ---
 import type { StorefrontShop } from "../lib/storefront/store";
 import { getBindings } from "../lib/platform/bindings";
-import { directionForLocale, normalizeSupportedLocale } from "../lib/i18n/locale";
+import { DEFAULT_LOCALE, directionForLocale, normalizeSupportedLocale, SUPPORTED_LOCALES } from "../lib/i18n/locale";
 import { createStorefrontTranslator } from "../lib/i18n/catalogs/storefront";
 import { resolveTurnstileConfiguration } from "../lib/storefront/turnstile";
+import { alternateLocaleUrl, ogLocaleFor, serializeStructuredData, type SeoStructuredData } from "../lib/seo";
 import "../styles/selinow-tokens.css";
 import "../styles/base.css";
 import "../styles/primitives.css";
@@ -15,19 +16,32 @@ interface Props {
   description?: string;
   noindex?: boolean;
   shop: StorefrontShop;
+  structuredData?: SeoStructuredData | undefined;
   title: string;
 }
 
-const { abuseReportProductSlug, description, noindex = false, shop, title } = Astro.props;
+const { abuseReportProductSlug, description, noindex = false, shop, structuredData, title } = Astro.props;
 const turnstileSiteKey = resolveTurnstileConfiguration(getBindings())?.siteKey ?? null;
 const style = `--merchant-brand:${shop.theme.brand};--merchant-brand-ink:${shop.theme.brandInk};--merchant-accent:${shop.theme.accent};--merchant-accent-ink:${shop.theme.accentInk}`;
-const canonicalUrl = new URL(Astro.url.pathname, `https://${shop.currentHostname}`).toString();
 const metaDescription = description ?? shop.content.seoDescription;
 const { publicDetails } = shop;
 // Keep the rendered language aligned with the locale dimension used by the
 // storefront cache; the shop default remains the safe SSR fallback in tests.
-const documentLocale = Astro.locals.locale ?? normalizeSupportedLocale(shop.defaultLocale);
+const documentLocaleHint = Astro.locals.locale ?? normalizeSupportedLocale(shop.defaultLocale);
+const documentLocale = normalizeSupportedLocale(documentLocaleHint);
 const t = createStorefrontTranslator(documentLocale);
+const storefrontOrigin = `https://${shop.currentHostname}`;
+const explicitLocale = Astro.url.searchParams.get("lang");
+const canonicalBase = new URL(Astro.url.pathname, storefrontOrigin).toString();
+const canonicalUrl = explicitLocale !== null && documentLocale !== DEFAULT_LOCALE && normalizeSupportedLocale(explicitLocale) === documentLocale
+  ? alternateLocaleUrl(Astro.url.pathname, documentLocale, storefrontOrigin)
+  : canonicalBase;
+const localeAlternates = [
+  ...SUPPORTED_LOCALES.map((locale) => ({ href: alternateLocaleUrl(Astro.url.pathname, locale, storefrontOrigin), hreflang: locale })),
+  { href: alternateLocaleUrl(Astro.url.pathname, DEFAULT_LOCALE, storefrontOrigin), hreflang: "x-default" },
+];
+Astro.response.headers.set("Content-Language", documentLocale);
+Astro.response.headers.set("Vary", "Accept-Language, Cookie, Host");
 const policyLinks = [
   publicDetails.refundPolicyUrl === null ? null : { href: publicDetails.refundPolicyUrl, label: t("storefront.policy.refund") },
   publicDetails.termsUrl === null ? null : { href: publicDetails.termsUrl, label: t("storefront.policy.terms") },
@@ -42,17 +56,25 @@ const policyLinks = [
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={metaDescription} />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={shop.name} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={metaDescription} />
     <meta property="og:url" content={canonicalUrl} />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:locale" content={ogLocaleFor(documentLocale)} />
+    {SUPPORTED_LOCALES.filter((locale) => locale !== documentLocale).map((locale) => <meta property="og:locale:alternate" content={ogLocaleFor(locale)} />)}
+    {shop.theme.logoUrl && <meta property="og:image" content={shop.theme.logoUrl} />}
+    <meta name="twitter:card" content="summary_large_image" />
+    {shop.theme.logoUrl && <meta name="twitter:image" content={shop.theme.logoUrl} />}
+    <meta name="twitter:image:alt" content={shop.name} />
     {noindex && <meta name="robots" content="noindex, nofollow" />}
     <meta name="theme-color" content="#F8FAFC" />
-    <link rel="canonical" href={canonicalUrl} />
+    {!noindex && <link rel="canonical" href={canonicalUrl} />}
+    {!noindex && localeAlternates.map((alternate) => <link rel="alternate" hreflang={alternate.hreflang} href={alternate.href} />)}
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/brand/logo/selinow-app-icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/selinow-180.png" />
     <title>{title}</title>
+    {structuredData && <script is:inline type="application/ld+json" set:html={serializeStructuredData(structuredData)}></script>}
   </head>
   <body
     data-shop-host={shop.currentHostname}

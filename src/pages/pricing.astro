@@ -66,6 +66,21 @@ const comparisonGroups = [
     { label: t("marketing.pricing.row.export"), value: (plan: MarketingPlan) => capability(plan.features.dataExport) },
   ] },
 ];
+const pricingStructuredData = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: t("marketing.pricing.seo_title"),
+  description: t("marketing.pricing.seo_description"),
+  url: "https://selinow.com/pricing",
+  isPartOf: { "@type": "WebSite", name: "Selinow", url: "https://selinow.com/" },
+  breadcrumb: {
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Selinow", item: "https://selinow.com/" },
+      { "@type": "ListItem", position: 2, name: t("marketing.pricing.intro.title"), item: "https://selinow.com/pricing" },
+    ],
+  },
+};
 ---
 
 <PlatformLayout
@@ -74,6 +89,7 @@ const comparisonGroups = [
   locale={locale}
   canonical="https://selinow.com/pricing"
   noindex={!validHost}
+  structuredData={validHost ? pricingStructuredData : undefined}
 >
   {validHost ? <>
     <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />

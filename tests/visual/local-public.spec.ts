@@ -16,12 +16,12 @@ type PublicRoute = {
 
 const routes: readonly PublicRoute[] = [
   {
-    heading: "Xây bot. Bán hàng. Tự động hoá trên mọi kênh.",
+    heading: "Biến mọi cuộc trò chuyện thành đơn hàng.",
     id: "marketing-home",
     origin: marketingOrigin,
     path: "/",
     screenshot: "public-marketing-home.png",
-    title: "Selinow OS - Xây bot, bán hàng, tự động hoá trên mọi kênh",
+    title: "Selinow - Biến mọi cuộc trò chuyện thành đơn hàng",
   },
   {
     heading: "Một gói phù hợp với nhịp vận hành của bạn.",

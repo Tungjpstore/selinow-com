@@ -35,8 +35,8 @@ const navItems: readonly AdminNavItem[] = [
   { icon: "overview", label: t("admin.layout.nav.overview"), path: "/admin" },
   { detail: t("admin.layout.nav.detail.directory"), icon: "shops", label: t("admin.layout.nav.shops"), path: "/admin/shops" },
   { icon: "reports", label: t("admin.layout.nav.reports"), path: "/admin#reports" },
-  { detail: t("admin.layout.nav.detail.no_investigation_api"), icon: "payments", label: t("admin.layout.nav.orders") },
-  { detail: t("admin.layout.nav.detail.no_queue_api"), icon: "appeals", label: t("admin.layout.nav.appeals") },
+  { detail: t("admin.layout.nav.detail.investigations"), icon: "payments", label: t("admin.layout.nav.orders"), path: "/admin/investigations" },
+  { detail: t("admin.layout.nav.detail.appeals"), icon: "appeals", label: t("admin.layout.nav.appeals"), path: "/admin/appeals" },
   { icon: "systems", label: t("admin.layout.nav.operations"), path: "/admin/operations" },
   { detail: t("admin.layout.nav.detail.audit"), icon: "audit", label: t("admin.layout.nav.audit"), path: "/admin#ledger" },
 ] as const;

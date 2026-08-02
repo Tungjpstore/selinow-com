@@ -8,6 +8,7 @@ export type ShopCapability =
   | "shop:update"
   | "team:manage"
   | "billing:manage"
+  | "customers:manage"
   | "catalog:manage"
   | "checkout:create"
   | "automation:manage"
@@ -17,8 +18,8 @@ export type ShopCapability =
   | "payments:manage";
 
 const ROLE_CAPABILITIES: Record<ShopRole, ReadonlySet<ShopCapability>> = {
-  manager: new Set(["shop:read", "shop:update", "automation:manage", "catalog:manage", "checkout:create", "fulfillment:manage", "integrations:manage", "payments:manage"]),
-  owner: new Set(["shop:read", "shop:update", "automation:manage", "team:manage", "billing:manage", "catalog:manage", "checkout:create", "domains:manage", "fulfillment:manage", "integrations:manage", "payments:manage"]),
+  manager: new Set(["shop:read", "shop:update", "automation:manage", "catalog:manage", "checkout:create", "customers:manage", "fulfillment:manage", "integrations:manage", "payments:manage"]),
+  owner: new Set(["shop:read", "shop:update", "automation:manage", "team:manage", "billing:manage", "catalog:manage", "checkout:create", "customers:manage", "domains:manage", "fulfillment:manage", "integrations:manage", "payments:manage"]),
   support: new Set(["shop:read"]),
   viewer: new Set(["shop:read"]),
 };
