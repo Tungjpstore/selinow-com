@@ -13,12 +13,16 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 
 - Historical Phase 2 runtime commit: `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`
 - Historical Phase 2 runtime tree: `a35e2c871d2db97b392910fb04f51b7aaa27313c`
-- P3 execution candidate: the final clean committed HEAD after P3 verification;
-  never substitute the historical Phase 2 commit.
+- P3 local implementation candidate:
+  `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`; a future execution still uses a
+  fresh manifest from the final approved clean HEAD and never substitutes the
+  historical Phase 2 commit.
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
 - Source migration ledger: current candidate `0001`-`0080`
-- Exact changed-file manifest and local verification: `docs/PHASE_2_REVIEW_PACKAGE_R2.md`
-- Candidate-bound local restore report: `.wrangler/restore-drills/local/rdr_20260803145929_b94ce8926be7.json`
+- Exact P3 changed-file manifest and local verification:
+  `docs/PHASE_3_REVIEW_PACKAGE_R0.md`
+- Candidate-bound local restore report:
+  `.wrangler/restore-drills/local/rdr_20260803200612_4388ccee7295.json`
 - Execution identity: generated, not hand-copied. `release:staging:manifest`
   binds the final clean commit/tree, exact migration ledger, staging D1 identity,
   and exact backup/restore fingerprints after fresh evidence exists. The manifest
@@ -92,7 +96,7 @@ repository-required provider secret names. Never record values here.
 ## Verification and evidence paths
 
 Local command results, restore report, test counts, prior browser evidence and
-dry-run artifacts are recorded in `docs/PHASE_2_REVIEW_PACKAGE_R2.md`.
+dry-run artifacts are recorded in `docs/PHASE_3_REVIEW_PACKAGE_R0.md`.
 Remote URLs, timestamps, checksums, account/D1 identity and protected backup
 reports remain `TBD`. No package is accepted until the exact committed candidate
 and fresh remote admission evidence are recorded.

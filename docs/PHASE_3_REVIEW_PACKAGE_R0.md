@@ -8,8 +8,10 @@ Reviewed locally: 2026-08-04 (Asia/Tokyo)
 ## Candidate identity
 
 - Baseline reviewed commit: `cabb703fd92d2bcf863dffabaca6eb349a1fbe8f`.
-- Exact implementation candidate: populated after the focused P3 commit; the
-  documentation-only evidence commit must not replace it.
+- Exact implementation candidate: `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`
+  (`fix: complete phase 3 pilot readiness`).
+- This verification update is documentation-only; it does not replace or amend
+  the immutable implementation candidate.
 - Branch: `codex/landing-page-deploy-20260801`.
 - Migration ledger: 80 contiguous forward-only files, `0001` through `0080`;
   P3 adds or edits no migration.
@@ -58,7 +60,22 @@ pilot status; no seller, provider or commercial observation is fabricated.
 
 ## Verification record
 
-Final command counts, implementation commit, local restore report and changed
-file manifest are recorded in the documentation follow-up after all gates pass.
+- `npm ci --ignore-scripts`: reproducible install, 456 packages audited, zero
+  vulnerabilities.
+- `npm run check`: 694 files, zero errors and the existing three hints.
+- `npm run lint` and `npx tsc --noEmit`: passed.
+- Focused P3 matrix: 3 files / 18 tests passed.
+- `npm run test`: 249 files / 1,777 tests passed.
+- `npm run build` and `npm run build:staging`: passed; the existing non-fatal
+  mixed static/dynamic inventory crypto import warning remains.
+- `npm run deploy:dry-run` and `npm run deploy:staging:dry-run`: passed with 280
+  modules and exited at Wrangler `--dry-run`; no deployment occurred.
+- `npm audit --audit-level=high`, `git diff --check` and the bounded changed-file
+  secret scan: passed; zero high-confidence secret findings.
+- Candidate-bound isolated restore:
+  `.wrangler/restore-drills/local/rdr_20260803200612_4388ccee7295.json`;
+  integrity `ok`, zero FK violations, 614 restored items and exact cleanup.
+
 No staging/production backup, migration, seed, deploy, provider mutation,
-route/DNS mutation, real order or seller pilot is authorized by this package.
+route/DNS mutation, real order or seller pilot was performed or authorized by
+this package.

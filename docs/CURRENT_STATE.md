@@ -1,20 +1,22 @@
-# Selinow Phase 2 Current State
+# Selinow Phase 3 Current State
 
-Last verified: 2026-08-03 (Asia/Tokyo)
+Last verified: 2026-08-04 (Asia/Tokyo)
 
 P3 local admission hardening was added on 2026-08-04. The current source now
 binds staging manifests to exact backup/restore/D1 evidence and requires a
 complete migration ledger plus passing database preflight before and after a
 staging build. This is local tooling evidence only; no remote mutation or pilot
-acceptance is implied. See `docs/PHASE_3_STAGING_PILOT_READINESS.md`.
+acceptance is implied. See `docs/PHASE_3_STAGING_PILOT_READINESS.md`,
+`docs/PHASE_3_STAGING_READINESS.md`, `docs/PHASE_3_PILOT_SCORECARD.md` and
+`docs/PHASE_3_REVIEW_PACKAGE_R0.md`.
 
-Latest P3 local evidence: 248 Vitest files / 1,773 tests; check/lint/TypeScript,
+Latest P3 local evidence: 249 Vitest files / 1,777 tests; check/lint/TypeScript,
 builds, both deploy dry-runs, audit, diff check, and isolated local restore pass.
 The restore report is
-`.wrangler/restore-drills/local/rdr_20260803190826_c9161ace0c4b.json` and remains
+`.wrangler/restore-drills/local/rdr_20260803200612_4388ccee7295.json` and remains
 ignored/private local evidence.
 
-This is the short current-state record for the Phase 2 seller-activation and
+This is the short current-state record for the Phase 3 staging-admission and
 controlled-pilot candidate. It is not a historical implementation log and does
 not authorize a remote mutation.
 Maturity values are intentionally specific: `implemented`, `locally_verified`,
@@ -25,7 +27,7 @@ Maturity values are intentionally specific: `implemented`, `locally_verified`,
 
 | Dimension | Source | Local | Staging | Production | Commercial |
 | --- | --- | --- | --- | --- | --- |
-| Commit/tree identity | Phase 2 review-fix runtime commit `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`, tree `a35e2c871d2db97b392910fb04f51b7aaa27313c` | `locally_verified`; R2 records the immutable runtime commit and local restore evidence | `blocked`; execution must use a fresh private staging manifest generated from the final clean HEAD | `deployed` platform handoff at historical Worker `6ca9c890-ed04-44dc-ac32-44b36881f2dc`; current tree not proven deployed | `blocked` pending external acceptance |
+| Commit/tree identity | P3 implementation candidate `ec66a7a909319ac0a4b5b4b8c777836e636e56a5` | `locally_verified`; R0 records the immutable implementation commit and local restore evidence | `blocked`; execution must use a fresh private staging manifest generated from the final clean HEAD | `deployed` platform handoff at historical Worker `6ca9c890-ed04-44dc-ac32-44b36881f2dc`; current tree not proven deployed | `blocked` pending external acceptance |
 | Migration ledger | `0001`-`0080`, contiguous | full source chain exercised by local SQLite-backed tests and isolated restore | `deployed` through `0028`; 52 pending (`0029`-`0080`) | `deployed` through `0052`; 28 pending (`0053`-`0080`) | `blocked` pending guarded migration admission |
 | Worker version | Current source only | `locally_verified` build/dry-runs | `deployed` historical staging version; current tree not proven there | `deployed` platform-only handoff; current candidate not proven there | `blocked` |
 | Marketing | Phase 1 copy/routes exist in source; Website is current and Telegram is labeled upcoming | `locally_verified` by source/browser gates | `blocked` pending candidate deploy | `deployed` homepage only; current source copy not proven live | `blocked` until truthful claims and routes are deployed |
@@ -39,9 +41,9 @@ Maturity values are intentionally specific: `implemented`, `locally_verified`,
 | Custom domain | Cloudflare for SaaS lifecycle in source | `locally_verified` | `deployed` lifecycle evidence exists | `blocked` pending exact hostname/Turnstile admission | `blocked` |
 | Legal/support | Seller storefront policy/abuse mechanics exist; platform surfaces absent | `blocked` pending owner/legal decisions | `blocked` | `blocked`; no placeholder copy may be published | `blocked` |
 | Analytics | Billing usage metering plus 12-milestone activation ledger, enum-only projections and rotating deterministic backfill | `locally_verified`; inventory readiness now requires active product/variant state and uses durable activation timestamps | `blocked` pending `0077`-`0080` admission | `blocked` | `blocked` pending retention ownership and pilot evidence |
-| Monitoring | Platform canary/route evidence only | `locally_verified` for scripts | `blocked` pending service/provider/budget evidence | `blocked` beyond platform handoff | `blocked` |
+| Monitoring | Concrete threshold, window, role and stop contract | `locally_verified` by artifact contract; no configured remote alert is claimed | `blocked` pending named owners, dashboards, alerts and acknowledgements | `blocked` beyond platform handoff | `blocked` |
 | Seller activation | `/app` sellability, readiness blockers, onboarding inventory cleanup, and route-safe next actions | `locally_verified`; source/unit/auth-browser evidence only | `blocked` pending candidate admission and UAT | `blocked` | `blocked` pending pilot evidence |
-| Pilot evidence | Phase 2 plan and evidence schema only; no seller/provider observations recorded | `not_started` | `blocked` pending controlled PayOS/Telegram UAT | `not_started` | `blocked` |
+| Pilot evidence | Phase 3 scorecard, safe evidence allowlist and 14-scenario regression map | `not_started`; local behavior is mapped separately from pilot status | `blocked` pending controlled Website-first and provider UAT | `not_started` | `blocked` |
 
 ## Read-only public evidence
 

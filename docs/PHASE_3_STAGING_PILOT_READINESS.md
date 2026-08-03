@@ -104,12 +104,12 @@ this repository or in chat.
 
 - `npm run check`: 694 files, 0 errors, 3 existing hints.
 - `npm run lint` and `npx tsc --noEmit`: passed.
-- `npm run test`: 248 files / 1,773 tests passed.
+- `npm run test`: 249 files / 1,777 tests passed.
 - `npm run build`, `npm run build:staging`, `npm run deploy:dry-run`, and
   `npm run deploy:staging:dry-run`: passed; both deploy commands stopped at
   Wrangler dry-run and performed no deployment.
 - `npm audit --audit-level=high`: 0 vulnerabilities after the lockfile update.
 - Isolated local restore drill:
-  `.wrangler/restore-drills/local/rdr_20260803190826_c9161ace0c4b.json`;
+  `.wrangler/restore-drills/local/rdr_20260803200612_4388ccee7295.json`;
   integrity `ok`, zero FK violations, 614 restored items, exact cleanup.
 - `git diff --check`: passed.
