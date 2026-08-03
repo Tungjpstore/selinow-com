@@ -1,33 +1,33 @@
 {
   "schemaVersion": 1,
   "package": "Selinow Frontend Rebuild Handoff",
-  "generatedAt": "2026-08-02",
+  "generatedAt": "2026-08-03",
   "sourceBaseline": {
     "repository": "Selinow.com",
-    "commit": "8e545fb37dfd0fe3ce78ccdd8dfeebb35abd8429",
+    "commit": "1144ae7b7021e6d6828cfebfb68f403fc6a2c2b0",
     "note": "Handoff files and seller operation/channel/UI continuation changes are uncommitted working-tree changes at generation time."
   },
   "scope": {
     "canonicalLogicalRoutes": 25,
     "redirectAliases": 2,
-    "acceptanceScenarios": 79,
+    "acceptanceScenarios": 87,
     "traceabilityRecords": 28,
-    "sourceMigrations": "0001-0056",
-    "apiEndpoints": 124
+    "sourceMigrations": "0001-0069",
+    "apiEndpoints": 148
   },
   "verification": {
-    "npm run check": "pass: 0 errors, 3 existing hints",
+    "npm run check": "pass: 0 errors, 3 hints",
     "npm run lint": "pass",
     "npx tsc --noEmit": "pass",
-    "npm run test": "pass: 197 files, 1489 tests",
-    "npm run build": "pass: 242 modules, 2971.73 KiB",
-    "npm run deploy:dry-run": "pass: 242 modules, 3498.58 KiB upload, no deployment",
+    "npm run test": "pass: 235 files / 1,670 tests",
+    "npm run build": "pass: 272 modules, 3156.58 KiB",
+    "npm run deploy:dry-run": "pass: 272 modules, 3713.82 KiB upload, no deployment",
     "npm audit --audit-level=high": "pass: 0 vulnerabilities",
-    "csv": "pass: 79 acceptance rows, 28 traceability rows",
+    "csv": "pass: 87 acceptance rows, 28 traceability rows",
     "yaml": "pass: 25 routes, 2 aliases",
     "git diff --check": "pass",
-    "apiEndpointIndex": "pass: 124 method/path rows, source paths and contract metadata",
-    "npm run deploy:staging:dry-run": "pass: 242 modules, 3498.58 KiB upload, no deployment"
+    "apiEndpointIndex": "pass: 148 method/path rows, source paths and contract metadata",
+    "npm run deploy:staging:dry-run": "pass: 272 modules, 3713.82 KiB upload, no deployment"
   },
   "productionBoundary": {
     "productionChanged": false,
@@ -38,27 +38,31 @@
   "files": [
     {
       "path": "docs/frontend-rebuild-handoff/ACCEPTANCE_MATRIX.csv",
-      "sha256": "6e5af95d5009ebeddc9516eb6652bf3fa6459668345d2d0c769e5ed0b6453192"
+      "sha256": "161b2de2fc2027a327e4ac0a9438bca9fbd2ef7439245544c9689b6656c65232"
     },
     {
       "path": "docs/frontend-rebuild-handoff/API_ENDPOINT_INDEX.csv",
-      "sha256": "c6923e3c656694dfa573a533c32f9d7e9128ef548b322321d63f303891088bb5"
+      "sha256": "954e44592ca9f93928d0ba4fb143d91789aeec2cb8cb8aaddce3948f057f03a1"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/DASHBOARD_INFORMATION_ARCHITECTURE.md",
+      "sha256": "16dc1cb2505eb5972512fff8bf9ff1ae5bb4281424e11b776e7d0eeaa90a80a1"
     },
     {
       "path": "docs/frontend-rebuild-handoff/DATA_API_AND_SECURITY_CONTRACTS.md",
-      "sha256": "a299df57642eb889f63be3a04d6a5adfbe436d25ca92e5d855b07275f34e6a3e"
+      "sha256": "e392447aa172df17e5708710b50d6081d25ded50d3c94611243ec0e969e43362"
     },
     {
       "path": "docs/frontend-rebuild-handoff/DESIGN_AND_INTERACTION_REQUIREMENTS.md",
-      "sha256": "70acefbe0ae5d3bdabec2458d45b709241e015d2f1b40c19cf5bb5e938ff48fb"
+      "sha256": "538fb6f03a7ae586e0c0e730966d4d9baaa76a684fabd9bff173285383582b45"
     },
     {
       "path": "docs/frontend-rebuild-handoff/DOMAIN_STATE_MACHINES.md",
-      "sha256": "da7d2fb97eb4106424d9ad597ed51a39b73e2b24dff86602c364c1f94f00d302"
+      "sha256": "6eb46c12c0f6b3a91129af53f5e5b4698337ed82d68edaa3d8422c0f5b6828f4"
     },
     {
       "path": "docs/frontend-rebuild-handoff/IMPLEMENTATION_MIGRATION_PLAN.md",
-      "sha256": "84746e440d19a4e66e18ceb9b64f04ace6ac5e710740b410faf5267e0f234f3b"
+      "sha256": "a3cba1ddb482e12eeb09ec5a947d9756d10050d1aabb64ee983dbd25ce7b43e5"
     },
     {
       "path": "docs/frontend-rebuild-handoff/MASTER_REBUILD_PROMPT.md",
@@ -66,27 +70,27 @@
     },
     {
       "path": "docs/frontend-rebuild-handoff/PRODUCT_CAPABILITY_CATALOG.md",
-      "sha256": "4adc9192ab55a2112952ed44ed54a54d508f47f3b46810154cb835c43a805e97"
+      "sha256": "f2bfff58819c3d48bb258bbf477e1616f7ee7ab58c0fa415d8cffd6c235aa19f"
     },
     {
       "path": "docs/frontend-rebuild-handoff/QUICK_START.md",
-      "sha256": "d987d0811096e0377b50d13a80c62ede8c9bab9710a142139f296abee4e9d53c"
+      "sha256": "c7f625deeda5b6c326219d2bd1db5f24b178b15e02ee7179c08e7131dd502517"
     },
     {
       "path": "docs/frontend-rebuild-handoff/README.md",
-      "sha256": "7a569bbd2bbc960f781d9b296a715fd26d651622695a33671162e731688bebc6"
+      "sha256": "8af67c3c93df9ea7e112ebf94845263d0e2465228971cd5ba9446a43eab5d115"
     },
     {
       "path": "docs/frontend-rebuild-handoff/ROLES_PERMISSIONS_AND_VISIBILITY.md",
-      "sha256": "38d1f5e921d42090c0b7a875533a9d028db3aa7d9b237fb9c7be3699e87d1252"
+      "sha256": "90c3b9d656863be07d292c614db62bcc6998d39425ab8f251408d87543012012"
     },
     {
       "path": "docs/frontend-rebuild-handoff/route-contracts.yaml",
-      "sha256": "8a293b8ace7cd27b4561b96e20765c1b96b2cf680dfed574152a94be6456be41"
+      "sha256": "db5ecfa0bd7469b83a35ec668e03d70c7d15ac8f37f99fda5e9cbc8a8fcd4042"
     },
     {
       "path": "docs/frontend-rebuild-handoff/SCREEN_BLUEPRINTS.md",
-      "sha256": "21b39906b5a752411744ff5c92a3fa03dd3dfce756cd94032b488579a49f456b"
+      "sha256": "8701820020b67b8ddcb8e5a4504efb0edb0b380f6510f91abdbd14aeab2df5b6"
     },
     {
       "path": "docs/frontend-rebuild-handoff/SOURCE_OF_TRUTH.md",
@@ -94,15 +98,15 @@
     },
     {
       "path": "docs/frontend-rebuild-handoff/SURFACES_ROUTES_AND_NAVIGATION.md",
-      "sha256": "854e2b5c71ed87cdcf5751f7972771ccc5a18319e11ef295637cbed03f630813"
+      "sha256": "c56c6e01bb4898a301d0eda436b71083dffe22912b7e6a428f282c32423c14f7"
     },
     {
       "path": "docs/frontend-rebuild-handoff/SYSTEM_ARCHITECTURE.md",
-      "sha256": "121b4dac170c85ce08c943c173a4c1c01b898a4ad515e13ac789fd1c9fd42c95"
+      "sha256": "394f0ef04ec548c50222f79c4e6b363986ff3ff93e3b8ebcdf590034e388550d"
     },
     {
       "path": "docs/frontend-rebuild-handoff/TRACEABILITY_MATRIX.csv",
-      "sha256": "2f9cb93355f7fd5b17ca1aab9f20ee24a06f4eeb2b730c047fc90eb5643422db"
+      "sha256": "4e36f18eaef465fb21f468da0c57b0c1ef992f47a1618b524b5cda316eefabb3"
     }
   ]
 }

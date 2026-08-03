@@ -40,7 +40,7 @@ if (shop !== undefined && loadState === "ready") {
     loadState = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
   }
   try {
-    const member = await getShopForMember({ capability: "payments:manage", env, shopPublicId: shop.publicId, userId: auth.userId });
+    const member = await getShopForMember({ capability: "payments:read", env, shopPublicId: shop.publicId, userId: auth.userId });
     paymentExceptions = await listPaymentExceptions({ env, shopId: member.row.shop_id });
   } catch (error) {
     paymentExceptionState = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";

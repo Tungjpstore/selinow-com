@@ -1,6 +1,7 @@
 import { sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { tryRecordFirstPaidFulfilled } from "../analytics/activation";
 import { sha256Hex } from "../events/append";
 import type { AppBindings } from "../platform/bindings";
 import { prepareGenericPaidActivationStatements } from "./entitlements";
@@ -289,7 +290,11 @@ export async function applyCommercePaymentEvent(input: ApplyCommercePaymentEvent
   const { attempt, claimToken, decision, env, eventId, evidence } = input;
   if (input.integrationId !== attempt.integrationId) throw new AppError("payment_event_claim_invalid", 500);
   await assertClaimedEventBinding(env, attempt, eventId, claimToken);
-  if (decision === "paid_exact") return fulfillExactPayment(env, attempt, eventId, claimToken, evidence);
+  if (decision === "paid_exact") {
+    const result = await fulfillExactPayment(env, attempt, eventId, claimToken, evidence);
+    if (result.state === "paid_exact") await tryRecordFirstPaidFulfilled({ env, orderId: attempt.orderId, shopId: attempt.shopId });
+    return result;
+  }
   if (decision === "pending" || decision === "terminal_unpaid") {
     const now = new Date().toISOString();
     // Unpaid provider observations may advance only a transient attempt. Once

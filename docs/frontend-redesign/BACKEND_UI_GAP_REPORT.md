@@ -1,6 +1,6 @@
 # Frontend/backend coverage report
 
-Updated: 2026-08-02
+Updated: 2026-08-03
 
 This report tracks the PromptOS seller surfaces against the contracts that are
 actually implemented. A surface is called operational only when it reads or
@@ -128,11 +128,15 @@ truthfully disabled instead of being simulated in the browser.
   provider-pending state; verified channel delivery, retry scheduling and
   payment/fulfillment overrides remain unavailable. Internal notes remain
   tenant-bound and hidden from unsupported UI controls.
-- **Catalog presentation:** product channel visibility and a hidden product state
-  lack a backend contract and remain unavailable. Product creation plus the first
-  variant now commits atomically with its idempotency and audit receipts; focused
-  rollback, replay/conflict and cross-tenant coverage closes the former two-write
-  orphan-draft risk.
+- **Catalog presentation:** migration `0069` now provides a tenant-bound product
+  channel-visibility GET/PUT contract with fail-closed missing rows, and Website
+  plus Telegram Mini App projections apply the visible fence. The product client
+  now exposes inline controls that remain disabled until server hydration succeeds,
+  then use CSRF/recent-auth, idempotency and expected-version conflict reloads;
+  provider activation and remote migration admission remain separate gates.
+  Product creation plus the first variant now commits atomically with its
+  idempotency and audit receipts; focused rollback, replay/conflict and
+  cross-tenant coverage closes the former two-write orphan-draft risk.
 - **Global shop configuration:** onboarding now exposes tenant-scoped merchant and
   business country, supported currency and default-locale controls for initial
   setup and later settings updates. Server validation, currency-drift guards and

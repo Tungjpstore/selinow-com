@@ -8,8 +8,9 @@ Source authority: `src/lib/tenants/policy.ts`. Active membership trong dung shop
 | --- | --- | --- | --- | --- | --- |
 | `shop:read` | yes | yes | yes | yes | Dashboard, orders, customers, integrations projection |
 | `shop:update` | yes | yes | no | no | Shop name/country/currency/locale, storefront draft |
-| `team:manage` | yes | no | no | no | Members projection; mutations chua co contract |
-| `billing:manage` | yes | no | no | no | Billing projection; plan mutation chua co contract |
+| `team:manage` | yes | no | no | no | Owner member ledger plus invite/resend/revoke, role-change and suspension APIs; owner/self protection applies |
+| `billing:manage` | yes | no | no | no | Owner billing projection plus audited plan-change/cancel request intents; provider settlement remains pending |
+| `customers:manage` | yes | yes | no | no | Customer detail, allowlisted profile/status update, internal notes and irreversible note redaction |
 | `catalog:manage` | yes | yes | no | no | Category/product/variant, inventory import |
 | `checkout:create` | yes | yes | no | no | Controlled seller test order/onboarding |
 | `automation:manage` | yes | yes | no | no | Automation read/control; domain task co fence rieng |
@@ -18,7 +19,7 @@ Source authority: `src/lib/tenants/policy.ts`. Active membership trong dung shop
 | `integrations:manage` | yes | yes | no | no | Telegram connect/health; provider configuration |
 | `payments:manage` | yes | yes | no | no | PayOS connect/health, payment exceptions |
 
-Luu y: `support` va `viewer` hien co cung capability server la `shop:read`; UI co the khac copy/intent nhung khong duoc cap action. `manager` khong co team, billing hoac domain management.
+Luu y: `support` va `viewer` hien co cung capability server la `shop:read`; UI co the khac copy/intent nhung khong duoc cap mutation action. `manager` co `customers:manage` nhung khong co team, billing hoac domain management. Owner member and billing mutations remain source/local contracts with recent-auth, CSRF, idempotency, optimistic-version and audit fences; billing requests stay provider-pending until external settlement evidence exists.
 
 ## Platform admin roles
 

@@ -40,17 +40,17 @@ Moi route can session; anonymous redirect 302 den `/login`. Query `?shop=shop_..
 | --- | --- | --- | --- |
 | `/app` | Tat ca seller roles | Overview, order ledger, readiness/catalog projections theo capability | no-shop, ready, subprojection forbidden, unavailable |
 | `/onboarding` | Auth member; flow intended owner/manager, server owner-gates sensitive steps | Create/select/rename shop; channels, catalog, inventory, Telegram, PayOS, settings, readiness, test, publish | no-shop, step pending/in-progress/blocked/warning/ready, provider waits, forbidden |
-| `/app/products` | Owner/manager | Category/product/variant CRUD-by-status; private-file policy | loading, empty, filtered empty, validation, conflict, forbidden, unavailable |
+| `/app/products` | Owner/manager | Category/product/variant CRUD-by-status; private-file policy; channel visibility remains a tenant-bound API contract with fail-closed missing rows (no inline control yet) | loading, empty, filtered empty, validation, conflict, forbidden, unavailable |
 | `/app/inventory` | Owner/manager | Counts; preview/import encrypted keys | empty, preview valid/expired, importing, duplicate/rejected, recent-auth, forbidden, unavailable |
 | `/app/orders` | Tat ca roles read; payment exception owner/manager | Latest 200 safe summaries; payment/fulfillment axes | empty, ready, payment exception unavailable/forbidden, data unavailable |
 | `/app/orders/:id` | Member cua selected shop | Safe order detail, attempts, fulfillment, audit; manual fulfillment API co contract | ready, 403 cross-tenant, 404 missing, unavailable; messages/notes read-only/unavailable |
-| `/app/customers` | Tat ca roles | Masked customer ledger | empty, ready, forbidden, unavailable; no edit/detail/merge actions |
+| `/app/customers` | Tat ca roles | Masked customer ledger; owner/manager detail, profile/status update, internal notes and redaction | empty, ready, forbidden, unavailable; support/viewer remain read-only; merge/unmask/delete unavailable |
 | `/app/integrations` | Owner/manager Telegram+PayOS and channel connectors; owner domains | Safe provider/domain health; channel expansion catalog; connector request/cancel theo capability | disconnected, connecting, active, degraded, requested, provider-pending, canceled, waiting-user/provider, expired, failed, forbidden |
 | `/app/domains` | Owner | Custom domain create/check/primary/delete | no custom domain, claim, DNS, hostname, SSL, routing, active, failed, forbidden |
 | `/app/automation` | Tat ca roles read; controls theo task capability | Task list/detail, start limited capabilities, cancel/resume | pending, waiting-user, waiting-provider, running, retryable, succeeded, failed, canceled, forbidden |
 | `/app/store` | Tat ca roles read; owner/manager edit; owner publish | Draft settings, narrow preview, readiness-gated publish | no-shop, draft, live, unpublished changes, blocked, conflict, forbidden, unavailable |
-| `/app/members` | Owner read | Masked members projection | empty, ready, forbidden; invite/change/revoke unavailable |
-| `/app/billing` | Owner read | Plan/subscription/usage projection | trialing, active, past-due, grace, canceled/blocked; mutations unavailable |
+| `/app/members` | Owner | Masked membership projection plus owner invitation, role-change, suspension and revoke workflow | empty, ready, forbidden, unavailable; non-owner access fails closed; owner/self membership and hard delete remain protected |
+| `/app/billing` | Owner | Plan/subscription/usage projection plus audited plan-change/cancel request intents | trialing, active, past-due, grace, canceled/blocked; request is provider-pending and never settles subscription state |
 | `/app/data` | Owner | Audit, exports, deletion, seller abuse/moderation | empty, export pending/ready/expired, deletion lifecycle/legal hold, forbidden, unavailable |
 
 ### Redirect aliases
@@ -90,12 +90,35 @@ Tat ca route phai resolve active hostname. Custom domain can ownership verified.
 
 - Marketing nav khong mang session/shop assumptions.
 - Workspace shell co shop switcher membership-bound va role-aware nav.
+- Workspace nav chia thanh Command, Commerce, Channels, Operations va Workspace.
+  `DASHBOARD_INFORMATION_ARCHITECTURE.md` la source cho thu tu va grouping; day
+  la presentation IA, khong phai authorization moi.
 - Selected shop query duoc giu khi di giua workspace routes.
 - Khi switch shop: xoa entity ID, cursor, filter, hash va local draft cua tenant cu; `/app/orders/:id` quay ve `/app/orders`.
 - Storefront nav khong cho buyer chon tenant; hostname la context.
 - Order/cart/grant tokens khong dat vao URL, analytics, logs hoac link share.
 - Admin shell khong co seller impersonation.
 - Error/forbidden state phai co safe exit route, khong tu redirect sang shop/admin gan nhat neu co nguy co data confusion.
+
+### Integrations lane split
+
+`/app/integrations` van la mot canonical screen nhung phai tach lane va anchor
+cho Website, PayOS, Telegram Bot, Telegram Mini App, Zalo Mini App, Zalo OA,
+WhatsApp Cloud, Discord Bot, connector requests va API credentials. Moi lane
+co identity, connection, inbound proof, outbound capability, commerce
+capability, freshness va next action rieng. Khong duoc copy health/credential/
+activation state tu lane khac; khong duoc hien provider payload, token, secret,
+internal tenant ID hoac coi `requested`/`provider_pending` la `active`.
+
+`/app/telegram` la redirect alias den Telegram Bot lane (`focus=telegram#telegram`),
+khong phai mot screen thu hai. Telegram Mini App co anchor rieng va van dung
+session exchange route; Zalo, WhatsApp va Discord chi hien safe catalog/request
+projections cho toi khi external gate duoc chap nhan.
+
+`/app/automation` doc durable tasks theo cac nhom `needs_seller`,
+`waiting_provider`, `running_retryable` va `terminal`. Task projection chi co
+safe error/status/action URL; client khong duoc tu tao evidence token, lease,
+provider payload hoac claim external work da hoan tat.
 
 ## Stale kit warning
 

@@ -19,8 +19,15 @@ describe("integrations frontend contract", () => {
     expect(page).not.toContain('data-provider-row="email"');
     expect(page).toContain("unavailableState");
     expect(page).toContain("data-can-manage-api-credentials");
+    expect(page).toContain("data-can-read-providers");
+    expect(page).toContain("data-can-refresh-telegram");
+    expect(page).toContain("data-can-read-domains");
+    expect(page).toContain("const canManageProviders = shop?.role === \"owner\";");
+    expect(page).toContain("const canManageChannelConnectors = shop?.role === \"owner\" || shop?.role === \"manager\";");
     expect(page).toContain("data-api-credentials-section");
     expect(page).toContain("dashboard.integrations.api_credentials");
+    expect(page).toContain('value="inventory:read"');
+    expect(page).toContain('value="orders:read"');
     expect(page).toContain("data-channel-expansion-section");
     expect(page).toContain("data-can-manage-channel-connectors");
   });
@@ -48,5 +55,36 @@ describe("integrations frontend contract", () => {
     expect(script).not.toContain("console.log");
     expect(script).not.toContain("localStorage");
     expect(script).not.toContain("sessionStorage");
+  });
+
+  it("keeps provider credentials owner-only while exposing safe manager read/health controls", async () => {
+    const [page, script] = await Promise.all([
+      readFile("src/pages/app/integrations.astro", "utf8"),
+      readFile("src/scripts/dashboard/integrations.ts", "utf8"),
+    ]);
+    expect(page).toContain("canReadProviders ? telegramView.summary : unavailableTelegram.summary");
+    expect(page).toContain("canRefreshTelegram && telegram !== null");
+    expect(page).toContain("canManageProviders && telegramConnected");
+    expect(page).toContain('data-reason-code={canReadProviders ? "owner_required" : "permission_unavailable"}');
+    expect(page).toContain("canReadDomains ? domainsView.summary : unavailableDomains.summary");
+    expect(script).toContain("const canReadProviders = root.dataset.canReadProviders === \"true\";");
+    expect(script).toContain("provider === \"telegram\" && !canRefreshTelegram");
+    expect(script).toContain("disconnect.hidden = !canManageProviders || !connected");
+    expect(script).toContain("if (canReadProviders)");
+    expect(script).toContain("if (canReadDomains)");
+  });
+
+  it("drops stale tenant responses when a shop switch races an integration request", async () => {
+    const script = await readFile("src/scripts/dashboard/integrations.ts", "utf8");
+
+    expect(script).toContain("class TenantChangedError extends Error");
+    expect(script).toContain("const tenantSignature = (): string");
+    expect(script).toContain("const resetTenantBoundState = (): void");
+    expect(script).toContain("const assertTenantContext = (requestSignature: string)");
+    expect(script).toContain("assertTenantContext(requestSignature);");
+    expect(script).toContain("window.addEventListener(\"popstate\", () => { ensureTenantContext(); });");
+    expect(script).toContain("channelExpansionGrid?.replaceChildren();");
+    expect(script).toContain("apiCredentialList?.replaceChildren();");
+    expect(script).toContain("if (isTenantChangedError(error)) return;");
   });
 });

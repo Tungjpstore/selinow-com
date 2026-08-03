@@ -6,6 +6,19 @@ export type ShopRole = typeof SHOP_ROLES[number];
 export type ShopCapability =
   | "shop:read"
   | "shop:update"
+  | "catalog:read"
+  | "orders:read"
+  | "orders:read:masked"
+  | "orders:read:summary"
+  | "customers:read"
+  | "customers:read:masked"
+  | "customers:read:summary"
+  | "fulfillment:read"
+  | "automation:read"
+  | "integrations:read"
+  | "integrations:credentials"
+  | "payments:read"
+  | "domains:read"
   | "team:manage"
   | "billing:manage"
   | "customers:manage"
@@ -18,10 +31,24 @@ export type ShopCapability =
   | "payments:manage";
 
 const ROLE_CAPABILITIES: Record<ShopRole, ReadonlySet<ShopCapability>> = {
-  manager: new Set(["shop:read", "shop:update", "automation:manage", "catalog:manage", "checkout:create", "customers:manage", "fulfillment:manage", "integrations:manage", "payments:manage"]),
-  owner: new Set(["shop:read", "shop:update", "automation:manage", "team:manage", "billing:manage", "catalog:manage", "checkout:create", "customers:manage", "domains:manage", "fulfillment:manage", "integrations:manage", "payments:manage"]),
-  support: new Set(["shop:read"]),
-  viewer: new Set(["shop:read"]),
+  manager: new Set([
+    "shop:read", "shop:update", "catalog:read", "orders:read", "orders:read:masked", "orders:read:summary", "customers:read", "customers:read:masked", "customers:read:summary",
+    "fulfillment:read", "automation:read", "integrations:read", "payments:read", "domains:read",
+    "automation:manage", "catalog:manage", "checkout:create", "customers:manage", "fulfillment:manage", "integrations:manage",
+  ]),
+  owner: new Set([
+    "shop:read", "shop:update", "catalog:read", "orders:read", "orders:read:masked", "orders:read:summary", "customers:read", "customers:read:masked", "customers:read:summary", "fulfillment:read", "automation:read",
+    "integrations:read", "integrations:credentials", "payments:read", "domains:read",
+    "automation:manage", "team:manage", "billing:manage", "catalog:manage", "checkout:create", "customers:manage", "domains:manage",
+    "fulfillment:manage", "integrations:manage", "payments:manage",
+  ]),
+  support: new Set([
+    "shop:read", "catalog:read", "orders:read:masked", "customers:read:masked", "fulfillment:read", "automation:read",
+    "integrations:read", "payments:read",
+  ]),
+  viewer: new Set([
+    "shop:read", "catalog:read", "orders:read:summary", "customers:read:summary", "fulfillment:read", "automation:read",
+  ]),
 };
 
 const RESERVED_SLUG_FALLBACK = new Set([
@@ -59,9 +86,14 @@ export function normalizeShopName(value: unknown): string {
 }
 
 export function assertRoleCapability(role: ShopRole, capability: ShopCapability): void {
-  if (!ROLE_CAPABILITIES[role].has(capability)) {
+  if (!Object.hasOwn(ROLE_CAPABILITIES, role) || !ROLE_CAPABILITIES[role].has(capability)) {
     throw new AppError("authorization_denied", 403);
   }
+}
+
+/** Return a safe boolean for projections that need role-specific redaction. */
+export function hasRoleCapability(role: ShopRole, capability: ShopCapability): boolean {
+  return Object.hasOwn(ROLE_CAPABILITIES, role) && ROLE_CAPABILITIES[role].has(capability);
 }
 
 export function assertCheckoutAllowed(input: {

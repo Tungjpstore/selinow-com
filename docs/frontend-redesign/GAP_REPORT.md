@@ -1,6 +1,6 @@
 # Frontend dependency gap
 
-Updated: 2026-08-02
+Updated: 2026-08-03
 
 This report distinguishes a backend contract that is genuinely missing from a backend capability that exists but has no truthful UI. No unsupported production behavior is mocked.
 
@@ -40,7 +40,7 @@ This report distinguishes a backend contract that is genuinely missing from a ba
 
 - Inventory now projects the server threshold per variant, exposes low/out-of-stock filters and hardens import plaintext/preview lifecycle; the current authenticated local gate covers desktop/mobile behavior and the 1440/768/390/320px viewport matrix.
 - Store builder now renders a safe server-backed active-catalog preview projection (`src/lib/storefront/preview.ts`) with explicit empty/error/truncated states and no buyer mutation affordances. Its current local desktop/mobile baselines are part of the reviewed 42-snapshot authenticated set.
-- Product manager now creates the product, first variant, idempotency receipt and safe audit receipt in one tenant-scoped D1 batch; a variant failure rolls the product back, and retries return the original IDs. It also supports a second variant, preserves opaque options on update, exposes an out-of-stock filter and renders the server product update time in the shop timezone. Category and product archive retain linked commerce evidence. Channel visibility and a hidden state still lack backend contracts and remain unavailable.
+- Product manager now creates the product, first variant, idempotency receipt and safe audit receipt in one tenant-scoped D1 batch; a variant failure rolls the product back, and retries return the original IDs. It also supports a second variant, preserves opaque options on update, exposes an out-of-stock filter and renders the server product update time in the shop timezone. Category and product archive retain linked commerce evidence. Migration `0069` now supplies the tenant-bound product/channel visibility GET/PUT contract with fail-closed missing rows; `/app/products` now exposes inline channel controls with disabled-until-loaded state, CSRF/recent-auth, idempotency and expected-version conflict reloads. Provider activation and remote migration admission remain separate gates.
 - Public abuse reporting is implemented across storefront, product, cart, checkout and order layouts through the sanitized Turnstile/idempotency API. The product target is now offered only when a reportable product resolved, so a product 404 cannot present an action the backend will reject as `resource_not_found`. Source/axe coverage remains authoritative for the dialog; the current public staging visual gate is 18/20 because both desktop and mobile cart checks stop before screenshot when the deployed Worker lacks the current hydration selector.
 - Order list/detail surfaces now show allowlisted expected/received amounts, evidence time and key-count mismatch impact; payment exception remediation requests remain provider-pending until the audited provider contract completes them.
 - The dedicated automation workspace and shop-name rename UI are source-verified; the isolated authenticated local browser gate supplies desktop/mobile rendered evidence without remote bindings.

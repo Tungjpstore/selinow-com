@@ -101,12 +101,45 @@ describe("shop country configuration service", () => {
       env,
       idempotencyKey: input.idempotencyKey,
       name: `Shop ${input.slug}`,
-      planCode: "store",
+      planCode: "starter",
       requestId: `request-${input.slug}`,
       slug: input.slug,
       userId: input.userId,
     });
   }
+
+  it("allows only public assignable paid plans for new shops", async () => {
+    const defaultPlan = await createShop({
+      env,
+      idempotencyKey: "shop-default-paid-plan",
+      name: "Default Paid Plan",
+      requestId: "request-default-paid-plan",
+      slug: "default-paid-plan",
+      userId: "user-a",
+    });
+    expect(defaultPlan.shop.planCode).toBe("starter");
+
+    await expect(createShop({
+      env,
+      idempotencyKey: "shop-legacy-plan-reject",
+      name: "Legacy Plan",
+      planCode: "store",
+      requestId: "request-legacy-plan-reject",
+      slug: "legacy-plan-reject",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "validation_failed", issues: ["plan_invalid"], status: 400 });
+
+    database.prepare("UPDATE plans SET is_assignable = 0 WHERE code = 'starter'").run();
+    await expect(createShop({
+      env,
+      idempotencyKey: "shop-nonassignable-plan-reject",
+      name: "Nonassignable Plan",
+      planCode: "starter",
+      requestId: "request-nonassignable-plan-reject",
+      slug: "nonassignable-plan-reject",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "validation_failed", issues: ["plan_invalid"], status: 400 });
+  });
 
   it("normalizes explicit ISO countries at creation and replays the same durable projection", async () => {
     const first = await createShop({
@@ -116,11 +149,13 @@ describe("shop country configuration service", () => {
       idempotencyKey: "shop-country-create-a",
       merchantCountry: "jp",
       name: "Global Shop",
-      planCode: "store",
+      planCode: "starter",
       requestId: "request-create-a",
       slug: "global-shop",
       userId: "user-a",
     });
+    const shopId = (database.prepare("SELECT id FROM shops WHERE public_id = ?").get(first.shop.publicId) as { id: string }).id;
+    database.prepare("DELETE FROM activation_milestones WHERE shop_id = ?").run(shopId);
     const replay = await createShop({
       businessCountry: "US",
       currency: "USD",
@@ -128,7 +163,7 @@ describe("shop country configuration service", () => {
       idempotencyKey: "shop-country-create-a",
       merchantCountry: "JP",
       name: "Global Shop",
-      planCode: "store",
+      planCode: "starter",
       requestId: "request-create-a-replay",
       slug: "global-shop",
       userId: "user-a",
@@ -137,6 +172,7 @@ describe("shop country configuration service", () => {
     expect(first.created).toBe(true);
     expect(first.shop).toMatchObject({ businessCountry: "US", currency: "USD", defaultLocale: "vi-VN", merchantCountry: "JP" });
     expect(replay).toEqual({ created: false, shop: first.shop });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM activation_milestones WHERE shop_id = ?").get(shopId)).toEqual({ count: 2 });
     expect(database.prepare(`
       SELECT business_country_code AS businessCountry, currency, merchant_country_code AS merchantCountry
       FROM shops WHERE public_id = ?
@@ -244,7 +280,7 @@ describe("shop country configuration service", () => {
       env: invalidDefaultEnv,
       idempotencyKey: "shop-invalid-default-currency",
       name: "Invalid Currency",
-      planCode: "store",
+      planCode: "starter",
       requestId: "request-invalid-default-currency",
       slug: "invalid-default-currency",
       userId: "user-b",
@@ -282,7 +318,7 @@ describe("shop country configuration service", () => {
       env,
       idempotencyKey: "shop-default-locale",
       name: "Locale Shop",
-      planCode: "store",
+      planCode: "starter",
       requestId: "request-default-locale",
       slug: "locale-shop",
       userId: "user-a",

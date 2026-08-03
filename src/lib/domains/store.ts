@@ -276,9 +276,10 @@ async function requireDomainActor(
   env: AppBindings,
   shopPublicId: string,
   userId: string,
+  access: "read" | "manage",
   requireEntitlement: boolean,
 ): Promise<DomainActor> {
-  const member = await getShopForMember({ capability: "domains:manage", env, shopPublicId, userId });
+  const member = await getShopForMember({ capability: access === "manage" ? "domains:manage" : "domains:read", env, shopPublicId, userId });
   if (requireEntitlement && !hasFeature(member.row.feature_flags_json, "customDomain")) {
     throw new AppError("subscription_required", 402, ["custom_domain_not_in_plan"]);
   }
@@ -688,7 +689,7 @@ async function claimCheckLease(input: { env: AppBindings; now: Date; row: Domain
 }
 
 export async function listShopDomains(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<DomainView[]> {
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, false);
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "read", false);
   const [result, claims] = await Promise.all([
     input.env.PLATFORM_DB.prepare(`${DOMAIN_SELECT}
     WHERE shop_id = ? AND deleted_at IS NULL
@@ -715,7 +716,7 @@ export async function createCustomDomain(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<{ created: boolean; domain: DomainView }> {
-  const actor = await requireDomainActor(input.env, input.shopPublicId, input.userId, true);
+  const actor = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", true);
   const { shopId } = actor;
   const limit = actor.customDomainLimit;
   if (limit === null) throw new AppError("subscription_configuration_invalid", 500, ["custom_domain_limit_invalid"]);
@@ -963,7 +964,7 @@ export async function checkCustomDomain(input: {
   userId: string;
 }): Promise<DomainView> {
   const runtime = input.runtime ?? {};
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, false);
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "read", false);
   const claim = await findClaimById(input.env, shopId, input.domainId);
   if (claim !== null) {
     return verifyAndPromoteClaim({
@@ -1011,10 +1012,10 @@ export async function setPrimaryDomain(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<DomainView> {
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, false);
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", false);
   const row = requireDomain(await findDomainById(input.env, shopId, input.domainId));
   if (row.type === "custom") {
-    await requireDomainActor(input.env, input.shopPublicId, input.userId, true);
+    await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", true);
     if (row.ownershipVerifiedAt === null) throw new AppError("domain_not_ready", 409);
   }
   if (row.status !== "active" || row.deleteRequestedAt !== null) throw new AppError("domain_not_ready", 409);
@@ -1207,7 +1208,7 @@ export async function deleteCustomDomain(input: {
   userId: string;
 }): Promise<void> {
   const runtime = input.runtime ?? {};
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, false);
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", false);
   const claim = await findClaimById(input.env, shopId, input.domainId);
   if (claim !== null && claim.verifiedAt === null) {
     const nowIso = (runtime.now ?? new Date()).toISOString();

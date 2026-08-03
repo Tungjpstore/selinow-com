@@ -71,10 +71,10 @@ Moi implementation PR cho mot screen phai ghi:
 ### `/app/products`
 
 - Job: tao va quan ly category/product/variant dung currency/status.
-- Mandatory: search/status filters, category ledger, product/variant hierarchy, price/min-max, fulfillment type, publication/moderation status, version/update time.
+- Mandatory: search/status filters, category ledger, product/variant hierarchy, price/min-max, fulfillment type, publication/moderation status, version/update time, and (when wired) the server-projected per-channel visibility state.
 - Actions: category create/update/archive; atomic product+initial variant; product/variant full update; private-file setup.
 - States: empty, filtered empty, draft, active, suspended, archived, validation, idempotency/version conflict, forbidden/unavailable.
-- Anti-drift: no hard delete; no hidden/channel visibility; active edit khong imply published snapshot.
+- Anti-drift: no hard delete; channel visibility is a separate tenant-bound GET/PUT contract with fail-closed missing rows and must not be conflated with product status, publication or provider activation; active edit khong imply published snapshot.
 
 ### `/app/inventory`
 
@@ -106,9 +106,9 @@ Moi implementation PR cho mot screen phai ghi:
 
 - Job: doc masked customer ledger va order activity.
 - Mandatory: masked email/display name, locale, status, order count, last order.
-- Actions: optional navigate/filter only.
+- Actions: all roles may navigate/filter the masked ledger; owner/manager may open a detail projection, update allowlisted display name/locale/status, append an internal note and redact a note with expected-version/idempotency guards.
 - States: empty, ready, forbidden/unavailable.
-- Anti-drift: no detail/edit/merge/note/delete; khong unmask identity.
+- Anti-drift: support/viewer remain read-only; no merge/delete or identity unmasking; note redaction is irreversible and must reload the authoritative projection.
 
 ## Store va integrations
 
@@ -123,12 +123,14 @@ Moi implementation PR cho mot screen phai ghi:
 ### `/app/integrations`
 
 - Job: biet Telegram/PayOS/domain da registered/configured/healthy/ready hay chua, xem kenh mo rong va lam next safe action.
-- Mandatory: separate credential/integration/webhook/readiness facts, checked time, safe error/reason, effective capabilities.
+- Mandatory: summary rail va cac lane doc lap cho Website, PayOS, Telegram Bot, Telegram Mini App, Zalo Mini App, Zalo OA, WhatsApp Cloud, Discord Bot, connector requests va API credentials; moi lane co credential/integration/webhook/readiness facts, checked time, safe error/reason, effective capabilities va next action rieng.
 - Actions: Telegram connect/replace/disconnect/health; PayOS connect/disconnect/health; issue/list/revoke scoped API credentials; channel expansion catalog plus request/cancel connector intent; links to domains.
 - States: disconnected, pending/connecting, waiting-user/provider, active, degraded/mismatch, requested, provider-pending, canceled/rejected, expired/error, credentials-empty/issued/revoked, forbidden.
 - Security: secret input one-way; never render token/key/checksum/webhook secret/provider payload.
 - API credential token is revealed exactly once after issue, copied only through the explicit action, and never persisted in browser storage or rendered again by list/reload.
 - Channel expansion cards show safe capabilities, required seller action and contract-ready/provider-pending stage. They never render credentials, webhook secrets or provider payloads, and a request never implies provider activation or delivery.
+- Lane-specific anti-drift: Telegram Bot webhook proof does not authenticate Mini App `initData`; Zalo Mini App app proof does not authenticate Zalo OA; WhatsApp challenge/HMAC does not prove template billing; Discord interaction ACK does not prove outbound delivery. Payment and fulfillment badges remain independent for every lane.
+- Responsive: at 1440/768 use grouped cards with explicit provider headings; at 390/320 stack one lane at a time and preserve anchor/focus context. No horizontal overflow, hidden secrets or stale prior-lane data after shop switch.
 
 ### `/app/domains`
 
@@ -145,22 +147,26 @@ Moi implementation PR cho mot screen phai ghi:
 - Actions: start only allowed API capabilities; cancel/resume by server projection, expectedVersion/idempotency.
 - States: pending, waiting-user, waiting-provider, running, retryable, succeeded, failed, canceled, forbidden/unavailable.
 - Anti-drift: no client evidence token; request accepted != external work completed; no cancel live lease.
+- IA groups: `needs_seller` (consent/prerequisite/action URL), `waiting_provider` (external review/webhook/delivery), `running_retryable` (lease/attempt/next run) and `terminal` (success/failure/canceled immutable result). A provider-pending task never becomes a success card because a connector request was accepted.
+- Accessibility/responsiveness: status is conveyed by text and icon/colour together; retry/cancel controls are keyboard reachable and server `canCancel` gated; 320px layout wraps all safe error codes and never exposes evidence or lease tokens.
 
 ## Account va data
 
 ### `/app/members`
 
 - Job: owner doc active/inactive membership va role.
-- Mandatory: masked identity, role, status, created time, clear read-only notice.
+- Mandatory: masked identity, role, status, created time, capability-derived action policy and invitation ledger for owner.
+- Actions: owner may invite/resend/revoke pending invitations, change non-owner roles and suspend non-owner memberships through CSRF/recent-auth/idempotency/expected-version contracts; non-owner views fail closed without member data.
 - States: empty, ready, forbidden, unavailable.
-- Anti-drift: no invite/change role/revoke controls.
+- Anti-drift: owner/self membership is protected, no hard delete or client-side privilege escalation, and forbidden/read-only states must not leak member data.
 
 ### `/app/billing`
 
 - Job: owner hieu plan/subscription period/grace/usage/limits.
 - Mandatory: server state, dates, feature flags, limits, usage counters; warning for past_due/grace/suspended.
+- Actions: owner may submit an audited plan-change or cancellation request intent with stable idempotency and expected subscription version; the UI must render request status independently from subscription state.
 - States: trialing, active, past_due, grace_period, suspended, canceled, unavailable.
-- Anti-drift: no plan change/payment method/upgrade/downgrade/cancel; no inferred entitlement from plan name.
+- Anti-drift: request accepted/provider-pending never means plan changed; no payment-method/proration/settlement/completion controls; no inferred entitlement from plan name.
 
 ### `/app/data`
 

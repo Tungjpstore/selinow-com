@@ -4,9 +4,11 @@ import { constantTimeEqual } from "../core/crypto";
 const MAX_INIT_DATA_BYTES = 16 * 1024;
 const MAX_USER_JSON_BYTES = 8 * 1024;
 const HEX_HASH = /^[0-9a-f]{64}$/u;
+const TELEGRAM_ID_MAX = 4_503_599_627_370_495n;
 
 export type TelegramMiniAppLaunch = {
   authDate: Date;
+  dataCheckString: string;
   queryId: string | null;
   startParam: string | null;
   user: {
@@ -51,7 +53,7 @@ function parseUser(value: string): TelegramMiniAppLaunch["user"] {
     if (typeof record.id !== "number" && typeof record.id !== "string") rejectInvalid();
     if (typeof record.first_name !== "string" || record.first_name.length < 1 || record.first_name.length > 128) rejectInvalid();
     const id = String(record.id);
-    if (id.length < 1 || id.length > 64 || containsControlCharacter(id) || containsControlCharacter(record.first_name)) rejectInvalid();
+    if (!/^\d{1,20}$/u.test(id) || BigInt(id) > TELEGRAM_ID_MAX || containsControlCharacter(id) || containsControlCharacter(record.first_name)) rejectInvalid();
     const lastName = record.last_name;
     const username = record.username;
     const languageCode = record.language_code;
@@ -103,14 +105,14 @@ export async function verifyTelegramMiniAppInitData(input: {
   if (authDateValue === null || !/^\d{1,12}$/u.test(authDateValue)) rejectInvalid();
   const authSeconds = Number(authDateValue);
   const now = input.now ?? new Date();
-  const maxAgeSeconds = input.maxAgeSeconds ?? 86_400;
+  const maxAgeSeconds = input.maxAgeSeconds ?? 300;
   if (!Number.isSafeInteger(maxAgeSeconds) || maxAgeSeconds < 60 || maxAgeSeconds > 604_800 || !Number.isFinite(now.getTime())) rejectInvalid();
   const age = Math.floor(now.getTime() / 1000) - authSeconds;
   if (age < -300 || age > maxAgeSeconds) rejectInvalid("telegram_mini_app_expired");
 
   const dataCheckString = entries
     .filter(([key]) => key !== "hash")
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
   const secretKey = await hmacBytes(encoder.encode("WebAppData"), input.botToken);
@@ -121,6 +123,7 @@ export async function verifyTelegramMiniAppInitData(input: {
   if (userValue === null) rejectInvalid();
   return {
     authDate: new Date(authSeconds * 1000),
+    dataCheckString,
     queryId: params.get("query_id"),
     startParam: params.get("start_param"),
     user: parseUser(userValue),

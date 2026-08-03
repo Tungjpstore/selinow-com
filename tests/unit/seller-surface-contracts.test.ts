@@ -8,6 +8,7 @@ const members = new Map([
   ["shop-a", { row: { shop_id: "shop-a", role: "owner" }, shop: { name: "Shop A" } }],
   ["shop-b", { row: { shop_id: "shop-b", role: "owner" }, shop: { name: "Shop B" } }],
   ["shop-support", { row: { shop_id: "shop-support", role: "support" }, shop: { name: "Support Shop" } }],
+  ["shop-viewer", { row: { shop_id: "shop-viewer", role: "viewer" }, shop: { name: "Viewer Shop" } }],
 ]);
 
 vi.mock("../../src/lib/tenants/store", () => ({
@@ -23,6 +24,7 @@ vi.mock("../../src/lib/tenants/store", () => ({
 import { getSellerOrder, listSellerOrders } from "../../src/lib/commerce/seller-orders";
 import { listSellerAuditEntries } from "../../src/lib/operations/seller-audit";
 import { getSellerBilling, listSellerCustomers, listSellerMembers } from "../../src/lib/tenants/seller-management";
+import { getSellerCustomer } from "../../src/lib/tenants/customer-management";
 import { getSellerStorefrontSettings, updateSellerStorefrontSettings } from "../../src/lib/tenants/storefront-settings";
 import { getShopForMember } from "../../src/lib/tenants/store";
 
@@ -49,7 +51,7 @@ class FakeDatabase {
               return Promise.resolve({ results: values[0] === "shop-a" ? [{ id: "aud-a", actorType: "user", action: "inventory.imported", resourceType: "inventory_batch", resourceId: "batch-a", requestId: "request-a", createdAt: "2026-07-28T00:02:00.000Z", sourceKind: "application", operationId: null, retentionClass: "standard" }] : [] });
             }
             if (sql.includes("FROM shop_customers")) {
-              return Promise.resolve({ results: values[0] === "shop-a" ? [{ id: "customer-internal-a", displayName: "Khách A", email: "customer-a@example.test", locale: "vi", status: "active", createdAt: "2026-07-28T00:00:00.000Z", orderCount: 2, lastOrderAt: "2026-07-28T00:05:00.000Z" }] : [] });
+              return Promise.resolve({ results: ["shop-a", "shop-support", "shop-viewer"].includes(String(values[0])) ? [{ id: "customer-internal-a", displayName: "Khách A", email: "customer-a@example.test", locale: "vi", status: "active", createdAt: "2026-07-28T00:00:00.000Z", orderCount: 2, lastOrderAt: "2026-07-28T00:05:00.000Z" }] : [] });
             }
             if (sql.includes("FROM shop_members")) {
               return Promise.resolve({ results: values[0] === "shop-a" ? [{ userId: "user-internal-a", displayName: "Owner A", email: "owner-a@example.test", memberPublicId: "mbr_00000000-0000-4000-8000-0000000000a1", role: "owner", status: "active", createdAt: "2026-07-28T00:00:00.000Z", version: 1 }] : [] });
@@ -69,7 +71,7 @@ class FakeDatabase {
           first() {
             if (sql.includes("FROM shop_settings")) { const state = readState(); return Promise.resolve({ brandingJson: state.branding, storefrontJson: state.storefront, version: state.version, publishedVersion: state.publishedVersion, publishedAt: state.publishedAt }); }
             if (sql.includes("FROM shop_subscriptions")) {
-              return Promise.resolve(values[0] === "shop-a" ? { planCode: "store", planName: "Store", planVersion: 7, featuresJson: '{"storefront":true}', limitsJson: '{"orders_month":100}', state: "active", trialEndsAt: null, currentPeriodStart: "2026-07-01T00:00:00.000Z", currentPeriodEnd: "2026-08-01T00:00:00.000Z", graceEndsAt: null, canceledAt: null } : null);
+              return Promise.resolve(values[0] === "shop-a" ? { planCode: "store", planName: "Store", planVersion: 7, featuresJson: '{"storefront":true}', limitsJson: '{"orders_month":100}', state: "active", trialEndsAt: null, currentPeriodStart: "2026-07-01T00:00:00.000Z", currentPeriodEnd: "2026-08-01T00:00:00.000Z", graceEndsAt: null, canceledAt: null, marketCode: "vn", priceCurrency: "VND", priceAmountMinor: 99000, priceInterval: "month" } : null);
             }
             if (sql.startsWith("UPDATE shop_settings")) { writeState(String(values[0]), String(values[1])); return Promise.resolve({ version: readState().version }); }
             if (sql.includes("FROM orders")) {
@@ -155,6 +157,34 @@ describe("seller surface contracts", () => {
     await expect(listSellerCustomers({ env: env(database), shopPublicId: "shop-b", userId: "user-b" })).resolves.toEqual([]);
   });
 
+  it("redacts customer projections by support/viewer role and blocks viewer detail", async () => {
+    const database = new FakeDatabase();
+    await expect(listSellerCustomers({ env: env(database), shopPublicId: "shop-support", userId: "user-support" })).resolves.toEqual([{
+      createdAt: "2026-07-28T00:00:00.000Z",
+      displayName: "K******",
+      emailMasked: "cu********@example.test",
+      lastOrderAt: "2026-07-28T00:05:00.000Z",
+      locale: "vi",
+      orderCount: 2,
+      publicId: "customer-internal-a",
+      status: "active",
+      version: 1,
+    }]);
+    await expect(listSellerCustomers({ env: env(database), shopPublicId: "shop-viewer", userId: "user-viewer" })).resolves.toEqual([{
+      createdAt: null,
+      displayName: null,
+      emailMasked: null,
+      lastOrderAt: "2026-07-28T00:05:00.000Z",
+      locale: null,
+      orderCount: 2,
+      publicId: "customer-internal-a",
+      status: "active",
+      version: 1,
+    }]);
+    await expect(getSellerCustomer({ env: env(database), customerPublicId: "customer-internal-a", shopPublicId: "shop-viewer", userId: "user-viewer" }))
+      .rejects.toMatchObject({ code: "authorization_denied", status: 403 });
+  });
+
   it("uses team and billing capabilities and strips internal member identities", async () => {
     const database = new FakeDatabase();
     const membersResult = await listSellerMembers({ env: env(database), shopPublicId: "shop-a", userId: "user-a" });
@@ -176,6 +206,7 @@ describe("seller surface contracts", () => {
       limits: { orders_month: 100 },
       planCode: "store",
       planVersion: 7,
+      currentPrice: { amountMinor: 99000, currency: "VND", interval: "month", marketCode: "vn" },
       state: "active",
       usage: [{ metric: "orders_month", periodKey: "2026-07", value: 12 }],
     });

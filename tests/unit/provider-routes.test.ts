@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertProviderConnectionBinding,
   createTelegramMiniAppClaims,
+  parseZaloMiniAppWebhook,
   parseDiscordInteraction,
   readAndVerifyProviderWebhook,
   verifyWhatsAppWebhookChallenge,
@@ -59,6 +60,14 @@ describe("provider route contracts", () => {
     expect(claims.initDataHash).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(claims.replayKey).toContain(claims.initDataHash);
     expect(JSON.stringify(claims)).not.toContain(BOT_TOKEN);
+  });
+
+  it("keeps the replay key stable when signed query parameters are reordered", async () => {
+    const original = await initData();
+    const first = await createTelegramMiniAppClaims({ botToken: BOT_TOKEN, connectionId: "connection-001", initData: original, now: NOW, shopId: "shop-001" });
+    const reordered = await createTelegramMiniAppClaims({ botToken: BOT_TOKEN, connectionId: "connection-001", initData: original.split("&").reverse().join("&"), now: NOW, shopId: "shop-001" });
+    expect(reordered.initDataHash).toBe(first.initDataHash);
+    expect(reordered.replayKey).toBe(first.replayKey);
   });
 
   it("rejects tenant or provider mismatches before a route can claim an event", () => {
@@ -142,13 +151,49 @@ describe("provider route contracts", () => {
   });
 
   it("only exposes Discord type and safe id after signature verification", () => {
-    expect(parseDiscordInteraction(JSON.stringify({ type: 1 }))).toEqual({ kind: "ping", type: 1 });
-    expect(parseDiscordInteraction(JSON.stringify({ id: "interaction-001", token: "secret", type: 2 }))).toEqual({
+    expect(parseDiscordInteraction(JSON.stringify({ type: 1 }))).toEqual({ applicationId: null, kind: "ping", type: 1 });
+    expect(parseDiscordInteraction(JSON.stringify({ application_id: "123456789012345678", id: "interaction-001", token: "secret", type: 2 }))).toEqual({
+      applicationId: "123456789012345678",
       id: "interaction-001",
       kind: "interaction",
       type: 2,
     });
+    for (const type of [3, 4, 5]) {
+      expect(parseDiscordInteraction(JSON.stringify({ application_id: "123456789012345678", id: `interaction-${String(type)}`, type }))).toMatchObject({ applicationId: "123456789012345678", kind: "interaction", type });
+    }
     expect(() => parseDiscordInteraction(JSON.stringify({ type: "1" }))).toThrow(expect.objectContaining({ code: "channel_route_invalid" }));
-    expect(() => parseDiscordInteraction(JSON.stringify({ id: "bad value", type: 2 }))).toThrow(expect.objectContaining({ code: "channel_reference_invalid" }));
+    expect(() => parseDiscordInteraction(JSON.stringify({ id: "interaction-006", type: 6 }))).toThrow(expect.objectContaining({ code: "channel_route_invalid" }));
+    expect(() => parseDiscordInteraction(JSON.stringify({ type: 99 }))).toThrow(expect.objectContaining({ code: "channel_route_invalid" }));
+    expect(() => parseDiscordInteraction(JSON.stringify({ application_id: "123456789012345678", id: "bad value", type: 2 }))).toThrow(expect.objectContaining({ code: "channel_reference_invalid" }));
+    expect(() => parseDiscordInteraction(JSON.stringify({ id: "interaction-missing-app", type: 2 }))).toThrow(expect.objectContaining({ code: "channel_route_invalid" }));
+    expect(parseDiscordInteraction(JSON.stringify({ application_id: "987654321098765432", id: "interaction-bad-app", type: 2 }))).toMatchObject({ applicationId: "987654321098765432" });
+  });
+
+  it("binds Zalo Mini App events to the expected app identity", async () => {
+    const body = JSON.stringify({
+      event: "user.revoke.consent",
+      appId: "zalo-app-001",
+      userId: "zalo-user-001",
+      timestamp: "1670553442564",
+    });
+    const claims = await parseZaloMiniAppWebhook({
+      connectionId: "connection-001",
+      expectedAppId: "zalo-app-001",
+      rawBody: body,
+      shopId: "shop-001",
+    });
+    expect(claims).toMatchObject({
+      appId: "zalo-app-001",
+      event: "user.revoke.consent",
+      userId: "zalo-user-001",
+      timestamp: "1670553442564",
+    });
+    expect(claims.eventId).toMatch(/^zalo_[A-Za-z0-9_-]{43}$/u);
+    await expect(parseZaloMiniAppWebhook({
+      connectionId: "connection-001",
+      expectedAppId: "other-app-001",
+      rawBody: body,
+      shopId: "shop-001",
+    })).rejects.toMatchObject({ code: "channel_tenant_mismatch" });
   });
 });

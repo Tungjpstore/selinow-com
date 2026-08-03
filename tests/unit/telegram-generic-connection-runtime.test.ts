@@ -144,6 +144,7 @@ function createRuntime(): {
       : method === "getWebhookInfo"
         ? {
             allowed_updates: ["message", "callback_query"],
+            max_connections: 20,
             ...(deliveryError ? { last_error_message: "provider detail" } : {}),
             pending_update_count: 0,
             url: "https://api.test/webhooks/telegram/telegram-webhook-placeholder",

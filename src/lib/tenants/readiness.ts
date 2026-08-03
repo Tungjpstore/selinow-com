@@ -1,5 +1,7 @@
 import { AppError } from "../core/errors";
+import { subscriptionAllows } from "../billing/entitlements";
 import { createId } from "../core/ids";
+import { tryRecordActivationMilestone } from "../analytics/activation";
 import { CURRENT_POLICY_ATTESTATION_VERSION } from "../onboarding/policy";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "./store";
@@ -46,6 +48,8 @@ export type ReadinessSnapshot = {
   shopStatus: string;
   storefrontEntitled: boolean;
   subscriptionState: string;
+  trialEndsAt?: string | null;
+  graceEndsAt?: string | null;
   supportContact: string | null;
   telegramEnabled: boolean;
   telegramEntitled: boolean;
@@ -77,6 +81,8 @@ type ReadinessRow = {
   shopStatus: string;
   storefrontEntitled: number;
   subscriptionState: string;
+  trialEndsAt: string | null;
+  graceEndsAt: string | null;
   supportContact: string | null;
   telegramEnabled: number;
   telegramEntitled: number;
@@ -110,7 +116,12 @@ export function evaluateReadinessSnapshot(
   const channelEntitled = (!snapshot.websiteEnabled || snapshot.storefrontEntitled)
     && (!snapshot.telegramEnabled || snapshot.telegramEntitled);
   const shopPublishable = new Set(["draft", "active"]).has(snapshot.shopStatus);
-  const subscriptionPublishable = new Set(["trialing", "active", "past_due"]).has(snapshot.subscriptionState);
+  const subscriptionPublishable = subscriptionAllows({
+    graceEndsAt: snapshot.graceEndsAt,
+    now,
+    subscriptionState: snapshot.subscriptionState,
+    trialEndsAt: snapshot.trialEndsAt,
+  });
   const payosReady = snapshot.payosStatus === "active"
     && snapshot.payosWebhookStatus === "verified"
     && isFreshTimestamp(snapshot.payosLastCheckedAt, now, PAYOS_HEALTH_TTL_MS)
@@ -140,7 +151,7 @@ export function evaluateReadinessSnapshot(
       code: "subscription_publishable",
       messageKey: subscriptionPublishable ? "readiness.subscription.pass" : "readiness.subscription.fail",
       required: true,
-      status: !subscriptionPublishable ? "fail" : snapshot.subscriptionState === "past_due" ? "warning" : "pass",
+      status: !subscriptionPublishable ? "fail" : snapshot.subscriptionState === "past_due" || snapshot.subscriptionState === "grace_period" ? "warning" : "pass",
     }, checkedAt),
     check({
       actionUrl: "/onboarding#channels",
@@ -245,6 +256,8 @@ async function loadReadinessRow(env: AppBindings, shopId: string): Promise<Readi
       shops.status AS shopStatus,
       shops.readiness_version AS readinessVersion,
       current_subscription.state AS subscriptionState,
+      current_subscription.trial_ends_at AS trialEndsAt,
+      current_subscription.grace_ends_at AS graceEndsAt,
       CASE WHEN json_extract(plans.feature_flags_json, '$.storefront') = 1 THEN 1 ELSE 0 END AS storefrontEntitled,
       CASE WHEN json_extract(plans.feature_flags_json, '$.telegram') = 1 THEN 1 ELSE 0 END AS telegramEntitled,
       onboarding.website_enabled AS websiteEnabled,
@@ -378,6 +391,8 @@ function mapSnapshot(row: ReadinessRow): ReadinessSnapshot {
     shopStatus: row.shopStatus,
     storefrontEntitled: row.storefrontEntitled === 1,
     subscriptionState: row.subscriptionState,
+    trialEndsAt: row.trialEndsAt,
+    graceEndsAt: row.graceEndsAt,
     supportContact: row.supportContact,
     telegramEnabled: row.telegramEnabled === 1,
     telegramEntitled: row.telegramEntitled === 1,
@@ -552,6 +567,17 @@ export async function runShopReadiness(input: {
     WHERE shop_id = ?
   `).bind(currentStep(evaluated, snapshot), evaluated.checkedAt, actor.shopId));
   await input.env.PLATFORM_DB.batch(statements);
+  if (evaluated.ready) {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "readiness_passed",
+      milestone: "readiness_passed",
+      projection: { trigger: input.trigger },
+      reason: "passed",
+      shopId: actor.shopId,
+      source: "readiness",
+    });
+  }
   return { ...evaluated, runId };
 }
 
@@ -562,6 +588,7 @@ export async function publishReadyStorefront(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<ReadinessResult> {
+  const actor = await requireOwnerActor(input);
   const readiness = await runShopReadiness({ ...input, trigger: "publish" });
   const failures = readiness.checks
     .filter((item) => item.required && item.status === "fail")
@@ -612,7 +639,19 @@ export async function publishReadyStorefront(input: {
             )
           INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
           WHERE shop_onboarding_profiles.shop_id = shops.id
-            AND shop_subscriptions.state IN ('trialing', 'active', 'past_due')
+            AND (
+              shop_subscriptions.state = 'active'
+              OR (
+                shop_subscriptions.state = 'trialing'
+                AND shop_subscriptions.trial_ends_at IS NOT NULL
+                AND shop_subscriptions.trial_ends_at > ?
+              )
+              OR (
+                shop_subscriptions.state IN ('past_due', 'grace_period')
+                AND shop_subscriptions.grace_ends_at IS NOT NULL
+                AND shop_subscriptions.grace_ends_at > ?
+              )
+            )
             AND (shop_onboarding_profiles.website_enabled = 1 OR shop_onboarding_profiles.telegram_enabled = 1)
             AND (
               shop_onboarding_profiles.website_enabled = 0
@@ -723,6 +762,8 @@ export async function publishReadyStorefront(input: {
       input.userId,
       input.expectedStorefrontVersion ?? null,
       input.expectedStorefrontVersion ?? null,
+      publishedAt,
+      publishedAt,
       input.env.PLATFORM_BASE_DOMAIN,
       payosFreshAfter,
       notAfter,
@@ -818,5 +859,13 @@ export async function publishReadyStorefront(input: {
     throw new AppError("readiness_changed", 409, ["rerun_readiness_required"]);
   }
   if ((results[1]?.meta.changes ?? 0) !== 1) throw new AppError("resource_conflict", 409, ["storefront_publish_conflict"]);
+  await tryRecordActivationMilestone({
+    env: input.env,
+    idempotencyKey: "storefront_published",
+    milestone: "storefront_published",
+    reason: "published",
+    shopId: actor.shopId,
+    source: "storefront",
+  });
   return { ...readiness, readinessVersion: readiness.readinessVersion + 1 };
 }

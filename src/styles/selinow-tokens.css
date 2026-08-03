@@ -36,6 +36,7 @@
   --sln-action-secondary: #0b1020;
   --sln-focus-ring: #3b82f6;
   --sln-state-success: #059669;
+  --sln-success-text-strong: #065f46;
   --sln-state-warning: #d97706;
   --sln-state-danger: #dc2626;
   --sln-state-info: #2563eb;
@@ -217,6 +218,7 @@
   --sln-action-secondary: #fff;
   --sln-focus-ring: #60a5fa;
   --sln-state-success: #34d399;
+  --sln-success-text-strong: #065f46;
   --sln-state-warning: #fbbf24;
   --sln-state-danger: #f87171;
   --sln-state-info: #60a5fa;

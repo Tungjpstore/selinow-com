@@ -1,4 +1,5 @@
 import type { AppBindings } from "../platform/bindings";
+import { subscriptionAllows } from "../billing/entitlements";
 import { normalizeSupportedLocale } from "../i18n/locale";
 import { buildStorefrontCacheKey, isPrivateStorefrontPath, isPublicStorefrontPath, normalizeHostname, type PlatformHostKind } from "./routing";
 
@@ -10,10 +11,10 @@ type ActiveDomainRow = {
   publishedVersion: number;
   shopStatus: string;
   status: string;
+  trialEndsAt: string | null;
+  graceEndsAt: string | null;
   subscriptionState: string | null;
 };
-
-const CACHEABLE_SUBSCRIPTION_STATES = new Set(["trialing", "active", "past_due"]);
 
 export function isStorefrontCacheCandidate(input: {
   appEnv: AppBindings["APP_ENV"];
@@ -51,6 +52,20 @@ export async function resolveActiveStorefrontCacheKey(input: {
         ORDER BY created_at DESC, id DESC
         LIMIT 1
       ) AS subscriptionState
+      ,(
+        SELECT trial_ends_at
+        FROM shop_subscriptions
+        WHERE shop_id = shops.id
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      ) AS trialEndsAt
+      ,(
+        SELECT grace_ends_at
+        FROM shop_subscriptions
+        WHERE shop_id = shops.id
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      ) AS graceEndsAt
     FROM shop_domains
     INNER JOIN shops ON shops.id = shop_domains.shop_id AND shops.status = 'active'
     INNER JOIN shop_settings ON shop_settings.shop_id = shops.id
@@ -61,13 +76,6 @@ export async function resolveActiveStorefrontCacheKey(input: {
         shop_domains.type = 'platform_subdomain'
         OR shop_domains.ownership_verified_at IS NOT NULL
       )
-      AND (
-        SELECT state
-        FROM shop_subscriptions
-        WHERE shop_id = shops.id
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
-      ) IN ('trialing', 'active', 'past_due')
     LIMIT 1
   `).bind(hostname).first<ActiveDomainRow>();
 
@@ -75,7 +83,7 @@ export async function resolveActiveStorefrontCacheKey(input: {
     || row.status !== "active"
     || row.shopStatus !== "active"
     || row.subscriptionState === null
-    || !CACHEABLE_SUBSCRIPTION_STATES.has(row.subscriptionState)
+    || !subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })
     || !/^[a-z0-9][a-z0-9_-]{0,127}$/iu.test(row.domainId)
     || normalizeHostname(row.hostnameNormalized) !== hostname
     || !Number.isSafeInteger(row.domainVersion)

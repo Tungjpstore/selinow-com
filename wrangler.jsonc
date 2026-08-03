@@ -86,6 +86,7 @@
   },
   "vars": {
     "APP_ENV": "local",
+    "DODO_PAYMENTS_ENVIRONMENT": "test_mode",
     "CLOUDFLARE_ZONE_ID": "00000000000000000000000000000000",
     "PLATFORM_NAME": "Selinow",
     "PLATFORM_BASE_DOMAIN": "localhost",
@@ -221,6 +222,7 @@
       },
       "vars": {
         "APP_ENV": "production",
+        "DODO_PAYMENTS_ENVIRONMENT": "live_mode",
         "CANARY_HOSTNAME": "canary.selinow.com",
         "PLATFORM_NAME": "Selinow",
         "PLATFORM_BASE_DOMAIN": "selinow.com",
@@ -385,6 +387,7 @@
       "vars": {
         "API_ORIGIN": "https://api-staging.selinow.com",
         "APP_ENV": "staging",
+        "DODO_PAYMENTS_ENVIRONMENT": "test_mode",
         "CLOUDFLARE_ZONE_ID": "ce1536fca500680c544662e361ed869b",
         "ACTIVE_CREDENTIAL_KEY_VERSION": "v1",
         "ACTIVE_INVENTORY_KEY_VERSION": "v1",

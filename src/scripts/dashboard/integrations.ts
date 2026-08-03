@@ -62,6 +62,13 @@ class IntegrationApiError extends Error {
   }
 }
 
+class TenantChangedError extends Error {
+  constructor() {
+    super("tenant_changed");
+    this.name = "TenantChangedError";
+  }
+}
+
 const root = document.querySelector<HTMLElement>("[data-integrations-workspace]");
 
 if (root !== null) {
@@ -78,9 +85,11 @@ if (root !== null) {
   })();
   const text = (key: string): string => copy[key] ?? "";
   const canManageProviders = root.dataset.canManageProviders === "true";
+  const canReadProviders = root.dataset.canReadProviders === "true";
   const canManageChannelConnectors = root.dataset.canManageChannelConnectors === "true";
   const canManageApiCredentials = root.dataset.canManageApiCredentials === "true";
-  const canManageDomains = root.dataset.canManageDomains === "true";
+  const canReadDomains = root.dataset.canReadDomains === "true";
+  const canRefreshTelegram = root.dataset.canRefreshTelegram === "true";
   const canRefreshPayos = root.dataset.canRefreshPayos === "true";
   const feedback = root.querySelector<HTMLElement>("[data-workspace-feedback]");
   const configPanel = root.querySelector<HTMLElement>("[data-config-panel]");
@@ -100,6 +109,11 @@ if (root !== null) {
   const channelExpansionGrid = root.querySelector<HTMLElement>("[data-channel-expansion-grid]");
   const channelExpansionFeedback = root.querySelector<HTMLElement>("[data-channel-expansion-feedback]");
   const channelExpansionEmpty = root.querySelector<HTMLElement>("[data-channel-expansion-empty]");
+  const tenantSignature = (): string => {
+    const urlShopPublicId = new URL(window.location.href).searchParams.get("shop") ?? "";
+    return `${root.dataset.shopPublicId ?? ""}\u0000${urlShopPublicId}`;
+  };
+  let activeTenantSignature = tenantSignature();
   let disconnectProvider: Provider | null = null;
   let sensitiveActionPending = false;
   let apiCredentialActionPending = false;
@@ -119,6 +133,45 @@ if (root !== null) {
     target.setAttribute("role", tone === "danger" ? "alert" : "status");
   };
 
+  const resetTenantBoundState = (): void => {
+    // A client-side transition can replace the shop URL before replacing this
+    // page's DOM. Clear entity-bound projections so the old shop is never
+    // mutated or presented while the next tenant is loading.
+    configPanel?.setAttribute("hidden", "");
+    disconnectProvider = null;
+    for (const form of credentialForms) {
+      form.hidden = true;
+      form.reset();
+    }
+    apiCredentialList?.replaceChildren();
+    if (apiCredentialTokenValue !== null) apiCredentialTokenValue.value = "";
+    apiCredentialTokenPanel?.setAttribute("hidden", "");
+    channelExpansionGrid?.replaceChildren();
+    if (channelExpansionEmpty !== null) channelExpansionEmpty.hidden = true;
+    for (const providerRow of root.querySelectorAll<HTMLElement>("[data-provider-row]")) {
+      providerRow.dataset.readable = "false";
+      providerRow.querySelector<HTMLElement>("[data-summary]")?.replaceChildren(document.createTextNode(text("reading")));
+      providerRow.querySelector<HTMLElement>("[data-last-check]")?.replaceChildren(document.createTextNode(""));
+      providerRow.querySelector<HTMLElement>("[data-error]")?.setAttribute("hidden", "");
+    }
+    setFeedback(feedback, "", "info");
+    setFeedback(channelExpansionFeedback, "", "info");
+    setFeedback(apiCredentialFeedback, "", "info");
+  };
+
+  const ensureTenantContext = (): boolean => {
+    const currentSignature = tenantSignature();
+    if (currentSignature === activeTenantSignature) return true;
+    activeTenantSignature = currentSignature;
+    resetTenantBoundState();
+    return false;
+  };
+
+  const assertTenantContext = (requestSignature: string): void => {
+    if (!ensureTenantContext() || activeTenantSignature !== requestSignature) throw new TenantChangedError();
+  };
+  const isTenantChangedError = (error: unknown): error is TenantChangedError => error instanceof TenantChangedError;
+
   const safeRequestId = (value: unknown): string | null => typeof value === "string" && /^[A-Za-z0-9._-]{8,128}$/u.test(value) ? value : null;
   const readSafeError = (value: unknown): SafeError => {
     const object = typeof value === "object" && value !== null && !Array.isArray(value) ? value as JsonObject : {};
@@ -129,6 +182,7 @@ if (root !== null) {
     : safeErrorMessage(error, undefined, locale);
 
   const requestApi = async (url: string, options: RequestInit = {}, idempotencyKey?: string): Promise<JsonObject | null> => {
+    const requestSignature = activeTenantSignature;
     const headers = new Headers(options.headers);
     const method = options.method?.toUpperCase() ?? "GET";
     if (method !== "GET" && method !== "HEAD") {
@@ -142,6 +196,7 @@ if (root !== null) {
     const response = await fetch(url, { ...options, credentials: "same-origin", headers });
     const contentType = response.headers.get("Content-Type") ?? "";
     const payload: unknown = contentType.includes("application/json") ? await response.json().catch(() => null) : null;
+    assertTenantContext(requestSignature);
     if (!response.ok) {
       const safe = readSafeError(payload);
       throw new IntegrationApiError(safe.code, safe.requestId);
@@ -221,6 +276,7 @@ if (root !== null) {
   const expansionName = (code: string): string => {
     if (code === "telegram.mini_app") return text("channelExpansionNameTelegram");
     if (code === "zalo.mini_app") return text("channelExpansionNameZalo");
+    if (code === "zalo.oa") return text("channelExpansionNameZaloOa");
     if (code === "whatsapp.cloud") return text("channelExpansionNameWhatsapp");
     if (code === "discord.bot") return text("channelExpansionNameDiscord");
     return code;
@@ -228,6 +284,7 @@ if (root !== null) {
   const expansionDescription = (code: string): string => {
     if (code === "telegram.mini_app") return text("channelExpansionDescriptionTelegram");
     if (code === "zalo.mini_app") return text("channelExpansionDescriptionZalo");
+    if (code === "zalo.oa") return text("channelExpansionDescriptionZaloOa");
     if (code === "whatsapp.cloud") return text("channelExpansionDescriptionWhatsapp");
     if (code === "discord.bot") return text("channelExpansionDescriptionDiscord");
     return "";
@@ -254,6 +311,14 @@ if (root !== null) {
   const channelStageLabel = (stage: ChannelExpansionStage): string => stage === "contract_ready"
     ? text("channelExpansionStageContractReady")
     : text("channelExpansionStageProviderPending");
+  const channelSurfaceSlug = (code: string): string => code.replaceAll(".", "-");
+  const channelMark = (code: string): string => {
+    if (code === "telegram.mini_app") return "TG";
+    if (code === "zalo.mini_app" || code === "zalo.oa") return "ZA";
+    if (code === "whatsapp.cloud") return "WA";
+    if (code === "discord.bot") return "DC";
+    return "CH";
+  };
   const channelDate = (value: string): string => {
     const timestamp = Date.parse(value);
     if (!Number.isFinite(timestamp)) return value;
@@ -273,6 +338,18 @@ if (root !== null) {
     badge.appendChild(document.createTextNode(channelStatusLabel(status)));
     return badge;
   };
+  const stageBadge = (stage: ChannelExpansionStage): HTMLElement => {
+    const badge = document.createElement("span");
+    badge.className = "sln-status";
+    badge.dataset.tone = stage === "provider_pending" ? "warning" : "info";
+    const dot = document.createElement("span");
+    dot.setAttribute("aria-hidden", "true");
+    badge.appendChild(dot);
+    badge.appendChild(document.createTextNode(stage === "provider_pending"
+      ? text("channelExpansionStatusProviderPending")
+      : text("channelExpansionStageContractReady")));
+    return badge;
+  };
   const renderChannelExpansions = (expansions: readonly ChannelExpansion[], requests: readonly ChannelConnectorRequest[]): void => {
     if (channelExpansionGrid === null) return;
     channelExpansionGrid.replaceChildren();
@@ -280,11 +357,20 @@ if (root !== null) {
     for (const expansion of expansions) {
       const request = requests.find((candidate) => candidate.channelCode === expansion.code) ?? null;
       const card = document.createElement("article");
-      card.className = "channel-expansion-card";
+      card.className = `channel-expansion-card channel-expansion-card--${channelSurfaceSlug(expansion.code)}`;
+      card.id = `channel-${channelSurfaceSlug(expansion.code)}`;
       card.dataset.channelCode = expansion.code;
       card.dataset.stage = expansion.providerExecution;
+      card.dataset.status = request?.status ?? expansion.providerExecution;
       const head = document.createElement("div");
       head.className = "channel-expansion-card-head";
+      const identity = document.createElement("div");
+      identity.className = "channel-expansion-identity";
+      const mark = document.createElement("span");
+      mark.className = "channel-provider-mark";
+      mark.setAttribute("aria-hidden", "true");
+      mark.textContent = channelMark(expansion.code);
+      identity.appendChild(mark);
       const title = document.createElement("div");
       const heading = document.createElement("h3");
       heading.textContent = expansionName(expansion.code);
@@ -293,8 +379,9 @@ if (root !== null) {
       code.textContent = expansion.code;
       title.appendChild(heading);
       title.appendChild(code);
-      head.appendChild(title);
-      if (request !== null) head.appendChild(connectorBadge(request.status));
+      identity.appendChild(title);
+      head.appendChild(identity);
+      head.appendChild(request === null ? stageBadge(expansion.providerExecution) : connectorBadge(request.status));
       card.appendChild(head);
       const description = document.createElement("p");
       description.textContent = expansionDescription(expansion.code);
@@ -302,14 +389,18 @@ if (root !== null) {
       const meta = document.createElement("div");
       meta.className = "channel-expansion-meta";
       const stage = document.createElement("div");
+      stage.className = "channel-expansion-stage";
       stage.textContent = channelStageLabel(expansion.providerExecution);
       const action = document.createElement("div");
+      action.className = "channel-expansion-next-action";
       action.textContent = `${text("channelExpansionRequiredAction")}: ${requiredSellerAction(expansion.requiredSellerAction)}`;
       meta.appendChild(stage);
       meta.appendChild(action);
-      const capabilitiesLabel = document.createElement("strong");
-      capabilitiesLabel.textContent = `${text("channelExpansionCapabilities")}:`;
-      meta.appendChild(capabilitiesLabel);
+      const capabilitiesDetails = document.createElement("details");
+      capabilitiesDetails.className = "channel-expansion-details";
+      const capabilitiesSummary = document.createElement("summary");
+      capabilitiesSummary.textContent = `${text("channelExpansionCapabilities")} (${String(expansion.capabilities.length)})`;
+      capabilitiesDetails.appendChild(capabilitiesSummary);
       const capabilities = document.createElement("div");
       capabilities.className = "channel-expansion-capabilities";
       for (const capability of expansion.capabilities) {
@@ -317,7 +408,8 @@ if (root !== null) {
         tag.textContent = capability;
         capabilities.appendChild(tag);
       }
-      meta.appendChild(capabilities);
+      capabilitiesDetails.appendChild(capabilities);
+      meta.appendChild(capabilitiesDetails);
       card.appendChild(meta);
       const actions = document.createElement("div");
       actions.className = "channel-expansion-card-actions";
@@ -325,7 +417,7 @@ if (root !== null) {
       note.className = "provider-note";
       if (!canManageChannelConnectors) note.textContent = text("channelExpansionReadOnly");
       else if (request !== null) note.textContent = `${request.requestPublicId} · ${channelDate(request.updatedAt)}`;
-      else note.textContent = channelStageLabel(expansion.providerExecution);
+      else note.textContent = requiredSellerAction(expansion.requiredSellerAction);
       actions.appendChild(note);
       if (canManageChannelConnectors) {
         if (request !== null && (request.status === "requested" || request.status === "provider_pending")) {
@@ -362,6 +454,7 @@ if (root !== null) {
       renderChannelExpansions(channelExpansionsFrom(catalogResult), channelRequestsFrom(requestsResult));
       setFeedback(channelExpansionFeedback, text("channelExpansionLoaded"), "success");
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       channelExpansionGrid.replaceChildren();
       if (channelExpansionEmpty !== null) channelExpansionEmpty.hidden = true;
       setFeedback(channelExpansionFeedback, `${text("channelExpansionUnavailable")} ${apiErrorMessage(error)}`, "danger");
@@ -385,6 +478,7 @@ if (root !== null) {
       await loadChannelExpansions(true, true);
       setFeedback(channelExpansionFeedback, text("channelExpansionRequested"), "success");
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       setFeedback(channelExpansionFeedback, apiErrorMessage(error), "danger");
     } finally {
       channelExpansionActionPending = false;
@@ -406,6 +500,7 @@ if (root !== null) {
       await loadChannelExpansions(true, true);
       setFeedback(channelExpansionFeedback, text("channelExpansionCanceled"), "success");
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       setFeedback(channelExpansionFeedback, apiErrorMessage(error), "danger");
     } finally {
       channelExpansionActionPending = false;
@@ -444,9 +539,11 @@ if (root !== null) {
     const configure = item.querySelector<HTMLButtonElement>("[data-action=configure]");
     if (configure !== null) configure.textContent = connected ? text("update") : text("connect");
     const health = item.querySelector<HTMLButtonElement>("[data-action=health]");
-    if (health !== null) health.hidden = !connected || (provider === "payos" && !canRefreshPayos);
+    if (health !== null) health.hidden = !connected
+      || (provider === "telegram" && !canRefreshTelegram)
+      || (provider === "payos" && !canRefreshPayos);
     let disconnect = item.querySelector<HTMLButtonElement>("[data-action=disconnect]");
-    if (connected && disconnect === null) {
+    if (connected && disconnect === null && canManageProviders) {
       disconnect = document.createElement("button");
       disconnect.type = "button";
       disconnect.className = "text-action danger-text";
@@ -454,7 +551,8 @@ if (root !== null) {
       disconnect.textContent = text("disconnect");
       item.querySelector<HTMLElement>(".provider-actions")?.appendChild(disconnect);
     }
-    if (disconnect !== null) disconnect.hidden = !connected;
+    if (disconnect !== null) disconnect.hidden = !canManageProviders || !connected;
+    if (configure !== null) configure.hidden = !canManageProviders;
   };
 
   const integrationFrom = (payload: JsonObject | null): JsonObject | null => {
@@ -541,6 +639,12 @@ if (root !== null) {
   const setApiCredentialFeedback = (message: string, tone: "danger" | "info" | "success" | "warning" = "info"): void => {
     setFeedback(apiCredentialFeedback, message, tone);
   };
+  const apiCredentialScopeLabel = (scope: string): string => ({
+    "catalog:read": text("apiCredentialsCatalogScope"),
+    "inventory:read": text("apiCredentialsInventoryScope"),
+    "orders:read": text("apiCredentialsOrdersScope"),
+    "shop:read": text("apiCredentialsShopScope"),
+  })[scope] ?? scope;
   const renderApiCredentials = (credentials: readonly ApiCredential[]): void => {
     if (apiCredentialList === null) return;
     apiCredentialList.replaceChildren();
@@ -561,7 +665,7 @@ if (root !== null) {
       const title = document.createElement("h3");
       title.textContent = credential.name;
       const details = document.createElement("p");
-      details.textContent = `${credential.publicId} · ${credential.scopes.join(", ")}`;
+      details.textContent = `${credential.publicId} · ${credential.scopes.map(apiCredentialScopeLabel).join(", ")}`;
       identity.appendChild(title);
       identity.appendChild(details);
 
@@ -612,6 +716,7 @@ if (root !== null) {
       if (apiCredentialForm !== null) apiCredentialForm.hidden = false;
       setApiCredentialFeedback(text("apiCredentialsLoaded"), "success");
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       if (apiCredentialForm !== null) apiCredentialForm.hidden = true;
       setApiCredentialFeedback(apiErrorMessage(error), "danger");
     } finally {
@@ -671,6 +776,7 @@ if (root !== null) {
       }
       apiCredentialForm.reset();
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       apiCredentialForm.reset();
       setApiCredentialFeedback(`${apiErrorMessage(error)}${(error instanceof IntegrationApiError && error.requestId !== null) ? ` (${text("apiCredentialsRequestId")}: ${error.requestId})` : ""}`, "danger");
     } finally {
@@ -698,6 +804,7 @@ if (root !== null) {
       await loadApiCredentials(false, true);
       setApiCredentialFeedback(text("apiCredentialsRevoked"), "success");
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       setApiCredentialFeedback(apiErrorMessage(error), "danger");
     } finally {
       apiCredentialActionPending = false;
@@ -709,6 +816,7 @@ if (root !== null) {
 
   const refreshStates = async (): Promise<void> => {
     if (shopPublicId === undefined) return;
+    const requestSignature = activeTenantSignature;
     if (refreshAll !== null) {
       refreshAll.disabled = true;
       refreshAll.textContent = text("refreshing");
@@ -716,11 +824,12 @@ if (root !== null) {
     setFeedback(feedback, text("reading"), "info");
     let failed = false;
     const base = `/api/app/shops/${encodeURIComponent(shopPublicId)}`;
-    if (canManageProviders) {
+    if (canReadProviders) {
       const [telegramResult, payosResult] = await Promise.allSettled([
         requestApi(`${base}/integrations/telegram`),
         requestApi(`${base}/payments/payos`),
       ]);
+      if (!ensureTenantContext() || activeTenantSignature !== requestSignature) return;
       if (telegramResult.status === "fulfilled") applyTelegram(integrationFrom(telegramResult.value) as TelegramIntegrationLike | null);
       else {
         failed = true;
@@ -734,9 +843,10 @@ if (root !== null) {
         row("payos")?.setAttribute("data-readable", "false");
       }
     }
-    if (canManageDomains) {
+    if (canReadDomains) {
       try { applyDomains(domainsFrom(await requestApi(`${base}/domains`))); }
       catch (error) {
+        if (isTenantChangedError(error)) return;
         failed = true;
         setRowState("domains", loadErrorState("domain", error, locale));
         row("domains")?.setAttribute("data-readable", "false");
@@ -789,11 +899,13 @@ if (root !== null) {
     setFeedback(configFeedback, text("sending"), "info");
     try {
       const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/${provider === "telegram" ? "integrations/telegram" : "payments/payos"}`, { method: "PUT", body: JSON.stringify(body) });
+      if (!ensureTenantContext()) return;
       if (provider === "telegram") applyTelegram(integrationFrom(payload) as TelegramIntegrationLike | null);
       else applyPayos(integrationFrom(payload) as PaymentIntegrationLike | null);
       form.reset();
       setFeedback(configFeedback, text("updated"), "success");
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       form.reset();
       setFeedback(configFeedback, apiErrorMessage(error), "danger");
     } finally {
@@ -804,7 +916,7 @@ if (root !== null) {
   };
 
   const healthCheck = async (provider: Provider): Promise<void> => {
-    if (shopPublicId === undefined || sensitiveActionPending || (provider === "payos" && !canRefreshPayos)) return;
+    if (shopPublicId === undefined || sensitiveActionPending || (provider === "telegram" && !canRefreshTelegram) || (provider === "payos" && !canRefreshPayos)) return;
     const button = row(provider)?.querySelector<HTMLButtonElement>("[data-action=health]");
     sensitiveActionPending = true;
     if (button !== null && button !== undefined) {
@@ -813,10 +925,12 @@ if (root !== null) {
     }
     try {
       const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/${provider === "telegram" ? "integrations/telegram/health-checks" : "payments/payos/health-checks"}`, { method: "POST", body: "{}" });
+      if (!ensureTenantContext()) return;
       if (provider === "telegram") applyTelegram(integrationFrom(payload) as TelegramIntegrationLike | null);
       else applyPayos(integrationFrom(payload) as PaymentIntegrationLike | null);
       setFeedback(feedback, text("healthUpdated"), "success");
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       setFeedback(feedback, apiErrorMessage(error), "danger");
     } finally {
       sensitiveActionPending = false;
@@ -853,12 +967,14 @@ if (root !== null) {
     }
     try {
       await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/${provider === "telegram" ? "integrations/telegram" : "payments/payos"}`, { method: "DELETE" });
+      if (!ensureTenantContext()) return;
       if (provider === "telegram") applyTelegram(null);
       else applyPayos(null);
       sensitiveActionPending = false;
       closeConfig();
       setFeedback(feedback, text("disconnected"), "success");
     } catch (error) {
+      if (isTenantChangedError(error)) return;
       setFeedback(configFeedback, apiErrorMessage(error), "danger");
     } finally {
       sensitiveActionPending = false;
@@ -926,6 +1042,8 @@ if (root !== null) {
   });
   refreshAll?.addEventListener("click", () => void refreshStates());
   apiCredentialLoad?.addEventListener("click", () => void loadApiCredentials());
+  window.addEventListener("popstate", () => { ensureTenantContext(); });
+  window.addEventListener("pageshow", () => { ensureTenantContext(); });
   void loadChannelExpansions();
   if (canManageApiCredentials) void loadApiCredentials();
 }

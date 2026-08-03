@@ -1,7 +1,9 @@
 import { handle } from "@astrojs/cloudflare/handler";
 
+import { processActivationMilestoneBackfill } from "./lib/analytics/activation";
 import { purgeAuthRequestAdmissions } from "./lib/auth/admission";
 import { processScheduledAutomationTasks } from "./lib/automation/scheduler";
+import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, suspendExpiredTrials } from "./lib/billing/service";
 import { purgeCartMutationReplays } from "./lib/commerce/cart-mutation";
 import { expireDueGenericEntitlements } from "./lib/commerce/entitlements";
 import {
@@ -404,8 +406,12 @@ export default {
     const generatedLicenses = await enqueueDueGeneratedLicenseRequests(bindings, scheduledAt);
     const domainEvents = await dispatchDueDomainEvents(bindings, scheduledAt);
     const automation = await processScheduledAutomationTasks(bindings, scheduledAt);
+    const activationBackfill = await processActivationMilestoneBackfill({ env: bindings, now: scheduledAt, limit: 25 });
     const customDomains = await reconcileCustomDomains(bindings, scheduledAt);
     const reconciliation = await reconcilePendingPayments(bindings, scheduledAt);
+    const billingChanges = await processDueDodoSubscriptionChanges({ env: bindings, now: scheduledAt });
+    const expiredBillingCheckouts = await expireBillingCheckoutSessions({ env: bindings, now: scheduledAt, limit: 100 });
+    const expiredBillingTrials = await suspendExpiredTrials({ env: bindings, now: scheduledAt, limit: 100 });
     const telegramOutbox = await processTelegramOutbox(bindings, scheduledAt);
     const expiredOrders = await expireUnpaidOrders(bindings, scheduledAt.toISOString());
     const expiredGenericEntitlements = await expireDueGenericEntitlements({ env: bindings, nowIso: scheduledAt.toISOString() });
@@ -429,6 +435,14 @@ export default {
         automationRetryable: automation.retryable,
         automationSkipped: automation.skipped,
         automationSucceeded: automation.succeeded,
+        activationBackfillAttempts: activationBackfill.attempted,
+        activationBackfillCreated: activationBackfill.created,
+        activationBackfillFailures: activationBackfill.failed,
+        activationBackfillShops: activationBackfill.shops,
+        billingChangeAttempts: billingChanges.attempted,
+        billingChangeCandidates: billingChanges.candidates,
+        billingChangeFailures: billingChanges.failed,
+        billingChangesProviderPending: billingChanges.providerPending,
         customDomainsChecked: customDomains.checked,
         customDomainsDeleted: customDomains.deleted,
         customDomainsFailed: customDomains.failed,
@@ -446,6 +460,8 @@ export default {
         generatedLicenseEnqueueFailed: generatedLicenses.failed,
         generatedLicenseEnqueued: generatedLicenses.sent,
         expiredOrders,
+        expiredBillingCheckouts,
+        expiredBillingTrials,
         expiredGenericEntitlements,
         paymentReconciliationFailed: reconciliation.failed,
         paymentReconciliationProcessed: reconciliation.processed,

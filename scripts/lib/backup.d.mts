@@ -100,8 +100,21 @@ export function resolvePendingMigrationNames(
   repositoryMigrationNames: string[],
 ): string[];
 
+export function normalizeHistoricalMigrationAliases(
+  databasePath: string,
+  repositoryMigrationNames: string[],
+): Array<{ canonical: string; historical: string }>;
+
 export const restoreCountValidationTables: readonly string[];
 export const restoreValidationTables: readonly string[];
+export function assertRequiredRestoreTables(tableNames: Iterable<string>): void;
+export function readCrossLedgerMismatches(database: {
+  prepare(sql: string): { all(): Array<Record<string, unknown>> };
+}): Array<{ code: string; id: string }>;
+export function verifyLocalIntegrity(databasePath: string): {
+  foreignKeyViolationCount: number;
+  integrityOk: boolean;
+};
 
 export function buildBackupSnapshotRecord(input: {
   checksumSha256?: string;

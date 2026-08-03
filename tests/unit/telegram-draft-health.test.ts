@@ -58,6 +58,8 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
                   shopStatus: "draft",
                   status: "active",
                   subscriptionState: "trialing",
+                  trialEndsAt: "2099-01-01T00:00:00.000Z",
+                  graceEndsAt: null,
                 });
               }
               if (sql.includes("FROM telegram_updates")) return Promise.resolve(null);

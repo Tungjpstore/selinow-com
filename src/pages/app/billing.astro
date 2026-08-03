@@ -9,6 +9,7 @@ import { createDashboardTranslator } from "../../lib/i18n";
 import { getBindings } from "../../lib/platform/bindings";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { getSellerBilling, type SellerBillingView } from "../../lib/tenants/seller-management";
+import { formatMarketingPrice, type MarketingPrice } from "../../lib/storefront/marketing";
 import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
 
 const env = getBindings();
@@ -31,6 +32,26 @@ const t = createDashboardTranslator(locale);
 const formatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
 const date = (value: string | null): string => value === null ? t("dashboard.billing.not_configured") : formatter.format(new Date(value));
 const subscriptionState = billing === null ? null : subscriptionStatePresentation(billing.state, locale);
+type BillingProjection = SellerBillingView & {
+  currentPrice?: unknown;
+  marketCode?: unknown;
+  price?: unknown;
+  priceDisplay?: unknown;
+};
+const projectedPrice = (value: unknown): MarketingPrice | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const amountMinor = row.amountMinor;
+  const currency = row.currency;
+  const interval = row.interval;
+  const marketCode = row.marketCode;
+  if (!Number.isSafeInteger(amountMinor) || typeof currency !== "string" || typeof interval !== "string" || typeof marketCode !== "string") return null;
+  return { amountMinor: amountMinor as number, currency, interval, marketCode };
+};
+const billingProjection = billing as BillingProjection | null;
+const currentPrice = billingProjection === null ? null : projectedPrice(billingProjection.currentPrice) ?? projectedPrice(billingProjection.price);
+const currentPriceLabel = currentPrice === null ? null : formatMarketingPrice(currentPrice, locale);
+const conversionHref = workspaceHref("/app/billing");
 ---
 
 <AppLayout activePath="/app/billing" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.billing.title")}>
@@ -40,13 +61,25 @@ const subscriptionState = billing === null ? null : subscriptionStatePresentatio
   {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.unavailable.title")} description={t("dashboard.billing.unavailable.description")} actionHref={workspaceHref("/app/billing")} actionLabel={t("dashboard.billing.retry")} tone="danger" /></div>
     : shop === undefined ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.no_store.title")} description={t("dashboard.billing.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.billing.no_store.action")} tone="info" /></div>
     : state === "forbidden" || billing === null ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.forbidden.title")} description={t("dashboard.billing.forbidden.description")} tone="warning" /></div>
-    : <div class="billing-workspace" data-billing-root data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-copy={JSON.stringify({
+    : <div class="billing-workspace" data-billing-root data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-billing-state={billing.state} data-copy={JSON.stringify({
       loading: t("dashboard.billing.requests.loading"), loaded: t("dashboard.billing.requests.loaded"), unavailable: t("dashboard.billing.requests.unavailable"),
       changePlan: t("dashboard.billing.requests.change_plan"), cancel: t("dashboard.billing.requests.cancel"), request: t("dashboard.billing.requests.submit"), requesting: t("dashboard.billing.requests.requesting"), requested: t("dashboard.billing.requests.requested"),
       reason: t("dashboard.billing.requests.reason"), reasonPlaceholder: t("dashboard.billing.requests.reason_placeholder"), plan: t("dashboard.billing.requests.plan"), cancelConfirm: t("dashboard.billing.requests.cancel_confirm"), error: t("dashboard.billing.requests.error"), pending: t("dashboard.billing.requests.pending"), statusRequested: t("dashboard.billing.requests.status_requested"), statusProviderPending: t("dashboard.billing.requests.status_provider_pending"), statusRejected: t("dashboard.billing.requests.status_rejected"), statusCompleted: t("dashboard.billing.requests.status_completed"), statusCanceled: t("dashboard.billing.requests.status_canceled"),
+      statePendingPayment: t("dashboard.billing.state.pending_payment"), stateTrialing: t("dashboard.billing.state.trialing"), stateGrace: t("dashboard.billing.state.grace"), stateSuspended: t("dashboard.billing.state.suspended"),
+      checkoutEyebrow: t("dashboard.billing.checkout.eyebrow"), checkoutTitle: t("dashboard.billing.checkout.title"), checkoutDescription: t("dashboard.billing.checkout.description"), checkoutPlan: t("dashboard.billing.checkout.plan"), checkoutSubmit: t("dashboard.billing.checkout.submit"), checkoutRecoverSubmit: t("dashboard.billing.checkout.recover_submit"), checkoutOpening: t("dashboard.billing.checkout.opening"), checkoutUnavailable: t("dashboard.billing.checkout.unavailable"), checkoutProvider: t("dashboard.billing.checkout.provider"), checkoutTrial: t("dashboard.billing.checkout.trial"), checkoutPending: t("dashboard.billing.checkout.pending"), checkoutRecovery: t("dashboard.billing.checkout.recovery"),
     })} data-can-manage={shop.role === "owner" ? "true" : "false"} data-subscription-version={billing.subscriptionVersion} data-current-plan-code={billing.planCode}>
-      <section class="plan-hero" aria-labelledby="plan-title" data-tone={subscriptionState?.tone ?? "neutral"}><div><p class="eyebrow">{t("dashboard.billing.current_subscription")}</p><h2 id="plan-title">{billing.planName}</h2><p>{t("dashboard.billing.plan_metadata", { code: billing.planCode, version: billing.planVersion })}</p><p class="subscription-impact">{subscriptionState?.impact}</p></div><span class="subscription-state">{subscriptionState?.label}</span></section>
+      <section class="plan-hero" aria-labelledby="plan-title" data-tone={subscriptionState?.tone ?? "neutral"}><div><p class="eyebrow">{t("dashboard.billing.current_subscription")}</p><h2 id="plan-title">{billing.planName}</h2><p>{t("dashboard.billing.plan_metadata", { code: billing.planCode, version: billing.planVersion })}</p>{currentPriceLabel !== null && currentPrice !== null && <p class="plan-price"><strong>{currentPriceLabel}</strong> <span>{currentPrice.interval === "month" ? t("dashboard.billing.price_per_month") : currentPrice.interval}</span><small>{currentPrice.marketCode} · {currentPrice.currency}</small></p>}<p class="subscription-impact">{subscriptionState?.impact}</p>{(billing.state === "grace_period" || billing.state === "past_due") && <p class="state-guidance">{t("dashboard.billing.state.grace")}</p>}{billing.state === "suspended" && <p class="state-guidance">{t("dashboard.billing.state.suspended")}</p>}{billing.state === "trialing" && <p class="trial-conversion"><span>{t("dashboard.billing.trial_conversion")}</span> <a class="sln-button sln-button-secondary" href={conversionHref}>{t("dashboard.billing.trial_conversion_cta")}</a></p>}{billing.state === "pending_payment" && <p class="trial-conversion"><span>{t("dashboard.billing.pending_payment_cta")}</span> <a class="sln-button sln-button-secondary" href={conversionHref}>{t("dashboard.billing.choose_paid_plan")}</a></p>}</div><span class="subscription-state">{subscriptionState?.label}</span></section>
       <section class="billing-grid"><article><span>{t("dashboard.billing.trial_ends")}</span><strong>{date(billing.trialEndsAt)}</strong></article><article><span>{t("dashboard.billing.current_period")}</span><strong>{date(billing.currentPeriodEnd)}</strong></article><article><span>{t("dashboard.billing.grace_ends")}</span><strong>{date(billing.graceEndsAt)}</strong></article><article><span>{t("dashboard.billing.canceled_at")}</span><strong>{date(billing.canceledAt)}</strong></article></section>
+      {shop.role === "owner" && (billing.state === "trialing" || billing.state === "pending_payment" || billing.state === "suspended") && <section class="billing-panel billing-checkout-panel" aria-labelledby="billing-checkout-title" data-billing-checkout>
+        <header><div><p class="eyebrow">{t("dashboard.billing.checkout.eyebrow")}</p><h2 id="billing-checkout-title">{t("dashboard.billing.checkout.title")}</h2><p class="billing-request-description">{t("dashboard.billing.checkout.description")}</p></div></header>
+        <p class="checkout-state-note">{billing.state === "trialing" ? t("dashboard.billing.checkout.trial") : billing.state === "suspended" ? t("dashboard.billing.checkout.recovery") : t("dashboard.billing.checkout.pending")}</p>
+        <form class="billing-checkout-form" data-billing-checkout-form novalidate>
+          <label>{t("dashboard.billing.checkout.plan")}<select name="planCode" data-billing-checkout-plan required></select></label>
+          <button class="sln-button sln-button-primary" type="submit" data-billing-checkout-submit>{billing.state === "suspended" ? t("dashboard.billing.checkout.recover_submit") : t("dashboard.billing.checkout.submit")}</button>
+        </form>
+        <p class="checkout-provider-note">{t("dashboard.billing.checkout.provider")}</p>
+        <p class="workspace-feedback" data-billing-checkout-feedback role="status" aria-live="polite" hidden></p>
+      </section>}
       <section class="billing-panel" aria-labelledby="limits-title"><header><div><p class="eyebrow">{t("dashboard.billing.entitlements.eyebrow")}</p><h2 id="limits-title">{t("dashboard.billing.entitlements.title")}</h2></div></header><div class="kv-ledger">{Object.entries(billing.limits).length === 0 ? <WorkspaceState title={t("dashboard.billing.entitlements.empty_title")} description={t("dashboard.billing.entitlements.empty_description")} tone="neutral" /> : Object.entries(billing.limits).map(([key, value]) => <div><span>{key}</span><strong>{typeof value === "string" || typeof value === "number" ? value : value === true ? t("dashboard.billing.value.yes") : value === false ? t("dashboard.billing.value.no") : t("dashboard.billing.value.configured")}</strong></div>)}</div></section>
       <section class="billing-panel" aria-labelledby="usage-title"><header><div><p class="eyebrow">{t("dashboard.billing.usage.eyebrow")}</p><h2 id="usage-title">{t("dashboard.billing.usage.title")}</h2></div></header>{billing.usage.length === 0 ? <WorkspaceState title={t("dashboard.billing.usage.empty_title")} description={t("dashboard.billing.usage.empty_description")} tone="neutral" /> : <div class="kv-ledger">{billing.usage.map((item) => <div><span>{item.metric} · {item.periodKey}</span><strong>{item.value}</strong><small>{date(item.updatedAt)}</small></div>)}</div>}</section>
       {shop.role === "owner" && <section class="billing-panel" aria-labelledby="billing-request-title" data-billing-requests>
@@ -73,6 +106,12 @@ const subscriptionState = billing === null ? null : subscriptionStatePresentatio
   .plan-hero { display:flex; align-items:center; justify-content:space-between; gap:20px; border:1px solid color-mix(in srgb,var(--sln-action-primary) 25%,var(--sln-border-default)); border-radius:var(--sln-radius-lg); padding:var(--sln-space-8); background:linear-gradient(135deg,var(--sln-tint-indigo),var(--sln-bg-surface)); }
   .plan-hero h2, .billing-panel h2 { margin:0; font:var(--sln-font-h3); letter-spacing:-.035em; }
   .plan-hero p { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .plan-price { display:grid; grid-template-columns:auto auto; align-items:baseline; column-gap:8px; }
+  .plan-price strong { color:var(--sln-text-primary); font:var(--sln-font-h3); }
+  .plan-price small { grid-column:1 / -1; color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .state-guidance { color:var(--sln-text-primary) !important; }
+  .trial-conversion { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+  .trial-conversion .sln-button { text-decoration:none; }
   .plan-hero code { font-family:var(--sln-font-mono); font-size:11px; }
   .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
   .subscription-impact { max-width:70ch; }
@@ -94,6 +133,12 @@ const subscriptionState = billing === null ? null : subscriptionStatePresentatio
   .kv-ledger strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
   .scope-note { margin:0; }
   .billing-request-description { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .billing-checkout-panel { border-color:color-mix(in srgb,var(--sln-action-primary) 30%,var(--sln-border-default)); background:linear-gradient(135deg,var(--sln-bg-surface),var(--sln-tint-indigo)); }
+  .checkout-state-note, .checkout-provider-note { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .checkout-provider-note { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .billing-checkout-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:end; }
+  .billing-checkout-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
+  .billing-checkout-form select { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
   .billing-request-form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) auto; gap:12px; align-items:end; }
   .billing-request-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
   .billing-request-form input, .billing-request-form select { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
@@ -107,6 +152,6 @@ const subscriptionState = billing === null ? null : subscriptionStatePresentatio
   .sln-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:9px 14px; font:var(--sln-font-label); cursor:pointer; }
   .sln-button-primary { background:var(--sln-action-primary); color:var(--sln-white); }
   @media (max-width:900px) { .billing-request-form { grid-template-columns:repeat(2,minmax(0,1fr)); } .billing-request-form .sln-button { width:100%; } }
-  @media (max-width:560px) { .billing-request-form { grid-template-columns:1fr; } .billing-request-row { grid-template-columns:1fr; } }
+  @media (max-width:560px) { .billing-request-form, .billing-checkout-form { grid-template-columns:1fr; } .billing-request-row { grid-template-columns:1fr; } .billing-checkout-form .sln-button { width:100%; } }
   @media (max-width:760px) { .plan-hero { align-items:start; flex-direction:column; padding:24px; } .billing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .billing-grid article:nth-child(2) { border-right:0; } .billing-grid article:nth-child(n+3) { border-top:1px solid var(--sln-border-default); } .kv-ledger { grid-template-columns:1fr; } }
 </style>

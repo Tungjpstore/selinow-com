@@ -18,6 +18,9 @@ Exit: 100% control trong wireframe co source authority hoac bi loai.
 
 - Tao token, typography, spacing, layout, focus, status va form primitives moi.
 - Tao surface shell rieng cho marketing, workspace, storefront, admin.
+- Dung `DASHBOARD_INFORMATION_ARCHITECTURE.md` de chia workspace thanh
+  Command/Commerce/Channels/Operations/Workspace va tach provider lanes trong
+  `/app/integrations` ma khong tao route ao.
 - Tao safe API client pattern cho CSRF/idempotency/request ID/error mapping.
 - Tao fixture tu safe projections, khong dung production data/secrets.
 - Dat a11y/overflow/browser test harness truoc khi lam feature.
@@ -37,15 +40,30 @@ Exit: public browser gate; khong mutation khi GET/HEAD; tenant hostname isolatio
 
 - Workspace shell, shop switch, `/app`, onboarding.
 - Products, inventory, orders, order detail.
-- Customers/members/billing doc dung projection va read-only boundary.
+- Customers/members/billing doc dung projection va role-scoped mutation boundary: owner/manager customer detail operations, owner member operations, and audited provider-pending billing request intents.
 - Store builder/draft/publish, integrations/Telegram, domains, automation, data/audit.
+- Tich hop provider lanes theo tung identity: Telegram Bot, Telegram Mini App,
+  Zalo Mini App, Zalo OA, WhatsApp Cloud va Discord; khong dung health/credential
+  state cua lane nay cho lane khac. Automation doc task theo seller/provider wait
+  va terminal projection.
 
-Exit: role matrix, tenant switch reset, secret handling, state coverage va authenticated browser gate.
+Exit: role matrix, tenant switch reset, secret handling, state coverage,
+provider-lane isolation, 1440/768/390/320 browser gate va authenticated browser gate.
 
 ## Giai doan 3.5 - Channel expansion contracts
 
 - Wire the safe channel-expansion catalog and tenant-bound connector request API from
-  migrations `0055`-`0056` before adding or enabling provider-specific execution.
+  migrations `0055`-`0069` before adding or enabling provider-specific execution. Migration
+  `0057` adds only a tenant-bound, short-lived Telegram Mini App session boundary; it does
+  not activate a provider or permit external delivery. Migration `0058` adds only the
+  D1 reference receipt/replay/conflict boundary for verified ingress; migration `0059`
+  adds only the tenant-bound provider customer identity hash projection and idempotent
+  server-side upsert, without altering legacy Telegram identity tables.
+- Migration `0065` binds provider-verification evidence to the exact credential version
+  and makes channel-connection identity immutable. Migration `0066` adds a blind HMAC
+  lookup value for the public Zalo OA callback without storing raw state; expire/revoke
+  all pre-`0066` pending OAuth rows or provide an explicitly reviewed legacy-resolution
+  path before applying it remotely.
 - Render `requested`, `provider_pending`, `rejected` and `canceled` states as durable
   workflow states; never present them as connected, healthy, delivered, paid or fulfilled.
 - Keep Telegram Mini App identity verification server-side (HMAC, freshness, tamper and
@@ -54,7 +72,7 @@ Exit: role matrix, tenant switch reset, secret handling, state coverage va authe
 - Use the exact catalog/request rows in `API_ENDPOINT_INDEX.csv`; no inline secret input,
   provider payload echo, external webhook assertion or provider-completion mock is allowed.
 
-Exit: channel catalog/request client tests pass with tenant isolation, idempotent create,
+Exit: dashboard IA and channel catalog/request client tests pass with tenant isolation, idempotent create,
 optimistic cancel, no-secret projections and explicit provider-pending/unavailable UI.
 
 ## Giai doan 4 - Admin

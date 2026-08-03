@@ -1,10 +1,12 @@
 import { AppError } from "../core/errors";
 import { hmacToken, sha256Json } from "../core/crypto";
 import { createId } from "../core/ids";
+import { backfillActivationMilestones, tryRecordActivationMilestone } from "../analytics/activation";
 import { normalizeCurrencyCode } from "../i18n/currency";
 import { DEFAULT_LOCALE, matchSupportedLocale } from "../i18n/locale";
 import { ONBOARDING_STEP_CODES } from "../onboarding/policy";
 import type { AppBindings } from "../platform/bindings";
+import { PUBLIC_PLAN_CODES, PUBLIC_TRIAL_DAYS } from "../billing/plan-catalog";
 import { normalizeOptionalCountryCode } from "./country";
 import { assertRoleCapability, type ShopCapability, type ShopRole } from "./policy";
 
@@ -94,6 +96,11 @@ function isPreCountrySchemaError(error: unknown): boolean {
   return error instanceof Error && /no such column: shops\.(?:merchant|business)_country_code/u.test(error.message);
 }
 
+async function recoverShopActivationMilestones(env: AppBindings, shop: ShopView): Promise<void> {
+  const row = await env.PLATFORM_DB.prepare("SELECT id FROM shops WHERE public_id = ? LIMIT 1").bind(shop.publicId).first<{ id: string }>();
+  if (row !== null) await backfillActivationMilestones({ env, shopId: row.id });
+}
+
 export async function createShop(input: {
   businessCountry?: string | null;
   currency?: unknown;
@@ -102,11 +109,15 @@ export async function createShop(input: {
   idempotencyKey: string;
   merchantCountry?: string | null;
   name: string;
-  planCode: string;
+  planCode?: string;
   requestId: string;
   slug: string;
   userId: string;
 }): Promise<{ created: boolean; shop: ShopView }> {
+  const requestedPlanCode = input.planCode ?? "starter";
+  if (!(PUBLIC_PLAN_CODES as readonly string[]).includes(requestedPlanCode)) {
+    throw new AppError("validation_failed", 400, ["plan_invalid"]);
+  }
   if (!/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
     throw new AppError("validation_failed", 400, ["idempotency_key_invalid"]);
   }
@@ -122,8 +133,8 @@ export async function createShop(input: {
   const requestHash = await sha256Json(
     input.businessCountry === undefined && input.currency === undefined
       && input.defaultLocale === undefined && input.merchantCountry === undefined
-      ? { name: input.name, planCode: input.planCode, slug: input.slug }
-      : { businessCountry, currency, defaultLocale, merchantCountry, name: input.name, planCode: input.planCode, slug: input.slug },
+      ? { name: input.name, planCode: requestedPlanCode, slug: input.slug }
+      : { businessCountry, currency, defaultLocale, merchantCountry, name: input.name, planCode: requestedPlanCode, slug: input.slug },
   );
   const existing = await input.env.PLATFORM_DB.prepare(`
     SELECT request_hash, response_json
@@ -136,7 +147,9 @@ export async function createShop(input: {
     if (existing.request_hash !== requestHash) {
       throw new AppError("idempotency_conflict", 409);
     }
-    return { created: false, shop: parseStoredShop(existing.response_json) };
+    const shop = parseStoredShop(existing.response_json);
+    await recoverShopActivationMilestones(input.env, shop).catch(() => undefined);
+    return { created: false, shop };
   }
 
   const reserved = await input.env.PLATFORM_DB.prepare(
@@ -149,9 +162,9 @@ export async function createShop(input: {
   const plan = await input.env.PLATFORM_DB.prepare(`
     SELECT id, code, feature_flags_json, limits_json
     FROM plans
-    WHERE code = ? AND is_active = 1
+    WHERE code = ? AND is_active = 1 AND is_public = 1 AND is_assignable = 1
     LIMIT 1
-  `).bind(input.planCode).first<{
+  `).bind(requestedPlanCode).first<{
     code: string;
     feature_flags_json: string;
     id: string;
@@ -167,7 +180,9 @@ export async function createShop(input: {
   const shopPublicId = createId("shop");
   const subscriptionId = createId("sub");
   const domainId = createId("dom");
-  const trialEndsAt = new Date(now.getTime() + 14 * 24 * 60 * 60_000).toISOString();
+  // New shops receive only the bounded onboarding trial. Runtime entitlement
+  // checks require this deadline and deny expired or malformed trial rows.
+  const trialEndsAt = new Date(now.getTime() + PUBLIC_TRIAL_DAYS * 24 * 60 * 60_000).toISOString();
   const hostname = `${input.slug}.${input.env.PLATFORM_BASE_DOMAIN}`;
   const shop: ShopView = {
     businessCountry,
@@ -268,11 +283,31 @@ export async function createShop(input: {
       LIMIT 1
     `).bind(input.userId, namespace, keyHash).first<ExistingIdempotency>();
     if (replay !== null && replay.request_hash === requestHash) {
-      return { created: false, shop: parseStoredShop(replay.response_json) };
+      const replayedShop = parseStoredShop(replay.response_json);
+      await recoverShopActivationMilestones(input.env, replayedShop).catch(() => undefined);
+      return { created: false, shop: replayedShop };
     }
     throw new AppError("validation_failed", 409, ["slug_unavailable"]);
   }
 
+  await tryRecordActivationMilestone({
+    env: input.env,
+    idempotencyKey: "setup_started",
+    milestone: "setup_started",
+    occurredAt: nowIso,
+    reason: "started",
+    shopId,
+    source: "onboarding",
+  });
+  await tryRecordActivationMilestone({
+    env: input.env,
+    idempotencyKey: "shop_created",
+    milestone: "shop_created",
+    occurredAt: nowIso,
+    reason: "created",
+    shopId,
+    source: "shop",
+  });
   return { created: true, shop };
 }
 

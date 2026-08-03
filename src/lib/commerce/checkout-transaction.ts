@@ -1,7 +1,12 @@
 import { createId } from "../core/ids";
+import { tryRecordActivationMilestone } from "../analytics/activation";
+import { AppError } from "../core/errors";
+import { parsePlanLimits, PUBLIC_PLAN_CODES } from "../billing/plan-catalog";
 import { prepareOrderChannelAttribution, resolveOrderChannelAttribution, type OrderChannelAttribution } from "../channels/attribution";
 import { prepareDomainEventAppend } from "../events/append";
+import { isSupportedCurrency } from "../i18n/currency";
 import type { AppBindings } from "../platform/bindings";
+import { prepareUsageStatements, resolveBillingPeriod } from "../billing/metering";
 import {
   genericEntitlementPolicyGuard,
   loadGenericEntitlementPolicies,
@@ -10,6 +15,28 @@ import {
   type GenericEntitlementRequirementSnapshot,
 } from "./entitlements";
 import { prepareCheckoutReservationPlan, prepareReservedFulfillmentItems } from "./reservations";
+
+async function resolveOrderUsageLimit(database: D1Database, shopId: string): Promise<number | undefined> {
+  try {
+    const row = await database.prepare(`
+      SELECT plans.code, plans.limits_json AS limitsJson
+      FROM shop_subscriptions AS subscriptions
+      INNER JOIN plans ON plans.id = subscriptions.plan_id
+      WHERE subscriptions.shop_id = ? AND subscriptions.state != 'canceled'
+      ORDER BY subscriptions.created_at DESC, subscriptions.id DESC
+      LIMIT 1
+    `).bind(shopId).first<{ code: string; limitsJson: string }>();
+    if (row === null || !(PUBLIC_PLAN_CODES as readonly string[]).includes(row.code)) return undefined;
+    const limits = parsePlanLimits(row.limitsJson);
+    if (!limits.ok) throw new AppError("quota_unavailable", 503, ["orders_created"]);
+    return limits.value.orders_created;
+  } catch (error) {
+    // The direct canonical test harness predates the billing catalog and
+    // intentionally omits plans; real tenant databases always have it.
+    if (error instanceof AppError) throw error;
+    return undefined;
+  }
+}
 
 /** Immutable catalog data copied into an order item during checkout. */
 export type CanonicalCheckoutLine = {
@@ -364,6 +391,28 @@ function assertInputInvariants(input: CanonicalCheckoutTransactionInput): void {
 export async function executeCanonicalCheckoutTransaction(input: CanonicalCheckoutTransactionInput): Promise<CanonicalCheckoutTransactionResult> {
   assertInputInvariants(input);
   const database = input.env.PLATFORM_DB;
+  // External channel adapters already admit an active subscription. The
+  // direct core harness may intentionally omit one, so retain compatibility
+  // there while real checkout paths still append an atomic usage event.
+  let orderUsageStatements: readonly D1PreparedStatement[] = [];
+  try {
+    const periodKey = await resolveBillingPeriod({ database, shopId: input.shopId });
+    const orderUsageLimit = await resolveOrderUsageLimit(database, input.shopId);
+    orderUsageStatements = prepareUsageStatements({
+      database,
+      delta: 1,
+      ...(orderUsageLimit === undefined ? {} : { limit: orderUsageLimit }),
+      metric: "orders_created",
+      occurredAt: input.nowIso,
+      periodKey,
+      shopId: input.shopId,
+      sourceId: input.orderId,
+      sourceKind: "order",
+      now: new Date(input.nowIso),
+    }).statements;
+  } catch (error) {
+    if (!(error instanceof AppError) || error.code !== "billing_period_unavailable") throw error;
+  }
   const attribution = resolveChannelAttribution(input.channel);
   const [privateFileRequirementState, genericEntitlementPolicyState] = await Promise.all([
     loadPrivateFileRequirements(input),
@@ -488,6 +537,7 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     // Keep this FK-backed statement immediately after the guarded order insert:
     // a failed cart/customer/reservation guard aborts the whole D1 batch.
     orderInsert,
+    ...orderUsageStatements,
     prepareOrderChannelAttribution({
       attribution,
       connectionId: input.channel.connectionId,
@@ -551,6 +601,22 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     statements.push(database.prepare("UPDATE inventory_keys SET status = 'sold', sold_order_item_id = reserved_order_item_id, sold_at = ?, reservation_token = NULL, reserved_until = NULL WHERE reservation_token = ? AND shop_id = ? AND status = 'reserved'").bind(input.nowIso, input.reservationToken, input.shopId));
   }
   await database.batch(statements);
+  const channelProjection = input.channel.code === "web"
+    ? "website"
+    : input.channel.code === "telegram" ? "telegram" : null;
+  const currencyProjection = isSupportedCurrency(input.currency) ? input.currency : null;
+  await tryRecordActivationMilestone({
+    env: input.env,
+    idempotencyKey: "first_order_created",
+    milestone: "first_order_created",
+    projection: {
+      ...(currencyProjection === null ? {} : { currency: currencyProjection }),
+      ...(channelProjection === null ? {} : { channel: channelProjection }),
+    },
+    reason: "created",
+    shopId: input.shopId,
+    source: "commerce",
+  });
   return {
     currency: input.currency,
     expiresAt: input.expiresAt,

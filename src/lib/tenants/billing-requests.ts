@@ -9,13 +9,24 @@ const SAFE_REASON_CODE = /^[a-z][a-z0-9._:-]{2,63}$/u;
 
 type ExistingIdempotency = { request_hash: string; response_json: string };
 type PlanRow = { code: string; featuresJson: string; id: string; limitsJson: string; name: string; version: number };
+type PlanPriceRow = {
+  amountMinor: number;
+  currency: string;
+  interval: string;
+  marketCode: "global" | "vn";
+  planCode: string;
+};
 type RequestRow = {
   action: "cancel" | "change_plan" | "resume";
   createdAt: string;
+  executionAttempts: number;
+  failureCode: string | null;
   currentPlanCode: string;
   expectedSubscriptionVersion: number;
   id: string;
   requestedPlanCode: string | null;
+  providerActionRef: string | null;
+  lastAttemptAt: string | null;
   reasonCode: string;
   status: "canceled" | "completed" | "provider_pending" | "rejected" | "requested";
   updatedAt: string;
@@ -27,6 +38,7 @@ export type SellerBillingPlan = {
   features: Record<string, unknown>;
   limits: Record<string, unknown>;
   name: string;
+  prices?: Array<Pick<PlanPriceRow, "amountMinor" | "currency" | "interval" | "marketCode">>;
   version: number;
 };
 
@@ -79,7 +91,11 @@ async function loadRequest(env: AppBindings, shopId: string, requestPublicId: st
       current_plan.code AS currentPlanCode, requested_plan.code AS requestedPlanCode,
       requests.expected_subscription_version AS expectedSubscriptionVersion,
       requests.reason_code AS reasonCode, requests.created_at AS createdAt,
-      requests.updated_at AS updatedAt, requests.version
+      requests.updated_at AS updatedAt, requests.version,
+      requests.provider_action_ref AS providerActionRef,
+      requests.failure_code AS failureCode,
+      requests.execution_attempts AS executionAttempts,
+      requests.last_attempt_at AS lastAttemptAt
     FROM subscription_change_requests AS requests
     INNER JOIN plans AS current_plan ON current_plan.id = requests.current_plan_id
     LEFT JOIN plans AS requested_plan ON requested_plan.id = requests.requested_plan_id
@@ -91,15 +107,53 @@ async function loadRequest(env: AppBindings, shopId: string, requestPublicId: st
 }
 
 export async function listSellerBillingPlans(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerBillingPlan[]> {
-  await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const actor = await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT code, name, version, feature_flags_json AS featuresJson, limits_json AS limitsJson
     FROM plans
-    WHERE is_active = 1
+    WHERE is_active = 1 AND is_public = 1 AND is_assignable = 1
     ORDER BY code, id
     LIMIT 50
   `).all<PlanRow>();
-  return rows.results.map(mapPlan);
+  const plans = rows.results.map(mapPlan);
+  // Prices are projected for the authenticated shop's server-selected market
+  // only. The client never chooses currency or provider references.
+  const market = actor.row.merchant_country_code?.trim().toUpperCase() === "VN"
+    ? "vn"
+    : actor.row.merchant_country_code === null || actor.row.merchant_country_code.trim().length === 0
+      ? null
+      : "global";
+  if (market === null || plans.length === 0) return plans;
+  try {
+    const nowIso = new Date().toISOString();
+    const prices = await input.env.PLATFORM_DB.prepare(`
+      SELECT plans.code AS planCode, plan_prices.market_code AS marketCode,
+        plan_prices.currency, plan_prices.amount_minor AS amountMinor,
+        plan_prices.interval
+      FROM plan_prices
+      INNER JOIN plans ON plans.id = plan_prices.plan_id
+      WHERE plan_prices.market_code = ?
+        AND plan_prices.is_active = 1
+        AND plan_prices.interval = 'month'
+        AND plans.is_active = 1
+        AND plan_prices.effective_from <= ?
+        AND (plan_prices.effective_to IS NULL OR plan_prices.effective_to > ?)
+      ORDER BY plans.code, plan_prices.effective_from DESC, plan_prices.version DESC
+    `).bind(market, nowIso, nowIso).all<PlanPriceRow>();
+    const byCode = new Map<string, SellerBillingPlan["prices"]>();
+    for (const price of prices.results) {
+      if (!Number.isSafeInteger(price.amountMinor) || price.amountMinor <= 0 || price.currency.length === 0) continue;
+      const list = byCode.get(price.planCode) ?? [];
+      if (list.some((item) => item.currency === price.currency && item.interval === price.interval)) continue;
+      list.push({ amountMinor: price.amountMinor, currency: price.currency, interval: price.interval, marketCode: price.marketCode });
+      byCode.set(price.planCode, list);
+    }
+    return plans.map((plan) => ({ ...plan, prices: byCode.get(plan.code) ?? [] }));
+  } catch {
+    // Keep the existing plan projection available when the additive pricing
+    // migration has not been applied locally. Checkout still fails closed.
+    return plans;
+  }
 }
 
 export async function listSubscriptionChangeRequests(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SubscriptionChangeRequest[]> {
@@ -109,7 +163,11 @@ export async function listSubscriptionChangeRequests(input: { env: AppBindings; 
       current_plan.code AS currentPlanCode, requested_plan.code AS requestedPlanCode,
       requests.expected_subscription_version AS expectedSubscriptionVersion,
       requests.reason_code AS reasonCode, requests.created_at AS createdAt,
-      requests.updated_at AS updatedAt, requests.version
+      requests.updated_at AS updatedAt, requests.version,
+      requests.provider_action_ref AS providerActionRef,
+      requests.failure_code AS failureCode,
+      requests.execution_attempts AS executionAttempts,
+      requests.last_attempt_at AS lastAttemptAt
     FROM subscription_change_requests AS requests
     INNER JOIN plans AS current_plan ON current_plan.id = requests.current_plan_id
     LEFT JOIN plans AS requested_plan ON requested_plan.id = requests.requested_plan_id
@@ -158,12 +216,15 @@ export async function createSubscriptionChangeRequest(input: {
   // retry remains deterministic when the subscription version changes.
   const subscription = await currentSubscription(input.env, actor.row.shop_id);
   if (input.action === "resume") throw new AppError("billing_resume_provider_required", 409);
+  if (!new Set(["trialing", "active", "past_due", "grace_period", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"]).has(subscription.state)) {
+    throw new AppError("billing_change_requires_request", 409);
+  }
   const active = await input.env.PLATFORM_DB.prepare("SELECT id FROM subscription_change_requests WHERE shop_id = ? AND status IN ('requested', 'provider_pending') LIMIT 1").bind(actor.row.shop_id).first<{ id: string }>();
   if (active !== null) throw new AppError("billing_change_pending", 409);
   if (subscription.version !== input.expectedSubscriptionVersion) throw new AppError("version_conflict", 409);
   let requestedPlan: PlanRow | null = null;
   if (input.action === "change_plan") {
-    requestedPlan = await input.env.PLATFORM_DB.prepare("SELECT id, code, name, version, feature_flags_json AS featuresJson, limits_json AS limitsJson FROM plans WHERE code = ? AND is_active = 1 LIMIT 1").bind(requestedPlanCode).first<PlanRow>();
+    requestedPlan = await input.env.PLATFORM_DB.prepare("SELECT id, code, name, version, feature_flags_json AS featuresJson, limits_json AS limitsJson FROM plans WHERE code = ? AND is_active = 1 AND is_public = 1 AND is_assignable = 1 LIMIT 1").bind(requestedPlanCode).first<PlanRow>();
     if (requestedPlan === null) throw new AppError("plan_not_found", 404);
     if (requestedPlan.id === subscription.currentPlanId) throw new AppError("billing_plan_unchanged", 409);
   }

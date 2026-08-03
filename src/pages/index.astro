@@ -5,7 +5,7 @@ import PlatformLayout from "../layouts/PlatformLayout.astro";
 import StorefrontLayout from "../layouts/StorefrontLayout.astro";
 import { isAppError } from "../lib/core/errors";
 import { getBindings } from "../lib/platform/bindings";
-import { getMarketingPlans, planFeatureList } from "../lib/storefront/marketing";
+import { formatMarketingPrice, getMarketingPlans, isMarketingPricingReady, planFeatureList } from "../lib/storefront/marketing";
 import { loggerFor } from "../lib/operations/logger";
 import { classifyPlatformHost, normalizeHostname } from "../lib/storefront/routing";
 import { canonicalRedirectFor, getStorefrontCatalog, resolveStorefrontShop, type StorefrontCategory, type StorefrontProduct, type StorefrontShop } from "../lib/storefront/store";
@@ -64,25 +64,41 @@ const landingCopy = {
     planned: mt("marketing.home.channels.status.planned"),
     development: mt("marketing.home.channels.status.development"),
   },
+  channelNames: {
+    website: mt("marketing.home.channels.name.website"),
+    telegram: mt("marketing.home.channels.name.telegram"),
+    whatsapp: mt("marketing.home.channels.name.whatsapp"),
+    zalo: mt("marketing.home.channels.name.zalo"),
+    discord: mt("marketing.home.channels.name.discord"),
+    api: mt("marketing.home.channels.name.api"),
+  },
+  channelCards: [
+    { key: "website", glyph: "▦", state: "live", label: mt("marketing.home.channels.name.website"), status: mt("marketing.home.channels.status.live") },
+    { key: "telegram", glyph: "➤", state: "next", label: mt("marketing.home.channels.name.telegram"), status: mt("marketing.home.channels.status.next") },
+    { key: "whatsapp", glyph: "◌", state: "next", label: mt("marketing.home.channels.name.whatsapp"), status: mt("marketing.home.channels.status.next") },
+    { key: "zalo", glyph: "Z", state: "next", label: mt("marketing.home.channels.name.zalo"), status: mt("marketing.home.channels.status.next") },
+    { key: "discord", glyph: "◈", state: "next", label: mt("marketing.home.channels.name.discord"), status: mt("marketing.home.channels.status.next") },
+    { key: "api", glyph: "</>", state: "planned", label: mt("marketing.home.channels.name.api"), status: mt("marketing.home.channels.status.development") },
+  ],
   useEyebrow: mt("marketing.home.use_cases.kicker"),
   useTitle: mt("marketing.home.use_cases.title"),
   useDescription: mt("marketing.home.use_cases.description"),
   uses: [
-    ["sales-bot", mt("marketing.home.use_cases.sales.title"), mt("marketing.home.use_cases.sales.description"), "global/global-shopping-bag.png"],
-    ["support-bot", mt("marketing.home.use_cases.support.title"), mt("marketing.home.use_cases.support.description"), "global/global-bot.png"],
-    ["digital-delivery", mt("marketing.home.use_cases.delivery.title"), mt("marketing.home.use_cases.delivery.description"), "global/global-delivery-cloud.png"],
-    ["catalog", mt("marketing.home.use_cases.catalog.title"), mt("marketing.home.use_cases.catalog.description"), "global/global-product-box.png"],
-    ["workflow", mt("marketing.home.use_cases.workflow.title"), mt("marketing.home.use_cases.workflow.description"), "global/global-network-nodes.png"],
-    ["notifications", mt("marketing.home.use_cases.notifications.title"), mt("marketing.home.use_cases.notifications.description"), "global/global-notification-bell.png"],
+    ["sales-bot", mt("marketing.home.use_cases.sales.title"), mt("marketing.home.use_cases.sales.description"), "global/v2/commerce-catalog.png"],
+    ["support-bot", mt("marketing.home.use_cases.support.title"), mt("marketing.home.use_cases.support.description"), "global/v2/support-automation.png"],
+    ["digital-delivery", mt("marketing.home.use_cases.delivery.title"), mt("marketing.home.use_cases.delivery.description"), "global/v2/delivery-payment.png"],
+    ["catalog", mt("marketing.home.use_cases.catalog.title"), mt("marketing.home.use_cases.catalog.description"), "global/v2/commerce-catalog.png"],
+    ["workflow", mt("marketing.home.use_cases.workflow.title"), mt("marketing.home.use_cases.workflow.description"), "global/v2/channel-network.png"],
+    ["notifications", mt("marketing.home.use_cases.notifications.title"), mt("marketing.home.use_cases.notifications.description"), "global/v2/support-automation.png"],
   ],
   workflowEyebrow: mt("marketing.home.workflow.kicker"),
   workflowTitle: mt("marketing.home.workflow.title"),
   workflowDescription: mt("marketing.home.workflow.description"),
   workflowSteps: [
-    [mt("marketing.home.workflow.step1.title"), mt("marketing.home.workflow.step1.description"), "global/global-bot.png"],
-    [mt("marketing.home.workflow.step2.title"), mt("marketing.home.workflow.step2.description"), "global/global-network-nodes.png"],
-    [mt("marketing.home.workflow.step3.title"), mt("marketing.home.workflow.step3.description"), "global/global-payment-card.png"],
-    [mt("marketing.home.workflow.step4.title"), mt("marketing.home.workflow.step4.description"), "global/global-delivery-cloud.png"],
+    [mt("marketing.home.workflow.step1.title"), mt("marketing.home.workflow.step1.description"), "global/v2/support-automation.png"],
+    [mt("marketing.home.workflow.step2.title"), mt("marketing.home.workflow.step2.description"), "global/v2/channel-network.png"],
+    [mt("marketing.home.workflow.step3.title"), mt("marketing.home.workflow.step3.description"), "global/v2/delivery-payment.png"],
+    [mt("marketing.home.workflow.step4.title"), mt("marketing.home.workflow.step4.description"), "global/v2/delivery-payment.png"],
   ],
   architectureEyebrow: mt("marketing.home.architecture.eyebrow"),
   architectureTitle: mt("marketing.home.architecture.title"),
@@ -97,7 +113,12 @@ const landingCopy = {
     mt("marketing.home.architecture.module.analytics"),
     mt("marketing.home.architecture.module.security"),
   ],
-  architectureChannels: ["Website", "Telegram", "Zalo OA", "Discord", "API / Webhook"],
+  architectureChannels: [
+    [mt("marketing.home.channels.name.website"), mt("marketing.home.channels.status.live")],
+    [mt("marketing.home.channels.name.telegram"), mt("marketing.home.channels.status.next")],
+    [`${mt("marketing.home.channels.name.whatsapp")}, ${mt("marketing.home.channels.name.zalo")}, ${mt("marketing.home.channels.name.discord")}, ${mt("marketing.home.channels.name.api")}`, mt("marketing.home.channels.status.next")],
+  ],
+  architectureCoreDetail: mt("marketing.home.architecture.core_detail"),
   pricingEyebrow: mt("marketing.home.pricing.kicker"),
   pricingTitle: mt("marketing.home.pricing.title"),
   pricingDescription: mt("marketing.home.pricing.description"),
@@ -105,6 +126,7 @@ const landingCopy = {
   pricingUnavailableDetail: mt("marketing.pricing.unavailable.description"),
   planCta: mt("marketing.home.pricing.create"),
   pricingCompare: mt("marketing.home.pricing.compare"),
+  pricingRecommended: mt("marketing.home.pricing.recommended"),
   faqEyebrow: mt("marketing.home.faq.kicker"),
   faqTitle: mt("marketing.home.faq.title"),
   faq: [
@@ -172,7 +194,7 @@ if (hostKind === "marketing") {
   mode = "marketing";
   try {
     plans = await getMarketingPlans(env);
-    pricingState = plans.length > 0 ? "ready" : "unavailable";
+    pricingState = isMarketingPricingReady(plans) ? "ready" : "unavailable";
   } catch {
     loggerFor(env).warn({ event: "marketing.pricing_unavailable", errorCode: "marketing_plans_unavailable", requestId: Astro.locals.requestId, source: "http", status: 503 });
   }
@@ -246,13 +268,16 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
           </div>
           <div class="hero-orbit" aria-label={mt("marketing.home.hero.orbit_aria")}>
             <div class="orbit-glow" aria-hidden="true"></div><div class="orbit-line orbit-line-one" aria-hidden="true"></div><div class="orbit-line orbit-line-two" aria-hidden="true"></div>
-            <img class="orbit-core" src="/brand/selinow-kit/hero.selinow-core.png" alt={mt("marketing.home.hero.core_alt")} width="265" height="260" />
-            <img class="orbit-provider orbit-provider-website" src="/brand/selinow-kit/provider.website-card.png" alt="" width="155" height="79" />
-            <img class="orbit-provider orbit-provider-telegram" src="/brand/selinow-kit/provider.telegram-card.png" alt="" width="165" height="100" />
-            <img class="orbit-provider orbit-provider-whatsapp" src="/brand/selinow-kit/provider.whatsapp-card.png" alt="" width="137" height="104" />
-            <img class="orbit-provider orbit-provider-zalo" src="/brand/selinow-kit/provider.zalo-card.png" alt="" width="123" height="95" />
-            <img class="orbit-provider orbit-provider-discord" src="/brand/selinow-kit/provider.discord-card.png" alt="" width="165" height="95" />
-            <img class="orbit-provider orbit-provider-api" src="/brand/selinow-kit/provider.api-card.png" alt="" width="160" height="88" />
+            <div class="orbit-core orbit-core-visual" role="img" aria-label={landingCopy.architectureCore}>
+              <img src="/brand/selinow-kit/global/v2/hero-core.png" alt="" width="1536" height="1024" />
+              <strong>{landingCopy.architectureCore}</strong>
+            </div>
+            {landingCopy.channelCards.map((channel) => (
+              <div class:list={["orbit-provider", "orbit-provider-card", `orbit-provider-${channel.key}`]} data-channel-state={channel.state} aria-label={`${channel.label} - ${channel.status}`}>
+                <span class="orbit-provider-icon" aria-hidden="true">{channel.glyph}</span>
+                <span class="orbit-provider-copy"><strong>{channel.label}</strong><small>{channel.status}</small></span>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -263,9 +288,9 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
         <section class="kit-section platform-shell" id="channels">
           <div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.channelsEyebrow}</p><h2>{landingCopy.channelsTitle}</h2></div><p>{landingCopy.channelsDescription}</p></div>
           <div class="channels-panel">
-            <div class="channel-column"><p class="channel-heading channel-heading-live">{landingCopy.available}</p><div class="channel-row"><img src="/brand/selinow-kit/provider.website-card.png" alt="Website" /><img src="/brand/selinow-kit/provider.telegram-card.png" alt="Telegram" /></div></div>
-            <div class="channel-column"><p class="channel-heading channel-heading-next">{landingCopy.expanding}</p><div class="channel-row"><img src="/brand/selinow-kit/provider.whatsapp-card.png" alt="WhatsApp" /><img src="/brand/selinow-kit/provider.zalo-card.png" alt="Zalo OA" /><img src="/brand/selinow-kit/provider.discord-card.png" alt="Discord" /></div></div>
-            <div class="channel-column channel-column-extensible"><p class="channel-heading channel-heading-planned">{landingCopy.extensible}</p><div class="extensible-card"><img src="/brand/selinow-kit/provider.api-card.png" alt="API" /><span>+ {landingCopy.channelStatus.development}</span></div></div>
+            <div class="channel-column"><p class="channel-heading channel-heading-live">{landingCopy.available}</p><div class="channel-row">{landingCopy.channelCards.filter((channel) => channel.state === "live").map((channel) => <div class="channel-card" data-channel-state={channel.state}><span class="channel-card-icon" aria-hidden="true">{channel.glyph}</span><strong>{channel.label}</strong><small>{channel.status}</small></div>)}</div></div>
+            <div class="channel-column"><p class="channel-heading channel-heading-next">{landingCopy.expanding}</p><div class="channel-row">{landingCopy.channelCards.filter((channel) => channel.state === "next").map((channel) => <div class="channel-card" data-channel-state={channel.state}><span class="channel-card-icon" aria-hidden="true">{channel.glyph}</span><strong>{channel.label}</strong><small>{channel.status}</small></div>)}</div></div>
+            <div class="channel-column channel-column-extensible"><p class="channel-heading channel-heading-planned">{landingCopy.extensible}</p><div class="extensible-card"><span class="channel-card-icon" aria-hidden="true">{landingCopy.channelCards.find((channel) => channel.key === "api")?.glyph}</span><strong>{landingCopy.channelNames.api}</strong><small>{landingCopy.channelStatus.development}</small></div></div>
           </div>
           <div class="channel-legend"><span><i class="legend-live"></i>{landingCopy.channelStatus.live}</span><span><i class="legend-next"></i>{landingCopy.channelStatus.next}</span><span><i class="legend-planned"></i>{landingCopy.channelStatus.planned}</span><span><i class="legend-extensible"></i>{landingCopy.extensible}</span></div>
         </section>
@@ -277,13 +302,13 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
 
         <section class="kit-section workflow-section" id="workflow"><div class="platform-shell"><div class="kit-section-heading kit-section-heading-centered"><div><p class="kit-kicker">{landingCopy.workflowEyebrow}</p><h2>{landingCopy.workflowTitle}</h2></div><p>{landingCopy.workflowDescription}</p></div><div class="workflow-track">{landingCopy.workflowSteps.map((step, index) => <article class="workflow-step"><span class="workflow-number">{index + 1}</span><div class="workflow-art"><img src={`/brand/selinow-kit/${step[2]}`} alt="" loading="lazy" /></div><h3>{step[0]}</h3><p>{step[1]}</p>{index < landingCopy.workflowSteps.length - 1 && <span class="workflow-arrow" aria-hidden="true">→</span>}</article>)}</div></div></section>
 
-        <section class="kit-section platform-shell architecture-section" id="architecture"><div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.architectureEyebrow}</p><h2>{landingCopy.architectureTitle}</h2></div><p>{landingCopy.architectureDescription}</p></div><div class="architecture-board"><div class="architecture-sources"><p>{landingCopy.architectureLeft}</p>{landingCopy.architectureModules.map((module) => <span><i aria-hidden="true">✦</i>{module}</span>)}</div><div class="architecture-core"><img src="/brand/selinow-kit/global/global-architecture-core.png" alt="" width="104" height="100" /><strong>{landingCopy.architectureCore}</strong><small>Product · Order · Payment · Fulfillment</small></div><div class="architecture-destinations"><p>{landingCopy.architectureRight}</p>{landingCopy.architectureChannels.map((channel, index) => <span><i aria-hidden="true">{index === 0 ? "◎" : index === 1 ? "◈" : index === 2 ? "◌" : index === 3 ? "✦" : "</>"}</i>{channel}</span>)}</div><div class="architecture-path architecture-path-one" aria-hidden="true"></div><div class="architecture-path architecture-path-two" aria-hidden="true"></div></div></section>
+        <section class="kit-section platform-shell architecture-section" id="architecture"><div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.architectureEyebrow}</p><h2>{landingCopy.architectureTitle}</h2></div><p>{landingCopy.architectureDescription}</p></div><div class="architecture-board"><div class="architecture-sources"><p>{landingCopy.architectureLeft}</p>{landingCopy.architectureModules.map((module) => <span><i aria-hidden="true">✦</i>{module}</span>)}</div><div class="architecture-core"><img src="/brand/selinow-kit/global/v2/hero-core.png" alt="" width="1536" height="1024" /><strong>{landingCopy.architectureCore}</strong><small>{landingCopy.architectureCoreDetail}</small></div><div class="architecture-destinations"><p>{landingCopy.architectureRight}</p>{landingCopy.architectureChannels.map((channel, index) => <span><i aria-hidden="true">{index === 0 ? "◎" : index === 1 ? "◈" : "◌"}</i><span class="architecture-destination-copy"><strong>{channel[0]}</strong><small>{channel[1]}</small></span></span>)}</div><div class="architecture-path architecture-path-one" aria-hidden="true"></div><div class="architecture-path architecture-path-two" aria-hidden="true"></div></div></section>
 
-        <section class="kit-section platform-shell pricing-kit" id="pricing" data-pricing-state={pricingState}><div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.pricingEyebrow}</p><h2>{landingCopy.pricingTitle}</h2></div><p>{landingCopy.pricingDescription}</p></div>{pricingState === "ready" ? <><div class="runtime-plan-grid">{plans.map((plan, index) => <article class:list={["runtime-plan-card", index === 1 && "runtime-plan-card-featured"]}><div class="runtime-plan-head"><span>{index === 1 ? "Recommended" : `0${index + 1}`}</span><h3>{plan.name}</h3></div><p class="runtime-plan-source">Runtime plan · {plan.code}</p><ul>{planFeatureList(plan, locale).map((feature) => <li>{feature}</li>)}</ul><a class="kit-button kit-button-secondary" href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.planCta}<span aria-hidden="true">→</span></a></article>)}</div><a class="pricing-link" href="/pricing">{landingCopy.pricingCompare}<span aria-hidden="true">→</span></a></> : <div class="pricing-empty"><h3>{landingCopy.pricingUnavailable}</h3><p>{landingCopy.pricingUnavailableDetail}</p></div>}</section>
+        <section class="kit-section platform-shell pricing-kit" id="pricing" data-pricing-state={pricingState}><div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.pricingEyebrow}</p><h2>{landingCopy.pricingTitle}</h2></div><p>{landingCopy.pricingDescription}</p></div>{pricingState === "ready" ? <><div class="runtime-plan-grid">{plans.map((plan) => <article class:list={["runtime-plan-card", plan.recommended === true && "runtime-plan-card-featured"]}><div class="runtime-plan-head"><span>{plan.recommended === true ? landingCopy.pricingRecommended : plan.code}</span><h3>{plan.name}</h3></div><p class="runtime-plan-source">Runtime plan · {plan.code}</p><div class="runtime-plan-prices">{(plan.prices ?? []).map((price) => { const amount = formatMarketingPrice(price, locale); return amount === null ? null : <p data-market={price.marketCode}><strong>{amount}</strong> <span>{price.interval}</span></p>; })}</div><ul>{planFeatureList(plan, locale).map((feature) => <li>{feature}</li>)}</ul><a class="kit-button kit-button-secondary" href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.planCta}<span aria-hidden="true">→</span></a></article>)}</div><a class="pricing-link" href="/pricing">{landingCopy.pricingCompare}<span aria-hidden="true">→</span></a></> : <div class="pricing-empty"><h3>{landingCopy.pricingUnavailable}</h3><p>{landingCopy.pricingUnavailableDetail}</p></div>}</section>
 
         <section class="kit-section platform-shell faq-kit" id="faq"><div class="kit-section-heading"><div><p class="kit-kicker">{landingCopy.faqEyebrow}</p><h2>{landingCopy.faqTitle}</h2></div></div><div class="faq-kit-list">{landingCopy.faq.map((item) => <details><summary>{item[0]}<span aria-hidden="true">+</span></summary><p>{item[1]}</p></details>)}</div></section>
 
-        <section class="final-cta-kit"><div class="platform-shell final-cta-inner"><img src="/brand/logo/selinow-mark-white.svg" alt="" width="56" height="56" /><div><p class="kit-kicker">{landingCopy.finalEyebrow}</p><h2>{landingCopy.finalTitle}</h2><p>{landingCopy.finalDescription}</p></div><div class="final-cta-actions"><a class="kit-button kit-button-light" href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.finalPrimary}<span aria-hidden="true">→</span></a><a class="kit-button kit-button-outline-light" href="#workflow">{landingCopy.finalSecondary}<span aria-hidden="true">▶</span></a></div></div></section>
+        <section class="final-cta-kit"><div class="platform-shell final-cta-inner"><img src="/brand/logo/selinow-mark-black.svg" class="final-cta-mark" alt="" width="56" height="56" /><div><p class="kit-kicker">{landingCopy.finalEyebrow}</p><h2>{landingCopy.finalTitle}</h2><p>{landingCopy.finalDescription}</p></div><div class="final-cta-actions"><a class="kit-button kit-button-light" href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.finalPrimary}<span aria-hidden="true">→</span></a><a class="kit-button kit-button-outline-light" href="#workflow">{landingCopy.finalSecondary}<span aria-hidden="true">▶</span></a></div></div></section>
       </main>
       <footer class="landing-footer"><div class="platform-shell footer-grid"><div class="footer-brand"><img src="/brand/logo/selinow-logo-black.svg" alt="Selinow" width="132" height="36" /><p>{landingCopy.footerTagline}</p><small>© {new Date().getFullYear()} Selinow. All rights reserved.</small></div><div><h2>{landingCopy.footer.product}</h2><a href="#channels">{landingCopy.channelsTitle}</a><a href="#workflow">{landingCopy.workflowTitle}</a><a href="#architecture">{landingCopy.architectureTitle}</a></div><div><h2>{landingCopy.footer.solutions}</h2><a href="#use-cases">{landingCopy.uses[0]?.[1] ?? ""}</a><a href="#use-cases">{landingCopy.uses[1]?.[1] ?? ""}</a><a href="#use-cases">{landingCopy.uses[3]?.[1] ?? ""}</a></div><div><h2>{landingCopy.footer.resources}</h2><a href="#faq">{landingCopy.faqTitle}</a><a href="/pricing">{landingCopy.pricingCompare}</a><a href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.heroPrimary}</a></div></div></footer>
     </div>

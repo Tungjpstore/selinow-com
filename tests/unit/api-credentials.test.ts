@@ -255,7 +255,7 @@ describe("API credential migration", () => {
       "api-credential-invalid-scope",
       "akc_00000000-0000-4000-8000-000000000042",
       "Invalid key",
-      '["orders:read"]',
+      '["unknown:read"]',
       "e".repeat(43),
       now,
       now,

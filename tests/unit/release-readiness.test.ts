@@ -19,6 +19,7 @@ import {
 } from "../../scripts/lib/release.mjs";
 
 const now = new Date("2026-07-26T03:00:00.000Z");
+const providerAcceptanceKeys = ["telegramBot", "telegramMiniApp", "zaloMiniApp", "zaloOa", "whatsappCloud", "discord"] as const;
 
 function readyWranglerConfig(): Record<string, unknown> {
   const vars = Object.fromEntries(REQUIRED_PRODUCTION_VARS.map((name) => [name, name === "APP_ENV" ? "production" : `configured-${name.toLowerCase()}`]));
@@ -119,12 +120,31 @@ function readyEvidence(): Record<string, unknown> {
     },
     candidateWorkerVersion: "worker-candidate",
     commitSha: "0123456789abcdef0123456789abcdef01234567",
-    manualAcceptance: { customDomain: true, paymentSignedEvent: true, telegram: true, website: true },
-    monitoring: { alertsReady: true, budgetAlertsReady: true, dashboardReady: true },
-    pilot: { shopCount: 2 },
+    manualAcceptance: {
+      customDomain: true,
+      evidenceRef: "private/manual-acceptance/report.json",
+      observedAt: "2026-07-25T12:00:00.000Z",
+      paymentSignedEvent: true,
+      telegram: true,
+      website: true,
+    },
+    monitoring: {
+      alertsReady: true,
+      budgetAlertsReady: true,
+      dashboardReady: true,
+      evidenceRef: "private/monitoring/report.json",
+      observedAt: "2026-07-26T02:00:00.000Z",
+    },
+    pilot: { completedAt: "2026-07-24T12:00:00.000Z", evidenceRef: "private/pilot/report.json", shopCount: 2 },
     previousWorkerVersion: "worker-current",
+    providerAcceptance: Object.fromEntries(providerAcceptanceKeys.map((provider) => [provider, {
+      accepted: true,
+      evidenceRef: `private/provider-acceptance/${provider}.json`,
+      observedAt: "2026-07-25T12:00:00.000Z",
+    }])),
     quality: { build: true, check: true, deployDryRun: true, lint: true, test: true },
     releaseId: "release_20260726_abcdef12",
+    rollback: { rehearsalEvidenceRef: "private/rollback/report.json", rehearsedAt: "2026-07-20T12:00:00.000Z" },
     security: { criticalOpen: 0, highOpen: 0 },
     staging: { accepted: true, acceptedAt: "2026-07-26T01:00:00.000Z" },
   };
@@ -198,6 +218,56 @@ describe("production release readiness", () => {
 
     expect(checks.find((check) => check.name === "backup.completedAt")?.ok).toBe(false);
     expect(checks.find((check) => check.name === "backup.restoreDrillCompletedAt")?.ok).toBe(false);
+  });
+
+  it("requires private acceptance references and fresh operational timestamps", () => {
+    const evidence = readyEvidence();
+    const manualAcceptance = evidence.manualAcceptance as Record<string, unknown>;
+    const monitoring = evidence.monitoring as Record<string, unknown>;
+    const pilot = evidence.pilot as Record<string, unknown>;
+    const rollback = evidence.rollback as Record<string, unknown>;
+    delete manualAcceptance.evidenceRef;
+    monitoring.observedAt = "2026-07-24T00:00:00.000Z";
+    delete pilot.evidenceRef;
+    rollback.rehearsedAt = "2026-06-01T00:00:00.000Z";
+
+    const result = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.missing).toEqual(expect.arrayContaining([
+      "evidence.manualAcceptance.evidenceRef",
+      "evidence.monitoring.observedAtFresh",
+      "evidence.pilot.evidenceRef",
+      "evidence.rollback.rehearsedAtFresh",
+    ]));
+  });
+
+  it("requires independent acceptance evidence for every channel provider", () => {
+    const evidence = readyEvidence();
+    const providerAcceptance = evidence.providerAcceptance as Record<string, Record<string, unknown>>;
+    delete providerAcceptance.discord;
+
+    const result = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.missing).toEqual(expect.arrayContaining([
+      "evidence.providerAcceptance.discord.accepted",
+      "evidence.providerAcceptance.discord.evidenceRef",
+      "evidence.providerAcceptance.discord.observedAt",
+      "evidence.providerAcceptance.discord.observedAtFresh",
+    ]));
   });
 
   it("builds a value-safe manifest and rollback matrix after readiness passes", () => {

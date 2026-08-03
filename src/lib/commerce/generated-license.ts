@@ -1,3 +1,4 @@
+import { tryRecordFirstPaidFulfilled } from "../analytics/activation";
 import { constantTimeEqual, hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
@@ -412,6 +413,7 @@ type GeneratedLicenseClaim = {
   requestId: string;
   resourceKey: string;
   orderPublicId: string;
+  orderId: string;
   shopId: string;
   keyVersion: string;
   leaseToken: string;
@@ -459,7 +461,8 @@ async function claimGeneratedLicenseRequest(input: {
       request.connection_id AS connectionId, request.provider_code AS providerCode,
       request.provider_idempotency_key_hash AS providerIdempotencyKeyHash,
       request.request_hash AS requestHash, request.entitlement_id AS entitlementId,
-      resource.resource_key AS resourceKey, orders.public_id AS orderPublicId,
+      resource.resource_key AS resourceKey, orders.id AS orderId,
+      orders.public_id AS orderPublicId,
       credential.id AS credentialId, credential.credential_version AS credentialVersion,
       credential.key_version AS keyVersion,
       credential.endpoint_ciphertext_b64 AS endpointCiphertextB64,
@@ -507,6 +510,7 @@ async function claimGeneratedLicenseRequest(input: {
     endpointIvB64: string;
     endpointFingerprint: string;
     entitlementId: string;
+    orderId: string;
     id: string;
     keyVersion: string;
     orderPublicId: string;
@@ -556,6 +560,7 @@ async function claimGeneratedLicenseRequest(input: {
     keyVersion: row.keyVersion,
     leaseToken,
     orderPublicId: row.orderPublicId,
+    orderId: row.orderId,
     priorStatus: row.priorStatus,
     providerCode: row.providerCode,
     providerIdempotencyKeyHash: row.providerIdempotencyKeyHash,
@@ -841,6 +846,7 @@ async function settleGeneratedLicenseSuccess(input: {
     ),
   ]);
   if (results[0]?.meta.changes !== 1) throw new AppError("generated_license_settlement_conflict", 409);
+  await tryRecordFirstPaidFulfilled({ env: input.env, orderId: input.claim.orderId, shopId: input.claim.shopId });
 }
 
 export async function processGeneratedLicenseRequestReference(input: {

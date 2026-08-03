@@ -2,7 +2,7 @@
 
 Phase 10 uses a prepare, backup, deploy, verify, confirm-or-rollback sequence. Repository tooling is fail-closed: production configuration, secret names, backup evidence, security status, monitoring ownership and pilot evidence must be complete before a release manifest can be written.
 
-Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. The first-production evidence records Worker version `6ca9c890-ed04-44dc-ac32-44b36881f2dc` serving the production apex/wildcard routes and the exact `app.selinow.com`/`api.selinow.com` Worker Domains. Production D1 is at the applied `0001`-`0052` ledger; source migrations `0053`-`0056` are pending and have not been applied remotely. The current source tree is clean at the reviewed continuation commit, but the older bootstrap evidence is pinned to a different historical commit and must not be treated as evidence for this continuation candidate.
+Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. The first-production evidence records Worker version `6ca9c890-ed04-44dc-ac32-44b36881f2dc` serving the production apex/wildcard routes and the exact `app.selinow.com`/`api.selinow.com` Worker Domains. Production D1 is at the applied `0001`-`0052` ledger; source migrations `0053`-`0077` are pending and have not been applied remotely. The shared worktree is currently dirty with parallel SEO/homepage/asset/provider-contract, billing and activation-analytics continuation changes; no current clean reviewed continuation tree exists yet. The older bootstrap evidence is pinned to a different historical commit and must not be treated as evidence for this continuation candidate.
 
 The platform handoff evidence is private and non-secret: `.wrangler/bootstrap/production-evidence.json`, `.wrangler/bootstrap/bootstrap_20260730_first_release/production-smoke.json` and `promotion-applied.json`. It proves platform routing and frontend/health smoke only. PayOS settlement/refunds, Telegram bot acceptance, provider-backed fulfillment, external customer-domain/Turnstile admission, channel-expansion providers (Zalo, WhatsApp and Discord), controlled seller pilots, support/legal ownership and rollback evidence for the current candidate remain incomplete. No provider activation or full-commerce GO is claimed.
 
@@ -17,6 +17,45 @@ Start from these non-secret templates:
 - `infra/release/pilot-smoke.production.example.json`: GET-only production smoke plan. Keep the completed plan private when it identifies pilot hostnames.
 
 Completed manifests are written with mode `0600` under `.wrangler/releases/<release-id>/` and must not be committed.
+
+The release doctor requires independent, recent acceptance evidence for
+`telegramBot`, `telegramMiniApp`, `zaloMiniApp`, `zaloOa`, `whatsappCloud` and
+`discord` under `providerAcceptance`. Each entry must contain only an accepted
+boolean, a private evidence reference and an observation timestamp. A local
+contract test or a provider-pending route response cannot satisfy this gate;
+the evidence must cover real provider credentials, webhook/outbound acceptance,
+tenant isolation and the applicable commerce/payment boundary.
+
+### Dashboard and channel-split acceptance boundary
+
+The private dashboard handoff keeps one canonical `/app/integrations` route but
+requires isolated lanes for Website, PayOS, Telegram Bot, Telegram Mini App,
+Zalo Mini App, Zalo OA, WhatsApp Cloud and Discord Bot. The lane IA and test
+scenarios are defined in
+`docs/frontend-rebuild-handoff/DASHBOARD_INFORMATION_ARCHITECTURE.md` and the
+handoff `ACCEPTANCE_MATRIX.csv` (currently 87 rows, API inventory 150 rows).
+This is a presentation and contract gate, not provider activation evidence.
+
+Before a production candidate can advertise a lane as active, release evidence
+must prove all of the following independently:
+
+- selected-shop switch reset, role/capability visibility and no cross-tenant
+  stale data in the dashboard shell;
+- responsive and keyboard acceptance at 1440, 768, 390 and 320 px with no
+  horizontal overflow, secret/token leakage or unsafe fallback data;
+- provider-specific identity, inbound proof, outbound capability, commerce
+  capability and freshness for that lane; no lane may inherit another lane's
+  health or credential state;
+- external provider consent/credentials, webhook or launch/installation proof,
+  outbound acceptance and replay/conflict evidence; payment and fulfillment
+  evidence is required whenever the lane touches checkout or delivery;
+- automation tasks show seller/provider waiting states honestly and do not treat
+  a connector request, queued task or webhook receipt as completed work.
+
+The current source/local dashboard and provider contracts do not satisfy these
+external gates. Production remains platform-only (`0001`-`0052`) until the
+reviewed candidate, protected backup/restore, controlled pilots, monitoring,
+support/legal ownership and provider evidence are admitted.
 
 ## First-production bootstrap ceremony
 
@@ -76,9 +115,9 @@ npm run release:production:bootstrap:migrate -- --env production --dry-run --jso
 
 If backup, generated-manifest, Git, account, D1, migration-ledger or confirmation evidence changes between checks, the command stops before Wrangler. Record the migration completion timestamp and exact applied ledger in the private bootstrap evidence before moving to the canary phase.
 
-### Continuation migration admission (`0053`-`0056`)
+### Continuation migration admission (`0053`-`0076`)
 
-The first-production executor above is historical and must not be reused for the non-empty continuation. For migrations `0053`-`0056`, create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports:
+The first-production executor above is historical and must not be reused for the non-empty continuation. For migrations `0053`-`0077`, create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports:
 
 ```bash
 npm run backup:create -- --env production --confirm-production --json
@@ -99,6 +138,14 @@ npm run db:migrate -- \
 ```
 
 The migration and normal Worker deploy admissions revalidate the exact account/D1 identity and require the latest non-empty report-v2 backup, protected artifact checksum/target/freshness, and the latest passed isolated restore report with matching reviewed commit, backup checksum/size, integrity/FK results and the complete current source migration ledger. Any evidence drift between the first and final checks fails closed before Wrangler. This path still requires a separately approved production mutation window; dry-runs and historical bootstrap evidence do not authorize applying or deploying the continuation.
+
+Restore normalization is limited to the disposable isolated target. If an older
+source ledger contains the known historical `0062_zalo_oa_oauth_state_reissue.sql`
+name together with the canonical `0062_zalo_oa_oauth_state_retry.sql` row, the
+drill removes only the historical alias from the isolated target before replay,
+records the normalized alias and verifies the exact current source ledger. It
+never edits the authoritative source database; a missing canonical row or an
+unknown extra migration fails closed.
 
 ### First-production Worker canary
 
@@ -224,7 +271,7 @@ The default mode is a read-only plan against a supplied saved live inventory (`-
 
 ### Empty-baseline restore drill
 
-The empty-baseline drill below is historical first-production bootstrap procedure. It was used before the `0001`-`0052` platform migration and must not be substituted for the normal non-empty backup/restore gate when applying `0053`-`0056`. A create timeout is reconciled through bounded D1 relists so an uncertain temporary target is not silently orphaned. The private mode-`0600` report records metadata and safe error codes only; it never records provider bookmarks, credentials or exported SQL:
+The empty-baseline drill below is historical first-production bootstrap procedure. It was used before the `0001`-`0052` platform migration and must not be substituted for the normal non-empty backup/restore gate when applying `0053`-`0069`. A create timeout is reconciled through bounded D1 relists so an uncertain temporary target is not silently orphaned. The private mode-`0600` report records metadata and safe error codes only; it never records provider bookmarks, credentials or exported SQL:
 
 ```bash
 npm run release:production:bootstrap:empty-baseline -- \
@@ -252,8 +299,8 @@ For this platform-only release, the apex/wildcard route handoff and canary accep
 - The live platform route matrix is `selinow.com/*` and `*.selinow.com/*` -> `selinow-com-production`, the exact staging exceptions -> `selinow-com-staging`, and `*/*` -> `selinow-com-staging`; this is recorded in `promotion-applied.json` and `production-smoke.json`. Reconcile the matrix again before any future route mutation; do not treat the checked-in staging null-guard contract as evidence that production traffic is absent.
 - The checked-in staging `*/*` route intentionally sends otherwise unmatched external custom domains to `selinow-com-staging`. The current platform-only handoff is: `selinow.com/*` and `*.selinow.com/*` point to `selinow-com-production`; exact in-zone staging exceptions (`staging.selinow.com/*`, `app-staging.selinow.com/*`, `api-staging.selinow.com/*`, and `*.staging.selinow.com/*`) point to `selinow-com-staging`; and `*/*` remains on `selinow-com-staging`. External custom-domain traffic therefore remains on staging. Because Worker route patterns must belong to the zone, a future external cutover still requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher; that pending inventory is not silently treated as production admission in this platform-only release.
 - The production Turnstile widget is authorized for `selinow.com`, which covers its subdomains. Turnstile does not support wildcard hostnames; every external custom hostname must be admitted explicitly before activation (or the account must use Enterprise Any Hostname). The current application has no runtime hostname-admission lifecycle evidence, so external custom-domain checkout remains blocked and no external-domain activation is claimed by the platform-only handoff.
-- Production migrations are forward-only. The current remote baseline is `0001`-`0052`; migrations `0053_seller_operations_contracts.sql`, `0054_backend_gap_workflows.sql`, `0055_channel_connector_requests.sql` and `0056_channel_connector_scope_guards.sql` require a fresh backup, reviewed clean commit and an approved, separately recorded mutation window before application.
-- The current working tree is clean, but the continuation still requires fresh evidence and a new release manifest pinned to the reviewed commit before deploying or migrating.
+- Production migrations are forward-only. The current remote baseline is `0001`-`0052`; migrations `0053_seller_operations_contracts.sql` through `0077_activation_milestone_ledger.sql` require a fresh backup, reviewed clean commit and an approved, separately recorded mutation window before application. Before `0066`, revoke or expire pending OAuth rows created without a lookup hash; before `0076`, confirm Dodo provider references and tax/merchant decisions without recording secret values; before `0077`, confirm activation-event retention ownership and analytics policy.
+- The shared working tree is dirty; the continuation still requires a clean reviewed tree, fresh evidence and a new release manifest pinned to that reviewed commit before deploying or migrating.
 
 Do not remove these blockers by broadening a shared-zone wildcard without the exact in-zone staging exceptions, routing an external staging hostname through production, or disabling Turnstile. Keep the platform-only route contracts explicit, and before any future external-domain cutover capture a fresh read-only external-host inventory, rerun staging acceptance and add tenant-routing/Turnstile lifecycle evidence. The route handoff is documented in `buildProductionRouteHandoff`; it is a plan-only helper and performs no Cloudflare mutation.
 
@@ -340,7 +387,7 @@ The following acceptance remains manual and controlled; the runner never perform
 - One external custom domain completing hostname, SSL and DNS readiness.
 - Cross-shop verification showing pilot shop A cannot read or mutate pilot shop B.
 
-Record only boolean evidence and private report references in the release evidence file.
+Record only boolean evidence, ISO-8601 observation/completion timestamps, and private report references in the release evidence file. Normal release admission also enforces freshness windows: manual acceptance, pilot completion and rollback rehearsal within 30 days; monitoring evidence within 24 hours.
 
 ## 5. Rollback decision matrix
 
@@ -359,12 +406,15 @@ Rollback authority and support ownership must be named before the change window 
 
 Phase 10 is not complete until:
 
-- The reviewed production baseline is explicitly recorded as `0001`-`0052`; any continuation migration (`0053`-`0056`) has a fresh protected backup, isolated restore evidence and forward-only apply record.
+- The reviewed production baseline is explicitly recorded as `0001`-`0052`; any continuation migration (`0053`-`0077`) has a fresh protected backup, isolated restore evidence and forward-only apply record.
 - Staging acceptance for the candidate migrations and Worker version is recorded.
 - The production doctor and reviewed release manifest pass for the exact candidate commit and rollback Worker version.
 - A production D1 export/bookmark is less than 24 hours old and the isolated restore-drill evidence is less than 30 days old.
 - Two isolated pilot shops pass.
 - Website and Telegram share inventory and fulfillment correctly.
+- Dashboard channel lanes pass the source/local IA and responsive acceptance;
+  each advertised provider lane has its own external identity, inbound proof,
+  outbound acceptance, tenant-isolation evidence and rollback owner.
 - A real signed PayOS event completes the payment-to-key path.
 - Cloudflare Email Sending delivery and its tested acknowledgement path are active without exposing magic-link tokens.
 - Custom-domain live acceptance passes.

@@ -1,6 +1,12 @@
 # Selinow PromptOS implementation report
 
-Updated: 2026-07-30
+Updated: 2026-08-03
+
+This report preserves the historical PromptOS visual checkpoint while its
+capability notes are reconciled with the current source chain. For authoritative
+current maturity, use `docs/IMPLEMENTATION_STATUS.md` and the frontend rebuild
+handoff; no historical visual checkpoint is evidence of staging or production
+activation.
 
 ## Outcome
 
@@ -257,17 +263,24 @@ race the same `dist/` output.
 
 - SEO metadata is intentionally limited to title/description. Canonical host,
   robots policy and publish eligibility remain server-owned.
-- No new provider, billing, customer mutation or order override behavior is
-  invented while backend/external contracts are incomplete.
-- Product channel visibility and a hidden product state remain unimplemented
-  because the required backend contract does not exist. Product plus first-variant
-  creation is now atomic, idempotent and covered for rollback, replay/conflict and
-  cross-tenant rejection without a schema migration.
+- No new provider settlement, customer unmasking/merge/delete or order override
+  behavior is invented while backend/external contracts are incomplete. Customer
+  detail/notes, owner member operations and audited billing request intents now use
+  tenant-bound local contracts; billing completion remains provider-pending.
+- Migration `0069` now provides the tenant-bound product/channel visibility
+  GET/PUT contract and fail-closed missing-row behavior. The current products UI
+  exposes inline controls that hydrate from the server and use CSRF/recent-auth,
+  idempotency and expected-version conflict reloads; provider activation remains
+  a separate gate. Product plus first-variant creation remains atomic, idempotent
+  and covered for rollback, replay/conflict and cross-tenant rejection.
 
 ## Known gaps
 
-- Member invite/role/revoke, billing plan/payment/cancel, customer detail/edit/
-  merge/notes, and seller order notes/retry/override APIs remain unavailable.
+- Provider-backed billing plan/payment/cancel settlement, customer merge/delete or
+  unmasking, seller order-note browser controls, message delivery, refund completion
+  and order retry/override remain unavailable or provider-pending. Member
+  invite/role/suspension/revoke, customer detail/notes and audited billing request
+  recording are implemented in the current source/local contract.
 - Controlled Telegram bot, PayOS channel and provider-backed automation UAT are
   still required for Phase 8/9 external acceptance.
 - Phase B source/local gates are closed: source-level missing-key detection,

@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import { hmacToken } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
+import { tryRecordActivationMilestone } from "../analytics/activation";
 import { resolveActiveEncryptionKey, resolveEncryptionKey } from "../crypto/keyring";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
@@ -156,8 +157,18 @@ function mapIntegration(row: IntegrationRow): TelegramIntegrationView {
   };
 }
 
-async function requireIntegrationActor(env: AppBindings, shopPublicId: string, userId: string): Promise<{ defaultLocale: string; shopId: string }> {
+async function requireIntegrationReader(env: AppBindings, shopPublicId: string, userId: string): Promise<{ defaultLocale: string; shopId: string }> {
+  const member = await getShopForMember({ capability: "integrations:read", env, shopPublicId, userId });
+  return { defaultLocale: member.shop.defaultLocale, shopId: member.row.shop_id };
+}
+
+async function requireIntegrationOperator(env: AppBindings, shopPublicId: string, userId: string): Promise<{ defaultLocale: string; shopId: string }> {
   const member = await getShopForMember({ capability: "integrations:manage", env, shopPublicId, userId });
+  return { defaultLocale: member.shop.defaultLocale, shopId: member.row.shop_id };
+}
+
+async function requireIntegrationCredential(env: AppBindings, shopPublicId: string, userId: string): Promise<{ defaultLocale: string; shopId: string }> {
+  const member = await getShopForMember({ capability: "integrations:credentials", env, shopPublicId, userId });
   return { defaultLocale: member.shop.defaultLocale, shopId: member.row.shop_id };
 }
 
@@ -174,15 +185,22 @@ function webhookUrl(env: AppBindings, publicId: string): string {
   return `${env.API_ORIGIN}/webhooks/telegram/${publicId}`;
 }
 
+function webhookAllowedUpdatesMatch(allowedUpdates: readonly string[]): boolean {
+  return allowedUpdates.length === 2
+    && allowedUpdates.includes("message")
+    && allowedUpdates.includes("callback_query");
+}
+
 async function configureProvider(client: TelegramClient, env: AppBindings, integration: IntegrationRow, secret: string, shopDefaultLocale: string): Promise<TelegramWebhookInfo> {
   await client.setMyCommands(telegramCommands(shopDefaultLocale));
   await client.setMyCommands(telegramCommands("en"), "en");
   await client.setMyCommands(telegramCommands("vi-VN"), "vi");
   await client.setChatMenuButton();
   const url = webhookUrl(env, integration.webhookPublicId);
-  await client.setWebhook({ allowedUpdates: ["message", "callback_query"], maxConnections: webhookMaxConnections(env), secretToken: secret, url });
+  const maxConnections = webhookMaxConnections(env);
+  await client.setWebhook({ allowedUpdates: ["message", "callback_query"], maxConnections, secretToken: secret, url });
   const info = await client.getWebhookInfo();
-  if (info.url !== url || !info.allowedUpdates.includes("message") || !info.allowedUpdates.includes("callback_query")) throw new AppError("telegram_webhook_failed", 409);
+  if (info.url !== url || info.maxConnections !== maxConnections || !webhookAllowedUpdatesMatch(info.allowedUpdates)) throw new AppError("telegram_webhook_failed", 409);
   return info;
 }
 
@@ -308,13 +326,13 @@ async function prepareTelegramCredential(input: {
 }
 
 export async function getTelegramIntegration(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<TelegramIntegrationView | null> {
-  const { shopId } = await requireIntegrationActor(input.env, input.shopPublicId, input.userId);
+  const { shopId } = await requireIntegrationReader(input.env, input.shopPublicId, input.userId);
   const integration = await findIntegration(input.env, shopId);
   return integration === null ? null : mapIntegration(integration);
 }
 
 export async function connectTelegram(input: { botToken: string; env: AppBindings; fetcher?: typeof fetch; replaceBot: boolean; requestId: string; shopPublicId: string; userId: string }): Promise<TelegramIntegrationView> {
-  const actor = await requireIntegrationActor(input.env, input.shopPublicId, input.userId);
+  const actor = await requireIntegrationCredential(input.env, input.shopPublicId, input.userId);
   const { shopId } = actor;
   const client = new TelegramClient(input.botToken, input.fetcher);
   const bot = await client.getMe();
@@ -331,7 +349,17 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
   integration = await ensureReconnectableGenericConnection(input.env, integration, shopId);
   const previous = integration.activeCredentialId === null ? null : await loadActiveTelegramCredential(input.env, integration.id, shopId);
   const credential = await prepareTelegramCredential({ botToken: input.botToken, env: input.env, integration, shopId, userId: input.userId });
-  if (credential.alreadyActive) return mapIntegration(integration);
+  if (credential.alreadyActive) {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "telegram_connected",
+      milestone: "telegram_connected",
+      reason: "connected",
+      shopId,
+      source: "telegram",
+    });
+    return mapIntegration(integration);
+  }
   let info: TelegramWebhookInfo;
   try {
     info = await configureProvider(client, input.env, integration, credential.secret, actor.defaultLocale);
@@ -361,6 +389,16 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
   }
   const active = await findIntegration(input.env, shopId);
   if (active === null) throw new AppError("internal_error", 500);
+  if (active.status === "active" && active.webhookStatus === "verified") {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "telegram_connected",
+      milestone: "telegram_connected",
+      reason: "connected",
+      shopId,
+      source: "telegram",
+    });
+  }
   return mapIntegration(active);
 }
 
@@ -410,10 +448,20 @@ async function retryTelegramSetup(input: {
     try { await client.deleteWebhook(false); } catch { /* Best-effort cleanup after an activation failure. */ }
     throw new AppError("telegram_activation_failed", 409);
   }
+  if (!info.hasDeliveryError) {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "telegram_connected",
+      milestone: "telegram_connected",
+      reason: "connected",
+      shopId: input.shopId,
+      source: "telegram",
+    });
+  }
 }
 
 export async function refreshTelegramHealth(input: { env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<TelegramIntegrationView> {
-  const actor = await requireIntegrationActor(input.env, input.shopPublicId, input.userId);
+  const actor = await requireIntegrationOperator(input.env, input.shopPublicId, input.userId);
   const { shopId } = actor;
   const integration = await findIntegration(input.env, shopId);
   if (integration === null || integration.status === "disabled") throw new AppError("telegram_not_configured", 409);
@@ -430,7 +478,9 @@ export async function refreshTelegramHealth(input: { env: AppBindings; fetcher?:
     const [bot, info] = await Promise.all([client.getMe(), client.getWebhookInfo()]);
     const expectedUrl = webhookUrl(input.env, integration.webhookPublicId);
     const identityMatches = integration.botId === bot.id;
-    const webhookMatches = info.url === expectedUrl && info.allowedUpdates.includes("message") && info.allowedUpdates.includes("callback_query");
+    const webhookMatches = info.url === expectedUrl
+      && info.maxConnections === webhookMaxConnections(input.env)
+      && webhookAllowedUpdatesMatch(info.allowedUpdates);
     const healthy = identityMatches && webhookMatches && !info.hasDeliveryError;
     const errorCode = !identityMatches ? "telegram_bot_mismatch" : !webhookMatches ? "telegram_webhook_mismatch" : info.hasDeliveryError ? "telegram_provider_delivery_error" : null;
     await input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = ?, webhook_status = ?, pending_update_count = ?, last_safe_error_code = ?, last_checked_at = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND status != 'disabled'").bind(healthy ? "active" : "degraded", webhookMatches ? "verified" : "mismatch", info.pendingUpdateCount, errorCode, now, now, integration.id, shopId).run();
@@ -440,11 +490,21 @@ export async function refreshTelegramHealth(input: { env: AppBindings; fetcher?:
   }
   const refreshed = await findIntegration(input.env, shopId);
   if (refreshed === null) throw new AppError("internal_error", 500);
+  if (refreshed.status === "active" && refreshed.webhookStatus === "verified") {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "telegram_connected",
+      milestone: "telegram_connected",
+      reason: "connected",
+      shopId,
+      source: "telegram",
+    });
+  }
   return mapIntegration(refreshed);
 }
 
 export async function disconnectTelegram(input: { env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<void> {
-  const { shopId } = await requireIntegrationActor(input.env, input.shopPublicId, input.userId);
+  const { shopId } = await requireIntegrationCredential(input.env, input.shopPublicId, input.userId);
   const integration = await findIntegration(input.env, shopId);
   if (integration === null || integration.activeCredentialId === null) throw new AppError("telegram_not_configured", 409);
   try {

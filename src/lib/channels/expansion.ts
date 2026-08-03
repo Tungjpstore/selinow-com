@@ -5,11 +5,12 @@ import type { ChannelAdapterManifest, ChannelCapability } from "./types";
 
 export const TELEGRAM_MINI_APP_CHANNEL_CODE = "telegram.mini_app";
 export const ZALO_MINI_APP_CHANNEL_CODE = "zalo.mini_app";
+export const ZALO_OFFICIAL_ACCOUNT_CHANNEL_CODE = "zalo.oa";
 export const WHATSAPP_CLOUD_CHANNEL_CODE = "whatsapp.cloud";
 export const DISCORD_BOT_CHANNEL_CODE = "discord.bot";
 
 export type ChannelExpansionStage = "contract_ready" | "provider_pending";
-export type ChannelExpansionFamily = "discord_bot" | "telegram_mini_app" | "whatsapp_bot" | "zalo_mini_app";
+export type ChannelExpansionFamily = "discord_bot" | "telegram_mini_app" | "whatsapp_bot" | "zalo_mini_app" | "zalo_official_account";
 
 export type ChannelExpansionCatalogEntry = {
   capabilities: readonly ChannelCapability[];
@@ -39,6 +40,23 @@ const expansionEntries = [
     providerExecution: "contract_ready",
     requiredSellerAction: "create_bot",
     safeDescriptionKey: "dashboard.channels.expansion.telegram_mini_app",
+    version: 1,
+  },
+  {
+    capabilities: [
+      "conversation.inbound",
+      "conversation.outbound",
+      "identity.private",
+      "message.rich_ui",
+      "orders.status_push",
+    ],
+    code: ZALO_OFFICIAL_ACCOUNT_CHANNEL_CODE,
+    family: "zalo_official_account",
+    inlineSecretDelivery: false,
+    providerCode: ZALO_OFFICIAL_ACCOUNT_CHANNEL_CODE,
+    providerExecution: "provider_pending",
+    requiredSellerAction: "connect_provider",
+    safeDescriptionKey: "dashboard.channels.expansion.zalo_oa",
     version: 1,
   },
   {

@@ -1,5 +1,9 @@
 # Telegram Multi-Bot Integration Contract
 
+## Current continuation overlay (2026-08-03)
+
+Telegram Bot remains the implemented webhook/commerce adapter. Telegram Mini App is a separate contract: signed `initData`, replay-safe tenant session exchange, active-plan and credential-version guards, catalog/cart/quote/checkout/order projections and no implicit authentication from the Bot webhook. Mini App session and commerce code is source/local-only until the continuation migrations and a controlled provider UAT are admitted.
+
 ## 1. Ownership model
 
 - Mỗi shop dùng một bot do seller tạo và sở hữu.

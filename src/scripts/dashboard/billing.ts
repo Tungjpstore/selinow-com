@@ -1,7 +1,8 @@
 export {};
 
 type JsonObject = Record<string, unknown>;
-type Plan = { code: string; name: string; version: number };
+type Price = { amountMinor: number; currency: string; displayAmount: string | null; interval: string; marketCode: string };
+type Plan = { code: string; name: string; prices: Price[]; version: number };
 type ChangeRequest = { action: string; currentPlanCode: string; requestedPlanCode: string | null; reasonCode: string; requestPublicId: string; status: string; updatedAt: string; version: number };
 
 const root = document.querySelector<HTMLElement>("[data-billing-root]");
@@ -14,6 +15,10 @@ if (root !== null && root.dataset.canManage === "true") {
   const actionSelect = root.querySelector<HTMLElement>("[data-billing-action]") as HTMLSelectElement | null;
   const form = root.querySelector<HTMLFormElement>("[data-billing-request-form]");
   const ledger = root.querySelector<HTMLElement>("[data-billing-request-ledger]");
+  const checkoutForm = root.querySelector<HTMLFormElement>("[data-billing-checkout-form]");
+  const checkoutPlanSelect = root.querySelector<HTMLElement>("[data-billing-checkout-plan]") as HTMLSelectElement | null;
+  const checkoutSubmit = root.querySelector<HTMLElement>("[data-billing-checkout-submit]") as HTMLButtonElement | null;
+  const checkoutFeedback = root.querySelector<HTMLElement>("[data-billing-checkout-feedback]");
   const copy = (() => {
     try {
       const parsed: unknown = JSON.parse(root.dataset.copy ?? "{}");
@@ -22,6 +27,7 @@ if (root !== null && root.dataset.canManage === "true") {
   })();
   const text = (key: string): string => copy[key] ?? "";
   const currentPlanCode = root.dataset.currentPlanCode ?? "";
+  const billingState = root.dataset.billingState ?? "";
   const subscriptionVersion = Number(root.dataset.subscriptionVersion);
   let pending = false;
 
@@ -54,10 +60,19 @@ if (root !== null && root.dataset.canManage === "true") {
     }
     return typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload as JsonObject : null;
   };
+  const priceFrom = (value: unknown): Price | null => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    const item = value as JsonObject;
+    if (!Number.isSafeInteger(item.amountMinor) || typeof item.currency !== "string" || typeof item.interval !== "string" || typeof item.marketCode !== "string") return null;
+    return { amountMinor: item.amountMinor as number, currency: item.currency, displayAmount: typeof item.displayAmount === "string" ? item.displayAmount : null, interval: item.interval, marketCode: item.marketCode };
+  };
   const plansFrom = (payload: JsonObject | null): Plan[] => {
     const values = payload?.plans;
     if (!Array.isArray(values)) return [];
-    return values.filter((item): item is JsonObject => typeof item === "object" && item !== null && !Array.isArray(item)).map((item) => ({ code: typeof item.code === "string" ? item.code : "", name: typeof item.name === "string" ? item.name : "", version: typeof item.version === "number" ? item.version : 0 })).filter((plan) => plan.code.length > 0 && plan.name.length > 0);
+    return values.filter((item): item is JsonObject => typeof item === "object" && item !== null && !Array.isArray(item)).map((item) => {
+      const rawPrices = Array.isArray(item.prices) ? item.prices : Array.isArray(item.offers) ? item.offers : [];
+      return { code: typeof item.code === "string" ? item.code : "", name: typeof item.name === "string" ? item.name : "", prices: rawPrices.map(priceFrom).filter((price): price is Price => price !== null), version: typeof item.version === "number" ? item.version : 0 };
+    }).filter((plan) => plan.code.length > 0 && plan.name.length > 0);
   };
   const requestsFrom = (payload: JsonObject | null): ChangeRequest[] => {
     const values = payload?.requests;
@@ -72,9 +87,37 @@ if (root !== null && root.dataset.canManage === "true") {
       if (plan.code === currentPlanCode) continue;
       const option = document.createElement("option");
       option.value = plan.code;
-      option.textContent = `${plan.name} (${plan.code})`;
+      const price = plan.prices[0];
+      const priceLabel = price === undefined ? "" : ` · ${price.displayAmount ?? new Intl.NumberFormat(document.documentElement.lang || "en", { style: "currency", currency: price.currency, maximumFractionDigits: price.currency === "VND" ? 0 : 2 }).format(price.amountMinor / (price.currency === "VND" ? 1 : 100))} / ${price.interval}`;
+      option.textContent = `${plan.name} (${plan.code})${priceLabel}`;
       planSelect.appendChild(option);
     }
+  };
+  const renderCheckoutPlans = (plans: readonly Plan[]): void => {
+    if (checkoutPlanSelect === null) return;
+    checkoutPlanSelect.replaceChildren();
+    const eligible = plans.filter((plan) => (plan.code === "starter" || plan.code === "pro") && plan.prices.length > 0 && (billingState !== "suspended" || plan.code === currentPlanCode));
+    for (const plan of eligible) {
+      const option = document.createElement("option");
+      option.value = plan.code;
+      const price = plan.prices[0];
+      const priceLabel = price === undefined ? "" : ` · ${price.displayAmount ?? new Intl.NumberFormat(document.documentElement.lang || "en", { style: "currency", currency: price.currency, maximumFractionDigits: price.currency === "VND" ? 0 : 2 }).format(price.amountMinor / (price.currency === "VND" ? 1 : 100))} / ${price.interval}`;
+      option.textContent = `${plan.name}${priceLabel}`;
+      checkoutPlanSelect.appendChild(option);
+    }
+    if (checkoutSubmit !== null) checkoutSubmit.disabled = eligible.length === 0;
+  };
+  const showCheckoutFeedback = (message: string, tone: "danger" | "info" | "success" = "info"): void => {
+    if (checkoutFeedback === null) return;
+    checkoutFeedback.textContent = message;
+    checkoutFeedback.dataset.tone = tone;
+    checkoutFeedback.hidden = message.length === 0;
+  };
+  const checkoutErrorMessage = (error: unknown): string => {
+    const code = error instanceof Error ? error.message : "";
+    return ["billing_market_unavailable", "plan_price_unavailable", "provider_not_ready", "billing_provider_unavailable", "billing_checkout_pending", "billing_recovery_plan_mismatch", "checkout_provider_invalid"].includes(code)
+      ? text("checkoutUnavailable")
+      : text("error");
   };
   const renderRequests = (requests: readonly ChangeRequest[]): void => {
     if (ledger === null) return;
@@ -109,11 +152,16 @@ if (root !== null && root.dataset.canManage === "true") {
     showFeedback(text("loading"), "info");
     try {
       const [plans, requests] = await Promise.all([requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/plans`), requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/requests`)]);
-      renderPlans(plansFrom(plans));
+      const parsedPlans = plansFrom(plans);
+      renderPlans(parsedPlans);
+      renderCheckoutPlans(parsedPlans);
       const parsedRequests = requestsFrom(requests);
       renderRequests(parsedRequests);
       const hasPending = parsedRequests.some((request) => request.status === "requested" || request.status === "provider_pending");
-      if (form !== null) form.querySelector<HTMLButtonElement>("button[type=submit]")?.toggleAttribute("disabled", hasPending);
+      const stateBlocksMutation = billingState === "pending_payment" || billingState === "suspended" || billingState === "canceled";
+      if (form !== null) form.querySelector<HTMLButtonElement>("button[type=submit]")?.toggleAttribute("disabled", hasPending || stateBlocksMutation);
+      if (planSelect !== null) planSelect.disabled = stateBlocksMutation;
+      if (actionSelect !== null) actionSelect.disabled = stateBlocksMutation;
       showFeedback(text("loaded"), "success");
     } catch (error) {
       showFeedback(`${text("unavailable")} ${error instanceof Error ? error.message : text("error")}`, "danger");
@@ -125,7 +173,7 @@ if (root !== null && root.dataset.canManage === "true") {
   });
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (pending || shopPublicId === undefined || !Number.isSafeInteger(subscriptionVersion) || !form.reportValidity()) return;
+    if (pending || billingState === "pending_payment" || billingState === "suspended" || billingState === "canceled" || shopPublicId === undefined || !Number.isSafeInteger(subscriptionVersion) || !form.reportValidity()) return;
     const values = new FormData(form);
     const action = values.get("action");
     const reasonCode = values.get("reasonCode");
@@ -137,6 +185,31 @@ if (root !== null && root.dataset.canManage === "true") {
     const submit = form.querySelector<HTMLButtonElement>("button[type=submit]");
     if (submit !== null) submit.disabled = true;
     void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/requests`, { method: "POST", body: JSON.stringify({ action, expectedSubscriptionVersion: subscriptionVersion, reasonCode, requestedPlanCode: action === "change_plan" ? requestedPlanCode : undefined }) }).then(() => { showFeedback(text("requested"), "success"); return load(); }).catch((error: unknown) => { showFeedback(error instanceof Error ? error.message : text("error"), "danger"); }).finally(() => { pending = false; if (submit !== null) submit.disabled = false; });
+  });
+  checkoutForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (pending || shopPublicId === undefined || checkoutPlanSelect === null || checkoutSubmit === null || billingState === "canceled") return;
+    const planCode = checkoutPlanSelect.value;
+    if (planCode !== "starter" && planCode !== "pro") return;
+    pending = true;
+    checkoutSubmit.disabled = true;
+    checkoutSubmit.setAttribute("aria-busy", "true");
+    showCheckoutFeedback(text("checkoutOpening"), "info");
+    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { method: "POST", body: JSON.stringify({ planCode, recovery: billingState === "suspended" }) }).then((payload) => {
+      const checkout = payload?.checkout;
+      const provider = typeof checkout === "object" && checkout !== null && typeof (checkout as { provider?: unknown }).provider === "string" ? (checkout as { provider: string }).provider : "";
+      const url = typeof checkout === "object" && checkout !== null && typeof (checkout as { checkoutUrl?: unknown }).checkoutUrl === "string" ? (checkout as { checkoutUrl: string }).checkoutUrl : "";
+      if (provider !== "dodo") throw new Error("checkout_provider_invalid");
+      if (!/^https:\/\//u.test(url)) throw new Error("checkout_url_invalid");
+      showCheckoutFeedback(text("checkoutOpening"), "success");
+      window.location.assign(url);
+    }).catch((error: unknown) => {
+      showCheckoutFeedback(checkoutErrorMessage(error), "danger");
+      checkoutSubmit.disabled = false;
+    }).finally(() => {
+      pending = false;
+      checkoutSubmit.removeAttribute("aria-busy");
+    });
   });
   void load();
 }

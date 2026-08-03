@@ -1,5 +1,9 @@
 # Automation and Onboarding Contract
 
+## Current continuation overlay (2026-08-03)
+
+Onboarding now has a provider-neutral connector-request path and explicit readiness stages. Sellers can request Telegram Mini App, Zalo Mini App/OA, WhatsApp Cloud or Discord Bot lanes from the dashboard, while `requested`, `provider_pending`, `active`, `rejected` and `canceled` remain distinct. Provider evidence is hash/reference-only, reviewable and credential-version-bound; it never silently activates a connection. Real provider setup, credentials, UAT and outbound acceptance remain external release gates. The source migration chain is `0001`-`0077`; staging remains at `0028` and production at `0052`.
+
 ## 1. Automation objective
 
 Tự động hóa có hai lớp khác nhau:
@@ -56,7 +60,7 @@ npm run platform:doctor -- --env staging --json
 npm run deploy:staging
 ```
 
-Hai operator token tạm `CLOUDFLARE_PLATFORM_API_TOKEN` và `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` phải được cấp ngoài source control cho live admission; thiếu một token, route inventory không đọc được hoặc route drift thì dừng trước backup thật, migration và deploy. `db:seed` chỉ chạy khi seed đã được review cho change đó, không phải bước mặc định; migrations `0035`-`0045` tự backfill/validate theo từng forward-only contract và không biến seed thành điều kiện mặc định. Source/local migration chain hiện qua `0045`; accepted staging ledger vẫn qua `0028`, với `0029`-`0045` pending. Read-only evidence hiện tại cho D1 identity và private `MEDIA` không thay thế việc recheck ngay trước mutation, và protected report-v2 backup của đúng staging D1 phải mới không quá 60 phút. Dry-run packaging không chứng minh route admission và không được dùng để tuyên bố staging đã deploy. Phase B source/local acceptance is complete for the reviewed locale catalogs, source-level key/placeholder detection, unified BCP47 boundaries, durable Telegram explicit preference, canonical order currency binding, seller country controls, paired English/Vietnamese commerce evidence and RTL logical/render checks. Seller onboarding/globalization remains visual-review pending; staging and production are not authorized by local evidence.
+Hai operator token tạm `CLOUDFLARE_PLATFORM_API_TOKEN` và `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` phải được cấp ngoài source control cho live admission; thiếu một token, route inventory không đọc được hoặc route drift thì dừng trước backup thật, migration và deploy. `db:seed` chỉ chạy khi seed đã được review cho change đó, không phải bước mặc định; các migration `0029`-`0077` tự backfill/validate theo từng forward-only contract và không biến seed thành điều kiện mặc định. Source/local migration chain hiện qua `0077`; accepted staging ledger vẫn qua `0028`, với `0029`-`0077` pending. Read-only evidence hiện tại cho D1 identity và private `MEDIA` không thay thế việc recheck ngay trước mutation, và protected report-v2 backup của đúng staging D1 phải mới không quá 60 phút. Dry-run packaging không chứng minh route admission và không được dùng để tuyên bố staging đã deploy. Phase B source/local acceptance is complete for the reviewed locale catalogs, source-level key/placeholder detection, unified BCP47 boundaries, durable Telegram explicit preference, canonical order currency binding, seller country controls, paired English/Vietnamese commerce evidence and RTL logical/render checks. Seller onboarding/globalization remains visual-review pending; staging and production are not authorized by local evidence.
 
 `platform:provision` phải:
 

@@ -39,6 +39,15 @@ for (const variant of variants) {
 const labelForStatus: Record<string, string> = { active: t("dashboard.products.status.active"), archived: t("dashboard.products.status.archived"), draft: t("dashboard.products.status.draft"), suspended: t("dashboard.products.status.suspended") };
 const toneForStatus = (status: unknown): "danger" | "neutral" | "success" | "warning" => status === "active" ? "success" : status === "suspended" ? "danger" : status === "draft" ? "warning" : "neutral";
 const updatedAtFormatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeStyle: "short", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
+const catalogVisibilityChannels = [
+  { code: "website", label: t("dashboard.nav.website") },
+  { code: "telegram", label: t("dashboard.nav.telegram") },
+  { code: "telegram.mini_app", label: t("dashboard.integrations.channel_expansion.name.telegram_mini_app") },
+  { code: "zalo.mini_app", label: t("dashboard.integrations.channel_expansion.name.zalo_mini_app") },
+  { code: "zalo.oa", label: t("dashboard.integrations.channel_expansion.name.zalo_oa") },
+  { code: "whatsapp.cloud", label: t("dashboard.integrations.channel_expansion.name.whatsapp_cloud") },
+  { code: "discord.bot", label: t("dashboard.integrations.channel_expansion.name.discord_bot") },
+] as const;
 const productRows = products.map((product, index) => {
   const productId = String(product.id ?? "");
   const rows = productVariants.get(productId) ?? [];
@@ -74,6 +83,30 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
         <div><span>{t("dashboard.products.summary.variants")}</span><strong>{variants.length}</strong><small>{t("dashboard.products.summary.variants_caption")}</small></div>
         <div><span>{t("dashboard.products.summary.active")}</span><strong>{products.filter((product) => product.status === "active").length}</strong><small>{t("dashboard.products.summary.active_caption")}</small></div>
         <div><span>{t("dashboard.products.summary.low_stock")}</span><strong class="warn">{variants.filter((variant) => Number(variant.availableStock ?? 0) < 5).length}</strong><small>{t("dashboard.products.summary.low_stock_caption")}</small></div>
+      </section>
+
+      <section class="visibility-panel" data-channel-visibility-panel data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-labelledby="catalog-visibility-title">
+        <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.products.visibility.eyebrow")}</p><h2 id="catalog-visibility-title">{t("dashboard.products.visibility.title")}</h2><p class="panel-copy">{t("dashboard.products.visibility.description")}</p></div><span class="record-count">{t("dashboard.products.visibility.count", { count: products.length })}</span></div>
+        <p class="form-feedback visibility-feedback" data-channel-visibility-feedback role="status" aria-live="polite">{t("dashboard.products.visibility.loading")}</p><button class="visibility-retry" type="button" data-channel-visibility-retry hidden>{t("dashboard.state.error.retry")}</button>
+        {products.length === 0 ? (
+          <p class="visibility-empty">{t("dashboard.products.visibility.empty")}</p>
+        ) : (
+          <div class="visibility-list">
+            {productRows.map(({ product, productId, rows }) => (
+              <article class="visibility-product" data-channel-visibility-product data-product-id={productId}>
+                <div class="visibility-product-heading"><div><strong>{String(product.title ?? t("dashboard.products.product.untitled"))}</strong><small>/{String(product.slug ?? "")}</small></div><StatusBadge label={labelForStatus[String(product.status)] ?? t("dashboard.products.status.unknown")} tone={toneForStatus(product.status)} /></div>
+                <div class="visibility-channel-grid" role="group" aria-label={t("dashboard.products.visibility.product_aria", { product: String(product.title ?? t("dashboard.products.product.untitled")) })}>
+                  {catalogVisibilityChannels.map((channel) => (
+                    <button class="visibility-toggle" type="button" data-visibility-toggle data-product-id={productId} data-channel-code={channel.code} data-channel-label={channel.label} data-visible="false" data-version="0" aria-pressed="false" disabled>
+                      <span class="visibility-channel-name">{channel.label}</span><span class="visibility-state" data-visibility-state>{t("dashboard.products.visibility.hidden")}</span>
+                    </button>
+                  ))}
+                </div>
+                <small class="visibility-product-note">{t("dashboard.products.visibility.product_note", { variants: rows.length })}</small>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section class="category-panel" aria-labelledby="category-ledger-title" data-category-manager data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`}>
@@ -222,6 +255,27 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .catalog-summary span, .catalog-summary small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .catalog-summary strong { font-size: 30px; line-height: 1; letter-spacing: -.04em; }
   .catalog-summary strong.warn { color: var(--sln-state-warning); }
+  .visibility-panel { margin-top: var(--sln-space-8); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .visibility-panel .panel-heading { margin-bottom: 10px; }
+  .panel-copy { max-width: 680px; margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .visibility-feedback { min-height: 20px; margin: 0 0 16px; color: var(--sln-text-secondary); }
+  .visibility-retry { min-height: 38px; margin: -4px 0 16px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 12px; background: var(--sln-bg-surface); color: var(--sln-text-primary); font: var(--sln-font-label); cursor: pointer; }
+  .visibility-retry[hidden] { display: none; }
+  .visibility-list { display: grid; gap: 12px; }
+  .visibility-product { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-canvas); }
+  .visibility-product-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .visibility-product-heading > div { display: grid; gap: 4px; min-width: 0; }
+  .visibility-product-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .visibility-product-heading small, .visibility-product-note { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .visibility-channel-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .visibility-toggle { display: grid; gap: 7px; min-height: 64px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 10px 12px; background: var(--sln-bg-surface); color: var(--sln-text-primary); text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+  .visibility-toggle:hover:not(:disabled), .visibility-toggle:focus-visible:not(:disabled) { border-color: var(--sln-action-primary); transform: translateY(-1px); }
+  .visibility-toggle:disabled { cursor: wait; opacity: .68; }
+  .visibility-toggle.is-visible { border-color: color-mix(in srgb, var(--sln-state-success) 45%, var(--sln-border-strong)); background: var(--sln-tint-success); }
+  .visibility-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--sln-font-label); }
+  .visibility-state { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .visibility-toggle.is-visible .visibility-state { color: var(--sln-success-text-strong); font-weight: 700; }
+  .visibility-empty { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
   .category-panel { margin-top: var(--sln-space-8); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
   .category-list { display: grid; gap: 12px; }
   .category-row { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-canvas); }
@@ -279,7 +333,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .variant-editor-list .new-variant-fieldset { border-style: dashed; background: var(--sln-bg-subtle); }
   .variant-number-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .dialog-actions { display: flex; justify-content: end; gap: 10px; margin-top: 6px; }
-  @media (max-width: 760px) { .catalog-summary { grid-template-columns: repeat(2, 1fr); } .catalog-summary > div:nth-child(2) { border-right: 0; } .catalog-summary > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); } .category-panel { padding: 16px; } .category-fields { grid-template-columns: 1fr 1fr; } .category-description { grid-column: 1 / -1; } .archive-confirmation { align-items: stretch; flex-direction: column; } .archive-confirmation > div { justify-content: end; } .table-head { display: none; } .table-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 16px; } .table-row > div:nth-child(2), .table-row > div:nth-child(3), .table-row > div:nth-child(4), .table-row > div:nth-child(5) { grid-column: 1; } .table-row > div:nth-child(6) { grid-column: 2; grid-row: 2 / span 4; } .price-cell, .stock-cell { display: flex; } .product-cell { grid-column: 1 / -1; } .ledger-panel { padding: 16px; } .catalog-toolbar { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .catalog-summary { grid-template-columns: repeat(2, 1fr); } .catalog-summary > div:nth-child(2) { border-right: 0; } .catalog-summary > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); } .visibility-panel, .category-panel { padding: 16px; } .visibility-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .category-fields { grid-template-columns: 1fr 1fr; } .category-description { grid-column: 1 / -1; } .archive-confirmation { align-items: stretch; flex-direction: column; } .archive-confirmation > div { justify-content: end; } .table-head { display: none; } .table-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 16px; } .table-row > div:nth-child(2), .table-row > div:nth-child(3), .table-row > div:nth-child(4), .table-row > div:nth-child(5) { grid-column: 1; } .table-row > div:nth-child(6) { grid-column: 2; grid-row: 2 / span 4; } .price-cell, .stock-cell { display: flex; } .product-cell { grid-column: 1 / -1; } .ledger-panel { padding: 16px; } .catalog-toolbar { grid-template-columns: 1fr; } }
   @media (max-width: 560px) { .private-file-grid { grid-template-columns: 1fr; } .private-file-actions { justify-content: stretch; } .private-file-actions .sln-button { flex: 1; } }
   @media (max-width: 440px) { .catalog-summary strong { font-size: 24px; } .panel-heading { align-items: start; flex-direction: column; } .category-fields { grid-template-columns: 1fr; } .category-description { grid-column: auto; } .category-actions, .archive-confirmation > div { flex-direction: column; } .variant-number-grid { grid-template-columns: 1fr; } }
 </style>

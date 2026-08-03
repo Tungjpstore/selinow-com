@@ -18,7 +18,7 @@ Khong bien `provider_pending`, `external_pending`, `service_only` hoac `read_onl
 | Multi-shop membership | live | SSR shop switcher, selected public shop query | Khong co browser shop-list API; chi active memberships |
 | Seller roles/capabilities | live | Owner/manager/support/viewer matrix | Server is final authority |
 | Platform admin roles | live | Owner/risk/support | Khong impersonation |
-| Plan features/limits | live projection | Billing/readiness/action policy | Mutation plan/subscription chua co |
+| Plan features/limits | live projection | Billing/readiness/action policy | Owner plan-change/cancel requests are audited and remain `provider_pending`; provider settlement, proration and payment-method mutation are not implemented |
 | Locale/currency/timezone | live | `en`, `vi-VN`, minor units, shop timezone | No FX; merchant content single-language |
 
 ## Shop setup va storefront publication
@@ -45,7 +45,8 @@ Khong bien `provider_pending`, `external_pending`, `service_only` hoac `read_onl
 | Encrypted license-key import | live | Preview then exact import | Recent-auth; no plaintext render/log |
 | Inventory availability/reservation/sale | live | Counts and safe timestamps | Counts not allocation promise |
 | Private file upload/policy | live service/API | Catalog UI may expose bounded setup | No public R2 URL; buyer grant flow required |
-| Product channel visibility/hidden state | absent | Do not expose | Needs new backend contract |
+| Public API read scopes (`inventory:read`, `orders:read`) | service_only | Bearer-scoped aggregate inventory and redacted order-summary GET projections with bounded cursors | Migration `0068` is source/local-only; no browser dashboard write scope, fulfillment/entitlement or outbound-webhook API is implied |
+| Product channel visibility/hidden state | contract_ready | Tenant-bound GET/PUT contract plus inline seller controls for per-product, per-channel `visible`/`hidden` rows; missing rows fail closed in Website and Telegram Mini App catalog projections; controls require CSRF/recent-auth, idempotency and expected-version fences | Migration `0069` and focused D1/UI tests are source/local-only; enabled-channel/provider activation and remote migration admission remain pending |
 | Discount management | absent | Do not expose | Checkout may consume existing discount, no seller CRUD |
 
 ## Buyer commerce
@@ -93,11 +94,19 @@ Khong bien `provider_pending`, `external_pending`, `service_only` hoac `read_onl
 | Telegram private-chat catalog/cart/checkout | live code/test | Shared canonical commerce | Provider-backed acceptance pending |
 | Paid notification/key reveal | live code | Shared fulfillment fences | External activation pending |
 | Generic channel registry/capabilities | live foundation | Render effective capabilities only | Generic lifecycle UI incomplete; expansion catalog is additive and safe |
-| Telegram Mini App manifest + launch verifier | contract_ready | Render catalog/request status; bind identity only after server HMAC/freshness checks | Bot/provider activation and tenant rollout pending |
+| Telegram Mini App manifest + launch verifier | contract_ready | Render catalog/request status; exchange fresh verified launch data for a tenant-bound opaque session only after active connector/credential/subscription gates | Bot/provider activation and tenant rollout pending; migration `0057` is source/local-only |
 | Zalo Mini App manifest + connector request | provider_pending | Render safe catalog entry and durable request states | Zalo app credentials, policy and provider execution pending |
 | WhatsApp Cloud manifest + messaging policy | contract_ready | Render safe catalog/request states; enforce customer-service window/templates | Meta business credentials, webhook and provider acceptance pending |
 | Discord bot manifest + connector request | contract_ready | Render safe catalog/request states; direct/private reveal only | Bot installation, permissions and provider execution pending |
 | Channel connector requests (migrations `0055`-`0056`) | contract_ready | Catalog + list/create/cancel request APIs; direct-D1 scope guards; show requested/provider-pending/canceled states | No inline secret delivery; provider activation remains pending |
+| Telegram Mini App sessions (migration `0057`) | contract_ready | Short-lived tenant-bound session exchange with replay, credential-version and connector-state fences | No provider activation or external rollout; session route is source/local-only |
+| Provider event receipt ledger (migration `0058`) | contract_ready | Verified ingress stores tenant/connection/provider-scoped reference envelopes; same-payload replay is idempotent and changed-payload conflict is audited | No active provider route, outbound delivery, payment or fulfillment transition is inferred |
+| Cross-channel customer identity references (migration `0059`) | contract_ready | Tenant/connection/provider-purpose HMAC references map external subjects to customers without persisting raw provider IDs; safe display metadata is bounded and tuple conflicts fail closed | No provider activation, outbound delivery, payment or fulfillment transition is inferred |
+| Zalo OA OAuth state (migrations `0060`-`0062`) | provider_pending | One-use tenant-bound state hash and AES-GCM PKCE verifier envelope with connector scope, expiry, pending-only retry uniqueness and direct-D1 transition guards | OAuth/token rotation, webhook proof and provider activation remain blocked pending external evidence |
+| Provider verification evidence (migration `0064`) | contract_ready | Store only bounded, hash/reference-based verification evidence bound to the tenant, connection, provider and reviewed candidate; expose safe readiness evidence without credentials or provider payloads | Evidence ledger does not activate a provider; controlled external verification and production admission remain pending |
+| Provider verification scope guards (migration `0065`) | contract_ready | Enforce credential-version lineage and immutable channel-connection tenant/provider identity at the D1 boundary | Direct-D1 guard only; existing evidence and provider activation remain separately gated |
+| Zalo OA blind OAuth state lookup (migration `0066`) | contract_ready | Resolve public callback state through a provider-scoped blind HMAC lookup without exposing tenant/request identifiers | Raw state is not backfilled; pre-`0066` pending rows require revoke/expire or reviewed legacy resolution before production cutover |
+| Telegram Mini App active-plan scope guard (migration `0067`) | contract_ready | Keep direct-D1 session inserts aligned with runtime plan activation policy | Forward migration remains source/local-only; provider activation still requires external acceptance |
 | Fake adapter parity | test-only | Never show to users | Verification boundary only |
 | Other Meta/marketplace/second payment provider | roadmap | Do not advertise/control | No runtime adapter |
 | Managed shared channel/bot | roadmap | Do not expose | External policy/product work |
@@ -118,9 +127,9 @@ Khong bien `provider_pending`, `external_pending`, `service_only` hoac `read_onl
 | Capability | Implementation | Frontend contract | Activation/limitation |
 | --- | --- | --- | --- |
 | Order list/detail | live | Safe masked read | Latest 200, no server filters/pagination |
-| Customer ledger | read-only | Masked list | No detail/edit/merge/note/delete |
-| Members | read-only | Owner list | No invite/role/revoke |
-| Billing | read-only | Plan/subscription/usage | No billing mutation/provider |
+| Customer ledger | contract_ready | Masked list for all roles; owner/manager detail, display-name/locale/status update, append-only notes and redaction; support/viewer remain read-only | Migrations `0053`/`0054`, tenant-bound versioned/idempotent APIs and focused UI/backend tests are source/local evidence; merge/delete and buyer unmasking remain unavailable |
+| Members | contract_ready | Owner membership ledger with invite/resend/revoke, role change and suspension controls; non-owner access is fail-closed/read-only | Migration `0053`, CSRF/recent-auth/idempotency/version/audit guards and focused UI/backend tests are source/local evidence; no self-owner mutation or hard delete |
+| Billing | provider_pending | Owner plan/subscription/usage projection plus audited plan-change/cancel request intents | Provider checkout, payment method, proration, settlement and completion webhooks remain external/provider pending; request acceptance never changes subscription state |
 | Automation tasks | live | Read all; controls capability/version gated | Start API limited to two capabilities |
 | API credentials | live API/service | `/app/integrations` lists, issues and revokes scoped credentials; new token is shown once | Requires recent auth; token cannot be recovered after issuance |
 | Audit ledger | live read | Owner safe projection | Safe fields only |

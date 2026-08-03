@@ -1,6 +1,7 @@
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
+import { recordUsage } from "../billing/metering";
 import { normalizeEmail } from "../auth/policy";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "./store";
@@ -41,6 +42,50 @@ function requireIdempotencyKey(value: string | null): string {
     throw new AppError("validation_failed", 400, ["idempotency_key_required"]);
   }
   return value;
+}
+
+function planLimit(limits: Record<string, unknown>, metric: string): number | null {
+  const value = limits[metric];
+  if (value === undefined) return null;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new AppError("quota_unavailable", 503);
+  return value as number;
+}
+
+async function activeSeatCount(input: { database: D1Database; nowIso: string; shopId: string }): Promise<number> {
+  const row = await input.database.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM shop_members
+        WHERE shop_id = ? AND status = 'active' AND role != 'owner')
+      + (SELECT COUNT(*) FROM shop_member_invitations
+        WHERE shop_id = ? AND status = 'pending' AND expires_at > ?) AS occupied
+  `).bind(input.shopId, input.shopId, input.nowIso).first<{ occupied: number }>();
+  if (row === null || !Number.isSafeInteger(row.occupied) || row.occupied < 0) throw new AppError("quota_unavailable", 503);
+  return row.occupied;
+}
+
+async function assertSeatAvailable(input: { database: D1Database; limit: number | null; nowIso: string; shopId: string }): Promise<void> {
+  if (input.limit === null) return;
+  const occupied = await activeSeatCount({ database: input.database, nowIso: input.nowIso, shopId: input.shopId });
+  if (occupied >= input.limit) throw new AppError("quota_exceeded", 409, ["active_member_seats"]);
+}
+
+async function loadSeatLimit(database: D1Database, shopId: string): Promise<number | null> {
+  const row = await database.prepare(`
+    SELECT plans.limits_json AS limitsJson
+    FROM shop_subscriptions
+    INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
+    WHERE shop_subscriptions.shop_id = ? AND shop_subscriptions.state != 'canceled'
+    ORDER BY shop_subscriptions.created_at DESC, shop_subscriptions.id DESC
+    LIMIT 1
+  `).bind(shopId).first<{ limitsJson: string }>();
+  if (row === null) throw new AppError("subscription_required", 409);
+  try {
+    const parsed = JSON.parse(row.limitsJson) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    return planLimit(parsed as Record<string, unknown>, "active_member_seats");
+  } catch {
+    throw new AppError("quota_unavailable", 503);
+  }
 }
 
 function parseRole(value: unknown): Exclude<ShopRole, "owner"> {
@@ -240,6 +285,7 @@ export async function issueMemberInvitation(input: {
     LIMIT 1
   `).bind(actor.row.shop_id, email).first<{ invitationPublicId: string }>();
   if (pending !== null) throw new AppError("member_invitation_pending", 409);
+  await assertSeatAvailable({ database: input.env.PLATFORM_DB, limit: planLimit(actor.shop.limits, "active_member_seats"), nowIso, shopId: actor.row.shop_id });
 
   const invitationId = createId("inv");
   const invitationPublicId = invitationId;
@@ -349,14 +395,40 @@ export async function acceptMemberInvitation(input: {
   const existing = await input.env.PLATFORM_DB.prepare("SELECT status FROM shop_members WHERE shop_id = ? AND user_id = ? LIMIT 1").bind(invitation.shopId, input.userId).first<{ status: string }>();
   if (existing?.status === "active") throw new AppError("member_already_active", 409);
   if (existing?.status === "suspended") throw new AppError("member_suspended", 409);
+  const seatLimit = await loadSeatLimit(input.env.PLATFORM_DB, invitation.shopId);
+  await assertSeatAvailable({ database: input.env.PLATFORM_DB, limit: seatLimit, nowIso, shopId: invitation.shopId });
   const memberPublicId = createId("mbr");
   const acceptance = await input.env.PLATFORM_DB.batch([
-    input.env.PLATFORM_DB.prepare("UPDATE shop_member_invitations SET status = 'accepted', accepted_user_id = ?, accepted_at = ?, updated_at = ?, version = version + 1 WHERE id = ? AND status = 'pending' AND expires_at > ?").bind(input.userId, nowIso, nowIso, invitation.id, nowIso),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE shop_member_invitations
+      SET status = 'accepted', accepted_user_id = ?, accepted_at = ?, updated_at = ?, version = version + 1
+      WHERE id = ? AND status = 'pending' AND expires_at > ?
+        AND (? = 1 OR (
+          (SELECT COUNT(*) FROM shop_members WHERE shop_id = ? AND status = 'active' AND role != 'owner')
+          + (SELECT COUNT(*) FROM shop_member_invitations WHERE shop_id = ? AND status = 'pending' AND expires_at > ?) < ?
+        ))
+    `).bind(input.userId, nowIso, nowIso, invitation.id, nowIso, seatLimit === null ? 1 : 0, invitation.shopId, invitation.shopId, nowIso, seatLimit ?? 0),
     input.env.PLATFORM_DB.prepare("INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at, version, member_public_id) SELECT ?, ?, ?, 'active', ?, ?, 1, ? WHERE EXISTS (SELECT 1 FROM shop_member_invitations WHERE id = ? AND status = 'accepted' AND accepted_user_id = ?)").bind(invitation.shopId, input.userId, invitation.role, nowIso, nowIso, memberPublicId, invitation.id, input.userId),
     input.env.PLATFORM_DB.prepare("INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, source_kind, retention_class, created_at) SELECT ?, ?, 'user', ?, 'member.accepted', 'member', ?, ?, ?, 'http', 'security', ? WHERE EXISTS (SELECT 1 FROM shop_member_invitations WHERE id = ? AND status = 'accepted' AND accepted_user_id = ?)").bind(createId("aud"), invitation.shopId, input.userId, input.userId, JSON.stringify({ role: invitation.role }), input.requestId, nowIso, invitation.id, input.userId),
   ]);
-  if (acceptance[0]?.meta.changes !== 1 || acceptance[1]?.meta.changes !== 1) {
+  if (acceptance[0]?.meta.changes !== 1) {
+    const stillPending = await input.env.PLATFORM_DB.prepare("SELECT status FROM shop_member_invitations WHERE id = ? AND shop_id = ? LIMIT 1").bind(invitation.id, invitation.shopId).first<{ status: string }>();
+    if (stillPending?.status === "pending" && seatLimit !== null) throw new AppError("quota_exceeded", 409, ["active_member_seats"]);
     throw new AppError("member_invitation_already_used", 409);
+  }
+  if (acceptance[1]?.meta.changes !== 1) throw new AppError("member_invitation_already_used", 409);
+  if (seatLimit !== null) {
+    await recordUsage({
+      database: input.env.PLATFORM_DB,
+      delta: 1,
+      limit: seatLimit,
+      metric: "active_member_seats",
+      occurredAt: nowIso,
+      shopId: invitation.shopId,
+      sourceId: input.userId,
+      sourceKind: "member",
+      now,
+    });
   }
   const memberRow = await input.env.PLATFORM_DB.prepare(`
     SELECT shop_members.user_id AS userId, platform_users.display_name AS displayName,

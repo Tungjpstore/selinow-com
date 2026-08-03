@@ -34,12 +34,20 @@ workspace,/app/integrations,api_credential_issue_and_revoke,owner_manager,1440|3
 workspace,/app/integrations,channel_catalog_ready,owner_manager,1440|768|390|320,"safe declared manifests for Telegram Mini App, Zalo Mini App, WhatsApp Cloud and Discord; capabilities and provider stage are explicit; no credentials",contract_ready
 workspace,/app/integrations,channel_request_states,owner_manager,1440|768|390|320,"request/cancel controls use CSRF/recent-auth/idempotency/expected-version; requested/provider_pending/canceled/rejected are distinct and never imply activation",contract_ready
 workspace,/app/integrations,channel_forbidden_or_read_only,support_viewer,1440|390|320,"catalog may be read only; no request/cancel controls; provider secrets and payloads absent",contract_ready
+workspace,/app/integrations,dashboard_shell_grouping,all_shop_roles,1440|768|390|320,"Command/Commerce/Channels/Operations/Workspace groups are discoverable; selected shop and role remain visible; no horizontal overflow",live
+workspace,/app/integrations,telegram_bot_lane,owner_manager,1440|768|390|320,"bot identity, webhook proof, health and connect/replace/disconnect are isolated; provider_pending never reads active",provider_pending
+workspace,/app/integrations,telegram_mini_app_lane,owner_manager,1440|768|390|320,"Mini App manifest and session/launch requirements are separate from Bot lane; no initData, token or provider payload in UI",contract_ready
+workspace,/app/integrations,zalo_mini_app_lane,owner_manager,1440|390|320,"app identity, signature stage, connector request and required seller action are explicit; no OA state or activation inference",provider_pending
+workspace,/app/integrations,zalo_oa_lane,owner_manager,1440|390|320,"OA OAuth/PKCE pending state is distinct from Mini App; callback/webhook proof and token rotation remain provider_pending",provider_pending
+workspace,/app/integrations,whatsapp_cloud_lane,owner_manager,1440|768|390|320,"WABA/phone identity, challenge/HMAC, service window/template policy and billing gate are shown without secrets",contract_ready
+workspace,/app/integrations,discord_bot_lane,owner_manager,1440|390|320,"application/public-key installation and Ed25519 interaction acknowledgement are separate from outbound delivery/payment",contract_ready
 workspace,/app/domains,no_custom_domain,owner,1440|768|390|320,"platform fallback visible; external activation caveat; hostname form",external_pending
 workspace,/app/domains,lifecycle,owner,1440|768|390|320,"ownership/hostname/DNS/SSL/primary/routing separate; version refresh; safe instructions",external_pending
 workspace,/app/domains,blocked_or_failed,owner,1440|390|320,"plan/payment-origin/provider blocker explicit; no browser-side override; safe error",external_pending
 workspace,/app/automation,pending_or_running,all_shop_roles,1440|768|390|320,"level/status/attempt/next attempt separate; canCancel from server; version shown",live
 workspace,/app/automation,waiting_user_or_provider,all_shop_roles,1440|390|320,"user/provider wait distinct; action URL safe; no evidence token in client",live
-workspace,/app/automation,retry_failed_canceled_succeeded,all_shop_roles,1440|390|320,"terminal/retry semantics exact; conflict reload; requested action not claimed complete",live
+workspace,/app/automation,retry_failed_canceled_succeeded,all_shop_roles,1440|768|390|320,"terminal/retry semantics exact; conflict reload; requested action not claimed complete",live
+workspace,/app/automation,provider_wait_group,all_shop_roles,1440|390|320,"needs_seller and waiting_provider groups are distinct; safe action URL/status only; no evidence or lease token",live
 workspace,/app/store,never_published,all_shop_roles,1440|768|390|320,"draft/live distinction; preview read-only; editor only owner/manager; publish owner",live
 workspace,/app/store,unpublished_changes,owner_manager,1440|768|390|320,"version/published version; pending changes; expectedVersion; no instant public claim",live
 workspace,/app/store,publish_blocked_or_conflict,owner,1440|390|320,"readiness blocker or 409 reload; no optimistic success; public snapshot unchanged",live

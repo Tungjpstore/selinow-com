@@ -1,4 +1,5 @@
 import { hmacToken, sha256Json } from "../core/crypto";
+import { assertSubscriptionAllows } from "../billing/entitlements";
 import { CommerceApplicationService } from "./application";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
@@ -37,9 +38,11 @@ export type TelegramCartShop = {
 };
 
 export type TelegramCheckoutShop = TelegramCartShop & {
+  graceEndsAt?: string | null;
   orderExpiryMinutes: number;
   status: string;
   subscriptionState: string;
+  trialEndsAt?: string | null;
 };
 
 export type TelegramCartIdentity = {
@@ -355,9 +358,8 @@ export class TelegramCartMutationPort implements Required<Pick<CommercePort, "cr
       return { access: { kind: "principal" }, cartId: result.cartId, expiresAt: active.expiresAt };
     }
     try {
-      const cart = await createCanonicalCart({
+      const cart = await createCanonicalCart({ channel: "telegram",
         additionalStatements: ({ cartId, nowIso }) => [this.input.env.PLATFORM_DB.prepare("INSERT INTO telegram_actions (id, shop_id, integration_id, update_id, action_kind, result_reference, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(createId("tga"), this.input.shop.id, this.input.integrationId, this.input.updateId, actionKind, mutationReference(cartId, requestHash), nowIso)],
-        channel: "telegram",
         env: this.input.env,
         items: input.command.items,
         locale: input.context.locale,
@@ -513,6 +515,7 @@ export class TelegramCheckoutOrderPort implements CommercePort {
 
   async checkoutCart(input: { command: CommerceCheckoutCommand; context: CommerceContext }): Promise<CommerceCheckoutView> {
     assertTelegramCheckoutContext(input.context, { connectionId: this.input.connectionId, customerId: this.input.identity.customerId, shop: this.input.shop });
+    assertSubscriptionAllows({ graceEndsAt: this.input.shop.graceEndsAt, subscriptionState: this.input.shop.subscriptionState, trialEndsAt: this.input.shop.trialEndsAt });
     assertCheckoutAllowed({ shopStatus: this.input.shop.status, subscriptionState: this.input.shop.subscriptionState });
     const command = input.command;
     let snapshot = this.input.requestedSnapshot;

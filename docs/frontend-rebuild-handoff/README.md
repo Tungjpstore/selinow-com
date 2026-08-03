@@ -15,7 +15,7 @@ Day la bo tai lieu nguon-that de mot doi khac xay lai toan bo frontend Selinow m
 
 1. Doc `SOURCE_OF_TRUTH.md` de biet tai lieu nao co quyen uu tien khi mau thuan.
 2. Doc `SYSTEM_ARCHITECTURE.md`, `ROLES_PERMISSIONS_AND_VISIBILITY.md` va `DATA_API_AND_SECURITY_CONTRACTS.md` truoc khi tao component hoac client state.
-3. Dung `SURFACES_ROUTES_AND_NAVIGATION.md` va `SCREEN_BLUEPRINTS.md` lam pham vi man hinh.
+3. Dung `DASHBOARD_INFORMATION_ARCHITECTURE.md`, `SURFACES_ROUTES_AND_NAVIGATION.md` va `SCREEN_BLUEPRINTS.md` lam pham vi shell, phan vung dashboard va man hinh.
 4. Dung `DOMAIN_STATE_MACHINES.md` de thiet ke status, transition va error/recovery UI.
 5. Dung `PRODUCT_CAPABILITY_CATALOG.md` de phan biet tinh nang dang hoat dong, read-only, service-only, provider-pending va roadmap.
 6. Dung `route-contracts.yaml` va `ACCEPTANCE_MATRIX.csv` lam checklist co the doc bang may.
@@ -53,6 +53,7 @@ Frontend moi chi duoc coi la dung contract khi:
 | `SOURCE_OF_TRUTH.md` | Thu tu authority, quy tac traceability va xu ly mau thuan |
 | `QUICK_START.md` | Khoi dong repository va verify baseline trong vai phut |
 | `SYSTEM_ARCHITECTURE.md` | Runtime, host/surface, module, data authority va request flow |
+| `DASHBOARD_INFORMATION_ARCHITECTURE.md` | Dashboard shell, nav groups, provider-isolated lanes, automation IA va external gates |
 | `PRODUCT_CAPABILITY_CATALOG.md` | Danh muc tinh nang va muc do san sang |
 | `SURFACES_ROUTES_AND_NAVIGATION.md` | Toan bo page route, audience, dieu huong va alias |
 | `ROLES_PERMISSIONS_AND_VISIBILITY.md` | Role/capability va quy tac render action |
@@ -63,12 +64,12 @@ Frontend moi chi duoc coi la dung contract khi:
 | `IMPLEMENTATION_MIGRATION_PLAN.md` | Cach xay, parity, cutover va rollback |
 | `MASTER_REBUILD_PROMPT.md` | Brief hoan chinh de giao cho doi/agent trien khai |
 | `route-contracts.yaml` | Route contract may-doc |
-| `API_ENDPOINT_INDEX.csv` | 124 method/path rows mapped to source, tenant boundary, security gate, capability, authority and contract reference |
+| `API_ENDPOINT_INDEX.csv` | 148 method/path rows mapped to source, tenant boundary, security gate, capability, authority and contract reference |
 | `ACCEPTANCE_MATRIX.csv` | Ma tran nghiem thu theo route/state/viewport |
 | `TRACEABILITY_MATRIX.csv` | Lien ket screen -> page -> API/service -> test |
 | `HANDOFF_MANIFEST.json` | Baseline, file inventory, counts va checksum cua goi |
 
-Ban cap nhat 2026-08-02 da bao gom UI credentials API va channel catalog/request controls trong `/app/integrations`, seller operations migration `0053`, backend gap workflows migration `0054` va channel expansion migrations `0055`-`0056`: member/customer/order operations, provider-pending messages, payment remediation, billing requests, admin investigation/appeal projections va tenant-bound connector requests cho Telegram Mini App, Zalo Mini App, WhatsApp Cloud va Discord bot. UI credential token moi chi hien mot lan va khong duoc luu trong browser; integrations UI chi hien thi safe projections va provider-pending states, con provider execution/activation remains pending.
+Ban cap nhat 2026-08-03 da bao gom UI credentials API va channel catalog/request controls trong `/app/integrations`, cung voi `DASHBOARD_INFORMATION_ARCHITECTURE.md` de tach rieng Website/PayOS, Telegram Bot, Telegram Mini App, Zalo Mini App, Zalo OA, WhatsApp Cloud va Discord Bot tren cung mot canonical integrations route. Seller operations migration `0053`, backend gap workflows migration `0054`, channel expansion migrations `0055`-`0056`, Telegram Mini App session migration `0057`, provider-event receipt migration `0058`, channel customer-identity migration `0059` va Zalo OA OAuth state/retry migrations `0060`-`0062`, enabled-channel scope repair `0063`, provider verification ledger `0064`, credential-lineage guards `0065`, blind OAuth state lookup `0066`, Mini App active-plan scope guard `0067`, public API read scopes `0068` va catalog channel visibility `0069` deu duoc ghi ro la source/local-only. UI credential token moi chi hien mot lan va khong duoc luu trong browser; integrations UI chi hien thi safe projections va provider-pending states, con provider execution/activation remains pending.
 
 Trong `API_ENDPOINT_INDEX.csv`, `contract_ref` la ID on dinh de tim den heading tuong ung trong `DATA_API_AND_SECURITY_CONTRACTS.md`; cac tien to `auth.*`, `store.*`, `app.*`, `external.*`, `webhooks.*` va `admin` khong phai URL moi.
 
@@ -77,8 +78,8 @@ Trong `API_ENDPOINT_INDEX.csv`, `contract_ref` la ID on dinh de tim den heading 
 - Kien truc tong: `docs/ARCHITECTURE.md`
 - Trang thai runtime: `docs/IMPLEMENTATION_STATUS.md`
 - Gap backend/UI hien tai: `docs/frontend-redesign/BACKEND_UI_GAP_REPORT.md`
-- ADR: `docs/adr/0001` den `docs/adr/0018`
+- ADR: `docs/adr/0001` den `docs/adr/0021`
 - Source page/API: `src/pages/**`
 - Service va policy: `src/lib/**`
-- Schema source: `migrations/0001` den `migrations/0056`; production remains on the previously admitted `0001`-`0052` ledger until approved migrations.
+- Schema source: `migrations/0001` den `migrations/0069`; production remains on the previously admitted `0001`-`0052` ledger until approved migrations.
 - Test: `tests/**`

@@ -33,7 +33,7 @@ trialing | active | past_due | grace_period | suspended | canceled
 
 Checkout/publication policy hien cho `trialing`, `active`, `past_due`; `past_due` can warning. `grace_period` khong tu dong duoc phep theo policy hien tai. Deletion final -> `canceled`.
 
-UI: dung feature flags/limits server; billing read-only; khong tao upgrade/downgrade/payment-method/cancel controls.
+UI: dung feature flags/limits server; billing renders the authoritative projection and owner-only audited plan-change/cancel request intents. A request remains `provider_pending` and never implies upgrade/downgrade/payment-method/settlement completion.
 
 ### Onboarding steps
 
@@ -363,4 +363,4 @@ UI: tach requested/enqueued/processing/completed/failed; safe refs/counts/severi
 
 Backend/schema/test da co: canonical checkout/payment, catalog/inventory, pooled/manual/private/generic/generated fulfillment graphs, domains, onboarding/readiness/publication, automation, deletion/legal hold, incidents/DLQ.
 
-Provider/config hoac intentional pending: production PayOS seller channel UAT, Telegram bot and Mini App activation, Zalo/WhatsApp/Discord provider execution, external customer custom domains, generated-license provider configuration, billing settlement/proration, seller order override/retry/message and product channel visibility. Migrations `0055`-`0056` connector catalog/request state is contract-ready but does not activate a provider.
+Provider/config hoac intentional pending: production PayOS seller channel UAT, Telegram bot and Mini App activation, Zalo/WhatsApp/Discord provider execution, external customer custom domains, generated-license provider configuration, billing settlement/proration, seller order override/retry/message delivery and provider-backed catalog rollout. Migration `0069` now supplies the tenant-bound product/channel visibility contract; seller GET/PUT is source/local-only and the products UI exposes inline controls with fail-closed hydration and version-conflict reloads. Migrations `0055`-`0056` connector catalog/request state, migration `0057` Mini App session exchange, migration `0058` provider-event receipts, migration `0059` customer-identity references, migrations `0060`-`0062` Zalo OA OAuth state/retry hardening, migration `0063` enabled-channel scope repair, migration `0064` provider-verification evidence, migration `0065` credential-lineage/connection-identity guards, migration `0066` blind Zalo OA state lookup and migration `0067` Mini App active-plan scope guard are contract-ready but do not activate a provider. Pre-`0066` pending OAuth rows require an explicit cutover policy.

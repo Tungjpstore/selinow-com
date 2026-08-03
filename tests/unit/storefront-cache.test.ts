@@ -12,6 +12,8 @@ type DomainRow = {
   shopStatus: string;
   status: string;
   subscriptionState: string | null;
+  trialEndsAt: string | null;
+  graceEndsAt: string | null;
 } | null;
 
 function fakeEnvironment(row: DomainRow): { env: Pick<AppBindings, "PLATFORM_DB">; queries: () => { sql: string; values: unknown[] }[] } {
@@ -48,6 +50,8 @@ function activeDomain(overrides: Partial<Exclude<DomainRow, null>> = {}): Exclud
     shopStatus: "active",
     status: "active",
     subscriptionState: "active",
+    trialEndsAt: null,
+    graceEndsAt: null,
     ...overrides,
   };
 }
@@ -66,7 +70,8 @@ describe("storefront cache domain gate", () => {
     expect(queries()[0]?.sql).toContain("shop_domains.ownership_verified_at IS NOT NULL");
     expect(queries()[0]?.sql).toContain("shops.status = 'active'");
     expect(queries()[0]?.sql).toContain("ORDER BY created_at DESC, id DESC");
-    expect(queries()[0]?.sql).toContain("IN ('trialing', 'active', 'past_due')");
+    expect(queries()[0]?.sql).toContain("trial_ends_at");
+    expect(queries()[0]?.sql).toContain("grace_ends_at");
   });
 
   it("uses the authoritative shop default when no request locale hint is present", async () => {
@@ -106,7 +111,14 @@ describe("storefront cache domain gate", () => {
   });
 
   it.each(["trialing", "active", "past_due"])("allows the %s subscription state", async (subscriptionState) => {
-    const key = await resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ subscriptionState })).env, ...cacheKeyInput });
+    const key = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({
+        graceEndsAt: subscriptionState === "past_due" ? "2099-01-01T00:00:00.000Z" : null,
+        subscriptionState,
+        trialEndsAt: subscriptionState === "trialing" ? "2099-01-01T00:00:00.000Z" : null,
+      })).env,
+      ...cacheKeyInput,
+    });
     expect(key).toContain("/i/domain-current/v7-3/shop.example.com/");
   });
 

@@ -28,7 +28,7 @@ function urlEntry(pathname: string, origin: string, includeAlternates = true): s
   return `<url><loc>${escapeXml(loc)}</loc>${alternates}</url>`;
 }
 
-function sitemapResponse(entries: readonly string[]): Response {
+function sitemapResponse(entries: readonly string[], indexable = false): Response {
   return new Response([
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">`,
@@ -38,6 +38,7 @@ function sitemapResponse(entries: readonly string[]): Response {
     headers: {
       "Cache-Control": "public, max-age=300",
       "Content-Type": XML_CONTENT_TYPE,
+      ...(indexable ? {} : { "X-Robots-Tag": "noindex, nofollow" }),
     },
   });
 }
@@ -53,7 +54,7 @@ export const GET: APIRoute = async ({ request }) => {
       urlEntry("/", SITE_ORIGIN),
       urlEntry("/pricing", SITE_ORIGIN),
       ...["/solutions", ...solutionSlugs.map((slug) => `/solutions/${slug}`)].map((pathname) => urlEntry(pathname, SITE_ORIGIN)),
-    ]);
+    ], true);
   }
 
   if (hostKind === "tenant-candidate") {
@@ -65,7 +66,7 @@ export const GET: APIRoute = async ({ request }) => {
       return sitemapResponse([
         urlEntry("/", origin),
         ...catalog.products.map((product) => urlEntry(`/products/${encodeURIComponent(product.slug)}`, origin)),
-      ]);
+      ], true);
     } catch {
       return sitemapResponse([]);
     }

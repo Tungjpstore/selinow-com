@@ -439,7 +439,7 @@ const channelLabel = (value: string): string => value === "telegram" ? "Telegram
             <div class="channel-head" role="row"><span role="columnheader">{t("dashboard.overview.channels.channel")}</span><span role="columnheader">{t("dashboard.overview.channels.count")}</span><span role="columnheader">{t("dashboard.overview.channels.delivered")}</span><span role="columnheader">{t("dashboard.overview.channels.paid_value")}</span></div>
             {channelRows.map(([channel, summary]) => (
               <div class="channel-row" role="row">
-                <strong role="cell">{channelLabel(channel)}</strong>
+                <strong role="cell" data-channel={channel}>{channelLabel(channel)}</strong>
                 <span role="cell">{summary.count}</span>
                 <span role="cell">{summary.fulfilled}</span>
                 <span role="cell"><Money value={summary.paidValue} currency={shop.currency} locale={locale ?? "en"} /></span>
@@ -527,7 +527,14 @@ const channelLabel = (value: string): string => value === "telegram" ? "Telegram
   .channel-head, .channel-row { display: grid; grid-template-columns: minmax(150px, 1.4fr) repeat(3, minmax(110px, .65fr)); gap: var(--sln-space-5); align-items: center; padding: 14px var(--sln-space-5); }
   .channel-head { background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
   .channel-row { border-top: 1px solid var(--sln-border-default); font: var(--sln-font-body-sm); font-variant-numeric: tabular-nums; }
-  .channel-row strong { font: var(--sln-font-label); }
+  .channel-row strong { display: inline-flex; align-items: center; gap: 8px; font: var(--sln-font-label); }
+  .channel-row strong::before { width: 7px; height: 7px; border-radius: 50%; background: var(--channel-accent, var(--sln-slate-400)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--channel-accent, var(--sln-slate-400)) 14%, transparent); content: ""; }
+  .channel-row strong[data-channel="web"] { --channel-accent: var(--sln-brand-teal); }
+  .channel-row strong[data-channel="telegram"] { --channel-accent: var(--sln-brand-blue); }
+  .channel-row strong[data-channel="telegram-mini-app"] { --channel-accent: #58b4f0; }
+  .channel-row strong[data-channel="zalo-mini-app"], .channel-row strong[data-channel="zalo-oa"] { --channel-accent: #3f84ef; }
+  .channel-row strong[data-channel="whatsapp-cloud"] { --channel-accent: var(--sln-state-success); }
+  .channel-row strong[data-channel="discord-bot"] { --channel-accent: var(--sln-brand-violet); }
   @media (max-width: 1100px) {
     .operations-grid { grid-template-columns: 1fr; }
     .commerce-section { padding: var(--sln-space-5); }

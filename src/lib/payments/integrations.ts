@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import { hmacToken } from "../core/crypto";
 import { createId } from "../core/ids";
+import { tryRecordActivationMilestone } from "../analytics/activation";
 import { resolveActiveEncryptionKey, resolveEncryptionKey } from "../crypto/keyring";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
@@ -37,7 +38,12 @@ function mapIntegration(row: IntegrationRow): PaymentIntegrationView {
   return { connectedAt: row.connectedAt, lastCheckedAt: row.lastCheckedAt, lastSafeErrorCode: row.lastSafeErrorCode, lastWebhookVerifiedAt: row.lastWebhookVerifiedAt, provider: "payos", publicId: row.publicId, status: row.status, webhookStatus: row.webhookStatus };
 }
 
-async function requirePaymentActor(env: AppBindings, shopPublicId: string, userId: string): Promise<string> {
+async function requirePaymentReader(env: AppBindings, shopPublicId: string, userId: string): Promise<string> {
+  const member = await getShopForMember({ capability: "payments:read", env, shopPublicId, userId });
+  return member.row.shop_id;
+}
+
+async function requirePaymentManager(env: AppBindings, shopPublicId: string, userId: string): Promise<string> {
   const member = await getShopForMember({ capability: "payments:manage", env, shopPublicId, userId });
   return member.row.shop_id;
 }
@@ -287,13 +293,13 @@ async function preparePaymentCredential(input: {
 }
 
 export async function getPaymentIntegration(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<PaymentIntegrationView | null> {
-  const shopId = await requirePaymentActor(input.env, input.shopPublicId, input.userId);
+  const shopId = await requirePaymentReader(input.env, input.shopPublicId, input.userId);
   const row = await findIntegration(input.env, shopId);
   return row === null ? null : mapIntegration(row);
 }
 
 export async function connectPayOS(input: { credentials: PayOSCredentials; env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<PaymentIntegrationView> {
-  const shopId = await requirePaymentActor(input.env, input.shopPublicId, input.userId);
+  const shopId = await requirePaymentManager(input.env, input.shopPublicId, input.userId);
   let integration = await findIntegration(input.env, shopId);
   const now = new Date();
   const nowIso = now.toISOString();
@@ -305,7 +311,17 @@ export async function connectPayOS(input: { credentials: PayOSCredentials; env: 
     integration = { activeCredentialId: null, connectedAt: null, id, lastCheckedAt: null, lastSafeErrorCode: null, lastWebhookVerifiedAt: null, providerIdentityFingerprint: null, publicId, status: "pending", webhookPublicId, webhookStatus: "pending" };
   }
   const credential = await preparePaymentCredential({ credentials: input.credentials, env: input.env, integration, shopId, userId: input.userId });
-  if (credential.alreadyActive) return mapIntegration(integration);
+  if (credential.alreadyActive) {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "payos_connected",
+      milestone: "payos_connected",
+      reason: "connected",
+      shopId,
+      source: "payment",
+    });
+    return mapIntegration(integration);
+  }
   const webhookUrl = `${input.env.API_ORIGIN}/webhooks/payos/${integration.webhookPublicId}`;
   try {
     await new PayOSClient(input.credentials, input.fetcher).confirmWebhook(webhookUrl);
@@ -344,6 +360,14 @@ export async function connectPayOS(input: { credentials: PayOSCredentials; env: 
   ]);
   const active = await findIntegration(input.env, shopId);
   if (active === null) throw new AppError("internal_error", 500);
+  await tryRecordActivationMilestone({
+    env: input.env,
+    idempotencyKey: "payos_connected",
+    milestone: "payos_connected",
+    reason: "connected",
+    shopId,
+    source: "payment",
+  });
   return mapIntegration(active);
 }
 
@@ -398,6 +422,14 @@ async function retryPayOSSetup(input: {
     input.env.PLATFORM_DB.prepare("UPDATE payment_integrations SET status = 'active', webhook_status = 'verified', active_credential_id = ?, connected_at = COALESCE(connected_at, ?), last_safe_error_code = NULL, last_checked_at = ?, last_webhook_verified_at = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND active_credential_id IS NULL AND EXISTS (SELECT 1 FROM payment_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)").bind(row.credentialId, activatedAt, activatedAt, activatedAt, activatedAt, input.integration.id, input.shopId, row.credentialId, input.integration.id, input.shopId, activatedAt),
     input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) SELECT ?, ?, 'user', ?, 'payos.credentials_connected', 'payment_integration', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM payment_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)`).bind(createId("aud"), input.shopId, input.userId, input.integration.id, JSON.stringify({ credentialVersion: row.version, retry: true, rotated: false }), input.requestId, activatedAt, row.credentialId, input.integration.id, input.shopId, activatedAt),
   ]);
+  await tryRecordActivationMilestone({
+    env: input.env,
+    idempotencyKey: "payos_connected",
+    milestone: "payos_connected",
+    reason: "connected",
+    shopId: input.shopId,
+    source: "payment",
+  });
 }
 
 export async function refreshPayOSHealth(input: { env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<PaymentIntegrationView> {
@@ -429,11 +461,21 @@ export async function refreshPayOSHealth(input: { env: AppBindings; fetcher?: ty
   }
   const refreshed = await findIntegration(input.env, shopId);
   if (refreshed === null) throw new AppError("internal_error", 500);
+  if (refreshed.status === "active" && refreshed.webhookStatus === "verified") {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "payos_connected",
+      milestone: "payos_connected",
+      reason: "connected",
+      shopId,
+      source: "payment",
+    });
+  }
   return mapIntegration(refreshed);
 }
 
 export async function disconnectPayOS(input: { env: AppBindings; requestId: string; shopPublicId: string; userId: string }): Promise<void> {
-  const shopId = await requirePaymentActor(input.env, input.shopPublicId, input.userId);
+  const shopId = await requirePaymentManager(input.env, input.shopPublicId, input.userId);
   const integration = await findIntegration(input.env, shopId);
   if (integration === null) throw new AppError("payment_not_configured", 409);
   const now = new Date().toISOString();

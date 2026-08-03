@@ -485,6 +485,7 @@ export class D1ChannelConnectionRepository {
     ivB64: string;
     keyVersion: string;
     connectionId: string;
+    credentialId?: string;
     shopId: string;
   }): Promise<ChannelCredentialRecord> {
     if (!ENCRYPTION_KEY_VERSION.test(input.keyVersion)) {
@@ -515,7 +516,10 @@ export class D1ChannelConnectionRepository {
     `).bind(input.shopId, input.connectionId).first<{ version: number }>();
     if (nextVersion === null) throw new AppError("channel_credential_conflict", 409);
 
-    const credentialId = createId("ccred");
+    const credentialId = input.credentialId ?? createId("ccred");
+    if (!/^ccred_[0-9a-f-]{36}$/u.test(credentialId)) {
+      throw new AppError("validation_failed", 400, ["channel_credential_id_invalid"]);
+    }
     const now = new Date().toISOString();
     try {
       await this.database.prepare(`

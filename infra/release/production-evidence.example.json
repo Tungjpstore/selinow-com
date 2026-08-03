@@ -33,17 +33,59 @@
     "highOpen": 0
   },
   "pilot": {
-    "shopCount": 0
+    "shopCount": 0,
+    "evidenceRef": "replace-with-private-pilot-report-reference",
+    "completedAt": null
   },
   "manualAcceptance": {
     "website": false,
     "telegram": false,
     "paymentSignedEvent": false,
-    "customDomain": false
+    "customDomain": false,
+    "evidenceRef": "replace-with-private-manual-acceptance-report-reference",
+    "observedAt": null
+  },
+  "providerAcceptance": {
+    "telegramBot": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "observedAt": null
+    },
+    "telegramMiniApp": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "observedAt": null
+    },
+    "zaloMiniApp": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "observedAt": null
+    },
+    "zaloOa": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "observedAt": null
+    },
+    "whatsappCloud": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "observedAt": null
+    },
+    "discord": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "observedAt": null
+    }
   },
   "monitoring": {
     "dashboardReady": false,
     "alertsReady": false,
-    "budgetAlertsReady": false
+    "budgetAlertsReady": false,
+    "evidenceRef": "replace-with-private-monitoring-report-reference",
+    "observedAt": null
+  },
+  "rollback": {
+    "rehearsalEvidenceRef": "replace-with-private-rollback-rehearsal-report-reference",
+    "rehearsedAt": null
   }
 }

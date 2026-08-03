@@ -59,6 +59,8 @@ describe("canonical checkout transaction boundary", () => {
     expect(importsFrom(principal, "./checkout-transaction")).toBe(true);
     expect(principal).toContain("executeCanonicalCheckoutTransaction");
     expect(principal).not.toMatch(/from\s+["'][^"']*\/(?:payments|telegram)\/(?:client|store|commerce)["']/u);
+    expect(principal).toContain("getProviderRuntimeContract");
+    expect(principal).toContain("channel_provider_pending");
   });
 
   it("keeps order, reservation, and fulfillment writes out of channel ports and the store facade", () => {

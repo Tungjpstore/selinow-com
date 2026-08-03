@@ -29,6 +29,16 @@ export type ChannelConnectorRequest = ConnectorRequestRow & {
   requestPublicId: string;
 };
 
+function parseReplayReference(value: string): string {
+  try {
+    const parsed = JSON.parse(value) as { requestPublicId?: unknown };
+    if (typeof parsed.requestPublicId !== "string") throw new Error("missing_request_public_id");
+    return parsed.requestPublicId;
+  } catch {
+    throw new AppError("channel_connector_replay_invalid", 500);
+  }
+}
+
 function requireIdempotencyKey(value: string | null): string {
   if (value === null || !IDEMPOTENCY_KEY.test(value)) throw new AppError("validation_failed", 400, ["idempotency_key_required"]);
   return value;
@@ -107,9 +117,7 @@ export async function createChannelConnectorRequest(input: {
   `).bind(input.userId, namespace, keyHash, nowIso).first<ExistingIdempotency>();
   if (replay !== null) {
     if (replay.request_hash !== requestHash) throw new AppError("idempotency_conflict", 409);
-    const reference = JSON.parse(replay.response_json) as { requestPublicId?: string };
-    if (typeof reference.requestPublicId !== "string") throw new AppError("channel_connector_replay_invalid", 500);
-    return mapRequest(await loadRequest(input.env, actor.row.shop_id, reference.requestPublicId));
+    return mapRequest(await loadRequest(input.env, actor.row.shop_id, parseReplayReference(replay.response_json)));
   }
   const active = await input.env.PLATFORM_DB.prepare(`
     SELECT id FROM channel_connector_requests
@@ -119,27 +127,52 @@ export async function createChannelConnectorRequest(input: {
   `).bind(actor.row.shop_id, expansion.providerCode).first<{ id: string }>();
   if (active !== null) throw new AppError("channel_connector_pending", 409);
   const requestId = createId("creq");
-  await input.env.PLATFORM_DB.batch([
-    input.env.PLATFORM_DB.prepare(`
-      INSERT INTO channel_connector_requests (
-        id, public_id, shop_id, channel_code, provider_code,
-        requested_by_user_id, status, idempotency_key_hash, request_hash,
-        created_at, updated_at, version
-      ) VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, 1)
-    `).bind(requestId, requestId, actor.row.shop_id, expansion.code, expansion.providerCode, input.userId, keyHash, requestHash, nowIso, nowIso),
-    input.env.PLATFORM_DB.prepare(`
-      INSERT INTO audit_logs (
-        id, shop_id, actor_type, actor_id, action, resource_type, resource_id,
-        safe_metadata_json, request_id, source_kind, retention_class, created_at
-      ) VALUES (?, ?, 'user', ?, 'channel.connector_requested', 'channel_connector_request', ?, ?, ?, 'http', 'standard', ?)
-    `).bind(createId("aud"), actor.row.shop_id, input.userId, requestId, JSON.stringify({ channelCode: expansion.code, providerCode: expansion.providerCode, providerExecution: expansion.providerExecution }), input.requestId, nowIso),
-    input.env.PLATFORM_DB.prepare(`
-      INSERT INTO idempotency_records (
-        actor_user_id, namespace, key_hash, request_hash, response_json,
-        created_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(input.userId, namespace, keyHash, requestHash, JSON.stringify({ requestPublicId: requestId }), nowIso, new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString()),
-  ]);
+  try {
+    await input.env.PLATFORM_DB.batch([
+      input.env.PLATFORM_DB.prepare(`
+        INSERT INTO channel_connector_requests (
+          id, public_id, shop_id, channel_code, provider_code,
+          requested_by_user_id, status, idempotency_key_hash, request_hash,
+          created_at, updated_at, version
+        ) VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, 1)
+      `).bind(requestId, requestId, actor.row.shop_id, expansion.code, expansion.providerCode, input.userId, keyHash, requestHash, nowIso, nowIso),
+      input.env.PLATFORM_DB.prepare(`
+        INSERT INTO audit_logs (
+          id, shop_id, actor_type, actor_id, action, resource_type, resource_id,
+          safe_metadata_json, request_id, source_kind, retention_class, created_at
+        ) VALUES (?, ?, 'user', ?, 'channel.connector_requested', 'channel_connector_request', ?, ?, ?, 'http', 'standard', ?)
+      `).bind(createId("aud"), actor.row.shop_id, input.userId, requestId, JSON.stringify({ channelCode: expansion.code, providerCode: expansion.providerCode, providerExecution: expansion.providerExecution }), input.requestId, nowIso),
+      input.env.PLATFORM_DB.prepare(`
+        INSERT INTO idempotency_records (
+          actor_user_id, namespace, key_hash, request_hash, response_json,
+          created_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).bind(input.userId, namespace, keyHash, requestHash, JSON.stringify({ requestPublicId: requestId }), nowIso, new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString()),
+    ]);
+  } catch {
+    // Concurrent creates can race between the replay/active checks and the
+    // unique D1 constraints. Resolve an idempotent winner or surface the same
+    // safe pending conflict instead of leaking a provider/database error.
+    const racedReplay = await input.env.PLATFORM_DB.prepare(`
+      SELECT request_hash, response_json
+      FROM idempotency_records
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND expires_at > ?
+      LIMIT 1
+    `).bind(input.userId, namespace, keyHash, nowIso).first<ExistingIdempotency>();
+    if (racedReplay !== null) {
+      if (racedReplay.request_hash !== requestHash) throw new AppError("idempotency_conflict", 409);
+      return mapRequest(await loadRequest(input.env, actor.row.shop_id, parseReplayReference(racedReplay.response_json)));
+    }
+    const racedActive = await input.env.PLATFORM_DB.prepare(`
+      SELECT id
+      FROM channel_connector_requests
+      WHERE shop_id = ? AND provider_code = ?
+        AND status IN ('requested', 'provider_pending', 'active')
+      LIMIT 1
+    `).bind(actor.row.shop_id, expansion.providerCode).first<{ id: string }>();
+    if (racedActive !== null) throw new AppError("channel_connector_pending", 409);
+    throw new AppError("channel_connector_conflict", 409);
+  }
   return mapRequest(await loadRequest(input.env, actor.row.shop_id, requestId));
 }
 

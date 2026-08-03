@@ -7,6 +7,7 @@ import {
   platformChannelRegistry,
   TELEGRAM_MINI_APP_CHANNEL_CODE,
   WHATSAPP_CLOUD_CHANNEL_CODE,
+  ZALO_OFFICIAL_ACCOUNT_CHANNEL_CODE,
   ZALO_MINI_APP_CHANNEL_CODE,
 } from "../../src/lib/channels/expansion";
 import { verifyTelegramMiniAppInitData } from "../../src/lib/channels/mini-app";
@@ -52,12 +53,13 @@ describe("channel expansion contracts", () => {
   it("keeps expansion manifests explicit and out of the active commerce registry", () => {
     expect(CHANNEL_EXPANSION_CATALOG.map((entry) => entry.code)).toEqual([
       TELEGRAM_MINI_APP_CHANNEL_CODE,
+      ZALO_OFFICIAL_ACCOUNT_CHANNEL_CODE,
       ZALO_MINI_APP_CHANNEL_CODE,
       WHATSAPP_CLOUD_CHANNEL_CODE,
       DISCORD_BOT_CHANNEL_CODE,
     ]);
     expect(platformChannelRegistry.require(WHATSAPP_CLOUD_CHANNEL_CODE).capabilities).toContain("message.template_outside_window");
-    expect(CHANNEL_EXPANSION_CATALOG.map((entry) => entry.inlineSecretDelivery)).toEqual([false, false, false, false]);
+    expect(CHANNEL_EXPANSION_CATALOG.map((entry) => entry.inlineSecretDelivery)).toEqual([false, false, false, false, false]);
   });
 
   it("enforces WhatsApp windows and keeps secrets on authorized reveal paths", () => {

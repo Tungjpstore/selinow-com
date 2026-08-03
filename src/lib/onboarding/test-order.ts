@@ -132,6 +132,7 @@ export type ControlledTestOrderResult = {
 export type ControlledTestOrderInput = {
   body: Record<string, unknown>;
   env: AppBindings;
+  emitSafeTestPassed?: (shopId: string) => Promise<void>;
   requestId: string;
   runReadiness: RunTestReadiness;
   shopPublicId: string;
@@ -421,12 +422,16 @@ export async function runControlledTestOrder(
     providerHealth,
     readiness,
   );
+  const passed = readiness.ready && inventoryDryRun.sufficient && domainHealth.ready;
+  if (passed && input.emitSafeTestPassed !== undefined) {
+    await input.emitSafeTestPassed(membership.row.shop_id);
+  }
 
   return {
     checkedAt: readiness.checkedAt,
     domainHealth,
     inventoryDryRun,
-    passed: readiness.ready && inventoryDryRun.sufficient && domainHealth.ready,
+    passed,
     providerHealth: authoritativeProviderHealth,
     readiness,
   };

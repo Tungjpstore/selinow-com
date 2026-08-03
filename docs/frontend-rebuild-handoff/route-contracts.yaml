@@ -1,5 +1,5 @@
 version: 1
-baseline_date: "2026-08-02"
+baseline_date: "2026-08-03"
 runtime:
   framework: Astro 7 SSR
   adapter: Cloudflare Workers
@@ -37,13 +37,13 @@ surfaces:
       - { path: /app/inventory, source: src/pages/app/inventory.astro, audience: owner_manager, maturity: live }
       - { path: /app/orders, source: src/pages/app/orders.astro, audience: all_shop_roles, maturity: live }
       - { path: "/app/orders/:id", source: "src/pages/app/orders/[id].astro", audience: all_shop_roles, maturity: live }
-      - { path: /app/customers, source: src/pages/app/customers.astro, audience: all_shop_roles, maturity: read_only }
+      - { path: /app/customers, source: src/pages/app/customers.astro, audience: all_shop_roles, maturity: contract_ready }
       - { path: /app/integrations, source: src/pages/app/integrations.astro, audience: capability_gated, maturity: provider_pending }
       - { path: /app/domains, source: src/pages/app/domains.astro, audience: owner, maturity: external_pending }
       - { path: /app/automation, source: src/pages/app/automation.astro, audience: all_read_capability_control, maturity: live }
       - { path: /app/store, source: src/pages/app/store.astro, audience: all_read_owner_manager_edit_owner_publish, maturity: live }
-      - { path: /app/members, source: src/pages/app/members.astro, audience: owner, maturity: read_only }
-      - { path: /app/billing, source: src/pages/app/billing.astro, audience: owner, maturity: read_only }
+      - { path: /app/members, source: src/pages/app/members.astro, audience: owner, maturity: contract_ready }
+      - { path: /app/billing, source: src/pages/app/billing.astro, audience: owner, maturity: provider_pending }
       - { path: /app/data, source: src/pages/app/data.astro, audience: owner, maturity: live }
     aliases:
       - { path: /app/telegram, redirect: "/app/integrations?focus=telegram#telegram", status: 307 }

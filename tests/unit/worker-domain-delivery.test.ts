@@ -10,7 +10,9 @@ import type { GeneratedLicenseQueueEnvelope } from "../../src/lib/commerce/gener
 const NOW = new Date("2026-07-27T12:00:00.000Z");
 
 const dependencies = vi.hoisted(() => ({
+  activationBackfill: vi.fn(),
   automation: vi.fn(),
+  billingChanges: vi.fn(),
   claimDeliveryJobReference: vi.fn(),
   consumeDeadLetterQueue: vi.fn(),
   customDomains: vi.fn(),
@@ -19,6 +21,7 @@ const dependencies = vi.hoisted(() => ({
   dispatchDueDomainEvents: vi.fn(),
   enqueueDueDeliveryJobs: vi.fn(),
   enqueueDueGeneratedLicenseRequests: vi.fn(),
+  expireBillingCheckouts: vi.fn(),
   expireOrders: vi.fn(),
   generatedLicenseProviderRegistry: vi.fn(),
   isGeneratedLicenseQueueEnvelope: vi.fn(),
@@ -40,6 +43,7 @@ const dependencies = vi.hoisted(() => ({
   recordDeadLetter: vi.fn(),
   sellerWebhookGeneratedLicenseAdapter: vi.fn(),
   settleDeliveryJob: vi.fn(),
+  suspendBillingTrials: vi.fn(),
   telegramOutbox: vi.fn(),
   terminalStatus: null as string | null,
   terminalAttempts: 3,
@@ -47,8 +51,14 @@ const dependencies = vi.hoisted(() => ({
 }));
 
 vi.mock("@astrojs/cloudflare/handler", () => ({ handle: dependencies.handle }));
+vi.mock("../../src/lib/analytics/activation", () => ({ processActivationMilestoneBackfill: dependencies.activationBackfill }));
 vi.mock("../../src/lib/auth/admission", () => ({ purgeAuthRequestAdmissions: dependencies.purgeAdmissions }));
 vi.mock("../../src/lib/automation/scheduler", () => ({ processScheduledAutomationTasks: dependencies.automation }));
+vi.mock("../../src/lib/billing/service", () => ({
+  expireBillingCheckoutSessions: dependencies.expireBillingCheckouts,
+  processDueDodoSubscriptionChanges: dependencies.billingChanges,
+  suspendExpiredTrials: dependencies.suspendBillingTrials,
+}));
 vi.mock("../../src/lib/commerce/cart-mutation", () => ({ purgeCartMutationReplays: dependencies.purgeCartMutationReplays }));
 vi.mock("../../src/lib/commerce/generated-license", () => ({
   enqueueDueGeneratedLicenseRequests: dependencies.enqueueDueGeneratedLicenseRequests,
@@ -269,6 +279,10 @@ beforeEach(() => {
     skipped: 0,
     succeeded: 1,
   });
+  dependencies.activationBackfill.mockResolvedValue({ attempted: 2, created: 1, failed: 0, shops: 1 });
+  dependencies.billingChanges.mockResolvedValue({ attempted: 1, candidates: 1, failed: 0, providerPending: 1 });
+  dependencies.expireBillingCheckouts.mockResolvedValue(1);
+  dependencies.suspendBillingTrials.mockResolvedValue(1);
   dependencies.customDomains.mockResolvedValue({ checked: 1, deleted: 0, failed: 0 });
   dependencies.paymentReconciliation.mockResolvedValue({ failed: 0, processed: 1 });
   dependencies.telegramOutbox.mockResolvedValue({ failed: 0, processed: 1, skipped: 0 });
@@ -532,11 +546,16 @@ describe("Worker generic domain delivery contract", () => {
       scheduledTime: NOW.getTime(),
     };
 
-    await worker.scheduled(controller, testEnv());
+    const runtimeEnv = testEnv();
+    await worker.scheduled(controller, runtimeEnv);
 
     expect(dependencies.enqueueDueDeliveryJobs).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.enqueueDueGeneratedLicenseRequests).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.dispatchDueDomainEvents).toHaveBeenCalledWith(expect.any(Object), NOW);
+    expect(dependencies.activationBackfill).toHaveBeenCalledWith({ env: runtimeEnv, limit: 25, now: NOW });
+    expect(dependencies.billingChanges).toHaveBeenCalledWith({ env: runtimeEnv, now: NOW });
+    expect(dependencies.expireBillingCheckouts).toHaveBeenCalledWith({ env: runtimeEnv, limit: 100, now: NOW });
+    expect(dependencies.suspendBillingTrials).toHaveBeenCalledWith({ env: runtimeEnv, limit: 100, now: NOW });
     expect(dependencies.telegramOutbox).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.purgeCartMutationReplays).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.purgeDataExports).toHaveBeenCalledWith(expect.any(Object), NOW);
@@ -544,6 +563,8 @@ describe("Worker generic domain delivery contract", () => {
     expect(dependencies.purgeSecurityRateLimits).toHaveBeenCalledWith(expect.any(Object), NOW);
     const metrics = loggedMetrics("infrastructure.cron_completed");
     expect(metrics).toMatchObject({
+      activationBackfillCreated: 1,
+      billingChangesProviderPending: 1,
       deliveryJobsCandidates: 2,
       deliveryJobsSent: 1,
       domainEventsCandidates: 3,

@@ -1,7 +1,7 @@
 {
   "name": "Selinow",
   "short_name": "Selinow",
-  "description": "Telegram commerce, automated.",
+  "description": "Digital product commerce for Website and Telegram with verified payment and protected delivery.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F8FAFC",

@@ -81,6 +81,7 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
   const fetcher: typeof fetch = (_input, init) => {
     providerCalls += 1;
     const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
+    if (body.callback_query_id !== undefined) return Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }));
     expect(body.chat_id).toBe("42");
     if (options.rotateCredentialOnReply === true) activeCredentialId = "credential-rotated";
     return Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }));
@@ -187,5 +188,32 @@ describe("active Telegram health evidence", () => {
     expect(runtime.getUpdateReadCount()).toBe(2);
     expect(runtime.getProviderCalls()).toBe(0);
     expect(commerce.handle).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges inline callbacks without entering private-chat commerce", async () => {
+    const runtime = await activeEnvironment();
+    const result = await processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: new Request("https://api.test/webhooks/telegram/tgwh_active", {
+        body: JSON.stringify({
+          callback_query: {
+            from: { first_name: "Buyer", id: 42, is_bot: false },
+            id: "callback-inline",
+            inline_message_id: "inline-message-1",
+          },
+          update_id: 106,
+        }),
+        headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET },
+        method: "POST",
+      }),
+      requestId: "request-inline-callback",
+      webhookPublicId: "tgwh_active",
+    });
+
+    expect(result).toMatchObject({ processed: true, state: "callback_unsupported" });
+    expect(commerce.handle).not.toHaveBeenCalled();
+    expect(runtime.getProviderCalls()).toBe(1);
+    expect(runtime.resultCodes).toContain("callback_unsupported");
   });
 });

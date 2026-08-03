@@ -24,6 +24,8 @@ export type TelegramWebhookIntegration = {
   defaultLocale: string;
   shopStatus: string;
   subscriptionState: string;
+  trialEndsAt: string | null;
+  graceEndsAt: string | null;
 };
 
 export type TelegramRecipientEncryptionRow = {
@@ -76,7 +78,9 @@ export async function loadTelegramWebhookIntegration(env: AppBindings, webhookPu
       shops.name AS shopName,
       shops.default_locale AS defaultLocale,
       shops.status AS shopStatus,
-      shop_subscriptions.state AS subscriptionState
+      shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.trial_ends_at AS trialEndsAt,
+      shop_subscriptions.grace_ends_at AS graceEndsAt
     FROM telegram_integrations
     INNER JOIN telegram_credentials
       ON telegram_credentials.id = telegram_integrations.active_credential_id

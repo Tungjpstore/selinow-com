@@ -39,8 +39,40 @@ const EXPECTED_DATABASE_NAMES = {
 const STAGING_BACKUP_FRESHNESS_MS = 60 * 60_000;
 const CLOUDFLARE_ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/u;
 const D1_DATABASE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+const BILLING_ACTIVATION_TABLES = [
+  "plans",
+  "plan_prices",
+  "shop_subscriptions",
+  "subscription_change_requests",
+  "billing_accounts",
+  "billing_checkout_sessions",
+  "billing_invoices",
+  "billing_provider_events",
+  "subscription_events",
+  "usage_counters",
+  "usage_events",
+  "activation_milestones",
+];
 const CORE_COUNT_TABLES = [
   "api_credentials",
+  "plans",
+  "plan_prices",
+  "shop_subscriptions",
+  "billing_accounts",
+  "billing_checkout_sessions",
+  "billing_invoices",
+  "billing_provider_events",
+  "subscription_events",
+  "usage_counters",
+  "usage_events",
+  "activation_milestones",
+  "catalog_channel_visibility",
+  "channel_customer_identities",
+  "channel_connector_requests",
+  "channel_oauth_states",
+  "channel_provider_verification_evidence",
+  "channel_provider_event_receipts",
+  "customer_notes",
   "delivery_grant_claims",
   "delivery_grant_consumptions",
   "delivery_grants",
@@ -77,6 +109,7 @@ const CORE_COUNT_TABLES = [
   "payment_events",
   "payment_exceptions",
   "payment_reversal_events",
+  "payment_remediation_requests",
   "payment_integrations",
   "payment_method_codes",
   "payment_provider_connection_capabilities",
@@ -89,7 +122,12 @@ const CORE_COUNT_TABLES = [
   "shop_domains",
   "shop_deletion_requests",
   "shop_deletion_steps",
+  "shop_member_invitations",
   "shops",
+  "subscription_change_requests",
+  "order_messages",
+  "order_notes",
+  "telegram_mini_app_sessions",
   "telegram_integrations",
 ];
 const REQUIRED_TABLES = [
@@ -104,8 +142,26 @@ const REQUIRED_TABLES = [
   "shop_channels",
 ];
 
+// A migration file was briefly renamed after it had already been applied to
+// the default Wrangler database. Restore drills may normalize that historical
+// ledger row only inside their disposable target; the authoritative database
+// is always opened read-only by the source-copy step.
+const HISTORICAL_MIGRATION_ALIASES = Object.freeze([
+  Object.freeze({
+    canonical: "0062_zalo_oa_oauth_state_retry.sql",
+    historical: "0062_zalo_oa_oauth_state_reissue.sql",
+  }),
+]);
+
 export const restoreCountValidationTables = Object.freeze([...CORE_COUNT_TABLES]);
 export const restoreValidationTables = Object.freeze([...REQUIRED_TABLES]);
+
+export function assertRequiredRestoreTables(tableNames) {
+  const names = new Set(tableNames);
+  if (REQUIRED_TABLES.some((table) => !names.has(table))) {
+    throw new Error("restore_schema_incomplete");
+  }
+}
 
 function compactTimestamp(now) {
   return now.toISOString().replaceAll(/[-:.TZ]/gu, "").slice(0, 14);
@@ -228,6 +284,54 @@ async function copyLocalDatabase(destinationPath) {
     throw new Error("local_database_copy_failed");
   } finally {
     source.close();
+  }
+}
+
+export function normalizeHistoricalMigrationAliases(databasePath, repositoryMigrationNames) {
+  const parentDirectory = basename(dirname(databasePath));
+  if (
+    basename(databasePath) !== "restored.sqlite"
+    || !parentDirectory.startsWith(RESTORE_TEMP_PREFIX)
+  ) {
+    throw new Error("restore_target_invalid");
+  }
+  const repositoryNames = new Set(repositoryMigrationNames);
+  const database = new DatabaseSync(databasePath);
+  const normalized = [];
+  try {
+    const migrationTable = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'd1_migrations'",
+    ).get();
+    if (migrationTable === undefined) throw new Error("restore_migration_ledger_missing");
+    database.exec("PRAGMA foreign_keys = ON");
+    const names = database.prepare("SELECT name FROM d1_migrations ORDER BY name").all()
+      .map((row) => String(row.name));
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const alias of HISTORICAL_MIGRATION_ALIASES) {
+        if (repositoryNames.has(alias.historical)) {
+          throw new Error("restore_migration_alias_is_current");
+        }
+        if (!repositoryNames.has(alias.canonical)) {
+          throw new Error("restore_migration_alias_canonical_missing");
+        }
+        const historicalCount = names.filter((name) => name === alias.historical).length;
+        if (historicalCount === 0) continue;
+        const canonicalCount = names.filter((name) => name === alias.canonical).length;
+        if (historicalCount !== 1 || canonicalCount !== 1) {
+          throw new Error("restore_migration_alias_unresolved");
+        }
+        database.prepare("DELETE FROM d1_migrations WHERE name = ?").run(alias.historical);
+        normalized.push({ ...alias });
+      }
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return normalized;
+  } finally {
+    database.close();
   }
 }
 
@@ -784,17 +888,27 @@ function verifyLocalDatabase(databasePath, baselineCounts) {
     const foreignKeyViolationCount = database.prepare("PRAGMA foreign_key_check").all().length;
     const tables = new Set(listApplicationTables(database));
     const missingTables = REQUIRED_TABLES.filter((table) => !tables.has(table));
-    const restoredCounts = readTableCounts(database, Object.keys(baselineCounts));
+    const countTables = Object.keys(baselineCounts);
+    const missingCountTables = countTables.filter((table) => !tables.has(table));
+    const restoredCounts = missingCountTables.length === 0
+      ? readTableCounts(database, countTables)
+      : {};
+    // Forward migrations may seed new catalog rows (for example paid plans),
+    // but a restore must never contain fewer authoritative rows than the
+    // snapshot baseline.
     const countMismatches = Object.entries(baselineCounts)
-      .filter(([table, count]) => restoredCounts[table] !== count)
+      .filter(([table, count]) => (restoredCounts[table] ?? -1) < count)
       .map(([table]) => table);
     const expectedMigrations = database.prepare("SELECT name FROM d1_migrations ORDER BY name").all().map((row) => String(row.name));
+    const crossLedgerMismatches = readCrossLedgerMismatches(database);
     return {
       countMismatches,
       expectedMigrations,
       foreignKeyViolationCount,
       integrityOk,
       missingTables,
+      missingCountTables,
+      crossLedgerMismatches,
       restoredItemCount: sumCounts(restoredCounts),
     };
   } finally {
@@ -802,7 +916,71 @@ function verifyLocalDatabase(databasePath, baselineCounts) {
   }
 }
 
-function verifyLocalIntegrity(databasePath) {
+// These relationships are not all expressible as SQLite foreign keys because
+// provider payloads may legitimately omit tenant metadata. Keep the checks
+// reference-only and fail closed when an explicit identity disagrees.
+export function readCrossLedgerMismatches(database) {
+  const rows = database.prepare(`
+    SELECT 'subscription_event_provider_shop' AS code, events.id AS id
+    FROM subscription_events AS events
+    INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
+    WHERE events.source_kind = 'provider'
+      AND provider.shop_id IS NOT NULL
+      AND provider.shop_id != events.shop_id
+    UNION ALL
+    SELECT 'subscription_event_provider_ref_missing' AS code, events.id AS id
+    FROM subscription_events AS events
+    WHERE events.source_kind = 'provider' AND events.provider_event_id IS NULL
+    UNION ALL
+    SELECT 'invoice_billing_account_shop' AS code, invoices.id AS id
+    FROM billing_invoices AS invoices
+    INNER JOIN billing_accounts AS accounts ON accounts.id = invoices.billing_account_id
+    WHERE invoices.billing_account_id IS NOT NULL
+      AND (accounts.shop_id != invoices.shop_id
+        OR accounts.provider_code != invoices.provider_code
+        OR accounts.currency != invoices.currency)
+    UNION ALL
+    SELECT 'checkout_subscription_plan_price_provider' AS code, sessions.id AS id
+    FROM billing_checkout_sessions AS sessions
+    INNER JOIN shop_subscriptions AS subscriptions
+      ON subscriptions.shop_id = sessions.shop_id AND subscriptions.id = sessions.subscription_id
+    INNER JOIN plan_prices AS prices ON prices.id = sessions.price_id
+    WHERE prices.plan_id != sessions.plan_id
+      OR prices.provider_code != sessions.provider_code
+      OR subscriptions.shop_id != sessions.shop_id
+    UNION ALL
+    SELECT 'activation_projection_invalid' AS code, milestones.id AS id
+    FROM activation_milestones AS milestones
+    WHERE json_type(milestones.projection_json) != 'object'
+      OR EXISTS (
+        SELECT 1
+        FROM json_each(milestones.projection_json)
+        WHERE key NOT IN ('channel', 'currency', 'fulfillment_type', 'trigger')
+          OR type != 'text'
+          OR (key = 'channel' AND value NOT IN ('website', 'telegram'))
+          OR (key = 'currency' AND value NOT IN ('VND', 'USD', 'EUR', 'JPY'))
+          OR (key = 'fulfillment_type' AND value NOT IN ('license_key', 'manual'))
+          OR (key = 'trigger' AND value NOT IN ('manual', 'publish', 'test'))
+      )
+    UNION ALL
+    SELECT 'trial_conversion_without_paid_event' AS code, milestones.id AS id
+    FROM activation_milestones AS milestones
+    WHERE milestones.milestone_code = 'trial_converted'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM subscription_events AS events
+        INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
+        WHERE events.shop_id = milestones.shop_id
+          AND events.to_state = 'active'
+          AND events.source_kind = 'provider'
+          AND provider.shop_id = milestones.shop_id
+          AND provider.status = 'processed'
+      )
+  `).all();
+  return rows.map((row) => ({ code: String(row.code), id: String(row.id) }));
+}
+
+export function verifyLocalIntegrity(databasePath) {
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
     const integrityRows = database.prepare("PRAGMA integrity_check").all();
@@ -854,8 +1032,10 @@ async function applyPendingLocalMigrations(databasePath, migrationNames) {
 function assertLocalVerification(verification, migrationNames) {
   if (!verification.integrityOk) throw new Error("restore_integrity_failed");
   if (verification.foreignKeyViolationCount !== 0) throw new Error("restore_foreign_keys_failed");
-  if (verification.missingTables.length !== 0) throw new Error("restore_schema_incomplete");
+  assertRequiredRestoreTables(REQUIRED_TABLES.filter((table) => !verification.missingTables.includes(table)));
+  if (verification.missingCountTables.length !== 0) throw new Error("restore_count_tables_missing");
   if (verification.countMismatches.length !== 0) throw new Error("restore_count_mismatch");
+  if (verification.crossLedgerMismatches.length !== 0) throw new Error("restore_cross_ledger_mismatch");
   assertExactMigrationLedger(verification.expectedMigrations, migrationNames);
 }
 
@@ -987,6 +1167,7 @@ async function runLocalRestoreDrill(target, identifiers) {
       baselineDatabase.close();
     }
     const migrationNames = await expectedMigrationNames();
+    const normalizedMigrationAliases = normalizeHistoricalMigrationAliases(databasePath, migrationNames);
     await applyPendingLocalMigrations(databasePath, migrationNames);
     const verification = verifyLocalDatabase(databasePath, baselineCounts);
     assertLocalVerification(verification, migrationNames);
@@ -1021,7 +1202,11 @@ async function runLocalRestoreDrill(target, identifiers) {
       updatedAt: completedAt,
     });
     insertIsolatedReportRecords(databasePath, snapshotRecord, drillRecord);
-    outcome = { drillRecord, snapshotRecord, verification };
+    outcome = {
+      drillRecord,
+      snapshotRecord,
+      verification: { ...verification, normalizedMigrationAliases },
+    };
   } catch (error) {
     operationError = error;
   } finally {
@@ -1068,6 +1253,45 @@ function parseRemoteCounts(output, tables = CORE_COUNT_TABLES) {
     if (!Number.isSafeInteger(count) || count < 0) throw new Error("restore_counts_invalid");
     return [table, count];
   }));
+}
+
+function remoteCrossLedgerSql() {
+  return `SELECT COUNT(*) AS mismatch_count FROM (
+    SELECT events.id
+    FROM subscription_events AS events
+    INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
+    WHERE events.source_kind = 'provider'
+      AND provider.shop_id IS NOT NULL
+      AND provider.shop_id != events.shop_id
+    UNION ALL
+    SELECT events.id FROM subscription_events AS events
+    WHERE events.source_kind = 'provider' AND events.provider_event_id IS NULL
+    UNION ALL
+    SELECT invoices.id
+    FROM billing_invoices AS invoices
+    INNER JOIN billing_accounts AS accounts ON accounts.id = invoices.billing_account_id
+    WHERE invoices.billing_account_id IS NOT NULL AND accounts.shop_id != invoices.shop_id
+    UNION ALL
+    SELECT milestones.id FROM activation_milestones AS milestones
+    WHERE milestones.milestone_code = 'trial_converted'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM subscription_events AS events
+        INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
+        WHERE events.shop_id = milestones.shop_id
+          AND events.to_state = 'active'
+          AND events.source_kind = 'provider'
+          AND provider.shop_id = milestones.shop_id
+          AND provider.status = 'processed'
+      )
+  );`;
+}
+
+function parseRemoteCrossLedgerMismatchCount(output) {
+  const row = parseWranglerRows(output, "restore_cross_ledger_invalid")[0];
+  const count = Number(row?.mismatch_count);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("restore_cross_ledger_invalid");
+  return count;
 }
 
 function parseWranglerWhoami(output) {
@@ -1161,6 +1385,39 @@ function approvedRemoteRunnerOptions(accountId, additionalEnvironment = {}) {
   };
 }
 
+function normalizeRemoteMigrationAliases(
+  runner,
+  targetName,
+  environment,
+  runnerOptions,
+  appliedMigrationNames,
+  repositoryMigrationNames,
+) {
+  const repositoryNames = new Set(repositoryMigrationNames);
+  const normalizedNames = [...appliedMigrationNames];
+  const normalizedMigrationAliases = [];
+  for (const alias of HISTORICAL_MIGRATION_ALIASES) {
+    if (repositoryNames.has(alias.historical)) throw new Error("restore_migration_alias_is_current");
+    if (!repositoryNames.has(alias.canonical)) throw new Error("restore_migration_alias_canonical_missing");
+    const historicalCount = normalizedNames.filter((name) => name === alias.historical).length;
+    if (historicalCount === 0) continue;
+    const canonicalCount = normalizedNames.filter((name) => name === alias.canonical).length;
+    if (historicalCount !== 1 || canonicalCount !== 1) throw new Error("restore_migration_alias_unresolved");
+    remoteExecute(
+      runner,
+      targetName,
+      environment,
+      `DELETE FROM d1_migrations WHERE name = '${alias.historical}';`,
+      "restore_migration_alias_normalization_failed",
+      runnerOptions,
+    );
+    const historicalIndex = normalizedNames.indexOf(alias.historical);
+    normalizedNames.splice(historicalIndex, 1);
+    normalizedMigrationAliases.push({ ...alias });
+  }
+  return { migrationNames: normalizedNames, normalizedMigrationAliases };
+}
+
 function admitRemoteRestoreTarget(runner, target, approvedIdentity, runnerOptions) {
   const accountIds = parseWranglerWhoami(safeRunner(
     runner,
@@ -1239,6 +1496,9 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     const sourceTableNames = new Set(sourceTableRows
       .map((row) => row?.name)
       .filter((name) => typeof name === "string"));
+    if (BILLING_ACTIVATION_TABLES.some((table) => !sourceTableNames.has(table))) {
+      throw new Error("restore_source_schema_incomplete");
+    }
     const sourceCountTables = CORE_COUNT_TABLES.filter((table) => sourceTableNames.has(table));
     if (sourceCountTables.length === 0) throw new Error("restore_source_tables_empty");
     const sourceCounts = parseRemoteCounts(remoteExecute(
@@ -1276,8 +1536,16 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       if (typeof row?.name !== "string") throw new Error("restore_migration_ledger_invalid");
       return row.name;
     });
-    const pendingMigrationNames = resolvePendingMigrationNames(
+    const normalizedMigrationLedger = normalizeRemoteMigrationAliases(
+      runner,
+      targetName,
+      environment,
+      runnerOptions,
       initialMigrationNames,
+      repositoryMigrationNames,
+    );
+    const pendingMigrationNames = resolvePendingMigrationNames(
+      normalizedMigrationLedger.migrationNames,
       repositoryMigrationNames,
     );
     const migrationRunnerOptions = approvedRemoteRunnerOptions(approvedIdentity.accountId, { CI: "1" });
@@ -1316,9 +1584,18 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       "restore_target_counts_failed",
       runnerOptions,
     ), sourceCountTables);
-    if (sourceCountTables.some((table) => sourceCounts[table] !== targetCounts[table])) {
+    if (sourceCountTables.some((table) => (targetCounts[table] ?? -1) < sourceCounts[table])) {
       throw new Error("restore_count_mismatch");
     }
+    const crossLedgerMismatchCount = parseRemoteCrossLedgerMismatchCount(remoteExecute(
+      runner,
+      targetName,
+      environment,
+      remoteCrossLedgerSql(),
+      "restore_cross_ledger_query_failed",
+      runnerOptions,
+    ));
+    if (crossLedgerMismatchCount !== 0) throw new Error("restore_cross_ledger_mismatch");
     safeRunner(runner, [
       "d1", "export", targetName, "--remote", "--env", environment,
       "--output", targetExport, "--skip-confirmation",
@@ -1349,7 +1626,7 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     const schemaNames = new Set(schemaRows.map((row) => row?.name).filter((name) => typeof name === "string"));
     if (!integrityOk) throw new Error("restore_integrity_failed");
     if (foreignKeyViolationCount !== 0) throw new Error("restore_foreign_keys_failed");
-    if (REQUIRED_TABLES.some((table) => !schemaNames.has(table))) throw new Error("restore_schema_incomplete");
+    assertRequiredRestoreTables(schemaNames);
     const completedAt = new Date().toISOString();
     const snapshotRecord = buildBackupSnapshotRecord({
       checksumSha256,
@@ -1393,6 +1670,8 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
         foreignKeyViolationCount,
         integrityOk,
         migrationNames: appliedMigrationNames,
+        normalizedMigrationAliases: normalizedMigrationLedger.normalizedMigrationAliases,
+        crossLedgerMismatchCount,
       },
     };
   } catch (error) {

@@ -293,6 +293,37 @@ describe("seller operations backend contracts", () => {
     expect(() => database.prepare("DELETE FROM channel_connector_requests WHERE id = ?").run(request.requestPublicId)).toThrow("channel_connector_request_immutable");
   });
 
+  it("normalizes concurrent connector creates to an idempotent winner or safe pending conflict", async () => {
+    const results = await Promise.allSettled([
+      createChannelConnectorRequest({
+        channelCode: "discord.bot",
+        env: bindings,
+        idempotencyKey: "connector-race-a",
+        providerCode: "discord.bot",
+        requestId: "request-connector-race-a",
+        shopPublicId: SHOP_A_PUBLIC,
+        userId: OWNER_A,
+        now: NOW,
+      }),
+      createChannelConnectorRequest({
+        channelCode: "discord.bot",
+        env: bindings,
+        idempotencyKey: "connector-race-b",
+        providerCode: "discord.bot",
+        requestId: "request-connector-race-b",
+        shopPublicId: SHOP_A_PUBLIC,
+        userId: OWNER_A,
+        now: NOW,
+      }),
+    ]);
+    const fulfilled = results.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof createChannelConnectorRequest>>> => result.status === "fulfilled");
+    const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toMatchObject({ code: "channel_connector_pending", status: 409 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM channel_connector_requests WHERE shop_id = ? AND provider_code = 'discord.bot'").get(SHOP_A)).toEqual({ count: 1 });
+  });
+
   it("keeps connector requests isolated by tenant and rejects idempotency/state reuse", async () => {
     const requestA = await createChannelConnectorRequest({
       channelCode: "discord.bot",
@@ -351,10 +382,9 @@ describe("seller operations backend contracts", () => {
   });
 
   it("records billing changes without mutating the authoritative subscription", async () => {
-    const secondPlanTime = NOW.toISOString();
-    database.prepare("INSERT INTO plans (id, code, name, feature_flags_json, limits_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run("plan-ops-pro", "pro", "Pro", "{}", "{}", secondPlanTime, secondPlanTime);
     const plans = await listSellerBillingPlans({ env: bindings, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
-    expect(plans.map((plan) => plan.code)).toEqual(["business", "pro"]);
+    expect(plans.map((plan) => plan.code)).toEqual(["pro", "starter"]);
+    await expect(createSubscriptionChangeRequest({ action: "change_plan", env: bindings, expectedSubscriptionVersion: 1, idempotencyKey: "billing-change-legacy", requestedPlanCode: "business", reasonCode: "seller_requested", requestId: "request-billing-legacy", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "plan_not_found", status: 404 });
     const request = await createSubscriptionChangeRequest({ action: "change_plan", env: bindings, expectedSubscriptionVersion: 1, idempotencyKey: "billing-change-1", requestedPlanCode: "pro", reasonCode: "seller_requested", requestId: "request-billing", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
     expect(request).toMatchObject({ action: "change_plan", currentPlanCode: "business", requestedPlanCode: "pro", status: "requested", version: 1 });
     expect(await createSubscriptionChangeRequest({ action: "change_plan", env: bindings, expectedSubscriptionVersion: 1, idempotencyKey: "billing-change-1", requestedPlanCode: "pro", reasonCode: "seller_requested", requestId: "request-billing-retry", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).toEqual(request);
@@ -367,6 +397,22 @@ describe("seller operations backend contracts", () => {
     await expect(listSubscriptionChangeRequests({ env: bindings, shopPublicId: SHOP_B_PUBLIC, userId: OWNER_A })).rejects.toMatchObject({ code: "authorization_denied" });
     await expect(createSubscriptionChangeRequest({ action: "resume", env: bindings, expectedSubscriptionVersion: 1, idempotencyKey: "billing-change-resume", reasonCode: "seller_requested", requestId: "request-billing-resume", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "billing_resume_provider_required" });
     await expect(createSubscriptionChangeRequest({ action: "cancel", env: bindings, expectedSubscriptionVersion: 1, idempotencyKey: "billing-manager", reasonCode: "seller_requested", requestId: "request-billing-manager", shopPublicId: SHOP_A_PUBLIC, userId: MANAGER_A, now: NOW })).rejects.toMatchObject({ code: "authorization_denied" });
+  });
+
+  it.each(["pending_payment", "suspended"] as const)("blocks direct billing change requests while subscription is %s", async (state) => {
+    database.prepare("UPDATE shop_subscriptions SET state = ?, version = version + 1 WHERE shop_id = ?").run(state, SHOP_A);
+    await expect(createSubscriptionChangeRequest({
+      action: "change_plan",
+      env: bindings,
+      expectedSubscriptionVersion: 2,
+      idempotencyKey: `billing-state-${state}`,
+      requestedPlanCode: "pro",
+      reasonCode: "seller_requested",
+      requestId: `request-billing-state-${state}`,
+      shopPublicId: SHOP_A_PUBLIC,
+      userId: OWNER_A,
+      now: NOW,
+    })).rejects.toMatchObject({ code: "billing_change_requires_request", status: 409 });
   });
 
   it("keeps payment remediation requests auditable and provider-bound", async () => {

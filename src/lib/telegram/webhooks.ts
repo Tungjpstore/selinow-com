@@ -1,4 +1,5 @@
 import { sha256Json } from "../core/crypto";
+import { subscriptionAllows } from "../billing/entitlements";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
 import { readJsonObject } from "../http/request";
@@ -8,7 +9,7 @@ import { decryptTelegramCredentialRow, loadTelegramWebhookIntegration, verifyTel
 import { handleTelegramCommerce } from "./commerce";
 import { resolveTelegramLocale, telegramText } from "./localization";
 import { parseTelegramUpdate } from "./policy";
-import type { TelegramCallbackUpdate, TelegramUpdate } from "./types";
+import type { TelegramCallbackUpdate, TelegramMessageUpdate, TelegramUpdate } from "./types";
 
 type UpdateRow = {
   id: string;
@@ -72,22 +73,22 @@ async function registerUpdate(input: { env: AppBindings; integrationId: string; 
 async function markProcessed(env: AppBindings, integrationId: string, rowId: string, resultCode: string): Promise<void> {
   const now = new Date().toISOString();
   await env.PLATFORM_DB.batch([
-    env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'processed', safe_result_code = ?, processed_at = ?, updated_at = ? WHERE id = ? AND integration_id = ?").bind(resultCode, now, now, rowId, integrationId),
+    env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'processed', safe_result_code = ?, processed_at = ?, updated_at = ? WHERE id = ? AND integration_id = ? AND status IN ('processing', 'failed')").bind(resultCode, now, now, rowId, integrationId),
     env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET last_update_at = ?, last_safe_error_code = CASE WHEN status = 'active' THEN NULL ELSE last_safe_error_code END, updated_at = ? WHERE id = ?").bind(now, now, integrationId),
   ]);
 }
 
 async function markFailed(env: AppBindings, integrationId: string, rowId: string, code: string): Promise<void> {
   const now = new Date().toISOString();
-  await env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'failed', safe_result_code = ?, updated_at = ? WHERE id = ? AND integration_id = ?").bind(code, now, rowId, integrationId).run();
+  await env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'failed', safe_result_code = ?, updated_at = ? WHERE id = ? AND integration_id = ? AND status IN ('processing', 'failed')").bind(code, now, rowId, integrationId).run();
 }
 
 async function answerCallback(client: TelegramClient, update: TelegramUpdate, text?: string): Promise<void> {
-  if (update.kind !== "callback_query") return;
+  if (update.kind !== "callback_query" && update.kind !== "unsupported_callback_query") return;
   try { await client.answerCallbackQuery(update.callbackId, text); } catch { /* Callback acknowledgement must not repeat a business mutation. */ }
 }
 
-async function handleNonPrivate(input: { botUsername: string | null; client: TelegramClient; locale: string; update: TelegramUpdate }): Promise<void> {
+async function handleNonPrivate(input: { botUsername: string | null; client: TelegramClient; locale: string; update: TelegramCallbackUpdate | TelegramMessageUpdate }): Promise<void> {
   const botLink = input.botUsername === null
     ? telegramText(input.locale, "webhook.openPrivate")
     : telegramText(input.locale, "webhook.privateLink", { url: `https://t.me/${input.botUsername}` });
@@ -135,19 +136,32 @@ async function handleDraftHealthStart(input: {
 export async function processTelegramWebhook(input: { env: AppBindings; fetcher?: typeof fetch; request: Request; requestId: string; webhookPublicId: string }): Promise<TelegramWebhookResult> {
   const integration = await loadTelegramWebhookIntegration(input.env, input.webhookPublicId);
   if (!await verifyTelegramWebhookSecret(input.env, integration, input.request.headers.get("X-Telegram-Bot-Api-Secret-Token"))) throw new AppError("telegram_webhook_invalid", 401);
-  const subscriptionAllowsHealth = new Set(["trialing", "active", "past_due"]).has(integration.subscriptionState);
+  const subscriptionAllowsHealth = subscriptionAllows({
+    graceEndsAt: integration.graceEndsAt,
+    subscriptionState: integration.subscriptionState,
+    trialEndsAt: integration.trialEndsAt,
+  });
   const commerceAllowed = integration.shopStatus === "active" && subscriptionAllowsHealth;
   const draftHealthAllowed = integration.shopStatus === "draft" && subscriptionAllowsHealth;
   if (!commerceAllowed && !draftHealthAllowed) throw new AppError("tenant_suspended", 403);
   const body = await readJsonObject(input.request, 64 * 1024);
   const [payloadHash, update] = await Promise.all([sha256Json(body), Promise.resolve(parseTelegramUpdate(body))]);
   const locale = resolveTelegramLocale({ requestLanguage: update.user.languageCode, shopDefaultLocale: integration.defaultLocale });
-  const registered = await registerUpdate({ env: input.env, integrationId: integration.integrationId, kind: update.kind, payloadHash, requestId: input.requestId, shopId: integration.shopId, updateId: update.updateId });
+  // The SQL ledger predates inline callback handling and only admits the two
+  // provider update kinds; retain the durable callback bucket for unsupported
+  // inline callbacks while returning an explicit ignored state.
+  const updateKind = update.kind === "unsupported_callback_query" ? "callback_query" : update.kind;
+  const registered = await registerUpdate({ env: input.env, integrationId: integration.integrationId, kind: updateKind, payloadHash, requestId: input.requestId, shopId: integration.shopId, updateId: update.updateId });
   const credentials = await decryptTelegramCredentialRow(input.env, integration.credential);
   const client = new TelegramClient(credentials.botToken, input.fetcher);
   if (!registered.shouldProcess) {
     if (commerceAllowed) await answerCallback(client, update);
     return { duplicate: true, processed: false, state: "duplicate" };
+  }
+  if (update.kind === "unsupported_callback_query") {
+    await answerCallback(client, update, telegramText(locale, "webhook.callbackPrivate"));
+    await markProcessed(input.env, integration.integrationId, registered.rowId, "callback_unsupported");
+    return { duplicate: registered.duplicate, processed: true, state: "callback_unsupported" };
   }
   if (update.user.isBot) {
     await markProcessed(input.env, integration.integrationId, registered.rowId, "bot_actor_ignored");

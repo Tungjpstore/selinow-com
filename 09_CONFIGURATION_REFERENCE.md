@@ -1,5 +1,9 @@
 # Configuration Reference
 
+## Current continuation overlay (2026-08-03)
+
+Telegram Mini App, Zalo Mini App/OA, WhatsApp Cloud and Discord Bot credentials are tenant-owned encrypted envelopes in D1, not Worker vars and never browser-readable after submission. Provider endpoints, webhook secrets, access tokens and public keys are resolved only inside the provider boundary. A provider contract or connector request is not a production configuration; activation requires the reviewed evidence and remote environment gates documented in `docs/IMPLEMENTATION_STATUS.md`.
+
 ## 1. Configuration principles
 
 - Public constants/non-secret values nằm trong `vars` hoặc typed config.
@@ -76,13 +80,21 @@ Queue consumer có thể dùng cùng Worker deployment nếu cấu hình hỗ tr
 | `CLOUDFLARE_API_TOKEN` | Custom hostname provisioning, least privilege |
 | `CLOUDFLARE_ACCOUNT_ID` | Treat as sensitive config if desired |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Only if OAuth enabled |
-| `PLATFORM_PAYOS_CLIENT_ID` | Only platform subscription billing |
-| `PLATFORM_PAYOS_API_KEY` | Only platform subscription billing |
-| `PLATFORM_PAYOS_CHECKSUM_KEY` | Only platform subscription billing |
+| `DODO_PAYMENTS_API_KEY` | Platform subscription checkout/API access |
+| `DODO_PAYMENTS_WEBHOOK_KEY` | Platform subscription webhook signature verification (`DODO_PAYMENTS_WEBHOOK_SECRET` is accepted as a compatibility alias) |
+| `DODO_PAYMENTS_ENVIRONMENT` | `test_mode` or `live_mode`; defaults to `test_mode` outside production and `live_mode` in production |
+| `DODO_PAYMENTS_API_BASE_URL` | Optional HTTPS API override; use the Dodo test/live endpoint |
 
 Tạo root secret bằng cryptographically secure random 32 bytes và encode base64url. Không dùng password/passphrase thủ công.
 
 `CLOUDFLARE_API_TOKEN` chỉ cần quyền custom-hostname tối thiểu trên đúng zone và được lưu bằng Worker secret. One-time platform setup dùng token operator riêng `CLOUDFLARE_PLATFORM_API_TOKEN` với quyền DNS/fallback cần thiết. Staging doctor/deploy dùng thêm `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`, chỉ có quyền đọc Worker Routes trên zone, để chứng minh hai null-script guard và catch-all Worker ngay trước deploy. Hai operator token này chỉ tồn tại tạm trong operator shell hoặc secret manager, không đưa vào Worker, Wrangler vars hay manifest.
+
+Dodo product/price IDs không phải Worker secrets. Migration `0076` seeds four
+  fail-closed `pending:dodo:*` references for Starter/Pro in VN/global; after
+  Dodo merchant verification, replace those references in the target D1 price
+  rows with the provisioned recurring price IDs and revalidate amount, currency,
+  interval and tax behavior before enabling checkout. Return URLs alone never
+  activate a subscription.
 
 ## 5. Tenant credential names
 
@@ -181,7 +193,8 @@ Buyer tenant lấy từ hostname. Order status/reveal yêu cầu order access to
 
 - `POST /webhooks/telegram/:webhookPublicId`
 - `POST /webhooks/payos/:webhookPublicId`
-- Platform billing webhook phải route/credential namespace riêng nếu có.
+- Platform billing Dodo webhook phải route/credential namespace riêng với seller
+  PayOS webhook và không được dùng credential của seller.
 
 ### Platform operations
 

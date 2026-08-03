@@ -7,7 +7,7 @@ Muc tieu cua quy trinh nay la dua mot engineer/agency tu repository rong den bas
 Baseline source cua goi handoff:
 
 ```text
-4b4b0c2f660fdbd9139390bc285fa5af723f9782
+1144ae7b7021e6d6828cfebfb68f403fc6a2c2b0
 ```
 
 Truoc khi bat dau, xac nhan source code van o baseline nay hoac lap mot change log ro rang cho moi commit moi hon. Neu source da thay doi route/API/state, cap nhat bo handoff truoc khi implement UI.
@@ -43,10 +43,11 @@ Khong doi package version neu chua co change request va verification rieng.
 3. `ROLES_PERMISSIONS_AND_VISIBILITY.md`
 4. `DATA_API_AND_SECURITY_CONTRACTS.md`
 5. `DOMAIN_STATE_MACHINES.md`
-6. `SURFACES_ROUTES_AND_NAVIGATION.md`
-7. `SCREEN_BLUEPRINTS.md`
-8. `DESIGN_AND_INTERACTION_REQUIREMENTS.md`
-9. `IMPLEMENTATION_MIGRATION_PLAN.md`
+6. `DASHBOARD_INFORMATION_ARCHITECTURE.md`
+7. `SURFACES_ROUTES_AND_NAVIGATION.md`
+8. `SCREEN_BLUEPRINTS.md`
+9. `DESIGN_AND_INTERACTION_REQUIREMENTS.md`
+10. `IMPLEMENTATION_MIGRATION_PLAN.md`
 
 Sau do mo `MASTER_REBUILD_PROMPT.md`, `route-contracts.yaml`, `API_ENDPOINT_INDEX.csv`, `TRACEABILITY_MATRIX.csv` va `ACCEPTANCE_MATRIX.csv` de lap backlog.
 
@@ -63,10 +64,10 @@ Expected baseline:
 
 - 25 canonical logical frontend routes.
 - 2 redirect aliases.
-- 124 implemented API/webhook method/path rows in `API_ENDPOINT_INDEX.csv`.
-- 79 acceptance scenarios.
+- 148 API/webhook method/path rows in `API_ENDPOINT_INDEX.csv`, including catalog channel visibility, explicit provider-pending boundaries and the `inventory:read`/`orders:read` public projections.
+- 87 acceptance scenarios, including provider-lane and automation-wait cases inside the canonical dashboard routes.
 - 28 traceability records gom canonical screens va aliases.
-- Migrations `0001` den `0056` trong source; production remains at `0052` until approved.
+- Migrations `0001` den `0069` trong source; production remains at `0052` until approved.
 
 Compare the exported method/path inventory with `API_ENDPOINT_INDEX.csv`; the index must remain source-accurate whenever a route is added, removed or changes security semantics.
 

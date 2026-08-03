@@ -56,6 +56,15 @@ export const REQUIRED_WORKER_SECRET_NAMES = [
   "TURNSTILE_SECRET_KEY",
 ];
 
+export const REQUIRED_PROVIDER_ACCEPTANCE_KEYS = [
+  "telegramBot",
+  "telegramMiniApp",
+  "zaloMiniApp",
+  "zaloOa",
+  "whatsappCloud",
+  "discord",
+];
+
 const REQUIRED_SPEC_PATHS = [
   "accountId",
   "environment",
@@ -89,13 +98,19 @@ const REQUIRED_EVIDENCE_PATHS = [
   "candidateWorkerVersion",
   "commitSha",
   "manualAcceptance.customDomain",
+  "manualAcceptance.evidenceRef",
+  "manualAcceptance.observedAt",
   "manualAcceptance.paymentSignedEvent",
   "manualAcceptance.telegram",
   "manualAcceptance.website",
   "monitoring.alertsReady",
   "monitoring.budgetAlertsReady",
   "monitoring.dashboardReady",
+  "monitoring.evidenceRef",
+  "monitoring.observedAt",
   "pilot.shopCount",
+  "pilot.evidenceRef",
+  "pilot.completedAt",
   "previousWorkerVersion",
   "quality.build",
   "quality.check",
@@ -103,6 +118,8 @@ const REQUIRED_EVIDENCE_PATHS = [
   "quality.lint",
   "quality.test",
   "releaseId",
+  "rollback.rehearsalEvidenceRef",
+  "rollback.rehearsedAt",
   "security.criticalOpen",
   "security.highOpen",
   "staging.accepted",
@@ -197,9 +214,15 @@ function validSpecPath(path, value) {
 }
 
 function validEvidencePath(path, value) {
+  if (path.endsWith(".evidenceRef")) return isConfigured(value);
+  if (path === "manualAcceptance.observedAt" || path === "monitoring.observedAt" || path === "pilot.completedAt" || path === "rollback.rehearsedAt") {
+    return safeDate(value) !== null;
+  }
   if (path.startsWith("quality.") || path.startsWith("manualAcceptance.") || path.startsWith("monitoring.")) return value === true;
   if (path === "staging.accepted") return value === true;
   if (path === "staging.acceptedAt") return safeDate(value) !== null;
+  if (/^providerAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.accepted$/u.test(path)) return value === true;
+  if (/^providerAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.observedAt$/u.test(path)) return safeDate(value) !== null;
   if (path === "security.criticalOpen" || path === "security.highOpen") return value === 0;
   if (path === "pilot.shopCount") return Number.isSafeInteger(value) && value >= 2;
   if (path === "releaseId") return typeof value === "string" && RELEASE_ID_PATTERN.test(value) && !PLACEHOLDER_PATTERN.test(value);
@@ -281,6 +304,12 @@ export function inspectProductionReadiness(input) {
     const value = getPath(evidence, path);
     checks.push(makeCheck(`evidence.${path}`, validEvidencePath(path, value)));
   }
+  for (const provider of REQUIRED_PROVIDER_ACCEPTANCE_KEYS) {
+    for (const field of ["accepted", "evidenceRef", "observedAt"]) {
+      const path = `providerAcceptance.${provider}.${field}`;
+      checks.push(makeCheck(`evidence.${path}`, validEvidencePath(path, getPath(evidence, path))));
+    }
+  }
   const routes = new Set(Array.isArray(production?.routes) ? production.routes.map((route) => route?.pattern).filter((value) => typeof value === "string") : []);
   const d1Database = Array.isArray(production?.d1_databases)
     ? production.d1_databases.find((database) => database?.binding === "PLATFORM_DB")
@@ -308,6 +337,24 @@ export function inspectProductionReadiness(input) {
     name: `evidence.${check.name}`,
     ok: check.ok,
   })));
+  const now = input.now ?? new Date();
+  const recent = (value, maximumAgeMs) => {
+    const observedAt = safeDate(value);
+    if (observedAt === null || observedAt > now.getTime()) return false;
+    return now.getTime() - observedAt <= maximumAgeMs;
+  };
+  checks.push(
+    makeCheck("evidence.manualAcceptance.observedAtFresh", recent(evidence?.manualAcceptance?.observedAt, 30 * 24 * 60 * 60_000)),
+    makeCheck("evidence.monitoring.observedAtFresh", recent(evidence?.monitoring?.observedAt, 24 * 60 * 60_000)),
+    makeCheck("evidence.pilot.completedAtFresh", recent(evidence?.pilot?.completedAt, 30 * 24 * 60 * 60_000)),
+    makeCheck("evidence.rollback.rehearsedAtFresh", recent(evidence?.rollback?.rehearsedAt, 30 * 24 * 60 * 60_000)),
+  );
+  for (const provider of REQUIRED_PROVIDER_ACCEPTANCE_KEYS) {
+    checks.push(makeCheck(
+      `evidence.providerAcceptance.${provider}.observedAtFresh`,
+      recent(evidence?.providerAcceptance?.[provider]?.observedAt, 30 * 24 * 60 * 60_000),
+    ));
+  }
 
   const unique = new Map(checks.map((check) => [check.name, check]));
   const result = [...unique.values()].sort((left, right) => left.name.localeCompare(right.name));
@@ -389,6 +436,7 @@ export function buildReleaseArtifacts(input) {
     createdAt: input.now.toISOString(),
     environment: "production",
     manualAcceptance: input.evidence.manualAcceptance,
+    providerAcceptance: input.evidence.providerAcceptance,
     migrationNames,
     packageVersion: input.packageVersion,
     pilotShopCount: input.evidence.pilot.shopCount,

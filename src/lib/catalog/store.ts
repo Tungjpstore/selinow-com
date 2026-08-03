@@ -3,6 +3,8 @@ import { resolveActiveEncryptionKey } from "../crypto/keyring";
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { tryRecordActivationMilestone } from "../analytics/activation";
+import { recordUsage } from "../billing/metering";
 import { isSupportedCurrency } from "../i18n/currency";
 import type { AppBindings } from "../platform/bindings";
 import { publishReadyStorefront } from "../tenants/readiness";
@@ -18,11 +20,52 @@ import {
   verifyInventoryPreviewToken,
 } from "./import-preview";
 
-type ShopActor = { shopId: string; currency: string };
+type ShopActor = { currency: string; limits: Record<string, unknown>; shopId: string };
 
 async function requireCatalogActor(env: AppBindings, shopPublicId: string, userId: string): Promise<ShopActor> {
   const member = await getShopForMember({ capability: "catalog:manage", env, shopPublicId, userId });
-  return { currency: member.row.currency, shopId: member.row.shop_id };
+  // Older unit/test adapters only project the membership row; an empty limit
+  // map preserves their catalog-currency behavior while live D1 always carries
+  // the canonical plan snapshot.
+  const projected = member as Omit<typeof member, "shop"> & { shop?: { limits: Record<string, unknown> } };
+  return { currency: member.row.currency, limits: projected.shop?.limits ?? {}, shopId: member.row.shop_id };
+}
+
+function planLimit(limits: Record<string, unknown>, metric: string): number | null {
+  const value = limits[metric];
+  if (value === undefined) return null;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new AppError("quota_unavailable", 503);
+  return value as number;
+}
+
+async function meterProductCreate(input: { actor: ShopActor; database: D1Database; limit: number | null; product: ProductView; now: Date }): Promise<void> {
+  if (input.product.status === "archived" || input.limit === null) return;
+  // Product status is the authoritative quota source. Metering is only a
+  // recoverable projection and must never leave a committed catalog write in
+  // an error state when its auxiliary tables are unavailable.
+  try {
+    await recordUsage({
+      database: input.database,
+      delta: 1,
+      metric: "products_non_archived",
+      occurredAt: input.product.createdAt,
+      shopId: input.actor.shopId,
+      sourceId: input.product.id,
+      sourceKind: "product",
+      now: input.now,
+    });
+  } catch {
+    // A reconciliation/backfill can rebuild this projection from products.
+  }
+}
+
+async function assertProductCount(input: { database: D1Database; limit: number | null; shopId: string }): Promise<void> {
+  if (input.limit === null) return;
+  const row = await input.database.prepare(
+    "SELECT COUNT(*) AS count FROM products WHERE shop_id = ? AND status != 'archived'",
+  ).bind(input.shopId).first<{ count: number }>();
+  if (row === null || !Number.isSafeInteger(row.count) || row.count < 0) throw new AppError("quota_unavailable", 503);
+  if (row.count >= input.limit) throw new AppError("quota_exceeded", 409, ["products_non_archived"]);
 }
 
 function resolveVariantCurrency(currency: string | undefined, shopCurrency: string): string {
@@ -136,11 +179,34 @@ async function assertCategory(env: AppBindings, shopId: string, categoryId: stri
 export async function createProduct(input: { data: ProductInput; env: AppBindings; shopPublicId: string; userId: string }): Promise<unknown> {
   const actor = await requireCatalogActor(input.env, input.shopPublicId, input.userId);
   await assertCategory(input.env, actor.shopId, input.data.categoryId);
+  if (input.data.status !== "archived") {
+    const limit = planLimit(actor.limits, "products_non_archived");
+    await assertProductCount({ database: input.env.PLATFORM_DB, limit, shopId: actor.shopId });
+  }
   const id = createId("prd");
   const now = new Date().toISOString();
   try {
-    return await input.env.PLATFORM_DB.prepare(`INSERT INTO products (id, shop_id, category_id, slug, title, description, status, fulfillment_type, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) RETURNING id, category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, version, created_at AS createdAt, updated_at AS updatedAt`).bind(id, actor.shopId, input.data.categoryId, input.data.slug, input.data.title, input.data.description, input.data.status, input.data.fulfillmentType, now, now).first();
-  } catch {
+    const limit = planLimit(actor.limits, "products_non_archived");
+    const product = await input.env.PLATFORM_DB.prepare(`
+      INSERT INTO products (id, shop_id, category_id, slug, title, description, status, fulfillment_type, version, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+      WHERE ? = 'archived' OR ? IS NULL OR (SELECT COUNT(*) FROM products WHERE shop_id = ? AND status != 'archived') < ?
+      RETURNING id, category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, version, created_at AS createdAt, updated_at AS updatedAt
+    `).bind(id, actor.shopId, input.data.categoryId, input.data.slug, input.data.title, input.data.description, input.data.status, input.data.fulfillmentType, now, now, input.data.status, limit, actor.shopId, limit).first<ProductView>();
+    if (product === null && input.data.status !== "archived") throw new AppError("quota_exceeded", 409, ["products_non_archived"]);
+    if (product === null) throw new AppError("catalog_conflict", 409);
+    await meterProductCreate({ actor, database: input.env.PLATFORM_DB, limit, now: new Date(now), product });
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "product_created",
+      milestone: "product_created",
+      reason: "created",
+      shopId: actor.shopId,
+      source: "catalog",
+    });
+    return product;
+  } catch (error) {
+    if (error instanceof AppError && (error.code.startsWith("usage_") || error.code.startsWith("quota_") || error.code === "billing_period_unavailable")) throw error;
     throw new AppError("catalog_conflict", 409);
   }
 }
@@ -213,7 +279,22 @@ export async function createProductWithInitialVariant(input: {
   `).bind(input.userId, namespace, keyHash, nowIso).first<StoredCatalogCreate>();
   if (existing !== null) {
     if (existing.request_hash !== requestHash) throw new AppError("idempotency_conflict", 409);
-    return { ...parseStoredProductWithInitialVariant(existing.response_json), created: false };
+    const replay = parseStoredProductWithInitialVariant(existing.response_json);
+    await meterProductCreate({ actor, database: input.env.PLATFORM_DB, limit: planLimit(actor.limits, "products_non_archived"), now, product: replay.product });
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "product_created",
+      milestone: "product_created",
+      reason: "created",
+      shopId: actor.shopId,
+      source: "catalog",
+    });
+    return { ...replay, created: false };
+  }
+
+  if (input.data.status !== "archived") {
+    const limit = planLimit(actor.limits, "products_non_archived");
+    await assertProductCount({ database: input.env.PLATFORM_DB, limit, shopId: actor.shopId });
   }
 
   const productId = createId("prd");
@@ -236,9 +317,10 @@ export async function createProductWithInitialVariant(input: {
   };
   const responseJson = JSON.stringify({ product, variant });
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60_000).toISOString();
+  const productLimit = planLimit(actor.limits, "products_non_archived");
 
   try {
-    await input.env.PLATFORM_DB.batch([
+    const results = await input.env.PLATFORM_DB.batch([
       input.env.PLATFORM_DB.prepare(`
         DELETE FROM idempotency_records
         WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND expires_at <= ?
@@ -247,7 +329,11 @@ export async function createProductWithInitialVariant(input: {
         INSERT INTO products (
           id, shop_id, category_id, slug, title, description, status,
           fulfillment_type, version, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        )
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+        WHERE ? = 'archived' OR ? IS NULL OR (
+          SELECT COUNT(*) FROM products WHERE shop_id = ? AND status != 'archived'
+        ) < ?
       `).bind(
         productId,
         actor.shopId,
@@ -259,13 +345,19 @@ export async function createProductWithInitialVariant(input: {
         input.data.fulfillmentType,
         nowIso,
         nowIso,
+        input.data.status,
+        productLimit,
+        actor.shopId,
+        productLimit,
       ),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO product_variants (
           id, shop_id, product_id, sku, title, options_json, price_minor,
           compare_at_minor, currency, min_per_order, max_per_order, status,
           version, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        )
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+        WHERE EXISTS (SELECT 1 FROM products WHERE id = ? AND shop_id = ?)
       `).bind(
         variantId,
         actor.shopId,
@@ -281,19 +373,25 @@ export async function createProductWithInitialVariant(input: {
         input.initialVariant.status,
         nowIso,
         nowIso,
+        productId,
+        actor.shopId,
       ),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO idempotency_records (
           actor_user_id, namespace, key_hash, request_hash, response_json,
           created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(input.userId, namespace, keyHash, requestHash, responseJson, nowIso, expiresAt),
+        )
+        SELECT ?, ?, ?, ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM products WHERE id = ? AND shop_id = ?)
+      `).bind(input.userId, namespace, keyHash, requestHash, responseJson, nowIso, expiresAt, productId, actor.shopId),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO audit_logs (
           id, shop_id, actor_type, actor_id, action, resource_type,
           resource_id, safe_metadata_json, request_id, created_at
-        ) VALUES (?, ?, 'user', ?, 'catalog.product_with_variant.created',
-          'product', ?, ?, ?, ?)
+        )
+        SELECT ?, ?, 'user', ?, 'catalog.product_with_variant.created',
+          'product', ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM products WHERE id = ? AND shop_id = ?)
       `).bind(
         createId("aud"),
         actor.shopId,
@@ -307,8 +405,13 @@ export async function createProductWithInitialVariant(input: {
         }),
         input.requestId,
         nowIso,
+        productId,
+        actor.shopId,
       ),
     ]);
+    if ((results[1]?.meta.changes ?? 0) === 0 && input.data.status !== "archived") {
+      throw new AppError("quota_exceeded", 409, ["products_non_archived"]);
+    }
   } catch (error) {
     const replay = await input.env.PLATFORM_DB.prepare(`
       SELECT request_hash, response_json
@@ -318,16 +421,37 @@ export async function createProductWithInitialVariant(input: {
     `).bind(input.userId, namespace, keyHash).first<StoredCatalogCreate>();
     if (replay !== null) {
       if (replay.request_hash !== requestHash) throw new AppError("idempotency_conflict", 409);
-      return { ...parseStoredProductWithInitialVariant(replay.response_json), created: false };
+      const replayed = parseStoredProductWithInitialVariant(replay.response_json);
+      await meterProductCreate({ actor, database: input.env.PLATFORM_DB, limit: planLimit(actor.limits, "products_non_archived"), now, product: replayed.product });
+      await tryRecordActivationMilestone({
+        env: input.env,
+        idempotencyKey: "product_created",
+        milestone: "product_created",
+        reason: "created",
+        shopId: actor.shopId,
+        source: "catalog",
+      });
+      return { ...replayed, created: false };
     }
+    if (error instanceof AppError) throw error;
     throw mapCatalogCurrencyWriteError(error) ?? new AppError("catalog_conflict", 409);
   }
 
+  await meterProductCreate({ actor, database: input.env.PLATFORM_DB, limit: productLimit, now, product });
+  await tryRecordActivationMilestone({
+    env: input.env,
+    idempotencyKey: "product_created",
+    milestone: "product_created",
+    reason: "created",
+    shopId: actor.shopId,
+    source: "catalog",
+  });
   return { created: true, product, variant };
 }
 
 export async function updateProduct(input: { data: ProductInput; env: AppBindings; productId: string; shopPublicId: string; userId: string }): Promise<unknown> {
   const actor = await requireCatalogActor(input.env, input.shopPublicId, input.userId);
+  const productLimit = planLimit(actor.limits, "products_non_archived");
   await assertCategory(input.env, actor.shopId, input.data.categoryId);
   if (input.data.status === "active") {
     const variant = await input.env.PLATFORM_DB.prepare("SELECT id FROM product_variants WHERE shop_id = ? AND product_id = ? AND status = 'active' LIMIT 1").bind(actor.shopId, input.productId).first();
@@ -335,13 +459,20 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
   }
   try {
     const row = await input.env.PLATFORM_DB.prepare(`
-      UPDATE products
+      UPDATE products AS target
       SET category_id = ?, slug = ?, title = ?, description = ?, status = ?,
         fulfillment_type = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND shop_id = ?
         AND (
+          ? = 'archived'
+          OR target.status != 'archived'
+          OR ? IS NULL
+          OR (SELECT COUNT(*) FROM products AS quota_products
+              WHERE quota_products.shop_id = ? AND quota_products.status != 'archived') < ?
+        )
+        AND (
           ? = 'suspended'
-          OR products.status != 'suspended'
+          OR target.status != 'suspended'
           OR COALESCE((
             SELECT CASE
               WHEN latest.action_kind = 'product_suspend'
@@ -349,7 +480,7 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
             END
             FROM moderation_actions AS latest
             WHERE latest.target_kind = 'product'
-              AND latest.target_ref = products.id
+              AND latest.target_ref = target.id
               AND latest.status = 'applied'
             ORDER BY latest.created_at DESC, latest.rowid DESC
             LIMIT 1
@@ -368,14 +499,22 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
       input.productId,
       actor.shopId,
       input.data.status,
-    ).first();
+      productLimit,
+      actor.shopId,
+      productLimit,
+      input.data.status,
+    ).first<ProductView>();
     if (row === null) {
       const product = await input.env.PLATFORM_DB.prepare(
-        "SELECT id FROM products WHERE id = ? AND shop_id = ? LIMIT 1",
-      ).bind(input.productId, actor.shopId).first();
+        "SELECT id, status FROM products WHERE id = ? AND shop_id = ? LIMIT 1",
+      ).bind(input.productId, actor.shopId).first<{ id: string; status: string }>();
+      if (product !== null && product.status === "archived" && input.data.status !== "archived" && productLimit !== null) {
+        await assertProductCount({ database: input.env.PLATFORM_DB, limit: productLimit, shopId: actor.shopId });
+      }
       if (product !== null) throw new AppError("moderation_state_conflict", 409);
       throw new AppError("resource_not_found", 404);
     }
+    await meterProductCreate({ actor, database: input.env.PLATFORM_DB, limit: productLimit, now: new Date(row.updatedAt), product: row });
     return row;
   } catch (error) {
     if (error instanceof AppError) throw error;
@@ -626,6 +765,14 @@ export async function confirmInventoryImport(input: {
   `).bind(input.userId, namespace, keyHash, nowIso).first<StoredIdempotency>();
   if (existing !== null) {
     if (existing.request_hash !== requestHash) throw new AppError("idempotency_conflict", 409);
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "inventory_ready",
+      milestone: "inventory_ready",
+      reason: "ready",
+      shopId: prepared.actor.shopId,
+      source: "inventory",
+    });
     return { ...parseStoredInventoryImport(existing.response_json), created: false };
   }
   await verifyInventoryPreviewToken({
@@ -674,10 +821,26 @@ export async function confirmInventoryImport(input: {
     `).bind(input.userId, namespace, keyHash).first<StoredIdempotency>();
     if (replay !== null) {
       if (replay.request_hash !== requestHash) throw new AppError("idempotency_conflict", 409);
+      await tryRecordActivationMilestone({
+        env: input.env,
+        idempotencyKey: "inventory_ready",
+        milestone: "inventory_ready",
+        reason: "ready",
+        shopId: prepared.actor.shopId,
+        source: "inventory",
+      });
       return { ...parseStoredInventoryImport(replay.response_json), created: false };
     }
     throw new AppError("inventory_import_conflict", 409);
   }
+  await tryRecordActivationMilestone({
+    env: input.env,
+    idempotencyKey: "inventory_ready",
+    milestone: "inventory_ready",
+    reason: "ready",
+    shopId: prepared.actor.shopId,
+    source: "inventory",
+  });
   return { ...result, created: true };
 }
 

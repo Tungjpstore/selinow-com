@@ -28,7 +28,7 @@ const {
 const locale = normalizeSupportedLocale(requestedLocale);
 const t = createMarketingTranslator(locale);
 const resolvedDescription = description === undefined ? t("marketing.layout.default_description") : description;
-const socialImage = "https://selinow.com/brand/selinow-og-cover.png";
+const socialImage = "https://selinow.com/brand/selinow-og-cover-global.png";
 const pathname = Astro.url.pathname;
 const explicitLocale = Astro.url.searchParams.get("lang");
 const canonicalBase = canonical ?? `${SITE_ORIGIN}${pathname}`;

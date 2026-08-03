@@ -108,8 +108,16 @@ Sai order/grant token co chu dich tra 404 de khong tiet lo ton tai. Token order/
 | `PUT .../products/:productId` | CSRF + catalog manage | Full product replacement; active needs active variant |
 | `POST .../products/:productId/variants` | CSRF + catalog manage | Full variant create |
 | `PUT .../variants/:variantId` | CSRF + catalog manage | Full variant replacement |
+| `GET .../catalog/visibility` | Session + `catalog:manage` | Tenant-bound product/channel visibility rows, capped at 5,000; missing rows remain fail-closed |
+| `PUT .../catalog/visibility` | CSRF + recent-auth + idempotency + expected version | Set one product/channel `visible|hidden` status; `expectedVersion=0` creates a missing row, later writes use optimistic CAS |
 
 Khong co hard delete; archive qua `status`. Seller variant `optionsJson` la JSON string; public variant `options` la object. Price la integer minor-unit, currency server validated.
+
+Migration `0069_catalog_channel_visibility.sql` provides the tenant-leading D1 table,
+scope/lifecycle triggers and defaults for the Website and explicitly enabled channels.
+It does not activate a provider; a missing row is intentionally hidden until a seller
+mutation creates or updates the explicit product/channel decision. Storefront and
+Telegram Mini App catalog projections apply the same channel-specific visible fence.
 
 ### Inventory va private files
 
@@ -137,7 +145,7 @@ Preview token bind user, tenant, variant, source va exact payload. Xoa plaintext
 | `GET .../orders/:orderId` | Session + `shop:read` | Safe detail, payment attempts, fulfillment records, download counters, audit |
 | `POST .../orders/:orderId/manual-fulfillments` | CSRF + recent + fulfillment manage + idempotency | Seller-attested per-item immutable execution; external reference khong echo |
 
-Khong co seller cancel/refund/edit order, message/note, payment override hoac retry-delivery API. Khong tao controls gia.
+Khong co seller cancel/refund/edit order, payment override hoac retry-delivery API. Internal order note/message APIs exist as tenant-bound, audited/provider-pending workflows, but the current order-detail browser surface does not expose their mutation controls.
 
 ## Integrations, payment va domains API
 
@@ -157,14 +165,18 @@ Khong bao gio render lai PayOS secret. Provider activation/controlled acceptance
 - `POST .../integrations/telegram/health-checks`: CSRF + recent; `201`.
 
 Khong tra bot token/webhook secret. Mini App launch identity is a separate server-side
-contract: `initData` must pass Telegram Web App HMAC, hash uniqueness, bounded payload,
-freshness (default 24 hours, max seven days) and user projection validation before any
-tenant/customer binding. The verifier never returns or persists the bot token.
+contract: `POST /api/channels/telegram-mini-app/sessions/:shopPublicId` accepts only the
+raw `initData` value and exchanges it for a short-lived opaque session after Telegram Web
+App HMAC, bounded freshness (300 seconds), replay, subscription, active integration,
+credential-version and active connector-request checks. The response is private/no-store;
+it contains no bot token, raw init data or provider payload. Session authentication
+rechecks the tenant and credential/connector state and fails closed on revocation or
+disablement. The verifier never returns or persists the bot token.
 
-### Channel expansion connectors (migrations `0055`-`0056`)
+### Channel expansion connectors, provider receipts, identities, OA state and verification evidence (migrations `0055`-`0069`)
 
 The channel expansion catalog is a safe, additive projection. It currently lists
-`telegram.mini_app`, `zalo.mini_app`, `whatsapp.cloud` and `discord.bot` with explicit
+`telegram.mini_app`, `zalo.mini_app`, `zalo.oa`, `whatsapp.cloud` and `discord.bot` with explicit
 capabilities, provider execution stage and required seller action. Every manifest sets
 `inlineSecretDelivery: false`; the catalog contains no credentials, webhook secrets,
 provider payloads or internal tenant IDs.
@@ -175,11 +187,63 @@ provider payloads or internal tenant IDs.
 | `GET .../channels/requests` | Session + `shop:read` | Returns at most 100 tenant-bound requests with `requestPublicId`, channel/provider code, status, safe failure code, timestamps and optimistic `version`. |
 | `POST .../channels/requests` | CSRF + recent-auth + `integrations:manage` + `Idempotency-Key` | Allowlist `{channelCode,providerCode}`. Creates one durable seller intent per provider in `requested`; idempotent replay returns the same safe projection. It never accepts credentials or implies provider activation. |
 | `DELETE .../channels/requests/:requestPublicId` | CSRF + recent-auth + `integrations:manage` + `Idempotency-Key` + expected version | Body `{expectedVersion}`; CAS-cancels only `requested`/`provider_pending` rows. The immutable D1 row is retained and the request never becomes active from a browser action. |
+| `GET .../channels/credentials` | Session + recent-auth + `integrations:manage` | Returns at most 100 tenant-bound pending/active/grace/revoked/error credential projections. It excludes ciphertext, IV, fingerprints, plaintext and provider payloads. |
+| `POST .../channels/credentials` | CSRF + recent-auth + `integrations:manage` + `Idempotency-Key` | Allowlist `{connectionPublicId,ciphertextB64,ivB64,fingerprint,keyVersion}`. Stores a validated encrypted envelope as `pending`; the repository derives provider and tenant from the connection, and no browser action activates a provider. Idempotent replay returns the same safe projection. |
 
 Connector state is `requested -> provider_pending -> active|rejected` or
 `requested|provider_pending -> canceled`; `active` additionally requires a hashed
 provider reference and reviewer evidence. Provider execution, webhook verification,
 outbound delivery and payment/fulfillment decisions remain separate acceptance gates.
+
+Verified provider ingress uses migration `0058_channel_provider_event_receipts.sql`
+and `D1ProviderReceiptStore`. The receipt is tenant/connection/provider scoped and
+stores only action, provider event ID, payload reference, timestamps, attempts and
+safe status/result codes. Same event plus same payload is a replay; same event with
+a different payload reference is a conflict and is audited. Receipt identity and
+deletion are immutable, status transitions are guarded, and direct inserts require
+an active or degraded same-tenant channel connection. Raw provider bodies,
+credentials and access tokens never enter D1, queues or audit metadata.
+
+Provider customer identity resolution uses migration
+`0059_channel_customer_identities.sql` and the server-only
+`upsertChannelCustomerIdentity` service. It hashes the external subject with a
+tenant/connection-purpose HMAC and stores only the hash, exact connection and
+provider code, canonical `shop_customers` binding and bounded display metadata.
+Composite foreign keys and active/degraded connection guards enforce tenant and
+provider scope. Repeating the same tuple is idempotent; a changed customer
+binding is a conflict. Telegram's legacy `customer_identities` table remains
+unchanged and no raw provider subject is returned or persisted.
+
+Zalo OA OAuth state uses migrations `0060`-`0062` and the server-only
+`zalo-oa-oauth-state-store` service. A state is bound to the exact tenant and
+Zalo OA connector request, stores only an HMAC state hash plus AES-GCM PKCE
+verifier envelope, expires within a bounded window and is consumed once by a
+versioned D1 compare-and-set. Direct writes cannot extend expiry or cross the
+connector/provider boundary. OAuth exchange, rotating token persistence,
+webhook proof and outbound capability acceptance remain provider-pending.
+
+Provider verification evidence uses migration `0064_provider_verification_evidence.sql`
+and the server-only `provider-verification-evidence` service. It records only a
+tenant/connection/provider-scoped evidence reference, credential version and
+fingerprint, verification kind (`webhook`, `identity`, `capability` or
+`outbound_acceptance`), bounded safe metadata and expiry/reviewer timestamps.
+Evidence rows are immutable after review, reject cross-tenant or disabled-channel
+inserts, require an active/degraded same-tenant connection and never store raw
+provider payloads, credentials, tokens or secrets. Replays of the same evidence
+reference are idempotent; changed references conflict. Review evidence contributes
+only to a safe readiness projection and cannot activate a provider, authorize
+outbound delivery, settle payment or fulfill an order without separate controlled
+external acceptance gates.
+
+Migration `0065_provider_verification_scope_guards.sql` adds direct-D1 credential
+lineage checks for evidence inserts and makes channel-connection tenant/channel/provider
+identity immutable. Migration `0066_zalo_oa_oauth_state_lookup.sql` adds a unique,
+provider-scoped blind HMAC lookup hash so a public callback can resolve state without
+trusting browser-supplied tenant or request identifiers. Raw state is intentionally not
+stored and existing pending rows cannot be backfilled; a production cutover must revoke/
+expire those rows or use an explicitly reviewed legacy-resolution path before accepting
+`0066`. The lookup index is not provider activation and does not authorize token rotation,
+webhook proof, outbound delivery, payment or fulfillment.
 
 ### Messaging policy boundary
 
@@ -270,6 +334,8 @@ Projection co safe lifecycle timestamps/error/version/steps; khong co provider s
 | --- | --- | --- |
 | `GET /api/v1/shop` | Bearer `sln_<env>_...`, `shop:read` | Safe shop data |
 | `GET /api/v1/catalog` | Bearer, `catalog:read` | Safe shop + catalog, stockState only |
+| `GET /api/v1/inventory` | Bearer, `inventory:read` | Tenant-bound aggregate inventory counts with safe variant references and bounded cursor pagination |
+| `GET /api/v1/orders` | Bearer, `orders:read` | Tenant-bound order summaries with customer/provider/payment internals and token data redacted; bounded cursor pagination |
 
 60 request/phut/credential; rate limit headers va `Retry-After`. Query `shopPublicId` khong thay doi credential tenant. Day la server/external integration surface, khong phai browser dashboard API.
 
@@ -337,11 +403,13 @@ and external adapter activation remain outside this local workflow contract.
 - Public store catalog API.
 - External API v1.
 - Seller order list/detail va manual fulfillment.
-- Seller member invitation/mutation, customer detail/notes, order messages,
-  billing/remediation requests and admin
-  investigation endpoints listed above.
-- Channel expansion catalog and connector request APIs (migrations `0055`-`0056`); catalog/
-  request wiring is safe to expose, but provider execution remains pending.
+- Seller order messages, payment remediation, and admin investigation/appeal
+  endpoints listed above; member/customer/billing routes are now wired to their
+  corresponding dashboard surfaces where the current UI supports the contract.
+- Telegram Mini App session exchange, provider receipt/identity claims, Zalo OA
+  OAuth state and verification-evidence runtime APIs; dashboard pages do not call
+  provider ingress directly, and none of these local contracts implies provider
+  execution or activation.
 - Payment exceptions.
 - Seller audit.
 - GET export/deletion/abuse/admin operations/directory thuong duoc page SSR goi service truc tiep.

@@ -1,5 +1,9 @@
 # Domains and Cloudflare Contract
 
+## Current continuation overlay (2026-08-03)
+
+The platform-only production route handoff is live for Selinow-owned hosts, but external customer-domain cutover and Turnstile hostname admission remain pending evidence. New provider webhook endpoints use opaque connection/public identifiers and do not change DNS ownership or authorize a provider. Local development and dry-runs must continue using isolated bindings and must never target production custom-hostname resources.
+
 ## 1. Domain map
 
 ```text

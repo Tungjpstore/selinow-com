@@ -2,6 +2,7 @@ export type ReleaseCheck = { name: string; ok: boolean };
 
 export const REQUIRED_PRODUCTION_VARS: string[];
 export const REQUIRED_WORKER_SECRET_NAMES: string[];
+export const REQUIRED_PROVIDER_ACCEPTANCE_KEYS: string[];
 export function evaluateBackupPrerequisites(evidence: Record<string, unknown> | null, now?: Date): ReleaseCheck[];
 export function inspectProductionReadiness(input: {
   evidence: Record<string, unknown> | null;

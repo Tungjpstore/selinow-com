@@ -2,13 +2,14 @@ import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "./store";
+import type { ShopRole } from "./policy";
 
 export type SellerCustomerView = {
-  createdAt: string;
+  createdAt: string | null;
   displayName: string | null;
   emailMasked: string | null;
   lastOrderAt: string | null;
-  locale: string;
+  locale: string | null;
   orderCount: number;
   publicId: string;
   status: string;
@@ -29,6 +30,12 @@ export type SellerBillingView = {
   canceledAt: string | null;
   currentPeriodEnd: string | null;
   currentPeriodStart: string | null;
+  currentPrice: {
+    amountMinor: number;
+    currency: string;
+    interval: string;
+    marketCode: string;
+  } | null;
   features: Record<string, unknown>;
   graceEndsAt: string | null;
   limits: Record<string, unknown>;
@@ -49,6 +56,12 @@ function maskEmail(value: string | null): string | null {
   return `${visible}${"*".repeat(Math.max(1, local.length - visible.length))}@${domain}`;
 }
 
+function maskDisplayName(value: string | null): string | null {
+  if (value === null || value.trim().length === 0) return null;
+  const normalized = value.trim();
+  return `${normalized.slice(0, 1)}${"*".repeat(Math.min(8, Math.max(1, normalized.length - 1)))}`;
+}
+
 function parseObject(value: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -58,8 +71,17 @@ function parseObject(value: string): Record<string, unknown> {
   }
 }
 
+type CustomerVisibility = "full" | "masked" | "summary";
+
+function customerVisibility(role: ShopRole): CustomerVisibility {
+  if (role === "owner" || role === "manager") return "full";
+  if (role === "support") return "masked";
+  return "summary";
+}
+
 export async function listSellerCustomers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerCustomerView[]> {
   const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const visibility = customerVisibility(member.row.role);
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT shop_customers.id, shop_customers.id AS publicId, shop_customers.version,
       shop_customers.display_name AS displayName,
@@ -75,17 +97,33 @@ export async function listSellerCustomers(input: { env: AppBindings; shopPublicI
     ORDER BY lastOrderAt DESC, shop_customers.created_at DESC, shop_customers.id DESC
     LIMIT 200
   `).bind(member.row.shop_id).all<{ createdAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; publicId?: string; status: string; version?: number }>();
-  return rows.results.map((row) => ({
-    createdAt: row.createdAt,
-    displayName: row.displayName,
-    emailMasked: maskEmail(row.email),
-    lastOrderAt: row.lastOrderAt,
-    locale: row.locale,
-    orderCount: row.orderCount,
-    publicId: row.publicId ?? row.id,
-    status: row.status,
-    version: Number.isSafeInteger(row.version) && (row.version ?? 0) > 0 ? (row.version ?? 1) : 1,
-  }));
+  return rows.results.map((row) => {
+    const version = Number.isSafeInteger(row.version) && (row.version ?? 0) > 0 ? (row.version ?? 1) : 1;
+    if (visibility === "summary") {
+      return {
+        createdAt: null,
+        displayName: null,
+        emailMasked: null,
+        lastOrderAt: row.lastOrderAt,
+        locale: null,
+        orderCount: row.orderCount,
+        publicId: row.publicId ?? row.id,
+        status: row.status,
+        version,
+      };
+    }
+    return {
+      createdAt: row.createdAt,
+      displayName: visibility === "masked" ? maskDisplayName(row.displayName) : row.displayName,
+      emailMasked: maskEmail(row.email),
+      lastOrderAt: row.lastOrderAt,
+      locale: row.locale,
+      orderCount: row.orderCount,
+      publicId: row.publicId ?? row.id,
+      status: row.status,
+      version,
+    };
+  });
 }
 
 export async function listSellerMembers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerMemberView[]> {
@@ -124,14 +162,31 @@ export async function getSellerBilling(input: { env: AppBindings; shopPublicId: 
       shop_subscriptions.state, shop_subscriptions.version AS subscriptionVersion, shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.current_period_start AS currentPeriodStart,
       shop_subscriptions.current_period_end AS currentPeriodEnd,
-      shop_subscriptions.grace_ends_at AS graceEndsAt, shop_subscriptions.canceled_at AS canceledAt
+      shop_subscriptions.grace_ends_at AS graceEndsAt, shop_subscriptions.canceled_at AS canceledAt,
+      shop_subscriptions.market_code AS marketCode,
+      shop_subscriptions.price_currency AS priceCurrency,
+      shop_subscriptions.price_amount_minor AS priceAmountMinor,
+      shop_subscriptions.price_interval AS priceInterval
     FROM shop_subscriptions
     INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
     WHERE shop_subscriptions.shop_id = ?
     ORDER BY shop_subscriptions.created_at DESC, shop_subscriptions.id DESC
     LIMIT 1
-  `).bind(member.row.shop_id).first<{ canceledAt: string | null; currentPeriodEnd: string | null; currentPeriodStart: string | null; featuresJson: string; graceEndsAt: string | null; limitsJson: string; planCode: string; planName: string; planVersion: number; state: string; subscriptionVersion?: number; trialEndsAt: string | null }>();
+  `).bind(member.row.shop_id).first<{ canceledAt: string | null; currentPeriodEnd: string | null; currentPeriodStart: string | null; featuresJson: string; graceEndsAt: string | null; limitsJson: string; marketCode: string | null; planCode: string; planName: string; planVersion: number; priceAmountMinor: number | null; priceCurrency: string | null; priceInterval: string | null; state: string; subscriptionVersion?: number; trialEndsAt: string | null }>();
   if (row === null) throw new AppError("subscription_required", 409);
+  const currentPrice = row.marketCode !== null
+    && row.priceCurrency !== null
+    && row.priceInterval !== null
+    && typeof row.priceAmountMinor === "number"
+    && Number.isSafeInteger(row.priceAmountMinor)
+    && row.priceAmountMinor > 0
+    ? {
+      amountMinor: row.priceAmountMinor,
+      currency: row.priceCurrency,
+      interval: row.priceInterval,
+      marketCode: row.marketCode,
+    }
+    : null;
   const usage = await input.env.PLATFORM_DB.prepare(`
     SELECT metric, period_key AS periodKey, value, updated_at AS updatedAt
     FROM usage_counters
@@ -143,6 +198,7 @@ export async function getSellerBilling(input: { env: AppBindings; shopPublicId: 
     canceledAt: row.canceledAt,
     currentPeriodEnd: row.currentPeriodEnd,
     currentPeriodStart: row.currentPeriodStart,
+    currentPrice,
     features: parseObject(row.featuresJson),
     graceEndsAt: row.graceEndsAt,
     limits: parseObject(row.limitsJson),

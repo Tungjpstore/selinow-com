@@ -161,7 +161,7 @@ async function telegramRuntime() {
     const result = method === "getMe"
       ? { first_name: "Resume Bot", id: 123_456_789, is_bot: true, username: "resume_bot" }
       : method === "getWebhookInfo"
-        ? { allowed_updates: ["message", "callback_query"], pending_update_count: 0, url: `${API_ORIGIN}/webhooks/telegram/${integration.webhookPublicId}` }
+        ? { allowed_updates: ["message", "callback_query"], max_connections: 20, pending_update_count: 0, url: `${API_ORIGIN}/webhooks/telegram/${integration.webhookPublicId}` }
         : true;
     return Promise.resolve(new Response(JSON.stringify({ ok: true, result }), { status: 200 }));
   };
@@ -443,7 +443,7 @@ async function telegramReplacementRuntime(input: { sameBot?: boolean } = {}) {
     const result = method === "getMe"
       ? { first_name: "Replacement Bot", id: 987_654_321, is_bot: true, username: "replacement_bot" }
       : method === "getWebhookInfo"
-        ? { allowed_updates: ["message", "callback_query"], pending_update_count: 0, url: `${API_ORIGIN}/webhooks/telegram/${integration.webhookPublicId}` }
+        ? { allowed_updates: ["message", "callback_query"], max_connections: 20, pending_update_count: 0, url: `${API_ORIGIN}/webhooks/telegram/${integration.webhookPublicId}` }
         : true;
     return Promise.resolve(new Response(JSON.stringify({ ok: true, result }), { status: 200 }));
   };

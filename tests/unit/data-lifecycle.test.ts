@@ -97,7 +97,7 @@ function seedTenant(database: DatabaseSync): void {
   const nowIso = NOW.toISOString();
   database.exec(`
     INSERT INTO plans (id, code, name, feature_flags_json, limits_json, created_at, updated_at)
-    VALUES ('plan-a', 'starter', 'Starter', '{}', '{}', '${nowIso}', '${nowIso}');
+    VALUES ('plan-a', 'legacy_test', 'Legacy Test', '{}', '{}', '${nowIso}', '${nowIso}');
     INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
     VALUES ('${USER_ID}', 'owner@example.test', 'Owner', 'active', '${nowIso}', '${nowIso}');
     INSERT INTO shops (

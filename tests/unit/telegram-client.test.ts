@@ -26,6 +26,12 @@ describe("Telegram Bot API client", () => {
     await expect(new TelegramClient(TOKEN, fetcher).getMe()).resolves.toEqual({ displayName: "Test Bot", id: "123456789", username: "test_shop_bot" });
   });
 
+  it("rejects provider bot IDs outside Telegram's documented 52-bit range", async () => {
+    const fetcher: typeof fetch = () => Promise.resolve(new Response(JSON.stringify({ ok: true, result: { first_name: "Test Bot", id: "4503599627370496", is_bot: true, username: "test_shop_bot" } }), { status: 200 }));
+
+    await expect(new TelegramClient(TOKEN, fetcher).getMe()).rejects.toMatchObject({ code: "telegram_provider_identity_invalid" });
+  });
+
   it("sets a URL-safe secret, bounded allowed updates and explicit connection limit", async () => {
     const fetcher: typeof fetch = (_input, init) => {
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;

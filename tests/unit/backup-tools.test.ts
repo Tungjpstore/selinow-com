@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -20,6 +21,10 @@ import {
   resolvePendingMigrationNames,
   restoreCountValidationTables,
   restoreValidationTables,
+  assertRequiredRestoreTables,
+  readCrossLedgerMismatches,
+  verifyLocalIntegrity,
+  normalizeHistoricalMigrationAliases,
   runRestoreDrill,
 } from "../../scripts/lib/backup.mjs";
 
@@ -186,6 +191,61 @@ describe("backup target safety", () => {
     )).toThrow("restore_migrations_incomplete");
   });
 
+  it("normalizes only the known historical migration alias in an isolated copy", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "selinow-restore-drill-"));
+    const sourcePath = join(directory, "source.sqlite");
+    const copyPath = join(directory, "restored.sqlite");
+    const repository = [
+      "0061_zalo_oa_connector_scope.sql",
+      "0062_zalo_oa_oauth_state_retry.sql",
+    ];
+    try {
+      const source = new DatabaseSync(sourcePath);
+      source.exec("CREATE TABLE d1_migrations (name TEXT NOT NULL UNIQUE);");
+      source.prepare("INSERT INTO d1_migrations (name) VALUES (?)").run("0061_zalo_oa_connector_scope.sql");
+      source.prepare("INSERT INTO d1_migrations (name) VALUES (?)").run("0062_zalo_oa_oauth_state_reissue.sql");
+      source.prepare("INSERT INTO d1_migrations (name) VALUES (?)").run("0062_zalo_oa_oauth_state_retry.sql");
+      source.prepare("VACUUM INTO ?").run(copyPath);
+      source.close();
+
+      expect(normalizeHistoricalMigrationAliases(copyPath, repository)).toEqual([{
+        canonical: "0062_zalo_oa_oauth_state_retry.sql",
+        historical: "0062_zalo_oa_oauth_state_reissue.sql",
+      }]);
+      const copy = new DatabaseSync(copyPath, { readOnly: true });
+      expect(copy.prepare("SELECT name FROM d1_migrations ORDER BY name").all()).toEqual([
+        { name: "0061_zalo_oa_connector_scope.sql" },
+        { name: "0062_zalo_oa_oauth_state_retry.sql" },
+      ]);
+      copy.close();
+      const authoritative = new DatabaseSync(sourcePath, { readOnly: true });
+      expect(authoritative.prepare("SELECT name FROM d1_migrations ORDER BY name").all()).toHaveLength(3);
+      authoritative.close();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("fails closed when a historical alias has no canonical ledger row", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "selinow-restore-drill-"));
+    const databasePath = join(directory, "restored.sqlite");
+    try {
+      const database = new DatabaseSync(databasePath);
+      database.exec("CREATE TABLE d1_migrations (name TEXT NOT NULL UNIQUE);");
+      database.prepare("INSERT INTO d1_migrations (name) VALUES (?)").run("0062_zalo_oa_oauth_state_reissue.sql");
+      database.close();
+      expect(() => normalizeHistoricalMigrationAliases(databasePath, ["0062_zalo_oa_oauth_state_retry.sql"]))
+        .toThrow("restore_migration_alias_unresolved");
+      const unchanged = new DatabaseSync(databasePath, { readOnly: true });
+      expect(unchanged.prepare("SELECT name FROM d1_migrations").all()).toEqual([
+        { name: "0062_zalo_oa_oauth_state_reissue.sql" },
+      ]);
+      unchanged.close();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("cleans only a direct temp child carrying the matching tool marker", async () => {
     const drillId = `rdr_test_${randomBytes(6).toString("hex")}`;
     const directory = await mkdtemp(join(tmpdir(), "selinow-restore-drill-"));
@@ -205,9 +265,71 @@ describe("backup target safety", () => {
 });
 
 describe("operations report compatibility", () => {
+  it("fails closed when an authoritative billing or activation table is absent", () => {
+    expect(() => {
+      assertRequiredRestoreTables(["shops", "billing_provider_events"]);
+    })
+      .toThrow("restore_schema_incomplete");
+    expect(restoreValidationTables).toEqual(expect.arrayContaining([
+      "shop_subscriptions", "billing_accounts", "billing_checkout_sessions",
+      "billing_invoices", "billing_provider_events", "subscription_events",
+      "usage_counters", "usage_events", "activation_milestones",
+    ]));
+  });
+
+  it("detects cross-tenant billing events and activation conversions without provider evidence", () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec(`
+      CREATE TABLE billing_provider_events (id TEXT PRIMARY KEY, shop_id TEXT, status TEXT);
+      CREATE TABLE subscription_events (
+        id TEXT PRIMARY KEY, shop_id TEXT, provider_event_id TEXT,
+        source_kind TEXT, to_state TEXT
+      );
+      CREATE TABLE billing_accounts (id TEXT PRIMARY KEY, shop_id TEXT, provider_code TEXT, currency TEXT);
+      CREATE TABLE billing_invoices (id TEXT PRIMARY KEY, shop_id TEXT, billing_account_id TEXT, provider_code TEXT, currency TEXT);
+      CREATE TABLE billing_checkout_sessions (id TEXT PRIMARY KEY, shop_id TEXT, subscription_id TEXT, plan_id TEXT, price_id TEXT, provider_code TEXT);
+      CREATE TABLE shop_subscriptions (id TEXT PRIMARY KEY, shop_id TEXT);
+      CREATE TABLE plan_prices (id TEXT PRIMARY KEY, plan_id TEXT, provider_code TEXT);
+      CREATE TABLE activation_milestones (id TEXT PRIMARY KEY, shop_id TEXT, milestone_code TEXT, projection_json TEXT);
+      INSERT INTO billing_provider_events VALUES ('provider-1', 'shop-a', 'processed');
+      INSERT INTO subscription_events VALUES ('sub-event-1', 'shop-b', 'provider-1', 'provider', 'active');
+      INSERT INTO billing_accounts VALUES ('account-1', 'shop-a', 'dodo', 'USD');
+      INSERT INTO billing_invoices VALUES ('invoice-1', 'shop-a', 'account-1', 'payos', 'USD');
+      INSERT INTO shop_subscriptions VALUES ('subscription-1', 'shop-a');
+      INSERT INTO plan_prices VALUES ('price-1', 'plan-pro', 'dodo');
+      INSERT INTO billing_checkout_sessions VALUES ('checkout-1', 'shop-a', 'subscription-1', 'plan-starter', 'price-1', 'dodo');
+      INSERT INTO activation_milestones VALUES ('activation-1', 'shop-b', 'trial_converted', '{}');
+      INSERT INTO activation_milestones VALUES ('activation-2', 'shop-a', 'setup_started', '{"channel":true}');
+    `);
+    expect(readCrossLedgerMismatches(database)).toEqual([
+      { code: "subscription_event_provider_shop", id: "sub-event-1" },
+      { code: "invoice_billing_account_shop", id: "invoice-1" },
+      { code: "checkout_subscription_plan_price_provider", id: "checkout-1" },
+      { code: "activation_projection_invalid", id: "activation-2" },
+      { code: "trial_conversion_without_paid_event", id: "activation-1" },
+    ]);
+    database.close();
+  });
+
+  it("reports foreign-key corruption during restore verification", () => {
+    const directory = mkdtempSync(join(tmpdir(), "selinow-restore-fk-"));
+    const databasePath = join(directory, "restore.sqlite");
+    const database = new DatabaseSync(databasePath);
+    database.exec("PRAGMA foreign_keys = OFF; CREATE TABLE shops (id TEXT PRIMARY KEY); CREATE TABLE activation_milestones (shop_id TEXT REFERENCES shops(id)); INSERT INTO activation_milestones VALUES ('missing-shop');");
+    database.close();
+    expect(verifyLocalIntegrity(databasePath).foreignKeyViolationCount).toBe(1);
+    rmSync(directory, { force: true, recursive: true });
+  });
   it("requires generic channel and domain delivery tables in every restored schema", () => {
     expect(restoreValidationTables).toEqual(expect.arrayContaining([
       "api_credentials",
+      "catalog_channel_visibility",
+      "channel_customer_identities",
+      "channel_connector_requests",
+      "channel_oauth_states",
+      "channel_provider_verification_evidence",
+      "channel_provider_event_receipts",
+      "customer_notes",
       "shop_channels",
       "channel_connections",
       "channel_connection_grants",
@@ -237,6 +359,7 @@ describe("operations report compatibility", () => {
       "payment_events",
       "payment_exceptions",
       "payment_reversal_events",
+      "payment_remediation_requests",
       "payment_method_codes",
       "payment_provider_connections",
       "payment_provider_connection_capabilities",
@@ -253,8 +376,18 @@ describe("operations report compatibility", () => {
       "order_items",
       "shop_deletion_requests",
       "shop_deletion_steps",
+      "shop_member_invitations",
+      "subscription_change_requests",
+      "order_messages",
+      "order_notes",
+      "telegram_mini_app_sessions",
     ]));
     expect(restoreCountValidationTables).toEqual(expect.arrayContaining([
+      "catalog_channel_visibility",
+      "channel_connector_requests",
+      "channel_oauth_states",
+      "channel_provider_event_receipts",
+      "customer_notes",
       "data_export_jobs",
       "encryption_rotation_items",
       "encryption_rotation_runs",
@@ -268,9 +401,15 @@ describe("operations report compatibility", () => {
       "entitlement_grants",
       "entitlement_transitions",
       "payment_reversal_events",
+      "payment_remediation_requests",
+      "shop_member_invitations",
       "order_items",
+      "order_messages",
+      "order_notes",
       "shop_deletion_requests",
       "shop_deletion_steps",
+      "subscription_change_requests",
+      "telegram_mini_app_sessions",
     ]));
   });
 
@@ -906,39 +1045,29 @@ describe("backup CLI dry runs", () => {
               return {
                 stderr: "",
                 stdout: JSON.stringify([{
-                  results: (source ? ["shops"] : restoreValidationTables).map((name) => ({ name })),
+                  results: (source ? restoreCountValidationTables : restoreValidationTables)
+                    .map((name) => ({ name })),
                 }]),
               };
             }
+            if (sql.includes("AS mismatch_count")) {
+              return { stderr: "", stdout: JSON.stringify([{ results: [{ mismatch_count: 0 }] }]) };
+            }
             if (args[2] === "selinow-staging") {
+              const aliases = Array.from(sql.matchAll(/\) AS ([a-z][a-z0-9_]*)/gu), (match) => match[1])
+                .filter((table): table is string => table !== undefined);
               return {
                 stderr: "",
-                stdout: JSON.stringify([{ results: [{ shops: 6 }] }]),
+                stdout: JSON.stringify([{ results: [Object.fromEntries(
+                  aliases.map((table) => [table, table === "shops" ? 6 : 0]),
+                )] }]),
               };
             }
-            return {
-              stderr: "",
-              stdout: JSON.stringify([{
-                results: [{
-                  delivery_grant_consumptions: 8,
-                  delivery_grants: 9,
-                  external_fulfillment_references: 15,
-                  digital_asset_versions: 10,
-                  digital_assets: 11,
-                  digital_entitlements: 12,
-                  manual_fulfillment_executions: 16,
-                  inventory_keys: 1,
-                  order_item_fulfillment_requirements: 13,
-                  orders: 2,
-                  payment_attempts: 3,
-                  product_fulfillment_policies: 14,
-                  products: 4,
-                  shop_domains: 5,
-                  shops: 6,
-                  telegram_integrations: 7,
-                }],
-              }]),
-            };
+            const aliases = Array.from(sql.matchAll(/\) AS ([a-z][a-z0-9_]*)/gu), (match) => match[1])
+              .filter((table): table is string => table !== undefined);
+            return { stderr: "", stdout: JSON.stringify([{ results: [Object.fromEntries(
+              aliases.map((table) => [table, table === "shops" ? 6 : 0]),
+            )] }]) };
           }
           return { stderr: "", stdout: "" };
         },
@@ -960,7 +1089,7 @@ describe("backup CLI dry runs", () => {
         && ci === "1"
       ))).toBe(true);
       expect(commands.filter(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--command")))
-        .toHaveLength(7);
+        .toHaveLength(8);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "delete")).toBe(true);
     } finally {
       await rm(reportPath, { force: true });
@@ -1108,30 +1237,17 @@ describe("backup CLI dry runs", () => {
             if (sql.includes("FROM sqlite_master")) {
               return {
                 stderr: "",
-                stdout: JSON.stringify([{ results: [{ name: "shops" }] }]),
+                stdout: JSON.stringify([{
+                  results: restoreCountValidationTables.map((name) => ({ name })),
+                }]),
               };
             }
+            const aliases = Array.from(sql.matchAll(/\) AS ([a-z][a-z0-9_]*)/gu), (match) => match[1])
+              .filter((table): table is string => table !== undefined);
             return {
               stderr: "",
               stdout: JSON.stringify([{
-                results: [{
-                  delivery_grant_consumptions: 0,
-                  delivery_grants: 0,
-                  external_fulfillment_references: 0,
-                  digital_asset_versions: 0,
-                  digital_assets: 0,
-                  digital_entitlements: 0,
-                  manual_fulfillment_executions: 0,
-                  inventory_keys: 0,
-                  order_item_fulfillment_requirements: 0,
-                  orders: 0,
-                  payment_attempts: 0,
-                  product_fulfillment_policies: 0,
-                  products: 0,
-                  shop_domains: 0,
-                  shops: 0,
-                  telegram_integrations: 0,
-                }],
+                results: [Object.fromEntries(aliases.map((table) => [table, 0]))],
               }]),
             };
           }

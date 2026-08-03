@@ -98,7 +98,10 @@ describe("tenant readiness policy", () => {
   });
 
   it("allows past-due within provider policy but surfaces a warning", () => {
-    const result = evaluateReadinessSnapshot(readySnapshot({ subscriptionState: "past_due" }), CHECKED_AT);
+    const result = evaluateReadinessSnapshot(readySnapshot({
+      graceEndsAt: "2026-07-29T00:00:00.000Z",
+      subscriptionState: "past_due",
+    }), CHECKED_AT);
     expect(result.ready).toBe(true);
     expect(result.checks.find((item) => item.code === "subscription_publishable")?.status).toBe("warning");
   });

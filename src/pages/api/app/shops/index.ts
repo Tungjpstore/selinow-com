@@ -5,6 +5,7 @@ import { AppError } from "../../../../lib/core/errors";
 import { readJsonObject, rejectUnknownFields } from "../../../../lib/http/request";
 import { createCaughtErrorResponse } from "../../../../lib/http/security";
 import { getBindings } from "../../../../lib/platform/bindings";
+import { PUBLIC_PLAN_CODES } from "../../../../lib/billing/plan-catalog";
 import { normalizeOptionalCountryCode } from "../../../../lib/tenants/country";
 import { normalizeShopName, normalizeSlug } from "../../../../lib/tenants/policy";
 import { createShop } from "../../../../lib/tenants/store";
@@ -15,8 +16,8 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const auth = await requireCsrfSession(request, env);
     const body = await readJsonObject(request);
     rejectUnknownFields(body, ["businessCountry", "currency", "defaultLocale", "merchantCountry", "name", "planCode", "slug"]);
-    const planCode = typeof body.planCode === "string" ? body.planCode : "store";
-    if (!new Set(["bot", "store", "business"]).has(planCode)) {
+    const planCode = body.planCode === undefined ? "starter" : typeof body.planCode === "string" ? body.planCode : "";
+    if (!(PUBLIC_PLAN_CODES as readonly string[]).includes(planCode)) {
       throw new AppError("validation_failed", 400, ["plan_invalid"]);
     }
     const businessCountry = normalizeOptionalCountryCode(body.businessCountry, "business_country_invalid");

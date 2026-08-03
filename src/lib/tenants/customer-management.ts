@@ -4,7 +4,7 @@ import { createId } from "../core/ids";
 import { matchSupportedLocale } from "../i18n/locale";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "./store";
-import { normalizeShopName } from "./policy";
+import { assertRoleCapability, normalizeShopName } from "./policy";
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60_000;
 const NOTE_BODY_MAX = 4_000;
@@ -43,6 +43,12 @@ function maskEmail(value: string | null): string | null {
   if (local === undefined || domain === undefined || local.length === 0) return "***";
   const visible = local.slice(0, Math.min(2, local.length));
   return `${visible}${"*".repeat(Math.max(1, local.length - visible.length))}@${domain}`;
+}
+
+function maskDisplayName(value: string | null): string | null {
+  if (value === null || value.trim().length === 0) return null;
+  const normalized = value.trim();
+  return `${normalized.slice(0, 1)}${"*".repeat(Math.min(8, Math.max(1, normalized.length - 1)))}`;
 }
 
 function normalizeCustomerName(value: unknown): string | null {
@@ -126,6 +132,15 @@ export async function getSellerCustomer(input: {
   userId: string;
 }): Promise<SellerCustomerDetail> {
   const actor = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  if (actor.row.role === "owner" || actor.row.role === "manager") {
+    assertRoleCapability(actor.row.role, "customers:read");
+  } else if (actor.row.role === "support") {
+    assertRoleCapability(actor.row.role, "customers:read:masked");
+  } else {
+    // Viewers may see aggregate customer activity only; never return detail
+    // records, order/payment evidence or internal notes to this role.
+    throw new AppError("authorization_denied", 403);
+  }
   const customer = await loadCustomer(input.env, actor.row.shop_id, input.customerPublicId);
   const canReadNotes = actor.row.role === "owner" || actor.row.role === "manager";
   const [orders, notes, count] = await Promise.all([
@@ -152,7 +167,7 @@ export async function getSellerCustomer(input: {
   ]);
   return {
     createdAt: customer.createdAt,
-    displayName: customer.displayName,
+    displayName: actor.row.role === "support" ? maskDisplayName(customer.displayName) : customer.displayName,
     emailMasked: maskEmail(customer.email),
     lastOrderAt: orders.results[0]?.createdAt ?? null,
     locale: customer.locale,

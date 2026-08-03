@@ -20,6 +20,12 @@ describe("tenant and subscription guards", () => {
     expect(() => {
       assertRoleCapability("manager", "integrations:manage");
     }).not.toThrow();
+    expect(() => {
+      assertRoleCapability("manager", "integrations:credentials");
+    }).toThrow(expect.objectContaining({ code: "authorization_denied" }));
+    expect(() => {
+      assertRoleCapability("manager", "payments:manage");
+    }).toThrow(expect.objectContaining({ code: "authorization_denied" }));
     for (const role of ["owner", "manager"] as const) {
       expect(() => {
         assertRoleCapability(role, "fulfillment:manage");
@@ -38,6 +44,23 @@ describe("tenant and subscription guards", () => {
         assertRoleCapability(role, "domains:manage");
       }).toThrow(expect.objectContaining({ code: "authorization_denied" }));
     }
+    expect(() => {
+      assertRoleCapability("manager", "domains:read");
+    }).not.toThrow();
+    expect(() => {
+      assertRoleCapability("support", "domains:read");
+    }).toThrow(expect.objectContaining({ code: "authorization_denied" }));
+    for (const role of ["support", "viewer"] as const) {
+      expect(() => {
+        assertRoleCapability(role, "customers:read");
+      }).toThrow(expect.objectContaining({ code: "authorization_denied" }));
+    }
+    expect(() => {
+      assertRoleCapability("support", "customers:read:masked");
+    }).not.toThrow();
+    expect(() => {
+      assertRoleCapability("viewer", "customers:read:summary");
+    }).not.toThrow();
   });
 
   it("requires a literal true feature entitlement", () => {

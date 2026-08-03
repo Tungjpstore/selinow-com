@@ -1,5 +1,9 @@
 # Architecture and Data Contract
 
+## Current continuation overlay (2026-08-03)
+
+The source architecture now includes a channel-neutral provider boundary for Telegram Mini App, Zalo Mini App/OA, WhatsApp Cloud and Discord Bot plus Dodo platform billing and a tenant-scoped activation milestone ledger. Migrations `0053`-`0069` add seller operations and provider contracts; `0070`-`0076` add paid plan catalog, prices, billing, metering and Dodo provider identity; `0077` adds privacy-safe activation milestones. D1 remains authoritative and every new query/mutation is tenant-leading. These migrations and provider execution are source/local-only: production is admitted through `0052`, staging through `0028`, and no provider activation is inferred from a contract or dry-run.
+
 ## 1. Kiến trúc được chọn
 
 Dùng modular monolith chạy trên Cloudflare Workers:
@@ -30,7 +34,7 @@ Astro Worker
 
 Không dùng KV làm source of truth cho order, payment, inventory hoặc subscription. KV chỉ cache dữ liệu có thể tái tạo từ D1.
 
-Chuỗi migration nguồn hiện kéo dài đến `0048_payment_reversal_entitlement_revocation.sql`. Staging vẫn chỉ áp dụng 28 migration đến `0028`; `0029`-`0048` (20 migration) là source/local-only và chưa được coi là đã áp dụng từ xa. Production chưa được chạm tới và vẫn `NO-GO`.
+The original architecture checkpoint ended at `0048_payment_reversal_entitlement_revocation.sql`. The current source chain extends through `0077_activation_milestone_ledger.sql`; staging remains accepted through `0028` and `0029`-`0077` are source/local-only. Production has an admitted platform handoff and schema through `0052`, but remains `NO-GO` for continuation migrations, provider activation and commerce traffic until the external release evidence is complete.
 
 ## 2. Host routing
 

@@ -140,6 +140,39 @@
   .app-nav { display: grid; gap: 20px; }
   .app-nav section { display: grid; gap: 3px; }
 
+  /* Keep the expanded channel catalog scannable without competing with operations. */
+  .app-nav-group-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .app-nav-group-label > p { min-width: 0; }
+
+  .app-nav-group-label > span {
+    display: grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    border: 1px solid rgb(255 255 255 / 14%);
+    border-radius: var(--sln-radius-pill);
+    color: var(--sln-slate-400);
+    font: 600 10px/1 var(--sln-font-mono);
+  }
+
+  .app-nav-channel-group {
+    margin-inline: -4px;
+    border: 1px solid rgb(20 184 166 / 18%);
+    border-radius: var(--sln-radius-lg);
+    padding: 9px 8px 10px;
+    background: linear-gradient(180deg, rgb(20 184 166 / 8%), rgb(255 255 255 / 3%));
+  }
+
+  .app-nav-channel-group .app-nav-group-label { padding-inline: 6px; }
+  .app-nav-channel-group .app-nav-group-label p { margin-inline: 0; color: #8de3d7; }
+
   .app-nav p {
     margin: 0 10px 6px;
     color: var(--sln-slate-400);
@@ -164,6 +197,34 @@
     transition: background var(--sln-duration-default) var(--sln-ease-standard), color var(--sln-duration-default) var(--sln-ease-standard);
   }
 
+  .app-nav-item-channel {
+    --channel-accent: var(--sln-slate-400);
+    gap: 9px;
+    min-height: 40px;
+    padding: 8px 9px;
+    border-radius: 9px;
+    font-size: 12px;
+  }
+
+  .app-nav-channel-mark {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--channel-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--channel-accent) 16%, transparent);
+  }
+
+  .app-nav-item-channel > svg { color: var(--channel-accent); }
+
+  .app-nav-item-channel[data-channel="telegram"],
+  .app-nav-item-channel[data-channel="telegram-mini-app"] { --channel-accent: var(--sln-brand-blue); }
+  .app-nav-item-channel[data-channel="zalo-mini-app"],
+  .app-nav-item-channel[data-channel="zalo-oa"] { --channel-accent: var(--sln-brand-teal); }
+  .app-nav-item-channel[data-channel="whatsapp-cloud"] { --channel-accent: var(--sln-state-success); }
+  .app-nav-item-channel[data-channel="discord-bot"] { --channel-accent: var(--sln-brand-violet); }
+  .app-nav-item-channel[data-channel="website"] { --channel-accent: var(--sln-slate-300); }
+
   a.app-nav-item:hover,
   a.app-nav-item[aria-current="page"] { background: rgb(255 255 255 / 9%); color: var(--sln-white); }
 
@@ -177,6 +238,13 @@
     background: var(--sln-brand-indigo);
     content: "";
   }
+
+  a.app-nav-item-channel[aria-current="page"] {
+    background: color-mix(in srgb, var(--channel-accent) 16%, transparent);
+    color: var(--sln-white);
+  }
+
+  a.app-nav-item-channel[aria-current="page"]::before { background: var(--channel-accent); }
 
   .app-nav-unavailable { color: var(--sln-slate-500); cursor: not-allowed; }
   .app-nav-unavailable em { margin-inline-start: auto; color: var(--sln-slate-500); font-size: 9px; font-style: normal; font-weight: 650; white-space: nowrap; }
@@ -294,6 +362,7 @@
 
 @layer responsive {
   @media (max-width: 920px) {
+    .app-shell { scroll-padding-block-end: calc(132px + env(safe-area-inset-bottom)); }
     .app-layout { display: block; }
     .app-sidebar { display: none; }
     .app-topbar { min-height: 64px; padding-inline: 16px; }
@@ -348,7 +417,7 @@
     .app-main {
       width: min(100% - 32px, 760px);
       padding-top: 32px;
-      padding-bottom: calc(112px + env(safe-area-inset-bottom));
+      padding-bottom: calc(140px + env(safe-area-inset-bottom));
     }
 
     .app-mobile-nav {
@@ -360,6 +429,7 @@
       grid-template-columns: repeat(5, 1fr);
       min-height: 66px;
       padding: 6px;
+      padding-bottom: max(6px, env(safe-area-inset-bottom));
       border: 1px solid rgb(255 255 255 / 14%);
       border-radius: 18px;
       background: rgb(8 11 20 / 96%);
@@ -387,6 +457,8 @@
     }
 
     .app-mobile-nav :where(a, button)[aria-current="page"] { background: rgb(255 255 255 / 10%); color: var(--sln-white); }
+    .app-mobile-nav button[data-mobile-menu-trigger="channels"] { color: #87e4d8; }
+    .app-mobile-nav button[data-mobile-menu-trigger="channels"][aria-current="page"] { background: rgb(20 184 166 / 18%); color: #b4fff5; box-shadow: inset 0 -2px 0 #3ccabb; }
     .app-mobile-nav svg { width: 19px; height: 19px; }
 
     .app-mobile-menu[open] {
@@ -501,6 +573,29 @@
       text-decoration: none;
     }
   }
+
+  .app-menu-link-channel {
+    position: relative;
+    --channel-accent: var(--sln-action-primary);
+    padding-inline-start: 16px;
+  }
+
+  .app-menu-channel-mark {
+    position: absolute;
+    inset-inline-start: 5px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--channel-accent);
+  }
+
+  .app-menu-link-channel[data-channel="telegram"],
+  .app-menu-link-channel[data-channel="telegram-mini-app"] { --channel-accent: var(--sln-brand-blue); }
+  .app-menu-link-channel[data-channel="zalo-mini-app"],
+  .app-menu-link-channel[data-channel="zalo-oa"] { --channel-accent: var(--sln-brand-teal); }
+  .app-menu-link-channel[data-channel="whatsapp-cloud"] { --channel-accent: var(--sln-state-success); }
+  .app-menu-link-channel[data-channel="discord-bot"] { --channel-accent: var(--sln-brand-violet); }
+  .app-menu-link-channel[data-channel="website"] { --channel-accent: var(--sln-slate-500); }
 
   @media (max-width: 560px) {
     .app-topbar { min-height: 60px; padding-inline: 14px; }

@@ -1,5 +1,6 @@
 import { AppError } from "../core/errors";
 import type { AppBindings } from "../platform/bindings";
+import { assertRoleCapability } from "../tenants/policy";
 import { getShopForMember } from "../tenants/store";
 import type { SellerOrderNote } from "./order-notes";
 
@@ -56,9 +57,20 @@ type SellerPrivateDownloadRow = {
   orderItemId: string;
 };
 
-async function requireOrderActor(env: AppBindings, shopPublicId: string, userId: string): Promise<{ canReadNotes: boolean; shopId: string }> {
+type OrderVisibility = "full" | "masked" | "summary";
+
+async function requireOrderActor(env: AppBindings, shopPublicId: string, userId: string): Promise<{ canReadNotes: boolean; shopId: string; visibility: OrderVisibility }> {
   const member = await getShopForMember({ capability: "shop:read", env, shopPublicId, userId });
-  return { canReadNotes: member.row.role === "owner" || member.row.role === "manager", shopId: member.row.shop_id };
+  if (member.row.role === "owner" || member.row.role === "manager") {
+    assertRoleCapability(member.row.role, "orders:read");
+    return { canReadNotes: true, shopId: member.row.shop_id, visibility: "full" };
+  }
+  if (member.row.role === "support") {
+    assertRoleCapability(member.row.role, "orders:read:masked");
+    return { canReadNotes: false, shopId: member.row.shop_id, visibility: "masked" };
+  }
+  assertRoleCapability(member.row.role, "orders:read:summary");
+  return { canReadNotes: false, shopId: member.row.shop_id, visibility: "summary" };
 }
 
 async function listSellerPrivateDownloads(input: { env: AppBindings; orderId: string; shopId: string }): Promise<SellerPrivateDownloadRow[]> {
@@ -102,7 +114,7 @@ async function listSellerPrivateDownloads(input: { env: AppBindings; orderId: st
 }
 
 export async function listSellerOrders(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerOrderSummary[]> {
-  const { shopId } = await requireOrderActor(input.env, input.shopPublicId, input.userId);
+  const { shopId, visibility } = await requireOrderActor(input.env, input.shopPublicId, input.userId);
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT
       orders.public_id AS orderId,
@@ -127,11 +139,17 @@ export async function listSellerOrders(input: { env: AppBindings; shopPublicId: 
     ORDER BY orders.created_at DESC, orders.id DESC
     LIMIT 200
   `).bind(shopId).all<SellerOrderSummary>();
-  return rows.results;
+  if (visibility !== "summary") return rows.results;
+  return rows.results.map((row) => ({
+    ...row,
+    customerEmail: null,
+    primaryItem: null,
+  }));
 }
 
 export async function getSellerOrder(input: { env: AppBindings; orderPublicId: string; shopPublicId: string; userId: string }): Promise<SellerOrderDetail> {
-  const { canReadNotes, shopId } = await requireOrderActor(input.env, input.shopPublicId, input.userId);
+  const { canReadNotes, shopId, visibility } = await requireOrderActor(input.env, input.shopPublicId, input.userId);
+  if (visibility === "summary") throw new AppError("authorization_denied", 403);
   const row = await input.env.PLATFORM_DB.prepare(`
     SELECT
       orders.id AS internalId,
@@ -223,7 +241,7 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
     ...safe,
     audit: audit.results,
     fulfillment: fulfillment.results,
-    items: items.results.map((item) => ({ ...item, privateDownload: privateDownloadByItem.get(item.id) ?? null })),
+    items: items.results.map((item) => ({ ...item, privateDownload: visibility === "full" ? privateDownloadByItem.get(item.id) ?? null : null })),
     notes: notes.results.map((note) => ({
       authorDisplayName: note.authorDisplayName,
       body: note.status === "redacted" ? "" : note.body,
@@ -234,6 +252,6 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
       updatedAt: note.updatedAt,
       version: note.version,
     })),
-    payments: payments.results,
+    payments: visibility === "full" ? payments.results : [],
   };
 }

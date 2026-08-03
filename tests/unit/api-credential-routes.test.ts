@@ -4,6 +4,7 @@ import { AppError } from "../../src/lib/core/errors";
 
 const dependencies = vi.hoisted(() => ({
   authenticateApi: vi.fn(),
+  recordPublicApiUsage: vi.fn(),
   authenticateSession: vi.fn(),
   env: {},
   issue: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("../../src/lib/auth/session", () => ({
 
 vi.mock("../../src/lib/api/credentials", () => ({
   authenticatePublicApiRequest: dependencies.authenticateApi,
+  recordPublicApiUsage: dependencies.recordPublicApiUsage,
   issueApiCredential: dependencies.issue,
   listApiCredentials: dependencies.list,
   parseApiCredentialCreateInput: dependencies.parseCreate,
@@ -96,6 +98,7 @@ function expectSensitiveResponseHeaders(response: Response): void {
 
 beforeEach(() => {
   dependencies.authenticateApi.mockReset();
+  dependencies.recordPublicApiUsage.mockReset();
   dependencies.authenticateSession.mockReset();
   dependencies.issue.mockReset();
   dependencies.list.mockReset();
@@ -141,6 +144,7 @@ beforeEach(() => {
     },
     shopId: "shop-a",
   });
+  dependencies.recordPublicApiUsage.mockResolvedValue(undefined);
 });
 
 describe("API credential management routes", () => {

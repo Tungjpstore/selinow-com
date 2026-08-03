@@ -106,9 +106,9 @@ function seed(database: DatabaseSync): void {
       ) VALUES (?, ?, ?, ?, ?, 'vi', 'VND', 'Asia/Ho_Chi_Minh', 1, ?, ?)
     `).run(shop.id, shop.publicId, shop.slug, shop.name, shop.status, now, updatedAt);
     database.prepare(`
-      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
-      VALUES (?, ?, 'plan-safe', ?, ?, ?)
-    `).run(`subscription-${shop.id}`, shop.id, shop.state, now, updatedAt);
+      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, trial_ends_at, created_at, updated_at)
+      VALUES (?, ?, 'plan-safe', ?, ?, ?, ?)
+    `).run(`subscription-${shop.id}`, shop.id, shop.state, shop.state === "trialing" ? new Date(base.getTime() + 8 * 24 * 60 * 60_000).toISOString() : null, now, updatedAt);
     if (shop.owner !== null) {
       database.prepare(`
         INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)

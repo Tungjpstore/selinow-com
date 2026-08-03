@@ -1,4 +1,5 @@
 import { AppError } from "../core/errors";
+import { assertSubscriptionAllows } from "../billing/entitlements";
 import { constantTimeEqual, hmacToken, sha256Json } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
 import { resolveOrderChannelAttribution } from "../channels/attribution";
@@ -149,6 +150,7 @@ export async function websiteCheckoutFingerprint(input: {
 }
 
 export async function checkoutCart(input: { cartId: string; cartToken: string; customerEmail: string | null; env: AppBindings; expected: ExpectedItem[]; idempotencyKey: string; quoteEvidence?: string; shop: PublicShop }): Promise<{ currency: string; expiresAt: string; fulfillmentStatus: string; orderId: string; orderNumber: string; orderToken: string; paymentStatus: string; status: string; totalMinor: number }> {
+  assertSubscriptionAllows({ graceEndsAt: input.shop.graceEndsAt, subscriptionState: input.shop.subscriptionState, trialEndsAt: input.shop.trialEndsAt });
   assertCheckoutAllowed({ shopStatus: input.shop.status, subscriptionState: input.shop.subscriptionState });
   if (!/^[A-Za-z0-9._:-]{16,128}$/u.test(input.idempotencyKey)) throw new AppError("validation_failed", 400, ["idempotency_key_invalid"]);
   const checkoutHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `checkout:${input.shop.id}`, input.idempotencyKey);
