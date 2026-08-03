@@ -2,9 +2,12 @@
 
 Status: `local_ready_remote_blocked` (2026-08-04, Asia/Tokyo)
 
-This package records what is enforced by source and local tests for a future,
-separately approved staging window. It does not authorize a backup, migration,
-deploy, provider call, secret change, route change, or seller pilot.
+This index records what is enforced by source and local tests for a future,
+separately approved staging window. The detailed admission/monitoring contract is
+`docs/PHASE_3_STAGING_READINESS.md`; the safe scorecard and scenario matrix are
+`docs/PHASE_3_PILOT_SCORECARD.md`; review findings are in
+`docs/PHASE_3_REVIEW_PACKAGE_R0.md`. None of these artifacts authorizes a backup,
+migration, deploy, provider call, secret change, route change, or seller pilot.
 
 ## Admission contract
 
@@ -37,8 +40,10 @@ build and before Wrangler is invoked.
 - A safe readiness test must not create an order, payment, reservation, or
   fulfillment record.
 - Exact signed payment, duplicate replay, partial/overpaid/late/mismatched
-  handling, fulfillment replay, support ownership, rollback ownership, and
-  monitoring acknowledgement remain acceptance observations, not local claims.
+  handling, inventory races, fulfillment replay, provider outage, stale
+  readiness, shop-switch cleanup and billing response loss have mapped local
+  regression coverage. Provider/seller outcomes, support ownership, rollback
+  ownership and monitoring acknowledgement remain external observations.
 - Unit economics remain variable-only until owner/provider evidence supplies fees,
   infrastructure allocation, support burden, conversion, churn, CAC, and policy.
 
@@ -68,6 +73,12 @@ this repository or in chat.
 - `scripts/deploy.mjs` — admission and repeat-before-Wrangler enforcement.
 - `tests/unit/staging-release-admission.test.ts` — evidence replacement and
   complete-ledger/preflight regression coverage.
+- `tests/unit/phase-3-pilot-artifacts.test.ts` — status, scorecard, evidence,
+  scenario, monitoring and traceability contract coverage.
+- `docs/PHASE_3_STAGING_READINESS.md` — thresholds, observation windows, owners,
+  stop rules and rollback boundary.
+- `docs/PHASE_3_PILOT_SCORECARD.md` — safe evidence schema and full scenario
+  matrix; checked-in status remains `not_started`.
 - `docs/PHASE_2_PILOT_PLAN.md` and `docs/PHASE_2_PILOT_EVIDENCE.example.json` —
   controlled pilot procedure and safe evidence shape.
 
@@ -79,11 +90,15 @@ this repository or in chat.
 - **P1:** a staging Worker deploy could be attempted before the full candidate
   ledger and data preflight were proven; fixed with before/after-build ledger and
   preflight gates.
-- **P1:** the final dependency audit found vulnerable transitive
-  `brace-expansion@5.0.8`; the lockfile now resolves `5.0.9` and audit passes.
-- **P2/P3:** no additional local/source finding remains open. Remote operations,
-  provider acceptance, legal/support ownership, thresholds, and commercial
-  observations remain external blockers rather than fabricated findings.
+- **P1:** the final dependency audit found vulnerable transitive `fast-uri` and
+  `undici`; exact patch-level npm overrides now resolve `3.1.5` and `7.29.0`
+  without downgrading Astro/Wrangler.
+- **P2:** pilot/monitoring readiness lacked a complete scorecard, explicit
+  thresholds/windows/owners/stop conditions and scenario traceability; the new
+  Phase 3 artifacts and contract test close the local documentation gap.
+- **P3:** no additional local/source finding remains open. Remote operations,
+  provider acceptance, named people, configured alerts and commercial
+  observations remain external blockers rather than fabricated evidence.
 
 ## Verification
 
