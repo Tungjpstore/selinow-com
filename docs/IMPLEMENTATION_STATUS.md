@@ -67,10 +67,11 @@ pilot seller, provider, conversion, cost, margin, CAC, churn, or revenue
 observation is fabricated.
 
 Current local evidence includes the isolated restore report
-`.wrangler/restore-drills/local/rdr_20260803134132_b8a543d64bc9.json`: integrity
-`ok`, zero FK violations, zero missing tables/count mismatches, 614 restored
-items, exact temporary-target cleanup, mode `0600`, and the contiguous 79-file
-ledger. The authenticated browser gate passed 7/7 after the intentional mobile
+`.wrangler/restore-drills/local/rdr_20260803135956_a4239ef55749.json`, bound to
+implementation candidate `a0a4a1624e29772d851a46cdea4a0ef0fe89d49d`:
+integrity `ok`, zero FK violations, zero missing tables/count mismatches, 614
+restored items, exact temporary-target cleanup, mode `0600`, and the contiguous
+79-file ledger. The authenticated browser gate passed 7/7 after the intentional mobile
 `/app` sellability snapshot refresh; the public gate passed 27/27 after review
 of the current-source mobile marketing baseline. Final sequential gates pass:
 `npm run check` (0 errors, 3 existing hints), `npm run lint`, `npm run test`

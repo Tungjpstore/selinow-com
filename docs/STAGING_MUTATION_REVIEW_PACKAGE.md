@@ -10,11 +10,12 @@ are filled from fresh read-only evidence. It does not authorize execution.
 
 ## Reviewed candidate
 
-- Commit/tree: `TBD after Phase 2 R1 commit`
+- Implementation candidate commit/tree: `a0a4a1624e29772d851a46cdea4a0ef0fe89d49d`
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
 - Source migration ledger: current candidate `0001`-`0079`
-- Exact changed-file manifest: `TBD in docs/PHASE_2_REVIEW_PACKAGE_R1.md`
-- Local verification artifact paths: `TBD after final local gates`
+- Exact changed-file manifest: `docs/PHASE_2_REVIEW_PACKAGE_R1.md`
+- Local verification artifact: `docs/PHASE_2_REVIEW_PACKAGE_R1.md`
+- Candidate-bound restore report: `.wrangler/restore-drills/local/rdr_20260803135956_a4239ef55749.json`
 
 ## Remote identity
 

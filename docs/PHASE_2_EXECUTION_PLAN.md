@@ -1,6 +1,6 @@
 # Phase 2 Execution Plan
 
-Status: local gates passed; candidate commit and R1 evidence binding pending
+Status: local PASS; remote staging/provider/pilot/production gates remain NO-GO
 
 Baseline: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
 

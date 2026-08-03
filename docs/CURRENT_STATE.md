@@ -56,7 +56,7 @@ The final exact candidate commit and verification references are recorded in
 ## Phase 2 local evidence
 
 - Source migration chain: `0001`-`0079`, contiguous; no migration was added by Phase 2.
-- Isolated restore drill: `.wrangler/restore-drills/local/rdr_20260803134132_b8a543d64bc9.json`; integrity `ok`, zero FK violations, zero missing tables/count mismatches, 614 restored items, and exact temporary-target cleanup. The report is mode `0600` and local-only.
+- Candidate-bound isolated restore drill: `.wrangler/restore-drills/local/rdr_20260803135956_a4239ef55749.json`; reviewed commit `a0a4a1624e29772d851a46cdea4a0ef0fe89d49d`, integrity `ok`, zero FK violations, zero missing tables/count mismatches, 614 restored items, and exact temporary-target cleanup. The report is mode `0600` and local-only.
 - Browser gates: authenticated 7/7 after an intentional mobile `/app` snapshot refresh for the new sellability copy; public 27/27 after review of the current-source mobile marketing baseline. Desktop/mobile, 1440/768/390/320, 200% geometry, accessibility, overflow, console and safe-request checks passed.
 - Final repository gates: `check` has 0 errors and 3 existing hints; lint passes; Vitest passes 244 files / 1,760 tests; local/staging builds and deploy dry-runs pass; audit reports 0 vulnerabilities; diff checks pass.
 - No staging/production migration, Worker deployment, provider activation, secret update, DNS/route change, webhook, or seller pilot was performed.
