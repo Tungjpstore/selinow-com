@@ -5,24 +5,29 @@ Status: `prepared_only` — approval required before any remote mutation.
 ## Decision requested
 
 Review and approve or reject the exact staging migration/deploy window for the
-clean Phase 2 pilot candidate. This document is a package template until all fields
-are filled from fresh read-only evidence. It does not authorize execution.
+clean Phase 2 pilot candidate. This document is a package template until all
+fields are filled from fresh read-only evidence and a private staging release
+manifest is generated from the final clean HEAD. It does not authorize execution.
 
 ## Reviewed candidate
 
-- Implementation candidate commit/tree: `a0a4a1624e29772d851a46cdea4a0ef0fe89d49d`
+- Reviewed runtime commit: `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`
+- Reviewed runtime tree: `a35e2c871d2db97b392910fb04f51b7aaa27313c`
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
-- Source migration ledger: current candidate `0001`-`0079`
-- Exact changed-file manifest: `docs/PHASE_2_REVIEW_PACKAGE_R1.md`
-- Local verification artifact: `docs/PHASE_2_REVIEW_PACKAGE_R1.md`
-- Candidate-bound restore report: `.wrangler/restore-drills/local/rdr_20260803135956_a4239ef55749.json`
+- Source migration ledger: current candidate `0001`-`0080`
+- Exact changed-file manifest and local verification: `docs/PHASE_2_REVIEW_PACKAGE_R2.md`
+- Candidate-bound local restore report: `.wrangler/restore-drills/local/rdr_20260803145929_b94ce8926be7.json`
+- Execution identity: generated, not hand-copied. `release:staging:manifest`
+  binds the final clean commit/tree and exact migration ledger after fresh staging
+  backup/restore evidence exists. The manifest is private and ignored under
+  `.wrangler/releases/staging/<release-id>/release-manifest.json`.
 
 ## Remote identity
 
 - Cloudflare account: `TBD from read-only admission`
 - Zone: `selinow.com`
 - Worker: `selinow-com-staging`
-- D1 name/UUID: `TBD from `platform:doctor``
+- D1 name/UUID: `TBD from platform:doctor output`
 - R2/KV/Queue resources: `TBD from manifest and live inventory`
 - Routes/domains: `TBD from route preflight and doctor`
 - Confirmation: no production resources, routes, domains, queues, or secrets
@@ -30,16 +35,17 @@ are filled from fresh read-only evidence. It does not authorize execution.
 ## Migration and backup
 
 - Current remote ledger: `0028` unless fresh evidence proves otherwise
-- Exact pending range: `0029`-`0079` (51 migrations) unless fresh read-only
+- Exact pending range: `0029`-`0080` (52 migrations) unless fresh read-only
   evidence proves a different staging ledger
 - Backup command: repository `backup:create` guarded script, exact env only
 - Backup evidence: report-v2, non-empty artifact, checksum, bookmark, freshness
   <= 60 minutes, exact account/D1 identity
 - Restore drill: isolated disposable target from the exact reviewed tree and
-  complete `0001`-`0079` ledger; integrity/FK/schema/count checks required
+  complete `0001`-`0080` ledger; integrity/FK/schema/count checks required;
+  every non-local drill requires `--reviewed-commit`
 - Pre-`0066` OAuth pending-row policy: revoke/expire or explicitly resolve
-- Dodo `0070`-`0079` and activation analytics schema review: local source/tests
-  required in R1; remote cutover review remains `TBD`
+- Dodo `0070`-`0079` and activation timestamp migration `0080`: local
+  source/tests are recorded in R2; remote cutover review remains `TBD`
 
 ## Commands after approval
 
@@ -47,12 +53,22 @@ Use only repository guarded scripts and the exact reviewed environment:
 
 1. Recheck account, D1, routes, domains, queues, cron and private `MEDIA`.
 2. Create and verify the protected staging backup.
-3. Run the isolated restore drill and record its artifact.
-4. Apply forward-only migrations `0029`-`0079` with
-   `npm run db:migrate -- --env staging`.
-5. Verify ledger, preflight, integrity/FK checks and supported smoke paths.
-6. Deploy with `npm run deploy:staging` through its admission guard.
-7. Run public/auth browser gates and controlled PayOS/Telegram UAT.
+3. Run the isolated restore drill bound to the exact clean commit:
+   `npm run restore:drill -- --env staging --reviewed-commit "$(git rev-parse HEAD)" --json`.
+4. Generate the private manifest only after the fresh backup and restore pass:
+   `npm run release:staging:manifest -- --write --json`.
+5. Apply forward-only migrations `0029`-`0080` with
+   `npm run db:migrate -- --env staging --release-manifest <manifest-ref>`.
+6. Verify ledger, preflight, integrity/FK checks and supported smoke paths.
+7. Deploy with
+   `npm run deploy:staging -- --release-manifest <manifest-ref>`.
+8. Run public/auth browser gates and controlled PayOS/Telegram UAT.
+
+Staging seed, if separately approved and actually required, uses the same
+`--release-manifest`; never seed implicitly as part of migration or deploy.
+Migration, seed, and deploy admissions revalidate the clean commit/tree,
+migration ledger, exact D1 identity, backup artifact checksum/size/freshness,
+restore integrity/FK/ledger, and unchanged evidence immediately before Wrangler.
 
 ## Rollback/forward fix
 
@@ -70,8 +86,8 @@ repository-required provider secret names. Never record values here.
 
 ## Verification and evidence paths
 
-Local command results, restore report, test counts, browser evidence and dry-run
-artifacts are recorded in `docs/PHASE_2_REVIEW_PACKAGE_R1.md` after verification.
+Local command results, restore report, test counts, prior browser evidence and
+dry-run artifacts are recorded in `docs/PHASE_2_REVIEW_PACKAGE_R2.md`.
 Remote URLs, timestamps, checksums, account/D1 identity and protected backup
 reports remain `TBD`. No package is accepted until the exact committed candidate
 and fresh remote admission evidence are recorded.

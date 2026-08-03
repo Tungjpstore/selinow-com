@@ -15,7 +15,7 @@ Last updated: 2026-08-03
 | 6 — Storefront/subdomain | Complete | Marketing/pricing, tenant storefront flow, hostname-safe caching, Turnstile/rate limits and remote Selinow staging acceptance |
 | 7 — Custom domains | Complete | External hostname ownership, Cloudflare for SaaS provisioning, SSL/DNS activation, primary switching, tenant rendering, redirect, deletion and DNS cleanup passed on staging |
 | 8 — Automated onboarding | In progress | Repository wizard, readiness, tenant automation API, durable task scheduling, guarded continuation evidence and Selinow-owned executors are live on staging; fresh-seller and external-provider acceptance remain pending |
-| 9 — Operations/security/platform extensibility | In progress | Operations runtime, channel-neutral connections, normalized order attribution, transactional domain events, generic queue fan-out/delivery, DLQ replay, accessibility gates, public-flow axe scans and read-only staging QA are accepted. Phase B globalization and the Phase C entitlement, reversal and generated-license execution slices through migration `0052` are implemented. Migrations `0053`-`0069` add seller operations and channel/provider contract boundaries. Paid Starter/Pro pricing, seven-day trial, three-day paid-renewal grace, Dodo evidence processing, role/plan/state gates, usage metering, activation analytics and Phase 1 billing/restore hardening are implemented through migration `0079`. Provider activation and remote migration remain pending. Production remains on the previously admitted `0001`-`0052` schema until separately approved migrations are applied. |
+| 9 — Operations/security/platform extensibility | In progress | Operations runtime, channel-neutral connections, normalized order attribution, transactional domain events, generic queue fan-out/delivery, DLQ replay, accessibility gates, public-flow axe scans and read-only staging QA are accepted. Phase B globalization and the Phase C entitlement, reversal and generated-license execution slices through migration `0052` are implemented. Migrations `0053`-`0069` add seller operations and channel/provider contract boundaries. Paid Starter/Pro pricing, seven-day trial, three-day paid-renewal grace, Dodo evidence processing, role/plan/state gates, usage metering, activation analytics, Phase 1 billing/restore hardening, and durable catalog activation timestamps are implemented through migration `0080`. Provider activation and remote migration remain pending. Production remains on the previously admitted `0001`-`0052` schema until separately approved migrations are applied. |
 | 10 — Production release | PLATFORM HANDOFF COMPLETE | The guarded first-production ceremony completed on 2026-07-30: D1 migrations `0001`-`0052` are applied forward-only, candidate Worker version `6ca9c890-ed04-44dc-ac32-44b36881f2dc` passed binding/route-neutrality checks, the private canary smoke passed, and the platform-only route handoff is live. `selinow.com/*` and `*.selinow.com/*` point to `selinow-com-production`; exact staging routes and `*/*` remain on `selinow-com-staging`. Exact Worker Custom Domains for `app.selinow.com` and `api.selinow.com` were then attached idempotently to the production Worker, and both now resolve publicly and pass HTTPS health checks. Preview subdomain, queues, cron and secrets were not changed. External customer-domain cutover, Turnstile hostname admission and payment/Telegram/fulfillment activation remain explicitly out of scope |
 
 ### Phase 1 completion candidate R3 (2026-08-03)
@@ -52,34 +52,36 @@ Phase 2 records the seller critical-path review before implementation in
 `docs/PHASE_2_REVIEW_PACKAGE_R0.md`. The two P1 findings are addressed: `/app`
 now derives sellability from the shop lifecycle plus the owner-authoritative
 readiness projection, and both inventory clients erase plaintext and invalidate
-previews on terminal preview/import errors. The P2 activation backfill finding
-is addressed by recovering `inventory_ready` from either accepted inventory or
-an active manual-fulfillment product, while preserving tenant-scoped idempotency.
-The admission-document drift is bounded to source migration `0001`-`0079` and
-explicit staging/production NO-GO ranges.
+previews on terminal preview/import errors. R2 closes the subsequent four review
+findings: staging mutation is bound to a private clean-commit/tree/migration
+manifest plus fresh candidate-bound backup/restore evidence; `inventory_ready`
+requires active product and variant state; migration `0080` records immutable
+activation timestamps so replay is not backdated to product creation; and
+onboarding aborts stale inventory requests while clearing both object and
+serialized plaintext references. Tenant isolation and idempotency remain intact.
 
 Phase 2 artifacts are `docs/PHASE_2_ACTIVATION_FUNNEL.md`,
 `docs/PHASE_2_UNIT_ECONOMICS.md`, `docs/PHASE_2_PILOT_PLAN.md`,
 `docs/PHASE_2_PILOT_EVIDENCE.example.json`, and
-`docs/PHASE_2_REVIEW_PACKAGE_R1.md` (written after final verification). The
+`docs/PHASE_2_REVIEW_PACKAGE_R1.md` plus
+`docs/PHASE_2_REVIEW_PACKAGE_R2.md` (written after review-fix verification). The
 funnel and unit-economics documents are variable/authority contracts only; no
 pilot seller, provider, conversion, cost, margin, CAC, churn, or revenue
 observation is fabricated.
 
 Current local evidence includes the isolated restore report
-`.wrangler/restore-drills/local/rdr_20260803135956_a4239ef55749.json`, bound to
-implementation candidate `a0a4a1624e29772d851a46cdea4a0ef0fe89d49d`:
+`.wrangler/restore-drills/local/rdr_20260803145929_b94ce8926be7.json`, bound to
+runtime candidate `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`:
 integrity `ok`, zero FK violations, zero missing tables/count mismatches, 614
 restored items, exact temporary-target cleanup, mode `0600`, and the contiguous
-79-file ledger. The authenticated browser gate passed 7/7 after the intentional mobile
-`/app` sellability snapshot refresh; the public gate passed 27/27 after review
-of the current-source mobile marketing baseline. Final sequential gates pass:
-`npm run check` (0 errors, 3 existing hints), `npm run lint`, `npm run test`
-(244 files / 1,760 tests), `npm run build`, `npm run build:staging`, both deploy
+80-file ledger through `0080`. Final sequential gates pass: `npm run check`
+(0 errors, 3 existing hints), `npm run lint`, `npx tsc --noEmit`, `npm run test`
+(248 files / 1,770 tests), `npm run build`, `npm run build:staging`, both deploy
 dry-runs, `npm audit --audit-level=high` (0 vulnerabilities), and
-`git diff --check`. No staging/production migration, Worker deployment,
-provider activation, secret update, DNS/route change, webhook, or seller pilot
-was performed.
+`git diff --check`. The prior authenticated 7/7 and public 27/27 browser runs
+remain R1 layout/accessibility evidence; no provider or remote browser acceptance
+was claimed for R2. No staging/production migration, Worker deployment, provider
+activation, secret update, DNS/route change, webhook, or seller pilot was performed.
 
 ### Paid pricing and billing continuation (2026-08-03)
 
@@ -91,7 +93,7 @@ was performed.
 - Role hardening is enforced server-side: owner-only billing/provider credentials, manager operational access without billing changes, support masked reads and viewer summary-only reads. Storefront, website/Telegram checkout, API credentials, provider contexts and readiness all enforce trial/grace deadlines.
 - Local verification completed: `npm run check` (0 errors, 3 hints), `npm run lint`, `npm test` (243 files / 1,755 tests), `npm run build`, both deploy dry-runs, `npm audit --audit-level=high`, `git diff --check`, authenticated browser gate (7/7) and public browser gate (27/27) pass. Marketing/public pricing snapshot baselines were refreshed for the current source UI.
 - Dodo dashboard preparation completed in the signed-in Chrome session: draft subscriptions `Selinow Starter` (`$5` / `99,000 VND`, monthly, free trial 7 days) and `Selinow Pro` (`$15` / `299,000 VND`, monthly, free trial 7 days) were saved with `SaaS` tax classification. Dodo currently hides the draft list while the product-information review is held; the verification page reports live payments inactive, identity verified, bank review pending, and a website URL typo as the hold reason. No publish/activation action was taken.
-- External requirements before staging/production rollout: resolve and resubmit the correct Selinow website URL in Dodo, complete merchant/bank review, then record product/price IDs and webhook signing secret per environment (including confirmed VND support and tax treatment for VN), tax/invoice/refund policy, migration admission/backup through `0079`, staging webhook UAT and reconciliation runbook. No provider secret was added and no remote migration/deploy was performed in this pass.
+- External requirements before staging/production rollout: resolve and resubmit the correct Selinow website URL in Dodo, complete merchant/bank review, then record product/price IDs and webhook signing secret per environment (including confirmed VND support and tax treatment for VN), tax/invoice/refund policy, migration admission/backup through `0080`, staging webhook UAT and reconciliation runbook. No provider secret was added and no remote migration/deploy was performed in this pass.
 
 ### Commercial launch marketing and SEO continuation (2026-08-03)
 

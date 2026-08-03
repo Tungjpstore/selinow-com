@@ -13,11 +13,11 @@ Maturity values are intentionally specific: `implemented`, `locally_verified`,
 
 | Dimension | Source | Local | Staging | Production | Commercial |
 | --- | --- | --- | --- | --- | --- |
-| Commit/tree identity | Phase 2 pilot candidate from baseline `4d3081a03a320ea84fdf66c31cf22e97f041a386` | `locally_verified`; exact candidate commit is recorded in R1 after local gates | `blocked` until exact reviewed commit and fresh admission evidence | `deployed` platform handoff at historical Worker `6ca9c890-ed04-44dc-ac32-44b36881f2dc`; current tree not proven deployed | `blocked` pending external acceptance |
-| Migration ledger | `0001`-`0079`, contiguous | full source chain exercised by local SQLite-backed tests | `deployed` through `0028`; 51 pending (`0029`-`0079`) | `deployed` through `0052`; 27 pending (`0053`-`0079`) | `blocked` pending guarded migration admission |
+| Commit/tree identity | Phase 2 review-fix runtime commit `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`, tree `a35e2c871d2db97b392910fb04f51b7aaa27313c` | `locally_verified`; R2 records the immutable runtime commit and local restore evidence | `blocked`; execution must use a fresh private staging manifest generated from the final clean HEAD | `deployed` platform handoff at historical Worker `6ca9c890-ed04-44dc-ac32-44b36881f2dc`; current tree not proven deployed | `blocked` pending external acceptance |
+| Migration ledger | `0001`-`0080`, contiguous | full source chain exercised by local SQLite-backed tests and isolated restore | `deployed` through `0028`; 52 pending (`0029`-`0080`) | `deployed` through `0052`; 28 pending (`0053`-`0080`) | `blocked` pending guarded migration admission |
 | Worker version | Current source only | `locally_verified` build/dry-runs | `deployed` historical staging version; current tree not proven there | `deployed` platform-only handoff; current candidate not proven there | `blocked` |
 | Marketing | Phase 1 copy/routes exist in source; Website is current and Telegram is labeled upcoming | `locally_verified` by source/browser gates | `blocked` pending candidate deploy | `deployed` homepage only; current source copy not proven live | `blocked` until truthful claims and routes are deployed |
-| Pricing | Starter/Pro D1 catalog and Dodo fail-closed path | `locally_verified`; pending/invalid Dodo references suppress prices, purchase CTA and structured Offers | `blocked` pending `0070`-`0078` | `blocked`; production pricing is not a migrated commercial catalog | `blocked` pending migrated environment and provider setup |
+| Pricing | Starter/Pro D1 catalog and Dodo fail-closed path | `locally_verified`; pending/invalid Dodo references suppress prices, purchase CTA and structured Offers | `blocked` pending `0070`-`0080` | `blocked`; production pricing is not a migrated commercial catalog | `blocked` pending migrated environment and provider setup |
 | Auth | Magic-link/session/CSRF controls | `locally_verified` | `deployed` platform baseline; current candidate pending | `deployed` platform login smoke only | `blocked` pending pilot evidence |
 | Website storefront | Shared catalog/cart/quote/checkout/order/fulfillment core | `locally_verified` with local browser and commerce tests | `blocked` pending full schema/candidate deploy | `blocked` for current full commerce candidate | `blocked` pending payment and fulfillment UAT |
 | PayOS | Seller-owned signed payment/reconciliation adapter | `implemented`, `locally_verified` | `blocked` pending controlled channel/UAT | `blocked`; no provider activation claimed | `blocked` |
@@ -26,7 +26,7 @@ Maturity values are intentionally specific: `implemented`, `locally_verified`,
 | Dodo billing | Scheduled subscription operations, response-loss-safe checkout, owner recovery, direct reconciliation and tenant-bound webhook completion | `implemented`, `locally_verified`; provider references remain pending | `blocked` pending migrations and Dodo test environment | `blocked`; no production IDs/secrets configured | `blocked` pending merchant verification and price/webhook setup |
 | Custom domain | Cloudflare for SaaS lifecycle in source | `locally_verified` | `deployed` lifecycle evidence exists | `blocked` pending exact hostname/Turnstile admission | `blocked` |
 | Legal/support | Seller storefront policy/abuse mechanics exist; platform surfaces absent | `blocked` pending owner/legal decisions | `blocked` | `blocked`; no placeholder copy may be published | `blocked` |
-| Analytics | Billing usage metering plus 12-milestone activation ledger, enum-only projections and rotating deterministic backfill | `locally_verified`; manual-fulfillment inventory readiness recovery and the privacy-safe funnel contract are included | `blocked` pending `0077`-`0079` admission | `blocked` | `blocked` pending retention ownership and pilot evidence |
+| Analytics | Billing usage metering plus 12-milestone activation ledger, enum-only projections and rotating deterministic backfill | `locally_verified`; inventory readiness now requires active product/variant state and uses durable activation timestamps | `blocked` pending `0077`-`0080` admission | `blocked` | `blocked` pending retention ownership and pilot evidence |
 | Monitoring | Platform canary/route evidence only | `locally_verified` for scripts | `blocked` pending service/provider/budget evidence | `blocked` beyond platform handoff | `blocked` |
 | Seller activation | `/app` sellability, readiness blockers, onboarding inventory cleanup, and route-safe next actions | `locally_verified`; source/unit/auth-browser evidence only | `blocked` pending candidate admission and UAT | `blocked` | `blocked` pending pilot evidence |
 | Pilot evidence | Phase 2 plan and evidence schema only; no seller/provider observations recorded | `not_started` | `blocked` pending controlled PayOS/Telegram UAT | `not_started` | `blocked` |
@@ -49,16 +49,17 @@ activation, tenant, channel and verification tests already present in the shared
 worktree. R3 does not rewrite historical migrations or discard any existing
 work. R0, R1 and R2 remain historical snapshots. Phase 2 adds seller-activation
 authority fixes, inventory plaintext cleanup, activation backfill recovery,
-funnel/unit-economics/pilot artifacts, and a refreshed staging-admission package.
-The final exact candidate commit and verification references are recorded in
-`docs/PHASE_2_REVIEW_PACKAGE_R1.md`.
+forward-only migration `0080_catalog_activation_timestamps.sql`, exact staging
+release/continuation admission, funnel/unit-economics/pilot artifacts, and a
+refreshed staging-admission package. The immutable runtime candidate and current
+verification references are recorded in `docs/PHASE_2_REVIEW_PACKAGE_R2.md`.
 
 ## Phase 2 local evidence
 
-- Source migration chain: `0001`-`0079`, contiguous; no migration was added by Phase 2.
-- Candidate-bound isolated restore drill: `.wrangler/restore-drills/local/rdr_20260803135956_a4239ef55749.json`; reviewed commit `a0a4a1624e29772d851a46cdea4a0ef0fe89d49d`, integrity `ok`, zero FK violations, zero missing tables/count mismatches, 614 restored items, and exact temporary-target cleanup. The report is mode `0600` and local-only.
-- Browser gates: authenticated 7/7 after an intentional mobile `/app` snapshot refresh for the new sellability copy; public 27/27 after review of the current-source mobile marketing baseline. Desktop/mobile, 1440/768/390/320, 200% geometry, accessibility, overflow, console and safe-request checks passed.
-- Final repository gates: `check` has 0 errors and 3 existing hints; lint passes; Vitest passes 244 files / 1,760 tests; local/staging builds and deploy dry-runs pass; audit reports 0 vulnerabilities; diff checks pass.
+- Source migration chain: `0001`-`0080`, contiguous; Phase 2 adds only forward-only migration `0080_catalog_activation_timestamps.sql`.
+- Candidate-bound isolated restore drill: `.wrangler/restore-drills/local/rdr_20260803145929_b94ce8926be7.json`; reviewed runtime commit `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`, integrity `ok`, zero FK violations, zero missing tables/count mismatches, 614 restored items, exact 80-file ledger, and exact temporary-target cleanup. The report is mode `0600` and local-only.
+- The prior authenticated 7/7 and public 27/27 browser runs remain R1 layout/accessibility evidence. R2 changes request lifecycle, activation state, migration, and release tooling; their current evidence is source/unit/integration/build coverage, not a new provider or remote browser acceptance run.
+- Final repository gates: `check` has 0 errors and 3 existing hints; lint and `tsc --noEmit` pass; Vitest passes 248 files / 1,770 tests; local/staging builds and deploy dry-runs pass; audit reports 0 vulnerabilities; diff checks pass.
 - No staging/production migration, Worker deployment, provider activation, secret update, DNS/route change, webhook, or seller pilot was performed.
 
 ## External requirements
