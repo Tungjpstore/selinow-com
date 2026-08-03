@@ -11,7 +11,12 @@ import {
   assertProductionContinuationDeployAdmission,
   assertProductionWorkerDeployAdmission,
 } from "./lib/release.mjs";
-import { assertStagingReleaseAdmission } from "./lib/staging-release.mjs";
+import {
+  assertStagingContinuationBinding,
+  assertStagingDatabasePreflight,
+  assertStagingMigrationLedger,
+  assertStagingReleaseAdmission,
+} from "./lib/staging-release.mjs";
 
 try {
   const flags = parseDeployFlags(process.argv.slice(2));
@@ -41,6 +46,8 @@ try {
   let stagingAdmission = null;
   let stagingReleaseAdmission = null;
   let stagingContinuationAdmission = null;
+  let stagingMigrationAdmission = null;
+  let stagingPreflightAdmission = null;
   if (requiresProductionAdmission) {
     productionAdmission = await assertProductionWorkerDeployAdmission({
       environment: process.env,
@@ -67,6 +74,16 @@ try {
       databaseId: stagingAdmission.databaseId,
       databaseName: stagingAdmission.databaseName,
       reviewedCommitSha: stagingReleaseAdmission.commitSha,
+    });
+    assertStagingContinuationBinding(stagingReleaseAdmission, stagingContinuationAdmission, stagingAdmission);
+    const stagingCommandEnvironment = buildPinnedCloudflareEnvironment(process.env, stagingAdmission.accountId);
+    stagingMigrationAdmission = await assertStagingMigrationLedger({
+      environment: stagingCommandEnvironment,
+      repositoryRoot,
+    });
+    stagingPreflightAdmission = assertStagingDatabasePreflight({
+      environment: stagingCommandEnvironment,
+      repositoryRoot,
     });
   }
 
@@ -126,6 +143,16 @@ try {
       reviewedCommitSha: finalReleaseAdmission.commitSha,
     });
     const finalAdmission = await assertStagingMutationAdmission();
+    assertStagingContinuationBinding(finalReleaseAdmission, finalContinuationAdmission, finalAdmission);
+    const finalStagingCommandEnvironment = buildPinnedCloudflareEnvironment(process.env, finalAdmission.accountId);
+    const finalMigrationAdmission = await assertStagingMigrationLedger({
+      environment: finalStagingCommandEnvironment,
+      repositoryRoot,
+    });
+    const finalPreflightAdmission = assertStagingDatabasePreflight({
+      environment: finalStagingCommandEnvironment,
+      repositoryRoot,
+    });
     if (
       finalAdmission.accountId !== stagingAdmission.accountId
       || finalAdmission.databaseId !== stagingAdmission.databaseId
@@ -135,6 +162,11 @@ try {
       || finalReleaseAdmission.releaseId !== stagingReleaseAdmission.releaseId
       || finalContinuationAdmission.backup.snapshotId !== stagingContinuationAdmission.backup.snapshotId
       || finalContinuationAdmission.restore.reportRef !== stagingContinuationAdmission.restore.reportRef
+      || stagingMigrationAdmission === null
+      || stagingPreflightAdmission === null
+      || finalMigrationAdmission.migrationNames.length !== stagingMigrationAdmission.migrationNames.length
+      || finalMigrationAdmission.migrationNames.some((name, index) => name !== stagingMigrationAdmission.migrationNames[index])
+      || JSON.stringify(finalPreflightAdmission.checks) !== JSON.stringify(stagingPreflightAdmission.checks)
     ) {
       throw new Error("staging_release_admission_changed");
     }

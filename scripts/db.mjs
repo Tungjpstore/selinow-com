@@ -26,7 +26,10 @@ import {
   buildPinnedCloudflareEnvironment,
   repositoryRoot,
 } from "./lib/platform.mjs";
-import { assertStagingReleaseAdmission } from "./lib/staging-release.mjs";
+import {
+  assertStagingContinuationBinding,
+  assertStagingReleaseAdmission,
+} from "./lib/staging-release.mjs";
 
 const operation = process.argv[2];
 
@@ -137,6 +140,7 @@ try {
         databaseName: backupAdmission.databaseName,
         reviewedCommitSha: releaseAdmission.commitSha,
       });
+      assertStagingContinuationBinding(releaseAdmission, continuationAdmission, backupAdmission);
       const finalAdmission = await assertStagingMutationAdmission();
       if (
         finalAdmission.accountId !== backupAdmission.accountId
@@ -155,6 +159,7 @@ try {
         databaseName: finalAdmission.databaseName,
         reviewedCommitSha: finalReleaseAdmission.commitSha,
       });
+      assertStagingContinuationBinding(finalReleaseAdmission, finalContinuationAdmission, finalAdmission);
       if (
         finalReleaseAdmission.commitSha !== releaseAdmission.commitSha
         || finalReleaseAdmission.treeSha !== releaseAdmission.treeSha

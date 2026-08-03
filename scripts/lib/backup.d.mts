@@ -180,11 +180,16 @@ export function assertFreshStagingContinuationEvidence(options: {
 }): Promise<{
   backup: {
     checksumSha256: string;
+    completedAt: string;
+    reportRef: string;
+    sizeBytes: number;
     snapshotId: string;
   };
   restore: {
+    completedAt: string;
     reportRef: string;
     snapshotId: string;
+    targetResourceRef: string;
   };
   reviewedCommitSha: string;
 }>;

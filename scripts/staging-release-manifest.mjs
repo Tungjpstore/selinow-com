@@ -6,6 +6,7 @@ import { assertFreshStagingContinuationEvidence, resolveDatabaseTarget } from ".
 import { repositoryRoot } from "./lib/platform.mjs";
 import {
   buildStagingReleaseManifest,
+  readStagingRepositoryState,
   writeStagingReleaseManifest,
 } from "./lib/staging-release.mjs";
 
@@ -21,8 +22,7 @@ function parseArguments(argv) {
 
 try {
   const options = parseArguments(process.argv.slice(2));
-  const [manifest, stagingSpec, wranglerConfig] = await Promise.all([
-    buildStagingReleaseManifest({ repositoryRoot }),
+  const [stagingSpec, wranglerConfig] = await Promise.all([
     readFile(resolve(repositoryRoot, "infra/environments/staging.json"), "utf8").then((value) => JSON.parse(value)),
     readFile(resolve(repositoryRoot, "wrangler.jsonc"), "utf8").then((value) => JSON.parse(value)),
   ]);
@@ -30,12 +30,23 @@ try {
     throw new Error("staging_release_spec_invalid");
   }
   const target = resolveDatabaseTarget(wranglerConfig, "staging");
-  await assertFreshStagingContinuationEvidence({
+  const repositoryState = readStagingRepositoryState(repositoryRoot);
+  const continuationEvidence = await assertFreshStagingContinuationEvidence({
     accountId: stagingSpec.accountId,
     databaseId: target.databaseId,
     databaseName: target.databaseName,
     repositoryRoot,
-    reviewedCommitSha: manifest.commitSha,
+    reviewedCommitSha: repositoryState.commitSha,
+  });
+  const manifest = await buildStagingReleaseManifest({
+    continuationEvidence,
+    databaseTarget: {
+      accountId: stagingSpec.accountId,
+      databaseId: target.databaseId,
+      databaseName: target.databaseName,
+    },
+    repositoryRoot,
+    repositoryState,
   });
   const manifestRef = options.write ? await writeStagingReleaseManifest(manifest, repositoryRoot) : null;
   const result = {

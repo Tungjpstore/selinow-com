@@ -6,8 +6,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   assertStagingReleaseAdmission,
+  assertStagingContinuationBinding,
+  assertStagingDatabasePreflight,
+  assertStagingMigrationLedger,
   buildStagingReleaseManifest,
   validateStagingReleaseManifest,
+  parseStagingMigrationLedgerOutput,
+  parseStagingDatabasePreflightOutput,
   writeStagingReleaseManifest,
 } from "../../scripts/lib/staging-release.mjs";
 
@@ -15,6 +20,26 @@ const COMMIT_SHA = "a".repeat(40);
 const TREE_SHA = "b".repeat(40);
 const NOW = new Date("2026-08-03T00:00:00.000Z");
 const MIGRATIONS = ["0001_foundation.sql", "0002_catalog.sql"];
+const DATABASE_TARGET = {
+  accountId: "a".repeat(32),
+  databaseId: "17ea8f2f-4c97-4337-8989-28b25a58ddeb",
+  databaseName: "selinow-staging",
+};
+const CONTINUATION_EVIDENCE = {
+  backup: {
+    checksumSha256: "c".repeat(64),
+    completedAt: "2026-08-02T23:30:00.000Z",
+    reportRef: ".wrangler/backups/staging/bkp_safe/snapshot.json",
+    sizeBytes: 128,
+    snapshotId: "bkp_20260802233000_aaaaaaaaaaaa",
+  },
+  restore: {
+    completedAt: "2026-08-02T23:45:00.000Z",
+    reportRef: ".wrangler/restore-drills/staging/rdr_safe.json",
+    snapshotId: "bkp_20260802234500_bbbbbbbbbbbb",
+    targetResourceRef: "d1:selinow-restore-drill-staging-bbbbbbbbbbbb",
+  },
+};
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -28,6 +53,8 @@ function repositoryState() {
 describe("staging release admission", () => {
   it("builds and validates an exact clean commit/tree manifest", async () => {
     const manifest = await buildStagingReleaseManifest({
+      continuationEvidence: CONTINUATION_EVIDENCE,
+      databaseTarget: DATABASE_TARGET,
       migrationNames: MIGRATIONS,
       now: NOW,
       repositoryState: repositoryState(),
@@ -35,6 +62,7 @@ describe("staging release admission", () => {
 
     expect(manifest).toMatchObject({
       commitSha: COMMIT_SHA,
+      databaseTarget: DATABASE_TARGET,
       environment: "staging",
       migrationNames: MIGRATIONS,
       releaseId: `stg_20260803T000000Z_${COMMIT_SHA.slice(0, 12)}`,
@@ -45,11 +73,13 @@ describe("staging release admission", () => {
       migrationNames: MIGRATIONS,
       now: NOW,
       repositoryState: repositoryState(),
-    })).toEqual({ commitSha: COMMIT_SHA, releaseId: manifest.releaseId, treeSha: TREE_SHA });
+    })).toMatchObject({ commitSha: COMMIT_SHA, databaseTarget: DATABASE_TARGET, releaseId: manifest.releaseId, treeSha: TREE_SHA });
   });
 
   it("rejects dirty, changed, expired, and migration-drifted candidates", async () => {
     const manifest = await buildStagingReleaseManifest({
+      continuationEvidence: CONTINUATION_EVIDENCE,
+      databaseTarget: DATABASE_TARGET,
       migrationNames: MIGRATIONS,
       now: NOW,
       repositoryState: repositoryState(),
@@ -80,10 +110,78 @@ describe("staging release admission", () => {
     })).toThrow("staging_release_window_invalid");
   });
 
+  it("rejects replacement backup, restore, or D1 evidence after manifest creation", async () => {
+    const manifest = await buildStagingReleaseManifest({
+      continuationEvidence: CONTINUATION_EVIDENCE,
+      databaseTarget: DATABASE_TARGET,
+      migrationNames: MIGRATIONS,
+      now: NOW,
+      repositoryState: repositoryState(),
+    });
+    const admission = validateStagingReleaseManifest({
+      manifest,
+      migrationNames: MIGRATIONS,
+      now: NOW,
+      repositoryState: repositoryState(),
+    });
+
+    expect(() => {
+      assertStagingContinuationBinding(admission, {
+        ...CONTINUATION_EVIDENCE,
+        backup: { ...CONTINUATION_EVIDENCE.backup, snapshotId: "bkp_20260802233000_cccccccccccc" },
+      }, DATABASE_TARGET);
+    }).toThrow("staging_release_continuation_evidence_mismatch");
+    expect(() => {
+      assertStagingContinuationBinding(admission, CONTINUATION_EVIDENCE, {
+        ...DATABASE_TARGET,
+        databaseId: "7ba9b340-514a-4b9f-81ed-00a4d115cc8d",
+      });
+    }).toThrow("staging_release_continuation_evidence_mismatch");
+  });
+
+  it("requires the complete ordered migration ledger before staging deploy", async () => {
+    const output = JSON.stringify([{ results: MIGRATIONS.map((name) => ({ name })) }]);
+    expect(parseStagingMigrationLedgerOutput(output)).toEqual(MIGRATIONS);
+    await expect(assertStagingMigrationLedger({
+      migrationNames: MIGRATIONS,
+      runWranglerImplementation: () => ({ stderr: "", stdout: output }),
+    })).resolves.toEqual({ migrationNames: MIGRATIONS });
+    await expect(assertStagingMigrationLedger({
+      migrationNames: MIGRATIONS,
+      runWranglerImplementation: () => ({
+        stderr: "",
+        stdout: JSON.stringify([{ results: [{ name: MIGRATIONS[0] }] }]),
+      }),
+    })).rejects.toThrow("staging_migration_ledger_incomplete");
+  });
+
+  it("requires every staging data preflight check to pass before deploy", () => {
+    const output = JSON.stringify({
+      checks: [{ code: "tenant_relationships", detail: "0", ok: true }],
+      environment: "staging",
+      ok: true,
+    });
+    expect(parseStagingDatabasePreflightOutput(output)).toEqual({
+      checks: [{ code: "tenant_relationships", detail: "0", ok: true }],
+    });
+    expect(assertStagingDatabasePreflight({
+      runImplementation: () => ({ stderr: "", stdout: output }),
+    })).toEqual({ checks: [{ code: "tenant_relationships", detail: "0", ok: true }] });
+    expect(() => {
+      parseStagingDatabasePreflightOutput(JSON.stringify({
+        checks: [{ code: "tenant_relationships", detail: "1", ok: false }],
+        environment: "staging",
+        ok: false,
+      }));
+    }).toThrow("staging_database_preflight_failed");
+  });
+
   it("writes a private canonical manifest that admission can revalidate", async () => {
     const root = await mkdtemp(join(tmpdir(), "selinow-staging-release-"));
     roots.push(root);
     const manifest = await buildStagingReleaseManifest({
+      continuationEvidence: CONTINUATION_EVIDENCE,
+      databaseTarget: DATABASE_TARGET,
       migrationNames: MIGRATIONS,
       now: NOW,
       repositoryState: repositoryState(),
@@ -97,8 +195,9 @@ describe("staging release admission", () => {
       now: NOW,
       repositoryRoot: root,
       repositoryState: repositoryState(),
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       commitSha: COMMIT_SHA,
+      databaseTarget: DATABASE_TARGET,
       releaseId: manifest.releaseId,
       treeSha: TREE_SHA,
     });

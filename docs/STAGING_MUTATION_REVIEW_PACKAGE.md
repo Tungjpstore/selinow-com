@@ -11,15 +11,18 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 
 ## Reviewed candidate
 
-- Reviewed runtime commit: `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`
-- Reviewed runtime tree: `a35e2c871d2db97b392910fb04f51b7aaa27313c`
+- Historical Phase 2 runtime commit: `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`
+- Historical Phase 2 runtime tree: `a35e2c871d2db97b392910fb04f51b7aaa27313c`
+- P3 execution candidate: the final clean committed HEAD after P3 verification;
+  never substitute the historical Phase 2 commit.
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
 - Source migration ledger: current candidate `0001`-`0080`
 - Exact changed-file manifest and local verification: `docs/PHASE_2_REVIEW_PACKAGE_R2.md`
 - Candidate-bound local restore report: `.wrangler/restore-drills/local/rdr_20260803145929_b94ce8926be7.json`
 - Execution identity: generated, not hand-copied. `release:staging:manifest`
-  binds the final clean commit/tree and exact migration ledger after fresh staging
-  backup/restore evidence exists. The manifest is private and ignored under
+  binds the final clean commit/tree, exact migration ledger, staging D1 identity,
+  and exact backup/restore fingerprints after fresh evidence exists. The manifest
+  is schema version `2`, private, and ignored under
   `.wrangler/releases/staging/<release-id>/release-manifest.json`.
 
 ## Remote identity
@@ -59,7 +62,9 @@ Use only repository guarded scripts and the exact reviewed environment:
    `npm run release:staging:manifest -- --write --json`.
 5. Apply forward-only migrations `0029`-`0080` with
    `npm run db:migrate -- --env staging --release-manifest <manifest-ref>`.
-6. Verify ledger, preflight, integrity/FK checks and supported smoke paths.
+6. Verify ledger, preflight, integrity/FK checks and supported smoke paths. Real
+   staging deploy repeats the complete ordered ledger and database preflight both
+   before and after build and fails before Wrangler on drift.
 7. Deploy with
    `npm run deploy:staging -- --release-manifest <manifest-ref>`.
 8. Run public/auth browser gates and controlled PayOS/Telegram UAT.

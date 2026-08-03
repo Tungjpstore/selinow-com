@@ -1,6 +1,35 @@
 # Implementation Status
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
+
+## Phase 3 staging admission and controlled pilot readiness (2026-08-04)
+
+Local/source status: **PASS** for admission hardening; staging, providers,
+pilot, and production remain **NO-GO**. The staging release manifest is now
+schema version `2` and binds the final clean commit/tree and migration ledger to
+the exact staging D1 account/name/UUID plus the protected backup checksum/size,
+snapshot, and candidate-bound restore report/target. `scripts/deploy.mjs` reads
+the complete ordered D1 migration ledger and runs the staging database preflight
+both before and after the build; drift or an incomplete/failed result stops before
+Wrangler. These guards do not perform a remote mutation.
+
+Regression coverage is in `tests/unit/staging-release-admission.test.ts` and
+`tests/unit/deploy-guard.test.ts`. The controlled Website-first pilot boundary,
+evidence classes, support/monitoring requirements, and remaining commercial
+unknowns are recorded in `docs/PHASE_3_STAGING_PILOT_READINESS.md`.
+
+P3 verification passes: `npm run check` (694 files, 0 errors, 3 existing hints),
+`npm run lint`, `npx tsc --noEmit`, `npm run test` (248 files / 1,773 tests),
+local/staging builds, local/staging deploy dry-runs, `npm audit --audit-level=high`
+(0 vulnerabilities), and `git diff --check`. The dependency audit required a
+lockfile-only update from vulnerable transitive `brace-expansion@5.0.8` to
+`5.0.9`. Isolated local restore report
+`.wrangler/restore-drills/local/rdr_20260803190826_c9161ace0c4b.json` passed with
+integrity `ok`, zero FK violations, 614 restored items, and exact cleanup.
+
+No staging/production backup, restore, migration, seed, Worker deploy, provider
+activation, secret update, route/DNS change, webhook registration, real order,
+or seller pilot was performed for P3.
 
 ## Phase status
 

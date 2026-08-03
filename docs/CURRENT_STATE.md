@@ -2,6 +2,18 @@
 
 Last verified: 2026-08-03 (Asia/Tokyo)
 
+P3 local admission hardening was added on 2026-08-04. The current source now
+binds staging manifests to exact backup/restore/D1 evidence and requires a
+complete migration ledger plus passing database preflight before and after a
+staging build. This is local tooling evidence only; no remote mutation or pilot
+acceptance is implied. See `docs/PHASE_3_STAGING_PILOT_READINESS.md`.
+
+Latest P3 local evidence: 248 Vitest files / 1,773 tests; check/lint/TypeScript,
+builds, both deploy dry-runs, audit, diff check, and isolated local restore pass.
+The restore report is
+`.wrangler/restore-drills/local/rdr_20260803190826_c9161ace0c4b.json` and remains
+ignored/private local evidence.
+
 This is the short current-state record for the Phase 2 seller-activation and
 controlled-pilot candidate. It is not a historical implementation log and does
 not authorize a remote mutation.
