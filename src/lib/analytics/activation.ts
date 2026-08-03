@@ -359,7 +359,18 @@ export async function backfillActivationMilestones(input: {
     {
       idempotencyKey: "inventory_ready",
       milestone: "inventory_ready",
-      occurredAt: await query("SELECT MIN(created_at) AS occurredAt FROM inventory_batches WHERE shop_id = ? AND accepted_count > 0", input.shopId),
+      occurredAt: await query(`
+        SELECT MIN(occurred_at) AS occurredAt
+        FROM (
+          SELECT created_at AS occurred_at
+          FROM inventory_batches
+          WHERE shop_id = ? AND accepted_count > 0
+          UNION ALL
+          SELECT created_at AS occurred_at
+          FROM products
+          WHERE shop_id = ? AND status = 'active' AND fulfillment_type = 'manual'
+        )
+      `, input.shopId, input.shopId),
     },
     {
       idempotencyKey: "payos_connected",

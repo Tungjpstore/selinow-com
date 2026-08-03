@@ -45,6 +45,7 @@ describe("inventory frontend contract", () => {
     expect(script).toContain('form.elements.namedItem("data")');
     expect(script).toContain('data.delete("data")');
     expect(script).toContain('requestBody.data = ""');
+    expect(script.match(/catch \(error\) \{[\s\S]*?eraseImportForm\(\);[\s\S]*?invalidatePreview\(\);/gu)).toHaveLength(2);
     expect(script).toContain('dialog.addEventListener("cancel"');
     expect(script).toContain('dialog.addEventListener("close", resetDialogState)');
     expect(script).toContain("if (pendingAction !== null) return false");
@@ -52,6 +53,18 @@ describe("inventory frontend contract", () => {
     expect(script).toContain("control.disabled = true");
     expect(script).toContain('lockDialog("preview")');
     expect(script).toContain('lockDialog("import")');
+  });
+
+  it("clears onboarding inventory plaintext after an import error", async () => {
+    const script = await readFile("src/scripts/dashboard/onboarding.ts", "utf8");
+
+    expect(script).toMatch(/catch \(error\) \{\n {8}if \(!selectionIsCurrent\(state, shop\.publicId, selectionEpoch\)\) return;\n {8}if \(inventoryData !== null\) inventoryData\.value = "";\n {8}updateLocalInventoryPreview\(root\);\n {8}invalidateInventoryPreview\(root, state, copy\("onboarding\.feedback\.import_expired"/u);
+  });
+
+  it("clears onboarding inventory plaintext after a preview error", async () => {
+    const script = await readFile("src/scripts/dashboard/onboarding.ts", "utf8");
+
+    expect(script).toMatch(/catch \(error\) \{\n {8}if \(!selectionIsCurrent\(state, shop\.publicId, selectionEpoch\)\) return;\n {8}if \(inventoryData !== null\) inventoryData\.value = "";\n {8}updateLocalInventoryPreview\(root\);\n {8}invalidateInventoryPreview\(root, state, copy\("onboarding\.feedback\.inventory_preview_failed"/u);
   });
 
   it("maps safe API errors and reports authoritative import counts", async () => {

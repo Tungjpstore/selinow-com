@@ -53,10 +53,10 @@ Moi implementation PR cho mot screen phai ghi:
 ### `/app`
 
 - Job: biet shop nao dang duoc xem, health nao chan ban hang, viec can lam tiep theo, recent orders.
-- Mandatory: shop identity/status/subscription, readiness summary with blocker links, order ledger, catalog/integration health only from real projections.
+- Mandatory: shop identity/status/subscription, sellability derived from shop lifecycle plus owner-authoritative readiness, readiness summary with blocker links, order ledger, catalog/integration health only from real projections.
 - Actions: navigate to fix; no fabricated quick mutations.
 - States: no-shop, ready, individual projection forbidden/unavailable, shop suspended/plan blocked.
-- Anti-drift: no fake revenue/conversion; payment va fulfillment in separate columns/badges.
+- Anti-drift: active shop status alone never means sellable; forbidden/unavailable projections never become zero or all-clear; no fake revenue/conversion; payment va fulfillment in separate columns/badges.
 
 ### `/onboarding`
 
@@ -82,7 +82,7 @@ Moi implementation PR cho mot screen phai ghi:
 - Mandatory: variant identity, available/reserved/delivered, low-stock threshold, last import, two-step preview/import.
 - Actions: preview exact paste/CSV; import same payload/token/idempotency.
 - States: empty, preview accepted/duplicate/rejected, preview expired/drift, importing, complete/replay, recent-auth, unavailable.
-- Security: plaintext khong vao SSR/HTML/log/screenshot/storage; clear input/memory after commit/cancel.
+- Security: plaintext khong vao SSR/HTML/log/screenshot/storage; clear input/memory after commit, cancel, close, shop switch, payload invalidation, preview error va import error.
 
 ## Orders va customers
 

@@ -46,6 +46,40 @@ Vitest suite passes 243 files / 1,755 tests; `npm run build`, `npm run deploy:dr
 remote mutation. The known non-fatal Vite warning for the mixed static/dynamic
 inventory crypto import remains unchanged.
 
+### Phase 2 seller activation and pilot candidate (2026-08-03)
+
+Phase 2 records the seller critical-path review before implementation in
+`docs/PHASE_2_REVIEW_PACKAGE_R0.md`. The two P1 findings are addressed: `/app`
+now derives sellability from the shop lifecycle plus the owner-authoritative
+readiness projection, and both inventory clients erase plaintext and invalidate
+previews on terminal preview/import errors. The P2 activation backfill finding
+is addressed by recovering `inventory_ready` from either accepted inventory or
+an active manual-fulfillment product, while preserving tenant-scoped idempotency.
+The admission-document drift is bounded to source migration `0001`-`0079` and
+explicit staging/production NO-GO ranges.
+
+Phase 2 artifacts are `docs/PHASE_2_ACTIVATION_FUNNEL.md`,
+`docs/PHASE_2_UNIT_ECONOMICS.md`, `docs/PHASE_2_PILOT_PLAN.md`,
+`docs/PHASE_2_PILOT_EVIDENCE.example.json`, and
+`docs/PHASE_2_REVIEW_PACKAGE_R1.md` (written after final verification). The
+funnel and unit-economics documents are variable/authority contracts only; no
+pilot seller, provider, conversion, cost, margin, CAC, churn, or revenue
+observation is fabricated.
+
+Current local evidence includes the isolated restore report
+`.wrangler/restore-drills/local/rdr_20260803134132_b8a543d64bc9.json`: integrity
+`ok`, zero FK violations, zero missing tables/count mismatches, 614 restored
+items, exact temporary-target cleanup, mode `0600`, and the contiguous 79-file
+ledger. The authenticated browser gate passed 7/7 after the intentional mobile
+`/app` sellability snapshot refresh; the public gate passed 27/27 after review
+of the current-source mobile marketing baseline. Final sequential gates pass:
+`npm run check` (0 errors, 3 existing hints), `npm run lint`, `npm run test`
+(244 files / 1,760 tests), `npm run build`, `npm run build:staging`, both deploy
+dry-runs, `npm audit --audit-level=high` (0 vulnerabilities), and
+`git diff --check`. No staging/production migration, Worker deployment,
+provider activation, secret update, DNS/route change, webhook, or seller pilot
+was performed.
+
 ### Paid pricing and billing continuation (2026-08-03)
 
 - Public catalog is paid-only: `starter` and `pro`, monthly, with Starter at `99,000 VND` / `5 USD` and Pro at `299,000 VND` / `15 USD`. Legacy `bot`, `store` and `business` plans remain hidden for existing tenants and are not public or assignable.

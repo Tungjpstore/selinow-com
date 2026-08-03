@@ -72,7 +72,7 @@ function setup(): { database: DatabaseSync; env: AppBindings } {
 
 function addBackfillTables(database: DatabaseSync): void {
   database.exec(`
-    CREATE TABLE products (shop_id TEXT, created_at TEXT);
+    CREATE TABLE products (shop_id TEXT, status TEXT, fulfillment_type TEXT, created_at TEXT);
     CREATE TABLE inventory_batches (shop_id TEXT, accepted_count INTEGER, created_at TEXT);
     CREATE TABLE payment_integrations (shop_id TEXT, provider TEXT, status TEXT, webhook_status TEXT, connected_at TEXT);
     CREATE TABLE telegram_integrations (shop_id TEXT, status TEXT, webhook_status TEXT, connected_at TEXT);
@@ -189,7 +189,7 @@ describe("activation milestone ledger", () => {
     addBackfillTables(database);
     const timestamp = "2026-01-01T00:00:00.000Z";
     database.exec(`
-      INSERT INTO products VALUES ('shp_a', '${timestamp}');
+      INSERT INTO products VALUES ('shp_a', 'active', 'license_key', '${timestamp}');
       INSERT INTO inventory_batches VALUES ('shp_a', 1, '${timestamp}');
       INSERT INTO payment_integrations VALUES ('shp_a', 'payos', 'active', 'verified', '${timestamp}');
       INSERT INTO telegram_integrations VALUES ('shp_a', 'active', 'verified', '${timestamp}');
@@ -203,6 +203,20 @@ describe("activation milestone ledger", () => {
     expect(result).toEqual({ attempted: 12, created: 12 });
     expect((await listActivationMilestones({ env, shopId: "shp_a" })).map((event) => event.milestone)).toHaveLength(12);
     expect((await backfillActivationMilestones({ env, now: timestamp, shopId: "shp_a" })).created).toBe(0);
+  });
+
+  it("recovers inventory readiness for a manual-fulfillment seller", async () => {
+    const { database, env } = setup();
+    addBackfillTables(database);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    database.prepare("INSERT INTO products VALUES (?, 'active', 'manual', ?)").run("shp_a", timestamp);
+
+    const result = await backfillActivationMilestones({ env, now: timestamp, shopId: "shp_a" });
+    const events = await listActivationMilestones({ env, shopId: "shp_a" });
+
+    expect(result).toEqual({ attempted: 4, created: 4 });
+    expect(events.map((event) => event.milestone)).toContain("inventory_ready");
+    expect((await listActivationMilestones({ env, shopId: "shp_b" })).length).toBe(0);
   });
 
   it("rotates scheduled backfill across every shop", async () => {

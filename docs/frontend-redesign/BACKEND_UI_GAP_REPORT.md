@@ -19,8 +19,15 @@ truthfully disabled instead of being simulated in the browser.
 - **Inventory:** `/app/inventory` projects tenant-scoped available, reserved and
   delivered counts, server low-stock thresholds and last-import timestamps. The
   import drawer clears plaintext from the form/request lifecycle, invalidates
-  stale previews, locks pending actions and maps safe errors without exposing
-  inventory-key plaintext in HTML, logs or screenshots.
+  stale previews after success, cancel, close, shop switch and terminal errors,
+  locks pending actions and maps safe errors without exposing inventory-key
+  plaintext in HTML, logs or screenshots. Onboarding uses the same cleanup
+  contract for preview/import failures.
+- **Overview:** `/app` now separates shop lifecycle from sellability. The
+  headline and storefront action use the owner-authoritative readiness result;
+  active-but-blocked, unavailable and role-limited states remain distinct, and
+  the action queue cannot claim an all-clear while required projections are
+  forbidden or unavailable. Payment and fulfillment projections remain separate.
 - **Orders:** `/app/orders` and `/app/orders/:id` use tenant-scoped seller order
   projections. Payment and fulfillment stay on separate axes; customer identity,
   access tokens, provider payloads and key plaintext are never returned. Payment
@@ -151,9 +158,9 @@ truthfully disabled instead of being simulated in the browser.
   controls and shell/static tenant-link changes are covered by source/unit
   contracts. The isolated local Playwright gate passes 7/7 across desktop/mobile
   and 1440/768/390/320px coverage; all 42 current-source authenticated snapshots
-  for 21 surface IDs were regenerated and manually reviewed at 1440x1024 and
-  390x844. The public local gate passes 27/27 with 26 additional route/state
-  screenshots.
+  for 21 surface IDs were reviewed at 1440x1024 and 390x844; the Phase 2
+  dashboard copy change intentionally refreshed the mobile dashboard baseline.
+  The public local gate passes 27/27 with 26 additional route/state screenshots.
 - **Additional adapters:** managed shared channels, DNS-provider authorization,
   social/marketplace adapters and a second payment provider remain roadmap work.
   The four channel-expansion manifests and connector workflow are contract-ready or
@@ -167,9 +174,9 @@ state. D1 remains authoritative; cache/KV is never used to decide a commerce or
 subscription mutation. Production remains `NO-GO` until Phase 10 release gates,
 controlled provider pilots, operations evidence and ownership approvals pass.
 
-- Latest continuation verification passes typecheck, lint, Astro check, the full
-  196-file/1,487-test suite, build and both deploy dry-runs; no deployment or
-  remote migration is performed here.
+- Latest continuation verification counts and artifact paths are recorded in
+  `docs/PHASE_2_REVIEW_PACKAGE_R1.md`; no deployment or remote migration is
+  performed here.
 
 All latest frontend slices remain local-only. No staging deployment or production
 mutation was performed. The authenticated Playwright contract defines 21 surface

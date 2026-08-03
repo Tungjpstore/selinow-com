@@ -1,0 +1,52 @@
+{
+  "schema": "phase_2_pilot_evidence",
+  "status": "proposed",
+  "candidateCommit": null,
+  "environment": "staging",
+  "pilot": {
+    "pilotId": null,
+    "sellerCount": null,
+    "sellerEligibilityReviewed": false,
+    "supportOwnerAssigned": false,
+    "legalOwnerAssigned": false
+  },
+  "credentials": {
+    "payosTestChannelApproved": false,
+    "telegramDedicatedBotApproved": false,
+    "dodoUatApproved": false,
+    "secretValuesRecorded": false
+  },
+  "testCases": {
+    "atomicProductInitialVariant": null,
+    "inventoryPreviewImport": null,
+    "safeTestNoCommerceMutation": null,
+    "payosExactSignedPayment": null,
+    "duplicateWebhook": null,
+    "mismatchedPayment": null,
+    "latePayment": null,
+    "inventoryRace": null,
+    "fulfillmentReplay": null,
+    "subscriptionRecovery": null
+  },
+  "proposedAcceptanceThresholds": {
+    "pilotSellerCount": "3-5",
+    "activationRate": "TBD owner decision",
+    "timeToPublish": "TBD owner decision",
+    "exactPaymentSuccess": "100% approved exact-payment cases",
+    "firstPaidFulfilledSuccess": "100% approved exact-payment cases",
+    "supportMinutesPerSeller": "TBD owner decision",
+    "trialConversion": "TBD owner decision",
+    "criticalSecurityIncidents": 0
+  },
+  "observations": [],
+  "evidenceReferences": [],
+  "rollback": {
+    "reviewed": false,
+    "reference": null
+  },
+  "cleanup": {
+    "reviewed": false,
+    "reference": null
+  },
+  "notes": "This example contains no actual seller, buyer, provider, credential, payment, or fulfillment evidence."
+}

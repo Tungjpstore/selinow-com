@@ -4,16 +4,17 @@ Status: `prepared_only` — approval required before any remote mutation.
 
 ## Decision requested
 
-Review and approve or reject the exact staging migration/deploy window for a
-clean Phase 1 candidate. This document is a package template until all fields
+Review and approve or reject the exact staging migration/deploy window for the
+clean Phase 2 pilot candidate. This document is a package template until all fields
 are filled from fresh read-only evidence. It does not authorize execution.
 
 ## Reviewed candidate
 
-- Commit/tree: `TBD after R1 clean review`
-- Source migration ledger: current candidate `0001`-`0077`
-- Exact changed-file manifest: `TBD`
-- Local verification artifact paths: `TBD`
+- Commit/tree: `TBD after Phase 2 R1 commit`
+- Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
+- Source migration ledger: current candidate `0001`-`0079`
+- Exact changed-file manifest: `TBD in docs/PHASE_2_REVIEW_PACKAGE_R1.md`
+- Local verification artifact paths: `TBD after final local gates`
 
 ## Remote identity
 
@@ -28,14 +29,16 @@ are filled from fresh read-only evidence. It does not authorize execution.
 ## Migration and backup
 
 - Current remote ledger: `0028` unless fresh evidence proves otherwise
-- Exact pending range: `0029`-`0077`
+- Exact pending range: `0029`-`0079` (51 migrations) unless fresh read-only
+  evidence proves a different staging ledger
 - Backup command: repository `backup:create` guarded script, exact env only
 - Backup evidence: report-v2, non-empty artifact, checksum, bookmark, freshness
   <= 60 minutes, exact account/D1 identity
 - Restore drill: isolated disposable target from the exact reviewed tree and
-  complete `0001`-`0077` ledger; integrity/FK/schema/count checks required
+  complete `0001`-`0079` ledger; integrity/FK/schema/count checks required
 - Pre-`0066` OAuth pending-row policy: revoke/expire or explicitly resolve
-- Dodo `0070`-`0076` and activation analytics `0077` schema review: `TBD`
+- Dodo `0070`-`0079` and activation analytics schema review: local source/tests
+  required in R1; remote cutover review remains `TBD`
 
 ## Commands after approval
 
@@ -44,7 +47,8 @@ Use only repository guarded scripts and the exact reviewed environment:
 1. Recheck account, D1, routes, domains, queues, cron and private `MEDIA`.
 2. Create and verify the protected staging backup.
 3. Run the isolated restore drill and record its artifact.
-4. Apply forward-only migrations with `npm run db:migrate -- --env staging`.
+4. Apply forward-only migrations `0029`-`0079` with
+   `npm run db:migrate -- --env staging`.
 5. Verify ledger, preflight, integrity/FK checks and supported smoke paths.
 6. Deploy with `npm run deploy:staging` through its admission guard.
 7. Run public/auth browser gates and controlled PayOS/Telegram UAT.
@@ -65,8 +69,11 @@ repository-required provider secret names. Never record values here.
 
 ## Verification and evidence paths
 
-All command results, URLs, timestamps, checksums and private reports: `TBD`.
-No package is accepted until the exact candidate and evidence are recorded.
+Local command results, restore report, test counts, browser evidence and dry-run
+artifacts are recorded in `docs/PHASE_2_REVIEW_PACKAGE_R1.md` after verification.
+Remote URLs, timestamps, checksums, account/D1 identity and protected backup
+reports remain `TBD`. No package is accepted until the exact committed candidate
+and fresh remote admission evidence are recorded.
 
 ## Approval gate
 

@@ -1677,6 +1677,8 @@ async function initialize(root: HTMLElement): Promise<void> {
         setFeedback(root, copy("onboarding.feedback.inventory_preview", "Preview complete. Key contents are never returned to the browser."), "success");
       } catch (error) {
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
+        if (inventoryData !== null) inventoryData.value = "";
+        updateLocalInventoryPreview(root);
         invalidateInventoryPreview(root, state, copy("onboarding.feedback.inventory_preview_failed", "Could not create the preview. Check your session and try again; no keys were imported."));
         setFeedback(root, errorMessage(error), "error");
       } finally {
@@ -1719,9 +1721,9 @@ async function initialize(root: HTMLElement): Promise<void> {
         showStep(root, state, "telegram");
       } catch (error) {
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
-        if (error instanceof ApiError && error.code.startsWith("inventory_preview_")) {
-          invalidateInventoryPreview(root, state, copy("onboarding.feedback.import_expired", "Preview is no longer valid. Create a new preview before importing."));
-        }
+        if (inventoryData !== null) inventoryData.value = "";
+        updateLocalInventoryPreview(root);
+        invalidateInventoryPreview(root, state, copy("onboarding.feedback.import_expired", "Preview is no longer valid. Create a new preview before importing."));
         setFeedback(root, errorMessage(error), "error");
       } finally {
         setBusy(button, false);

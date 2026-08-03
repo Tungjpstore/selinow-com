@@ -11,6 +11,7 @@ import { listSellerCatalog } from "../../lib/catalog/store";
 import { listSellerOrders, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
 import { isAppError } from "../../lib/core/errors";
 import { getBindings } from "../../lib/platform/bindings";
+import { deriveSellerSellability, hasCompleteActionAuthority } from "../../lib/dashboard/overview-ui";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { createDashboardTranslator } from "../../lib/i18n";
 import { getShopReadiness, type ReadinessCheck, type ReadinessResult } from "../../lib/tenants/readiness";
@@ -108,17 +109,31 @@ const catalogState = catalogLoad.state;
 
 const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
 const storefrontUrl = shop === undefined ? null : `https://${shop.slug}.${env.PLATFORM_BASE_DOMAIN}`;
-const shopTone: Tone = shop?.status === "active" ? "success" : shop?.status === "suspended" ? "danger" : "warning";
-const shopStatus = shop?.status === "active"
-  ? t("dashboard.overview.shop_status.active.title")
-  : shop?.status === "suspended"
-    ? t("dashboard.overview.shop_status.suspended.title")
-    : t("dashboard.overview.shop_status.setup.title");
-const shopSummary = shop?.status === "active"
-  ? t("dashboard.overview.shop_status.active.summary")
-  : shop?.status === "suspended"
-    ? t("dashboard.overview.shop_status.suspended.summary")
-    : t("dashboard.overview.shop_status.setup.summary");
+const sellability = deriveSellerSellability({
+  readinessReady: readiness?.ready === true,
+  readinessState,
+  shopStatus: shop?.status ?? "draft",
+});
+const sellabilityCopy = {
+  blocked: { summary: t("dashboard.overview.sellability.blocked.summary"), title: t("dashboard.overview.sellability.blocked.title") },
+  draft: { summary: t("dashboard.overview.sellability.draft.summary"), title: t("dashboard.overview.sellability.draft.title") },
+  owner_only: { summary: t("dashboard.overview.sellability.owner_only.summary"), title: t("dashboard.overview.sellability.owner_only.title") },
+  ready: { summary: t("dashboard.overview.sellability.ready.summary"), title: t("dashboard.overview.sellability.ready.title") },
+  suspended: { summary: t("dashboard.overview.sellability.suspended.summary"), title: t("dashboard.overview.sellability.suspended.title") },
+  unavailable: { summary: t("dashboard.overview.sellability.unavailable.summary"), title: t("dashboard.overview.sellability.unavailable.title") },
+} as const;
+const shopTone: Tone = sellability === "ready"
+  ? "success"
+  : sellability === "blocked" || sellability === "suspended"
+    ? "danger"
+    : sellability === "unavailable" || sellability === "owner_only"
+      ? "neutral"
+      : "warning";
+const shopStatus = sellabilityCopy[sellability].title;
+const shopSummary = sellabilityCopy[sellability].summary;
+const sellabilityActionLabel = sellability === "unavailable"
+  ? t("dashboard.overview.workspace_unavailable.action")
+  : t("dashboard.overview.action.finish_publish");
 
 const dateFormatter = new Intl.DateTimeFormat(typeof locale === "string" ? locale : "en", {
   dateStyle: "medium",
@@ -282,6 +297,12 @@ const percentFormatter = new Intl.NumberFormat(typeof locale === "string" ? loca
 const paymentRate = orders.length === 0 ? null : paidOrders.length / orders.length;
 const fulfillmentRate = paidOrders.length === 0 ? null : fulfilledOrders.length / paidOrders.length;
 const recentOrders = orders.slice(0, 6);
+const completeActionAuthority = hasCompleteActionAuthority({
+  catalogRequired: canReadCatalog,
+  catalogState,
+  ordersState,
+  readinessState,
+});
 const channelRows = Array.from(orders.reduce((channels, order) => {
   const current = channels.get(order.sourceChannel) ?? { count: 0, fulfilled: 0, paidValue: 0 };
   current.count += 1;
@@ -301,7 +322,7 @@ const channelLabel = (value: string): string => value === "telegram" ? "Telegram
     descriptionId={shop === undefined ? undefined : "dashboard-overview-date"}
   >
     {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/onboarding")}>{t("dashboard.overview.action.view_readiness")}</a>}
-    {shop?.status === "active" && storefrontUrl !== null && <a slot="actions" class="sln-button sln-button-primary" href={storefrontUrl}>{t("dashboard.overview.action.open_storefront")} <span aria-hidden="true">↗</span></a>}
+    {sellability === "ready" && storefrontUrl !== null && <a slot="actions" class="sln-button sln-button-primary" href={storefrontUrl}>{t("dashboard.overview.action.open_storefront")} <span aria-hidden="true">↗</span></a>}
   </PageHeader>
 
   {workspaceState === "unavailable" ? (
@@ -317,14 +338,16 @@ const channelLabel = (value: string): string => value === "telegram" ? "Telegram
       <section class="store-status" data-tone={shopTone} aria-labelledby="store-status-title">
         <div class="status-signal" aria-hidden="true"><span></span></div>
         <div>
-          <p>{t("dashboard.overview.shop_status.eyebrow")}</p>
+          <p>{t("dashboard.overview.sellability.eyebrow")}</p>
           <h2 id="store-status-title">{shopStatus}</h2>
           <span>{shopSummary}</span>
         </div>
         <div class="store-address">
           <span>{t("dashboard.overview.platform_address")}</span>
           <code>{shop.slug}.{env.PLATFORM_BASE_DOMAIN}</code>
-          {shop.status === "active" ? <a href={storefrontUrl}>{t("dashboard.overview.action.open_address")} <span aria-hidden="true">↗</span></a> : <a href={workspaceHref("/onboarding#readiness")}>{t("dashboard.overview.action.finish_publish")} <span aria-hidden="true">→</span></a>}
+          {sellability === "ready" ? <a href={storefrontUrl}>{t("dashboard.overview.action.open_address")} <span aria-hidden="true">↗</span></a>
+            : sellability === "owner_only" ? <small>{t("dashboard.overview.sellability.owner_only.action")}</small>
+              : <a href={workspaceHref(sellability === "unavailable" ? "/app" : "/onboarding#readiness")}>{sellabilityActionLabel} <span aria-hidden="true">→</span></a>}
         </div>
       </section>
 
@@ -360,10 +383,15 @@ const channelLabel = (value: string): string => value === "telegram" ? "Telegram
           <span class="section-count">{t("dashboard.overview.actions.count", { count: actionItems.length })}</span>
         </div>
 
-        {actionItems.length === 0 ? (
+        {actionItems.length === 0 && completeActionAuthority ? (
           <div class="queue-clear">
             <span aria-hidden="true">✓</span>
             <div><strong>{t("dashboard.overview.actions.empty_title")}</strong><p>{t("dashboard.overview.actions.empty_description")}</p></div>
+          </div>
+        ) : actionItems.length === 0 ? (
+          <div class="queue-clear queue-partial">
+            <span aria-hidden="true">i</span>
+            <div><strong>{t("dashboard.overview.actions.partial_title")}</strong><p>{t("dashboard.overview.actions.partial_description")}</p></div>
           </div>
         ) : (
           <div class="action-queue">
@@ -502,6 +530,8 @@ const channelLabel = (value: string): string => value === "telegram" ? "Telegram
   .action-queue a { display: inline-flex; align-items: center; justify-content: end; gap: 7px; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; white-space: nowrap; }
   .queue-clear { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: var(--sln-space-4); align-items: center; padding: var(--sln-space-5); border: 1px solid color-mix(in srgb, var(--sln-state-success) 20%, var(--sln-border-default)); border-radius: var(--sln-radius-lg); background: var(--sln-tint-success); }
   .queue-clear > span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--sln-state-success); color: var(--sln-white); font-weight: 800; }
+  .queue-clear.queue-partial { border-color: var(--sln-border-default); background: var(--sln-bg-subtle); }
+  .queue-clear.queue-partial > span { background: var(--sln-state-info); }
   .queue-clear strong { font: var(--sln-font-label); }
   .queue-clear p { margin: 3px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
   .operations-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: var(--sln-space-8); }

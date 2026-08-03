@@ -128,7 +128,7 @@ Telegram Mini App catalog projections apply the same channel-specific visible fe
 | `POST .../assets/private-files` | CSRF + catalog manage | Raw bytes <=50 MiB + content type/file name; metadata/hash only |
 | `POST .../products/:productId/private-file-policy` | CSRF | Asset version, download limits, grant/entitlement TTL |
 
-Preview token bind user, tenant, variant, source va exact payload. Xoa plaintext source khoi input/DOM/memory ngay sau commit/cancel; khong dua vao screenshot/log.
+Preview token bind user, tenant, variant, source va exact payload. Xoa plaintext source khoi input/DOM/memory ngay sau commit, cancel, close, shop switch, preview/import error hoac payload change lam preview cu khong con hop le; khong dua vao screenshot/log.
 
 ### Storefront draft va publication
 
