@@ -45,6 +45,10 @@ export function requiresStagingDatabaseAdmission(operation, flags) {
     && !flags.dryRun;
 }
 
+export function requiresStagingReleaseManifest(operation, flags) {
+  return requiresStagingDatabaseAdmission(operation, flags) && flags.releaseManifestPath === null;
+}
+
 export function resolveApprovedProductionDatabaseTarget(input) {
   if (input.productionSpec?.environment !== "production") {
     throw new Error("production_database_spec_invalid");

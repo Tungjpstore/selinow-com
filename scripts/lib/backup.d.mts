@@ -159,7 +159,35 @@ export function assertFreshStagingBackupEvidence(options: {
   databaseId: string;
   databaseName: string;
   now?: Date;
-}): Promise<{ completedAt: string; reportRef: string; snapshotId: string }>;
+}): Promise<{
+  artifactPath: string;
+  checksumSha256: string;
+  completedAt: string;
+  reportRef: string;
+  sizeBytes: number;
+  snapshotId: string;
+}>;
+
+export function assertFreshStagingContinuationEvidence(options: {
+  accountId: string;
+  backupRoot?: string;
+  databaseId: string;
+  databaseName: string;
+  now?: Date;
+  repositoryRoot?: string;
+  restoreRoot?: string;
+  reviewedCommitSha: string;
+}): Promise<{
+  backup: {
+    checksumSha256: string;
+    snapshotId: string;
+  };
+  restore: {
+    reportRef: string;
+    snapshotId: string;
+  };
+  reviewedCommitSha: string;
+}>;
 
 export function assertFreshProductionBootstrapBackupEvidence(options: {
   accountId: string;

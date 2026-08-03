@@ -72,8 +72,9 @@ function setup(): { database: DatabaseSync; env: AppBindings } {
 
 function addBackfillTables(database: DatabaseSync): void {
   database.exec(`
-    CREATE TABLE products (shop_id TEXT, status TEXT, fulfillment_type TEXT, created_at TEXT);
-    CREATE TABLE inventory_batches (shop_id TEXT, accepted_count INTEGER, created_at TEXT);
+    CREATE TABLE products (id TEXT, shop_id TEXT, status TEXT, fulfillment_type TEXT, created_at TEXT, updated_at TEXT, activated_at TEXT);
+    CREATE TABLE product_variants (id TEXT, shop_id TEXT, product_id TEXT, status TEXT, created_at TEXT, updated_at TEXT, activated_at TEXT);
+    CREATE TABLE inventory_batches (shop_id TEXT, variant_id TEXT, accepted_count INTEGER, created_at TEXT);
     CREATE TABLE payment_integrations (shop_id TEXT, provider TEXT, status TEXT, webhook_status TEXT, connected_at TEXT);
     CREATE TABLE telegram_integrations (shop_id TEXT, status TEXT, webhook_status TEXT, connected_at TEXT);
     CREATE TABLE shop_readiness_runs (shop_id TEXT, overall_status TEXT, trigger_kind TEXT, checked_at TEXT);
@@ -189,8 +190,9 @@ describe("activation milestone ledger", () => {
     addBackfillTables(database);
     const timestamp = "2026-01-01T00:00:00.000Z";
     database.exec(`
-      INSERT INTO products VALUES ('shp_a', 'active', 'license_key', '${timestamp}');
-      INSERT INTO inventory_batches VALUES ('shp_a', 1, '${timestamp}');
+      INSERT INTO products VALUES ('prd_a', 'shp_a', 'active', 'license_key', '${timestamp}', '${timestamp}', '${timestamp}');
+      INSERT INTO product_variants VALUES ('var_a', 'shp_a', 'prd_a', 'active', '${timestamp}', '${timestamp}', '${timestamp}');
+      INSERT INTO inventory_batches VALUES ('shp_a', 'var_a', 1, '${timestamp}');
       INSERT INTO payment_integrations VALUES ('shp_a', 'payos', 'active', 'verified', '${timestamp}');
       INSERT INTO telegram_integrations VALUES ('shp_a', 'active', 'verified', '${timestamp}');
       INSERT INTO shop_readiness_runs VALUES ('shp_a', 'ready', 'manual', '${timestamp}');
@@ -209,7 +211,8 @@ describe("activation milestone ledger", () => {
     const { database, env } = setup();
     addBackfillTables(database);
     const timestamp = "2026-01-01T00:00:00.000Z";
-    database.prepare("INSERT INTO products VALUES (?, 'active', 'manual', ?)").run("shp_a", timestamp);
+    database.prepare("INSERT INTO products VALUES (?, ?, 'active', 'manual', ?, ?, ?)").run("prd_a", "shp_a", timestamp, timestamp, timestamp);
+    database.prepare("INSERT INTO product_variants VALUES (?, ?, ?, 'active', ?, ?, ?)").run("var_a", "shp_a", "prd_a", timestamp, timestamp, timestamp);
 
     const result = await backfillActivationMilestones({ env, now: timestamp, shopId: "shp_a" });
     const events = await listActivationMilestones({ env, shopId: "shp_a" });
@@ -217,6 +220,33 @@ describe("activation milestone ledger", () => {
     expect(result).toEqual({ attempted: 4, created: 4 });
     expect(events.map((event) => event.milestone)).toContain("inventory_ready");
     expect((await listActivationMilestones({ env, shopId: "shp_b" })).length).toBe(0);
+  });
+
+  it("does not recover manual readiness without an active variant", async () => {
+    const { database, env } = setup();
+    addBackfillTables(database);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    database.prepare("INSERT INTO products VALUES (?, ?, 'active', 'manual', ?, ?, ?)").run("prd_a", "shp_a", timestamp, timestamp, timestamp);
+
+    await backfillActivationMilestones({ env, now: timestamp, shopId: "shp_a" });
+
+    expect((await listActivationMilestones({ env, shopId: "shp_a" })).map((event) => event.milestone)).not.toContain("inventory_ready");
+  });
+
+  it("uses the latest durable activation boundary for manual readiness", async () => {
+    const { database, env } = setup();
+    addBackfillTables(database);
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const productActivatedAt = "2026-01-02T00:00:00.000Z";
+    const variantActivatedAt = "2026-01-03T00:00:00.000Z";
+    database.prepare("INSERT INTO products VALUES (?, ?, 'active', 'manual', ?, ?, ?)").run("prd_a", "shp_a", createdAt, productActivatedAt, productActivatedAt);
+    database.prepare("INSERT INTO product_variants VALUES (?, ?, ?, 'active', ?, ?, ?)").run("var_a", "shp_a", "prd_a", createdAt, variantActivatedAt, variantActivatedAt);
+
+    await backfillActivationMilestones({ env, now: variantActivatedAt, shopId: "shp_a" });
+    const inventoryReady = (await listActivationMilestones({ env, shopId: "shp_a" }))
+      .find((event) => event.milestone === "inventory_ready");
+
+    expect(inventoryReady?.occurredAt).toBe(variantActivatedAt);
   });
 
   it("rotates scheduled backfill across every shop", async () => {

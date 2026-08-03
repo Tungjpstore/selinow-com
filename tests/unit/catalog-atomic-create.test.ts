@@ -217,6 +217,17 @@ describe("atomic product and initial variant creation", () => {
     expect(database.database.prepare("SELECT COUNT(*) AS count FROM products").get()).toEqual({ count: 0 });
   });
 
+  it("rejects the legacy product-only path for active products", async () => {
+    const database = createDatabase();
+    await expect(createProduct({
+      data: { ...createInput(database).data, status: "active" },
+      env: envFor(database),
+      shopPublicId: SHOP_A_PUBLIC_ID,
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "validation_failed", issues: ["active_variant_required"], status: 409 });
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM products").get()).toEqual({ count: 0 });
+  });
+
   it("uses current non-archived rows as the quota authority and permits archive/reactivate only when capacity exists", async () => {
     const database = createDatabase();
     database.database.prepare("UPDATE plans SET limits_json = ? WHERE id = 'plan-test'").run(JSON.stringify({ products_non_archived: 1 }));

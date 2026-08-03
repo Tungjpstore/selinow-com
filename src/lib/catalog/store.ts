@@ -177,6 +177,9 @@ async function assertCategory(env: AppBindings, shopId: string, categoryId: stri
 }
 
 export async function createProduct(input: { data: ProductInput; env: AppBindings; shopPublicId: string; userId: string }): Promise<unknown> {
+  if (input.data.status === "active") {
+    throw new AppError("validation_failed", 409, ["active_variant_required"]);
+  }
   const actor = await requireCatalogActor(input.env, input.shopPublicId, input.userId);
   await assertCategory(input.env, actor.shopId, input.data.categoryId);
   if (input.data.status !== "archived") {
@@ -289,6 +292,17 @@ export async function createProductWithInitialVariant(input: {
       shopId: actor.shopId,
       source: "catalog",
     });
+    if (replay.product.status === "active" && replay.product.fulfillmentType === "manual" && replay.variant.status === "active") {
+      await tryRecordActivationMilestone({
+        env: input.env,
+        idempotencyKey: "inventory_ready",
+        milestone: "inventory_ready",
+        occurredAt: replay.product.updatedAt,
+        reason: "ready",
+        shopId: actor.shopId,
+        source: "inventory",
+      });
+    }
     return { ...replay, created: false };
   }
 
@@ -446,6 +460,17 @@ export async function createProductWithInitialVariant(input: {
     shopId: actor.shopId,
     source: "catalog",
   });
+  if (product.status === "active" && product.fulfillmentType === "manual" && variant.status === "active") {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "inventory_ready",
+      milestone: "inventory_ready",
+      occurredAt: nowIso,
+      reason: "ready",
+      shopId: actor.shopId,
+      source: "inventory",
+    });
+  }
   return { created: true, product, variant };
 }
 
@@ -515,6 +540,17 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
       throw new AppError("resource_not_found", 404);
     }
     await meterProductCreate({ actor, database: input.env.PLATFORM_DB, limit: productLimit, now: new Date(row.updatedAt), product: row });
+    if (row.status === "active" && row.fulfillmentType === "manual") {
+      await tryRecordActivationMilestone({
+        env: input.env,
+        idempotencyKey: "inventory_ready",
+        milestone: "inventory_ready",
+        occurredAt: row.updatedAt,
+        reason: "ready",
+        shopId: actor.shopId,
+        source: "inventory",
+      });
+    }
     return row;
   } catch (error) {
     if (error instanceof AppError) throw error;

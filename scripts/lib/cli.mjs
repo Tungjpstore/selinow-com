@@ -66,11 +66,13 @@ export function parseDeployFlags(argv) {
   if (flags.environment === "production" && !flags.confirmProduction) {
     throw new Error("production_confirmation_required");
   }
-  const requiresReleaseManifest = flags.environment === "production"
+  const requiresReleaseManifest = (flags.environment === "production" || flags.environment === "staging")
     && !flags.dryRun
     && !flags.buildOnly;
   if (requiresReleaseManifest && !releaseManifestPath) {
-    throw new Error("production_release_manifest_required");
+    throw new Error(flags.environment === "production"
+      ? "production_release_manifest_required"
+      : "staging_release_manifest_required");
   }
   return { ...flags, releaseManifestPath };
 }

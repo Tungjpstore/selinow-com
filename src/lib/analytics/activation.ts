@@ -362,13 +362,36 @@ export async function backfillActivationMilestones(input: {
       occurredAt: await query(`
         SELECT MIN(occurred_at) AS occurredAt
         FROM (
-          SELECT created_at AS occurred_at
+          SELECT MAX(
+            inventory_batches.created_at,
+            products.activated_at,
+            product_variants.activated_at
+          ) AS occurred_at
           FROM inventory_batches
-          WHERE shop_id = ? AND accepted_count > 0
+          INNER JOIN product_variants
+            ON product_variants.id = inventory_batches.variant_id
+            AND product_variants.shop_id = inventory_batches.shop_id
+            AND product_variants.status = 'active'
+          INNER JOIN products
+            ON products.id = product_variants.product_id
+            AND products.shop_id = product_variants.shop_id
+            AND products.status = 'active'
+          WHERE inventory_batches.shop_id = ?
+            AND inventory_batches.accepted_count > 0
+            AND products.activated_at IS NOT NULL
+            AND product_variants.activated_at IS NOT NULL
           UNION ALL
-          SELECT created_at AS occurred_at
+          SELECT MAX(products.activated_at, product_variants.activated_at) AS occurred_at
           FROM products
-          WHERE shop_id = ? AND status = 'active' AND fulfillment_type = 'manual'
+          INNER JOIN product_variants
+            ON product_variants.product_id = products.id
+            AND product_variants.shop_id = products.shop_id
+            AND product_variants.status = 'active'
+          WHERE products.shop_id = ?
+            AND products.status = 'active'
+            AND products.fulfillment_type = 'manual'
+            AND products.activated_at IS NOT NULL
+            AND product_variants.activated_at IS NOT NULL
         )
       `, input.shopId, input.shopId),
     },

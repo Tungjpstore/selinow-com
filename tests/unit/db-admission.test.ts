@@ -55,6 +55,13 @@ describe("production database migration admission", () => {
       dryRun: true,
       environment: "staging",
     });
+    expect(parseDatabaseFlags([
+      "--env", "staging",
+      "--release-manifest", ".wrangler/releases/staging/stg_test/release-manifest.json",
+    ])).toMatchObject({
+      environment: "staging",
+      releaseManifestPath: ".wrangler/releases/staging/stg_test/release-manifest.json",
+    });
     const productionDryRun = parseDatabaseFlags([
       "--env", "production", "--confirm-production", "--dry-run",
     ]);
@@ -82,11 +89,7 @@ describe("production database migration admission", () => {
     })).toBe(false);
   });
 
-  it("fails staging migrate and seed before Wrangler when route admission is unavailable", () => {
-    const environment = { ...process.env };
-    delete environment.CLOUDFLARE_PLATFORM_API_TOKEN;
-    delete environment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
-
+  it("requires reviewed release evidence before staging database mutation", () => {
     for (const operation of ["migrate", "seed"]) {
       const result = spawnSync(process.execPath, [
         "scripts/db.mjs",
@@ -96,35 +99,10 @@ describe("production database migration admission", () => {
       ], {
         cwd: process.cwd(),
         encoding: "utf8",
-        env: environment,
       });
       expect(result.status).toBe(1);
       expect(result.stdout).toBe("");
-      expect(result.stderr.trim()).toBe("cloudflare_route_audit_api_token_missing");
-    }
-  });
-
-  it("requires the full platform doctor token before staging database mutation", () => {
-    const environment: NodeJS.ProcessEnv = {
-      ...process.env,
-      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
-    };
-    delete environment.CLOUDFLARE_PLATFORM_API_TOKEN;
-
-    for (const operation of ["migrate", "seed"]) {
-      const result = spawnSync(process.execPath, [
-        "scripts/db.mjs",
-        operation,
-        "--env",
-        "staging",
-      ], {
-        cwd: process.cwd(),
-        encoding: "utf8",
-        env: environment,
-      });
-      expect(result.status).toBe(1);
-      expect(result.stdout).toBe("");
-      expect(result.stderr.trim()).toBe("cloudflare_platform_api_token_missing");
+      expect(result.stderr.trim()).toBe("staging_release_manifest_required");
     }
   });
 
@@ -327,19 +305,26 @@ describe("production database migration admission", () => {
     expect(sink).toBeGreaterThan(pin);
   });
 
-  it("rechecks staging admission after backup evidence and immediately before mutation sinks", () => {
+  it("rechecks staging release and restore evidence before mutation sinks", () => {
     const source = readFileSync("scripts/db.mjs", "utf8");
+    const firstRelease = source.indexOf("await assertStagingReleaseAdmission");
     const firstGate = source.indexOf("await assertStagingMutationAdmission");
-    const backup = source.indexOf("await assertFreshStagingBackupEvidence", firstGate);
+    const continuation = source.indexOf("await assertFreshStagingContinuationEvidence", firstGate);
     const finalGate = source.indexOf("await assertStagingMutationAdmission", firstGate + 1);
-    const stableTargetGuard = source.indexOf("staging_backup_admission_changed", finalGate);
+    const finalRelease = source.indexOf("await assertStagingReleaseAdmission", firstRelease + 1);
+    const finalContinuation = source.indexOf("await assertFreshStagingContinuationEvidence", continuation + 1);
+    const stableTargetGuard = source.indexOf("staging_release_admission_changed", finalContinuation);
     const pin = source.indexOf("buildPinnedCloudflareEnvironment", finalGate);
     const sink = source.indexOf("runWrangler(wranglerArgs", finalGate);
 
+    expect(firstRelease).toBeGreaterThan(-1);
+    expect(firstRelease).toBeLessThan(firstGate);
     expect(firstGate).toBeGreaterThan(-1);
-    expect(backup).toBeGreaterThan(firstGate);
-    expect(finalGate).toBeGreaterThan(backup);
-    expect(stableTargetGuard).toBeGreaterThan(finalGate);
+    expect(continuation).toBeGreaterThan(firstGate);
+    expect(finalGate).toBeGreaterThan(continuation);
+    expect(finalRelease).toBeGreaterThan(finalGate);
+    expect(finalContinuation).toBeGreaterThan(finalRelease);
+    expect(stableTargetGuard).toBeGreaterThan(finalContinuation);
     expect(pin).toBeGreaterThan(stableTargetGuard);
     expect(sink).toBeGreaterThan(pin);
   });

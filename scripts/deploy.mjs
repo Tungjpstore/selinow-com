@@ -1,7 +1,7 @@
 import process from "node:process";
 
 import { parseDeployFlags, run } from "./lib/cli.mjs";
-import { assertFreshStagingBackupEvidence } from "./lib/backup.mjs";
+import { assertFreshStagingContinuationEvidence } from "./lib/backup.mjs";
 import {
   assertStagingMutationAdmission,
   buildPinnedCloudflareEnvironment,
@@ -11,6 +11,7 @@ import {
   assertProductionContinuationDeployAdmission,
   assertProductionWorkerDeployAdmission,
 } from "./lib/release.mjs";
+import { assertStagingReleaseAdmission } from "./lib/staging-release.mjs";
 
 try {
   const flags = parseDeployFlags(process.argv.slice(2));
@@ -38,6 +39,8 @@ try {
   let productionAdmission = null;
   let productionContinuationAdmission = null;
   let stagingAdmission = null;
+  let stagingReleaseAdmission = null;
+  let stagingContinuationAdmission = null;
   if (requiresProductionAdmission) {
     productionAdmission = await assertProductionWorkerDeployAdmission({
       environment: process.env,
@@ -54,7 +57,17 @@ try {
     });
   }
   if (requiresStagingAdmission) {
+    stagingReleaseAdmission = await assertStagingReleaseAdmission({
+      manifestPath: flags.releaseManifestPath,
+      repositoryRoot,
+    });
     stagingAdmission = await assertStagingMutationAdmission();
+    stagingContinuationAdmission = await assertFreshStagingContinuationEvidence({
+      accountId: stagingAdmission.accountId,
+      databaseId: stagingAdmission.databaseId,
+      databaseName: stagingAdmission.databaseName,
+      reviewedCommitSha: stagingReleaseAdmission.commitSha,
+    });
   }
 
   run("npm", ["run", "build"], { capture: false, cwd: repositoryRoot, env: buildEnvironment });
@@ -99,20 +112,35 @@ try {
   }
   if (requiresStagingAdmission) {
     if (stagingAdmission === null) throw new Error("staging_admission_missing");
-    await assertFreshStagingBackupEvidence({
+    if (stagingReleaseAdmission === null || stagingContinuationAdmission === null) {
+      throw new Error("staging_release_admission_missing");
+    }
+    const finalReleaseAdmission = await assertStagingReleaseAdmission({
+      manifestPath: flags.releaseManifestPath,
+      repositoryRoot,
+    });
+    const finalContinuationAdmission = await assertFreshStagingContinuationEvidence({
       accountId: stagingAdmission.accountId,
       databaseId: stagingAdmission.databaseId,
       databaseName: stagingAdmission.databaseName,
+      reviewedCommitSha: finalReleaseAdmission.commitSha,
     });
     const finalAdmission = await assertStagingMutationAdmission();
     if (
       finalAdmission.accountId !== stagingAdmission.accountId
       || finalAdmission.databaseId !== stagingAdmission.databaseId
       || finalAdmission.databaseName !== stagingAdmission.databaseName
+      || finalReleaseAdmission.commitSha !== stagingReleaseAdmission.commitSha
+      || finalReleaseAdmission.treeSha !== stagingReleaseAdmission.treeSha
+      || finalReleaseAdmission.releaseId !== stagingReleaseAdmission.releaseId
+      || finalContinuationAdmission.backup.snapshotId !== stagingContinuationAdmission.backup.snapshotId
+      || finalContinuationAdmission.restore.reportRef !== stagingContinuationAdmission.restore.reportRef
     ) {
-      throw new Error("staging_backup_admission_changed");
+      throw new Error("staging_release_admission_changed");
     }
     stagingAdmission = finalAdmission;
+    stagingReleaseAdmission = finalReleaseAdmission;
+    stagingContinuationAdmission = finalContinuationAdmission;
   }
   if (!flags.buildOnly) {
     const deployArgs = ["wrangler", "deploy"];

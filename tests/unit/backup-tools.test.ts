@@ -32,6 +32,7 @@ const STAGING_ACCOUNT_ID = "ef250a88911fd24073cb73d1c07e0218";
 const STAGING_DATABASE_ID = "c86d76a0-7407-42b6-ba92-f9f9623d0730";
 const PRODUCTION_ACCOUNT_ID = "ab250a88911fd24073cb73d1c07e0218";
 const PRODUCTION_DATABASE_ID = "d86d76a0-7407-42b6-ba92-f9f9623d0730";
+const REVIEWED_COMMIT_SHA = "c".repeat(40);
 const GENERATED_LICENSE_TABLES = [
   "generated_license_provider_connections",
   "generated_license_provider_credentials",
@@ -874,6 +875,18 @@ describe("backup CLI dry runs", () => {
     }
   });
 
+  it("requires exact reviewed-commit binding before a remote restore drill", async () => {
+    const runner = vi.fn();
+
+    await expect(runRestoreDrill({
+      config: CONFIG,
+      dryRun: false,
+      environment: "staging",
+      runner,
+    })).rejects.toThrow("restore_reviewed_commit_required");
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it("rejects an ambient Wrangler account before creating a remote restore target", async () => {
     const reportPath = resolve(
       import.meta.dirname,
@@ -887,6 +900,7 @@ describe("backup CLI dry runs", () => {
         environment: "staging",
         now: new Date("2026-07-26T00:00:00.000Z"),
         randomBytesImplementation: () => Buffer.alloc(6, 3),
+        reviewedCommitSha: REVIEWED_COMMIT_SHA,
         runner: (args, options) => {
           commands.push({ args, accountId: options?.env?.CLOUDFLARE_ACCOUNT_ID });
           if (args[0] === "whoami") {
@@ -935,6 +949,7 @@ describe("backup CLI dry runs", () => {
         environment: "staging",
         now: new Date("2026-07-26T00:00:00.000Z"),
         randomBytesImplementation: () => Buffer.alloc(6, 4),
+        reviewedCommitSha: REVIEWED_COMMIT_SHA,
         runner: (args, options) => {
           commands.push({ args, accountId: options?.env?.CLOUDFLARE_ACCOUNT_ID });
           if (args[0] === "whoami") {
@@ -997,6 +1012,7 @@ describe("backup CLI dry runs", () => {
         environment: "staging",
         now: new Date("2026-07-26T00:00:00.000Z"),
         randomBytesImplementation: () => Buffer.alloc(6, 5),
+        reviewedCommitSha: REVIEWED_COMMIT_SHA,
         runner: (args, options) => {
           commands.push({
             accountId: options?.env?.CLOUDFLARE_ACCOUNT_ID,
@@ -1115,6 +1131,7 @@ describe("backup CLI dry runs", () => {
         environment: "staging",
         now: new Date("2026-07-26T00:00:00.000Z"),
         randomBytesImplementation: () => Buffer.alloc(6, 6),
+        reviewedCommitSha: REVIEWED_COMMIT_SHA,
         runner: (args) => {
           commands.push(args);
           if (args[0] === "whoami") {
@@ -1215,6 +1232,7 @@ describe("backup CLI dry runs", () => {
         environment: "staging",
         now,
         randomBytesImplementation: () => Buffer.alloc(6, 2),
+        reviewedCommitSha: REVIEWED_COMMIT_SHA,
         runner: (args, options) => {
           commands.push({ args, accountId: options?.env?.CLOUDFLARE_ACCOUNT_ID });
           if (args[0] === "whoami") {

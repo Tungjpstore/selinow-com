@@ -10,6 +10,7 @@ export type DatabaseFlags = {
 export function parseDatabaseFlags(argv: string[]): DatabaseFlags;
 export function requiresProductionMigrationAdmission(operation: string | undefined, flags: DatabaseFlags): boolean;
 export function requiresStagingDatabaseAdmission(operation: string | undefined, flags: DatabaseFlags): boolean;
+export function requiresStagingReleaseManifest(operation: string | undefined, flags: DatabaseFlags): boolean;
 export function resolveApprovedProductionDatabaseTarget(input: {
   productionSpec: Record<string, any>;
   wranglerConfig: Record<string, any>;

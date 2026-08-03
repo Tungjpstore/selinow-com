@@ -34,6 +34,7 @@
     "restore:drill": "node scripts/restore-drill.mjs",
     "release:doctor": "node scripts/release-doctor.mjs",
     "release:manifest": "node scripts/release-manifest.mjs",
+    "release:staging:manifest": "node scripts/staging-release-manifest.mjs",
     "release:production:bootstrap": "node scripts/production-bootstrap.mjs",
     "release:production:bootstrap:migrate": "node scripts/production-bootstrap-execute.mjs",
     "release:production:bootstrap:empty-baseline": "node scripts/production-bootstrap-empty-baseline.mjs",

@@ -58,13 +58,16 @@ describe("inventory frontend contract", () => {
   it("clears onboarding inventory plaintext after an import error", async () => {
     const script = await readFile("src/scripts/dashboard/onboarding.ts", "utf8");
 
-    expect(script).toMatch(/catch \(error\) \{\n {8}if \(!selectionIsCurrent\(state, shop\.publicId, selectionEpoch\)\) return;\n {8}if \(inventoryData !== null\) inventoryData\.value = "";\n {8}updateLocalInventoryPreview\(root\);\n {8}invalidateInventoryPreview\(root, state, copy\("onboarding\.feedback\.import_expired"/u);
+    expect(script).toMatch(/catch \(error\) \{\n {8}if \(!isCurrentInventoryRequest\(state, controller\)\) return;\n {8}if \(!selectionIsCurrent\(state, shop\.publicId, selectionEpoch\)\) return;\n {8}if \(inventoryData !== null\) inventoryData\.value = "";\n {8}updateLocalInventoryPreview\(root\);\n {8}invalidateInventoryPreview\(root, state, copy\("onboarding\.feedback\.import_expired"/u);
+    expect(script).toContain("requestBody.clear()");
+    expect(script).toContain("signal: controller.signal");
+    expect(script).toContain("clearPendingInventoryRequest(state)");
   });
 
   it("clears onboarding inventory plaintext after a preview error", async () => {
     const script = await readFile("src/scripts/dashboard/onboarding.ts", "utf8");
 
-    expect(script).toMatch(/catch \(error\) \{\n {8}if \(!selectionIsCurrent\(state, shop\.publicId, selectionEpoch\)\) return;\n {8}if \(inventoryData !== null\) inventoryData\.value = "";\n {8}updateLocalInventoryPreview\(root\);\n {8}invalidateInventoryPreview\(root, state, copy\("onboarding\.feedback\.inventory_preview_failed"/u);
+    expect(script).toMatch(/catch \(error\) \{\n {8}if \(!isCurrentInventoryRequest\(state, controller\)\) return;\n {8}if \(!selectionIsCurrent\(state, shop\.publicId, selectionEpoch\)\) return;\n {8}if \(inventoryData !== null\) inventoryData\.value = "";\n {8}updateLocalInventoryPreview\(root\);\n {8}invalidateInventoryPreview\(root, state, copy\("onboarding\.feedback\.inventory_preview_failed"/u);
   });
 
   it("maps safe API errors and reports authoritative import counts", async () => {

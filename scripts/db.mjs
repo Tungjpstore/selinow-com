@@ -1,7 +1,7 @@
 import process from "node:process";
 
 import { runWrangler, writeOutput } from "./lib/cli.mjs";
-import { assertFreshStagingBackupEvidence } from "./lib/backup.mjs";
+import { assertFreshStagingContinuationEvidence } from "./lib/backup.mjs";
 import {
   assertProductionMigrationAdmission,
   parseDatabaseFlags,
@@ -26,6 +26,7 @@ import {
   buildPinnedCloudflareEnvironment,
   repositoryRoot,
 } from "./lib/platform.mjs";
+import { assertStagingReleaseAdmission } from "./lib/staging-release.mjs";
 
 const operation = process.argv[2];
 
@@ -124,11 +125,17 @@ try {
       );
     }
     if (requiresStagingDatabaseAdmission(operation, flags)) {
+      if (!flags.releaseManifestPath) throw new Error("staging_release_manifest_required");
+      const releaseAdmission = await assertStagingReleaseAdmission({
+        manifestPath: flags.releaseManifestPath,
+        repositoryRoot,
+      });
       const backupAdmission = await assertStagingMutationAdmission();
-      await assertFreshStagingBackupEvidence({
+      const continuationAdmission = await assertFreshStagingContinuationEvidence({
         accountId: backupAdmission.accountId,
         databaseId: backupAdmission.databaseId,
         databaseName: backupAdmission.databaseName,
+        reviewedCommitSha: releaseAdmission.commitSha,
       });
       const finalAdmission = await assertStagingMutationAdmission();
       if (
@@ -137,6 +144,25 @@ try {
         || finalAdmission.databaseName !== backupAdmission.databaseName
       ) {
         throw new Error("staging_backup_admission_changed");
+      }
+      const finalReleaseAdmission = await assertStagingReleaseAdmission({
+        manifestPath: flags.releaseManifestPath,
+        repositoryRoot,
+      });
+      const finalContinuationAdmission = await assertFreshStagingContinuationEvidence({
+        accountId: finalAdmission.accountId,
+        databaseId: finalAdmission.databaseId,
+        databaseName: finalAdmission.databaseName,
+        reviewedCommitSha: finalReleaseAdmission.commitSha,
+      });
+      if (
+        finalReleaseAdmission.commitSha !== releaseAdmission.commitSha
+        || finalReleaseAdmission.treeSha !== releaseAdmission.treeSha
+        || finalReleaseAdmission.releaseId !== releaseAdmission.releaseId
+        || finalContinuationAdmission.backup.snapshotId !== continuationAdmission.backup.snapshotId
+        || finalContinuationAdmission.restore.reportRef !== continuationAdmission.restore.reportRef
+      ) {
+        throw new Error("staging_release_admission_changed");
       }
       commandEnvironment = buildPinnedCloudflareEnvironment(
         process.env,

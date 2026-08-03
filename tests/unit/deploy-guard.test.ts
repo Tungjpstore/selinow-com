@@ -38,39 +38,26 @@ describe("deploy command safety", () => {
       dryRun: true,
       environment: "staging",
     });
-    expect(parseDeployFlags(["--env", "staging"])).toMatchObject({
+    expect(() => parseDeployFlags(["--env", "staging"]))
+      .toThrow("staging_release_manifest_required");
+    expect(parseDeployFlags([
+      "--env", "staging",
+      "--release-manifest", ".wrangler/releases/staging/stg_test/release-manifest.json",
+    ])).toMatchObject({
       dryRun: false,
       environment: "staging",
+      releaseManifestPath: ".wrangler/releases/staging/stg_test/release-manifest.json",
     });
   });
 
-  it("fails a real staging deploy before build when live route audit is unavailable", () => {
-    const environment = { ...process.env };
-    delete environment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
+  it("requires reviewed release evidence before a real staging deploy", () => {
     const result = spawnSync(process.execPath, ["scripts/deploy.mjs", "--env", "staging"], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: environment,
     });
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr.trim()).toBe("cloudflare_route_audit_api_token_missing");
-  });
-
-  it("requires the platform doctor token before a real staging deploy can build", () => {
-    const environment: NodeJS.ProcessEnv = {
-      ...process.env,
-      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
-    };
-    delete environment.CLOUDFLARE_PLATFORM_API_TOKEN;
-    const result = spawnSync(process.execPath, ["scripts/deploy.mjs", "--env", "staging"], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: environment,
-    });
-    expect(result.status).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr.trim()).toBe("cloudflare_platform_api_token_missing");
+    expect(result.stderr.trim()).toBe("staging_release_manifest_required");
   });
 
   it("keeps production behind explicit environment and confirmation flags", () => {
@@ -142,19 +129,27 @@ describe("deploy command safety", () => {
     expect(source).toContain("buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId)");
   });
 
-  it("enforces backup evidence and final staging admission immediately before deploy", () => {
+  it("enforces candidate, restore evidence, and final staging admission before deploy", () => {
     const source = readFileSync("scripts/deploy.mjs", "utf8");
+    const firstRelease = source.indexOf("await assertStagingReleaseAdmission");
     const firstAdmission = source.indexOf("await assertStagingMutationAdmission");
     const build = source.indexOf('run("npm", ["run", "build"]');
-    const backup = source.indexOf("await assertFreshStagingBackupEvidence", build);
+    const firstContinuation = source.indexOf("await assertFreshStagingContinuationEvidence");
+    const secondRelease = source.indexOf("await assertStagingReleaseAdmission", firstRelease + 1);
+    const secondContinuation = source.indexOf("await assertFreshStagingContinuationEvidence", firstContinuation + 1);
     const secondAdmission = source.indexOf("await assertStagingMutationAdmission", firstAdmission + 1);
-    const stableTargetGuard = source.indexOf("staging_backup_admission_changed", secondAdmission);
+    const stableTargetGuard = source.indexOf("staging_release_admission_changed", secondAdmission);
     const deploySink = source.indexOf('const deployArgs = ["wrangler", "deploy"]');
 
+    expect(firstRelease).toBeGreaterThan(-1);
+    expect(firstRelease).toBeLessThan(firstAdmission);
     expect(firstAdmission).toBeGreaterThan(-1);
     expect(firstAdmission).toBeLessThan(build);
-    expect(backup).toBeGreaterThan(build);
-    expect(secondAdmission).toBeGreaterThan(backup);
+    expect(firstContinuation).toBeGreaterThan(firstAdmission);
+    expect(firstContinuation).toBeLessThan(build);
+    expect(secondRelease).toBeGreaterThan(build);
+    expect(secondContinuation).toBeGreaterThan(secondRelease);
+    expect(secondAdmission).toBeGreaterThan(secondContinuation);
     expect(secondAdmission).toBeLessThan(deploySink);
     expect(stableTargetGuard).toBeGreaterThan(secondAdmission);
     expect(stableTargetGuard).toBeLessThan(deploySink);

@@ -29,6 +29,7 @@ import {
   normalizeCurrencyCode,
 } from "../../lib/i18n/currency";
 import { matchSupportedLocale } from "../../lib/i18n/locale";
+import { createSensitiveRequestBody, type SensitiveRequestBody } from "../../lib/security/sensitive-request-body";
 
 type CopyParams = Readonly<Record<string, string | number>>;
 
@@ -181,6 +182,10 @@ type PageState = {
   catalogVariants: CatalogVariant[];
   domains: DomainRecord[];
   inventoryPreview: InventoryPreview | null;
+  pendingInventoryRequest: {
+    controller: AbortController;
+    requestBody: SensitiveRequestBody<Record<string, unknown> & { data: string }>;
+  } | null;
   onboarding: OnboardingSnapshot;
   payos: PaymentIntegration | null;
   published: boolean;
@@ -553,7 +558,18 @@ function selectionIsCurrent(state: PageState, shopId: string, epoch: number): bo
   return state.selectedShopId === shopId && state.shopSelectionEpoch === epoch;
 }
 
+function clearPendingInventoryRequest(state: PageState): void {
+  state.pendingInventoryRequest?.controller.abort();
+  state.pendingInventoryRequest?.requestBody.clear();
+  state.pendingInventoryRequest = null;
+}
+
+function isCurrentInventoryRequest(state: PageState, controller: AbortController): boolean {
+  return state.pendingInventoryRequest?.controller === controller;
+}
+
 function clearTenantBoundDrafts(root: HTMLElement, state: PageState): void {
+  clearPendingInventoryRequest(state);
   for (const selector of [
     "[data-channels-form]",
     "[data-product-form]",
@@ -1315,6 +1331,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     catalogVariants: [],
     domains: [],
     inventoryPreview: null,
+    pendingInventoryRequest: null,
     onboarding: { profile: null, settings: null, steps: new Map() },
     payos: null,
     published: false,
@@ -1656,10 +1673,15 @@ async function initialize(root: HTMLElement): Promise<void> {
       const button = query<HTMLButtonElement>(root, "[data-inventory-preview-button]");
       invalidateInventoryPreview(root, state, copy("onboarding.inventory.preview_safe", "Creating a safe preview…"));
       setBusy(button, true, copy("onboarding.busy.previewing", "Creating preview…"));
+      clearPendingInventoryRequest(state);
+      const requestBody = createSensitiveRequestBody({ data, source });
+      const controller = new AbortController();
+      state.pendingInventoryRequest = { controller, requestBody };
       try {
         const response = await requestApi(root, `${apiBase(shop.publicId)}/variants/${encodeURIComponent(variantId)}/inventory/preview`, {
-          body: JSON.stringify({ data, source }),
+          body: requestBody.serialized,
           method: "POST",
+          signal: controller.signal,
         });
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
         const preview = parseInventoryPreview(response);
@@ -1676,12 +1698,15 @@ async function initialize(root: HTMLElement): Promise<void> {
         if (confirm !== null) confirm.disabled = preview.acceptedCount === 0 || preview.rejectedCount > 0 || preview.duplicateCount > 0;
         setFeedback(root, copy("onboarding.feedback.inventory_preview", "Preview complete. Key contents are never returned to the browser."), "success");
       } catch (error) {
+        if (!isCurrentInventoryRequest(state, controller)) return;
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
         if (inventoryData !== null) inventoryData.value = "";
         updateLocalInventoryPreview(root);
         invalidateInventoryPreview(root, state, copy("onboarding.feedback.inventory_preview_failed", "Could not create the preview. Check your session and try again; no keys were imported."));
         setFeedback(root, errorMessage(error), "error");
       } finally {
+        requestBody.clear();
+        if (isCurrentInventoryRequest(state, controller)) state.pendingInventoryRequest = null;
         setBusy(button, false);
       }
     })();
@@ -1699,16 +1724,19 @@ async function initialize(root: HTMLElement): Promise<void> {
       const selectionEpoch = state.shopSelectionEpoch;
       if (variantId.length === 0) { markFieldInvalid(root, query<HTMLSelectElement>(root, "[data-inventory-variant]"), copy("onboarding.feedback.inventory_variant_required", "Choose an offer to receive keys.")); return; }
       if (state.inventoryPreview === null) { markFieldInvalid(root, inventoryData, copy("onboarding.feedback.inventory_preview_required", "Create a preview before confirming the import.")); return; }
-      const bodyValue: Record<string, unknown> = { data, filename: null, previewToken: state.inventoryPreview.previewToken, source };
-      const payload = JSON.stringify(bodyValue);
+      const requestBody = createSensitiveRequestBody({ data, filename: null, previewToken: state.inventoryPreview.previewToken, source });
       const namespace = `inventory:${shop.publicId}:${variantId}`;
       const button = query<HTMLButtonElement>(root, "[data-inventory-confirm]");
       setBusy(button, true, copy("onboarding.busy.encrypting", "Encrypting…"));
+      clearPendingInventoryRequest(state);
+      const controller = new AbortController();
+      state.pendingInventoryRequest = { controller, requestBody };
       try {
         await requestApi(root, `${apiBase(shop.publicId)}/variants/${encodeURIComponent(variantId)}/inventory/import`, {
-          body: payload,
-          idempotencyKey: await intentKey(namespace, payload),
+          body: requestBody.serialized,
+          idempotencyKey: await intentKey(namespace, requestBody.serialized),
           method: "POST",
+          signal: controller.signal,
         });
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
         clearIntent(namespace);
@@ -1720,12 +1748,15 @@ async function initialize(root: HTMLElement): Promise<void> {
         await loadShopState(root, state, shops);
         showStep(root, state, "telegram");
       } catch (error) {
+        if (!isCurrentInventoryRequest(state, controller)) return;
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
         if (inventoryData !== null) inventoryData.value = "";
         updateLocalInventoryPreview(root);
         invalidateInventoryPreview(root, state, copy("onboarding.feedback.import_expired", "Preview is no longer valid. Create a new preview before importing."));
         setFeedback(root, errorMessage(error), "error");
       } finally {
+        requestBody.clear();
+        if (isCurrentInventoryRequest(state, controller)) state.pendingInventoryRequest = null;
         setBusy(button, false);
         if (button !== null && state.inventoryPreview === null) button.disabled = true;
       }
