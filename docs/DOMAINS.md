@@ -78,14 +78,14 @@ The deployed shared-zone configuration uses four explicit Worker routes:
 
 | Route | Worker |
 | --- | --- |
-| `selinow.com/*` | Disabled |
-| `*.selinow.com/*` | Disabled |
+| `selinow.com/*` | `selinow-com-production` |
+| `*.selinow.com/*` | `selinow-com-production` |
 | `*.staging.selinow.com/*` | `selinow-com-staging` |
 | `*/*` | `selinow-com-staging` |
 
-Cloudflare applies the more specific disabled routes before the broad fallback route. This keeps the apex and normal platform subdomains out of the staging Worker while allowing arbitrary external custom hostnames to reach the Cloudflare for SaaS fallback. The disabled null-script guards were applied manually and verified against staging; production Worker resources and routes were not changed.
+Cloudflare applies the more specific production routes before the broad staging fallback route. This keeps the production apex and normal platform subdomains on the production Worker while staging wildcard traffic and the catch-all remain on `selinow-com-staging`; arbitrary external custom hostnames still reach the Cloudflare for SaaS fallback.
 
-The staging environment specification validates the full reviewed contract. Wrangler owns and regenerates only the seven custom domains plus the active wildcard and `*/*` Worker routes; the two disabled null-script guards remain operator-managed because the Worker routes API does not accept them as script-owned routes. `platform:doctor` and every non-dry staging deploy now use a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` to require the exact two `script=null` guards and bind both `*.staging.selinow.com/*` and `*/*` to `selinow-com-staging`; a missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
+The staging environment specification validates the full reviewed contract. Wrangler owns and regenerates the seven custom domains plus the active wildcard and `*/*` Worker routes; the shared apex and wildcard boundary is operator-managed and must be either the pre-handoff `script=null` guard pair or the exact approved `selinow-com-production` pair now live after the platform handoff. `platform:doctor` and every non-dry staging deploy use a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` to require that exact boundary and bind both `*.staging.selinow.com/*` and `*/*` to `selinow-com-staging`; a missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
 
 ### Production platform handoff matrix (historical baseline; revalidate before mutation)
 

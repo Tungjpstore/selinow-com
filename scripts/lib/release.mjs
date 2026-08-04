@@ -405,9 +405,12 @@ export function inspectProductionReadiness(input) {
     makeCheck("alignment.resource.privateExports", isConfigured(spec?.resources?.privateExports) && exportsBucket?.bucket_name === spec.resources.privateExports),
     makeCheck("alignment.queue.integration", isConfigured(spec?.resources?.integrationQueue) && queues.consumers.has(spec.resources.integrationQueue)),
     makeCheck("alignment.queue.notification", isConfigured(spec?.resources?.notificationQueue) && queues.consumers.has(spec.resources.notificationQueue)),
-    makeCheck("alignment.route.marketing", isConfigured(spec?.hostnames?.marketing) && routes.has(spec.hostnames.marketing)),
-    makeCheck("alignment.route.dashboard", isConfigured(spec?.hostnames?.dashboard) && routes.has(spec.hostnames.dashboard)),
-    makeCheck("alignment.route.api", isConfigured(spec?.hostnames?.api) && routes.has(spec.hostnames.api)),
+    makeCheck("alignment.route.marketing", isConfigured(spec?.hostnames?.marketing)
+      && (routes.has(spec.hostnames.marketing) || routes.has(`${spec.hostnames.marketing}/*`))),
+    makeCheck("alignment.route.dashboard", isConfigured(spec?.hostnames?.dashboard)
+      && (routes.has(spec.hostnames.dashboard) || routes.has(`${spec.hostnames.dashboard}/*`))),
+    makeCheck("alignment.route.api", isConfigured(spec?.hostnames?.api)
+      && (routes.has(spec.hostnames.api) || routes.has(`${spec.hostnames.api}/*`))),
     makeCheck("alignment.var.zoneId", isConfigured(spec?.zoneId) && production?.vars?.CLOUDFLARE_ZONE_ID === spec.zoneId),
     makeCheck("alignment.var.saasTarget", isConfigured(spec?.saas?.cnameTarget) && production?.vars?.SAAS_CNAME_TARGET === spec.saas.cnameTarget),
   );

@@ -36,6 +36,7 @@ const stagingSpec = {
   sharedZoneDisabledRoutes: ["selinow.com/*", "*.selinow.com/*"],
   wildcardRoute: "*.staging.selinow.com/*",
   workerName: "selinow-com-staging",
+  productionWorkerName: "selinow-com-production",
   workerRoutes: [
     { custom_domain: true, pattern: "staging.selinow.com" },
     { custom_domain: true, pattern: "app-staging.selinow.com" },

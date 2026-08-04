@@ -25,6 +25,7 @@ export interface PlatformEnvironmentSpec {
     fallbackOrigin: string;
   };
   sharedZoneDisabledRoutes: string[];
+  productionWorkerName: string;
   wildcardRoute: string;
   workerName: string;
   workerRoutes: Array<

@@ -77,6 +77,7 @@ const stagingSpec = {
   ],
   wildcardRoute: "*.staging.selinow.com/*",
   workerName: "selinow-com-staging",
+  productionWorkerName: "selinow-com-production",
   workerRoutes: [
     { custom_domain: true, pattern: "staging.selinow.com" },
     { custom_domain: true, pattern: "app-staging.selinow.com" },
@@ -142,7 +143,8 @@ function productionSpec() {
 
 function productionWranglerConfig() {
   const routes: Array<{ custom_domain?: true; pattern: string; zone_name?: string }> = [
-    { custom_domain: true, pattern: "selinow.com" },
+    { pattern: "selinow.com/*", zone_name: "selinow.com" },
+    { pattern: "*.selinow.com/*", zone_name: "selinow.com" },
     { custom_domain: true, pattern: "app.selinow.com" },
     { custom_domain: true, pattern: "api.selinow.com" },
   ];
@@ -163,8 +165,8 @@ function productionWranglerConfig() {
 
 function exactSharedZoneRouteInventory() {
   return [
-    { pattern: "selinow.com/*", script: null },
-    { pattern: "*.selinow.com/*", script: null },
+    { pattern: "selinow.com/*", script: "selinow-com-production" },
+    { pattern: "*.selinow.com/*", script: "selinow-com-production" },
     { pattern: stagingSpec.wildcardRoute, script: stagingSpec.workerName },
     { pattern: "*/*", script: stagingSpec.workerName },
   ];
@@ -179,7 +181,7 @@ function exactSharedZoneDomainInventory(includeCanaryCarrier = false) {
       zone_id: stagingSpec.zoneId,
       zone_name: stagingSpec.zoneName,
     })),
-    ...Object.values(production.hostnames).map((hostname) => ({
+    ...Object.values(production.hostnames).filter((hostname) => hostname !== production.hostnames.marketing).map((hostname) => ({
       hostname,
       service: production.workerName,
       zone_id: production.zoneId,
@@ -321,6 +323,20 @@ describe("Cloudflare for SaaS platform configuration", () => {
     ))).ok).toBe(false);
     expect(validateStagingRouteInventory(stagingSpec, [...exactRoutes, exactRoutes[0]]).ok)
       .toBe(false);
+  });
+
+  it("accepts only a complete production handoff for the shared-zone boundary", () => {
+    const handoffRoutes = exactSharedZoneRouteInventory();
+    expect(validateStagingRouteInventory(stagingSpec, handoffRoutes)).toMatchObject({ ok: true });
+
+    expect(validateStagingRouteInventory(stagingSpec, handoffRoutes.map((route) => (
+      route.pattern === "*.selinow.com/*" ? { ...route, script: null } : route
+    ))).ok).toBe(false);
+    expect(validateStagingRouteInventory(stagingSpec, handoffRoutes.map((route) => (
+      route.pattern === stagingSpec.wildcardRoute
+        ? { ...route, script: stagingSpec.productionWorkerName }
+        : route
+    ))).ok).toBe(false);
   });
 
   it("fails closed on extra or conflicting script-bound routes", () => {

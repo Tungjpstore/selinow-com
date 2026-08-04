@@ -66,7 +66,8 @@ function readyWranglerConfig(): Record<string, unknown> {
           { binding: "PRIVATE_EXPORTS", bucket_name: "selinow-private-exports-production" },
         ],
         routes: [
-          { pattern: "selinow.com" },
+          { pattern: "selinow.com/*", zone_name: "selinow.com" },
+          { pattern: "*.selinow.com/*", zone_name: "selinow.com" },
           { pattern: "app.selinow.com" },
           { pattern: "api.selinow.com" },
         ],

@@ -4,6 +4,7 @@
   "zoneId": "ce1536fca500680c544662e361ed869b",
   "zoneName": "selinow.com",
   "workerName": "selinow-com-staging",
+  "productionWorkerName": "selinow-com-production",
   "resources": {
     "d1": "selinow-staging",
     "r2": "selinow-media-staging",

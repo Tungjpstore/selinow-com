@@ -121,8 +121,12 @@
       "preview_urls": false,
       "routes": [
         {
-          "custom_domain": true,
-          "pattern": "selinow.com"
+          "pattern": "selinow.com/*",
+          "zone_name": "selinow.com"
+        },
+        {
+          "pattern": "*.selinow.com/*",
+          "zone_name": "selinow.com"
         },
         {
           "custom_domain": true,

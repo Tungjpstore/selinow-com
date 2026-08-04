@@ -554,6 +554,9 @@ export function buildStagingVars(spec, manifest) {
 }
 
 export function buildStagingRoutes(spec) {
+  const expectedProductionWorkerName = typeof spec.workerName === "string"
+    ? spec.workerName.replace(/-staging$/u, "-production")
+    : null;
   const expectedDisabledRoutes = [
     `${spec.zoneName}/*`,
     `*.${spec.zoneName}/*`,
@@ -563,7 +566,10 @@ export function buildStagingRoutes(spec) {
     { pattern: spec.wildcardRoute, zone_name: spec.zoneName },
     { pattern: "*/*", zone_name: spec.zoneName },
   ];
-  if (JSON.stringify(spec.sharedZoneDisabledRoutes) !== JSON.stringify(expectedDisabledRoutes)
+  if (expectedProductionWorkerName === spec.workerName
+    || spec.productionWorkerName !== expectedProductionWorkerName
+    || spec.productionWorkerName === spec.workerName
+    || JSON.stringify(spec.sharedZoneDisabledRoutes) !== JSON.stringify(expectedDisabledRoutes)
     || JSON.stringify(spec.workerRoutes) !== JSON.stringify(expectedRoutes)) {
     throw new Error("cloudflare_staging_route_contract_invalid");
   }
@@ -594,10 +600,21 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
     ))
     .map((route) => route.pattern)
     .sort();
-  const expectedNullScriptPatterns = [...spec.sharedZoneDisabledRoutes].sort();
+  const sharedZonePatterns = new Set(spec.sharedZoneDisabledRoutes);
+  const sharedZoneRoutes = liveRoutes.filter((route) => (
+    route !== null
+      && typeof route === "object"
+      && sharedZonePatterns.has(route.pattern)
+  ));
+  const sharedZoneNull = sharedZoneRoutes.length === sharedZonePatterns.size
+    && sharedZoneRoutes.every((route) => route.script === null);
+  const sharedZoneProduction = sharedZoneRoutes.length === sharedZonePatterns.size
+    && sharedZoneRoutes.every((route) => route.script === spec.productionWorkerName);
+  const expectedNullScriptPatterns = sharedZoneNull ? [...spec.sharedZoneDisabledRoutes].sort() : [];
   const inventoryAllowlistOk = routePatterns.every((pattern) => pattern !== null)
     && new Set(routePatterns).size === routePatterns.length
-    && JSON.stringify(nullScriptPatterns) === JSON.stringify(expectedNullScriptPatterns);
+    && JSON.stringify(nullScriptPatterns) === JSON.stringify(expectedNullScriptPatterns)
+    && (sharedZoneNull || sharedZoneProduction);
 
   // A required route can be correct while an additional, higher-priority
   // script-bound route still diverts staging traffic to another Worker. Keep
@@ -605,6 +622,7 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
   // on any extra or conflicting script binding.
   const allowedScriptPatterns = new Set([
     ...spec.hostnames,
+    ...spec.sharedZoneDisabledRoutes,
     spec.wildcardRoute,
     "*/*",
   ]);
@@ -620,11 +638,12 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
     .map((route) => {
       const ok = typeof route.script === "string"
         && allowedScriptPatterns.has(route.pattern)
-        && route.script === spec.workerName;
+        && (route.script === spec.workerName
+          || (sharedZonePatterns.has(route.pattern) && route.script === spec.productionWorkerName));
       return {
         code: "cloudflare_staging_route_script_binding",
         detail: ok
-          ? `${route.pattern} is bound to ${spec.workerName}`
+          ? `${route.pattern} is bound to ${route.script}`
           : `${route.pattern} has an unapproved staging Worker binding`,
         ok,
       };
@@ -664,11 +683,17 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
       && route.pattern === expected.pattern
     ));
     const ok = matchingRoutes.length === 1
-      && matchingRoutes[0].script === expected.script;
+      && (matchingRoutes[0].script === expected.script
+        || (sharedZonePatterns.has(expected.pattern)
+          && matchingRoutes[0].script === spec.productionWorkerName));
+    const acceptedDetail = sharedZonePatterns.has(expected.pattern)
+      && matchingRoutes[0]?.script === spec.productionWorkerName
+      ? `${expected.pattern} is bound to the approved production Worker`
+      : expected.detail;
     return {
       code: expected.code,
       detail: ok
-        ? expected.detail
+        ? acceptedDetail
         : `${expected.pattern} does not match the required staging route contract`,
       ok,
     };
@@ -678,7 +703,7 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
   checks.push({
     code: "cloudflare_staging_route_inventory_allowlist",
     detail: inventoryAllowlistOk
-      ? "Live routes contain only unique, well-formed bindings and the exact null-script guards"
+      ? "Live routes contain only unique, well-formed bindings and the approved shared-zone boundary"
       : "Live routes contain malformed, duplicate, or unapproved null-script bindings",
     ok: inventoryAllowlistOk,
   });
@@ -714,6 +739,7 @@ function productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConf
     || productionSpec?.zoneName !== stagingSpec?.zoneName
     || canaryHostname !== `canary.${productionSpec?.zoneName}`
     || production?.name !== productionSpec?.workerName
+    || stagingSpec?.productionWorkerName !== productionSpec?.workerName
     || !cloudflareAccountIdPattern.test(productionSpec?.accountId ?? "")
     || !cloudflareAccountIdPattern.test(productionSpec?.zoneId ?? "")
     || typeof productionSpec?.workerName !== "string"
@@ -758,7 +784,10 @@ function productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConf
     if (kind === "domain") customDomains.add(pattern);
     else zoneRoutes.add(pattern);
   }
-  if (productionHostnames.some((hostname) => !customDomains.has(hostname))) {
+  const marketingHostname = productionSpec.hostnames.marketing;
+  const requiredProductionDomains = productionHostnames.filter((hostname) => hostname !== marketingHostname);
+  if (requiredProductionDomains.some((hostname) => !customDomains.has(hostname))
+    || (!customDomains.has(marketingHostname) && !zoneRoutes.has(`${marketingHostname}/*`))) {
     throw new Error("production_worker_route_contract_invalid");
   }
 
@@ -768,9 +797,6 @@ function productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConf
   const stagingZoneRoutes = new Map(stagingSpec.workerRoutes
     .filter((route) => route.custom_domain !== true)
     .map((route) => [route.pattern, stagingSpec.workerName]));
-  for (const pattern of stagingSpec.sharedZoneDisabledRoutes) {
-    stagingZoneRoutes.set(pattern, null);
-  }
   if ([...zoneRoutes].some((pattern) => stagingZoneRoutes.has(pattern))) {
     throw new Error("production_worker_route_contract_invalid");
   }
