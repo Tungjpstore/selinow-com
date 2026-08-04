@@ -3,8 +3,8 @@
 ## Phase 4 review update (2026-08-04)
 
 Current decision: `local_ready_remote_blocked` for candidate
-`6b2b8a92ef6ecf4e6f102f06df5a3c86ed2fd62e` (tree
-`ffdcf4daa040ca67e17522986430a338b10ed77c`). No explicit staging
+`8f251e43e9bd6e11e03937160181395202e35ade` (tree
+`338587de6d69f354f7d124b78d9b2aa51918dd2d`). No explicit staging
 mutation approval was supplied for P4, so no remote command was executed.
 
 The mutation contract now requires a live ledger that is an exact ordered prefix

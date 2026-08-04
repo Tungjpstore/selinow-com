@@ -13,9 +13,9 @@ before Wrangler. P4 also replaces the 14-scenario readiness projection with an
 window, owner, acknowledgement reference, and stop/reconciliation action for
 every required monitoring signal.
 
-The reviewed runtime candidate is
-`6b2b8a92ef6ecf4e6f102f06df5a3c86ed2fd62e` with tree
-`ffdcf4daa040ca67e17522986430a338b10ed77c`. P4 artifacts are
+The reviewed runtime/test candidate is
+`8f251e43e9bd6e11e03937160181395202e35ade` with tree
+`338587de6d69f354f7d124b78d9b2aa51918dd2d`. P4 artifacts are
 `docs/PHASE_4_REVIEW_PACKAGE_R0.md`, `docs/PHASE_4_STAGING_ACCEPTANCE.md`,
 `docs/PHASE_4_UAT_MATRIX.md`, `docs/PHASE_4_PILOT_EXECUTION_PLAN.md`,
 `docs/PHASE_4_INCIDENT_AND_ROLLBACK.md`, and the explicitly non-evidence example
@@ -26,6 +26,15 @@ deploy, route/DNS/secret change, provider side effect, real order, or pilot sell
 action was performed. External approval, least-privilege credentials, protected
 staging evidence, exact owners/acknowledgement paths, previous Worker version,
 PayOS/Dodo/Telegram readiness, and an approved observation window remain required.
+
+Final local verification: `npm ci --ignore-scripts` audited 456 packages with
+zero vulnerabilities; `npm run check` passed 696 files with zero errors and the
+existing three hints; lint and `npx tsc --noEmit` passed; Vitest passed 250 files
+and 1,783 tests; both builds and both deploy dry-runs passed with 280 modules;
+`npm audit --audit-level=high` found zero vulnerabilities. The existing non-fatal
+mixed static/dynamic inventory crypto import warning remains. Candidate-bound
+local restore report `.wrangler/restore-drills/local/rdr_20260804084301_d401da7dbdf1.json`
+passed integrity, zero FK violations, 614 restored items, and exact cleanup.
 
 ## Phase 3 staging admission and controlled pilot readiness (2026-08-04)
 

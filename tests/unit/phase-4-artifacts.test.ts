@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const candidate = "6b2b8a92ef6ecf4e6f102f06df5a3c86ed2fd62e";
+const candidate = "8f251e43e9bd6e11e03937160181395202e35ade";
 const artifactPaths = [
   "docs/PHASE_4_REVIEW_PACKAGE_R0.md",
   "docs/PHASE_4_STAGING_ACCEPTANCE.md",

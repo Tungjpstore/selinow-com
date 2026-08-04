@@ -2,7 +2,7 @@
 
 Status: `local_ready_remote_blocked`
 
-Candidate: `6b2b8a92ef6ecf4e6f102f06df5a3c86ed2fd62e`
+Candidate: `8f251e43e9bd6e11e03937160181395202e35ade`
 
 This is an executable evidence contract, not staging evidence. No remote mutation
 is authorized by this file. The P4 task contains no explicit staging-mutation

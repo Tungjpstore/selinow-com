@@ -3,8 +3,8 @@
 Last verified: 2026-08-04 (Asia/Tokyo)
 
 P4 completion state: `local_ready_remote_blocked`. The independently reviewed
-runtime candidate is `6b2b8a92ef6ecf4e6f102f06df5a3c86ed2fd62e`
-(tree `ffdcf4daa040ca67e17522986430a338b10ed77c`). Staging database
+runtime/test candidate is `8f251e43e9bd6e11e03937160181395202e35ade`
+(tree `338587de6d69f354f7d124b78d9b2aa51918dd2d`). Staging database
 mutation now fails closed unless the live ledger is an exact ordered prefix of
 the reviewed source ledger; staging seed additionally requires the complete
 ledger and passing preflight immediately before its sink. The P4 acceptance,
