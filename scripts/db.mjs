@@ -3,6 +3,8 @@ import process from "node:process";
 import { runWrangler, writeOutput } from "./lib/cli.mjs";
 import { assertFreshStagingContinuationEvidence } from "./lib/backup.mjs";
 import {
+  assertProductionDatabasePreflight,
+  assertProductionMigrationLedger,
   assertProductionMigrationAdmission,
   parseDatabaseFlags,
   requiresProductionMigrationAdmission,
@@ -123,6 +125,7 @@ try {
       const productionAdmission = await assertProductionMigrationAdmission({
         environment: process.env,
         manifestPath: flags.releaseManifestPath,
+        operation,
         repositoryRoot,
         workerSecretNames,
       });
@@ -202,6 +205,17 @@ try {
         cwd: repositoryRoot,
         env: commandEnvironment,
       });
+      if (requiresProductionMigrationAdmission(operation, flags)) {
+        await assertProductionMigrationLedger({
+          environment: commandEnvironment,
+          repositoryRoot,
+        });
+        assertProductionDatabasePreflight({
+          environment: commandEnvironment,
+          requirePaymentProviderSchema: true,
+          repositoryRoot,
+        });
+      }
     }
   }
 } catch (error) {

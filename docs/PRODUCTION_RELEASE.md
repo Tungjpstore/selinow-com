@@ -18,13 +18,21 @@ Start from these non-secret templates:
 
 Completed manifests are written with mode `0600` under `.wrangler/releases/<release-id>/` and must not be committed.
 
-The release doctor requires independent, recent acceptance evidence for
-`telegramBot`, `telegramMiniApp`, `zaloMiniApp`, `zaloOa`, `whatsappCloud` and
-`discord` under `providerAcceptance`. Each entry must contain only an accepted
-boolean, a private evidence reference and an observation timestamp. A local
-contract test or a provider-pending route response cannot satisfy this gate;
-the evidence must cover real provider credentials, webhook/outbound acceptance,
-tenant isolation and the applicable commerce/payment boundary.
+The release doctor uses schema version 2 with an explicit `releaseScope`: the
+`activeChannels` and `deferredChannels` arrays must partition Website plus the
+six provider channels, and Website + Telegram Bot are the minimum core launch.
+Only active provider lanes require recent independent acceptance under
+`providerAcceptance`; deferred lanes must not be marked accepted. PayOS and
+Dodo always require separate recent entries under `commerceAcceptance`, even
+when their channel lane is deferred. Each acceptance entry contains only an
+accepted boolean, a private evidence reference and an observation timestamp;
+references for active providers and the two commerce lanes must be distinct.
+A local contract test or provider-pending route response cannot satisfy this
+gate; active evidence must cover real provider credentials, webhook/outbound
+acceptance, tenant isolation and the applicable commerce/payment boundary.
+The evidence also records the reviewed live `migrationLedgerPrefix`; it must
+be an exact source prefix and is checked against the live D1 ledger before the
+production migration sink.
 
 ### Dashboard and channel-split acceptance boundary
 

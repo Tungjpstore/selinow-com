@@ -14,7 +14,7 @@ Phase 6 platform routing is implemented and live on Selinow staging. Worker `sel
 
 Phase 7 implementation and the shared-zone route matrix are accepted on staging. The `selinow.com` zone, Selinow-owned storage/queues, proxied wildcard DNS, fallback/CNAME records, Worker bindings/secrets and Cloudflare for SaaS fallback origin are provisioned. The external `selinow-lab.vnecs.store` lifecycle completed ownership verification, pending -> active hostname/SSL readiness, primary selection, HTTPS tenant rendering, platform-host redirect, deletion, fallback-primary restoration and authoritative DNS cleanup. Temporary acceptance resources were removed.
 
-Production routing remains intentionally unchanged.
+Production platform routing is live for the Selinow apex and wildcard surfaces after the platform-only handoff. External customer-domain traffic, Turnstile hostname admission and commerce/provider activation remain disabled pending their separate release gates; do not infer full production readiness from the route handoff.
 
 ## Production canary hostname
 
@@ -87,9 +87,9 @@ Cloudflare applies the more specific disabled routes before the broad fallback r
 
 The staging environment specification validates the full reviewed contract. Wrangler owns and regenerates only the seven custom domains plus the active wildcard and `*/*` Worker routes; the two disabled null-script guards remain operator-managed because the Worker routes API does not accept them as script-owned routes. `platform:doctor` and every non-dry staging deploy now use a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` to require the exact two `script=null` guards and bind both `*.staging.selinow.com/*` and `*/*` to `selinow-com-staging`; a missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
 
-### Production platform handoff matrix (not live)
+### Production platform handoff matrix (historical baseline; revalidate before mutation)
 
-The reviewed production platform-only handoff intentionally differs from the current staging inventory and has not been applied. Cloudflare evaluates the most-specific route first, so the safe target is:
+The reviewed production platform-only handoff intentionally differs from the current staging inventory and was applied after this matrix was drafted. Cloudflare evaluates the most-specific route first; the historical handoff target was:
 
 | Route | Worker |
 | --- | --- |
@@ -101,7 +101,7 @@ The reviewed production platform-only handoff intentionally differs from the cur
 | `*.staging.selinow.com/*` | `selinow-com-staging` |
 | `*/*` | `selinow-com-staging` |
 
-The exact in-zone staging routes are required because a production wildcard route outranks a staging Custom Domain. In this platform-only release, `*/*` intentionally remains on `selinow-com-staging`, so external custom-domain traffic remains on staging and no external-domain production cutover is claimed. Worker route patterns must belong to the zone; a future external cutover therefore requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher. During first-production canary, add `canary.selinow.com/* -> selinow-com-production` as a temporary specificity override while the existing null wildcard is still present. This matrix is plan-only evidence until a fresh live inventory confirms that every entry and service binding matches.
+The exact in-zone staging routes are required because a production wildcard route outranks a staging Custom Domain. In this platform-only release, `*/*` intentionally remains on `selinow-com-staging`, so external custom-domain traffic remains on staging and no external-domain production cutover is claimed. Worker route patterns must belong to the zone; a future external cutover therefore requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher. During first-production canary, the historical procedure added `canary.selinow.com/* -> selinow-com-production` as a temporary specificity override while the null wildcard was still present. This matrix is historical evidence only and cannot replace a fresh live inventory confirming every route and service binding before mutation.
 
 The active fallback origin and deployed route matrix prove the shared-zone configuration exists. The accepted external customer-hostname lifecycle additionally proves staging resolution through `customers.selinow.com`, successful HTTPS, correct tenant rendering and removal that stops routing; it does not prove production external-host admission or Turnstile lifecycle. Every future route or SaaS-contract change must repeat the relevant checks rather than relying only on this baseline.
 

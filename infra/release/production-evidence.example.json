@@ -1,10 +1,24 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "environment": "production",
   "releaseId": "replace-with-release-id",
   "commitSha": "replace-with-reviewed-git-sha",
+  "migrationLedgerPrefix": [],
   "previousWorkerVersion": "replace-with-current-worker-version",
   "candidateWorkerVersion": "replace-with-candidate-worker-version",
+  "releaseScope": {
+    "activeChannels": [
+      "website",
+      "telegramBot"
+    ],
+    "deferredChannels": [
+      "telegramMiniApp",
+      "zaloMiniApp",
+      "zaloOa",
+      "whatsappCloud",
+      "discord"
+    ]
+  },
   "approvals": {
     "releaseOwner": "replace-with-release-owner",
     "supportOwner": "replace-with-support-owner"
@@ -50,30 +64,17 @@
       "accepted": false,
       "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
       "observedAt": null
-    },
-    "telegramMiniApp": {
+    }
+  },
+  "commerceAcceptance": {
+    "payos": {
       "accepted": false,
-      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "evidenceRef": "replace-with-private-payos-acceptance-report-reference",
       "observedAt": null
     },
-    "zaloMiniApp": {
+    "dodo": {
       "accepted": false,
-      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
-      "observedAt": null
-    },
-    "zaloOa": {
-      "accepted": false,
-      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
-      "observedAt": null
-    },
-    "whatsappCloud": {
-      "accepted": false,
-      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
-      "observedAt": null
-    },
-    "discord": {
-      "accepted": false,
-      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "evidenceRef": "replace-with-private-dodo-acceptance-report-reference",
       "observedAt": null
     }
   },

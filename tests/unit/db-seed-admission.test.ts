@@ -47,6 +47,8 @@ async function runDatabaseCli(input: {
   const runner = vi.fn(input.runner);
   vi.doMock("../../scripts/lib/db-admission.mjs", () => {
     return {
+      assertProductionDatabasePreflight: vi.fn(() => ({ checks: [], ok: true })),
+      assertProductionMigrationLedger: vi.fn(() => Promise.resolve({ migrationNames: [] })),
       assertProductionMigrationAdmission: admission,
       parseDatabaseFlags,
       requiresProductionMigrationAdmission,

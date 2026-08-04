@@ -2,6 +2,43 @@
 
 Last updated: 2026-08-04
 
+## Current operational reconciliation (2026-08-04)
+
+The authoritative source migration chain is contiguous through `0080`; the
+accepted remote ledgers remain staging through `0028` and production through
+`0052` until separately admitted mutation evidence exists. Read-only Cloudflare
+checks confirmed the configured staging and production D1 names/UUIDs match the
+Wrangler inventory, without recording identifiers here. The production dashboard
+currently shows Worker version prefix `e2a4bc53` (`frontend-only release` /
+`release_20260802_mobilefix`), four domains, zero queues, nine bindings, logs
+enabled and previews disabled; historical bootstrap version `6ca9c890...` is not
+the current Worker. Staging currently shows version `049009b4`, previous version
+`2d7166ff`, 14 domains, three queues, one trigger and nine bindings. These are
+read-only observations, not durable admission evidence: exact version, route,
+domain, trigger/queue and release-manifest reconciliation remains required, and
+the final execution commit is pending until this batch is committed and reviewed.
+
+This batch hardens the normal production continuation path without opening the
+remote mutation gate. Release evidence is now schema version 2 with an explicit
+active/deferred channel partition, independent PayOS/Dodo commerce acceptance,
+distinct acceptance references, allowlisted value-safe manifest projections and
+an exact reviewed `migrationLedgerPrefix`. Production migration/seed admission
+checks the pinned account and D1 identity, exact reviewed ledger baseline, D1
+preflight and evidence stability before Wrangler; after the sink it requires the
+complete `0001`-`0080` ledger and provider schema/preflight. No staging or
+production migration, seed, deploy, route, DNS, queue/trigger or provider
+mutation was performed.
+
+Final local verification for this batch: `npm run check` passed with 0 errors and
+3 existing hints; `npm run lint`, `npx tsc --noEmit`, and 252 Vitest files / 1,804
+tests passed; `npm run build`, `npm run build:staging`, both deploy dry-runs and
+`npm audit --audit-level=high` passed. `npm run release:production:plan -- --json`
+remained a non-mutating plan; `npm run release:doctor -- --json` failed closed
+because fresh production evidence, backup/restore, candidate identity, provider
+acceptance, monitoring, pilot and secret-name inputs are absent. Cloudflare
+Chrome was used read-only for identity/ledger/runtime inspection; it did not
+apply migrations or alter configuration.
+
 ## Phase 5 staging execution and pilot admission (2026-08-04)
 
 Completion state: **`staging_execution_blocked`**. The P4 implementation
@@ -574,7 +611,7 @@ Verified through 2026-08-03 with Node 25.9.0, npm 11.12.1 and Wrangler 4.114.0:
 | First-production bootstrap admission | Focused bootstrap/backup/domain coverage passes 78/78. The exact production D1/R2/KV/Queue resources and Turnstile widget exist; all eight required Worker secrets are installed. Protected backup `.wrangler/backups/production/bkp_20260730085510_b14287fa3c8e/snapshot.json` captured the empty D1 with a provider bookmark, 32-byte artifact and verified SHA-256, and the isolated drill verified the empty baseline before cleanup. The completed ceremony then applied migrations `0001`-`0052`, deployed Worker version `6ca9c890-ed04-44dc-ac32-44b36881f2dc`, promoted apex/wildcard routes and activated exact dashboard/API Worker Domains. External customer-domain inventory/Turnstile admission, payment, Telegram and fulfillment remain pending or disabled. |
 | Historical normal-release `npm run release:manifest -- --json` | Failed closed because canonical normal-release pilots and acceptance were incomplete; the completed first-production platform handoff used its separate guarded ceremony instead |
 | Staging Worker deployment | Generic domain-event fan-out, Telegram delivery, DLQ replay, hardened queue consumers and the mobile checkout correction are active at code version `049009b4-9683-4c7f-8638-df859d50a0c8`; D1/R2/KV/Queue/Email bindings, custom domains and wildcard routing remain live |
-| Current frontend slice deployment boundary | The PromptOS frontend kit is traffic-deployed on Worker version `6ca9c890-ed04-44dc-ac32-44b36881f2dc`. `selinow.com`, `app.selinow.com` and `api.selinow.com` resolve publicly through Cloudflare; marketing, pricing, login and canonical health checks return 200. External customer-domain traffic remains on the staging catch-all, and no production Turnstile external-host admission is claimed. |
+| Current frontend slice deployment boundary | A 2026-08-04 read-only Cloudflare observation found the production Worker version prefix `e2a4bc53` carrying the frontend-only release; historical version `6ca9c890-ed04-44dc-ac32-44b36881f2dc` is no longer current. `selinow.com`, `app.selinow.com` and `api.selinow.com` resolve publicly through Cloudflare; exact candidate/rollback identity, route inventory and the observed zero-consumer production queue state must be reconciled before continuation. No production Turnstile external-host or full-commerce admission is claimed. |
 | Staging rollback target | Previous accepted Worker version `2d7166ff-3a87-4a9f-81bd-edd4db1074e2` remains available in the staging version history |
 | Staging backup | Historical pre-migration snapshot `bkp_20260727115311_ae2d581d060a` (report v1) remains retained with SHA-256 checksum `ad8beee57fc443f92699e2496e3eb00830742c6fe23af601e03d900fe7556213`, but is stale/invalid for current staging mutation admission (`staging_backup_evidence_invalid`). Read-only backup dry-run passes; a new non-empty report-v2 Time Travel backup with exact admitted account/D1 identity, provider bookmark, recorded size/SHA-256 and age <=60 minutes is mandatory after doctor/live-route admission |
 | Staging live-route admission | `platform:doctor --env staging --json` confirms staging resource readiness and the Worker secret binding, then fails closed because `CLOUDFLARE_PLATFORM_API_TOKEN` and `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` are unavailable. No live route inventory was bypassed and no staging mutation was attempted |

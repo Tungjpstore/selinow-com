@@ -12,12 +12,14 @@ changes.
 
 ## Release identity
 
-- Clean reviewed commit/tree: `TBD after R3 and final review`
+- Clean reviewed commit/tree: `TBD after this batch is committed and final review`
 - Release manifest/checksum: `TBD`
-- Current Worker/version: platform-only handoff is historical; fresh inventory
-  required
+- Current source migration ledger: contiguous `0001`-`0080`
+- Current Worker/version: read-only dashboard observation shows prefix
+  `e2a4bc53`; the historical `6ca9c890...` bootstrap version is not current,
+  and fresh exact inventory is required
 - Current D1 ledger: `0001`-`0052` must be rechecked live
-- Exact pending migrations: `0053`-`0077`, subject to live ledger
+- Exact pending migrations: `0053`-`0080`, subject to live ledger
 
 ## Production scope
 

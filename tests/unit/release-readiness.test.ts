@@ -109,6 +109,8 @@ function readyProductionSpec(): Record<string, unknown> {
 
 function readyEvidence(): Record<string, unknown> {
   return {
+    schemaVersion: 2,
+    environment: "production",
     approvals: { releaseOwner: "release-team", supportOwner: "support-team" },
     backup: {
       completedAt: "2026-07-26T02:30:00.000Z",
@@ -120,6 +122,11 @@ function readyEvidence(): Record<string, unknown> {
     },
     candidateWorkerVersion: "worker-candidate",
     commitSha: "0123456789abcdef0123456789abcdef01234567",
+    commerceAcceptance: Object.fromEntries(["payos", "dodo"].map((provider) => [provider, {
+      accepted: true,
+      evidenceRef: `private/commerce-acceptance/${provider}.json`,
+      observedAt: "2026-07-25T12:00:00.000Z",
+    }])),
     manualAcceptance: {
       customDomain: true,
       evidenceRef: "private/manual-acceptance/report.json",
@@ -128,6 +135,7 @@ function readyEvidence(): Record<string, unknown> {
       telegram: true,
       website: true,
     },
+    migrationLedgerPrefix: ["0001_first.sql"],
     monitoring: {
       alertsReady: true,
       budgetAlertsReady: true,
@@ -143,6 +151,10 @@ function readyEvidence(): Record<string, unknown> {
       observedAt: "2026-07-25T12:00:00.000Z",
     }])),
     quality: { build: true, check: true, deployDryRun: true, lint: true, test: true },
+    releaseScope: {
+      activeChannels: ["website", ...providerAcceptanceKeys],
+      deferredChannels: [],
+    },
     releaseId: "release_20260726_abcdef12",
     rollback: { rehearsalEvidenceRef: "private/rollback/report.json", rehearsedAt: "2026-07-20T12:00:00.000Z" },
     security: { criticalOpen: 0, highOpen: 0 },
@@ -270,6 +282,114 @@ describe("production release readiness", () => {
     ]));
   });
 
+  it("requires acceptance only for active providers and rejects accepted deferred providers", () => {
+    const evidence = readyEvidence();
+    evidence.releaseScope = {
+      activeChannels: ["website", "telegramBot"],
+      deferredChannels: ["telegramMiniApp", "zaloMiniApp", "zaloOa", "whatsappCloud", "discord"],
+    };
+    const providerAcceptance = evidence.providerAcceptance as Record<string, Record<string, unknown>>;
+    for (const provider of providerAcceptanceKeys.slice(1)) Reflect.deleteProperty(providerAcceptance, provider);
+
+    const accepted = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+    expect(accepted.ok).toBe(true);
+
+    providerAcceptance.discord = {
+      accepted: true,
+      evidenceRef: "private/provider-acceptance/discord.json",
+      observedAt: "2026-07-25T12:00:00.000Z",
+    };
+    const rejected = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+    expect(rejected.missing).toEqual(expect.arrayContaining([
+      "evidence.providerAcceptance.discord.deferredNotAccepted",
+      "evidence.releaseScope.deferredProvidersNotAccepted",
+    ]));
+  });
+
+  it("fails closed for incomplete channel scope and commerce acceptance", () => {
+    const evidence = readyEvidence();
+    evidence.releaseScope = {
+      activeChannels: ["website", "telegramBot", "telegramBot"],
+      deferredChannels: ["telegramMiniApp", "zaloMiniApp", "zaloOa", "whatsappCloud"],
+    };
+    const commerceAcceptance = evidence.commerceAcceptance as {
+      dodo: Record<string, unknown>;
+      payos: Record<string, unknown>;
+    };
+    delete commerceAcceptance.dodo.evidenceRef;
+    commerceAcceptance.payos.observedAt = "2026-06-01T00:00:00.000Z";
+
+    const result = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.missing).toEqual(expect.arrayContaining([
+      "evidence.releaseScope.channelsComplete",
+      "evidence.commerceAcceptance.dodo.evidenceRef",
+      "evidence.commerceAcceptance.payos.observedAtFresh",
+    ]));
+  });
+
+  it("requires distinct evidence references for independent acceptance lanes", () => {
+    const evidence = readyEvidence();
+    const providers = evidence.providerAcceptance as {
+      discord: Record<string, unknown>;
+      telegramBot: Record<string, unknown>;
+    };
+    const commerce = evidence.commerceAcceptance as {
+      dodo: Record<string, unknown>;
+      payos: Record<string, unknown>;
+    };
+    providers.discord.evidenceRef = providers.telegramBot.evidenceRef;
+    commerce.dodo.evidenceRef = commerce.payos.evidenceRef;
+
+    const result = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.missing).toEqual(expect.arrayContaining([
+      "evidence.providerAcceptance.activeEvidenceRefsUnique",
+      "evidence.commerceAcceptance.evidenceRefsUnique",
+    ]));
+  });
+
+  it("rejects evidence references reused across provider and commerce lanes", () => {
+    const evidence = readyEvidence();
+    const providers = evidence.providerAcceptance as { telegramBot: Record<string, unknown> };
+    const commerce = evidence.commerceAcceptance as { payos: Record<string, unknown> };
+    commerce.payos.evidenceRef = providers.telegramBot.evidenceRef;
+
+    const result = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.missing).toContain("evidence.acceptanceRefs.crossLaneUnique");
+  });
+
   it("builds a value-safe manifest and rollback matrix after readiness passes", () => {
     const result = buildReleaseArtifacts({
       evidence: readyEvidence(),
@@ -283,10 +403,51 @@ describe("production release readiness", () => {
 
     expect(result.manifest.releaseId).toBe("release_20260726_abcdef12");
     expect(result.manifest.migrationNames).toEqual(["0001_first.sql", "0002_second.sql"]);
+    expect(result.manifest.migrationLedgerPrefix).toEqual(["0001_first.sql"]);
     expect(result.manifest.schemaVersion).toBe(2);
+    expect(result.manifest.releaseScope).toEqual({
+      activeChannels: ["website", ...providerAcceptanceKeys],
+      deferredChannels: [],
+    });
+    expect(result.manifest.commerceAcceptance).toEqual((readyEvidence().commerceAcceptance));
     expect(result.manifest.releaseEvidenceFingerprintSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(result.rollbackMatrix).toHaveLength(6);
     expect(JSON.stringify(result)).not.toContain("snapshotReportRef");
+  });
+
+  it("rejects a reviewed migration baseline that is not the exact source prefix", () => {
+    const evidence = readyEvidence();
+    evidence.migrationLedgerPrefix = ["0002_second.sql"];
+
+    expect(() => buildReleaseArtifacts({
+      evidence,
+      migrationNames: ["0001_first.sql", "0002_second.sql"],
+      now,
+      packageVersion: "0.0.0",
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    })).toThrow("release_prerequisites_incomplete:evidence.migrationLedgerPrefix");
+  });
+
+  it("projects only allowlisted acceptance fields into the release manifest", () => {
+    const evidence = readyEvidence();
+    (evidence.manualAcceptance as Record<string, unknown>).token = "manual-secret";
+    ((evidence.providerAcceptance as { telegramBot: Record<string, unknown> }).telegramBot).token = "provider-secret";
+    ((evidence.commerceAcceptance as { payos: Record<string, unknown> }).payos).rawPayload = "commerce-secret";
+    (evidence.releaseScope as Record<string, unknown>).credential = "scope-secret";
+
+    const result = buildReleaseArtifacts({
+      evidence,
+      migrationNames: ["0001_first.sql", "0002_second.sql"],
+      now,
+      packageVersion: "0.0.0",
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(JSON.stringify(result.manifest)).not.toMatch(/manual-secret|provider-secret|commerce-secret|scope-secret/u);
   });
 
   it("admits only a clean source tree matching the reviewed release manifest", () => {
@@ -317,6 +478,7 @@ describe("production release readiness", () => {
       wranglerConfig,
     })).toEqual({
       commitSha: "0123456789abcdef0123456789abcdef01234567",
+      migrationLedgerPrefix: ["0001_first.sql"],
       releaseId: "release_20260726_abcdef12",
     });
 
@@ -430,7 +592,7 @@ describe("production release readiness", () => {
         now,
         repositoryRoot: root,
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
-      })).resolves.toEqual({ commitSha, releaseId });
+      })).resolves.toEqual({ commitSha, migrationLedgerPrefix: ["0001_first.sql"], releaseId });
 
       await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.0.1" }));
       await expect(assertProductionDeployAdmission({

@@ -5,8 +5,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertProductionAccountIdentity,
+  assertProductionDatabasePreflight,
   assertProductionDatabaseIdentity,
+  assertProductionMigrationLedger,
   assertProductionMigrationAdmission,
+  assertProductionMigrationLedgerPrefix,
+  parseProductionMigrationLedgerOutput,
   parseDatabaseFlags,
   requiresProductionMigrationAdmission,
   requiresStagingDatabaseAdmission,
@@ -203,6 +207,86 @@ describe("production database migration admission", () => {
     }).toThrow("production_database_identity_mismatch");
   });
 
+  it("accepts only an exact ordered production ledger prefix and requires completeness after migration", async () => {
+    const migrationNames = [
+      "0001_platform_foundation.sql",
+      "0002_tenant_auth_subscription.sql",
+      "0003_catalog_inventory_orders.sql",
+    ];
+    const runner = (observed: string[]) => () => ({
+      stderr: "",
+      stdout: JSON.stringify([{ success: true, results: observed.map((name) => ({ name })) }]),
+    });
+
+    await expect(assertProductionMigrationLedgerPrefix({
+      expectedPrefix: migrationNames.slice(0, 2),
+      migrationNames,
+      runWranglerImplementation: runner(migrationNames.slice(0, 2)),
+    })).resolves.toEqual({ migrationNames: migrationNames.slice(0, 2) });
+    await expect(assertProductionMigrationLedgerPrefix({
+      expectedPrefix: migrationNames.slice(0, 1),
+      migrationNames,
+      runWranglerImplementation: runner(migrationNames.slice(0, 2)),
+    })).rejects.toThrow("production_migration_ledger_prefix_invalid");
+    await expect(assertProductionMigrationLedgerPrefix({
+      migrationNames,
+      runWranglerImplementation: runner([
+        "0002_tenant_auth_subscription.sql",
+        "0001_platform_foundation.sql",
+      ]),
+    })).rejects.toThrow("production_migration_ledger_prefix_invalid");
+    await expect(assertProductionMigrationLedger({
+      migrationNames,
+      runWranglerImplementation: runner(migrationNames.slice(0, 2)),
+    })).rejects.toThrow("production_migration_ledger_incomplete");
+    await expect(assertProductionMigrationLedger({
+      migrationNames,
+      runWranglerImplementation: runner(migrationNames),
+    })).resolves.toEqual({ migrationNames });
+    expect(() => parseProductionMigrationLedgerOutput(JSON.stringify([{
+      results: migrationNames.map((name) => ({ name })),
+      success: false,
+    }]))).toThrow("production_migration_ledger_invalid_result");
+  });
+
+  it("runs every production database invariant query and fails closed on violations", () => {
+    const runner = vi.fn((args: string[]) => {
+      const sql = args[args.indexOf("--command") + 1] ?? "";
+      if (sql.includes("sqlite_master")) return { stderr: "", stdout: JSON.stringify([{ results: [] }]) };
+      if (sql.includes("missing_payos_connections")) throw new Error("provider query should be skipped");
+      if (sql.includes("invalid_payos_active_credential_links")) {
+        return { stderr: "", stdout: JSON.stringify([{ results: [{
+          invalid_payos_active_credential_links: 0,
+          invalid_payos_attempt_links: 0,
+          invalid_payos_credential_integration_links: 0,
+          invalid_payos_event_links: 0,
+          invalid_payos_exception_links: 0,
+          invalid_payos_paid_event_links: 0,
+        }] }]) };
+      }
+      return { stderr: "", stdout: JSON.stringify([{ results: [{
+        canonical_null_shops: 0,
+        duplicate_primary_shops: 0,
+        duplicate_provider_ids: 0,
+        invalid_canonical_links: 0,
+        legacy_custom_domains: 0,
+        unresolved_active_attempt_origins: 0,
+      }] }]) };
+    });
+
+    expect(assertProductionDatabasePreflight({ runWranglerImplementation: runner })).toMatchObject({ ok: true });
+    expect(runner).toHaveBeenCalledTimes(3);
+    expect(() => assertProductionDatabasePreflight({
+      requirePaymentProviderSchema: true,
+      runWranglerImplementation: runner,
+    })).toThrow("production_database_preflight_failed");
+    expect(() => assertProductionDatabasePreflight({
+      runWranglerImplementation: () => {
+        throw new Error("provider output");
+      },
+    })).toThrow("production_database_preflight_failed");
+  });
+
   it("does not expose provider output when account lookup fails", async () => {
     await expect(assertProductionMigrationAdmission({
       assertReleaseAdmissionImplementation: () => Promise.resolve({
@@ -246,6 +330,7 @@ describe("production database migration admission", () => {
       events.push("release");
       return Promise.resolve({
         commitSha: "0123456789abcdef0123456789abcdef01234567",
+        migrationLedgerPrefix: ["0001_platform_foundation.sql"],
         releaseId: "release_20260729_abcdef12",
       });
     });
@@ -262,6 +347,15 @@ describe("production database migration admission", () => {
 
     await expect(assertProductionMigrationAdmission({
       assertReleaseAdmissionImplementation: releaseAdmission,
+      assertDatabasePreflightImplementation: () => {
+        events.push("preflight");
+        return { checks: [], ok: true };
+      },
+      assertMigrationLedgerPrefixImplementation: (input) => {
+        expect(input.expectedPrefix).toEqual(["0001_platform_foundation.sql"]);
+        events.push("ledger");
+        return Promise.resolve({ migrationNames: ["0001_platform_foundation.sql"] });
+      },
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
       assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
@@ -276,7 +370,44 @@ describe("production database migration admission", () => {
       databaseName: "selinow-production",
       releaseId: "release_20260729_abcdef12",
     });
-    expect(events).toEqual(["release", "whoami --json", "d1 list --env production --json", "release"]);
+    expect(events).toEqual([
+      "release",
+      "whoami --json",
+      "d1 list --env production --json",
+      "ledger",
+      "preflight",
+      "release",
+      "ledger",
+      "preflight",
+    ]);
+  });
+
+  it("fails closed when the production migration ledger changes during admission", async () => {
+    let ledgerRead = 0;
+    await expect(assertProductionMigrationAdmission({
+      assertReleaseAdmissionImplementation: () => Promise.resolve({
+        commitSha: "0123456789abcdef0123456789abcdef01234567",
+        releaseId: "release_20260729_abcdef12",
+      }),
+      assertDatabasePreflightImplementation: () => ({ checks: [], ok: true }),
+      assertMigrationLedgerPrefixImplementation: () => Promise.resolve({
+        migrationNames: ledgerRead++ === 0
+          ? ["0001_platform_foundation.sql"]
+          : ["0001_platform_foundation.sql", "0002_tenant_auth_subscription.sql"],
+      }),
+      manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
+      assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
+      productionSpec: productionSpec(),
+      repositoryRoot: process.cwd(),
+      runWranglerImplementation: (args) => ({
+        stderr: "",
+        stdout: args[0] === "d1"
+          ? JSON.stringify([{ name: "selinow-production", uuid: databaseId }])
+          : `Account ID: ${accountId}`,
+      }),
+      workerSecretNames: [],
+      wranglerConfig: wranglerConfig(),
+    })).rejects.toThrow("production_migration_ledger_changed");
   });
 
   it("places admission immediately before the production migration sink", () => {
@@ -284,10 +415,16 @@ describe("production database migration admission", () => {
     const gate = source.indexOf("await assertProductionMigrationAdmission");
     const pin = source.indexOf("buildPinnedCloudflareEnvironment", gate);
     const sink = source.indexOf("runWrangler(wranglerArgs", gate);
+    const postLedger = source.indexOf("await assertProductionMigrationLedger", sink);
+    const postPreflight = source.indexOf("assertProductionDatabasePreflight", postLedger);
+    const strictProviderSchema = source.indexOf("requirePaymentProviderSchema: true", postPreflight);
 
     expect(gate).toBeGreaterThan(-1);
     expect(pin).toBeGreaterThan(gate);
     expect(sink).toBeGreaterThan(gate);
+    expect(postLedger).toBeGreaterThan(sink);
+    expect(postPreflight).toBeGreaterThan(postLedger);
+    expect(strictProviderSchema).toBeGreaterThan(postPreflight);
   });
 
   it("places the same production admission immediately before the seed sink", () => {

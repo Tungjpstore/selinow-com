@@ -65,6 +65,9 @@ export const REQUIRED_PROVIDER_ACCEPTANCE_KEYS = [
   "discord",
 ];
 
+export const RELEASE_CHANNEL_KEYS = ["website", ...REQUIRED_PROVIDER_ACCEPTANCE_KEYS];
+export const REQUIRED_COMMERCE_ACCEPTANCE_KEYS = ["payos", "dodo"];
+
 const REQUIRED_SPEC_PATHS = [
   "accountId",
   "environment",
@@ -223,11 +226,80 @@ function validEvidencePath(path, value) {
   if (path === "staging.acceptedAt") return safeDate(value) !== null;
   if (/^providerAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.accepted$/u.test(path)) return value === true;
   if (/^providerAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.observedAt$/u.test(path)) return safeDate(value) !== null;
+  if (/^commerceAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.accepted$/u.test(path)) return value === true;
+  if (/^commerceAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.observedAt$/u.test(path)) return safeDate(value) !== null;
   if (path === "security.criticalOpen" || path === "security.highOpen") return value === 0;
   if (path === "pilot.shopCount") return Number.isSafeInteger(value) && value >= 2;
   if (path === "releaseId") return typeof value === "string" && RELEASE_ID_PATTERN.test(value) && !PLACEHOLDER_PATTERN.test(value);
   if (path === "commitSha") return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
   return isConfigured(value);
+}
+
+function evaluateReleaseScope(evidence) {
+  const activeChannels = Array.isArray(evidence?.releaseScope?.activeChannels)
+    ? evidence.releaseScope.activeChannels
+    : [];
+  const deferredChannels = Array.isArray(evidence?.releaseScope?.deferredChannels)
+    ? evidence.releaseScope.deferredChannels
+    : [];
+  const knownChannels = new Set(RELEASE_CHANNEL_KEYS);
+  const activeProviderKeys = activeChannels.filter((channel) => channel !== "website");
+  const deferredProviderKeys = deferredChannels.filter((channel) => channel !== "website");
+  const activeValid = activeChannels.every((channel) => typeof channel === "string" && knownChannels.has(channel));
+  const deferredValid = deferredChannels.every((channel) => typeof channel === "string" && knownChannels.has(channel));
+  const activeUnique = new Set(activeChannels).size === activeChannels.length;
+  const deferredUnique = new Set(deferredChannels).size === deferredChannels.length;
+  const uniqueChannels = new Set([...activeChannels, ...deferredChannels]);
+  const complete = activeUnique
+    && deferredUnique
+    && uniqueChannels.size === RELEASE_CHANNEL_KEYS.length
+    && RELEASE_CHANNEL_KEYS.every((channel) => uniqueChannels.has(channel))
+    && activeChannels.every((channel) => !deferredChannels.includes(channel));
+  const coreLaunch = activeChannels.includes("website") && activeChannels.includes("telegramBot");
+  const deferredAccepted = deferredChannels.some((channel) => evidence?.providerAcceptance?.[channel]?.accepted === true);
+  return {
+    activeProviderKeys,
+    deferredProviderKeys,
+    checks: [
+      makeCheck("evidence.schemaVersion", evidence?.schemaVersion === 2),
+      makeCheck("evidence.environment", evidence?.environment === "production"),
+      makeCheck("evidence.releaseScope.activeChannels", activeChannels.length > 0 && activeValid),
+      makeCheck("evidence.releaseScope.deferredChannels", deferredValid),
+      makeCheck("evidence.releaseScope.channelsComplete", complete),
+      makeCheck("evidence.releaseScope.coreLaunch", coreLaunch),
+      makeCheck("evidence.releaseScope.deferredProvidersNotAccepted", !deferredAccepted),
+    ],
+  };
+}
+
+function evaluateCommerceAcceptance(evidence) {
+  return REQUIRED_COMMERCE_ACCEPTANCE_KEYS.flatMap((provider) => [
+    makeCheck(
+      `evidence.commerceAcceptance.${provider}.accepted`,
+      validEvidencePath(`commerceAcceptance.${provider}.accepted`, evidence?.commerceAcceptance?.[provider]?.accepted),
+    ),
+    makeCheck(
+      `evidence.commerceAcceptance.${provider}.evidenceRef`,
+      validEvidencePath(`commerceAcceptance.${provider}.evidenceRef`, evidence?.commerceAcceptance?.[provider]?.evidenceRef),
+    ),
+    makeCheck(
+      `evidence.commerceAcceptance.${provider}.observedAt`,
+      validEvidencePath(`commerceAcceptance.${provider}.observedAt`, evidence?.commerceAcceptance?.[provider]?.observedAt),
+    ),
+  ]);
+}
+
+function acceptanceEntry(source, key) {
+  const entry = source?.[key] ?? {};
+  return {
+    accepted: entry.accepted === true,
+    evidenceRef: typeof entry.evidenceRef === "string" ? entry.evidenceRef : null,
+    observedAt: typeof entry.observedAt === "string" ? entry.observedAt : null,
+  };
+}
+
+function projectAcceptance(source, keys) {
+  return Object.fromEntries(keys.map((key) => [key, acceptanceEntry(source, key)]));
 }
 
 export function evaluateBackupPrerequisites(evidence, now = new Date()) {
@@ -250,6 +322,7 @@ export function inspectProductionReadiness(input) {
   const production = input.wranglerConfig?.env?.production;
   const spec = input.productionSpec;
   const evidence = input.evidence;
+  const releaseScope = evaluateReleaseScope(evidence);
   const checks = [
     makeCheck("wrangler.env.production", typeof production === "object" && production !== null),
     makeCheck("wrangler.env.production.name", isConfigured(production?.name)),
@@ -288,6 +361,17 @@ export function inspectProductionReadiness(input) {
     makeCheck("wrangler.env.production.triggers", Array.isArray(production?.triggers?.crons) && production.triggers.crons.length > 0),
     makeCheck("wrangler.env.production.observability", production?.observability?.enabled === true),
   );
+  const activeRefs = releaseScope.activeProviderKeys
+    .map((provider) => evidence?.providerAcceptance?.[provider]?.evidenceRef)
+    .filter((value) => typeof value === "string");
+  const commerceRefs = REQUIRED_COMMERCE_ACCEPTANCE_KEYS
+    .map((provider) => evidence?.commerceAcceptance?.[provider]?.evidenceRef)
+    .filter((value) => typeof value === "string");
+  checks.push(
+    makeCheck("evidence.providerAcceptance.activeEvidenceRefsUnique", new Set(activeRefs).size === activeRefs.length),
+    makeCheck("evidence.commerceAcceptance.evidenceRefsUnique", new Set(commerceRefs).size === commerceRefs.length),
+    makeCheck("evidence.acceptanceRefs.crossLaneUnique", new Set([...activeRefs, ...commerceRefs]).size === activeRefs.length + commerceRefs.length),
+  );
 
   for (const name of REQUIRED_PRODUCTION_VARS) {
     const value = production?.vars?.[name];
@@ -303,12 +387,6 @@ export function inspectProductionReadiness(input) {
   for (const path of REQUIRED_EVIDENCE_PATHS) {
     const value = getPath(evidence, path);
     checks.push(makeCheck(`evidence.${path}`, validEvidencePath(path, value)));
-  }
-  for (const provider of REQUIRED_PROVIDER_ACCEPTANCE_KEYS) {
-    for (const field of ["accepted", "evidenceRef", "observedAt"]) {
-      const path = `providerAcceptance.${provider}.${field}`;
-      checks.push(makeCheck(`evidence.${path}`, validEvidencePath(path, getPath(evidence, path))));
-    }
   }
   const routes = new Set(Array.isArray(production?.routes) ? production.routes.map((route) => route?.pattern).filter((value) => typeof value === "string") : []);
   const d1Database = Array.isArray(production?.d1_databases)
@@ -337,6 +415,15 @@ export function inspectProductionReadiness(input) {
     name: `evidence.${check.name}`,
     ok: check.ok,
   })));
+  checks.push(...releaseScope.checks, ...evaluateCommerceAcceptance(evidence));
+  const migrationLedgerPrefix = evidence?.migrationLedgerPrefix;
+  checks.push(makeCheck(
+    "evidence.migrationLedgerPrefix",
+    Array.isArray(migrationLedgerPrefix)
+      && migrationLedgerPrefix.length > 0
+      && new Set(migrationLedgerPrefix).size === migrationLedgerPrefix.length
+      && migrationLedgerPrefix.every((name) => typeof name === "string" && /^\d{4}_[a-z0-9_]+\.sql$/u.test(name)),
+  ));
   const now = input.now ?? new Date();
   const recent = (value, maximumAgeMs) => {
     const observedAt = safeDate(value);
@@ -349,10 +436,28 @@ export function inspectProductionReadiness(input) {
     makeCheck("evidence.pilot.completedAtFresh", recent(evidence?.pilot?.completedAt, 30 * 24 * 60 * 60_000)),
     makeCheck("evidence.rollback.rehearsedAtFresh", recent(evidence?.rollback?.rehearsedAt, 30 * 24 * 60 * 60_000)),
   );
-  for (const provider of REQUIRED_PROVIDER_ACCEPTANCE_KEYS) {
+  for (const provider of releaseScope.activeProviderKeys) {
+    for (const field of ["accepted", "evidenceRef", "observedAt"]) {
+      const path = `providerAcceptance.${provider}.${field}`;
+      checks.push(makeCheck(`evidence.${path}`, validEvidencePath(path, getPath(evidence, path))));
+    }
+  }
+  for (const provider of releaseScope.deferredProviderKeys) {
+    checks.push(makeCheck(
+      `evidence.providerAcceptance.${provider}.deferredNotAccepted`,
+      evidence?.providerAcceptance?.[provider]?.accepted !== true,
+    ));
+  }
+  for (const provider of releaseScope.activeProviderKeys) {
     checks.push(makeCheck(
       `evidence.providerAcceptance.${provider}.observedAtFresh`,
       recent(evidence?.providerAcceptance?.[provider]?.observedAt, 30 * 24 * 60 * 60_000),
+    ));
+  }
+  for (const provider of REQUIRED_COMMERCE_ACCEPTANCE_KEYS) {
+    checks.push(makeCheck(
+      `evidence.commerceAcceptance.${provider}.observedAtFresh`,
+      recent(evidence?.commerceAcceptance?.[provider]?.observedAt, 30 * 24 * 60 * 60_000),
     ));
   }
 
@@ -419,6 +524,14 @@ export function buildReleaseArtifacts(input) {
   const readiness = inspectProductionReadiness(input);
   if (!readiness.ok) throw new Error(`release_prerequisites_incomplete:${readiness.missing[0] ?? "unknown"}`);
   const migrationNames = [...input.migrationNames].sort();
+  const migrationLedgerPrefix = Array.isArray(input.evidence.migrationLedgerPrefix)
+    ? [...input.evidence.migrationLedgerPrefix]
+    : [];
+  if (migrationLedgerPrefix.length === 0
+    || migrationLedgerPrefix.length > migrationNames.length
+    || migrationLedgerPrefix.some((name, index) => name !== migrationNames[index])) {
+    throw new Error("release_prerequisites_incomplete:evidence.migrationLedgerPrefix");
+  }
   const configFingerprint = fingerprint({
     production: input.wranglerConfig.env.production,
     productionSpec: input.productionSpec,
@@ -435,8 +548,21 @@ export function buildReleaseArtifacts(input) {
     configFingerprintSha256: configFingerprint,
     createdAt: input.now.toISOString(),
     environment: "production",
-    manualAcceptance: input.evidence.manualAcceptance,
-    providerAcceptance: input.evidence.providerAcceptance,
+    manualAcceptance: {
+      customDomain: input.evidence.manualAcceptance.customDomain === true,
+      evidenceRef: input.evidence.manualAcceptance.evidenceRef,
+      observedAt: input.evidence.manualAcceptance.observedAt,
+      paymentSignedEvent: input.evidence.manualAcceptance.paymentSignedEvent === true,
+      telegram: input.evidence.manualAcceptance.telegram === true,
+      website: input.evidence.manualAcceptance.website === true,
+    },
+    providerAcceptance: projectAcceptance(input.evidence.providerAcceptance, RELEASE_CHANNEL_KEYS.slice(1)),
+    releaseScope: {
+      activeChannels: [...input.evidence.releaseScope.activeChannels],
+      deferredChannels: [...input.evidence.releaseScope.deferredChannels],
+    },
+    commerceAcceptance: projectAcceptance(input.evidence.commerceAcceptance, REQUIRED_COMMERCE_ACCEPTANCE_KEYS),
+    migrationLedgerPrefix,
     migrationNames,
     packageVersion: input.packageVersion,
     pilotShopCount: input.evidence.pilot.shopCount,
@@ -479,6 +605,7 @@ export function validateProductionDeployAdmission(input) {
   }
   return {
     commitSha: input.repositoryCommitSha,
+    migrationLedgerPrefix: input.manifest.migrationLedgerPrefix,
     releaseId: input.manifest.releaseId,
   };
 }

@@ -3,6 +3,8 @@ export type ReleaseCheck = { name: string; ok: boolean };
 export const REQUIRED_PRODUCTION_VARS: string[];
 export const REQUIRED_WORKER_SECRET_NAMES: string[];
 export const REQUIRED_PROVIDER_ACCEPTANCE_KEYS: string[];
+export const RELEASE_CHANNEL_KEYS: string[];
+export const REQUIRED_COMMERCE_ACCEPTANCE_KEYS: string[];
 export function evaluateBackupPrerequisites(evidence: Record<string, unknown> | null, now?: Date): ReleaseCheck[];
 export function inspectProductionReadiness(input: {
   evidence: Record<string, unknown> | null;
@@ -32,7 +34,7 @@ export function validateProductionDeployAdmission(input: {
   repositoryCommitSha: string;
   workerSecretNames: string[];
   wranglerConfig: Record<string, unknown>;
-}): { commitSha: string; releaseId: string };
+}): { commitSha: string; migrationLedgerPrefix: string[]; releaseId: string };
 export function assertProductionDeployAdmission(input: {
   evidencePath?: string;
   manifestPath: string;
@@ -40,7 +42,7 @@ export function assertProductionDeployAdmission(input: {
   repositoryRoot?: string;
   specPath?: string;
   workerSecretNames: string[];
-}): Promise<{ commitSha: string; releaseId: string }>;
+}): Promise<{ commitSha: string; migrationLedgerPrefix: string[]; releaseId: string }>;
 export function assertProductionWorkerDeployAdmission(input: {
   assertReleaseAdmissionImplementation?: (input: {
     manifestPath: string;

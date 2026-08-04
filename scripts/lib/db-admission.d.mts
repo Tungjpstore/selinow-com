@@ -30,7 +30,45 @@ export function assertProductionDatabaseIdentity(
   databaseId: string,
   databaseName: string,
 ): void;
+export function parseProductionMigrationLedgerOutput(output: string): string[];
+export function assertProductionMigrationLedgerPrefix(input?: {
+  environment?: NodeJS.ProcessEnv;
+  expectedPrefix?: string[];
+  migrationNames?: string[];
+  repositoryRoot?: string;
+  runWranglerImplementation?: (
+    args: string[],
+    options: { cwd: string; env?: NodeJS.ProcessEnv },
+  ) => { stderr: string; stdout: string };
+}): Promise<{ migrationNames: string[] }>;
+export function assertProductionMigrationLedger(input?: {
+  environment?: NodeJS.ProcessEnv;
+  migrationNames?: string[];
+  repositoryRoot?: string;
+  runWranglerImplementation?: (
+    args: string[],
+    options: { cwd: string; env?: NodeJS.ProcessEnv },
+  ) => { stderr: string; stdout: string };
+}): Promise<{ migrationNames: string[] }>;
+export function assertProductionDatabasePreflight(input?: {
+  environment?: NodeJS.ProcessEnv;
+  requirePaymentProviderSchema?: boolean;
+  repositoryRoot?: string;
+  runWranglerImplementation?: (
+    args: string[],
+    options: { cwd: string; env?: NodeJS.ProcessEnv },
+  ) => { stderr: string; stdout: string };
+}): { checks: Array<{ code: string; detail: string; ok: boolean }>; ok: true };
 export function assertProductionMigrationAdmission(input: {
+  assertDatabasePreflightImplementation?: (input: {
+    environment?: NodeJS.ProcessEnv;
+    repositoryRoot: string;
+    requirePaymentProviderSchema?: boolean;
+    runWranglerImplementation: (
+      args: string[],
+      options: { cwd: string; env?: NodeJS.ProcessEnv },
+    ) => { stderr: string; stdout: string };
+  }) => { checks: Array<{ code: string; detail: string; ok: boolean }>; ok: boolean };
   assertContinuationEvidenceImplementation?: (input: {
     accountId: string;
     databaseId: string;
@@ -51,9 +89,30 @@ export function assertProductionMigrationAdmission(input: {
     manifestPath: string;
     repositoryRoot: string;
     workerSecretNames: string[];
-  }) => Promise<{ commitSha: string; releaseId: string }>;
+  }) => Promise<{ commitSha: string; migrationLedgerPrefix?: string[]; releaseId: string }>;
+  assertMigrationLedgerImplementation?: (input: {
+    environment?: NodeJS.ProcessEnv;
+    migrationNames: string[];
+    repositoryRoot: string;
+    runWranglerImplementation: (
+      args: string[],
+      options: { cwd: string; env?: NodeJS.ProcessEnv },
+    ) => { stderr: string; stdout: string };
+  }) => Promise<{ migrationNames: string[] }>;
+  assertMigrationLedgerPrefixImplementation?: (input: {
+    environment?: NodeJS.ProcessEnv;
+    expectedPrefix?: string[];
+    migrationNames: string[];
+    repositoryRoot: string;
+    runWranglerImplementation: (
+      args: string[],
+      options: { cwd: string; env?: NodeJS.ProcessEnv },
+    ) => { stderr: string; stdout: string };
+  }) => Promise<{ migrationNames: string[] }>;
   manifestPath: string;
   environment?: NodeJS.ProcessEnv;
+  migrationNames?: string[];
+  operation?: "migrate" | "seed";
   productionSpec?: Record<string, any> | null;
   repositoryRoot?: string;
   runWranglerImplementation?: (
