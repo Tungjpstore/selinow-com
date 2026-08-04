@@ -19,15 +19,11 @@ P5 audit HEAD tree: `9729847f92f14dc2d174acf19a01e872afbc28f1`
 - The source ledger is a contiguous forward-only chain of 80 files from `0001`
   through `0080`. There is no `0081`, missing number, duplicate number, or
   unexpected migration file.
-- Fresh read-only `platform:doctor` authenticated the checked-in staging account
-  and found the expected D1, R2, private-export R2, KV, integration queue,
-  notification queue, DLQ, and Worker custom-hostname secret name.
-- Fresh Wrangler migration status reported `0029` through `0080` as pending.
-  This is consistent with an applied `0001` through `0028` prefix, but it is not
-  the manifest code's direct ordered `d1_migrations` proof and therefore is not
-  promoted to an exact-ledger acceptance claim.
-- Fresh read-only database preflight passed all available checks. The payment
-  provider projection is correctly reported as `not_applied` at this ledger.
+- Read-only doctor, migration-status, and database-preflight commands were
+  attempted, but no timestamped mode-`0600` report, checksum, or durable evidence
+  reference was retained. Their observations are not accepted as P5 evidence;
+  account/resource identity, live ledger, and database preflight remain blocked
+  under the safe code `phase_5_read_only_evidence_unavailable`.
 - Live route, custom-domain, and SaaS inventory could not complete because the
   scoped route-audit and platform API token contexts are absent. No secret value
   was requested, printed, or stored.
@@ -45,7 +41,8 @@ pilot was performed. Production was not accessed or mutated.
 ## Local verification
 
 - `npm run check`, `npm run lint`, and `npx tsc --noEmit`: pass.
-- `npm run test`: pass, 250 files / 1,787 tests.
+- `npm run test`: pass, 251 files / 1,793 tests, including the dedicated
+  `tests/unit/phase-5-artifacts.test.ts` evidence contract.
 - `npm run build` and `npm run build:staging`: pass; the existing non-fatal
   mixed static/dynamic inventory crypto import warning remains.
 - `npm run deploy:dry-run` and `npm run deploy:staging:dry-run`: pass and stop at
@@ -59,9 +56,12 @@ pilot was performed. Production was not accessed or mutated.
 
 ## Required next admission
 
-1. Provide the scoped read-only token contexts outside chat and Git, then rerun
-   doctor, exact D1 identity/ledger admission, route/domain/resource inventory,
-   Worker version inventory, and monitoring proof.
+1. Provide the scoped read-only token contexts outside chat and Git, then capture
+   doctor, exact D1 identity/ledger admission, database preflight,
+   route/domain/resource inventory, Worker version inventory, and monitoring
+   proof in one private mode-`0600` report. The report must bind `observedAt`,
+   candidate commit/tree, environment, safe command outcomes, and evidence refs;
+   Git records only its private path and SHA-256 checksum.
 2. Record the named owner roster, approved execution window, tested private
    acknowledgement paths, and previous known-good Worker version.
 3. Grant Gate B explicitly if staging backup/restore, migration, and deploy are

@@ -5,6 +5,8 @@
   "candidateCommit": null,
   "candidateTree": null,
   "releaseId": null,
+  "readOnlyAdmissionReportRef": null,
+  "readOnlyAdmissionReportSha256": null,
   "environment": "staging",
   "overallStatus": "not_started",
   "pilotId": null,

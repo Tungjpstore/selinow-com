@@ -2,12 +2,14 @@
 
 ## Phase 5 read-only execution update (2026-08-04)
 
-Current decision: `staging_execution_blocked`. Fresh read-only doctor and
-database preflight checks completed; migration status reports `0029`-`0080`
-pending. Complete route/custom-domain/SaaS inventory and direct manifest-grade
-ledger capture remain blocked by absent scoped audit token contexts. Gate B was
-not granted, so no backup, restore, manifest, migration, deploy, provider action,
-or pilot action occurred. See `docs/PHASE_5_REVIEW_PACKAGE_R0.md`.
+Current decision: `staging_execution_blocked`. Read-only commands were attempted,
+but no timestamped private report/checksum/reference was retained, so their
+account/resource, migration-status, and database-preflight observations are not
+accepted as evidence. Complete route/custom-domain/SaaS inventory and direct
+manifest-grade identity/ledger capture also remain blocked by absent scoped audit
+token contexts. Gate B was not granted, so no backup, restore, manifest,
+migration, deploy, provider action, or pilot action occurred. See
+`docs/PHASE_5_REVIEW_PACKAGE_R0.md`.
 
 ## Phase 4 review update (2026-08-04)
 

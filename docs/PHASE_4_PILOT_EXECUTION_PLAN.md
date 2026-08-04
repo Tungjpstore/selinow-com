@@ -1,8 +1,5 @@
 # Phase 4 Controlled Pilot Execution Plan
 
-P5 execution note (2026-08-04): pilot admission is blocked before staging
-acceptance. No seller, provider, traffic, order, or fulfillment action occurred.
-
 Overall status: `not_started`
 
 Use `infra/release/phase-4-pilot-scorecard.example.json` only as an

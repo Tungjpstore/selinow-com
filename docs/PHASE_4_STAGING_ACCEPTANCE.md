@@ -1,10 +1,5 @@
 # Phase 4 Staging Acceptance
 
-P5 execution note (2026-08-04): fresh partial read-only admission and database
-preflight passed, but route/SaaS inventory is blocked by absent scoped token
-contexts and Gate B was not granted. Current execution status is
-`staging_execution_blocked`; the contract below is unchanged.
-
 Status: `local_ready_remote_blocked`
 
 Candidate: `bff69f9d26a04b1318fd9862afa6eaffb8c003f4`
