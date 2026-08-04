@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const candidate = "8f251e43e9bd6e11e03937160181395202e35ade";
+const candidate = "bff69f9d26a04b1318fd9862afa6eaffb8c003f4";
 const artifactPaths = [
   "docs/PHASE_4_REVIEW_PACKAGE_R0.md",
   "docs/PHASE_4_STAGING_ACCEPTANCE.md",
@@ -34,7 +34,19 @@ describe("Phase 4 evidence contracts", () => {
     expect(review).not.toContain("staging_accepted_pilot_not_started");
     const current = readFileSync("docs/CURRENT_STATE.md", "utf8");
     expect(current).toContain("staging, providers, pilot, and production remain NO-GO");
+    expect(current).toContain(`P4 implementation candidate \`${candidate}\``);
+    expect(current).toContain("Phase 4 scorecard, safe evidence allowlist and 18-scenario regression map");
+    expect(current).toContain("docs/PHASE_4_REVIEW_PACKAGE_R0.md");
+    expect(current).not.toContain("This is the short current-state record for the Phase 3 staging-admission");
+    expect(current).not.toContain("P3 implementation candidate `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`");
+    expect(current).not.toContain("Phase 3 scorecard, safe evidence allowlist and 14-scenario regression map");
     expect(current).not.toContain("P4 completion state: `pilot_accepted`");
+    const mutationPackage = readFileSync("docs/STAGING_MUTATION_REVIEW_PACKAGE.md", "utf8");
+    expect(mutationPackage).toContain("clean Phase 4 pilot candidate");
+    expect(mutationPackage).toContain("docs/PHASE_4_REVIEW_PACKAGE_R0.md");
+    expect(mutationPackage).toContain("schema version `3`");
+    expect(mutationPackage).not.toContain("clean Phase 2 pilot candidate");
+    expect(mutationPackage).not.toContain("Exact P3 changed-file manifest and local verification");
   });
 
   it("covers all scenarios and the exact status vocabulary without fake completion", () => {

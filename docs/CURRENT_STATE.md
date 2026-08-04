@@ -3,11 +3,12 @@
 Last verified: 2026-08-04 (Asia/Tokyo)
 
 P4 completion state: `local_ready_remote_blocked`. The independently reviewed
-runtime/test candidate is `8f251e43e9bd6e11e03937160181395202e35ade`
-(tree `338587de6d69f354f7d124b78d9b2aa51918dd2d`). Staging database
-mutation now fails closed unless the live ledger is an exact ordered prefix of
-the reviewed source ledger; staging seed additionally requires the complete
-ledger and passing preflight immediately before its sink. The P4 acceptance,
+runtime/test candidate is `bff69f9d26a04b1318fd9862afa6eaffb8c003f4`
+(tree `c5c52c0b7ed9f174b65fb5969b3f5beeaa4c386`). Manifest creation now
+captures a non-empty live ledger prefix. Staging migration requires passing
+preflight and that exact manifest-bound baseline before its sink, then the
+complete source ledger and another preflight after it; staging seed requires the
+complete ledger and passing preflight immediately before its sink. The P4 acceptance,
 18-scenario UAT, controlled-pilot, incident/rollback, and safe machine-template
 contracts are checked in. No remote mutation or seller/provider observation was
 authorized or performed; staging, providers, pilot, and production remain NO-GO.
@@ -17,8 +18,10 @@ See `docs/PHASE_4_REVIEW_PACKAGE_R0.md`,
 `docs/PHASE_4_PILOT_EXECUTION_PLAN.md`, and
 `docs/PHASE_4_INCIDENT_AND_ROLLBACK.md`.
 
-P3 local admission hardening was added on 2026-08-04. The current source now
-binds staging manifests to exact backup/restore/D1 evidence and requires a
+## Historical Phase 3 checkpoint
+
+P3 local admission hardening was added on 2026-08-04. At that checkpoint, the
+source bound staging manifests to exact backup/restore/D1 evidence and required a
 complete migration ledger plus passing database preflight before and after a
 staging build. This is local tooling evidence only; no remote mutation or pilot
 acceptance is implied. See `docs/PHASE_3_STAGING_PILOT_READINESS.md`,
@@ -31,7 +34,7 @@ The restore report is
 `.wrangler/restore-drills/local/rdr_20260803200612_4388ccee7295.json` and remains
 ignored/private local evidence.
 
-This is the short current-state record for the Phase 3 staging-admission and
+This is the short current-state record for the Phase 4 staging-admission and
 controlled-pilot candidate. It is not a historical implementation log and does
 not authorize a remote mutation.
 Maturity values are intentionally specific: `implemented`, `locally_verified`,
@@ -42,8 +45,8 @@ Maturity values are intentionally specific: `implemented`, `locally_verified`,
 
 | Dimension | Source | Local | Staging | Production | Commercial |
 | --- | --- | --- | --- | --- | --- |
-| Commit/tree identity | P3 implementation candidate `ec66a7a909319ac0a4b5b4b8c777836e636e56a5` | `locally_verified`; R0 records the immutable implementation commit and local restore evidence | `blocked`; execution must use a fresh private staging manifest generated from the final clean HEAD | `deployed` platform handoff at historical Worker `6ca9c890-ed04-44dc-ac32-44b36881f2dc`; current tree not proven deployed | `blocked` pending external acceptance |
-| Migration ledger | `0001`-`0080`, contiguous | full source chain exercised by local SQLite-backed tests and isolated restore | `deployed` through `0028`; 52 pending (`0029`-`0080`) | `deployed` through `0052`; 28 pending (`0053`-`0080`) | `blocked` pending guarded migration admission |
+| Commit/tree identity | P4 implementation candidate `bff69f9d26a04b1318fd9862afa6eaffb8c003f4` | `locally_verified`; P4 records the immutable implementation commit and local restore evidence | `blocked`; execution must use a fresh private staging manifest generated from the final clean HEAD | `deployed` platform handoff at historical Worker `6ca9c890-ed04-44dc-ac32-44b36881f2dc`; current tree not proven deployed | `blocked` pending external acceptance |
+| Migration ledger | `0001`-`0080`, contiguous | full source chain exercised by local SQLite-backed tests and isolated restore | `blocked`; manifest captures a non-empty live ordered baseline, migration requires it before the sink and the complete ledger after the sink | `deployed` through `0052`; 28 pending (`0053`-`0080`) | `blocked` pending guarded migration admission |
 | Worker version | Current source only | `locally_verified` build/dry-runs | `deployed` historical staging version; current tree not proven there | `deployed` platform-only handoff; current candidate not proven there | `blocked` |
 | Marketing | Phase 1 copy/routes exist in source; Website is current and Telegram is labeled upcoming | `locally_verified` by source/browser gates | `blocked` pending candidate deploy | `deployed` homepage only; current source copy not proven live | `blocked` until truthful claims and routes are deployed |
 | Pricing | Starter/Pro D1 catalog and Dodo fail-closed path | `locally_verified`; pending/invalid Dodo references suppress prices, purchase CTA and structured Offers | `blocked` pending `0070`-`0080` | `blocked`; production pricing is not a migrated commercial catalog | `blocked` pending migrated environment and provider setup |
@@ -58,7 +61,12 @@ Maturity values are intentionally specific: `implemented`, `locally_verified`,
 | Analytics | Billing usage metering plus 12-milestone activation ledger, enum-only projections and rotating deterministic backfill | `locally_verified`; inventory readiness now requires active product/variant state and uses durable activation timestamps | `blocked` pending `0077`-`0080` admission | `blocked` | `blocked` pending retention ownership and pilot evidence |
 | Monitoring | Concrete threshold, window, role and stop contract | `locally_verified` by artifact contract; no configured remote alert is claimed | `blocked` pending named owners, dashboards, alerts and acknowledgements | `blocked` beyond platform handoff | `blocked` |
 | Seller activation | `/app` sellability, readiness blockers, onboarding inventory cleanup, and route-safe next actions | `locally_verified`; source/unit/auth-browser evidence only | `blocked` pending candidate admission and UAT | `blocked` | `blocked` pending pilot evidence |
-| Pilot evidence | Phase 3 scorecard, safe evidence allowlist and 14-scenario regression map | `not_started`; local behavior is mapped separately from pilot status | `blocked` pending controlled Website-first and provider UAT | `not_started` | `blocked` |
+| Pilot evidence | Phase 4 scorecard, safe evidence allowlist and 18-scenario regression map | `not_started`; local behavior is mapped separately from pilot status | `blocked` pending controlled Website-first and provider UAT | `not_started` | `blocked` |
+
+## Historical Phase 3 notes
+
+The following Phase 3 and earlier entries are retained as historical checkpoints;
+they do not describe the current P4 candidate or authorize a remote mutation.
 
 ## Read-only public evidence
 

@@ -11,7 +11,7 @@ provider call, secret change, route change, order, or seller pilot.
 
 | Gate | Local/source result | Required staging evidence | Current decision |
 | --- | --- | --- | --- |
-| Candidate identity | Clean commit, tree, ordered `0001`-`0080` ledger and schema-2 manifest are enforced | Private manifest generated from the final clean HEAD | `blocked` |
+| Candidate identity | Historical P3 clean commit, tree, ordered `0001`-`0080` ledger and schema-2 manifest were enforced | P4 supersedes this with a private schema-3 manifest and live ledger baseline generated from the final clean HEAD | `blocked` |
 | D1 identity | Account, database name and UUID are manifest-bound | Fresh read-only inventory matching the staging target | `blocked` |
 | Backup | Report-v2 checksum, size, snapshot and freshness are manifest-bound | Fresh protected, non-empty staging backup no older than 60 minutes | `blocked` |
 | Restore | Candidate, target, integrity, FK and ledger evidence are manifest-bound | Isolated staging restore drill for the exact candidate | `blocked` |

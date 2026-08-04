@@ -3,13 +3,13 @@
 ## Phase 4 review update (2026-08-04)
 
 Current decision: `local_ready_remote_blocked` for candidate
-`8f251e43e9bd6e11e03937160181395202e35ade` (tree
-`338587de6d69f354f7d124b78d9b2aa51918dd2d`). No explicit staging
+`bff69f9d26a04b1318fd9862afa6eaffb8c003f4` (tree
+`c5c52c0b7ed9f174b65fb5969b3f5beeaa4c386`). No explicit staging
 mutation approval was supplied for P4, so no remote command was executed.
 
 The mutation contract now requires a live ledger that is an exact ordered prefix
 before staging migration, and a complete ledger plus passing preflight before
-staging seed. The same private schema-2 release manifest, candidate-bound
+staging seed. The same private schema-3 release manifest, candidate-bound
 backup/restore evidence, account ID, D1 name/UUID, clean commit/tree, and final
 rechecks remain mandatory for migration, seed, and deploy. The full external
 entry checklist and monitoring evidence contract are in
@@ -22,7 +22,7 @@ Status: `prepared_only` — approval required before any remote mutation.
 ## Decision requested
 
 Review and approve or reject the exact staging migration/deploy window for the
-clean Phase 2 pilot candidate. This document is a package template until all
+clean Phase 4 pilot candidate. This document is a package template until all
 fields are filled from fresh read-only evidence and a private staging release
 manifest is generated from the final clean HEAD. It does not authorize execution.
 
@@ -30,20 +30,20 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 
 - Historical Phase 2 runtime commit: `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`
 - Historical Phase 2 runtime tree: `a35e2c871d2db97b392910fb04f51b7aaa27313c`
-- P3 local implementation candidate:
-  `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`; a future execution still uses a
-  fresh manifest from the final approved clean HEAD and never substitutes the
-  historical Phase 2 commit.
+- Historical P3 local implementation candidate:
+  `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`; execution uses the P4 candidate
+  above and never substitutes an historical commit.
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
 - Source migration ledger: current candidate `0001`-`0080`
-- Exact P3 changed-file manifest and local verification:
-  `docs/PHASE_3_REVIEW_PACKAGE_R0.md`
+- Exact P4 changed-file manifest and local verification:
+  `docs/PHASE_4_REVIEW_PACKAGE_R0.md`
 - Candidate-bound local restore report:
-  `.wrangler/restore-drills/local/rdr_20260803200612_4388ccee7295.json`
+  `.wrangler/restore-drills/local/rdr_20260804091903_1127db4c1b34.json`
 - Execution identity: generated, not hand-copied. `release:staging:manifest`
-  binds the final clean commit/tree, exact migration ledger, staging D1 identity,
-  and exact backup/restore fingerprints after fresh evidence exists. The manifest
-  is schema version `2`, private, and ignored under
+  binds the final clean commit/tree, full source ledger, non-empty observed
+  baseline, staging D1 identity, and exact backup/restore fingerprints after
+  fresh evidence exists. The manifest
+  is schema version `3`, private, and ignored under
   `.wrangler/releases/staging/<release-id>/release-manifest.json`.
 
 ## Remote identity
@@ -58,9 +58,10 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 
 ## Migration and backup
 
-- Current remote ledger: `0028` unless fresh evidence proves otherwise
-- Exact pending range: `0029`-`0080` (52 migrations) unless fresh read-only
-  evidence proves a different staging ledger
+- Historical remote ledger note: `0028` (not re-verified for P4)
+- Exact pending range: captured as a non-empty ordered prefix in the private
+  schema-3 manifest; no current staging ledger is claimed until fresh read-only
+  evidence exists
 - Backup command: repository `backup:create` guarded script, exact env only
 - Backup evidence: report-v2, non-empty artifact, checksum, bookmark, freshness
   <= 60 minutes, exact account/D1 identity
@@ -81,7 +82,7 @@ Use only repository guarded scripts and the exact reviewed environment:
    `npm run restore:drill -- --env staging --reviewed-commit "$(git rev-parse HEAD)" --json`.
 4. Generate the private manifest only after the fresh backup and restore pass:
    `npm run release:staging:manifest -- --write --json`.
-5. Apply forward-only migrations `0029`-`0080` with
+5. Apply the exact forward-only range derived from the manifest-bound baseline with
    `npm run db:migrate -- --env staging --release-manifest <manifest-ref>`.
 6. Verify ledger, preflight, integrity/FK checks and supported smoke paths. Real
    staging deploy repeats the complete ordered ledger and database preflight both
@@ -113,7 +114,8 @@ repository-required provider secret names. Never record values here.
 ## Verification and evidence paths
 
 Local command results, restore report, test counts, prior browser evidence and
-dry-run artifacts are recorded in `docs/PHASE_3_REVIEW_PACKAGE_R0.md`.
+dry-run artifacts are recorded in `docs/PHASE_4_REVIEW_PACKAGE_R0.md`; the Phase
+3 package remains historical.
 Remote URLs, timestamps, checksums, account/D1 identity and protected backup
 reports remain `TBD`. No package is accepted until the exact committed candidate
 and fresh remote admission evidence are recorded.

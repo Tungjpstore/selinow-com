@@ -2,7 +2,7 @@
 
 Status: `local_ready_remote_blocked`
 
-Candidate: `8f251e43e9bd6e11e03937160181395202e35ade`
+Candidate: `bff69f9d26a04b1318fd9862afa6eaffb8c003f4`
 
 This is an executable evidence contract, not staging evidence. No remote mutation
 is authorized by this file. The P4 task contains no explicit staging-mutation
@@ -14,15 +14,19 @@ private monitoring acknowledgement path.
 The only permitted future mutation order is: clean reviewed candidate; fresh
 read-only identity/resource inventory; protected non-empty report-v2 backup;
 checksum/size/freshness verification; candidate-bound isolated restore; private
-schema-2 manifest; exact ledger and preflight; forward-only migrations; repeated
-ledger/integrity/FK/preflight; credential-free build; repeated admission;
+schema-3 manifest with a non-empty live ledger baseline; exact baseline and
+preflight; forward-only migrations; repeated complete ledger/integrity/FK/preflight;
+credential-free build; repeated admission;
 candidate deploy; smoke; monitoring; Website-first UAT; confirm or captured-version
 rollback; reconciliation; exact cleanup.
 
-Migration admission requires the live `d1_migrations` rows to be an exact ordered
-prefix of `0001`-`0080`. Seed and deploy require the complete ordered ledger and
-passing database preflight. Missing, extra, duplicated, or out-of-order rows stop
-before the mutation sink.
+Manifest creation captures the live `d1_migrations` rows as a non-empty exact
+ordered prefix of `0001`-`0080` after read-only account/D1 admission. Migration
+requires database preflight to pass and the live ledger to equal that exact
+manifest-bound baseline before Wrangler; after Wrangler it requires the complete
+ordered source ledger and another passing preflight. Seed and deploy require the
+complete ordered ledger and passing database preflight. Missing, empty, extra,
+duplicated, out-of-order, reset, or changed baseline rows stop closed.
 
 ## Required private evidence
 

@@ -5,17 +5,19 @@ Last updated: 2026-08-04
 ## Phase 4 staging acceptance and controlled pilot execution (2026-08-04)
 
 Completion state: **`local_ready_remote_blocked`**. Independent review found and
-closed a P1 staging database-admission gap: migration now requires the remote D1
-ledger to be an exact ordered prefix of the reviewed `0001`-`0080` source chain,
-while staging seed requires the complete ledger and passing preflight immediately
+closed P1/P2 staging database-admission gaps: the private schema-3 manifest now
+captures a non-empty live D1 ledger baseline after read-only identity admission;
+migration requires passing preflight plus that exact baseline before Wrangler,
+then rechecks the complete `0001`-`0080` ledger and preflight after Wrangler.
+Staging seed requires the complete ledger and passing preflight immediately
 before Wrangler. P4 also replaces the 14-scenario readiness projection with an
 18-scenario acceptance matrix and adds explicit metric/source, thresholds,
 window, owner, acknowledgement reference, and stop/reconciliation action for
 every required monitoring signal.
 
 The reviewed runtime/test candidate is
-`8f251e43e9bd6e11e03937160181395202e35ade` with tree
-`338587de6d69f354f7d124b78d9b2aa51918dd2d`. P4 artifacts are
+`bff69f9d26a04b1318fd9862afa6eaffb8c003f4` with tree
+`c5c52c0b7ed9f174b65fb5969b3f5beeaa4c386`. P4 artifacts are
 `docs/PHASE_4_REVIEW_PACKAGE_R0.md`, `docs/PHASE_4_STAGING_ACCEPTANCE.md`,
 `docs/PHASE_4_UAT_MATRIX.md`, `docs/PHASE_4_PILOT_EXECUTION_PLAN.md`,
 `docs/PHASE_4_INCIDENT_AND_ROLLBACK.md`, and the explicitly non-evidence example
@@ -30,17 +32,19 @@ PayOS/Dodo/Telegram readiness, and an approved observation window remain require
 Final local verification: `npm ci --ignore-scripts` audited 456 packages with
 zero vulnerabilities; `npm run check` passed 696 files with zero errors and the
 existing three hints; lint and `npx tsc --noEmit` passed; Vitest passed 250 files
-and 1,783 tests; both builds and both deploy dry-runs passed with 280 modules;
+and 1,787 tests; both builds and both deploy dry-runs passed with 280 modules;
 `npm audit --audit-level=high` found zero vulnerabilities. The existing non-fatal
 mixed static/dynamic inventory crypto import warning remains. Candidate-bound
-local restore report `.wrangler/restore-drills/local/rdr_20260804084301_d401da7dbdf1.json`
+local restore report `.wrangler/restore-drills/local/rdr_20260804091903_1127db4c1b34.json`
 passed integrity, zero FK violations, 614 restored items, and exact cleanup.
 
 ## Phase 3 staging admission and controlled pilot readiness (2026-08-04)
 
 Local/source status: **PASS** for admission and pilot-readiness contracts;
-staging, providers, pilot, and production remain **NO-GO**. The staging release manifest is now
-schema version `2` and binds the final clean commit/tree and migration ledger to
+staging, providers, pilot, and production remain **NO-GO**. At the historical P3
+checkpoint, the staging release manifest used schema version `2`; current P4
+supersedes it with schema version `3`, including the live ledger baseline. At
+that checkpoint, P3 bound the final clean commit/tree and source migration ledger to
 the exact staging D1 account/name/UUID plus the protected backup checksum/size,
 snapshot, and candidate-bound restore report/target. `scripts/deploy.mjs` reads
 the complete ordered D1 migration ledger and runs the staging database preflight

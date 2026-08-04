@@ -25,7 +25,7 @@ clean HEAD
   -> deploy
 ```
 
-The private manifest is schema version `2` and records only non-secret identity,
+The historical P3 private manifest used schema version `2` and recorded only non-secret identity,
 checksums, sizes, timestamps, opaque report references, and migration names. The
 deploy gate rejects replacement backup/restore evidence, D1 target drift, an
 incomplete ledger, or any failed preflight. The final read is repeated after the
@@ -68,7 +68,7 @@ this repository or in chat.
 
 ## Local artifacts
 
-- `scripts/lib/staging-release.mjs` — schema-2 manifest, evidence binding, ledger,
+- `scripts/lib/staging-release.mjs` — historical schema-2 manifest, evidence binding, ledger,
   and preflight admission helpers.
 - `scripts/deploy.mjs` — admission and repeat-before-Wrangler enforcement.
 - `tests/unit/staging-release-admission.test.ts` — evidence replacement and
@@ -86,7 +86,8 @@ this repository or in chat.
 
 - **P0:** none found.
 - **P1:** the staging manifest did not bind the exact backup/restore/D1 evidence;
-  fixed with schema version `2` and exact evidence revalidation.
+  fixed at the P3 checkpoint with schema version `2` and exact evidence revalidation;
+  current P4 uses schema version `3` with a live ledger baseline.
 - **P1:** a staging Worker deploy could be attempted before the full candidate
   ledger and data preflight were proven; fixed with before/after-build ledger and
   preflight gates.

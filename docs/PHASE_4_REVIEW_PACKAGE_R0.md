@@ -2,20 +2,22 @@
 
 Status: `local_ready_remote_blocked`
 
-Reviewed candidate: `8f251e43e9bd6e11e03937160181395202e35ade`
+Reviewed candidate: `bff69f9d26a04b1318fd9862afa6eaffb8c003f4`
 
-Reviewed tree: `338587de6d69f354f7d124b78d9b2aa51918dd2d`
+Reviewed tree: `c5c52c0b7ed9f174b65fb5969b3f5beeaa4c386`
 
 Evidence commit: documentation follow-up commit containing this final record;
 the exact SHA is recorded by Git and in the final handoff.
 
 ## Independent findings
 
-- P1 closed: staging migration lacked an exact live-ledger prefix gate, and
-  staging seed lacked complete-ledger plus preflight gates immediately before
-  its sink. The database CLI now rejects extra, missing-middle, or out-of-order
-  ledgers before migration and requires all `0001`-`0080` rows plus passing
-  preflight before seed.
+- P1 closed: staging migration lacked an exact live-ledger baseline and a
+  preflight gate before its sink, while staging seed lacked complete-ledger plus
+  preflight gates immediately before its sink. Manifest creation now captures a
+  non-empty read-only ledger prefix; migration requires that exact baseline and
+  a passing preflight before Wrangler, then verifies the complete ledger and
+  preflight after Wrangler. Extra, missing-middle, empty, reset, or out-of-order
+  ledgers fail closed.
 - P2 closed: P3 artifacts covered 14 scenarios and monitoring lacked explicit
   metric/source, notification acknowledgement, and per-signal stop action. P4
   artifacts cover all 18 required scenarios and the complete monitoring contract.
@@ -57,12 +59,12 @@ remain NO-GO pending the external prerequisites in
 - `npm run check`: exit 0; 696 files; 0 errors; 3 existing hints.
 - `npm run lint` and `npx tsc --noEmit`: exit 0.
 - Focused P4/runtime/billing tests: exit 0.
-- `npm run test`: exit 0; 250 files / 1,783 tests.
+- `npm run test`: exit 0; 250 files / 1,787 tests.
 - `npm run build`, `npm run build:staging`, `npm run deploy:dry-run`, and
   `npm run deploy:staging:dry-run`: exit 0; dry-runs exited without mutation;
   280 modules. The existing inventory mixed-import warning remains non-fatal.
 - `npm audit --audit-level=high`: exit 0; 0 vulnerabilities.
-- Local restore: `.wrangler/restore-drills/local/rdr_20260804084301_d401da7dbdf1.json`,
+- Local restore: `.wrangler/restore-drills/local/rdr_20260804091903_1127db4c1b34.json`,
   bound to the reviewed candidate; integrity `ok`, zero FK violations, 614
   restored items, and exact temporary-target cleanup.
 - `git diff --check` and bounded changed/untracked-file secret scan: exit 0;
