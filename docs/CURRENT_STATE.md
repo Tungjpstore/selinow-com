@@ -1,6 +1,21 @@
-# Selinow Phase 3 Current State
+# Selinow Phase 4 Current State
 
 Last verified: 2026-08-04 (Asia/Tokyo)
+
+P4 completion state: `local_ready_remote_blocked`. The independently reviewed
+runtime candidate is `6b2b8a92ef6ecf4e6f102f06df5a3c86ed2fd62e`
+(tree `ffdcf4daa040ca67e17522986430a338b10ed77c`). Staging database
+mutation now fails closed unless the live ledger is an exact ordered prefix of
+the reviewed source ledger; staging seed additionally requires the complete
+ledger and passing preflight immediately before its sink. The P4 acceptance,
+18-scenario UAT, controlled-pilot, incident/rollback, and safe machine-template
+contracts are checked in. No remote mutation or seller/provider observation was
+authorized or performed; staging, providers, pilot, and production remain NO-GO.
+
+See `docs/PHASE_4_REVIEW_PACKAGE_R0.md`,
+`docs/PHASE_4_STAGING_ACCEPTANCE.md`, `docs/PHASE_4_UAT_MATRIX.md`,
+`docs/PHASE_4_PILOT_EXECUTION_PLAN.md`, and
+`docs/PHASE_4_INCIDENT_AND_ROLLBACK.md`.
 
 P3 local admission hardening was added on 2026-08-04. The current source now
 binds staging manifests to exact backup/restore/D1 evidence and requires a

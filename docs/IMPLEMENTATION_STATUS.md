@@ -2,6 +2,31 @@
 
 Last updated: 2026-08-04
 
+## Phase 4 staging acceptance and controlled pilot execution (2026-08-04)
+
+Completion state: **`local_ready_remote_blocked`**. Independent review found and
+closed a P1 staging database-admission gap: migration now requires the remote D1
+ledger to be an exact ordered prefix of the reviewed `0001`-`0080` source chain,
+while staging seed requires the complete ledger and passing preflight immediately
+before Wrangler. P4 also replaces the 14-scenario readiness projection with an
+18-scenario acceptance matrix and adds explicit metric/source, thresholds,
+window, owner, acknowledgement reference, and stop/reconciliation action for
+every required monitoring signal.
+
+The reviewed runtime candidate is
+`6b2b8a92ef6ecf4e6f102f06df5a3c86ed2fd62e` with tree
+`ffdcf4daa040ca67e17522986430a338b10ed77c`. P4 artifacts are
+`docs/PHASE_4_REVIEW_PACKAGE_R0.md`, `docs/PHASE_4_STAGING_ACCEPTANCE.md`,
+`docs/PHASE_4_UAT_MATRIX.md`, `docs/PHASE_4_PILOT_EXECUTION_PLAN.md`,
+`docs/PHASE_4_INCIDENT_AND_ROLLBACK.md`, and the explicitly non-evidence example
+`infra/release/phase-4-pilot-scorecard.example.json`.
+
+No staging or production backup, restore, ledger inventory, migration, seed,
+deploy, route/DNS/secret change, provider side effect, real order, or pilot seller
+action was performed. External approval, least-privilege credentials, protected
+staging evidence, exact owners/acknowledgement paths, previous Worker version,
+PayOS/Dodo/Telegram readiness, and an approved observation window remain required.
+
 ## Phase 3 staging admission and controlled pilot readiness (2026-08-04)
 
 Local/source status: **PASS** for admission and pilot-readiness contracts;

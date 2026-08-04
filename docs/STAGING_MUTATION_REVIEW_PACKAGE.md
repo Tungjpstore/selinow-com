@@ -1,5 +1,22 @@
 # STAGING_MUTATION_REVIEW_PACKAGE
 
+## Phase 4 review update (2026-08-04)
+
+Current decision: `local_ready_remote_blocked` for candidate
+`6b2b8a92ef6ecf4e6f102f06df5a3c86ed2fd62e` (tree
+`ffdcf4daa040ca67e17522986430a338b10ed77c`). No explicit staging
+mutation approval was supplied for P4, so no remote command was executed.
+
+The mutation contract now requires a live ledger that is an exact ordered prefix
+before staging migration, and a complete ledger plus passing preflight before
+staging seed. The same private schema-2 release manifest, candidate-bound
+backup/restore evidence, account ID, D1 name/UUID, clean commit/tree, and final
+rechecks remain mandatory for migration, seed, and deploy. The full external
+entry checklist and monitoring evidence contract are in
+`docs/PHASE_4_STAGING_ACCEPTANCE.md`; missing approval, owner, acknowledgement,
+credential, backup/restore, OAuth disposition, previous Worker version, provider
+readiness, or observation window fails closed.
+
 Status: `prepared_only` — approval required before any remote mutation.
 
 ## Decision requested
