@@ -315,6 +315,9 @@ describe("production database migration admission", () => {
     const finalContinuation = source.indexOf("await assertFreshStagingContinuationEvidence", continuation + 1);
     const stableTargetGuard = source.indexOf("staging_release_admission_changed", finalContinuation);
     const pin = source.indexOf("buildPinnedCloudflareEnvironment", finalGate);
+    const prefixLedger = source.indexOf("await assertStagingMigrationLedgerPrefix", pin);
+    const completeLedger = source.indexOf("await assertStagingMigrationLedger({", pin);
+    const preflight = source.indexOf("assertStagingDatabasePreflight", completeLedger);
     const sink = source.indexOf("runWrangler(wranglerArgs", finalGate);
 
     expect(firstRelease).toBeGreaterThan(-1);
@@ -326,6 +329,11 @@ describe("production database migration admission", () => {
     expect(finalContinuation).toBeGreaterThan(finalRelease);
     expect(stableTargetGuard).toBeGreaterThan(finalContinuation);
     expect(pin).toBeGreaterThan(stableTargetGuard);
+    expect(prefixLedger).toBeGreaterThan(pin);
+    expect(prefixLedger).toBeLessThan(sink);
+    expect(completeLedger).toBeGreaterThan(pin);
+    expect(completeLedger).toBeLessThan(preflight);
+    expect(preflight).toBeLessThan(sink);
     expect(sink).toBeGreaterThan(pin);
   });
 });

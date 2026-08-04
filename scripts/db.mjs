@@ -28,6 +28,9 @@ import {
 } from "./lib/platform.mjs";
 import {
   assertStagingContinuationBinding,
+  assertStagingMigrationLedger,
+  assertStagingMigrationLedgerPrefix,
+  assertStagingDatabasePreflight,
   assertStagingReleaseAdmission,
 } from "./lib/staging-release.mjs";
 
@@ -173,6 +176,12 @@ try {
         process.env,
         finalAdmission.accountId,
       );
+      if (operation === "migrate") {
+        await assertStagingMigrationLedgerPrefix({ environment: commandEnvironment, repositoryRoot });
+      } else {
+        await assertStagingMigrationLedger({ environment: commandEnvironment, repositoryRoot });
+        assertStagingDatabasePreflight({ environment: commandEnvironment, repositoryRoot });
+      }
     }
     runWrangler(wranglerArgs, {
       capture: false,

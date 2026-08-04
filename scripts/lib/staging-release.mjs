@@ -202,6 +202,24 @@ export async function assertStagingMigrationLedger(input = {}) {
   return { migrationNames: observed };
 }
 
+/** A migration sink may advance only a contiguous prefix of the reviewed source ledger. */
+export async function assertStagingMigrationLedgerPrefix(input = {}) {
+  const root = input.repositoryRoot ?? repositoryRoot;
+  const expected = input.migrationNames ?? await listMigrationNames(root);
+  const runner = input.runWranglerImplementation ?? runWrangler;
+  const observed = parseStagingMigrationLedgerOutput(runner([
+    "d1", "execute", "PLATFORM_DB", "--env", "staging", "--remote",
+    "--command", "SELECT name FROM d1_migrations ORDER BY name;", "--json",
+  ], {
+    cwd: root,
+    env: input.environment,
+  }).stdout);
+  if (observed.length > expected.length || observed.some((name, index) => name !== expected[index])) {
+    throw new Error("staging_migration_ledger_prefix_invalid");
+  }
+  return { migrationNames: observed };
+}
+
 export function parseStagingDatabasePreflightOutput(output) {
   let result;
   try {

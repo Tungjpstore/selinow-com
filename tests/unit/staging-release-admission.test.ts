@@ -9,6 +9,7 @@ import {
   assertStagingContinuationBinding,
   assertStagingDatabasePreflight,
   assertStagingMigrationLedger,
+  assertStagingMigrationLedgerPrefix,
   buildStagingReleaseManifest,
   validateStagingReleaseManifest,
   parseStagingMigrationLedgerOutput,
@@ -153,6 +154,21 @@ describe("staging release admission", () => {
         stdout: JSON.stringify([{ results: [{ name: MIGRATIONS[0] }] }]),
       }),
     })).rejects.toThrow("staging_migration_ledger_incomplete");
+  });
+
+  it("rejects a staging migration ledger that is not a reviewed prefix", async () => {
+    const output = JSON.stringify([{ results: [{ name: "0002_catalog.sql" }] }]);
+    await expect(assertStagingMigrationLedgerPrefix({
+      migrationNames: MIGRATIONS,
+      runWranglerImplementation: () => ({ stderr: "", stdout: output }),
+    })).rejects.toThrow("staging_migration_ledger_prefix_invalid");
+    await expect(assertStagingMigrationLedgerPrefix({
+      migrationNames: MIGRATIONS,
+      runWranglerImplementation: () => ({
+        stderr: "",
+        stdout: JSON.stringify([{ results: [...MIGRATIONS, "0003_extra.sql"].map((name) => ({ name })) }]),
+      }),
+    })).rejects.toThrow("staging_migration_ledger_prefix_invalid");
   });
 
   it("requires every staging data preflight check to pass before deploy", () => {

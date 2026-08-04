@@ -84,6 +84,15 @@ export function assertStagingMigrationLedger(input?: {
     options?: { cwd?: string; env?: NodeJS.ProcessEnv },
   ) => { stdout: string; stderr: string };
 }): Promise<{ migrationNames: string[] }>;
+export function assertStagingMigrationLedgerPrefix(input?: {
+  environment?: NodeJS.ProcessEnv;
+  migrationNames?: string[];
+  repositoryRoot?: string;
+  runWranglerImplementation?: (
+    args: string[],
+    options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+  ) => { stdout: string; stderr: string };
+}): Promise<{ migrationNames: string[] }>;
 export function parseStagingDatabasePreflightOutput(output: string): {
   checks: Array<{ code: string; detail: string; ok: true }>;
 };
