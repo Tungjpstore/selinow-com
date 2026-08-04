@@ -13,6 +13,7 @@ import type { AppBindings } from "../../src/lib/platform/bindings";
 const SECRET = "dodo-webhook-secret-for-tests";
 const NOW = 1_759_507_200;
 const NOW_ISO = "2026-08-03T00:00:00.000Z";
+const MIGRATION_TIMESTAMP = "'2026-08-01T00:00:00.000Z'";
 const NOW_ISO_SECONDS = Math.floor(new Date(NOW_ISO).getTime() / 1000);
 const WEBHOOK_PUBLIC_ID = "ddowh_00000000-0000-4000-8000-000000000001";
 
@@ -70,7 +71,9 @@ class SqliteD1 {
 
 function applyMigrations(database: DatabaseSync): void {
   for (const filename of readdirSync(join(process.cwd(), "migrations")).filter((name) => /^\d{4}_.+\.sql$/u.test(name)).sort()) {
-    database.exec(readFileSync(join(process.cwd(), "migrations", filename), "utf8"));
+    const migration = readFileSync(join(process.cwd(), "migrations", filename), "utf8")
+      .replaceAll("CURRENT_TIMESTAMP", MIGRATION_TIMESTAMP);
+    database.exec(migration);
   }
 }
 
