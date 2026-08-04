@@ -104,8 +104,8 @@ const stagingAdmissionFixtures = {
 
 function exactStagingRouteInventory() {
   return [
-    { pattern: "selinow.com/*", script: null },
-    { pattern: "*.selinow.com/*", script: null },
+    { pattern: "selinow.com/*", script: stagingSpec.productionWorkerName },
+    { pattern: "*.selinow.com/*", script: stagingSpec.productionWorkerName },
     { pattern: stagingSpec.wildcardRoute, script: stagingSpec.workerName },
     { pattern: "*/*", script: stagingSpec.workerName },
   ];
@@ -289,7 +289,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     })).toThrow("cloudflare_staging_route_contract_invalid");
   });
 
-  it("accepts only the exact live guards, staging wildcard, and catch-all", () => {
+  it("accepts only the exact live production handoff", () => {
     const exactRoutes = exactStagingRouteInventory();
     const result = validateStagingRouteInventory(stagingSpec, exactRoutes);
     expect(result.ok).toBe(true);
@@ -325,18 +325,26 @@ describe("Cloudflare for SaaS platform configuration", () => {
       .toBe(false);
   });
 
-  it("accepts only a complete production handoff for the shared-zone boundary", () => {
-    const handoffRoutes = exactSharedZoneRouteInventory();
-    expect(validateStagingRouteInventory(stagingSpec, handoffRoutes)).toMatchObject({ ok: true });
-
-    expect(validateStagingRouteInventory(stagingSpec, handoffRoutes.map((route) => (
-      route.pattern === "*.selinow.com/*" ? { ...route, script: null } : route
-    ))).ok).toBe(false);
-    expect(validateStagingRouteInventory(stagingSpec, handoffRoutes.map((route) => (
-      route.pattern === stagingSpec.wildcardRoute
-        ? { ...route, script: stagingSpec.productionWorkerName }
+  it("rejects the pre-handoff guards, deleted legacy routes, and bare custom-domain hosts", () => {
+    const handoffRoutes = exactStagingRouteInventory();
+    const preHandoffRoutes = handoffRoutes.map((route) => (
+      stagingSpec.sharedZoneDisabledRoutes.includes(route.pattern)
+        ? { ...route, script: null }
         : route
-    ))).ok).toBe(false);
+    ));
+    expect(validateStagingRouteInventory(stagingSpec, preHandoffRoutes).ok).toBe(false);
+
+    for (const pattern of [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
+      "staging.selinow.com",
+    ]) {
+      expect(validateStagingRouteInventory(stagingSpec, [
+        ...handoffRoutes,
+        { pattern, script: stagingSpec.workerName },
+      ]).ok).toBe(false);
+    }
   });
 
   it("fails closed on extra or conflicting script-bound routes", () => {
@@ -943,8 +951,8 @@ describe("Cloudflare for SaaS platform configuration", () => {
       if (url.endsWith("/workers/routes")) {
         return Promise.resolve(new Response(JSON.stringify({
           result: [
-            { pattern: "selinow.com/*", script: null },
-            { pattern: "*.selinow.com/*", script: null },
+            { pattern: "selinow.com/*", script: spec.productionWorkerName },
+            { pattern: "*.selinow.com/*", script: spec.productionWorkerName },
             { pattern: spec.wildcardRoute, script: spec.workerName },
             { pattern: "*/*", script: spec.workerName },
           ],
@@ -1093,6 +1101,11 @@ describe("Cloudflare for SaaS platform configuration", () => {
       SAAS_CNAME_TARGET: stagingSpec.saas.cnameTarget,
     });
     expect(wranglerConfig.env.staging.routes).toEqual(buildStagingRoutes(stagingSpec));
+    expect(wranglerConfig.env.staging.routes.filter((route) => route.custom_domain !== true))
+      .toEqual([
+        { pattern: "*.staging.selinow.com/*", zone_name: "selinow.com" },
+        { pattern: "*/*", zone_name: "selinow.com" },
+      ]);
     expect(wranglerConfig.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(wranglerConfig.queues).toEqual(buildQueueBindings({
       deadLetterQueue: "selinow-dlq-local",

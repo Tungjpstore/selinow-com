@@ -84,9 +84,6 @@ const productionSpec = {
     routeHandoff: "atomic_platform_route_replacement",
     stagingExternalCustomDomainInventory: "pending_inventory",
     stagingRouteExceptions: [
-      "staging.selinow.com/*",
-      "app-staging.selinow.com/*",
-      "api-staging.selinow.com/*",
       "*.staging.selinow.com/*",
     ],
   },
@@ -101,8 +98,8 @@ const productionSpec = {
 };
 
 const routes = [
-  { pattern: "selinow.com/*", script: null },
-  { pattern: "*.selinow.com/*", script: null },
+  { pattern: "selinow.com/*", script: "selinow-com-production" },
+  { pattern: "*.selinow.com/*", script: "selinow-com-production" },
   { pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" },
   { pattern: "*/*", script: "selinow-com-staging" },
 ];
@@ -220,9 +217,6 @@ describe("first-production bootstrap ceremony", () => {
     expect(handoff.promote).toEqual([
       { pattern: "selinow.com/*", script: "selinow-com-production" },
       { pattern: "*.selinow.com/*", script: "selinow-com-production" },
-      { pattern: "staging.selinow.com/*", script: "selinow-com-staging" },
-      { pattern: "app-staging.selinow.com/*", script: "selinow-com-staging" },
-      { pattern: "api-staging.selinow.com/*", script: "selinow-com-staging" },
       { pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" },
       { pattern: "*/*", script: "selinow-com-staging" },
     ]);

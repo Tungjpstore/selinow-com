@@ -591,37 +591,25 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
       ? route.pattern
       : null
   ));
-  const nullScriptPatterns = liveRoutes
-    .filter((route) => (
-      route !== null
-      && typeof route === "object"
-      && Object.prototype.hasOwnProperty.call(route, "script")
-      && route.script === null
-    ))
-    .map((route) => route.pattern)
-    .sort();
   const sharedZonePatterns = new Set(spec.sharedZoneDisabledRoutes);
-  const sharedZoneRoutes = liveRoutes.filter((route) => (
-    route !== null
-      && typeof route === "object"
-      && sharedZonePatterns.has(route.pattern)
-  ));
-  const sharedZoneNull = sharedZoneRoutes.length === sharedZonePatterns.size
-    && sharedZoneRoutes.every((route) => route.script === null);
-  const sharedZoneProduction = sharedZoneRoutes.length === sharedZonePatterns.size
-    && sharedZoneRoutes.every((route) => route.script === spec.productionWorkerName);
-  const expectedNullScriptPatterns = sharedZoneNull ? [...spec.sharedZoneDisabledRoutes].sort() : [];
+  const expectedBindings = new Map([
+    ...[...sharedZonePatterns].map((pattern) => [pattern, spec.productionWorkerName]),
+    [spec.wildcardRoute, spec.workerName],
+    ["*/*", spec.workerName],
+  ]);
   const inventoryAllowlistOk = routePatterns.every((pattern) => pattern !== null)
     && new Set(routePatterns).size === routePatterns.length
-    && JSON.stringify(nullScriptPatterns) === JSON.stringify(expectedNullScriptPatterns)
-    && (sharedZoneNull || sharedZoneProduction);
+    && liveRoutes.length === expectedBindings.size
+    && liveRoutes.every((route) => (
+      expectedBindings.has(route.pattern)
+      && route.script === expectedBindings.get(route.pattern)
+    ));
 
   // A required route can be correct while an additional, higher-priority
   // script-bound route still diverts staging traffic to another Worker. Keep
   // the allowlist tied to the checked-in staging route contract and fail closed
   // on any extra or conflicting script binding.
   const allowedScriptPatterns = new Set([
-    ...spec.hostnames,
     ...spec.sharedZoneDisabledRoutes,
     spec.wildcardRoute,
     "*/*",
@@ -652,15 +640,15 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
   const expectedRoutes = [
     {
       code: "cloudflare_staging_route_guard_apex",
-      detail: `${spec.zoneName}/* is an exact null-script guard`,
+      detail: `${spec.zoneName}/* is bound to the approved production Worker`,
       pattern: `${spec.zoneName}/*`,
-      script: null,
+      script: spec.productionWorkerName,
     },
     {
       code: "cloudflare_staging_route_guard_wildcard",
-      detail: `*.${spec.zoneName}/* is an exact null-script guard`,
+      detail: `*.${spec.zoneName}/* is bound to the approved production Worker`,
       pattern: `*.${spec.zoneName}/*`,
-      script: null,
+      script: spec.productionWorkerName,
     },
     {
       code: "cloudflare_staging_route_wildcard",
@@ -683,17 +671,11 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
       && route.pattern === expected.pattern
     ));
     const ok = matchingRoutes.length === 1
-      && (matchingRoutes[0].script === expected.script
-        || (sharedZonePatterns.has(expected.pattern)
-          && matchingRoutes[0].script === spec.productionWorkerName));
-    const acceptedDetail = sharedZonePatterns.has(expected.pattern)
-      && matchingRoutes[0]?.script === spec.productionWorkerName
-      ? `${expected.pattern} is bound to the approved production Worker`
-      : expected.detail;
+      && matchingRoutes[0].script === expectedBindings.get(expected.pattern);
     return {
       code: expected.code,
       detail: ok
-        ? acceptedDetail
+        ? expected.detail
         : `${expected.pattern} does not match the required staging route contract`,
       ok,
     };
@@ -704,7 +686,7 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
     code: "cloudflare_staging_route_inventory_allowlist",
     detail: inventoryAllowlistOk
       ? "Live routes contain only unique, well-formed bindings and the approved shared-zone boundary"
-      : "Live routes contain malformed, duplicate, or unapproved null-script bindings",
+      : "Live routes contain malformed, duplicate, missing, or unapproved bindings",
     ok: inventoryAllowlistOk,
   });
   return { checks, ok: checks.every((check) => check.ok) };

@@ -476,14 +476,8 @@ export function inspectProductionBootstrapCutoverBlockers(input) {
   const zoneName = input.productionSpec?.zoneName;
   const platformApexRoute = `${zoneName}/*`;
   const platformWildcard = `*.${zoneName}/*`;
-  const stagingRoot = input.stagingSpec?.hostnames?.[0];
-  const stagingRouteExceptions = [
-    `${stagingRoot}/*`,
-    ...(input.stagingSpec?.hostnames ?? [])
-      .filter((hostname) => hostname !== stagingRoot && !hostname.endsWith(`.${stagingRoot}`))
-      .map((hostname) => `${hostname}/*`),
-    input.stagingSpec?.wildcardRoute,
-  ].filter((route) => typeof route === "string");
+  const stagingRouteExceptions = [input.stagingSpec?.wildcardRoute]
+    .filter((route) => typeof route === "string");
   const blockers = [];
   if (input.productionSpec?.routing?.platformApexRoute !== platformApexRoute) {
     blockers.push("platform_apex_route_missing");
@@ -555,15 +549,9 @@ export function buildProductionRouteHandoff(productionSpec, stagingSpec) {
   if (typeof zoneName !== "string" || typeof productionWorker !== "string" || typeof stagingWorker !== "string") {
     throw new Error("production_bootstrap_route_strategy_invalid");
   }
-  const stagingRoot = stagingSpec?.hostnames?.[0];
-  if (typeof stagingRoot !== "string") throw new Error("production_bootstrap_route_strategy_invalid");
-  const stagingExceptions = [
-    `${stagingRoot}/*`,
-    ...(stagingSpec.hostnames ?? [])
-      .filter((hostname) => hostname !== stagingRoot && !hostname.endsWith(`.${stagingRoot}`))
-      .map((hostname) => `${hostname}/*`),
-    stagingSpec.wildcardRoute,
-  ];
+  const stagingWildcard = stagingSpec?.wildcardRoute;
+  if (typeof stagingWildcard !== "string") throw new Error("production_bootstrap_route_strategy_invalid");
+  const stagingExceptions = [stagingWildcard];
   return {
     canary: [
       { pattern: `canary.${zoneName}/*`, script: productionWorker },

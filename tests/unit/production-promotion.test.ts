@@ -80,9 +80,6 @@ const productionSpec = {
     routeHandoff: "atomic_platform_route_replacement",
     stagingExternalCustomDomainInventory: "pending_inventory",
     stagingRouteExceptions: [
-      "staging.selinow.com/*",
-      "app-staging.selinow.com/*",
-      "api-staging.selinow.com/*",
       "*.staging.selinow.com/*",
     ],
   },
@@ -307,7 +304,7 @@ function mutableRouteApi(initial = routesAfterCanary) {
 describe("first-production route promotion", () => {
   it("binds the reviewed plan to the exact source, snapshot, evidence, and route matrix", () => {
     const result = validateProductionPromotionPlan(common());
-    expect(result.handoff.promote).toHaveLength(7);
+    expect(result.handoff.promote).toHaveLength(4);
 
     const candidate = common();
     candidate.plan.safeguards.allowedMutations = ["production_stable_worker_domains"];
@@ -335,7 +332,7 @@ describe("first-production route promotion", () => {
 
     expect(result.executed).toBe(false);
     expect(result.actions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: "create", detail: "staging.selinow.com/* -> selinow-com-staging" }),
+      expect.objectContaining({ action: "replace", detail: "selinow.com/* -> selinow-com-production" }),
       expect.objectContaining({ action: "delete", detail: "canary.selinow.com/* -> selinow-com-production" }),
     ]));
     expect(result.actions).not.toEqual(expect.arrayContaining([
@@ -391,17 +388,21 @@ describe("first-production route promotion", () => {
     expect(result.ok).toBe(true);
     const appliedState = result.state as { routesBefore: unknown; changes: Array<{ before: unknown; after: unknown }> };
     expect(appliedState.routesBefore).toEqual(routesAfterCanary.slice().sort((left, right) => left.pattern.localeCompare(right.pattern)));
-    expect(appliedState.changes).toHaveLength(6);
+    expect(appliedState.changes).toHaveLength(3);
     expect(appliedState.changes.every((change) => (
       change.before !== undefined && change.after !== undefined
     ))).toBe(true);
     expect(api.routes().map(({ pattern, script }) => ({ pattern, script })).sort((left, right) => left.pattern.localeCompare(right.pattern)))
       .toEqual(handoff.promote.slice().sort((left, right) => left.pattern.localeCompare(right.pattern)));
     expect(api.routes()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ pattern: "staging.selinow.com/*", script: "selinow-com-staging" }),
       expect.objectContaining({ pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" }),
       expect.objectContaining({ id: "route-fallback-0004", pattern: "*/*", script: "selinow-com-staging" }),
     ]));
+    expect(api.routes().some((route) => new Set([
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
+    ]).has(route.pattern))).toBe(false);
     expect(api.update).not.toHaveBeenCalledWith(
       "route-fallback-0004",
       expect.anything(),
@@ -432,25 +433,25 @@ describe("first-production route promotion", () => {
       .toEqual(routesAfterCanary.map(({ pattern, script }) => ({ pattern, script })).sort((left, right) => left.pattern.localeCompare(right.pattern)));
   });
 
-  it("reconciles a committed create whose response is lost", async () => {
+  it("does not recreate deleted legacy staging routes", async () => {
     const api = mutableRouteApi();
-    const create = vi.fn(({ pattern, script }: { pattern: string; script: string | null }) => (
-      api.create({ pattern, script }).then(() => Promise.reject(new Error("response_lost_after_create")))
-    ));
     const result = await runProductionPromotion({
       ...common(),
       confirmFirstProductionBootstrap: true,
       confirmProduction: true,
-      createRouteImplementation: create,
+      createRouteImplementation: api.create,
       deleteRouteImplementation: api.delete,
       updateRouteImplementation: api.update,
       execute: true,
       inventoryImplementation: api.inventory,
     });
     expect(result.ok).toBe(true);
-    expect(api.routes()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ pattern: "staging.selinow.com/*", script: "selinow-com-staging" }),
-    ]));
+    expect(api.create).not.toHaveBeenCalled();
+    expect(api.routes().some((route) => new Set([
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
+    ]).has(route.pattern))).toBe(false);
   });
 
   it("reconciles a committed per-route update whose response is lost", async () => {
@@ -600,7 +601,7 @@ describe("first-production route promotion", () => {
       updateRouteImplementation: api.update,
       execute: true,
       inventoryImplementation: inventory,
-    })).rejects.toThrow("production_promotion_post_mutation_drift");
+    })).rejects.toThrow("production_promotion_compensation_failed");
   });
 
   it("resumes a partially failed rollback from the verified route checkpoint", async () => {
