@@ -1,5 +1,8 @@
 # Phase 4 UAT Matrix
 
+P5 execution note (2026-08-04): no scenario was executed. Current reference-safe
+results are recorded in `docs/PHASE_5_UAT_RESULTS.md`; this contract is unchanged.
+
 Status: `local_ready_remote_blocked`. Local tests are evidence of source behavior
 only. Every staging observation below is unexecuted.
 

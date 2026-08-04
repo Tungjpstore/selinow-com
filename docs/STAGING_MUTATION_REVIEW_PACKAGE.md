@@ -1,5 +1,14 @@
 # STAGING_MUTATION_REVIEW_PACKAGE
 
+## Phase 5 read-only execution update (2026-08-04)
+
+Current decision: `staging_execution_blocked`. Fresh read-only doctor and
+database preflight checks completed; migration status reports `0029`-`0080`
+pending. Complete route/custom-domain/SaaS inventory and direct manifest-grade
+ledger capture remain blocked by absent scoped audit token contexts. Gate B was
+not granted, so no backup, restore, manifest, migration, deploy, provider action,
+or pilot action occurred. See `docs/PHASE_5_REVIEW_PACKAGE_R0.md`.
+
 ## Phase 4 review update (2026-08-04)
 
 Current decision: `local_ready_remote_blocked` for candidate

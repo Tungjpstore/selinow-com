@@ -1,5 +1,8 @@
 # Phase 4 Incident and Rollback
 
+P5 execution note (2026-08-04): no runtime incident or rollback occurred. The
+read-only route-audit token blocker failed closed before any mutation sink.
+
 This contract applies to staging and controlled pilot only. It does not authorize
 a mutation.
 

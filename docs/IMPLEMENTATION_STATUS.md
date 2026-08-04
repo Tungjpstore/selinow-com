@@ -2,6 +2,27 @@
 
 Last updated: 2026-08-04
 
+## Phase 5 staging execution and pilot admission (2026-08-04)
+
+Completion state: **`staging_execution_blocked`**. The P4 implementation
+candidate remains `bff69f9d26a04b1318fd9862afa6eaffb8c003f4` with tree
+`c5c52c0b7ed9f174b65fb5969b3f5beeaa4c386`. Fresh read-only admission
+authenticated the checked-in staging account, found all expected named D1/R2/KV/
+queue resources and the required Worker secret name, reported `0029`-`0080` as
+pending, and passed the available database preflight. Route/custom-domain/SaaS
+inventory and exact manifest-grade live-ledger capture remain blocked by absent
+scoped audit token contexts.
+
+All local gates passed, including 250 Vitest files / 1,787 tests, both builds,
+both deploy dry-runs, zero high-severity npm audit findings, and exact-HEAD local
+restore report `.wrangler/restore-drills/local/rdr_20260804101522_085452a4f0e8.json`
+with integrity `ok`, zero FK violations, 614 restored items, and exact cleanup.
+Gate B, provider UAT, and seller pilot approvals were not supplied. No staging or
+production mutation occurred. P5 evidence is in
+`docs/PHASE_5_REVIEW_PACKAGE_R0.md`, `docs/PHASE_5_STAGING_EXECUTION.md`,
+`docs/PHASE_5_UAT_RESULTS.md`, `docs/PHASE_5_PILOT_ADMISSION.md`, and
+`docs/PHASE_5_INCIDENT_LOG.md`.
+
 ## Phase 4 staging acceptance and controlled pilot execution (2026-08-04)
 
 Completion state: **`local_ready_remote_blocked`**. Independent review found and

@@ -1,0 +1,33 @@
+{
+  "schema": "phase_5_pilot_scorecard_example",
+  "schemaVersion": 1,
+  "exampleOnly": true,
+  "candidateCommit": null,
+  "candidateTree": null,
+  "releaseId": null,
+  "environment": "staging",
+  "overallStatus": "not_started",
+  "pilotId": null,
+  "opaqueShopId": null,
+  "scenarios": {
+    "exact_payment": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "duplicate_webhook": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "partial_payment": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "overpaid_payment": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "late_payment": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "mismatched_payment": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "inventory_race": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "fulfillment_replay": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "provider_outage": { "status": "waiting_provider", "evidenceRef": null, "ownerAckRef": null },
+    "stale_readiness": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "shop_switch_inventory_request": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "billing_response_loss": { "status": "waiting_provider", "evidenceRef": null, "ownerAckRef": null },
+    "support_escalation": { "status": "pending_user", "evidenceRef": null, "ownerAckRef": null },
+    "rollback_cleanup": { "status": "pending_user", "evidenceRef": null, "ownerAckRef": null },
+    "tenant_isolation": { "status": "not_started", "evidenceRef": null, "ownerAckRef": null },
+    "migration_retry": { "status": "pending_user", "evidenceRef": null, "ownerAckRef": null },
+    "deploy_response_ambiguity": { "status": "pending_user", "evidenceRef": null, "ownerAckRef": null },
+    "monitoring_acknowledgement_loss": { "status": "pending_user", "evidenceRef": null, "ownerAckRef": null }
+  },
+  "notes": "Example only. Real evidence stays private, reference-safe, and mode 0600."
+}
