@@ -52,13 +52,18 @@ npm run db:migrate:status -- --env staging
 npm run db:preflight -- --env staging --json
 npm run backup:create -- --env staging --dry-run --json
 npm run backup:create -- --env staging --json
-npm run db:migrate -- --env staging
+HEAD_SHA="$(git rev-parse HEAD)"
+npm run restore:drill -- --env staging --reviewed-commit "$HEAD_SHA" --json
+npm run release:staging:manifest -- --write --json
+# Use the exact manifestRef emitted by the previous command.
+MANIFEST_REF=".wrangler/releases/staging/<release-id>/release-manifest.json"
+npm run db:migrate -- --env staging --release-manifest "$MANIFEST_REF"
 npm run db:migrate:status -- --env staging
 npm run db:preflight -- --env staging --json
 # Run only when the reviewed change explicitly requires a seed.
-npm run db:seed -- --env staging
+npm run db:seed -- --env staging --release-manifest "$MANIFEST_REF"
 npm run platform:doctor -- --env staging --json
-npm run deploy:staging
+npm run deploy:staging -- --release-manifest "$MANIFEST_REF"
 npm run db:migrate:status -- --env staging
 npm run db:preflight -- --env staging --json
 npm run platform:route-preflight -- --json

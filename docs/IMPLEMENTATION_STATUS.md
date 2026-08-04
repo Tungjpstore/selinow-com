@@ -39,6 +39,20 @@ acceptance, monitoring, pilot and secret-name inputs are absent. Cloudflare
 Chrome was used read-only for identity/ledger/runtime inspection; it did not
 apply migrations or alter configuration.
 
+The later 2026-08-04 production execution attempt progressed only through
+safety evidence. A fresh non-empty report-v2 production backup was created at
+`.wrangler/backups/production/bkp_20260804113931_e87d7ee5bfa1/snapshot.json`.
+The first isolated restore exposed a gate bug that incorrectly required
+post-`0070` billing/activation tables on the `0052` source; the gate now requires
+only the durable source baseline and still validates the complete schema after
+replaying all pending migrations. The retry passed with report
+`.wrangler/restore-drills/production/rdr_20260804114401_67010b1e6913.json`, exact
+`0001`-`0080` replay, integrity `ok`, zero foreign-key violations and exact
+temporary-target cleanup. Production migration/deploy was not attempted because
+staging admission, route/platform tokens, UAT/pilot/provider evidence, canonical
+release evidence/manifest, queue-consumer intent and current rollback identity
+remain unresolved.
+
 ## Phase 5 staging execution and pilot admission (2026-08-04)
 
 Completion state: **`staging_execution_blocked`**. The P4 implementation

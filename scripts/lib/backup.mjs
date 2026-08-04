@@ -39,20 +39,10 @@ const EXPECTED_DATABASE_NAMES = {
 const STAGING_BACKUP_FRESHNESS_MS = 60 * 60_000;
 const CLOUDFLARE_ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/u;
 const D1_DATABASE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
-const BILLING_ACTIVATION_TABLES = [
-  "plans",
-  "plan_prices",
-  "shop_subscriptions",
-  "subscription_change_requests",
-  "billing_accounts",
-  "billing_checkout_sessions",
-  "billing_invoices",
-  "billing_provider_events",
-  "subscription_events",
-  "usage_counters",
-  "usage_events",
-  "activation_milestones",
-];
+// The source database may legitimately predate the billing/activation chain;
+// those tables are created by pending migrations and validated on the replayed
+// target below. Only require the durable platform baseline in the source copy.
+const SOURCE_BASELINE_TABLES = ["plans", "shops", "shop_subscriptions", "usage_counters"];
 const CORE_COUNT_TABLES = [
   "api_credentials",
   "plans",
@@ -1600,7 +1590,7 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     const sourceTableNames = new Set(sourceTableRows
       .map((row) => row?.name)
       .filter((name) => typeof name === "string"));
-    if (BILLING_ACTIVATION_TABLES.some((table) => !sourceTableNames.has(table))) {
+    if (SOURCE_BASELINE_TABLES.some((table) => !sourceTableNames.has(table))) {
       throw new Error("restore_source_schema_incomplete");
     }
     const sourceCountTables = CORE_COUNT_TABLES.filter((table) => sourceTableNames.has(table));
