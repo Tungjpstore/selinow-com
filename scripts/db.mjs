@@ -29,9 +29,9 @@ import {
 import {
   assertStagingContinuationBinding,
   assertStagingMigrationLedger,
-  assertStagingMigrationLedgerPrefix,
   assertStagingDatabasePreflight,
   assertStagingReleaseAdmission,
+  runStagingMigrationWithVerification,
 } from "./lib/staging-release.mjs";
 
 const operation = process.argv[2];
@@ -50,6 +50,7 @@ try {
     ? ["--local"]
     : ["--env", flags.environment, "--remote"];
   let wranglerArgs;
+  let stagingMigrationHandled = false;
 
   if (operation === "migrate") {
     wranglerArgs = ["d1", "migrations", "apply", "PLATFORM_DB", ...targetFlags];
@@ -169,6 +170,8 @@ try {
         || finalReleaseAdmission.releaseId !== releaseAdmission.releaseId
         || finalContinuationAdmission.backup.snapshotId !== continuationAdmission.backup.snapshotId
         || finalContinuationAdmission.restore.reportRef !== continuationAdmission.restore.reportRef
+        || finalReleaseAdmission.migrationLedgerPrefix.length !== releaseAdmission.migrationLedgerPrefix.length
+        || finalReleaseAdmission.migrationLedgerPrefix.some((name, index) => name !== releaseAdmission.migrationLedgerPrefix[index])
       ) {
         throw new Error("staging_release_admission_changed");
       }
@@ -177,17 +180,29 @@ try {
         finalAdmission.accountId,
       );
       if (operation === "migrate") {
-        await assertStagingMigrationLedgerPrefix({ environment: commandEnvironment, repositoryRoot });
+        await runStagingMigrationWithVerification({
+          environment: commandEnvironment,
+          expectedPrefix: finalReleaseAdmission.migrationLedgerPrefix,
+          repositoryRoot,
+          runMigrationImplementation: () => runWrangler(wranglerArgs, {
+            capture: false,
+            cwd: repositoryRoot,
+            env: commandEnvironment,
+          }),
+        });
+        stagingMigrationHandled = true;
       } else {
         await assertStagingMigrationLedger({ environment: commandEnvironment, repositoryRoot });
         assertStagingDatabasePreflight({ environment: commandEnvironment, repositoryRoot });
       }
     }
-    runWrangler(wranglerArgs, {
-      capture: false,
-      cwd: repositoryRoot,
-      env: commandEnvironment,
-    });
+    if (!stagingMigrationHandled) {
+      runWrangler(wranglerArgs, {
+        capture: false,
+        cwd: repositoryRoot,
+        env: commandEnvironment,
+      });
+    }
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : "unknown_error";

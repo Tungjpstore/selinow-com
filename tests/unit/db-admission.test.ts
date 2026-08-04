@@ -315,10 +315,11 @@ describe("production database migration admission", () => {
     const finalContinuation = source.indexOf("await assertFreshStagingContinuationEvidence", continuation + 1);
     const stableTargetGuard = source.indexOf("staging_release_admission_changed", finalContinuation);
     const pin = source.indexOf("buildPinnedCloudflareEnvironment", finalGate);
-    const prefixLedger = source.indexOf("await assertStagingMigrationLedgerPrefix", pin);
+    const migrationVerification = source.indexOf("await runStagingMigrationWithVerification", pin);
     const completeLedger = source.indexOf("await assertStagingMigrationLedger({", pin);
     const preflight = source.indexOf("assertStagingDatabasePreflight", completeLedger);
-    const sink = source.indexOf("runWrangler(wranglerArgs", finalGate);
+    const migrationSink = source.indexOf("runWrangler(wranglerArgs", migrationVerification);
+    const seedSink = source.indexOf("runWrangler(wranglerArgs", migrationSink + 1);
 
     expect(firstRelease).toBeGreaterThan(-1);
     expect(firstRelease).toBeLessThan(firstGate);
@@ -329,11 +330,12 @@ describe("production database migration admission", () => {
     expect(finalContinuation).toBeGreaterThan(finalRelease);
     expect(stableTargetGuard).toBeGreaterThan(finalContinuation);
     expect(pin).toBeGreaterThan(stableTargetGuard);
-    expect(prefixLedger).toBeGreaterThan(pin);
-    expect(prefixLedger).toBeLessThan(sink);
+    expect(migrationVerification).toBeGreaterThan(pin);
+    expect(migrationVerification).toBeLessThan(migrationSink);
     expect(completeLedger).toBeGreaterThan(pin);
     expect(completeLedger).toBeLessThan(preflight);
-    expect(preflight).toBeLessThan(sink);
-    expect(sink).toBeGreaterThan(pin);
+    expect(preflight).toBeLessThan(seedSink);
+    expect(migrationSink).toBeGreaterThan(pin);
+    expect(seedSink).toBeGreaterThan(preflight);
   });
 });

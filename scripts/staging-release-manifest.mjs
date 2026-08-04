@@ -6,6 +6,7 @@ import { assertFreshStagingContinuationEvidence, resolveDatabaseTarget } from ".
 import { repositoryRoot } from "./lib/platform.mjs";
 import {
   buildStagingReleaseManifest,
+  captureStagingReleaseDatabaseBaseline,
   readStagingRepositoryState,
   writeStagingReleaseManifest,
 } from "./lib/staging-release.mjs";
@@ -31,20 +32,29 @@ try {
   }
   const target = resolveDatabaseTarget(wranglerConfig, "staging");
   const repositoryState = readStagingRepositoryState(repositoryRoot);
+  const databaseBaseline = await captureStagingReleaseDatabaseBaseline({
+    databaseTarget: {
+      accountId: stagingSpec.accountId,
+      databaseId: target.databaseId,
+      databaseName: target.databaseName,
+    },
+    repositoryRoot,
+  });
   const continuationEvidence = await assertFreshStagingContinuationEvidence({
-    accountId: stagingSpec.accountId,
-    databaseId: target.databaseId,
-    databaseName: target.databaseName,
+    accountId: databaseBaseline.databaseTarget.accountId,
+    databaseId: databaseBaseline.databaseTarget.databaseId,
+    databaseName: databaseBaseline.databaseTarget.databaseName,
     repositoryRoot,
     reviewedCommitSha: repositoryState.commitSha,
   });
   const manifest = await buildStagingReleaseManifest({
     continuationEvidence,
     databaseTarget: {
-      accountId: stagingSpec.accountId,
-      databaseId: target.databaseId,
-      databaseName: target.databaseName,
+      accountId: databaseBaseline.databaseTarget.accountId,
+      databaseId: databaseBaseline.databaseTarget.databaseId,
+      databaseName: databaseBaseline.databaseTarget.databaseName,
     },
+    migrationLedgerPrefix: databaseBaseline.migrationLedgerPrefix,
     repositoryRoot,
     repositoryState,
   });

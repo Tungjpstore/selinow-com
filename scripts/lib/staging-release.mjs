@@ -5,7 +5,11 @@ import process from "node:process";
 
 import { run, runWrangler } from "./cli.mjs";
 import { listMigrationNames } from "./release.mjs";
-import { repositoryRoot } from "./platform.mjs";
+import {
+  assertStagingMutationAdmission,
+  buildPinnedCloudflareEnvironment,
+  repositoryRoot,
+} from "./platform.mjs";
 
 const GIT_OBJECT_PATTERN = /^[a-f0-9]{40}$/u;
 const RELEASE_ID_PATTERN = /^stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}$/u;
@@ -46,6 +50,7 @@ export function validateStagingReleaseManifest(input) {
     "databaseTarget",
     "environment",
     "expiresAt",
+    "migrationLedgerPrefix",
     "migrationNames",
     "releaseId",
     "schemaVersion",
@@ -66,7 +71,7 @@ export function validateStagingReleaseManifest(input) {
   if (input.repositoryState.clean !== true) throw new Error("staging_release_source_dirty");
   if (!GIT_OBJECT_PATTERN.test(input.repositoryState.commitSha ?? "")) throw new Error("staging_release_commit_unavailable");
   if (!GIT_OBJECT_PATTERN.test(input.repositoryState.treeSha ?? "")) throw new Error("staging_release_tree_unavailable");
-  if (input.manifest.schemaVersion !== 2 || input.manifest.environment !== "staging") {
+  if (input.manifest.schemaVersion !== 3 || input.manifest.environment !== "staging") {
     throw new Error("staging_release_manifest_invalid");
   }
   if (!ACCOUNT_ID_PATTERN.test(input.manifest.databaseTarget.accountId ?? "")
@@ -87,6 +92,12 @@ export function validateStagingReleaseManifest(input) {
     || input.manifest.migrationNames.some((name, index) => name !== input.migrationNames[index])) {
     throw new Error("staging_release_migration_ledger_mismatch");
   }
+  if (!Array.isArray(input.manifest.migrationLedgerPrefix)
+    || input.manifest.migrationLedgerPrefix.length === 0
+    || input.manifest.migrationLedgerPrefix.length > input.migrationNames.length
+    || input.manifest.migrationLedgerPrefix.some((name, index) => name !== input.migrationNames[index])) {
+    throw new Error("staging_release_migration_ledger_baseline_mismatch");
+  }
   const createdAt = new Date(input.manifest.createdAt ?? "");
   const expiresAt = new Date(input.manifest.expiresAt ?? "");
   const now = input.now ?? new Date();
@@ -104,6 +115,7 @@ export function validateStagingReleaseManifest(input) {
     commitSha: input.repositoryState.commitSha,
     continuationEvidence: input.manifest.continuationEvidence,
     databaseTarget: input.manifest.databaseTarget,
+    migrationLedgerPrefix: input.manifest.migrationLedgerPrefix,
     releaseId: input.manifest.releaseId,
     treeSha: input.repositoryState.treeSha,
   };
@@ -122,6 +134,15 @@ export async function buildStagingReleaseManifest(input = {}) {
   if (input.databaseTarget === undefined || input.continuationEvidence === undefined) {
     throw new Error("staging_release_continuation_evidence_required");
   }
+  if (input.migrationLedgerPrefix === undefined) {
+    throw new Error("staging_release_migration_ledger_baseline_required");
+  }
+  if (!Array.isArray(input.migrationLedgerPrefix)
+    || input.migrationLedgerPrefix.length === 0
+    || input.migrationLedgerPrefix.length > migrationNames.length
+    || input.migrationLedgerPrefix.some((name, index) => name !== migrationNames[index])) {
+    throw new Error("staging_release_migration_ledger_baseline_mismatch");
+  }
   return {
     commitSha: repositoryState.commitSha,
     continuationEvidence: {
@@ -139,9 +160,10 @@ export async function buildStagingReleaseManifest(input = {}) {
     databaseTarget: input.databaseTarget,
     environment: "staging",
     expiresAt: new Date(now.getTime() + 24 * 60 * 60_000).toISOString(),
+    migrationLedgerPrefix: input.migrationLedgerPrefix,
     migrationNames,
     releaseId,
-    schemaVersion: 2,
+    schemaVersion: 3,
     treeSha: repositoryState.treeSha,
   };
 }
@@ -185,17 +207,27 @@ export function parseStagingMigrationLedgerOutput(output) {
   return names;
 }
 
+function readStagingMigrationLedger(input, root) {
+  const runner = input.runWranglerImplementation ?? runWrangler;
+  let output;
+  try {
+    output = runner([
+      "d1", "execute", "PLATFORM_DB", "--env", "staging", "--remote",
+      "--command", "SELECT name FROM d1_migrations ORDER BY name;", "--json",
+    ], {
+      cwd: root,
+      env: input.environment,
+    }).stdout;
+  } catch {
+    throw new Error("staging_migration_ledger_unavailable");
+  }
+  return parseStagingMigrationLedgerOutput(output);
+}
+
 export async function assertStagingMigrationLedger(input = {}) {
   const root = input.repositoryRoot ?? repositoryRoot;
   const expected = input.migrationNames ?? await listMigrationNames(root);
-  const runner = input.runWranglerImplementation ?? runWrangler;
-  const observed = parseStagingMigrationLedgerOutput(runner([
-    "d1", "execute", "PLATFORM_DB", "--env", "staging", "--remote",
-    "--command", "SELECT name FROM d1_migrations ORDER BY name;", "--json",
-  ], {
-    cwd: root,
-    env: input.environment,
-  }).stdout);
+  const observed = readStagingMigrationLedger(input, root);
   if (observed.length !== expected.length || observed.some((name, index) => name !== expected[index])) {
     throw new Error("staging_migration_ledger_incomplete");
   }
@@ -206,18 +238,55 @@ export async function assertStagingMigrationLedger(input = {}) {
 export async function assertStagingMigrationLedgerPrefix(input = {}) {
   const root = input.repositoryRoot ?? repositoryRoot;
   const expected = input.migrationNames ?? await listMigrationNames(root);
-  const runner = input.runWranglerImplementation ?? runWrangler;
-  const observed = parseStagingMigrationLedgerOutput(runner([
-    "d1", "execute", "PLATFORM_DB", "--env", "staging", "--remote",
-    "--command", "SELECT name FROM d1_migrations ORDER BY name;", "--json",
-  ], {
-    cwd: root,
-    env: input.environment,
-  }).stdout);
+  if (input.expectedPrefix !== undefined
+    && (!Array.isArray(input.expectedPrefix)
+      || input.expectedPrefix.length === 0
+      || input.expectedPrefix.length > expected.length
+      || input.expectedPrefix.some((name, index) => name !== expected[index]))) {
+    throw new Error("staging_migration_ledger_baseline_mismatch");
+  }
+  const observed = readStagingMigrationLedger(input, root);
+  if (observed.length === 0) {
+    throw new Error("staging_migration_ledger_prefix_empty");
+  }
   if (observed.length > expected.length || observed.some((name, index) => name !== expected[index])) {
     throw new Error("staging_migration_ledger_prefix_invalid");
   }
+  if (input.expectedPrefix !== undefined
+    && (observed.length !== input.expectedPrefix.length
+      || observed.some((name, index) => name !== input.expectedPrefix[index]))) {
+    throw new Error("staging_migration_ledger_baseline_mismatch");
+  }
   return { migrationNames: observed };
+}
+
+export async function captureStagingReleaseDatabaseBaseline(input) {
+  const root = input.repositoryRoot ?? repositoryRoot;
+  const operatorEnvironment = input.environment ?? process.env;
+  const migrationNames = input.migrationNames ?? await listMigrationNames(root);
+  const admission = await (input.assertStagingMutationAdmissionImplementation ?? assertStagingMutationAdmission)({
+    environment: operatorEnvironment,
+    runWranglerImplementation: input.runWranglerImplementation,
+  });
+  if (admission.accountId !== input.databaseTarget.accountId
+    || admission.databaseId !== input.databaseTarget.databaseId
+    || admission.databaseName !== input.databaseTarget.databaseName) {
+    throw new Error("staging_release_target_mismatch");
+  }
+  const ledger = await assertStagingMigrationLedgerPrefix({
+    environment: buildPinnedCloudflareEnvironment(operatorEnvironment, admission.accountId),
+    migrationNames,
+    repositoryRoot: root,
+    runWranglerImplementation: input.runWranglerImplementation,
+  });
+  return {
+    databaseTarget: {
+      accountId: admission.accountId,
+      databaseId: admission.databaseId,
+      databaseName: admission.databaseName,
+    },
+    migrationLedgerPrefix: ledger.migrationNames,
+  };
 }
 
 export function parseStagingDatabasePreflightOutput(output) {
@@ -240,12 +309,35 @@ export function parseStagingDatabasePreflightOutput(output) {
 export function assertStagingDatabasePreflight(input = {}) {
   const root = input.repositoryRoot ?? repositoryRoot;
   const runner = input.runImplementation ?? run;
-  return parseStagingDatabasePreflightOutput(runner(process.execPath, [
-    "scripts/db.mjs", "preflight", "--env", "staging", "--json",
-  ], {
-    cwd: root,
-    env: input.environment,
-  }).stdout);
+  let output;
+  try {
+    output = runner(process.execPath, [
+      "scripts/db.mjs", "preflight", "--env", "staging", "--json",
+    ], {
+      cwd: root,
+      env: input.environment,
+    }).stdout;
+  } catch {
+    throw new Error("staging_database_preflight_failed");
+  }
+  return parseStagingDatabasePreflightOutput(output);
+}
+
+export async function runStagingMigrationWithVerification(input) {
+  const preflight = input.assertDatabasePreflightImplementation ?? assertStagingDatabasePreflight;
+  const prefix = input.assertMigrationLedgerPrefixImplementation ?? assertStagingMigrationLedgerPrefix;
+  const complete = input.assertMigrationLedgerImplementation ?? assertStagingMigrationLedger;
+  const shared = {
+    environment: input.environment,
+    migrationNames: input.migrationNames,
+    repositoryRoot: input.repositoryRoot,
+  };
+
+  preflight(shared);
+  await prefix({ ...shared, expectedPrefix: input.expectedPrefix });
+  await input.runMigrationImplementation();
+  await complete(shared);
+  preflight(shared);
 }
 
 export async function writeStagingReleaseManifest(manifest, root = repositoryRoot) {

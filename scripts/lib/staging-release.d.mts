@@ -25,9 +25,10 @@ export type StagingReleaseManifest = {
   };
   environment: "staging";
   expiresAt: string;
+  migrationLedgerPrefix: string[];
   migrationNames: string[];
   releaseId: string;
-  schemaVersion: 2;
+  schemaVersion: 3;
   treeSha: string;
 };
 
@@ -41,6 +42,7 @@ export function validateStagingReleaseManifest(input: {
   commitSha: string;
   continuationEvidence: StagingReleaseManifest["continuationEvidence"];
   databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationLedgerPrefix: string[];
   releaseId: string;
   treeSha: string;
 };
@@ -61,6 +63,7 @@ export function buildStagingReleaseManifest(input?: {
     };
   };
   databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationLedgerPrefix: string[];
   migrationNames?: string[];
   now?: Date;
   repositoryRoot?: string;
@@ -86,6 +89,7 @@ export function assertStagingMigrationLedger(input?: {
 }): Promise<{ migrationNames: string[] }>;
 export function assertStagingMigrationLedgerPrefix(input?: {
   environment?: NodeJS.ProcessEnv;
+  expectedPrefix?: string[];
   migrationNames?: string[];
   repositoryRoot?: string;
   runWranglerImplementation?: (
@@ -93,6 +97,26 @@ export function assertStagingMigrationLedgerPrefix(input?: {
     options?: { cwd?: string; env?: NodeJS.ProcessEnv },
   ) => { stdout: string; stderr: string };
 }): Promise<{ migrationNames: string[] }>;
+export function captureStagingReleaseDatabaseBaseline(input: {
+  assertStagingMutationAdmissionImplementation?: (input: {
+    environment?: NodeJS.ProcessEnv;
+    runWranglerImplementation?: (
+      args: string[],
+      options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+    ) => { stdout: string; stderr: string };
+  }) => Promise<StagingReleaseManifest["databaseTarget"]>;
+  databaseTarget: StagingReleaseManifest["databaseTarget"];
+  environment?: NodeJS.ProcessEnv;
+  migrationNames?: string[];
+  repositoryRoot?: string;
+  runWranglerImplementation?: (
+    args: string[],
+    options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+  ) => { stdout: string; stderr: string };
+}): Promise<{
+  databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationLedgerPrefix: string[];
+}>;
 export function parseStagingDatabasePreflightOutput(output: string): {
   checks: Array<{ code: string; detail: string; ok: true }>;
 };
@@ -105,6 +129,29 @@ export function assertStagingDatabasePreflight(input?: {
     options?: { cwd?: string; env?: NodeJS.ProcessEnv },
   ) => { stdout: string; stderr: string };
 }): { checks: Array<{ code: string; detail: string; ok: true }> };
+export function runStagingMigrationWithVerification(input: {
+  assertDatabasePreflightImplementation?: (input?: {
+    environment?: NodeJS.ProcessEnv;
+    migrationNames?: string[];
+    repositoryRoot?: string;
+  }) => unknown;
+  assertMigrationLedgerImplementation?: (input?: {
+    environment?: NodeJS.ProcessEnv;
+    migrationNames?: string[];
+    repositoryRoot?: string;
+  }) => Promise<unknown>;
+  assertMigrationLedgerPrefixImplementation?: (input?: {
+    environment?: NodeJS.ProcessEnv;
+    expectedPrefix?: string[];
+    migrationNames?: string[];
+    repositoryRoot?: string;
+  }) => Promise<unknown>;
+  environment?: NodeJS.ProcessEnv;
+  expectedPrefix: string[];
+  migrationNames?: string[];
+  repositoryRoot?: string;
+  runMigrationImplementation: () => unknown | Promise<unknown>;
+}): Promise<void>;
 export function writeStagingReleaseManifest(manifest: StagingReleaseManifest, root?: string): Promise<string>;
 export function assertStagingReleaseAdmission(input: {
   manifestPath: string;
@@ -116,6 +163,7 @@ export function assertStagingReleaseAdmission(input: {
   commitSha: string;
   continuationEvidence: StagingReleaseManifest["continuationEvidence"];
   databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationLedgerPrefix: string[];
   releaseId: string;
   treeSha: string;
 }>;
