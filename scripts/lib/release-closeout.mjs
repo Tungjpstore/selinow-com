@@ -63,6 +63,41 @@ const CHECK_GROUPS = [
     nextAction: "Partition all channels explicitly; leave unsupported channels deferred and unaccepted.",
   },
   {
+    prefix: "evidence.rollback.",
+    category: "rollback_rehearsal",
+    nextAction: "Rehearse rollback for the exact candidate and retain the private, redacted report.",
+  },
+  {
+    prefix: "evidence.candidateWorkerVersion",
+    category: "worker_version_admission",
+    nextAction: "Upload the admitted candidate version and record the exact immutable Worker version ID.",
+  },
+  {
+    prefix: "evidence.previousWorkerVersion",
+    category: "worker_version_admission",
+    nextAction: "Read the current stable production Worker version and retain it as the rollback target.",
+  },
+  {
+    prefix: "evidence.commitSha",
+    category: "candidate_identity",
+    nextAction: "Record the exact clean reviewed commit SHA for this release candidate.",
+  },
+  {
+    prefix: "evidence.environment",
+    category: "candidate_identity",
+    nextAction: "Set the evidence environment to production.",
+  },
+  {
+    prefix: "evidence.releaseId",
+    category: "candidate_identity",
+    nextAction: "Create a unique non-placeholder production release ID bound to this candidate.",
+  },
+  {
+    prefix: "evidence.schemaVersion",
+    category: "candidate_identity",
+    nextAction: "Use production release evidence schema version 2.",
+  },
+  {
     prefix: "evidence.migrationLedgerPrefix",
     category: "migration_admission",
     nextAction: "Record the exact source migration prefix observed in the target database.",
