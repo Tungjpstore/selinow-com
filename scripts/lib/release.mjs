@@ -123,11 +123,17 @@ const REQUIRED_EVIDENCE_PATHS = [
   "pilot.evidenceRef",
   "pilot.completedAt",
   "previousWorkerVersion",
+  "quality.auditHigh",
   "quality.build",
+  "quality.buildStaging",
   "quality.check",
   "quality.deployDryRun",
+  "quality.deployStagingDryRun",
+  "quality.gitDiffCheck",
   "quality.lint",
+  "quality.schemaVersion",
   "quality.test",
+  "quality.tscNoEmit",
   "releaseId",
   "rollback.rehearsalEvidenceRef",
   "rollback.rehearsedAt",
@@ -233,6 +239,7 @@ function validEvidencePath(path, value) {
   if (path === "manualAcceptance.observedAt" || path === "monitoring.observedAt" || path === "pilot.completedAt" || path === "rollback.rehearsedAt") {
     return safeDate(value) !== null;
   }
+  if (path === "quality.schemaVersion") return value === 2;
   if (path.startsWith("quality.") || path.startsWith("manualAcceptance.") || path.startsWith("monitoring.")) return value === true;
   if (path === "staging.accepted") return value === true;
   if (path === "staging.acceptedAt") return safeDate(value) !== null;
@@ -403,8 +410,10 @@ export function inspectProductionReadiness(input) {
     ),
     makeCheck("binding.INTEGRATION_QUEUE", queues.producers.has("INTEGRATION_QUEUE")),
     makeCheck("binding.NOTIFICATION_QUEUE", queues.producers.has("NOTIFICATION_QUEUE")),
-    makeCheck("queue.consumer.integration", queues.consumers.size >= 2),
-    makeCheck("wrangler.env.production.triggers", Array.isArray(production?.triggers?.crons) && production.triggers.crons.length > 0),
+    makeCheck("queue.consumer.integration", isConfigured(spec?.resources?.integrationQueue) && queues.consumers.has(spec.resources.integrationQueue)),
+    makeCheck("queue.consumer.notification", isConfigured(spec?.resources?.notificationQueue) && queues.consumers.has(spec.resources.notificationQueue)),
+    makeCheck("queue.consumer.deadLetter", isConfigured(spec?.resources?.deadLetterQueue) && queues.consumers.has(spec.resources.deadLetterQueue)),
+    makeCheck("wrangler.env.production.triggers", isDeepStrictEqual(production?.triggers?.crons, ["*/15 * * * *"])),
     makeCheck("wrangler.env.production.observability", production?.observability?.enabled === true),
   );
   const activeRefs = releaseScope.activeProviderKeys
@@ -455,6 +464,7 @@ export function inspectProductionReadiness(input) {
     makeCheck("alignment.resource.privateExports", isConfigured(spec?.resources?.privateExports) && exportsBucket?.bucket_name === spec.resources.privateExports),
     makeCheck("alignment.queue.integration", isConfigured(spec?.resources?.integrationQueue) && queues.consumers.has(spec.resources.integrationQueue)),
     makeCheck("alignment.queue.notification", isConfigured(spec?.resources?.notificationQueue) && queues.consumers.has(spec.resources.notificationQueue)),
+    makeCheck("alignment.queue.deadLetter", isConfigured(spec?.resources?.deadLetterQueue) && queues.consumers.has(spec.resources.deadLetterQueue)),
     makeCheck("alignment.route.marketing", isConfigured(spec?.hostnames?.marketing)
       && (routes.has(spec.hostnames.marketing) || routes.has(`${spec.hostnames.marketing}/*`))),
     makeCheck("alignment.route.dashboard", isConfigured(spec?.hostnames?.dashboard)

@@ -58,7 +58,11 @@ function readyWranglerConfig(): Record<string, unknown> {
         observability: { enabled: true },
         preview_urls: false,
         queues: {
-          consumers: [{ queue: "selinow-integration-production" }, { queue: "selinow-notification-production" }],
+          consumers: [
+            { queue: "selinow-integration-production" },
+            { queue: "selinow-notification-production" },
+            { queue: "selinow-dlq-production" },
+          ],
           producers: [
             { binding: "INTEGRATION_QUEUE", queue: "selinow-integration-production" },
             { binding: "NOTIFICATION_QUEUE", queue: "selinow-notification-production" },
@@ -176,7 +180,19 @@ function readyEvidence(): Record<string, unknown> {
       evidenceRef: `private/provider-acceptance/${provider}.json`,
       observedAt: "2026-07-25T12:00:00.000Z",
     }])),
-    quality: { build: true, check: true, deployDryRun: true, lint: true, test: true },
+    quality: {
+      auditHigh: true,
+      build: true,
+      buildStaging: true,
+      check: true,
+      deployDryRun: true,
+      deployStagingDryRun: true,
+      gitDiffCheck: true,
+      lint: true,
+      schemaVersion: 2,
+      test: true,
+      tscNoEmit: true,
+    },
     releaseScope: {
       activeChannels: ["website", ...providerAcceptanceKeys],
       deferredChannels: [],
@@ -231,6 +247,102 @@ describe("production release readiness", () => {
 
     expect(result.ok).toBe(true);
     expect(result.missing).toEqual([]);
+  });
+
+  it("requires the exact production cron schedule", () => {
+    const config = readyWranglerConfig();
+    const production = (config.env as { production: { triggers: { crons: string[] } } }).production;
+    production.triggers.crons = ["*/15 * * * *", "0 * * * *"];
+
+    const result = inspectProductionReadiness({
+      evidence: readyEvidence(),
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: config,
+    });
+
+    expect(result.missing).toContain("wrangler.env.production.triggers");
+  });
+
+  it("requires each configured production queue consumer by name", () => {
+    const config = readyWranglerConfig();
+    const production = (config.env as {
+      production: { queues: { consumers: Array<{ queue: string }> } };
+    }).production;
+    production.queues.consumers = [
+      { queue: "selinow-notification-production" },
+      { queue: "selinow-dlq-production" },
+      { queue: "unrelated-production" },
+    ];
+
+    const result = inspectProductionReadiness({
+      evidence: readyEvidence(),
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: config,
+    });
+
+    expect(result.checks.find((check) => check.name === "queue.consumer.integration")?.ok).toBe(false);
+  });
+
+  it("requires the configured production dead-letter queue consumer", () => {
+    const config = readyWranglerConfig();
+    const production = (config.env as {
+      production: { queues: { consumers: Array<{ queue: string }> } };
+    }).production;
+    production.queues.consumers = production.queues.consumers
+      .filter((consumer) => consumer.queue !== "selinow-dlq-production");
+
+    const result = inspectProductionReadiness({
+      evidence: readyEvidence(),
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: config,
+    });
+
+    expect(result.missing).toEqual(expect.arrayContaining([
+      "alignment.queue.deadLetter",
+      "queue.consumer.deadLetter",
+    ]));
+  });
+
+  it("rejects legacy quality evidence schema v1 for a new candidate", () => {
+    const evidence = readyEvidence();
+    (evidence.quality as Record<string, unknown>).schemaVersion = 1;
+
+    const result = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.missing).toContain("evidence.quality.schemaVersion");
+  });
+
+  it.each([
+    "auditHigh",
+    "buildStaging",
+    "deployStagingDryRun",
+    "gitDiffCheck",
+    "tscNoEmit",
+  ])("requires the quality.%s sequential gate", (gate) => {
+    const evidence = readyEvidence();
+    (evidence.quality as Record<string, unknown>)[gate] = false;
+
+    const result = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.missing).toContain(`evidence.quality.${gate}`);
   });
 
   it("reports missing names without echoing configuration values", () => {
