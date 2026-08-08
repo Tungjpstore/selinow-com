@@ -9,6 +9,7 @@ import {
   repositoryRoot,
 } from "./platform.mjs";
 import { assertFreshProductionContinuationEvidence } from "./backup.mjs";
+import { validateCommerceUatArtifacts, validateCommerceUatArtifactsSync } from "./commerce-uat-evidence.mjs";
 
 export const REQUIRED_PRODUCTION_VARS = [
   "ACTIVE_CREDENTIAL_KEY_VERSION",
@@ -96,6 +97,9 @@ const REQUIRED_SPEC_PATHS = [
 const REQUIRED_EVIDENCE_PATHS = [
   "approvals.releaseOwner",
   "approvals.supportOwner",
+  "approvals.paymentOwner",
+  "approvals.dataOwner",
+  "approvals.securityOwner",
   "backup.completedAt",
   "backup.providerBookmarkRecorded",
   "backup.restoreDrillCompletedAt",
@@ -131,6 +135,10 @@ const REQUIRED_EVIDENCE_PATHS = [
   "security.highOpen",
   "staging.accepted",
   "staging.acceptedAt",
+  "staging.releaseId",
+  "staging.manifestRef",
+  "staging.manifestSha256",
+  "staging.workerVersion",
 ];
 
 const PLACEHOLDER_PATTERN = /(?:change-me|not-provisioned|placeholder|replace-with|<[^>]+>)/iu;
@@ -228,6 +236,10 @@ function validEvidencePath(path, value) {
   if (path.startsWith("quality.") || path.startsWith("manualAcceptance.") || path.startsWith("monitoring.")) return value === true;
   if (path === "staging.accepted") return value === true;
   if (path === "staging.acceptedAt") return safeDate(value) !== null;
+  if (path === "staging.releaseId") return typeof value === "string" && /^stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}$/u.test(value);
+  if (path === "staging.manifestRef") return typeof value === "string" && /^\.wrangler\/releases\/staging\/stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}\/release-manifest\.json$/u.test(value);
+  if (path === "staging.manifestSha256") return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value) && !/^0+$/u.test(value);
+  if (path === "staging.workerVersion") return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/u.test(value) && !PLACEHOLDER_PATTERN.test(value);
   if (/^providerAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.accepted$/u.test(path)) return value === true;
   if (/^providerAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.observedAt$/u.test(path)) return safeDate(value) !== null;
   if (/^commerceAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.accepted$/u.test(path)) return value === true;
@@ -276,7 +288,7 @@ function evaluateReleaseScope(evidence) {
   };
 }
 
-function evaluateCommerceAcceptance(evidence) {
+function evaluateCommerceAcceptance(evidence, artifactValidation) {
   return REQUIRED_COMMERCE_ACCEPTANCE_KEYS.flatMap((provider) => [
     makeCheck(
       `evidence.commerceAcceptance.${provider}.accepted`,
@@ -290,6 +302,14 @@ function evaluateCommerceAcceptance(evidence) {
       `evidence.commerceAcceptance.${provider}.observedAt`,
       validEvidencePath(`commerceAcceptance.${provider}.observedAt`, evidence?.commerceAcceptance?.[provider]?.observedAt),
     ),
+    ...(artifactValidation === undefined ? [] : [
+      makeCheck(`evidence.commerceAcceptance.${provider}.artifactAccepted`, artifactValidation?.[provider]?.accepted === true),
+      makeCheck(`evidence.commerceAcceptance.${provider}.artifactFingerprintSha256`, typeof artifactValidation?.[provider]?.artifactFingerprintSha256 === "string" && /^[a-f0-9]{64}$/u.test(artifactValidation[provider].artifactFingerprintSha256)),
+      makeCheck(`evidence.commerceAcceptance.${provider}.artifactReleaseBinding`, artifactValidation?.[provider]?.releaseId === evidence?.staging?.releaseId
+        && artifactValidation?.[provider]?.manifestRef === evidence?.staging?.manifestRef
+        && artifactValidation?.[provider]?.manifestSha256 === evidence?.staging?.manifestSha256
+        && artifactValidation?.[provider]?.workerVersion === evidence?.staging?.workerVersion),
+    ]),
   ]);
 }
 
@@ -302,8 +322,21 @@ function acceptanceEntry(source, key) {
   };
 }
 
-function projectAcceptance(source, keys) {
-  return Object.fromEntries(keys.map((key) => [key, acceptanceEntry(source, key)]));
+function projectAcceptance(source, keys, artifactValidation) {
+  return Object.fromEntries(keys.map((key) => {
+    const entry = acceptanceEntry(source, key);
+    const validation = artifactValidation?.[key];
+    if (validation?.accepted !== true) return [key, entry];
+    return [key, {
+      ...entry,
+      artifactFingerprintSha256: validation.artifactFingerprintSha256,
+      artifactReleaseId: validation.releaseId,
+      artifactManifestRef: validation.manifestRef,
+      artifactManifestSha256: validation.manifestSha256,
+      artifactWorkerVersion: validation.workerVersion,
+      artifactScenarioCount: validation.scenarioCount,
+    }];
+  }));
 }
 
 export function evaluateBackupPrerequisites(evidence, now = new Date()) {
@@ -326,6 +359,15 @@ export function inspectProductionReadiness(input) {
   const production = input.wranglerConfig?.env?.production;
   const spec = input.productionSpec;
   const evidence = input.evidence;
+  const canonicalCommerceRefs = REQUIRED_COMMERCE_ACCEPTANCE_KEYS.every((provider) => (
+    typeof evidence?.commerceAcceptance?.[provider]?.evidenceRef === "string"
+    && evidence.commerceAcceptance[provider].evidenceRef.startsWith(".wrangler/releases/staging/")
+  ));
+  const commerceEvidenceValidation = input.commerceEvidenceValidation
+    ?? (canonicalCommerceRefs ? validateCommerceUatArtifactsSync({
+      evidence,
+      repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+    }) : undefined);
   const releaseScope = evaluateReleaseScope(evidence);
   const checks = [
     makeCheck("wrangler.env.production", typeof production === "object" && production !== null),
@@ -436,7 +478,17 @@ export function inspectProductionReadiness(input) {
     name: `evidence.${check.name}`,
     ok: check.ok,
   })));
-  checks.push(...releaseScope.checks, ...evaluateCommerceAcceptance(evidence));
+  checks.push(...releaseScope.checks, ...evaluateCommerceAcceptance(evidence, commerceEvidenceValidation));
+  if (commerceEvidenceValidation !== undefined) {
+    const dodo = commerceEvidenceValidation.dodo;
+    const payos = commerceEvidenceValidation.payos;
+    checks.push(makeCheck("evidence.commerceAcceptance.sharedStagingBinding", dodo?.accepted === true
+      && payos?.accepted === true
+      && dodo.releaseId === payos.releaseId
+      && dodo.manifestRef === payos.manifestRef
+      && dodo.manifestSha256 === payos.manifestSha256
+      && dodo.workerVersion === payos.workerVersion));
+  }
   const migrationLedgerPrefix = evidence?.migrationLedgerPrefix;
   checks.push(makeCheck(
     "evidence.migrationLedgerPrefix",
@@ -542,7 +594,17 @@ export function buildReleaseArtifacts(input) {
   if (!RELEASE_ID_PATTERN.test(input.evidence?.releaseId ?? "") || PLACEHOLDER_PATTERN.test(input.evidence.releaseId)) {
     throw new Error("release_id_invalid");
   }
-  const readiness = inspectProductionReadiness(input);
+  const canonicalCommerceRefs = REQUIRED_COMMERCE_ACCEPTANCE_KEYS.every((provider) => (
+    typeof input.evidence?.commerceAcceptance?.[provider]?.evidenceRef === "string"
+    && input.evidence.commerceAcceptance[provider].evidenceRef.startsWith(".wrangler/releases/staging/")
+  ));
+  const commerceEvidenceValidation = input.commerceEvidenceValidation
+    ?? (canonicalCommerceRefs ? validateCommerceUatArtifactsSync({
+      evidence: input.evidence,
+      repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+    }) : undefined);
+  const releaseInput = { ...input, commerceEvidenceValidation };
+  const readiness = inspectProductionReadiness(releaseInput);
   if (!readiness.ok) throw new Error(`release_prerequisites_incomplete:${readiness.missing[0] ?? "unknown"}`);
   const migrationNames = [...input.migrationNames].sort();
   const migrationLedgerPrefix = Array.isArray(input.evidence.migrationLedgerPrefix)
@@ -582,7 +644,13 @@ export function buildReleaseArtifacts(input) {
       activeChannels: [...input.evidence.releaseScope.activeChannels],
       deferredChannels: [...input.evidence.releaseScope.deferredChannels],
     },
-    commerceAcceptance: projectAcceptance(input.evidence.commerceAcceptance, REQUIRED_COMMERCE_ACCEPTANCE_KEYS),
+    commerceAcceptance: projectAcceptance(input.evidence.commerceAcceptance, REQUIRED_COMMERCE_ACCEPTANCE_KEYS, commerceEvidenceValidation),
+    stagingBinding: {
+      manifestRef: input.evidence.staging.manifestRef,
+      manifestSha256: input.evidence.staging.manifestSha256,
+      releaseId: input.evidence.staging.releaseId,
+      workerVersion: input.evidence.staging.workerVersion,
+    },
     migrationLedgerPrefix,
     migrationNames,
     packageVersion: input.packageVersion,
@@ -683,7 +751,12 @@ export async function assertProductionDeployAdmission(input) {
   if (evidence === null) throw new Error("production_evidence_missing");
   if (productionSpec === null) throw new Error("production_spec_missing");
   const gitState = readRepositoryGitState(root);
+  const commerceEvidenceValidation = await validateCommerceUatArtifacts({
+    evidence,
+    repositoryRoot: root,
+  });
   const admission = validateProductionDeployAdmission({
+    commerceEvidenceValidation,
     evidence,
     manifest,
     migrationNames,

@@ -2,6 +2,32 @@
 
 Last updated: 2026-08-08
 
+## Current payment handoff (2026-08-08)
+
+- Dodo merchant approval is confirmed as **live payments active**. Test and
+  live mode each contain four distinct monthly SaaS products: Starter/Pro in
+  VND 99,000/299,000 and USD 5/15. Product tax category is SaaS, pricing is
+  tax-inclusive, and provider trial is configured for 7 days on all eight
+  products. No live charge has been made.
+- A Dodo live API key has been created and stored as the production Worker
+  secret `DODO_PAYMENTS_API_KEY`; secret values are not retained in evidence.
+  Staging already has its API key. Neither environment has a webhook signing
+  secret or registered endpoint because the canonical routes still return
+  `404` until the shared Cloudflare route handoff completes.
+- PayOS runtime now fails closed in staging without the attested controlled
+  channel fingerprint `PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT`, and checks
+  provider-identity ownership before any webhook-registration mutation. This
+  prevents a rotated credential set from redirecting another shop's channel.
+- Source migrations are contiguous through `0086`; staging remains at ledger
+  `0028`. No remote migration, backup/restore drill, staging deploy, Dodo
+  webhook registration, or PayOS staging tenant setup has been performed.
+- Current admission result: Cloudflare account/D1/resource identity passes,
+  but live `*/*` still binds `selinow-com-staging` while the final route
+  contract requires the production handoff. Therefore staging mutation and
+  all provider UAT remain blocked. Production remains **NO-GO** on route,
+  backup/restore, evidence, monitoring, pilot, ownership and other non-Dodo
+  gates.
+
 ## Dodo deep-lane continuation (2026-08-08)
 
 The Dodo adapter/webhook hardening is committed in `2f1e6b2`. The source lane

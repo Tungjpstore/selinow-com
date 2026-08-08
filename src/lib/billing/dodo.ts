@@ -41,6 +41,8 @@ export type DodoBillingEvent = {
   priceId: string | null;
   periodStart: string | null;
   periodEnd: string | null;
+  scheduledPriceId: string | null;
+  cancelAtNextBillingDate: boolean | null;
 };
 
 type DodoBindings = AppBindings & {
@@ -61,10 +63,10 @@ const DEFAULT_API_URLS = {
   test_mode: "https://test.dodopayments.com",
 } as const;
 
-const CHECKOUT_HOSTS = new Set([
-  "checkout.dodopayments.com",
-  "test.checkout.dodopayments.com",
-]);
+const CHECKOUT_HOSTS = {
+  live_mode: "checkout.dodopayments.com",
+  test_mode: "test.checkout.dodopayments.com",
+} as const;
 
 const CURRENCY_EXPONENTS: Record<string, number> = { JPY: 0, KRW: 0, VND: 0 };
 const PROVIDER_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/u;
@@ -198,6 +200,22 @@ function findPriceId(data: Record<string, unknown>): string | null {
   return null;
 }
 
+function checkoutUrlForEnvironment(config: DodoConfig, value: unknown, issue: string): string {
+  const checkoutUrl = readString(value);
+  if (checkoutUrl === null) throw new AppError("billing_provider_invalid", 502, [issue]);
+  let checkout: URL;
+  try { checkout = new URL(checkoutUrl); } catch { throw new AppError("billing_provider_invalid", 502, ["checkout_url"]); }
+  if (checkout.protocol !== "https:"
+    || checkout.hostname !== CHECKOUT_HOSTS[config.environment]
+    || checkout.port.length > 0
+    || checkout.username.length > 0
+    || checkout.password.length > 0
+    || checkout.pathname.length < 2) {
+    throw new AppError("billing_provider_invalid", 502, ["checkout_url"]);
+  }
+  return checkoutUrl;
+}
+
 /** Normalize Dodo's envelope while retaining only safe, provider-neutral fields. */
 export function parseDodoEvent(payload: unknown, webhookId?: string | null): DodoBillingEvent {
   const envelope = asObject(payload);
@@ -219,6 +237,7 @@ export function parseDodoEvent(payload: unknown, webhookId?: string | null): Dod
   const currency = (readString(data.currency) ?? readString(data.currency_code) ?? readString(data.billing_currency))?.toUpperCase() ?? null;
   const amount = minorAmount(data.total_amount ?? data.amount ?? data.amount_minor ?? data.total, currency);
   const billingPeriod = asObject(data.billing_period ?? data.current_billing_period);
+  const scheduledChange = asObject(data.scheduled_change);
   const periodStart = readDate(data.period_start) ?? readDate(data.current_period_start) ?? readDate(data.previous_billing_date) ?? readDate(billingPeriod.starts_at) ?? readDate(billingPeriod.start);
   const periodEnd = readDate(data.period_end) ?? readDate(data.current_period_end) ?? readDate(data.next_billing_date) ?? readDate(billingPeriod.ends_at) ?? readDate(billingPeriod.end);
   return {
@@ -238,6 +257,8 @@ export function parseDodoEvent(payload: unknown, webhookId?: string | null): Dod
     // explicit checkout/payment fields.
     providerTransactionId: providerPaymentId ?? providerCheckoutId,
     status: readString(data.status),
+    scheduledPriceId: findPriceId(scheduledChange),
+    cancelAtNextBillingDate: typeof data.cancel_at_next_billing_date === "boolean" ? data.cancel_at_next_billing_date : null,
   };
 }
 
@@ -330,10 +351,7 @@ export async function createDodoCheckout(input: {
   const providerCheckoutId = readProviderReference(data.session_id) ?? readProviderReference(data.checkout_id) ?? readProviderReference(data.id);
   const checkoutUrl = readString(data.checkout_url) ?? readString(data.checkoutUrl);
   if (providerCheckoutId === null || checkoutUrl === null) throw new AppError("billing_provider_invalid", 502, ["checkout_response"]);
-  let checkout: URL;
-  try { checkout = new URL(checkoutUrl); } catch { throw new AppError("billing_provider_invalid", 502, ["checkout_url"]); }
-  if (checkout.protocol !== "https:" || !CHECKOUT_HOSTS.has(checkout.hostname) || checkout.port.length > 0 || checkout.username.length > 0 || checkout.password.length > 0 || checkout.pathname.length < 2) throw new AppError("billing_provider_invalid", 502, ["checkout_url"]);
-  return { checkoutUrl, providerCheckoutId, providerTransactionId: providerCheckoutId };
+  return { checkoutUrl: checkoutUrlForEnvironment(input.config, checkoutUrl, "checkout_response"), providerCheckoutId, providerTransactionId: providerCheckoutId };
 }
 
 /** Retrieve a durable checkout reference without persisting the bearer URL. */
@@ -360,10 +378,7 @@ export async function retrieveDodoCheckout(input: {
   const checkoutUrl = readString(data.checkout_url) ?? readString(data.checkoutUrl);
   const providerCheckoutId = readProviderReference(data.session_id) ?? readProviderReference(data.checkout_id) ?? readProviderReference(data.id) ?? requestedCheckoutId;
   if (checkoutUrl === null) throw new AppError("billing_provider_invalid", 502, ["checkout_response_url"]);
-  let checkout: URL;
-  try { checkout = new URL(checkoutUrl); } catch { throw new AppError("billing_provider_invalid", 502, ["checkout_url"]); }
-  if (checkout.protocol !== "https:" || !CHECKOUT_HOSTS.has(checkout.hostname) || checkout.port.length > 0 || checkout.username.length > 0 || checkout.password.length > 0 || checkout.pathname.length < 2) throw new AppError("billing_provider_invalid", 502, ["checkout_url"]);
-  return { checkoutUrl, providerCheckoutId, providerTransactionId: providerCheckoutId };
+  return { checkoutUrl: checkoutUrlForEnvironment(input.config, checkoutUrl, "checkout_response_url"), providerCheckoutId, providerTransactionId: providerCheckoutId };
 }
 
 /** Retrieve provider truth for webhook fields that Dodo may omit. */
@@ -458,6 +473,23 @@ export async function cancelDodoSubscription(input: {
 }): Promise<DodoSubscriptionOperation> {
   return dodoSubscriptionOperation({
     body: { cancel_at_next_billing_date: true, cancellation_comment: input.cancellationComment ?? "cancelled_by_customer", cancel_reason: "cancelled_by_customer" },
+    config: input.config,
+    idempotencyKey: input.idempotencyKey,
+    method: "PATCH",
+    path: "",
+    providerSubscriptionId: input.providerSubscriptionId,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+  });
+}
+
+export async function resumeDodoSubscription(input: {
+  config: DodoConfig;
+  idempotencyKey: string;
+  providerSubscriptionId: string;
+  fetcher?: typeof fetch;
+}): Promise<DodoSubscriptionOperation> {
+  return dodoSubscriptionOperation({
+    body: { cancel_at_next_billing_date: false },
     config: input.config,
     idempotencyKey: input.idempotencyKey,
     method: "PATCH",

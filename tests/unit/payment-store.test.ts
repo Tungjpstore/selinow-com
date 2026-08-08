@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { encryptPayOSCredentials } from "../../src/lib/payments/crypto";
 import { createPayOSObjectSignature } from "../../src/lib/payments/payos";
+import { payOSProviderIdentityFingerprint } from "../../src/lib/payments/payos-admission";
 import { createOrRecoverTelegramPaymentLink } from "../../src/lib/payments/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
@@ -38,7 +39,7 @@ type ProviderBindingOverride = Partial<{
   paymentLinkId: string;
 }>;
 
-async function paymentEnvironment(options: { concurrentWinner?: boolean; concurrentWinnerCheckoutUrl?: string; errorDueAt?: string; existingError?: boolean; existingLease?: boolean; orderCurrency?: string; pauseCreatingReread?: boolean; pauseProviderCreate?: boolean; providerCreateOverride?: ProviderBindingOverride; providerGetFails?: boolean; providerRecoveryOverride?: ProviderBindingOverride } = {}) {
+async function paymentEnvironment(options: { concurrentWinner?: boolean; concurrentWinnerCheckoutUrl?: string; errorDueAt?: string; existingError?: boolean; existingLease?: boolean; orderCurrency?: string; pauseCreatingReread?: boolean; pauseProviderCreate?: boolean; providerCreateOverride?: ProviderBindingOverride; providerGetFails?: boolean; providerRecoveryOverride?: ProviderBindingOverride; stagingChannelAttested?: boolean } = {}) {
   const context = {
     credentialId: "credential-a",
     hmacSecret: "identifier-secret",
@@ -252,10 +253,17 @@ async function paymentEnvironment(options: { concurrentWinner?: boolean; concurr
     });
   };
 
+  const identityBindings = { IDENTIFIER_HMAC_SECRET: "identifier-secret" };
+  const stagingFingerprint = await payOSProviderIdentityFingerprint(identityBindings, {
+    apiKey: "api-key-test",
+    checksumKey: "checksum-key-test",
+    clientId: "client-id-test",
+  });
   const env = {
     APP_ENV: "staging",
     CREDENTIAL_KEK_V1: KEK,
-    IDENTIFIER_HMAC_SECRET: "identifier-secret",
+    IDENTIFIER_HMAC_SECRET: identityBindings.IDENTIFIER_HMAC_SECRET,
+    ...(options.stagingChannelAttested === false ? {} : { PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT: stagingFingerprint }),
     PLATFORM_DB: database,
   } as unknown as AppBindings;
 
@@ -292,6 +300,22 @@ describe("payment origin snapshots", () => {
     expect(runtime.getInsertSql()).toBe("");
     expect(runtime.getAttempt()).toBeNull();
     expect(runtime.getProviderCalls()).toBe(0);
+  });
+
+  it("fails staging checkout closed before provider access without channel attestation", async () => {
+    const runtime = await paymentEnvironment({ stagingChannelAttested: false });
+
+    await expect(createOrRecoverTelegramPaymentLink({
+      customerId: "customer-a",
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      orderPublicId: "order-public-a",
+      origin: "https://alias.customer.com",
+      shopId: "shop-a",
+    })).rejects.toMatchObject({ code: "payment_provider_environment_not_admitted", status: 409 });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getAttempt()).toBeNull();
   });
 
   it("authorizes the entry hostname but snapshots the active canonical domain", async () => {

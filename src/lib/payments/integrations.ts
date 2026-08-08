@@ -8,6 +8,7 @@ import { getShopForMember } from "../tenants/store";
 import { decryptPayOSCredentials, encryptPayOSCredentials, type EncryptedPayOSCredentials, type PayOSCredentials } from "./crypto";
 import { loadCredentialById } from "./credentials";
 import { PayOSClient } from "./payos";
+import { assertPayOSChannelAdmitted, payOSProviderIdentityFingerprint } from "./payos-admission";
 
 type IntegrationRow = {
   activeCredentialId: string | null;
@@ -82,8 +83,26 @@ async function paymentProviderCredentialFingerprint(env: AppBindings, credential
   return hmacToken(env.IDENTIFIER_HMAC_SECRET, "payos-provider-credential:v1", `${credentials.clientId.trim()}\0${credentials.apiKey.trim()}\0${credentials.checksumKey.trim()}`);
 }
 
-async function paymentProviderIdentityFingerprint(env: AppBindings, credentials: PayOSCredentials): Promise<string> {
-  return hmacToken(env.IDENTIFIER_HMAC_SECRET, "payos-provider-identity:v1", credentials.clientId.trim());
+async function assertPaymentProviderIdentityOwnership(
+  env: AppBindings,
+  shopId: string,
+  credentials: PayOSCredentials,
+  integration: IntegrationRow | null,
+): Promise<void> {
+  const fingerprint = await payOSProviderIdentityFingerprint(env, credentials);
+  const existingFingerprint = integration?.providerIdentityFingerprint ?? null;
+  if (existingFingerprint !== null && existingFingerprint !== fingerprint) {
+    throw new AppError("credential_channel_mismatch", 409);
+  }
+  const owner = await env.PLATFORM_DB.prepare(`
+    SELECT shop_id AS shopId
+    FROM payment_integrations
+    WHERE provider = 'payos' AND provider_identity_fingerprint = ?
+    LIMIT 1
+  `).bind(fingerprint).first<{ shopId: string }>();
+  if (owner !== null && owner.shopId !== shopId) {
+    throw new AppError("credential_already_connected", 409);
+  }
 }
 
 async function claimPaymentProviderIdentity(input: {
@@ -92,7 +111,7 @@ async function claimPaymentProviderIdentity(input: {
   integration: IntegrationRow;
   shopId: string;
 }): Promise<void> {
-  const fingerprint = await paymentProviderIdentityFingerprint(input.env, input.credentials);
+  const fingerprint = await payOSProviderIdentityFingerprint(input.env, input.credentials);
   const existing = input.integration.providerIdentityFingerprint ?? null;
   if (existing !== null && existing !== fingerprint) throw new AppError("credential_channel_mismatch", 409);
   if (existing === fingerprint) return;
@@ -301,6 +320,8 @@ export async function getPaymentIntegration(input: { env: AppBindings; shopPubli
 export async function connectPayOS(input: { credentials: PayOSCredentials; env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<PaymentIntegrationView> {
   const shopId = await requirePaymentManager(input.env, input.shopPublicId, input.userId);
   let integration = await findIntegration(input.env, shopId);
+  await assertPayOSChannelAdmitted(input.env, input.credentials);
+  await assertPaymentProviderIdentityOwnership(input.env, shopId, input.credentials, integration);
   const now = new Date();
   const nowIso = now.toISOString();
   if (integration === null) {
@@ -389,6 +410,8 @@ async function retryPayOSSetup(input: {
     keyVersion: key.version,
     shopId: input.shopId,
   });
+  await assertPayOSChannelAdmitted(input.env, credentials);
+  await assertPaymentProviderIdentityOwnership(input.env, input.shopId, credentials, input.integration);
   const checkedAt = new Date().toISOString();
   try {
     await new PayOSClient(credentials, input.fetcher).confirmWebhook(`${input.env.API_ORIGIN}/webhooks/payos/${input.integration.webhookPublicId}`);

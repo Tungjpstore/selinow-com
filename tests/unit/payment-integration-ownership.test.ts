@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import type { PayOSCredentials } from "../../src/lib/payments/crypto";
+import { payOSProviderIdentityFingerprint } from "../../src/lib/payments/payos-admission";
 
 vi.mock("../../src/lib/tenants/store", () => ({
   getShopForMember: vi.fn((input: { shopPublicId: string; userId: string }) => {
@@ -59,7 +60,9 @@ function applyMigrations(database: DatabaseSync, maximumMigration = Number.POSIT
   }
 }
 
-function bindings(database: DatabaseSync): AppBindings {
+type PayOSTestBindings = AppBindings & { PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT?: string };
+
+function bindings(database: DatabaseSync): PayOSTestBindings {
   return {
     ACTIVE_CREDENTIAL_KEY_VERSION: "v1",
     API_ORIGIN: "https://api.example.test",
@@ -113,7 +116,7 @@ function provider(fetchCount: { value: number }): typeof fetch {
 
 describe("PayOS provider identity ownership", () => {
   let database: DatabaseSync;
-  let env: AppBindings;
+  let env: PayOSTestBindings;
 
   beforeEach(() => {
     database = new DatabaseSync(":memory:");
@@ -144,6 +147,81 @@ describe("PayOS provider identity ownership", () => {
     expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials").get()).toEqual({ count: 1 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM payment_integrations WHERE provider_identity_fingerprint IS NOT NULL").get())
       .toEqual({ count: 1 });
+  });
+
+  it("rejects rotated cross-shop credentials before redirecting the verified channel webhook", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-owner-a", shopPublicId: SHOP_A, userId: "owner-a" });
+
+    await expect(connectPayOS({
+      credentials: {
+        ...CHANNEL_A,
+        apiKey: "rotated-api-key-for-shop-b",
+        checksumKey: "rotated-checksum-key-for-shop-b",
+      },
+      env,
+      fetcher,
+      requestId: "request-owner-b-rotated",
+      shopPublicId: SHOP_B,
+      userId: "owner-b",
+    })).rejects.toMatchObject({ code: "credential_already_connected", status: 409 });
+
+    expect(fetchCount.value).toBe(1);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials WHERE shop_id = 'shop-b'").get())
+      .toEqual({ count: 0 });
+  });
+
+  it("rejects a different channel identity before redirecting an existing shop webhook", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-owner-a", shopPublicId: SHOP_A, userId: "owner-a" });
+
+    await expect(connectPayOS({
+      credentials: {
+        apiKey: "different-api-key",
+        checksumKey: "different-checksum-key",
+        clientId: "different-client-id",
+      },
+      env,
+      fetcher,
+      requestId: "request-different-channel",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "credential_channel_mismatch", status: 409 });
+
+    expect(fetchCount.value).toBe(1);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials WHERE shop_id = 'shop-a'").get())
+      .toEqual({ count: 1 });
+  });
+
+  it("fails staging connection closed until the controlled channel is explicitly attested", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    env.APP_ENV = "staging";
+
+    await expect(connectPayOS({
+      credentials: CHANNEL_A,
+      env,
+      fetcher,
+      requestId: "request-staging-unattested",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "payment_provider_environment_not_admitted", status: 409 });
+
+    expect(fetchCount.value).toBe(0);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials").get()).toEqual({ count: 0 });
+
+    env.PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT = await payOSProviderIdentityFingerprint(env, CHANNEL_A);
+    await expect(connectPayOS({
+      credentials: CHANNEL_A,
+      env,
+      fetcher,
+      requestId: "request-staging-attested",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(fetchCount.value).toBe(1);
   });
 
   it("retains channel ownership across same-shop secret rotation and disconnect", async () => {

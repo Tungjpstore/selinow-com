@@ -20,6 +20,7 @@ export function buildReleaseArtifacts(input: {
   now: Date;
   packageVersion: string;
   productionSpec: Record<string, unknown>;
+  repositoryRoot?: string;
   workerSecretNames: string[];
   wranglerConfig: Record<string, unknown>;
 }): { manifest: Record<string, unknown>; rollbackMatrix: Array<Record<string, string>> };

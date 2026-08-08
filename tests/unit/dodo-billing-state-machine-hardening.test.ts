@@ -110,17 +110,19 @@ function addCheckout(database: DatabaseSync, input: { status: "completed" | "ope
   `).run(input.status, input.status === "completed" ? NOW_ISO : null, NOW_ISO, NOW_ISO);
 }
 
-function bodyFor(input: { eventType: string; metadata?: Record<string, string> | undefined; occurredAt?: string; status?: string; paymentId?: string; subscriptionId?: string; amount?: number; periodStart?: string; periodEnd?: string }): string {
+function bodyFor(input: { eventType: string; metadata?: Record<string, string> | undefined; occurredAt?: string; status?: string; paymentId?: string; subscriptionId?: string; amount?: number; periodStart?: string; periodEnd?: string; checkoutSessionId?: string; productId?: string; scheduledPriceId?: string; cancelAtNextBillingDate?: boolean }): string {
   return JSON.stringify({
     data: {
-      checkout_session_id: "chk_test_hardening",
+      ...(input.checkoutSessionId === undefined ? { checkout_session_id: "chk_test_hardening" } : input.checkoutSessionId === "" ? {} : { checkout_session_id: input.checkoutSessionId }),
       currency: "USD",
       ...(input.amount === undefined ? {} : { total_amount: input.amount }),
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       ...(input.paymentId === undefined ? {} : { payment_id: input.paymentId }),
       ...(input.periodEnd === undefined ? {} : { period_end: input.periodEnd }),
       ...(input.periodStart === undefined ? {} : { period_start: input.periodStart }),
-      product_id: "prod_test_pro",
+      product_id: input.productId ?? "prod_test_pro",
+      ...(input.scheduledPriceId === undefined ? {} : { scheduled_change: { product_id: input.scheduledPriceId } }),
+      ...(input.cancelAtNextBillingDate === undefined ? {} : { cancel_at_next_billing_date: input.cancelAtNextBillingDate }),
       ...(input.status === undefined ? {} : { status: input.status }),
       ...(input.subscriptionId === undefined ? {} : { subscription_id: input.subscriptionId }),
     },
@@ -185,6 +187,33 @@ describe("Dodo billing state-machine hardening", () => {
 
     await expect(webhook(testFixture, body, `msg_metadata_${_label.replaceAll(" ", "_")}`)).rejects.toMatchObject({ code: "billing_webhook_identity_mismatch", status: 409 });
     expect(testFixture.database.prepare("SELECT state FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "trialing" });
+    testFixture.database.close();
+  });
+
+  it("requires the provider checkout identity on initial payment", async () => {
+    const testFixture = fixture();
+    addCheckout(testFixture.database, { status: "open" });
+    const body = bodyFor({ amount: 1500, checkoutSessionId: "", eventType: "payment.succeeded", metadata: exactMetadata, paymentId: "pay_test_missing_checkout", subscriptionId: "sub_test_missing_checkout" });
+    await expect(webhook(testFixture, body, "msg_missing_checkout")).rejects.toMatchObject({ code: "billing_webhook_identity_mismatch", status: 409 });
+    testFixture.database.close();
+  });
+
+  it("applies a signed provider plan_changed event to the requested plan", async () => {
+    const testFixture = fixture({ providerSubscriptionRef: "sub_test_plan_change", state: "active" });
+    addCheckout(testFixture.database, { status: "completed" });
+    testFixture.database.prepare("UPDATE plan_prices SET provider_price_ref = 'prod_test_starter' WHERE id = 'price_starter_global_v1'").run();
+    testFixture.database.prepare(`
+      INSERT INTO subscription_change_requests (
+        id, public_id, shop_id, subscription_id, current_plan_id, requested_plan_id,
+        action, status, expected_subscription_version, reason_code, requested_by_user_id,
+        reviewed_by_user_id, reviewed_at, idempotency_key_hash, request_hash, created_at, updated_at, version
+      ) VALUES ('sreq-plan-change', 'sreq-plan-change', 'billing-shop-hardening', 'billing-sub-hardening',
+        'plan_pro_v1', 'plan_starter_v1', 'change_plan', 'provider_pending', 1, 'seller_requested',
+        'billing-user-hardening', 'billing-user-hardening', '${NOW_ISO}', 'sreq-plan-change-key', 'sreq-plan-change-hash', '${NOW_ISO}', '${NOW_ISO}', 1)
+    `).run();
+    const body = bodyFor({ eventType: "subscription.plan_changed", metadata: exactMetadata, productId: "prod_test_starter", subscriptionId: "sub_test_plan_change" });
+    await expect(webhook(testFixture, body, "msg_plan_changed")).resolves.toMatchObject({ processed: true, state: "active" });
+    expect(testFixture.database.prepare("SELECT plan_id AS planId FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ planId: "plan_starter_v1" });
     testFixture.database.close();
   });
 

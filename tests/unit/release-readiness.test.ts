@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,6 +18,8 @@ import {
   validateProductionDeployAdmission,
   validatePilotSmokePlan,
 } from "../../scripts/lib/release.mjs";
+import { DODO_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/dodo-uat-evidence.mjs";
+import { PAYOS_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/payos-uat-evidence.mjs";
 
 const now = new Date("2026-07-26T03:00:00.000Z");
 const providerAcceptanceKeys = ["telegramBot", "telegramMiniApp", "zaloMiniApp", "zaloOa", "whatsappCloud", "discord"] as const;
@@ -128,7 +131,13 @@ function readyEvidence(): Record<string, unknown> {
   return {
     schemaVersion: 2,
     environment: "production",
-    approvals: { releaseOwner: "release-team", supportOwner: "support-team" },
+    approvals: {
+      dataOwner: "data-team",
+      paymentOwner: "payment-team",
+      releaseOwner: "release-team",
+      securityOwner: "security-team",
+      supportOwner: "support-team",
+    },
     backup: {
       completedAt: "2026-07-26T02:30:00.000Z",
       providerBookmarkRecorded: true,
@@ -175,7 +184,14 @@ function readyEvidence(): Record<string, unknown> {
     releaseId: "release_20260726_abcdef12",
     rollback: { rehearsalEvidenceRef: "private/rollback/report.json", rehearsedAt: "2026-07-20T12:00:00.000Z" },
     security: { criticalOpen: 0, highOpen: 0 },
-    staging: { accepted: true, acceptedAt: "2026-07-26T01:00:00.000Z" },
+    staging: {
+      accepted: true,
+      acceptedAt: "2026-07-26T01:00:00.000Z",
+      manifestRef: ".wrangler/releases/staging/stg_20260726T010000Z_0123456789ab/release-manifest.json",
+      manifestSha256: "a".repeat(64),
+      releaseId: "stg_20260726T010000Z_0123456789ab",
+      workerVersion: "staging-worker-version",
+    },
   };
 }
 
@@ -588,8 +604,84 @@ describe("production release readiness", () => {
       execFileSync("git", ["add", "."], { cwd: root });
       execFileSync("git", ["commit", "--quiet", "-m", "release fixture"], { cwd: root });
       const commitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+      const treeSha = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim();
       const evidence = readyEvidence();
       evidence.commitSha = commitSha;
+      const stagingReleaseId = `stg_20260726T010000Z_${commitSha.slice(0, 12)}`;
+      const stagingDirectory = join(root, ".wrangler/releases/staging", stagingReleaseId);
+      await mkdir(stagingDirectory, { recursive: true });
+      const stagingManifestRef = `.wrangler/releases/staging/${stagingReleaseId}/release-manifest.json`;
+      const stagingManifest = JSON.stringify({
+        commitSha,
+        environment: "staging",
+        releaseId: stagingReleaseId,
+        schemaVersion: 3,
+        treeSha,
+      });
+      const stagingManifestSha256 = createHash("sha256").update(stagingManifest).digest("hex");
+      await writeFile(join(root, stagingManifestRef), stagingManifest, { mode: 0o600 });
+      const staging = evidence.staging as Record<string, unknown>;
+      Object.assign(staging, {
+        manifestRef: stagingManifestRef,
+        manifestSha256: stagingManifestSha256,
+        releaseId: stagingReleaseId,
+        workerVersion: "staging-worker-version",
+      });
+      const releaseBinding = {
+        commitSha,
+        manifestRef: stagingManifestRef,
+        manifestSha256: stagingManifestSha256,
+        releaseId: stagingReleaseId,
+        treeSha,
+        workerVersion: "staging-worker-version",
+      };
+      const scenarioRecord = (index: number) => ({
+        eventReference: `event:evt_${String(index).padStart(4, "0")}`,
+        evidenceFingerprintSha256: (index + 1).toString(16).padStart(64, "0"),
+        observedAt: "2026-07-25T12:00:00.000Z",
+        requestReference: `request:req_${String(index).padStart(4, "0")}`,
+        status: "passed",
+      });
+      const dodoArtifact = {
+        completedAt: "2026-07-25T13:00:00.000Z",
+        createdAt: "2026-07-25T11:00:00.000Z",
+        endpointFingerprintSha256: "e".repeat(64),
+        environment: "staging",
+        offers: [
+          { planCode: "starter", marketCode: "vn", currency: "VND", amountMinor: 99_000, interval: "month", providerReferenceFingerprintSha256: "1".repeat(64) },
+          { planCode: "pro", marketCode: "vn", currency: "VND", amountMinor: 299_000, interval: "month", providerReferenceFingerprintSha256: "2".repeat(64) },
+          { planCode: "starter", marketCode: "global", currency: "USD", amountMinor: 500, interval: "month", providerReferenceFingerprintSha256: "3".repeat(64) },
+          { planCode: "pro", marketCode: "global", currency: "USD", amountMinor: 1_500, interval: "month", providerReferenceFingerprintSha256: "4".repeat(64) },
+        ],
+        provider: "dodo",
+        providerEnvironment: "test_mode",
+        redaction: { auditNoSensitiveValues: true, d1NoHostedCheckoutUrl: true, d1NoRawPayload: true, d1NoSecretValues: true, evidenceFingerprintSha256: "f".repeat(64), logsNoSensitiveValues: true, queuesNoSensitiveValues: true },
+        release: releaseBinding,
+        scenarios: Object.fromEntries(DODO_STAGING_UAT_SCENARIO_IDS.map((id, index) => [id, { ...scenarioRecord(index), sessionReference: `session:ses_${String(index).padStart(4, "0")}` }])),
+        schemaVersion: 1,
+      };
+      const payosArtifact = {
+        channel: "seller_payment",
+        completedAt: "2026-07-25T13:00:00.000Z",
+        createdAt: "2026-07-25T11:00:00.000Z",
+        environment: "staging",
+        provider: "payos",
+        providerEnvironment: "test_mode",
+        redaction: { auditNoSensitiveValues: true, d1NoRawPayload: true, d1NoSecretValues: true, evidenceFingerprintSha256: "f".repeat(64), logsNoSensitiveValues: true, queuesNoSensitiveValues: true },
+        release: releaseBinding,
+        scenarios: Object.fromEntries(PAYOS_STAGING_UAT_SCENARIO_IDS.map((id, index) => [id, scenarioRecord(index + 40)])),
+        schemaVersion: 1,
+      };
+      const commerce = evidence.commerceAcceptance as Record<string, Record<string, unknown>>;
+      const dodoCommerce = commerce.dodo;
+      const payosCommerce = commerce.payos;
+      if (dodoCommerce === undefined || payosCommerce === undefined) throw new Error("missing_commerce_fixture");
+      dodoCommerce.evidenceRef = `.wrangler/releases/staging/${stagingReleaseId}/dodo-uat-evidence.json`;
+      payosCommerce.evidenceRef = `.wrangler/releases/staging/${stagingReleaseId}/payos-uat-evidence.json`;
+      await Promise.all([
+        writeFile(join(root, String(dodoCommerce.evidenceRef)), JSON.stringify(dodoArtifact), { mode: 0o600 }),
+        writeFile(join(root, String(payosCommerce.evidenceRef)), JSON.stringify(payosArtifact), { mode: 0o600 }),
+      ]);
       const manifest = buildReleaseArtifacts({
         evidence,
         migrationNames: ["0001_first.sql"],
@@ -597,6 +689,7 @@ describe("production release readiness", () => {
         packageVersion: "0.0.0",
         productionSpec: readyProductionSpec(),
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+        repositoryRoot: root,
         wranglerConfig: readyWranglerConfig(),
       }).manifest;
       const evidencePath = join(root, ".wrangler/release/production-evidence.json");

@@ -12,6 +12,7 @@ import {
   parseDodoEvent,
   retrieveDodoCheckout,
   retrieveDodoSubscription,
+  resumeDodoSubscription,
   verifyDodoWebhookSignature,
   type DodoBillingEvent,
 } from "./dodo";
@@ -654,7 +655,10 @@ export async function executeDodoSubscriptionChangeRequest(input: {
       if (context.action === "cancel") {
         return cancelDodoSubscription({ config, idempotencyKey, providerSubscriptionId: request.providerSubscriptionRef as string, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }) });
       }
-      if (context.action !== "change_plan" || context.requestedPlanId === null || request.marketCode === null || request.currency === null) throw new AppError("billing_provider_operation_unavailable", 503);
+      if (context.action === "resume") {
+        return resumeDodoSubscription({ config, idempotencyKey, providerSubscriptionId: request.providerSubscriptionRef as string, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }) });
+      }
+      if (context.requestedPlanId === null || request.marketCode === null || request.currency === null) throw new AppError("billing_provider_operation_unavailable", 503);
       const price = await input.env.PLATFORM_DB.prepare(`
         SELECT provider_price_ref AS providerPriceRef
         FROM plan_prices
@@ -939,8 +943,9 @@ async function loadCheckoutForEvent(env: AppBindings, event: DodoBillingEvent): 
   // D1 has stored either ref; the signed checkout-session identity is the
   // authoritative bridge for that one event.
   const initialPaymentWithLocalSession = sessionId !== null && event.eventType === "payment.succeeded";
+  if (initialPaymentWithLocalSession && providerCheckoutId === null) throw new AppError("billing_webhook_identity_mismatch", 409);
   let subscriptionLookupFound = event.providerSubscriptionId === null || initialPaymentWithLocalSession;
-  let transactionLookupFound = providerCheckoutId === null || initialPaymentWithLocalSession;
+  let transactionLookupFound = providerCheckoutId === null && !initialPaymentWithLocalSession;
   if (sessionId !== null) {
     const row = await env.PLATFORM_DB.prepare(`${select} WHERE ${shopPredicate}(sessions.id = ? OR sessions.public_id = ?) LIMIT 1`).bind(...shopValue, sessionId, sessionId).first<BillingCheckoutSession>();
     if (row !== null) {
@@ -982,6 +987,9 @@ function targetStateForEvent(event: DodoBillingEvent): BillingState | null {
   if (event.eventType === "subscription.expired") return "canceled";
   if (event.eventType === "subscription.cancelled" || event.eventType === "subscription.canceled" || event.eventType === "subscription.terminated") return "canceled";
   if (event.eventType === "subscription.paused") return "suspended";
+  if (event.eventType === "subscription.plan_changed") return "active";
+  if (event.eventType === "subscription.updated" && event.cancelAtNextBillingDate === true) return "cancel_scheduled";
+  if (event.eventType === "subscription.updated" && event.scheduledPriceId !== null) return "downgrade_scheduled";
   if (event.eventType === "subscription.renewed") return "active";
   if (event.eventType === "subscription.active") return "active";
   if (event.eventType === "subscription.updated" && (event.status === "on_hold" || event.status === "past_due")) return "grace_period";
@@ -1128,10 +1136,13 @@ export async function processDodoWebhook(input: {
       ? (subscription.planId === checkoutPrice.planId ? checkoutPrice : null)
       : await loadBillingPriceById(input.env, subscription.priceId);
     const eventPrice = providerPriceRef === null ? null : await loadBillingPriceByProviderRef(input.env, providerPriceRef);
+    const scheduledPrice = event.scheduledPriceId === null ? null : await loadBillingPriceByProviderRef(input.env, event.scheduledPriceId);
     let verifiedPrice = session.status === "completed" ? currentPrice ?? checkoutPrice : checkoutPrice;
     if (session.status === "completed" && target === "active" && pendingChange?.action === "change_plan") {
       if (eventPrice === null || eventPrice.planId !== pendingChange.requestedPlanId) throw new AppError("billing_webhook_price_mismatch", 409);
       verifiedPrice = eventPrice;
+    } else if (target === "downgrade_scheduled" && pendingChange?.action === "change_plan") {
+      if (scheduledPrice === null || scheduledPrice.planId !== pendingChange.requestedPlanId) throw new AppError("billing_webhook_price_mismatch", 409);
     } else if (eventPrice !== null && eventPrice.id !== verifiedPrice.id) {
       throw new AppError("billing_webhook_price_mismatch", 409);
     }
@@ -1250,9 +1261,10 @@ export async function processDodoWebhook(input: {
         `).bind(event.providerCheckoutId, nowIso, nowIso, session.id));
     }
     const completesPendingChange = pendingChange !== null && target !== null && (
-      (pendingChange.action === "cancel" && target === "canceled")
+      (pendingChange.action === "cancel" && (target === "cancel_scheduled" || target === "canceled"))
       || (pendingChange.action === "change_plan" && target === "active")
       || (pendingChange.action === "resume" && target === "active")
+      || (pendingChange.action === "change_plan" && target === "downgrade_scheduled")
     );
     if (completesPendingChange) {
       statements.push(input.env.PLATFORM_DB.prepare(`

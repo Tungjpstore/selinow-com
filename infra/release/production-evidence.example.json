@@ -20,7 +20,10 @@
     ]
   },
   "approvals": {
+    "dataOwner": "replace-with-data-owner",
+    "paymentOwner": "replace-with-payment-owner",
     "releaseOwner": "replace-with-release-owner",
+    "securityOwner": "replace-with-security-owner",
     "supportOwner": "replace-with-support-owner"
   },
   "quality": {
@@ -40,7 +43,11 @@
   },
   "staging": {
     "accepted": false,
-    "acceptedAt": null
+    "acceptedAt": null,
+    "releaseId": "replace-with-staging-release-id",
+    "manifestRef": "replace-with-private-staging-manifest-reference",
+    "manifestSha256": "replace-with-staging-manifest-sha256",
+    "workerVersion": "replace-with-staging-worker-version"
   },
   "security": {
     "criticalOpen": 0,

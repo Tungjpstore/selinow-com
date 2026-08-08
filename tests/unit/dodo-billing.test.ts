@@ -6,7 +6,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { createBillingCheckout, createBillingRecoveryCheckout, executeDodoSubscriptionChangeRequest, expireBillingCheckoutSessions, processDodoWebhook, processDueDodoSubscriptionChanges } from "../../src/lib/billing/service";
-import { cancelDodoSubscription, changeDodoSubscription, createDodoCheckout, getDodoConfig, parseDodoEvent, retrieveDodoSubscription, verifyDodoWebhookSignature } from "../../src/lib/billing/dodo";
+import { cancelDodoSubscription, changeDodoSubscription, createDodoCheckout, getDodoConfig, parseDodoEvent, retrieveDodoSubscription, resumeDodoSubscription, verifyDodoWebhookSignature } from "../../src/lib/billing/dodo";
 import { sha256Json } from "../../src/lib/core/crypto";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
@@ -213,9 +213,11 @@ describe("Dodo billing adapter", () => {
     };
     await expect(changeDodoSubscription({ config, effectiveAt: "next_billing_date", fetcher, idempotencyKey: "stable-key", onPaymentFailure: "prevent_change", priceId: "prod_starter", providerSubscriptionId: "sub_dodo_test" })).resolves.toEqual({ providerActionRef: "op_dodo_1" });
     await expect(cancelDodoSubscription({ config, fetcher, idempotencyKey: "stable-key-cancel", providerSubscriptionId: "sub_dodo_test" })).resolves.toEqual({ providerActionRef: "op_dodo_1" });
+    await expect(resumeDodoSubscription({ config, fetcher, idempotencyKey: "stable-key-resume", providerSubscriptionId: "sub_dodo_test" })).resolves.toEqual({ providerActionRef: "op_dodo_1" });
     expect(calls).toEqual([
       { body: { effective_at: "next_billing_date", on_payment_failure: "prevent_change", product_id: "prod_starter" }, method: "POST", url: "https://test.dodopayments.com/subscriptions/sub_dodo_test/change-plan" },
       { body: { cancel_at_next_billing_date: true, cancellation_comment: "cancelled_by_customer", cancel_reason: "cancelled_by_customer" }, method: "PATCH", url: "https://test.dodopayments.com/subscriptions/sub_dodo_test" },
+      { body: { cancel_at_next_billing_date: false }, method: "PATCH", url: "https://test.dodopayments.com/subscriptions/sub_dodo_test" },
     ]);
   });
 

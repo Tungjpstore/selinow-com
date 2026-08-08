@@ -215,7 +215,7 @@ export async function createSubscriptionChangeRequest(input: {
   // Resolve authoritative subscription state only after replay lookup so a
   // retry remains deterministic when the subscription version changes.
   const subscription = await currentSubscription(input.env, actor.row.shop_id);
-  if (input.action === "resume") throw new AppError("billing_resume_provider_required", 409);
+  if (input.action === "resume" && subscription.state !== "cancel_scheduled") throw new AppError("billing_resume_provider_required", 409);
   if (!new Set(["trialing", "active", "past_due", "grace_period", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"]).has(subscription.state)) {
     throw new AppError("billing_change_requires_request", 409);
   }

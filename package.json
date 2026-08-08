@@ -26,6 +26,7 @@
     "platform:route-preflight": "node scripts/staging-route-preflight.mjs --env staging",
     "staging:phase-a:smoke": "node scripts/staging-phase-a-smoke.mjs --env staging",
     "dodo:uat:validate": "node scripts/dodo-uat-validate.mjs",
+    "payos:uat:validate": "node scripts/payos-uat-validate.mjs",
     "platform:provision": "node scripts/platform-provision.mjs",
     "platform:admin-bootstrap": "node scripts/platform-admin-bootstrap.mjs",
     "db:migrate": "node scripts/db.mjs migrate",

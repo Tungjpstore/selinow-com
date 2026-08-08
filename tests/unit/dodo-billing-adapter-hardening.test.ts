@@ -112,6 +112,18 @@ describe("Dodo billing adapter hardening", () => {
     });
   });
 
+  it("pins hosted checkout URLs to the configured provider environment", async () => {
+    const staging = getDodoConfig(environment("staging"));
+    await expect(createDodoCheckout({
+      config: staging,
+      currency: "USD",
+      customData: { checkoutSessionId: "bchk_local_123" },
+      fetcher: () => Promise.resolve(new Response(JSON.stringify({ checkout_url: "https://checkout.dodopayments.com/session/live", session_id: "chk_live_123" }), { status: 200 })),
+      idempotencyKey: "checkout-key",
+      priceId: "prod_test_123",
+    })).rejects.toMatchObject({ code: "billing_provider_invalid", status: 502 });
+  });
+
   it("rejects a webhook-id outside the durable provider reference grammar", async () => {
     const body = JSON.stringify({ timestamp: "2026-08-08T00:00:00.000Z", type: "payment.succeeded" });
     const timestamp = 1_775_779_200;
