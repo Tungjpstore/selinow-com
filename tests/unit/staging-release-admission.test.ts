@@ -131,6 +131,18 @@ describe("staging release admission", () => {
     })).toThrow("staging_release_migration_ledger_baseline_mismatch");
   });
 
+  it("normalizes sub-second manifest timestamps to the admitted release-id format", async () => {
+    const manifest = await buildStagingReleaseManifest({
+      continuationEvidence: CONTINUATION_EVIDENCE,
+      databaseTarget: DATABASE_TARGET,
+      migrationLedgerPrefix: MIGRATION_LEDGER_PREFIX,
+      migrationNames: MIGRATIONS,
+      now: new Date("2026-08-03T00:00:00.001Z"),
+      repositoryState: repositoryState(),
+    });
+    expect(manifest.releaseId).toBe(`stg_20260803T000000Z_${COMMIT_SHA.slice(0, 12)}`);
+  });
+
   it("rejects replacement backup, restore, or D1 evidence after manifest creation", async () => {
     const manifest = await buildStagingReleaseManifest({
       continuationEvidence: CONTINUATION_EVIDENCE,

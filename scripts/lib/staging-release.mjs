@@ -130,7 +130,7 @@ export async function buildStagingReleaseManifest(input = {}) {
   if (!GIT_OBJECT_PATTERN.test(repositoryState.commitSha ?? "")) throw new Error("staging_release_commit_unavailable");
   if (!GIT_OBJECT_PATTERN.test(repositoryState.treeSha ?? "")) throw new Error("staging_release_tree_unavailable");
   const now = input.now ?? new Date();
-  const compactTimestamp = now.toISOString().replaceAll(/[-:]/gu, "").replace(".000", "");
+  const compactTimestamp = now.toISOString().replaceAll(/[-:]/gu, "").replace(/\.\d{3}Z$/u, "Z");
   const releaseId = `stg_${compactTimestamp}_${repositoryState.commitSha.slice(0, 12)}`;
   const migrationNames = input.migrationNames ?? await listMigrationNames(root);
   if (input.databaseTarget === undefined || input.continuationEvidence === undefined) {
