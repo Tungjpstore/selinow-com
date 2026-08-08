@@ -5,10 +5,13 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
-const routeDependencies = vi.hoisted<{ env: AppBindings | null }>(() => ({ env: null }));
+const routeDependencies = vi.hoisted<{ env: AppBindings | null; warnings: unknown[] }>(() => ({ env: null, warnings: [] }));
 
 vi.mock("../../src/lib/platform/bindings", () => ({
   getBindings: () => routeDependencies.env,
+}));
+vi.mock("../../src/lib/operations/logger", () => ({
+  loggerFor: () => ({ warn: (event: unknown) => { routeDependencies.warnings.push(event); } }),
 }));
 
 import { magicLinkRequesterAddress, purgeAuthRequestAdmissions } from "../../src/lib/auth/admission";
@@ -115,6 +118,7 @@ describe("magic-link issuance rate limit", () => {
     applyMigrations(database);
     env = bindings(database);
     routeDependencies.env = env;
+    routeDependencies.warnings = [];
   });
 
   afterEach(() => {
@@ -332,6 +336,27 @@ describe("magic-link issuance rate limit", () => {
     const body = await sameOriginResponse.json();
     expect(body).not.toHaveProperty("initiationBinding");
     expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 1 });
+  });
+
+  it("records only safe request telemetry when magic-link initiation fails", async () => {
+    const response = await requestMagicLinkRoute({
+      locals: { requestId: "request-safe-auth-log" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/request`, {
+        body: JSON.stringify({ email: "seller@example.test" }),
+        headers: { "Content-Type": "application/json", Origin: "https://wrong.example.test" },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof requestMagicLinkRoute>[0]);
+
+    expect(response.status).toBe(403);
+    expect(routeDependencies.warnings).toEqual([{
+      errorCode: "csrf_invalid",
+      event: "auth.magic_link_request_failed",
+      requestId: "request-safe-auth-log",
+      source: "http",
+      status: 403,
+    }]);
+    expect(JSON.stringify(routeDependencies.warnings)).not.toContain("seller@example.test");
   });
 
   it("binds consumption to the browser that requested the link", async () => {

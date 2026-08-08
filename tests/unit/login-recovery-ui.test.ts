@@ -30,4 +30,14 @@ describe("magic-link cross-browser recovery UI", () => {
     expect(controller).toContain('link.textContent = t("auth.login.debug_link")');
     expect(controller).not.toContain("link.textContent = token");
   });
+
+  it("redirects login to the canonical dashboard origin before submitting", () => {
+    expect(page).toContain("Astro.url.origin !== env.DASHBOARD_ORIGIN");
+    expect(page).toContain("return Astro.redirect(canonicalLogin.toString(), 308)");
+  });
+
+  it("shows the safe request ID returned by failed login requests", () => {
+    expect(controller).toContain('response.headers.get("X-Request-Id")');
+    expect(controller).toContain('t("auth.login.request_id", { requestId })');
+  });
 });

@@ -15,6 +15,7 @@ const messageKeys: Readonly<Record<string, string>> = {
   rate_limited: "auth.login.rate_limited",
   provider_unavailable: "auth.login.provider_unavailable",
 };
+const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/u;
 
 function setStatus(tone: "error" | "pending" | "success" | "", message: string): void {
   if (statusElement === null) return;
@@ -110,7 +111,11 @@ async function submitLogin(event: SubmitEvent): Promise<void> {
 
     if (!response.ok) {
       const code = typeof body.code === "string" ? body.code : "unknown_error";
-      setStatus("error", t(messageKeys[code] ?? "auth.login.generic_error"));
+      const bodyRequestId = typeof body.requestId === "string" && REQUEST_ID.test(body.requestId) ? body.requestId : null;
+      const headerRequestId = response.headers.get("X-Request-Id");
+      const requestId = bodyRequestId ?? (headerRequestId !== null && REQUEST_ID.test(headerRequestId) ? headerRequestId : null);
+      const message = t(messageKeys[code] ?? "auth.login.generic_error");
+      setStatus("error", requestId === null ? message : `${message} ${t("auth.login.request_id", { requestId })}`);
       return;
     }
 
