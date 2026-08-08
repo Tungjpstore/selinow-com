@@ -40,6 +40,9 @@
     { "custom_domain": true, "pattern": "canvas.staging.selinow.com" },
     { "custom_domain": true, "pattern": "coming-soon.staging.selinow.com" },
     { "custom_domain": true, "pattern": "paused.staging.selinow.com" },
+    { "pattern": "staging.selinow.com/*", "zone_name": "selinow.com" },
+    { "pattern": "app-staging.selinow.com/*", "zone_name": "selinow.com" },
+    { "pattern": "api-staging.selinow.com/*", "zone_name": "selinow.com" },
     { "pattern": "*.staging.selinow.com/*", "zone_name": "selinow.com" },
     { "pattern": "*/*", "zone_name": "selinow.com" }
   ],

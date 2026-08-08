@@ -562,13 +562,16 @@ export function buildStagingRoutes(spec) {
     `*.${spec.zoneName}/*`,
     "*/*",
   ];
-  const expectedRoutes = [
-    ...spec.hostnames.map((hostname) => ({ custom_domain: true, pattern: hostname })),
-    { pattern: spec.wildcardRoute, zone_name: spec.zoneName },
-  ];
   const expectedStagingRouteExceptions = [
     ...spec.hostnames.slice(0, 3).map((hostname) => `${hostname}/*`),
     spec.wildcardRoute,
+  ];
+  const expectedRoutes = [
+    ...spec.hostnames.map((hostname) => ({ custom_domain: true, pattern: hostname })),
+    ...expectedStagingRouteExceptions
+      .filter((pattern) => pattern !== spec.wildcardRoute)
+      .map((pattern) => ({ pattern, zone_name: spec.zoneName })),
+    { pattern: spec.wildcardRoute, zone_name: spec.zoneName },
   ];
   if (expectedProductionWorkerName === spec.workerName
     || spec.productionWorkerName !== expectedProductionWorkerName

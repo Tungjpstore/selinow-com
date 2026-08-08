@@ -298,6 +298,18 @@
           "pattern": "paused.staging.selinow.com"
         },
         {
+          "pattern": "staging.selinow.com/*",
+          "zone_name": "selinow.com"
+        },
+        {
+          "pattern": "app-staging.selinow.com/*",
+          "zone_name": "selinow.com"
+        },
+        {
+          "pattern": "api-staging.selinow.com/*",
+          "zone_name": "selinow.com"
+        },
+        {
           "pattern": "*.staging.selinow.com/*",
           "zone_name": "selinow.com"
         }

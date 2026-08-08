@@ -93,6 +93,9 @@ const stagingSpec = {
     { custom_domain: true, pattern: "canvas.staging.selinow.com" },
     { custom_domain: true, pattern: "coming-soon.staging.selinow.com" },
     { custom_domain: true, pattern: "paused.staging.selinow.com" },
+    { pattern: "staging.selinow.com/*", zone_name: "selinow.com" },
+    { pattern: "app-staging.selinow.com/*", zone_name: "selinow.com" },
+    { pattern: "api-staging.selinow.com/*", zone_name: "selinow.com" },
     { pattern: "*.staging.selinow.com/*", zone_name: "selinow.com" },
   ],
   zoneId: "ce1536fca500680c544662e361ed869b",
@@ -1119,6 +1122,9 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(wranglerConfig.env.staging.routes).toEqual(buildStagingRoutes(stagingSpec));
     expect(wranglerConfig.env.staging.routes.filter((route) => route.custom_domain !== true))
       .toEqual([
+        { pattern: "staging.selinow.com/*", zone_name: "selinow.com" },
+        { pattern: "app-staging.selinow.com/*", zone_name: "selinow.com" },
+        { pattern: "api-staging.selinow.com/*", zone_name: "selinow.com" },
         { pattern: "*.staging.selinow.com/*", zone_name: "selinow.com" },
       ]);
     expect(wranglerConfig.compatibility_flags).toEqual(["nodejs_compat"]);
