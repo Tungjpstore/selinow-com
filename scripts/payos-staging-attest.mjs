@@ -2,6 +2,8 @@ import { createHmac } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
+import { assertPaymentProviderMutationAdmission } from "./lib/payment-provider-mutation-admission.mjs";
+
 const PURPOSE = "payos-provider-identity:v1";
 
 function fingerprint(secret, clientId) {
@@ -11,7 +13,10 @@ function fingerprint(secret, clientId) {
 try {
   const argumentsList = process.argv.slice(2);
   const execute = argumentsList.includes("--execute");
-  if (argumentsList.some((argument) => argument !== "--execute")) throw new Error("payos_attestation_argument_invalid");
+  const manifestIndex = argumentsList.findIndex((argument) => argument === "--release-manifest");
+  const manifestPath = manifestIndex >= 0 ? argumentsList[manifestIndex + 1] : null;
+  if (argumentsList.some((argument, index) => argument !== "--execute" && index !== manifestIndex && index !== manifestIndex + 1)) throw new Error("payos_attestation_argument_invalid");
+  if (execute && (typeof manifestPath !== "string" || manifestPath.length === 0)) throw new Error("payos_attestation_release_manifest_required");
   if (!execute) {
     process.stdout.write(`${JSON.stringify({ action: "would_attest_controlled_staging_channel", environment: "staging", workerSecretName: "PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT" }, null, 2)}\n`);
   } else {
@@ -19,9 +24,11 @@ try {
     const hmacSecret = process.env.IDENTIFIER_HMAC_SECRET;
     if (typeof clientId !== "string" || clientId.trim().length < 3) throw new Error("payos_controlled_client_id_required");
     if (typeof hmacSecret !== "string" || hmacSecret.length < 16) throw new Error("payos_identifier_hmac_secret_required");
+    const admission = await assertPaymentProviderMutationAdmission({ environment: "staging", manifestPath });
     const value = fingerprint(hmacSecret, clientId);
-    const result = spawnSync("npx", ["wrangler", "secret", "put", "PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT", "--env", "staging"], {
+    const result = spawnSync("npx", ["--no-install", "wrangler", "secret", "put", "PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT", "--env", "staging", "--name", admission.workerName], {
       encoding: "utf8",
+      env: admission.childEnvironment,
       input: `${value}\n`,
       stdio: ["pipe", "ignore", "pipe"],
     });
