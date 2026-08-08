@@ -106,7 +106,7 @@ try {
         manifestPath: flags.releaseManifestPath,
         repositoryRoot,
       });
-      const databaseTarget = await assertStagingMutationAdmission();
+      const databaseTarget = databaseTargetFromAdmission(await assertStagingMutationAdmission());
       const preMigrationEvidence = await assertStagingContinuationEvidenceByReference({
         accountId: databaseTarget.accountId,
         continuationEvidence: releaseAdmission.continuationEvidence,

@@ -522,6 +522,10 @@ describe("production database migration admission", () => {
     const source = readFileSync("scripts/db.mjs", "utf8");
     const completionBranch = source.indexOf('if (operation === "complete-release")');
     const releaseAdmission = source.indexOf("await assertStagingReleaseAdmission", completionBranch);
+    const projectedTarget = source.indexOf(
+      "databaseTargetFromAdmission(await assertStagingMutationAdmission())",
+      releaseAdmission,
+    );
     const preEvidence = source.indexOf("await assertStagingContinuationEvidenceByReference", releaseAdmission);
     const completeLedger = source.indexOf("await assertStagingMigrationLedger", preEvidence);
     const migrationCompletion = source.indexOf("await assertStagingMigrationCompletion", completeLedger);
@@ -532,6 +536,8 @@ describe("production database migration admission", () => {
 
     expect(completionBranch).toBeGreaterThan(-1);
     expect(releaseAdmission).toBeGreaterThan(completionBranch);
+    expect(projectedTarget).toBeGreaterThan(releaseAdmission);
+    expect(projectedTarget).toBeLessThan(preEvidence);
     expect(preEvidence).toBeGreaterThan(releaseAdmission);
     expect(completeLedger).toBeGreaterThan(preEvidence);
     expect(migrationCompletion).toBeGreaterThan(completeLedger);
