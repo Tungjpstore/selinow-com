@@ -238,9 +238,11 @@ describe("PayOS integration ownership concurrency", () => {
       ORDER BY name
     `).all()).toEqual([
       { name: "idx_payment_integrations_provider_claim_nonce" },
+      { name: "payment_credentials_payos_claim_fingerprint_clear_guard" },
       { name: "payment_credentials_payos_claim_fingerprint_update_guard" },
       { name: "payment_credentials_payos_claim_scope_insert_guard" },
       { name: "payment_credentials_payos_claim_scope_update_guard" },
+      { name: "payment_integrations_payos_claim_fingerprint_clear_guard" },
       { name: "payment_integrations_payos_claim_fingerprint_update_guard" },
       { name: "payment_integrations_payos_claim_state_insert_guard" },
       { name: "payment_integrations_payos_claim_state_update_guard" },
@@ -335,6 +337,89 @@ describe("PayOS integration ownership concurrency", () => {
     } finally {
       rolling.close();
     }
+  });
+
+  it("rejects late old-worker fingerprint clears but admits fenced finalization", () => {
+    const now = "2026-08-09T00:00:00.000Z";
+    const integrationId = "integration-late-clear-000000000001";
+    const credentialId = "credential-late-clear-000000000001";
+    const nonce = "n".repeat(32);
+    const target = "t".repeat(43);
+    database.prepare(`
+      INSERT INTO payment_integrations (
+        id, public_id, webhook_public_id, shop_id, provider, status,
+        webhook_status, provider_identity_fingerprint, provider_claim_generation,
+        provider_claim_nonce, provider_claim_state, provider_claim_target_fingerprint,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, 'shop-a', 'payos', 'error', 'error', ?, 4, ?, 'in_flight', ?, ?, ?)
+    `).run(
+      integrationId,
+      "public-late-clear-000000000001",
+      "webhook-late-clear-000000000001",
+      "identity-late-clear",
+      nonce,
+      target,
+      now,
+      now,
+    );
+    database.prepare(`
+      INSERT INTO payment_credentials (
+        id, shop_id, integration_id, provider, status, version, key_version,
+        client_id_ciphertext_b64, client_id_iv_b64, api_key_ciphertext_b64,
+        api_key_iv_b64, checksum_key_ciphertext_b64, checksum_key_iv_b64,
+        credential_fingerprint, provider_ownership_fingerprint, provider_claim_nonce,
+        created_by_user_id, created_at
+      ) VALUES (?, 'shop-a', ?, 'payos', 'error', 1, 'v1', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'owner-a', ?)
+    `).run(
+      credentialId,
+      integrationId,
+      "cipher",
+      "iv",
+      "cipher",
+      "iv",
+      "cipher",
+      "iv",
+      "credential-late-clear",
+      "ownership-late-clear",
+      nonce,
+      now,
+    );
+
+    expect(() => database.prepare(`
+      UPDATE payment_credentials
+      SET provider_ownership_fingerprint = NULL
+      WHERE id = ? AND integration_id = ? AND shop_id = ? AND provider = 'payos'
+        AND provider_ownership_fingerprint = ? AND status IN ('pending', 'error')
+    `).run(credentialId, integrationId, "shop-a", "ownership-late-clear"))
+      .toThrow(/payos_provider_credential_clear_unfenced/u);
+    expect(() => database.prepare(`
+      UPDATE payment_integrations
+      SET provider_identity_fingerprint = NULL, updated_at = ?
+      WHERE id = ? AND shop_id = ? AND provider = 'payos'
+        AND provider_identity_fingerprint = ? AND active_credential_id IS NULL
+        AND status IN ('pending', 'error')
+    `).run(now, integrationId, "shop-a", "identity-late-clear"))
+      .toThrow(/payos_provider_identity_clear_unfenced/u);
+
+    expect(() => database.prepare(`
+      UPDATE payment_credentials
+      SET provider_ownership_fingerprint = NULL, provider_claim_nonce = NULL
+      WHERE id = ? AND integration_id = ? AND shop_id = ? AND provider = 'payos'
+        AND provider_claim_nonce = ?
+    `).run(credentialId, integrationId, "shop-a", nonce)).not.toThrow();
+    expect(() => database.prepare(`
+      UPDATE payment_integrations
+      SET provider_identity_fingerprint = NULL, provider_claim_nonce = NULL,
+        provider_claim_state = 'idle', provider_claim_target_fingerprint = NULL,
+        updated_at = ?
+      WHERE id = ? AND shop_id = ? AND provider = 'payos'
+        AND provider_claim_nonce = ?
+    `).run(now, integrationId, "shop-a", nonce)).not.toThrow();
+    expect(database.prepare(`
+      SELECT provider_claim_nonce AS nonce, provider_claim_state AS claimState,
+        provider_claim_target_fingerprint AS target, provider_identity_fingerprint AS identity
+      FROM payment_integrations WHERE id = ?
+    `).get(integrationId)).toEqual({ claimState: "idle", identity: null, nonce: null, target: null });
   });
 
   it("migrates unverifiable legacy claims into durable quarantine", () => {
@@ -464,6 +549,48 @@ describe("PayOS integration ownership concurrency", () => {
         userId: "owner-b",
       })).rejects.toMatchObject({ code: "credential_already_connected", status: 409 });
       expect(crossTenantProviderCalls).toBe(0);
+
+      // Reproduce a pre-0090 response that arrived after 0089 quarantined the claim.
+      legacy.prepare(`
+        UPDATE payment_credentials
+        SET provider_ownership_fingerprint = NULL
+        WHERE id = ? AND integration_id = ? AND shop_id = ? AND provider = 'payos'
+          AND provider_ownership_fingerprint = ? AND status IN ('pending', 'error')
+      `).run(credentialId, integrationId, "shop-a", providerOwnershipFingerprint);
+      legacy.prepare(`
+        UPDATE payment_integrations
+        SET provider_identity_fingerprint = NULL, updated_at = ?
+        WHERE id = ? AND shop_id = ? AND provider = 'payos'
+          AND provider_identity_fingerprint = ? AND active_credential_id IS NULL
+          AND status IN ('pending', 'error')
+      `).run(now, integrationId, "shop-a", providerIdentityFingerprint);
+      expect(legacy.prepare(`
+        SELECT provider_claim_nonce AS nonce, provider_claim_state AS claimState,
+          provider_claim_target_fingerprint AS target,
+          provider_identity_fingerprint AS identity
+        FROM payment_integrations WHERE id = ? AND shop_id = 'shop-a'
+      `).get(integrationId)).toEqual({ claimState: "quarantined", identity: null, nonce: quarantine.nonce, target: null });
+      expect(legacy.prepare(`
+        SELECT provider_claim_nonce AS nonce,
+          provider_ownership_fingerprint AS ownership
+        FROM payment_credentials WHERE id = ? AND shop_id = 'shop-a'
+      `).get(credentialId)).toEqual({ nonce: quarantine.nonce, ownership: null });
+      legacy.exec(readFileSync(join(process.cwd(), "migrations/0090_payos_provider_claim_clear_guard.sql"), "utf8"));
+
+      const rotatedCredentials = { ...CHANNEL, apiKey: "rotated-after-legacy-clear", checksumKey: "rotated-after-legacy-clear" };
+      let rotatedProviderCalls = 0;
+      await expect(connectPayOS({
+        credentials: rotatedCredentials,
+        env,
+        fetcher: () => {
+          rotatedProviderCalls += 1;
+          return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+        },
+        requestId: "request-legacy-rotated",
+        shopPublicId: SHOP_A,
+        userId: "owner-a",
+      })).rejects.toMatchObject({ code: "payment_integration_conflict", status: 409 });
+      expect(rotatedProviderCalls).toBe(0);
 
       let ownerProviderCalls = 0;
       await expect(connectPayOS({

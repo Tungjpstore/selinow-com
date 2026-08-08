@@ -191,6 +191,7 @@ async function claimPaymentProviderOwnership(input: {
   const providerIdentityFingerprint = await payOSProviderIdentityFingerprint(input.env, input.credentials);
   const existing = input.integration.providerIdentityFingerprint ?? null;
   if (existing !== null && existing !== providerIdentityFingerprint) throw new AppError("credential_channel_mismatch", 409);
+  const credentialFingerprint = await paymentCredentialFingerprint(input.env, input.shopId, input.credentials);
   const providerCredentialFingerprint = await paymentProviderCredentialFingerprint(input.env, input.credentials);
   const targetFingerprint = await paymentProviderWebhookTargetFingerprint(input.env, input.webhookUrl);
   const nonce = createId("pcl");
@@ -228,11 +229,15 @@ async function claimPaymentProviderOwnership(input: {
                   AND legacy_credential.provider = payment_integrations.provider
                   AND legacy_credential.status IN ('pending', 'error')
                   AND legacy_credential.provider_claim_nonce = payment_integrations.provider_claim_nonce
-                  AND legacy_credential.provider_ownership_fingerprint = ?
+                  AND legacy_credential.credential_fingerprint = ?
+                  AND (
+                    legacy_credential.provider_ownership_fingerprint = ?
+                    OR legacy_credential.provider_ownership_fingerprint IS NULL
+                  )
               )
             )
           )
-      `).bind(providerIdentityFingerprint, nonce, targetFingerprint, now, input.integration.id, input.shopId, providerIdentityFingerprint, targetFingerprint, input.credentialId, providerCredentialFingerprint),
+      `).bind(providerIdentityFingerprint, nonce, targetFingerprint, now, input.integration.id, input.shopId, providerIdentityFingerprint, targetFingerprint, input.credentialId, credentialFingerprint, providerCredentialFingerprint),
       input.env.PLATFORM_DB.prepare(`
         UPDATE payment_credentials
         SET status = CASE
