@@ -178,6 +178,8 @@ describe("remote post-migration database contract", () => {
     expect(POST_MIGRATION_FOREIGN_KEY_SQL.toLowerCase()).toContain("pragma foreign_key_check");
     expect(POST_MIGRATION_FOREIGN_KEY_SQL.toLowerCase()).not.toContain("integrity_check");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL.toLowerCase()).not.toContain("integrity_check");
+    expect(POST_MIGRATION_COLUMN_SQL).not.toContain("pragma_table_info(tables.name)");
+    expect(findCompoundSelectLimitViolations(POST_MIGRATION_COLUMN_SQL)).toEqual([]);
     expect(findCompoundSelectLimitViolations(POST_MIGRATION_CROSS_LEDGER_SQL)).toEqual([]);
   });
 

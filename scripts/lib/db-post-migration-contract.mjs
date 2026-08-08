@@ -226,6 +226,10 @@ export const REQUIRED_POST_MIGRATION_COLUMNS = Object.freeze({
   usage_counters: Object.freeze(["period_kind"]),
 });
 
+function quoteSqlString(value) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 export const POST_MIGRATION_FOREIGN_KEY_SQL = "PRAGMA foreign_key_check;";
 export const POST_MIGRATION_OBJECT_SQL = `
 SELECT type, name
@@ -233,12 +237,21 @@ FROM sqlite_master
 WHERE type IN ('table', 'index', 'trigger')
 ORDER BY type, name;
 `;
+// D1 rejects correlated pragma table-valued joins against sqlite_master. Keep
+// the admission query deterministic by expanding the reviewed table set into
+// constant pragma_table_info calls instead.
+const POST_MIGRATION_COLUMN_SELECTS = Object.keys(REQUIRED_POST_MIGRATION_COLUMNS)
+  .map((table) => `SELECT ${quoteSqlString(table)} AS table_name, name AS column_name, cid FROM pragma_table_info(${quoteSqlString(table)})`);
+const POST_MIGRATION_COLUMN_GROUPS = [];
+for (let index = 0; index < POST_MIGRATION_COLUMN_SELECTS.length; index += 5) {
+  POST_MIGRATION_COLUMN_GROUPS.push(`SELECT * FROM (\n${POST_MIGRATION_COLUMN_SELECTS.slice(index, index + 5).join("\nUNION ALL\n")}\n)`);
+}
 export const POST_MIGRATION_COLUMN_SQL = `
-SELECT tables.name AS table_name, columns.name AS column_name
-FROM sqlite_master AS tables
-JOIN pragma_table_info(tables.name) AS columns
-WHERE tables.type = 'table'
-ORDER BY tables.name, columns.cid;
+SELECT table_name, column_name
+FROM (
+${POST_MIGRATION_COLUMN_GROUPS.join("\nUNION ALL\n")}
+)
+ORDER BY table_name, column_name;
 `;
 export const POST_MIGRATION_CROSS_LEDGER_SQL = `
 SELECT COUNT(*) AS mismatch_count FROM (
