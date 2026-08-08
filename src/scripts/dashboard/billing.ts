@@ -1,4 +1,4 @@
-export {};
+import { getBillingCheckoutAdmission } from "../../lib/dashboard/billing-checkout";
 
 type JsonObject = Record<string, unknown>;
 type Price = { amountMinor: number; currency: string; displayAmount: string | null; interval: string; marketCode: string };
@@ -28,6 +28,7 @@ if (root !== null && root.dataset.canManage === "true") {
   const text = (key: string): string => copy[key] ?? "";
   const currentPlanCode = root.dataset.currentPlanCode ?? "";
   const billingState = root.dataset.billingState ?? "";
+  const billingMarketReady = root.dataset.billingMarketReady === "true";
   const subscriptionVersion = Number(root.dataset.subscriptionVersion);
   let pending = false;
 
@@ -96,7 +97,8 @@ if (root !== null && root.dataset.canManage === "true") {
   const renderCheckoutPlans = (plans: readonly Plan[]): void => {
     if (checkoutPlanSelect === null) return;
     checkoutPlanSelect.replaceChildren();
-    const eligible = plans.filter((plan) => (plan.code === "starter" || plan.code === "pro") && plan.prices.length > 0 && (billingState !== "suspended" || plan.code === currentPlanCode));
+    const admission = getBillingCheckoutAdmission({ billingState, currentPlanCode, marketReady: billingMarketReady, plans });
+    const eligible = admission.eligible;
     for (const plan of eligible) {
       const option = document.createElement("option");
       option.value = plan.code;
@@ -106,6 +108,9 @@ if (root !== null && root.dataset.canManage === "true") {
       checkoutPlanSelect.appendChild(option);
     }
     if (checkoutSubmit !== null) checkoutSubmit.disabled = eligible.length === 0;
+    if (admission.reasonCode === "billing_market_unavailable") showCheckoutFeedback(text("checkoutMarketRequired"), "danger");
+    else if (admission.reasonCode === "plan_price_unavailable") showCheckoutFeedback(text("checkoutUnavailable"), "danger");
+    else showCheckoutFeedback("");
   };
   const showCheckoutFeedback = (message: string, tone: "danger" | "info" | "success" = "info"): void => {
     if (checkoutFeedback === null) return;
