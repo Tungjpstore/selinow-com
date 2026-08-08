@@ -185,13 +185,17 @@ if (root !== null) {
   const payosFingerprintCopy = root.querySelector<HTMLButtonElement>("[data-payos-fingerprint-copy]");
   payosFingerprintCopy?.addEventListener("click", () => {
     const fingerprint = payosFingerprintValue?.textContent ?? "";
-    if (!/^[A-Za-z0-9_-]{43}$/u.test(fingerprint) || navigator.clipboard === undefined) {
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(fingerprint)) {
       feedback(text(copy, "payos.fingerprint_copy_failed"), "error");
       return;
     }
     void navigator.clipboard.writeText(fingerprint)
-      .then(() => feedback(text(copy, "payos.fingerprint_copied"), "success"))
-      .catch(() => feedback(text(copy, "payos.fingerprint_copy_failed"), "error"));
+      .then(() => {
+        feedback(text(copy, "payos.fingerprint_copied"), "success");
+      })
+      .catch(() => {
+        feedback(text(copy, "payos.fingerprint_copy_failed"), "error");
+      });
   });
   payosFingerprintForm?.addEventListener("submit", (event) => {
     event.preventDefault();
