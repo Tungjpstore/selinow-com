@@ -191,7 +191,7 @@ describe("remote post-migration database contract", () => {
     expect(POST_MIGRATION_COLUMN_SQL).not.toContain("pragma_table_info(tables.name)");
 
     const groups = [...POST_MIGRATION_COLUMN_SQL.matchAll(/SELECT \* FROM \(\n([\s\S]*?)\n\)/gu)]
-      .map((match) => match[1]);
+      .flatMap((match) => match[1] === undefined ? [] : [match[1]]);
     expect(groups).toHaveLength(Math.ceil(requiredTables.length / 5));
     for (const group of groups) {
       const termCount = group.match(/pragma_table_info\(/gu)?.length ?? 0;
