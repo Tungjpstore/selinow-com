@@ -75,9 +75,11 @@ describe("PayOS staging UAT evidence", () => {
   it("rejects hash-shaped scenario claims when trusted artifact proof is required", () => {
     const value = evidence();
     expect(() => assertPayosStagingUatEvidence(value, { ...binding, requireArtifactProof: true })).toThrow("payos_uat_scenario_artifact_unverified");
-    const scenarioArtifactFingerprints = Object.fromEntries(
-      PAYOS_STAGING_UAT_SCENARIO_IDS.map((id) => [id, value.scenarios[id]?.evidenceFingerprintSha256]),
-    );
+    const scenarioArtifactFingerprints = Object.fromEntries(PAYOS_STAGING_UAT_SCENARIO_IDS.map((id) => {
+      const scenario = value.scenarios[id];
+      if (scenario === undefined) throw new Error("missing_scenario_fixture");
+      return [id, scenario.evidenceFingerprintSha256];
+    }));
     expect(assertPayosStagingUatEvidence(value, { ...binding, requireArtifactProof: true, scenarioArtifactFingerprints })).toMatchObject({ accepted: true });
   });
 
