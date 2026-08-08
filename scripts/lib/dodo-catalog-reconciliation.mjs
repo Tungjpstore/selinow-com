@@ -193,35 +193,32 @@ export function classifyDodoCatalogRows(rows, references) {
   };
 }
 
-function exactPendingPredicate() {
+function exactPendingPredicate(alias = "p", planCode = `${alias}.plan_code`) {
   return DODO_CATALOG_OFFERS.map((offer) => {
     const expected = expectedRow(offer);
-    return `(p.id = ${sqlString(offer.id)} AND p.plan_code = ${sqlString(offer.planCode)} AND p.market_code = ${sqlString(offer.marketCode)} AND p.currency = ${sqlString(offer.currency)} AND p.amount_minor = ${expected.amount_minor} AND p.interval = 'month' AND p.tax_behavior = 'inclusive' AND p.provider_code = 'dodo' AND p.provider_price_ref = ${sqlString(offer.pendingRef)} AND p.effective_from = p.created_at AND julianday(p.updated_at) >= julianday(p.created_at) AND datetime(p.effective_from) IS NOT NULL AND julianday(p.effective_from) <= julianday('now') AND p.effective_to IS NULL AND p.version = 1 AND p.is_active = 1)`;
+    return `(${alias}.id = ${sqlString(offer.id)} AND ${planCode} = ${sqlString(offer.planCode)} AND ${alias}.market_code = ${sqlString(offer.marketCode)} AND ${alias}.currency = ${sqlString(offer.currency)} AND ${alias}.amount_minor = ${expected.amount_minor} AND ${alias}.interval = 'month' AND ${alias}.tax_behavior = 'inclusive' AND ${alias}.provider_code = 'dodo' AND ${alias}.provider_price_ref = ${sqlString(offer.pendingRef)} AND ${alias}.effective_from = ${alias}.created_at AND julianday(${alias}.updated_at) >= julianday(${alias}.created_at) AND datetime(${alias}.effective_from) IS NOT NULL AND julianday(${alias}.effective_from) <= julianday('now') AND ${alias}.effective_to IS NULL AND ${alias}.version = 1 AND ${alias}.is_active = 1)`;
   }).join(" OR ");
 }
 
 export function dodoCatalogUpdateSql(references) {
   const cases = DODO_CATALOG_OFFERS.map((offer) => `WHEN ${sqlString(offer.id)} THEN ${sqlString(references[offer.id])}`).join(" ");
   const ids = DODO_CATALOG_OFFERS.map((offer) => sqlString(offer.id)).join(", ");
-  const rowPredicates = DODO_CATALOG_OFFERS.map((offer) => `(id = ${sqlString(offer.id)} AND provider_price_ref = ${sqlString(offer.pendingRef)})`).join(" OR ");
   return `
+WITH exact_pending AS (
+  SELECT p.id
+  FROM plan_prices AS p
+  INNER JOIN plans ON plans.id = p.plan_id
+  WHERE p.id IN (${ids})
+    AND (${exactPendingPredicate("p", "plans.code")})
+), ready AS (
+  SELECT COUNT(*) AS matched_count
+  FROM exact_pending
+)
 UPDATE plan_prices
 SET provider_price_ref = CASE id ${cases} ELSE provider_price_ref END,
   updated_at = CURRENT_TIMESTAMP
-WHERE (${rowPredicates})
-  AND (
-    SELECT COUNT(*)
-    FROM (
-      SELECT p.id, p.plan_id, p.market_code, p.currency, p.amount_minor,
-        p.interval, p.tax_behavior, p.provider_code, p.provider_price_ref,
-        p.effective_from, p.effective_to, p.version, p.is_active,
-        p.created_at, p.updated_at, plans.code AS plan_code
-      FROM plan_prices AS p
-      INNER JOIN plans ON plans.id = p.plan_id
-      WHERE p.id IN (${ids})
-    ) AS p
-    WHERE ${exactPendingPredicate()}
-  ) = ${DODO_CATALOG_OFFERS.length};
+WHERE id IN (SELECT id FROM exact_pending)
+  AND (SELECT matched_count FROM ready) = ${DODO_CATALOG_OFFERS.length};
 SELECT changes() AS updated_count;
 `;
 }

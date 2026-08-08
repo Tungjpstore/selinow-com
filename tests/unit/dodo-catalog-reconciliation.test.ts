@@ -50,7 +50,7 @@ describe("Dodo catalog reconciliation", () => {
     // exact offer shape while accepting independently valid row timestamps.
     Object.keys(REFERENCES).forEach((id, index) => {
       database.prepare("UPDATE plan_prices SET updated_at = datetime(created_at, ?) WHERE id = ?")
-        .run(`+${Math.floor(index / 2)} seconds`, id);
+        .run(`+${String(Math.floor(index / 2))} seconds`, id);
     });
     expect(classifyDodoCatalogRows(rows(database), REFERENCES)).toEqual({
       mode: "pending",
@@ -58,6 +58,7 @@ describe("Dodo catalog reconciliation", () => {
       publishedCount: 0,
     });
     database.exec(dodoCatalogUpdateSql(REFERENCES));
+    expect(database.prepare("SELECT changes() AS updated_count").get()).toEqual({ updated_count: 4 });
     expect(classifyDodoCatalogRows(rows(database), REFERENCES)).toEqual({
       mode: "already_configured",
       pendingCount: 0,
