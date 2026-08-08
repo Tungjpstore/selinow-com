@@ -94,7 +94,7 @@ Use only repository guarded scripts and the exact reviewed environment:
 4. Generate the private manifest only after the fresh backup and restore pass:
    `npm run release:staging:manifest -- --write --json`.
 5. Apply the exact forward-only range derived from the manifest-bound baseline with
-   `npm run db:migrate -- --env staging --release-manifest <manifest-ref>`.
+   `npm run db:migrate -- --env staging --confirm-maintenance-drain --release-manifest <manifest-ref>`.
 6. Verify ledger, preflight, integrity/FK checks and supported smoke paths. Real
    staging deploy repeats the complete ordered ledger and database preflight both
    before and after build and fails before Wrangler on drift.

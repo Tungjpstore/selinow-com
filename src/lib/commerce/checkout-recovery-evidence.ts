@@ -8,6 +8,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
 type CheckoutRecoveryClaims = {
+  capabilityId?: string;
   cartId: string;
   checkoutSubjectHash: string;
   expiresAt: string;
@@ -39,6 +40,7 @@ function parseClaims(encodedClaims: string): CheckoutRecoveryClaims {
   const claims = value as Partial<CheckoutRecoveryClaims>;
   if (
     claims.version !== CHECKOUT_RECOVERY_VERSION
+    || (claims.capabilityId !== undefined && (typeof claims.capabilityId !== "string" || !/^crc_[0-9a-f-]{36}$/u.test(claims.capabilityId)))
     || typeof claims.cartId !== "string"
     || typeof claims.checkoutSubjectHash !== "string"
     || typeof claims.expiresAt !== "string"
@@ -52,6 +54,7 @@ function parseClaims(encodedClaims: string): CheckoutRecoveryClaims {
 }
 
 export async function createCheckoutRecoveryEvidence(input: {
+  capabilityId?: string;
   cartId: string;
   checkoutSubjectHash: string;
   expiresAt: string;
@@ -61,6 +64,7 @@ export async function createCheckoutRecoveryEvidence(input: {
   shopId: string;
 }): Promise<string> {
   const claims: CheckoutRecoveryClaims = {
+    ...(input.capabilityId === undefined ? {} : { capabilityId: input.capabilityId }),
     cartId: input.cartId,
     checkoutSubjectHash: input.checkoutSubjectHash,
     expiresAt: input.expiresAt,
@@ -74,7 +78,7 @@ export async function createCheckoutRecoveryEvidence(input: {
   return `${encodedClaims}.${signature}`;
 }
 
-export async function verifyCheckoutRecoveryEvidence(input: {
+async function verifyEvidence(input: {
   cartExpiresAt: string;
   cartId: string;
   checkoutSubjectHash: string;
@@ -83,7 +87,7 @@ export async function verifyCheckoutRecoveryEvidence(input: {
   requestHash: string;
   secret: string;
   shopId: string;
-}): Promise<void> {
+}): Promise<CheckoutRecoveryClaims> {
   if (input.evidence.length < 40 || input.evidence.length > 4_096) throw new AppError("checkout_recovery_invalid", 409);
   const parts = input.evidence.split(".");
   if (parts.length !== 2) throw new AppError("checkout_recovery_invalid", 409);
@@ -109,4 +113,15 @@ export async function verifyCheckoutRecoveryEvidence(input: {
   ) {
     throw new AppError("checkout_recovery_invalid", 409);
   }
+  return claims;
+}
+
+export async function verifyCheckoutRecoveryEvidence(input: Parameters<typeof verifyEvidence>[0]): Promise<void> {
+  await verifyEvidence(input);
+}
+
+export async function verifyCheckoutRecoveryCapabilityEvidence(input: Parameters<typeof verifyEvidence>[0]): Promise<{ capabilityId: string }> {
+  const claims = await verifyEvidence(input);
+  if (claims.capabilityId === undefined) throw new AppError("checkout_recovery_invalid", 409);
+  return { capabilityId: claims.capabilityId };
 }

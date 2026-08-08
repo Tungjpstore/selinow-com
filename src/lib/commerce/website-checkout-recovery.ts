@@ -1,10 +1,11 @@
 import { constantTimeEqual, hmacToken } from "../core/crypto";
 import { AppError } from "../core/errors";
+import { createId } from "../core/ids";
 import { resolveOrderChannelAttribution } from "../channels/attribution";
 import { WEBSITE_CHANNEL_CODE } from "../channels/builtins";
 import type { AppBindings } from "../platform/bindings";
 import type { StorefrontShop } from "../storefront/store";
-import { createCheckoutRecoveryEvidence, verifyCheckoutRecoveryEvidence } from "./checkout-recovery-evidence";
+import { createCheckoutRecoveryEvidence, verifyCheckoutRecoveryCapabilityEvidence } from "./checkout-recovery-evidence";
 import { verifyQuoteEvidence } from "./quote-evidence";
 import { loadWebsiteCheckoutState, websiteCheckoutFingerprint } from "./store";
 import type { WebsiteCheckoutExpectedItem } from "./website-checkout-input";
@@ -115,17 +116,33 @@ export async function prepareWebsiteCheckoutRecovery(input: {
     shopId: input.shop.id,
     totalMinor: state.quote.totalMinor,
   });
+  const proposedCapabilityId = createId("crc");
+  const issuedAt = now.toISOString();
+  await input.env.PLATFORM_DB.prepare(`
+    INSERT OR IGNORE INTO checkout_recovery_capabilities (
+      id, shop_id, cart_id, checkout_subject_hash, request_hash,
+      issued_at, expires_at, consumed_at, consumed_order_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+  `).bind(proposedCapabilityId, input.shop.id, input.cartId, hashes.checkoutSubjectHash, hashes.requestHash, issuedAt, cart.expiresAt, issuedAt).run();
+  const capability = await input.env.PLATFORM_DB.prepare(`
+    SELECT id, issued_at AS issuedAt, expires_at AS expiresAt
+    FROM checkout_recovery_capabilities
+    WHERE shop_id = ? AND checkout_subject_hash = ? AND request_hash = ?
+    LIMIT 1
+  `).bind(input.shop.id, hashes.checkoutSubjectHash, hashes.requestHash).first<{ expiresAt: string; id: string; issuedAt: string }>();
+  if (capability === null || capability.expiresAt !== cart.expiresAt) throw new AppError("checkout_recovery_invalid", 409);
   return {
     evidence: await createCheckoutRecoveryEvidence({
+      capabilityId: capability.id,
       cartId: input.cartId,
       checkoutSubjectHash: hashes.checkoutSubjectHash,
-      expiresAt: cart.expiresAt,
-      issuedAt: now.toISOString(),
+      expiresAt: capability.expiresAt,
+      issuedAt: capability.issuedAt,
       requestHash: hashes.requestHash,
       secret: input.env.IDENTIFIER_HMAC_SECRET,
       shopId: input.shop.id,
     }),
-    expiresAt: cart.expiresAt,
+    expiresAt: capability.expiresAt,
   };
 }
 
@@ -143,7 +160,7 @@ export async function recoverWebsiteCheckout(input: {
   await verifyCartToken({ cartToken: input.cartToken, env: input.env, shopId: input.shop.id, subjectHash: cart.subjectHash });
   const checkoutSubjectHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `checkout:${input.shop.id}`, input.idempotencyKey);
   const order = await input.env.PLATFORM_DB.prepare(`
-    SELECT orders.public_id AS orderId, orders.order_number AS orderNumber,
+    SELECT orders.id AS internalId, orders.public_id AS orderId, orders.order_number AS orderNumber,
       orders.checkout_cart_id AS checkoutCartId,
       orders.checkout_request_hash AS requestHash,
       orders.expires_at AS expiresAt,
@@ -176,6 +193,7 @@ export async function recoverWebsiteCheckout(input: {
     currency: string;
     expiresAt: string;
     fulfillmentStatus: string;
+    internalId: string;
     orderId: string;
     orderNumber: string;
     paymentStatus: string;
@@ -194,7 +212,7 @@ export async function recoverWebsiteCheckout(input: {
     expected: input.expected,
     totalMinor: order.totalMinor,
   });
-  await verifyCheckoutRecoveryEvidence({
+  const claims = await verifyCheckoutRecoveryCapabilityEvidence({
     cartExpiresAt: cart.expiresAt,
     cartId: input.cartId,
     checkoutSubjectHash,
@@ -209,6 +227,14 @@ export async function recoverWebsiteCheckout(input: {
   const orderToken = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `order-access-token:${input.shop.id}`, input.idempotencyKey);
   const orderTokenHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, "order-access", orderToken);
   if (!constantTimeEqual(order.orderTokenHash, orderTokenHash)) throw new AppError("checkout_recovery_invalid", 409);
+  const consumed = await input.env.PLATFORM_DB.prepare(`
+    UPDATE checkout_recovery_capabilities
+    SET consumed_at = ?, consumed_order_id = ?
+    WHERE id = ? AND shop_id = ? AND cart_id = ?
+      AND checkout_subject_hash = ? AND request_hash = ?
+      AND expires_at > ? AND consumed_at IS NULL
+  `).bind(new Date().toISOString(), order.internalId, claims.capabilityId, input.shop.id, input.cartId, checkoutSubjectHash, requestHash, new Date().toISOString()).run();
+  if (consumed.meta.changes !== 1) throw new AppError("checkout_recovery_consumed", 409);
   return {
     currency: order.currency,
     expiresAt: order.expiresAt,

@@ -43,8 +43,8 @@ const dependencies = vi.hoisted(() => ({
   recordDeadLetter: vi.fn(),
   sellerWebhookGeneratedLicenseAdapter: vi.fn(),
   settleDeliveryJob: vi.fn(),
+  suspendBillingGracePeriods: vi.fn(),
   suspendBillingTrials: vi.fn(),
-  telegramOutbox: vi.fn(),
   terminalStatus: null as string | null,
   terminalAttempts: 3,
   terminalErrorCode: "legacy_delivery_failed",
@@ -57,6 +57,7 @@ vi.mock("../../src/lib/automation/scheduler", () => ({ processScheduledAutomatio
 vi.mock("../../src/lib/billing/service", () => ({
   expireBillingCheckoutSessions: dependencies.expireBillingCheckouts,
   processDueDodoSubscriptionChanges: dependencies.billingChanges,
+  suspendExpiredBillingGracePeriods: dependencies.suspendBillingGracePeriods,
   suspendExpiredTrials: dependencies.suspendBillingTrials,
 }));
 vi.mock("../../src/lib/commerce/cart-mutation", () => ({ purgeCartMutationReplays: dependencies.purgeCartMutationReplays }));
@@ -99,7 +100,6 @@ vi.mock("../../src/lib/operations/security-rate-limit-maintenance", () => ({
 }));
 vi.mock("../../src/lib/payments/reconciliation", () => ({ reconcilePendingPayments: dependencies.paymentReconciliation }));
 vi.mock("../../src/lib/telegram/outbox", () => ({
-  processTelegramOutbox: dependencies.telegramOutbox,
   purgeTelegramUpdateHistory: dependencies.purgeTelegramUpdates,
 }));
 vi.mock("../../src/lib/storefront/abuse", () => ({ purgeAnonymousLimits: dependencies.purgeAnonymousLimits }));
@@ -282,10 +282,10 @@ beforeEach(() => {
   dependencies.activationBackfill.mockResolvedValue({ attempted: 2, created: 1, failed: 0, shops: 1 });
   dependencies.billingChanges.mockResolvedValue({ attempted: 1, candidates: 1, failed: 0, providerPending: 1 });
   dependencies.expireBillingCheckouts.mockResolvedValue(1);
+  dependencies.suspendBillingGracePeriods.mockResolvedValue(1);
   dependencies.suspendBillingTrials.mockResolvedValue(1);
   dependencies.customDomains.mockResolvedValue({ checked: 1, deleted: 0, failed: 0 });
   dependencies.paymentReconciliation.mockResolvedValue({ failed: 0, processed: 1 });
-  dependencies.telegramOutbox.mockResolvedValue({ failed: 0, processed: 1, skipped: 0 });
   dependencies.expireOrders.mockResolvedValue(0);
   dependencies.purgeAdmissions.mockResolvedValue(0);
   dependencies.purgeTelegramUpdates.mockResolvedValue(0);
@@ -536,7 +536,7 @@ describe("Worker generic domain delivery contract", () => {
     expect(recordError.ack).not.toHaveBeenCalled();
   });
 
-  it("runs generic event/job recovery and the legacy Telegram outbox in cron", async () => {
+  it("uses only the generic event/job queue as the paid-order notification authority", async () => {
     dependencies.purgeDataExports.mockResolvedValueOnce({ candidates: 5, deleted: 3, failed: 1, invalidObjectKeys: 1 });
     dependencies.purgeDeliveryGrantClaims.mockResolvedValueOnce(2);
     dependencies.purgeSecurityRateLimits.mockResolvedValueOnce(4);
@@ -549,14 +549,19 @@ describe("Worker generic domain delivery contract", () => {
     const runtimeEnv = testEnv();
     await worker.scheduled(controller, runtimeEnv);
 
+    dependencies.claimDeliveryJobReference.mockResolvedValueOnce(deliveryClaim());
+    const delivery = trackedMessage(deliveryEnvelope(), "message-delivery-authority-001");
+    await worker.queue(messageBatch([delivery]), runtimeEnv);
+
     expect(dependencies.enqueueDueDeliveryJobs).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.enqueueDueGeneratedLicenseRequests).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.dispatchDueDomainEvents).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.activationBackfill).toHaveBeenCalledWith({ env: runtimeEnv, limit: 25, now: NOW });
     expect(dependencies.billingChanges).toHaveBeenCalledWith({ env: runtimeEnv, now: NOW });
     expect(dependencies.expireBillingCheckouts).toHaveBeenCalledWith({ env: runtimeEnv, limit: 100, now: NOW });
+    expect(dependencies.suspendBillingGracePeriods).toHaveBeenCalledWith({ env: runtimeEnv, limit: 100, now: NOW });
     expect(dependencies.suspendBillingTrials).toHaveBeenCalledWith({ env: runtimeEnv, limit: 100, now: NOW });
-    expect(dependencies.telegramOutbox).toHaveBeenCalledWith(expect.any(Object), NOW);
+    expect(dependencies.deliverTelegramJob).toHaveBeenCalledOnce();
     expect(dependencies.purgeCartMutationReplays).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.purgeDataExports).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.purgeDeliveryGrantClaims).toHaveBeenCalledWith(expect.any(Object), NOW);
@@ -578,7 +583,6 @@ describe("Worker generic domain delivery contract", () => {
       purgedDataExports: 3,
       purgedDeliveryGrantClaims: 2,
       purgedSecurityRateLimits: 4,
-      telegramOutboxProcessed: 1,
     });
     expect(Object.values(metrics).every((value) => typeof value === "number")).toBe(true);
   });

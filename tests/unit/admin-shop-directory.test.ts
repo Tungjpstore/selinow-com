@@ -56,7 +56,8 @@ function bindings(database: DatabaseSync): AppBindings {
 }
 
 function seed(database: DatabaseSync): void {
-  const base = new Date("2026-07-29T00:00:00.000Z");
+  // Keep the trial fixture valid regardless of the wall clock used by CI.
+  const base = new Date("2099-07-29T00:00:00.000Z");
   const now = base.toISOString();
   database.prepare(`
     INSERT INTO plans (id, code, name, feature_flags_json, limits_json, created_at, updated_at)

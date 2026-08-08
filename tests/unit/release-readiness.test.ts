@@ -68,12 +68,19 @@ function readyWranglerConfig(): Record<string, unknown> {
         routes: [
           { pattern: "selinow.com/*", zone_name: "selinow.com" },
           { pattern: "*.selinow.com/*", zone_name: "selinow.com" },
+          { pattern: "*/*", zone_name: "selinow.com" },
           { pattern: "app.selinow.com" },
           { pattern: "api.selinow.com" },
         ],
         triggers: { crons: ["*/15 * * * *"] },
         vars,
         workers_dev: false,
+      },
+      staging: {
+        routes: [
+          { pattern: "*.staging.selinow.com/*", zone_name: "selinow.com" },
+          { pattern: "staging.selinow.com" },
+        ],
       },
     },
   };
@@ -101,6 +108,15 @@ function readyProductionSpec(): Record<string, unknown> {
     saas: {
       cnameTarget: "customers.selinow.com",
       fallbackOrigin: "proxy-fallback.selinow.com",
+    },
+    routing: {
+      externalCustomDomainFallbackRoute: "*/*",
+      externalCustomDomainStrategy: "production_fallback_with_platform_staging_exceptions",
+      routeHandoff: "atomic_shared_zone_route_replacement",
+    },
+    turnstile: {
+      externalCustomDomainAdmission: "verified_before_domain_activation",
+      externalCustomDomainStrategy: "exact_hostname_admission_before_activation",
     },
     workerName: "selinow-com-production",
     zoneId: "0123456789abcdef0123456789abcdef",

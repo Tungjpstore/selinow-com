@@ -45,6 +45,15 @@ export type SessionCredentials = {
   sessionToken: string;
 };
 
+export type SessionSummary = {
+  authenticatedAt: string;
+  createdAt: string;
+  expiresAt: string;
+  isCurrent: boolean;
+  lastSeenAt: string;
+  sessionId: string;
+};
+
 export type MagicLinkRequestResult = {
   debugMagicLink?: string;
   expiresAt: string;
@@ -68,8 +77,8 @@ export async function requestMagicLink(input: {
 }): Promise<MagicLinkRequestResult> {
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + MAGIC_LINK_TTL_MINUTES * 60_000).toISOString();
-  const rateLimitWindowStart = new Date(now.getTime() - MAGIC_LINK_TTL_MINUTES * 60_000).toISOString();
-  await claimMagicLinkAdmission({
+  const admission = await claimMagicLinkAdmission({
+    email: input.email,
     env: input.env,
     now,
     requesterAddress: input.requesterAddress,
@@ -79,6 +88,7 @@ export async function requestMagicLink(input: {
   const token = createOpaqueToken();
   const tokenHash = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link", token);
   const initiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", token);
+  if (!admission.deliveryPermitted) return { expiresAt, initiationBinding };
 
   const user = await input.env.PLATFORM_DB.prepare(`
     INSERT INTO platform_users (
@@ -98,14 +108,10 @@ export async function requestMagicLink(input: {
       INSERT INTO magic_link_tokens (
         id, user_id, token_hash, purpose, expires_at, created_at
       )
-      SELECT ?, ?, ?, 'seller_login', ?, ?
-      WHERE (
-        SELECT COUNT(*) FROM magic_link_tokens
-        WHERE user_id = ? AND created_at >= ?
-      ) < 5
-    `).bind(tokenId, resolvedUser.id, tokenHash, expiresAt, now.toISOString(), resolvedUser.id, rateLimitWindowStart),
+      VALUES (?, ?, ?, 'seller_login', ?, ?)
+    `).bind(tokenId, resolvedUser.id, tokenHash, expiresAt, now.toISOString()),
   ]);
-  if ((results[0]?.meta.changes ?? 0) !== 1) throw new AppError("rate_limited", 429);
+  if ((results[0]?.meta.changes ?? 0) !== 1) throw new AppError("provider_unavailable", 503);
 
   if (input.env.APP_ENV === "local") {
     return {
@@ -287,6 +293,25 @@ export async function revokeSession(auth: AuthContext, env: AppBindings): Promis
     SET status = 'revoked', revoked_at = ?
     WHERE id = ? AND user_id = ? AND status = 'active'
   `).bind(now, auth.sessionId, auth.userId).run();
+}
+
+export async function listSessions(auth: AuthContext, env: AppBindings): Promise<SessionSummary[]> {
+  const rows = await env.PLATFORM_DB.prepare(`
+    SELECT id AS sessionId, authenticated_at AS authenticatedAt,
+      created_at AS createdAt, expires_at AS expiresAt, last_seen_at AS lastSeenAt
+    FROM auth_sessions
+    WHERE user_id = ? AND status = 'active' AND revoked_at IS NULL AND expires_at > ?
+    ORDER BY last_seen_at DESC, id
+  `).bind(auth.userId, new Date().toISOString()).all<SessionSummary>();
+  return rows.results.map((row) => ({ ...row, isCurrent: row.sessionId === auth.sessionId }));
+}
+
+export async function revokeAllSessions(auth: AuthContext, env: AppBindings): Promise<number> {
+  const result = await env.PLATFORM_DB.prepare(`
+    UPDATE auth_sessions SET status = 'revoked', revoked_at = ?
+    WHERE user_id = ? AND status = 'active' AND revoked_at IS NULL
+  `).bind(new Date().toISOString(), auth.userId).run();
+  return result.meta.changes;
 }
 
 export function magicLinkInitiationCookieName(env: AppBindings): string {

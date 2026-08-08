@@ -44,6 +44,21 @@ const t = createSystemTranslator(locale);
           <button type="submit" data-login-submit><span data-login-submit-label>{t("auth.login.submit")}</span><span aria-hidden="true">→</span></button>
           <p id="status" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
         </form>
+        <section class="login-recovery" aria-labelledby="login-recovery-title" data-login-recovery hidden>
+          <p class="recovery-kicker">{t("auth.login.recovery_kicker")}</p>
+          <h2 id="login-recovery-title">{t("auth.login.recovery_title")}</h2>
+          <p>{t("auth.login.recovery_intro")}</p>
+          <ol>
+            <li>{t("auth.login.recovery_same_browser")}</li>
+            <li>{t("auth.login.recovery_expiry")}</li>
+            <li>{t("auth.login.recovery_wrong_device")}</li>
+          </ol>
+          <div class="recovery-actions">
+            <button type="button" class="recovery-primary" data-login-resend>{t("auth.login.resend")}</button>
+            <button type="button" class="recovery-secondary" data-login-restart>{t("auth.login.restart")}</button>
+          </div>
+          <p class="recovery-privacy">{t("auth.login.recovery_privacy")}</p>
+        </section>
         <div class="login-help"><a href="/#faq">{t("auth.login.help")}</a><span>{t("auth.login.privacy")}</span></div>
       </section>
     </main>
@@ -80,9 +95,20 @@ const t = createSystemTranslator(locale);
   #status[data-tone="success"] { background: var(--sln-tint-success); color: var(--selinow-success-text); }
   #status[data-tone="error"] { background: var(--sln-tint-danger); color: var(--selinow-danger-text); }
   #status :global(a) { color: inherit; font-weight: 750; }
+  .login-recovery { margin-top: 20px; padding: 20px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-subtle); }
+  .login-recovery[hidden] { display: none; }
+  .recovery-kicker { margin: 0 0 6px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+  .login-recovery h2 { margin: 0; font: var(--sln-font-h4); letter-spacing: -.02em; }
+  .login-recovery > p:not(.recovery-kicker, .recovery-privacy) { margin: 8px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .login-recovery ol { display: grid; gap: 8px; margin: 16px 0 0; padding-left: 20px; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .recovery-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
+  .recovery-actions button { min-height: 44px; margin: 0; padding: 10px 12px; }
+  .recovery-secondary { border-color: var(--sln-border-strong); background: transparent; color: var(--sln-text-primary); }
+  .recovery-secondary:hover { background: var(--sln-bg-surface); }
+  .recovery-privacy { margin: 14px 0 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .login-help { display: grid; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--sln-border-default); color: var(--sln-text-muted); font: var(--sln-font-caption); text-align: center; }
   .login-help a { color: var(--sln-action-primary); font-weight: 700; }
   :global(:focus-visible) { outline: 3px solid var(--sln-focus-ring); outline-offset: 3px; }
-  @media (max-width: 480px) { main { padding-top: 16px; } .login-panel { margin-top: 48px; padding: 24px 20px; } }
+  @media (max-width: 480px) { main { padding-top: 16px; } .login-panel { margin-top: 48px; padding: 24px 20px; } .recovery-actions { grid-template-columns: 1fr; } }
   @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 </style>

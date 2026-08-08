@@ -15,6 +15,7 @@ import {
   type GenericEntitlementRequirementSnapshot,
 } from "./entitlements";
 import { prepareCheckoutReservationPlan, prepareReservedFulfillmentItems } from "./reservations";
+import { assertSupportedFulfillmentComposition } from "./policy";
 
 async function resolveOrderUsageLimit(database: D1Database, shopId: string): Promise<number | undefined> {
   try {
@@ -146,7 +147,7 @@ function customerSql(input: CanonicalCheckoutTransactionInput): CustomerSql {
   if (customer.kind === "existing") {
     return {
       guardBindings: [input.shopId, customer.customerId],
-      guardSql: "EXISTS (SELECT 1 FROM shop_customers WHERE shop_id = ? AND id = ?)",
+      guardSql: "EXISTS (SELECT 1 FROM shop_customers WHERE shop_id = ? AND id = ? AND status = 'active')",
       lookupBindings: [],
       lookupSql: "?",
       statement: null,
@@ -155,10 +156,10 @@ function customerSql(input: CanonicalCheckoutTransactionInput): CustomerSql {
   }
   return {
     guardBindings: [input.shopId, customer.emailNormalized],
-    guardSql: "EXISTS (SELECT 1 FROM shop_customers WHERE shop_id = ? AND email_normalized = ?)",
+    guardSql: "EXISTS (SELECT 1 FROM shop_customers WHERE shop_id = ? AND email_normalized = ? AND status = 'active')",
     lookupBindings: [input.shopId, customer.emailNormalized],
     lookupSql: "(SELECT id FROM shop_customers WHERE shop_id = ? AND email_normalized = ? LIMIT 1)",
-    statement: input.env.PLATFORM_DB.prepare("INSERT INTO shop_customers (id, shop_id, email_normalized, display_name, locale, status, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, 'active', ?, ?) ON CONFLICT(shop_id, email_normalized) DO UPDATE SET locale = excluded.locale, updated_at = excluded.updated_at").bind(customer.id, input.shopId, customer.emailNormalized, customer.locale, input.nowIso, input.nowIso),
+    statement: input.env.PLATFORM_DB.prepare("INSERT INTO shop_customers (id, shop_id, email_normalized, display_name, locale, status, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, 'active', ?, ?) ON CONFLICT(shop_id, email_normalized) DO UPDATE SET locale = excluded.locale, updated_at = excluded.updated_at WHERE shop_customers.status = 'active'").bind(customer.id, input.shopId, customer.emailNormalized, customer.locale, input.nowIso, input.nowIso),
     valueBindings: [],
   };
 }
@@ -381,6 +382,15 @@ function assertInputInvariants(input: CanonicalCheckoutTransactionInput): void {
   const computedSubtotal = input.lines.reduce((sum, line) => sum + line.priceMinor * line.quantity, 0);
   if (computedSubtotal !== input.subtotalMinor || !Number.isInteger(input.discountMinor) || input.discountMinor < 0 || input.discountMinor > input.subtotalMinor || input.totalMinor !== input.subtotalMinor - input.discountMinor) throw new Error("canonical_checkout_amounts_invalid");
   if (input.currency.length === 0 || input.fulfillmentIdempotencyPrefix.length === 0) throw new Error("canonical_checkout_metadata_invalid");
+  assertSupportedFulfillmentComposition(input.lines);
+}
+
+async function assertCustomerCheckoutAllowed(input: CanonicalCheckoutTransactionInput): Promise<void> {
+  if (input.customer.kind === "anonymous") return;
+  const row = input.customer.kind === "existing"
+    ? await input.env.PLATFORM_DB.prepare("SELECT status FROM shop_customers WHERE shop_id = ? AND id = ? LIMIT 1").bind(input.shopId, input.customer.customerId).first<{ status: string }>()
+    : await input.env.PLATFORM_DB.prepare("SELECT status FROM shop_customers WHERE shop_id = ? AND email_normalized = ? LIMIT 1").bind(input.shopId, input.customer.emailNormalized).first<{ status: string }>();
+  if (row?.status === "blocked") throw new AppError("customer_blocked", 403, ["checkout_not_available"]);
 }
 
 /**
@@ -390,6 +400,7 @@ function assertInputInvariants(input: CanonicalCheckoutTransactionInput): void {
  */
 export async function executeCanonicalCheckoutTransaction(input: CanonicalCheckoutTransactionInput): Promise<CanonicalCheckoutTransactionResult> {
   assertInputInvariants(input);
+  await assertCustomerCheckoutAllowed(input);
   const database = input.env.PLATFORM_DB;
   // External channel adapters already admit an active subscription. The
   // direct core harness may intentionally omit one, so retain compatibility
@@ -422,6 +433,9 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
       shopId: input.shopId,
     }),
   ]);
+  if (input.channel.code === "telegram" && privateFileRequirementState.snapshots.size > 0) {
+    throw new AppError("telegram_private_file_unsupported", 409, ["use_website_checkout"]);
+  }
   const customer = customerSql(input);
   const orderItems = input.lines.map((line) => ({ id: createId("oit"), line }));
   const genericEntitlementRequirements = orderItems.flatMap((item) => (

@@ -100,6 +100,14 @@ async function markProviderDegraded(env: AppBindings, integrationId: string, cod
   await env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = 'degraded', last_safe_error_code = ?, last_checked_at = ?, updated_at = ? WHERE id = ? AND status != 'disabled'").bind(code, now, now, integrationId).run();
 }
 
+async function rejectStaleGeneration(input: { env: AppBindings; integrationId: string; requestId: string; rowId: string; shopId: string; updateId: number }): Promise<void> {
+  const now = new Date().toISOString();
+  await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'rejected', safe_result_code = 'telegram_update_stale_generation', processed_at = ?, updated_at = ? WHERE id = ? AND integration_id = ? AND status IN ('processing', 'failed')").bind(now, now, input.rowId, input.integrationId),
+    input.env.PLATFORM_DB.prepare("INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'system', NULL, 'telegram.update_stale_generation', 'telegram_integration', ?, ?, ?, ?)").bind(createId("aud"), input.shopId, input.integrationId, JSON.stringify({ updateId: input.updateId }), input.requestId, now),
+  ]);
+}
+
 function providerResult(error: TelegramProviderError): "recipient" | "retry" | "terminal" {
   if (error.code === "telegram_recipient_unavailable") return "recipient";
   if (error.code === "telegram_unauthorized") return "terminal";
@@ -157,6 +165,14 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
   if (!registered.shouldProcess) {
     if (commerceAllowed) await answerCallback(client, update);
     return { duplicate: true, processed: false, state: "duplicate" };
+  }
+  // A queued update may have passed ingress verification just before a
+  // credential rotation/disconnect. Re-check the generation before any
+  // commerce mutation or outbound reply.
+  if (integration.activeCredentialId !== undefined
+    && (integration.activeCredentialId === null || integration.activeCredentialId !== integration.credential.credentialId)) {
+    await rejectStaleGeneration({ env: input.env, integrationId: integration.integrationId, requestId: input.requestId, rowId: registered.rowId, shopId: integration.shopId, updateId: update.updateId });
+    return { duplicate: registered.duplicate, processed: false, state: "stale_generation" };
   }
   if (update.kind === "unsupported_callback_query") {
     await answerCallback(client, update, telegramText(locale, "webhook.callbackPrivate"));

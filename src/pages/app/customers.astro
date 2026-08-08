@@ -7,7 +7,7 @@ import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { isAppError } from "../../lib/core/errors";
 import { createDashboardTranslator } from "../../lib/i18n";
 import { getBindings } from "../../lib/platform/bindings";
-import { listSellerCustomers, type SellerCustomerView } from "../../lib/tenants/seller-management";
+import { listSellerCustomersPage, type SellerCustomerView } from "../../lib/tenants/seller-management";
 import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
 
 const env = getBindings();
@@ -19,8 +19,9 @@ try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { 
 const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
 let customers: SellerCustomerView[] = [];
+let nextCursor: string | null = null;
 if (shop !== undefined && state === "ready") {
-  try { customers = await listSellerCustomers({ env, shopPublicId: shop.publicId, userId: auth.userId }); }
+  try { const page = await listSellerCustomersPage({ cursor: Astro.url.searchParams.get("cursor"), env, shopPublicId: shop.publicId, userId: auth.userId }); customers = page.customers; nextCursor = page.nextCursor; }
   catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; }
 }
 if (state === "forbidden") Astro.response.status = 403;
@@ -71,6 +72,7 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
       <div class="customer-notes" data-customer-notes></div>
       <form class="customer-note-form" data-customer-note-form novalidate><label>{t("dashboard.customers.detail.note")}<textarea name="body" maxlength="4000" required></textarea></label><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.customers.detail.add_note")}</button></form>
     </section> : null}
+    {nextCursor !== null && <a class="sln-button sln-button-secondary" href={workspaceHref(`/app/customers?cursor=${encodeURIComponent(nextCursor)}`)}>{t("dashboard.customers.pagination.next")} →</a>}
     </div>}
 </AppLayout>
 

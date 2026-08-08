@@ -12,17 +12,17 @@
   "routing": {
     "canaryOverrideRoute": "canary.selinow.com/*",
     "externalCustomDomainFallbackRoute": "*/*",
-    "externalCustomDomainStrategy": "platform_only_staging_fallback",
+    "externalCustomDomainStrategy": "production_fallback_with_platform_staging_exceptions",
     "platformApexRoute": "selinow.com/*",
     "platformStorefrontWildcard": "*.selinow.com/*",
-    "routeHandoff": "atomic_platform_route_replacement",
-    "stagingExternalCustomDomainInventory": "pending_inventory",
+    "routeHandoff": "atomic_shared_zone_route_replacement",
+    "stagingExternalCustomDomainInventory": "verified_none_active",
     "stagingRouteExceptions": [
       "*.staging.selinow.com/*"
     ]
   },
   "turnstile": {
-    "externalCustomDomainAdmission": "pending_runtime_lifecycle",
+    "externalCustomDomainAdmission": "verified_before_domain_activation",
     "externalCustomDomainStrategy": "exact_hostname_admission_before_activation",
     "platformHostname": "selinow.com"
   },

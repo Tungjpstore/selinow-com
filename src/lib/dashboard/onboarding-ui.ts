@@ -417,6 +417,8 @@ export function readableErrorKey(code: string, issues: readonly string[] = []): 
     "plan_invalid",
     "publishable_product_required",
     "slug_reserved",
+    "slug_unavailable",
+    "trial_already_used",
   ]);
   for (const issue of issues) {
     if (knownIssues.has(issue)) return `onboarding.error.issue.${issue}`;

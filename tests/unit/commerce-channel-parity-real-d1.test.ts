@@ -498,6 +498,17 @@ describe("canonical commerce channel parity on local D1", () => {
       status: created.status,
       totalMinor: expectedTotal,
     });
+    await expect(prepared.app.recoverCheckout(prepared.context, {
+      cart: prepared.command.cart,
+      customerEmail: prepared.command.customerEmail,
+      expected: prepared.command.expected,
+      idempotencyKey: prepared.command.idempotencyKey,
+      recoveryEvidence: recovery.evidence,
+    })).rejects.toMatchObject({ code: "checkout_recovery_consumed", status: 409 });
+    expect(runtime.database.database.prepare(`
+      SELECT COUNT(*) AS count FROM checkout_recovery_capabilities
+      WHERE shop_id = ? AND consumed_at IS NOT NULL
+    `).get(SHOP_ID)).toEqual({ count: 1 });
     const persisted = runtime.database.database.prepare(`
       SELECT checkout_request_hash AS requestHash, discount_minor AS discountMinor,
         total_minor AS totalMinor
@@ -510,7 +521,7 @@ describe("canonical commerce channel parity on local D1", () => {
     expect(persisted?.requestHash).toMatch(/^[A-Za-z0-9_-]{43}$/u);
   });
 
-  it("keeps Website replay and recovery stable when expected lines are reordered", async () => {
+  it("fails closed before checkout when expected lines mix fulfillment modes", async () => {
     const runtime = createRuntime();
     const context: CommerceContext = {
       actor: { kind: "anonymous" },
@@ -529,39 +540,19 @@ describe("canonical commerce channel parity on local D1", () => {
     if (cart.access.kind !== "opaque_token") throw new Error("website_reordered_cart_access_invalid");
     const cartReference = { access: cart.access, cartId: cart.cartId };
     const quote = await app.quoteCart(context, { cart: cartReference });
-    if (quote.quoteEvidence === undefined) throw new Error("website_reordered_quote_evidence_missing");
-    const canonicalExpected = expectedItems(quote);
-    const reorderedExpected = [...canonicalExpected].reverse();
-    const idempotencyKey = "parity-recovery-reordered-0001";
-    const recovery = await app.prepareCheckoutRecovery(context, {
-      cart: cartReference,
-      customerEmail: null,
-      expected: reorderedExpected,
-      idempotencyKey,
-      quoteEvidence: quote.quoteEvidence,
-    });
-    const first = await app.checkoutCart(context, {
-      cart: cartReference,
-      customerEmail: null,
-      expected: canonicalExpected,
-      idempotencyKey,
-      quoteEvidence: quote.quoteEvidence,
-    });
+    if (quote.quoteEvidence === undefined) throw new Error("website_mixed_quote_evidence_missing");
     await expect(app.checkoutCart(context, {
       cart: cartReference,
       customerEmail: null,
-      expected: reorderedExpected,
-      idempotencyKey,
+      expected: expectedItems(quote),
+      idempotencyKey: "parity-recovery-reordered-0001",
       quoteEvidence: quote.quoteEvidence,
-    })).resolves.toEqual(first);
-    const recovered = await app.recoverCheckout(context, {
-      cart: cartReference,
-      customerEmail: null,
-      expected: reorderedExpected,
-      idempotencyKey,
-      recoveryEvidence: recovery.evidence,
+    })).rejects.toMatchObject({
+      code: "mixed_fulfillment_unsupported",
+      status: 409,
+      issues: ["split_cart_by_fulfillment"],
     });
-    expect(recovered).toMatchObject({ access: first.access, orderId: first.orderId, totalMinor: first.totalMinor });
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get(SHOP_ID)).toEqual({ count: 0 });
   });
 
   it.each(["website", "telegram", "fake"] as const)("keeps %s commerce state equivalent for English and Vietnamese locales", async (channel) => {
@@ -1395,13 +1386,11 @@ describe("canonical commerce channel parity on local D1", () => {
     expect(runtime.database.database.prepare("SELECT state FROM carts WHERE id = ? AND shop_id = ?").get(cartId, SHOP_ID)).toEqual({ state: "active" });
   });
 
-  it.each(["website", "telegram", "fake"] as const)("captures the private-file requirement in the canonical %s checkout", async (channel) => {
+  it.each(["website", "fake"] as const)("captures the private-file requirement in the canonical %s checkout", async (channel) => {
     const runtime = createRuntime();
     const prepared = channel === "website"
       ? await prepareWebsiteCheckout(runtime, "variant-private-free", `parity-private-${channel}-0001`)
-      : channel === "telegram"
-        ? await prepareTelegramCheckout(runtime, "variant-private-free", 3011)
-        : await prepareFakeCheckout(runtime, "variant-private-free", `parity-private-${channel}-0001`);
+      : await prepareFakeCheckout(runtime, "variant-private-free", `parity-private-${channel}-0001`);
     const first = await checkoutAndReadOrder({ app: prepared.app, command: prepared.command, context: prepared.context });
     const order = runtime.database.database.prepare("SELECT id FROM orders WHERE public_id = ? AND shop_id = ?").get(first.view.orderId, SHOP_ID) as { id: string } | undefined;
     expect(order).toBeDefined();
@@ -1425,6 +1414,18 @@ describe("canonical commerce channel parity on local D1", () => {
 
     await expect(prepared.app.checkoutCart(prepared.context, prepared.command)).resolves.toEqual(first.view);
     expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM order_item_fulfillment_requirements WHERE shop_id = ? AND order_id = ?").get(SHOP_ID, order.id)).toEqual({ count: 1 });
+  });
+
+  it("rejects Telegram private-file checkout before creating an order", async () => {
+    const runtime = createRuntime();
+    const prepared = await prepareTelegramCheckout(runtime, "variant-private-free", 3011);
+
+    await expect(prepared.app.checkoutCart(prepared.context, prepared.command)).rejects.toMatchObject({
+      code: "telegram_private_file_unsupported",
+      status: 409,
+    });
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get(SHOP_ID)).toEqual({ count: 0 });
+    expect(runtime.database.database.prepare("SELECT state FROM carts WHERE id = ? AND shop_id = ?").get(prepared.command.cart.cartId, SHOP_ID)).toEqual({ state: "active" });
   });
 
   it("preserves the checkout-time private-file policy when the seller publishes a replacement", async () => {

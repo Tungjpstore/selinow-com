@@ -1,6 +1,48 @@
 # Implementation Status
 
-Last updated: 2026-08-04
+Last updated: 2026-08-08
+
+## Dodo deep-lane continuation (2026-08-08)
+
+The Dodo adapter/webhook hardening is committed in `2f1e6b2`. The source lane
+passes `npm run check`, `npm run lint`, `npm run build`, both deploy dry-runs and
+the full Vitest suite (265 files / 1,892 tests). A bounded CLI validator now
+checks all 32 staging UAT scenarios against the exact commit, tree, release
+manifest and Worker version; see `docs/DODO_PAYMENTS_RELEASE.md`.
+
+Remote staging execution remains blocked, not skipped: the live Cloudflare
+inventory currently sends `*/*` to `selinow-com-staging` while the checked-in
+staging admission contract treats that shared route as production-owned, and
+the canonical Dodo webhook probe still returns `404`. No remote migration,
+deploy, webhook registration, webhook secret, or live charge was performed.
+
+## Release admission and customer-journey verification (2026-08-08)
+
+Agent F completed a non-mutating release verification pass. The customer-flow
+regression suite now uses wall-clock-independent trial fixtures and asserts the
+current fail-closed mixed-fulfillment contract for Website, Telegram and free
+checkout paths; the focused 4-file run passed 95/95 tests. The repository lockfile
+was refreshed only for non-billing transitive security patches (`js-yaml` 4.3.1
+and `nanoid` 3.3.18); `npm audit --audit-level=high` reports zero vulnerabilities.
+
+The focused Agent F integration/release contracts pass 14/14: all 86 source
+migrations replay on isolated SQLite with `integrity_check=ok` and zero foreign-key
+violations; first-admin bootstrap is exact and one-time; expansion channels fail
+closed without runtime proofs; and checkout recovery rejects a second consume.
+The Wrangler typegen wrapper removes only the generated global `ProcessEnv`
+augmentation, reducing TypeScript failures to one payment-owned Dodo diagnostic.
+Route inventory/privacy and provider-pending expectations are reconciled. Root
+must rerun the complete serial matrix after the final source/payment merge.
+
+The source migration directory currently contains untracked `0081`-`0086` files
+with a contiguous numeric ledger, but migration admission must remain fail-closed
+until both workstreams are reviewed together. No staging or
+production migration, seed, deploy, route, DNS, queue/trigger, secret or
+provider mutation was performed. Release doctor remains correctly blocked on
+fresh protected backup/restore evidence, candidate identity, approvals,
+monitoring, pilot and provider acceptance (including the explicit payment-thread
+handoff for PayOS and Dodo UAT evidence). This pass does not claim production
+readiness.
 
 ## Current operational reconciliation (2026-08-04)
 
@@ -261,8 +303,9 @@ activation, secret update, DNS/route change, webhook, or seller pilot was perfor
 - Canonical webhook route is `POST /api/webhooks/billing/dodo/:webhookPublicId`. Return URLs and checkout responses never activate access. Only a signed raw-body Dodo event with tenant, recurring-subscription, amount, currency and price identity evidence can activate or transition a subscription; duplicate/conflicting events are deterministic and audited.
 - Role hardening is enforced server-side: owner-only billing/provider credentials, manager operational access without billing changes, support masked reads and viewer summary-only reads. Storefront, website/Telegram checkout, API credentials, provider contexts and readiness all enforce trial/grace deadlines.
 - Local verification completed: `npm run check` (0 errors, 3 hints), `npm run lint`, `npm test` (243 files / 1,755 tests), `npm run build`, both deploy dry-runs, `npm audit --audit-level=high`, `git diff --check`, authenticated browser gate (7/7) and public browser gate (27/27) pass. Marketing/public pricing snapshot baselines were refreshed for the current source UI.
-- Dodo dashboard preparation completed in the signed-in Chrome session: draft subscriptions `Selinow Starter` (`$5` / `99,000 VND`, monthly, free trial 7 days) and `Selinow Pro` (`$15` / `299,000 VND`, monthly, free trial 7 days) were saved with `SaaS` tax classification. Dodo currently hides the draft list while the product-information review is held; the verification page reports live payments inactive, identity verified, bank review pending, and a website URL typo as the hold reason. No publish/activation action was taken.
-- External requirements before staging/production rollout: resolve and resubmit the correct Selinow website URL in Dodo, complete merchant/bank review, then record product/price IDs and webhook signing secret per environment (including confirmed VND support and tax treatment for VN), tax/invoice/refund policy, migration admission/backup through `0080`, staging webhook UAT and reconciliation runbook. No provider secret was added and no remote migration/deploy was performed in this pass.
+- Dodo dashboard configuration is now owner-approved: test and live mode are available, VND subscriptions are supported, and four distinct monthly offers exist for Starter/Pro in USD and VND with the approved prices. Safe webhook IDs are pinned per environment in `wrangler.jsonc`; no API key, webhook endpoint or Worker secret has been created yet.
+- The Dodo runtime lane validates Standard Webhooks signatures, exact tenant/checkout/subscription/plan/amount/currency metadata, idempotent event identity, stale-event ordering, grace expiry and provider-pending retry recovery. The 32-scenario evidence validator exists, but no staging test-mode evidence artifact has been accepted and no remote migration/deploy occurred.
+- External requirements before staging/production rollout: create scoped test credentials and register environment-specific signed webhooks only after route and release admission pass; then run checkout -> signed webhook -> subscription UAT. Production remains blocked by non-Dodo gates and no live charge is authorized.
 
 ### Commercial launch marketing and SEO continuation (2026-08-03)
 

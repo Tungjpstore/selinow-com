@@ -27,6 +27,7 @@ describe("production promotion staging contract", () => {
     expect(stagingSpec.sharedZoneDisabledRoutes).toEqual([
       "selinow.com/*",
       "*.selinow.com/*",
+      "*/*",
     ]);
     expect(promotionStagingSpec).toEqual(derivePromotionSpec(stagingSpec));
     expect(promotionStagingSpec.sharedZoneDisabledRoutes).toEqual([]);

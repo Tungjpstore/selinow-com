@@ -153,7 +153,7 @@ describe("seller surface contracts", () => {
     }]);
     expect(customers[0]).not.toHaveProperty("email");
     expect(customers[0]).not.toHaveProperty("id");
-    expect(database.calls.find((call) => call.sql.includes("FROM shop_customers"))?.values).toEqual(["shop-a"]);
+    expect(database.calls.find((call) => call.sql.includes("FROM shop_customers"))?.values).toEqual(["shop-a", 101, 0]);
     await expect(listSellerCustomers({ env: env(database), shopPublicId: "shop-b", userId: "user-b" })).resolves.toEqual([]);
   });
 

@@ -1,0 +1,241 @@
+import { createHmac } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+
+import { describe, expect, it } from "vitest";
+
+import { processDodoWebhook, suspendExpiredBillingGracePeriods } from "../../src/lib/billing/service";
+import { parseDodoEvent } from "../../src/lib/billing/dodo";
+import type { AppBindings } from "../../src/lib/platform/bindings";
+
+const SECRET = "dodo-webhook-secret-for-state-tests";
+const NOW_ISO = "2026-08-08T00:00:00.000Z";
+const NOW_SECONDS = Math.floor(new Date(NOW_ISO).getTime() / 1000);
+const WEBHOOK_PUBLIC_ID = "ddowh_00000000-0000-4000-8000-000000000081";
+
+class SqliteStatement {
+  constructor(private readonly database: DatabaseSync, private readonly sql: string, private readonly values: SQLInputValue[] = []) {}
+
+  bind(...values: unknown[]): SqliteStatement {
+    return new SqliteStatement(this.database, this.sql, values as SQLInputValue[]);
+  }
+
+  first<T>(): Promise<T | null> {
+    return Promise.resolve((this.database.prepare(this.sql).get(...this.values) as T | undefined) ?? null);
+  }
+
+  all(): Promise<{ results: unknown[] }> {
+    return Promise.resolve({ results: this.database.prepare(this.sql).all(...this.values) });
+  }
+
+  run(): Promise<{ meta: { changes: number } }> {
+    const result = this.database.prepare(this.sql).run(...this.values);
+    return Promise.resolve({ meta: { changes: Number(result.changes) } });
+  }
+}
+
+class SqliteD1 {
+  constructor(readonly database: DatabaseSync) {}
+
+  prepare(sql: string): SqliteStatement {
+    return new SqliteStatement(this.database, sql);
+  }
+
+  async batch(statements: SqliteStatement[]): Promise<Array<{ meta: { changes: number } }>> {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const results: Array<{ meta: { changes: number } }> = [];
+      for (const statement of statements) results.push(await statement.run());
+      this.database.exec("COMMIT");
+      return results;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+}
+
+function applyMigrations(database: DatabaseSync): void {
+  for (const filename of readdirSync(join(process.cwd(), "migrations")).filter((name) => /^\d{4}_.+\.sql$/u.test(name)).sort()) {
+    database.exec(readFileSync(join(process.cwd(), "migrations", filename), "utf8").replaceAll("CURRENT_TIMESTAMP", `'${NOW_ISO}'`));
+  }
+}
+
+function fixture(input: { providerSubscriptionRef: string | null; state: "active" | "trialing" } = { providerSubscriptionRef: null, state: "trialing" }): { database: DatabaseSync; env: AppBindings } {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON");
+  applyMigrations(database);
+  database.exec(`
+    INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+    VALUES ('billing-user-hardening', 'billing-hardening@example.test', 'Billing Hardening', 'active', '${NOW_ISO}', '${NOW_ISO}');
+    INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone,
+      readiness_version, merchant_country_code, created_at, updated_at)
+    VALUES ('billing-shop-hardening', 'shop_00000000-0000-4000-8000-000000000081', 'billing-hardening', 'Billing Hardening',
+      'active', 'en', 'USD', 'UTC', 1, 'US', '${NOW_ISO}', '${NOW_ISO}');
+    INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
+    VALUES ('billing-shop-hardening', 'billing-user-hardening', 'owner', 'active', '${NOW_ISO}', '${NOW_ISO}');
+    UPDATE plan_prices SET provider_price_ref = 'prod_test_pro' WHERE id = 'price_pro_global_v1';
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, trial_ends_at,
+      current_period_start, current_period_end, billing_provider_code, provider_subscription_ref,
+      market_code, price_currency, price_amount_minor, price_interval, price_version, price_id,
+      created_at, updated_at)
+    VALUES ('billing-sub-hardening', 'billing-shop-hardening', 'plan_pro_v1', '${input.state}',
+      '2026-08-15T00:00:00.000Z', '2026-08-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z',
+      'dodo', ${input.providerSubscriptionRef === null ? "NULL" : `'${input.providerSubscriptionRef}'`}, 'global', 'USD', 1500, 'month', 1, 'price_pro_global_v1',
+      '${NOW_ISO}', '${NOW_ISO}');
+  `);
+  return {
+    database,
+    env: {
+      APP_ENV: "local",
+      DODO_PAYMENTS_API_KEY: "dodo-api-key-for-state-tests",
+      DODO_PAYMENTS_API_BASE_URL: "https://test.dodopayments.com",
+      DODO_PAYMENTS_WEBHOOK_KEY: SECRET,
+      PLATFORM_DB: new SqliteD1(database) as unknown as D1Database,
+      SESSION_SECRET: "session-secret-for-state-tests",
+    } as unknown as AppBindings,
+  };
+}
+
+function addCheckout(database: DatabaseSync, input: { status: "completed" | "open" }): void {
+  database.prepare(`
+    INSERT INTO billing_checkout_sessions (
+      id, public_id, shop_id, subscription_id, plan_id, price_id, provider_code,
+      provider_checkout_ref, status, idempotency_key_hash, request_hash, expires_at,
+      completed_at, created_at, updated_at
+    ) VALUES ('bchk-hardening', 'bchk-hardening', 'billing-shop-hardening', 'billing-sub-hardening',
+      'plan_pro_v1', 'price_pro_global_v1', 'dodo', 'chk_test_hardening', ?, 'checkout-key', 'request-hash',
+      '2026-08-09T00:00:00.000Z', ?, ?, ?)
+  `).run(input.status, input.status === "completed" ? NOW_ISO : null, NOW_ISO, NOW_ISO);
+}
+
+function bodyFor(input: { eventType: string; metadata?: Record<string, string> | undefined; occurredAt?: string; status?: string; paymentId?: string; subscriptionId?: string; amount?: number; periodStart?: string; periodEnd?: string }): string {
+  return JSON.stringify({
+    data: {
+      checkout_session_id: "chk_test_hardening",
+      currency: "USD",
+      ...(input.amount === undefined ? {} : { total_amount: input.amount }),
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+      ...(input.paymentId === undefined ? {} : { payment_id: input.paymentId }),
+      ...(input.periodEnd === undefined ? {} : { period_end: input.periodEnd }),
+      ...(input.periodStart === undefined ? {} : { period_start: input.periodStart }),
+      product_id: "prod_test_pro",
+      ...(input.status === undefined ? {} : { status: input.status }),
+      ...(input.subscriptionId === undefined ? {} : { subscription_id: input.subscriptionId }),
+    },
+    timestamp: input.occurredAt ?? NOW_ISO,
+    type: input.eventType,
+  });
+}
+
+function signed(body: string, webhookId: string): string {
+  return `v1,${createHmac("sha256", SECRET).update(`${webhookId}.${String(NOW_SECONDS)}.${body}`).digest("base64")}`;
+}
+
+async function webhook(fixtureValue: ReturnType<typeof fixture>, body: string, webhookId: string, now = NOW_ISO): Promise<unknown> {
+  return processDodoWebhook({
+    env: fixtureValue.env,
+    now: new Date(now),
+    rawBody: body,
+    signature: signed(body, webhookId),
+    webhookId,
+    webhookPublicId: WEBHOOK_PUBLIC_ID,
+    webhookTimestamp: String(NOW_SECONDS),
+  });
+}
+
+const exactMetadata = {
+  amountMinor: "1500",
+  checkoutSessionId: "bchk-hardening",
+  currency: "USD",
+  marketCode: "global",
+  planCode: "pro",
+  providerPriceRef: "prod_test_pro",
+  shopId: "billing-shop-hardening",
+  subscriptionId: "billing-sub-hardening",
+};
+
+describe("Dodo billing state-machine hardening", () => {
+  it("activates an initial payment only with exact checkout, subscription and tenant metadata", async () => {
+    const testFixture = fixture();
+    addCheckout(testFixture.database, { status: "open" });
+    const body = bodyFor({
+      amount: 1500,
+      eventType: "payment.succeeded",
+      metadata: exactMetadata,
+      paymentId: "pay_test_initial",
+      subscriptionId: "sub_test_initial",
+    });
+    expect(parseDodoEvent(JSON.parse(body) as unknown, "msg_initial_exact")).toMatchObject({ providerCheckoutId: "chk_test_hardening", providerSubscriptionId: "sub_test_initial" });
+
+    await expect(webhook(testFixture, body, "msg_initial_exact")).resolves.toMatchObject({ processed: true, state: "active" });
+    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "active", providerSubscriptionRef: "sub_test_initial" });
+    testFixture.database.close();
+  });
+
+  it.each([
+    ["missing metadata", undefined],
+    ["wrong shop metadata", { ...exactMetadata, shopId: "billing-shop-other" }],
+    ["wrong subscription metadata", { ...exactMetadata, subscriptionId: "billing-sub-other" }],
+  ])("rejects %s on initial payment", async (_label, metadata) => {
+    const testFixture = fixture();
+    addCheckout(testFixture.database, { status: "open" });
+    const body = bodyFor({ amount: 1500, eventType: "payment.succeeded", metadata, paymentId: "pay_test_metadata", subscriptionId: "sub_test_metadata" });
+
+    await expect(webhook(testFixture, body, `msg_metadata_${_label.replaceAll(" ", "_")}`)).rejects.toMatchObject({ code: "billing_webhook_identity_mismatch", status: 409 });
+    expect(testFixture.database.prepare("SELECT state FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "trialing" });
+    testFixture.database.close();
+  });
+
+  it("conflicts when the same webhook-id is replayed with a changed payload", async () => {
+    const testFixture = fixture({ providerSubscriptionRef: "sub_test_active", state: "active" });
+    addCheckout(testFixture.database, { status: "completed" });
+    const firstBody = bodyFor({ eventType: "subscription.updated", metadata: exactMetadata, status: "active", subscriptionId: "sub_test_active" });
+    const changedBody = bodyFor({ eventType: "subscription.updated", metadata: exactMetadata, status: "failed", subscriptionId: "sub_test_active" });
+
+    await expect(webhook(testFixture, firstBody, "msg_same_id")).resolves.toMatchObject({ processed: true, state: "active" });
+    await expect(webhook(testFixture, changedBody, "msg_same_id")).rejects.toMatchObject({ code: "billing_webhook_conflict", status: 409 });
+    testFixture.database.close();
+  });
+
+  it("updates both renewal period boundaries from signed provider evidence", async () => {
+    const testFixture = fixture({ providerSubscriptionRef: "sub_test_renewal", state: "active" });
+    addCheckout(testFixture.database, { status: "completed" });
+    const body = bodyFor({
+      amount: 1500,
+      eventType: "subscription.renewed",
+      metadata: exactMetadata,
+      periodEnd: "2026-10-01T00:00:00.000Z",
+      periodStart: "2026-09-01T00:00:00.000Z",
+      subscriptionId: "sub_test_renewal",
+    });
+
+    await expect(webhook(testFixture, body, "msg_renewal_period")).resolves.toMatchObject({ processed: true, state: "active" });
+    expect(testFixture.database.prepare("SELECT current_period_start AS periodStart, current_period_end AS periodEnd FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ periodStart: "2026-09-01T00:00:00.000Z", periodEnd: "2026-10-01T00:00:00.000Z" });
+    testFixture.database.close();
+  });
+
+  it("keeps one grace deadline across repeated renewal-failure evidence", async () => {
+    const testFixture = fixture({ providerSubscriptionRef: "sub_test_grace", state: "active" });
+    addCheckout(testFixture.database, { status: "completed" });
+    const firstBody = bodyFor({ amount: 1500, eventType: "payment.failed", metadata: exactMetadata, paymentId: "pay_test_failed", subscriptionId: "sub_test_grace" });
+    const secondBody = bodyFor({ eventType: "subscription.on_hold", metadata: exactMetadata, status: "on_hold", subscriptionId: "sub_test_grace", occurredAt: "2026-08-08T00:01:00.000Z" });
+
+    await expect(webhook(testFixture, firstBody, "msg_grace_first")).resolves.toMatchObject({ processed: true, state: "grace_period" });
+    const firstDeadline = (testFixture.database.prepare("SELECT grace_ends_at AS graceEndsAt FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get() as { graceEndsAt: string }).graceEndsAt;
+    await expect(webhook(testFixture, secondBody, "msg_grace_second")).resolves.toMatchObject({ processed: true, state: "grace_period" });
+    expect(testFixture.database.prepare("SELECT grace_ends_at AS graceEndsAt FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ graceEndsAt: firstDeadline });
+    testFixture.database.close();
+  });
+
+  it("suspends expired grace periods exactly once when the helper is available", async () => {
+    const testFixture = fixture({ providerSubscriptionRef: "sub_test_expiry", state: "active" });
+    testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'grace_period', grace_ends_at = '2026-08-08T00:00:00.000Z' WHERE id = 'billing-sub-hardening'").run();
+
+    await expect(suspendExpiredBillingGracePeriods({ env: testFixture.env, now: new Date("2026-08-08T00:01:00.000Z") })).resolves.toBe(1);
+    expect(testFixture.database.prepare("SELECT state, grace_ends_at AS graceEndsAt FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "suspended", graceEndsAt: null });
+    await expect(suspendExpiredBillingGracePeriods({ env: testFixture.env, now: new Date("2026-08-08T00:02:00.000Z") })).resolves.toBe(0);
+    testFixture.database.close();
+  });
+});

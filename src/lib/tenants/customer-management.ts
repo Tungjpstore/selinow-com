@@ -113,6 +113,35 @@ export type SellerCustomerDetail = {
   version: number;
 };
 
+export type BuyerPrivacyProjection = {
+  customer: {
+    createdAt: string;
+    displayName: string | null;
+    email: string | null;
+    locale: string;
+    status: "active" | "blocked";
+    updatedAt: string;
+  };
+  orders: Array<{
+    createdAt: string;
+    currency: string;
+    fulfillmentStatus: string;
+    orderNumber: string;
+    orderPublicId: string;
+    paymentStatus: string;
+    status: string;
+    totalMinor: number;
+  }>;
+  providerIdentities: Array<{ provider: string; verifiedAt: string }>;
+};
+
+export type BuyerPrivacyResult = {
+  privacyRequestPublicId: string;
+  projection?: BuyerPrivacyProjection;
+  safeResultCode: "active_records_blocked" | "anonymized_financial_audit_retained" | "export_ready";
+  status: "blocked" | "completed";
+};
+
 async function loadCustomer(env: AppBindings, shopId: string, customerPublicId: string): Promise<CustomerRow> {
   const row = await env.PLATFORM_DB.prepare(`
     SELECT id, display_name AS displayName, email_normalized AS email, locale, status,
@@ -294,4 +323,166 @@ export async function redactCustomerNote(input: {
   const note = await input.env.PLATFORM_DB.prepare("SELECT customer_notes.id, customer_notes.body, customer_notes.status, customer_notes.redacted_at AS redactedAt, customer_notes.created_at AS createdAt, customer_notes.updated_at AS updatedAt, customer_notes.version, platform_users.display_name AS authorDisplayName, customer_notes.author_user_id AS authorUserId FROM customer_notes INNER JOIN platform_users ON platform_users.id = customer_notes.author_user_id WHERE customer_notes.shop_id = ? AND customer_notes.customer_id = ? AND customer_notes.public_id = ? LIMIT 1").bind(actor.row.shop_id, input.customerPublicId, input.notePublicId).first<NoteRow>();
   if (note === null) throw new AppError("customer_note_redact_failed", 500);
   return mapNote(note);
+}
+
+async function buildBuyerPrivacyProjection(env: AppBindings, shopId: string, customerId: string): Promise<BuyerPrivacyProjection> {
+  const customer = await loadCustomer(env, shopId, customerId);
+  const [orders, telegramIdentities, channelIdentities] = await Promise.all([
+    env.PLATFORM_DB.prepare(`
+      SELECT public_id AS orderPublicId, order_number AS orderNumber, status,
+        payment_status AS paymentStatus, fulfillment_status AS fulfillmentStatus,
+        total_minor AS totalMinor, currency, created_at AS createdAt
+      FROM orders WHERE shop_id = ? AND customer_id = ? ORDER BY created_at, id
+    `).bind(shopId, customerId).all<BuyerPrivacyProjection["orders"][number]>(),
+    env.PLATFORM_DB.prepare(`
+      SELECT provider, verified_at AS verifiedAt
+      FROM customer_identities WHERE shop_id = ? AND customer_id = ? ORDER BY verified_at, id
+    `).bind(shopId, customerId).all<{ provider: string; verifiedAt: string }>(),
+    env.PLATFORM_DB.prepare(`
+      SELECT provider_code AS provider, verified_at AS verifiedAt
+      FROM channel_customer_identities WHERE shop_id = ? AND customer_id = ? ORDER BY verified_at, id
+    `).bind(shopId, customerId).all<{ provider: string; verifiedAt: string }>(),
+  ]);
+  return {
+    customer: {
+      createdAt: customer.createdAt,
+      displayName: customer.displayName,
+      email: customer.email,
+      locale: customer.locale,
+      status: customer.status,
+      updatedAt: customer.updatedAt,
+    },
+    orders: orders.results,
+    providerIdentities: [...telegramIdentities.results, ...channelIdentities.results],
+  };
+}
+
+export async function executeBuyerPrivacyRequest(input: {
+  customerPublicId: string;
+  env: AppBindings;
+  idempotencyKey: string | null;
+  kind: "anonymize" | "export";
+  requestId: string;
+  shopPublicId: string;
+  userId: string;
+  now?: Date;
+}): Promise<BuyerPrivacyResult> {
+  const idempotencyKey = requireIdempotencyKey(input.idempotencyKey);
+  const actor = await getShopForMember({ capability: "customers:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  await loadCustomer(input.env, actor.row.shop_id, input.customerPublicId);
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  const keyHash = await hmacToken(input.env.SESSION_SECRET, "buyer-privacy-idempotency:v1", idempotencyKey);
+  const requestHash = await sha256Json({ customerId: input.customerPublicId, kind: input.kind, shopId: actor.row.shop_id });
+  const replay = await input.env.PLATFORM_DB.prepare(`
+    SELECT public_id AS publicId, kind, status, request_hash AS requestHash,
+      projection_hash AS projectionHash,
+      safe_result_code AS safeResultCode
+    FROM buyer_privacy_requests
+    WHERE shop_id = ? AND requested_by_user_id = ? AND idempotency_key_hash = ? LIMIT 1
+  `).bind(actor.row.shop_id, input.userId, keyHash).first<{
+    kind: "anonymize" | "export";
+    publicId: string;
+    projectionHash: string | null;
+    requestHash: string;
+    safeResultCode: BuyerPrivacyResult["safeResultCode"];
+    status: "blocked" | "completed";
+  }>();
+  if (replay !== null) {
+    if (replay.requestHash !== requestHash || replay.kind !== input.kind) throw new AppError("idempotency_conflict", 409);
+    const projection = input.kind === "export"
+      ? await buildBuyerPrivacyProjection(input.env, actor.row.shop_id, input.customerPublicId)
+      : undefined;
+    if (projection !== undefined && replay.projectionHash !== await sha256Json(projection)) {
+      throw new AppError("privacy_projection_changed", 409);
+    }
+    return {
+      privacyRequestPublicId: replay.publicId,
+      ...(projection === undefined ? {} : { projection }),
+      safeResultCode: replay.safeResultCode,
+      status: replay.status,
+    };
+  }
+
+  const privacyRequestId = createId("pvr");
+  if (input.kind === "export") {
+    const projection = await buildBuyerPrivacyProjection(input.env, actor.row.shop_id, input.customerPublicId);
+    const projectionHash = await sha256Json(projection);
+    await input.env.PLATFORM_DB.batch([
+      input.env.PLATFORM_DB.prepare(`
+        INSERT INTO buyer_privacy_requests (
+          id, public_id, shop_id, customer_id, kind, status, requested_by_user_id,
+          idempotency_key_hash, request_hash, projection_hash, safe_result_code,
+          retained_records_json, request_id, completed_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'export', 'completed', ?, ?, ?, ?, 'export_ready', '{}', ?, ?, ?, ?)
+      `).bind(privacyRequestId, privacyRequestId, actor.row.shop_id, input.customerPublicId, input.userId, keyHash, requestHash, projectionHash, input.requestId, nowIso, nowIso, nowIso),
+      input.env.PLATFORM_DB.prepare(`
+        INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type,
+          resource_id, safe_metadata_json, request_id, source_kind, retention_class, created_at)
+        VALUES (?, ?, 'user', ?, 'customer.privacy_exported', 'customer', ?, '{}', ?, 'http', 'security', ?)
+      `).bind(createId("aud"), actor.row.shop_id, input.userId, input.customerPublicId, input.requestId, nowIso),
+    ]);
+    return { privacyRequestPublicId: privacyRequestId, projection, safeResultCode: "export_ready", status: "completed" };
+  }
+
+  const blockers = await input.env.PLATFORM_DB.prepare(`
+    SELECT COUNT(*) AS count FROM orders
+    WHERE shop_id = ? AND customer_id = ? AND (
+      status NOT IN ('completed', 'canceled', 'expired')
+      OR payment_status IN ('pending', 'partial', 'overpaid')
+      OR fulfillment_status = 'reserved'
+    )
+  `).bind(actor.row.shop_id, input.customerPublicId).first<{ count: number }>();
+  if ((blockers?.count ?? 0) > 0) {
+    await input.env.PLATFORM_DB.prepare(`
+      INSERT INTO buyer_privacy_requests (
+        id, public_id, shop_id, customer_id, kind, status, requested_by_user_id,
+        idempotency_key_hash, request_hash, safe_result_code, retained_records_json,
+        request_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'anonymize', 'blocked', ?, ?, ?, 'active_records_blocked', ?, ?, ?, ?)
+    `).bind(privacyRequestId, privacyRequestId, actor.row.shop_id, input.customerPublicId, input.userId, keyHash, requestHash, JSON.stringify({ activeOrderCount: blockers?.count ?? 0 }), input.requestId, nowIso, nowIso).run();
+    return { privacyRequestPublicId: privacyRequestId, safeResultCode: "active_records_blocked", status: "blocked" };
+  }
+
+  const retained = await input.env.PLATFORM_DB.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM orders WHERE shop_id = ? AND customer_id = ?) AS orderCount,
+      (SELECT COUNT(*) FROM audit_logs WHERE shop_id = ? AND resource_type = 'customer' AND resource_id = ?) AS auditCount
+  `).bind(actor.row.shop_id, input.customerPublicId, actor.row.shop_id, input.customerPublicId).first<{ auditCount: number; orderCount: number }>();
+  const mutation = await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE shop_customers SET email_normalized = NULL, display_name = NULL, status = 'blocked',
+        anonymized_at = ?, updated_at = ?, version = version + 1
+      WHERE shop_id = ? AND id = ? AND anonymized_at IS NULL
+    `).bind(nowIso, nowIso, actor.row.shop_id, input.customerPublicId),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE orders SET customer_email_masked = NULL, updated_at = ?
+      WHERE shop_id = ? AND customer_id = ?
+    `).bind(nowIso, actor.row.shop_id, input.customerPublicId),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE customer_notes SET body = '[redacted]', status = 'redacted', redacted_at = ?, updated_at = ?, version = version + 1
+      WHERE shop_id = ? AND customer_id = ? AND status = 'active'
+    `).bind(nowIso, nowIso, actor.row.shop_id, input.customerPublicId),
+    input.env.PLATFORM_DB.prepare("DELETE FROM customer_identities WHERE shop_id = ? AND customer_id = ?").bind(actor.row.shop_id, input.customerPublicId),
+    input.env.PLATFORM_DB.prepare("DELETE FROM channel_customer_identities WHERE shop_id = ? AND customer_id = ?").bind(actor.row.shop_id, input.customerPublicId),
+    input.env.PLATFORM_DB.prepare(`
+      INSERT INTO buyer_privacy_requests (
+        id, public_id, shop_id, customer_id, kind, status, requested_by_user_id,
+        idempotency_key_hash, request_hash, safe_result_code, retained_records_json,
+        request_id, completed_at, created_at, updated_at
+      ) SELECT ?, ?, ?, ?, 'anonymize', 'completed', ?, ?, ?,
+        'anonymized_financial_audit_retained', ?, ?, ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM shop_customers WHERE shop_id = ? AND id = ? AND anonymized_at = ?)
+    `).bind(privacyRequestId, privacyRequestId, actor.row.shop_id, input.customerPublicId, input.userId, keyHash, requestHash, JSON.stringify(retained ?? { auditCount: 0, orderCount: 0 }), input.requestId, nowIso, nowIso, nowIso, actor.row.shop_id, input.customerPublicId, nowIso),
+    input.env.PLATFORM_DB.prepare(`
+      INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type,
+        resource_id, safe_metadata_json, request_id, source_kind, retention_class, created_at)
+      SELECT ?, ?, 'user', ?, 'customer.anonymized', 'customer', ?, ?, ?, 'http', 'security', ?
+      WHERE EXISTS (SELECT 1 FROM buyer_privacy_requests WHERE id = ? AND shop_id = ? AND status = 'completed')
+    `).bind(createId("aud"), actor.row.shop_id, input.userId, input.customerPublicId, JSON.stringify({ retainedAuditRecords: retained?.auditCount ?? 0, retainedOrderRecords: retained?.orderCount ?? 0 }), input.requestId, nowIso, privacyRequestId, actor.row.shop_id),
+  ]);
+  if (mutation[0]?.meta.changes !== 1 || mutation[5]?.meta.changes !== 1 || mutation[6]?.meta.changes !== 1) {
+    throw new AppError("privacy_request_conflict", 409);
+  }
+  return { privacyRequestPublicId: privacyRequestId, safeResultCode: "anonymized_financial_audit_retained", status: "completed" };
 }

@@ -14,8 +14,10 @@ vi.mock("../../src/lib/platform/bindings", () => ({
 import { magicLinkRequesterAddress, purgeAuthRequestAdmissions } from "../../src/lib/auth/admission";
 import {
   consumeMagicLink,
+  listSessions,
   magicLinkInitiationCookieName,
   requestMagicLink,
+  revokeAllSessions,
 } from "../../src/lib/auth/session";
 import { GET as consumeMagicLinkRoute } from "../../src/pages/api/auth/magic-link/consume";
 import { POST as requestMagicLinkRoute } from "../../src/pages/api/auth/magic-link/request";
@@ -41,6 +43,10 @@ class SqliteStatement {
     return Promise.resolve((this.database.prepare(this.sql).get(...this.values) as T | undefined) ?? null);
   }
 
+  all(): Promise<{ results: unknown[] }> {
+    return Promise.resolve({ results: this.database.prepare(this.sql).all(...this.values) });
+  }
+
   run(): Promise<{ meta: { changes: number } }> {
     return Promise.resolve(this.runSync());
   }
@@ -59,7 +65,7 @@ function applyMigrations(database: DatabaseSync): void {
 }
 
 type TestBindingOverrides = Partial<Record<
-  "MAGIC_LINK_GLOBAL_RATE_LIMIT" | "MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS" | "MAGIC_LINK_REQUESTER_RATE_LIMIT",
+  "MAGIC_LINK_EMAIL_RATE_LIMIT" | "MAGIC_LINK_GLOBAL_RATE_LIMIT" | "MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS" | "MAGIC_LINK_REQUESTER_RATE_LIMIT",
   string
 >> & {
   APP_ENV?: AppBindings["APP_ENV"];
@@ -75,6 +81,7 @@ function bindings(database: DatabaseSync, overrides: TestBindingOverrides = {}):
     EMAIL_FROM_NAME: "Selinow",
     IDENTIFIER_HMAC_SECRET: "identifier-hmac-test-secret",
     MAGIC_LINK_GLOBAL_RATE_LIMIT: overrides.MAGIC_LINK_GLOBAL_RATE_LIMIT ?? "200",
+    MAGIC_LINK_EMAIL_RATE_LIMIT: overrides.MAGIC_LINK_EMAIL_RATE_LIMIT ?? "5",
     MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS: overrides.MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS ?? "900",
     MAGIC_LINK_REQUESTER_RATE_LIMIT: overrides.MAGIC_LINK_REQUESTER_RATE_LIMIT ?? "20",
     MAGIC_LINK_SECRET: "magic-link-rate-limit-test-secret",
@@ -114,7 +121,7 @@ describe("magic-link issuance rate limit", () => {
     database.close();
   });
 
-  it("atomically admits only five concurrent requests for one normalized email", async () => {
+  it("soft-suppresses mailbox abuse without returning an account-specific 429", async () => {
     const results = await Promise.allSettled(Array.from({ length: 8 }, (_, index) => requestMagicLink({
       displayName: `Seller ${String(index)}`,
       email: "seller@example.test",
@@ -123,9 +130,10 @@ describe("magic-link issuance rate limit", () => {
       now: NOW,
     })));
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(5);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(3);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(8);
+    expect(results.filter((result) => result.status === "fulfilled" && result.value.debugMagicLink !== undefined)).toHaveLength(5);
     expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 5 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_request_admissions WHERE delivery_permitted = 0").get()).toEqual({ count: 3 });
   });
 
   it("allows exactly one request when four tokens already exist", async () => {
@@ -137,7 +145,8 @@ describe("magic-link issuance rate limit", () => {
       requestMagicLink({ displayName: "Rejected", email: "seller@example.test", env, requesterAddress: "203.0.113.10", now: NOW }),
     ]);
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+    expect(results.filter((result) => result.status === "fulfilled" && result.value.debugMagicLink !== undefined)).toHaveLength(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 5 });
   });
 
@@ -147,7 +156,7 @@ describe("magic-link issuance rate limit", () => {
       await requestMagicLink({ displayName: `Untrusted ${String(index)}`, email: "seller@example.test", env, requesterAddress: "203.0.113.10", now: NOW });
     }
     await expect(requestMagicLink({ displayName: "Blocked Rename", email: "seller@example.test", env, requesterAddress: "203.0.113.10", now: NOW }))
-      .rejects.toMatchObject({ code: "rate_limited", status: 429 });
+      .resolves.not.toHaveProperty("debugMagicLink");
 
     expect(database.prepare("SELECT display_name AS displayName FROM platform_users WHERE email_normalized = 'seller@example.test'").get())
       .toEqual({ displayName: "Trusted Name" });
@@ -398,5 +407,35 @@ describe("magic-link issuance rate limit", () => {
       ORDER BY auth_sessions.created_at DESC
       LIMIT 1
     `).get()).toEqual({ email: "attacker@example.test" });
+  });
+
+  it("lists only the user's active sessions and revokes them together", async () => {
+    const now = new Date();
+    const firstLink = await requestMagicLink({
+      displayName: "Seller",
+      email: "sessions@example.test",
+      env,
+      requesterAddress: "203.0.113.80",
+      now,
+    });
+    const secondLink = await requestMagicLink({
+      displayName: "Seller",
+      email: "sessions@example.test",
+      env,
+      requesterAddress: "203.0.113.80",
+      now,
+    });
+    const token = (link: string | undefined) => new URL(link ?? "", env.DASHBOARD_ORIGIN).searchParams.get("token") ?? "";
+    await consumeMagicLink({ env, initiationBinding: firstLink.initiationBinding, token: token(firstLink.debugMagicLink) });
+    const current = await consumeMagicLink({ env, initiationBinding: secondLink.initiationBinding, token: token(secondLink.debugMagicLink) });
+    const auth = { ...current.auth, csrfTokenHash: "test-csrf-hash" };
+
+    const sessions = await listSessions(auth, env);
+    expect(sessions).toHaveLength(2);
+    expect(sessions.filter((session) => session.isCurrent)).toHaveLength(1);
+    expect(sessions.every((session) => !Object.hasOwn(session, "tokenHash"))).toBe(true);
+
+    expect(await revokeAllSessions(auth, env)).toBe(2);
+    expect(await listSessions(auth, env)).toEqual([]);
   });
 });

@@ -45,10 +45,14 @@ function requireIdempotencyKey(value: string | null): string {
 }
 
 function mapRequest(row: ConnectorRequestRow): ChannelConnectorRequest {
+  const expansion = requireChannelExpansion(row.channelCode);
   return {
     ...row,
-    providerExecution: requireChannelExpansion(row.channelCode).providerExecution,
+    providerExecution: expansion.providerExecution,
     requestPublicId: row.requestPublicId,
+    status: expansion.providerExecution === "provider_pending" && row.status === "active"
+      ? "provider_pending"
+      : row.status,
   };
 }
 

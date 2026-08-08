@@ -38,7 +38,38 @@ async function incrementLimit(input: { action: string; env: AppBindings; request
   return row?.requestCount ?? 1;
 }
 
+async function assertTurnstileHostnameAdmission(input: { env: AppBindings; request: Request; shop: StorefrontShop }): Promise<string> {
+  const hostname = new URL(input.request.url).hostname.toLowerCase().replace(/\.$/u, "");
+  if (input.shop.currentHostname.toLowerCase().replace(/\.$/u, "") !== hostname) {
+    throw new AppError("turnstile_invalid", 403);
+  }
+  if (input.env.APP_ENV !== "production") return hostname;
+
+  let admitted: { hostname: string } | null;
+  try {
+    admitted = await input.env.PLATFORM_DB.prepare(`
+      SELECT hostname_normalized AS hostname
+      FROM shop_domains
+      WHERE shop_id = ? AND hostname_normalized = ? AND status = 'active'
+        AND delete_requested_at IS NULL AND deleted_at IS NULL
+        AND (
+          type = 'platform_subdomain'
+          OR (
+            type = 'custom' AND ownership_verified_at IS NOT NULL
+            AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'
+          )
+        )
+      LIMIT 1
+    `).bind(input.shop.id, hostname).first<{ hostname: string }>();
+  } catch {
+    throw new AppError("turnstile_unavailable", 503);
+  }
+  if (admitted?.hostname !== hostname) throw new AppError("turnstile_invalid", 403);
+  return hostname;
+}
+
 async function verifyTurnstile(input: { configuration: TurnstileConfiguration; env: AppBindings; request: Request; shop: StorefrontShop; token: string }): Promise<void> {
+  const hostname = await assertTurnstileHostnameAdmission(input);
   const body = new FormData();
   body.set("secret", input.configuration.secretKey);
   body.set("response", input.token);
@@ -60,7 +91,6 @@ async function verifyTurnstile(input: { configuration: TurnstileConfiguration; e
   } catch {
     throw new AppError("turnstile_unavailable", 503);
   }
-  const hostname = new URL(input.request.url).hostname.toLowerCase();
   if (!response.ok || result.success !== true || result.action !== "storefront_checkout" || result.hostname?.toLowerCase() !== hostname) {
     throw new AppError("turnstile_invalid", 403);
   }

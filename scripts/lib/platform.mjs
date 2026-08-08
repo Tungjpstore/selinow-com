@@ -560,11 +560,11 @@ export function buildStagingRoutes(spec) {
   const expectedDisabledRoutes = [
     `${spec.zoneName}/*`,
     `*.${spec.zoneName}/*`,
+    "*/*",
   ];
   const expectedRoutes = [
     ...spec.hostnames.map((hostname) => ({ custom_domain: true, pattern: hostname })),
     { pattern: spec.wildcardRoute, zone_name: spec.zoneName },
-    { pattern: "*/*", zone_name: spec.zoneName },
   ];
   if (expectedProductionWorkerName === spec.workerName
     || spec.productionWorkerName !== expectedProductionWorkerName
@@ -595,7 +595,6 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
   const expectedBindings = new Map([
     ...[...sharedZonePatterns].map((pattern) => [pattern, spec.productionWorkerName]),
     [spec.wildcardRoute, spec.workerName],
-    ["*/*", spec.workerName],
   ]);
   const inventoryAllowlistOk = routePatterns.every((pattern) => pattern !== null)
     && new Set(routePatterns).size === routePatterns.length
@@ -612,7 +611,6 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
   const allowedScriptPatterns = new Set([
     ...spec.sharedZoneDisabledRoutes,
     spec.wildcardRoute,
-    "*/*",
   ]);
   const scriptBindingChecks = liveRoutes
     .filter((route) => (
@@ -660,7 +658,7 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
       code: "cloudflare_staging_route_catch_all",
       detail: `*/* points only to ${spec.workerName}`,
       pattern: "*/*",
-      script: spec.workerName,
+      script: spec.productionWorkerName,
     },
   ];
 

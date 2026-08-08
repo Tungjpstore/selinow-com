@@ -46,6 +46,10 @@ const initialShop = shops[0];
   </section>
 
   <div id="onboarding-global-feedback" class="global-feedback" data-global-feedback role="status" aria-live="polite" aria-atomic="true" hidden></div>
+  <div class="resume-recovery" data-onboarding-resume-recovery hidden>
+    <p>{t("onboarding.feedback.create_recovery")}</p>
+    <button type="button" class="secondary-action" data-onboarding-resume-reload>{t("onboarding.button.reload_saved_setup")}</button>
+  </div>
 
   <section class="wizard-frame" aria-label={t("onboarding.aria.steps")}>
     <div class="mobile-step-summary">
@@ -130,7 +134,7 @@ const initialShop = shops[0];
           </form>
         </div>
 
-        <details class="create-shop-box" open={shops.length === 0} data-create-shop-box>
+        <details class="create-shop-box" open={shops.length === 0} hidden={shops.length > 0} data-create-shop-box>
           <summary>{shops.length === 0 ? t("onboarding.shop.create_first") : t("onboarding.shop.create_more")}</summary>
           <form class="form-grid" data-shop-form novalidate>
             <label class="field field-wide">
@@ -145,10 +149,10 @@ const initialShop = shops[0];
             <label class="field">
               <span>{t("onboarding.form.plan_label")}</span>
               <select name="planCode" data-shop-plan>
-                <option value="store">{t("onboarding.form.plan_store")}</option>
-                <option value="bot">{t("onboarding.form.plan_bot")}</option>
-                <option value="business">{t("onboarding.form.plan_business")}</option>
+                <option value="starter">{t("onboarding.form.plan_starter")}</option>
+                <option value="pro">{t("onboarding.form.plan_pro")}</option>
               </select>
+              <small data-plan-summary>{t("onboarding.form.plan_loading")}</small>
             </label>
             <label class="field">
               <span>{t("onboarding.form.merchant_country")}</span>
@@ -540,6 +544,10 @@ const initialShop = shops[0];
   .global-feedback { position: sticky; top: 12px; z-index: 20; margin-bottom: 16px; padding: 16px 20px; border: 1px solid var(--selinow-info); border-radius: var(--selinow-radius-md); background: rgb(11 16 32 / 96%); box-shadow: var(--selinow-shadow-md); line-height: 1.5; }
   .global-feedback[data-tone="error"] { border-color: var(--selinow-danger); }
   .global-feedback[data-tone="success"] { border-color: var(--selinow-success); }
+  .resume-recovery { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -4px 0 20px; padding: 14px 16px; border: 1px solid var(--selinow-info); border-radius: var(--selinow-radius-md); background: rgb(37 99 235 / 8%); }
+  .resume-recovery[hidden] { display: none; }
+  .resume-recovery p { margin: 0; line-height: 1.5; }
+  .resume-recovery button { flex: 0 0 auto; }
   .wizard-frame { display: grid; grid-template-columns: minmax(224px, .35fr) minmax(0, 1.65fr); overflow: hidden; border: 1px solid var(--selinow-ink-700); border-radius: var(--selinow-radius-xl); background: var(--selinow-ink-900); box-shadow: var(--selinow-shadow-lg); }
   .mobile-step-summary { display: none; }
   .step-rail { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--selinow-ink-700); background: var(--selinow-ink-950); }
@@ -749,6 +757,7 @@ const initialShop = shops[0];
   .global-feedback { top: calc(var(--sln-topbar-height) + 12px); border-color: var(--sln-state-info); background: var(--sln-bg-surface); color: var(--sln-text-primary); box-shadow: var(--sln-shadow-sm); }
   .global-feedback[data-tone="error"] { border-color: var(--sln-state-danger); background: var(--sln-tint-danger); }
   .global-feedback[data-tone="success"] { border-color: var(--sln-state-success); background: var(--sln-tint-success); }
+  .resume-recovery { border-color: var(--sln-state-info); background: var(--sln-tint-info); color: var(--sln-text-primary); }
   .wizard-frame { grid-template-columns: minmax(248px, 280px) minmax(0, 1fr); border-color: var(--sln-border-default); border-radius: var(--sln-radius-xl); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-sm); }
   .step-rail { border-color: var(--sln-border-default); background: var(--sln-bg-subtle); }
   .step-rail li { border-color: var(--sln-border-default); }

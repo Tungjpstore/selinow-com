@@ -179,6 +179,106 @@ describe("shop country configuration service", () => {
     `).get(first.shop.publicId)).toEqual({ businessCountry: "US", currency: "USD", merchantCountry: "JP" });
   });
 
+  it("creates the tenant bootstrap graph and bounded trial atomically", async () => {
+    const created = await createOwnedShop({ idempotencyKey: "shop-atomic-bootstrap", slug: "atomic-bootstrap", userId: "user-a" });
+    const shopId = (database.prepare("SELECT id FROM shops WHERE public_id = ?").get(created.shop.publicId) as { id: string }).id;
+    expect(database.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM shop_members WHERE shop_id = ?) AS members,
+        (SELECT COUNT(*) FROM shop_settings WHERE shop_id = ?) AS settings,
+        (SELECT COUNT(*) FROM shop_onboarding_profiles WHERE shop_id = ?) AS profiles,
+        (SELECT COUNT(*) FROM shop_onboarding_steps WHERE shop_id = ?) AS steps,
+        (SELECT COUNT(*) FROM shop_subscriptions WHERE shop_id = ?) AS subscriptions,
+        (SELECT COUNT(*) FROM account_trial_claims WHERE shop_id = ? AND user_id = 'user-a') AS claims
+    `).get(shopId, shopId, shopId, shopId, shopId, shopId)).toEqual({
+      claims: 1,
+      members: 1,
+      profiles: 1,
+      settings: 1,
+      steps: 10,
+      subscriptions: 1,
+    });
+    const subscription = database.prepare(`
+      SELECT state, trial_ends_at AS trialEndsAt
+      FROM shop_subscriptions WHERE shop_id = ?
+    `).get(shopId) as { state: string; trialEndsAt: string };
+    expect(subscription.state).toBe("trialing");
+    expect(Date.parse(subscription.trialEndsAt)).toBeGreaterThan(Date.now());
+    expect(Date.parse(subscription.trialEndsAt) - Date.now()).toBeLessThanOrEqual(7 * 24 * 60 * 60_000);
+  });
+
+  it("rejects an idempotency key replay with a different request body", async () => {
+    await createOwnedShop({ idempotencyKey: "shop-replay-mismatch", slug: "replay-original", userId: "user-a" });
+    await expect(createShop({
+      env,
+      idempotencyKey: "shop-replay-mismatch",
+      name: "Changed replay",
+      planCode: "pro",
+      requestId: "request-replay-mismatch",
+      slug: "replay-changed",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+  });
+
+  it("returns one durable shop for concurrent same-key creates", async () => {
+    const input = {
+      env,
+      idempotencyKey: "shop-concurrent-replay",
+      name: "Concurrent Replay",
+      planCode: "starter",
+      slug: "concurrent-replay",
+      userId: "user-a",
+    } as const;
+    const results = await Promise.all([
+      createShop({ ...input, requestId: "request-concurrent-a" }),
+      createShop({ ...input, requestId: "request-concurrent-b" }),
+    ]);
+    expect(new Set(results.map((result) => result.shop.publicId)).size).toBe(1);
+    expect(results.filter((result) => result.created)).toHaveLength(1);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM shops WHERE slug = 'concurrent-replay'").get()).toEqual({ count: 1 });
+  });
+
+  it("allows only one account evaluation even across concurrent different shop bodies", async () => {
+    const attempts = await Promise.allSettled([
+      createOwnedShop({ idempotencyKey: "shop-trial-race-a", slug: "trial-race-a", userId: "user-a" }),
+      createOwnedShop({ idempotencyKey: "shop-trial-race-b", slug: "trial-race-b", userId: "user-a" }),
+    ]);
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    const rejected = attempts.find((attempt): attempt is PromiseRejectedResult => attempt.status === "rejected");
+    expect(rejected?.reason).toMatchObject({ code: "validation_failed", issues: ["trial_already_used"], status: 409 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM account_trial_claims WHERE user_id = 'user-a'").get()).toEqual({ count: 1 });
+  });
+
+  it("does not reissue a trial after the first shop expires or is canceled", async () => {
+    const first = await createOwnedShop({ idempotencyKey: "shop-trial-once", slug: "trial-once", userId: "user-a" });
+    database.prepare(`
+      UPDATE shop_subscriptions
+      SET state = 'canceled', trial_ends_at = '2026-01-01T00:00:00.000Z', canceled_at = '2026-01-01T00:00:00.000Z'
+      WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
+    `).run(first.shop.publicId);
+    await expect(createOwnedShop({ idempotencyKey: "shop-trial-twice", slug: "trial-twice", userId: "user-a" }))
+      .rejects.toMatchObject({ code: "validation_failed", issues: ["trial_already_used"], status: 409 });
+  });
+
+  it("keeps globally duplicate slugs opaque across accounts", async () => {
+    await createOwnedShop({ idempotencyKey: "shop-shared-slug-a", slug: "shared-slug", userId: "user-a" });
+    await expect(createOwnedShop({ idempotencyKey: "shop-shared-slug-b", slug: "shared-slug", userId: "user-b" }))
+      .rejects.toMatchObject({ code: "validation_failed", issues: ["slug_unavailable"], status: 409 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM account_trial_claims WHERE user_id = 'user-b'").get()).toEqual({ count: 0 });
+  });
+
+  it("rejects an already-expired trial placeholder at the database boundary", () => {
+    const now = "2026-08-08T00:00:00.000Z";
+    database.prepare(`
+      INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, readiness_version, created_at, updated_at)
+      VALUES ('expired-shop', 'expired-public', 'expired-shop', 'Expired', 'draft', 'en', 'USD', 'UTC', 1, ?, ?)
+    `).run(now, now);
+    expect(() => database.prepare(`
+      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, trial_ends_at, created_at, updated_at)
+      VALUES ('expired-sub', 'expired-shop', 'plan_starter_v1', 'trialing', '2026-01-01T00:00:00.000Z', ?, ?)
+    `).run(now, now)).toThrow(/trial_subscription_expired/u);
+  });
+
   it("updates countries through a tenant-scoped mutation and permits an explicit unknown state", async () => {
     const shopA = await createOwnedShop({ idempotencyKey: "shop-country-owner-a", slug: "owner-a", userId: "user-a" });
     const shopB = await createOwnedShop({ idempotencyKey: "shop-country-owner-b", slug: "owner-b", userId: "user-b" });

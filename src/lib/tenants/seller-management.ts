@@ -16,6 +16,16 @@ export type SellerCustomerView = {
   version: number;
 };
 
+export type SellerCustomerPage = { customers: SellerCustomerView[]; nextCursor: string | null };
+
+function sellerPage(input: { cursor?: string | null; limit?: number }): { limit: number; offset: number } {
+  const limit = input.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AppError("validation_failed", 400, ["page_limit_invalid"]);
+  if (input.cursor === undefined || input.cursor === null || input.cursor === "") return { limit, offset: 0 };
+  if (!/^(?:0|[1-9][0-9]{0,8})$/u.test(input.cursor)) throw new AppError("validation_failed", 400, ["page_cursor_invalid"]);
+  return { limit, offset: Number(input.cursor) };
+}
+
 export type SellerMemberView = {
   createdAt: string;
   displayName: string;
@@ -79,9 +89,10 @@ function customerVisibility(role: ShopRole): CustomerVisibility {
   return "summary";
 }
 
-export async function listSellerCustomers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerCustomerView[]> {
+export async function listSellerCustomersPage(input: { cursor?: string | null; env: AppBindings; limit?: number; shopPublicId: string; userId: string }): Promise<SellerCustomerPage> {
   const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   const visibility = customerVisibility(member.row.role);
+  const page = sellerPage(input);
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT shop_customers.id, shop_customers.id AS publicId, shop_customers.version,
       shop_customers.display_name AS displayName,
@@ -95,9 +106,10 @@ export async function listSellerCustomers(input: { env: AppBindings; shopPublicI
     WHERE shop_customers.shop_id = ?
     GROUP BY shop_customers.id
     ORDER BY lastOrderAt DESC, shop_customers.created_at DESC, shop_customers.id DESC
-    LIMIT 200
-  `).bind(member.row.shop_id).all<{ createdAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; publicId?: string; status: string; version?: number }>();
-  return rows.results.map((row) => {
+    LIMIT ? OFFSET ?
+  `).bind(member.row.shop_id, page.limit + 1, page.offset).all<{ createdAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; publicId?: string; status: string; version?: number }>();
+  const hasNext = rows.results.length > page.limit;
+  const customers = rows.results.slice(0, page.limit).map((row) => {
     const version = Number.isSafeInteger(row.version) && (row.version ?? 0) > 0 ? (row.version ?? 1) : 1;
     if (visibility === "summary") {
       return {
@@ -124,6 +136,11 @@ export async function listSellerCustomers(input: { env: AppBindings; shopPublicI
       version,
     };
   });
+  return { customers, nextCursor: hasNext ? String(page.offset + page.limit) : null };
+}
+
+export async function listSellerCustomers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerCustomerView[]> {
+  return (await listSellerCustomersPage({ ...input, limit: 100 })).customers;
 }
 
 export async function listSellerMembers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerMemberView[]> {

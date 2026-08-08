@@ -658,7 +658,8 @@ export class TelegramCheckoutOrderPort implements CommercePort {
         discountMinor: discount,
         effects: {
           afterCartConversion: [this.input.env.PLATFORM_DB.prepare("INSERT OR IGNORE INTO telegram_actions (id, shop_id, integration_id, update_id, action_kind, result_reference, created_at) VALUES (?, ?, ?, ?, 'checkout', ?, ?)").bind(createId("tga"), this.input.shop.id, this.input.identity.integrationId, this.input.updateId, orderId, nowIso)],
-          afterFreePayment: [this.input.env.PLATFORM_DB.prepare("INSERT OR IGNORE INTO outbox_jobs (id, shop_id, kind, aggregate_type, aggregate_id, status, attempts, next_attempt_at, created_at, updated_at) VALUES (?, ?, 'order_paid', 'order', ?, 'pending', 0, ?, ?, ?)").bind(createId("job"), this.input.shop.id, orderId, nowIso, nowIso, nowIso)],
+          // `order.paid` is delivered by the domain delivery queue. Keep one
+          // notification authority and do not enqueue the legacy outbox.
         },
         env: this.input.env,
         eventIdempotencyKey: this.input.expectedIdempotencyKey,

@@ -3,7 +3,7 @@ import { handle } from "@astrojs/cloudflare/handler";
 import { processActivationMilestoneBackfill } from "./lib/analytics/activation";
 import { purgeAuthRequestAdmissions } from "./lib/auth/admission";
 import { processScheduledAutomationTasks } from "./lib/automation/scheduler";
-import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, suspendExpiredTrials } from "./lib/billing/service";
+import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, suspendExpiredBillingGracePeriods, suspendExpiredTrials } from "./lib/billing/service";
 import { purgeCartMutationReplays } from "./lib/commerce/cart-mutation";
 import { expireDueGenericEntitlements } from "./lib/commerce/entitlements";
 import {
@@ -35,7 +35,7 @@ import { consumeDeadLetterQueue, isDeadLetterQueue } from "./lib/operations/queu
 import { purgeExpiredSecurityRateLimits } from "./lib/operations/security-rate-limit-maintenance";
 import { reconcilePendingPayments } from "./lib/payments/reconciliation";
 import type { AppBindings } from "./lib/platform/bindings";
-import { processTelegramOutbox, purgeTelegramUpdateHistory } from "./lib/telegram/outbox";
+import { purgeTelegramUpdateHistory } from "./lib/telegram/outbox";
 import { purgeAnonymousLimits } from "./lib/storefront/abuse";
 
 const MAX_DELIVERY_ATTEMPTS = 8;
@@ -411,8 +411,8 @@ export default {
     const reconciliation = await reconcilePendingPayments(bindings, scheduledAt);
     const billingChanges = await processDueDodoSubscriptionChanges({ env: bindings, now: scheduledAt });
     const expiredBillingCheckouts = await expireBillingCheckoutSessions({ env: bindings, now: scheduledAt, limit: 100 });
+    const expiredBillingGracePeriods = await suspendExpiredBillingGracePeriods({ env: bindings, now: scheduledAt, limit: 100 });
     const expiredBillingTrials = await suspendExpiredTrials({ env: bindings, now: scheduledAt, limit: 100 });
-    const telegramOutbox = await processTelegramOutbox(bindings, scheduledAt);
     const expiredOrders = await expireUnpaidOrders(bindings, scheduledAt.toISOString());
     const expiredGenericEntitlements = await expireDueGenericEntitlements({ env: bindings, nowIso: scheduledAt.toISOString() });
     const purgedAuthRequestAdmissions = await purgeAuthRequestAdmissions(bindings, scheduledAt);
@@ -461,6 +461,7 @@ export default {
         generatedLicenseEnqueued: generatedLicenses.sent,
         expiredOrders,
         expiredBillingCheckouts,
+        expiredBillingGracePeriods,
         expiredBillingTrials,
         expiredGenericEntitlements,
         paymentReconciliationFailed: reconciliation.failed,
@@ -475,9 +476,6 @@ export default {
         purgedDeliveryGrantClaims,
         purgedSecurityRateLimits,
         purgedTelegramUpdates,
-        telegramOutboxFailed: telegramOutbox.failed,
-        telegramOutboxProcessed: telegramOutbox.processed,
-        telegramOutboxSkipped: telegramOutbox.skipped,
       },
       schedule: controller.cron,
       scheduledTime: controller.scheduledTime,

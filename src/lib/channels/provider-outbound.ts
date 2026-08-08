@@ -1,5 +1,6 @@
 import { AppError } from "../core/errors";
 import { assertProviderEndpoint, getProviderRuntimeContract } from "./provider-contracts";
+import { requireChannelExpansion } from "./expansion";
 import type { ChannelOutboundCommand } from "./types";
 
 const SAFE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/u;
@@ -73,7 +74,7 @@ export function prepareProviderOutboundDelivery(input: {
   providerCode: ProviderOutboundCode;
 }): ProviderOutboundPlan {
   const contract = getProviderRuntimeContract(input.providerCode);
-  if (contract.stage === "provider_pending") {
+  if (requireChannelExpansion(contract.code).providerExecution === "provider_pending") {
     throw new AppError("channel_provider_pending", 409, [input.providerCode]);
   }
   if (input.admission.status !== "ready") {

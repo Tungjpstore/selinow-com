@@ -22,6 +22,8 @@ export const REQUIRED_PRODUCTION_VARS = [
   "DEFAULT_CURRENCY",
   "DEFAULT_LOCALE",
   "DEFAULT_TIMEZONE",
+  "DODO_PAYMENTS_ENVIRONMENT",
+  "DODO_PAYMENTS_WEBHOOK_PUBLIC_ID",
   "EMAIL_FROM_ADDRESS",
   "EMAIL_FROM_NAME",
   "EXPORT_KEY_VERSION",
@@ -48,6 +50,8 @@ export const REQUIRED_PRODUCTION_VARS = [
 export const REQUIRED_WORKER_SECRET_NAMES = [
   "CLOUDFLARE_API_TOKEN",
   "CREDENTIAL_KEK_V1",
+  "DODO_PAYMENTS_API_KEY",
+  "DODO_PAYMENTS_WEBHOOK_KEY",
   "EXPORT_KEK_V1",
   "IDENTIFIER_HMAC_SECRET",
   "INVENTORY_KEK_V1",
@@ -389,6 +393,10 @@ export function inspectProductionReadiness(input) {
     checks.push(makeCheck(`evidence.${path}`, validEvidencePath(path, value)));
   }
   const routes = new Set(Array.isArray(production?.routes) ? production.routes.map((route) => route?.pattern).filter((value) => typeof value === "string") : []);
+  const productionFallback = Array.isArray(production?.routes)
+    ? production.routes.find((route) => route?.pattern === "*/*")
+    : null;
+  const stagingRoutes = input.wranglerConfig?.env?.staging?.routes;
   const d1Database = Array.isArray(production?.d1_databases)
     ? production.d1_databases.find((database) => database?.binding === "PLATFORM_DB")
     : null;
@@ -411,6 +419,16 @@ export function inspectProductionReadiness(input) {
       && (routes.has(spec.hostnames.dashboard) || routes.has(`${spec.hostnames.dashboard}/*`))),
     makeCheck("alignment.route.api", isConfigured(spec?.hostnames?.api)
       && (routes.has(spec.hostnames.api) || routes.has(`${spec.hostnames.api}/*`))),
+    makeCheck("alignment.route.externalCustomDomains", productionFallback?.zone_name === spec?.zoneName),
+    makeCheck("alignment.route.externalCustomDomainsNotStaging", Array.isArray(stagingRoutes)
+      && !stagingRoutes.some((route) => route?.pattern === "*/*")),
+    makeCheck("alignment.route.externalCustomDomainStrategy",
+      spec?.routing?.externalCustomDomainFallbackRoute === "*/*"
+      && spec?.routing?.externalCustomDomainStrategy === "production_fallback_with_platform_staging_exceptions"
+      && spec?.routing?.routeHandoff === "atomic_shared_zone_route_replacement"),
+    makeCheck("alignment.turnstile.externalCustomDomainAdmission",
+      spec?.turnstile?.externalCustomDomainAdmission === "verified_before_domain_activation"
+      && spec?.turnstile?.externalCustomDomainStrategy === "exact_hostname_admission_before_activation"),
     makeCheck("alignment.var.zoneId", isConfigured(spec?.zoneId) && production?.vars?.CLOUDFLARE_ZONE_ID === spec.zoneId),
     makeCheck("alignment.var.saasTarget", isConfigured(spec?.saas?.cnameTarget) && production?.vars?.SAAS_CNAME_TARGET === spec.saas.cnameTarget),
   );

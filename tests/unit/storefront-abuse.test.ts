@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import { guardAnonymousCart, guardAnonymousCheckout } from "../../src/lib/storefront/abuse";
@@ -36,6 +36,9 @@ class SqliteStatement {
 }
 
 type TestBindingOverrides = {
+  APP_ENV?: "local" | "production";
+  TURNSTILE_SECRET_KEY?: string;
+  TURNSTILE_SITE_KEY?: string;
   STOREFRONT_CART_RATE_LIMIT?: string;
   STOREFRONT_CHECKOUT_RATE_LIMIT?: string;
   STOREFRONT_RATE_LIMIT_WINDOW_SECONDS?: string;
@@ -55,6 +58,8 @@ function bindings(database: DatabaseSync, overrides: TestBindingOverrides = {}):
     STOREFRONT_CHECKOUT_RATE_LIMIT: "2",
     STOREFRONT_RATE_LIMIT_WINDOW_SECONDS: "600",
     STOREFRONT_TURNSTILE_THRESHOLD: "100",
+    TURNSTILE_SECRET_KEY: "",
+    TURNSTILE_SITE_KEY: "",
     ...overrides,
   } as AppBindings;
 }
@@ -67,7 +72,7 @@ function request(ip: string | null, userAgent?: string): Request {
 }
 
 function shop(id: string): StorefrontShop {
-  return { id } as StorefrontShop;
+  return { currentHostname: "shop.example.com", id } as StorefrontShop;
 }
 
 describe("storefront anonymous request limits", () => {
@@ -81,6 +86,20 @@ describe("storefront anonymous request limits", () => {
       INSERT INTO shops (id) VALUES ('shop-a'), ('shop-b');
     `);
     database.exec(readFileSync(join(process.cwd(), "migrations/0008_storefront_abuse_controls.sql"), "utf8"));
+    database.exec(`
+      CREATE TABLE shop_domains (
+        shop_id TEXT NOT NULL,
+        hostname_normalized TEXT NOT NULL,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        ownership_verified_at TEXT,
+        hostname_status TEXT,
+        ssl_status TEXT,
+        dns_status TEXT,
+        delete_requested_at TEXT,
+        deleted_at TEXT
+      );
+    `);
   });
 
   afterEach(() => {
@@ -140,5 +159,67 @@ describe("storefront anonymous request limits", () => {
 
     expect(database.prepare("SELECT request_count AS requestCount FROM anonymous_request_limits").get())
       .toEqual({ requestCount: 24 });
+  });
+
+  it("admits production Turnstile only for an exact active custom hostname", async () => {
+    database.exec(`
+      INSERT INTO shop_domains (
+        shop_id, hostname_normalized, type, status, ownership_verified_at,
+        hostname_status, ssl_status, dns_status, delete_requested_at, deleted_at
+      ) VALUES ('shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z', 'active', 'active', 'active', NULL, NULL);
+    `);
+    const env = bindings(database, {
+      APP_ENV: "production",
+      STOREFRONT_CHECKOUT_RATE_LIMIT: "10",
+      STOREFRONT_TURNSTILE_THRESHOLD: "1",
+      TURNSTILE_SECRET_KEY: "0xSecretKeyThatLooksConfigured123456",
+      TURNSTILE_SITE_KEY: "0xSiteKeyThatLooksConfigured123456",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      action: "storefront_checkout",
+      hostname: "shop.example.com",
+      success: true,
+    }), { status: 200 }));
+    await guardAnonymousCheckout({
+      env,
+      request: new Request("https://shop.example.com/api/store/checkout", { method: "POST" }),
+      shop: shop("shop-a"),
+      turnstileToken: null,
+    });
+    await expect(guardAnonymousCheckout({
+      env,
+      request: new Request("https://shop.example.com/api/store/checkout", { method: "POST" }),
+      shop: shop("shop-a"),
+      turnstileToken: "turnstile-token-123",
+    })).resolves.toBeUndefined();
+    fetchMock.mockRestore();
+  });
+
+  it("fails closed when production custom hostname readiness is incomplete", async () => {
+    database.exec(`
+      INSERT INTO shop_domains (
+        shop_id, hostname_normalized, type, status, ownership_verified_at,
+        hostname_status, ssl_status, dns_status, delete_requested_at, deleted_at
+      ) VALUES ('shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z', 'active', 'pending_validation', 'active', NULL, NULL);
+    `);
+    const env = bindings(database, {
+      APP_ENV: "production",
+      STOREFRONT_CHECKOUT_RATE_LIMIT: "10",
+      STOREFRONT_TURNSTILE_THRESHOLD: "1",
+      TURNSTILE_SECRET_KEY: "0xSecretKeyThatLooksConfigured123456",
+      TURNSTILE_SITE_KEY: "0xSiteKeyThatLooksConfigured123456",
+    });
+    await guardAnonymousCheckout({
+      env,
+      request: new Request("https://shop.example.com/api/store/checkout", { method: "POST" }),
+      shop: shop("shop-a"),
+      turnstileToken: null,
+    });
+    await expect(guardAnonymousCheckout({
+      env,
+      request: new Request("https://shop.example.com/api/store/checkout", { method: "POST" }),
+      shop: shop("shop-a"),
+      turnstileToken: "turnstile-token-123",
+    })).rejects.toMatchObject({ code: "turnstile_invalid", status: 403 });
   });
 });

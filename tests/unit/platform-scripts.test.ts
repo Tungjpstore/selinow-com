@@ -74,6 +74,7 @@ const stagingSpec = {
   sharedZoneDisabledRoutes: [
     "selinow.com/*",
     "*.selinow.com/*",
+    "*/*",
   ],
   wildcardRoute: "*.staging.selinow.com/*",
   workerName: "selinow-com-staging",
@@ -87,7 +88,6 @@ const stagingSpec = {
     { custom_domain: true, pattern: "coming-soon.staging.selinow.com" },
     { custom_domain: true, pattern: "paused.staging.selinow.com" },
     { pattern: "*.staging.selinow.com/*", zone_name: "selinow.com" },
-    { pattern: "*/*", zone_name: "selinow.com" },
   ],
   zoneId: "ce1536fca500680c544662e361ed869b",
   zoneName: "selinow.com",
@@ -107,7 +107,7 @@ function exactStagingRouteInventory() {
     { pattern: "selinow.com/*", script: stagingSpec.productionWorkerName },
     { pattern: "*.selinow.com/*", script: stagingSpec.productionWorkerName },
     { pattern: stagingSpec.wildcardRoute, script: stagingSpec.workerName },
-    { pattern: "*/*", script: stagingSpec.workerName },
+    { pattern: "*/*", script: stagingSpec.productionWorkerName },
   ];
 }
 
@@ -145,6 +145,7 @@ function productionWranglerConfig() {
   const routes: Array<{ custom_domain?: true; pattern: string; zone_name?: string }> = [
     { pattern: "selinow.com/*", zone_name: "selinow.com" },
     { pattern: "*.selinow.com/*", zone_name: "selinow.com" },
+    { pattern: "*/*", zone_name: "selinow.com" },
     { custom_domain: true, pattern: "app.selinow.com" },
     { custom_domain: true, pattern: "api.selinow.com" },
   ];
@@ -168,7 +169,7 @@ function exactSharedZoneRouteInventory() {
     { pattern: "selinow.com/*", script: "selinow-com-production" },
     { pattern: "*.selinow.com/*", script: "selinow-com-production" },
     { pattern: stagingSpec.wildcardRoute, script: stagingSpec.workerName },
-    { pattern: "*/*", script: stagingSpec.workerName },
+    { pattern: "*/*", script: stagingSpec.productionWorkerName },
   ];
 }
 
@@ -954,7 +955,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
             { pattern: "selinow.com/*", script: spec.productionWorkerName },
             { pattern: "*.selinow.com/*", script: spec.productionWorkerName },
             { pattern: spec.wildcardRoute, script: spec.workerName },
-            { pattern: "*/*", script: spec.workerName },
+            { pattern: "*/*", script: spec.productionWorkerName },
           ],
           success: true,
         }), { status: 200 }));
@@ -1104,7 +1105,6 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(wranglerConfig.env.staging.routes.filter((route) => route.custom_domain !== true))
       .toEqual([
         { pattern: "*.staging.selinow.com/*", zone_name: "selinow.com" },
-        { pattern: "*/*", zone_name: "selinow.com" },
       ]);
     expect(wranglerConfig.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(wranglerConfig.queues).toEqual(buildQueueBindings({

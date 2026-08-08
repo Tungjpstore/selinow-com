@@ -19,23 +19,23 @@ function readyInput(overrides: Partial<Parameters<typeof evaluateProviderRuntime
 }
 
 describe("provider runtime admission", () => {
-  it("requires every provider proof and grant before ready", () => {
+  it("keeps coming-next providers blocked even when every local proof looks complete", () => {
     expect(evaluateProviderRuntimeAdmission(readyInput())).toEqual({
       code: "whatsapp.cloud",
-      reasons: [],
-      status: "ready",
+      reasons: ["provider_contract_pending"],
+      status: "blocked",
     });
     expect(evaluateProviderRuntimeAdmission(readyInput({ credentialStatus: "pending" }))).toMatchObject({
       status: "blocked",
-      reasons: ["credential_not_active"],
+      reasons: ["provider_contract_pending", "credential_not_active"],
     });
     expect(evaluateProviderRuntimeAdmission(readyInput({ providerIdentityMatched: false }))).toMatchObject({
       status: "blocked",
-      reasons: ["provider_identity_unverified"],
+      reasons: ["provider_contract_pending", "provider_identity_unverified"],
     });
     expect(evaluateProviderRuntimeAdmission(readyInput({ webhookVerifiedAt: "2026-08-02T11:00:00.000Z" }))).toMatchObject({
       status: "blocked",
-      reasons: ["webhook_evidence_stale"],
+      reasons: ["provider_contract_pending", "webhook_evidence_stale"],
     });
   });
 
@@ -52,7 +52,7 @@ describe("provider runtime admission", () => {
     }));
     expect(admission).toEqual({
       code: "whatsapp.cloud",
-      reasons: ["connection_not_active", "required_capability_missing"],
+      reasons: ["provider_contract_pending", "connection_not_active", "required_capability_missing"],
       status: "blocked",
     });
     expect(JSON.stringify(admission)).not.toMatch(/token|secret|credential/i);

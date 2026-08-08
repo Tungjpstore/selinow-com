@@ -60,6 +60,13 @@ describe("channel expansion contracts", () => {
     ]);
     expect(platformChannelRegistry.require(WHATSAPP_CLOUD_CHANNEL_CODE).capabilities).toContain("message.template_outside_window");
     expect(CHANNEL_EXPANSION_CATALOG.map((entry) => entry.inlineSecretDelivery)).toEqual([false, false, false, false, false]);
+    expect(CHANNEL_EXPANSION_CATALOG.map((entry) => entry.providerExecution)).toEqual([
+      "provider_pending",
+      "provider_pending",
+      "provider_pending",
+      "provider_pending",
+      "provider_pending",
+    ]);
   });
 
   it("enforces WhatsApp windows and keeps secrets on authorized reveal paths", () => {

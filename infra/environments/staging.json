@@ -27,7 +27,8 @@
   "wildcardRoute": "*.staging.selinow.com/*",
   "sharedZoneDisabledRoutes": [
     "selinow.com/*",
-    "*.selinow.com/*"
+    "*.selinow.com/*",
+    "*/*"
   ],
   "workerRoutes": [
     { "custom_domain": true, "pattern": "staging.selinow.com" },
@@ -37,8 +38,7 @@
     { "custom_domain": true, "pattern": "canvas.staging.selinow.com" },
     { "custom_domain": true, "pattern": "coming-soon.staging.selinow.com" },
     { "custom_domain": true, "pattern": "paused.staging.selinow.com" },
-    { "pattern": "*.staging.selinow.com/*", "zone_name": "selinow.com" },
-    { "pattern": "*/*", "zone_name": "selinow.com" }
+    { "pattern": "*.staging.selinow.com/*", "zone_name": "selinow.com" }
   ],
   "saas": {
     "fallbackOrigin": "proxy-fallback.selinow.com",

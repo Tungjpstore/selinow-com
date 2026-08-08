@@ -15,6 +15,10 @@ type ExistingIdempotency = {
   response_json: string;
 };
 
+type AccountTrialClaim = {
+  shop_id: string;
+};
+
 type MembershipShopRow = {
   business_country_code: string | null;
   currency: string;
@@ -174,6 +178,16 @@ export async function createShop(input: {
     throw new AppError("validation_failed", 400, ["plan_invalid"]);
   }
 
+  const priorTrial = await input.env.PLATFORM_DB.prepare(`
+    SELECT shop_id
+    FROM account_trial_claims
+    WHERE user_id = ?
+    LIMIT 1
+  `).bind(input.userId).first<AccountTrialClaim>();
+  if (priorTrial !== null) {
+    throw new AppError("validation_failed", 409, ["trial_already_used"]);
+  }
+
   const now = new Date();
   const nowIso = now.toISOString();
   const shopId = createId("shp");
@@ -231,6 +245,10 @@ export async function createShop(input: {
           current_step, version, created_at, updated_at
         ) VALUES (?, 0, 0, 'later', 'channel_selected', 1, ?, ?)
       `).bind(shopId, nowIso, nowIso),
+      input.env.PLATFORM_DB.prepare(`
+        INSERT INTO account_trial_claims (user_id, shop_id, claimed_at)
+        VALUES (?, ?, ?)
+      `).bind(input.userId, shopId, nowIso),
       ...ONBOARDING_STEP_CODES.map((stepCode) => {
         const complete = stepCode === "account_ready" || stepCode === "shop_created";
         const inProgress = stepCode === "channel_selected";
@@ -286,6 +304,18 @@ export async function createShop(input: {
       const replayedShop = parseStoredShop(replay.response_json);
       await recoverShopActivationMilestones(input.env, replayedShop).catch(() => undefined);
       return { created: false, shop: replayedShop };
+    }
+    if (replay !== null) {
+      throw new AppError("idempotency_conflict", 409);
+    }
+    const claimed = await input.env.PLATFORM_DB.prepare(`
+      SELECT shop_id
+      FROM account_trial_claims
+      WHERE user_id = ?
+      LIMIT 1
+    `).bind(input.userId).first<AccountTrialClaim>();
+    if (claimed !== null) {
+      throw new AppError("validation_failed", 409, ["trial_already_used"]);
     }
     throw new AppError("validation_failed", 409, ["slug_unavailable"]);
   }

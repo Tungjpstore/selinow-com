@@ -8,6 +8,7 @@ export type AppBindings = Omit<Env, "APP_ENV" | "CANARY_HOSTNAME" | "CLOUDFLARE_
   CLOUDFLARE_ZONE_ID?: string;
   CREDENTIAL_KEK_V1: string;
   CREDENTIAL_KEK_V2?: string;
+  DODO_PAYMENTS_WEBHOOK_PUBLIC_ID?: string;
   EXPORT_KEK_V1?: string;
   EXPORT_KEY_VERSION?: string;
   IDENTIFIER_HMAC_SECRET: string;
@@ -15,6 +16,7 @@ export type AppBindings = Omit<Env, "APP_ENV" | "CANARY_HOSTNAME" | "CLOUDFLARE_
   INVENTORY_KEK_V1: string;
   INVENTORY_KEK_V2?: string;
   MAGIC_LINK_GLOBAL_RATE_LIMIT: string;
+  MAGIC_LINK_EMAIL_RATE_LIMIT?: string;
   MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS: string;
   MAGIC_LINK_REQUESTER_RATE_LIMIT: string;
   MAGIC_LINK_SECRET: string;

@@ -211,49 +211,19 @@ describe("provider verification evidence seam", () => {
     })).rejects.toMatchObject({ code: "validation_failed", status: 400 });
   });
 
-  it("never promotes a provider-pending contract, even with a caller-supplied evidence set", async () => {
+  it.each(["telegram.mini_app", "zalo.mini_app", "zalo.oa", "whatsapp.cloud", "discord.bot"])("never promotes coming-next provider %s, even with caller-supplied evidence", async (providerCode) => {
     const db = database();
     await expect(promoteProviderConnectionFromEvidence({
       connectionId: "connection-001",
       env: { PLATFORM_DB: db } as never,
       evidenceIds: [evidenceRow.id, "cve_00000000-0000-4000-8000-000000000002", "cve_00000000-0000-4000-8000-000000000003"],
       expectedConnectionVersion: 1,
-      providerCode: "zalo.mini_app",
+      providerCode,
       requestId: "request-provider-promote",
       reviewerUserId: "user-owner-001",
       shopId: "shop-001",
     })).rejects.toMatchObject({ code: "channel_provider_pending", status: 409 });
     expect(db.prepare).not.toHaveBeenCalled();
-  });
-
-  it.each(["suspended shop", "inactive plan"])("blocks promotion when the %s is no longer live", async (lifecycle) => {
-    const db = database({
-      connectionUnavailable: true,
-      evidenceRows: [
-        { ...evidenceRow, providerCode: "whatsapp.cloud", status: "reviewed", reviewedAt: VERIFIED, reviewedByUserId: "user-owner-001", verificationKind: "webhook" },
-        { ...evidenceRow, id: "cve_00000000-0000-4000-8000-000000000002", providerCode: "whatsapp.cloud", status: "reviewed", reviewedAt: VERIFIED, reviewedByUserId: "user-owner-001", verificationKind: "identity", providerIdentityFingerprint: HASH },
-        { ...evidenceRow, id: "cve_00000000-0000-4000-8000-000000000003", providerCode: "whatsapp.cloud", status: "reviewed", reviewedAt: VERIFIED, reviewedByUserId: "user-owner-001", verificationKind: "capability" },
-      ],
-    });
-    await expect(promoteProviderConnectionFromEvidence({
-      connectionId: "connection-001",
-      env: { PLATFORM_DB: db } as never,
-      evidenceIds: [
-        "cve_00000000-0000-4000-8000-000000000001",
-        "cve_00000000-0000-4000-8000-000000000002",
-        "cve_00000000-0000-4000-8000-000000000003",
-      ],
-      expectedConnectionVersion: 1,
-      providerCode: "whatsapp.cloud",
-      requestId: `request-provider-promote-${lifecycle.replaceAll(" ", "-")}`,
-      reviewerUserId: "user-owner-001",
-      shopId: "shop-001",
-    })).rejects.toMatchObject({ code: "channel_connection_not_found", status: 404 });
-    const connectionQuery = db.prepare.mock.calls.map(([sql]) => sql).find((sql) => sql.includes("FROM channel_connections"));
-    expect(connectionQuery).toContain("shops.status = 'active'");
-    expect(connectionQuery).toContain("subscription.trial_ends_at AS trialEndsAt");
-    expect(connectionQuery).toContain("subscription.grace_ends_at AS graceEndsAt");
-    expect(connectionQuery).toContain("plans.is_active = 1");
   });
 
   it("atomically records a tenant-bound evidence bundle without activating the connection", async () => {

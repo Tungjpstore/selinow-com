@@ -188,7 +188,7 @@ describe("Dodo billing adapter", () => {
       expect(body).toMatchObject({ billing_currency: "USD", metadata: { checkoutSessionId: "bchk_test" }, product_cart: [{ product_id: "prod_starter", quantity: 1 }] });
       return Promise.resolve(new Response(JSON.stringify({ checkout_url: "https://test.checkout.dodopayments.com/session/cks_test", session_id: "cks_test" }), { status: 200 }));
     };
-    await expect(createDodoCheckout({ config, currency: "USD", customData: { checkoutSessionId: "bchk_test" }, fetcher, idempotencyKey: "checkout-key", priceId: "prod_starter" })).resolves.toEqual({ checkoutUrl: "https://test.checkout.dodopayments.com/session/cks_test", providerTransactionId: "cks_test" });
+    await expect(createDodoCheckout({ config, currency: "USD", customData: { checkoutSessionId: "bchk_test" }, fetcher, idempotencyKey: "checkout-key", priceId: "prod_starter" })).resolves.toEqual({ checkoutUrl: "https://test.checkout.dodopayments.com/session/cks_test", providerCheckoutId: "cks_test", providerTransactionId: "cks_test" });
   });
 
   it("retrieves subscription price evidence when a webhook omits it", async () => {

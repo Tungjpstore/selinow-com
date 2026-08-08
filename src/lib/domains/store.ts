@@ -184,7 +184,12 @@ function getSaasTarget(env: AppBindings): string {
     return `customers.${env.PLATFORM_BASE_DOMAIN}`.toLowerCase().replace(/\.$/u, "");
   }
   if (typeof value !== "string" || value.length === 0) throw new AppError("cloudflare_config_invalid", 500);
-  return value.trim().toLowerCase().replace(/\.$/u, "");
+  const target = value.trim().toLowerCase().replace(/\.$/u, "");
+  // Production and staging must use the reviewed Cloudflare for SaaS target.
+  if (env.APP_ENV !== "local" && target !== "customers.selinow.com") {
+    throw new AppError("cloudflare_config_invalid", 500);
+  }
+  return target;
 }
 
 function safeJsonObject(value: string): Record<string, unknown> {

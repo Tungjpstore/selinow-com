@@ -20,6 +20,16 @@ export type SellerOrderSummary = {
   updatedAt: string;
 };
 
+export type SellerOrderPage = { nextCursor: string | null; orders: SellerOrderSummary[] };
+
+function sellerPage(input: { cursor?: string | null; limit?: number }): { limit: number; offset: number } {
+  const limit = input.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AppError("validation_failed", 400, ["page_limit_invalid"]);
+  if (input.cursor === undefined || input.cursor === null || input.cursor === "") return { limit, offset: 0 };
+  if (!/^(?:0|[1-9][0-9]{0,8})$/u.test(input.cursor)) throw new AppError("validation_failed", 400, ["page_cursor_invalid"]);
+  return { limit, offset: Number(input.cursor) };
+}
+
 export type SellerOrderDetail = SellerOrderSummary & {
   audit: Array<{ action: string; createdAt: string }>;
   expiresAt: string;
@@ -113,8 +123,9 @@ async function listSellerPrivateDownloads(input: { env: AppBindings; orderId: st
   return rows.results;
 }
 
-export async function listSellerOrders(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerOrderSummary[]> {
+export async function listSellerOrdersPage(input: { cursor?: string | null; env: AppBindings; limit?: number; shopPublicId: string; userId: string }): Promise<SellerOrderPage> {
   const { shopId, visibility } = await requireOrderActor(input.env, input.shopPublicId, input.userId);
+  const page = sellerPage(input);
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT
       orders.public_id AS orderId,
@@ -137,14 +148,20 @@ export async function listSellerOrders(input: { env: AppBindings; shopPublicId: 
     WHERE orders.shop_id = ?
     GROUP BY orders.id
     ORDER BY orders.created_at DESC, orders.id DESC
-    LIMIT 200
-  `).bind(shopId).all<SellerOrderSummary>();
-  if (visibility !== "summary") return rows.results;
-  return rows.results.map((row) => ({
+    LIMIT ? OFFSET ?
+  `).bind(shopId, page.limit + 1, page.offset).all<SellerOrderSummary>();
+  const hasNext = rows.results.length > page.limit;
+  const visibleRows = rows.results.slice(0, page.limit);
+  const orders = visibility !== "summary" ? visibleRows : visibleRows.map((row) => ({
     ...row,
     customerEmail: null,
     primaryItem: null,
   }));
+  return { nextCursor: hasNext ? String(page.offset + page.limit) : null, orders };
+}
+
+export async function listSellerOrders(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerOrderSummary[]> {
+  return (await listSellerOrdersPage({ ...input, limit: 100 })).orders;
 }
 
 export async function getSellerOrder(input: { env: AppBindings; orderPublicId: string; shopPublicId: string; userId: string }): Promise<SellerOrderDetail> {

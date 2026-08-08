@@ -5,6 +5,9 @@ const email = document.querySelector<HTMLInputElement>("[data-login-email]");
 const statusElement = document.querySelector<HTMLElement>("[data-login-status]");
 const submit = document.querySelector<HTMLButtonElement>("[data-login-submit]");
 const submitLabel = document.querySelector<HTMLElement>("[data-login-submit-label]");
+const recovery = document.querySelector<HTMLElement>("[data-login-recovery]");
+const resend = document.querySelector<HTMLButtonElement>("[data-login-resend]");
+const restart = document.querySelector<HTMLButtonElement>("[data-login-restart]");
 const t = createSystemTranslator(document.documentElement.lang);
 
 const messageKeys: Readonly<Record<string, string>> = {
@@ -25,6 +28,18 @@ function setBusy(busy: boolean): void {
   submit.disabled = busy;
   submit.setAttribute("aria-busy", String(busy));
   if (submitLabel !== null) submitLabel.textContent = t(busy ? "auth.login.submitting" : "auth.login.submit");
+}
+
+function showRecovery(): void {
+  if (recovery !== null) recovery.hidden = false;
+}
+
+function restartLogin(): void {
+  form?.reset();
+  if (recovery !== null) recovery.hidden = true;
+  setStatus("", "");
+  email?.removeAttribute("aria-invalid");
+  email?.focus();
 }
 
 function isLocalDebugOrigin(): boolean {
@@ -101,10 +116,12 @@ async function submitLogin(event: SubmitEvent): Promise<void> {
 
     if (typeof body.debugMagicLink === "string" && appendLocalDebugLink(body.debugMagicLink)) {
       statusElement.dataset.tone = "success";
+      showRecovery();
       return;
     }
 
     setStatus("success", t("auth.login.success"));
+    showRecovery();
   } catch {
     setStatus("error", t("auth.login.provider_unavailable"));
   } finally {
@@ -115,5 +132,7 @@ async function submitLogin(event: SubmitEvent): Promise<void> {
 form?.addEventListener("submit", (event) => {
   void submitLogin(event);
 });
+resend?.addEventListener("click", () => { form?.requestSubmit(); });
+restart?.addEventListener("click", restartLogin);
 
 export {};

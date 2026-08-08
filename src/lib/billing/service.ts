@@ -144,6 +144,7 @@ async function loadPlanPrice(env: AppBindings, input: { currency: string; market
     WHERE plans.code = ?
       AND plans.is_active = 1
       AND plans.is_public = 1
+      AND plans.is_assignable = 1
       AND prices.market_code = ?
       AND prices.currency = ?
       AND prices.interval = 'month'
@@ -232,7 +233,16 @@ async function loadReplay(input: {
     provider = await createDodoCheckout({
       config: input.config,
       currency: row.currency,
-      customData: { checkoutSessionId: row.id, planCode: row.planCode, shopId: input.shopId, subscriptionId: row.subscriptionId },
+      customData: {
+        amountMinor: String(row.amountMinor),
+        checkoutSessionId: row.id,
+        currency: row.currency.toUpperCase(),
+        marketCode: row.marketCode,
+        planCode: row.planCode,
+        providerPriceRef: row.providerPriceRef,
+        shopId: input.shopId,
+        subscriptionId: row.subscriptionId,
+      },
       idempotencyKey: providerIdempotencyKey,
       priceId: row.providerPriceRef,
       ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
@@ -362,7 +372,16 @@ export async function createBillingCheckout(input: {
   const provider = await createDodoCheckout({
     config: dodoConfig,
     currency,
-    customData: { checkoutSessionId: sessionId, planCode, shopId: actor.row.shop_id, subscriptionId: subscription.id },
+    customData: {
+      amountMinor: String(price.amountMinor),
+      checkoutSessionId: sessionId,
+      currency,
+      marketCode: market,
+      planCode,
+      providerPriceRef: price.providerPriceRef,
+      shopId: actor.row.shop_id,
+      subscriptionId: subscription.id,
+    },
     idempotencyKey: providerIdempotencyKey,
     priceId: price.providerPriceRef,
     ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
@@ -423,14 +442,16 @@ type SubscriptionChangeExecutionRow = {
 
 type PendingSubscriptionChange = {
   action: "cancel" | "change_plan" | "resume";
+  id: string;
   requestedPlanCode: string | null;
   requestedPlanId: string | null;
+  version: number;
 };
 
 async function loadPendingSubscriptionChange(env: AppBindings, shopId: string, subscriptionId: string): Promise<PendingSubscriptionChange | null> {
   return env.PLATFORM_DB.prepare(`
-    SELECT requests.action, requests.requested_plan_id AS requestedPlanId,
-      requested_plan.code AS requestedPlanCode
+    SELECT requests.id, requests.action, requests.requested_plan_id AS requestedPlanId,
+      requested_plan.code AS requestedPlanCode, requests.version
     FROM subscription_change_requests AS requests
     LEFT JOIN plans AS requested_plan ON requested_plan.id = requests.requested_plan_id
     WHERE requests.shop_id = ? AND requests.subscription_id = ?
@@ -658,6 +679,28 @@ export type BillingChangeSchedulerMetrics = {
   providerPending: number;
 };
 
+const MAX_BILLING_CHANGE_ATTEMPTS = 8;
+const PERMANENT_BILLING_CHANGE_ERRORS = new Set([
+  "billing_provider_invalid",
+  "billing_provider_operation_unavailable",
+  "provider_not_ready",
+]);
+
+async function rejectSubscriptionChangeRequest(input: {
+  env: AppBindings;
+  failureCode: string;
+  requestPublicId: string;
+  shopId: string;
+  now: Date;
+}): Promise<void> {
+  await input.env.PLATFORM_DB.prepare(`
+    UPDATE subscription_change_requests
+    SET status = 'rejected', failure_code = ?, reviewed_by_user_id = NULL,
+      reviewed_at = NULL, updated_at = ?, version = version + 1
+    WHERE shop_id = ? AND public_id = ? AND status IN ('requested', 'provider_pending')
+  `).bind(input.failureCode, input.now.toISOString(), input.shopId, input.requestPublicId).run();
+}
+
 /** Execute durable seller billing intents from the scheduled Worker runtime. */
 export async function processDueDodoSubscriptionChanges(input: {
   env: AppBindings;
@@ -667,15 +710,29 @@ export async function processDueDodoSubscriptionChanges(input: {
 }): Promise<BillingChangeSchedulerMetrics> {
   const now = input.now ?? new Date();
   const limit = Number.isSafeInteger(input.limit) && (input.limit ?? 0) > 0 ? Math.min(input.limit ?? 25, 100) : 25;
-  const retryCutoff = new Date(now.getTime() - 60_000).toISOString();
   const rows = await input.env.PLATFORM_DB.prepare(`
-    SELECT id, shop_id AS shopId, requested_by_user_id AS requestedByUserId
+    SELECT id, shop_id AS shopId, requested_by_user_id AS requestedByUserId,
+      execution_attempts AS executionAttempts
     FROM subscription_change_requests
-    WHERE status = 'requested'
-      AND (last_attempt_at IS NULL OR last_attempt_at <= ?)
+    WHERE (
+        status = 'requested'
+        OR (status = 'provider_pending' AND provider_action_ref LIKE 'operation:%')
+      )
+      AND execution_attempts < ?
+      AND (
+        last_attempt_at IS NULL
+        OR last_attempt_at <= datetime(?, '-' || CASE
+          WHEN execution_attempts <= 1 THEN 1
+          WHEN execution_attempts = 2 THEN 2
+          WHEN execution_attempts = 3 THEN 4
+          WHEN execution_attempts = 4 THEN 8
+          WHEN execution_attempts = 5 THEN 15
+          ELSE 30
+        END || ' minutes')
+      )
     ORDER BY COALESCE(last_attempt_at, created_at), id
     LIMIT ?
-  `).bind(retryCutoff, limit).all<{ id: string; requestedByUserId: string; shopId: string }>();
+  `).bind(MAX_BILLING_CHANGE_ATTEMPTS, now.toISOString(), limit).all<{ executionAttempts: number; id: string; requestedByUserId: string; shopId: string }>();
   const metrics: BillingChangeSchedulerMetrics = { attempted: 0, candidates: rows.results.length, failed: 0, providerPending: 0 };
   for (const row of rows.results) {
     metrics.attempted += 1;
@@ -690,8 +747,12 @@ export async function processDueDodoSubscriptionChanges(input: {
         ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
       });
       if (result.status === "provider_pending") metrics.providerPending += 1;
-    } catch {
+    } catch (error) {
       metrics.failed += 1;
+      const code = error instanceof AppError ? error.code : "billing_provider_unavailable";
+      if (PERMANENT_BILLING_CHANGE_ERRORS.has(code) || row.executionAttempts + 1 >= MAX_BILLING_CHANGE_ATTEMPTS) {
+        await rejectSubscriptionChangeRequest({ env: input.env, failureCode: code, now, requestPublicId: row.id, shopId: row.shopId }).catch(() => undefined);
+      }
     }
   }
   return metrics;
@@ -810,10 +871,50 @@ export async function suspendExpiredTrials(input: { env: AppBindings; now?: Date
   return suspended;
 }
 
+/** Persist grace expiry so authoritative billing state matches fail-closed access. */
+export async function suspendExpiredBillingGracePeriods(input: { env: AppBindings; now?: Date; limit?: number }): Promise<number> {
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  const limit = Number.isSafeInteger(input.limit) && (input.limit ?? 0) > 0 ? Math.min(input.limit ?? 100, 500) : 100;
+  const rows = await input.env.PLATFORM_DB.prepare(`
+    SELECT id, shop_id AS shopId, grace_ends_at AS graceEndsAt, version
+    FROM shop_subscriptions
+    WHERE state = 'grace_period' AND grace_ends_at IS NOT NULL AND grace_ends_at <= ?
+    ORDER BY grace_ends_at, id
+    LIMIT ?
+  `).bind(nowIso, limit).all<{ graceEndsAt: string; id: string; shopId: string; version: number }>();
+  let suspended = 0;
+  for (const row of rows.results) {
+    const eventHash = await sha256Json({ graceEndsAt: row.graceEndsAt, kind: "billing_grace_expired", subscriptionId: row.id });
+    try {
+      const results = await input.env.PLATFORM_DB.batch([
+        input.env.PLATFORM_DB.prepare(`
+          INSERT OR IGNORE INTO subscription_events (
+            id, shop_id, subscription_id, provider_event_id, source_kind,
+            event_type, from_state, to_state, event_hash, safe_metadata_json,
+            occurred_at, created_at
+          ) VALUES (?, ?, ?, NULL, 'system', 'billing.grace_expired', 'grace_period', 'suspended', ?, '{}', ?, ?)
+        `).bind(createId("sevt"), row.shopId, row.id, eventHash, row.graceEndsAt, nowIso),
+        input.env.PLATFORM_DB.prepare(`
+          UPDATE shop_subscriptions
+          SET state = 'suspended', grace_ends_at = NULL, updated_at = ?, version = version + 1
+          WHERE id = ? AND shop_id = ? AND state = 'grace_period' AND version = ? AND grace_ends_at <= ?
+        `).bind(nowIso, row.id, row.shopId, row.version, nowIso),
+        input.env.PLATFORM_DB.prepare("UPDATE shop_subscriptions SET version = 0 WHERE id = ? AND changes() = 0").bind(row.id),
+      ]);
+      if ((results[0]?.meta.changes ?? 0) === 1 && (results[1]?.meta.changes ?? 0) === 1) suspended += 1;
+    } catch (error) {
+      if (error instanceof Error && /version > 0|CHECK constraint failed/u.test(error.message)) continue;
+      throw error;
+    }
+  }
+  return suspended;
+}
+
 async function loadCheckoutForEvent(env: AppBindings, event: DodoBillingEvent): Promise<BillingCheckoutSession | null> {
   const sessionId = customValue(event.customData, "checkoutSessionId", "checkout_session_id");
   const shopId = customValue(event.customData, "shopId", "shop_id");
-  const providerTransactionId = event.providerTransactionId;
+  const providerCheckoutId = event.providerCheckoutId;
   const select = `
     SELECT sessions.id, sessions.shop_id AS shopId, sessions.subscription_id AS subscriptionId,
       sessions.plan_id AS planId, plans.code AS planCode, sessions.price_id AS priceId,
@@ -837,10 +938,9 @@ async function loadCheckoutForEvent(env: AppBindings, event: DodoBillingEvent): 
   // The first payment carries a new subscription/payment reference before
   // D1 has stored either ref; the signed checkout-session identity is the
   // authoritative bridge for that one event.
-  let subscriptionLookupFound = event.providerSubscriptionId === null
-    || (sessionId !== null && event.eventType === "payment.succeeded");
-  let transactionLookupFound = providerTransactionId === null
-    || (sessionId !== null && event.eventType === "payment.succeeded");
+  const initialPaymentWithLocalSession = sessionId !== null && event.eventType === "payment.succeeded";
+  let subscriptionLookupFound = event.providerSubscriptionId === null || initialPaymentWithLocalSession;
+  let transactionLookupFound = providerCheckoutId === null || initialPaymentWithLocalSession;
   if (sessionId !== null) {
     const row = await env.PLATFORM_DB.prepare(`${select} WHERE ${shopPredicate}(sessions.id = ? OR sessions.public_id = ?) LIMIT 1`).bind(...shopValue, sessionId, sessionId).first<BillingCheckoutSession>();
     if (row !== null) {
@@ -848,15 +948,15 @@ async function loadCheckoutForEvent(env: AppBindings, event: DodoBillingEvent): 
       candidates.push(row);
     }
   }
-  if (providerTransactionId !== null) {
-    const row = await env.PLATFORM_DB.prepare(`${select} WHERE ${shopPredicate}sessions.provider_checkout_ref = ? LIMIT 1`).bind(...shopValue, providerTransactionId).first<BillingCheckoutSession>();
+  if (providerCheckoutId !== null) {
+    const row = await env.PLATFORM_DB.prepare(`${select} WHERE ${shopPredicate}sessions.provider_checkout_ref = ? ORDER BY CASE WHEN sessions.status = 'completed' THEN 0 ELSE 1 END, sessions.completed_at DESC, sessions.created_at DESC, sessions.id DESC LIMIT 1`).bind(...shopValue, providerCheckoutId).first<BillingCheckoutSession>();
     if (row !== null) {
       transactionLookupFound = true;
       candidates.push(row);
     }
   }
   if (event.providerSubscriptionId !== null) {
-    const row = await env.PLATFORM_DB.prepare(`${select} WHERE ${shopPredicate}subscriptions.billing_provider_code = 'dodo' AND subscriptions.provider_subscription_ref = ? LIMIT 1`).bind(...shopValue, event.providerSubscriptionId).first<BillingCheckoutSession>();
+    const row = await env.PLATFORM_DB.prepare(`${select} WHERE ${shopPredicate}subscriptions.billing_provider_code = 'dodo' AND subscriptions.provider_subscription_ref = ? ORDER BY CASE WHEN sessions.status = 'completed' THEN 0 ELSE 1 END, sessions.completed_at DESC, sessions.created_at DESC, sessions.id DESC LIMIT 1`).bind(...shopValue, event.providerSubscriptionId).first<BillingCheckoutSession>();
     if (row !== null) {
       subscriptionLookupFound = true;
       candidates.push(row);
@@ -920,7 +1020,7 @@ async function recordEvent(env: AppBindings, event: DodoBillingEvent, payloadHas
       id, provider_code, provider_event_id, provider_object_ref, shop_id, event_type,
       payload_hash, status, safe_metadata_json, occurred_at, created_at, subscription_id
     ) VALUES (?, 'dodo', ?, ?, ?, ?, ?, 'received', '{}', ?, ?, ?)
-  `).bind(id, event.eventId, event.providerTransactionId ?? event.providerSubscriptionId, shopId, event.eventType, payloadHash, event.occurredAt, nowIso, subscriptionId).run();
+  `).bind(id, event.eventId, event.providerPaymentId ?? event.providerCheckoutId ?? event.providerSubscriptionId, shopId, event.eventType, payloadHash, event.occurredAt, nowIso, subscriptionId).run();
   if (inserted.meta.changes === 1) return { duplicate: false, event: { id, payloadHash, status: "received" }, retryable: true };
 
   // INSERT OR IGNORE makes concurrent deliveries converge on one durable row.
@@ -983,9 +1083,25 @@ export async function processDodoWebhook(input: {
     const customShopId = customValue(event.customData, "shopId", "shop_id");
     const customPlanCode = customValue(event.customData, "planCode", "plan_code");
     const customMarketCode = customValue(event.customData, "marketCode", "market_code");
+    const customCheckoutSessionId = customValue(event.customData, "checkoutSessionId", "checkout_session_id");
+    const customSubscriptionId = customValue(event.customData, "subscriptionId", "subscription_id");
+    const customCurrency = customValue(event.customData, "currency")?.toUpperCase() ?? null;
+    const customAmountMinor = customValue(event.customData, "amountMinor", "amount_minor");
+    const customProviderPriceRef = customValue(event.customData, "providerPriceRef", "provider_price_ref");
+    const initialPayment = event.eventType === "payment.succeeded" && session.status !== "completed";
+    if (initialPayment && (customShopId === null || customPlanCode === null || customMarketCode === null
+      || customCheckoutSessionId === null || customSubscriptionId === null || customCurrency === null
+      || customAmountMinor === null || customProviderPriceRef === null)) {
+      throw new AppError("billing_webhook_identity_mismatch", 409);
+    }
     if ((customShopId !== null && customShopId !== session.shopId)
       || (customPlanCode !== null && customPlanCode !== session.planCode && customPlanCode !== pendingChange?.requestedPlanCode)
-      || (customMarketCode !== null && customMarketCode !== session.marketCode)) throw new AppError("billing_webhook_identity_mismatch", 409);
+      || (customMarketCode !== null && customMarketCode !== session.marketCode)
+      || (customCheckoutSessionId !== null && customCheckoutSessionId !== session.id)
+      || (customSubscriptionId !== null && customSubscriptionId !== session.subscriptionId)
+      || (customCurrency !== null && customCurrency !== session.currency.toUpperCase())
+      || (customAmountMinor !== null && Number(customAmountMinor) !== session.amountMinor)
+      || (customProviderPriceRef !== null && customProviderPriceRef !== session.providerPriceRef)) throw new AppError("billing_webhook_identity_mismatch", 409);
     // Dodo emits subscription.active when the mandate is authorized. That
     // event can precede the actual charge, so it is intentionally informational
     // until a signed payment.succeeded event confirms the first payment.
@@ -993,11 +1109,10 @@ export async function processDodoWebhook(input: {
       await markEvent(input.env, recorded.event.id, "ignored", nowIso);
       return { duplicate: false, processed: false, state: "pending_payment" };
     }
-    const customSubscriptionId = customValue(event.customData, "subscriptionId", "subscription_id");
-    if (customSubscriptionId !== null && customSubscriptionId !== session.subscriptionId) throw new AppError("billing_webhook_identity_mismatch", 409);
+    if (event.providerCheckoutId !== null && session.providerCheckoutRef !== null && event.providerCheckoutId !== session.providerCheckoutRef) throw new AppError("billing_webhook_identity_mismatch", 409);
     let target = targetStateForEvent(event);
     let providerPriceRef = event.priceId;
-    if (target === "active" && pendingChange?.action === "change_plan" && providerPriceRef === null) {
+    if (target === "active" && providerPriceRef === null && (initialPayment || pendingChange?.action === "change_plan")) {
       if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
       const providerSubscription = await retrieveDodoSubscription({
         config,
@@ -1025,6 +1140,9 @@ export async function processDodoWebhook(input: {
       if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
       if (event.amountMinor === null || event.currency === null || providerPriceRef === null || event.amountMinor !== verifiedPrice.amountMinor || event.currency !== verifiedPrice.currency.toUpperCase() || providerPriceRef !== verifiedPrice.providerPriceRef) throw new AppError("billing_webhook_amount_mismatch", 409);
     }
+    if (initialPayment && (customCurrency !== verifiedPrice.currency.toUpperCase()
+      || Number(customAmountMinor) !== verifiedPrice.amountMinor
+      || customProviderPriceRef !== verifiedPrice.providerPriceRef)) throw new AppError("billing_webhook_amount_mismatch", 409);
     // Subscription events may omit product/amount fields. Validate any fields
     // supplied by Dodo, while requiring all price evidence on first payment.
     if (event.eventType.startsWith("subscription.")) {
@@ -1032,6 +1150,7 @@ export async function processDodoWebhook(input: {
     } else if (event.eventType === "payment.failed") {
       if (event.currency !== null && event.currency !== verifiedPrice.currency.toUpperCase()) throw new AppError("billing_webhook_price_mismatch", 409);
     }
+    if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
     if (event.eventType.startsWith("subscription.") && session.providerSubscriptionRef !== null && event.providerSubscriptionId !== session.providerSubscriptionRef) throw new AppError("billing_webhook_identity_mismatch", 409);
     if (event.eventType === "payment.failed" && session.providerSubscriptionRef !== null && event.providerSubscriptionId !== session.providerSubscriptionRef) throw new AppError("billing_webhook_identity_mismatch", 409);
     // A failed initial mandate/payment cannot receive the paid grace window;
@@ -1039,7 +1158,7 @@ export async function processDodoWebhook(input: {
     if ((event.eventType === "payment.failed" || event.eventType === "subscription.failed") && session.status !== "completed") target = "suspended";
     if (target === "active" && event.eventType !== "payment.succeeded" && session.status !== "completed") throw new AppError("billing_webhook_activation_unverified", 409);
     if (target === "grace_period" && session.status !== "completed") throw new AppError("billing_webhook_grace_invalid", 409);
-    if (target === "grace_period" && subscription.state !== "active") throw new AppError("billing_webhook_grace_invalid", 409);
+    if (target === "grace_period" && subscription.state !== "active" && subscription.state !== "grace_period") throw new AppError("billing_webhook_grace_invalid", 409);
     if (target !== null && await hasLaterProviderEvent({
       env: input.env,
       occurredAt: event.occurredAt,
@@ -1049,26 +1168,18 @@ export async function processDodoWebhook(input: {
       await markEvent(input.env, recorded.event.id, "ignored", nowIso);
       return { duplicate: false, processed: false, state: "stale" };
     }
-    if (target !== null) {
-      await input.env.PLATFORM_DB.prepare(`
-        INSERT OR IGNORE INTO subscription_events (
-          id, shop_id, subscription_id, provider_event_id, source_kind,
-          event_type, from_state, to_state, event_hash, safe_metadata_json,
-          occurred_at, created_at
-        ) VALUES (?, ?, ?, ?, 'provider', ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        createId("sevt"), session.shopId, session.subscriptionId, recorded.event.id,
-        event.eventType, subscription.state, target, payloadHash,
-        JSON.stringify({ amountMinor: event.amountMinor, currency: event.currency, priceId: providerPriceRef }),
-        event.occurredAt, nowIso,
-      ).run();
-    }
     const periodChanged = event.periodStart !== null || event.periodEnd !== null;
-    const providerRefChanged = event.providerSubscriptionId !== null && event.providerSubscriptionId !== subscription.providerSubscriptionRef;
+    const providerRefChanged = event.providerSubscriptionId !== subscription.providerSubscriptionRef;
     const priceChanged = target === "active" && (subscription.planId !== verifiedPrice.planId || subscription.priceId !== verifiedPrice.id);
-    if (target !== null && (subscription.state !== target || periodChanged || providerRefChanged || priceChanged)) {
-      const graceEndsAt = target === "grace_period" ? new Date((input.now ?? new Date()).getTime() + BILLING_GRACE_PERIOD_MS).toISOString() : null;
-      const transition = await input.env.PLATFORM_DB.prepare(`
+    const transitionNeeded = target !== null && (subscription.state !== target || periodChanged || providerRefChanged || priceChanged);
+    const statements: D1PreparedStatement[] = [];
+    if (transitionNeeded && target !== null) {
+      const graceEndsAt = target === "grace_period"
+        ? subscription.state === "grace_period" && subscription.graceEndsAt !== null
+          ? subscription.graceEndsAt
+          : new Date(new Date(event.occurredAt).getTime() + BILLING_GRACE_PERIOD_MS).toISOString()
+        : null;
+      statements.push(input.env.PLATFORM_DB.prepare(`
         UPDATE shop_subscriptions
         SET state = ?, plan_id = CASE WHEN ? = 'active' THEN ? ELSE plan_id END,
           market_code = CASE WHEN ? = 'active' THEN ? ELSE market_code END,
@@ -1079,7 +1190,7 @@ export async function processDodoWebhook(input: {
           price_id = CASE WHEN ? = 'active' THEN ? ELSE price_id END,
           grace_ends_at = ?, canceled_at = CASE WHEN ? = 'canceled' THEN ? ELSE canceled_at END,
           trial_ends_at = CASE WHEN ? = 'active' THEN NULL ELSE trial_ends_at END,
-          current_period_start = CASE WHEN ? = 'active' THEN COALESCE(current_period_start, ?) ELSE current_period_start END,
+          current_period_start = CASE WHEN ? = 'active' THEN COALESCE(?, current_period_start) ELSE current_period_start END,
           current_period_end = CASE WHEN ? = 'active' THEN COALESCE(?, current_period_end) ELSE current_period_end END,
           provider_subscription_ref = COALESCE(?, provider_subscription_ref),
           version = version + 1, updated_at = ?
@@ -1093,38 +1204,78 @@ export async function processDodoWebhook(input: {
         target, verifiedPrice.version,
         target, verifiedPrice.id,
         graceEndsAt, target, target === "canceled" ? nowIso : null,
-        target, target, event.periodStart ?? nowIso, target, event.periodEnd,
+        target, target, event.periodStart, target, event.periodEnd,
         event.providerSubscriptionId, nowIso, subscription.id, subscription.version,
-      ).run();
-      if (transition.meta.changes !== 1) throw new AppError("billing_subscription_version_conflict", 409);
+      ));
+    }
+    if (target !== null) {
+      statements.push(input.env.PLATFORM_DB.prepare(`
+        INSERT OR IGNORE INTO subscription_events (
+          id, shop_id, subscription_id, provider_event_id, source_kind,
+          event_type, from_state, to_state, event_hash, safe_metadata_json,
+          occurred_at, created_at
+        ) VALUES (?, ?, ?, ?, 'provider', ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        createId("sevt"), session.shopId, session.subscriptionId, recorded.event.id,
+        event.eventType, subscription.state, target, payloadHash,
+        JSON.stringify({ amountMinor: event.amountMinor, currency: event.currency, priceId: providerPriceRef }),
+        event.occurredAt, nowIso,
+      ));
+      if (transitionNeeded) {
+        statements.push(input.env.PLATFORM_DB.prepare(`
+          UPDATE shop_subscriptions SET version = 0
+          WHERE id = ? AND (
+            version != ?
+            OR NOT EXISTS (
+              SELECT 1 FROM subscription_events
+              WHERE provider_event_id = ? AND subscription_id = ? AND shop_id = ?
+            )
+          )
+        `).bind(subscription.id, subscription.version + 1, recorded.event.id, session.subscriptionId, session.shopId));
+      }
     }
     if ((event.eventType === "payment.failed" || event.eventType === "subscription.failed") && session.status !== "completed") {
-      await input.env.PLATFORM_DB.prepare(`
+      statements.push(input.env.PLATFORM_DB.prepare(`
         UPDATE billing_checkout_sessions
         SET status = 'failed', failure_code = ?, updated_at = ?, version = version + 1
         WHERE id = ? AND status IN ('pending', 'open')
-      `).bind(event.eventType.replaceAll(".", "_"), nowIso, session.id).run();
+      `).bind(event.eventType.replaceAll(".", "_"), nowIso, session.id));
     }
     if (event.eventType === "payment.succeeded") {
-      await input.env.PLATFORM_DB.prepare(`
+      statements.push(input.env.PLATFORM_DB.prepare(`
         UPDATE billing_checkout_sessions
         SET status = 'completed', provider_checkout_ref = COALESCE(provider_checkout_ref, ?),
           completed_at = ?, updated_at = ?, version = version + 1
         WHERE id = ?
-      `).bind(event.providerTransactionId, nowIso, nowIso, session.id).run();
+        `).bind(event.providerCheckoutId, nowIso, nowIso, session.id));
     }
-    if (target !== null) {
-      await completeSubscriptionChangeRequestFromProvider({
-        env: input.env,
-        eventId: recorded.event.id,
-        ...(providerPriceRef === null ? {} : { priceId: providerPriceRef }),
-        shopId: session.shopId,
-        subscriptionId: session.subscriptionId,
-        targetState: target,
-        ...(input.now === undefined ? {} : { now: input.now }),
-      });
+    const completesPendingChange = pendingChange !== null && target !== null && (
+      (pendingChange.action === "cancel" && target === "canceled")
+      || (pendingChange.action === "change_plan" && target === "active")
+      || (pendingChange.action === "resume" && target === "active")
+    );
+    if (completesPendingChange) {
+      statements.push(input.env.PLATFORM_DB.prepare(`
+        UPDATE subscription_change_requests
+        SET status = 'completed', completed_at = ?, provider_event_id = ?, failure_code = NULL,
+          reviewed_by_user_id = NULL, reviewed_at = NULL, updated_at = ?, version = version + 1
+        WHERE id = ? AND shop_id = ? AND subscription_id = ?
+          AND status = 'provider_pending' AND version = ?
+      `).bind(nowIso, recorded.event.id, nowIso, pendingChange.id, session.shopId, session.subscriptionId, pendingChange.version));
     }
-    await markEvent(input.env, recorded.event.id, target === null ? "ignored" : "processed", nowIso);
+    statements.push(input.env.PLATFORM_DB.prepare(`
+      UPDATE billing_provider_events
+      SET status = ?, processed_at = ?
+      WHERE id = ? AND status = 'received'
+    `).bind(target === null ? "ignored" : "processed", nowIso, recorded.event.id));
+    try {
+      await input.env.PLATFORM_DB.batch(statements);
+    } catch (error) {
+      if (error instanceof Error && /version > 0|CHECK constraint failed/u.test(error.message)) {
+        throw new AppError("billing_subscription_version_conflict", 409);
+      }
+      throw error;
+    }
     return { duplicate: false, processed: target !== null, state: target ?? "ignored" };
   } catch (error) {
     const result = error instanceof AppError && error.code.startsWith("billing_webhook_") ? "conflict" : "failed";

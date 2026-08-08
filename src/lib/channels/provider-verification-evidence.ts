@@ -3,6 +3,7 @@ import { createId } from "../core/ids";
 import type { AppBindings } from "../platform/bindings";
 import { subscriptionAllows } from "../billing/entitlements";
 import { getProviderRuntimeContract } from "./provider-contracts";
+import { requireChannelExpansion } from "./expansion";
 
 const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/u;
 const HASH_REFERENCE = /^[A-Za-z0-9_-]{43}$/u;
@@ -562,7 +563,7 @@ export async function promoteProviderConnectionFromEvidence(input: {
   requireIdentifier(input.reviewerUserId, "reviewer_id_invalid");
   requireVersion(input.expectedConnectionVersion, "connection_version_invalid");
   const providerCode = requireProviderCode(input.providerCode);
-  if (getProviderRuntimeContract(providerCode).stage === "provider_pending") throw new AppError("channel_provider_pending", 409, [providerCode]);
+  if (requireChannelExpansion(providerCode).providerExecution === "provider_pending") throw new AppError("channel_provider_pending", 409, [providerCode]);
   const requiredKinds = input.requiredKinds ?? ["webhook", "identity", "capability"];
   const required = new Set(requiredKinds.map(requireKind));
   if (required.size < 2) throw new AppError("validation_failed", 400, ["required_evidence_incomplete"]);

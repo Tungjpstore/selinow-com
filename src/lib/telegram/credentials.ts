@@ -14,6 +14,7 @@ export type TelegramCredentialRow = EncryptedTelegramCredential & {
 };
 
 export type TelegramWebhookIntegration = {
+  activeCredentialId?: string | null;
   botDisplayName: string | null;
   botUsername: string | null;
   credential: TelegramCredentialRow;
@@ -71,6 +72,7 @@ export async function loadTelegramWebhookIntegration(env: AppBindings, webhookPu
   const row = await env.PLATFORM_DB.prepare(`
     SELECT ${CREDENTIAL_SELECT},
       telegram_integrations.id AS integrationId,
+      telegram_integrations.active_credential_id AS activeCredentialId,
       telegram_integrations.shop_id AS shopId,
       telegram_integrations.status AS integrationStatus,
       telegram_integrations.bot_username_sanitized AS botUsername,

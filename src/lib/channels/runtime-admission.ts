@@ -1,4 +1,5 @@
 import { getProviderRuntimeContract } from "./provider-contracts";
+import { requireChannelExpansion } from "./expansion";
 import type { ChannelCapability, ChannelConnectionHealth, ChannelCredentialStatus } from "./types";
 
 export type ProviderRuntimeAdmissionReason =
@@ -39,7 +40,7 @@ export function evaluateProviderRuntimeAdmission(input: {
   const now = input.now ?? new Date();
   const ttl = input.webhookEvidenceTtlMs ?? DEFAULT_WEBHOOK_EVIDENCE_TTL_MS;
 
-  if (contract.stage === "provider_pending") reasons.add("provider_contract_pending");
+  if (requireChannelExpansion(contract.code).providerExecution === "provider_pending") reasons.add("provider_contract_pending");
   if (input.connectionStatus !== "active") reasons.add("connection_not_active");
   if (input.credentialStatus !== "active") reasons.add("credential_not_active");
   if (!input.providerIdentityMatched) reasons.add("provider_identity_unverified");

@@ -73,4 +73,29 @@ describe("onboarding localization contract", () => {
     expect(client).toContain("readShopGlobalizationForm");
     expect(client).toContain("Object.assign(shop, profileResponse.shop)");
   });
+
+  it("keeps onboarding plan options aligned with the authenticated shop API", () => {
+    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
+    const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
+    expect(component).toContain('<option value="starter">');
+    expect(component).toContain('<option value="pro">');
+    for (const legacy of ["bot", "store", "business"]) {
+      expect(component).not.toContain(`<option value="${legacy}">`);
+    }
+    expect(route).toContain("PUBLIC_PLAN_CODES");
+    expect(route).toContain("is_public = 1 AND is_assignable = 1");
+    expect(client).toContain('requestApi(root, "/api/app/shops", { method: "GET" })');
+    expect(client).toContain("formatMoney(offer.amountMinor, offer.currency, activeLocale)");
+  });
+
+  it("recovers server-owned onboarding state without relying on the idempotency storage cache", () => {
+    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
+    const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    expect(component).toContain("data-onboarding-resume-recovery");
+    expect(component).toContain("data-onboarding-resume-reload");
+    expect(client).toContain('error.issues.includes("trial_already_used")');
+    expect(client).toContain('window.location.assign("/onboarding")');
+    expect(client).toContain("return crypto.randomUUID()");
+  });
 });

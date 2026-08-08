@@ -183,11 +183,18 @@ describe("website checkout recovery", () => {
     const orderTokenHash = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "order-access", orderToken);
     await seedOrder(database, { requestHash, subjectHash: checkoutSubjectHash, tokenHash: orderTokenHash });
 
-    await expect(recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() })).resolves.toMatchObject({
-      orderId: "order_33333333-3333-4333-8333-333333333333",
-      orderToken,
-      paymentStatus: "unpaid",
-    });
+    const attempts = await Promise.allSettled([
+      recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() }),
+      recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() }),
+    ]);
+    const fulfilled = attempts.filter((attempt) => attempt.status === "fulfilled");
+    const rejected = attempts.filter((attempt) => attempt.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(fulfilled[0]).toMatchObject({ value: { orderId: "order_33333333-3333-4333-8333-333333333333", orderToken, paymentStatus: "unpaid" } });
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({ reason: { code: "checkout_recovery_consumed", status: 409 } });
+    await expect(recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() })).rejects.toMatchObject({ code: "checkout_recovery_consumed", status: 409 });
+    expect(database.database.prepare("SELECT consumed_order_id AS consumedOrderId FROM checkout_recovery_capabilities WHERE shop_id = ?").get("shop_recovery")).toEqual({ consumedOrderId: "order_recovery" });
   });
 
   it("fails closed on order request/cart conflicts and token-hash mismatch", async () => {

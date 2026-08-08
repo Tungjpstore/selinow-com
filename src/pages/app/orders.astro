@@ -6,7 +6,7 @@ import PaymentState from "../../components/commerce/PaymentState.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
 import { authenticateRequest } from "../../lib/auth/session";
-import { listSellerOrders, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
+import { listSellerOrdersPage, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
 import { isAppError } from "../../lib/core/errors";
 import { listPaymentExceptions, parsePaymentExceptionEvidence, type PaymentExceptionEvidence, type PaymentExceptionView } from "../../lib/payments/reconciliation";
 import { getBindings } from "../../lib/platform/bindings";
@@ -30,12 +30,15 @@ const workspaceHref = (href: string): string => withSelectedShop(href, shop?.pub
 const locale = Astro.locals.locale;
 const t = createDashboardTranslator(locale);
 let orders: SellerOrderSummary[] = [];
+let nextCursor: string | null = null;
 let paymentExceptions: PaymentExceptionView[] = [];
 let paymentExceptionState: "forbidden" | "ready" | "unavailable" = "ready";
 
 if (shop !== undefined && loadState === "ready") {
   try {
-    orders = await listSellerOrders({ env, shopPublicId: shop.publicId, userId: auth.userId });
+    const page = await listSellerOrdersPage({ cursor: Astro.url.searchParams.get("cursor"), env, shopPublicId: shop.publicId, userId: auth.userId });
+    orders = page.orders;
+    nextCursor = page.nextCursor;
   } catch (error) {
     loadState = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
   }
@@ -217,6 +220,7 @@ const filterTags = (order: SellerOrderSummary): string => [
           <div class="no-results" data-no-results hidden aria-live="polite">
             <WorkspaceState eyebrow={t("dashboard.orders.no_results.eyebrow")} title={t("dashboard.orders.no_results.title")} description={t("dashboard.orders.no_results.description")} tone="neutral" />
           </div>
+          {nextCursor !== null && <a class="sln-button sln-button-secondary" href={workspaceHref(`/app/orders?cursor=${encodeURIComponent(nextCursor)}`)}>{t("dashboard.orders.pagination.next")} →</a>}
         </section>
       )}
     </>

@@ -84,6 +84,12 @@ type Shop = {
   timezone: string;
 };
 
+type PublicPlan = {
+  code: "pro" | "starter";
+  features: Record<string, unknown>;
+  offers: Array<{ amountMinor: number; currency: string; interval: string; marketCode: string }>;
+};
+
 type CatalogProduct = {
   description: string;
   fulfillmentType: "license_key" | "manual";
@@ -229,6 +235,59 @@ function parseShops(value: string | undefined): Shop[] {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed) ? parsed.filter(isShop) : [];
   } catch {
+    return [];
+  }
+}
+
+function parsePublicPlans(value: unknown): PublicPlan[] {
+  const root = asRecord(value);
+  if (root === null || !Array.isArray(root.plans)) return [];
+  const plans: PublicPlan[] = [];
+  for (const item of root.plans) {
+    const row = asRecord(item);
+    if (row === null || (row.code !== "starter" && row.code !== "pro")) continue;
+    const offers = Array.isArray(row.offers) ? row.offers.flatMap((item) => {
+      const offer = asRecord(item);
+      return offer !== null
+        && typeof offer.amountMinor === "number"
+        && typeof offer.currency === "string"
+        && typeof offer.interval === "string"
+        && typeof offer.marketCode === "string"
+        ? [{ amountMinor: offer.amountMinor, currency: offer.currency, interval: offer.interval, marketCode: offer.marketCode }]
+        : [];
+    }) : [];
+    plans.push({ code: row.code, features: asRecord(row.features) ?? {}, offers });
+  }
+  return plans;
+}
+
+function renderPlanSummary(root: HTMLElement, plans: readonly PublicPlan[]): void {
+  const selected = query<HTMLSelectElement>(root, "[data-shop-plan]")?.value;
+  const plan = plans.find((item) => item.code === selected);
+  if (plan === undefined) {
+    setText(root, "[data-plan-summary]", copy("onboarding.form.plan_unavailable", "Plan details are temporarily unavailable."));
+    return;
+  }
+  const merchantCountry = query<HTMLInputElement>(root, "[data-shop-merchant-country]")?.value.trim().toUpperCase() ?? "";
+  const market = merchantCountry === "VN" ? "vn" : "global";
+  const offer = plan.offers.find((item) => item.marketCode === market);
+  const featureKey = plan.code === "pro" ? "onboarding.form.plan_pro_features" : "onboarding.form.plan_starter_features";
+  const featureFallback = plan.code === "pro"
+    ? "Starter features plus API, advanced analytics, and a custom domain."
+    : "Storefront, Telegram, inventory, automation, and basic analytics.";
+  const price = offer === undefined
+    ? copy("onboarding.form.plan_price_unavailable", "Price unavailable")
+    : copy("onboarding.form.plan_price", "{price}/month", { price: formatMoney(offer.amountMinor, offer.currency, activeLocale) });
+  setText(root, "[data-plan-summary]", `${price} · ${copy(featureKey, featureFallback)}`);
+}
+
+async function loadPublicPlans(root: HTMLElement): Promise<PublicPlan[]> {
+  try {
+    const plans = parsePublicPlans(await requestApi(root, "/api/app/shops", { method: "GET" }));
+    renderPlanSummary(root, plans);
+    return plans;
+  } catch {
+    renderPlanSummary(root, []);
     return [];
   }
 }
@@ -526,6 +585,11 @@ function setFeedback(root: HTMLElement, message: string, tone: "error" | "info" 
   feedback.setAttribute("aria-live", tone === "error" ? "assertive" : "polite");
   feedback.hidden = message.length === 0;
   if (message.length > 0) feedback.scrollIntoView({ behavior: preferredScrollBehavior(), block: "nearest" });
+}
+
+function showCreateRecovery(root: HTMLElement): void {
+  const recovery = query<HTMLElement>(root, "[data-onboarding-resume-recovery]");
+  if (recovery !== null) recovery.hidden = false;
 }
 
 function errorMessage(error: unknown): string {
@@ -1325,6 +1389,7 @@ function addShopOption(root: HTMLElement, shop: Shop): void {
 async function initialize(root: HTMLElement): Promise<void> {
   configureLocalization(root);
   const shops = parseShops(root.dataset.shops);
+  const publicPlans = await loadPublicPlans(root);
   const state: PageState = {
     automationTasks: [],
     catalogProducts: [],
@@ -1350,6 +1415,8 @@ async function initialize(root: HTMLElement): Promise<void> {
   };
   root.addEventListener("input", clearEditedFieldError);
   root.addEventListener("change", clearEditedFieldError);
+  query<HTMLSelectElement>(root, "[data-shop-plan]")?.addEventListener("change", () => { renderPlanSummary(root, publicPlans); });
+  query<HTMLInputElement>(root, "[data-shop-merchant-country]")?.addEventListener("input", () => { renderPlanSummary(root, publicPlans); });
 
   for (const button of queryAll<HTMLButtonElement>(root, "[data-step-button]")) {
     button.addEventListener("click", () => {
@@ -1375,6 +1442,9 @@ async function initialize(root: HTMLElement): Promise<void> {
   });
   query<HTMLButtonElement>(root, "[data-refresh-shop]")?.addEventListener("click", () => { void loadShopState(root, state, shops); });
   query<HTMLButtonElement>(root, "[data-automation-refresh]")?.addEventListener("click", () => { void loadAutomationTasks(root, state, shops); });
+  query<HTMLButtonElement>(root, "[data-onboarding-resume-reload]")?.addEventListener("click", () => {
+    window.location.assign("/onboarding");
+  });
 
   query<HTMLFormElement>(root, "[data-shop-rename-form]")?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1439,7 +1509,11 @@ async function initialize(root: HTMLElement): Promise<void> {
       clearInvalidFields(root);
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_shop", "Check the highlighted fields before creating the store."))) return;
       const draft = validateShopDraft(shopName?.value ?? "", shopSlug?.value ?? "");
-      const planCode = query<HTMLSelectElement>(root, "[data-shop-plan]")?.value ?? "store";
+      const planCode = query<HTMLSelectElement>(root, "[data-shop-plan]")?.value ?? "starter";
+      if (planCode !== "starter" && planCode !== "pro") {
+        markFieldInvalid(root, query<HTMLSelectElement>(root, "[data-shop-plan]"), copy("onboarding.feedback.invalid_plan", "Choose Starter or Pro."));
+        return;
+      }
       const merchantCountry = query<HTMLInputElement>(root, "[data-shop-merchant-country]")?.value.trim().toUpperCase() ?? "";
       const businessCountry = query<HTMLInputElement>(root, "[data-shop-business-country]")?.value.trim().toUpperCase() ?? "";
       const currency = normalizeCurrencyCode(query<HTMLSelectElement>(root, "[data-shop-currency]")?.value);
@@ -1479,6 +1553,7 @@ async function initialize(root: HTMLElement): Promise<void> {
         await loadShopState(root, state, shops);
         showStep(root, state, "channels");
       } catch (error) {
+        if (error instanceof ApiError && error.issues.includes("trial_already_used")) showCreateRecovery(root);
         setFeedback(root, errorMessage(error), "error");
       } finally {
         setBusy(button, false);

@@ -10,7 +10,7 @@ import { cancelChannelConnectorRequest, createChannelConnectorRequest, listChann
 import { listAdminAuditEntries, listAdminOrderInvestigations } from "../../src/lib/operations/admin-investigations";
 import { createPaymentRemediationRequest, listAdminPaymentRemediationRequests, listSellerPaymentRemediationRequests, reviewPaymentRemediationRequest } from "../../src/lib/payments/remediation";
 import type { AppBindings } from "../../src/lib/platform/bindings";
-import { appendCustomerNote, getSellerCustomer, redactCustomerNote, updateSellerCustomer } from "../../src/lib/tenants/customer-management";
+import { appendCustomerNote, executeBuyerPrivacyRequest, getSellerCustomer, redactCustomerNote, updateSellerCustomer } from "../../src/lib/tenants/customer-management";
 import { createSubscriptionChangeRequest, listSellerBillingPlans, listSubscriptionChangeRequests } from "../../src/lib/tenants/billing-requests";
 import { acceptMemberInvitation, issueMemberInvitation, listMemberInvitations, resendMemberInvitation, revokeMemberInvitation, suspendMember, updateMemberRole } from "../../src/lib/tenants/member-management";
 
@@ -175,6 +175,39 @@ describe("seller operations backend contracts", () => {
     expect(triggers.map((trigger) => trigger.name)).toEqual(expect.arrayContaining(["customer_notes_no_delete", "order_notes_no_delete", "customer_notes_redaction_guard", "order_notes_redaction_guard"]));
   });
 
+  it("keeps buyer privacy export allowlisted, replay-safe and tenant-bound", async () => {
+    const exported = await executeBuyerPrivacyRequest({
+      customerPublicId: CUSTOMER_A,
+      env: bindings,
+      idempotencyKey: "privacy-export-a1",
+      kind: "export",
+      now: NOW,
+      requestId: "request-privacy-export",
+      shopPublicId: SHOP_A_PUBLIC,
+      userId: OWNER_A,
+    });
+    expect(exported).toMatchObject({ safeResultCode: "export_ready", status: "completed" });
+    expect(exported.projection?.customer.email).toBe("buyer-a@example.test");
+    expect(JSON.stringify(exported.projection)).not.toContain("token-a");
+    expect(JSON.stringify(exported.projection)).not.toContain("subject-a");
+    expect(await executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-export-a1", kind: "export", now: NOW, requestId: "request-privacy-replay", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A })).toEqual(exported);
+    await expect(executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-export-cross", kind: "export", now: NOW, requestId: "request-privacy-cross", shopPublicId: SHOP_B_PUBLIC, userId: OWNER_B })).rejects.toMatchObject({ code: "customer_not_found" });
+  });
+
+  it("blocks active buyer deletion and anonymizes only after operational records settle", async () => {
+    const blocked = await executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-delete-blocked", kind: "anonymize", now: NOW, requestId: "request-privacy-blocked", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
+    expect(blocked).toMatchObject({ safeResultCode: "active_records_blocked", status: "blocked" });
+    expect(database.prepare("SELECT email_normalized AS email FROM shop_customers WHERE id = ?").get(CUSTOMER_A)).toEqual({ email: "buyer-a@example.test" });
+
+    database.prepare("UPDATE orders SET status = 'completed', payment_status = 'paid', fulfillment_status = 'fulfilled' WHERE id = ?").run(ORDER_A);
+    const note = await appendCustomerNote({ body: "Contains buyer-provided context", customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-note-a1", now: NOW, requestId: "request-privacy-note", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
+    const completed = await executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-delete-complete", kind: "anonymize", now: NOW, requestId: "request-privacy-complete", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
+    expect(completed).toMatchObject({ safeResultCode: "anonymized_financial_audit_retained", status: "completed" });
+    expect(database.prepare("SELECT email_normalized AS email, display_name AS displayName, anonymized_at AS anonymizedAt FROM shop_customers WHERE id = ?").get(CUSTOMER_A)).toEqual({ email: null, displayName: null, anonymizedAt: NOW.toISOString() });
+    expect(database.prepare("SELECT customer_email_masked AS email, customer_id AS customerId FROM orders WHERE id = ?").get(ORDER_A)).toEqual({ email: null, customerId: CUSTOMER_A });
+    expect(database.prepare("SELECT body, status FROM customer_notes WHERE id = ?").get(note.notePublicId)).toEqual({ body: "[redacted]", status: "redacted" });
+  });
+
   it("keeps member mutations tenant-bound, owner-protected, versioned and replay-safe", async () => {
     const changed = await updateMemberRole({ env: bindings, expectedVersion: 1, idempotencyKey: "member-role-key-1", memberPublicId: MEMBER_MANAGER, newRole: "support", requestId: "request-role", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
     expect(changed).toMatchObject({ memberPublicId: MEMBER_MANAGER, role: "support", status: "active", version: 2 });
@@ -283,13 +316,23 @@ describe("seller operations backend contracts", () => {
       userId: OWNER_A,
       now: NOW,
     });
-    expect(request).toMatchObject({ channelCode: "whatsapp.cloud", providerCode: "whatsapp.cloud", providerExecution: "contract_ready", status: "requested", version: 1 });
+    expect(request).toMatchObject({ channelCode: "whatsapp.cloud", providerCode: "whatsapp.cloud", providerExecution: "provider_pending", status: "requested", version: 1 });
     expect(await createChannelConnectorRequest({ channelCode: "whatsapp.cloud", env: bindings, idempotencyKey: "connector-request-1", providerCode: "whatsapp.cloud", requestId: "request-connector-retry", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).toEqual(request);
     expect(await listChannelConnectorRequests({ env: bindings, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A })).toEqual([request]);
     await expect(createChannelConnectorRequest({ channelCode: "whatsapp.cloud", env: bindings, idempotencyKey: "connector-request-bad", providerCode: "telegram.mini_app", requestId: "request-connector-bad", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "validation_failed" });
     const canceled = await cancelChannelConnectorRequest({ env: bindings, expectedVersion: 1, idempotencyKey: "connector-cancel-1", requestId: "request-connector-cancel", requestPublicId: request.requestPublicId, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
     expect(canceled).toMatchObject({ status: "canceled", version: 2 });
     expect(await cancelChannelConnectorRequest({ env: bindings, expectedVersion: 1, idempotencyKey: "connector-cancel-1", requestId: "request-connector-cancel-retry", requestPublicId: request.requestPublicId, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).toEqual(canceled);
+    database.prepare(`INSERT INTO channel_connector_requests (
+      id, public_id, shop_id, channel_code, provider_code, requested_by_user_id,
+      status, provider_reference_hash, reviewed_by_user_id, reviewed_at,
+      idempotency_key_hash, request_hash, created_at, updated_at, version
+    ) VALUES (?, ?, ?, 'whatsapp.cloud', 'whatsapp.cloud', ?, 'active', ?, ?, ?, ?, ?, ?, ?, 1)`).run(
+      "creq_active_projection_a", "creq_active_projection_a", SHOP_A, OWNER_A,
+      "provider-reference-hash", OWNER_A, NOW.toISOString(), "active-idempotency-hash",
+      "active-request-hash", NOW.toISOString(), NOW.toISOString(),
+    );
+    expect((await listChannelConnectorRequests({ env: bindings, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A })).find((entry) => entry.requestPublicId === "creq_active_projection_a")).toMatchObject({ providerExecution: "provider_pending", status: "provider_pending" });
     expect(() => database.prepare("DELETE FROM channel_connector_requests WHERE id = ?").run(request.requestPublicId)).toThrow("channel_connector_request_immutable");
   });
 
