@@ -64,18 +64,21 @@ describe("operational migration-ledger documentation", () => {
       deployStagingDryRun: false,
       gitDiffCheck: false,
     });
-    expect(productionEvidenceExample.rollback?.candidate).toMatchObject({
+    const rollbackCandidate = productionEvidenceExample.rollback?.candidate;
+    expect(rollbackCandidate).toMatchObject({
       schemaVersion: 2,
       accepted: false,
       rehearsalPassed: false,
-      workerVersion: expect.any(String),
-      commitSha: expect.any(String),
-      treeSha: expect.any(String),
-      migrationName: expect.any(String),
-      migrationLedgerSha256: expect.any(String),
-      evidenceRef: expect.any(String),
-      artifactSha256: expect.any(String),
     });
+    for (const key of [
+      "workerVersion",
+      "commitSha",
+      "treeSha",
+      "migrationName",
+      "migrationLedgerSha256",
+      "evidenceRef",
+      "artifactSha256",
+    ]) expect(typeof rollbackCandidate?.[key]).toBe("string");
   });
 
   it("allows checkpoint history but rejects stale current operational claims", () => {
