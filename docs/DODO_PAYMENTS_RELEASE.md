@@ -1,0 +1,59 @@
+# Dodo Payments Release Lane
+
+This runbook records the platform-subscription lane separately from PayOS seller
+payments. It is intentionally evidence-first: local tests prove source behavior,
+while only a final staging release can produce accepted provider evidence.
+
+## Current State
+
+- Four approved test/live offers exist: Starter/Pro in VN/VND and Global/USD.
+- Staging uses `DODO_PAYMENTS_ENVIRONMENT=test_mode` and has the API key secret
+  name configured. The webhook key and endpoint remain pending.
+- The canonical staging webhook probe currently returns `404`; Cloudflare route
+  ownership must be reconciled before any staging mutation.
+- No migration, staging deploy, production deploy, or live charge is authorized
+  by this document.
+
+## Evidence Contract
+
+After a guarded staging deploy, create a private evidence file from
+`infra/release/dodo-uat-evidence.example.json`. Fill only safe fingerprints and
+opaque request/event/session references. Never store secrets, raw payloads,
+hosted checkout URLs, customer details, or payment details.
+
+Validate it against the exact release manifest and Worker version:
+
+```bash
+npm run dodo:uat:validate -- \
+  --evidence .wrangler/releases/staging/<release-id>/dodo-uat-evidence.json \
+  --commit <40-hex-commit> \
+  --tree <40-hex-tree> \
+  --release-id <stg_release_id> \
+  --manifest-ref .wrangler/releases/staging/<release-id>/release-manifest.json \
+  --manifest-sha256 <64-hex-sha256> \
+  --worker-version <provider-worker-version> \
+  --json
+```
+
+The validator requires all 32 scenarios to be `passed`, exact four-offer
+commercial values, unique provider-reference fingerprints, signed-event
+references, complete redaction checks, and an exact commit/tree/manifest/Worker
+binding. A source test pass or a placeholder example is not staging evidence.
+
+## Mutation Order
+
+1. Reconcile Cloudflare route inventory and pass `platform:route-preflight` and
+   `platform:doctor`.
+2. Create fresh protected backup and restore drill; write the exact staging
+   release manifest.
+3. Run the full forward-only migration chain with maintenance-drain confirmation,
+   then create post-migration evidence and deploy that same manifest.
+4. Reprobe the canonical webhook route; it must reject unsigned input rather than
+   return `404`.
+5. Register the environment-specific Dodo webhook, set the webhook secret through
+   Cloudflare Worker secrets, reconcile the four staging provider references, and
+   execute test-mode checkout -> signed webhook -> subscription UAT.
+6. Revoke temporary audit credentials and preserve only reference-only evidence.
+
+Production remains blocked until the non-Dodo admission contract, backup/restore,
+monitoring, rollback, owner, pilot, PayOS and other provider gates are accepted.
