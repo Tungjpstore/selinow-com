@@ -92,6 +92,8 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "payment_integrations_payos_claim_state_update_guard",
   "payment_credentials_payos_claim_scope_insert_guard",
   "payment_credentials_payos_claim_scope_update_guard",
+  "payment_integrations_payos_claim_fingerprint_update_guard",
+  "payment_credentials_payos_claim_fingerprint_update_guard",
 ]);
 
 const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
@@ -122,6 +124,13 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       payment_integrations: "4f1c6a5aaf7f825b06c08a43c5ad3827327a43d7a8361d2dd602bc29d74b5224",
       payment_integrations_payos_claim_state_insert_guard: "d59e9de101ad4c396b1321caeefd69a21dc5740a2942805f0c0816646524b8de",
       payment_integrations_payos_claim_state_update_guard: "ba4a58fa87d7964fd6073d689b9870fee8aa8cd5503362d5bbba106477cb8ba0",
+    }),
+  }),
+  "0089_payos_provider_claim_compatibility.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      payment_credentials_payos_claim_fingerprint_update_guard: "1138afea4b9ad196d64dc2e19e81847a6a9a13861e3d8b773e49392f86d218be",
+      payment_integrations_payos_claim_fingerprint_update_guard: "e5c2d27d420af8e0302def762a5bb51218b1c618267c8fd46b188975193e44ed",
     }),
   }),
 });
@@ -1247,7 +1256,27 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
           WHERE integration.id = credential.integration_id
             AND integration.shop_id = credential.shop_id
             AND integration.provider = credential.provider
-            AND integration.provider_claim_nonce = credential.provider_claim_nonce)) AS integrity_0088_provider_claim_scope;`;
+            AND integration.provider_claim_nonce = credential.provider_claim_nonce)) AS integrity_0088_provider_claim_scope,
+    (SELECT COUNT(*) FROM payment_integrations AS integration
+      WHERE integration.provider = 'payos'
+        AND integration.provider_identity_fingerprint IS NOT NULL
+        AND integration.active_credential_id IS NULL
+        AND integration.status IN ('pending', 'error')
+        AND integration.provider_claim_nonce IS NULL
+        AND integration.provider_claim_state = 'idle'
+        AND integration.provider_claim_target_fingerprint IS NULL) AS integrity_0089_unfenced_integration_claim,
+    (SELECT COUNT(*) FROM payment_credentials AS credential
+      WHERE credential.provider = 'payos'
+        AND credential.provider_ownership_fingerprint IS NOT NULL
+        AND credential.status IN ('pending', 'error')
+        AND credential.provider_claim_nonce IS NULL
+        AND EXISTS (SELECT 1 FROM payment_integrations AS integration
+          WHERE integration.id = credential.integration_id
+            AND integration.shop_id = credential.shop_id
+            AND integration.provider = credential.provider
+            AND integration.provider_claim_state = 'quarantined'
+            AND integration.provider_claim_nonce IS NOT NULL
+            AND integration.provider_claim_target_fingerprint IS NULL)) AS integrity_0089_unfenced_credential_claim;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {
@@ -1303,6 +1332,8 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0087_trial_claim",
     "integrity_0088_provider_claim_scope",
     "integrity_0088_provider_claim_state",
+    "integrity_0089_unfenced_credential_claim",
+    "integrity_0089_unfenced_integration_claim",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

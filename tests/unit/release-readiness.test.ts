@@ -41,6 +41,8 @@ const rollbackInvariants = [
   "payment_integrations_payos_claim_state_update_guard",
   "payment_credentials_payos_claim_scope_insert_guard",
   "payment_credentials_payos_claim_scope_update_guard",
+  "payment_integrations_payos_claim_fingerprint_update_guard",
+  "payment_credentials_payos_claim_fingerprint_update_guard",
 ];
 const sourceMigrationNames = readdirSync("migrations")
   .filter((name) => name.endsWith(".sql"))

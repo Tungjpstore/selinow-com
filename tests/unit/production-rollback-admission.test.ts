@@ -100,7 +100,7 @@ describe("production rollback schema compatibility admission", () => {
 
     const advanced = (evaluate as (
       value: Record<string, unknown>, time: Date, names: string[],
-    ) => { missing: string[] })(input, now, [...migrationNames, "0089_future.sql"]);
+    ) => { missing: string[] })(input, now, [...migrationNames, "0090_future.sql"]);
     expect(advanced.missing).toEqual(expect.arrayContaining([
       "evidence.rollback.candidate.migrationLedgerSha256",
       "evidence.rollback.candidate.migrationName",

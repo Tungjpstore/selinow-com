@@ -153,7 +153,7 @@ describe("production Worker continuation deploy admission", () => {
     }
   });
 
-  it("proves the reviewed 0087 and 0088 schema definitions and live data invariants", () => {
+  it("proves the reviewed 0087 through 0089 schema definitions and live data invariants", () => {
     const assertInvariants = (releaseModule as Record<string, unknown>).assertProductionDatabaseInvariantContract;
     expect(typeof assertInvariants).toBe("function");
     if (typeof assertInvariants !== "function") return;
@@ -183,6 +183,7 @@ describe("production Worker continuation deploy admission", () => {
       "shop_subscriptions_trial_claim_insert_guard",
       "payment_integrations_payos_claim_state_insert_guard",
       "idx_payment_integrations_provider_claim_nonce",
+      "payment_integrations_payos_claim_fingerprint_update_guard",
     ]));
     expect(runner).toHaveBeenCalledTimes(3);
   });
@@ -223,9 +224,9 @@ describe("production Worker continuation deploy admission", () => {
     })).toThrow("production_database_invariant_data_violation:integrity_0088_provider_claim_state");
 
     expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
-      migrationNames: [...migrationNames, "0089_future.sql"],
+      migrationNames: [...migrationNames, "0090_future.sql"],
       runWranglerImplementation: vi.fn(),
-    })).toThrow("production_database_invariant_registry_incomplete:0089_future.sql");
+    })).toThrow("production_database_invariant_registry_incomplete:0090_future.sql");
   });
 
   it("places complete production database admission before and after the build", () => {
