@@ -5,16 +5,55 @@ type JsonObject = Record<string, unknown>;
 type Price = { amountMinor: number; currency: string; displayAmount: string | null; interval: string; marketCode: string };
 type Plan = { code: string; name: string; prices: Price[]; version: number };
 type ChangeRequest = { action: string; currentPlanCode: string; requestedPlanCode: string | null; reasonCode: string; requestPublicId: string; status: string; updatedAt: string; version: number };
+type BillingCheckoutAttemptInput = { planCode: string; recovery: boolean; shopPublicId: string };
+type BillingCheckoutAttempt = BillingCheckoutAttemptInput & { idempotencyKey: string };
+
+function createBillingIdempotencyKey(): string {
+  try { return `billing_ui_${crypto.randomUUID()}`; }
+  catch { return `billing_ui_${String(Date.now())}_${Math.random().toString(36).slice(2)}`; }
+}
+
+export class BillingCheckoutAttemptTracker {
+  private current: BillingCheckoutAttempt | null = null;
+
+  constructor(private readonly createKey: () => string = createBillingIdempotencyKey) {}
+
+  begin(input: BillingCheckoutAttemptInput): BillingCheckoutAttempt {
+    if (this.current !== null
+      && this.current.planCode === input.planCode
+      && this.current.recovery === input.recovery
+      && this.current.shopPublicId === input.shopPublicId) return this.current;
+    this.current = { ...input, idempotencyKey: this.createKey() };
+    return this.current;
+  }
+
+  finish(attempt: Pick<BillingCheckoutAttempt, "idempotencyKey">): void {
+    if (this.current?.idempotencyKey === attempt.idempotencyKey) this.current = null;
+  }
+
+  fail(attempt: Pick<BillingCheckoutAttempt, "idempotencyKey">, terminalResponse: boolean): void {
+    if (terminalResponse) this.finish(attempt);
+  }
+}
+
+export function isBillingCheckoutTerminalFailure(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const failure = error as { code?: unknown; terminalResponse?: unknown };
+  if (failure.terminalResponse !== true) return false;
+  return failure.code !== "billing_provider_unavailable" && failure.code !== "billing_checkout_pending";
+}
 
 class BillingApiError extends Error {
   readonly code: string;
   readonly requestId: string | null;
+  readonly terminalResponse: boolean;
 
-  constructor(failure: BillingApiFailure) {
+  constructor(failure: BillingApiFailure, terminalResponse = false) {
     super(failure.code);
     this.name = "BillingApiError";
     this.code = failure.code;
     this.requestId = failure.requestId;
+    this.terminalResponse = terminalResponse;
   }
 }
 
@@ -44,20 +83,17 @@ if (root !== null && root.dataset.canManage === "true") {
   const billingState = root.dataset.billingState ?? "";
   const billingMarketReady = root.dataset.billingMarketReady === "true";
   const subscriptionVersion = Number(root.dataset.subscriptionVersion);
+  const checkoutAttempts = new BillingCheckoutAttemptTracker();
   let pending = false;
 
   const readCookie = (name: string): string | null => document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
-  const key = (): string => {
-    try { return `billing_ui_${crypto.randomUUID()}`; }
-    catch { return `billing_ui_${String(Date.now())}_${Math.random().toString(36).slice(2)}`; }
-  };
   const showFeedback = (message: string, tone: "danger" | "info" | "success" = "info"): void => {
     if (feedback === null) return;
     feedback.textContent = message;
     feedback.dataset.tone = tone;
     feedback.hidden = message.length === 0;
   };
-  const requestApi = async (url: string, options: RequestInit = {}): Promise<JsonObject | null> => {
+  const requestApi = async (url: string, options: RequestInit = {}, idempotencyKey?: string): Promise<JsonObject | null> => {
     const headers = new Headers(options.headers);
     const method = options.method?.toUpperCase() ?? "GET";
     if (method !== "GET" && method !== "HEAD") {
@@ -65,12 +101,18 @@ if (root !== null && root.dataset.canManage === "true") {
       if (csrf === null) throw new BillingApiError({ code: "csrf_missing", requestId: null });
       headers.set("X-CSRF-Token", decodeURIComponent(csrf));
       headers.set("Content-Type", "application/json");
-      headers.set("Idempotency-Key", key());
+      headers.set("Idempotency-Key", idempotencyKey ?? createBillingIdempotencyKey());
     }
     const response = await fetch(url, { ...options, credentials: "same-origin", headers });
-    const payload: unknown = await response.json().catch(() => null);
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      if (response.ok && method !== "GET" && method !== "HEAD") throw new BillingApiError({ code: "billing_response_unavailable", requestId: null });
+      payload = null;
+    }
     if (!response.ok) {
-      throw new BillingApiError(readBillingApiFailure(payload, response.status));
+      throw new BillingApiError(readBillingApiFailure(payload, response.status), true);
     }
     return typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload as JsonObject : null;
   };
@@ -218,12 +260,14 @@ if (root !== null && root.dataset.canManage === "true") {
     if (pending || shopPublicId === undefined || checkoutPlanSelect === null || checkoutSubmit === null || billingState === "canceled") return;
     const planCode = checkoutPlanSelect.value;
     if (planCode !== "starter" && planCode !== "pro") return;
+    const checkoutAttempt = checkoutAttempts.begin({ planCode, recovery: billingState === "suspended", shopPublicId });
     pending = true;
     checkoutSubmit.disabled = true;
     checkoutSubmit.setAttribute("aria-busy", "true");
     if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = true;
     showCheckoutFeedback(text("checkoutOpening"), "info");
-    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { method: "POST", body: JSON.stringify({ planCode, recovery: billingState === "suspended" }) }).then((payload) => {
+    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { method: "POST", body: JSON.stringify({ planCode, recovery: billingState === "suspended" }) }, checkoutAttempt.idempotencyKey).then((payload) => {
+      checkoutAttempts.finish(checkoutAttempt);
       const checkout = payload?.checkout;
       const provider = typeof checkout === "object" && checkout !== null && typeof (checkout as { provider?: unknown }).provider === "string" ? (checkout as { provider: string }).provider : "";
       const url = typeof checkout === "object" && checkout !== null && typeof (checkout as { checkoutUrl?: unknown }).checkoutUrl === "string" ? (checkout as { checkoutUrl: string }).checkoutUrl : "";
@@ -233,6 +277,7 @@ if (root !== null && root.dataset.canManage === "true") {
       showCheckoutFeedback(text("checkoutOpening"), "success");
       window.location.assign(url);
     }).catch((error: unknown) => {
+      checkoutAttempts.fail(checkoutAttempt, isBillingCheckoutTerminalFailure(error));
       const failure = billingFailure(error);
       if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = !isBillingRecentAuthFailure(failure.code);
       showCheckoutFeedback(checkoutErrorMessage(error), "danger");

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { isBillingRecentAuthFailure, readBillingApiFailure } from "../../src/lib/dashboard/billing-api-error";
 import { subscriptionStatePresentation } from "../../src/lib/dashboard/billing-ui";
@@ -51,6 +51,46 @@ describe("subscription state presentation", () => {
     expect(source).toContain('provider !== "dodo"');
     expect(source).toContain('new BillingApiError({ code: "checkout_provider_invalid", requestId })');
     expect(source).not.toMatch(/paddle/iu);
+  });
+
+  it("reuses one in-memory checkout key after response loss and rotates it at terminal boundaries", async () => {
+    vi.stubGlobal("document", { querySelector: () => null });
+    const billingModule = await import("../../src/scripts/dashboard/billing");
+    vi.unstubAllGlobals();
+    const Tracker = (billingModule as unknown as {
+      BillingCheckoutAttemptTracker: new (createKey: () => string) => {
+        begin: (input: { planCode: string; recovery: boolean; shopPublicId: string }) => { idempotencyKey: string };
+        fail: (attempt: { idempotencyKey: string }, terminalResponse: boolean) => void;
+        finish: (attempt: { idempotencyKey: string }) => void;
+      };
+    }).BillingCheckoutAttemptTracker;
+    const isTerminalFailure = (billingModule as unknown as {
+      isBillingCheckoutTerminalFailure: (error: unknown) => boolean;
+    }).isBillingCheckoutTerminalFailure;
+    expect(Tracker).toBeTypeOf("function");
+    expect(isTerminalFailure).toBeTypeOf("function");
+    expect(isTerminalFailure({ code: "billing_provider_unavailable", terminalResponse: true })).toBe(false);
+    expect(isTerminalFailure({ code: "plan_price_unavailable", terminalResponse: true })).toBe(true);
+
+    const generatedKeys = ["checkout-key-1", "checkout-key-2", "checkout-key-3", "checkout-key-4", "checkout-key-5"];
+    const tracker = new Tracker(() => generatedKeys.shift() ?? "unexpected-key");
+    const first = tracker.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" });
+    tracker.fail(first, false);
+    expect(tracker.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-1");
+
+    const changedPlan = tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" });
+    expect(changedPlan.idempotencyKey).toBe("checkout-key-2");
+    tracker.fail(changedPlan, true);
+    expect(tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-3");
+
+    const changedShop = tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-b" });
+    expect(changedShop.idempotencyKey).toBe("checkout-key-4");
+    tracker.finish(changedShop);
+    expect(tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-b" }).idempotencyKey).toBe("checkout-key-5");
+
+    const source = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
+    expect(source).not.toMatch(/(?:local|session)Storage/u);
+    expect(source).toContain("if (pending || shopPublicId === undefined");
   });
 
   it("explains that a missing merchant country blocks paid plan projection", () => {

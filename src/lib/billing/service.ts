@@ -1108,6 +1108,39 @@ async function markEvent(env: AppBindings, eventId: string, result: "processed" 
   await env.PLATFORM_DB.prepare("UPDATE billing_provider_events SET status = ?, processed_at = ? WHERE id = ? AND status = 'received' AND processed_at = ?").bind(result, nowIso, eventId, leaseToken).run();
 }
 
+async function markIdentityMismatchEvent(input: {
+  env: AppBindings;
+  event: DodoBillingEvent;
+  eventId: string;
+  leaseToken: string | null;
+  nowIso: string;
+  shopId: string;
+}): Promise<void> {
+  await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE billing_provider_events
+      SET status = 'conflict', processed_at = ?
+      WHERE id = ? AND status = 'received' AND processed_at = ?
+    `).bind(input.nowIso, input.eventId, input.leaseToken),
+    input.env.PLATFORM_DB.prepare(`
+      INSERT INTO audit_logs (
+        id, shop_id, actor_type, actor_id, action, resource_type, resource_id,
+        safe_metadata_json, request_id, source_kind, retention_class, created_at
+      )
+      SELECT ?, ?, 'system', NULL, 'billing.webhook_identity_mismatch',
+        'billing_provider_event', ?, ?, ?, 'http', 'financial', ?
+      WHERE changes() = 1
+    `).bind(
+      createId("aud"),
+      input.shopId,
+      input.eventId,
+      JSON.stringify({ eventType: input.event.eventType, failureCode: "billing_webhook_identity_mismatch" }),
+      `dodo-webhook:${input.event.eventId}`,
+      input.nowIso,
+    ),
+  ]);
+}
+
 export async function processDodoWebhook(input: {
   env: AppBindings;
   fetcher?: typeof fetch;
@@ -1173,6 +1206,7 @@ export async function processDodoWebhook(input: {
       return { duplicate: false, processed: false, state: "pending_payment" };
     }
     if (event.providerCheckoutId !== null && session.providerCheckoutRef !== null && event.providerCheckoutId !== session.providerCheckoutRef) throw new AppError("billing_webhook_identity_mismatch", 409);
+    if (event.providerSubscriptionId !== null && subscription.providerSubscriptionRef !== null && event.providerSubscriptionId !== subscription.providerSubscriptionRef) throw new AppError("billing_webhook_identity_mismatch", 409);
     let target = targetStateForEvent(event);
     let providerPriceRef = event.priceId;
     if (target === "active" && providerPriceRef === null && (initialPayment || pendingChange?.action === "change_plan")) {
@@ -1217,8 +1251,6 @@ export async function processDodoWebhook(input: {
       if (event.currency !== null && event.currency !== verifiedPrice.currency.toUpperCase()) throw new AppError("billing_webhook_price_mismatch", 409);
     }
     if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
-    if (event.eventType.startsWith("subscription.") && session.providerSubscriptionRef !== null && event.providerSubscriptionId !== session.providerSubscriptionRef) throw new AppError("billing_webhook_identity_mismatch", 409);
-    if (event.eventType === "payment.failed" && session.providerSubscriptionRef !== null && event.providerSubscriptionId !== session.providerSubscriptionRef) throw new AppError("billing_webhook_identity_mismatch", 409);
     // A failed initial mandate/payment cannot receive the paid grace window;
     // leave it suspended until the customer starts a new checkout.
     if ((event.eventType === "payment.failed" || event.eventType === "subscription.failed") && session.status !== "completed") target = "suspended";
@@ -1261,9 +1293,10 @@ export async function processDodoWebhook(input: {
           trial_ends_at = CASE WHEN ? = 'active' THEN NULL ELSE trial_ends_at END,
           current_period_start = CASE WHEN ? = 'active' THEN COALESCE(?, current_period_start) ELSE current_period_start END,
           current_period_end = CASE WHEN ? = 'active' THEN COALESCE(?, current_period_end) ELSE current_period_end END,
-          provider_subscription_ref = COALESCE(?, provider_subscription_ref),
+          provider_subscription_ref = COALESCE(provider_subscription_ref, ?),
           version = version + 1, updated_at = ?
         WHERE id = ? AND version = ?
+          AND (provider_subscription_ref IS NULL OR provider_subscription_ref = ?)
       `).bind(
         target, target, verifiedPrice.planId,
         target, verifiedPrice.marketCode,
@@ -1274,7 +1307,7 @@ export async function processDodoWebhook(input: {
         target, verifiedPrice.id,
         graceEndsAt, target, target === "canceled" ? nowIso : null,
         target, target, event.periodStart, target, event.periodEnd,
-        event.providerSubscriptionId, nowIso, subscription.id, subscription.version,
+        event.providerSubscriptionId, nowIso, subscription.id, subscription.version, event.providerSubscriptionId,
       ));
     }
     if (target !== null) {
@@ -1351,7 +1384,11 @@ export async function processDodoWebhook(input: {
     return { duplicate: false, processed: target !== null, state: target ?? "ignored" };
   } catch (error) {
     const result = error instanceof AppError && error.code.startsWith("billing_webhook_") ? "conflict" : "failed";
-    await markEvent(input.env, recorded.event.id, result, nowIso, recorded.leaseToken).catch(() => undefined);
+    if (error instanceof AppError && error.code === "billing_webhook_identity_mismatch" && session !== null) {
+      await markIdentityMismatchEvent({ env: input.env, event, eventId: recorded.event.id, leaseToken: recorded.leaseToken, nowIso, shopId: session.shopId }).catch(() => undefined);
+    } else {
+      await markEvent(input.env, recorded.event.id, result, nowIso, recorded.leaseToken).catch(() => undefined);
+    }
     throw error;
   }
 }

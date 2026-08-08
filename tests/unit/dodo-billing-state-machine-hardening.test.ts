@@ -176,6 +176,70 @@ describe("Dodo billing state-machine hardening", () => {
     testFixture.database.close();
   });
 
+  it("rejects and audits a completed-checkout payment that tries to rebind the Dodo subscription", async () => {
+    const testFixture = fixture({ providerSubscriptionRef: "sub_test_bound", state: "active" });
+    addCheckout(testFixture.database, { status: "completed" });
+    const before = testFixture.database.prepare(`
+      SELECT state, provider_subscription_ref AS providerSubscriptionRef,
+        current_period_start AS periodStart, current_period_end AS periodEnd, version
+      FROM shop_subscriptions
+      WHERE id = 'billing-sub-hardening'
+    `).get();
+    const body = bodyFor({
+      amount: 1500,
+      eventType: "payment.succeeded",
+      metadata: exactMetadata,
+      paymentId: "pay_test_rebind",
+      subscriptionId: "sub_test_rebind",
+    });
+
+    await expect(webhook(testFixture, body, "msg_payment_rebind")).rejects.toMatchObject({ code: "billing_webhook_identity_mismatch", status: 409 });
+    expect(testFixture.database.prepare(`
+      SELECT state, provider_subscription_ref AS providerSubscriptionRef,
+        current_period_start AS periodStart, current_period_end AS periodEnd, version
+      FROM shop_subscriptions
+      WHERE id = 'billing-sub-hardening'
+    `).get()).toEqual(before);
+    expect(testFixture.database.prepare(`
+      SELECT status, shop_id AS shopId, subscription_id AS subscriptionId
+      FROM billing_provider_events
+      WHERE provider_code = 'dodo' AND provider_event_id = 'msg_payment_rebind'
+    `).get()).toEqual({ shopId: "billing-shop-hardening", status: "conflict", subscriptionId: "billing-sub-hardening" });
+    expect(testFixture.database.prepare(`
+      SELECT action, resource_type AS resourceType, source_kind AS sourceKind,
+        retention_class AS retentionClass, safe_metadata_json AS safeMetadataJson
+      FROM audit_logs
+      WHERE action = 'billing.webhook_identity_mismatch'
+    `).get()).toEqual({
+      action: "billing.webhook_identity_mismatch",
+      resourceType: "billing_provider_event",
+      retentionClass: "financial",
+      safeMetadataJson: JSON.stringify({ eventType: "payment.succeeded", failureCode: "billing_webhook_identity_mismatch" }),
+      sourceKind: "http",
+    });
+    await expect(webhook(testFixture, body, "msg_payment_rebind")).resolves.toEqual({ duplicate: true, processed: false, state: "conflict" });
+    expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'billing.webhook_identity_mismatch'").get()).toEqual({ count: 1 });
+    testFixture.database.close();
+  });
+
+  it("binds a legacy null Dodo subscription reference exactly once from signed payment evidence", async () => {
+    const testFixture = fixture({ providerSubscriptionRef: null, state: "active" });
+    addCheckout(testFixture.database, { status: "completed" });
+    const body = bodyFor({
+      amount: 1500,
+      eventType: "payment.succeeded",
+      metadata: exactMetadata,
+      paymentId: "pay_test_legacy_binding",
+      subscriptionId: "sub_test_legacy_binding",
+    });
+
+    await expect(webhook(testFixture, body, "msg_legacy_binding")).resolves.toMatchObject({ processed: true, state: "active" });
+    expect(testFixture.database.prepare("SELECT provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: "sub_test_legacy_binding" });
+    await expect(webhook(testFixture, body, "msg_legacy_binding")).resolves.toEqual({ duplicate: true, processed: false, state: "processed" });
+    expect(testFixture.database.prepare("SELECT provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: "sub_test_legacy_binding" });
+    testFixture.database.close();
+  });
+
   it.each([
     ["missing metadata", undefined],
     ["wrong shop metadata", { ...exactMetadata, shopId: "billing-shop-other" }],
