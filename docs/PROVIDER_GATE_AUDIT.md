@@ -19,7 +19,7 @@ is active.
 | Gate | Local/source evidence | Current state | Missing release evidence or action |
 | --- | --- | --- | --- |
 | Release identity | `HEAD` is `4328b3b` (Phase 5 evidence-contract hardening); this completion batch is still uncommitted, while bootstrap evidence remains pinned to its historical platform candidate | **Blocked** | Review all scoped changes, create the final clean execution commit/tree, then regenerate private evidence and the release manifest from that exact tree. |
-| Production schema | Bootstrap evidence records `0001`-`0052`; source has the contiguous forward-only chain through `0080`; isolated local D1 validation applies through `0080` | **Blocked** | Fresh backup, approved mutation window, remote ledger proof through `0080`, integrity/preflight evidence, and post-migration restore drill. Before `0066`, revoke/expire pending OAuth rows without a lookup hash; before applying `0070`-`0080`, validate Dodo, plan/price, billing and activation-reference decisions. |
+| Production schema | Bootstrap evidence records `0001`-`0052`; source has the contiguous forward-only chain through `0086`; isolated local and staging D1 validation applies through `0086` | **Blocked** | Fresh production backup, approved mutation window, remote ledger proof through `0086`, integrity/preflight evidence, and post-migration restore drill. Before `0066`, revoke/expire pending OAuth rows without a lookup hash; before applying `0070`-`0086`, validate Dodo, plan/price, billing, activation, account-security, recovery, privacy and platform-admin decisions. |
 | Website/platform | Historical canary and post-promotion smoke prove apex/wildcard routing, health, marketing, login, and platform domains; the 2026-08-04 dashboard observation shows current Worker prefix `e2a4bc53` | Platform-only accepted | Reconcile the exact current Worker, routes/domains and candidate-bound smoke before any new release; this does not prove commerce. |
 | PayOS | Signed webhook, reconciliation, idempotency, tenant guards, and payment tests exist locally | **Blocked** | Controlled PayOS credentials/channel, signed paid/refund/chargeback events, reconciliation and exception evidence, and provider-backed fulfillment acceptance. |
 | Telegram Bot | Token encryption, webhook authentication, replay protection, private-chat commerce, and outbox tests exist locally | **Blocked** | Dedicated test bot, real `/start`, connect/rotate/disconnect, webhook delivery, paid notification, and two-pilot acceptance without logging token values. |
@@ -33,7 +33,7 @@ is active.
 | External domains/Turnstile | Staging custom-hostname lifecycle and platform route contracts are documented | **Blocked** | Fresh production external-host inventory, exact hostname/SSL/DNS readiness, Turnstile hostname admission, tenant-routing smoke, and rollback evidence. |
 | Seller pilots | GET-only smoke plan requires two pilot storefronts and one controlled custom domain | **Blocked** | Completed private pilot plan with two distinct sellers, order/payment/fulfillment observations, acceptance timestamps, support owner, and no placeholder hosts. |
 | Monitoring and budgets | Canary alert/dashboard acknowledgements cover frontend/route invariants only | **Blocked** | Owned dashboards/alerts for Worker, D1, inventory, payment, providers, queues/DLQ, domains, security, and budgets; thresholds, destinations, acknowledgement test, and 5m/15m/1h/next-day watch records. |
-| Backup and restore | Bootstrap empty-baseline backup/drill and a fresh local source-chain integrity/foreign-key check through `0080` are retained; the isolated copy normalized the known historical `0062` alias without changing the authoritative local D1 | **Blocked** | The local drill is not production evidence; capture a fresh protected backup for the exact migration target, artifact/checksum/bookmark/age proof, an isolated restore after the continuation ledger, and post-restore credential/key admission. |
+| Backup and restore | Bootstrap empty-baseline backup/drill plus fresh candidate-bound staging backup/restore evidence through `0086` are retained | **Blocked** | Staging evidence is not production evidence; capture a fresh protected production backup for the exact migration target, artifact/checksum/bookmark/age proof, an isolated restore after the continuation ledger, and post-restore credential/key admission. |
 | Rollback | Canary/promotion state capture and forward-only rollback runbooks exist | **Blocked** | Current candidate version/state capture, route and Worker rollback rehearsal, D1 forward-fix or controlled restore/cutover plan, and owner acknowledgement. |
 | Approvals and operations | Bootstrap names generic release/operations owners | **Blocked** | Named release, data, payment-incident, integration-incident, domain, and support owners plus legal/provider/pilot sign-off. |
 
@@ -71,7 +71,7 @@ is active.
 
 1. Pin and review a clean commit containing the intended continuation, then
    produce a fresh release manifest.
-2. Back up production, apply `0053`-`0080` forward-only through the guarded
+2. Back up production, apply `0053`-`0086` forward-only through the guarded
    executor, verify the remote ledger and integrity, and complete an isolated
    restore drill. Revoke/expire pre-`0066` pending OAuth rows before the lookup
    migration.

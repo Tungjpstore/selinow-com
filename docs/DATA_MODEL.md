@@ -1,6 +1,6 @@
 # Data Model
 
-All 28 forward-only D1 migrations through `0028_domain_delivery_runtime_hardening.sql` are applied on staging. They cover platform and tenant foundations, commerce/provider integrations, operations controls, channel-neutral connections, normalized order attribution, durable automation evidence and the generic event/delivery/DLQ runtime. The authoritative numbered source chain is contiguous through `0080_catalog_activation_timestamps.sql`; 52 migrations, `0029` through `0080`, remain pending on staging and are not claimed as remotely applied. Production D1 is admitted through `0052`; continuation migrations `0053` through `0080` remain unapplied and require the protected backup/restore and mutation-window gates. The reviewed production resource identity and platform deployment are provisioned; provider activation and commerce traffic remain separately fail-closed. The full future schema contract remains in `02_ARCHITECTURE_AND_DATA.md`.
+The authoritative numbered source chain is contiguous through `0086_platform_admin_bootstrap_receipt.sql`. Staging D1 has applied the complete `0001`-`0086` ledger through the guarded backup, isolated restore and migration sequence; Worker deployment and provider UAT are tracked separately. Production D1 remains admitted through `0052`; continuation migrations `0053` through `0086` remain unapplied and require fresh production backup/restore and mutation-window gates. The reviewed production resource identity and platform deployment are provisioned; provider activation and commerce traffic remain separately fail-closed. The full future schema contract remains in `02_ARCHITECTURE_AND_DATA.md`.
 
 All shop-owned access must resolve active membership first and retain the internal `shop_id` predicate for reads and writes. Public IDs are routing identifiers, not authorization authority.
 
@@ -114,7 +114,7 @@ is idempotent for the same tuple and fails closed if a provider subject is
 remapped to a different customer. Raw external subjects and provider payloads
 never enter D1, queues, exports or logs.
 
-Current operational ledger note: source migrations `0001`-`0080` are contiguous;
+Current operational ledger note: source migrations `0001`-`0086` are contiguous;
 staging remains admitted only through `0028`, and production remains admitted only
 through `0052`. All later migration descriptions in this document are schema
 contracts or checkpoint history until a protected, exact-target admission and

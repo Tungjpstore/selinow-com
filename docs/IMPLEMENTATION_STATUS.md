@@ -71,6 +71,10 @@ monitoring, pilot and provider acceptance (including the explicit payment-thread
 handoff for PayOS and Dodo UAT evidence). This pass does not claim production
 readiness.
 
+Current operational source migration chain: contiguous `0001`-`0086`; staging has
+applied the guarded continuation through `0086`, while production remains at
+`0052` pending its own backup, restore, manifest and release gates.
+
 ## Historical operational reconciliation (2026-08-04)
 
 The authoritative source migration chain is contiguous through `0080`; the
