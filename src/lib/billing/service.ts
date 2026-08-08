@@ -73,7 +73,13 @@ type BillingEventRow = {
   id: string;
   payloadHash: string;
   status: "received" | "processed" | "ignored" | "conflict" | "failed";
+  processedAt?: string | null;
 };
+
+// A received event is leased while it is being applied. A crashed worker can
+// be reclaimed after this interval; the final guarded update prevents the old
+// worker from committing after its lease has been taken over.
+const DODO_EVENT_LEASE_MS = 2 * 60_000;
 
 export type CheckoutResult = {
   amountMinor: number;
@@ -1000,28 +1006,68 @@ function targetStateForEvent(event: DodoBillingEvent): BillingState | null {
 }
 
 async function loadEvent(env: AppBindings, providerEventId: string): Promise<BillingEventRow | null> {
-  return env.PLATFORM_DB.prepare("SELECT id, payload_hash AS payloadHash, status FROM billing_provider_events WHERE provider_code = 'dodo' AND provider_event_id = ? LIMIT 1").bind(providerEventId).first<BillingEventRow>();
+  return env.PLATFORM_DB.prepare("SELECT id, payload_hash AS payloadHash, status, processed_at AS processedAt FROM billing_provider_events WHERE provider_code = 'dodo' AND provider_event_id = ? LIMIT 1").bind(providerEventId).first<BillingEventRow>();
 }
 
-async function hasLaterProviderEvent(input: {
+function providerTransitionPrecedence(eventType: string, target: BillingState | null): number {
+  if (target === "canceled" || eventType.includes("terminated") || eventType.includes("expired")) return 500;
+  if (target === "suspended") return 400;
+  if (target === "grace_period") return 300;
+  if (target === "cancel_scheduled" || target === "downgrade_scheduled") return 200;
+  if (target === "active") return 100;
+  return 0;
+}
+
+async function hasDominatingProviderEvent(input: {
   env: AppBindings;
   occurredAt: string;
   shopId: string;
   subscriptionId: string;
+  eventId: string;
+  eventType: string;
+  target: BillingState | null;
 }): Promise<boolean> {
+  const incomingPrecedence = providerTransitionPrecedence(input.eventType, input.target);
   const row = await input.env.PLATFORM_DB.prepare(`
-    SELECT 1 AS present
+    SELECT billing_provider_events.provider_event_id AS providerEventId,
+      billing_provider_events.event_type AS eventType,
+      subscription_events.to_state AS toState,
+      billing_provider_events.occurred_at AS occurredAt
     FROM subscription_events
-    WHERE shop_id = ?
-      AND subscription_id = ?
-      AND source_kind = 'provider'
-      AND julianday(occurred_at) > julianday(?)
+    INNER JOIN billing_provider_events
+      ON billing_provider_events.id = subscription_events.provider_event_id
+    WHERE subscription_events.shop_id = ?
+      AND subscription_events.subscription_id = ?
+      AND subscription_events.source_kind = 'provider'
+      AND (
+        julianday(billing_provider_events.occurred_at) > julianday(?)
+        OR (julianday(billing_provider_events.occurred_at) = julianday(?)
+          AND (
+            CASE
+              WHEN subscription_events.to_state = 'canceled' THEN 500
+              WHEN subscription_events.to_state = 'suspended' THEN 400
+              WHEN subscription_events.to_state = 'grace_period' THEN 300
+              WHEN subscription_events.to_state IN ('cancel_scheduled', 'downgrade_scheduled') THEN 200
+              WHEN subscription_events.to_state = 'active' THEN 100
+              ELSE 0
+            END > ?
+            OR (CASE
+              WHEN subscription_events.to_state = 'canceled' THEN 500
+              WHEN subscription_events.to_state = 'suspended' THEN 400
+              WHEN subscription_events.to_state = 'grace_period' THEN 300
+              WHEN subscription_events.to_state IN ('cancel_scheduled', 'downgrade_scheduled') THEN 200
+              WHEN subscription_events.to_state = 'active' THEN 100
+              ELSE 0
+            END = ? AND billing_provider_events.provider_event_id >= ?)
+          )
+        )
+      )
     LIMIT 1
-  `).bind(input.shopId, input.subscriptionId, input.occurredAt).first<{ present: number }>();
+  `).bind(input.shopId, input.subscriptionId, input.occurredAt, input.occurredAt, incomingPrecedence, incomingPrecedence, input.eventId).first<{ providerEventId: string }>();
   return row !== null;
 }
 
-async function recordEvent(env: AppBindings, event: DodoBillingEvent, payloadHash: string, nowIso: string, shopId: string | null, subscriptionId: string | null): Promise<{ event: BillingEventRow; duplicate: boolean; retryable: boolean }> {
+async function recordEvent(env: AppBindings, event: DodoBillingEvent, payloadHash: string, nowIso: string, shopId: string | null, subscriptionId: string | null): Promise<{ event: BillingEventRow; duplicate: boolean; retryable: boolean; leaseToken: string | null }> {
   const id = createId("bevt");
   const inserted = await env.PLATFORM_DB.prepare(`
     INSERT OR IGNORE INTO billing_provider_events (
@@ -1029,7 +1075,11 @@ async function recordEvent(env: AppBindings, event: DodoBillingEvent, payloadHas
       payload_hash, status, safe_metadata_json, occurred_at, created_at, subscription_id
     ) VALUES (?, 'dodo', ?, ?, ?, ?, ?, 'received', '{}', ?, ?, ?)
   `).bind(id, event.eventId, event.providerPaymentId ?? event.providerCheckoutId ?? event.providerSubscriptionId, shopId, event.eventType, payloadHash, event.occurredAt, nowIso, subscriptionId).run();
-  if (inserted.meta.changes === 1) return { duplicate: false, event: { id, payloadHash, status: "received" }, retryable: true };
+  if (inserted.meta.changes === 1) {
+    const claimed = await env.PLATFORM_DB.prepare("UPDATE billing_provider_events SET processed_at = ? WHERE id = ? AND status = 'received' AND processed_at IS NULL").bind(nowIso, id).run();
+    if (claimed.meta.changes !== 1) throw new AppError("billing_event_record_failed", 503);
+    return { duplicate: false, event: { id, payloadHash, status: "received", processedAt: nowIso }, retryable: true, leaseToken: nowIso };
+  }
 
   // INSERT OR IGNORE makes concurrent deliveries converge on one durable row.
   // Reload the winner so the losing request can still validate its payload hash.
@@ -1040,17 +1090,22 @@ async function recordEvent(env: AppBindings, event: DodoBillingEvent, payloadHas
   // back to the processable state before applying the idempotent transition;
   // terminal event states remain immutable and are returned as duplicates.
   if (existing.status === "failed") {
-    const reset = await env.PLATFORM_DB.prepare("UPDATE billing_provider_events SET status = 'received', processed_at = NULL WHERE id = ? AND status = 'failed'").bind(existing.id).run();
-    if (reset.meta.changes === 1) return { duplicate: true, event: { ...existing, status: "received" }, retryable: true };
+    const reset = await env.PLATFORM_DB.prepare("UPDATE billing_provider_events SET status = 'received', processed_at = ? WHERE id = ? AND status = 'failed'").bind(nowIso, existing.id).run();
+    if (reset.meta.changes === 1) return { duplicate: true, event: { ...existing, status: "received", processedAt: nowIso }, retryable: true, leaseToken: nowIso };
     const current = await loadEvent(env, event.eventId);
     if (current === null) throw new AppError("billing_event_record_failed", 503);
-    return { duplicate: true, event: current, retryable: false };
+    return { duplicate: true, event: current, retryable: false, leaseToken: null };
   }
-  return { duplicate: true, event: existing, retryable: false };
+  if (existing.status === "received") {
+    const leaseCutoff = new Date(new Date(nowIso).getTime() - DODO_EVENT_LEASE_MS).toISOString();
+    const claimed = await env.PLATFORM_DB.prepare("UPDATE billing_provider_events SET processed_at = ? WHERE id = ? AND status = 'received' AND (processed_at IS NULL OR processed_at <= ?)").bind(nowIso, existing.id, leaseCutoff).run();
+    if (claimed.meta.changes === 1) return { duplicate: true, event: { ...existing, processedAt: nowIso }, retryable: true, leaseToken: nowIso };
+  }
+  return { duplicate: true, event: existing, retryable: false, leaseToken: null };
 }
 
-async function markEvent(env: AppBindings, eventId: string, result: "processed" | "ignored" | "conflict" | "failed", nowIso: string): Promise<void> {
-  await env.PLATFORM_DB.prepare("UPDATE billing_provider_events SET status = ?, processed_at = ? WHERE id = ? AND status = 'received'").bind(result, nowIso, eventId).run();
+async function markEvent(env: AppBindings, eventId: string, result: "processed" | "ignored" | "conflict" | "failed", nowIso: string, leaseToken: string | null): Promise<void> {
+  await env.PLATFORM_DB.prepare("UPDATE billing_provider_events SET status = ?, processed_at = ? WHERE id = ? AND status = 'received' AND processed_at = ?").bind(result, nowIso, eventId, leaseToken).run();
 }
 
 export async function processDodoWebhook(input: {
@@ -1083,7 +1138,7 @@ export async function processDodoWebhook(input: {
   if (recorded.duplicate && !recorded.retryable) return { duplicate: true, processed: false, state: recorded.event.status };
   try {
     if (session === null) {
-      await markEvent(input.env, recorded.event.id, "ignored", nowIso);
+      await markEvent(input.env, recorded.event.id, "ignored", nowIso, recorded.leaseToken);
       return { duplicate: false, processed: false, state: "unmapped" };
     }
     const subscription = await loadSubscription(input.env, session.shopId);
@@ -1114,7 +1169,7 @@ export async function processDodoWebhook(input: {
     // event can precede the actual charge, so it is intentionally informational
     // until a signed payment.succeeded event confirms the first payment.
     if (event.eventType === "subscription.active" && session.status !== "completed") {
-      await markEvent(input.env, recorded.event.id, "ignored", nowIso);
+      await markEvent(input.env, recorded.event.id, "ignored", nowIso, recorded.leaseToken);
       return { duplicate: false, processed: false, state: "pending_payment" };
     }
     if (event.providerCheckoutId !== null && session.providerCheckoutRef !== null && event.providerCheckoutId !== session.providerCheckoutRef) throw new AppError("billing_webhook_identity_mismatch", 409);
@@ -1170,13 +1225,16 @@ export async function processDodoWebhook(input: {
     if (target === "active" && event.eventType !== "payment.succeeded" && session.status !== "completed") throw new AppError("billing_webhook_activation_unverified", 409);
     if (target === "grace_period" && session.status !== "completed") throw new AppError("billing_webhook_grace_invalid", 409);
     if (target === "grace_period" && subscription.state !== "active" && subscription.state !== "grace_period") throw new AppError("billing_webhook_grace_invalid", 409);
-    if (target !== null && await hasLaterProviderEvent({
+    if (target !== null && await hasDominatingProviderEvent({
       env: input.env,
       occurredAt: event.occurredAt,
       shopId: session.shopId,
       subscriptionId: session.subscriptionId,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      target,
     })) {
-      await markEvent(input.env, recorded.event.id, "ignored", nowIso);
+      await markEvent(input.env, recorded.event.id, "ignored", nowIso, recorded.leaseToken);
       return { duplicate: false, processed: false, state: "stale" };
     }
     const periodChanged = event.periodStart !== null || event.periodEnd !== null;
@@ -1278,10 +1336,12 @@ export async function processDodoWebhook(input: {
     statements.push(input.env.PLATFORM_DB.prepare(`
       UPDATE billing_provider_events
       SET status = ?, processed_at = ?
-      WHERE id = ? AND status = 'received'
-    `).bind(target === null ? "ignored" : "processed", nowIso, recorded.event.id));
+      WHERE id = ? AND status = 'received' AND processed_at = ?
+    `).bind(target === null ? "ignored" : "processed", nowIso, recorded.event.id, recorded.leaseToken));
     try {
-      await input.env.PLATFORM_DB.batch(statements);
+      const results = await input.env.PLATFORM_DB.batch(statements);
+      const eventResult = results.at(-1);
+      if ((eventResult?.meta.changes ?? 0) !== 1) throw new AppError("billing_webhook_lease_lost", 409);
     } catch (error) {
       if (error instanceof Error && /version > 0|CHECK constraint failed/u.test(error.message)) {
         throw new AppError("billing_subscription_version_conflict", 409);
@@ -1291,7 +1351,7 @@ export async function processDodoWebhook(input: {
     return { duplicate: false, processed: target !== null, state: target ?? "ignored" };
   } catch (error) {
     const result = error instanceof AppError && error.code.startsWith("billing_webhook_") ? "conflict" : "failed";
-    await markEvent(input.env, recorded.event.id, result, nowIso).catch(() => undefined);
+    await markEvent(input.env, recorded.event.id, result, nowIso, recorded.leaseToken).catch(() => undefined);
     throw error;
   }
 }

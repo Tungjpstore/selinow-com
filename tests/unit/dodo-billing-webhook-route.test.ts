@@ -45,7 +45,7 @@ function context(webhookPublicId = WEBHOOK_PUBLIC_ID, webhookId = "msg_test") {
 
 beforeEach(() => {
   dependencies.backfill.mockReset();
-  dependencies.env = { DODO_PAYMENTS_WEBHOOK_PUBLIC_ID: undefined, PLATFORM_DB: {} };
+  dependencies.env = { DODO_PAYMENTS_WEBHOOK_PUBLIC_ID: WEBHOOK_PUBLIC_ID, PLATFORM_DB: {} };
   dependencies.process.mockReset();
 });
 
@@ -95,6 +95,17 @@ describe("Dodo Payments billing webhook route", () => {
     await expect(response.json()).resolves.toMatchObject({ code: "webhook_not_found", ok: false });
   });
 
+  it.each([undefined, "", "not-a-public-id"])("fails closed before processing when the configured endpoint id is %s", async (configured) => {
+    dependencies.env = { DODO_PAYMENTS_WEBHOOK_PUBLIC_ID: configured, PLATFORM_DB: {} };
+
+    const response = await POST(context());
+
+    expect(response.status).toBe(502);
+    expect(dependencies.process).not.toHaveBeenCalled();
+    expect(dependencies.backfill).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({ code: "billing_provider_invalid", ok: false });
+  });
+
   it("backfills only the shop bound to the processed Standard Webhooks event", async () => {
     const first = vi.fn().mockResolvedValue({ shopId: "billing-shop-a" });
     const bind = vi.fn().mockReturnValue({ first });
@@ -119,7 +130,7 @@ describe("Dodo Payments billing webhook route", () => {
 
   it("does not query tenant analytics for ignored or duplicate webhook results", async () => {
     const prepare = vi.fn();
-    dependencies.env = { DODO_PAYMENTS_WEBHOOK_PUBLIC_ID: undefined, PLATFORM_DB: { prepare } };
+    dependencies.env = { DODO_PAYMENTS_WEBHOOK_PUBLIC_ID: WEBHOOK_PUBLIC_ID, PLATFORM_DB: { prepare } };
     dependencies.process.mockResolvedValue({ duplicate: true, processed: false, state: "processed" });
 
     const response = await POST(context());

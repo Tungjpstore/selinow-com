@@ -16,7 +16,6 @@ type AppBindingsLike = ReturnType<typeof getBindings>;
 
 function assertConfiguredWebhookPublicId(env: DodoWebhookRouteBindings, webhookPublicId: string): void {
   const configured: unknown = env.DODO_PAYMENTS_WEBHOOK_PUBLIC_ID;
-  if (configured === undefined) return;
   if (typeof configured !== "string" || !WEBHOOK_PUBLIC_ID_PATTERN.test(configured)) {
     throw new AppError("billing_provider_invalid", 502, ["webhook_public_id"]);
   }
