@@ -1139,7 +1139,7 @@ describe("backup CLI dry runs", () => {
         id: PROTECTED_STAGING_SNAPSHOT_ID,
         size_bytes: protectedBackup.sizeBytes,
       });
-      expect(report.records.restore_drills[0].backup_snapshot_id).toBe(PROTECTED_STAGING_SNAPSHOT_ID);
+      expect(report.records.restore_drills[0]!.backup_snapshot_id).toBe(PROTECTED_STAGING_SNAPSHOT_ID);
     } finally {
       await rm(reportPath, { force: true });
     }

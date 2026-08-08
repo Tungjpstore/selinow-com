@@ -287,6 +287,24 @@ export function runRestoreDrill(options: {
   reviewedCommitSha?: string;
   randomBytesImplementation?: (size: number) => Buffer;
   runner?: WranglerRunner;
+  stagingBackupEvidenceImplementation?: (options: {
+    accountId: string;
+    backupRoot?: string;
+    databaseId: string;
+    databaseName: string;
+    now?: Date;
+  }) => Promise<{
+    artifactPath: string;
+    checksumSha256: string;
+    completedAt: string;
+    createdAt?: string;
+    expiresAt?: string | null;
+    providerReference?: string | null;
+    reportRef: string;
+    sizeBytes: number;
+    snapshotId: string;
+    snapshotKind?: BackupSnapshotRecord["snapshot_kind"];
+  }>;
 }): Promise<OperationResult>;
 
 export const backupPaths: {
