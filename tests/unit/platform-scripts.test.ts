@@ -76,6 +76,12 @@ const stagingSpec = {
     "*.selinow.com/*",
     "*/*",
   ],
+  stagingRouteExceptions: [
+    "staging.selinow.com/*",
+    "app-staging.selinow.com/*",
+    "api-staging.selinow.com/*",
+    "*.staging.selinow.com/*",
+  ],
   wildcardRoute: "*.staging.selinow.com/*",
   workerName: "selinow-com-staging",
   productionWorkerName: "selinow-com-production",
@@ -106,6 +112,9 @@ function exactStagingRouteInventory() {
   return [
     { pattern: "selinow.com/*", script: stagingSpec.productionWorkerName },
     { pattern: "*.selinow.com/*", script: stagingSpec.productionWorkerName },
+    { pattern: "staging.selinow.com/*", script: stagingSpec.workerName },
+    { pattern: "app-staging.selinow.com/*", script: stagingSpec.workerName },
+    { pattern: "api-staging.selinow.com/*", script: stagingSpec.workerName },
     { pattern: stagingSpec.wildcardRoute, script: stagingSpec.workerName },
     { pattern: "*/*", script: stagingSpec.productionWorkerName },
   ];
@@ -168,6 +177,9 @@ function exactSharedZoneRouteInventory() {
   return [
     { pattern: "selinow.com/*", script: "selinow-com-production" },
     { pattern: "*.selinow.com/*", script: "selinow-com-production" },
+    { pattern: "staging.selinow.com/*", script: stagingSpec.workerName },
+    { pattern: "app-staging.selinow.com/*", script: stagingSpec.workerName },
+    { pattern: "api-staging.selinow.com/*", script: stagingSpec.workerName },
     { pattern: stagingSpec.wildcardRoute, script: stagingSpec.workerName },
     { pattern: "*/*", script: stagingSpec.productionWorkerName },
   ];
@@ -297,6 +309,9 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(result.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "cloudflare_staging_route_guard_apex", ok: true }),
       expect.objectContaining({ code: "cloudflare_staging_route_guard_wildcard", ok: true }),
+      expect.objectContaining({ code: "cloudflare_staging_route_exception_staging_selinow_com", ok: true }),
+      expect.objectContaining({ code: "cloudflare_staging_route_exception_app_staging_selinow_com", ok: true }),
+      expect.objectContaining({ code: "cloudflare_staging_route_exception_api_staging_selinow_com", ok: true }),
       expect.objectContaining({ code: "cloudflare_staging_route_wildcard", ok: true }),
       expect.objectContaining({ code: "cloudflare_staging_route_catch_all", ok: true }),
       expect.objectContaining({ code: "cloudflare_staging_route_script_binding", ok: true }),
@@ -326,7 +341,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
       .toBe(false);
   });
 
-  it("rejects the pre-handoff guards, deleted legacy routes, and bare custom-domain hosts", () => {
+  it("rejects pre-handoff guards, missing exact exceptions, and bare custom-domain hosts", () => {
     const handoffRoutes = exactStagingRouteInventory();
     const preHandoffRoutes = handoffRoutes.map((route) => (
       stagingSpec.sharedZoneDisabledRoutes.includes(route.pattern)
@@ -335,17 +350,15 @@ describe("Cloudflare for SaaS platform configuration", () => {
     ));
     expect(validateStagingRouteInventory(stagingSpec, preHandoffRoutes).ok).toBe(false);
 
-    for (const pattern of [
-      "staging.selinow.com/*",
-      "app-staging.selinow.com/*",
-      "api-staging.selinow.com/*",
-      "staging.selinow.com",
-    ]) {
-      expect(validateStagingRouteInventory(stagingSpec, [
-        ...handoffRoutes,
-        { pattern, script: stagingSpec.workerName },
-      ]).ok).toBe(false);
+    for (const pattern of stagingSpec.stagingRouteExceptions) {
+      expect(validateStagingRouteInventory(stagingSpec, handoffRoutes.filter((route) => (
+        route.pattern !== pattern
+      ))).ok).toBe(false);
     }
+    expect(validateStagingRouteInventory(stagingSpec, [
+      ...handoffRoutes,
+      { pattern: "staging.selinow.com", script: stagingSpec.workerName },
+    ]).ok).toBe(false);
   });
 
   it("fails closed on extra or conflicting script-bound routes", () => {
@@ -954,6 +967,8 @@ describe("Cloudflare for SaaS platform configuration", () => {
           result: [
             { pattern: "selinow.com/*", script: spec.productionWorkerName },
             { pattern: "*.selinow.com/*", script: spec.productionWorkerName },
+            ...spec.stagingRouteExceptions.filter((pattern) => pattern !== spec.wildcardRoute)
+              .map((pattern) => ({ pattern, script: spec.workerName })),
             { pattern: spec.wildcardRoute, script: spec.workerName },
             { pattern: "*/*", script: spec.productionWorkerName },
           ],

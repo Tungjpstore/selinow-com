@@ -566,10 +566,15 @@ export function buildStagingRoutes(spec) {
     ...spec.hostnames.map((hostname) => ({ custom_domain: true, pattern: hostname })),
     { pattern: spec.wildcardRoute, zone_name: spec.zoneName },
   ];
+  const expectedStagingRouteExceptions = [
+    ...spec.hostnames.slice(0, 3).map((hostname) => `${hostname}/*`),
+    spec.wildcardRoute,
+  ];
   if (expectedProductionWorkerName === spec.workerName
     || spec.productionWorkerName !== expectedProductionWorkerName
     || spec.productionWorkerName === spec.workerName
     || JSON.stringify(spec.sharedZoneDisabledRoutes) !== JSON.stringify(expectedDisabledRoutes)
+    || JSON.stringify(spec.stagingRouteExceptions) !== JSON.stringify(expectedStagingRouteExceptions)
     || JSON.stringify(spec.workerRoutes) !== JSON.stringify(expectedRoutes)) {
     throw new Error("cloudflare_staging_route_contract_invalid");
   }
@@ -592,9 +597,10 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
       : null
   ));
   const sharedZonePatterns = new Set(spec.sharedZoneDisabledRoutes);
+  const stagingExceptionPatterns = new Set(spec.stagingRouteExceptions);
   const expectedBindings = new Map([
     ...[...sharedZonePatterns].map((pattern) => [pattern, spec.productionWorkerName]),
-    [spec.wildcardRoute, spec.workerName],
+    ...[...stagingExceptionPatterns].map((pattern) => [pattern, spec.workerName]),
   ]);
   const inventoryAllowlistOk = routePatterns.every((pattern) => pattern !== null)
     && new Set(routePatterns).size === routePatterns.length
@@ -610,7 +616,7 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
   // on any extra or conflicting script binding.
   const allowedScriptPatterns = new Set([
     ...spec.sharedZoneDisabledRoutes,
-    spec.wildcardRoute,
+    ...spec.stagingRouteExceptions,
   ]);
   const scriptBindingChecks = liveRoutes
     .filter((route) => (
@@ -661,6 +667,16 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
       script: spec.productionWorkerName,
     },
   ];
+
+  for (const pattern of spec.stagingRouteExceptions) {
+    if (pattern === spec.wildcardRoute) continue;
+    expectedRoutes.splice(expectedRoutes.length - 1, 0, {
+      code: `cloudflare_staging_route_exception_${pattern.replace(/[^a-z0-9]+/giu, "_").replace(/^_|_$/gu, "")}`,
+      detail: `${pattern} points only to ${spec.workerName}`,
+      pattern,
+      script: spec.workerName,
+    });
+  }
 
   const checks = expectedRoutes.map((expected) => {
     const matchingRoutes = liveRoutes.filter((route) => (
@@ -774,9 +790,8 @@ function productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConf
   const stagingCustomDomains = new Set(stagingSpec.workerRoutes
     .filter((route) => route.custom_domain === true)
     .map((route) => route.pattern));
-  const stagingZoneRoutes = new Map(stagingSpec.workerRoutes
-    .filter((route) => route.custom_domain !== true)
-    .map((route) => [route.pattern, stagingSpec.workerName]));
+  const stagingZoneRoutes = new Map(stagingSpec.stagingRouteExceptions
+    .map((pattern) => [pattern, stagingSpec.workerName]));
   if ([...zoneRoutes].some((pattern) => stagingZoneRoutes.has(pattern))) {
     throw new Error("production_worker_route_contract_invalid");
   }

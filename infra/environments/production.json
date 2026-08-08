@@ -33,6 +33,9 @@
     "routeHandoff": "atomic_shared_zone_route_replacement",
     "stagingExternalCustomDomainInventory": "verified_none_active",
     "stagingRouteExceptions": [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
       "*.staging.selinow.com/*"
     ]
   },

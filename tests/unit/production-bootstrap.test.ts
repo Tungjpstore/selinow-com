@@ -33,6 +33,12 @@ const stagingSpec = {
     "coming-soon.staging.selinow.com",
     "paused.staging.selinow.com",
   ],
+  stagingRouteExceptions: [
+    "staging.selinow.com/*",
+    "app-staging.selinow.com/*",
+    "api-staging.selinow.com/*",
+    "*.staging.selinow.com/*",
+  ],
   sharedZoneDisabledRoutes: ["selinow.com/*", "*.selinow.com/*", "*/*"],
   wildcardRoute: "*.staging.selinow.com/*",
   workerName: "selinow-com-staging",
@@ -83,6 +89,9 @@ const productionSpec = {
     routeHandoff: "atomic_shared_zone_route_replacement",
     stagingExternalCustomDomainInventory: "verified_none_active",
     stagingRouteExceptions: [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
       "*.staging.selinow.com/*",
     ],
   },
@@ -99,6 +108,9 @@ const productionSpec = {
 const routes = [
   { pattern: "selinow.com/*", script: "selinow-com-production" },
   { pattern: "*.selinow.com/*", script: "selinow-com-production" },
+  { pattern: "staging.selinow.com/*", script: "selinow-com-staging" },
+  { pattern: "app-staging.selinow.com/*", script: "selinow-com-staging" },
+  { pattern: "api-staging.selinow.com/*", script: "selinow-com-staging" },
   { pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" },
   { pattern: "*/*", script: "selinow-com-production" },
 ];
@@ -216,6 +228,9 @@ describe("first-production bootstrap ceremony", () => {
     expect(handoff.promote).toEqual([
       { pattern: "selinow.com/*", script: "selinow-com-production" },
       { pattern: "*.selinow.com/*", script: "selinow-com-production" },
+      { pattern: "staging.selinow.com/*", script: "selinow-com-staging" },
+      { pattern: "app-staging.selinow.com/*", script: "selinow-com-staging" },
+      { pattern: "api-staging.selinow.com/*", script: "selinow-com-staging" },
       { pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" },
       { pattern: "*/*", script: "selinow-com-production" },
     ]);

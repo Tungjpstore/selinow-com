@@ -35,6 +35,12 @@ const stagingSpec = {
     "coming-soon.staging.selinow.com",
     "paused.staging.selinow.com",
   ],
+  stagingRouteExceptions: [
+    "staging.selinow.com/*",
+    "app-staging.selinow.com/*",
+    "api-staging.selinow.com/*",
+    "*.staging.selinow.com/*",
+  ],
   sharedZoneDisabledRoutes: [] as string[],
   wildcardRoute: "*.staging.selinow.com/*",
   workerName: "selinow-com-staging",
@@ -80,6 +86,9 @@ const productionSpec = {
     routeHandoff: "atomic_platform_route_replacement",
     stagingExternalCustomDomainInventory: "pending_inventory",
     stagingRouteExceptions: [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
       "*.staging.selinow.com/*",
     ],
   },
@@ -96,13 +105,16 @@ const productionSpec = {
 const routesBeforeCanary = [
   { id: "route-apex-0001", pattern: "selinow.com/*", script: null },
   { id: "route-wild-0002", pattern: "*.selinow.com/*", script: null },
-  { id: "route-stage-0003", pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" },
-  { id: "route-fallback-0004", pattern: "*/*", script: "selinow-com-staging" },
+  { id: "route-stage-0003", pattern: "staging.selinow.com/*", script: "selinow-com-staging" },
+  { id: "route-stage-0004", pattern: "app-staging.selinow.com/*", script: "selinow-com-staging" },
+  { id: "route-stage-0005", pattern: "api-staging.selinow.com/*", script: "selinow-com-staging" },
+  { id: "route-stage-0006", pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" },
+  { id: "route-fallback-0007", pattern: "*/*", script: "selinow-com-staging" },
 ];
 
 const routesAfterCanary = [
   ...routesBeforeCanary,
-  { id: "route-canary-0005", pattern: "canary.selinow.com/*", script: "selinow-com-production" },
+  { id: "route-canary-0008", pattern: "canary.selinow.com/*", script: "selinow-com-production" },
 ];
 
 const domains = stagingSpec.hostnames.map((hostname) => ({
@@ -304,7 +316,7 @@ function mutableRouteApi(initial = routesAfterCanary) {
 describe("first-production route promotion", () => {
   it("binds the reviewed plan to the exact source, snapshot, evidence, and route matrix", () => {
     const result = validateProductionPromotionPlan(common());
-    expect(result.handoff.promote).toHaveLength(4);
+    expect(result.handoff.promote).toHaveLength(7);
 
     const candidate = common();
     candidate.plan.safeguards.allowedMutations = ["production_stable_worker_domains"];
@@ -396,18 +408,18 @@ describe("first-production route promotion", () => {
       .toEqual(handoff.promote.slice().sort((left, right) => left.pattern.localeCompare(right.pattern)));
     expect(api.routes()).toEqual(expect.arrayContaining([
       expect.objectContaining({ pattern: "*.staging.selinow.com/*", script: "selinow-com-staging" }),
-      expect.objectContaining({ id: "route-fallback-0004", pattern: "*/*", script: "selinow-com-staging" }),
+      expect.objectContaining({ id: "route-fallback-0007", pattern: "*/*", script: "selinow-com-staging" }),
     ]));
-    expect(api.routes().some((route) => new Set([
-      "staging.selinow.com/*",
-      "app-staging.selinow.com/*",
-      "api-staging.selinow.com/*",
-    ]).has(route.pattern))).toBe(false);
+    expect(api.routes()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pattern: "staging.selinow.com/*", script: "selinow-com-staging" }),
+      expect.objectContaining({ pattern: "app-staging.selinow.com/*", script: "selinow-com-staging" }),
+      expect.objectContaining({ pattern: "api-staging.selinow.com/*", script: "selinow-com-staging" }),
+    ]));
     expect(api.update).not.toHaveBeenCalledWith(
-      "route-fallback-0004",
+      "route-fallback-0007",
       expect.anything(),
     );
-    expect(api.delete).not.toHaveBeenCalledWith("route-fallback-0004");
+    expect(api.delete).not.toHaveBeenCalledWith("route-fallback-0007");
   });
 
   it("compensates completed changes from captured state when a later update fails", async () => {
@@ -433,7 +445,7 @@ describe("first-production route promotion", () => {
       .toEqual(routesAfterCanary.map(({ pattern, script }) => ({ pattern, script })).sort((left, right) => left.pattern.localeCompare(right.pattern)));
   });
 
-  it("does not recreate deleted legacy staging routes", async () => {
+  it("preserves the exact staging route exceptions", async () => {
     const api = mutableRouteApi();
     const result = await runProductionPromotion({
       ...common(),
@@ -447,11 +459,11 @@ describe("first-production route promotion", () => {
     });
     expect(result.ok).toBe(true);
     expect(api.create).not.toHaveBeenCalled();
-    expect(api.routes().some((route) => new Set([
-      "staging.selinow.com/*",
-      "app-staging.selinow.com/*",
-      "api-staging.selinow.com/*",
-    ]).has(route.pattern))).toBe(false);
+    expect(api.routes()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pattern: "staging.selinow.com/*", script: "selinow-com-staging" }),
+      expect.objectContaining({ pattern: "app-staging.selinow.com/*", script: "selinow-com-staging" }),
+      expect.objectContaining({ pattern: "api-staging.selinow.com/*", script: "selinow-com-staging" }),
+    ]));
   });
 
   it("reconciles a committed per-route update whose response is lost", async () => {
@@ -525,7 +537,7 @@ describe("first-production route promotion", () => {
     expect(api.routes().map(({ pattern, script }) => ({ pattern, script })).sort((left, right) => left.pattern.localeCompare(right.pattern)))
       .toEqual(routesAfterCanary.map(({ pattern, script }) => ({ pattern, script })).sort((left, right) => left.pattern.localeCompare(right.pattern)));
     expect(api.routes()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "route-fallback-0004", pattern: "*/*", script: "selinow-com-staging" }),
+      expect.objectContaining({ id: "route-fallback-0007", pattern: "*/*", script: "selinow-com-staging" }),
     ]));
   });
 

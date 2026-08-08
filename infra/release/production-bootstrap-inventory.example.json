@@ -11,6 +11,9 @@
   "routes": [
     { "pattern": "selinow.com/*", "script": null },
     { "pattern": "*.selinow.com/*", "script": null },
+    { "pattern": "staging.selinow.com/*", "script": "selinow-com-staging" },
+    { "pattern": "app-staging.selinow.com/*", "script": "selinow-com-staging" },
+    { "pattern": "api-staging.selinow.com/*", "script": "selinow-com-staging" },
     { "pattern": "*.staging.selinow.com/*", "script": "selinow-com-staging" },
     { "pattern": "*/*", "script": "selinow-com-staging" }
   ],

@@ -80,12 +80,15 @@ The deployed shared-zone configuration uses four explicit Worker routes:
 | --- | --- |
 | `selinow.com/*` | `selinow-com-production` |
 | `*.selinow.com/*` | `selinow-com-production` |
+| `staging.selinow.com/*` | `selinow-com-staging` |
+| `app-staging.selinow.com/*` | `selinow-com-staging` |
+| `api-staging.selinow.com/*` | `selinow-com-staging` |
 | `*.staging.selinow.com/*` | `selinow-com-staging` |
 | `*/*` | `selinow-com-production` |
 
-The catch-all belongs to production so external Cloudflare for SaaS customer hostnames cannot fall through to the staging Worker. The more-specific staging wildcard remains the only staging Worker route exception in the shared zone; staging's seven named hostnames remain attached as Worker Custom Domains.
+The catch-all belongs to production so external Cloudflare for SaaS customer hostnames cannot fall through to the staging Worker. The exact staging host routes are required because a wildcard route does not match the bare `staging.selinow.com`, `app-staging.selinow.com` or `api-staging.selinow.com` hostnames. The seven named staging hostnames remain attached as Worker Custom Domains and their DNS records remain manual/operator-managed.
 
-The staging environment specification validates the full reviewed contract. Wrangler owns and regenerates the seven staging Worker Custom Domains plus `*.staging.selinow.com/*`; it does not own the production catch-all. `platform:doctor` and every non-dry staging deploy use a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` to require the exact four-route inventory, with the staging wildcard on `selinow-com-staging` and all three shared-zone production routes, including `*/*`, on `selinow-com-production`. A missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
+The staging environment specification validates the exact four staging-bound exceptions plus the three production-bound shared routes. Wrangler owns and regenerates the seven staging Worker Custom Domains plus `*.staging.selinow.com/*`; the exact shared-zone exceptions and production catch-all require a separately reviewed route handoff. `platform:doctor` and every non-dry staging deploy use a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` to require this seven-route inventory. A missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
 
 ### Production platform handoff matrix (historical baseline; revalidate before mutation)
 
@@ -101,7 +104,7 @@ The reviewed production platform-only handoff intentionally differs from the cur
 | `*.staging.selinow.com/*` | `selinow-com-staging` |
 | `*/*` | `selinow-com-staging` |
 
-This was the initial handoff matrix. The three exact staging routes were later removed as redundant while their Worker Custom Domains remained active. The subsequent production handoff moved `*/*` to `selinow-com-production`; therefore this historical table must never be used as a rollback target or current route contract. During first-production canary, the historical procedure added `canary.selinow.com/* -> selinow-com-production` as a temporary specificity override while the staging catch-all was still present. The current authoritative Worker Route inventory is the four-route matrix above, and every future route or SaaS-contract change must capture a fresh live inventory before mutation.
+This was the initial handoff matrix. The three exact staging routes were later removed as redundant while their Worker Custom Domains remained active. The subsequent production handoff moved `*/*` to `selinow-com-production`; therefore this historical table must never be used as a rollback target or current route contract. The reviewed repair reapplied the three exact staging exceptions without changing DNS or Worker Custom Domains. Capture a fresh live inventory before every subsequent mutation.
 
 The active fallback origin and deployed route matrix prove the shared-zone configuration exists. The accepted external customer-hostname lifecycle additionally proves staging resolution through `customers.selinow.com`, successful HTTPS, correct tenant rendering and removal that stops routing; it does not prove production external-host admission or Turnstile lifecycle. Every future route or SaaS-contract change must repeat the relevant checks rather than relying only on this baseline.
 

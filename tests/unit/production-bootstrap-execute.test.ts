@@ -44,6 +44,9 @@ const productionSpec = {
     routeHandoff: "atomic_shared_zone_route_replacement",
     stagingExternalCustomDomainInventory: "pending_inventory",
     stagingRouteExceptions: [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
       "*.staging.selinow.com/*",
     ],
   },

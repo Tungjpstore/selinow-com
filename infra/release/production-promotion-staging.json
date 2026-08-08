@@ -25,6 +25,12 @@
     "paused.staging.selinow.com"
   ],
   "wildcardRoute": "*.staging.selinow.com/*",
+  "stagingRouteExceptions": [
+    "staging.selinow.com/*",
+    "app-staging.selinow.com/*",
+    "api-staging.selinow.com/*",
+    "*.staging.selinow.com/*"
+  ],
   "sharedZoneDisabledRoutes": [],
   "workerRoutes": [
     { "custom_domain": true, "pattern": "staging.selinow.com" },

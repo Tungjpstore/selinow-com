@@ -69,7 +69,12 @@ const productionSpec = {
     platformStorefrontWildcard: "*.selinow.com/*",
     routeHandoff: "atomic_shared_zone_route_replacement",
     stagingExternalCustomDomainInventory: "pending_inventory",
-    stagingRouteExceptions: ["*.staging.selinow.com/*"],
+    stagingRouteExceptions: [
+      "staging.selinow.com/*",
+      "app-staging.selinow.com/*",
+      "api-staging.selinow.com/*",
+      "*.staging.selinow.com/*",
+    ],
   },
   turnstile: {
     externalCustomDomainAdmission: "pending_runtime_lifecycle",

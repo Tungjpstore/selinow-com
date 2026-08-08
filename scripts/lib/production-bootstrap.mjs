@@ -476,8 +476,9 @@ export function inspectProductionBootstrapCutoverBlockers(input) {
   const zoneName = input.productionSpec?.zoneName;
   const platformApexRoute = `${zoneName}/*`;
   const platformWildcard = `*.${zoneName}/*`;
-  const stagingRouteExceptions = [input.stagingSpec?.wildcardRoute]
-    .filter((route) => typeof route === "string");
+  const stagingRouteExceptions = Array.isArray(input.stagingSpec?.stagingRouteExceptions)
+    ? input.stagingSpec.stagingRouteExceptions
+    : [];
   const blockers = [];
   if (input.productionSpec?.routing?.platformApexRoute !== platformApexRoute) {
     blockers.push("platform_apex_route_missing");
@@ -549,9 +550,12 @@ export function buildProductionRouteHandoff(productionSpec, stagingSpec) {
   if (typeof zoneName !== "string" || typeof productionWorker !== "string" || typeof stagingWorker !== "string") {
     throw new Error("production_bootstrap_route_strategy_invalid");
   }
-  const stagingWildcard = stagingSpec?.wildcardRoute;
-  if (typeof stagingWildcard !== "string") throw new Error("production_bootstrap_route_strategy_invalid");
-  const stagingExceptions = [stagingWildcard];
+  const stagingExceptions = Array.isArray(stagingSpec?.stagingRouteExceptions)
+    ? stagingSpec.stagingRouteExceptions
+    : [];
+  if (stagingExceptions.length === 0 || stagingExceptions.some((pattern) => typeof pattern !== "string")) {
+    throw new Error("production_bootstrap_route_strategy_invalid");
+  }
   return {
     canary: [
       { pattern: `canary.${zoneName}/*`, script: productionWorker },
