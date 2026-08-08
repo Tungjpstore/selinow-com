@@ -198,10 +198,7 @@ describe("production rollback schema compatibility admission", () => {
         items: [
           {
             annotations: {
-              "selinow/commit-sha": "a".repeat(40),
-              "selinow/manifest-ref": ".wrangler/releases/release_20260809_abcdef12/release-manifest.json",
-              "selinow/release-id": "release_20260809_abcdef12",
-              "selinow/tree-sha": "b".repeat(40),
+              "workers/message": `selinow-release commitSha=${"a".repeat(40)} treeSha=${"b".repeat(40)} releaseId=release_20260809_abcdef12 manifestRef=.wrangler/releases/release_20260809_abcdef12/release-manifest.json`,
             },
             id: candidateWorkerVersion,
           },

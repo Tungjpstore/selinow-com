@@ -956,10 +956,24 @@ export function parseProductionWorkerDeploymentVersion(value) {
   return versionId;
 }
 
+function workerVersionMessageBinding(annotations) {
+  const message = annotations?.["workers/message"];
+  if (typeof message !== "string") return {};
+  try {
+    const value = JSON.parse(message);
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) return value;
+  } catch {
+    // Wrangler messages also support a compact key=value provenance format.
+  }
+  return Object.fromEntries([...message.matchAll(/\b(commitSha|manifestRef|manifestSha256|releaseId|treeSha)=([^\s]+)\b/gu)]
+    .map((match) => [match[1], match[2]]));
+}
+
 function normalizeWorkerVersionBinding(version) {
   if (version === null || typeof version !== "object") return null;
   const metadata = version.metadata;
   const annotations = version.annotations ?? metadata?.annotations;
+  const messageBinding = workerVersionMessageBinding(annotations);
   const annotation = (names) => names
     .map((name) => annotations?.[name])
     .find((value) => typeof value === "string");
@@ -969,18 +983,23 @@ function normalizeWorkerVersionBinding(version) {
   return {
     commitSha: metadataValue(["commitSha", "commit_sha", "reviewedCommitSha", "reviewed_commit_sha"])
       ?? annotation(["selinow/commit-sha", "selinow_commit_sha", "commitSha", "commit_sha"])
+      ?? messageBinding.commitSha
       ?? null,
     manifestSha256: metadataValue(["manifestSha256", "manifest_sha256", "releaseManifestSha256", "release_manifest_sha256"])
       ?? annotation(["selinow/manifest-sha256", "selinow_manifest_sha256", "manifestSha256", "manifest_sha256"])
+      ?? messageBinding.manifestSha256
       ?? null,
     manifestRef: metadataValue(["manifestRef", "manifest_ref", "releaseManifestRef", "release_manifest_ref"])
       ?? annotation(["selinow/manifest-ref", "selinow_manifest_ref", "manifestRef", "manifest_ref"])
+      ?? messageBinding.manifestRef
       ?? null,
     releaseId: metadataValue(["releaseId", "release_id"])
       ?? annotation(["selinow/release-id", "selinow_release_id", "releaseId", "release_id"])
+      ?? messageBinding.releaseId
       ?? null,
     treeSha: metadataValue(["treeSha", "tree_sha", "reviewedTreeSha", "reviewed_tree_sha"])
       ?? annotation(["selinow/tree-sha", "selinow_tree_sha", "treeSha", "tree_sha"])
+      ?? messageBinding.treeSha
       ?? null,
   };
 }
