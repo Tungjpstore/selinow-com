@@ -635,13 +635,19 @@ describe("production release readiness", () => {
         treeSha,
         workerVersion: "staging-worker-version",
       };
-      const scenarioRecord = (index: number) => ({
-        eventReference: `event:evt_${String(index).padStart(4, "0")}`,
-        evidenceFingerprintSha256: (index + 1).toString(16).padStart(64, "0"),
-        observedAt: "2026-07-25T12:00:00.000Z",
-        requestReference: `request:req_${String(index).padStart(4, "0")}`,
-        status: "passed",
-      });
+      const scenarioRecord = async (provider: string, id: string) => {
+        const artifactRef = `.wrangler/releases/staging/${stagingReleaseId}/scenarios/${provider}-${id}.json`;
+        const artifact = JSON.stringify({ environment: "staging", provider, release: releaseBinding, scenarioId: id });
+        await mkdir(join(root, ".wrangler/releases/staging", stagingReleaseId, "scenarios"), { recursive: true });
+        await writeFile(join(root, artifactRef), artifact, { mode: 0o600 });
+        return {
+          eventReference: `artifact:${artifactRef}`,
+          evidenceFingerprintSha256: createHash("sha256").update(artifact).digest("hex"),
+          observedAt: "2026-07-25T12:00:00.000Z",
+          requestReference: `artifact:${artifactRef}`,
+          status: "passed",
+        };
+      };
       const dodoArtifact = {
         completedAt: "2026-07-25T13:00:00.000Z",
         createdAt: "2026-07-25T11:00:00.000Z",
@@ -657,7 +663,7 @@ describe("production release readiness", () => {
         providerEnvironment: "test_mode",
         redaction: { auditNoSensitiveValues: true, d1NoHostedCheckoutUrl: true, d1NoRawPayload: true, d1NoSecretValues: true, evidenceFingerprintSha256: "f".repeat(64), logsNoSensitiveValues: true, queuesNoSensitiveValues: true },
         release: releaseBinding,
-        scenarios: Object.fromEntries(DODO_STAGING_UAT_SCENARIO_IDS.map((id, index) => [id, { ...scenarioRecord(index), sessionReference: `session:ses_${String(index).padStart(4, "0")}` }])),
+        scenarios: Object.fromEntries(await Promise.all(DODO_STAGING_UAT_SCENARIO_IDS.map(async (id) => [id, { ...(await scenarioRecord("dodo", id)), sessionReference: null }]))),
         schemaVersion: 1,
       };
       const payosArtifact = {
@@ -669,7 +675,7 @@ describe("production release readiness", () => {
         providerEnvironment: "test_mode",
         redaction: { auditNoSensitiveValues: true, d1NoRawPayload: true, d1NoSecretValues: true, evidenceFingerprintSha256: "f".repeat(64), logsNoSensitiveValues: true, queuesNoSensitiveValues: true },
         release: releaseBinding,
-        scenarios: Object.fromEntries(PAYOS_STAGING_UAT_SCENARIO_IDS.map((id, index) => [id, scenarioRecord(index + 40)])),
+        scenarios: Object.fromEntries(await Promise.all(PAYOS_STAGING_UAT_SCENARIO_IDS.map(async (id) => [id, await scenarioRecord("payos", id)]))),
         schemaVersion: 1,
       };
       const commerce = evidence.commerceAcceptance as Record<string, Record<string, unknown>>;
@@ -678,10 +684,14 @@ describe("production release readiness", () => {
       if (dodoCommerce === undefined || payosCommerce === undefined) throw new Error("missing_commerce_fixture");
       dodoCommerce.evidenceRef = `.wrangler/releases/staging/${stagingReleaseId}/dodo-uat-evidence.json`;
       payosCommerce.evidenceRef = `.wrangler/releases/staging/${stagingReleaseId}/payos-uat-evidence.json`;
+      const dodoBytes = JSON.stringify(dodoArtifact);
+      const payosBytes = JSON.stringify(payosArtifact);
       await Promise.all([
-        writeFile(join(root, String(dodoCommerce.evidenceRef)), JSON.stringify(dodoArtifact), { mode: 0o600 }),
-        writeFile(join(root, String(payosCommerce.evidenceRef)), JSON.stringify(payosArtifact), { mode: 0o600 }),
+        writeFile(join(root, String(dodoCommerce.evidenceRef)), dodoBytes, { mode: 0o600 }),
+        writeFile(join(root, String(payosCommerce.evidenceRef)), payosBytes, { mode: 0o600 }),
       ]);
+      dodoCommerce.artifactSha256 = createHash("sha256").update(dodoBytes).digest("hex");
+      payosCommerce.artifactSha256 = createHash("sha256").update(payosBytes).digest("hex");
       const manifest = buildReleaseArtifacts({
         evidence,
         migrationNames: ["0001_first.sql"],

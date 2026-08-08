@@ -21,7 +21,7 @@ const SHA256 = /^[a-f0-9]{64}$/u;
 const GIT_SHA = /^[a-f0-9]{40}$/u;
 const RELEASE_ID = /^stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}$/u;
 const WORKER_VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/u;
-const REF = /^(?:request|event|session|artifact):[A-Za-z0-9._-]{3,128}$/u;
+const REF = /^(?:request|event|session):[A-Za-z0-9._-]{3,128}$|^artifact:[A-Za-z0-9._/-]{3,240}$/u;
 const UNSAFE = [/https?:\/\//iu, /Bearer(?:\s+|[_-])/iu, /whsec_/iu, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu, /(?:secret|token|api[_-]?key|raw[_-]?(?:body|payload)|checkout[_-]?url|customer|buyer|credential)/iu];
 
 function keys(value, expected, issue) {

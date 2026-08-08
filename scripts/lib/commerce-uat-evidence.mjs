@@ -50,7 +50,7 @@ function assertScenarioArtifacts(root, evidence, provider) {
     : Object.keys(evidence.scenarios ?? {});
   for (const id of ids) {
     const record = evidence.scenarios[id];
-    const refs = [record?.requestReference, record?.eventReference, record?.sessionReference].filter((ref) => ref !== null);
+    const refs = [record?.requestReference, record?.eventReference, record?.sessionReference].filter((ref) => ref !== null && ref !== undefined);
     if (refs.length === 0 || refs.some((ref) => typeof ref !== "string" || !ref.startsWith("artifact:"))) {
       throw new Error(`${provider}_uat_scenario_artifact_reference_required`);
     }
