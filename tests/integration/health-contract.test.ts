@@ -8,7 +8,11 @@ describe("health response contract", () => {
     const health = {
       ok: true,
       service: "selinow.com",
-      phase: 6,
+      phase: 10,
+      release: {
+        platform: "deployed",
+        commerce: "provider_pending",
+      },
       commerce: {
         channels: [TELEGRAM_CHANNEL_CODE, WEBSITE_CHANNEL_CODE],
         contract: CANONICAL_COMMERCE_CONTRACT,
@@ -18,7 +22,8 @@ describe("health response contract", () => {
 
     expect(health.ok).toBe(true);
     expect(health.service).toBe("selinow.com");
-    expect(health.phase).toBe(6);
+    expect(health.phase).toBe(10);
+    expect(health.release).toEqual({ platform: "deployed", commerce: "provider_pending" });
     expect(health.commerce).toEqual({
       channels: ["telegram", "website"],
       contract: "principal-channel-canonical-v1",

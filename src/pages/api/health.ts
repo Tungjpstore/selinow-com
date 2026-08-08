@@ -8,7 +8,11 @@ export const GET: APIRoute = ({ locals }) => {
     {
       ok: true,
       service: "selinow.com",
-      phase: 6,
+      phase: 10,
+      release: {
+        platform: "deployed",
+        commerce: "provider_pending",
+      },
       commerce: {
         channels: [TELEGRAM_CHANNEL_CODE, WEBSITE_CHANNEL_CODE],
         contract: CANONICAL_COMMERCE_CONTRACT,
