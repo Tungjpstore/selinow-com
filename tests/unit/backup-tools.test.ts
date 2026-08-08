@@ -1139,7 +1139,10 @@ describe("backup CLI dry runs", () => {
         id: PROTECTED_STAGING_SNAPSHOT_ID,
         size_bytes: protectedBackup.sizeBytes,
       });
-      expect(report.records.restore_drills[0]!.backup_snapshot_id).toBe(PROTECTED_STAGING_SNAPSHOT_ID);
+      const firstDrill = report.records.restore_drills[0];
+      expect(firstDrill).toBeDefined();
+      if (firstDrill === undefined) throw new Error("restore_drill_record_missing");
+      expect(firstDrill.backup_snapshot_id).toBe(PROTECTED_STAGING_SNAPSHOT_ID);
     } finally {
       await rm(reportPath, { force: true });
     }

@@ -189,7 +189,10 @@ describe("staging continuation admission", () => {
     };
     const changedArtifact = "CREATE TABLE evil_baseline (id TEXT);\n";
     expect(changedArtifact.length).toBe("CREATE TABLE safe_baseline (id TEXT);\n".length);
-    report.records.backup_snapshots[0]!.checksum_sha256 = createHash("sha256")
+    const firstSnapshot = report.records.backup_snapshots[0];
+    expect(firstSnapshot).toBeDefined();
+    if (firstSnapshot === undefined) throw new Error("backup_snapshot_record_missing");
+    firstSnapshot.checksum_sha256 = createHash("sha256")
       .update(changedArtifact)
       .digest("hex");
     await writeFile(evidence.reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
@@ -215,8 +218,15 @@ describe("staging continuation admission", () => {
       };
     };
     const renamedSnapshotId = "bkp_20260803003000_bbbbbbbbbbbb";
-    report.records.backup_snapshots[0]!.id = renamedSnapshotId;
-    report.records.restore_drills[0]!.backup_snapshot_id = renamedSnapshotId;
+    const firstSnapshot = report.records.backup_snapshots[0];
+    const firstDrill = report.records.restore_drills[0];
+    expect(firstSnapshot).toBeDefined();
+    expect(firstDrill).toBeDefined();
+    if (firstSnapshot === undefined || firstDrill === undefined) {
+      throw new Error("restore_binding_records_missing");
+    }
+    firstSnapshot.id = renamedSnapshotId;
+    firstDrill.backup_snapshot_id = renamedSnapshotId;
     await writeFile(evidence.reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
 
     await expect(assertFreshStagingContinuationEvidence({
