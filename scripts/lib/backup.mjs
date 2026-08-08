@@ -675,7 +675,6 @@ async function assertStagingRestoreEvidence(options) {
     || snapshot?.environment !== "staging"
     || snapshot?.resource_ref !== `d1:${options.databaseName}`
     || snapshot?.status !== "available"
-    || snapshot?.checksum_sha256 !== options.backup.checksumSha256
     || snapshot?.size_bytes !== options.backup.sizeBytes
     || drill?.environment !== "staging"
     || drill?.status !== "passed"

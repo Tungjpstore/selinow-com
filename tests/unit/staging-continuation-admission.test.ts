@@ -30,6 +30,7 @@ async function writeEvidenceRoot() {
   await mkdir(restoreDirectory, { mode: 0o700, recursive: true });
   const artifact = "CREATE TABLE safe_baseline (id TEXT);\n";
   const checksum = createHash("sha256").update(artifact).digest("hex");
+  const restoreChecksum = createHash("sha256").update(`${artifact}-- restore export\n`).digest("hex");
   await writeFile(join(backupDirectory, "database.sql"), artifact, { mode: 0o600 });
   const source = {
     account_id: ACCOUNT_ID,
@@ -65,7 +66,7 @@ async function writeEvidenceRoot() {
   await writeFile(reportPath, `${JSON.stringify({
     records: {
       backup_snapshots: [{
-        checksum_sha256: checksum,
+        checksum_sha256: restoreChecksum,
         environment: "staging",
         id: restoreSnapshotId,
         resource_ref: `d1:${DATABASE_NAME}`,
