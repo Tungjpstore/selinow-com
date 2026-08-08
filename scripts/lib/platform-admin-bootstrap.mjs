@@ -30,8 +30,7 @@ export function buildPlatformAdminBootstrapSql({ requestId, userEmail, userId })
     throw new Error("platform_admin_bootstrap_input_invalid");
   }
   const now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
-  return `BEGIN IMMEDIATE;
-INSERT INTO platform_admin_bootstrap_receipts (ceremony_key, user_id, role, request_id, created_at)
+  return `INSERT INTO platform_admin_bootstrap_receipts (ceremony_key, user_id, role, request_id, created_at)
 SELECT 'first_platform_admin', id, 'owner', ${sqlLiteral(requestId)}, ${now}
 FROM platform_users
 WHERE id = ${sqlLiteral(userId)} AND email_normalized = ${sqlLiteral(userEmail)} AND status = 'active'
@@ -42,7 +41,6 @@ SELECT user_id, 'owner', 'active', ${now}, ${now}
 FROM platform_admin_bootstrap_receipts
 WHERE ceremony_key = 'first_platform_admin' AND user_id = ${sqlLiteral(userId)}
   AND (SELECT COUNT(*) FROM platform_admins) = 0;
-COMMIT;
 SELECT
   (SELECT COUNT(*) FROM platform_admins) AS adminCount,
   (SELECT COUNT(*) FROM platform_admins WHERE user_id = ${sqlLiteral(userId)} AND role = 'owner' AND status = 'active') AS candidateOwnerCount,
