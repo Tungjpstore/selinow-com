@@ -50,6 +50,13 @@ function continuationEvidence() {
   };
 }
 
+function d1OperatorEnvironment(): NodeJS.ProcessEnv {
+  return {
+    CLOUDFLARE_API_TOKEN: "ambient-token-must-not-win",
+    CLOUDFLARE_D1_API_TOKEN: "d1-token",
+  };
+}
+
 describe("production database migration admission", () => {
   it("preserves local, staging, dry-run, and read-only command behavior", () => {
     expect(parseDatabaseFlags(["--env", "local"])).toMatchObject({
@@ -324,6 +331,7 @@ describe("production database migration admission", () => {
         commitSha: "0123456789abcdef0123456789abcdef01234567",
         releaseId: "release_20260729_abcdef12",
       }),
+      environment: d1OperatorEnvironment(),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
       assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
@@ -342,6 +350,7 @@ describe("production database migration admission", () => {
         commitSha: "0123456789abcdef0123456789abcdef01234567",
         releaseId: "release_20260729_abcdef12",
       }),
+      environment: d1OperatorEnvironment(),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
       assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
@@ -368,6 +377,8 @@ describe("production database migration admission", () => {
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       events.push(args.join(" "));
       expect(options?.env?.CLOUDFLARE_ACCOUNT_ID).toBe(accountId);
+      expect(options?.env?.CLOUDFLARE_API_TOKEN).toBe("d1-token");
+      expect(options?.env).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
       return {
         stderr: "",
         stdout: args[0] === "d1"
@@ -383,10 +394,16 @@ describe("production database migration admission", () => {
         return { checks: [], ok: true };
       },
       assertMigrationLedgerPrefixImplementation: (input) => {
+        expect(input.environment).toMatchObject({
+          CLOUDFLARE_ACCOUNT_ID: accountId,
+          CLOUDFLARE_API_TOKEN: "d1-token",
+        });
+        expect(input.environment).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
         expect(input.expectedPrefix).toEqual(["0001_platform_foundation.sql"]);
         events.push("ledger");
         return Promise.resolve({ migrationNames: ["0001_platform_foundation.sql"] });
       },
+      environment: d1OperatorEnvironment(),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
       assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
@@ -426,6 +443,7 @@ describe("production database migration admission", () => {
           ? ["0001_platform_foundation.sql"]
           : ["0001_platform_foundation.sql", "0002_tenant_auth_subscription.sql"],
       }),
+      environment: d1OperatorEnvironment(),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
       assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),

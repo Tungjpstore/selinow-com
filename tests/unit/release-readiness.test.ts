@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assertProductionDeployAdmission,
   assertProductionWorkerDeployAdmission,
+  buildProductionRollbackRehearsalArtifact,
   buildReleaseArtifacts,
   evaluateBackupPrerequisites,
   inspectProductionReadiness,
@@ -18,6 +19,7 @@ import {
   runPilotSmoke,
   validateProductionDeployAdmission,
   validatePilotSmokePlan,
+  writeProductionRollbackRehearsalArtifact,
 } from "../../scripts/lib/release.mjs";
 import { DODO_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/dodo-uat-evidence.mjs";
 import { PAYOS_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/payos-uat-evidence.mjs";
@@ -639,6 +641,54 @@ describe("production release readiness", () => {
     expect(JSON.stringify(result)).not.toContain("snapshotReportRef");
   });
 
+  it("builds and writes the canonical rollback rehearsal artifact", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-rollback-rehearsal-"));
+    try {
+      await mkdir(join(root, "migrations"), { recursive: true });
+      await writeFile(join(root, "migrations/0001_first.sql"), "SELECT 1;\n");
+      execFileSync("git", ["init", "--quiet"], { cwd: root });
+      execFileSync("git", ["config", "user.email", "release-test@selinow.invalid"], { cwd: root });
+      execFileSync("git", ["config", "user.name", "Selinow Release Test"], { cwd: root });
+      execFileSync("git", ["add", "."], { cwd: root });
+      execFileSync("git", ["commit", "--quiet", "-m", "rollback source"], { cwd: root });
+      const rollbackCommitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+      const rollbackTreeSha = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim();
+      await writeFile(join(root, "release.txt"), "candidate\n");
+      execFileSync("git", ["add", "release.txt"], { cwd: root });
+      execFileSync("git", ["commit", "--quiet", "-m", "release source"], { cwd: root });
+      const commitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+      const treeSha = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim();
+      const releaseEvidence = readyEvidence(["0001_first.sql"]);
+      releaseEvidence.commitSha = commitSha;
+      releaseEvidence.treeSha = treeSha;
+      const rollback = releaseEvidence.rollback as { candidate: Record<string, unknown>; rehearsedAt: string };
+      rollback.candidate.commitSha = rollbackCommitSha;
+      rollback.candidate.treeSha = rollbackTreeSha;
+
+      const artifact = buildProductionRollbackRehearsalArtifact({
+        evidence: releaseEvidence,
+        migrationNames: ["0001_first.sql"],
+        now,
+      });
+      expect(artifact).toMatchObject({
+        releaseSource: { commitSha, treeSha },
+        rollbackSource: { commitSha: rollbackCommitSha, treeSha: rollbackTreeSha },
+        schemaVersion: 1,
+      });
+
+      const written = await writeProductionRollbackRehearsalArtifact({
+        evidence: releaseEvidence,
+        migrationNames: ["0001_first.sql"],
+        now,
+        repositoryRoot: root,
+      });
+      expect(written.artifactSha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(written.evidenceRef).toBe(`.wrangler/releases/${String(releaseEvidence.releaseId)}/rollback-rehearsal.json`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a reviewed migration baseline that is not the exact source prefix", () => {
     const migrationNames = ["0001_first.sql", "0002_second.sql"];
     const evidence = readyEvidence(migrationNames);
@@ -1084,7 +1134,12 @@ describe("production release readiness", () => {
         },
         id: candidateWorkerVersion,
       }, {
-        binding: null,
+        binding: {
+          commitSha: "rollback-commit-sha",
+          manifestRef: `.wrangler/releases/${releaseId}/rollback-manifest.json`,
+          releaseId: `${releaseId}_rollback`,
+          treeSha: "rollback-tree-sha",
+        },
         id: rollbackCandidateWorkerVersion,
       }],
       workerName: "selinow-com-production",
@@ -1109,6 +1164,20 @@ describe("production release readiness", () => {
     })).rejects.toThrow("cloudflare_worker_deploy_api_token_missing");
     await expect(assertProductionWorkerDeployAdmission({
       ...common,
+      environment: {
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+        CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: "dedicated-worker-token",
+      },
+    })).rejects.toThrow("production_rollback_worker_version_binding_invalid");
+
+    await expect(assertProductionWorkerDeployAdmission({
+      ...common,
+      rollbackWorkerVersionBinding: {
+        commitSha: "rollback-commit-sha",
+        manifestRef: `.wrangler/releases/${releaseId}/rollback-manifest.json`,
+        releaseId: `${releaseId}_rollback`,
+        treeSha: "rollback-tree-sha",
+      },
       environment: {
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
         CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: "dedicated-worker-token",

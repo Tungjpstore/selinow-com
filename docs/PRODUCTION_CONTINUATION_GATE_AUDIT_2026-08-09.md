@@ -1,14 +1,15 @@
 # Production Continuation Gate Audit
 
-Status: `NO-GO` (`prepared_only`). This is a non-secret, read-only audit for
-the exact repository tree observed on 2026-08-09. It does not authorize a
+Status: `NO-GO` (`prepared_only`, historical observation). This is a non-secret,
+read-only audit for the tree observed on 2026-08-09; it is not current-candidate
+release evidence and does not authorize a
 Cloudflare, D1, DNS, Worker, queue, cron, provider, or secret mutation.
 
 ## Release identity
 
-- Reviewed source tree: commit `1eab0f62c5a338884d2f9a48d85c660d07c22259`.
-- Reviewed Git tree: `66b753e5b245dbb915d28e14ab8d4ba605e21430`.
-- Source migration chain: contiguous `0001` through `0086` (86 files).
+- Historical reviewed source tree: commit `1eab0f62c5a338884d2f9a48d85c660d07c22259`.
+- Historical reviewed Git tree: `66b753e5b245dbb915d28e14ab8d4ba605e21430`.
+- Current source migration chain: contiguous `0001` through `0090` (90 files).
 - Production Worker expected by source: `selinow-com-production`.
 - Production D1 expected by source: `selinow-production`, UUID
   `75102e37-45f6-40ed-a32a-9e700fd184db`.
@@ -36,8 +37,8 @@ ends at `0052_generated_license_request_hardening.sql`. This is not a live
 query and must not be treated as current remote proof.
 
 - Latest retained production backup: `.wrangler/backups/production/bkp_20260804113931_e87d7ee5bfa1/` (completed 2026-08-04; source ledger through `0052`).
-- Latest retained passed isolated restore: `.wrangler/restore-drills/production/rdr_20260804114401_67010b1e6913.json` (reviewed commit `72248cc...`; isolated verification through `0080`, not the current `0086` tree).
-- A fresh production backup and isolated restore bound to commit `1eab0f6` do not exist.
+- Latest retained passed isolated restore: `.wrangler/restore-drills/production/rdr_20260804114401_67010b1e6913.json` (reviewed commit `72248cc...`; isolated verification through `0080`, not the current `0090` tree).
+- A fresh production backup and isolated restore bound to the current clean HEAD do not exist.
 - A live remote migration-ledger query was not performed because no dedicated
   read/migration token was available to the audit session; no production D1
   mutation was attempted.
@@ -46,7 +47,7 @@ query and must not be treated as current remote proof.
 fresh protected production backup, run the isolated restore drill against the
 exact reviewed tree, query the live ledger, verify integrity/FK/preflight, and
 bind all reports to one release manifest. The first irreversible sink is the
-forward-only application of `0053` through `0086` via the guarded migration
+forward-only application of `0053` through `0090` via the guarded migration
 executor.
 
 ## Production Worker names and secret admission
@@ -68,7 +69,10 @@ Required short-lived operator variables and scopes are defined by
 
 | Variable | Scope/use |
 | --- | --- |
-| `CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN` | Dedicated account-pinned D1 migration access for the forward-only production migration sink. |
+| `CLOUDFLARE_D1_API_TOKEN` | Short-lived least-privilege D1 token for normal continuation backup/restore/migration; mapped to `CLOUDFLARE_API_TOKEN` only inside the child Wrangler process. |
+| `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` | Dedicated Workers Scripts token for the normal Worker deploy sink only. |
+| `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` | Read-only route/domain/account inventory admission only. |
+| `CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN` | Historical first-bootstrap D1 migration access only; never reuse for continuation. |
 | `CLOUDFLARE_PRODUCTION_EMPTY_BASELINE_API_TOKEN` | Separate, historical empty-baseline bootstrap/restore path only; never reuse for continuation. |
 | `CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN` | Read-only account/D1/Worker/routes/domains/versions/deployments/queues/cron inventory. |
 | `CLOUDFLARE_PRODUCTION_PROMOTION_ROUTE_API_TOKEN` | Workers Routes edit limited to the `selinow.com` zone for exact ID-bound route operations. |
@@ -77,7 +81,8 @@ Required short-lived operator variables and scopes are defined by
 | `CLOUDFLARE_CANARY_ROUTE_API_TOKEN` | Workers Routes edit limited to the `selinow.com` zone for the canary route only. |
 
 These operator tokens must be short-lived, kept outside the repository/build,
-and revoked after their specific ceremony. No token values are recorded here.
+and revoked after their specific ceremony. The runtime Worker secret named
+`CLOUDFLARE_API_TOKEN` is never operator input. No token values are recorded here.
 
 ## Monitoring, budget, and rollback gates
 
@@ -97,9 +102,9 @@ and revoked after their specific ceremony. No token values are recorded here.
 2. Capture account, zone, D1 UUID/name, Worker, routes, domains, queues,
    consumers, cron, and secret names immediately before mutation.
 3. Create a fresh protected production backup and an isolated restore drill
-   bound to commit `1eab0f6`; query the live migration ledger and run D1
+   bound to the full reviewed commit `$(git rev-parse HEAD)`; query the live migration ledger and run D1
    integrity/preflight checks.
-4. If and only if the evidence is accepted, apply `0053`-`0086` forward-only,
+4. If and only if the evidence is accepted, apply `0053`-`0090` forward-only,
    then verify the complete ledger and restore evidence again.
 5. Complete provider handoff/UAT and owner approvals separately; do not infer
    Dodo/PayOS acceptance from route, secret-name, or health checks.
@@ -112,6 +117,6 @@ and revoked after their specific ceremony. No token values are recorded here.
 Production deployment and migration remain **NO-GO**. The exact next
 irreversible action is not a Worker deploy or route change: it is the approved,
 fresh production backup plus isolated restore/ledger admission required before
-the forward-only `0053`-`0086` migration sink. Provider UAT, Dodo webhook secret
+the forward-only `0053`-`0090` migration sink. Provider UAT, Dodo webhook secret
 admission, PayOS acceptance, monitoring/budget ownership, and pilot evidence
 remain independent blockers.

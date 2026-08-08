@@ -13,10 +13,9 @@ migration, deploy, provider action, or pilot action occurred. See
 
 ## Phase 4 review update (2026-08-04)
 
-Current decision: `local_ready_remote_blocked` for the current candidate
-`3c598fcf242127891e8fe4112720938cc3592c4e` (tree
-`3bf5cb32aab3d23060042aabd3f97ac7d20ff696`). No explicit staging
-mutation approval was supplied for P4, so no remote command was executed.
+Current decision: `local_ready_remote_blocked` for the clean committed HEAD selected
+for the fresh manifest (tree/commit must be captured at execution time). No explicit
+staging mutation approval was supplied for P4, so no remote command was executed.
 
 The mutation contract now requires a live ledger that is an exact ordered prefix
 before staging migration, and a complete ledger plus passing preflight before
@@ -42,10 +41,10 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 - Historical Phase 2 runtime commit: `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`
 - Historical Phase 2 runtime tree: `a35e2c871d2db97b392910fb04f51b7aaa27313c`
 - Historical P3 local implementation candidate:
-  `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`; execution uses the P4 candidate
-  above and never substitutes an historical commit.
+  `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`; execution uses the final clean
+  committed HEAD and never substitutes an historical commit.
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
-- Source migration ledger: current candidate `0001`-`0086`
+- Source migration ledger: current candidate `0001`-`0090`
 - Exact P4 changed-file manifest and local verification:
   `docs/PHASE_4_REVIEW_PACKAGE_R0.md`
 - Candidate-bound local restore report:
@@ -69,7 +68,8 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 
 ## Migration and backup
 
-- Historical remote ledger note: `0028` (not re-verified for P4)
+- Latest retained staging evidence: complete through `0086`; reverify the live
+  ledger before using it as the `0090` candidate baseline
 - Exact pending range: captured as a non-empty ordered prefix in the private
   schema-3 manifest; no current staging ledger is claimed until fresh read-only
   evidence exists
@@ -77,11 +77,11 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 - Backup evidence: report-v2, non-empty artifact, checksum, bookmark, freshness
   <= 60 minutes, exact account/D1 identity
 - Restore drill: isolated disposable target from the exact reviewed tree and
-  complete `0001`-`0086` ledger; integrity/FK/schema/count checks required;
+  complete `0001`-`0090` ledger; integrity/FK/schema/count checks required;
   every non-local drill requires `--reviewed-commit`
 - Pre-`0066` OAuth pending-row policy: revoke/expire or explicitly resolve
 - Dodo `0070`-`0081`, activation timestamp migration `0080`, and non-payment
-  migrations `0082`-`0086`: local source/tests are recorded; remote cutover
+  migrations `0082`-`0090`: local source/tests are recorded; remote cutover
   review remains `TBD`
 
 ## Commands after approval
@@ -92,13 +92,23 @@ Use only repository guarded scripts and the exact reviewed environment:
 2. Create and verify the protected staging backup.
 3. Run the isolated restore drill bound to the exact clean commit:
    `npm run restore:drill -- --env staging --reviewed-commit "$(git rev-parse HEAD)" --json`.
-4. Generate the private manifest only after the fresh backup and restore pass:
+4. Generate the private manifest only after the fresh pre-migration backup and restore pass:
    `npm run release:staging:manifest -- --write --json`.
 5. Apply the exact forward-only range derived from the manifest-bound baseline with
    `npm run db:migrate -- --env staging --confirm-maintenance-drain --release-manifest <manifest-ref>`.
-6. Verify ledger, preflight, integrity/FK checks and supported smoke paths. Real
-   staging deploy repeats the complete ordered ledger and database preflight both
-   before and after build and fails before Wrangler on drift.
+6. Verify ledger, preflight, integrity/FK checks and supported smoke paths. If a
+   seed is separately approved, run it with the same manifest. Then create a newer,
+   different post-migration backup, rerun the candidate-bound restore drill, and
+   complete the release evidence before deploy:
+
+   ```bash
+   npm run backup:create -- --env staging --json
+   npm run restore:drill -- --env staging --reviewed-commit "$(git rev-parse HEAD)" --json
+   npm run db:complete-release -- --env staging --release-manifest <manifest-ref> --json
+   ```
+
+   Real staging deploy repeats the complete ordered ledger and database preflight
+   both before and after build and fails before Wrangler on drift.
 7. Deploy with
    `npm run deploy:staging -- --release-manifest <manifest-ref>`.
 8. Run public/auth browser gates and controlled PayOS/Telegram UAT.
@@ -120,7 +130,10 @@ restore integrity/FK/ledger, and unchanged evidence immediately before Wrangler.
 ## External requirements
 
 Secret names only: `CLOUDFLARE_PLATFORM_API_TOKEN`,
-`CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`, staging Dodo webhook secret and any existing
+`CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`, `CLOUDFLARE_D1_API_TOKEN` (short-lived
+D1-capable operator token mapped to `CLOUDFLARE_API_TOKEN` only inside child
+Wrangler), `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` (dedicated Workers Scripts deploy
+token), staging Dodo webhook secret and any existing
 repository-required provider secret names. Never record values here.
 
 ## Verification and evidence paths

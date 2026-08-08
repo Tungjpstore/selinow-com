@@ -378,6 +378,11 @@ describe("authenticated browser gate isolation", () => {
     expect(diagnostic).not.toContain("short-webhook-key");
     expect(diagnostic).not.toContain("short-fingerprint");
     expect(diagnostic).not.toContain("short-client");
+    const operatorTokens = redactPlaywrightFailure(
+      "CLOUDFLARE_D1_API_TOKEN=d1-secret CLOUDFLARE_WORKER_DEPLOY_API_TOKEN=worker-secret",
+    );
+    expect(operatorTokens).toContain("CLOUDFLARE_D1_API_TOKEN=[redacted]");
+    expect(operatorTokens).not.toContain("worker-secret");
     expect(diagnostic).not.toContain("short-platform-token");
     expect(diagnostic).not.toContain("short-route-token");
   });

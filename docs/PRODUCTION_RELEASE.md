@@ -2,7 +2,7 @@
 
 Phase 10 uses a prepare, backup, deploy, verify, confirm-or-rollback sequence. Repository tooling is fail-closed: production configuration, secret names, backup evidence, security status, monitoring ownership and pilot evidence must be complete before a release manifest can be written.
 
-Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. Production currently serves Worker version `e2a4bc53...`, tagged `release_20260802_mobilefix`, on the apex/wildcard routes and the exact `app.selinow.com`/`api.selinow.com` Worker Domains; `6ca9c890-ed04-44dc-ac32-44b36881f2dc` remains the historical first-production baseline. Production D1 is at the applied `0001`-`0052` ledger; current candidate source migrations `0053`-`0086` are pending and have not been applied remotely. The current candidate is commit `3c598fcf242127891e8fe4112720938cc3592c4e` with tree `3bf5cb32aab3d23060042aabd3f97ac7d20ff696`; it still requires a fresh production manifest, backup, and restore bound to that exact clean execution identity. The older bootstrap evidence and Phase 2 review-fix runtime are historical and must not be treated as continuation evidence.
+Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. Production D1 is at the applied `0001`-`0052` ledger; current source migrations `0053`-`0090` are pending and have not been applied remotely. The release candidate is the final clean committed HEAD used to write the production manifest; it requires a fresh production backup and restore bound to that exact commit/tree. Dated Worker-version observations, older bootstrap evidence and Phase 2 review-fix runtime are historical and must not be treated as continuation evidence.
 
 The platform handoff evidence is private and non-secret: `.wrangler/bootstrap/production-evidence.json`, `.wrangler/bootstrap/bootstrap_20260730_first_release/production-smoke.json` and `promotion-applied.json`. It proves platform routing and frontend/health smoke only. PayOS settlement/refunds, Telegram bot acceptance, provider-backed fulfillment, external customer-domain/Turnstile admission, channel-expansion providers (Zalo, WhatsApp and Discord), controlled seller pilots, support/legal ownership and rollback evidence for the current candidate remain incomplete. No provider activation or full-commerce GO is claimed.
 
@@ -123,9 +123,9 @@ npm run release:production:bootstrap:migrate -- --env production --dry-run --jso
 
 If backup, generated-manifest, Git, account, D1, migration-ledger or confirmation evidence changes between checks, the command stops before Wrangler. Record the migration completion timestamp and exact applied ledger in the private bootstrap evidence before moving to the canary phase.
 
-### Continuation migration admission (`0053`-`0086`)
+### Continuation migration admission (`0053`-`0090`)
 
-The first-production executor above is historical and must not be reused for the non-empty continuation. For current candidate migrations `0053`-`0086`, create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports:
+The first-production executor above is historical and must not be reused for the non-empty continuation. `CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN` remains a first-bootstrap-only credential and must never authorize a continuation. For current candidate migrations `0053`-`0090`, use a short-lived least-privilege `CLOUDFLARE_D1_API_TOKEN` (mapped to `CLOUDFLARE_API_TOKEN` only inside the child Wrangler process), create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports. The runtime Worker secret is never operator input:
 
 ```bash
 npm run backup:create -- --env production --confirm-production --json
@@ -135,6 +135,44 @@ npm run restore:drill -- \
   --reviewed-commit "$(git rev-parse HEAD)" \
   --json
 ```
+
+Before writing the production release manifest, upload two route-neutral Worker
+versions. The candidate upload runs from the clean candidate checkout. The
+rollback upload must run from a separate clean worktree checked out at the exact
+rollback commit/tree recorded in `rollback.candidate`:
+
+```bash
+npm run release:worker:upload -- \
+  --role candidate \
+  --tag candidate-<release-id> \
+  --execute \
+  --confirm-production \
+  --json
+
+npm run release:worker:upload -- \
+  --role rollback \
+  --tag rollback-<release-id> \
+  --source-root /absolute/path/to/clean-rollback-worktree \
+  --execute \
+  --confirm-production \
+  --json
+```
+
+Record the exact full `workerVersion` UUID returned by each command in
+`candidateWorkerVersion` and `rollback.candidate.workerVersion`. Then write the
+canonical rollback rehearsal and record its returned `evidenceRef` and
+`artifactSha256` in the production evidence:
+
+```bash
+npm run release:rollback:rehearsal -- --write --json
+npm run release:manifest -- --write --json
+```
+
+Do not write the release manifest before both route-neutral uploads and the
+rollback rehearsal are complete. Normal deploy admission validates both the
+candidate and rollback Cloudflare version UUIDs against their commit/tree,
+release ID, manifest reference and role bindings; a missing, active, ambiguous
+or mismatched version fails closed.
 
 The normal production migration sink is then admitted only with a canonical release manifest pinned to the same clean commit:
 
@@ -147,6 +185,19 @@ npm run db:migrate -- \
 ```
 
 The migration and normal Worker deploy admissions revalidate the exact account/D1 identity and require the latest non-empty report-v2 backup, protected artifact checksum/target/freshness, and the latest passed isolated restore report with matching reviewed commit, backup checksum/size, integrity/FK results and the complete current source migration ledger. Any evidence drift between the first and final checks fails closed before Wrangler. This path still requires a separately approved production mutation window; dry-runs and historical bootstrap evidence do not authorize applying or deploying the continuation.
+
+Keep the normal Worker deploy token separate from D1 and audit credentials.
+`CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` is read-only admission for the production
+route/domain inventory, and `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` is the dedicated
+Workers Scripts credential mapped only to the final deploy sink. Neither token,
+nor the D1-capable operator token, may enter the application build or runtime.
+After the migration evidence and all production release gates pass, use the exact
+manifest-bound command:
+
+```bash
+MANIFEST_REF=".wrangler/releases/<release-id>/release-manifest.json"
+npm run deploy -- --env production --confirm-production --release-manifest "$MANIFEST_REF"
+```
 
 Restore normalization is limited to the disposable isolated target. If an older
 source ledger contains the known historical `0062_zalo_oa_oauth_state_reissue.sql`
@@ -280,7 +331,7 @@ The default mode is a read-only plan against a supplied saved live inventory (`-
 
 ### Empty-baseline restore drill
 
-The empty-baseline drill below is historical first-production bootstrap procedure. It was used before the `0001`-`0052` platform migration and must not be substituted for the normal non-empty backup/restore gate when applying current candidate migrations `0053`-`0086`. A create timeout is reconciled through bounded D1 relists so an uncertain temporary target is not silently orphaned. The private mode-`0600` report records metadata and safe error codes only; it never records provider bookmarks, credentials or exported SQL:
+The empty-baseline drill below is historical first-production bootstrap procedure. It was used before the `0001`-`0052` platform migration and must not be substituted for the normal non-empty backup/restore gate when applying current candidate migrations `0053`-`0090`. A create timeout is reconciled through bounded D1 relists so an uncertain temporary target is not silently orphaned. The private mode-`0600` report records metadata and safe error codes only; it never records provider bookmarks, credentials or exported SQL:
 
 ```bash
 npm run release:production:bootstrap:empty-baseline -- \
@@ -308,7 +359,7 @@ For this platform-only release, the apex/wildcard route handoff and canary accep
 - The route repair target sends `*/*` to `selinow-com-production` and preserves exact `staging.selinow.com/*`, `app-staging.selinow.com/*`, `api-staging.selinow.com/*` and `*.staging.selinow.com/*` exceptions on `selinow-com-staging`. Exact platform custom domains remain pinned to their reviewed Workers and DNS remains manual. Reconcile the live inventory before the route-only mutation; never restore the historical broad staging catch-all.
 - External customer hostnames therefore reach the production Worker. Application admission must still fail closed unless the hostname is attached to the correct tenant and its Cloudflare hostname, SSL, DNS target, plan entitlement and Turnstile admission are all active.
 - The production Turnstile widget is authorized for `selinow.com`, which covers its subdomains. Turnstile does not support wildcard hostnames; every external custom hostname must be admitted explicitly before activation (or the account must use Enterprise Any Hostname). The current application has no runtime hostname-admission lifecycle evidence, so external custom-domain checkout remains blocked and no external-domain activation is claimed by the platform-only handoff.
-- Production migrations are forward-only. The current remote baseline is `0001`-`0052`; current candidate migrations `0053_seller_operations_contracts.sql` through `0086_platform_admin_bootstrap_receipt.sql` require a fresh backup, reviewed clean commit and an approved, separately recorded mutation window before application. Before `0066`, revoke or expire pending OAuth rows created without a lookup hash; before `0076`, confirm Dodo provider references and tax/merchant decisions without recording secret values; before `0077`, confirm activation-event retention ownership and analytics policy; review the `0078`-`0080` billing/activation invariants and the `0081`-`0086` payment, account-security, recovery, privacy and platform-admin constraints with the same candidate.
+- Production migrations are forward-only. The current remote baseline is `0001`-`0052`; current candidate migrations `0053_seller_operations_contracts.sql` through `0090_payos_provider_claim_clear_guard.sql` require a fresh backup, reviewed clean commit and an approved, separately recorded mutation window before application. Before `0066`, revoke or expire pending OAuth rows created without a lookup hash; before `0076`, confirm Dodo provider references and tax/merchant decisions without recording secret values; before `0077`, confirm activation-event retention ownership and analytics policy; review the `0078`-`0080` billing/activation invariants and the `0081`-`0090` payment, account-security, recovery, privacy, platform-admin and PayOS claim-fencing constraints with the same candidate.
 - The continuation requires the exact clean Phase 2 execution commit, fresh evidence and a new release manifest pinned to that reviewed commit before deploying or migrating. Local dry-runs and R2 do not authorize production mutation.
 
 Do not remove these blockers by broadening a shared-zone wildcard without the exact in-zone staging exceptions, routing an external staging hostname through production, or disabling Turnstile. Keep the platform-only route contracts explicit, and before any future external-domain cutover capture a fresh read-only external-host inventory, rerun staging acceptance and add tenant-routing/Turnstile lifecycle evidence. The route handoff is documented in `buildProductionRouteHandoff`; it is a plan-only helper and performs no Cloudflare mutation.
@@ -415,7 +466,7 @@ Rollback authority and support ownership must be named before the change window 
 
 Phase 10 is not complete until:
 
-- The reviewed production baseline is explicitly recorded as `0001`-`0052`; any current-candidate continuation migration (`0053`-`0086`) has a fresh protected backup, isolated restore evidence and forward-only apply record.
+- The reviewed production baseline is explicitly recorded as `0001`-`0052`; any current-candidate continuation migration (`0053`-`0090`) has a fresh protected backup, isolated restore evidence and forward-only apply record.
 - Staging acceptance for the candidate migrations and Worker version is recorded.
 - The production doctor and reviewed release manifest pass for the exact candidate commit and rollback Worker version.
 - A production D1 export/bookmark is less than 24 hours old and the isolated restore-drill evidence is less than 30 days old.

@@ -4,9 +4,10 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import process from "node:process";
 import { DatabaseSync } from "node:sqlite";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertExactMigrationLedger,
@@ -33,6 +34,8 @@ const STAGING_DATABASE_ID = "c86d76a0-7407-42b6-ba92-f9f9623d0730";
 const PRODUCTION_ACCOUNT_ID = "ab250a88911fd24073cb73d1c07e0218";
 const PRODUCTION_DATABASE_ID = "d86d76a0-7407-42b6-ba92-f9f9623d0730";
 const REVIEWED_COMMIT_SHA = "c".repeat(40);
+const D1_OPERATOR_TOKEN = "d1-token";
+const originalD1OperatorToken = process.env.CLOUDFLARE_D1_API_TOKEN;
 const PROTECTED_STAGING_ARTIFACT = resolve(import.meta.dirname, "../../migrations/0001_platform_foundation.sql");
 const PROTECTED_STAGING_SNAPSHOT_ID = "bkp_20260725235900_aaaaaaaaaaaa";
 const GENERATED_LICENSE_TABLES = [
@@ -76,6 +79,15 @@ const PRODUCTION_CONFIG = {
     },
   },
 };
+
+beforeEach(() => {
+  process.env.CLOUDFLARE_D1_API_TOKEN = D1_OPERATOR_TOKEN;
+});
+
+afterEach(() => {
+  if (originalD1OperatorToken === undefined) delete process.env.CLOUDFLARE_D1_API_TOKEN;
+  else process.env.CLOUDFLARE_D1_API_TOKEN = originalD1OperatorToken;
+});
 
 async function protectedStagingBackupEvidence() {
   const artifact = await readFile(PROTECTED_STAGING_ARTIFACT);
@@ -632,9 +644,10 @@ describe("backup CLI dry runs", () => {
     );
     const commands: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
     const operatorEnvironment = {
+      CLOUDFLARE_D1_API_TOKEN: D1_OPERATOR_TOKEN,
       CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
       CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
-      KEEP_ME: "safe",
+      KEEP_ME: "must-not-forward",
     };
     try {
       const result = await createBackup({
@@ -687,9 +700,11 @@ describe("backup CLI dry runs", () => {
       ]);
       expect(commands.every(({ env }) => (
         env.CLOUDFLARE_ACCOUNT_ID === STAGING_ACCOUNT_ID
+        && env.CLOUDFLARE_API_TOKEN === D1_OPERATOR_TOKEN
+        && !Object.prototype.hasOwnProperty.call(env, "CLOUDFLARE_D1_API_TOKEN")
         && !Object.prototype.hasOwnProperty.call(env, "CLOUDFLARE_PLATFORM_API_TOKEN")
         && !Object.prototype.hasOwnProperty.call(env, "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN")
-        && env.KEEP_ME === "safe"
+        && env.KEEP_ME === undefined
       ))).toBe(true);
     } finally {
       await rm(reportDirectory, { force: true, recursive: true });
@@ -703,6 +718,7 @@ describe("backup CLI dry runs", () => {
       dryRun: false,
       environment: "staging",
       operatorEnvironment: {
+        CLOUDFLARE_D1_API_TOKEN: D1_OPERATOR_TOKEN,
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
       },
@@ -719,8 +735,9 @@ describe("backup CLI dry runs", () => {
   it("rejects a wrong ambient production account before any backup sink", async () => {
     const commands: Array<{ accountId: string | undefined; args: string[] }> = [];
     const operatorEnvironment = {
+      CLOUDFLARE_D1_API_TOKEN: D1_OPERATOR_TOKEN,
       CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
-      KEEP_ME: "safe",
+      KEEP_ME: "must-not-forward",
     };
     const runner = (args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       commands.push({ accountId: options?.env?.CLOUDFLARE_ACCOUNT_ID, args });
@@ -810,9 +827,10 @@ describe("backup CLI dry runs", () => {
     );
     const commands: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
     const operatorEnvironment = {
+      CLOUDFLARE_D1_API_TOKEN: D1_OPERATOR_TOKEN,
       CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
       CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
-      KEEP_ME: "safe",
+      KEEP_ME: "must-not-forward",
     };
     try {
       const result = await createBackup({
@@ -878,12 +896,15 @@ describe("backup CLI dry runs", () => {
       ]);
       expect(commands.every(({ env }) => (
         env.CLOUDFLARE_ACCOUNT_ID === PRODUCTION_ACCOUNT_ID
+        && env.CLOUDFLARE_API_TOKEN === D1_OPERATOR_TOKEN
+        && !Object.prototype.hasOwnProperty.call(env, "CLOUDFLARE_D1_API_TOKEN")
         && !Object.prototype.hasOwnProperty.call(env, "CLOUDFLARE_PLATFORM_API_TOKEN")
         && !Object.prototype.hasOwnProperty.call(env, "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN")
-        && env.KEEP_ME === "safe"
+        && env.KEEP_ME === undefined
       ))).toBe(true);
       expect(JSON.stringify(report)).not.toContain("platform-token");
       expect(JSON.stringify(report)).not.toContain("route-token");
+      expect(JSON.stringify(report)).not.toContain(D1_OPERATOR_TOKEN);
     } finally {
       await rm(reportDirectory, { force: true, recursive: true });
     }

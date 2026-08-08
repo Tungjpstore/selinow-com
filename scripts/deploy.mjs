@@ -342,14 +342,11 @@ try {
   }
   if (!flags.buildOnly) {
     const admittedAccountId = stagingAdmission?.accountId ?? productionAdmission?.accountId;
-    const pinnedBuildEnvironment = admittedAccountId === undefined
-      ? buildEnvironment
-      : buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId);
     const wranglerEnvironment = admittedAccountId === undefined
       ? buildEnvironment
       : buildWorkerDeployEnvironment(process.env, admittedAccountId);
-    if (pinnedBuildEnvironment.CLOUDFLARE_ENV !== undefined) {
-      wranglerEnvironment.CLOUDFLARE_ENV = pinnedBuildEnvironment.CLOUDFLARE_ENV;
+    if (buildEnvironment.CLOUDFLARE_ENV !== undefined) {
+      wranglerEnvironment.CLOUDFLARE_ENV = buildEnvironment.CLOUDFLARE_ENV;
     }
     if (requiresProductionAdmission) {
       if (productionAdmission === null) throw new Error("production_deploy_admission_missing");

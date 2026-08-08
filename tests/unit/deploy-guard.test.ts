@@ -126,7 +126,10 @@ describe("deploy command safety", () => {
     expect(source).toContain("finalAdmission.databaseId !== productionAdmission.databaseId");
     expect(source).toContain("finalAdmission.databaseName !== productionAdmission.databaseName");
     expect(source).toContain("productionAdmission?.accountId");
-    expect(source).toContain("buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId)");
+    expect(source).not.toContain("buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId)");
+    expect(source).toContain("buildPinnedCloudflareEnvironment(process.env, productionAdmission.accountId)");
+    expect(source).toContain("buildWorkerDeployEnvironment(process.env, admittedAccountId)");
+    expect(source).toContain("buildEnvironment.CLOUDFLARE_ENV");
     expect(source).toContain("buildWorkerBuildEnvironment(process.env, flags.environment)");
     expect(source).toContain('"--no-install"');
     expect(source).toContain("requireDedicatedWorkerDeployToken: true");
@@ -200,7 +203,9 @@ describe("deploy command safety", () => {
     expect(stableTargetGuard).toBeLessThan(deploySink);
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN");
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
-    expect(source).toContain("buildPinnedCloudflareEnvironment");
+    expect(source).toContain("buildPinnedCloudflareEnvironment(process.env, stagingAdmission.accountId)");
+    expect(source).toContain("buildPinnedCloudflareEnvironment(process.env, finalAdmission.accountId)");
+    expect(source).toContain("buildWorkerDeployEnvironment(process.env, admittedAccountId)");
     expect(source).toContain("JSON.stringify(finalPostMigrationEvidenceAdmission) !== JSON.stringify(stagingPostMigrationEvidenceAdmission)");
   });
 });

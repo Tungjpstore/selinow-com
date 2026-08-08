@@ -322,7 +322,10 @@ describe("staging release admission", () => {
     await expect(captureStagingReleaseDatabaseBaseline({
       assertStagingMutationAdmissionImplementation: () => Promise.resolve(DATABASE_TARGET),
       databaseTarget: DATABASE_TARGET,
-      environment: { CLOUDFLARE_PLATFORM_API_TOKEN: "not-forwarded" },
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_PLATFORM_API_TOKEN: "not-forwarded",
+      },
       migrationNames: MIGRATIONS,
       runWranglerImplementation: runner,
     })).resolves.toEqual({

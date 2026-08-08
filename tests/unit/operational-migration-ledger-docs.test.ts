@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 
 const operationalDocs = [
   "docs/RELEASE.md",
+  "docs/STAGING_MUTATION_REVIEW_PACKAGE.md",
+  "docs/PHASE_4_STAGING_ACCEPTANCE.md",
   "docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md",
+  "docs/PRODUCTION_CONTINUATION_GATE_AUDIT_2026-08-09.md",
+  "docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md",
   "docs/PRODUCTION_RELEASE.md",
   "docs/PROVIDER_GATE_AUDIT.md",
   "docs/RUNBOOKS.md",
@@ -13,18 +17,65 @@ const operationalDocs = [
   "docs/IMPLEMENTATION_STATUS.md",
 ] as const;
 const content = Object.fromEntries(operationalDocs.map((path) => [path, readFileSync(path, "utf8")]));
+const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+  scripts?: Record<string, string>;
+};
+const productionEvidenceExample = JSON.parse(readFileSync("infra/release/production-evidence.example.json", "utf8")) as {
+  treeSha?: string;
+  quality?: Record<string, unknown>;
+  rollback?: { candidate?: Record<string, unknown> };
+};
 
 describe("operational migration-ledger documentation", () => {
-  it("keeps current operational sections on the complete 0086 source chain", () => {
-    expect(content["docs/RELEASE.md"]).toContain("source tree is now `0001`-`0086`");
-    expect(content["docs/RELEASE.md"]).toContain("58 pending migrations `0029`-`0086`");
-    expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).toContain("Exact pending migrations: `0053`-`0086`");
+  it("keeps current operational sections on the complete 0090 source chain", () => {
+    expect(content["docs/RELEASE.md"]).toContain("source tree is now `0001`-`0090`");
+    expect(content["docs/RELEASE.md"]).toContain("retained staging evidence covers `0001`-`0086`");
+    expect(content["docs/RELEASE.md"]).toContain("production remains at `0052` with `0053`-`0090` pending");
+    expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).toContain("Exact pending migrations: `0053`-`0090`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("explicit `releaseScope`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("reviewed live `migrationLedgerPrefix`");
-    expect(content["docs/PROVIDER_GATE_AUDIT.md"]).toContain("source has the contiguous forward-only chain through `0086`");
-    expect(content["docs/RUNBOOKS.md"]).toContain("complete `0029`-`0086` chain");
-    expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0086_platform_admin_bootstrap_receipt.sql`");
-    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0086`");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Continuation migration admission (`0053`-`0090`)");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("npm run deploy -- --env production --confirm-production --release-manifest");
+    expect(content["docs/PROVIDER_GATE_AUDIT.md"]).toContain("source has the contiguous forward-only chain through `0090`");
+    expect(content["docs/RUNBOOKS.md"]).toContain("complete source ledger ends at `0090_payos_provider_claim_clear_guard.sql`");
+    expect(content["docs/RUNBOOKS.md"]).toContain("npm run db:complete-release");
+    expect(content["docs/RUNBOOKS.md"]).toContain("CLOUDFLARE_WORKER_DEPLOY_API_TOKEN");
+    expect(content["docs/RUNBOOKS.md"]).toContain("restore:drill -- --env production --confirm-production --reviewed-commit");
+    expect(content["docs/STAGING_MUTATION_REVIEW_PACKAGE.md"]).toContain("complete `0001`-`0090` ledger");
+    expect(content["docs/PHASE_4_STAGING_ACCEPTANCE.md"]).toContain("`db:complete-release`");
+    expect(content["docs/PRODUCTION_CONTINUATION_GATE_AUDIT_2026-08-09.md"]).toContain("`0053` through `0090`");
+    expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain("release:worker:upload");
+    expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0090_payos_provider_claim_clear_guard.sql`");
+    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0090`");
+    expect(packageJson.scripts?.["db:complete-release"]).toBe("node scripts/db.mjs complete-release");
+    expect(packageJson.scripts?.["release:rollback:rehearsal"]).toBe("node scripts/release-rollback-rehearsal.mjs");
+    expect(packageJson.scripts?.["release:worker:upload"]).toBe("node scripts/release-worker-upload.mjs");
+    expect(productionEvidenceExample.treeSha).toBeTruthy();
+    expect(productionEvidenceExample.quality).toMatchObject({
+      schemaVersion: 2,
+      check: false,
+      lint: false,
+      tscNoEmit: false,
+      test: false,
+      build: false,
+      buildStaging: false,
+      auditHigh: false,
+      deployDryRun: false,
+      deployStagingDryRun: false,
+      gitDiffCheck: false,
+    });
+    expect(productionEvidenceExample.rollback?.candidate).toMatchObject({
+      schemaVersion: 2,
+      accepted: false,
+      rehearsalPassed: false,
+      workerVersion: expect.any(String),
+      commitSha: expect.any(String),
+      treeSha: expect.any(String),
+      migrationName: expect.any(String),
+      migrationLedgerSha256: expect.any(String),
+      evidenceRef: expect.any(String),
+      artifactSha256: expect.any(String),
+    });
   });
 
   it("allows checkpoint history but rejects stale current operational claims", () => {

@@ -3,6 +3,7 @@
   "environment": "production",
   "releaseId": "replace-with-release-id",
   "commitSha": "replace-with-reviewed-git-sha",
+  "treeSha": "replace-with-reviewed-git-tree-sha",
   "migrationLedgerPrefix": [],
   "previousWorkerVersion": "replace-with-current-worker-version",
   "candidateWorkerVersion": "replace-with-candidate-worker-version",
@@ -27,11 +28,17 @@
     "supportOwner": "replace-with-support-owner"
   },
   "quality": {
+    "schemaVersion": 2,
     "check": false,
     "lint": false,
+    "tscNoEmit": false,
     "test": false,
     "build": false,
-    "deployDryRun": false
+    "buildStaging": false,
+    "auditHigh": false,
+    "deployDryRun": false,
+    "deployStagingDryRun": false,
+    "gitDiffCheck": false
   },
   "backup": {
     "snapshotReportRef": "replace-with-private-backup-report-reference",
@@ -94,6 +101,20 @@
   },
   "rollback": {
     "rehearsalEvidenceRef": "replace-with-private-rollback-rehearsal-report-reference",
-    "rehearsedAt": null
+    "rehearsedAt": null,
+    "candidate": {
+      "schemaVersion": 2,
+      "accepted": false,
+      "rehearsalPassed": false,
+      "rehearsedAt": null,
+      "workerVersion": "replace-with-schema-compatible-rollback-worker-version",
+      "commitSha": "replace-with-rollback-source-git-sha",
+      "treeSha": "replace-with-rollback-source-git-tree-sha",
+      "migrationName": "replace-with-latest-source-migration-name",
+      "migrationLedgerSha256": "replace-with-source-migration-ledger-sha256",
+      "invariants": [],
+      "evidenceRef": "replace-with-private-rollback-rehearsal-report-reference",
+      "artifactSha256": "replace-with-rollback-rehearsal-artifact-sha256"
+    }
   }
 }

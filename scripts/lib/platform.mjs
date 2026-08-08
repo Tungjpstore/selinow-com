@@ -15,6 +15,7 @@ const cloudflareAccountIdPattern = /^[a-f0-9]{32}$/u;
 const d1DatabaseIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const workerVersionIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME = "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
+export const CLOUDFLARE_D1_TOKEN_NAME = "CLOUDFLARE_D1_API_TOKEN";
 
 const SAFE_BUILD_ENVIRONMENT_NAMES = new Set([
   "CI",
@@ -79,6 +80,14 @@ export function requireCloudflareWorkerDeployToken(environment = process.env) {
   const token = environment[CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME]?.trim();
   if (!token) {
     throw new Error("cloudflare_worker_deploy_api_token_missing");
+  }
+  return token;
+}
+
+export function requireCloudflareD1Token(environment = process.env) {
+  const token = environment[CLOUDFLARE_D1_TOKEN_NAME]?.trim();
+  if (!token) {
+    throw new Error("cloudflare_d1_api_token_missing");
   }
   return token;
 }
@@ -168,12 +177,24 @@ export function buildPinnedCloudflareEnvironment(environment, accountId) {
   if (typeof accountId !== "string" || !cloudflareAccountIdPattern.test(accountId)) {
     throw new Error("staging_account_identity_invalid");
   }
-  const childEnvironment = {
-    ...environment,
-    CLOUDFLARE_ACCOUNT_ID: accountId,
-  };
+  const token = requireCloudflareD1Token(environment);
+  const childEnvironment = Object.fromEntries(Object.entries(environment ?? {}).filter(([name, value]) => (
+    SAFE_BUILD_ENVIRONMENT_NAMES.has(name) && typeof value === "string"
+  )));
+  childEnvironment.CLOUDFLARE_API_TOKEN = token;
+  if (typeof environment?.CLOUDFLARE_ENV === "string") {
+    childEnvironment.CLOUDFLARE_ENV = environment.CLOUDFLARE_ENV;
+  }
+  childEnvironment.CLOUDFLARE_ACCOUNT_ID = accountId;
   delete childEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN;
   delete childEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
+  delete childEnvironment[CLOUDFLARE_D1_TOKEN_NAME];
+  delete childEnvironment.CLOUDFLARE_API_KEY;
+  delete childEnvironment.CLOUDFLARE_API_USER_SERVICE_KEY;
+  delete childEnvironment.CLOUDFLARE_EMAIL;
+  delete childEnvironment.CLOUDFLARE_OAUTH_TOKEN;
+  delete childEnvironment.CF_API_KEY;
+  delete childEnvironment.CF_API_TOKEN;
   return childEnvironment;
 }
 

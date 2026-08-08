@@ -218,6 +218,7 @@ describe("platform admin bootstrap guard", () => {
     );
 
     await expect(runPlatformAdminBootstrap({
+      environment: { CLOUDFLARE_D1_API_TOKEN: "d1-token" },
       flags: productionFlags(),
       productionAdmissionImplementation: () => Promise.resolve({
         accountId: ACCOUNT_ID,
@@ -247,7 +248,11 @@ describe("platform admin bootstrap guard", () => {
     const productionLedger = vi.fn(() => Promise.resolve({ migrationNames: [REQUIRED_MIGRATION] }));
 
     await expect(runPlatformAdminBootstrap({
-      environment: { CLOUDFLARE_ACCOUNT_ID: "wrong-account", SECRET_VALUE: "must-not-print" },
+      environment: {
+        CLOUDFLARE_ACCOUNT_ID: "wrong-account",
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        SECRET_VALUE: "must-not-print",
+      },
       flags: productionFlags(),
       productionAdmissionImplementation: productionAdmission,
       productionLedgerImplementation: productionLedger,
@@ -258,6 +263,8 @@ describe("platform admin bootstrap guard", () => {
     const [args, options] = runner.mock.calls[0] ?? [];
     expect(args).toContain("--remote");
     expect(options?.env?.CLOUDFLARE_ACCOUNT_ID).toBe(ACCOUNT_ID);
+    expect(options?.env?.CLOUDFLARE_API_TOKEN).toBe("d1-token");
+    expect(options?.env).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
   });
 
   it("accepts only the exact single-owner verification result", async () => {

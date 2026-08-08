@@ -294,6 +294,8 @@ export function requireCloudflarePlatformToken(environment?: NodeJS.ProcessEnv):
 export function requireCloudflareRouteAuditToken(environment?: NodeJS.ProcessEnv): string;
 export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME: "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
 export function requireCloudflareWorkerDeployToken(environment?: NodeJS.ProcessEnv): string;
+export const CLOUDFLARE_D1_TOKEN_NAME: "CLOUDFLARE_D1_API_TOKEN";
+export function requireCloudflareD1Token(environment?: NodeJS.ProcessEnv): string;
 export function buildWorkerBuildEnvironment(
   environment: NodeJS.ProcessEnv | undefined,
   environmentName: "local" | "staging" | "production",

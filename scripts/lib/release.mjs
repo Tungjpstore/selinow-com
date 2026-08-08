@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { chmod, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import {
   assertProductionWorkerIdentityAdmission,
   assertProductionWorkerVersionAdmission,
+  parseProductionWorkerDeployableVersionInventory,
   requireCloudflareWorkerDeployToken,
   repositoryRoot,
 } from "./platform.mjs";
@@ -801,6 +803,107 @@ export function buildRollbackMatrix() {
   ];
 }
 
+export function buildProductionRollbackRehearsalArtifact(input) {
+  const evidence = input?.evidence;
+  const candidate = evidence?.rollback?.candidate;
+  const migrationNames = validateSourceMigrationNames(input?.migrationNames);
+  const expectedMigrationName = migrationNames.at(-1);
+  const expectedMigrationLedgerSha256 = fingerprint(migrationNames);
+  const now = input?.now instanceof Date ? input.now.getTime() : Date.now();
+  const rehearsedAt = safeDate(candidate?.rehearsedAt);
+  const rehearsalAge = rehearsedAt === null ? Number.POSITIVE_INFINITY : now - rehearsedAt;
+  const invariants = Array.isArray(candidate?.invariants) ? candidate.invariants : [];
+  if (!RELEASE_ID_PATTERN.test(evidence?.releaseId ?? "")
+    || PLACEHOLDER_PATTERN.test(evidence.releaseId)
+    || candidate?.accepted !== true
+    || candidate?.rehearsalPassed !== true
+    || candidate?.schemaVersion !== 2
+    || evidence?.rollback?.rehearsedAt !== candidate?.rehearsedAt
+    || rehearsedAt === null
+    || rehearsalAge < 0
+    || rehearsalAge > 30 * 24 * 60 * 60_000
+    || candidate?.migrationName !== expectedMigrationName
+    || candidate?.migrationLedgerSha256 !== expectedMigrationLedgerSha256
+    || invariants.length < REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS.length
+    || new Set(invariants).size !== invariants.length
+    || invariants.some((name) => typeof name !== "string" || !/^[a-z][a-z0-9_]{2,127}$/u.test(name))
+    || !REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS.every((name) => invariants.includes(name))
+    || !/^[a-f0-9]{40}$/u.test(evidence?.commitSha ?? "")
+    || !/^[a-f0-9]{40}$/u.test(evidence?.treeSha ?? "")
+    || !/^[a-f0-9]{40}$/u.test(candidate?.commitSha ?? "")
+    || !/^[a-f0-9]{40}$/u.test(candidate?.treeSha ?? "")
+    || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(evidence?.candidateWorkerVersion ?? "")
+    || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(evidence?.previousWorkerVersion ?? "")
+    || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(candidate?.workerVersion ?? "")
+    || candidate.workerVersion === evidence.previousWorkerVersion
+    || candidate.workerVersion === evidence.candidateWorkerVersion) {
+    throw new Error("production_rollback_rehearsal_input_invalid");
+  }
+  return {
+    environment: "production",
+    invariants: [...invariants],
+    migrationLedger: {
+      latest: expectedMigrationName,
+      sha256: expectedMigrationLedgerSha256,
+    },
+    rehearsal: {
+      completedAt: candidate.rehearsedAt,
+      result: "passed",
+    },
+    releaseSource: {
+      commitSha: evidence.commitSha,
+      treeSha: evidence.treeSha,
+    },
+    rollbackSource: {
+      commitSha: candidate.commitSha,
+      treeSha: candidate.treeSha,
+    },
+    schemaVersion: 1,
+    workerVersions: {
+      candidate: evidence.candidateWorkerVersion,
+      current: evidence.previousWorkerVersion,
+      rollback: candidate.workerVersion,
+    },
+  };
+}
+
+export async function writeProductionRollbackRehearsalArtifact(input) {
+  const root = input?.repositoryRoot ?? repositoryRoot;
+  const artifact = buildProductionRollbackRehearsalArtifact(input);
+  const repositoryState = readRepositoryGitState(root);
+  if (repositoryState.clean !== true
+    || repositoryState.commitSha !== input.evidence.commitSha
+    || repositoryState.treeSha !== input.evidence.treeSha) {
+    throw new Error("production_rollback_rehearsal_source_mismatch");
+  }
+  const rollbackCommit = spawnSync("git", ["rev-parse", "--verify", `${input.evidence.rollback.candidate.commitSha}^{commit}`], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const rollbackTree = spawnSync("git", ["rev-parse", "--verify", `${input.evidence.rollback.candidate.commitSha}^{tree}`], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (rollbackCommit.error || rollbackCommit.status !== 0
+    || rollbackCommit.stdout.trim() !== input.evidence.rollback.candidate.commitSha
+    || rollbackTree.error || rollbackTree.status !== 0
+    || rollbackTree.stdout.trim() !== input.evidence.rollback.candidate.treeSha) {
+    throw new Error("production_rollback_rehearsal_rollback_source_invalid");
+  }
+  const releaseId = input.evidence.releaseId;
+  const evidenceRef = `.wrangler/releases/${releaseId}/rollback-rehearsal.json`;
+  const artifactPath = resolve(root, evidenceRef);
+  const bytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+  await mkdir(dirname(artifactPath), { mode: 0o700, recursive: true });
+  await writeFile(artifactPath, bytes, { mode: 0o600 });
+  await chmod(artifactPath, 0o600);
+  return {
+    artifact,
+    artifactSha256: createHash("sha256").update(bytes).digest("hex"),
+    evidenceRef,
+  };
+}
+
 export function buildReleaseArtifacts(input) {
   if (!RELEASE_ID_PATTERN.test(input.evidence?.releaseId ?? "") || PLACEHOLDER_PATTERN.test(input.evidence.releaseId)) {
     throw new Error("release_id_invalid");
@@ -1157,6 +1260,21 @@ export async function assertProductionWorkerDeployAdmission(input) {
   ]);
   if (productionSpec === null) throw new Error("production_spec_missing");
   if (stagingSpec === null) throw new Error("staging_spec_missing");
+  let rollbackWorkerVersionBinding = input.rollbackWorkerVersionBinding;
+  if (rollbackWorkerVersionBinding === undefined
+    && input.assertReleaseAdmissionImplementation === undefined) {
+    const manifest = await readOptionalJson(resolve(root, input.manifestPath));
+    const rollback = manifest?.rollbackCandidate;
+    rollbackWorkerVersionBinding = {
+      commitSha: rollback?.commitSha,
+      manifestRef: `.wrangler/releases/${manifest?.releaseId}/release-manifest.json`,
+      releaseId: manifest?.releaseId,
+      treeSha: rollback?.treeSha,
+    };
+  }
+  if (input.requireWorkerVersionBinding === true && rollbackWorkerVersionBinding === undefined) {
+    throw new Error("production_rollback_worker_version_binding_invalid");
+  }
   const workerAdmission = await (
     input.workerIdentityImplementation ?? assertProductionWorkerIdentityAdmission
   )({
@@ -1185,6 +1303,7 @@ export async function assertProductionWorkerDeployAdmission(input) {
     deployableWorkerVersionInventory: workerAdmission.deployableWorkerVersionInventory,
     previousWorkerVersion: releaseAdmission.previousWorkerVersion,
     rollbackCandidateWorkerVersion: releaseAdmission.rollbackCandidateWorkerVersion,
+    rollbackWorkerVersionBinding,
   });
   return {
     ...releaseAdmission,
@@ -1194,6 +1313,50 @@ export async function assertProductionWorkerDeployAdmission(input) {
     workerName: workerAdmission.workerName,
     zoneId: workerAdmission.zoneId,
     zoneName: workerAdmission.zoneName,
+  };
+}
+
+export function buildProductionWorkerVersionMessage(input) {
+  if (!new Set(["candidate", "rollback"]).has(input?.role)
+    || !/^[a-f0-9]{40}$/u.test(input?.commitSha ?? "")
+    || !/^[a-f0-9]{40}$/u.test(input?.treeSha ?? "")
+    || !RELEASE_ID_PATTERN.test(input?.releaseId ?? "")
+    || PLACEHOLDER_PATTERN.test(input.releaseId)
+    || typeof input?.manifestRef !== "string"
+    || !input.manifestRef.startsWith(".wrangler/releases/")
+    || !input.manifestRef.endsWith("/release-manifest.json")) {
+    throw new Error("production_worker_upload_binding_invalid");
+  }
+  return JSON.stringify({
+    commitSha: input.commitSha,
+    manifestRef: input.manifestRef,
+    releaseId: input.releaseId,
+    role: input.role,
+    treeSha: input.treeSha,
+  });
+}
+
+export function assertProductionWorkerUploadResult(input) {
+  const normalize = (value) => Array.isArray(value)
+    && value.every((entry) => typeof entry?.id === "string" && Object.hasOwn(entry, "binding"))
+    ? value
+    : parseProductionWorkerDeployableVersionInventory(value);
+  const before = normalize(input?.before);
+  const after = normalize(input?.after);
+  const beforeIds = new Set(before.map((entry) => entry.id));
+  const additions = after.filter((entry) => !beforeIds.has(entry.id));
+  if (additions.length !== 1) throw new Error("production_worker_upload_version_delta_invalid");
+  const expected = input?.expectedBinding;
+  const actual = additions[0].binding;
+  const required = ["commitSha", "treeSha", "releaseId", "manifestRef"];
+  if (expected === null || typeof expected !== "object"
+    || actual === null || typeof actual !== "object"
+    || required.some((key) => typeof expected[key] !== "string" || actual[key] !== expected[key])) {
+    throw new Error("production_worker_upload_binding_mismatch");
+  }
+  return {
+    binding: actual,
+    workerVersion: additions[0].id,
   };
 }
 

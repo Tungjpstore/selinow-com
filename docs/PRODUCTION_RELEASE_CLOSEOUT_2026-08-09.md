@@ -44,6 +44,10 @@ reports, synthetic webhooks, or local-only test output.
    - Record command results in a private, release-bound evidence artifact.
    - Run staging migration/backup/restore admission and the relevant browser,
      route, health, domain, Website and Telegram smoke checks.
+   - After migration (and any separately approved seed), create a newer,
+     different staging backup, rerun the restore drill with the full reviewed
+     commit, and run `npm run db:complete-release -- --env staging
+     --release-manifest <manifest-ref> --json` before `deploy:staging`.
 
 3. **Provider acceptance**
 
@@ -75,8 +79,25 @@ reports, synthetic webhooks, or local-only test output.
    - Require `release:doctor` to return `ok: true` and the continuation-file
      admission to pass for the same commit/tree and migration ledger.
    - Bind a release manifest and rollback rehearsal to the candidate.
+   - Before `release:manifest`, upload route-neutral candidate and rollback
+     versions with `npm run release:worker:upload -- --role candidate --tag
+     <candidate-tag> --execute --confirm-production --json` and
+     `npm run release:worker:upload -- --role rollback --tag <rollback-tag>
+     --source-root <clean-rollback-worktree> --execute --confirm-production
+     --json`; record both full returned UUIDs. Then run
+     `npm run release:rollback:rehearsal -- --write --json` and record its
+     `evidenceRef`/`artifactSha256`. Deploy admission validates both Cloudflare
+     version bindings.
    - Only after all approvals and provider/operations artifacts are accepted,
      execute the separately approved production migration and deploy ceremony.
+   - Use a short-lived D1-capable `CLOUDFLARE_D1_API_TOKEN` for normal continuation
+     (mapped to `CLOUDFLARE_API_TOKEN` only inside child Wrangler), read-only
+     `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` for inventory admission, and dedicated
+     `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` for the Worker deploy sink; the
+     historical bootstrap migration token is never a continuation token and the
+     runtime Worker secret is never operator input.
+     The exact deploy command is
+     `npm run deploy -- --env production --confirm-production --release-manifest <manifest-ref>`.
    - Recheck live routes, Worker version, health, queues, cron and tenant
      isolation after deployment; retain rollback references.
 
@@ -98,4 +119,3 @@ but those artifacts are not production admission. In particular:
 The only safe way to shorten this list is to produce the corresponding
 auditable artifact through the real operator/provider workflow. Never edit the
 doctor, evidence JSON, or release manifest to bypass an external gate.
-

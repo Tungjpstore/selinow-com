@@ -2,7 +2,7 @@
 
 Status: `local_ready_remote_blocked`
 
-Candidate: `bff69f9d26a04b1318fd9862afa6eaffb8c003f4`
+Candidate: final clean committed HEAD captured by the private release manifest
 
 This is an executable evidence contract, not staging evidence. No remote mutation
 is authorized by this file. The P4 task contains no explicit staging-mutation
@@ -16,17 +16,23 @@ read-only identity/resource inventory; protected non-empty report-v2 backup;
 checksum/size/freshness verification; candidate-bound isolated restore; private
 schema-3 manifest with a non-empty live ledger baseline; exact baseline and
 preflight; forward-only migrations; repeated complete ledger/integrity/FK/preflight;
-credential-free build; repeated admission;
+newer post-migration backup; candidate-bound post-migration restore;
+`db:complete-release`; credential-free build; repeated admission;
 candidate deploy; smoke; monitoring; Website-first UAT; confirm or captured-version
 rollback; reconciliation; exact cleanup.
 
 Manifest creation captures the live `d1_migrations` rows as a non-empty exact
-ordered prefix of `0001`-`0080` after read-only account/D1 admission. Migration
+ordered prefix of the current `0001`-`0090` source chain after read-only account/D1 admission. Migration
 requires database preflight to pass and the live ledger to equal that exact
 manifest-bound baseline before Wrangler; after Wrangler it requires the complete
 ordered source ledger and another passing preflight. Seed and deploy require the
 complete ordered ledger and passing database preflight. Missing, empty, extra,
 duplicated, out-of-order, reset, or changed baseline rows stop closed.
+
+Before the candidate deploy, the operator must create a second protected backup
+that is newer and different from the manifest-bound pre-migration snapshot, run
+another isolated restore with `--reviewed-commit "$(git rev-parse HEAD)"`, then run
+`npm run db:complete-release -- --env staging --release-manifest <manifest-ref> --json`.
 
 ## Required private evidence
 

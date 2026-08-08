@@ -49,9 +49,10 @@ Last updated: 2026-08-09
   channel fingerprint `PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT`, and checks
   provider-identity ownership before any webhook-registration mutation. This
   prevents a rotated credential set from redirecting another shop's channel.
-- Source migrations are contiguous through `0086`; staging now has the applied
-  `0001`-`0086` ledger under the final staging evidence below. Production
-  remains at `0052`; no production migration or deploy has been performed.
+- Source migrations are contiguous through `0090`; retained staging evidence has
+  the applied `0001`-`0086` ledger under the final staging evidence below, while
+  `0087`-`0090` are not covered by that historical manifest. Production remains
+  at `0052`; no production migration or deploy has been performed.
 - Current admission result: staging route, backup/restore, migration, deploy
   and smoke evidence pass for the final candidate. Genuine provider UAT remains
   blocked, and production remains **NO-GO** on approvals, backup/restore,
@@ -87,10 +88,11 @@ augmentation, reducing TypeScript failures to one payment-owned Dodo diagnostic.
 Route inventory/privacy and provider-pending expectations are reconciled. Root
 must rerun the complete serial matrix after the final source/payment merge.
 
-The current candidate commit `3c598fcf242127891e8fe4112720938cc3592c4e` (tree
-`3bf5cb32aab3d23060042aabd3f97ac7d20ff696`) contains the committed `0081`-`0086`
-files with a contiguous numeric ledger, but migration admission must remain fail-closed
-until both workstreams are reviewed together. No staging or
+The historical review candidate commit `3c598fcf242127891e8fe4112720938cc3592c4e`
+(tree `3bf5cb32aab3d23060042aabd3f97ac7d20ff696`) contains the committed
+`0081`-`0086` files with a contiguous numeric ledger, but it is not current-candidate
+identity. Current migration admission must remain fail-closed until the clean
+`0090` tree and both workstreams are reviewed together. No staging or
 production migration, seed, deploy, route, DNS, queue/trigger, secret or
 provider mutation was performed. Release doctor remains correctly blocked on
 fresh protected backup/restore evidence, candidate identity, approvals,
@@ -98,9 +100,11 @@ monitoring, pilot and provider acceptance (including the explicit payment-thread
 handoff for PayOS and Dodo UAT evidence). This pass does not claim production
 readiness.
 
-Current operational source migration chain: contiguous `0001`-`0086`; staging has
-applied the guarded continuation through `0086`, while production remains at
-`0052` pending its own backup, restore, manifest and release gates.
+Current operational source migration chain: contiguous `0001`-`0090`; retained
+staging evidence has applied the guarded continuation through `0086`, while
+`0087`-`0090` need a fresh two-phase backup/restore ceremony and
+`db:complete-release`. Production remains at `0052` pending its own backup,
+restore, manifest and release gates for `0053`-`0090`.
 
 ## Historical operational reconciliation (2026-08-04)
 

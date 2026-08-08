@@ -14,12 +14,12 @@ changes.
 
 - Clean reviewed commit/tree: `TBD after this batch is committed and final review`
 - Release manifest/checksum: `TBD`
-- Current source migration ledger: contiguous `0001`-`0086`
+- Current source migration ledger: contiguous `0001`-`0090`
 - Current Worker/version: read-only dashboard observation shows prefix
   `e2a4bc53`; the historical `6ca9c890...` bootstrap version is not current,
   and fresh exact inventory is required
 - Current D1 ledger: `0001`-`0052` must be rechecked live
-- Exact pending migrations: `0053`-`0086`, subject to live ledger
+- Exact pending migrations: `0053`-`0090`, subject to live ledger
 
 ## Production scope
 
@@ -30,6 +30,12 @@ changes.
 - Telegram production test tenant/bot/UAT: `TBD`
 - Custom-domain and Turnstile hostname admission: `TBD`
 - Queue consumers, cron, monitoring and budget thresholds: `TBD`
+- Operator credentials: short-lived D1-capable `CLOUDFLARE_D1_API_TOKEN` for
+  backup/restore/migration (mapped to `CLOUDFLARE_API_TOKEN` only inside child
+  Wrangler), read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` for route/domain
+  admission, and dedicated `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` for the Worker
+  deploy sink; historical bootstrap token is not continuation and the runtime
+  Worker secret is never operator input
 - Pilot sellers, support owner, incident owners and legal approval: `TBD`
 
 ## Explicit mutation list

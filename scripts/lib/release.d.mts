@@ -14,6 +14,38 @@ export function inspectProductionReadiness(input: {
   wranglerConfig: Record<string, unknown>;
 }): { checks: ReleaseCheck[]; missing: string[]; ok: boolean };
 export function buildRollbackMatrix(): Array<Record<string, string>>;
+export function buildProductionRollbackRehearsalArtifact(input: {
+  evidence: Record<string, unknown>;
+  migrationNames: string[];
+  now?: Date;
+}): Record<string, unknown>;
+export function writeProductionRollbackRehearsalArtifact(input: {
+  evidence: Record<string, unknown>;
+  migrationNames: string[];
+  now?: Date;
+  repositoryRoot?: string;
+}): Promise<{
+  artifact: Record<string, unknown>;
+  artifactSha256: string;
+  evidenceRef: string;
+}>;
+export function buildProductionWorkerVersionMessage(input: {
+  commitSha: string;
+  manifestRef: string;
+  releaseId: string;
+  role: "candidate" | "rollback";
+  treeSha: string;
+}): string;
+export function assertProductionWorkerUploadResult(input: {
+  after: unknown;
+  before: unknown;
+  expectedBinding: {
+    commitSha: string;
+    manifestRef: string;
+    releaseId: string;
+    treeSha: string;
+  };
+}): { binding: Record<string, string>; workerVersion: string };
 export function buildReleaseArtifacts(input: {
   evidence: Record<string, unknown>;
   migrationNames: string[];
@@ -59,6 +91,12 @@ export function assertProductionWorkerDeployAdmission(input: {
   repositoryRoot?: string;
   requireDedicatedWorkerDeployToken?: boolean;
   requireWorkerVersionBinding?: boolean;
+  rollbackWorkerVersionBinding?: {
+    commitSha: string;
+    manifestRef: string;
+    releaseId: string;
+    treeSha: string;
+  };
   runWranglerImplementation?: (
     args: string[],
     options?: { cwd?: string; env?: NodeJS.ProcessEnv },

@@ -28,6 +28,7 @@ import {
   planSaasConfiguration,
   provision,
   requireCloudflarePlatformToken,
+  requireCloudflareD1Token,
   requireCloudflareRouteAuditToken,
   requireCloudflareWorkerDeployToken,
   type PlatformEnvironmentSpec,
@@ -107,6 +108,7 @@ const stagingSpec = {
 
 const stagingAdmissionFixtures = {
   doctorImplementation: () => Promise.resolve({ checks: [], ok: true }),
+  environment: { CLOUDFLARE_D1_API_TOKEN: "d1-token" },
   platformToken: "platform-token",
   runtimeIdentityImplementation: () => Promise.resolve({
     databaseId: STAGING_DATABASE_ID,
@@ -562,6 +564,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     await expect(assertProductionWorkerIdentityAdmission({
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
       },
@@ -603,7 +606,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(fetchImplementation).not.toHaveBeenCalled();
 
     await expect(assertProductionWorkerIdentityAdmission({
-      environment: { CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token" },
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+      },
       fetchImplementation,
       productionSpec: productionSpec(),
       runWranglerImplementation: (args) => args[0] === "whoami"
@@ -660,6 +666,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     await expect(inspectStagingRoutePreflight({
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
       },
@@ -876,7 +883,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: stagingSpec.accountId,
-        KEEP_ME: "safe",
+        CLOUDFLARE_API_TOKEN: "d1-token",
       });
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_PLATFORM_API_TOKEN");
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
@@ -900,9 +907,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
     await expect(assertStagingMutationAdmission({
       ...stagingAdmissionFixtures,
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       fetchImplementation,
       runWranglerImplementation: runner,
@@ -996,9 +1004,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     await expect(doctor("staging", {
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       fetchImplementation,
       runWranglerImplementation: runner,
@@ -1007,7 +1016,8 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(observedEnvironments.length).toBeGreaterThan(0);
     expect(observedEnvironments.every((environment) => (
       environment.CLOUDFLARE_ACCOUNT_ID === spec.accountId
-      && environment.KEEP_ME === "safe"
+      && environment.CLOUDFLARE_API_TOKEN === "d1-token"
+      && environment.KEEP_ME === undefined
       && !Object.prototype.hasOwnProperty.call(environment, "CLOUDFLARE_PLATFORM_API_TOKEN")
       && !Object.prototype.hasOwnProperty.call(environment, "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN")
     ))).toBe(true);
@@ -1024,7 +1034,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     })).rejects.toThrow("staging_account_identity_unavailable");
   });
 
-  it("pins staging child commands without forwarding temporary operator tokens", () => {
+  it("requires and maps the dedicated D1 token for pinned Wrangler commands", () => {
     expect(() => {
       assertStagingAccountIdentity(
         `Account ID: ${stagingSpec.accountId}`,
@@ -1032,13 +1042,23 @@ describe("Cloudflare for SaaS platform configuration", () => {
       );
     }).not.toThrow();
 
+    expect(() => requireCloudflareD1Token({})).toThrow("cloudflare_d1_api_token_missing");
+    expect(requireCloudflareD1Token({
+      CLOUDFLARE_D1_API_TOKEN: " d1-token ",
+    })).toBe("d1-token");
+    expect(() => buildPinnedCloudflareEnvironment({
+      CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
+    }, stagingSpec.accountId)).toThrow("cloudflare_d1_api_token_missing");
     expect(buildPinnedCloudflareEnvironment({
       CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
       CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
-      KEEP_ME: "safe",
+      CLOUDFLARE_D1_API_TOKEN: "d1-token",
+      PATH: "/bin",
     }, stagingSpec.accountId)).toEqual({
       CLOUDFLARE_ACCOUNT_ID: stagingSpec.accountId,
-      KEEP_ME: "safe",
+      CLOUDFLARE_API_TOKEN: "d1-token",
+      PATH: "/bin",
     });
   });
 
@@ -1266,7 +1286,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
       expect(args).toEqual(["whoami"]);
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: specification.accountId,
-        KEEP_ME: "safe",
+        CLOUDFLARE_API_TOKEN: "d1-token",
       });
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_PLATFORM_API_TOKEN");
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
@@ -1275,9 +1295,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     await expect(provision("staging", true, {
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "temporary-platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "temporary-route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       platformToken: "platform-token",
       runWranglerImplementation: runner,
@@ -1298,7 +1319,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: specification.accountId,
-        KEEP_ME: "safe",
+        CLOUDFLARE_API_TOKEN: "d1-token",
       });
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_PLATFORM_API_TOKEN");
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
@@ -1364,9 +1385,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     const result = await provision("staging", true, {
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "temporary-platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "temporary-route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       fetchImplementation,
       platformToken: "platform-token",
@@ -1396,7 +1418,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: specification.accountId,
-        KEEP_ME: "safe",
+        CLOUDFLARE_API_TOKEN: "d1-token",
       });
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_PLATFORM_API_TOKEN");
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
@@ -1496,9 +1518,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     const result = await provision("staging", false, {
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "temporary-platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "temporary-route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       fetchImplementation,
       platformToken: "platform-token",
@@ -1548,6 +1571,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const accountId = "abcdef0123456789abcdef0123456789";
     const source = {
       CLOUDFLARE_API_TOKEN: "ambient-token",
+      CLOUDFLARE_D1_API_TOKEN: "d1-token",
       CLOUDFLARE_OAUTH_TOKEN: "ambient-oauth",
       CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: "dedicated-deploy-token",
       DODO_PAYMENTS_API_KEY: "provider-secret",
@@ -1558,6 +1582,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const build = buildWorkerBuildEnvironment(source, "production");
     expect(build).toMatchObject({ CI: "1", CLOUDFLARE_ENV: "production", PATH: "/bin" });
     expect(build).not.toHaveProperty("CLOUDFLARE_API_TOKEN");
+    expect(build).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
     expect(build).not.toHaveProperty("DODO_PAYMENTS_API_KEY");
     expect(build).not.toHaveProperty("NODE_OPTIONS");
     expect(build).not.toHaveProperty("RELEASE_OPERATOR_NOTE");
@@ -1565,6 +1590,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const sink = buildWorkerDeployEnvironment(source, accountId);
     expect(sink).toMatchObject({ CLOUDFLARE_ACCOUNT_ID: accountId, CLOUDFLARE_API_TOKEN: "dedicated-deploy-token" });
     expect(sink).not.toHaveProperty("CLOUDFLARE_WORKER_DEPLOY_API_TOKEN");
+    expect(sink).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
     expect(sink).not.toHaveProperty("CLOUDFLARE_OAUTH_TOKEN");
     expect(sink).not.toHaveProperty("DODO_PAYMENTS_API_KEY");
   });
