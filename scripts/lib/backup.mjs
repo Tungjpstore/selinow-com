@@ -1488,6 +1488,18 @@ function parseWranglerWhoami(output) {
   return accountIds;
 }
 
+function hasScopedUserTokenWithoutAccountInventory(output) {
+  try {
+    const payload = JSON.parse(String(output ?? ""));
+    return payload?.loggedIn === true
+      && payload?.authType === "User API Token"
+      && Array.isArray(payload?.accounts)
+      && payload.accounts.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 function parseD1List(output) {
   let payload;
   try {
@@ -1594,13 +1606,15 @@ function normalizeRemoteMigrationAliases(
 }
 
 function admitRemoteRestoreTarget(runner, target, approvedIdentity, runnerOptions) {
-  const accountIds = parseWranglerWhoami(safeRunner(
+  const whoamiOutput = safeRunner(
     runner,
     ["whoami", "--json"],
     "cloudflare_credentials_missing",
     runnerOptions,
-  ).stdout);
-  if (!accountIds.includes(approvedIdentity.accountId)) {
+  ).stdout;
+  const accountIds = parseWranglerWhoami(whoamiOutput);
+  if (!accountIds.includes(approvedIdentity.accountId)
+    && !hasScopedUserTokenWithoutAccountInventory(whoamiOutput)) {
     throw new Error(`restore_account_mismatch:${target.environment}`);
   }
 

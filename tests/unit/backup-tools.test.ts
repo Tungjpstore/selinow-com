@@ -14,6 +14,7 @@ import {
   assertDistinctRestoreTarget,
   assertFreshStagingBackupEvidence,
   assertFreshProductionBootstrapBackupEvidence,
+  assertProductionBackupAdmission,
   buildBackupSnapshotRecord,
   buildRestoreDrillRecord,
   cleanupRestoreTempDirectory,
@@ -775,6 +776,41 @@ describe("backup CLI dry runs", () => {
       accountId: PRODUCTION_ACCOUNT_ID,
       args: ["whoami", "--json"],
     }]);
+  });
+
+  it("admits a scoped user token when Wrangler omits account inventory", async () => {
+    const target = {
+      binding: "PLATFORM_DB" as const,
+      databaseId: PRODUCTION_DATABASE_ID,
+      databaseName: "selinow-production",
+      environment: "production" as const,
+      resourceRef: "d1:selinow-production",
+    };
+    await expect(assertProductionBackupAdmission({
+      environment: { CLOUDFLARE_D1_API_TOKEN: D1_OPERATOR_TOKEN },
+      identityImplementation: () => Promise.resolve({
+        accountId: PRODUCTION_ACCOUNT_ID,
+        databaseId: PRODUCTION_DATABASE_ID,
+        databaseName: "selinow-production",
+      }),
+      runWranglerImplementation: (args) => {
+        if (args[0] === "whoami") {
+          return {
+            stderr: "",
+            stdout: JSON.stringify({ accounts: [], authType: "User API Token", loggedIn: true }),
+          };
+        }
+        return {
+          stderr: "",
+          stdout: JSON.stringify([{ name: "selinow-production", uuid: PRODUCTION_DATABASE_ID }]),
+        };
+      },
+      target,
+    })).resolves.toMatchObject({
+      accountId: PRODUCTION_ACCOUNT_ID,
+      databaseId: PRODUCTION_DATABASE_ID,
+      databaseName: "selinow-production",
+    });
   });
 
   it("rejects a same-name production D1 with the wrong UUID before any backup sink", async () => {
