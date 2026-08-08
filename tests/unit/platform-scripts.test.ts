@@ -1053,7 +1053,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(observedEnvironments.length).toBeGreaterThan(0);
     expect(observedEnvironments.every((environment) => (
       environment.CLOUDFLARE_ACCOUNT_ID === spec.accountId
-      && environment.CLOUDFLARE_API_TOKEN === "d1-token"
+      && environment.CLOUDFLARE_API_TOKEN === "platform-token"
       && environment.KEEP_ME === undefined
       && !Object.prototype.hasOwnProperty.call(environment, "CLOUDFLARE_PLATFORM_API_TOKEN")
       && !Object.prototype.hasOwnProperty.call(environment, "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN")

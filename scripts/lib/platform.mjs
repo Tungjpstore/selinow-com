@@ -1666,10 +1666,23 @@ export async function doctor(environment, input = {}) {
   const spec = environment !== "local"
     ? input.spec ?? await loadEnvironment(environment)
     : null;
-  const wranglerEnvironment = buildPinnedCloudflareEnvironment(
+  const accountId = input.accountId ?? spec?.accountId ?? "00000000000000000000000000000000";
+  const d1Environment = buildPinnedCloudflareEnvironment(
     operatorEnvironment,
-    input.accountId ?? spec?.accountId ?? "00000000000000000000000000000000",
+    accountId,
   );
+  let cloudflareApiToken = null;
+  try {
+    cloudflareApiToken = requireCloudflarePlatformToken(operatorEnvironment);
+  } catch {
+    // The check below keeps the missing operator context visible.
+  }
+  const wranglerEnvironment = cloudflareApiToken === null
+    ? d1Environment
+    : buildPinnedCloudflareEnvironment({
+        ...operatorEnvironment,
+        CLOUDFLARE_D1_API_TOKEN: cloudflareApiToken,
+      }, accountId);
   const runnerOptions = { cwd: repositoryRoot, env: wranglerEnvironment };
   const nodeVersion = process.versions.node;
   checks.push({ code: "node_version", detail: `Node ${nodeVersion}`, ok: Number(nodeVersion.split(".")[0]) >= 22 });
@@ -1716,15 +1729,13 @@ export async function doctor(environment, input = {}) {
       ok: secretNames.includes("CLOUDFLARE_API_TOKEN"),
     });
 
-    let cloudflareApiToken;
-    try {
-      cloudflareApiToken = requireCloudflarePlatformToken(operatorEnvironment);
+    if (cloudflareApiToken !== null) {
       checks.push({
         code: "cloudflare_platform_api_token_context",
         detail: "Operator platform token is available for scoped SaaS checks",
         ok: true,
       });
-    } catch {
+    } else {
       checks.push({
         code: "cloudflare_platform_api_token_context",
         detail: "Export CLOUDFLARE_PLATFORM_API_TOKEN temporarily to run SaaS checks",
@@ -1732,7 +1743,7 @@ export async function doctor(environment, input = {}) {
       });
     }
 
-    if (cloudflareApiToken) {
+    if (cloudflareApiToken !== null) {
       try {
         const saasState = await discoverSaasState(
           spec,
