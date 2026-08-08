@@ -8,10 +8,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   classifyDodoCatalogRows,
   dodoCatalogReadSql,
+  dodoCatalogRotationSql,
   dodoCatalogUpdateSql,
+  parseDodoCatalogRotationCommandOutput,
   parseDodoCatalogArguments,
   parseDodoCatalogCommandOutput,
   readDodoCatalogReferences,
+  validateDodoCatalogTarget,
 } from "../../scripts/lib/dodo-catalog-reconciliation.mjs";
 
 const NOW = "2026-08-08T00:00:00.000Z";
@@ -20,6 +23,13 @@ const REFERENCES = {
   price_pro_vn_v1: "pdt_test_pro_vn",
   price_starter_global_v1: "pdt_test_starter_global",
   price_starter_vn_v1: "pdt_test_starter_vn",
+};
+
+const LIVE_REFERENCES = {
+  price_pro_global_v1: "pdt_live_pro_global",
+  price_pro_vn_v1: "pdt_live_pro_vn",
+  price_starter_global_v1: "pdt_live_starter_global",
+  price_starter_vn_v1: "pdt_live_starter_vn",
 };
 
 function applyMigrations(database: DatabaseSync): void {
@@ -64,6 +74,89 @@ describe("Dodo catalog reconciliation", () => {
       pendingCount: 0,
       publishedCount: 4,
     });
+  });
+
+  it("rotates published v1 rows into v2 without rebinding existing subscriptions or checkouts", () => {
+    database.exec(dodoCatalogUpdateSql(LIVE_REFERENCES));
+    database.exec(`
+      INSERT INTO shops (
+        id, public_id, slug, name, status, default_locale, currency, timezone,
+        readiness_version, merchant_country_code, business_country_code, created_at, updated_at
+      ) VALUES ('dodo-rotation-shop', 'shop_dodo_rotation', 'dodo-rotation', 'Dodo Rotation',
+        'draft', 'en', 'VND', 'UTC', 1, 'VN', 'VN', '${NOW}', '${NOW}');
+      INSERT INTO shop_subscriptions (
+        id, shop_id, plan_id, state, billing_provider_code, market_code, price_currency,
+        price_amount_minor, price_interval, price_version, price_id, created_at, updated_at
+      ) VALUES ('dodo-rotation-sub', 'dodo-rotation-shop', 'plan_starter_v1', 'active', 'dodo', 'vn',
+        'VND', 99000, 'month', 1, 'price_starter_vn_v1', '${NOW}', '${NOW}');
+      INSERT INTO billing_checkout_sessions (
+        id, public_id, shop_id, subscription_id, plan_id, price_id, provider_code,
+        provider_checkout_ref, status, idempotency_key_hash, request_hash, version,
+        created_at, updated_at
+      ) VALUES ('dodo-rotation-checkout', 'bchk_dodo_rotation', 'dodo-rotation-shop',
+        'dodo-rotation-sub', 'plan_starter_v1', 'price_starter_vn_v1', 'dodo', NULL,
+        'pending', 'hash_dodo_rotation_idempotency', 'hash_dodo_rotation_request', 1,
+        '${NOW}', '${NOW}');
+    `);
+    expect(classifyDodoCatalogRows(rows(database), REFERENCES)).toEqual({
+      mode: "rotation_required",
+      pendingCount: 0,
+      publishedCount: 4,
+    });
+
+    database.exec(dodoCatalogRotationSql(LIVE_REFERENCES, REFERENCES));
+
+    expect(classifyDodoCatalogRows(rows(database), REFERENCES)).toEqual({
+      mode: "rotated",
+      pendingCount: 0,
+      publishedCount: 4,
+    });
+    expect(database.prepare(`
+      SELECT id, provider_price_ref, is_active, version
+      FROM plan_prices
+      WHERE id IN ('price_starter_vn_v1', 'price_starter_vn_v2')
+      ORDER BY version
+    `).all()).toEqual([
+      {
+        id: "price_starter_vn_v1",
+        provider_price_ref: LIVE_REFERENCES.price_starter_vn_v1,
+        is_active: 0,
+        version: 1,
+      },
+      {
+        id: "price_starter_vn_v2",
+        provider_price_ref: REFERENCES.price_starter_vn_v1,
+        is_active: 1,
+        version: 2,
+      },
+    ]);
+    expect(database.prepare(`
+      SELECT effective_to IS NOT NULL AS v1_closed,
+        (SELECT effective_to IS NULL FROM plan_prices WHERE id = 'price_starter_vn_v2') AS v2_open
+      FROM plan_prices WHERE id = 'price_starter_vn_v1'
+    `).get()).toEqual({ v1_closed: 1, v2_open: 1 });
+    expect(database.prepare("SELECT price_id FROM shop_subscriptions WHERE id = 'dodo-rotation-sub'").get())
+      .toEqual({ price_id: "price_starter_vn_v1" });
+    expect(database.prepare("SELECT price_id FROM billing_checkout_sessions WHERE id = 'dodo-rotation-checkout'").get())
+      .toEqual({ price_id: "price_starter_vn_v1" });
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("replays rotation idempotently and rolls back when the observed v1 source is stale", () => {
+    database.exec(dodoCatalogUpdateSql(LIVE_REFERENCES));
+    const rotationSql = dodoCatalogRotationSql(LIVE_REFERENCES, REFERENCES);
+    database.exec(rotationSql);
+    database.exec(rotationSql);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM plan_prices WHERE version = 2").get())
+      .toEqual({ count: 4 });
+    expect(() => {
+      database.exec(dodoCatalogRotationSql({
+        ...LIVE_REFERENCES,
+        price_starter_vn_v1: "pdt_live_starter_vn_changed",
+      }, REFERENCES));
+    }).toThrow();
+    expect(database.prepare("SELECT COUNT(*) AS count FROM plan_prices WHERE version = 2").get())
+      .toEqual({ count: 4 });
   });
 
   it("rejects catalog timing drift before publishing provider references", () => {
@@ -143,6 +236,29 @@ describe("Dodo catalog reconciliation", () => {
       .toThrow("dodo_catalog_confirmation_required");
     expect(() => parseDodoCatalogArguments(["--env", "production", "--apply", "--confirm-catalog-update"]))
       .toThrow("production_confirmation_required");
+    expect(() => parseDodoCatalogArguments(["--env", "staging", "--apply", "--confirm-catalog-update"]))
+      .toThrow("staging_test_catalog_confirmation_required");
+    expect(parseDodoCatalogArguments([
+      "--env", "staging", "--apply", "--confirm-catalog-update", "--confirm-staging-test-catalog",
+    ])).toMatchObject({ confirmStagingTestCatalog: true });
+    expect(() => parseDodoCatalogArguments([
+      "--env", "production", "--apply", "--confirm-catalog-update", "--confirm-production",
+    ])).toThrow("production_live_catalog_confirmation_required");
+    expect(parseDodoCatalogArguments([
+      "--env", "production", "--apply", "--confirm-catalog-update", "--confirm-production",
+      "--confirm-production-live-catalog",
+    ])).toMatchObject({ confirmProductionLiveCatalog: true });
+    expect(() => {
+      validateDodoCatalogTarget({
+        environment: "staging", providerMode: "live_mode", confirmStagingTestCatalog: true,
+      });
+    }).toThrow("dodo_catalog_staging_live_mode_forbidden");
+    expect(() => {
+      validateDodoCatalogTarget({
+        environment: "production", providerMode: "test_mode", confirmProduction: true,
+        confirmProductionLiveCatalog: true,
+      });
+    }).toThrow("dodo_catalog_production_test_mode_forbidden");
   });
 
   it("keeps dry-run output free of product references and parses exact update counts", () => {
@@ -165,5 +281,10 @@ describe("Dodo catalog reconciliation", () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ mode: "dry_run", environment: "staging" });
     expect(parseDodoCatalogCommandOutput(JSON.stringify([{ success: true, results: [{ updated_count: 4 }] }]))).toEqual({ updatedCount: 4 });
     expect(() => parseDodoCatalogCommandOutput(JSON.stringify([{ success: true, results: [{ updated_count: 3 }] }]))).toThrow("dodo_catalog_update_count_mismatch");
+    expect(parseDodoCatalogRotationCommandOutput(JSON.stringify([{ success: true, results: [{ rotation_mode: "rotated", closed_count: 4, inserted_count: 4 }] }]))).toEqual({
+      mode: "rotated",
+      closedCount: 4,
+      insertedCount: 4,
+    });
   });
 });

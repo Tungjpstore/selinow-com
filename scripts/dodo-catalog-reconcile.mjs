@@ -3,7 +3,9 @@ import process from "node:process";
 import {
   parseDodoCatalogArguments,
   readDodoCatalogReferences,
+  readDodoCatalogProviderMode,
   reconcileDodoCatalog,
+  validateDodoCatalogTarget,
 } from "./lib/dodo-catalog-reconciliation.mjs";
 
 function output(value, json) {
@@ -15,6 +17,8 @@ function output(value, json) {
   process.stdout.write(`= catalog: ${value.action}\n`);
   process.stdout.write(`= pending_rows: ${value.pendingCount}\n`);
   process.stdout.write(`= published_rows: ${value.publishedCount}\n`);
+  process.stdout.write(`= closed_rows: ${value.closedCount}\n`);
+  process.stdout.write(`= inserted_rows: ${value.insertedCount}\n`);
   process.stdout.write(`= updated_rows: ${value.updatedCount}\n`);
 }
 
@@ -26,14 +30,33 @@ try {
       action: "would_reconcile_four_dodo_catalog_rows",
       environment: options.environment,
       mode: "dry_run",
+      closedCount: 0,
+      insertedCount: 0,
       pendingCount: null,
       publishedCount: null,
       updatedCount: 0,
     }, options.json);
   } else {
-    const result = await reconcileDodoCatalog({ environment: options.environment, references });
+    const providerMode = readDodoCatalogProviderMode(process.env);
+    validateDodoCatalogTarget({
+      confirmProduction: options.confirmProduction,
+      confirmProductionLiveCatalog: options.confirmProductionLiveCatalog,
+      confirmStagingTestCatalog: options.confirmStagingTestCatalog,
+      environment: options.environment,
+      providerMode,
+    });
+    const result = await reconcileDodoCatalog({
+      confirmProduction: options.confirmProduction,
+      confirmProductionLiveCatalog: options.confirmProductionLiveCatalog,
+      confirmStagingTestCatalog: options.confirmStagingTestCatalog,
+      environment: options.environment,
+      providerMode,
+      references,
+    });
     output({
-      action: result.updatedCount === 0 ? "catalog_already_configured" : "catalog_reconciled",
+      action: result.insertedCount === 4
+        ? "catalog_rotated"
+        : (result.updatedCount === 0 ? "catalog_already_configured" : "catalog_reconciled"),
       ...result,
     }, options.json);
   }
