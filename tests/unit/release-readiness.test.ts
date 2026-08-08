@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +24,31 @@ import { PAYOS_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/payos-uat-evid
 
 const now = new Date("2026-07-26T03:00:00.000Z");
 const providerAcceptanceKeys = ["telegramBot", "telegramMiniApp", "zaloMiniApp", "zaloOa", "whatsappCloud", "discord"] as const;
+const rollbackInvariants = [
+  "shop_subscriptions_trial_claim_insert_guard",
+  "shop_subscriptions_trial_claim_update_guard",
+  "shop_customers_anonymized_insert_guard",
+  "shop_customers_anonymized_update_guard",
+  "checkout_recovery_capabilities_tenant_order_insert_guard",
+  "checkout_recovery_capabilities_tenant_order_guard",
+  "payment_integrations_provider_claim_generation",
+  "payment_integrations_provider_claim_nonce",
+  "payment_integrations_provider_claim_state",
+  "payment_integrations_provider_claim_target_fingerprint",
+  "payment_credentials_provider_claim_nonce",
+  "idx_payment_integrations_provider_claim_nonce",
+  "payment_integrations_payos_claim_state_insert_guard",
+  "payment_integrations_payos_claim_state_update_guard",
+  "payment_credentials_payos_claim_scope_insert_guard",
+  "payment_credentials_payos_claim_scope_update_guard",
+];
+const sourceMigrationNames = readdirSync("migrations")
+  .filter((name) => name.endsWith(".sql"))
+  .sort();
+
+function fingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
 
 function readyWranglerConfig(): Record<string, unknown> {
   const vars = Object.fromEntries(REQUIRED_PRODUCTION_VARS.map((name) => [name, name === "APP_ENV" ? "production" : `configured-${name.toLowerCase()}`]));
@@ -131,7 +157,7 @@ function readyProductionSpec(): Record<string, unknown> {
   };
 }
 
-function readyEvidence(): Record<string, unknown> {
+function readyEvidence(migrationNames = sourceMigrationNames): Record<string, unknown> {
   return {
     schemaVersion: 2,
     environment: "production",
@@ -150,7 +176,7 @@ function readyEvidence(): Record<string, unknown> {
       restoreDrillReportRef: "private-restore-report",
       snapshotReportRef: "private-backup-report",
     },
-    candidateWorkerVersion: "worker-candidate",
+    candidateWorkerVersion: "33333333-3333-4333-8333-333333333333",
     commitSha: "0123456789abcdef0123456789abcdef01234567",
     commerceAcceptance: Object.fromEntries(["payos", "dodo"].map((provider) => [provider, {
       accepted: true,
@@ -174,7 +200,7 @@ function readyEvidence(): Record<string, unknown> {
       observedAt: "2026-07-26T02:00:00.000Z",
     },
     pilot: { completedAt: "2026-07-24T12:00:00.000Z", evidenceRef: "private/pilot/report.json", shopCount: 2 },
-    previousWorkerVersion: "worker-current",
+    previousWorkerVersion: "11111111-1111-4111-8111-111111111111",
     providerAcceptance: Object.fromEntries(providerAcceptanceKeys.map((provider) => [provider, {
       accepted: true,
       evidenceRef: `private/provider-acceptance/${provider}.json`,
@@ -198,7 +224,24 @@ function readyEvidence(): Record<string, unknown> {
       deferredChannels: [],
     },
     releaseId: "release_20260726_abcdef12",
-    rollback: { rehearsalEvidenceRef: "private/rollback/report.json", rehearsedAt: "2026-07-20T12:00:00.000Z" },
+    rollback: {
+      candidate: {
+        accepted: true,
+        artifactSha256: "b".repeat(64),
+        commitSha: "abcdef0123456789abcdef0123456789abcdef01",
+        evidenceRef: "private/rollback/schema-compatible-candidate.json",
+        invariants: [...rollbackInvariants],
+        migrationLedgerSha256: fingerprint(migrationNames),
+        migrationName: migrationNames.at(-1),
+        rehearsalPassed: true,
+        rehearsedAt: "2026-07-20T12:00:00.000Z",
+        schemaVersion: 2,
+        treeSha: "fedcba9876543210fedcba9876543210fedcba98",
+        workerVersion: "22222222-2222-4222-8222-222222222222",
+      },
+      rehearsalEvidenceRef: "private/rollback/report.json",
+      rehearsedAt: "2026-07-20T12:00:00.000Z",
+    },
     security: { criticalOpen: 0, highOpen: 0 },
     staging: {
       accepted: true,
@@ -208,6 +251,7 @@ function readyEvidence(): Record<string, unknown> {
       releaseId: "stg_20260726T010000Z_0123456789ab",
       workerVersion: "staging-worker-version",
     },
+    treeSha: "89abcdef0123456789abcdef0123456789abcdef",
   };
 }
 
@@ -322,6 +366,21 @@ describe("production release readiness", () => {
     });
 
     expect(result.missing).toContain("evidence.quality.schemaVersion");
+  });
+
+  it("requires an immutable current production Worker version ID", () => {
+    const evidence = readyEvidence();
+    evidence.previousWorkerVersion = "phase-6-worker";
+
+    const result = inspectProductionReadiness({
+      evidence,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.missing).toContain("evidence.previousWorkerVersion");
   });
 
   it.each([
@@ -536,9 +595,11 @@ describe("production release readiness", () => {
   });
 
   it("builds a value-safe manifest and rollback matrix after readiness passes", () => {
+    const migrationNames = ["0001_first.sql", "0002_second.sql"];
+    const evidence = readyEvidence(migrationNames);
     const result = buildReleaseArtifacts({
-      evidence: readyEvidence(),
-      migrationNames: ["0002_second.sql", "0001_first.sql"],
+      evidence,
+      migrationNames: [...migrationNames].reverse(),
       now,
       packageVersion: "0.0.0",
       productionSpec: readyProductionSpec(),
@@ -554,19 +615,23 @@ describe("production release readiness", () => {
       activeChannels: ["website", ...providerAcceptanceKeys],
       deferredChannels: [],
     });
-    expect(result.manifest.commerceAcceptance).toEqual((readyEvidence().commerceAcceptance));
+    expect(result.manifest.commerceAcceptance).toEqual(evidence.commerceAcceptance);
+    expect(result.manifest.rollbackCandidate).toEqual((evidence.rollback as {
+      candidate: Record<string, unknown>;
+    }).candidate);
     expect(result.manifest.releaseEvidenceFingerprintSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(result.rollbackMatrix).toHaveLength(6);
     expect(JSON.stringify(result)).not.toContain("snapshotReportRef");
   });
 
   it("rejects a reviewed migration baseline that is not the exact source prefix", () => {
-    const evidence = readyEvidence();
+    const migrationNames = ["0001_first.sql", "0002_second.sql"];
+    const evidence = readyEvidence(migrationNames);
     evidence.migrationLedgerPrefix = ["0002_second.sql"];
 
     expect(() => buildReleaseArtifacts({
       evidence,
-      migrationNames: ["0001_first.sql", "0002_second.sql"],
+      migrationNames,
       now,
       packageVersion: "0.0.0",
       productionSpec: readyProductionSpec(),
@@ -576,7 +641,8 @@ describe("production release readiness", () => {
   });
 
   it("projects only allowlisted acceptance fields into the release manifest", () => {
-    const evidence = readyEvidence();
+    const migrationNames = ["0001_first.sql", "0002_second.sql"];
+    const evidence = readyEvidence(migrationNames);
     (evidence.manualAcceptance as Record<string, unknown>).token = "manual-secret";
     ((evidence.providerAcceptance as { telegramBot: Record<string, unknown> }).telegramBot).token = "provider-secret";
     ((evidence.commerceAcceptance as { payos: Record<string, unknown> }).payos).rawPayload = "commerce-secret";
@@ -584,7 +650,7 @@ describe("production release readiness", () => {
 
     const result = buildReleaseArtifacts({
       evidence,
-      migrationNames: ["0001_first.sql", "0002_second.sql"],
+      migrationNames,
       now,
       packageVersion: "0.0.0",
       productionSpec: readyProductionSpec(),
@@ -596,8 +662,8 @@ describe("production release readiness", () => {
   });
 
   it("admits only a clean source tree matching the reviewed release manifest", () => {
-    const evidence = readyEvidence();
     const migrationNames = ["0001_first.sql", "0002_second.sql"];
+    const evidence = readyEvidence(migrationNames);
     const wranglerConfig = readyWranglerConfig();
     const productionSpec = readyProductionSpec();
     const manifest = buildReleaseArtifacts({
@@ -619,12 +685,19 @@ describe("production release readiness", () => {
       productionSpec,
       repositoryClean: true,
       repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      ...{ repositoryTreeSha: evidence.treeSha },
       workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
       wranglerConfig,
     })).toEqual({
+      candidateWorkerVersion: "33333333-3333-4333-8333-333333333333",
       commitSha: "0123456789abcdef0123456789abcdef01234567",
+      migrationLedgerSha256: fingerprint(migrationNames),
       migrationLedgerPrefix: ["0001_first.sql"],
+      previousWorkerVersion: "11111111-1111-4111-8111-111111111111",
       releaseId: "release_20260726_abcdef12",
+      rollbackArtifactSha256: "b".repeat(64),
+      rollbackCandidateWorkerVersion: "22222222-2222-4222-8222-222222222222",
+      treeSha: evidence.treeSha,
     });
 
     expect(() => validateProductionDeployAdmission({
@@ -636,14 +709,15 @@ describe("production release readiness", () => {
       productionSpec,
       repositoryClean: false,
       repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      ...{ repositoryTreeSha: evidence.treeSha },
       workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
       wranglerConfig,
     })).toThrow("production_release_source_dirty");
   });
 
   it("rejects a manifest when reviewed evidence or repository identity drifts", () => {
-    const evidence = readyEvidence();
     const migrationNames = ["0001_first.sql", "0002_second.sql"];
+    const evidence = readyEvidence(migrationNames);
     const wranglerConfig = readyWranglerConfig();
     const productionSpec = readyProductionSpec();
     const manifest = buildReleaseArtifacts({
@@ -667,6 +741,7 @@ describe("production release readiness", () => {
       productionSpec,
       repositoryClean: true,
       repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      repositoryTreeSha: evidence.treeSha,
       workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
       wranglerConfig,
     };
@@ -681,7 +756,7 @@ describe("production release readiness", () => {
       ...input,
       evidence,
       migrationNames: [...migrationNames, "0003_new.sql"],
-    })).toThrow("production_release_manifest_mismatch:migrationNames");
+    })).toThrow("release_prerequisites_incomplete:evidence.rollback.candidate.migrationLedgerSha256");
     const changedConfig = structuredClone(wranglerConfig);
     ((changedConfig.env as Record<string, unknown>).production as {
       vars: Record<string, string>;
@@ -714,11 +789,26 @@ describe("production release readiness", () => {
       execFileSync("git", ["config", "user.email", "release-test@selinow.invalid"], { cwd: root });
       execFileSync("git", ["config", "user.name", "Selinow Release Test"], { cwd: root });
       execFileSync("git", ["add", "."], { cwd: root });
+      execFileSync("git", ["commit", "--quiet", "-m", "rollback fixture"], { cwd: root });
+      const rollbackCommitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+      const rollbackTreeSha = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim();
+      await writeFile(join(root, "release-marker.txt"), "release candidate\n");
+      execFileSync("git", ["add", "release-marker.txt"], { cwd: root });
       execFileSync("git", ["commit", "--quiet", "-m", "release fixture"], { cwd: root });
       const commitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
       const treeSha = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim();
-      const evidence = readyEvidence();
+      const evidence = readyEvidence(["0001_first.sql"]);
       evidence.commitSha = commitSha;
+      evidence.treeSha = treeSha;
+      const rollback = evidence.rollback as {
+        candidate: Record<string, unknown>;
+        rehearsalEvidenceRef: string;
+        rehearsedAt: string;
+      };
+      rollback.candidate.commitSha = rollbackCommitSha;
+      rollback.candidate.treeSha = rollbackTreeSha;
+      rollback.candidate.evidenceRef = `.wrangler/releases/${releaseId}/rollback-rehearsal.json`;
+      rollback.rehearsalEvidenceRef = String(rollback.candidate.evidenceRef);
       const stagingReleaseId = `stg_20260726T010000Z_${commitSha.slice(0, 12)}`;
       const stagingDirectory = join(root, ".wrangler/releases/staging", stagingReleaseId);
       await mkdir(stagingDirectory, { recursive: true });
@@ -819,6 +909,28 @@ describe("production release readiness", () => {
       ]);
       dodoCommerce.artifactSha256 = createHash("sha256").update(dodoBytes).digest("hex");
       payosCommerce.artifactSha256 = createHash("sha256").update(payosBytes).digest("hex");
+      const rollbackArtifact = JSON.stringify({
+        environment: "production",
+        invariants: rollback.candidate.invariants,
+        migrationLedger: {
+          latest: "0001_first.sql",
+          sha256: rollback.candidate.migrationLedgerSha256,
+        },
+        rehearsal: {
+          completedAt: rollback.rehearsedAt,
+          result: "passed",
+        },
+        releaseSource: { commitSha, treeSha },
+        rollbackSource: { commitSha: rollbackCommitSha, treeSha: rollbackTreeSha },
+        schemaVersion: 1,
+        workerVersions: {
+          candidate: evidence.candidateWorkerVersion,
+          current: evidence.previousWorkerVersion,
+          rollback: rollback.candidate.workerVersion,
+        },
+      });
+      rollback.candidate.artifactSha256 = createHash("sha256").update(rollbackArtifact).digest("hex");
+      await writeFile(join(root, rollback.rehearsalEvidenceRef), rollbackArtifact, { mode: 0o600 });
       const manifest = buildReleaseArtifacts({
         evidence,
         migrationNames: ["0001_first.sql"],
@@ -839,7 +951,26 @@ describe("production release readiness", () => {
         now,
         repositoryRoot: root,
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
-      })).resolves.toEqual({ commitSha, migrationLedgerPrefix: ["0001_first.sql"], releaseId });
+      })).resolves.toEqual({
+        candidateWorkerVersion: "33333333-3333-4333-8333-333333333333",
+        commitSha,
+        migrationLedgerSha256: fingerprint(["0001_first.sql"]),
+        migrationLedgerPrefix: ["0001_first.sql"],
+        previousWorkerVersion: "11111111-1111-4111-8111-111111111111",
+        releaseId,
+        rollbackArtifactSha256: rollback.candidate.artifactSha256,
+        rollbackCandidateWorkerVersion: "22222222-2222-4222-8222-222222222222",
+        treeSha,
+      });
+
+      await writeFile(join(root, rollback.rehearsalEvidenceRef), `${rollbackArtifact}\n`, { mode: 0o600 });
+      await expect(assertProductionDeployAdmission({
+        manifestPath,
+        now,
+        repositoryRoot: root,
+        workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      })).rejects.toThrow("production_rollback_artifact_hash_mismatch");
+      await writeFile(join(root, rollback.rehearsalEvidenceRef), rollbackArtifact, { mode: 0o600 });
 
       await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.0.1" }));
       await expect(assertProductionDeployAdmission({
@@ -854,14 +985,22 @@ describe("production release readiness", () => {
   });
 
   it("combines reviewed release evidence with the exact live production target", async () => {
+    const currentWorkerVersion = "11111111-1111-4111-8111-111111111111";
+    const rollbackCandidateWorkerVersion = "22222222-2222-4222-8222-222222222222";
+    const candidateWorkerVersion = "33333333-3333-4333-8333-333333333333";
     const releaseAdmission = vi.fn(() => Promise.resolve({
+      candidateWorkerVersion,
       commitSha: "0123456789abcdef0123456789abcdef01234567",
+      previousWorkerVersion: currentWorkerVersion,
       releaseId: "release_20260726_abcdef12",
+      rollbackCandidateWorkerVersion,
     }));
     const workerIdentity = vi.fn(() => Promise.resolve({
       accountId: "abcdef0123456789abcdef0123456789",
+      currentWorkerVersion,
       databaseId: "17ea8f2f-4c97-4337-8989-28b25a58ddeb",
       databaseName: "selinow-production",
+      deployableWorkerVersionIds: [candidateWorkerVersion, rollbackCandidateWorkerVersion],
       workerName: "selinow-com-production",
       zoneId: "0123456789abcdef0123456789abcdef",
       zoneName: "selinow.com",
@@ -879,10 +1018,13 @@ describe("production release readiness", () => {
       wranglerConfig: readyWranglerConfig(),
     })).resolves.toEqual({
       accountId: "abcdef0123456789abcdef0123456789",
+      candidateWorkerVersion,
       commitSha: "0123456789abcdef0123456789abcdef01234567",
       databaseId: "17ea8f2f-4c97-4337-8989-28b25a58ddeb",
       databaseName: "selinow-production",
+      previousWorkerVersion: currentWorkerVersion,
       releaseId: "release_20260726_abcdef12",
+      rollbackCandidateWorkerVersion,
       workerName: "selinow-com-production",
       zoneId: "0123456789abcdef0123456789abcdef",
       zoneName: "selinow.com",
@@ -890,6 +1032,7 @@ describe("production release readiness", () => {
     expect(releaseAdmission).toHaveBeenCalledTimes(1);
     expect(workerIdentity).toHaveBeenCalledWith(expect.objectContaining({
       productionSpec: readyProductionSpec(),
+      requireCurrentWorkerVersion: true,
       token: undefined,
       wranglerConfig: readyWranglerConfig(),
     }));

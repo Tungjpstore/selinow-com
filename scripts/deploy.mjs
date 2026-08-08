@@ -8,6 +8,12 @@ import {
   repositoryRoot,
 } from "./lib/platform.mjs";
 import {
+  assertProductionDatabasePreflight,
+  assertProductionMigrationLedger,
+} from "./lib/db-admission.mjs";
+import { assertRemotePostMigrationContract } from "./lib/db-post-migration-contract.mjs";
+import {
+  assertProductionDatabaseDeployAdmission,
   assertProductionContinuationDeployAdmission,
   assertProductionWorkerDeployAdmission,
 } from "./lib/release.mjs";
@@ -54,6 +60,7 @@ try {
     .filter(Boolean);
   let productionAdmission = null;
   let productionContinuationAdmission = null;
+  let productionDatabaseAdmission = null;
   let stagingAdmission = null;
   let stagingReleaseAdmission = null;
   let stagingPreMigrationContinuationAdmission = null;
@@ -75,6 +82,13 @@ try {
       databaseName: productionAdmission.databaseName,
       repositoryRoot,
       reviewedCommitSha: productionAdmission.commitSha,
+    });
+    productionDatabaseAdmission = await assertProductionDatabaseDeployAdmission({
+      assertDatabasePreflightImplementation: assertProductionDatabasePreflight,
+      assertMigrationLedgerImplementation: assertProductionMigrationLedger,
+      assertPostMigrationContractImplementation: assertRemotePostMigrationContract,
+      environment: buildPinnedCloudflareEnvironment(process.env, productionAdmission.accountId),
+      repositoryRoot,
     });
   }
   if (requiresStagingAdmission) {
@@ -155,12 +169,25 @@ try {
       repositoryRoot,
       reviewedCommitSha: finalAdmission.commitSha,
     });
+    const finalDatabaseAdmission = await assertProductionDatabaseDeployAdmission({
+      assertDatabasePreflightImplementation: assertProductionDatabasePreflight,
+      assertMigrationLedgerImplementation: assertProductionMigrationLedger,
+      assertPostMigrationContractImplementation: assertRemotePostMigrationContract,
+      environment: buildPinnedCloudflareEnvironment(process.env, finalAdmission.accountId),
+      repositoryRoot,
+    });
     if (
       finalAdmission.accountId !== productionAdmission.accountId
+      || finalAdmission.candidateWorkerVersion !== productionAdmission.candidateWorkerVersion
       || finalAdmission.commitSha !== productionAdmission.commitSha
       || finalAdmission.databaseId !== productionAdmission.databaseId
       || finalAdmission.databaseName !== productionAdmission.databaseName
+      || finalAdmission.migrationLedgerSha256 !== productionAdmission.migrationLedgerSha256
+      || finalAdmission.previousWorkerVersion !== productionAdmission.previousWorkerVersion
       || finalAdmission.releaseId !== productionAdmission.releaseId
+      || finalAdmission.rollbackArtifactSha256 !== productionAdmission.rollbackArtifactSha256
+      || finalAdmission.rollbackCandidateWorkerVersion !== productionAdmission.rollbackCandidateWorkerVersion
+      || finalAdmission.treeSha !== productionAdmission.treeSha
       || finalAdmission.workerName !== productionAdmission.workerName
       || finalAdmission.zoneId !== productionAdmission.zoneId
       || finalAdmission.zoneName !== productionAdmission.zoneName
@@ -177,7 +204,39 @@ try {
     ) {
       throw new Error("production_continuation_evidence_changed");
     }
-    productionAdmission = finalAdmission;
+    if (
+      productionDatabaseAdmission === null
+      || finalDatabaseAdmission.preflightFingerprintSha256 !== productionDatabaseAdmission.preflightFingerprintSha256
+      || finalDatabaseAdmission.postMigrationFingerprintSha256 !== productionDatabaseAdmission.postMigrationFingerprintSha256
+      || JSON.stringify(finalDatabaseAdmission.migrationNames) !== JSON.stringify(productionDatabaseAdmission.migrationNames)
+    ) {
+      throw new Error("production_database_admission_changed");
+    }
+    const sinkAdmission = await assertProductionWorkerDeployAdmission({
+      environment: process.env,
+      manifestPath: flags.releaseManifestPath,
+      repositoryRoot,
+      workerSecretNames,
+    });
+    if (
+      sinkAdmission.accountId !== finalAdmission.accountId
+      || sinkAdmission.candidateWorkerVersion !== finalAdmission.candidateWorkerVersion
+      || sinkAdmission.commitSha !== finalAdmission.commitSha
+      || sinkAdmission.databaseId !== finalAdmission.databaseId
+      || sinkAdmission.databaseName !== finalAdmission.databaseName
+      || sinkAdmission.migrationLedgerSha256 !== finalAdmission.migrationLedgerSha256
+      || sinkAdmission.previousWorkerVersion !== finalAdmission.previousWorkerVersion
+      || sinkAdmission.releaseId !== finalAdmission.releaseId
+      || sinkAdmission.rollbackArtifactSha256 !== finalAdmission.rollbackArtifactSha256
+      || sinkAdmission.rollbackCandidateWorkerVersion !== finalAdmission.rollbackCandidateWorkerVersion
+      || sinkAdmission.treeSha !== finalAdmission.treeSha
+      || sinkAdmission.workerName !== finalAdmission.workerName
+      || sinkAdmission.zoneId !== finalAdmission.zoneId
+      || sinkAdmission.zoneName !== finalAdmission.zoneName
+    ) {
+      throw new Error("production_sink_admission_changed");
+    }
+    productionAdmission = sinkAdmission;
   }
   if (requiresStagingAdmission) {
     if (stagingAdmission === null) throw new Error("staging_admission_missing");
@@ -274,18 +333,31 @@ try {
     stagingPostMigrationEvidenceAdmission = finalPostMigrationEvidenceAdmission;
   }
   if (!flags.buildOnly) {
-    const deployArgs = ["wrangler", "deploy"];
-    if (flags.environment !== "local") {
-      deployArgs.push("--env", flags.environment);
-    }
-    if (flags.dryRun) {
-      deployArgs.push("--dry-run", "--outdir", `.wrangler/dry-run-${flags.environment}`);
-    }
     const admittedAccountId = stagingAdmission?.accountId ?? productionAdmission?.accountId;
     const wranglerEnvironment = admittedAccountId === undefined
       ? buildEnvironment
       : buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId);
-    run("npx", deployArgs, { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
+    if (requiresProductionAdmission) {
+      if (productionAdmission === null) throw new Error("production_deploy_admission_missing");
+      run("npx", [
+        "wrangler",
+        "versions",
+        "deploy",
+        `${productionAdmission.candidateWorkerVersion}@100%`,
+        "--env",
+        "production",
+        "--yes",
+      ], { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
+    } else {
+      const deployArgs = ["wrangler", "deploy"];
+      if (flags.environment !== "local") {
+        deployArgs.push("--env", flags.environment);
+      }
+      if (flags.dryRun) {
+        deployArgs.push("--dry-run", "--outdir", `.wrangler/dry-run-${flags.environment}`);
+      }
+      run("npx", deployArgs, { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
+    }
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : "unknown_error";

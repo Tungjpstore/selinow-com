@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { chmod, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import {
   assertProductionWorkerIdentityAdmission,
+  assertProductionWorkerVersionAdmission,
   repositoryRoot,
 } from "./platform.mjs";
 import { assertFreshProductionContinuationEvidence } from "./backup.mjs";
+import { runWrangler } from "./cli.mjs";
 import { validateCommerceUatArtifacts, validateCommerceUatArtifactsSync } from "./commerce-uat-evidence.mjs";
 
 export const REQUIRED_PRODUCTION_VARS = [
@@ -72,6 +75,56 @@ export const REQUIRED_PROVIDER_ACCEPTANCE_KEYS = [
 
 export const RELEASE_CHANNEL_KEYS = ["website", ...REQUIRED_PROVIDER_ACCEPTANCE_KEYS];
 export const REQUIRED_COMMERCE_ACCEPTANCE_KEYS = ["payos", "dodo"];
+export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
+  "shop_subscriptions_trial_claim_insert_guard",
+  "shop_subscriptions_trial_claim_update_guard",
+  "shop_customers_anonymized_insert_guard",
+  "shop_customers_anonymized_update_guard",
+  "checkout_recovery_capabilities_tenant_order_insert_guard",
+  "checkout_recovery_capabilities_tenant_order_guard",
+  "payment_integrations_provider_claim_generation",
+  "payment_integrations_provider_claim_nonce",
+  "payment_integrations_provider_claim_state",
+  "payment_integrations_provider_claim_target_fingerprint",
+  "payment_credentials_provider_claim_nonce",
+  "idx_payment_integrations_provider_claim_nonce",
+  "payment_integrations_payos_claim_state_insert_guard",
+  "payment_integrations_payos_claim_state_update_guard",
+  "payment_credentials_payos_claim_scope_insert_guard",
+  "payment_credentials_payos_claim_scope_update_guard",
+]);
+
+const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
+  "0087_integrity_hardening.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      checkout_recovery_capabilities_tenant_order_guard: "0f3b38075413bd31942a131f36c6ea10978ab7e78f31e21198e6950c55c141cb",
+      checkout_recovery_capabilities_tenant_order_insert_guard: "14dd928c2991af0e9b589fc3fce725db23dc36e38223e60ffb8dc73e76a6bf98",
+      shop_customers_anonymized_insert_guard: "438798587050686f4f1ca7da56a9f9d37eab4c04ec5cb0aa9c48fe0e6fefd70e",
+      shop_customers_anonymized_update_guard: "93f26ab3180b34e7c721876adcdf96dfb5d5e026d90145a13488192f439eb469",
+      shop_subscriptions_trial_claim_insert_guard: "87b0b44aacac4ff3cd3efa400fe69bcbe0fc2dae1d1748e14908e893ccb763d9",
+      shop_subscriptions_trial_claim_update_guard: "c13c78161470d4cf6cb0142ebe71bdf593a9cd688e81453b06b9e70049badd4a",
+    }),
+  }),
+  "0088_payos_provider_claim_fencing.sql": Object.freeze({
+    columns: Object.freeze({
+      "payment_credentials.provider_claim_nonce": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "payment_integrations.provider_claim_generation": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "payment_integrations.provider_claim_nonce": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "payment_integrations.provider_claim_state": Object.freeze({ defaultValue: "'idle'", notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_integrations.provider_claim_target_fingerprint": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_payment_integrations_provider_claim_nonce: "c3769618c6f601d7d8ff2160410c4f8d274583b2a0bfd915c0bdb43437580c1f",
+      payment_credentials: "5c28bc5d11ad4a0fe5e1fbb46af999f61d5c1aa3e2bcebecd3e9f68e4b601283",
+      payment_credentials_payos_claim_scope_insert_guard: "ca71d5b1965ec92e61ed57caa90cfd6d64a338596972f14b1cab7f34375ccd30",
+      payment_credentials_payos_claim_scope_update_guard: "524ca6ad0d9443cc3a0d62937580a4d21bbb829af6bb93589e4c7867d3f83372",
+      payment_integrations: "4f1c6a5aaf7f825b06c08a43c5ad3827327a43d7a8361d2dd602bc29d74b5224",
+      payment_integrations_payos_claim_state_insert_guard: "d59e9de101ad4c396b1321caeefd69a21dc5740a2942805f0c0816646524b8de",
+      payment_integrations_payos_claim_state_update_guard: "ba4a58fa87d7964fd6073d689b9870fee8aa8cd5503362d5bbba106477cb8ba0",
+    }),
+  }),
+});
 
 const REQUIRED_SPEC_PATHS = [
   "accountId",
@@ -145,6 +198,7 @@ const REQUIRED_EVIDENCE_PATHS = [
   "staging.manifestRef",
   "staging.manifestSha256",
   "staging.workerVersion",
+  "treeSha",
 ];
 
 const PLACEHOLDER_PATTERN = /(?:change-me|not-provisioned|placeholder|replace-with|<[^>]+>)/iu;
@@ -179,6 +233,26 @@ function canonicalize(value) {
 
 function fingerprint(value) {
   return createHash("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
+}
+
+function validateSourceMigrationNames(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("source_migration_ledger_invalid");
+  }
+  const names = [...value].sort();
+  if (names.some((name, index) => {
+    const match = /^(\d{4})_[a-z0-9_]+\.sql$/u.exec(name);
+    return match === null || Number(match[1]) !== index + 1;
+  })) {
+    throw new Error("source_migration_ledger_invalid");
+  }
+  return names;
+}
+
+function listMigrationNamesSync(root = repositoryRoot) {
+  return validateSourceMigrationNames(
+    readdirSync(resolve(root, "migrations")).filter((name) => name.endsWith(".sql")),
+  );
 }
 
 function bindingNames(items) {
@@ -247,6 +321,10 @@ function validEvidencePath(path, value) {
   if (path === "staging.manifestRef") return typeof value === "string" && /^\.wrangler\/releases\/staging\/stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}\/release-manifest\.json$/u.test(value);
   if (path === "staging.manifestSha256") return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value) && !/^0+$/u.test(value);
   if (path === "staging.workerVersion") return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/u.test(value) && !PLACEHOLDER_PATTERN.test(value);
+  if (path === "candidateWorkerVersion" || path === "previousWorkerVersion") {
+    return typeof value === "string"
+      && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(value);
+  }
   if (/^providerAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.accepted$/u.test(path)) return value === true;
   if (/^providerAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.observedAt$/u.test(path)) return safeDate(value) !== null;
   if (/^commerceAcceptance\.[a-zA-Z][a-zA-Z0-9]*\.accepted$/u.test(path)) return value === true;
@@ -254,7 +332,7 @@ function validEvidencePath(path, value) {
   if (path === "security.criticalOpen" || path === "security.highOpen") return value === 0;
   if (path === "pilot.shopCount") return Number.isSafeInteger(value) && value >= 2;
   if (path === "releaseId") return typeof value === "string" && RELEASE_ID_PATTERN.test(value) && !PLACEHOLDER_PATTERN.test(value);
-  if (path === "commitSha") return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
+  if (path === "commitSha" || path === "treeSha") return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
   return isConfigured(value);
 }
 
@@ -362,10 +440,81 @@ export function evaluateBackupPrerequisites(evidence, now = new Date()) {
   ];
 }
 
+export function evaluateProductionRollbackCandidate(evidence, now = new Date(), migrationNames = []) {
+  const candidate = evidence?.rollback?.candidate ?? {};
+  let sourceMigrationNames = [];
+  try {
+    sourceMigrationNames = validateSourceMigrationNames(migrationNames);
+  } catch {
+    // The failed ledger check below keeps readiness fail-closed.
+  }
+  const expectedMigrationName = sourceMigrationNames.at(-1);
+  const expectedMigrationLedgerSha256 = sourceMigrationNames.length > 0
+    ? fingerprint(sourceMigrationNames)
+    : null;
+  const rehearsedAt = safeDate(candidate.rehearsedAt);
+  const rehearsalFresh = rehearsedAt !== null
+    && rehearsedAt <= now.getTime()
+    && now.getTime() - rehearsedAt <= 30 * 24 * 60 * 60_000;
+  const workerVersionValid = typeof candidate.workerVersion === "string"
+    && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(candidate.workerVersion);
+  const invariants = Array.isArray(candidate.invariants) ? candidate.invariants : [];
+  const invariantsValid = invariants.length >= REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS.length
+    && new Set(invariants).size === invariants.length
+    && invariants.every((name) => typeof name === "string" && /^[a-z][a-z0-9_]{2,127}$/u.test(name))
+    && REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS.every((name) => invariants.includes(name));
+  const checks = [
+    makeCheck("evidence.rollback.candidate.accepted", candidate.accepted === true),
+    makeCheck("evidence.rollback.candidate.artifactSha256", typeof candidate.artifactSha256 === "string" && /^[a-f0-9]{64}$/u.test(candidate.artifactSha256)),
+    makeCheck("evidence.rollback.candidate.commitSha", typeof candidate.commitSha === "string" && /^[a-f0-9]{40}$/u.test(candidate.commitSha)),
+    makeCheck("evidence.rollback.candidate.evidenceRef", isConfigured(candidate.evidenceRef)),
+    makeCheck("evidence.rollback.candidate.invariants", invariantsValid),
+    makeCheck("evidence.rollback.candidate.migrationLedger", expectedMigrationName !== undefined),
+    makeCheck("evidence.rollback.candidate.migrationLedgerSha256", expectedMigrationLedgerSha256 !== null && candidate.migrationLedgerSha256 === expectedMigrationLedgerSha256),
+    makeCheck("evidence.rollback.candidate.migrationName", expectedMigrationName !== undefined && candidate.migrationName === expectedMigrationName),
+    makeCheck("evidence.rollback.candidate.rehearsalPassed", candidate.rehearsalPassed === true),
+    makeCheck("evidence.rollback.candidate.rehearsedAt", rehearsedAt !== null && candidate.rehearsedAt === evidence?.rollback?.rehearsedAt),
+    makeCheck("evidence.rollback.candidate.rehearsedAtFresh", rehearsalFresh),
+    makeCheck("evidence.rollback.candidate.schemaVersion", candidate.schemaVersion === 2),
+    makeCheck("evidence.rollback.candidate.treeSha", typeof candidate.treeSha === "string" && /^[a-f0-9]{40}$/u.test(candidate.treeSha)),
+    makeCheck("evidence.rollback.candidate.workerVersion", workerVersionValid),
+    makeCheck("evidence.rollback.candidate.notCurrentWorker", workerVersionValid && candidate.workerVersion !== evidence?.previousWorkerVersion),
+    makeCheck("evidence.rollback.candidate.distinctFromReleaseCandidate", workerVersionValid && candidate.workerVersion !== evidence?.candidateWorkerVersion),
+    makeCheck("evidence.rollback.candidate.commitDistinctFromReleaseCandidate", candidate.commitSha !== evidence?.commitSha),
+  ];
+  return {
+    candidate: {
+      accepted: candidate.accepted === true,
+      artifactSha256: candidate.artifactSha256,
+      commitSha: candidate.commitSha,
+      evidenceRef: candidate.evidenceRef,
+      invariants: [...invariants],
+      migrationLedgerSha256: candidate.migrationLedgerSha256,
+      migrationName: candidate.migrationName,
+      rehearsalPassed: candidate.rehearsalPassed === true,
+      rehearsedAt: candidate.rehearsedAt,
+      schemaVersion: candidate.schemaVersion,
+      treeSha: candidate.treeSha,
+      workerVersion: candidate.workerVersion,
+    },
+    checks,
+    missing: checks.filter((check) => !check.ok).map((check) => check.name),
+    ok: checks.every((check) => check.ok),
+  };
+}
+
 export function inspectProductionReadiness(input) {
   const production = input.wranglerConfig?.env?.production;
   const spec = input.productionSpec;
   const evidence = input.evidence;
+  let migrationNames = [];
+  try {
+    migrationNames = input.migrationNames === undefined
+      ? listMigrationNamesSync(input.repositoryRoot ?? repositoryRoot)
+      : validateSourceMigrationNames(input.migrationNames);
+  } catch {
+    // Rollback admission reports the invalid source ledger as a missing check.
+  }
   const canonicalCommerceRefs = REQUIRED_COMMERCE_ACCEPTANCE_KEYS.every((provider) => (
     typeof evidence?.commerceAcceptance?.[provider]?.evidenceRef === "string"
     && evidence.commerceAcceptance[provider].evidenceRef.startsWith(".wrangler/releases/staging/")
@@ -376,6 +525,7 @@ export function inspectProductionReadiness(input) {
       repositoryRoot: input.repositoryRoot ?? repositoryRoot,
     }) : undefined);
   const releaseScope = evaluateReleaseScope(evidence);
+  const rollbackCandidate = evaluateProductionRollbackCandidate(evidence, input.now, migrationNames);
   const checks = [
     makeCheck("wrangler.env.production", typeof production === "object" && production !== null),
     makeCheck("wrangler.env.production.name", isConfigured(production?.name)),
@@ -488,7 +638,7 @@ export function inspectProductionReadiness(input) {
     name: `evidence.${check.name}`,
     ok: check.ok,
   })));
-  checks.push(...releaseScope.checks, ...evaluateCommerceAcceptance(evidence, commerceEvidenceValidation));
+  checks.push(...releaseScope.checks, ...rollbackCandidate.checks, ...evaluateCommerceAcceptance(evidence, commerceEvidenceValidation));
   if (commerceEvidenceValidation !== undefined) {
     const dodo = commerceEvidenceValidation.dodo;
     const payos = commerceEvidenceValidation.payos;
@@ -557,9 +707,9 @@ export function buildRollbackMatrix() {
   return [
     {
       authority: "release_owner",
-      containment: "stop_rollout_and_restore_previous_worker_version",
+      containment: "stop_rollout_and_restore_schema_compatible_rollback_candidate",
       signal: "worker_error_or_latency_regression",
-      strategy: "worker_version_rollback",
+      strategy: "schema_compatible_rollback_candidate",
       verification: "health_storefront_dashboard_webhook_smoke",
     },
     {
@@ -573,14 +723,14 @@ export function buildRollbackMatrix() {
       authority: "payment_incident_owner",
       containment: "disable_new_checkout_and_pause_fulfillment_workers",
       signal: "payment_or_fulfillment_correctness_failure",
-      strategy: "previous_worker_version_and_manual_payment_exception_review",
+      strategy: "schema_compatible_rollback_candidate_and_manual_payment_exception_review",
       verification: "signed_event_dedupe_inventory_and_fulfillment_reconciliation",
     },
     {
       authority: "integration_incident_owner",
       containment: "pause_affected_integration_jobs_without_rotating_credentials",
       signal: "telegram_or_provider_webhook_degradation",
-      strategy: "previous_worker_version_or_provider_specific_fix_forward",
+      strategy: "schema_compatible_rollback_candidate_or_provider_specific_fix_forward",
       verification: "webhook_secret_replay_queue_and_private_chat_checks",
     },
     {
@@ -594,7 +744,7 @@ export function buildRollbackMatrix() {
       authority: "operations_owner",
       containment: "pause_consumers_if_retries_amplify_and_preserve_dlq_evidence",
       signal: "queue_backlog_or_dlq_growth",
-      strategy: "previous_worker_version_then_bounded_replay",
+      strategy: "schema_compatible_rollback_candidate_then_bounded_replay",
       verification: "queue_age_retry_rate_dlq_and_exactly_once_side_effects",
     },
   ];
@@ -616,7 +766,7 @@ export function buildReleaseArtifacts(input) {
   const releaseInput = { ...input, commerceEvidenceValidation };
   const readiness = inspectProductionReadiness(releaseInput);
   if (!readiness.ok) throw new Error(`release_prerequisites_incomplete:${readiness.missing[0] ?? "unknown"}`);
-  const migrationNames = [...input.migrationNames].sort();
+  const migrationNames = validateSourceMigrationNames(input.migrationNames);
   const migrationLedgerPrefix = Array.isArray(input.evidence.migrationLedgerPrefix)
     ? [...input.evidence.migrationLedgerPrefix]
     : [];
@@ -666,9 +816,11 @@ export function buildReleaseArtifacts(input) {
     packageVersion: input.packageVersion,
     pilotShopCount: input.evidence.pilot.shopCount,
     previousWorkerVersion: input.evidence.previousWorkerVersion,
+    rollbackCandidate: evaluateProductionRollbackCandidate(input.evidence, input.now, migrationNames).candidate,
     releaseEvidenceFingerprintSha256: fingerprint(input.evidence),
     releaseId: input.evidence.releaseId,
     schemaVersion: 2,
+    treeSha: input.evidence.treeSha,
   };
   return { manifest, rollbackMatrix: buildRollbackMatrix() };
 }
@@ -683,6 +835,15 @@ export function validateProductionDeployAdmission(input) {
   }
   if (input.evidence?.commitSha !== input.repositoryCommitSha) {
     throw new Error("production_release_evidence_commit_mismatch");
+  }
+  if (!/^[a-f0-9]{40}$/u.test(input.repositoryTreeSha ?? "")) {
+    throw new Error("production_release_tree_unavailable");
+  }
+  if (input.evidence?.treeSha !== input.repositoryTreeSha) {
+    throw new Error("production_release_evidence_tree_mismatch");
+  }
+  if (input.requireRollbackArtifact === true && input.rollbackArtifactValidation?.accepted !== true) {
+    throw new Error("production_rollback_artifact_invalid");
   }
 
   const createdAt = safeDate(input.manifest.createdAt);
@@ -703,9 +864,15 @@ export function validateProductionDeployAdmission(input) {
     }
   }
   return {
+    candidateWorkerVersion: input.manifest.candidateWorkerVersion,
     commitSha: input.repositoryCommitSha,
+    migrationLedgerSha256: input.manifest.rollbackCandidate.migrationLedgerSha256,
     migrationLedgerPrefix: input.manifest.migrationLedgerPrefix,
+    previousWorkerVersion: input.manifest.previousWorkerVersion,
     releaseId: input.manifest.releaseId,
+    rollbackArtifactSha256: input.manifest.rollbackCandidate.artifactSha256,
+    rollbackCandidateWorkerVersion: input.manifest.rollbackCandidate.workerVersion,
+    treeSha: input.repositoryTreeSha,
   };
 }
 
@@ -724,9 +891,123 @@ function readRepositoryGitState(root) {
   if (status.error || status.status !== 0) {
     throw new Error("production_release_source_status_unavailable");
   }
+  const tree = spawnSync("git", ["rev-parse", "--verify", "HEAD^{tree}"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (tree.error || tree.status !== 0) {
+    throw new Error("production_release_tree_unavailable");
+  }
   return {
     commitSha: commit.stdout.trim(),
     clean: status.stdout.trim().length === 0,
+    treeSha: tree.stdout.trim(),
+  };
+}
+
+export function validateProductionRollbackArtifact(input) {
+  const root = input.repositoryRoot ?? repositoryRoot;
+  const evidence = input.evidence;
+  const candidate = evidence?.rollback?.candidate;
+  const migrationNames = validateSourceMigrationNames(input.migrationNames);
+  if (typeof evidence?.releaseId !== "string"
+    || !RELEASE_ID_PATTERN.test(evidence.releaseId)
+    || PLACEHOLDER_PATTERN.test(evidence.releaseId)
+    || typeof candidate?.commitSha !== "string"
+    || !/^[a-f0-9]{40}$/u.test(candidate.commitSha)
+    || typeof candidate?.treeSha !== "string"
+    || !/^[a-f0-9]{40}$/u.test(candidate.treeSha)
+    || typeof candidate?.artifactSha256 !== "string"
+    || !/^[a-f0-9]{64}$/u.test(candidate.artifactSha256)) {
+    throw new Error("production_rollback_artifact_binding_mismatch");
+  }
+  const expectedRef = `.wrangler/releases/${evidence?.releaseId}/rollback-rehearsal.json`;
+  if (candidate?.evidenceRef !== expectedRef
+    || evidence?.rollback?.rehearsalEvidenceRef !== expectedRef) {
+    throw new Error("production_rollback_artifact_ref_invalid");
+  }
+  const releaseDirectory = resolve(root, ".wrangler", "releases", evidence.releaseId);
+  const artifactPath = resolve(root, candidate.evidenceRef);
+  const artifactRelative = relative(releaseDirectory, artifactPath);
+  if (artifactRelative !== "rollback-rehearsal.json") {
+    throw new Error("production_rollback_artifact_ref_invalid");
+  }
+  let stat;
+  try {
+    stat = lstatSync(artifactPath);
+  } catch {
+    throw new Error("production_rollback_artifact_missing");
+  }
+  if (!stat.isFile() || (stat.mode & 0o077) !== 0) {
+    throw new Error("production_rollback_artifact_permissions_invalid");
+  }
+  let bytes;
+  let artifact;
+  try {
+    bytes = readFileSync(artifactPath);
+    artifact = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("production_rollback_artifact_invalid");
+  }
+  const artifactSha256 = createHash("sha256").update(bytes).digest("hex");
+  if (artifactSha256 !== candidate.artifactSha256) {
+    throw new Error("production_rollback_artifact_hash_mismatch");
+  }
+  if (!Array.isArray(candidate.invariants)) {
+    throw new Error("production_rollback_artifact_binding_mismatch");
+  }
+  const rollbackCommit = spawnSync(
+    "git",
+    ["rev-parse", "--verify", `${candidate.commitSha}^{commit}`],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (rollbackCommit.error || rollbackCommit.status !== 0
+    || rollbackCommit.stdout.trim() !== candidate.commitSha) {
+    throw new Error("production_rollback_artifact_rollback_source_invalid");
+  }
+  const rollbackTree = spawnSync(
+    "git",
+    ["rev-parse", "--verify", `${candidate.commitSha}^{tree}`],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (rollbackTree.error || rollbackTree.status !== 0
+    || rollbackTree.stdout.trim() !== candidate.treeSha) {
+    throw new Error("production_rollback_artifact_rollback_source_invalid");
+  }
+  const expected = {
+    environment: "production",
+    invariants: [...candidate.invariants],
+    migrationLedger: {
+      latest: migrationNames.at(-1),
+      sha256: fingerprint(migrationNames),
+    },
+    rehearsal: {
+      completedAt: evidence.rollback.rehearsedAt,
+      result: "passed",
+    },
+    releaseSource: {
+      commitSha: evidence.commitSha,
+      treeSha: evidence.treeSha,
+    },
+    rollbackSource: {
+      commitSha: candidate.commitSha,
+      treeSha: candidate.treeSha,
+    },
+    schemaVersion: 1,
+    workerVersions: {
+      candidate: evidence.candidateWorkerVersion,
+      current: evidence.previousWorkerVersion,
+      rollback: candidate.workerVersion,
+    },
+  };
+  if (!isDeepStrictEqual(artifact, expected)) {
+    throw new Error("production_rollback_artifact_binding_mismatch");
+  }
+  return {
+    accepted: true,
+    artifactSha256,
+    migrationLedgerSha256: expected.migrationLedger.sha256,
+    rollbackCandidateWorkerVersion: candidate.workerVersion,
   };
 }
 
@@ -761,6 +1042,11 @@ export async function assertProductionDeployAdmission(input) {
   if (evidence === null) throw new Error("production_evidence_missing");
   if (productionSpec === null) throw new Error("production_spec_missing");
   const gitState = readRepositoryGitState(root);
+  const rollbackArtifactValidation = validateProductionRollbackArtifact({
+    evidence,
+    migrationNames,
+    repositoryRoot: root,
+  });
   const commerceEvidenceValidation = await validateCommerceUatArtifacts({
     evidence,
     repositoryRoot: root,
@@ -775,6 +1061,9 @@ export async function assertProductionDeployAdmission(input) {
     productionSpec,
     repositoryClean: gitState.clean,
     repositoryCommitSha: gitState.commitSha,
+    repositoryTreeSha: gitState.treeSha,
+    requireRollbackArtifact: true,
+    rollbackArtifactValidation,
     workerSecretNames: input.workerSecretNames,
     wranglerConfig,
   });
@@ -824,7 +1113,15 @@ export async function assertProductionWorkerDeployAdmission(input) {
     runWranglerImplementation: input.runWranglerImplementation,
     stagingSpec,
     token: input.token,
+    requireCurrentWorkerVersion: true,
     wranglerConfig,
+  });
+  assertProductionWorkerVersionAdmission({
+    candidateWorkerVersion: releaseAdmission.candidateWorkerVersion,
+    currentWorkerVersion: workerAdmission.currentWorkerVersion,
+    deployableWorkerVersionIds: workerAdmission.deployableWorkerVersionIds,
+    previousWorkerVersion: releaseAdmission.previousWorkerVersion,
+    rollbackCandidateWorkerVersion: releaseAdmission.rollbackCandidateWorkerVersion,
   });
   return {
     ...releaseAdmission,
@@ -884,6 +1181,214 @@ export async function assertProductionContinuationDeployAdmission(input) {
   };
 }
 
+function parseProductionDatabaseInvariantRows(output, issue) {
+  let parsed;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    throw new Error(`${issue}_invalid_json`);
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0
+    || parsed.some((entry) => entry?.success !== true || !Array.isArray(entry?.results))) {
+    throw new Error(`${issue}_invalid_result`);
+  }
+  return parsed.flatMap((entry) => entry.results);
+}
+
+function canonicalDatabaseObjectSql(value) {
+  return value.trim().replace(/;$/u, "").replace(/\s+/gu, " ");
+}
+
+export function assertProductionDatabaseInvariantContract(input = {}) {
+  const migrationNames = validateSourceMigrationNames(input.migrationNames);
+  const baselineIndex = migrationNames.indexOf("0087_integrity_hardening.sql");
+  if (baselineIndex === -1) {
+    throw new Error("production_database_invariant_baseline_missing");
+  }
+  const coveredMigrations = migrationNames.slice(baselineIndex);
+  for (const name of coveredMigrations) {
+    if (!Object.hasOwn(PRODUCTION_DATABASE_INVARIANT_REGISTRY, name)) {
+      throw new Error(`production_database_invariant_registry_incomplete:${name}`);
+    }
+  }
+  const registryEntries = coveredMigrations.map((name) => PRODUCTION_DATABASE_INVARIANT_REGISTRY[name]);
+  const expectedObjects = Object.assign({}, ...registryEntries.map((entry) => entry.objects));
+  const expectedColumns = Object.assign({}, ...registryEntries.map((entry) => entry.columns));
+  const objectNames = Object.keys(expectedObjects).sort();
+  const quotedObjectNames = objectNames.map((name) => `'${name}'`).join(", ");
+  const objectSql = `SELECT type, name, sql FROM sqlite_schema WHERE name IN (${quotedObjectNames}) ORDER BY type, name;`;
+  const columnsByTable = Map.groupBy(Object.keys(expectedColumns), (name) => name.split(".")[0]);
+  const columnSql = [...columnsByTable.entries()].map(([table, names]) => (
+    `SELECT '${table}' AS table_name, name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info('${table}') WHERE name IN (${names.map((name) => `'${name.split(".")[1]}'`).join(", ")})`
+  )).join(" UNION ALL ").concat(" ORDER BY table_name, name;");
+  const dataSql = `SELECT
+    (SELECT COUNT(*) FROM shop_subscriptions AS subscription
+      WHERE subscription.state = 'trialing'
+        AND NOT EXISTS (SELECT 1 FROM account_trial_claims AS claim WHERE claim.shop_id = subscription.shop_id)) AS integrity_0087_trial_claim,
+    (SELECT COUNT(*) FROM shop_customers AS customer
+      WHERE customer.anonymized_at IS NOT NULL
+        AND (customer.email_normalized IS NOT NULL OR customer.display_name IS NOT NULL OR customer.status != 'blocked')) AS integrity_0087_anonymized_customer,
+    (SELECT COUNT(*) FROM checkout_recovery_capabilities AS recovery
+      WHERE recovery.consumed_order_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM orders AS order_row
+          WHERE order_row.id = recovery.consumed_order_id AND order_row.shop_id = recovery.shop_id)) AS integrity_0087_checkout_recovery_tenant_order,
+    (SELECT COUNT(*) FROM payment_integrations AS integration
+      WHERE integration.provider_claim_generation IS NULL
+        OR integration.provider_claim_state IS NULL
+        OR integration.provider_claim_generation < 0
+        OR NOT (
+          (integration.provider_claim_state = 'idle' AND integration.provider_claim_nonce IS NULL AND integration.provider_claim_target_fingerprint IS NULL)
+          OR (integration.provider_claim_state IN ('in_flight', 'ambiguous') AND integration.provider_claim_nonce IS NOT NULL AND integration.provider_claim_target_fingerprint IS NOT NULL)
+          OR integration.provider_claim_state = 'quarantined'
+        )) AS integrity_0088_provider_claim_state,
+    (SELECT COUNT(*) FROM payment_credentials AS credential
+      WHERE credential.provider_claim_nonce IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM payment_integrations AS integration
+          WHERE integration.id = credential.integration_id
+            AND integration.shop_id = credential.shop_id
+            AND integration.provider = credential.provider
+            AND integration.provider_claim_nonce = credential.provider_claim_nonce)) AS integrity_0088_provider_claim_scope;`;
+  const runner = input.runWranglerImplementation ?? runWrangler;
+  const run = (sql, issue) => {
+    try {
+      return parseProductionDatabaseInvariantRows(runner([
+        "d1", "execute", "PLATFORM_DB", "--env", "production", "--remote",
+        "--command", sql, "--json",
+      ], { cwd: input.repositoryRoot ?? repositoryRoot, env: input.environment }).stdout, issue);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith(`${issue}_`)) throw error;
+      throw new Error(`${issue}_unavailable`, { cause: error });
+    }
+  };
+  const objectRows = run(objectSql, "production_database_invariant_object_query");
+  if (objectRows.length !== objectNames.length) {
+    throw new Error("production_database_invariant_object_query_invalid_result");
+  }
+  const observedObjects = new Map();
+  for (const row of objectRows) {
+    let expectedType = "trigger";
+    if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
+    if (["payment_credentials", "payment_integrations"].includes(row?.name)) expectedType = "table";
+    if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
+      || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
+      throw new Error("production_database_invariant_object_query_invalid_result");
+    }
+    const digest = createHash("sha256").update(canonicalDatabaseObjectSql(row.sql)).digest("hex");
+    if (digest !== expectedObjects[row.name]) {
+      throw new Error(`production_database_invariant_definition_mismatch:${row.type}:${row.name}`);
+    }
+    observedObjects.set(row.name, digest);
+  }
+  const columnRows = run(columnSql, "production_database_invariant_column_query");
+  const observedColumns = {};
+  for (const row of columnRows) {
+    const key = `${row?.table_name}.${row?.name}`;
+    if (!Object.hasOwn(expectedColumns, key) || Object.hasOwn(observedColumns, key)) {
+      throw new Error("production_database_invariant_column_query_invalid_result");
+    }
+    observedColumns[key] = {
+      defaultValue: row.dflt_value,
+      notNull: row.not_null,
+      primaryKey: row.pk,
+      type: row.type,
+    };
+  }
+  if (!isDeepStrictEqual(canonicalize(observedColumns), canonicalize(expectedColumns))) {
+    throw new Error("production_database_invariant_column_query_invalid_result");
+  }
+  const dataRows = run(dataSql, "production_database_invariant_data_query");
+  const expectedDataCodes = [
+    "integrity_0087_anonymized_customer",
+    "integrity_0087_checkout_recovery_tenant_order",
+    "integrity_0087_trial_claim",
+    "integrity_0088_provider_claim_scope",
+    "integrity_0088_provider_claim_state",
+  ];
+  if (dataRows.length !== 1
+    || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)
+    || expectedDataCodes.some((code) => !Number.isSafeInteger(dataRows[0][code]) || dataRows[0][code] < 0)) {
+    throw new Error("production_database_invariant_data_query_invalid_result");
+  }
+  for (const code of expectedDataCodes) {
+    if (dataRows[0][code] !== 0) {
+      throw new Error(`production_database_invariant_data_violation:${code}`);
+    }
+  }
+  return {
+    checks: expectedDataCodes.map((code) => ({ code, ok: true, violationCount: 0 })),
+    invariantNames: [...REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS].sort(),
+    objectDefinitionsSha256: fingerprint(Object.fromEntries([...observedObjects].sort())),
+    ok: true,
+  };
+}
+
+export async function assertProductionDatabaseDeployAdmission(input = {}) {
+  const root = input.repositoryRoot ?? repositoryRoot;
+  let migrationNames;
+  try {
+    migrationNames = await listMigrationNames(root);
+  } catch {
+    throw new Error("production_deploy_source_migration_ledger_invalid");
+  }
+  const ledgerImplementation = input.assertMigrationLedgerImplementation;
+  const preflightImplementation = input.assertDatabasePreflightImplementation;
+  const postMigrationImplementation = input.assertPostMigrationContractImplementation;
+  if (typeof ledgerImplementation !== "function"
+    || typeof preflightImplementation !== "function"
+    || typeof postMigrationImplementation !== "function") {
+    throw new Error("production_deploy_database_admission_invalid");
+  }
+  const shared = {
+    environment: input.environment,
+    migrationNames,
+    repositoryRoot: root,
+    runWranglerImplementation: input.runWranglerImplementation,
+  };
+  const ledger = await ledgerImplementation(shared);
+  if (!Array.isArray(ledger?.migrationNames)
+    || ledger.migrationNames.length !== migrationNames.length
+    || ledger.migrationNames.some((name, index) => name !== migrationNames[index])) {
+    throw new Error("production_deploy_migration_ledger_incomplete");
+  }
+  const preflight = await preflightImplementation({
+    ...shared,
+    requirePaymentProviderSchema: true,
+  });
+  if (preflight?.ok !== true
+    || !Array.isArray(preflight.checks)
+    || preflight.checks.length === 0
+    || preflight.checks.some((check) => check?.ok !== true || typeof check?.code !== "string")) {
+    throw new Error("production_deploy_database_preflight_failed");
+  }
+  const preflightSafetyChecks = preflight.checks
+    .map((check) => ({ code: check.code, ok: true }))
+    .sort((left, right) => left.code.localeCompare(right.code));
+  if (new Set(preflightSafetyChecks.map((check) => check.code)).size !== preflightSafetyChecks.length) {
+    throw new Error("production_deploy_database_preflight_failed");
+  }
+  const postMigration = await postMigrationImplementation({
+    ...shared,
+    environmentName: "production",
+  });
+  if (postMigration?.ok !== true) {
+    throw new Error("production_deploy_post_migration_contract_failed");
+  }
+  const invariants = await (
+    input.assertDatabaseInvariantContractImplementation ?? assertProductionDatabaseInvariantContract
+  )(shared);
+  if (invariants?.ok !== true
+    || !Array.isArray(invariants.checks)
+    || invariants.checks.length === 0
+    || invariants.checks.some((check) => check?.ok !== true)) {
+    throw new Error("production_deploy_database_invariant_contract_failed");
+  }
+  return {
+    migrationNames: [...ledger.migrationNames],
+    postMigrationFingerprintSha256: fingerprint({ invariants, postMigration }),
+    preflightFingerprintSha256: fingerprint({ checks: preflightSafetyChecks, ok: true }),
+  };
+}
+
 export async function readOptionalJson(path) {
   try {
     return JSON.parse(await readFile(path, "utf8"));
@@ -895,9 +1400,9 @@ export async function readOptionalJson(path) {
 }
 
 export async function listMigrationNames(root = repositoryRoot) {
-  return (await readdir(resolve(root, "migrations")))
-    .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/u.test(name))
-    .sort();
+  return validateSourceMigrationNames(
+    (await readdir(resolve(root, "migrations"))).filter((name) => name.endsWith(".sql")),
+  );
 }
 
 export async function writeReleaseArtifacts(artifacts) {

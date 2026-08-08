@@ -13,6 +13,7 @@ const cloudflareResponseLimit = 256 * 1024;
 const cloudflareTimeoutMs = 10_000;
 const cloudflareAccountIdPattern = /^[a-f0-9]{32}$/u;
 const d1DatabaseIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+const workerVersionIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 
 export class CloudflareApiError extends Error {
   constructor(status, code) {
@@ -857,6 +858,94 @@ export function assertProductionWorkerDatabaseIdentity(
   }
 }
 
+export function parseProductionWorkerDeploymentVersion(value) {
+  const deployments = Array.isArray(value) ? value : value?.deployments;
+  if (!Array.isArray(deployments) || deployments.length === 0) {
+    throw new Error("production_worker_deployment_inventory_invalid");
+  }
+  const normalized = deployments.map((deployment) => {
+    const createdOn = deployment?.created_on ?? deployment?.createdOn;
+    if (typeof deployment?.id !== "string"
+      || !workerVersionIdPattern.test(deployment.id)
+      || typeof createdOn !== "string"
+      || !Number.isFinite(Date.parse(createdOn))) {
+      throw new Error("production_worker_deployment_inventory_invalid");
+    }
+    return { createdOn, deployment };
+  }).sort((left, right) => Date.parse(right.createdOn) - Date.parse(left.createdOn));
+  const latest = normalized[0].deployment;
+  const rawVersion = Array.isArray(latest?.versions) && latest.versions.length === 1
+    ? latest.versions[0]
+    : null;
+  const versionId = latest?.versionId ?? rawVersion?.version_id;
+  if (typeof versionId !== "string"
+    || !workerVersionIdPattern.test(versionId)
+    || (latest?.versionId === undefined && rawVersion?.percentage !== 100)) {
+    throw new Error("production_worker_deployment_inventory_invalid");
+  }
+  return versionId;
+}
+
+export function parseProductionWorkerDeployableVersions(value) {
+  const versions = Array.isArray(value) ? value : value?.items;
+  if (!Array.isArray(versions) || versions.length === 0) {
+    throw new Error("production_worker_deployable_version_inventory_invalid");
+  }
+  const ids = versions.map((version) => version?.id);
+  if (ids.some((id) => typeof id !== "string" || !workerVersionIdPattern.test(id))
+    || new Set(ids).size !== ids.length) {
+    throw new Error("production_worker_deployable_version_inventory_invalid");
+  }
+  return ids.sort();
+}
+
+export function assertProductionWorkerVersionAdmission(input) {
+  if (typeof input.currentWorkerVersion !== "string"
+    || !workerVersionIdPattern.test(input.currentWorkerVersion)) {
+    throw new Error("production_worker_current_version_invalid");
+  }
+  if (input.previousWorkerVersion !== input.currentWorkerVersion) {
+    throw new Error("production_previous_worker_version_mismatch");
+  }
+  if (typeof input.candidateWorkerVersion !== "string"
+    || !workerVersionIdPattern.test(input.candidateWorkerVersion)) {
+    throw new Error("production_candidate_worker_version_invalid");
+  }
+  if (typeof input.rollbackCandidateWorkerVersion !== "string"
+    || !workerVersionIdPattern.test(input.rollbackCandidateWorkerVersion)) {
+    throw new Error("production_rollback_candidate_version_invalid");
+  }
+  if (input.candidateWorkerVersion === input.currentWorkerVersion) {
+    throw new Error("production_candidate_worker_version_is_current");
+  }
+  if (input.rollbackCandidateWorkerVersion === input.currentWorkerVersion) {
+    throw new Error("production_rollback_candidate_is_current_worker");
+  }
+  if (input.candidateWorkerVersion === input.rollbackCandidateWorkerVersion) {
+    throw new Error("production_candidate_and_rollback_versions_match");
+  }
+  if (!Array.isArray(input.deployableWorkerVersionIds)
+    || input.deployableWorkerVersionIds.length === 0
+    || input.deployableWorkerVersionIds.some((id) => typeof id !== "string" || !workerVersionIdPattern.test(id))) {
+    throw new Error("production_worker_deployable_version_inventory_invalid");
+  }
+  const deployable = new Set(input.deployableWorkerVersionIds);
+  if (deployable.size !== input.deployableWorkerVersionIds.length) {
+    throw new Error("production_worker_deployable_version_inventory_invalid");
+  }
+  if (!deployable.has(input.candidateWorkerVersion)) {
+    throw new Error("production_candidate_worker_version_not_deployable");
+  }
+  if (!deployable.has(input.rollbackCandidateWorkerVersion)) {
+    throw new Error("production_rollback_candidate_version_not_deployable");
+  }
+  return {
+    candidateWorkerVersion: input.candidateWorkerVersion,
+    currentWorkerVersion: input.currentWorkerVersion,
+    rollbackCandidateWorkerVersion: input.rollbackCandidateWorkerVersion,
+  };
+}
+
 function liveWorkerDomainIdentity(domain) {
   if (
     domain === null
@@ -1014,13 +1103,27 @@ export async function assertProductionWorkerIdentityAdmission(input) {
     contract.databaseName,
   );
 
-  const [liveRoutes, liveDomains] = await Promise.all([
+  const [liveRoutes, liveDomains, deploymentsResult, deployableVersionsResult] = await Promise.all([
     cloudflareApiRequest(token, `/zones/${contract.zoneId}/workers/routes`, {
       fetchImplementation: input.fetchImplementation,
     }),
     cloudflareApiRequest(token, `/accounts/${input.productionSpec.accountId}/workers/domains`, {
       fetchImplementation: input.fetchImplementation,
     }),
+    input.requireCurrentWorkerVersion === true
+      ? cloudflareApiRequest(
+        token,
+        `/accounts/${input.productionSpec.accountId}/workers/scripts/${encodeURIComponent(contract.productionWorkerName)}/deployments`,
+        { fetchImplementation: input.fetchImplementation },
+      )
+      : Promise.resolve(null),
+    input.requireCurrentWorkerVersion === true
+      ? cloudflareApiRequest(
+        token,
+        `/accounts/${input.productionSpec.accountId}/workers/scripts/${encodeURIComponent(contract.productionWorkerName)}/versions?deployable=true`,
+        { fetchImplementation: input.fetchImplementation },
+      )
+      : Promise.resolve(null),
   ]);
   const audit = validateProductionWorkerRouteInventory(
     input.productionSpec,
@@ -1039,6 +1142,12 @@ export async function assertProductionWorkerIdentityAdmission(input) {
   return {
     accountId: input.productionSpec.accountId,
     checks: audit.checks,
+    ...(input.requireCurrentWorkerVersion === true
+      ? {
+        currentWorkerVersion: parseProductionWorkerDeploymentVersion(deploymentsResult),
+        deployableWorkerVersionIds: parseProductionWorkerDeployableVersions(deployableVersionsResult),
+      }
+      : {}),
     databaseId: contract.databaseId,
     databaseName: contract.databaseName,
     ok: true,
