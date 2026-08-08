@@ -142,8 +142,9 @@ if (root !== null && root.dataset.canManage === "true") {
       : ["billing_market_unavailable", "plan_price_unavailable", "provider_not_ready", "billing_provider_unavailable", "billing_checkout_pending", "billing_recovery_plan_mismatch", "checkout_provider_invalid"].includes(failure.code)
         ? text("checkoutUnavailable")
         : text("error");
-    if (failure.requestId === null) return message;
-    return `${message} ${text("checkoutRequestId").replace("{requestId}", failure.requestId)}`;
+    const references = [text("checkoutErrorCode").replace("{code}", failure.code)];
+    if (failure.requestId !== null) references.push(text("checkoutRequestId").replace("{requestId}", failure.requestId));
+    return `${message} ${references.join(" · ")}`;
   };
   const renderRequests = (requests: readonly ChangeRequest[]): void => {
     if (ledger === null) return;

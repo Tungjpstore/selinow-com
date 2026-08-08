@@ -107,11 +107,13 @@ describe("subscription state presentation", () => {
     expect(page).toContain("data-billing-recent-auth-action");
     expect(controller).toContain("BillingApiError");
     expect(controller).toContain("readBillingApiFailure");
+    expect(controller).toContain("checkoutErrorCode");
     expect(controller).toContain("checkoutRequestId");
     for (const locale of ["en", "vi-VN"] as const) {
       const translate = createDashboardTranslator(locale);
       expect(translate("dashboard.billing.checkout.recent_auth_required").length).toBeGreaterThan(20);
       expect(translate("dashboard.billing.checkout.recent_auth_action").length).toBeGreaterThan(10);
+      expect(translate("dashboard.billing.checkout.error_code", { code: "provider_not_ready" })).toContain("provider_not_ready");
       expect(translate("dashboard.billing.checkout.request_id", { requestId: "request-checkout-001" })).toContain("request-checkout-001");
     }
   });
