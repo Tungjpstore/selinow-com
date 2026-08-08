@@ -47,3 +47,9 @@ URLs when configured. The storefront abuse report form warns reporters not to
 send passwords, tokens, license keys, or payment details. These seller-owned
 surfaces do not substitute for Selinow platform policies or a named platform
 support owner.
+
+The authenticated seller buyer-privacy endpoint can produce an allowlisted
+export or perform guarded anonymization after active operational records are
+settled. It is an internal tenant operation, not a published Selinow privacy
+policy, public data-subject intake promise, deletion deadline, or statement
+that legally retained financial and audit records will be erased.

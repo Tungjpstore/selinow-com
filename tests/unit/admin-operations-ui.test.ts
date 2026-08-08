@@ -43,6 +43,8 @@ describe("admin operations PromptOS surface", () => {
     expect(systems).toContain("admin.operations.payos.result_warning");
     expect(systems).toContain('env.APP_ENV === "staging" && adminRole === "owner"');
     expect(systems).toContain("data-rotation-process");
+    expect(systems).toContain("item.retryCount");
+    expect(systems).toContain("item.retryRequestedAt");
     expect(systems).toContain("max=\"100\"");
     expect(systems).toContain("listActiveDeletionRequests");
     expect(systems).toContain("data-deletion-legal-hold-form");

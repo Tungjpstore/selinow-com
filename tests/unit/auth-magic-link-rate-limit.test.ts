@@ -16,6 +16,7 @@ vi.mock("../../src/lib/operations/logger", () => ({
 
 import { magicLinkRequesterAddress, purgeAuthRequestAdmissions } from "../../src/lib/auth/admission";
 import {
+  authenticateRequest,
   consumeMagicLink,
   listSessions,
   magicLinkInitiationCookieName,
@@ -426,12 +427,11 @@ describe("magic-link issuance rate limit", () => {
     expect(legitimateResponse.headers.get("Set-Cookie")).toContain("Max-Age=0");
     expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 2 });
     expect(database.prepare(`
-      SELECT platform_users.email_normalized AS email
+      SELECT COUNT(*) AS count
       FROM auth_sessions
       INNER JOIN platform_users ON platform_users.id = auth_sessions.user_id
-      ORDER BY auth_sessions.created_at DESC
-      LIMIT 1
-    `).get()).toEqual({ email: "attacker@example.test" });
+      WHERE platform_users.email_normalized = 'attacker@example.test'
+    `).get()).toEqual({ count: 1 });
   });
 
   it("lists only the user's active sessions and revokes them together", async () => {
@@ -462,5 +462,29 @@ describe("magic-link issuance rate limit", () => {
 
     expect(await revokeAllSessions(auth, env)).toBe(2);
     expect(await listSessions(auth, env)).toEqual([]);
+  });
+
+  it("refreshes stale session activity without making it part of authentication authority", async () => {
+    const activityStartedAt = new Date();
+    const requested = await requestMagicLink({
+      displayName: "Seller",
+      email: "activity@example.test",
+      env,
+      requesterAddress: "203.0.113.81",
+      now: activityStartedAt,
+    });
+    const magicToken = new URL(requested.debugMagicLink ?? "", env.DASHBOARD_ORIGIN).searchParams.get("token") ?? "";
+    const session = await consumeMagicLink({ env, initiationBinding: requested.initiationBinding, token: magicToken });
+    database.prepare("UPDATE auth_sessions SET last_seen_at = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+      .run(session.auth.sessionId);
+
+    await expect(authenticateRequest(new Request(`${env.DASHBOARD_ORIGIN}/app`, {
+      headers: { Cookie: `${env.SESSION_COOKIE_NAME}=${session.credentials.sessionToken}` },
+    }), env)).resolves.toMatchObject({ sessionId: session.auth.sessionId });
+
+    const activity = database.prepare("SELECT last_seen_at AS lastSeenAt FROM auth_sessions WHERE id = ?")
+      .get(session.auth.sessionId) as { lastSeenAt: string };
+    expect(activity.lastSeenAt).not.toBe("2000-01-01T00:00:00.000Z");
+    expect(Date.parse(activity.lastSeenAt)).toBeGreaterThanOrEqual(activityStartedAt.getTime());
   });
 });

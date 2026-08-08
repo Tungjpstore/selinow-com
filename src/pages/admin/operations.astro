@@ -506,6 +506,7 @@ const operationsClientCopy = {
                           <div><dt>{t("admin.operations.dead_letter.detail.message_id")}</dt><dd><code>{item.messageId}</code></dd></div>
                           <div><dt>{t("admin.operations.dead_letter.detail.replay_target")}</dt><dd>{item.replayTargetKind === null ? t("admin.operations.dead_letter.unlinked") : t("admin.operations.dead_letter.replay_target_value", { kind: item.replayTargetKind, status: item.replayStatus ?? t("admin.common.unknown") })}</dd></div>
                           <div><dt>{t("admin.operations.field.occurrences")}</dt><dd>{t("admin.operations.dead_letter.occurrence_summary", { count: item.occurrenceCount, attempts: item.providerAttempts })}</dd></div>
+                          <div><dt>{t("admin.operations.status.retry_requested")}</dt><dd>{item.retryRequestedAt === null ? t("admin.common.unknown") : `${item.retryCount} · ${formatTime(item.retryRequestedAt)}`}</dd></div>
                         </dl>
                       </div>
                       <div>

@@ -55,4 +55,53 @@ describe("buyer privacy route", () => {
     const response = await POST(context());
     expect(await response.json()).toEqual({ code: "privacy_request_conflict", ok: false, requestId: "privacy-route-request" });
   });
+
+  it("forwards only the tenant-bound privacy command and returns a private response", async () => {
+    dependencies.recent = true;
+    dependencies.execute.mockReset();
+    dependencies.execute.mockResolvedValueOnce({
+      privacyRequestPublicId: "pvr_00000000-0000-4000-8000-000000000001",
+      safeResultCode: "export_ready",
+      status: "completed",
+    });
+
+    const response = await POST(context());
+
+    expect(dependencies.execute).toHaveBeenCalledWith({
+      customerPublicId: "cus_00000000-0000-4000-8000-000000000001",
+      env: {},
+      idempotencyKey: "privacy-route-key",
+      kind: "export",
+      requestId: "privacy-route-request",
+      shopPublicId: "shop_00000000-0000-4000-8000-000000000001",
+      userId: "owner-id",
+    });
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store, max-age=0");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      requestId: "privacy-route-request",
+      privacy: { safeResultCode: "export_ready", status: "completed" },
+    });
+  });
+
+  it("rejects an unsupported deletion mode before the privacy service", async () => {
+    dependencies.recent = true;
+    dependencies.execute.mockReset();
+    const invalid = context();
+    invalid.request = new Request("https://app.example.test/privacy", {
+      body: JSON.stringify({ kind: "delete" }),
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "privacy-route-key" },
+      method: "POST",
+    });
+
+    const response = await POST(invalid);
+
+    expect(response.status).toBe(400);
+    expect(dependencies.execute).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      code: "validation_failed",
+      issues: ["privacy_kind_invalid"],
+      requestId: "privacy-route-request",
+    });
+  });
 });

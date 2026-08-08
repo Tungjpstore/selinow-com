@@ -8,6 +8,7 @@ import { sendMagicLinkEmail } from "./email";
 import { assertCsrfRequest } from "./policy";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
+const SESSION_LAST_SEEN_WRITE_INTERVAL_MS = 5 * 60_000;
 const MAGIC_LINK_TTL_MINUTES = 15;
 const MAGIC_LINK_INITIATION_TTL_SECONDS = MAGIC_LINK_TTL_MINUTES * 60;
 
@@ -255,6 +256,17 @@ export async function authenticateRequest(request: Request, env: AppBindings): P
 
   if (session === null || session.user_status !== "active") {
     throw new AppError("authentication_required", 401);
+  }
+
+  const lastSeenCutoff = new Date(Date.parse(now) - SESSION_LAST_SEEN_WRITE_INTERVAL_MS).toISOString();
+  try {
+    await env.PLATFORM_DB.prepare(`
+      UPDATE auth_sessions SET last_seen_at = ?
+      WHERE id = ? AND user_id = ? AND status = 'active' AND revoked_at IS NULL
+        AND last_seen_at < ?
+    `).bind(now, session.session_id, session.user_id, lastSeenCutoff).run();
+  } catch {
+    // Activity metadata must not turn a valid session into an availability failure.
   }
 
   return {
