@@ -367,12 +367,18 @@ describe("authenticated browser gate isolation", () => {
 
   it("persists only redacted Playwright failure diagnostics", () => {
     const diagnostic = redactPlaywrightFailure(
-      'href="/api/auth/magic-link/consume?token=opaque-token-value-that-is-longer-than-thirty-two-bytes" Cookie: selinow_session=private-value SESSION_SECRET=private-secret',
+      'href="/api/auth/magic-link/consume?token=opaque-token-value-that-is-longer-than-thirty-two-bytes" Cookie: selinow_session=private-value SESSION_SECRET=private-secret DODO_PAYMENTS_API_KEY=short-dodo-key DODO_PAYMENTS_WEBHOOK_KEY=short-webhook-key PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT=short-fingerprint PAYOS_CONTROLLED_STAGING_CLIENT_ID=short-client CLOUDFLARE_PLATFORM_API_TOKEN=short-platform-token CLOUDFLARE_ROUTE_AUDIT_API_TOKEN=short-route-token',
     );
     expect(diagnostic).toContain("/api/auth/magic-link/consume?[redacted]");
     expect(diagnostic).toContain("Cookie: [redacted]");
     expect(diagnostic).not.toContain("opaque-token-value");
     expect(diagnostic).not.toContain("private-value");
     expect(diagnostic).not.toContain("private-secret");
+    expect(diagnostic).not.toContain("short-dodo-key");
+    expect(diagnostic).not.toContain("short-webhook-key");
+    expect(diagnostic).not.toContain("short-fingerprint");
+    expect(diagnostic).not.toContain("short-client");
+    expect(diagnostic).not.toContain("short-platform-token");
+    expect(diagnostic).not.toContain("short-route-token");
   });
 });
