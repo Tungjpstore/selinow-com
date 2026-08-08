@@ -46,6 +46,10 @@ describe("Dodo catalog reconciliation", () => {
   afterEach(() => { database.close(); });
 
   it("classifies the four exact pending offers and reconciles them atomically", () => {
+    // A real replay can cross a SQLite CURRENT_TIMESTAMP second between the
+    // original insert and migration 0076's provider rewrite.
+    database.prepare("UPDATE plan_prices SET updated_at = datetime(created_at, '+1 second') WHERE id IN (?, ?, ?, ?)")
+      .run(...Object.keys(REFERENCES));
     expect(classifyDodoCatalogRows(rows(database), REFERENCES)).toEqual({
       mode: "pending",
       pendingCount: 4,

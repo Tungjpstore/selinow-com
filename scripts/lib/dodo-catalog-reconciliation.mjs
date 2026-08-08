@@ -163,6 +163,7 @@ export function classifyDodoCatalogRows(rows, references) {
   let pendingCount = 0;
   let publishedCount = 0;
   const baselineCreatedAt = rows[0]?.created_at;
+  const baselineUpdatedAt = rows[0]?.updated_at;
   const publishedAt = new Set();
   for (const offer of DODO_CATALOG_OFFERS) {
     const matches = rows.filter((candidate) => candidate?.id === offer.id);
@@ -177,7 +178,9 @@ export function classifyDodoCatalogRows(rows, references) {
       || row.created_at !== baselineCreatedAt
       || updatedAtMillis < createdAtMillis) throw new Error("dodo_catalog_baseline_mismatch");
     if (reference === offer.pendingRef) {
-      if (row.updated_at !== row.created_at) throw new Error("dodo_catalog_baseline_mismatch");
+      // Migration 0076 may run in a later SQLite second than the original
+      // insert. All four untouched rows must still share one update timestamp.
+      if (row.updated_at !== baselineUpdatedAt) throw new Error("dodo_catalog_baseline_mismatch");
       pendingCount += 1;
     } else if (reference === references[offer.id]) {
       publishedAt.add(row.updated_at);
@@ -197,7 +200,7 @@ export function classifyDodoCatalogRows(rows, references) {
 function exactPendingPredicate() {
   return DODO_CATALOG_OFFERS.map((offer) => {
     const expected = expectedRow(offer);
-    return `(p.id = ${sqlString(offer.id)} AND p.plan_code = ${sqlString(offer.planCode)} AND p.market_code = ${sqlString(offer.marketCode)} AND p.currency = ${sqlString(offer.currency)} AND p.amount_minor = ${expected.amount_minor} AND p.interval = 'month' AND p.tax_behavior = 'inclusive' AND p.provider_code = 'dodo' AND p.provider_price_ref = ${sqlString(offer.pendingRef)} AND p.effective_from = p.created_at AND p.updated_at = p.created_at AND datetime(p.effective_from) IS NOT NULL AND julianday(p.effective_from) <= julianday('now') AND p.effective_to IS NULL AND p.version = 1 AND p.is_active = 1)`;
+    return `(p.id = ${sqlString(offer.id)} AND p.plan_code = ${sqlString(offer.planCode)} AND p.market_code = ${sqlString(offer.marketCode)} AND p.currency = ${sqlString(offer.currency)} AND p.amount_minor = ${expected.amount_minor} AND p.interval = 'month' AND p.tax_behavior = 'inclusive' AND p.provider_code = 'dodo' AND p.provider_price_ref = ${sqlString(offer.pendingRef)} AND p.effective_from = p.created_at AND julianday(p.updated_at) >= julianday(p.created_at) AND datetime(p.effective_from) IS NOT NULL AND julianday(p.effective_from) <= julianday('now') AND p.effective_to IS NULL AND p.version = 1 AND p.is_active = 1)`;
   }).join(" OR ");
 }
 
@@ -222,7 +225,9 @@ WHERE (${rowPredicates})
       WHERE p.id IN (${ids})
     ) AS p
     WHERE ${exactPendingPredicate()}
-  ) = ${DODO_CATALOG_OFFERS.length};
+  ) = ${DODO_CATALOG_OFFERS.length}
+  AND (SELECT COUNT(DISTINCT created_at) FROM plan_prices WHERE id IN (${ids})) = 1
+  AND (SELECT COUNT(DISTINCT updated_at) FROM plan_prices WHERE id IN (${ids})) = 1;
 SELECT changes() AS updated_count;
 `;
 }
