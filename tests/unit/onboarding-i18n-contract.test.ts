@@ -74,6 +74,17 @@ describe("onboarding localization contract", () => {
     expect(client).toContain("Object.assign(shop, profileResponse.shop)");
   });
 
+  it("saves regional settings independently from legal readiness", () => {
+    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
+    const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    expect(component).toContain("data-globalization-form");
+    expect(component).toContain("data-globalization-submit");
+    expect(component).toContain("data-settings-form");
+    expect(client).toContain("changedShopGlobalization(shop, globalization)");
+    expect(client).toContain("body: JSON.stringify(patch)");
+    expect(client).not.toContain("const globalizationChanged =");
+  });
+
   it("keeps onboarding plan options aligned with the authenticated shop API", () => {
     const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");

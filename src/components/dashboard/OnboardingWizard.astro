@@ -355,7 +355,7 @@ const initialShop = shops[0];
           <h2>{t("onboarding.settings.title")}</h2>
           <p>{t("onboarding.settings.description")}</p>
         </header>
-        <form class="form-grid" data-settings-form novalidate>
+        <form class="form-grid" data-globalization-form novalidate>
           <fieldset class="field-wide settings-globalization">
             <legend>{t("onboarding.form.globalization_legend")}</legend>
             <div class="form-grid">
@@ -365,6 +365,9 @@ const initialShop = shops[0];
               <label class="field"><span>{t("onboarding.form.default_locale")}</span><select name="defaultLocale" data-settings-default-locale><option value="en">English</option><option value="vi-VN">Tiếng Việt</option></select></label>
             </div>
           </fieldset>
+          <div class="form-actions field-wide"><p>{t("onboarding.form.globalization_note")}</p><button type="submit" class="primary-action" data-globalization-submit>{t("onboarding.button.save_globalization")}</button></div>
+        </form>
+        <form class="form-grid settings-legal-form" data-settings-form novalidate>
           <label class="field field-wide"><span>{t("onboarding.form.support")}</span><input name="supportContact" type="text" minlength="3" maxlength="180" placeholder={t("onboarding.form.support_placeholder")} required data-support-contact /></label>
           <label class="field"><span>{t("onboarding.form.terms")}</span><input name="termsUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/terms" required data-terms-url /></label>
           <label class="field"><span>{t("onboarding.form.privacy")}</span><input name="privacyUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/privacy" required data-privacy-url /></label>

@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { AppBindings } from "../../src/lib/platform/bindings";
+import { getShopReadiness } from "../../src/lib/tenants/readiness";
 import { createShop, getShopForMember, updateShopProfile } from "../../src/lib/tenants/store";
 
 class SqliteStatement {
@@ -319,6 +320,35 @@ describe("shop country configuration service", () => {
         SELECT id FROM shops WHERE public_id = ?
       ) AND action = 'shop.updated' ORDER BY rowid DESC LIMIT 1
     `).get(shopA.shop.publicId)).toEqual({ changedFields: '["businessCountry"]' });
+  });
+
+  it("persists country-only changes while legal and publish readiness remain fail-closed", async () => {
+    const shop = await createOwnedShop({ idempotencyKey: "shop-country-only", slug: "country-only", userId: "user-a" });
+    const updated = await updateShopProfile({
+      businessCountry: "US",
+      env,
+      merchantCountry: "VN",
+      requestId: "request-country-only",
+      shopPublicId: shop.shop.publicId,
+      userId: "user-a",
+    });
+    expect(updated).toMatchObject({ businessCountry: "US", merchantCountry: "VN" });
+    expect(database.prepare(`
+      SELECT support_contact AS supportContact, terms_url AS termsUrl,
+        privacy_url AS privacyUrl, refund_policy_url AS refundPolicyUrl,
+        policy_attestation_version AS attestationVersion
+      FROM shop_settings
+      WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
+    `).get(shop.shop.publicId)).toEqual({
+      attestationVersion: null,
+      privacyUrl: null,
+      refundPolicyUrl: null,
+      supportContact: null,
+      termsUrl: null,
+    });
+    const readiness = await getShopReadiness({ env, shopPublicId: shop.shop.publicId, userId: "user-a" });
+    expect(readiness.ready).toBe(false);
+    expect(readiness.checks.find((check) => check.code === "policies_ready")).toMatchObject({ required: true, status: "fail" });
   });
 
   it("rejects non-ISO and user-assigned country codes before mutation", async () => {

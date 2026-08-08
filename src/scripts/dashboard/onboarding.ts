@@ -1346,6 +1346,8 @@ type ShopGlobalizationDraft = {
   merchantCountry: string | null;
 };
 
+type ShopGlobalizationPatch = Partial<ShopGlobalizationDraft>;
+
 function readShopGlobalizationForm(root: HTMLElement): ShopGlobalizationDraft | null {
   const currency = normalizeCurrencyCode(query<HTMLSelectElement>(root, "[data-settings-currency]")?.value);
   const defaultLocale = matchSupportedLocale(query<HTMLSelectElement>(root, "[data-settings-default-locale]")?.value);
@@ -1359,6 +1361,15 @@ function readShopGlobalizationForm(root: HTMLElement): ShopGlobalizationDraft | 
     currency,
     defaultLocale,
     merchantCountry: countryValue("[data-settings-merchant-country]"),
+  };
+}
+
+function changedShopGlobalization(shop: Shop, draft: ShopGlobalizationDraft): ShopGlobalizationPatch {
+  return {
+    ...(draft.businessCountry === shop.businessCountry ? {} : { businessCountry: draft.businessCountry }),
+    ...(draft.currency === shop.currency ? {} : { currency: draft.currency }),
+    ...(draft.defaultLocale === shop.defaultLocale ? {} : { defaultLocale: draft.defaultLocale }),
+    ...(draft.merchantCountry === shop.merchantCountry ? {} : { merchantCountry: draft.merchantCountry }),
   };
 }
 
@@ -1968,6 +1979,43 @@ async function initialize(root: HTMLElement): Promise<void> {
     })();
   });
 
+  query<HTMLFormElement>(root, "[data-globalization-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void (async () => {
+      const form = event.currentTarget as HTMLFormElement;
+      clearInvalidFields(root);
+      const shop = selectedShop(state, shops);
+      if (shop === null) { showStep(root, state, "shop"); return; }
+      const selectionEpoch = state.shopSelectionEpoch;
+      if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_globalization", "Check the regional fields before saving."))) return;
+      const globalization = readShopGlobalizationForm(root);
+      if (globalization === null) {
+        markFieldInvalid(root, query<HTMLSelectElement>(root, "[data-settings-currency]"), copy("onboarding.feedback.invalid_shop_globalization", "Choose a supported currency and locale."));
+        return;
+      }
+      const patch = changedShopGlobalization(shop, globalization);
+      if (Object.keys(patch).length === 0) {
+        setFeedback(root, copy("onboarding.feedback.globalization_unchanged", "Regional settings have not changed."), "info");
+        return;
+      }
+      const button = query<HTMLButtonElement>(root, "[data-globalization-submit]");
+      setBusy(button, true, copy("onboarding.busy.saving", "Saving…"));
+      try {
+        const profileResponse = asRecord(await requestApi(root, apiBase(shop.publicId), { body: JSON.stringify(patch), method: "PATCH" }));
+        if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
+        if (!isShop(profileResponse?.shop)) throw new ApiError("request_failed", 500, [], stringOrNull(profileResponse?.requestId));
+        Object.assign(shop, profileResponse.shop);
+        renderShopSelection(root, state, shops);
+        setFeedback(root, copy("onboarding.feedback.globalization_saved", "Regional and billing-market settings saved. Legal readiness is still checked separately."), "success");
+      } catch (error) {
+        if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
+        setFeedback(root, errorMessage(error), "error");
+      } finally {
+        setBusy(button, false);
+      }
+    })();
+  });
+
   query<HTMLFormElement>(root, "[data-settings-form]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void (async () => {
@@ -1977,12 +2025,7 @@ async function initialize(root: HTMLElement): Promise<void> {
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const settings = readSettingsForm(root);
-      const globalization = readShopGlobalizationForm(root);
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_settings", "Complete the required fields before saving."))) return;
-      if (globalization === null) {
-        markFieldInvalid(root, query<HTMLSelectElement>(root, "[data-settings-currency]"), copy("onboarding.feedback.invalid_shop_globalization", "Choose a supported currency and locale."));
-        return;
-      }
       if (!settingsDraftReady(settings)) {
         const invalidUrlField = [
           [settings.termsUrl, query<HTMLInputElement>(root, "[data-terms-url]")],
@@ -2001,20 +2044,6 @@ async function initialize(root: HTMLElement): Promise<void> {
       const button = query<HTMLButtonElement>(root, "[data-settings-submit]");
       setBusy(button, true, copy("onboarding.busy.saving", "Saving…"));
       try {
-        const globalizationChanged = globalization.businessCountry !== shop.businessCountry
-          || globalization.currency !== shop.currency
-          || globalization.defaultLocale !== shop.defaultLocale
-          || globalization.merchantCountry !== shop.merchantCountry;
-        if (globalizationChanged) {
-          const profileResponse = asRecord(await requestApi(root, apiBase(shop.publicId), {
-            body: JSON.stringify(globalization),
-            method: "PATCH",
-          }));
-          if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
-          if (!isShop(profileResponse?.shop)) throw new ApiError("request_failed", 500, [], stringOrNull(profileResponse?.requestId));
-          Object.assign(shop, profileResponse.shop);
-          renderShopSelection(root, state, shops);
-        }
         const response = await requestApi(root, `${apiBase(shop.publicId)}/onboarding/settings`, {
           body: JSON.stringify({ ...settings, attestationVersion: 1 }),
           method: "PUT",
