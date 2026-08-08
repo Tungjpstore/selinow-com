@@ -635,7 +635,14 @@ describe("production release readiness", () => {
         treeSha,
         workerVersion: "staging-worker-version",
       };
-      const scenarioRecord = async (provider: string, id: string) => {
+      type ScenarioRecord = {
+        eventReference: string;
+        evidenceFingerprintSha256: string;
+        observedAt: string;
+        requestReference: string;
+        status: "passed";
+      };
+      const scenarioRecord = async (provider: string, id: string): Promise<ScenarioRecord> => {
         const artifactRef = `.wrangler/releases/staging/${stagingReleaseId}/scenarios/${provider}-${id}.json`;
         const artifact = JSON.stringify({ environment: "staging", provider, release: releaseBinding, scenarioId: id });
         await mkdir(join(root, ".wrangler/releases/staging", stagingReleaseId, "scenarios"), { recursive: true });
@@ -648,6 +655,14 @@ describe("production release readiness", () => {
           status: "passed",
         };
       };
+      const dodoScenarios: Record<string, ScenarioRecord & { sessionReference: null }> = {};
+      for (const id of DODO_STAGING_UAT_SCENARIO_IDS) {
+        dodoScenarios[id] = { ...(await scenarioRecord("dodo", id)), sessionReference: null };
+      }
+      const payosScenarios: Record<string, ScenarioRecord> = {};
+      for (const id of PAYOS_STAGING_UAT_SCENARIO_IDS) {
+        payosScenarios[id] = await scenarioRecord("payos", id);
+      }
       const dodoArtifact = {
         completedAt: "2026-07-25T13:00:00.000Z",
         createdAt: "2026-07-25T11:00:00.000Z",
@@ -663,7 +678,7 @@ describe("production release readiness", () => {
         providerEnvironment: "test_mode",
         redaction: { auditNoSensitiveValues: true, d1NoHostedCheckoutUrl: true, d1NoRawPayload: true, d1NoSecretValues: true, evidenceFingerprintSha256: "f".repeat(64), logsNoSensitiveValues: true, queuesNoSensitiveValues: true },
         release: releaseBinding,
-        scenarios: Object.fromEntries(await Promise.all(DODO_STAGING_UAT_SCENARIO_IDS.map(async (id) => [id, { ...(await scenarioRecord("dodo", id)), sessionReference: null }]))),
+        scenarios: dodoScenarios,
         schemaVersion: 1,
       };
       const payosArtifact = {
@@ -675,7 +690,7 @@ describe("production release readiness", () => {
         providerEnvironment: "test_mode",
         redaction: { auditNoSensitiveValues: true, d1NoRawPayload: true, d1NoSecretValues: true, evidenceFingerprintSha256: "f".repeat(64), logsNoSensitiveValues: true, queuesNoSensitiveValues: true },
         release: releaseBinding,
-        scenarios: Object.fromEntries(await Promise.all(PAYOS_STAGING_UAT_SCENARIO_IDS.map(async (id) => [id, await scenarioRecord("payos", id)]))),
+        scenarios: payosScenarios,
         schemaVersion: 1,
       };
       const commerce = evidence.commerceAcceptance as Record<string, Record<string, unknown>>;
