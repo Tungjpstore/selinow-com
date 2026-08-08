@@ -87,6 +87,7 @@ export function assertPayosStagingUatEvidence(evidence, binding) {
     if (record.status !== "passed") throw new Error("payos_uat_scenario_not_passed");
     iso(record.observedAt, "payos_uat_scenario_timestamp_invalid");
     sha(record.evidenceFingerprintSha256, "payos_uat_scenario_fingerprint_invalid");
+    if (binding?.requireArtifactProof === true && binding.scenarioArtifactFingerprints?.[id] !== record.evidenceFingerprintSha256) throw new Error("payos_uat_scenario_artifact_unverified");
     if (![record.requestReference, record.eventReference].some((ref) => typeof ref === "string" && REF.test(ref))) throw new Error("payos_uat_scenario_reference_invalid");
     fingerprints.push(record.evidenceFingerprintSha256);
   }

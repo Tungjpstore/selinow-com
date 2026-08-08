@@ -142,19 +142,22 @@ function assertOffers(offers) {
   });
 }
 
-function assertScenarioRecord(record) {
+function assertScenarioRecord(record, scenarioId, binding) {
   exactKeys(record, ["evidenceFingerprintSha256", "eventReference", "observedAt", "requestReference", "sessionReference", "status"], "dodo_uat_scenario_record_invalid");
   assertSafeStrings(record);
   if (record.status !== "passed") throw new Error("dodo_uat_scenario_not_passed");
   assertIsoDate(record.observedAt, "dodo_uat_scenario_timestamp_invalid");
   assertSha256(record.evidenceFingerprintSha256, "dodo_uat_scenario_fingerprint_invalid");
+  if (binding?.requireArtifactProof === true && binding.scenarioArtifactFingerprints?.[scenarioId] !== record.evidenceFingerprintSha256) {
+    throw new Error("dodo_uat_scenario_artifact_unverified");
+  }
   const references = [record.requestReference, record.eventReference, record.sessionReference].filter((reference) => reference !== null);
   if (references.length === 0 || references.some((reference) => typeof reference !== "string" || !SAFE_REFERENCE_PATTERN.test(reference))) throw new Error("dodo_uat_scenario_reference_invalid");
 }
 
-function assertScenarios(scenarios) {
+function assertScenarios(scenarios, binding) {
   exactKeys(scenarios, DODO_STAGING_UAT_SCENARIO_IDS, "dodo_uat_scenario_set_invalid");
-  DODO_STAGING_UAT_SCENARIO_IDS.forEach((scenarioId) => assertScenarioRecord(scenarios[scenarioId]));
+  DODO_STAGING_UAT_SCENARIO_IDS.forEach((scenarioId) => assertScenarioRecord(scenarios[scenarioId], scenarioId, binding));
   const fingerprints = DODO_STAGING_UAT_SCENARIO_IDS.map((scenarioId) => scenarios[scenarioId].evidenceFingerprintSha256);
   if (new Set(fingerprints).size !== fingerprints.length) throw new Error("dodo_uat_scenario_fingerprint_duplicate");
 }
@@ -172,7 +175,7 @@ export function assertDodoStagingUatEvidence(evidence, binding) {
   assertSha256(evidence.endpointFingerprintSha256, "dodo_uat_endpoint_fingerprint_invalid");
   assertRelease(evidence, binding);
   assertOffers(evidence.offers);
-  assertScenarios(evidence.scenarios);
+  assertScenarios(evidence.scenarios, binding);
   assertRedaction(evidence.redaction);
   assertIsoDate(evidence.createdAt, "dodo_uat_created_at_invalid");
   assertIsoDate(evidence.completedAt, "dodo_uat_completed_at_invalid");

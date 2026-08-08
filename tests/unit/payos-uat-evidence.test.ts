@@ -72,6 +72,15 @@ describe("PayOS staging UAT evidence", () => {
     expect(() => assertPayosStagingUatEvidence(drift, binding)).toThrow("payos_uat_commit_mismatch");
   });
 
+  it("rejects hash-shaped scenario claims when trusted artifact proof is required", () => {
+    const value = evidence();
+    expect(() => assertPayosStagingUatEvidence(value, { ...binding, requireArtifactProof: true })).toThrow("payos_uat_scenario_artifact_unverified");
+    const scenarioArtifactFingerprints = Object.fromEntries(
+      PAYOS_STAGING_UAT_SCENARIO_IDS.map((id) => [id, value.scenarios[id]?.evidenceFingerprintSha256]),
+    );
+    expect(assertPayosStagingUatEvidence(value, { ...binding, requireArtifactProof: true, scenarioArtifactFingerprints })).toMatchObject({ accepted: true });
+  });
+
   it("ships only a bounded, redacted example", () => {
     const source = readFileSync("infra/release/payos-uat-evidence.example.json", "utf8");
     const example = JSON.parse(source) as { scenarios?: Record<string, unknown> };

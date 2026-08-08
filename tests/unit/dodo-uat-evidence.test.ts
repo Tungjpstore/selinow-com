@@ -193,6 +193,16 @@ describe("Dodo staging UAT evidence", () => {
     expect(() => assertDodoStagingUatEvidence(evidence, binding)).toThrow("dodo_uat_redaction_incomplete");
   });
 
+  it("rejects hash-shaped scenario claims when trusted artifact proof is required", () => {
+    const value = validEvidence();
+    expect(() => assertDodoStagingUatEvidence(value, { ...binding, requireArtifactProof: true })).toThrow("dodo_uat_scenario_artifact_unverified");
+
+    const scenarioArtifactFingerprints = Object.fromEntries(
+      DODO_STAGING_UAT_SCENARIO_IDS.map((id) => [id, getScenario(value, id).evidenceFingerprintSha256]),
+    );
+    expect(assertDodoStagingUatEvidence(value, { ...binding, requireArtifactProof: true, scenarioArtifactFingerprints })).toMatchObject({ accepted: true });
+  });
+
   it("ships a bounded, secret-free example with all scenario identifiers", () => {
     const source = readFileSync("infra/release/dodo-uat-evidence.example.json", "utf8");
     const example = JSON.parse(source) as { scenarios?: Record<string, unknown> };

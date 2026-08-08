@@ -34,11 +34,39 @@ function readPrivateJson(root, reference, missingIssue) {
     throw new Error(missingIssue);
   }
   if (!stat.isFile() || (stat.mode & 0o077) !== 0) throw new Error(`${missingIssue}_permissions_invalid`);
+  let bytes;
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    bytes = readFileSync(path);
+    return { value: JSON.parse(bytes.toString("utf8")), bytes, path };
   } catch {
     throw new Error(`${missingIssue}_invalid`);
   }
+}
+
+function assertScenarioArtifacts(root, evidence, provider) {
+  const fingerprints = {};
+  const ids = provider === "dodo"
+    ? Object.keys(evidence.scenarios ?? {})
+    : Object.keys(evidence.scenarios ?? {});
+  for (const id of ids) {
+    const record = evidence.scenarios[id];
+    const refs = [record?.requestReference, record?.eventReference, record?.sessionReference].filter((ref) => ref !== null);
+    if (refs.length === 0 || refs.some((ref) => typeof ref !== "string" || !ref.startsWith("artifact:"))) {
+      throw new Error(`${provider}_uat_scenario_artifact_reference_required`);
+    }
+    for (const ref of refs) {
+      const relativeRef = ref.slice("artifact:".length);
+      const artifact = readPrivateJson(root, relativeRef, `${provider}_uat_scenario_artifact_missing`);
+      const digest = createHash("sha256").update(artifact.bytes).digest("hex");
+      if (digest !== record.evidenceFingerprintSha256) throw new Error(`${provider}_uat_scenario_artifact_hash_mismatch`);
+      if (artifact.value?.provider !== provider || artifact.value?.environment !== "staging"
+        || artifact.value?.release?.releaseId !== evidence.release.releaseId) {
+        throw new Error(`${provider}_uat_scenario_artifact_binding_mismatch`);
+      }
+      fingerprints[id] = digest;
+    }
+  }
+  return fingerprints;
 }
 
 export function readTrustedStagingUatBinding({ evidence, manifestPath: requestedManifestPath, repositoryRoot, workerVersion }) {
@@ -90,12 +118,27 @@ export function validateCommerceUatArtifactsSync({ evidence, repositoryRoot }) {
   for (const [provider, validator] of [["dodo", assertDodoStagingUatEvidence], ["payos", assertPayosStagingUatEvidence]]) {
     const reference = evidence?.commerceAcceptance?.[provider]?.evidenceRef;
     try {
-      const artifact = readPrivateJson(root, reference, `${provider}_uat_artifact_missing`);
-      const binding = readTrustedStagingUatBinding({ evidence: artifact, repositoryRoot: root });
+      const loaded = readPrivateJson(root, reference, `${provider}_uat_artifact_missing`);
+      const artifact = loaded.value;
+      const declaredArtifactSha256 = evidence?.commerceAcceptance?.[provider]?.artifactSha256;
+      if (typeof declaredArtifactSha256 !== "string" || !SHA256.test(declaredArtifactSha256)) {
+        throw new Error(`${provider}_uat_artifact_fingerprint_missing`);
+      }
+      const artifactSha256 = createHash("sha256").update(loaded.bytes).digest("hex");
+      if (artifactSha256 !== declaredArtifactSha256) throw new Error(`${provider}_uat_artifact_hash_mismatch`);
+      if (artifact.provider !== provider || artifact.providerEnvironment !== "test_mode") {
+        throw new Error(`${provider}_uat_provider_binding_mismatch`);
+      }
+      const scenarioArtifactFingerprints = assertScenarioArtifacts(root, artifact, provider);
+      const binding = {
+        ...readTrustedStagingUatBinding({ evidence: artifact, repositoryRoot: root }),
+        requireArtifactProof: true,
+        scenarioArtifactFingerprints,
+      };
       const accepted = validator(artifact, binding);
       result[provider] = {
         accepted: true,
-        artifactFingerprintSha256: accepted.evidenceFingerprintSha256,
+        artifactFingerprintSha256: artifactSha256,
         manifestRef: binding.manifestRef,
         manifestSha256: binding.manifestSha256,
         releaseId: binding.releaseId,
