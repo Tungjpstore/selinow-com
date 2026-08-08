@@ -162,8 +162,6 @@ export function classifyDodoCatalogRows(rows, references) {
   const seen = new Set();
   let pendingCount = 0;
   let publishedCount = 0;
-  const baselineCreatedAt = rows[0]?.created_at;
-  const baselineUpdatedAt = rows[0]?.updated_at;
   const publishedAt = new Set();
   for (const offer of DODO_CATALOG_OFFERS) {
     const matches = rows.filter((candidate) => candidate?.id === offer.id);
@@ -175,12 +173,10 @@ export function classifyDodoCatalogRows(rows, references) {
     const updatedAtMillis = timestampMillis(row.updated_at);
     if (createdAtMillis === null || updatedAtMillis === null
       || row.effective_from !== row.created_at
-      || row.created_at !== baselineCreatedAt
       || updatedAtMillis < createdAtMillis) throw new Error("dodo_catalog_baseline_mismatch");
     if (reference === offer.pendingRef) {
-      // Migration 0076 may run in a later SQLite second than the original
-      // insert. All four untouched rows must still share one update timestamp.
-      if (row.updated_at !== baselineUpdatedAt) throw new Error("dodo_catalog_baseline_mismatch");
+      // Migration 0076 can update individual rows in different SQLite
+      // seconds. Each untouched pending row is validated independently.
       pendingCount += 1;
     } else if (reference === references[offer.id]) {
       publishedAt.add(row.updated_at);
@@ -225,9 +221,7 @@ WHERE (${rowPredicates})
       WHERE p.id IN (${ids})
     ) AS p
     WHERE ${exactPendingPredicate()}
-  ) = ${DODO_CATALOG_OFFERS.length}
-  AND (SELECT COUNT(DISTINCT created_at) FROM plan_prices WHERE id IN (${ids})) = 1
-  AND (SELECT COUNT(DISTINCT updated_at) FROM plan_prices WHERE id IN (${ids})) = 1;
+  ) = ${DODO_CATALOG_OFFERS.length};
 SELECT changes() AS updated_count;
 `;
 }

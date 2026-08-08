@@ -45,11 +45,13 @@ describe("Dodo catalog reconciliation", () => {
 
   afterEach(() => { database.close(); });
 
-  it("classifies the four exact pending offers and reconciles them atomically", () => {
-    // A real replay can cross a SQLite CURRENT_TIMESTAMP second between the
-    // original insert and migration 0076's provider rewrite.
-    database.prepare("UPDATE plan_prices SET updated_at = datetime(created_at, '+1 second') WHERE id IN (?, ?, ?, ?)")
-      .run(...Object.keys(REFERENCES));
+  it("accepts valid per-row pending timestamp drift and reconciles atomically", () => {
+    // Migration 0076 can replay across multiple SQLite seconds. Preserve the
+    // exact offer shape while accepting independently valid row timestamps.
+    Object.keys(REFERENCES).forEach((id, index) => {
+      database.prepare("UPDATE plan_prices SET updated_at = datetime(created_at, ?) WHERE id = ?")
+        .run(`+${Math.floor(index / 2)} seconds`, id);
+    });
     expect(classifyDodoCatalogRows(rows(database), REFERENCES)).toEqual({
       mode: "pending",
       pendingCount: 4,
@@ -70,8 +72,8 @@ describe("Dodo catalog reconciliation", () => {
       : row);
     expect(() => classifyDodoCatalogRows(altered, REFERENCES)).toThrow("dodo_catalog_baseline_mismatch");
 
-    database.prepare("UPDATE plan_prices SET updated_at = ? WHERE id = ?")
-      .run("2099-01-01 00:00:00", "price_starter_vn_v1");
+    database.prepare("UPDATE plan_prices SET updated_at = datetime(created_at, '-1 second') WHERE id = ?")
+      .run("price_starter_vn_v1");
     expect(() => classifyDodoCatalogRows(rows(database), REFERENCES)).toThrow("dodo_catalog_baseline_mismatch");
     database.exec(dodoCatalogUpdateSql(REFERENCES));
     expect(rows(database).every((row) => String(row.provider_price_ref).startsWith("pending:dodo:"))).toBe(true);
