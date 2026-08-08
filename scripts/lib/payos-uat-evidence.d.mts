@@ -7,6 +7,8 @@ export type PayosStagingUatBinding = {
   manifestRef: string;
   manifestSha256: string;
   workerVersion: string;
+  requireArtifactProof?: boolean;
+  scenarioArtifactFingerprints?: Record<string, string>;
 };
 
 export function fingerprintPayosStagingUatEvidence(evidence: unknown): string;

@@ -43,7 +43,10 @@ export type DodoStagingUatEvidence = {
   completedAt: string;
 };
 
-export type DodoStagingUatBinding = Pick<DodoStagingUatEvidence["release"], "commitSha" | "treeSha" | "releaseId" | "manifestRef" | "manifestSha256" | "workerVersion">;
+export type DodoStagingUatBinding = Pick<DodoStagingUatEvidence["release"], "commitSha" | "treeSha" | "releaseId" | "manifestRef" | "manifestSha256" | "workerVersion"> & {
+  requireArtifactProof?: boolean;
+  scenarioArtifactFingerprints?: Record<string, string>;
+};
 
 export function fingerprintDodoStagingUatEvidence(evidence: unknown): string;
 export function fingerprintDodoUatReference(scope: string, value: string): string;
