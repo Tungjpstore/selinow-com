@@ -1,31 +1,68 @@
-import { createHmac } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { lstat, readFile } from "node:fs/promises";
 import process from "node:process";
+import { resolve } from "node:path";
 
 import { assertPaymentProviderMutationAdmission } from "./lib/payment-provider-mutation-admission.mjs";
 
-const PURPOSE = "payos-provider-identity:v1";
+const FINGERPRINT = /^[A-Za-z0-9_-]{43}$/u;
+const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/u;
 
-function fingerprint(secret, clientId) {
-  return createHmac("sha256", secret).update(`${PURPOSE}\0${clientId.trim()}`).digest("base64url");
+function parseArguments(argumentsList) {
+  const options = { evidencePath: null, execute: false, manifestPath: null };
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const argument = argumentsList[index];
+    if (argument === "--execute") options.execute = true;
+    else if (argument === "--release-manifest") options.manifestPath = argumentsList[++index] ?? "";
+    else if (argument.startsWith("--release-manifest=")) options.manifestPath = argument.slice("--release-manifest=".length);
+    else if (argument === "--fingerprint-evidence") options.evidencePath = argumentsList[++index] ?? "";
+    else if (argument.startsWith("--fingerprint-evidence=")) options.evidencePath = argument.slice("--fingerprint-evidence=".length);
+    else throw new Error("payos_attestation_argument_invalid");
+  }
+  return options;
+}
+
+async function readFingerprintEvidence(path) {
+  const resolvedPath = resolve(path);
+  let stat;
+  try {
+    stat = await lstat(resolvedPath);
+  } catch {
+    throw new Error("payos_fingerprint_evidence_missing");
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
+    throw new Error("payos_fingerprint_evidence_permissions_invalid");
+  }
+  let evidence;
+  try {
+    evidence = JSON.parse(await readFile(resolvedPath, "utf8"));
+  } catch {
+    throw new Error("payos_fingerprint_evidence_invalid");
+  }
+  const keys = evidence !== null && typeof evidence === "object" && !Array.isArray(evidence)
+    ? Object.keys(evidence).sort()
+    : [];
+  if (keys.join(",") !== "environment,fingerprint,ok,requestId"
+    || evidence.environment !== "staging"
+    || evidence.ok !== true
+    || typeof evidence.fingerprint !== "string"
+    || !FINGERPRINT.test(evidence.fingerprint)
+    || typeof evidence.requestId !== "string"
+    || !REQUEST_ID.test(evidence.requestId)) {
+    throw new Error("payos_fingerprint_evidence_invalid");
+  }
+  return evidence.fingerprint;
 }
 
 try {
-  const argumentsList = process.argv.slice(2);
-  const execute = argumentsList.includes("--execute");
-  const manifestIndex = argumentsList.findIndex((argument) => argument === "--release-manifest");
-  const manifestPath = manifestIndex >= 0 ? argumentsList[manifestIndex + 1] : null;
-  if (argumentsList.some((argument, index) => argument !== "--execute" && index !== manifestIndex && index !== manifestIndex + 1)) throw new Error("payos_attestation_argument_invalid");
-  if (execute && (typeof manifestPath !== "string" || manifestPath.length === 0)) throw new Error("payos_attestation_release_manifest_required");
-  if (!execute) {
+  const options = parseArguments(process.argv.slice(2));
+  if (options.execute && (typeof options.manifestPath !== "string" || options.manifestPath.length === 0)) throw new Error("payos_attestation_release_manifest_required");
+  if (options.execute && (typeof options.evidencePath !== "string" || options.evidencePath.length === 0)) throw new Error("payos_fingerprint_evidence_required");
+  if (!options.execute) {
     process.stdout.write(`${JSON.stringify({ action: "would_attest_controlled_staging_channel", environment: "staging", workerSecretName: "PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT" }, null, 2)}\n`);
   } else {
-    const clientId = process.env.PAYOS_CONTROLLED_STAGING_CLIENT_ID;
-    const hmacSecret = process.env.IDENTIFIER_HMAC_SECRET;
-    if (typeof clientId !== "string" || clientId.trim().length < 3) throw new Error("payos_controlled_client_id_required");
-    if (typeof hmacSecret !== "string" || hmacSecret.length < 16) throw new Error("payos_identifier_hmac_secret_required");
-    const admission = await assertPaymentProviderMutationAdmission({ environment: "staging", manifestPath });
-    const value = fingerprint(hmacSecret, clientId);
+    const value = await readFingerprintEvidence(options.evidencePath);
+    const admission = await assertPaymentProviderMutationAdmission({ environment: "staging", manifestPath: options.manifestPath });
     const result = spawnSync("npx", ["--no-install", "wrangler", "secret", "put", "PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT", "--env", "staging", "--name", admission.workerName], {
       encoding: "utf8",
       env: admission.childEnvironment,
