@@ -53,10 +53,12 @@ Last updated: 2026-08-09
   the applied `0001`-`0086` ledger under the final staging evidence below, while
   `0087`-`0090` are not covered by that historical manifest. Production remains
   at `0052`; no production migration or deploy has been performed.
-- Current admission result: staging route, backup/restore, migration, deploy
-  and smoke evidence pass for the final candidate. Genuine provider UAT remains
-  blocked, and production remains **NO-GO** on approvals, backup/restore,
-  monitoring, pilot, ownership and provider gates.
+- Current admission result: the retained staging route, backup/restore,
+  migration, deploy and smoke evidence pass only for the historical `0086`
+  package; they are not current-HEAD/`0090` admission. A fresh current
+  candidate ceremony is required. Genuine provider UAT remains blocked, and
+  production remains **NO-GO** on approvals, backup/restore, monitoring,
+  pilot, ownership and provider gates.
 
 ## Dodo deep-lane continuation (2026-08-08)
 
