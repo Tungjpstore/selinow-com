@@ -142,6 +142,27 @@ export function assertStagingAccountIdentity(whoamiOutput, accountId) {
   }
 }
 
+function hasAuthenticatedUserTokenWithoutAccountInventory(whoamiOutput) {
+  try {
+    const parsed = JSON.parse(String(whoamiOutput ?? ""));
+    return parsed?.loggedIn === true
+      && parsed?.authType === "User API Token"
+      && Array.isArray(parsed?.accounts)
+      && parsed.accounts.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function accountIdentityMatches(whoamiOutput, accountId) {
+  try {
+    assertStagingAccountIdentity(whoamiOutput, accountId);
+    return true;
+  } catch {
+    return hasAuthenticatedUserTokenWithoutAccountInventory(whoamiOutput);
+  }
+}
+
 export function assertStagingDatabaseIdentity(d1ListOutput, databaseId, databaseName) {
   let databases;
   try {
@@ -755,7 +776,7 @@ export function validateStagingRouteInventory(spec, liveRoutes) {
     },
     {
       code: "cloudflare_staging_route_catch_all",
-      detail: `*/* points only to ${spec.workerName}`,
+      detail: `*/* points only to ${spec.productionWorkerName} outside staging exceptions`,
       pattern: "*/*",
       script: spec.productionWorkerName,
     },
@@ -1261,10 +1282,7 @@ export async function assertProductionWorkerIdentityAdmission(input) {
   } catch {
     throw new Error("production_worker_account_identity_unavailable");
   }
-  const observedAccountIds = String(whoamiOutput ?? "")
-    .match(/(?<![a-f0-9])[a-f0-9]{32}(?![a-f0-9])/giu)
-    ?.map((value) => value.toLowerCase()) ?? [];
-  if (!observedAccountIds.includes(input.productionSpec.accountId.toLowerCase())) {
+  if (!accountIdentityMatches(whoamiOutput, input.productionSpec.accountId)) {
     throw new Error("production_worker_account_identity_mismatch");
   }
 
@@ -1370,11 +1388,15 @@ export async function inspectStagingRoutePreflight(input = {}) {
 
   let whoamiOutput;
   try {
-    whoamiOutput = runner(["whoami"], runnerOptions).stdout;
+    whoamiOutput = runner(["whoami", "--json"], runnerOptions).stdout;
   } catch {
     throw new Error("staging_account_identity_unavailable");
   }
-  assertStagingAccountIdentity(whoamiOutput, spec.accountId);
+  // Wrangler can omit account inventory for scoped user tokens. The pinned D1
+  // list immediately below remains the authoritative account/resource check.
+  if (!accountIdentityMatches(whoamiOutput, spec.accountId)) {
+    throw new Error("staging_account_identity_mismatch");
+  }
   checks.push({
     code: "staging_account_identity",
     detail: "Authenticated Wrangler account matches the checked-in staging account",
@@ -1579,11 +1601,13 @@ export async function provision(environment, dryRun, input = {}) {
   const runnerOptions = { cwd: repositoryRoot, env: pinnedEnvironment };
   let whoamiOutput;
   try {
-    whoamiOutput = runner(["whoami"], runnerOptions).stdout;
+    whoamiOutput = runner(["whoami", "--json"], runnerOptions).stdout;
   } catch {
     throw new Error("staging_provision_account_identity_unavailable");
   }
-  assertStagingAccountIdentity(whoamiOutput, spec.accountId);
+  if (!accountIdentityMatches(whoamiOutput, spec.accountId)) {
+    throw new Error("staging_account_identity_mismatch");
+  }
 
   let remote = await discoverRemoteResources({
     environment: pinnedEnvironment,
@@ -1661,11 +1685,12 @@ export async function doctor(environment, input = {}) {
 
   if (environment !== "local") {
     if (spec === null) throw new Error("doctor_environment_spec_missing");
-    const whoami = runner(["whoami"], runnerOptions).stdout;
+    const whoami = runner(["whoami", "--json"], runnerOptions).stdout;
+    const accountMatches = accountIdentityMatches(whoami, spec.accountId);
     checks.push({
       code: "cloudflare_account",
-      detail: whoami.includes(spec.accountId) ? "Authenticated account matches environment" : "Authenticated account mismatch",
-      ok: whoami.includes(spec.accountId),
+      detail: accountMatches ? "Authenticated account matches environment" : "Authenticated account mismatch",
+      ok: accountMatches,
     });
     const remote = await discoverRemoteResources({
       environment: wranglerEnvironment,

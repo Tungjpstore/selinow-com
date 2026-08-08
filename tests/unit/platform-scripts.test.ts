@@ -685,7 +685,44 @@ describe("Cloudflare for SaaS platform configuration", () => {
       zoneName: stagingSpec.zoneName,
     });
     expect(commands).toEqual([
-      ["whoami"],
+      ["whoami", "--json"],
+      ["d1", "list", "--env", "staging", "--json"],
+    ]);
+  });
+
+  it("accepts scoped user tokens whose Wrangler account inventory is omitted", async () => {
+    const fetchImplementation: typeof fetch = () => Promise.resolve(new Response(JSON.stringify({
+      result: exactStagingRouteInventory(),
+      success: true,
+    }), { status: 200 }));
+    const runner = vi.fn((args: string[]) => {
+      if (args[0] === "whoami") {
+        return {
+          stderr: "",
+          stdout: JSON.stringify({ accounts: [], authType: "User API Token", loggedIn: true }),
+        };
+      }
+      return {
+        stderr: "",
+        stdout: JSON.stringify([{
+          name: stagingSpec.resources.d1,
+          uuid: STAGING_DATABASE_ID,
+        }]),
+      };
+    });
+
+    await expect(inspectStagingRoutePreflight({
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+      },
+      fetchImplementation,
+      runWranglerImplementation: runner,
+      runtimeIdentityImplementation: stagingAdmissionFixtures.runtimeIdentityImplementation,
+      spec: stagingSpec,
+    })).resolves.toMatchObject({ ok: true });
+    expect(runner.mock.calls.map(([args]) => args)).toEqual([
+      ["whoami", "--json"],
       ["d1", "list", "--env", "staging", "--json"],
     ]);
   });
@@ -874,7 +911,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     })).rejects.toThrow("staging_database_identity_mismatch");
     expect(fetchImplementation).not.toHaveBeenCalled();
     expect(runner.mock.calls.map(([args]) => args.slice(0, 2))).toEqual([
-      ["whoami"],
+      ["whoami", "--json"],
       ["d1", "list"],
     ]);
   });
@@ -1283,7 +1320,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
       await readFile(new URL("../../infra/environments/staging.json", import.meta.url), "utf8"),
     ) as PlatformEnvironmentSpec;
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
-      expect(args).toEqual(["whoami"]);
+      expect(args).toEqual(["whoami", "--json"]);
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: specification.accountId,
         CLOUDFLARE_API_TOKEN: "d1-token",
