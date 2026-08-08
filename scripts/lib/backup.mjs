@@ -608,9 +608,13 @@ async function assertStagingBackupEvidence(options) {
     artifactPath,
     checksumSha256: record.checksum_sha256,
     completedAt: completedAt.toISOString(),
+    createdAt: record.created_at,
+    expiresAt: record.expires_at,
+    providerReference: record.provider_reference,
     reportRef: options.reportRef,
     sizeBytes: record.size_bytes,
     snapshotId: record.id,
+    snapshotKind: record.snapshot_kind,
   };
 }
 
@@ -673,8 +677,10 @@ async function assertStagingRestoreEvidence(options) {
     || source?.database_name !== options.databaseName
     || source?.resource_ref !== `d1:${options.databaseName}`
     || snapshot?.environment !== "staging"
+    || snapshot?.id !== options.backup.snapshotId
     || snapshot?.resource_ref !== `d1:${options.databaseName}`
     || snapshot?.status !== "available"
+    || snapshot?.checksum_sha256 !== options.backup.checksumSha256
     || snapshot?.size_bytes !== options.backup.sizeBytes
     || drill?.environment !== "staging"
     || drill?.status !== "passed"
@@ -1637,6 +1643,15 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
   const approvedIdentity = await loadApprovedRemoteRestoreIdentity(target);
   const runnerOptions = approvedRemoteRunnerOptions(approvedIdentity.accountId);
   const databases = admitRemoteRestoreTarget(runner, target, approvedIdentity, runnerOptions);
+  const protectedBackup = environment === "staging"
+    ? await (options.stagingBackupEvidenceImplementation ?? assertFreshStagingBackupEvidence)({
+      accountId: approvedIdentity.accountId,
+      backupRoot: options.backupRoot,
+      databaseId: approvedIdentity.databaseId,
+      databaseName: approvedIdentity.databaseName,
+      now: options.now ?? new Date(),
+    })
+    : null;
   if (databases.some((database) => database.name === targetName)) {
     throw new Error("restore_target_already_exists");
   }
@@ -1654,9 +1669,38 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       "d1", "create", targetName, "--env", environment, "--location", "apac",
     ], "restore_target_create_failed", runnerOptions);
     createdTarget = true;
+    const sourceArtifact = protectedBackup?.artifactPath ?? sourceExport;
+    if (protectedBackup === null) {
+      safeRunner(
+        runner,
+        exportArgs(target, environment, sourceExport),
+        "database_export_failed",
+        runnerOptions,
+      );
+      await chmod(sourceExport, 0o600);
+      const exportedStat = await stat(sourceExport);
+      if (!exportedStat.isFile() || exportedStat.size === 0) throw new Error("database_export_empty");
+    }
+    const sourceStat = await stat(sourceArtifact);
+    if (!sourceStat.isFile() || sourceStat.size === 0) throw new Error("database_export_empty");
+    const artifactChecksumSha256 = await sha256File(sourceArtifact);
+    const checksumSha256 = protectedBackup?.checksumSha256 ?? artifactChecksumSha256;
+    if (protectedBackup !== null && sourceStat.size !== protectedBackup.sizeBytes) {
+      throw new Error("staging_backup_artifact_invalid");
+    }
+    if (protectedBackup !== null && artifactChecksumSha256 !== protectedBackup.checksumSha256) {
+      throw new Error("staging_backup_artifact_invalid");
+    }
+    if (protectedBackup !== null) {
+      safeRunner(runner, [
+        "d1", "execute", targetName, "--remote", "--env", environment,
+        "--file", sourceArtifact, "--yes",
+      ], "restore_import_failed", runnerOptions);
+    }
+    const sourceQueryTarget = protectedBackup === null ? target.databaseName : targetName;
     const sourceTableRows = parseWranglerRows(remoteExecute(
       runner,
-      target.databaseName,
+      sourceQueryTarget,
       environment,
       `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${CORE_COUNT_TABLES.map((table) => `'${table}'`).join(", ")});`,
       "restore_source_tables_failed",
@@ -1672,26 +1716,18 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     if (sourceCountTables.length === 0) throw new Error("restore_source_tables_empty");
     const sourceCounts = parseRemoteCounts(remoteExecute(
       runner,
-      target.databaseName,
+      sourceQueryTarget,
       environment,
       remoteCountSql(sourceCountTables),
       "restore_source_counts_failed",
       runnerOptions,
     ), sourceCountTables);
-    safeRunner(
-      runner,
-      exportArgs(target, environment, sourceExport),
-      "database_export_failed",
-      runnerOptions,
-    );
-    await chmod(sourceExport, 0o600);
-    const sourceStat = await stat(sourceExport);
-    if (!sourceStat.isFile() || sourceStat.size === 0) throw new Error("database_export_empty");
-    const checksumSha256 = await sha256File(sourceExport);
-    safeRunner(runner, [
-      "d1", "execute", targetName, "--remote", "--env", environment,
-      "--file", sourceExport, "--yes",
-    ], "restore_import_failed", runnerOptions);
+    if (protectedBackup === null) {
+      safeRunner(runner, [
+        "d1", "execute", targetName, "--remote", "--env", environment,
+        "--file", sourceArtifact, "--yes",
+      ], "restore_import_failed", runnerOptions);
+    }
     const repositoryMigrationNames = await expectedMigrationNames();
     const initialMigrationRows = parseWranglerRows(remoteExecute(
       runner,
@@ -1799,20 +1835,22 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     const completedAt = new Date().toISOString();
     const snapshotRecord = buildBackupSnapshotRecord({
       checksumSha256,
-      completedAt,
-      createdAt: identifiers.startedAt,
+      completedAt: protectedBackup?.completedAt ?? completedAt,
+      createdAt: protectedBackup?.createdAt ?? identifiers.startedAt,
       environment,
-      id: identifiers.snapshotId,
+      expiresAt: protectedBackup?.expiresAt,
+      id: protectedBackup?.snapshotId ?? identifiers.snapshotId,
       itemCount: sumCounts(sourceCounts),
+      providerReference: protectedBackup?.providerReference,
       requestId: identifiers.requestId,
       resourceRef: target.resourceRef,
       sizeBytes: sourceStat.size,
-      snapshotKind: "export",
+      snapshotKind: protectedBackup?.snapshotKind ?? "export",
       status: "available",
-      updatedAt: completedAt,
+      updatedAt: protectedBackup?.completedAt ?? completedAt,
     });
     const drillRecord = buildRestoreDrillRecord({
-      backupSnapshotId: identifiers.snapshotId,
+      backupSnapshotId: protectedBackup?.snapshotId ?? identifiers.snapshotId,
       completedAt,
       createdAt: identifiers.startedAt,
       environment: environment === "production" ? "isolated" : environment,

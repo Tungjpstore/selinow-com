@@ -30,7 +30,6 @@ async function writeEvidenceRoot() {
   await mkdir(restoreDirectory, { mode: 0o700, recursive: true });
   const artifact = "CREATE TABLE safe_baseline (id TEXT);\n";
   const checksum = createHash("sha256").update(artifact).digest("hex");
-  const restoreChecksum = createHash("sha256").update(`${artifact}-- restore export\n`).digest("hex");
   await writeFile(join(backupDirectory, "database.sql"), artifact, { mode: 0o600 });
   const source = {
     account_id: ACCOUNT_ID,
@@ -61,12 +60,12 @@ async function writeEvidenceRoot() {
   const migrationNames = (await readdir(join(process.cwd(), "migrations")))
     .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/u.test(name))
     .sort();
-  const restoreSnapshotId = "bkp_20260803003000_bbbbbbbbbbbb";
+  const restoreSnapshotId = "bkp_20260803000000_aaaaaaaaaaaa";
   const reportPath = join(restoreDirectory, "rdr_20260803003000_bbbbbbbbbbbb.json");
   await writeFile(reportPath, `${JSON.stringify({
     records: {
       backup_snapshots: [{
-        checksum_sha256: restoreChecksum,
+        checksum_sha256: checksum,
         environment: "staging",
         id: restoreSnapshotId,
         resource_ref: `d1:${DATABASE_NAME}`,
@@ -116,7 +115,7 @@ describe("staging continuation admission", () => {
     })).resolves.toMatchObject({
       backup: { snapshotId: "bkp_20260803000000_aaaaaaaaaaaa" },
       reviewedCommitSha: REVIEWED_COMMIT,
-      restore: { snapshotId: "bkp_20260803003000_bbbbbbbbbbbb" },
+      restore: { snapshotId: "bkp_20260803000000_aaaaaaaaaaaa" },
     });
   });
 
@@ -169,6 +168,55 @@ describe("staging continuation admission", () => {
     const evidence = await writeEvidenceRoot();
     const report = JSON.parse(await readFile(evidence.reportPath, "utf8")) as Record<string, unknown>;
     delete report.reviewed_commit_sha;
+    await writeFile(evidence.reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
+
+    await expect(assertFreshStagingContinuationEvidence({
+      accountId: ACCOUNT_ID,
+      backupRoot: evidence.backupRoot,
+      databaseId: DATABASE_ID,
+      databaseName: DATABASE_NAME,
+      now: NOW,
+      repositoryRoot: process.cwd(),
+      restoreRoot: evidence.restoreRoot,
+      reviewedCommitSha: REVIEWED_COMMIT,
+    })).rejects.toThrow("staging_continuation_restore_evidence_invalid");
+  });
+
+  it("rejects equal-size restore evidence for changed backup contents", async () => {
+    const evidence = await writeEvidenceRoot();
+    const report = JSON.parse(await readFile(evidence.reportPath, "utf8")) as {
+      records: { backup_snapshots: Array<{ checksum_sha256: string }> };
+    };
+    const changedArtifact = "CREATE TABLE evil_baseline (id TEXT);\n";
+    expect(changedArtifact.length).toBe("CREATE TABLE safe_baseline (id TEXT);\n".length);
+    report.records.backup_snapshots[0].checksum_sha256 = createHash("sha256")
+      .update(changedArtifact)
+      .digest("hex");
+    await writeFile(evidence.reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
+
+    await expect(assertFreshStagingContinuationEvidence({
+      accountId: ACCOUNT_ID,
+      backupRoot: evidence.backupRoot,
+      databaseId: DATABASE_ID,
+      databaseName: DATABASE_NAME,
+      now: NOW,
+      repositoryRoot: process.cwd(),
+      restoreRoot: evidence.restoreRoot,
+      reviewedCommitSha: REVIEWED_COMMIT,
+    })).rejects.toThrow("staging_continuation_restore_evidence_invalid");
+  });
+
+  it("rejects a restore report that renames the protected backup snapshot", async () => {
+    const evidence = await writeEvidenceRoot();
+    const report = JSON.parse(await readFile(evidence.reportPath, "utf8")) as {
+      records: {
+        backup_snapshots: Array<{ id: string }>;
+        restore_drills: Array<{ backup_snapshot_id: string }>;
+      };
+    };
+    const renamedSnapshotId = "bkp_20260803003000_bbbbbbbbbbbb";
+    report.records.backup_snapshots[0].id = renamedSnapshotId;
+    report.records.restore_drills[0].backup_snapshot_id = renamedSnapshotId;
     await writeFile(evidence.reportPath, `${JSON.stringify(report)}\n`, { mode: 0o600 });
 
     await expect(assertFreshStagingContinuationEvidence({

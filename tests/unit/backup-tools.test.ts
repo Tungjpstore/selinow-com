@@ -33,6 +33,8 @@ const STAGING_DATABASE_ID = "c86d76a0-7407-42b6-ba92-f9f9623d0730";
 const PRODUCTION_ACCOUNT_ID = "ab250a88911fd24073cb73d1c07e0218";
 const PRODUCTION_DATABASE_ID = "d86d76a0-7407-42b6-ba92-f9f9623d0730";
 const REVIEWED_COMMIT_SHA = "c".repeat(40);
+const PROTECTED_STAGING_ARTIFACT = resolve(import.meta.dirname, "../../migrations/0001_platform_foundation.sql");
+const PROTECTED_STAGING_SNAPSHOT_ID = "bkp_20260725235900_aaaaaaaaaaaa";
 const GENERATED_LICENSE_TABLES = [
   "generated_license_provider_connections",
   "generated_license_provider_credentials",
@@ -74,6 +76,18 @@ const PRODUCTION_CONFIG = {
     },
   },
 };
+
+async function protectedStagingBackupEvidence() {
+  const artifact = await readFile(PROTECTED_STAGING_ARTIFACT);
+  return {
+    artifactPath: PROTECTED_STAGING_ARTIFACT,
+    checksumSha256: createHash("sha256").update(artifact).digest("hex"),
+    completedAt: "2026-07-25T23:59:00.000Z",
+    reportRef: ".wrangler/backups/staging/protected/snapshot.json",
+    sizeBytes: artifact.byteLength,
+    snapshotId: PROTECTED_STAGING_SNAPSHOT_ID,
+  };
+}
 
 async function writeStagingBackupEvidence(root: string, completedAt: string) {
   const snapshotId = "bkp_20260726000000_010101010101";
@@ -1013,6 +1027,7 @@ describe("backup CLI dry runs", () => {
         now: new Date("2026-07-26T00:00:00.000Z"),
         randomBytesImplementation: () => Buffer.alloc(6, 5),
         reviewedCommitSha: REVIEWED_COMMIT_SHA,
+        stagingBackupEvidenceImplementation: protectedStagingBackupEvidence,
         runner: (args, options) => {
           commands.push({
             accountId: options?.env?.CLOUDFLARE_ACCOUNT_ID,
@@ -1092,9 +1107,14 @@ describe("backup CLI dry runs", () => {
       expect(result.ok).toBe(true);
       expect(commands.every(({ accountId }) => accountId === STAGING_ACCOUNT_ID)).toBe(true);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "create")).toBe(true);
-      expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "export")).toBe(true);
-      expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--file")))
-        .toBe(true);
+      expect(commands.filter(({ args }) => args[0] === "d1" && args[1] === "export"))
+        .toHaveLength(1);
+      expect(commands.some(({ args }) => (
+        args[0] === "d1"
+        && args[1] === "execute"
+        && args.includes("--file")
+        && args[args.indexOf("--file") + 1] === PROTECTED_STAGING_ARTIFACT
+      ))).toBe(true);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "migrations"))
         .toBe(false);
       expect(commands.some(({ args, ci }) => (
@@ -1107,6 +1127,19 @@ describe("backup CLI dry runs", () => {
       expect(commands.filter(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--command")))
         .toHaveLength(8);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "delete")).toBe(true);
+      const report = JSON.parse(await readFile(reportPath, "utf8")) as {
+        records: {
+          backup_snapshots: Array<Record<string, unknown>>;
+          restore_drills: Array<{ backup_snapshot_id: string }>;
+        };
+      };
+      const protectedBackup = await protectedStagingBackupEvidence();
+      expect(report.records.backup_snapshots[0]).toMatchObject({
+        checksum_sha256: protectedBackup.checksumSha256,
+        id: PROTECTED_STAGING_SNAPSHOT_ID,
+        size_bytes: protectedBackup.sizeBytes,
+      });
+      expect(report.records.restore_drills[0].backup_snapshot_id).toBe(PROTECTED_STAGING_SNAPSHOT_ID);
     } finally {
       await rm(reportPath, { force: true });
     }
@@ -1124,6 +1157,7 @@ describe("backup CLI dry runs", () => {
       restoreCountValidationTables.map((table, index) => [table, index + 1]),
     );
     const commands: string[][] = [];
+    let countQueries = 0;
     try {
       const failure = await runRestoreDrill({
         config: CONFIG,
@@ -1132,6 +1166,7 @@ describe("backup CLI dry runs", () => {
         now: new Date("2026-07-26T00:00:00.000Z"),
         randomBytesImplementation: () => Buffer.alloc(6, 6),
         reviewedCommitSha: REVIEWED_COMMIT_SHA,
+        stagingBackupEvidenceImplementation: protectedStagingBackupEvidence,
         runner: (args) => {
           commands.push(args);
           if (args[0] === "whoami") {
@@ -1188,7 +1223,8 @@ describe("backup CLI dry runs", () => {
             const counts: Record<string, number> = Object.fromEntries(
               aliases.map((table) => [table, sourceCounts[table] ?? 0]),
             );
-            if (args[2] !== "selinow-staging") {
+            countQueries += 1;
+            if (countQueries > 1) {
               counts.generated_license_requests = (counts.generated_license_requests ?? 0) - 1;
             }
             return {
@@ -1218,8 +1254,11 @@ describe("backup CLI dry runs", () => {
     }
   });
 
-  it("rejects an empty remote export before importing the isolated target", async () => {
+  it("rejects an empty isolated-target export after importing the protected backup", async () => {
     const now = new Date("2026-07-26T00:00:00.000Z");
+    const migrationNames = readdirSync(resolve(import.meta.dirname, "../../migrations"))
+      .filter((name) => /^\d{4}_.+\.sql$/u.test(name))
+      .sort();
     const reportPath = resolve(
       import.meta.dirname,
       "../../.wrangler/restore-drills/staging/rdr_20260726000000_020202020202.json",
@@ -1233,6 +1272,7 @@ describe("backup CLI dry runs", () => {
         now,
         randomBytesImplementation: () => Buffer.alloc(6, 2),
         reviewedCommitSha: REVIEWED_COMMIT_SHA,
+        stagingBackupEvidenceImplementation: protectedStagingBackupEvidence,
         runner: (args, options) => {
           commands.push({ args, accountId: options?.env?.CLOUDFLARE_ACCOUNT_ID });
           if (args[0] === "whoami") {
@@ -1252,13 +1292,22 @@ describe("backup CLI dry runs", () => {
           }
           if (args[0] === "d1" && args[1] === "execute" && args.includes("--command")) {
             const sql = args[args.indexOf("--command") + 1] ?? "";
+            if (sql.includes("FROM d1_migrations")) {
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{ results: migrationNames.map((name) => ({ name })) }]),
+              };
+            }
             if (sql.includes("FROM sqlite_master")) {
               return {
                 stderr: "",
                 stdout: JSON.stringify([{
-                  results: restoreCountValidationTables.map((name) => ({ name })),
+                  results: restoreValidationTables.map((name) => ({ name })),
                 }]),
               };
+            }
+            if (sql.includes("AS mismatch_count")) {
+              return { stderr: "", stdout: JSON.stringify([{ results: [{ mismatch_count: 0 }] }]) };
             }
             const aliases = Array.from(sql.matchAll(/\) AS ([a-z][a-z0-9_]*)/gu), (match) => match[1])
               .filter((table): table is string => table !== undefined);
@@ -1280,9 +1329,9 @@ describe("backup CLI dry runs", () => {
       }).catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
-      expect((failure as Error).message).toBe("database_export_empty");
+      expect((failure as Error).message).toBe("restore_target_export_empty");
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--file")))
-        .toBe(false);
+        .toBe(true);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "delete"))
         .toBe(true);
       expect(commands.every(({ accountId }) => accountId === STAGING_ACCOUNT_ID)).toBe(true);
