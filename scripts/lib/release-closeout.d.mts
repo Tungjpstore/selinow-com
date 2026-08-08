@@ -32,7 +32,9 @@ export interface ReleaseCloseoutReport {
   staging: {
     latestManifest: ReleaseCloseoutManifest | null;
     manifestCount: number;
+    manifestFresh: boolean;
     candidateMatchesLatestStaging: boolean;
+    eligibleForCurrentCandidate: boolean;
   };
   failedChecks: ReleaseCloseoutCheck[];
   missing: string[];

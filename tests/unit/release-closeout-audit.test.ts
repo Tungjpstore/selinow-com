@@ -33,7 +33,7 @@ describe("release closeout audit", () => {
       commitSha: "0123456789abcdef0123456789abcdef01234567",
       treeSha: "89abcdef0123456789abcdef0123456789abcdef",
       createdAt: "2026-08-09T01:02:03.000Z",
-      expiresAt: "2026-08-10T01:02:03.000Z",
+      expiresAt: "2020-01-01T01:02:03.000Z",
       schemaVersion: 3,
       secretValue: "must-not-appear",
     }));
@@ -49,14 +49,16 @@ describe("release closeout audit", () => {
 
       expect(report.ok).toBe(false);
       expect(report.repository.headSha).toMatch(/^[a-f0-9]{40}$/u);
+      expect(report.staging.manifestFresh).toBe(false);
       expect(report.staging.candidateMatchesLatestStaging).toBe(false);
+      expect(report.staging.eligibleForCurrentCandidate).toBe(false);
       expect(report.staging.latestManifest?.path).toContain(`${releaseId}/release-manifest.json`);
       expect(report.staging.latestManifest).toMatchObject({
         releaseId,
         commitSha: "0123456789abcdef0123456789abcdef01234567",
         treeSha: "89abcdef0123456789abcdef0123456789abcdef",
         createdAt: "2026-08-09T01:02:03.000Z",
-        expiresAt: "2026-08-10T01:02:03.000Z",
+        expiresAt: "2020-01-01T01:02:03.000Z",
         schemaVersion: 3,
       });
       expect(JSON.stringify(report)).not.toContain("must-not-appear");

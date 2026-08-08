@@ -225,6 +225,10 @@ export async function buildCloseoutReport({
   const treeSha = gitValue(["rev-parse", "HEAD^{tree}"]);
   const dirty = gitValue(["status", "--porcelain"]);
   const latestStaging = stagingManifests[0] ?? null;
+  const latestStagingExpiry = Date.parse(latestStaging?.expiresAt ?? "");
+  const manifestFresh = Number.isFinite(latestStagingExpiry) && latestStagingExpiry >= now.getTime();
+  const candidateMatchesLatestStaging = latestStaging?.commitSha === headSha;
+  const repositoryClean = dirty === "";
   return {
     generatedAt: now.toISOString(),
     ok: readiness.ok,
@@ -237,12 +241,14 @@ export async function buildCloseoutReport({
     repository: {
       headSha,
       treeSha,
-      clean: dirty === "",
+      clean: repositoryClean,
     },
     staging: {
       latestManifest: latestStaging,
       manifestCount: stagingManifests.length,
-      candidateMatchesLatestStaging: latestStaging?.commitSha === headSha,
+      manifestFresh,
+      candidateMatchesLatestStaging,
+      eligibleForCurrentCandidate: repositoryClean && manifestFresh && candidateMatchesLatestStaging,
     },
     failedChecks,
     missing: readiness.missing,
