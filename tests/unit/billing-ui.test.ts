@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { isBillingRecentAuthFailure, readBillingApiFailure } from "../../src/lib/dashboard/billing-api-error";
 import { subscriptionStatePresentation } from "../../src/lib/dashboard/billing-ui";
 import { getBillingCheckoutAdmission } from "../../src/lib/dashboard/billing-checkout";
 import { createDashboardTranslator } from "../../src/lib/i18n/catalogs/dashboard";
@@ -48,7 +49,7 @@ describe("subscription state presentation", () => {
   it("fails closed if the checkout response is not explicitly Dodo", () => {
     const source = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
     expect(source).toContain('provider !== "dodo"');
-    expect(source).toContain('throw new Error("checkout_provider_invalid")');
+    expect(source).toContain('new BillingApiError({ code: "checkout_provider_invalid", requestId })');
     expect(source).not.toMatch(/paddle/iu);
   });
 
@@ -80,6 +81,38 @@ describe("subscription state presentation", () => {
       const translate = createDashboardTranslator(locale);
       expect(translate("dashboard.billing.checkout.market_required").length).toBeGreaterThan(20);
       expect(translate("dashboard.billing.checkout.market_action").length).toBeGreaterThan(5);
+    }
+  });
+
+  it("retains safe API error codes and request IDs for checkout support", () => {
+    expect(readBillingApiFailure({ code: "recent_auth_required", requestId: "request-checkout-001" }, 403)).toEqual({
+      code: "recent_auth_required",
+      requestId: "request-checkout-001",
+    });
+    expect(readBillingApiFailure({ code: "provider_not_ready", requestId: "unsafe request id" }, 503)).toEqual({
+      code: "provider_not_ready",
+      requestId: null,
+    });
+  });
+
+  it("recognizes current and compatibility recent-auth error codes", () => {
+    expect(isBillingRecentAuthFailure("recent_auth_required")).toBe(true);
+    expect(isBillingRecentAuthFailure("authentication_recent_required")).toBe(true);
+    expect(isBillingRecentAuthFailure("authentication_required")).toBe(false);
+  });
+
+  it("renders a localized reauthentication action and request reference", () => {
+    const page = readFileSync("src/pages/app/billing.astro", "utf8");
+    const controller = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
+    expect(page).toContain("data-billing-recent-auth-action");
+    expect(controller).toContain("BillingApiError");
+    expect(controller).toContain("readBillingApiFailure");
+    expect(controller).toContain("checkoutRequestId");
+    for (const locale of ["en", "vi-VN"] as const) {
+      const translate = createDashboardTranslator(locale);
+      expect(translate("dashboard.billing.checkout.recent_auth_required").length).toBeGreaterThan(20);
+      expect(translate("dashboard.billing.checkout.recent_auth_action").length).toBeGreaterThan(10);
+      expect(translate("dashboard.billing.checkout.request_id", { requestId: "request-checkout-001" })).toContain("request-checkout-001");
     }
   });
 });

@@ -1,9 +1,22 @@
+import { isBillingRecentAuthFailure, readBillingApiFailure, type BillingApiFailure } from "../../lib/dashboard/billing-api-error";
 import { getBillingCheckoutAdmission } from "../../lib/dashboard/billing-checkout";
 
 type JsonObject = Record<string, unknown>;
 type Price = { amountMinor: number; currency: string; displayAmount: string | null; interval: string; marketCode: string };
 type Plan = { code: string; name: string; prices: Price[]; version: number };
 type ChangeRequest = { action: string; currentPlanCode: string; requestedPlanCode: string | null; reasonCode: string; requestPublicId: string; status: string; updatedAt: string; version: number };
+
+class BillingApiError extends Error {
+  readonly code: string;
+  readonly requestId: string | null;
+
+  constructor(failure: BillingApiFailure) {
+    super(failure.code);
+    this.name = "BillingApiError";
+    this.code = failure.code;
+    this.requestId = failure.requestId;
+  }
+}
 
 const root = document.querySelector<HTMLElement>("[data-billing-root]");
 
@@ -19,6 +32,7 @@ if (root !== null && root.dataset.canManage === "true") {
   const checkoutPlanSelect = root.querySelector<HTMLElement>("[data-billing-checkout-plan]") as HTMLSelectElement | null;
   const checkoutSubmit = root.querySelector<HTMLElement>("[data-billing-checkout-submit]") as HTMLButtonElement | null;
   const checkoutFeedback = root.querySelector<HTMLElement>("[data-billing-checkout-feedback]");
+  const checkoutRecentAuthAction = root.querySelector<HTMLButtonElement>("[data-billing-recent-auth-action]");
   const copy = (() => {
     try {
       const parsed: unknown = JSON.parse(root.dataset.copy ?? "{}");
@@ -48,7 +62,7 @@ if (root !== null && root.dataset.canManage === "true") {
     const method = options.method?.toUpperCase() ?? "GET";
     if (method !== "GET" && method !== "HEAD") {
       const csrf = readCookie(csrfCookieName);
-      if (csrf === null) throw new Error(text("error"));
+      if (csrf === null) throw new BillingApiError({ code: "csrf_missing", requestId: null });
       headers.set("X-CSRF-Token", decodeURIComponent(csrf));
       headers.set("Content-Type", "application/json");
       headers.set("Idempotency-Key", key());
@@ -56,8 +70,7 @@ if (root !== null && root.dataset.canManage === "true") {
     const response = await fetch(url, { ...options, credentials: "same-origin", headers });
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {
-      const code = typeof payload === "object" && payload !== null && typeof (payload as { code?: unknown }).code === "string" ? (payload as { code: string }).code : text("error");
-      throw new Error(code);
+      throw new BillingApiError(readBillingApiFailure(payload, response.status));
     }
     return typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload as JsonObject : null;
   };
@@ -108,6 +121,7 @@ if (root !== null && root.dataset.canManage === "true") {
       checkoutPlanSelect.appendChild(option);
     }
     if (checkoutSubmit !== null) checkoutSubmit.disabled = eligible.length === 0;
+    if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = true;
     if (admission.reasonCode === "billing_market_unavailable") showCheckoutFeedback(text("checkoutMarketRequired"), "danger");
     else if (admission.reasonCode === "plan_price_unavailable") showCheckoutFeedback(text("checkoutUnavailable"), "danger");
     else showCheckoutFeedback("");
@@ -118,11 +132,18 @@ if (root !== null && root.dataset.canManage === "true") {
     checkoutFeedback.dataset.tone = tone;
     checkoutFeedback.hidden = message.length === 0;
   };
+  const billingFailure = (error: unknown): BillingApiFailure => error instanceof BillingApiError
+    ? { code: error.code, requestId: error.requestId }
+    : { code: error instanceof Error ? error.message : "internal_error", requestId: null };
   const checkoutErrorMessage = (error: unknown): string => {
-    const code = error instanceof Error ? error.message : "";
-    return ["billing_market_unavailable", "plan_price_unavailable", "provider_not_ready", "billing_provider_unavailable", "billing_checkout_pending", "billing_recovery_plan_mismatch", "checkout_provider_invalid"].includes(code)
-      ? text("checkoutUnavailable")
-      : text("error");
+    const failure = billingFailure(error);
+    const message = isBillingRecentAuthFailure(failure.code)
+      ? text("checkoutRecentAuthRequired")
+      : ["billing_market_unavailable", "plan_price_unavailable", "provider_not_ready", "billing_provider_unavailable", "billing_checkout_pending", "billing_recovery_plan_mismatch", "checkout_provider_invalid"].includes(failure.code)
+        ? text("checkoutUnavailable")
+        : text("error");
+    if (failure.requestId === null) return message;
+    return `${message} ${text("checkoutRequestId").replace("{requestId}", failure.requestId)}`;
   };
   const renderRequests = (requests: readonly ChangeRequest[]): void => {
     if (ledger === null) return;
@@ -199,22 +220,29 @@ if (root !== null && root.dataset.canManage === "true") {
     pending = true;
     checkoutSubmit.disabled = true;
     checkoutSubmit.setAttribute("aria-busy", "true");
+    if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = true;
     showCheckoutFeedback(text("checkoutOpening"), "info");
     void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { method: "POST", body: JSON.stringify({ planCode, recovery: billingState === "suspended" }) }).then((payload) => {
       const checkout = payload?.checkout;
       const provider = typeof checkout === "object" && checkout !== null && typeof (checkout as { provider?: unknown }).provider === "string" ? (checkout as { provider: string }).provider : "";
       const url = typeof checkout === "object" && checkout !== null && typeof (checkout as { checkoutUrl?: unknown }).checkoutUrl === "string" ? (checkout as { checkoutUrl: string }).checkoutUrl : "";
-      if (provider !== "dodo") throw new Error("checkout_provider_invalid");
-      if (!/^https:\/\//u.test(url)) throw new Error("checkout_url_invalid");
+      const requestId = typeof payload?.requestId === "string" && /^[A-Za-z0-9._-]{8,128}$/u.test(payload.requestId) ? payload.requestId : null;
+      if (provider !== "dodo") throw new BillingApiError({ code: "checkout_provider_invalid", requestId });
+      if (!/^https:\/\//u.test(url)) throw new BillingApiError({ code: "checkout_url_invalid", requestId });
       showCheckoutFeedback(text("checkoutOpening"), "success");
       window.location.assign(url);
     }).catch((error: unknown) => {
+      const failure = billingFailure(error);
+      if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = !isBillingRecentAuthFailure(failure.code);
       showCheckoutFeedback(checkoutErrorMessage(error), "danger");
       checkoutSubmit.disabled = false;
     }).finally(() => {
       pending = false;
       checkoutSubmit.removeAttribute("aria-busy");
     });
+  });
+  checkoutRecentAuthAction?.addEventListener("click", () => {
+    document.querySelector<HTMLButtonElement>("[data-app-logout]")?.click();
   });
   void load();
 }
