@@ -186,4 +186,80 @@ describe("production rollback schema compatibility admission", () => {
     expect(() => admit({ deployableWorkerVersionIds: [candidateWorkerVersion] }))
       .toThrow("production_rollback_candidate_version_not_deployable");
   });
+
+  it("requires reviewed provenance metadata for candidate and rollback inventory entries", () => {
+    const parseInventory = (platformModule as Record<string, unknown>).parseProductionWorkerDeployableVersionInventory;
+    const assertVersion = (platformModule as Record<string, unknown>).assertProductionWorkerVersionAdmission;
+    expect(typeof parseInventory).toBe("function");
+    expect(typeof assertVersion).toBe("function");
+    if (typeof parseInventory !== "function" || typeof assertVersion !== "function") return;
+    const inventory = (parseInventory as (value: unknown) => Array<{ id: string; binding: Record<string, string> }>)(
+      {
+        items: [
+          {
+            annotations: {
+              "selinow/commit-sha": "a".repeat(40),
+              "selinow/manifest-ref": ".wrangler/releases/release_20260809_abcdef12/release-manifest.json",
+              "selinow/release-id": "release_20260809_abcdef12",
+              "selinow/tree-sha": "b".repeat(40),
+            },
+            id: candidateWorkerVersion,
+          },
+          {
+            metadata: {
+              commitSha: "a".repeat(40),
+              manifestRef: ".wrangler/releases/release_20260809_rollback12/release-manifest.json",
+              releaseId: "release_20260809_rollback12",
+              treeSha: "b".repeat(40),
+            },
+            id: rollbackWorkerVersion,
+          },
+        ],
+      },
+    );
+    expect(() => (assertVersion as (input: Record<string, unknown>) => unknown)({
+      candidateWorkerVersion,
+      candidateWorkerVersionBinding: {
+        commitSha: "a".repeat(40),
+        manifestRef: ".wrangler/releases/release_20260809_abcdef12/release-manifest.json",
+        releaseId: "release_20260809_abcdef12",
+        treeSha: "b".repeat(40),
+      },
+      currentWorkerVersion,
+      deployableWorkerVersionIds: [candidateWorkerVersion, rollbackWorkerVersion],
+      deployableWorkerVersionInventory: inventory,
+      previousWorkerVersion: currentWorkerVersion,
+      rollbackCandidateWorkerVersion: rollbackWorkerVersion,
+    })).not.toThrow();
+    expect(() => (assertVersion as (input: Record<string, unknown>) => unknown)({
+      candidateWorkerVersion,
+      candidateWorkerVersionBinding: {
+        commitSha: "c".repeat(40),
+        manifestRef: ".wrangler/releases/release_20260809_abcdef12/release-manifest.json",
+        releaseId: "release_20260809_abcdef12",
+        treeSha: "b".repeat(40),
+      },
+      currentWorkerVersion,
+      deployableWorkerVersionIds: [candidateWorkerVersion, rollbackWorkerVersion],
+      deployableWorkerVersionInventory: inventory,
+      previousWorkerVersion: currentWorkerVersion,
+      rollbackCandidateWorkerVersion: rollbackWorkerVersion,
+    })).toThrow("production_candidate_worker_version_binding_mismatch");
+  });
+
+  it("rejects a latest deployment that is split or not exactly 100 percent", () => {
+    const parse = (platformModule as Record<string, unknown>).parseProductionWorkerDeploymentVersion;
+    expect(typeof parse).toBe("function");
+    if (typeof parse !== "function") return;
+    expect(() => (parse as (value: unknown) => string)({
+      deployments: [{
+        created_on: "2026-08-08T12:00:00.000Z",
+        id: "44444444-4444-4444-8444-444444444444",
+        versions: [
+          { percentage: 50, version_id: currentWorkerVersion },
+          { percentage: 50, version_id: candidateWorkerVersion },
+        ],
+      }],
+    })).toThrow("production_worker_deployment_inventory_invalid");
+  });
 });

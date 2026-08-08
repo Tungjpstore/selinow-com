@@ -57,6 +57,8 @@ export function assertProductionWorkerDeployAdmission(input: {
   now?: Date;
   productionSpec?: Record<string, unknown> | null;
   repositoryRoot?: string;
+  requireDedicatedWorkerDeployToken?: boolean;
+  requireWorkerVersionBinding?: boolean;
   runWranglerImplementation?: (
     args: string[],
     options?: { cwd?: string; env?: NodeJS.ProcessEnv },
@@ -67,6 +69,9 @@ export function assertProductionWorkerDeployAdmission(input: {
     accountId: string;
     databaseId: string;
     databaseName: string;
+    deployableWorkerVersionIds?: string[];
+    deployableWorkerVersionInventory?: Array<Record<string, unknown>>;
+    currentWorkerVersion?: string;
     workerName: string;
     zoneId: string;
     zoneName: string;
@@ -75,10 +80,13 @@ export function assertProductionWorkerDeployAdmission(input: {
   wranglerConfig?: Record<string, unknown>;
 }): Promise<{
   accountId: string;
+  candidateWorkerVersion?: string;
   commitSha: string;
   databaseId: string;
   databaseName: string;
   releaseId: string;
+  rollbackCandidateWorkerVersion?: string;
+  treeSha?: string;
   workerName: string;
   zoneId: string;
   zoneName: string;

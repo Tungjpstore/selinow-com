@@ -14,6 +14,28 @@ const cloudflareTimeoutMs = 10_000;
 const cloudflareAccountIdPattern = /^[a-f0-9]{32}$/u;
 const d1DatabaseIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const workerVersionIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME = "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
+
+const SAFE_BUILD_ENVIRONMENT_NAMES = new Set([
+  "CI",
+  "COREPACK_HOME",
+  "FORCE_COLOR",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "NO_COLOR",
+  "NPM_CONFIG_CACHE",
+  "PATH",
+  "SHELL",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "TERM",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "npm_config_cache",
+]);
 
 export class CloudflareApiError extends Error {
   constructor(status, code) {
@@ -51,6 +73,52 @@ export function requireCloudflareRouteAuditToken(environment = process.env) {
     throw new Error("cloudflare_route_audit_api_token_missing");
   }
   return token;
+}
+
+export function requireCloudflareWorkerDeployToken(environment = process.env) {
+  const token = environment[CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME]?.trim();
+  if (!token) {
+    throw new Error("cloudflare_worker_deploy_api_token_missing");
+  }
+  return token;
+}
+
+/** Keep application builds and Worker sinks free of operator credentials. */
+export function buildWorkerBuildEnvironment(environment = process.env, environmentName) {
+  if (!new Set(["local", "staging", "production"]).has(environmentName)) {
+    throw new Error("worker_build_environment_invalid");
+  }
+  const child = Object.fromEntries(Object.entries(environment ?? {}).filter(([name, value]) => (
+    SAFE_BUILD_ENVIRONMENT_NAMES.has(name) && typeof value === "string"
+  )));
+  child.CI = "1";
+  if (environmentName === "local") delete child.CLOUDFLARE_ENV;
+  else child.CLOUDFLARE_ENV = environmentName;
+  return child;
+}
+
+export function buildWorkerDeployEnvironment(environment = process.env, accountId) {
+  if (!cloudflareAccountIdPattern.test(accountId ?? "")) {
+    throw new Error("worker_deploy_account_identity_invalid");
+  }
+  const token = requireCloudflareWorkerDeployToken(environment);
+  const child = {
+    CLOUDFLARE_ACCOUNT_ID: accountId,
+    CLOUDFLARE_API_TOKEN: token,
+  };
+  for (const name of SAFE_BUILD_ENVIRONMENT_NAMES) {
+    if (typeof environment?.[name] === "string") child[name] = environment[name];
+  }
+  delete child[CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME];
+  delete child.CLOUDFLARE_OAUTH_TOKEN;
+  delete child.CLOUDFLARE_API_KEY;
+  delete child.CLOUDFLARE_API_USER_SERVICE_KEY;
+  delete child.CLOUDFLARE_EMAIL;
+  delete child.CF_API_KEY;
+  delete child.CF_API_TOKEN;
+  delete child.CLOUDFLARE_PLATFORM_API_TOKEN;
+  delete child.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
+  return child;
 }
 
 export function assertStagingAccountIdentity(whoamiOutput, accountId) {
@@ -880,23 +948,77 @@ export function parseProductionWorkerDeploymentVersion(value) {
   const versionId = latest?.versionId ?? rawVersion?.version_id;
   if (typeof versionId !== "string"
     || !workerVersionIdPattern.test(versionId)
-    || (latest?.versionId === undefined && rawVersion?.percentage !== 100)) {
+    || rawVersion === null
+    || rawVersion?.percentage !== 100
+    || rawVersion?.version_id !== versionId) {
     throw new Error("production_worker_deployment_inventory_invalid");
   }
   return versionId;
 }
 
-export function parseProductionWorkerDeployableVersions(value) {
+function normalizeWorkerVersionBinding(version) {
+  if (version === null || typeof version !== "object") return null;
+  const metadata = version.metadata;
+  const annotations = version.annotations ?? metadata?.annotations;
+  const annotation = (names) => names
+    .map((name) => annotations?.[name])
+    .find((value) => typeof value === "string");
+  const metadataValue = (names) => names
+    .map((name) => metadata?.[name])
+    .find((value) => typeof value === "string");
+  return {
+    commitSha: metadataValue(["commitSha", "commit_sha", "reviewedCommitSha", "reviewed_commit_sha"])
+      ?? annotation(["selinow/commit-sha", "selinow_commit_sha", "commitSha", "commit_sha"])
+      ?? null,
+    manifestSha256: metadataValue(["manifestSha256", "manifest_sha256", "releaseManifestSha256", "release_manifest_sha256"])
+      ?? annotation(["selinow/manifest-sha256", "selinow_manifest_sha256", "manifestSha256", "manifest_sha256"])
+      ?? null,
+    manifestRef: metadataValue(["manifestRef", "manifest_ref", "releaseManifestRef", "release_manifest_ref"])
+      ?? annotation(["selinow/manifest-ref", "selinow_manifest_ref", "manifestRef", "manifest_ref"])
+      ?? null,
+    releaseId: metadataValue(["releaseId", "release_id"])
+      ?? annotation(["selinow/release-id", "selinow_release_id", "releaseId", "release_id"])
+      ?? null,
+    treeSha: metadataValue(["treeSha", "tree_sha", "reviewedTreeSha", "reviewed_tree_sha"])
+      ?? annotation(["selinow/tree-sha", "selinow_tree_sha", "treeSha", "tree_sha"])
+      ?? null,
+  };
+}
+
+export function parseProductionWorkerDeployableVersionInventory(value) {
   const versions = Array.isArray(value) ? value : value?.items;
   if (!Array.isArray(versions) || versions.length === 0) {
     throw new Error("production_worker_deployable_version_inventory_invalid");
   }
-  const ids = versions.map((version) => version?.id);
-  if (ids.some((id) => typeof id !== "string" || !workerVersionIdPattern.test(id))
-    || new Set(ids).size !== ids.length) {
+  const normalized = versions.map((version) => {
+    if (typeof version?.id !== "string" || !workerVersionIdPattern.test(version.id)) {
+      throw new Error("production_worker_deployable_version_inventory_invalid");
+    }
+    return {
+      id: version.id,
+      binding: normalizeWorkerVersionBinding(version),
+    };
+  });
+  if (new Set(normalized.map((version) => version.id)).size !== normalized.length) {
     throw new Error("production_worker_deployable_version_inventory_invalid");
   }
-  return ids.sort();
+  return normalized.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export function parseProductionWorkerDeployableVersions(value) {
+  return parseProductionWorkerDeployableVersionInventory(value).map((version) => version.id);
+}
+
+function assertWorkerVersionBinding(actual, expected, issue) {
+  if (expected === undefined) return;
+  if (expected === null || typeof expected !== "object") throw new Error(`${issue}_invalid`);
+  const required = ["commitSha", "treeSha", "releaseId"];
+  if (expected.manifestSha256 !== undefined) required.push("manifestSha256");
+  if (expected.manifestRef !== undefined) required.push("manifestRef");
+  if (actual === null || typeof actual !== "object" || required.some((key) => typeof expected[key] !== "string" || expected[key].length === 0
+    || actual[key] !== expected[key])) {
+    throw new Error(`${issue}_mismatch`);
+  }
 }
 
 export function assertProductionWorkerVersionAdmission(input) {
@@ -938,6 +1060,24 @@ export function assertProductionWorkerVersionAdmission(input) {
   }
   if (!deployable.has(input.rollbackCandidateWorkerVersion)) {
     throw new Error("production_rollback_candidate_version_not_deployable");
+  }
+  const versionInventory = Array.isArray(input.deployableWorkerVersionInventory)
+    ? input.deployableWorkerVersionInventory
+    : [];
+  if (versionInventory.length > 0) {
+    const entries = new Map(versionInventory.map((entry) => [entry?.id, entry?.binding]));
+    assertWorkerVersionBinding(
+      entries.get(input.candidateWorkerVersion),
+      input.candidateWorkerVersionBinding,
+      "production_candidate_worker_version_binding",
+    );
+    assertWorkerVersionBinding(
+      entries.get(input.rollbackCandidateWorkerVersion),
+      input.rollbackWorkerVersionBinding,
+      "production_rollback_worker_version_binding",
+    );
+  } else if (input.candidateWorkerVersionBinding !== undefined || input.rollbackWorkerVersionBinding !== undefined) {
+    throw new Error("production_worker_version_inventory_binding_unavailable");
   }
   return {
     candidateWorkerVersion: input.candidateWorkerVersion,
@@ -1139,13 +1279,21 @@ export async function assertProductionWorkerIdentityAdmission(input) {
       .join(",");
     throw new Error(`cloudflare_production_worker_identity_invalid:${failedChecks}`);
   }
+  const currentWorkerVersion = input.requireCurrentWorkerVersion === true
+    ? parseProductionWorkerDeploymentVersion(deploymentsResult)
+    : undefined;
+  if (input.expectedCurrentWorkerVersion !== undefined
+    && currentWorkerVersion !== input.expectedCurrentWorkerVersion) {
+    throw new Error("production_worker_active_version_mismatch");
+  }
   return {
     accountId: input.productionSpec.accountId,
     checks: audit.checks,
     ...(input.requireCurrentWorkerVersion === true
       ? {
-        currentWorkerVersion: parseProductionWorkerDeploymentVersion(deploymentsResult),
+        currentWorkerVersion,
         deployableWorkerVersionIds: parseProductionWorkerDeployableVersions(deployableVersionsResult),
+        deployableWorkerVersionInventory: parseProductionWorkerDeployableVersionInventory(deployableVersionsResult),
       }
       : {}),
     databaseId: contract.databaseId,

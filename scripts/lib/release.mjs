@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   assertProductionWorkerIdentityAdmission,
   assertProductionWorkerVersionAdmission,
+  requireCloudflareWorkerDeployToken,
   repositoryRoot,
 } from "./platform.mjs";
 import { assertFreshProductionContinuationEvidence } from "./backup.mjs";
@@ -76,6 +77,17 @@ export const REQUIRED_PROVIDER_ACCEPTANCE_KEYS = [
 export const RELEASE_CHANNEL_KEYS = ["website", ...REQUIRED_PROVIDER_ACCEPTANCE_KEYS];
 export const REQUIRED_COMMERCE_ACCEPTANCE_KEYS = ["payos", "dodo"];
 export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
+  "billing_checkout_sessions_scope_guard",
+  "billing_checkout_sessions_scope_update_guard",
+  "shop_subscriptions_provider_ref_guard",
+  "shop_subscriptions_provider_ref_update_guard",
+  "plan_prices_published_reference_guard",
+  "plans_public_assignable_insert_guard",
+  "plans_public_assignable_update_guard",
+  "shop_subscriptions_price_snapshot_presence_guard",
+  "shop_subscriptions_price_snapshot_presence_update_guard",
+  "shop_subscriptions_price_snapshot_scope_guard",
+  "shop_subscriptions_price_snapshot_scope_update_guard",
   "shop_subscriptions_trial_claim_insert_guard",
   "shop_subscriptions_trial_claim_update_guard",
   "shop_customers_anonymized_insert_guard",
@@ -94,9 +106,32 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "payment_credentials_payos_claim_scope_update_guard",
   "payment_integrations_payos_claim_fingerprint_update_guard",
   "payment_credentials_payos_claim_fingerprint_update_guard",
+  "payment_integrations_payos_claim_fingerprint_clear_guard",
+  "payment_credentials_payos_claim_fingerprint_clear_guard",
 ]);
 
 const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
+  "0078_dodo_billing_hardening.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      billing_checkout_sessions_scope_guard: "ee232682d7c3f5fbd9f5758bb3093b2001599ecd610b417cd002fe57a5c734a3",
+      billing_checkout_sessions_scope_update_guard: "dedd8e9d81332f762040b5f921a152a02cc9e8083a1e7c2c7bc56ba896cbd4f3",
+      shop_subscriptions_provider_ref_guard: "589a4375cd09461734ab10cca198bdc5a06ccdb534d4d745d289aef2329aaa6d",
+      shop_subscriptions_provider_ref_update_guard: "6e0fd7e2c41a7344294bc34514547c3f5dd3a239729310219a2f222e57e7df4b",
+    }),
+  }),
+  "0081_dodo_catalog_contract.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      plan_prices_published_reference_guard: "f01e36d58bc1a6271bf6bcea5325ea74cc3a6fe02882f32ce869232169627e2a",
+      plans_public_assignable_insert_guard: "1f26d64dbdae22b3c24e03f060f576fd02de82ad0396bc3ae3995cf7ad566b12",
+      plans_public_assignable_update_guard: "4178d72edc41026751defe365b59552543f413ff24800c1b204795880bfc9c98",
+      shop_subscriptions_price_snapshot_presence_guard: "6c11041abd06e63e204d41443d84d82ab88dac1fcb55778b30ca69cfbee2454a",
+      shop_subscriptions_price_snapshot_presence_update_guard: "140671de929da01f5a41eb97717c7fe54e8789d33148c10b3cbef8c3aa99e2cc",
+      shop_subscriptions_price_snapshot_scope_guard: "c554fa734c391b71467f4e70a999c2f73f7d8aff475dc6321a541bdd9ea9279e",
+      shop_subscriptions_price_snapshot_scope_update_guard: "ed2cd456ca838d9f20a60bc31d9cc6c4d68ecf06593a76c4183224358813381c",
+    }),
+  }),
   "0087_integrity_hardening.sql": Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({
@@ -131,6 +166,13 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
     objects: Object.freeze({
       payment_credentials_payos_claim_fingerprint_update_guard: "1138afea4b9ad196d64dc2e19e81847a6a9a13861e3d8b773e49392f86d218be",
       payment_integrations_payos_claim_fingerprint_update_guard: "e5c2d27d420af8e0302def762a5bb51218b1c618267c8fd46b188975193e44ed",
+    }),
+  }),
+  "0090_payos_provider_claim_clear_guard.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      payment_credentials_payos_claim_fingerprint_clear_guard: "8a8848633184c67e65f6eab33eb8d6b8453cc2b05056bc6702cc8c2c3cd322c8",
+      payment_integrations_payos_claim_fingerprint_clear_guard: "77977a03b5c5c865420f744e88e05a4b7510c2d39d04537fa710ed457d11a20d",
     }),
   }),
 });
@@ -1099,6 +1141,9 @@ export async function assertProductionWorkerDeployAdmission(input) {
     repositoryRoot: root,
     workerSecretNames: input.workerSecretNames,
   });
+  if (input.requireDedicatedWorkerDeployToken === true) {
+    requireCloudflareWorkerDeployToken(input.environment);
+  }
   const [productionSpec, stagingSpec, wranglerConfig] = await Promise.all([
     input.productionSpec === undefined
       ? readOptionalJson(resolve(root, "infra/environments/production.json"))
@@ -1127,8 +1172,17 @@ export async function assertProductionWorkerDeployAdmission(input) {
   });
   assertProductionWorkerVersionAdmission({
     candidateWorkerVersion: releaseAdmission.candidateWorkerVersion,
+    candidateWorkerVersionBinding: input.requireWorkerVersionBinding === true
+      ? {
+        commitSha: releaseAdmission.commitSha,
+        manifestRef: `.wrangler/releases/${releaseAdmission.releaseId}/release-manifest.json`,
+        releaseId: releaseAdmission.releaseId,
+        treeSha: releaseAdmission.treeSha,
+      }
+      : undefined,
     currentWorkerVersion: workerAdmission.currentWorkerVersion,
     deployableWorkerVersionIds: workerAdmission.deployableWorkerVersionIds,
+    deployableWorkerVersionInventory: workerAdmission.deployableWorkerVersionInventory,
     previousWorkerVersion: releaseAdmission.previousWorkerVersion,
     rollbackCandidateWorkerVersion: releaseAdmission.rollbackCandidateWorkerVersion,
   });
@@ -1209,12 +1263,25 @@ function canonicalDatabaseObjectSql(value) {
 }
 
 export function assertProductionDatabaseInvariantContract(input = {}) {
+  const environmentName = input.environmentName ?? "production";
+  if (!new Set(["staging", "production"]).has(environmentName)) {
+    throw new Error("production_database_invariant_environment_invalid");
+  }
   const migrationNames = validateSourceMigrationNames(input.migrationNames);
+  const historicalMigrations = [
+    "0078_dodo_billing_hardening.sql",
+    "0081_dodo_catalog_contract.sql",
+  ];
+  for (const name of historicalMigrations) {
+    if (!migrationNames.includes(name)) {
+      throw new Error(`production_database_invariant_baseline_missing:${name}`);
+    }
+  }
   const baselineIndex = migrationNames.indexOf("0087_integrity_hardening.sql");
   if (baselineIndex === -1) {
     throw new Error("production_database_invariant_baseline_missing");
   }
-  const coveredMigrations = migrationNames.slice(baselineIndex);
+  const coveredMigrations = [...historicalMigrations, ...migrationNames.slice(baselineIndex)];
   for (const name of coveredMigrations) {
     if (!Object.hasOwn(PRODUCTION_DATABASE_INVARIANT_REGISTRY, name)) {
       throw new Error(`production_database_invariant_registry_incomplete:${name}`);
@@ -1281,7 +1348,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   const run = (sql, issue) => {
     try {
       return parseProductionDatabaseInvariantRows(runner([
-        "d1", "execute", "PLATFORM_DB", "--env", "production", "--remote",
+        "d1", "execute", "PLATFORM_DB", "--env", environmentName, "--remote",
         "--command", sql, "--json",
       ], { cwd: input.repositoryRoot ?? repositoryRoot, env: input.environment }).stdout, issue);
     } catch (error) {

@@ -186,6 +186,35 @@ describe("production Worker continuation deploy admission", () => {
       "payment_integrations_payos_claim_fingerprint_update_guard",
     ]));
     expect(runner).toHaveBeenCalledTimes(3);
+    expect(runner.mock.calls.every(([args]) => args[4] === "production")).toBe(true);
+  });
+
+  it("pins staging invariant queries to the staging D1 environment", () => {
+    const assertInvariants = (releaseModule as Record<string, unknown>).assertProductionDatabaseInvariantContract;
+    expect(typeof assertInvariants).toBe("function");
+    if (typeof assertInvariants !== "function") return;
+    const migrationNames = readdirSync("migrations").filter((name) => name.endsWith(".sql")).sort();
+    const database = new DatabaseSync(":memory:");
+    for (const name of migrationNames) {
+      database.exec(readFileSync(join("migrations", name), "utf8"));
+    }
+    const runner = vi.fn((args: string[]) => {
+      const sql = args[args.indexOf("--command") + 1];
+      if (sql === undefined) throw new Error("missing_sql");
+      return { stdout: JSON.stringify([{ results: database.prepare(sql).all(), success: true }]) };
+    });
+    try {
+      const result = (assertInvariants as (input: Record<string, unknown>) => { ok: boolean })({
+        environmentName: "staging",
+        migrationNames,
+        repositoryRoot: process.cwd(),
+        runWranglerImplementation: runner,
+      });
+      expect(result.ok).toBe(true);
+      expect(runner.mock.calls.every(([args]) => args[4] === "staging")).toBe(true);
+    } finally {
+      database.close();
+    }
   });
 
   it("rejects altered invariant definitions, live violations and unreviewed migration slots", () => {
@@ -223,10 +252,51 @@ describe("production Worker continuation deploy admission", () => {
       runWranglerImplementation: violation,
     })).toThrow("production_database_invariant_data_violation:integrity_0088_provider_claim_state");
 
+    const unreviewedMigration = `${String(migrationNames.length + 1).padStart(4, "0")}_future.sql`;
     expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
-      migrationNames: [...migrationNames, "0090_future.sql"],
+      migrationNames: [...migrationNames, unreviewedMigration],
       runWranglerImplementation: vi.fn(),
-    })).toThrow("production_database_invariant_registry_incomplete:0090_future.sql");
+    })).toThrow(`production_database_invariant_registry_incomplete:${unreviewedMigration}`);
+  });
+
+  it("rejects same-name replacements for the reviewed billing, catalog and PayOS guards", () => {
+    const assertInvariants = (releaseModule as Record<string, unknown>).assertProductionDatabaseInvariantContract;
+    expect(typeof assertInvariants).toBe("function");
+    if (typeof assertInvariants !== "function") return;
+    const migrationNames = readdirSync("migrations").filter((name) => name.endsWith(".sql")).sort();
+    const database = new DatabaseSync(":memory:");
+    for (const name of migrationNames) {
+      database.exec(readFileSync(join("migrations", name), "utf8"));
+    }
+    const triggerNames = [
+      "billing_checkout_sessions_scope_guard",
+      "billing_checkout_sessions_scope_update_guard",
+      "shop_subscriptions_provider_ref_guard",
+      "shop_subscriptions_provider_ref_update_guard",
+      "plan_prices_published_reference_guard",
+      "plans_public_assignable_insert_guard",
+      "plans_public_assignable_update_guard",
+      "shop_subscriptions_price_snapshot_presence_guard",
+      "shop_subscriptions_price_snapshot_presence_update_guard",
+      "shop_subscriptions_price_snapshot_scope_guard",
+      "shop_subscriptions_price_snapshot_scope_update_guard",
+      "payment_integrations_payos_claim_fingerprint_clear_guard",
+      "payment_credentials_payos_claim_fingerprint_clear_guard",
+    ];
+    for (const triggerName of triggerNames) {
+      const runner = vi.fn((args: string[]) => {
+        const sql = args[args.indexOf("--command") + 1];
+        if (sql === undefined) throw new Error("missing_sql");
+        const rows = database.prepare(sql).all() as Array<Record<string, unknown>>;
+        const row = rows.find((entry) => entry.name === triggerName);
+        if (row !== undefined) row.sql = `CREATE TRIGGER ${triggerName} AFTER INSERT ON sqlite_schema BEGIN SELECT 1; END`;
+        return { stdout: JSON.stringify([{ results: rows, success: true }]) };
+      });
+      expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+        migrationNames,
+        runWranglerImplementation: runner,
+      })).toThrow(`production_database_invariant_definition_mismatch:trigger:${triggerName}`);
+    }
   });
 
   it("places complete production database admission before and after the build", () => {

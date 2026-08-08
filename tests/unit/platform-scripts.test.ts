@@ -15,6 +15,8 @@ import {
   auditStagingRouteInventory,
   buildQueueBindings,
   buildPinnedCloudflareEnvironment,
+  buildWorkerBuildEnvironment,
+  buildWorkerDeployEnvironment,
   buildStagingRoutes,
   buildStagingVars,
   cloudflareApiRequest,
@@ -27,6 +29,7 @@ import {
   provision,
   requireCloudflarePlatformToken,
   requireCloudflareRouteAuditToken,
+  requireCloudflareWorkerDeployToken,
   type PlatformEnvironmentSpec,
   validateProductionWorkerRouteInventory,
   validateStagingRouteInventory,
@@ -1533,5 +1536,36 @@ describe("Cloudflare for SaaS platform configuration", () => {
       CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: " route-audit-token ",
     }))
       .toBe("route-audit-token");
+    expect(() => requireCloudflareWorkerDeployToken({}))
+      .toThrow("cloudflare_worker_deploy_api_token_missing");
+    expect(requireCloudflareWorkerDeployToken({
+      CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: " worker-deploy-token ",
+    }))
+      .toBe("worker-deploy-token");
+  });
+
+  it("keeps builds and Worker sinks on explicit environment allowlists", () => {
+    const accountId = "abcdef0123456789abcdef0123456789";
+    const source = {
+      CLOUDFLARE_API_TOKEN: "ambient-token",
+      CLOUDFLARE_OAUTH_TOKEN: "ambient-oauth",
+      CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: "dedicated-deploy-token",
+      DODO_PAYMENTS_API_KEY: "provider-secret",
+      NODE_OPTIONS: "--require=operator-hook",
+      PATH: "/bin",
+      RELEASE_OPERATOR_NOTE: "must-not-forward",
+    };
+    const build = buildWorkerBuildEnvironment(source, "production");
+    expect(build).toMatchObject({ CI: "1", CLOUDFLARE_ENV: "production", PATH: "/bin" });
+    expect(build).not.toHaveProperty("CLOUDFLARE_API_TOKEN");
+    expect(build).not.toHaveProperty("DODO_PAYMENTS_API_KEY");
+    expect(build).not.toHaveProperty("NODE_OPTIONS");
+    expect(build).not.toHaveProperty("RELEASE_OPERATOR_NOTE");
+
+    const sink = buildWorkerDeployEnvironment(source, accountId);
+    expect(sink).toMatchObject({ CLOUDFLARE_ACCOUNT_ID: accountId, CLOUDFLARE_API_TOKEN: "dedicated-deploy-token" });
+    expect(sink).not.toHaveProperty("CLOUDFLARE_WORKER_DEPLOY_API_TOKEN");
+    expect(sink).not.toHaveProperty("CLOUDFLARE_OAUTH_TOKEN");
+    expect(sink).not.toHaveProperty("DODO_PAYMENTS_API_KEY");
   });
 });

@@ -15,6 +15,7 @@ import {
   requiresStagingDatabaseAdmission,
 } from "./lib/db-admission.mjs";
 import { assertRemotePostMigrationContract } from "./lib/db-post-migration-contract.mjs";
+import { assertProductionDatabaseInvariantContract } from "./lib/release.mjs";
 import {
   evaluatePaymentProviderPreflight,
   evaluatePayosRelationshipPreflight,
@@ -72,6 +73,7 @@ try {
     : ["--env", flags.environment, "--remote"];
   let wranglerArgs;
   let stagingMigrationHandled = false;
+  let stagingMigrationLedger = null;
 
   if (operation === "complete-release") {
     if (flags.environment !== "staging") throw new Error("staging_release_completion_environment_invalid");
@@ -127,6 +129,12 @@ try {
       assertRemotePostMigrationContract({
         environment: commandEnvironment,
         environmentName: "staging",
+        repositoryRoot,
+      });
+      assertProductionDatabaseInvariantContract({
+        environment: commandEnvironment,
+        environmentName: "staging",
+        migrationNames: migrationAdmission.migrationNames,
         repositoryRoot,
       });
       const migrationCompletion = await assertStagingMigrationCompletion({
@@ -291,12 +299,21 @@ try {
         await runStagingMigrationWithVerification({
           environment: commandEnvironment,
           expectedPrefix: finalReleaseAdmission.migrationLedgerPrefix,
+          migrationNames: finalReleaseAdmission.migrationNames,
           repositoryRoot,
-          assertPostMigrationContractImplementation: (shared) => assertRemotePostMigrationContract({
-            environment: shared.environment,
-            environmentName: "staging",
-            repositoryRoot,
-          }),
+          assertPostMigrationContractImplementation: (shared) => {
+            assertRemotePostMigrationContract({
+              environment: shared.environment,
+              environmentName: "staging",
+              repositoryRoot,
+            });
+            assertProductionDatabaseInvariantContract({
+              environment: shared.environment,
+              environmentName: "staging",
+              migrationNames: shared.migrationNames,
+              repositoryRoot,
+            });
+          },
           runMigrationImplementation: () => runWrangler(wranglerArgs, {
             capture: false,
             cwd: repositoryRoot,
@@ -322,11 +339,20 @@ try {
         }
         stagingMigrationHandled = true;
       } else {
-        await assertStagingMigrationLedger({ environment: commandEnvironment, repositoryRoot });
+        stagingMigrationLedger = await assertStagingMigrationLedger({
+          environment: commandEnvironment,
+          repositoryRoot,
+        });
         assertStagingDatabasePreflight({ environment: commandEnvironment, repositoryRoot });
         assertRemotePostMigrationContract({
           environment: commandEnvironment,
           environmentName: "staging",
+          repositoryRoot,
+        });
+        assertProductionDatabaseInvariantContract({
+          environment: commandEnvironment,
+          environmentName: "staging",
+          migrationNames: stagingMigrationLedger.migrationNames,
           repositoryRoot,
         });
       }
@@ -338,7 +364,7 @@ try {
         env: commandEnvironment,
       });
       if (requiresProductionMigrationAdmission(operation, flags)) {
-        await assertProductionMigrationLedger({
+        const productionMigrationLedger = await assertProductionMigrationLedger({
           environment: commandEnvironment,
           repositoryRoot,
         });
@@ -352,11 +378,23 @@ try {
           environmentName: "production",
           repositoryRoot,
         });
+        assertProductionDatabaseInvariantContract({
+          environment: commandEnvironment,
+          environmentName: "production",
+          migrationNames: productionMigrationLedger.migrationNames,
+          repositoryRoot,
+        });
       }
       if (requiresStagingDatabaseAdmission(operation, flags) && operation === "seed") {
         assertRemotePostMigrationContract({
           environment: commandEnvironment,
           environmentName: "staging",
+          repositoryRoot,
+        });
+        assertProductionDatabaseInvariantContract({
+          environment: commandEnvironment,
+          environmentName: "staging",
+          migrationNames: stagingMigrationLedger?.migrationNames,
           repositoryRoot,
         });
       }

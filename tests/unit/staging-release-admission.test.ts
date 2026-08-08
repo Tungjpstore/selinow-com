@@ -401,6 +401,9 @@ describe("staging release admission", () => {
       },
       expectedPrefix: MIGRATION_LEDGER_PREFIX,
       migrationNames: MIGRATIONS,
+      assertPostMigrationContractImplementation: () => {
+        events.push("post-contract");
+      },
       runMigrationImplementation: () => {
         events.push("migrate");
       },
@@ -411,6 +414,7 @@ describe("staging release admission", () => {
       "migrate",
       "complete",
       "preflight",
+      "post-contract",
     ]);
   });
 

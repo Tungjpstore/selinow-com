@@ -65,6 +65,10 @@ async function runDatabaseCli(input: {
   vi.doMock("../../scripts/lib/db-post-migration-contract.mjs", () => ({
     assertRemotePostMigrationContract: vi.fn(() => ({ ok: true })),
   }));
+  const invariant = vi.fn(() => ({ ok: true }));
+  vi.doMock("../../scripts/lib/release.mjs", () => ({
+    assertProductionDatabaseInvariantContract: invariant,
+  }));
 
   process.argv = [
     process.execPath,
@@ -78,7 +82,7 @@ async function runDatabaseCli(input: {
   ];
   const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   await import("../../scripts/db.mjs");
-  return { admission, runner, stderr, status: process.exitCode };
+  return { admission, invariant, runner, stderr, status: process.exitCode };
 }
 
 afterEach(() => {
@@ -89,6 +93,7 @@ afterEach(() => {
   vi.doUnmock("../../scripts/lib/db-admission.mjs");
   vi.doUnmock("../../scripts/lib/cli.mjs");
   vi.doUnmock("../../scripts/lib/db-post-migration-contract.mjs");
+  vi.doUnmock("../../scripts/lib/release.mjs");
 });
 
 describe("production seed admission CLI", () => {
@@ -122,6 +127,7 @@ describe("production seed admission CLI", () => {
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
     }));
     expect(result.runner).toHaveBeenCalledOnce();
+    expect(result.invariant).toHaveBeenCalledOnce();
     const [runnerArgs, runnerOptions] = result.runner.mock.calls[0] ?? [];
     expect(runnerArgs).toEqual([
       "d1",

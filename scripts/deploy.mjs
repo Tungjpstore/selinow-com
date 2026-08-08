@@ -1,10 +1,14 @@
 import process from "node:process";
+import { readFile } from "node:fs/promises";
 
 import { parseDeployFlags, run } from "./lib/cli.mjs";
 import { assertStagingContinuationEvidenceByReference } from "./lib/backup.mjs";
 import {
   assertStagingMutationAdmission,
   buildPinnedCloudflareEnvironment,
+  buildWorkerBuildEnvironment,
+  buildWorkerDeployEnvironment,
+  assertProductionWorkerIdentityAdmission,
   repositoryRoot,
 } from "./lib/platform.mjs";
 import {
@@ -38,12 +42,7 @@ function databaseTargetFromAdmission(admission) {
 try {
   const flags = parseDeployFlags(process.argv.slice(2));
 
-  const buildEnvironment = { ...process.env };
-  if (flags.environment !== "local") {
-    buildEnvironment.CLOUDFLARE_ENV = flags.environment;
-  } else {
-    delete buildEnvironment.CLOUDFLARE_ENV;
-  }
+  const buildEnvironment = buildWorkerBuildEnvironment(process.env, flags.environment);
   // Keep the read-only admission credential outside the application build process.
   delete buildEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN;
   delete buildEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
@@ -75,6 +74,8 @@ try {
       manifestPath: flags.releaseManifestPath,
       repositoryRoot,
       workerSecretNames,
+      requireDedicatedWorkerDeployToken: true,
+      requireWorkerVersionBinding: true,
     });
     productionContinuationAdmission = await assertProductionContinuationDeployAdmission({
       accountId: productionAdmission.accountId,
@@ -161,6 +162,8 @@ try {
       manifestPath: flags.releaseManifestPath,
       repositoryRoot,
       workerSecretNames,
+      requireDedicatedWorkerDeployToken: true,
+      requireWorkerVersionBinding: true,
     });
     const finalContinuationAdmission = await assertProductionContinuationDeployAdmission({
       accountId: finalAdmission.accountId,
@@ -217,6 +220,8 @@ try {
       manifestPath: flags.releaseManifestPath,
       repositoryRoot,
       workerSecretNames,
+      requireDedicatedWorkerDeployToken: true,
+      requireWorkerVersionBinding: true,
     });
     if (
       sinkAdmission.accountId !== finalAdmission.accountId
@@ -316,6 +321,9 @@ try {
       || finalPreMigrationContinuationAdmission.backup.snapshotId !== stagingPreMigrationContinuationAdmission.backup.snapshotId
       || finalPreMigrationContinuationAdmission.restore.reportRef !== stagingPreMigrationContinuationAdmission.restore.reportRef
       || JSON.stringify(finalMigrationCompletionAdmission) !== JSON.stringify(stagingMigrationCompletionAdmission)
+      || JSON.stringify(finalPostMigrationContinuationAdmission) !== JSON.stringify(stagingPostMigrationContinuationAdmission)
+      || JSON.stringify(finalPostMigrationEvidenceAdmission.continuationEvidence)
+        !== JSON.stringify(stagingPostMigrationEvidenceAdmission.continuationEvidence)
       || JSON.stringify(finalPostMigrationEvidenceAdmission) !== JSON.stringify(stagingPostMigrationEvidenceAdmission)
       || stagingMigrationAdmission === null
       || stagingPreflightAdmission === null
@@ -334,12 +342,19 @@ try {
   }
   if (!flags.buildOnly) {
     const admittedAccountId = stagingAdmission?.accountId ?? productionAdmission?.accountId;
-    const wranglerEnvironment = admittedAccountId === undefined
+    const pinnedBuildEnvironment = admittedAccountId === undefined
       ? buildEnvironment
       : buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId);
+    const wranglerEnvironment = admittedAccountId === undefined
+      ? buildEnvironment
+      : buildWorkerDeployEnvironment(process.env, admittedAccountId);
+    if (pinnedBuildEnvironment.CLOUDFLARE_ENV !== undefined) {
+      wranglerEnvironment.CLOUDFLARE_ENV = pinnedBuildEnvironment.CLOUDFLARE_ENV;
+    }
     if (requiresProductionAdmission) {
       if (productionAdmission === null) throw new Error("production_deploy_admission_missing");
       run("npx", [
+        "--no-install",
         "wrangler",
         "versions",
         "deploy",
@@ -350,6 +365,7 @@ try {
       ], { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
     } else {
       const deployArgs = ["wrangler", "deploy"];
+      deployArgs.unshift("--no-install");
       if (flags.environment !== "local") {
         deployArgs.push("--env", flags.environment);
       }
@@ -357,6 +373,23 @@ try {
         deployArgs.push("--dry-run", "--outdir", `.wrangler/dry-run-${flags.environment}`);
       }
       run("npx", deployArgs, { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
+    }
+    if (requiresProductionAdmission) {
+      const [productionSpec, stagingSpec, wranglerConfig] = await Promise.all([
+        readFile(`${repositoryRoot}/infra/environments/production.json`, "utf8").then((text) => JSON.parse(text)),
+        readFile(`${repositoryRoot}/infra/environments/staging.json`, "utf8").then((text) => JSON.parse(text)),
+        readFile(`${repositoryRoot}/wrangler.jsonc`, "utf8").then((text) => JSON.parse(text)),
+      ]);
+      await assertProductionWorkerIdentityAdmission({
+        environment: process.env,
+        expectedCurrentWorkerVersion: productionAdmission?.candidateWorkerVersion,
+        fetchImplementation: undefined,
+        productionSpec,
+        repositoryRoot,
+        stagingSpec,
+        requireCurrentWorkerVersion: true,
+        wranglerConfig,
+      });
     }
   }
 } catch (error) {

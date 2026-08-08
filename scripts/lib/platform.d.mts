@@ -98,7 +98,25 @@ export function assertProductionWorkerDatabaseIdentity(
   databaseId: string,
   databaseName: string,
 ): void;
+export function parseProductionWorkerDeploymentVersion(value: unknown): string;
+export function parseProductionWorkerDeployableVersions(value: unknown): string[];
+export function parseProductionWorkerDeployableVersionInventory(value: unknown): Array<{
+  binding: {
+    commitSha: string | null;
+    manifestRef: string | null;
+    manifestSha256: string | null;
+    releaseId: string | null;
+    treeSha: string | null;
+  } | null;
+  id: string;
+}>;
+export function assertProductionWorkerVersionAdmission(input: Record<string, unknown>): {
+  candidateWorkerVersion: string;
+  currentWorkerVersion: string;
+  rollbackCandidateWorkerVersion: string;
+};
 export function assertProductionWorkerIdentityAdmission(input: {
+  expectedCurrentWorkerVersion?: string;
   environment?: NodeJS.ProcessEnv;
   fetchImplementation?: typeof fetch;
   productionSpec: Record<string, any>;
@@ -109,6 +127,7 @@ export function assertProductionWorkerIdentityAdmission(input: {
   ) => { stderr: string; stdout: string };
   stagingSpec: Record<string, any>;
   token?: string;
+  requireCurrentWorkerVersion?: boolean;
   wranglerConfig: Record<string, any>;
 }): Promise<{
   accountId: string;
@@ -116,6 +135,18 @@ export function assertProductionWorkerIdentityAdmission(input: {
   databaseId: string;
   databaseName: string;
   ok: boolean;
+  currentWorkerVersion?: string;
+  deployableWorkerVersionIds?: string[];
+  deployableWorkerVersionInventory?: Array<{
+    binding: {
+      commitSha: string | null;
+      manifestRef: string | null;
+      manifestSha256: string | null;
+      releaseId: string | null;
+      treeSha: string | null;
+    } | null;
+    id: string;
+  }>;
   workerName: string;
   zoneId: string;
   zoneName: string;
@@ -261,3 +292,13 @@ export function provision(
 }>;
 export function requireCloudflarePlatformToken(environment?: NodeJS.ProcessEnv): string;
 export function requireCloudflareRouteAuditToken(environment?: NodeJS.ProcessEnv): string;
+export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME: "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
+export function requireCloudflareWorkerDeployToken(environment?: NodeJS.ProcessEnv): string;
+export function buildWorkerBuildEnvironment(
+  environment: NodeJS.ProcessEnv | undefined,
+  environmentName: "local" | "staging" | "production",
+): NodeJS.ProcessEnv;
+export function buildWorkerDeployEnvironment(
+  environment: NodeJS.ProcessEnv | undefined,
+  accountId: string,
+): NodeJS.ProcessEnv;

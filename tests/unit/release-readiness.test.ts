@@ -25,6 +25,17 @@ import { PAYOS_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/payos-uat-evid
 const now = new Date("2026-07-26T03:00:00.000Z");
 const providerAcceptanceKeys = ["telegramBot", "telegramMiniApp", "zaloMiniApp", "zaloOa", "whatsappCloud", "discord"] as const;
 const rollbackInvariants = [
+  "billing_checkout_sessions_scope_guard",
+  "billing_checkout_sessions_scope_update_guard",
+  "shop_subscriptions_provider_ref_guard",
+  "shop_subscriptions_provider_ref_update_guard",
+  "plan_prices_published_reference_guard",
+  "plans_public_assignable_insert_guard",
+  "plans_public_assignable_update_guard",
+  "shop_subscriptions_price_snapshot_presence_guard",
+  "shop_subscriptions_price_snapshot_presence_update_guard",
+  "shop_subscriptions_price_snapshot_scope_guard",
+  "shop_subscriptions_price_snapshot_scope_update_guard",
   "shop_subscriptions_trial_claim_insert_guard",
   "shop_subscriptions_trial_claim_update_guard",
   "shop_customers_anonymized_insert_guard",
@@ -43,6 +54,8 @@ const rollbackInvariants = [
   "payment_credentials_payos_claim_scope_update_guard",
   "payment_integrations_payos_claim_fingerprint_update_guard",
   "payment_credentials_payos_claim_fingerprint_update_guard",
+  "payment_integrations_payos_claim_fingerprint_clear_guard",
+  "payment_credentials_payos_claim_fingerprint_clear_guard",
 ];
 const sourceMigrationNames = readdirSync("migrations")
   .filter((name) => name.endsWith(".sql"))
@@ -1038,6 +1051,69 @@ describe("production release readiness", () => {
       token: undefined,
       wranglerConfig: readyWranglerConfig(),
     }));
+  });
+
+  it("requires a dedicated deploy token and candidate provenance at the production sink", async () => {
+    const currentWorkerVersion = "11111111-1111-4111-8111-111111111111";
+    const rollbackCandidateWorkerVersion = "22222222-2222-4222-8222-222222222222";
+    const candidateWorkerVersion = "33333333-3333-4333-8333-333333333333";
+    const commitSha = "0123456789abcdef0123456789abcdef01234567";
+    const treeSha = "89abcdef0123456789abcdef0123456789abcdef";
+    const releaseId = "release_20260726_abcdef12";
+    const releaseAdmission = () => Promise.resolve({
+      candidateWorkerVersion,
+      commitSha,
+      previousWorkerVersion: currentWorkerVersion,
+      releaseId,
+      rollbackCandidateWorkerVersion,
+      treeSha,
+    });
+    const workerIdentity = () => Promise.resolve({
+      accountId: "abcdef0123456789abcdef0123456789",
+      currentWorkerVersion,
+      databaseId: "17ea8f2f-4c97-4337-8989-28b25a58ddeb",
+      databaseName: "selinow-production",
+      deployableWorkerVersionIds: [candidateWorkerVersion, rollbackCandidateWorkerVersion],
+      deployableWorkerVersionInventory: [{
+        binding: {
+          commitSha,
+          manifestRef: `.wrangler/releases/${releaseId}/release-manifest.json`,
+          manifestSha256: null,
+          releaseId,
+          treeSha,
+        },
+        id: candidateWorkerVersion,
+      }, {
+        binding: null,
+        id: rollbackCandidateWorkerVersion,
+      }],
+      workerName: "selinow-com-production",
+      zoneId: "0123456789abcdef0123456789abcdef",
+      zoneName: "selinow.com",
+    });
+    const common = {
+      assertReleaseAdmissionImplementation: releaseAdmission,
+      manifestPath: `.wrangler/releases/${releaseId}/release-manifest.json`,
+      productionSpec: readyProductionSpec(),
+      repositoryRoot: process.cwd(),
+      requireDedicatedWorkerDeployToken: true,
+      requireWorkerVersionBinding: true,
+      stagingSpec: { environment: "staging" },
+      workerIdentityImplementation: workerIdentity,
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    };
+    await expect(assertProductionWorkerDeployAdmission({
+      ...common,
+      environment: { CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token" },
+    })).rejects.toThrow("cloudflare_worker_deploy_api_token_missing");
+    await expect(assertProductionWorkerDeployAdmission({
+      ...common,
+      environment: {
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+        CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: "dedicated-worker-token",
+      },
+    })).resolves.toMatchObject({ candidateWorkerVersion, commitSha, releaseId, treeSha });
   });
 
   it("keeps pilot smoke in plan mode without network access by default", async () => {

@@ -127,6 +127,11 @@ describe("deploy command safety", () => {
     expect(source).toContain("finalAdmission.databaseName !== productionAdmission.databaseName");
     expect(source).toContain("productionAdmission?.accountId");
     expect(source).toContain("buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId)");
+    expect(source).toContain("buildWorkerBuildEnvironment(process.env, flags.environment)");
+    expect(source).toContain('"--no-install"');
+    expect(source).toContain("requireDedicatedWorkerDeployToken: true");
+    expect(source).toContain("requireWorkerVersionBinding: true");
+    expect(source).toContain("expectedCurrentWorkerVersion: productionAdmission?.candidateWorkerVersion");
   });
 
   it("enforces immutable pre/post migration evidence before and after the staging build", () => {
@@ -196,5 +201,6 @@ describe("deploy command safety", () => {
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN");
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
     expect(source).toContain("buildPinnedCloudflareEnvironment");
+    expect(source).toContain("JSON.stringify(finalPostMigrationEvidenceAdmission) !== JSON.stringify(stagingPostMigrationEvidenceAdmission)");
   });
 });

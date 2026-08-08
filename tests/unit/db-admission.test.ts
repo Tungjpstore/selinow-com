@@ -473,6 +473,23 @@ describe("production database migration admission", () => {
     expect(sink).toBeGreaterThan(pin);
   });
 
+  it("runs the complete remote and invariant contract after database mutation sinks", () => {
+    const source = readFileSync("scripts/db.mjs", "utf8");
+    const productionSink = source.indexOf("runWrangler(wranglerArgs");
+    const productionRemote = source.indexOf("assertRemotePostMigrationContract({", productionSink);
+    const productionInvariant = source.indexOf("assertProductionDatabaseInvariantContract({", productionRemote);
+    const stagingMigration = source.indexOf("await runStagingMigrationWithVerification");
+    const stagingRemote = source.indexOf("assertRemotePostMigrationContract({", stagingMigration);
+    const stagingInvariant = source.indexOf("assertProductionDatabaseInvariantContract({", stagingRemote);
+
+    expect(productionSink).toBeGreaterThan(-1);
+    expect(productionRemote).toBeGreaterThan(productionSink);
+    expect(productionInvariant).toBeGreaterThan(productionRemote);
+    expect(stagingMigration).toBeGreaterThan(-1);
+    expect(stagingRemote).toBeGreaterThan(stagingMigration);
+    expect(stagingInvariant).toBeGreaterThan(stagingRemote);
+  });
+
   it("rechecks manifest-pinned staging evidence before mutation and records migration completion", () => {
     const source = readFileSync("scripts/db.mjs", "utf8");
     const stagingGate = source.indexOf("if (requiresStagingDatabaseAdmission(operation, flags))");
@@ -485,6 +502,10 @@ describe("production database migration admission", () => {
     const stableTargetGuard = source.indexOf("staging_release_admission_changed", finalContinuation);
     const pin = source.indexOf("buildPinnedCloudflareEnvironment", finalGate);
     const migrationVerification = source.indexOf("await runStagingMigrationWithVerification", pin);
+    const migrationNamesBinding = source.indexOf(
+      "migrationNames: finalReleaseAdmission.migrationNames",
+      migrationVerification,
+    );
     const completeLedger = source.indexOf("await assertStagingMigrationLedger({", pin);
     const preflight = source.indexOf("assertStagingDatabasePreflight", completeLedger);
     const migrationSink = source.indexOf("runWrangler(wranglerArgs", migrationVerification);
@@ -507,6 +528,8 @@ describe("production database migration admission", () => {
     expect(pin).toBeGreaterThan(stableTargetGuard);
     expect(migrationVerification).toBeGreaterThan(pin);
     expect(migrationVerification).toBeLessThan(migrationSink);
+    expect(migrationNamesBinding).toBeGreaterThan(migrationVerification);
+    expect(migrationNamesBinding).toBeLessThan(migrationSink);
     expect(completeLedger).toBeGreaterThan(pin);
     expect(completeLedger).toBeLessThan(preflight);
     expect(preflight).toBeLessThan(seedSink);
