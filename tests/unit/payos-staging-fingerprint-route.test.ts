@@ -10,6 +10,7 @@ describe("PayOS staging fingerprint derivation contract", () => {
     expect(source).toContain("requireRecentAuth");
     expect(source).toContain("requireCsrfSession");
     expect(source).toContain('rejectUnknownFields(body, ["clientId"])');
+    expect(source).toContain('{ environment: "staging", fingerprint, ok: true, requestId: locals.requestId }');
     expect(source).not.toMatch(/apiKey|checksumKey/iu);
   });
 });

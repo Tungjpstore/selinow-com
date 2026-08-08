@@ -1,6 +1,6 @@
 export {};
 
-type ApiFailure = { code?: unknown; requestId?: unknown };
+type ApiFailure = { code?: unknown; fingerprint?: unknown; requestId?: unknown };
 
 const ENGLISH_COPY = {
   "deletion.action_invalid": "The legal hold action is invalid. Reload the page.",
@@ -45,6 +45,8 @@ const ENGLISH_COPY = {
   "rotation.processing": "Processing the rotation batch. Do not close or submit the action again...",
   "rotation.shop_required": "A public store ID is required when the scope is one store.",
   "payos.client_id_required": "Enter the controlled staging channel client ID.",
+  "payos.fingerprint_copied": "Fingerprint copied for the transient staging secret handoff.",
+  "payos.fingerprint_copy_failed": "Could not copy the fingerprint. Copy it manually from this one-time attestation view.",
   "payos.fingerprint_created": "Staging fingerprint accepted. Request {requestId}.",
   "payos.fingerprint_creating": "Deriving the staging fingerprint inside the Worker...",
 } as const;
@@ -135,7 +137,7 @@ async function postJson(
   endpoint: string,
   body: Record<string, unknown>,
   operationKey: string,
-): Promise<{ requestId: string | null }> {
+): Promise<{ fingerprint: string | null; requestId: string | null }> {
   const csrf = cookieValue(root.dataset.csrfCookieName ?? "");
   if (csrf === null) throw new OperationsError("csrf_missing", null);
   const response = await fetch(endpoint, {
@@ -155,7 +157,10 @@ async function postJson(
       typeof payload.requestId === "string" ? payload.requestId : null,
     );
   }
-  return { requestId: typeof payload.requestId === "string" ? payload.requestId : null };
+  return {
+    fingerprint: typeof payload.fingerprint === "string" && /^[A-Za-z0-9_-]{43}$/u.test(payload.fingerprint) ? payload.fingerprint : null,
+    requestId: typeof payload.requestId === "string" ? payload.requestId : null,
+  };
 }
 
 function setBusy(root: HTMLElement, busy: boolean): void {
@@ -174,6 +179,20 @@ if (root !== null) {
   };
   const rotationForm = root.querySelector<HTMLFormElement>("[data-rotation-create-form]");
   const payosFingerprintForm = root.querySelector<HTMLFormElement>("[data-payos-fingerprint-form]");
+  const payosFingerprintResult = root.querySelector<HTMLElement>("[data-payos-fingerprint-result]");
+  const payosFingerprintValue = root.querySelector<HTMLElement>("[data-payos-fingerprint-value]");
+  const payosFingerprintRequest = root.querySelector<HTMLElement>("[data-payos-fingerprint-request]");
+  const payosFingerprintCopy = root.querySelector<HTMLButtonElement>("[data-payos-fingerprint-copy]");
+  payosFingerprintCopy?.addEventListener("click", () => {
+    const fingerprint = payosFingerprintValue?.textContent ?? "";
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(fingerprint) || navigator.clipboard === undefined) {
+      feedback(text(copy, "payos.fingerprint_copy_failed"), "error");
+      return;
+    }
+    void navigator.clipboard.writeText(fingerprint)
+      .then(() => feedback(text(copy, "payos.fingerprint_copied"), "success"))
+      .catch(() => feedback(text(copy, "payos.fingerprint_copy_failed"), "error"));
+  });
   payosFingerprintForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     if (!payosFingerprintForm.reportValidity()) return;
@@ -188,8 +207,15 @@ if (root !== null) {
     setBusy(root, true);
     feedback(text(copy, "payos.fingerprint_creating"), "neutral");
     void postJson(root, "/api/admin/payments/payos/staging-fingerprint", { clientId: clientIdInput.value.trim() }, idempotencyKey(payosFingerprintForm, "payos_fingerprint"))
-      .then(({ requestId }) => {
+      .then(({ fingerprint, requestId }) => {
         clientIdInput.value = "";
+        if (fingerprint === null || payosFingerprintResult === null || payosFingerprintValue === null || payosFingerprintRequest === null) {
+          throw new OperationsError("payos_fingerprint_invalid", requestId);
+        }
+        payosFingerprintValue.textContent = fingerprint;
+        payosFingerprintRequest.textContent = requestId === null ? "" : `Request ${requestId}`;
+        payosFingerprintResult.hidden = false;
+        setBusy(root, false);
         feedback(text(copy, "payos.fingerprint_created", { requestId: requestId ?? "unknown" }), "success");
       })
       .catch((error: unknown) => {

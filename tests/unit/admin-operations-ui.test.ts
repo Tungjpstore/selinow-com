@@ -38,6 +38,9 @@ describe("admin operations PromptOS surface", () => {
     expect(admin).toContain("data-copy={JSON.stringify(clientCopy)}");
     expect(systems).toContain("data-rotation-create-form");
     expect(systems).toContain("data-payos-fingerprint-form");
+    expect(systems).toContain("data-payos-fingerprint-result");
+    expect(systems).toContain("data-payos-fingerprint-copy");
+    expect(systems).toContain("admin.operations.payos.result_warning");
     expect(systems).toContain('env.APP_ENV === "staging" && adminRole === "owner"');
     expect(systems).toContain("data-rotation-process");
     expect(systems).toContain("max=\"100\"");
@@ -92,8 +95,11 @@ describe("admin operations PromptOS surface", () => {
     expect(operations).toContain("expectedConfirmation");
     expect(operations).toContain("window.confirm");
     expect(operations).toContain("/api/admin/payments/payos/staging-fingerprint");
+    expect(operations).toContain("navigator.clipboard.writeText");
+    expect(operations).toContain("payosFingerprintValue.textContent = fingerprint");
     expect(operations).toContain('clientIdInput.value = ""');
     expect(operations).not.toContain("fingerprint: payload");
+    expect(operations).not.toMatch(/(?:apiKey|checksumKey|IDENTIFIER_HMAC_SECRET)/);
     expect(operations).not.toMatch(/name="[^"]*(?:ciphertext|plaintext|license)[^"]*"/i);
     expect(systems).toContain("listAdminOrderInvestigations");
     expect(systems).toContain("listAdminAuditEntries");
