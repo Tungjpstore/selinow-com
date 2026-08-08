@@ -698,6 +698,105 @@ describe("Dodo billing adapter", () => {
     fixture.database.close();
   });
 
+  it("expires a legacy provisional checkout without blocking global expiry or a fresh conversion", async () => {
+    const fixture = billingFixture("trialing");
+    fixture.database.exec(`
+      INSERT INTO plans (
+        id, code, name, feature_flags_json, limits_json, version, is_active,
+        created_at, updated_at, is_public, is_assignable, schema_version
+      ) VALUES (
+        'plan_business_v1', 'business', 'Business', '{}', '{}', 1, 1,
+        '${NOW_ISO}', '${NOW_ISO}', 0, 0, 1
+      );
+      UPDATE plan_prices
+      SET provider_price_ref = 'prod_test_starter'
+      WHERE id = 'price_starter_global_v1';
+      UPDATE shop_subscriptions
+      SET plan_id = 'plan_business_v1', billing_provider_code = NULL,
+        provider_customer_ref = NULL, provider_subscription_ref = NULL,
+        market_code = NULL, price_currency = NULL, price_amount_minor = NULL,
+        price_interval = NULL, price_version = NULL, price_id = NULL
+      WHERE id = 'billing-sub-a';
+    `);
+    let checkoutCount = 0;
+    const fetcher: typeof fetch = () => {
+      checkoutCount += 1;
+      const suffix = checkoutCount === 1 ? "legacy_stale" : "legacy_fresh";
+      return Promise.resolve(new Response(JSON.stringify({
+        checkout_url: `https://test.checkout.dodopayments.com/session/cks_${suffix}`,
+        session_id: `cks_${suffix}`,
+      }), { status: 200 }));
+    };
+    const stale = await createBillingCheckout({
+      env: fixture.env,
+      fetcher,
+      idempotencyKey: "checkout-legacy-expiry-1",
+      planCode: "starter",
+      requestId: "request-legacy-expiry-1",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+      now: new Date(NOW_ISO),
+    });
+    fixture.database.prepare("UPDATE billing_checkout_sessions SET expires_at = '2026-08-03T00:29:00.000Z' WHERE id = ?").run(stale.sessionId);
+    fixture.database.exec(`
+      INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone,
+        readiness_version, merchant_country_code, created_at, updated_at)
+      VALUES ('billing-shop-b', 'shop_00000000-0000-4000-8000-0000000000b2', 'billing-b', 'Billing B',
+        'active', 'en', 'USD', 'UTC', 1, 'US', '${NOW_ISO}', '${NOW_ISO}');
+      INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
+      VALUES ('billing-shop-b', 'billing-user-a', 'owner', 'active', '${NOW_ISO}', '${NOW_ISO}');
+      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, trial_ends_at,
+        current_period_start, current_period_end, billing_provider_code, provider_subscription_ref,
+        market_code, price_currency, price_amount_minor, price_interval, price_version, price_id,
+        created_at, updated_at)
+      VALUES ('billing-sub-b', 'billing-shop-b', 'plan_pro_v1', 'pending_payment',
+        '2026-08-10T00:00:00.000Z', '2026-08-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z',
+        'dodo', NULL, 'global', 'USD', 1500, 'month', 1, 'price_pro_global_v1', '${NOW_ISO}', '${NOW_ISO}');
+      INSERT INTO billing_checkout_sessions (
+        id, public_id, shop_id, subscription_id, plan_id, price_id, provider_code,
+        provider_checkout_ref, status, idempotency_key_hash, request_hash, expires_at,
+        created_at, updated_at
+      ) VALUES ('bchk-unrelated-expired', 'bchk-unrelated-expired', 'billing-shop-b', 'billing-sub-b',
+        'plan_pro_v1', 'price_pro_global_v1', 'dodo', 'cks_unrelated_expired', 'open',
+        'unrelated-key-hash', 'unrelated-request-hash', '2026-08-03T00:30:00.000Z', '${NOW_ISO}', '${NOW_ISO}');
+    `);
+
+    await expect(expireBillingCheckoutSessions({ env: fixture.env, now: new Date("2026-08-03T00:31:00.000Z") })).resolves.toBe(2);
+    expect(fixture.database.prepare(`
+      SELECT sessions.status, subscriptions.state, plans.code AS planCode,
+        subscriptions.price_id AS priceId
+      FROM billing_checkout_sessions AS sessions
+      INNER JOIN shop_subscriptions AS subscriptions ON subscriptions.id = sessions.subscription_id
+      INNER JOIN plans ON plans.id = subscriptions.plan_id
+      WHERE sessions.id = ?
+    `).get(stale.sessionId)).toEqual({ planCode: "business", priceId: "price_starter_global_v1", state: "pending_payment", status: "expired" });
+    expect(fixture.database.prepare(`
+      SELECT sessions.status, subscriptions.state
+      FROM billing_checkout_sessions AS sessions
+      INNER JOIN shop_subscriptions AS subscriptions ON subscriptions.id = sessions.subscription_id
+      WHERE sessions.id = 'bchk-unrelated-expired'
+    `).get()).toEqual({ state: "suspended", status: "expired" });
+
+    const fresh = await createBillingCheckout({
+      env: fixture.env,
+      fetcher,
+      idempotencyKey: "checkout-legacy-expiry-2",
+      planCode: "starter",
+      requestId: "request-legacy-expiry-2",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+      now: new Date("2026-08-03T00:31:00.000Z"),
+    });
+    expect(fresh).toMatchObject({ duplicate: false, planCode: "starter", providerTransactionId: "cks_legacy_fresh", subscriptionState: "pending_payment" });
+    expect(fixture.database.prepare(`
+      SELECT plans.code AS planCode, subscriptions.state
+      FROM shop_subscriptions AS subscriptions
+      INNER JOIN plans ON plans.id = subscriptions.plan_id
+      WHERE subscriptions.id = 'billing-sub-a'
+    `).get()).toEqual({ planCode: "business", state: "pending_payment" });
+    fixture.database.close();
+  });
+
   it("releases a failed initial checkout and exposes immediate suspended recovery", async () => {
     const fixture = billingFixture("trialing");
     let calls = 0;

@@ -426,11 +426,24 @@ export async function expireBillingCheckoutSessions(input: { env: AppBindings; n
         UPDATE shop_subscriptions
         SET state = 'suspended', grace_ends_at = NULL, updated_at = ?, version = version + 1
         WHERE id = ? AND shop_id = ? AND state = 'pending_payment'
+          AND EXISTS (
+            SELECT 1
+            FROM billing_checkout_sessions AS selected_checkout
+            INNER JOIN plan_prices AS selected_price ON selected_price.id = selected_checkout.price_id
+            WHERE selected_checkout.id = ? AND selected_checkout.shop_id = ?
+              AND selected_checkout.subscription_id = ?
+              AND selected_checkout.price_id = shop_subscriptions.price_id
+              AND selected_price.plan_id = shop_subscriptions.plan_id
+          )
           AND NOT EXISTS (
             SELECT 1 FROM billing_checkout_sessions
             WHERE shop_id = ? AND subscription_id = ? AND status IN ('pending', 'open')
           )
-      `).bind(nowIso, row.subscriptionId, row.shopId, row.shopId, row.subscriptionId),
+      `).bind(
+        nowIso, row.subscriptionId, row.shopId,
+        row.id, row.shopId, row.subscriptionId,
+        row.shopId, row.subscriptionId,
+      ),
     ]);
     if ((results[0]?.meta.changes ?? 0) === 1) expired += 1;
   }
