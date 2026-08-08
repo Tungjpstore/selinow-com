@@ -206,6 +206,35 @@ describe("seller operations backend contracts", () => {
     expect(database.prepare("SELECT email_normalized AS email, display_name AS displayName, anonymized_at AS anonymizedAt FROM shop_customers WHERE id = ?").get(CUSTOMER_A)).toEqual({ email: null, displayName: null, anonymizedAt: NOW.toISOString() });
     expect(database.prepare("SELECT customer_email_masked AS email, customer_id AS customerId FROM orders WHERE id = ?").get(ORDER_A)).toEqual({ email: null, customerId: CUSTOMER_A });
     expect(database.prepare("SELECT body, status FROM customer_notes WHERE id = ?").get(note.notePublicId)).toEqual({ body: "[redacted]", status: "redacted" });
+
+    await expect(updateSellerCustomer({
+      customerPublicId: CUSTOMER_A,
+      displayName: "Buyer Restored",
+      env: bindings,
+      expectedVersion: 2,
+      idempotencyKey: "privacy-reactivate-blocked",
+      locale: "en",
+      now: NOW,
+      requestId: "request-privacy-reactivate",
+      shopPublicId: SHOP_A_PUBLIC,
+      status: "active",
+      userId: OWNER_A,
+    })).rejects.toMatchObject({ code: "customer_anonymized", status: 409 });
+    expect(() => database.prepare(`
+      UPDATE shop_customers
+      SET email_normalized = 'restored@example.test', display_name = 'Buyer Restored',
+        status = 'active', anonymized_at = NULL, version = version + 1
+      WHERE id = ?
+    `).run(CUSTOMER_A)).toThrow(/customer_anonymized_immutable/u);
+    expect(database.prepare(`
+      SELECT email_normalized AS email, display_name AS displayName, status, anonymized_at AS anonymizedAt
+      FROM shop_customers WHERE id = ?
+    `).get(CUSTOMER_A)).toEqual({
+      anonymizedAt: NOW.toISOString(),
+      displayName: null,
+      email: null,
+      status: "blocked",
+    });
   });
 
   it("keeps member mutations tenant-bound, owner-protected, versioned and replay-safe", async () => {

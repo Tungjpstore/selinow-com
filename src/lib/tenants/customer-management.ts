@@ -11,6 +11,7 @@ const NOTE_BODY_MAX = 4_000;
 
 type ExistingIdempotency = { request_hash: string; response_json: string };
 type CustomerRow = {
+  anonymizedAt: string | null;
   createdAt: string;
   displayName: string | null;
   email: string | null;
@@ -145,6 +146,7 @@ export type BuyerPrivacyResult = {
 async function loadCustomer(env: AppBindings, shopId: string, customerPublicId: string): Promise<CustomerRow> {
   const row = await env.PLATFORM_DB.prepare(`
     SELECT id, display_name AS displayName, email_normalized AS email, locale, status,
+      anonymized_at AS anonymizedAt,
       created_at AS createdAt, updated_at AS updatedAt, version
     FROM shop_customers
     WHERE shop_id = ? AND id = ?
@@ -227,6 +229,7 @@ export async function updateSellerCustomer(input: {
   const idempotencyKey = requireIdempotencyKey(input.idempotencyKey);
   const actor = await getShopForMember({ capability: "customers:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   const existing = await loadCustomer(input.env, actor.row.shop_id, input.customerPublicId);
+  if (existing.anonymizedAt !== null) throw new AppError("customer_anonymized", 409);
   const displayName = input.displayName === undefined ? existing.displayName : normalizeCustomerName(input.displayName);
   const locale = normalizeCustomerLocale(input.locale, existing.locale);
   const status = input.status === undefined ? existing.status : input.status;
