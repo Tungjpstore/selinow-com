@@ -21,6 +21,14 @@ import {
   readStagingPostMigrationEvidence,
 } from "./lib/staging-release.mjs";
 
+function databaseTargetFromAdmission(admission) {
+  return {
+    accountId: admission.accountId,
+    databaseId: admission.databaseId,
+    databaseName: admission.databaseName,
+  };
+}
+
 try {
   const flags = parseDeployFlags(process.argv.slice(2));
 
@@ -100,13 +108,13 @@ try {
       repositoryRoot,
     });
     stagingMigrationCompletionAdmission = await assertStagingMigrationCompletion({
-      databaseTarget: stagingAdmission,
+      databaseTarget: databaseTargetFromAdmission(stagingAdmission),
       migrationNames: stagingMigrationAdmission.migrationNames,
       releaseAdmission: stagingReleaseAdmission,
       repositoryRoot,
     });
     const postMigrationRecord = await readStagingPostMigrationEvidence({
-      databaseTarget: stagingAdmission,
+      databaseTarget: databaseTargetFromAdmission(stagingAdmission),
       migrationCompletion: stagingMigrationCompletionAdmission,
       migrationNames: stagingMigrationAdmission.migrationNames,
       releaseAdmission: stagingReleaseAdmission,
@@ -123,7 +131,7 @@ try {
     });
     stagingPostMigrationEvidenceAdmission = await assertStagingPostMigrationEvidence({
       continuationEvidence: stagingPostMigrationContinuationAdmission,
-      databaseTarget: stagingAdmission,
+      databaseTarget: databaseTargetFromAdmission(stagingAdmission),
       migrationCompletion: stagingMigrationCompletionAdmission,
       migrationNames: stagingMigrationAdmission.migrationNames,
       releaseAdmission: stagingReleaseAdmission,
@@ -210,13 +218,13 @@ try {
       repositoryRoot,
     });
     const finalMigrationCompletionAdmission = await assertStagingMigrationCompletion({
-      databaseTarget: finalAdmission,
+      databaseTarget: databaseTargetFromAdmission(finalAdmission),
       migrationNames: finalMigrationAdmission.migrationNames,
       releaseAdmission: finalReleaseAdmission,
       repositoryRoot,
     });
     const finalPostMigrationRecord = await readStagingPostMigrationEvidence({
-      databaseTarget: finalAdmission,
+      databaseTarget: databaseTargetFromAdmission(finalAdmission),
       migrationCompletion: finalMigrationCompletionAdmission,
       migrationNames: finalMigrationAdmission.migrationNames,
       releaseAdmission: finalReleaseAdmission,
@@ -233,7 +241,7 @@ try {
     });
     const finalPostMigrationEvidenceAdmission = await assertStagingPostMigrationEvidence({
       continuationEvidence: finalPostMigrationContinuationAdmission,
-      databaseTarget: finalAdmission,
+      databaseTarget: databaseTargetFromAdmission(finalAdmission),
       migrationCompletion: finalMigrationCompletionAdmission,
       migrationNames: finalMigrationAdmission.migrationNames,
       releaseAdmission: finalReleaseAdmission,

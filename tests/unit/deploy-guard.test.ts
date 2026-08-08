@@ -131,6 +131,7 @@ describe("deploy command safety", () => {
 
   it("enforces immutable pre/post migration evidence before and after the staging build", () => {
     const source = readFileSync("scripts/deploy.mjs", "utf8");
+    expect(source.match(/databaseTarget: databaseTargetFromAdmission\(/gu)).toHaveLength(6);
     const firstRelease = source.indexOf("await assertStagingReleaseAdmission");
     const firstAdmission = source.indexOf("await assertStagingMutationAdmission");
     const build = source.indexOf('run("npm", ["run", "build"]');

@@ -489,6 +489,10 @@ describe("production database migration admission", () => {
     const preflight = source.indexOf("assertStagingDatabasePreflight", completeLedger);
     const migrationSink = source.indexOf("runWrangler(wranglerArgs", migrationVerification);
     const migrationCompletion = source.indexOf("buildStagingMigrationCompletion", migrationSink);
+    const projectedCompletionTarget = source.indexOf(
+      "databaseTarget: databaseTargetFromAdmission(finalAdmission)",
+      migrationSink,
+    );
     const migrationCompletionWrite = source.indexOf("writeStagingMigrationCompletion", migrationCompletion);
     const seedSink = source.indexOf("runWrangler(wranglerArgs", migrationSink + 1);
 
@@ -508,6 +512,8 @@ describe("production database migration admission", () => {
     expect(preflight).toBeLessThan(seedSink);
     expect(migrationSink).toBeGreaterThan(pin);
     expect(migrationCompletion).toBeGreaterThan(migrationSink);
+    expect(projectedCompletionTarget).toBeGreaterThan(migrationSink);
+    expect(projectedCompletionTarget).toBeLessThan(migrationCompletionWrite);
     expect(migrationCompletionWrite).toBeGreaterThan(migrationCompletion);
     expect(seedSink).toBeGreaterThan(preflight);
   });

@@ -49,6 +49,14 @@ import {
 
 const operation = process.argv[2];
 
+function databaseTargetFromAdmission(admission) {
+  return {
+    accountId: admission.accountId,
+    databaseId: admission.databaseId,
+    databaseName: admission.databaseName,
+  };
+}
+
 try {
   if (!new Set(["complete-release", "migrate", "preflight", "seed", "status"]).has(operation)) {
     throw new Error(`unsupported_db_operation:${operation ?? "missing"}`);
@@ -298,7 +306,7 @@ try {
         let migrationCompletion;
         try {
           migrationCompletion = await assertStagingMigrationCompletion({
-            databaseTarget: finalAdmission,
+            databaseTarget: databaseTargetFromAdmission(finalAdmission),
             migrationNames: finalReleaseAdmission.migrationNames,
             releaseAdmission: finalReleaseAdmission,
             repositoryRoot,
@@ -306,7 +314,7 @@ try {
         } catch (error) {
           if (!(error instanceof Error) || error.message !== "staging_migration_completion_missing") throw error;
           migrationCompletion = buildStagingMigrationCompletion({
-            databaseTarget: finalAdmission,
+            databaseTarget: databaseTargetFromAdmission(finalAdmission),
             migrationNames: finalReleaseAdmission.migrationNames,
             releaseAdmission: finalReleaseAdmission,
           });
