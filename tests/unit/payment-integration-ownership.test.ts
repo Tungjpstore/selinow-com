@@ -288,7 +288,7 @@ describe("PayOS provider identity ownership", () => {
       .toEqual({ count: 1 });
   });
 
-  it("retries an unverified same-shop credential without a global ownership claim", async () => {
+  it("reconciles an ambiguously quarantined same-shop credential without releasing ownership", async () => {
     const fetchCount = { value: 0 };
     const failingFetcher: typeof fetch = () => {
       fetchCount.value += 1;
@@ -301,7 +301,18 @@ describe("PayOS provider identity ownership", () => {
       requestId: "request-failed",
       shopPublicId: SHOP_A,
       userId: "owner-a",
-    })).rejects.toMatchObject({ code: "provider_verification_failed", status: 409 });
+    })).rejects.toMatchObject({ code: "provider_verification_failed", status: 503 });
+    expect(database.prepare(`
+      SELECT provider_claim_nonce IS NOT NULL AS claimed,
+        provider_claim_state AS claimState,
+        provider_identity_fingerprint IS NOT NULL AS owned
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ claimed: 1, claimState: "ambiguous", owned: 1 });
+    expect(database.prepare(`
+      SELECT provider_claim_nonce IS NOT NULL AS claimed,
+        provider_ownership_fingerprint IS NOT NULL AS owned, status
+      FROM payment_credentials WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ claimed: 1, owned: 1, status: "error" });
 
     await expect(connectPayOS({
       credentials: CHANNEL_A,

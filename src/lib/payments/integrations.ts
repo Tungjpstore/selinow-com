@@ -211,8 +211,28 @@ async function claimPaymentProviderOwnership(input: {
           updated_at = ?
         WHERE id = ? AND shop_id = ? AND provider = 'payos'
           AND (provider_identity_fingerprint IS NULL OR provider_identity_fingerprint = ?)
-          AND (provider_claim_nonce IS NULL OR provider_claim_target_fingerprint = ?)
-      `).bind(providerIdentityFingerprint, nonce, targetFingerprint, now, input.integration.id, input.shopId, providerIdentityFingerprint, targetFingerprint),
+          AND (
+            provider_claim_nonce IS NULL
+            OR provider_claim_target_fingerprint = ?
+            OR (
+              provider_claim_state = 'quarantined'
+              AND provider_claim_target_fingerprint IS NULL
+              AND active_credential_id IS NULL
+              AND status IN ('pending', 'error')
+              AND EXISTS (
+                SELECT 1
+                FROM payment_credentials AS legacy_credential
+                WHERE legacy_credential.id = ?
+                  AND legacy_credential.integration_id = payment_integrations.id
+                  AND legacy_credential.shop_id = payment_integrations.shop_id
+                  AND legacy_credential.provider = payment_integrations.provider
+                  AND legacy_credential.status IN ('pending', 'error')
+                  AND legacy_credential.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                  AND legacy_credential.provider_ownership_fingerprint = ?
+              )
+            )
+          )
+      `).bind(providerIdentityFingerprint, nonce, targetFingerprint, now, input.integration.id, input.shopId, providerIdentityFingerprint, targetFingerprint, input.credentialId, providerCredentialFingerprint),
       input.env.PLATFORM_DB.prepare(`
         UPDATE payment_credentials
         SET status = CASE
@@ -563,11 +583,12 @@ async function activatePaymentProviderOwnership(input: {
         WHERE integration.id = ? AND integration.shop_id = ?
           AND integration.status = 'active' AND integration.webhook_status = 'verified'
           AND integration.provider_claim_nonce IS NULL
+          AND integration.provider_claim_generation = ?
           AND integration.last_webhook_verified_at = ? AND integration.updated_at = ?
           AND credential.id = ? AND credential.status = 'active'
           AND credential.provider_ownership_fingerprint IS NOT NULL
       )
-    `).bind(createId("aud"), input.shopId, input.userId, input.integration.id, JSON.stringify({ credentialVersion: input.credentialVersion, rotated: input.rotated }), input.requestId, activatedAt, input.integration.id, input.shopId, activatedAt, activatedAt, input.credentialId),
+    `).bind(createId("aud"), input.shopId, input.userId, input.integration.id, JSON.stringify({ credentialVersion: input.credentialVersion, rotated: input.rotated }), input.requestId, activatedAt, input.integration.id, input.shopId, input.claim.generation, activatedAt, activatedAt, input.credentialId),
   ]);
   if ((results[2]?.meta.changes ?? 0) !== 1 || (results[3]?.meta.changes ?? 0) !== 1) {
     throw new AppError("payment_integration_conflict", 409);
@@ -618,12 +639,13 @@ export async function connectPayOS(input: { credentials: PayOSCredentials; env: 
   try {
     await new PayOSClient(input.credentials, input.fetcher).confirmWebhook(webhookUrl);
   } catch (error) {
-    if (isDefinitivePayOSWebhookRejection(error)) {
+    const definitiveRejection = isDefinitivePayOSWebhookRejection(error);
+    if (definitiveRejection) {
       await finalizeDefinitivePaymentProviderRejection({ claim, credentialId: credential.credentialId, env: input.env, integrationId: integration.id, shopId });
     } else {
       await markAmbiguousPaymentProviderOwnership({ claim, credentialId: credential.credentialId, env: input.env, integrationId: integration.id, shopId });
     }
-    throw new AppError("provider_verification_failed", 409);
+    throw new AppError("provider_verification_failed", definitiveRejection ? 409 : 503);
   }
   const rotated = integration.activeCredentialId !== null && integration.activeCredentialId !== credential.credentialId;
   await activatePaymentProviderOwnership({ claim, credentialId: credential.credentialId, credentialVersion: credential.version, env: input.env, integration, requestId: input.requestId, rotated, shopId, userId: input.userId });
