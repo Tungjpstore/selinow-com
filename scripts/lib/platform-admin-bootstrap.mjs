@@ -1,19 +1,66 @@
+import process from "node:process";
+
+import {
+  assertProductionMigrationAdmission,
+  assertProductionMigrationLedger,
+} from "./db-admission.mjs";
+import { assertFreshProductionContinuationEvidence } from "./backup.mjs";
+import { buildPinnedCloudflareEnvironment, repositoryRoot } from "./platform.mjs";
+
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,95}$/u;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/u;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const REQUIRED_MIGRATION = "0086_platform_admin_bootstrap_receipt.sql";
+const PRODUCTION_EVIDENCE_FRESHNESS_MS = 24 * 60 * 60_000;
+const SAFE_ERROR_CODES = new Set([
+  "platform_admin_bootstrap_argument_invalid",
+  "platform_admin_bootstrap_confirmation_required",
+  "platform_admin_bootstrap_environment_invalid",
+  "platform_admin_bootstrap_exact_empty_state_required",
+  "platform_admin_bootstrap_failed",
+  "platform_admin_bootstrap_input_invalid",
+  "platform_admin_bootstrap_migration_0086_required",
+  "platform_admin_bootstrap_output_invalid",
+  "platform_admin_bootstrap_production_admission_failed",
+  "platform_admin_bootstrap_production_backup_restore_invalid",
+  "platform_admin_bootstrap_user_email_invalid",
+  "platform_admin_bootstrap_user_id_invalid",
+  "production_confirmation_required",
+  "production_release_manifest_duplicate",
+  "production_release_manifest_path_invalid",
+  "production_release_manifest_required",
+]);
 
 function sqlLiteral(value) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
 export function parsePlatformAdminBootstrapFlags(argv) {
-  const flags = { confirm: false, dryRun: false, environment: "", json: false, userEmail: "", userId: "" };
+  const flags = {
+    confirm: false,
+    confirmProduction: false,
+    dryRun: false,
+    environment: "",
+    json: false,
+    releaseManifestPath: null,
+    userEmail: "",
+    userId: "",
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--confirm-first-admin-bootstrap") flags.confirm = true;
+    else if (argument === "--confirm-production") flags.confirmProduction = true;
     else if (argument === "--dry-run") flags.dryRun = true;
     else if (argument === "--json") flags.json = true;
     else if (argument === "--env") flags.environment = argv[++index] ?? "";
+    else if (argument.startsWith("--env=")) flags.environment = argument.slice("--env=".length);
+    else if (argument === "--release-manifest") {
+      if (flags.releaseManifestPath !== null) throw new Error("production_release_manifest_duplicate");
+      flags.releaseManifestPath = argv[++index] ?? "";
+    } else if (argument.startsWith("--release-manifest=")) {
+      if (flags.releaseManifestPath !== null) throw new Error("production_release_manifest_duplicate");
+      flags.releaseManifestPath = argument.slice("--release-manifest=".length);
+    }
     else if (argument === "--user-id") flags.userId = argv[++index] ?? "";
     else if (argument === "--user-email") flags.userEmail = (argv[++index] ?? "").trim().toLowerCase();
     else throw new Error("platform_admin_bootstrap_argument_invalid");
@@ -21,8 +68,50 @@ export function parsePlatformAdminBootstrapFlags(argv) {
   if (!new Set(["local", "staging", "production"]).has(flags.environment)) throw new Error("platform_admin_bootstrap_environment_invalid");
   if (!SAFE_ID.test(flags.userId)) throw new Error("platform_admin_bootstrap_user_id_invalid");
   if (flags.userEmail.length > 254 || !EMAIL.test(flags.userEmail)) throw new Error("platform_admin_bootstrap_user_email_invalid");
+  if (flags.releaseManifestPath !== null && flags.releaseManifestPath.length === 0) throw new Error("production_release_manifest_path_invalid");
+  if (flags.environment === "production" && !flags.confirmProduction) throw new Error("production_confirmation_required");
   if (!flags.dryRun && !flags.confirm) throw new Error("platform_admin_bootstrap_confirmation_required");
+  if (flags.environment === "production" && !flags.dryRun && flags.releaseManifestPath === null) {
+    throw new Error("production_release_manifest_required");
+  }
   return flags;
+}
+
+export function assertPlatformAdminBootstrapMigrationLedger(migrationNames) {
+  if (!Array.isArray(migrationNames) || !migrationNames.includes(REQUIRED_MIGRATION)) {
+    throw new Error("platform_admin_bootstrap_migration_0086_required");
+  }
+  return { migrationName: REQUIRED_MIGRATION };
+}
+
+export function assertPlatformAdminBootstrapContinuationFreshness(evidence, now = new Date()) {
+  const backupCompletedAt = new Date(evidence?.backup?.completedAt ?? "");
+  const restoreCompletedAt = new Date(evidence?.restore?.completedAt ?? "");
+  const nowTimestamp = now.getTime();
+  const backupAge = nowTimestamp - backupCompletedAt.getTime();
+  const restoreAge = nowTimestamp - restoreCompletedAt.getTime();
+  if (
+    !Number.isFinite(nowTimestamp)
+    || !Number.isFinite(backupCompletedAt.getTime())
+    || !Number.isFinite(restoreCompletedAt.getTime())
+    || backupAge < 0
+    || backupAge > PRODUCTION_EVIDENCE_FRESHNESS_MS
+    || restoreAge < 0
+    || restoreAge > PRODUCTION_EVIDENCE_FRESHNESS_MS
+    || restoreCompletedAt < backupCompletedAt
+  ) {
+    throw new Error("platform_admin_bootstrap_production_backup_restore_invalid");
+  }
+  return evidence;
+}
+
+export function safePlatformAdminBootstrapErrorCode(error) {
+  const message = error instanceof Error ? error.message : "platform_admin_bootstrap_failed";
+  if (SAFE_ERROR_CODES.has(message)) return message;
+  if (message.startsWith("production_") || message.startsWith("release_json_")) {
+    return "platform_admin_bootstrap_production_admission_failed";
+  }
+  return "platform_admin_bootstrap_failed";
 }
 
 export function buildPlatformAdminBootstrapSql({ requestId, userEmail, userId }) {
@@ -40,11 +129,12 @@ INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
 SELECT user_id, 'owner', 'active', ${now}, ${now}
 FROM platform_admin_bootstrap_receipts
 WHERE ceremony_key = 'first_platform_admin' AND user_id = ${sqlLiteral(userId)}
+  AND request_id = ${sqlLiteral(requestId)}
   AND (SELECT COUNT(*) FROM platform_admins) = 0;
 SELECT
   (SELECT COUNT(*) FROM platform_admins) AS adminCount,
   (SELECT COUNT(*) FROM platform_admins WHERE user_id = ${sqlLiteral(userId)} AND role = 'owner' AND status = 'active') AS candidateOwnerCount,
-  (SELECT COUNT(*) FROM platform_admin_bootstrap_receipts WHERE ceremony_key = 'first_platform_admin' AND user_id = ${sqlLiteral(userId)}) AS receiptCount;`;
+  (SELECT COUNT(*) FROM platform_admin_bootstrap_receipts WHERE ceremony_key = 'first_platform_admin' AND user_id = ${sqlLiteral(userId)} AND request_id = ${sqlLiteral(requestId)}) AS receiptCount;`;
 }
 
 export function parsePlatformAdminBootstrapOutput(output) {
@@ -55,11 +145,12 @@ export function parsePlatformAdminBootstrapOutput(output) {
     const item = queue.shift();
     if (Array.isArray(item)) queue.push(...item);
     else if (item !== null && typeof item === "object") {
-      if (Number(item.adminCount) >= 0 && Number(item.candidateOwnerCount) >= 0 && Number(item.receiptCount) >= 0) {
+      const counts = [item.adminCount, item.candidateOwnerCount, item.receiptCount];
+      if (counts.every((count) => Number.isSafeInteger(count) && count >= 0)) {
         return {
-          adminCount: Number(item.adminCount),
-          candidateOwnerCount: Number(item.candidateOwnerCount),
-          receiptCount: Number(item.receiptCount),
+          adminCount: item.adminCount,
+          candidateOwnerCount: item.candidateOwnerCount,
+          receiptCount: item.receiptCount,
         };
       }
       queue.push(...Object.values(item));
@@ -68,13 +159,73 @@ export function parsePlatformAdminBootstrapOutput(output) {
   throw new Error("platform_admin_bootstrap_output_invalid");
 }
 
-export function runPlatformAdminBootstrap({ flags, requestId, runner }) {
-  if (flags.dryRun) {
-    return { actions: [{ code: "exact_empty_state_required", ok: true }, { code: "owner_candidate_must_be_active", ok: true }], environment: flags.environment, ok: true };
+export async function runPlatformAdminBootstrap(input) {
+  const { flags, requestId, runner } = input;
+  if (flags.environment === "production") {
+    if (flags.confirmProduction !== true) throw new Error("production_confirmation_required");
+    if (!flags.dryRun && flags.confirm !== true) throw new Error("platform_admin_bootstrap_confirmation_required");
+    if (!flags.dryRun && (typeof flags.releaseManifestPath !== "string" || flags.releaseManifestPath.length === 0)) {
+      throw new Error("production_release_manifest_required");
+    }
   }
+  if (flags.dryRun) {
+    const actions = [
+      { code: "exact_empty_state_required", ok: true },
+      { code: "owner_candidate_must_be_active", ok: true },
+    ];
+    if (flags.environment === "production") {
+      actions.unshift(
+        { code: "production_exact_account_identity_required", ok: true },
+        { code: "production_release_manifest_required", ok: true },
+        { code: "production_fresh_backup_restore_required", ok: true },
+        { code: "production_migration_0086_required", ok: true },
+      );
+    }
+    return { actions, environment: flags.environment, ok: true };
+  }
+
+  let runnerOptions;
+  if (flags.environment === "production") {
+    const root = input.repositoryRoot ?? repositoryRoot;
+    const operatorEnvironment = input.environment ?? process.env;
+    const now = input.now ?? new Date();
+    const continuationEvidenceImplementation = input.productionContinuationEvidenceImplementation
+      ?? assertFreshProductionContinuationEvidence;
+    const productionAdmission = await (
+      input.productionAdmissionImplementation ?? assertProductionMigrationAdmission
+    )({
+      assertContinuationEvidenceImplementation: async (options) => assertPlatformAdminBootstrapContinuationFreshness(
+        await continuationEvidenceImplementation({ ...options, now }),
+        now,
+      ),
+      environment: operatorEnvironment,
+      manifestPath: flags.releaseManifestPath,
+      operation: "seed",
+      repositoryRoot: root,
+      runWranglerImplementation: runner,
+      workerSecretNames: input.workerSecretNames ?? [],
+    });
+    const pinnedEnvironment = buildPinnedCloudflareEnvironment(
+      operatorEnvironment,
+      productionAdmission.accountId,
+    );
+    const ledger = await (
+      input.productionLedgerImplementation ?? assertProductionMigrationLedger
+    )({
+      environment: pinnedEnvironment,
+      migrationNames: undefined,
+      repositoryRoot: root,
+      runWranglerImplementation: runner,
+    });
+    assertPlatformAdminBootstrapMigrationLedger(ledger?.migrationNames);
+    runnerOptions = { cwd: root, env: pinnedEnvironment };
+  }
+
   const target = flags.environment === "local" ? ["--local"] : ["--env", flags.environment, "--remote"];
   const sql = buildPlatformAdminBootstrapSql({ requestId, userEmail: flags.userEmail, userId: flags.userId });
-  const result = parsePlatformAdminBootstrapOutput(runner(["d1", "execute", "PLATFORM_DB", ...target, "--command", sql, "--json"]).stdout);
+  const result = parsePlatformAdminBootstrapOutput(runner([
+    "d1", "execute", "PLATFORM_DB", ...target, "--command", sql, "--json",
+  ], runnerOptions).stdout);
   if (result.adminCount !== 1 || result.candidateOwnerCount !== 1 || result.receiptCount !== 1) {
     throw new Error("platform_admin_bootstrap_exact_empty_state_required");
   }
