@@ -10,7 +10,7 @@ describe("system operations client localization", () => {
       .map((match) => match[1])
       .filter((key): key is string => key !== undefined);
 
-    expect(fallbackKeys).toHaveLength(41);
+    expect(fallbackKeys).toHaveLength(44);
     expect(new Set(fallbackKeys).size).toBe(fallbackKeys.length);
     expect(source).toContain("root.dataset.copy");
     expect(source).toContain("copy[key] ?? ENGLISH_COPY[key]");
@@ -63,6 +63,9 @@ describe("system operations client localization", () => {
       "rotation.processed",
       "rotation.processing",
       "rotation.shop_required",
+      "payos.client_id_required",
+      "payos.fingerprint_created",
+      "payos.fingerprint_creating",
     ];
 
     for (const key of expectedKeys) expect(source).toContain(`"${key}"`);

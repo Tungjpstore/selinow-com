@@ -191,6 +191,9 @@ const operationsClientCopy = {
   "rotation.processed": t("admin.operations.client.rotation.processed"),
   "rotation.processing": t("admin.operations.client.rotation.processing"),
   "rotation.shop_required": t("admin.operations.client.rotation.shop_required"),
+  "payos.client_id_required": t("admin.operations.client.payos.client_id_required"),
+  "payos.fingerprint_created": t("admin.operations.client.payos.fingerprint_created"),
+  "payos.fingerprint_creating": t("admin.operations.client.payos.fingerprint_creating"),
 };
 ---
 
@@ -261,6 +264,21 @@ const operationsClientCopy = {
           </ul>
         </div>
       </section>
+
+      {env.APP_ENV === "staging" && adminRole === "owner" && (
+        <section class="admin-section" aria-labelledby="payos-fingerprint-title" data-payos-fingerprint>
+          <div class="admin-section-heading">
+            <div>
+              <h2 id="payos-fingerprint-title">{t("admin.operations.payos.title")}</h2>
+              <p>{t("admin.operations.payos.description")}</p>
+            </div>
+          </div>
+          <form class="admin-form" data-payos-fingerprint-form>
+            <label>{t("admin.operations.payos.client_id")}<input name="clientId" type="password" autocomplete="off" required pattern="[A-Za-z0-9._:-]{3,128}" maxlength="128" /></label>
+            <div class="admin-form-actions"><button type="submit">{t("admin.operations.payos.create")}</button></div>
+          </form>
+        </section>
+      )}
 
       <section class="admin-section" aria-labelledby="investigation-title" data-admin-investigation-bridge>
         <div class="admin-section-heading">

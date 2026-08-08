@@ -37,6 +37,8 @@ describe("admin operations PromptOS surface", () => {
     expect(admin).toContain("data-manual-action-form");
     expect(admin).toContain("data-copy={JSON.stringify(clientCopy)}");
     expect(systems).toContain("data-rotation-create-form");
+    expect(systems).toContain("data-payos-fingerprint-form");
+    expect(systems).toContain('env.APP_ENV === "staging" && adminRole === "owner"');
     expect(systems).toContain("data-rotation-process");
     expect(systems).toContain("max=\"100\"");
     expect(systems).toContain("listActiveDeletionRequests");
@@ -89,6 +91,9 @@ describe("admin operations PromptOS surface", () => {
     expect(operations).toContain("legalHoldForm.getAttribute(\"aria-busy\") !== \"true\"");
     expect(operations).toContain("expectedConfirmation");
     expect(operations).toContain("window.confirm");
+    expect(operations).toContain("/api/admin/payments/payos/staging-fingerprint");
+    expect(operations).toContain('clientIdInput.value = ""');
+    expect(operations).not.toContain("fingerprint: payload");
     expect(operations).not.toMatch(/name="[^"]*(?:ciphertext|plaintext|license)[^"]*"/i);
     expect(systems).toContain("listAdminOrderInvestigations");
     expect(systems).toContain("listAdminAuditEntries");
