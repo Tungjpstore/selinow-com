@@ -258,11 +258,16 @@ export async function loadCloseoutInputs({
   const wranglerConfig = JSON.parse(await readFile(wranglerConfigPath, "utf8"));
   const evidence = await readOptionalJson(evidencePath);
   const productionSpec = await readOptionalJson(productionSpecPath);
-  const workerSecretNames = secretNamesPath
-    ? await readOptionalJson(secretNamesPath)
-    : (process.env.SELINOW_WORKER_SECRET_NAMES ?? "")
+  let workerSecretNames;
+  if (secretNamesPath) {
+    const value = await readOptionalJson(secretNamesPath);
+    if (!Array.isArray(value)) throw new Error("worker_secret_names_invalid");
+    workerSecretNames = value.filter((name) => typeof name === "string");
+  } else {
+    workerSecretNames = (process.env.SELINOW_WORKER_SECRET_NAMES ?? "")
       .split(",")
       .map((name) => name.trim())
       .filter(Boolean);
+  }
   return { evidence, productionSpec, workerSecretNames, wranglerConfig };
 }
