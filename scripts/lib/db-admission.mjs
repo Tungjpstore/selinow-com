@@ -28,6 +28,7 @@ const ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/u;
 export function parseDatabaseFlags(argv) {
   const commonArgv = [];
   let releaseManifestPath = null;
+  let maintenanceDrainConfirmed = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--release-manifest") {
@@ -36,6 +37,8 @@ export function parseDatabaseFlags(argv) {
     } else if (argument.startsWith("--release-manifest=")) {
       if (releaseManifestPath !== null) throw new Error("production_release_manifest_duplicate");
       releaseManifestPath = argument.slice("--release-manifest=".length);
+    } else if (argument === "--confirm-maintenance-drain") {
+      maintenanceDrainConfirmed = true;
     } else {
       commonArgv.push(argument);
     }
@@ -43,7 +46,7 @@ export function parseDatabaseFlags(argv) {
   if (releaseManifestPath !== null && releaseManifestPath.length === 0) {
     throw new Error("production_release_manifest_path_invalid");
   }
-  return { ...parseFlags(commonArgv), releaseManifestPath };
+  return { ...parseFlags(commonArgv), maintenanceDrainConfirmed, releaseManifestPath };
 }
 
 export function requiresProductionMigrationAdmission(operation, flags) {
@@ -60,6 +63,13 @@ export function requiresStagingDatabaseAdmission(operation, flags) {
 
 export function requiresStagingReleaseManifest(operation, flags) {
   return requiresStagingDatabaseAdmission(operation, flags) && flags.releaseManifestPath === null;
+}
+
+export function requiresMaintenanceDrainConfirmation(operation, flags) {
+  return operation === "migrate"
+    && new Set(["staging", "production"]).has(flags.environment)
+    && !flags.dryRun
+    && flags.maintenanceDrainConfirmed !== true;
 }
 
 export function resolveApprovedProductionDatabaseTarget(input) {

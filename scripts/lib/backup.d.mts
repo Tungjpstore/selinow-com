@@ -194,6 +194,28 @@ export function assertFreshStagingContinuationEvidence(options: {
   reviewedCommitSha: string;
 }>;
 
+export function assertStagingContinuationEvidenceByReference(options: {
+  accountId: string;
+  backupRoot?: string;
+  continuationEvidence: {
+    backupChecksumSha256: string;
+    backupCompletedAt: string;
+    backupReportRef: string;
+    backupSizeBytes: number;
+    backupSnapshotId: string;
+    restoreCompletedAt: string;
+    restoreReportRef: string;
+    restoreSnapshotId: string;
+    restoreTargetResourceRef: string;
+  };
+  databaseId: string;
+  databaseName: string;
+  evidenceRecordedAt: Date | string;
+  repositoryRoot?: string;
+  restoreRoot?: string;
+  reviewedCommitSha: string;
+}): ReturnType<typeof assertFreshStagingContinuationEvidence>;
+
 export function assertFreshProductionBootstrapBackupEvidence(options: {
   accountId: string;
   backupRoot?: string;

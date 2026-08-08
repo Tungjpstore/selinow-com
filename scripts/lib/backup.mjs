@@ -545,22 +545,8 @@ export async function createBackup(options) {
   };
 }
 
-export async function assertFreshStagingBackupEvidence(options) {
-  const backupRoot = options.backupRoot ?? resolve(BACKUP_ROOT, "staging");
-  let entries;
-  try {
-    entries = await readdir(backupRoot, { withFileTypes: true });
-  } catch {
-    throw new Error("staging_backup_evidence_missing");
-  }
-  const latestDirectory = entries
-    .filter((entry) => entry.isDirectory() && /^bkp_\d{14}_[a-f0-9]{12}$/u.test(entry.name))
-    .map((entry) => entry.name)
-    .sort()
-    .at(-1);
-  if (latestDirectory === undefined) throw new Error("staging_backup_evidence_missing");
-
-  const snapshotDirectory = resolve(backupRoot, latestDirectory);
+async function assertStagingBackupEvidence(options) {
+  const snapshotDirectory = resolve(options.backupRoot, options.snapshotId);
   const reportPath = resolve(snapshotDirectory, "snapshot.json");
   let report;
   try {
@@ -575,7 +561,7 @@ export async function assertFreshStagingBackupEvidence(options) {
     report?.report_version !== 2
     || report?.artifact?.format !== "sql"
     || report?.artifact?.path !== "database.sql"
-    || record?.id !== latestDirectory
+    || record?.id !== options.snapshotId
     || record?.environment !== "staging"
     || record?.resource_ref !== `d1:${options.databaseName}`
     || record?.snapshot_kind !== "time_travel"
@@ -598,7 +584,7 @@ export async function assertFreshStagingBackupEvidence(options) {
   }
 
   const completedAt = new Date(record.completed_at);
-  const age = (options.now ?? new Date()).getTime() - completedAt.getTime();
+  const age = options.now.getTime() - completedAt.getTime();
   if (!Number.isFinite(completedAt.getTime()) || age < 0 || age > STAGING_BACKUP_FRESHNESS_MS) {
     throw new Error("staging_backup_evidence_stale");
   }
@@ -622,9 +608,101 @@ export async function assertFreshStagingBackupEvidence(options) {
     artifactPath,
     checksumSha256: record.checksum_sha256,
     completedAt: completedAt.toISOString(),
-    reportRef: options.backupRoot === undefined ? relativeReportPath(reportPath) : reportPath,
+    reportRef: options.reportRef,
     sizeBytes: record.size_bytes,
     snapshotId: record.id,
+  };
+}
+
+export async function assertFreshStagingBackupEvidence(options) {
+  const backupRoot = options.backupRoot ?? resolve(BACKUP_ROOT, "staging");
+  let entries;
+  try {
+    entries = await readdir(backupRoot, { withFileTypes: true });
+  } catch {
+    throw new Error("staging_backup_evidence_missing");
+  }
+  const latestDirectory = entries
+    .filter((entry) => entry.isDirectory() && /^bkp_\d{14}_[a-f0-9]{12}$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .at(-1);
+  if (latestDirectory === undefined) throw new Error("staging_backup_evidence_missing");
+  const reportPath = resolve(backupRoot, latestDirectory, "snapshot.json");
+  return assertStagingBackupEvidence({
+    ...options,
+    backupRoot,
+    now: options.now ?? new Date(),
+    reportRef: options.backupRoot === undefined ? relativeReportPath(reportPath) : reportPath,
+    snapshotId: latestDirectory,
+  });
+}
+
+async function assertStagingRestoreEvidence(options) {
+  const reportPath = options.reportPath;
+  let report;
+  let reportStat;
+  try {
+    [report, reportStat] = await Promise.all([
+      readFile(reportPath, "utf8").then((value) => JSON.parse(value)),
+      lstat(reportPath),
+    ]);
+  } catch {
+    throw new Error("staging_continuation_restore_evidence_invalid");
+  }
+  if (!reportStat.isFile() || (reportStat.mode & 0o077) !== 0) {
+    throw new Error("staging_continuation_restore_permissions_invalid");
+  }
+
+  const snapshots = report?.records?.backup_snapshots;
+  const drills = report?.records?.restore_drills;
+  const snapshot = Array.isArray(snapshots) && snapshots.length === 1 ? snapshots[0] : null;
+  const drill = Array.isArray(drills) && drills.length === 1 ? drills[0] : null;
+  const source = report?.source;
+  const repositoryMigrationNames = await expectedMigrationNames();
+  const updatedAt = new Date(drill?.updated_at ?? "");
+  const restoreAge = options.now.getTime() - updatedAt.getTime();
+  const backupCompletedAt = new Date(options.backup.completedAt).getTime();
+  const targetResourceRef = drill?.target_resource_ref;
+
+  if (
+    report?.report_version !== 1
+    || report?.reviewed_commit_sha !== options.reviewedCommitSha
+    || source?.account_id !== options.accountId
+    || source?.database_id !== options.databaseId
+    || source?.database_name !== options.databaseName
+    || source?.resource_ref !== `d1:${options.databaseName}`
+    || snapshot?.environment !== "staging"
+    || snapshot?.resource_ref !== `d1:${options.databaseName}`
+    || snapshot?.status !== "available"
+    || snapshot?.checksum_sha256 !== options.backup.checksumSha256
+    || snapshot?.size_bytes !== options.backup.sizeBytes
+    || drill?.environment !== "staging"
+    || drill?.status !== "passed"
+    || drill?.backup_snapshot_id !== snapshot?.id
+    || !/^d1:selinow-restore-drill-staging-[a-f0-9]{12}$/u.test(targetResourceRef ?? "")
+    || targetResourceRef === `d1:${options.databaseName}`
+    || drill?.foreign_key_violation_count !== 0
+    || !Number.isSafeInteger(drill?.restored_item_count)
+    || drill.restored_item_count < 1
+    || report?.verification?.integrityOk !== true
+    || report?.verification?.foreignKeyViolationCount !== 0
+    || !Array.isArray(report?.verification?.migrationNames)
+    || report.verification.migrationNames.length !== repositoryMigrationNames.length
+    || report.verification.migrationNames.some((name, index) => name !== repositoryMigrationNames[index])
+    || !Number.isFinite(updatedAt.getTime())
+    || updatedAt.getTime() < backupCompletedAt
+    || restoreAge < 0
+    || restoreAge > STAGING_BACKUP_FRESHNESS_MS
+  ) {
+    throw new Error("staging_continuation_restore_evidence_invalid");
+  }
+
+  return {
+    completedAt: updatedAt.toISOString(),
+    reportRef: reportPath,
+    snapshotId: snapshot.id,
+    targetResourceRef,
   };
 }
 
@@ -657,76 +735,74 @@ export async function assertFreshStagingContinuationEvidence(options) {
     .at(-1);
   if (latestReport === undefined) throw new Error("staging_continuation_restore_evidence_missing");
 
-  const reportPath = resolve(restoreRoot, latestReport);
-  let report;
-  let reportStat;
-  try {
-    [report, reportStat] = await Promise.all([
-      readFile(reportPath, "utf8").then((value) => JSON.parse(value)),
-      lstat(reportPath),
-    ]);
-  } catch {
-    throw new Error("staging_continuation_restore_evidence_invalid");
-  }
-  if (!reportStat.isFile() || (reportStat.mode & 0o077) !== 0) {
-    throw new Error("staging_continuation_restore_permissions_invalid");
-  }
-
-  const snapshots = report?.records?.backup_snapshots;
-  const drills = report?.records?.restore_drills;
-  const snapshot = Array.isArray(snapshots) && snapshots.length === 1 ? snapshots[0] : null;
-  const drill = Array.isArray(drills) && drills.length === 1 ? drills[0] : null;
-  const source = report?.source;
-  const repositoryMigrationNames = await expectedMigrationNames();
-  const updatedAt = new Date(drill?.updated_at ?? "");
-  const nowTimestamp = (options.now ?? new Date()).getTime();
-  const restoreAge = nowTimestamp - updatedAt.getTime();
-  const backupCompletedAt = new Date(backup.completedAt).getTime();
-  const targetResourceRef = drill?.target_resource_ref;
-
-  if (
-    report?.report_version !== 1
-    || report?.reviewed_commit_sha !== reviewedCommitSha
-    || source?.account_id !== options.accountId
-    || source?.database_id !== options.databaseId
-    || source?.database_name !== options.databaseName
-    || source?.resource_ref !== `d1:${options.databaseName}`
-    || snapshot?.environment !== "staging"
-    || snapshot?.resource_ref !== `d1:${options.databaseName}`
-    || snapshot?.status !== "available"
-    || snapshot?.checksum_sha256 !== backup.checksumSha256
-    || snapshot?.size_bytes !== backup.sizeBytes
-    || drill?.environment !== "staging"
-    || drill?.status !== "passed"
-    || drill?.backup_snapshot_id !== snapshot?.id
-    || !/^d1:selinow-restore-drill-staging-[a-f0-9]{12}$/u.test(targetResourceRef ?? "")
-    || targetResourceRef === `d1:${options.databaseName}`
-    || drill?.foreign_key_violation_count !== 0
-    || !Number.isSafeInteger(drill?.restored_item_count)
-    || drill.restored_item_count < 1
-    || report?.verification?.integrityOk !== true
-    || report?.verification?.foreignKeyViolationCount !== 0
-    || !Array.isArray(report?.verification?.migrationNames)
-    || report.verification.migrationNames.length !== repositoryMigrationNames.length
-    || report.verification.migrationNames.some((name, index) => name !== repositoryMigrationNames[index])
-    || !Number.isFinite(updatedAt.getTime())
-    || updatedAt.getTime() < backupCompletedAt
-    || restoreAge < 0
-    || restoreAge > STAGING_BACKUP_FRESHNESS_MS
-  ) {
-    throw new Error("staging_continuation_restore_evidence_invalid");
-  }
+  const restore = await assertStagingRestoreEvidence({
+    ...options,
+    backup,
+    now: options.now ?? new Date(),
+    reportPath: resolve(restoreRoot, latestReport),
+    reviewedCommitSha,
+  });
 
   return {
     backup,
     reviewedCommitSha,
-    restore: {
-      completedAt: updatedAt.toISOString(),
-      reportRef: reportPath,
-      snapshotId: snapshot.id,
-      targetResourceRef,
-    },
+    restore,
   };
+}
+
+export async function assertStagingContinuationEvidenceByReference(options) {
+  const expected = options.continuationEvidence;
+  const root = resolve(options.repositoryRoot ?? repositoryRoot);
+  const backupRoot = resolve(options.backupRoot ?? resolve(root, ".wrangler/backups/staging"));
+  const restoreRoot = resolve(options.restoreRoot ?? resolve(root, ".wrangler/restore-drills/staging"));
+  const snapshotId = expected?.backupSnapshotId;
+  const backupReportPath = resolve(root, expected?.backupReportRef ?? "");
+  const restoreReportPath = resolve(root, expected?.restoreReportRef ?? "");
+  if (!/^bkp_\d{14}_[a-f0-9]{12}$/u.test(snapshotId ?? "")
+    || backupReportPath !== resolve(backupRoot, snapshotId, "snapshot.json")
+    || dirname(restoreReportPath) !== restoreRoot
+    || !/^rdr_\d{14}_[a-f0-9]{12}\.json$/u.test(basename(restoreReportPath))) {
+    throw new Error("staging_release_continuation_evidence_mismatch");
+  }
+  const now = options.evidenceRecordedAt instanceof Date
+    ? options.evidenceRecordedAt
+    : new Date(options.evidenceRecordedAt ?? "");
+  if (!Number.isFinite(now.getTime())) {
+    throw new Error("staging_release_continuation_evidence_mismatch");
+  }
+  const backup = await assertStagingBackupEvidence({
+    accountId: options.accountId,
+    backupRoot,
+    databaseId: options.databaseId,
+    databaseName: options.databaseName,
+    now,
+    reportRef: expected.backupReportRef,
+    snapshotId,
+  });
+  const restore = await assertStagingRestoreEvidence({
+    accountId: options.accountId,
+    backup,
+    databaseId: options.databaseId,
+    databaseName: options.databaseName,
+    now,
+    reportPath: restoreReportPath,
+    reviewedCommitSha: options.reviewedCommitSha,
+  });
+  const actual = {
+    backupChecksumSha256: backup.checksumSha256,
+    backupCompletedAt: backup.completedAt,
+    backupReportRef: backup.reportRef,
+    backupSizeBytes: backup.sizeBytes,
+    backupSnapshotId: backup.snapshotId,
+    restoreCompletedAt: restore.completedAt,
+    restoreReportRef: restore.reportRef,
+    restoreSnapshotId: restore.snapshotId,
+    restoreTargetResourceRef: restore.targetResourceRef,
+  };
+  if (Object.keys(actual).some((key) => actual[key] !== expected[key])) {
+    throw new Error("staging_release_continuation_evidence_mismatch");
+  }
+  return { backup, restore, reviewedCommitSha: options.reviewedCommitSha };
 }
 
 export async function assertFreshProductionBootstrapBackupEvidence(options) {

@@ -1,15 +1,20 @@
 import process from "node:process";
 
 import { runWrangler, writeOutput } from "./lib/cli.mjs";
-import { assertFreshStagingContinuationEvidence } from "./lib/backup.mjs";
+import {
+  assertFreshStagingContinuationEvidence,
+  assertStagingContinuationEvidenceByReference,
+} from "./lib/backup.mjs";
 import {
   assertProductionDatabasePreflight,
   assertProductionMigrationLedger,
   assertProductionMigrationAdmission,
   parseDatabaseFlags,
+  requiresMaintenanceDrainConfirmation,
   requiresProductionMigrationAdmission,
   requiresStagingDatabaseAdmission,
 } from "./lib/db-admission.mjs";
+import { assertRemotePostMigrationContract } from "./lib/db-post-migration-contract.mjs";
 import {
   evaluatePaymentProviderPreflight,
   evaluatePayosRelationshipPreflight,
@@ -32,14 +37,20 @@ import {
   assertStagingContinuationBinding,
   assertStagingMigrationLedger,
   assertStagingDatabasePreflight,
+  assertStagingMigrationCompletion,
+  assertStagingPostMigrationEvidence,
   assertStagingReleaseAdmission,
+  buildStagingMigrationCompletion,
+  buildStagingPostMigrationEvidence,
   runStagingMigrationWithVerification,
+  writeStagingMigrationCompletion,
+  writeStagingPostMigrationEvidence,
 } from "./lib/staging-release.mjs";
 
 const operation = process.argv[2];
 
 try {
-  if (!new Set(["migrate", "preflight", "seed", "status"]).has(operation)) {
+  if (!new Set(["complete-release", "migrate", "preflight", "seed", "status"]).has(operation)) {
     throw new Error(`unsupported_db_operation:${operation ?? "missing"}`);
   }
 
@@ -54,7 +65,10 @@ try {
   let wranglerArgs;
   let stagingMigrationHandled = false;
 
-  if (operation === "migrate") {
+  if (operation === "complete-release") {
+    if (flags.environment !== "staging") throw new Error("staging_release_completion_environment_invalid");
+    wranglerArgs = null;
+  } else if (operation === "migrate") {
     wranglerArgs = ["d1", "migrations", "apply", "PLATFORM_DB", ...targetFlags];
   } else if (operation === "status") {
     wranglerArgs = ["d1", "migrations", "list", "PLATFORM_DB", ...targetFlags];
@@ -71,7 +85,78 @@ try {
     ];
   }
 
-  if (flags.dryRun) {
+  if (operation === "complete-release") {
+    if (!flags.releaseManifestPath) throw new Error("staging_release_manifest_required");
+    if (flags.dryRun) {
+      writeOutput({
+        actions: [{ action: "would_write", name: "post-migration-evidence.json", type: "release_evidence" }],
+        environment: "staging",
+        ok: true,
+      }, flags.json);
+    } else {
+      const releaseAdmission = await assertStagingReleaseAdmission({
+        manifestPath: flags.releaseManifestPath,
+        repositoryRoot,
+      });
+      const databaseTarget = await assertStagingMutationAdmission();
+      const preMigrationEvidence = await assertStagingContinuationEvidenceByReference({
+        accountId: databaseTarget.accountId,
+        continuationEvidence: releaseAdmission.continuationEvidence,
+        databaseId: databaseTarget.databaseId,
+        databaseName: databaseTarget.databaseName,
+        evidenceRecordedAt: releaseAdmission.createdAt,
+        repositoryRoot,
+        reviewedCommitSha: releaseAdmission.commitSha,
+      });
+      assertStagingContinuationBinding(releaseAdmission, preMigrationEvidence, databaseTarget);
+      const commandEnvironment = buildPinnedCloudflareEnvironment(process.env, databaseTarget.accountId);
+      const migrationAdmission = await assertStagingMigrationLedger({
+        environment: commandEnvironment,
+        migrationNames: releaseAdmission.migrationNames,
+        repositoryRoot,
+      });
+      assertStagingDatabasePreflight({ environment: commandEnvironment, repositoryRoot });
+      assertRemotePostMigrationContract({
+        environment: commandEnvironment,
+        environmentName: "staging",
+        repositoryRoot,
+      });
+      const migrationCompletion = await assertStagingMigrationCompletion({
+        databaseTarget,
+        migrationNames: migrationAdmission.migrationNames,
+        releaseAdmission,
+        repositoryRoot,
+      });
+      const postMigrationContinuation = await assertFreshStagingContinuationEvidence({
+        accountId: databaseTarget.accountId,
+        databaseId: databaseTarget.databaseId,
+        databaseName: databaseTarget.databaseName,
+        repositoryRoot,
+        reviewedCommitSha: releaseAdmission.commitSha,
+      });
+      const postMigrationEvidence = buildStagingPostMigrationEvidence({
+        continuationEvidence: postMigrationContinuation,
+        databaseTarget,
+        migrationCompletion,
+        migrationNames: migrationAdmission.migrationNames,
+        releaseAdmission,
+      });
+      const evidenceRef = await writeStagingPostMigrationEvidence(postMigrationEvidence, repositoryRoot);
+      await assertStagingPostMigrationEvidence({
+        continuationEvidence: postMigrationContinuation,
+        databaseTarget,
+        migrationCompletion,
+        migrationNames: migrationAdmission.migrationNames,
+        releaseAdmission,
+        repositoryRoot,
+      });
+      writeOutput({
+        actions: [{ code: "post_migration_evidence_written", detail: evidenceRef, ok: true }],
+        environment: "staging",
+        ok: true,
+      }, flags.json);
+    }
+  } else if (flags.dryRun) {
     const actions = operation === "preflight"
       ? [
           { action: "would_run", name: "phase_7_database_invariants", type: "database" },
@@ -118,6 +203,9 @@ try {
     let commandEnvironment = process.env;
     if (requiresProductionMigrationAdmission(operation, flags)) {
       if (!flags.releaseManifestPath) throw new Error("production_release_manifest_required");
+      if (requiresMaintenanceDrainConfirmation(operation, flags)) {
+        throw new Error("maintenance_drain_confirmation_required");
+      }
       const workerSecretNames = (process.env.SELINOW_WORKER_SECRET_NAMES ?? "")
         .split(",")
         .map((name) => name.trim())
@@ -136,15 +224,21 @@ try {
     }
     if (requiresStagingDatabaseAdmission(operation, flags)) {
       if (!flags.releaseManifestPath) throw new Error("staging_release_manifest_required");
+      if (requiresMaintenanceDrainConfirmation(operation, flags)) {
+        throw new Error("maintenance_drain_confirmation_required");
+      }
       const releaseAdmission = await assertStagingReleaseAdmission({
         manifestPath: flags.releaseManifestPath,
         repositoryRoot,
       });
       const backupAdmission = await assertStagingMutationAdmission();
-      const continuationAdmission = await assertFreshStagingContinuationEvidence({
+      const continuationAdmission = await assertStagingContinuationEvidenceByReference({
         accountId: backupAdmission.accountId,
+        continuationEvidence: releaseAdmission.continuationEvidence,
         databaseId: backupAdmission.databaseId,
         databaseName: backupAdmission.databaseName,
+        evidenceRecordedAt: releaseAdmission.createdAt,
+        repositoryRoot,
         reviewedCommitSha: releaseAdmission.commitSha,
       });
       assertStagingContinuationBinding(releaseAdmission, continuationAdmission, backupAdmission);
@@ -160,10 +254,13 @@ try {
         manifestPath: flags.releaseManifestPath,
         repositoryRoot,
       });
-      const finalContinuationAdmission = await assertFreshStagingContinuationEvidence({
+      const finalContinuationAdmission = await assertStagingContinuationEvidenceByReference({
         accountId: finalAdmission.accountId,
+        continuationEvidence: finalReleaseAdmission.continuationEvidence,
         databaseId: finalAdmission.databaseId,
         databaseName: finalAdmission.databaseName,
+        evidenceRecordedAt: finalReleaseAdmission.createdAt,
+        repositoryRoot,
         reviewedCommitSha: finalReleaseAdmission.commitSha,
       });
       assertStagingContinuationBinding(finalReleaseAdmission, finalContinuationAdmission, finalAdmission);
@@ -187,16 +284,43 @@ try {
           environment: commandEnvironment,
           expectedPrefix: finalReleaseAdmission.migrationLedgerPrefix,
           repositoryRoot,
+          assertPostMigrationContractImplementation: (shared) => assertRemotePostMigrationContract({
+            environment: shared.environment,
+            environmentName: "staging",
+            repositoryRoot,
+          }),
           runMigrationImplementation: () => runWrangler(wranglerArgs, {
             capture: false,
             cwd: repositoryRoot,
             env: commandEnvironment,
           }),
         });
+        let migrationCompletion;
+        try {
+          migrationCompletion = await assertStagingMigrationCompletion({
+            databaseTarget: finalAdmission,
+            migrationNames: finalReleaseAdmission.migrationNames,
+            releaseAdmission: finalReleaseAdmission,
+            repositoryRoot,
+          });
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== "staging_migration_completion_missing") throw error;
+          migrationCompletion = buildStagingMigrationCompletion({
+            databaseTarget: finalAdmission,
+            migrationNames: finalReleaseAdmission.migrationNames,
+            releaseAdmission: finalReleaseAdmission,
+          });
+          await writeStagingMigrationCompletion(migrationCompletion, repositoryRoot);
+        }
         stagingMigrationHandled = true;
       } else {
         await assertStagingMigrationLedger({ environment: commandEnvironment, repositoryRoot });
         assertStagingDatabasePreflight({ environment: commandEnvironment, repositoryRoot });
+        assertRemotePostMigrationContract({
+          environment: commandEnvironment,
+          environmentName: "staging",
+          repositoryRoot,
+        });
       }
     }
     if (!stagingMigrationHandled) {
@@ -213,6 +337,18 @@ try {
         assertProductionDatabasePreflight({
           environment: commandEnvironment,
           requirePaymentProviderSchema: true,
+          repositoryRoot,
+        });
+        assertRemotePostMigrationContract({
+          environment: commandEnvironment,
+          environmentName: "production",
+          repositoryRoot,
+        });
+      }
+      if (requiresStagingDatabaseAdmission(operation, flags) && operation === "seed") {
+        assertRemotePostMigrationContract({
+          environment: commandEnvironment,
+          environmentName: "staging",
           repositoryRoot,
         });
       }

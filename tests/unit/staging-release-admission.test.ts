@@ -5,17 +5,23 @@ import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  assertStagingReleaseAdmission,
   assertStagingContinuationBinding,
   assertStagingDatabasePreflight,
   assertStagingMigrationLedger,
   assertStagingMigrationLedgerPrefix,
+  assertStagingMigrationCompletion,
+  assertStagingPostMigrationEvidence,
+  assertStagingReleaseAdmission,
+  buildStagingMigrationCompletion,
+  buildStagingPostMigrationEvidence,
   buildStagingReleaseManifest,
   captureStagingReleaseDatabaseBaseline,
-  validateStagingReleaseManifest,
-  parseStagingMigrationLedgerOutput,
   parseStagingDatabasePreflightOutput,
+  parseStagingMigrationLedgerOutput,
   runStagingMigrationWithVerification,
+  validateStagingReleaseManifest,
+  writeStagingMigrationCompletion,
+  writeStagingPostMigrationEvidence,
   writeStagingReleaseManifest,
 } from "../../scripts/lib/staging-release.mjs";
 
@@ -153,6 +159,86 @@ describe("staging release admission", () => {
         databaseId: "7ba9b340-514a-4b9f-81ed-00a4d115cc8d",
       });
     }).toThrow("staging_release_continuation_evidence_mismatch");
+  });
+
+  it("binds immutable post-migration evidence to the release, target, ledger, and migration completion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-staging-release-completion-"));
+    roots.push(root);
+    const manifest = await buildStagingReleaseManifest({
+      continuationEvidence: CONTINUATION_EVIDENCE,
+      databaseTarget: DATABASE_TARGET,
+      migrationLedgerPrefix: MIGRATION_LEDGER_PREFIX,
+      migrationNames: MIGRATIONS,
+      now: NOW,
+      repositoryState: repositoryState(),
+    });
+    const releaseAdmission = validateStagingReleaseManifest({
+      manifest,
+      migrationNames: MIGRATIONS,
+      now: NOW,
+      repositoryState: repositoryState(),
+    });
+    const migrationCompletion = buildStagingMigrationCompletion({
+      databaseTarget: DATABASE_TARGET,
+      migrationNames: MIGRATIONS,
+      now: new Date("2026-08-03T00:10:00.000Z"),
+      releaseAdmission,
+    });
+    await writeStagingMigrationCompletion(migrationCompletion, root);
+    await expect(assertStagingMigrationCompletion({
+      databaseTarget: DATABASE_TARGET,
+      migrationNames: MIGRATIONS,
+      now: new Date("2026-08-03T00:40:00.000Z"),
+      releaseAdmission,
+      repositoryRoot: root,
+    })).resolves.toEqual(migrationCompletion);
+
+    const postMigrationContinuation = {
+      backup: {
+        checksumSha256: "d".repeat(64),
+        completedAt: "2026-08-03T00:20:00.000Z",
+        reportRef: ".wrangler/backups/staging/bkp_20260803002000_cccccccccccc/snapshot.json",
+        sizeBytes: 256,
+        snapshotId: "bkp_20260803002000_cccccccccccc",
+      },
+      restore: {
+        completedAt: "2026-08-03T00:30:00.000Z",
+        reportRef: ".wrangler/restore-drills/staging/rdr_20260803003000_dddddddddddd.json",
+        snapshotId: "bkp_20260803003000_dddddddddddd",
+        targetResourceRef: "d1:selinow-restore-drill-staging-dddddddddddd",
+      },
+    };
+    const postMigrationEvidence = buildStagingPostMigrationEvidence({
+      continuationEvidence: postMigrationContinuation,
+      databaseTarget: DATABASE_TARGET,
+      migrationCompletion,
+      migrationNames: MIGRATIONS,
+      now: new Date("2026-08-03T00:40:00.000Z"),
+      releaseAdmission,
+    });
+    await writeStagingPostMigrationEvidence(postMigrationEvidence, root);
+    await expect(assertStagingPostMigrationEvidence({
+      continuationEvidence: postMigrationContinuation,
+      databaseTarget: DATABASE_TARGET,
+      migrationCompletion,
+      migrationNames: MIGRATIONS,
+      now: new Date("2026-08-03T00:45:00.000Z"),
+      releaseAdmission,
+      repositoryRoot: root,
+    })).resolves.toEqual(postMigrationEvidence);
+    await expect(writeStagingPostMigrationEvidence(postMigrationEvidence, root))
+      .rejects.toThrow("staging_post_migration_evidence_exists");
+    expect(() => buildStagingPostMigrationEvidence({
+      continuationEvidence: {
+        ...postMigrationContinuation,
+        backup: { ...postMigrationContinuation.backup, completedAt: migrationCompletion.completedAt },
+      },
+      databaseTarget: DATABASE_TARGET,
+      migrationCompletion,
+      migrationNames: MIGRATIONS,
+      now: new Date("2026-08-03T00:40:00.000Z"),
+      releaseAdmission,
+    })).toThrow("staging_post_migration_evidence_invalid");
   });
 
   it("requires the complete ordered migration ledger before staging deploy", async () => {

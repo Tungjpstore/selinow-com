@@ -12,6 +12,7 @@ import {
   assertProductionMigrationLedgerPrefix,
   parseProductionMigrationLedgerOutput,
   parseDatabaseFlags,
+  requiresMaintenanceDrainConfirmation,
   requiresProductionMigrationAdmission,
   requiresStagingDatabaseAdmission,
   resolveApprovedProductionDatabaseTarget,
@@ -53,6 +54,7 @@ describe("production database migration admission", () => {
   it("preserves local, staging, dry-run, and read-only command behavior", () => {
     expect(parseDatabaseFlags(["--env", "local"])).toMatchObject({
       environment: "local",
+      maintenanceDrainConfirmed: false,
       releaseManifestPath: null,
     });
     expect(parseDatabaseFlags(["--env", "staging", "--dry-run"])).toMatchObject({
@@ -91,6 +93,11 @@ describe("production database migration admission", () => {
       ...stagingFlags,
       dryRun: true,
     })).toBe(false);
+    const drainedStagingFlags = parseDatabaseFlags(["--env", "staging", "--confirm-maintenance-drain"]);
+    expect(drainedStagingFlags.maintenanceDrainConfirmed).toBe(true);
+    expect(requiresMaintenanceDrainConfirmation("migrate", stagingFlags)).toBe(true);
+    expect(requiresMaintenanceDrainConfirmation("migrate", drainedStagingFlags)).toBe(false);
+    expect(requiresMaintenanceDrainConfirmation("seed", stagingFlags)).toBe(false);
   });
 
   it("requires reviewed release evidence before staging database mutation", () => {
@@ -125,6 +132,30 @@ describe("production database migration admission", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr.trim()).toBe("production_release_manifest_required");
+  });
+
+  it("requires an explicit maintenance drain after manifest presence is established", () => {
+    const cases = [
+      ["staging"],
+      ["production", "--confirm-production"],
+    ];
+    for (const [environment, ...extra] of cases) {
+      const result = spawnSync(process.execPath, [
+        "scripts/db.mjs",
+        "migrate",
+        "--env",
+        environment ?? "missing",
+        ...extra,
+        "--release-manifest",
+        ".wrangler/releases/test/release-manifest.json",
+      ], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr.trim()).toBe("maintenance_drain_confirmation_required");
+    }
   });
 
   it("keeps production migration and status dry-runs network-free without a manifest", () => {
@@ -442,20 +473,23 @@ describe("production database migration admission", () => {
     expect(sink).toBeGreaterThan(pin);
   });
 
-  it("rechecks staging release and restore evidence before mutation sinks", () => {
+  it("rechecks manifest-pinned staging evidence before mutation and records migration completion", () => {
     const source = readFileSync("scripts/db.mjs", "utf8");
-    const firstRelease = source.indexOf("await assertStagingReleaseAdmission");
-    const firstGate = source.indexOf("await assertStagingMutationAdmission");
-    const continuation = source.indexOf("await assertFreshStagingContinuationEvidence", firstGate);
+    const stagingGate = source.indexOf("if (requiresStagingDatabaseAdmission(operation, flags))");
+    const firstRelease = source.indexOf("await assertStagingReleaseAdmission", stagingGate);
+    const firstGate = source.indexOf("await assertStagingMutationAdmission", firstRelease);
+    const continuation = source.indexOf("await assertStagingContinuationEvidenceByReference", firstGate);
     const finalGate = source.indexOf("await assertStagingMutationAdmission", firstGate + 1);
     const finalRelease = source.indexOf("await assertStagingReleaseAdmission", firstRelease + 1);
-    const finalContinuation = source.indexOf("await assertFreshStagingContinuationEvidence", continuation + 1);
+    const finalContinuation = source.indexOf("await assertStagingContinuationEvidenceByReference", continuation + 1);
     const stableTargetGuard = source.indexOf("staging_release_admission_changed", finalContinuation);
     const pin = source.indexOf("buildPinnedCloudflareEnvironment", finalGate);
     const migrationVerification = source.indexOf("await runStagingMigrationWithVerification", pin);
     const completeLedger = source.indexOf("await assertStagingMigrationLedger({", pin);
     const preflight = source.indexOf("assertStagingDatabasePreflight", completeLedger);
     const migrationSink = source.indexOf("runWrangler(wranglerArgs", migrationVerification);
+    const migrationCompletion = source.indexOf("buildStagingMigrationCompletion", migrationSink);
+    const migrationCompletionWrite = source.indexOf("writeStagingMigrationCompletion", migrationCompletion);
     const seedSink = source.indexOf("runWrangler(wranglerArgs", migrationSink + 1);
 
     expect(firstRelease).toBeGreaterThan(-1);
@@ -473,6 +507,31 @@ describe("production database migration admission", () => {
     expect(completeLedger).toBeLessThan(preflight);
     expect(preflight).toBeLessThan(seedSink);
     expect(migrationSink).toBeGreaterThan(pin);
+    expect(migrationCompletion).toBeGreaterThan(migrationSink);
+    expect(migrationCompletionWrite).toBeGreaterThan(migrationCompletion);
     expect(seedSink).toBeGreaterThan(preflight);
+  });
+
+  it("finalizes staging only from a completed ledger and post-migration backup/restore", () => {
+    const source = readFileSync("scripts/db.mjs", "utf8");
+    const completionBranch = source.indexOf('if (operation === "complete-release")');
+    const releaseAdmission = source.indexOf("await assertStagingReleaseAdmission", completionBranch);
+    const preEvidence = source.indexOf("await assertStagingContinuationEvidenceByReference", releaseAdmission);
+    const completeLedger = source.indexOf("await assertStagingMigrationLedger", preEvidence);
+    const migrationCompletion = source.indexOf("await assertStagingMigrationCompletion", completeLedger);
+    const postEvidence = source.indexOf("await assertFreshStagingContinuationEvidence", migrationCompletion);
+    const buildEvidence = source.indexOf("buildStagingPostMigrationEvidence", postEvidence);
+    const writeEvidence = source.indexOf("writeStagingPostMigrationEvidence", buildEvidence);
+    const validateEvidence = source.indexOf("await assertStagingPostMigrationEvidence", writeEvidence);
+
+    expect(completionBranch).toBeGreaterThan(-1);
+    expect(releaseAdmission).toBeGreaterThan(completionBranch);
+    expect(preEvidence).toBeGreaterThan(releaseAdmission);
+    expect(completeLedger).toBeGreaterThan(preEvidence);
+    expect(migrationCompletion).toBeGreaterThan(completeLedger);
+    expect(postEvidence).toBeGreaterThan(migrationCompletion);
+    expect(buildEvidence).toBeGreaterThan(postEvidence);
+    expect(writeEvidence).toBeGreaterThan(buildEvidence);
+    expect(validateEvidence).toBeGreaterThan(writeEvidence);
   });
 });

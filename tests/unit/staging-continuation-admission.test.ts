@@ -5,7 +5,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { assertFreshStagingContinuationEvidence } from "../../scripts/lib/backup.mjs";
+import {
+  assertFreshStagingContinuationEvidence,
+  assertStagingContinuationEvidenceByReference,
+} from "../../scripts/lib/backup.mjs";
 
 const ACCOUNT_ID = "abcdef0123456789abcdef0123456789";
 const DATABASE_ID = "17ea8f2f-4c97-4337-8989-28b25a58ddeb";
@@ -113,6 +116,51 @@ describe("staging continuation admission", () => {
       backup: { snapshotId: "bkp_20260803000000_aaaaaaaaaaaa" },
       reviewedCommitSha: REVIEWED_COMMIT,
       restore: { snapshotId: "bkp_20260803003000_bbbbbbbbbbbb" },
+    });
+  });
+
+  it("loads manifest-pinned evidence even when newer unrelated artifacts exist", async () => {
+    const evidence = await writeEvidenceRoot();
+    const pinned = await assertFreshStagingContinuationEvidence({
+      accountId: ACCOUNT_ID,
+      backupRoot: evidence.backupRoot,
+      databaseId: DATABASE_ID,
+      databaseName: DATABASE_NAME,
+      now: NOW,
+      repositoryRoot: process.cwd(),
+      restoreRoot: evidence.restoreRoot,
+      reviewedCommitSha: REVIEWED_COMMIT,
+    });
+    await mkdir(join(evidence.backupRoot, "bkp_20260803004000_eeeeeeeeeeee"), { mode: 0o700 });
+    await writeFile(
+      join(evidence.restoreRoot, "rdr_20260803004000_eeeeeeeeeeee.json"),
+      "{}\n",
+      { mode: 0o600 },
+    );
+
+    await expect(assertStagingContinuationEvidenceByReference({
+      accountId: ACCOUNT_ID,
+      backupRoot: evidence.backupRoot,
+      continuationEvidence: {
+        backupChecksumSha256: pinned.backup.checksumSha256,
+        backupCompletedAt: pinned.backup.completedAt,
+        backupReportRef: pinned.backup.reportRef,
+        backupSizeBytes: pinned.backup.sizeBytes,
+        backupSnapshotId: pinned.backup.snapshotId,
+        restoreCompletedAt: pinned.restore.completedAt,
+        restoreReportRef: pinned.restore.reportRef,
+        restoreSnapshotId: pinned.restore.snapshotId,
+        restoreTargetResourceRef: pinned.restore.targetResourceRef,
+      },
+      databaseId: DATABASE_ID,
+      databaseName: DATABASE_NAME,
+      evidenceRecordedAt: NOW,
+      repositoryRoot: process.cwd(),
+      restoreRoot: evidence.restoreRoot,
+      reviewedCommitSha: REVIEWED_COMMIT,
+    })).resolves.toMatchObject({
+      backup: { snapshotId: "bkp_20260803000000_aaaaaaaaaaaa" },
+      restore: { reportRef: evidence.reportPath },
     });
   });
 

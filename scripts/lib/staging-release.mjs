@@ -114,8 +114,10 @@ export function validateStagingReleaseManifest(input) {
   return {
     commitSha: input.repositoryState.commitSha,
     continuationEvidence: input.manifest.continuationEvidence,
+    createdAt: input.manifest.createdAt,
     databaseTarget: input.manifest.databaseTarget,
     migrationLedgerPrefix: input.manifest.migrationLedgerPrefix,
+    migrationNames: input.manifest.migrationNames,
     releaseId: input.manifest.releaseId,
     treeSha: input.repositoryState.treeSha,
   };
@@ -187,6 +189,296 @@ export function assertStagingContinuationBinding(admission, continuationEvidence
     || admission.databaseTarget.databaseName !== databaseTarget.databaseName) {
     throw new Error("staging_release_continuation_evidence_mismatch");
   }
+}
+
+function stagingReleaseArtifactPath(root, releaseId, fileName) {
+  if (!RELEASE_ID_PATTERN.test(releaseId ?? "")) throw new Error("staging_release_id_invalid");
+  return resolve(root, ".wrangler", "releases", "staging", releaseId, fileName);
+}
+
+async function writeImmutableStagingReleaseArtifact(root, releaseId, fileName, value, issue) {
+  const artifactPath = stagingReleaseArtifactPath(root, releaseId, fileName);
+  await mkdir(dirname(artifactPath), { mode: 0o700, recursive: true });
+  await chmod(dirname(artifactPath), 0o700);
+  try {
+    await writeFile(artifactPath, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    if (error?.code === "EEXIST") throw new Error(issue, { cause: error });
+    throw error;
+  }
+  await chmod(artifactPath, 0o600);
+  return artifactPath;
+}
+
+async function readPrivateStagingReleaseArtifact(path, missingIssue, permissionsIssue) {
+  let artifact;
+  let artifactStat;
+  try {
+    [artifact, artifactStat] = await Promise.all([
+      readFile(path, "utf8").then((value) => JSON.parse(value)),
+      lstat(path),
+    ]);
+  } catch {
+    throw new Error(missingIssue);
+  }
+  if (!artifactStat.isFile() || (artifactStat.mode & 0o077) !== 0) {
+    throw new Error(permissionsIssue);
+  }
+  return artifact;
+}
+
+function assertExactDatabaseTarget(actual, expected, issue) {
+  exactKeys(actual, ["accountId", "databaseId", "databaseName"], issue);
+  if (actual.accountId !== expected.accountId
+    || actual.databaseId !== expected.databaseId
+    || actual.databaseName !== expected.databaseName) {
+    throw new Error(issue);
+  }
+}
+
+function assertExactMigrationNames(actual, expected, issue) {
+  if (!Array.isArray(actual)
+    || actual.length !== expected.length
+    || actual.some((name, index) => name !== expected[index])) {
+    throw new Error(issue);
+  }
+}
+
+export function buildStagingMigrationCompletion(input) {
+  const now = input.now ?? new Date();
+  if (!Number.isFinite(now.getTime())) throw new Error("staging_migration_completion_invalid");
+  assertExactDatabaseTarget(
+    input.databaseTarget,
+    input.releaseAdmission.databaseTarget,
+    "staging_migration_completion_target_mismatch",
+  );
+  assertExactMigrationNames(
+    input.migrationNames,
+    input.releaseAdmission.migrationNames,
+    "staging_migration_completion_ledger_mismatch",
+  );
+  if (now.getTime() < new Date(input.releaseAdmission.createdAt).getTime()) {
+    throw new Error("staging_migration_completion_invalid");
+  }
+  return {
+    commitSha: input.releaseAdmission.commitSha,
+    completedAt: now.toISOString(),
+    databaseTarget: { ...input.databaseTarget },
+    environment: "staging",
+    migrationNames: [...input.migrationNames],
+    releaseId: input.releaseAdmission.releaseId,
+    schemaVersion: 1,
+    treeSha: input.releaseAdmission.treeSha,
+  };
+}
+
+export function writeStagingMigrationCompletion(completion, root = repositoryRoot) {
+  return writeImmutableStagingReleaseArtifact(
+    root,
+    completion.releaseId,
+    "migration-completion.json",
+    completion,
+    "staging_migration_completion_exists",
+  );
+}
+
+export async function assertStagingMigrationCompletion(input) {
+  const root = input.repositoryRoot ?? repositoryRoot;
+  const artifactPath = stagingReleaseArtifactPath(
+    root,
+    input.releaseAdmission.releaseId,
+    "migration-completion.json",
+  );
+  const completion = await readPrivateStagingReleaseArtifact(
+    artifactPath,
+    "staging_migration_completion_missing",
+    "staging_migration_completion_permissions_invalid",
+  );
+  exactKeys(completion, [
+    "commitSha",
+    "completedAt",
+    "databaseTarget",
+    "environment",
+    "migrationNames",
+    "releaseId",
+    "schemaVersion",
+    "treeSha",
+  ], "staging_migration_completion_invalid");
+  assertExactDatabaseTarget(
+    completion.databaseTarget,
+    input.databaseTarget,
+    "staging_migration_completion_target_mismatch",
+  );
+  assertExactMigrationNames(
+    completion.migrationNames,
+    input.migrationNames,
+    "staging_migration_completion_ledger_mismatch",
+  );
+  const completedAt = new Date(completion.completedAt ?? "");
+  const now = input.now ?? new Date();
+  if (completion.schemaVersion !== 1
+    || completion.environment !== "staging"
+    || completion.releaseId !== input.releaseAdmission.releaseId
+    || completion.commitSha !== input.releaseAdmission.commitSha
+    || completion.treeSha !== input.releaseAdmission.treeSha
+    || !Number.isFinite(completedAt.getTime())
+    || completedAt.toISOString() !== completion.completedAt
+    || completedAt.getTime() < new Date(input.releaseAdmission.createdAt).getTime()
+    || completedAt.getTime() > now.getTime()) {
+    throw new Error("staging_migration_completion_invalid");
+  }
+  return completion;
+}
+
+function continuationEvidenceRecord(continuationEvidence) {
+  return {
+    backupChecksumSha256: continuationEvidence.backup.checksumSha256,
+    backupCompletedAt: continuationEvidence.backup.completedAt,
+    backupReportRef: continuationEvidence.backup.reportRef,
+    backupSizeBytes: continuationEvidence.backup.sizeBytes,
+    backupSnapshotId: continuationEvidence.backup.snapshotId,
+    restoreCompletedAt: continuationEvidence.restore.completedAt,
+    restoreReportRef: continuationEvidence.restore.reportRef,
+    restoreSnapshotId: continuationEvidence.restore.snapshotId,
+    restoreTargetResourceRef: continuationEvidence.restore.targetResourceRef,
+  };
+}
+
+export function buildStagingPostMigrationEvidence(input) {
+  const now = input.now ?? new Date();
+  const evidence = continuationEvidenceRecord(input.continuationEvidence);
+  const backupCompletedAt = new Date(evidence.backupCompletedAt);
+  const restoreCompletedAt = new Date(evidence.restoreCompletedAt);
+  const migrationCompletedAt = new Date(input.migrationCompletion.completedAt);
+  assertExactDatabaseTarget(
+    input.databaseTarget,
+    input.releaseAdmission.databaseTarget,
+    "staging_post_migration_target_mismatch",
+  );
+  assertExactMigrationNames(
+    input.migrationNames,
+    input.releaseAdmission.migrationNames,
+    "staging_post_migration_ledger_mismatch",
+  );
+  if (input.migrationCompletion.releaseId !== input.releaseAdmission.releaseId
+    || input.migrationCompletion.commitSha !== input.releaseAdmission.commitSha
+    || input.migrationCompletion.treeSha !== input.releaseAdmission.treeSha
+    || evidence.backupSnapshotId === input.releaseAdmission.continuationEvidence.backupSnapshotId
+    || evidence.restoreReportRef === input.releaseAdmission.continuationEvidence.restoreReportRef
+    || !Number.isFinite(now.getTime())
+    || !Number.isFinite(backupCompletedAt.getTime())
+    || !Number.isFinite(restoreCompletedAt.getTime())
+    || !Number.isFinite(migrationCompletedAt.getTime())
+    || backupCompletedAt.getTime() <= migrationCompletedAt.getTime()
+    || restoreCompletedAt.getTime() < backupCompletedAt.getTime()
+    || restoreCompletedAt.getTime() > now.getTime()) {
+    throw new Error("staging_post_migration_evidence_invalid");
+  }
+  return {
+    commitSha: input.releaseAdmission.commitSha,
+    completedAt: now.toISOString(),
+    continuationEvidence: evidence,
+    databaseTarget: { ...input.databaseTarget },
+    environment: "staging",
+    migrationCompletedAt: input.migrationCompletion.completedAt,
+    migrationNames: [...input.migrationNames],
+    releaseId: input.releaseAdmission.releaseId,
+    schemaVersion: 1,
+    treeSha: input.releaseAdmission.treeSha,
+  };
+}
+
+export function writeStagingPostMigrationEvidence(evidence, root = repositoryRoot) {
+  return writeImmutableStagingReleaseArtifact(
+    root,
+    evidence.releaseId,
+    "post-migration-evidence.json",
+    evidence,
+    "staging_post_migration_evidence_exists",
+  );
+}
+
+export async function readStagingPostMigrationEvidence(input) {
+  const root = input.repositoryRoot ?? repositoryRoot;
+  const artifactPath = stagingReleaseArtifactPath(
+    root,
+    input.releaseAdmission.releaseId,
+    "post-migration-evidence.json",
+  );
+  const evidence = await readPrivateStagingReleaseArtifact(
+    artifactPath,
+    "staging_post_migration_evidence_missing",
+    "staging_post_migration_evidence_permissions_invalid",
+  );
+  exactKeys(evidence, [
+    "commitSha",
+    "completedAt",
+    "continuationEvidence",
+    "databaseTarget",
+    "environment",
+    "migrationCompletedAt",
+    "migrationNames",
+    "releaseId",
+    "schemaVersion",
+    "treeSha",
+  ], "staging_post_migration_evidence_invalid");
+  exactKeys(evidence.continuationEvidence, [
+    "backupChecksumSha256",
+    "backupCompletedAt",
+    "backupReportRef",
+    "backupSizeBytes",
+    "backupSnapshotId",
+    "restoreCompletedAt",
+    "restoreReportRef",
+    "restoreSnapshotId",
+    "restoreTargetResourceRef",
+  ], "staging_post_migration_evidence_invalid");
+  assertExactDatabaseTarget(
+    evidence.databaseTarget,
+    input.databaseTarget,
+    "staging_post_migration_target_mismatch",
+  );
+  assertExactMigrationNames(
+    evidence.migrationNames,
+    input.migrationNames,
+    "staging_post_migration_ledger_mismatch",
+  );
+  const completedAt = new Date(evidence.completedAt ?? "");
+  const migrationCompletedAt = new Date(evidence.migrationCompletedAt ?? "");
+  if (evidence.schemaVersion !== 1
+    || evidence.environment !== "staging"
+    || evidence.releaseId !== input.releaseAdmission.releaseId
+    || evidence.commitSha !== input.releaseAdmission.commitSha
+    || evidence.treeSha !== input.releaseAdmission.treeSha
+    || evidence.migrationCompletedAt !== input.migrationCompletion.completedAt
+    || !Number.isFinite(completedAt.getTime())
+    || completedAt.toISOString() !== evidence.completedAt
+    || !Number.isFinite(migrationCompletedAt.getTime())
+    || completedAt.getTime() < migrationCompletedAt.getTime()
+    || completedAt.getTime() > (input.now ?? new Date()).getTime()) {
+    throw new Error("staging_post_migration_evidence_invalid");
+  }
+  return evidence;
+}
+
+export async function assertStagingPostMigrationEvidence(input) {
+  const evidence = await readStagingPostMigrationEvidence(input);
+  const expected = buildStagingPostMigrationEvidence({
+    continuationEvidence: input.continuationEvidence,
+    databaseTarget: input.databaseTarget,
+    migrationCompletion: input.migrationCompletion,
+    migrationNames: input.migrationNames,
+    now: new Date(evidence.completedAt),
+    releaseAdmission: input.releaseAdmission,
+  });
+  if (JSON.stringify(evidence) !== JSON.stringify(expected)) {
+    throw new Error("staging_post_migration_evidence_mismatch");
+  }
+  return evidence;
 }
 
 export function parseStagingMigrationLedgerOutput(output) {
@@ -338,6 +630,9 @@ export async function runStagingMigrationWithVerification(input) {
   await input.runMigrationImplementation();
   await complete(shared);
   preflight(shared);
+  if (input.assertPostMigrationContractImplementation !== undefined) {
+    await input.assertPostMigrationContractImplementation(shared);
+  }
 }
 
 export async function writeStagingReleaseManifest(manifest, root = repositoryRoot) {

@@ -4,6 +4,7 @@ export type DatabaseFlags = {
   dryRun: boolean;
   environment: "local" | "staging" | "production";
   json: boolean;
+  maintenanceDrainConfirmed: boolean;
   releaseManifestPath: string | null;
 };
 
@@ -11,6 +12,7 @@ export function parseDatabaseFlags(argv: string[]): DatabaseFlags;
 export function requiresProductionMigrationAdmission(operation: string | undefined, flags: DatabaseFlags): boolean;
 export function requiresStagingDatabaseAdmission(operation: string | undefined, flags: DatabaseFlags): boolean;
 export function requiresStagingReleaseManifest(operation: string | undefined, flags: DatabaseFlags): boolean;
+export function requiresMaintenanceDrainConfirmation(operation: string | undefined, flags: DatabaseFlags): boolean;
 export function resolveApprovedProductionDatabaseTarget(input: {
   productionSpec: Record<string, any>;
   wranglerConfig: Record<string, any>;

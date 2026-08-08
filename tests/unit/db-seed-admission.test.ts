@@ -51,6 +51,7 @@ async function runDatabaseCli(input: {
       assertProductionMigrationLedger: vi.fn(() => Promise.resolve({ migrationNames: [] })),
       assertProductionMigrationAdmission: admission,
       parseDatabaseFlags,
+      requiresMaintenanceDrainConfirmation: vi.fn(() => false),
       requiresProductionMigrationAdmission,
       requiresStagingDatabaseAdmission,
     };
@@ -61,6 +62,9 @@ async function runDatabaseCli(input: {
       writeOutput: vi.fn(),
     };
   });
+  vi.doMock("../../scripts/lib/db-post-migration-contract.mjs", () => ({
+    assertRemotePostMigrationContract: vi.fn(() => ({ ok: true })),
+  }));
 
   process.argv = [
     process.execPath,
@@ -84,6 +88,7 @@ afterEach(() => {
   vi.resetModules();
   vi.doUnmock("../../scripts/lib/db-admission.mjs");
   vi.doUnmock("../../scripts/lib/cli.mjs");
+  vi.doUnmock("../../scripts/lib/db-post-migration-contract.mjs");
 });
 
 describe("production seed admission CLI", () => {

@@ -129,19 +129,36 @@ describe("deploy command safety", () => {
     expect(source).toContain("buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId)");
   });
 
-  it("enforces candidate, restore evidence, and final staging admission before deploy", () => {
+  it("enforces immutable pre/post migration evidence before and after the staging build", () => {
     const source = readFileSync("scripts/deploy.mjs", "utf8");
     const firstRelease = source.indexOf("await assertStagingReleaseAdmission");
     const firstAdmission = source.indexOf("await assertStagingMutationAdmission");
     const build = source.indexOf('run("npm", ["run", "build"]');
-    const firstContinuation = source.indexOf("await assertFreshStagingContinuationEvidence");
+    const firstPreContinuation = source.indexOf("await assertStagingContinuationEvidenceByReference");
     const firstMigrationLedger = source.indexOf("await assertStagingMigrationLedger");
     const firstDatabasePreflight = source.indexOf("stagingPreflightAdmission = assertStagingDatabasePreflight");
+    const firstMigrationCompletion = source.indexOf("await assertStagingMigrationCompletion", firstDatabasePreflight);
+    const firstPostRecord = source.indexOf("await readStagingPostMigrationEvidence", firstMigrationCompletion);
+    const firstPostContinuation = source.indexOf(
+      "await assertStagingContinuationEvidenceByReference",
+      firstPreContinuation + 1,
+    );
+    const firstPostEvidence = source.indexOf("await assertStagingPostMigrationEvidence", firstPostContinuation);
     const secondRelease = source.indexOf("await assertStagingReleaseAdmission", firstRelease + 1);
-    const secondContinuation = source.indexOf("await assertFreshStagingContinuationEvidence", firstContinuation + 1);
     const secondMigrationLedger = source.indexOf("await assertStagingMigrationLedger", firstMigrationLedger + 1);
     const secondDatabasePreflight = source.indexOf("finalPreflightAdmission = assertStagingDatabasePreflight");
     const secondAdmission = source.indexOf("await assertStagingMutationAdmission", firstAdmission + 1);
+    const secondPreContinuation = source.indexOf(
+      "await assertStagingContinuationEvidenceByReference",
+      firstPostContinuation + 1,
+    );
+    const secondMigrationCompletion = source.indexOf("await assertStagingMigrationCompletion", firstMigrationCompletion + 1);
+    const secondPostRecord = source.indexOf("await readStagingPostMigrationEvidence", firstPostRecord + 1);
+    const secondPostContinuation = source.indexOf(
+      "await assertStagingContinuationEvidenceByReference",
+      secondPreContinuation + 1,
+    );
+    const secondPostEvidence = source.indexOf("await assertStagingPostMigrationEvidence", firstPostEvidence + 1);
     const stableTargetGuard = source.indexOf("staging_release_admission_changed", secondAdmission);
     const deploySink = source.indexOf('const deployArgs = ["wrangler", "deploy"]');
 
@@ -149,20 +166,30 @@ describe("deploy command safety", () => {
     expect(firstRelease).toBeLessThan(firstAdmission);
     expect(firstAdmission).toBeGreaterThan(-1);
     expect(firstAdmission).toBeLessThan(build);
-    expect(firstContinuation).toBeGreaterThan(firstAdmission);
-    expect(firstContinuation).toBeLessThan(build);
-    expect(firstMigrationLedger).toBeGreaterThan(firstContinuation);
+    expect(firstPreContinuation).toBeGreaterThan(firstAdmission);
+    expect(firstPreContinuation).toBeLessThan(build);
+    expect(firstMigrationLedger).toBeGreaterThan(firstPreContinuation);
     expect(firstMigrationLedger).toBeLessThan(build);
     expect(firstDatabasePreflight).toBeGreaterThan(firstMigrationLedger);
     expect(firstDatabasePreflight).toBeLessThan(build);
+    expect(firstMigrationCompletion).toBeGreaterThan(firstDatabasePreflight);
+    expect(firstPostRecord).toBeGreaterThan(firstMigrationCompletion);
+    expect(firstPostContinuation).toBeGreaterThan(firstPostRecord);
+    expect(firstPostEvidence).toBeGreaterThan(firstPostContinuation);
+    expect(firstPostEvidence).toBeLessThan(build);
     expect(secondRelease).toBeGreaterThan(build);
-    expect(secondContinuation).toBeGreaterThan(secondRelease);
-    expect(secondAdmission).toBeGreaterThan(secondContinuation);
+    expect(secondAdmission).toBeGreaterThan(secondRelease);
+    expect(secondPreContinuation).toBeGreaterThan(secondAdmission);
     expect(secondAdmission).toBeLessThan(deploySink);
     expect(secondMigrationLedger).toBeGreaterThan(secondAdmission);
     expect(secondMigrationLedger).toBeLessThan(deploySink);
     expect(secondDatabasePreflight).toBeGreaterThan(secondMigrationLedger);
     expect(secondDatabasePreflight).toBeLessThan(deploySink);
+    expect(secondMigrationCompletion).toBeGreaterThan(secondDatabasePreflight);
+    expect(secondPostRecord).toBeGreaterThan(secondMigrationCompletion);
+    expect(secondPostContinuation).toBeGreaterThan(secondPostRecord);
+    expect(secondPostEvidence).toBeGreaterThan(secondPostContinuation);
+    expect(secondPostEvidence).toBeLessThan(deploySink);
     expect(stableTargetGuard).toBeGreaterThan(secondAdmission);
     expect(stableTargetGuard).toBeLessThan(deploySink);
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN");

@@ -32,20 +32,40 @@ export type StagingReleaseManifest = {
   treeSha: string;
 };
 
+export type StagingReleaseAdmission = {
+  commitSha: string;
+  continuationEvidence: StagingReleaseManifest["continuationEvidence"];
+  createdAt: string;
+  databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationLedgerPrefix: string[];
+  migrationNames: string[];
+  releaseId: string;
+  treeSha: string;
+};
+
+export type StagingMigrationCompletion = {
+  commitSha: string;
+  completedAt: string;
+  databaseTarget: StagingReleaseManifest["databaseTarget"];
+  environment: "staging";
+  migrationNames: string[];
+  releaseId: string;
+  schemaVersion: 1;
+  treeSha: string;
+};
+
+export type StagingPostMigrationEvidence = StagingMigrationCompletion & {
+  continuationEvidence: StagingReleaseManifest["continuationEvidence"];
+  migrationCompletedAt: string;
+};
+
 export function readStagingRepositoryState(root?: string): StagingRepositoryState;
 export function validateStagingReleaseManifest(input: {
   manifest: StagingReleaseManifest;
   migrationNames: string[];
   now?: Date;
   repositoryState: StagingRepositoryState;
-}): {
-  commitSha: string;
-  continuationEvidence: StagingReleaseManifest["continuationEvidence"];
-  databaseTarget: StagingReleaseManifest["databaseTarget"];
-  migrationLedgerPrefix: string[];
-  releaseId: string;
-  treeSha: string;
-};
+}): StagingReleaseAdmission;
 export function buildStagingReleaseManifest(input?: {
   continuationEvidence: {
     backup: {
@@ -77,6 +97,46 @@ export function assertStagingContinuationBinding(
   continuationEvidence: Parameters<typeof buildStagingReleaseManifest>[0]["continuationEvidence"],
   databaseTarget: StagingReleaseManifest["databaseTarget"],
 ): void;
+export function buildStagingMigrationCompletion(input: {
+  databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationNames: string[];
+  now?: Date;
+  releaseAdmission: StagingReleaseAdmission;
+}): StagingMigrationCompletion;
+export function writeStagingMigrationCompletion(
+  completion: StagingMigrationCompletion,
+  root?: string,
+): Promise<string>;
+export function assertStagingMigrationCompletion(input: {
+  databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationNames: string[];
+  now?: Date;
+  releaseAdmission: StagingReleaseAdmission;
+  repositoryRoot?: string;
+}): Promise<StagingMigrationCompletion>;
+export function buildStagingPostMigrationEvidence(input: {
+  continuationEvidence: Parameters<typeof buildStagingReleaseManifest>[0]["continuationEvidence"];
+  databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationCompletion: StagingMigrationCompletion;
+  migrationNames: string[];
+  now?: Date;
+  releaseAdmission: StagingReleaseAdmission;
+}): StagingPostMigrationEvidence;
+export function writeStagingPostMigrationEvidence(
+  evidence: StagingPostMigrationEvidence,
+  root?: string,
+): Promise<string>;
+export function readStagingPostMigrationEvidence(input: {
+  databaseTarget: StagingReleaseManifest["databaseTarget"];
+  migrationCompletion: StagingMigrationCompletion;
+  migrationNames: string[];
+  now?: Date;
+  releaseAdmission: StagingReleaseAdmission;
+  repositoryRoot?: string;
+}): Promise<StagingPostMigrationEvidence>;
+export function assertStagingPostMigrationEvidence(input: Parameters<typeof readStagingPostMigrationEvidence>[0] & {
+  continuationEvidence: Parameters<typeof buildStagingReleaseManifest>[0]["continuationEvidence"];
+}): Promise<StagingPostMigrationEvidence>;
 export function parseStagingMigrationLedgerOutput(output: string): string[];
 export function assertStagingMigrationLedger(input?: {
   environment?: NodeJS.ProcessEnv;
@@ -135,6 +195,11 @@ export function runStagingMigrationWithVerification(input: {
     migrationNames?: string[];
     repositoryRoot?: string;
   }) => unknown;
+  assertPostMigrationContractImplementation?: (input?: {
+    environment?: NodeJS.ProcessEnv;
+    migrationNames?: string[];
+    repositoryRoot?: string;
+  }) => unknown;
   assertMigrationLedgerImplementation?: (input?: {
     environment?: NodeJS.ProcessEnv;
     migrationNames?: string[];
@@ -159,11 +224,4 @@ export function assertStagingReleaseAdmission(input: {
   now?: Date;
   repositoryRoot?: string;
   repositoryState?: StagingRepositoryState;
-}): Promise<{
-  commitSha: string;
-  continuationEvidence: StagingReleaseManifest["continuationEvidence"];
-  databaseTarget: StagingReleaseManifest["databaseTarget"];
-  migrationLedgerPrefix: string[];
-  releaseId: string;
-  treeSha: string;
-}>;
+}): Promise<StagingReleaseAdmission>;
