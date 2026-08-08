@@ -254,7 +254,7 @@ describe("PayOS provider identity ownership", () => {
     const fetchCount = { value: 0 };
     const failingFetcher: typeof fetch = () => {
       fetchCount.value += 1;
-      return Promise.resolve(new Response(JSON.stringify({ code: "01", desc: "timeout after provider processing" }), { status: 503 }));
+      return Promise.resolve(new Response(JSON.stringify({ code: "01", desc: "credentials rejected" }), { status: 409 }));
     };
     await expect(connectPayOS({ credentials: CHANNEL_A, env, fetcher: failingFetcher, requestId: "request-failed", shopPublicId: SHOP_A, userId: "owner-a" }))
       .rejects.toMatchObject({ code: "provider_verification_failed", status: 409 });
