@@ -36,6 +36,8 @@ class SqliteStatement {
 }
 
 class SqliteD1 {
+  beforeNextBatch: (() => void) | null = null;
+
   constructor(readonly database: DatabaseSync) {}
 
   prepare(sql: string): SqliteStatement {
@@ -43,6 +45,9 @@ class SqliteD1 {
   }
 
   async batch(statements: SqliteStatement[]): Promise<Array<{ meta: { changes: number } }>> {
+    const beforeBatch = this.beforeNextBatch;
+    this.beforeNextBatch = null;
+    beforeBatch?.();
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const results: Array<{ meta: { changes: number } }> = [];
@@ -62,7 +67,7 @@ function applyMigrations(database: DatabaseSync): void {
   }
 }
 
-function fixture(input: { providerSubscriptionRef: string | null; state: "active" | "trialing" } = { providerSubscriptionRef: null, state: "trialing" }): { database: DatabaseSync; env: AppBindings } {
+function fixture(input: { providerSubscriptionRef: string | null; state: "active" | "trialing" } = { providerSubscriptionRef: null, state: "trialing" }): { database: DatabaseSync; env: AppBindings; platformDb: SqliteD1 } {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON");
   applyMigrations(database);
@@ -85,6 +90,7 @@ function fixture(input: { providerSubscriptionRef: string | null; state: "active
       'dodo', ${input.providerSubscriptionRef === null ? "NULL" : `'${input.providerSubscriptionRef}'`}, 'global', 'USD', 1500, 'month', 1, 'price_pro_global_v1',
       '${NOW_ISO}', '${NOW_ISO}');
   `);
+  const platformDb = new SqliteD1(database);
   return {
     database,
     env: {
@@ -92,9 +98,10 @@ function fixture(input: { providerSubscriptionRef: string | null; state: "active
       DODO_PAYMENTS_API_KEY: "dodo-api-key-for-state-tests",
       DODO_PAYMENTS_API_BASE_URL: "https://test.dodopayments.com",
       DODO_PAYMENTS_WEBHOOK_KEY: SECRET,
-      PLATFORM_DB: new SqliteD1(database) as unknown as D1Database,
+      PLATFORM_DB: platformDb as unknown as D1Database,
       SESSION_SECRET: "session-secret-for-state-tests",
     } as unknown as AppBindings,
+    platformDb,
   };
 }
 
@@ -237,6 +244,43 @@ describe("Dodo billing state-machine hardening", () => {
     expect(testFixture.database.prepare("SELECT provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: "sub_test_legacy_binding" });
     await expect(webhook(testFixture, body, "msg_legacy_binding")).resolves.toEqual({ duplicate: true, processed: false, state: "processed" });
     expect(testFixture.database.prepare("SELECT provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: "sub_test_legacy_binding" });
+    testFixture.database.close();
+  });
+
+  it("conflicts and audits a competing first-payment reference that wins before the guarded update", async () => {
+    const testFixture = fixture();
+    addCheckout(testFixture.database, { status: "open" });
+    testFixture.platformDb.beforeNextBatch = () => {
+      testFixture.database.exec(`
+        UPDATE shop_subscriptions
+        SET state = 'active', provider_subscription_ref = 'sub_test_competing_winner',
+          trial_ends_at = NULL, version = version + 1, updated_at = '${NOW_ISO}'
+        WHERE id = 'billing-sub-hardening';
+        UPDATE billing_checkout_sessions
+        SET status = 'completed', completed_at = '${NOW_ISO}', version = version + 1
+        WHERE id = 'bchk-hardening';
+      `);
+    };
+    const body = bodyFor({
+      amount: 1500,
+      eventType: "payment.succeeded",
+      metadata: exactMetadata,
+      paymentId: "pay_test_competing_loser",
+      subscriptionId: "sub_test_competing_loser",
+    });
+
+    await expect(webhook(testFixture, body, "msg_competing_loser")).rejects.toMatchObject({ code: "billing_webhook_identity_mismatch", status: 409 });
+    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: "sub_test_competing_winner", state: "active" });
+    expect(testFixture.database.prepare("SELECT status FROM billing_provider_events WHERE provider_code = 'dodo' AND provider_event_id = 'msg_competing_loser'").get()).toEqual({ status: "conflict" });
+    expect(testFixture.database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM subscription_events AS events
+      INNER JOIN billing_provider_events AS provider_events ON provider_events.id = events.provider_event_id
+      WHERE provider_events.provider_event_id = 'msg_competing_loser'
+    `).get()).toEqual({ count: 0 });
+    expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'billing.webhook_identity_mismatch'").get()).toEqual({ count: 1 });
+    await expect(webhook(testFixture, body, "msg_competing_loser")).resolves.toEqual({ duplicate: true, processed: false, state: "conflict" });
+    expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'billing.webhook_identity_mismatch'").get()).toEqual({ count: 1 });
     testFixture.database.close();
   });
 

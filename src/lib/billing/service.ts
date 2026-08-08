@@ -1309,6 +1309,12 @@ export async function processDodoWebhook(input: {
         target, target, event.periodStart, target, event.periodEnd,
         event.providerSubscriptionId, nowIso, subscription.id, subscription.version, event.providerSubscriptionId,
       ));
+      // A zero-row identity/version guard must abort the whole D1 batch before
+      // this event can insert transition evidence or mark itself processed.
+      statements.push(input.env.PLATFORM_DB.prepare(`
+        UPDATE shop_subscriptions SET version = 0
+        WHERE id = ? AND changes() = 0
+      `).bind(subscription.id));
     }
     if (target !== null) {
       statements.push(input.env.PLATFORM_DB.prepare(`
@@ -1377,6 +1383,17 @@ export async function processDodoWebhook(input: {
       if ((eventResult?.meta.changes ?? 0) !== 1) throw new AppError("billing_webhook_lease_lost", 409);
     } catch (error) {
       if (error instanceof Error && /version > 0|CHECK constraint failed/u.test(error.message)) {
+        const currentIdentity = await input.env.PLATFORM_DB.prepare(`
+          SELECT provider_subscription_ref AS providerSubscriptionRef
+          FROM shop_subscriptions
+          WHERE id = ? AND shop_id = ?
+          LIMIT 1
+        `).bind(subscription.id, session.shopId).first<{ providerSubscriptionRef: string | null }>();
+        if (currentIdentity !== null
+          && currentIdentity.providerSubscriptionRef !== null
+          && currentIdentity.providerSubscriptionRef !== event.providerSubscriptionId) {
+          throw new AppError("billing_webhook_identity_mismatch", 409);
+        }
         throw new AppError("billing_subscription_version_conflict", 409);
       }
       throw error;

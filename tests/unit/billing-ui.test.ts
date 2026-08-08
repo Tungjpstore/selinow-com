@@ -7,6 +7,42 @@ import { subscriptionStatePresentation } from "../../src/lib/dashboard/billing-u
 import { getBillingCheckoutAdmission } from "../../src/lib/dashboard/billing-checkout";
 import { createDashboardTranslator } from "../../src/lib/i18n/catalogs/dashboard";
 
+type Attempt = { idempotencyKey: string; planCode: string; recovery: boolean; shopPublicId: string };
+type AttemptStorage = {
+  getItem: (key: string) => string | null;
+  removeItem: (key: string) => void;
+  setItem: (key: string, value: string) => void;
+};
+type AttemptTracker = {
+  begin: (input: { planCode: string; recovery: boolean; shopPublicId: string }) => Attempt;
+  fail: (attempt: Pick<Attempt, "idempotencyKey">, terminalResponse: boolean) => void;
+  finish: (attempt: Pick<Attempt, "idempotencyKey">) => void;
+};
+type BillingScriptModule = {
+  acceptBillingCheckoutResponse: (payload: Record<string, unknown> | null, attempt: Attempt, tracker: AttemptTracker) => string;
+  BillingCheckoutAttemptTracker: new (input: { createKey: () => string; now: () => number; storage: AttemptStorage; ttlMs?: number }) => AttemptTracker;
+  isBillingCheckoutTerminalFailure: (error: unknown) => boolean;
+};
+
+function memoryStorage(): AttemptStorage & { value: (key: string) => string | null } {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    removeItem: (key) => { values.delete(key); },
+    setItem: (key, value) => { values.set(key, value); },
+    value: (key) => values.get(key) ?? null,
+  };
+}
+
+async function loadBillingScript(): Promise<BillingScriptModule> {
+  vi.stubGlobal("document", { querySelector: () => null });
+  try {
+    return await import("../../src/scripts/dashboard/billing") as unknown as BillingScriptModule;
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
 describe("subscription state presentation", () => {
   it("does not present blocked or degraded subscriptions as success", () => {
     expect(subscriptionStatePresentation("active", "vi-VN").tone).toBe("success");
@@ -53,44 +89,88 @@ describe("subscription state presentation", () => {
     expect(source).not.toMatch(/paddle/iu);
   });
 
-  it("reuses one in-memory checkout key after response loss and rotates it at terminal boundaries", async () => {
-    vi.stubGlobal("document", { querySelector: () => null });
-    const billingModule = await import("../../src/scripts/dashboard/billing");
-    vi.unstubAllGlobals();
-    const Tracker = (billingModule as unknown as {
-      BillingCheckoutAttemptTracker: new (createKey: () => string) => {
-        begin: (input: { planCode: string; recovery: boolean; shopPublicId: string }) => { idempotencyKey: string };
-        fail: (attempt: { idempotencyKey: string }, terminalResponse: boolean) => void;
-        finish: (attempt: { idempotencyKey: string }) => void;
-      };
-    }).BillingCheckoutAttemptTracker;
-    const isTerminalFailure = (billingModule as unknown as {
-      isBillingCheckoutTerminalFailure: (error: unknown) => boolean;
-    }).isBillingCheckoutTerminalFailure;
+  it("reuses a scoped checkout key after reload without persisting credentials", async () => {
+    const billingModule = await loadBillingScript();
+    const Tracker = billingModule.BillingCheckoutAttemptTracker;
+    const acceptResponse = billingModule.acceptBillingCheckoutResponse;
+    const isTerminalFailure = billingModule.isBillingCheckoutTerminalFailure;
     expect(Tracker).toBeTypeOf("function");
+    expect(acceptResponse).toBeTypeOf("function");
     expect(isTerminalFailure).toBeTypeOf("function");
     expect(isTerminalFailure({ code: "billing_provider_unavailable", terminalResponse: true })).toBe(false);
     expect(isTerminalFailure({ code: "plan_price_unavailable", terminalResponse: true })).toBe(true);
 
-    const generatedKeys = ["checkout-key-1", "checkout-key-2", "checkout-key-3", "checkout-key-4", "checkout-key-5"];
-    const tracker = new Tracker(() => generatedKeys.shift() ?? "unexpected-key");
-    const first = tracker.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" });
-    tracker.fail(first, false);
-    expect(tracker.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-1");
+    const storage = memoryStorage();
+    const firstTracker = new Tracker({ createKey: () => "checkout-key-1", now: () => 1_000, storage });
+    const first = firstTracker.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" });
+    firstTracker.fail(first, false);
+    const reloadKeys = ["checkout-key-2", "checkout-key-3", "checkout-key-4"];
+    const reloadedTracker = new Tracker({ createKey: () => reloadKeys.shift() ?? "unexpected-key", now: () => 2_000, storage });
+    expect(reloadedTracker.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-1");
+    const persisted = storage.value("selinow.billing.checkout-attempt.v1");
+    expect(persisted).not.toBeNull();
+    expect(JSON.parse(persisted ?? "null")).toEqual({
+      expiresAt: 1_801_000,
+      idempotencyKey: "checkout-key-1",
+      planCode: "starter",
+      recovery: false,
+      shopPublicId: "shop-a",
+      version: 1,
+    });
+    expect(persisted).not.toMatch(/csrf|credential|secret|token/iu);
 
-    const changedPlan = tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" });
+    const changedPlan = reloadedTracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" });
     expect(changedPlan.idempotencyKey).toBe("checkout-key-2");
-    tracker.fail(changedPlan, true);
-    expect(tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-3");
-
-    const changedShop = tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-b" });
+    expect(JSON.parse(storage.value("selinow.billing.checkout-attempt.v1") ?? "null")).toMatchObject({ idempotencyKey: "checkout-key-2", planCode: "pro" });
+    const changedRecovery = reloadedTracker.begin({ planCode: "pro", recovery: true, shopPublicId: "shop-a" });
+    expect(changedRecovery.idempotencyKey).toBe("checkout-key-3");
+    const changedShop = reloadedTracker.begin({ planCode: "pro", recovery: true, shopPublicId: "shop-b" });
     expect(changedShop.idempotencyKey).toBe("checkout-key-4");
-    tracker.finish(changedShop);
-    expect(tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-b" }).idempotencyKey).toBe("checkout-key-5");
+    reloadedTracker.fail(changedShop, true);
+    expect(storage.value("selinow.billing.checkout-attempt.v1")).toBeNull();
 
     const source = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
-    expect(source).not.toMatch(/(?:local|session)Storage/u);
+    expect(source).toContain("window.sessionStorage");
+    expect(source).not.toMatch(/localStorage/u);
     expect(source).toContain("if (pending || shopPublicId === undefined");
+  });
+
+  it("retains the persisted key until a successful checkout response is fully validated", async () => {
+    const billingModule = await loadBillingScript();
+    const storage = memoryStorage();
+    const tracker = new billingModule.BillingCheckoutAttemptTracker({ createKey: () => "checkout-key-malformed", now: () => 1_000, storage });
+    const attempt = tracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" });
+
+    expect(() => billingModule.acceptBillingCheckoutResponse({ checkout: { checkoutUrl: "https://", provider: "dodo" }, requestId: "request-malformed-001" }, attempt, tracker)).toThrow();
+    expect(() => billingModule.acceptBillingCheckoutResponse({ checkout: { checkoutUrl: "https://checkout.example.test/session/wrong", provider: "other" } }, attempt, tracker)).toThrow();
+    const reloadedTracker = new billingModule.BillingCheckoutAttemptTracker({ createKey: () => "checkout-key-replacement", now: () => 2_000, storage });
+    const reloadedAttempt = reloadedTracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" });
+    expect(reloadedAttempt.idempotencyKey).toBe("checkout-key-malformed");
+
+    expect(billingModule.acceptBillingCheckoutResponse({ checkout: { checkoutUrl: "https://checkout.example.test/session/ok", provider: "dodo" } }, reloadedAttempt, reloadedTracker)).toBe("https://checkout.example.test/session/ok");
+    expect(storage.value("selinow.billing.checkout-attempt.v1")).toBeNull();
+  });
+
+  it("rotates an expired persisted checkout key", async () => {
+    const billingModule = await loadBillingScript();
+    const storage = memoryStorage();
+    const firstTracker = new billingModule.BillingCheckoutAttemptTracker({ createKey: () => "checkout-key-expiring", now: () => 1_000, storage, ttlMs: 1_000 });
+    firstTracker.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" });
+
+    const afterExpiry = new billingModule.BillingCheckoutAttemptTracker({ createKey: () => "checkout-key-fresh", now: () => 2_000, storage, ttlMs: 1_000 });
+    expect(afterExpiry.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-fresh");
+    expect(JSON.parse(storage.value("selinow.billing.checkout-attempt.v1") ?? "null")).toMatchObject({ expiresAt: 3_000, idempotencyKey: "checkout-key-fresh" });
+
+    storage.setItem("selinow.billing.checkout-attempt.v1", JSON.stringify({
+      expiresAt: 100_000,
+      idempotencyKey: "checkout-key-unbounded",
+      planCode: "starter",
+      recovery: false,
+      shopPublicId: "shop-a",
+      version: 1,
+    }));
+    const boundedExpiry = new billingModule.BillingCheckoutAttemptTracker({ createKey: () => "checkout-key-bounded", now: () => 4_000, storage, ttlMs: 1_000 });
+    expect(boundedExpiry.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-bounded");
   });
 
   it("explains that a missing merchant country blocks paid plan projection", () => {

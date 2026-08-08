@@ -7,6 +7,11 @@ type Plan = { code: string; name: string; prices: Price[]; version: number };
 type ChangeRequest = { action: string; currentPlanCode: string; requestedPlanCode: string | null; reasonCode: string; requestPublicId: string; status: string; updatedAt: string; version: number };
 type BillingCheckoutAttemptInput = { planCode: string; recovery: boolean; shopPublicId: string };
 type BillingCheckoutAttempt = BillingCheckoutAttemptInput & { idempotencyKey: string };
+type BillingCheckoutAttemptRecord = BillingCheckoutAttempt & { expiresAt: number; version: 1 };
+type BillingCheckoutAttemptStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
+
+const BILLING_CHECKOUT_ATTEMPT_STORAGE_KEY = "selinow.billing.checkout-attempt.v1";
+const BILLING_CHECKOUT_ATTEMPT_TTL_MS = 30 * 60_000;
 
 function createBillingIdempotencyKey(): string {
   try { return `billing_ui_${crypto.randomUUID()}`; }
@@ -14,25 +19,76 @@ function createBillingIdempotencyKey(): string {
 }
 
 export class BillingCheckoutAttemptTracker {
-  private current: BillingCheckoutAttempt | null = null;
+  private current: BillingCheckoutAttemptRecord | null;
+  private readonly createKey: () => string;
+  private readonly now: () => number;
+  private readonly storage: BillingCheckoutAttemptStorage | null;
+  private readonly ttlMs: number;
 
-  constructor(private readonly createKey: () => string = createBillingIdempotencyKey) {}
+  constructor(input: {
+    createKey?: () => string;
+    now?: () => number;
+    storage?: BillingCheckoutAttemptStorage | null;
+    ttlMs?: number;
+  } = {}) {
+    this.createKey = input.createKey ?? createBillingIdempotencyKey;
+    this.now = input.now ?? Date.now;
+    this.storage = input.storage ?? null;
+    this.ttlMs = input.ttlMs ?? BILLING_CHECKOUT_ATTEMPT_TTL_MS;
+    this.current = this.load();
+  }
 
   begin(input: BillingCheckoutAttemptInput): BillingCheckoutAttempt {
+    if (this.current !== null && this.current.expiresAt <= this.now()) this.clear();
     if (this.current !== null
       && this.current.planCode === input.planCode
       && this.current.recovery === input.recovery
       && this.current.shopPublicId === input.shopPublicId) return this.current;
-    this.current = { ...input, idempotencyKey: this.createKey() };
+    this.clear();
+    this.current = { ...input, expiresAt: this.now() + this.ttlMs, idempotencyKey: this.createKey(), version: 1 };
+    this.persist();
     return this.current;
   }
 
   finish(attempt: Pick<BillingCheckoutAttempt, "idempotencyKey">): void {
-    if (this.current?.idempotencyKey === attempt.idempotencyKey) this.current = null;
+    if (this.current?.idempotencyKey === attempt.idempotencyKey) this.clear();
   }
 
   fail(attempt: Pick<BillingCheckoutAttempt, "idempotencyKey">, terminalResponse: boolean): void {
     if (terminalResponse) this.finish(attempt);
+  }
+
+  private clear(): void {
+    this.current = null;
+    try { this.storage?.removeItem(BILLING_CHECKOUT_ATTEMPT_STORAGE_KEY); } catch { /* Storage denial falls back to memory-only recovery. */ }
+  }
+
+  private load(): BillingCheckoutAttemptRecord | null {
+    let raw: string | null;
+    try { raw = this.storage?.getItem(BILLING_CHECKOUT_ATTEMPT_STORAGE_KEY) ?? null; } catch { return null; }
+    if (raw === null) return null;
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("invalid");
+      const record = value as Partial<BillingCheckoutAttemptRecord>;
+      const now = this.now();
+      if (record.version !== 1
+        || typeof record.shopPublicId !== "string" || record.shopPublicId.length === 0
+        || (record.planCode !== "starter" && record.planCode !== "pro")
+        || typeof record.recovery !== "boolean"
+        || typeof record.idempotencyKey !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/u.test(record.idempotencyKey)
+        || typeof record.expiresAt !== "number" || !Number.isSafeInteger(record.expiresAt)
+        || record.expiresAt <= now || record.expiresAt > now + this.ttlMs) throw new Error("invalid");
+      return record as BillingCheckoutAttemptRecord;
+    } catch {
+      try { this.storage?.removeItem(BILLING_CHECKOUT_ATTEMPT_STORAGE_KEY); } catch { /* Ignore unavailable storage cleanup. */ }
+      return null;
+    }
+  }
+
+  private persist(): void {
+    if (this.current === null) return;
+    try { this.storage?.setItem(BILLING_CHECKOUT_ATTEMPT_STORAGE_KEY, JSON.stringify(this.current)); } catch { /* Storage denial keeps the in-memory attempt usable. */ }
   }
 }
 
@@ -55,6 +111,19 @@ class BillingApiError extends Error {
     this.requestId = failure.requestId;
     this.terminalResponse = terminalResponse;
   }
+}
+
+export function acceptBillingCheckoutResponse(payload: JsonObject | null, attempt: BillingCheckoutAttempt, tracker: BillingCheckoutAttemptTracker): string {
+  const checkout = payload?.checkout;
+  const provider = typeof checkout === "object" && checkout !== null && typeof (checkout as { provider?: unknown }).provider === "string" ? (checkout as { provider: string }).provider : "";
+  const rawUrl = typeof checkout === "object" && checkout !== null && typeof (checkout as { checkoutUrl?: unknown }).checkoutUrl === "string" ? (checkout as { checkoutUrl: string }).checkoutUrl : "";
+  const requestId = typeof payload?.requestId === "string" && /^[A-Za-z0-9._-]{8,128}$/u.test(payload.requestId) ? payload.requestId : null;
+  if (provider !== "dodo") throw new BillingApiError({ code: "checkout_provider_invalid", requestId });
+  let checkoutUrl: URL;
+  try { checkoutUrl = new URL(rawUrl); } catch { throw new BillingApiError({ code: "checkout_url_invalid", requestId }); }
+  if (checkoutUrl.protocol !== "https:" || checkoutUrl.username.length > 0 || checkoutUrl.password.length > 0) throw new BillingApiError({ code: "checkout_url_invalid", requestId });
+  tracker.finish(attempt);
+  return checkoutUrl.toString();
 }
 
 const root = document.querySelector<HTMLElement>("[data-billing-root]");
@@ -83,7 +152,10 @@ if (root !== null && root.dataset.canManage === "true") {
   const billingState = root.dataset.billingState ?? "";
   const billingMarketReady = root.dataset.billingMarketReady === "true";
   const subscriptionVersion = Number(root.dataset.subscriptionVersion);
-  const checkoutAttempts = new BillingCheckoutAttemptTracker();
+  const checkoutAttemptStorage = (() => {
+    try { return window.sessionStorage; } catch { return null; }
+  })();
+  const checkoutAttempts = new BillingCheckoutAttemptTracker({ storage: checkoutAttemptStorage });
   let pending = false;
 
   const readCookie = (name: string): string | null => document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
@@ -267,13 +339,7 @@ if (root !== null && root.dataset.canManage === "true") {
     if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = true;
     showCheckoutFeedback(text("checkoutOpening"), "info");
     void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { method: "POST", body: JSON.stringify({ planCode, recovery: billingState === "suspended" }) }, checkoutAttempt.idempotencyKey).then((payload) => {
-      checkoutAttempts.finish(checkoutAttempt);
-      const checkout = payload?.checkout;
-      const provider = typeof checkout === "object" && checkout !== null && typeof (checkout as { provider?: unknown }).provider === "string" ? (checkout as { provider: string }).provider : "";
-      const url = typeof checkout === "object" && checkout !== null && typeof (checkout as { checkoutUrl?: unknown }).checkoutUrl === "string" ? (checkout as { checkoutUrl: string }).checkoutUrl : "";
-      const requestId = typeof payload?.requestId === "string" && /^[A-Za-z0-9._-]{8,128}$/u.test(payload.requestId) ? payload.requestId : null;
-      if (provider !== "dodo") throw new BillingApiError({ code: "checkout_provider_invalid", requestId });
-      if (!/^https:\/\//u.test(url)) throw new BillingApiError({ code: "checkout_url_invalid", requestId });
+      const url = acceptBillingCheckoutResponse(payload, checkoutAttempt, checkoutAttempts);
       showCheckoutFeedback(text("checkoutOpening"), "success");
       window.location.assign(url);
     }).catch((error: unknown) => {
