@@ -2,10 +2,35 @@
 
 ## Candidate identity
 
-- Runtime implementation commit: `3c598fcf242127891e8fe4112720938cc3592c4e`
-- Runtime implementation tree: `3bf5cb32aab3d23060042aabd3f97ac7d20ff696`
-- Handoff identity: the final release manifest must bind the clean reviewed HEAD that contains this document; a committed file cannot safely self-record its own commit hash.
-- Production readiness: not claimed. A protected staging backup and candidate-bound isolated restore drill were executed as pre-admission evidence; authoritative staging/production databases, Workers, routes, DNS, queues and provider configuration were not mutated by that drill.
+- Final staging candidate commit: `17922377aa6bd0893c5c4aae206ac78d0208875d`
+- Final staging candidate tree: `9d44eb6a9318a1b5c94fc012c3573b3f4e31611a`
+- Staging manifest: `stg_20260808T172324Z_17922377aa6b`.
+- Production readiness: not claimed. This is staging-only execution evidence; production remains NO-GO.
+
+## Final staging execution evidence
+
+- The protected pre-migration backup was `bkp_20260808172147_c2b52d57c662` and
+  the candidate-bound restore drill passed. The post-migration backup was
+  `bkp_20260808172407_dc9c5b57486c` and its candidate-bound restore drill also
+  passed. Staging now has the complete `0001`-`0086` ledger.
+- Staging deployment `2400fc01-fd71-4c91-93e7-7a93a44a4216` serves Worker
+  version `6688b21f-401e-43b2-95b5-a0e9434167a2`. The captured rollback target
+  is deployment `65a8d605-78e4-4a85-91b8-bb6e9e2ea37c`, Worker version
+  `14381227-1f9f-4719-9eb4-98404595764c`.
+- The live seven-route inventory passed exactly: `selinow.com/*` and
+  `*.selinow.com/*` -> `selinow-com-production`; `staging.selinow.com/*`,
+  `app-staging.selinow.com/*`, `api-staging.selinow.com/*`,
+  `*.staging.selinow.com/*`, and `*/*` -> `selinow-com-staging`. The Phase 10
+  staging smoke passed. This proves the deployed staging runtime and route
+  contract only; it is not a production smoke or provider acceptance.
+- The staging Dodo endpoint/key is registered and the four-offer catalog is
+  published (4/4). A canonical JSON `POST` returns `401`, proving an unauthenticated
+  request is rejected. Genuine Dodo UAT remains blocked pending provider-created
+  test checkout/events, authoritative D1 subscription transitions, and exact
+  release-bound private UAT evidence.
+- The controlled PayOS fingerprint endpoint succeeded with request ID
+  `094fdcff-e55d-435e-ad70-b9673ecba828`. It does not prove an installed
+  fingerprint secret, PayOS credentials, a signed event, or PayOS UAT.
 
 ## Non-payment changed files
 
@@ -150,4 +175,7 @@ Values must remain in Cloudflare secrets or reviewed environment configuration a
 - Refund provider execution remains unsupported until the payment handoff supplies it.
 - Seller pagination uses validated offset cursors, not snapshot-stable keyset pagination.
 - TXT ownership and CNAME setup remain manual; Selinow automates only hostname/SSL polling after DNS is correct.
-- Production and staging migrations remain blocked until contiguous-ledger review through `0086`, protected backup/restore evidence, approved staging execution and UAT evidence, and a generated manifest bound to this candidate are available.
+- Staging migration/deploy evidence is now recorded above. Production migration
+  remains blocked until its own contiguous-ledger review, protected production
+  backup/restore evidence, approvals, monitoring, pilots and provider UAT are
+  available; no production-readiness claim is made.

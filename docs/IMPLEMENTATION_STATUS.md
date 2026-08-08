@@ -1,6 +1,37 @@
 # Implementation Status
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
+
+## Final staging release evidence (2026-08-08)
+
+- Final staging candidate: commit `17922377aa6bd0893c5c4aae206ac78d0208875d`,
+  tree `9d44eb6a9318a1b5c94fc012c3573b3f4e31611a`, and manifest
+  `stg_20260808T172324Z_17922377aa6b`. The pre-migration backup
+  `bkp_20260808172147_c2b52d57c662` and post-migration backup
+  `bkp_20260808172407_dc9c5b57486c` each have candidate-bound passing restore
+  drills. Staging has applied the complete contiguous `0001`-`0086` ledger.
+- Deployment `2400fc01-fd71-4c91-93e7-7a93a44a4216` serves Worker version
+  `6688b21f-401e-43b2-95b5-a0e9434167a2`. The captured staging rollback target
+  is deployment `65a8d605-78e4-4a85-91b8-bb6e9e2ea37c`, version
+  `14381227-1f9f-4719-9eb4-98404595764c`.
+- The exact seven-route inventory passed: production owns `selinow.com/*` and
+  `*.selinow.com/*`; staging owns `staging.selinow.com/*`,
+  `app-staging.selinow.com/*`, `api-staging.selinow.com/*`,
+  `*.staging.selinow.com/*`, and `*/*`. The Phase 10 staging smoke passed.
+  This is staging deployment/health evidence only, not production acceptance.
+- Dodo's staging endpoint/key is registered and the published catalog is 4/4.
+  The canonical JSON `POST` returns `401` for unauthenticated input. Synthetic
+  probes prove route/signature admission only; genuine Dodo UAT still requires
+  provider-created test checkout/events, authoritative D1 subscription state
+  transitions, and exact release-bound private evidence.
+- The controlled PayOS fingerprint endpoint completed with request ID
+  `094fdcff-e55d-435e-ad70-b9673ecba828`. No installed fingerprint secret,
+  controlled credential, signed PayOS event, or PayOS UAT is proven.
+- Production remains **NO-GO**: required approvals, a fresh production backup
+  and restore drill, monitoring/acknowledgement evidence, controlled pilots,
+  and Dodo/PayOS UAT remain absent. No production migration, deployment,
+  provider activation, or production-readiness claim follows from this staging
+  release.
 
 ## Current payment handoff (2026-08-08)
 
@@ -18,15 +49,13 @@ Last updated: 2026-08-08
   channel fingerprint `PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT`, and checks
   provider-identity ownership before any webhook-registration mutation. This
   prevents a rotated credential set from redirecting another shop's channel.
-- Source migrations are contiguous through `0086`; staging remains at ledger
-  `0028`. No remote migration, backup/restore drill, staging deploy, Dodo
-  webhook registration, or PayOS staging tenant setup has been performed.
-- Current admission result: Cloudflare account/D1/resource identity passes,
-  but live `*/*` now binds `selinow-com-production` while the final route
-  contract requires the production handoff. Therefore staging mutation and
-  all provider UAT remain blocked. Production remains **NO-GO** on route,
-  backup/restore, evidence, monitoring, pilot, ownership and other non-Dodo
-  gates.
+- Source migrations are contiguous through `0086`; staging now has the applied
+  `0001`-`0086` ledger under the final staging evidence below. Production
+  remains at `0052`; no production migration or deploy has been performed.
+- Current admission result: staging route, backup/restore, migration, deploy
+  and smoke evidence pass for the final candidate. Genuine provider UAT remains
+  blocked, and production remains **NO-GO** on approvals, backup/restore,
+  monitoring, pilot, ownership and provider gates.
 
 ## Dodo deep-lane continuation (2026-08-08)
 
@@ -36,11 +65,9 @@ the full Vitest suite (265 files / 1,892 tests). A bounded CLI validator now
 checks all 32 staging UAT scenarios against the exact commit, tree, release
 manifest and Worker version; see `docs/DODO_PAYMENTS_RELEASE.md`.
 
-Remote staging execution remains blocked, not skipped: the live Cloudflare
-inventory currently sends `*/*` to `selinow-com-production` while the checked-in
-staging admission contract treats that shared route as production-owned, and
-the canonical Dodo webhook probe still returns `404`. No remote migration,
-deploy, webhook registration, webhook secret, or live charge was performed.
+The final staging execution is recorded in the handoff evidence below. The
+canonical Dodo JSON `POST` returns `401` for unauthenticated input; genuine
+provider-created checkout/event UAT remains pending. No live charge was made.
 
 ## Release admission and customer-journey verification (2026-08-08)
 
