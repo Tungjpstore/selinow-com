@@ -40,6 +40,7 @@ const ERROR_KEYS: Readonly<Record<string, string>> = {
   csrf_missing: "integration.error.csrf_missing",
   recent_auth_required: "integration.error.recent_auth_required",
   payment_not_configured: "integration.error.payment_not_configured",
+  payment_provider_environment_not_admitted: "integration.error.payment_provider_environment_not_admitted",
   provider_unavailable: "integration.error.provider_unavailable",
   provider_verification_failed: "integration.error.provider_verification_failed",
   telegram_webhook_failed: "integration.error.telegram_webhook_failed",
