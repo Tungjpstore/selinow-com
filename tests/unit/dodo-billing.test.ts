@@ -338,6 +338,101 @@ describe("Dodo billing adapter", () => {
     fixture.database.close();
   });
 
+  it("converts a legacy Business trial to the published Starter VN offer only after signed payment evidence", async () => {
+    const fixture = billingFixture("trialing");
+    fixture.database.exec(`
+      INSERT INTO plans (
+        id, code, name, feature_flags_json, limits_json, version, is_active,
+        created_at, updated_at, is_public, is_assignable, schema_version
+      ) VALUES (
+        'plan_business_v1', 'business', 'Business', '{}', '{}', 1, 1,
+        '${NOW_ISO}', '${NOW_ISO}', 0, 0, 1
+      );
+      UPDATE shops
+      SET merchant_country_code = 'VN', currency = 'VND'
+      WHERE id = 'billing-shop-a';
+      UPDATE plan_prices
+      SET provider_price_ref = 'prod_test_starter_vn'
+      WHERE id = 'price_starter_vn_v1';
+      UPDATE shop_subscriptions
+      SET plan_id = 'plan_business_v1', billing_provider_code = NULL,
+        provider_customer_ref = NULL, provider_subscription_ref = NULL,
+        market_code = NULL, price_currency = NULL, price_amount_minor = NULL,
+        price_interval = NULL, price_version = NULL, price_id = NULL
+      WHERE id = 'billing-sub-a';
+    `);
+    let checkoutMetadata: Record<string, string> = {};
+    const checkout = await createBillingCheckout({
+      env: fixture.env,
+      fetcher: (_input, init) => {
+        const body = JSON.parse(init?.body as string) as {
+          billing_currency?: string;
+          metadata?: Record<string, string>;
+          product_cart?: Array<{ product_id?: string }>;
+        };
+        expect(body.billing_currency).toBe("VND");
+        expect(body.product_cart).toEqual([{ product_id: "prod_test_starter_vn", quantity: 1 }]);
+        checkoutMetadata = body.metadata ?? {};
+        return Promise.resolve(new Response(JSON.stringify({
+          checkout_url: "https://test.checkout.dodopayments.com/session/cks_legacy_starter_vn",
+          session_id: "cks_legacy_starter_vn",
+        }), { status: 200 }));
+      },
+      idempotencyKey: "checkout-legacy-business-vn-1",
+      planCode: "starter",
+      requestId: "request-legacy-business-vn",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+      now: new Date(NOW_ISO),
+    });
+    expect(checkout).toMatchObject({
+      amountMinor: 99_000,
+      currency: "VND",
+      planCode: "starter",
+      providerTransactionId: "cks_legacy_starter_vn",
+      subscriptionState: "pending_payment",
+    });
+    expect(fixture.database.prepare(`
+      SELECT plans.code AS planCode, subscriptions.state,
+        subscriptions.provider_subscription_ref AS providerSubscriptionRef
+      FROM shop_subscriptions AS subscriptions
+      INNER JOIN plans ON plans.id = subscriptions.plan_id
+      WHERE subscriptions.id = 'billing-sub-a'
+    `).get()).toEqual({ planCode: "business", providerSubscriptionRef: null, state: "pending_payment" });
+
+    const payload = {
+      data: {
+        checkout_session_id: "cks_legacy_starter_vn",
+        currency: "VND",
+        metadata: checkoutMetadata,
+        payment_id: "pay_legacy_starter_vn",
+        product_id: "prod_test_starter_vn",
+        subscription_id: "sub_legacy_starter_vn",
+        total_amount: 99_000,
+      },
+      timestamp: NOW_ISO,
+      type: "payment.succeeded",
+    };
+    const body = JSON.stringify(payload);
+    await expect(processDodoWebhook({
+      env: fixture.env,
+      now: new Date(NOW_ISO),
+      rawBody: body,
+      signature: signature(body, "evt_legacy_starter_vn", NOW_ISO_SECONDS),
+      webhookId: "evt_legacy_starter_vn",
+      webhookTimestamp: String(NOW_ISO_SECONDS),
+      webhookPublicId: WEBHOOK_PUBLIC_ID,
+    })).resolves.toMatchObject({ processed: true, state: "active" });
+    expect(fixture.database.prepare(`
+      SELECT plans.code AS planCode, subscriptions.state,
+        subscriptions.provider_subscription_ref AS providerSubscriptionRef
+      FROM shop_subscriptions AS subscriptions
+      INNER JOIN plans ON plans.id = subscriptions.plan_id
+      WHERE subscriptions.id = 'billing-sub-a'
+    `).get()).toEqual({ planCode: "starter", providerSubscriptionRef: "sub_legacy_starter_vn", state: "active" });
+    fixture.database.close();
+  });
+
   it("selects the newest currently effective price revision", async () => {
     const fixture = billingFixture("trialing");
     fixture.database.prepare("UPDATE plan_prices SET effective_to = '2999-01-01T00:00:00.000Z' WHERE id = 'price_pro_global_v1'").run();
