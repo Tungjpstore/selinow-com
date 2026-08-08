@@ -183,6 +183,24 @@ describe("remote post-migration database contract", () => {
     expect(findCompoundSelectLimitViolations(POST_MIGRATION_CROSS_LEDGER_SQL)).toEqual([]);
   });
 
+  it("expands every required table into D1-safe literal pragma groups", () => {
+    const requiredTables = Object.keys(REQUIRED_POST_MIGRATION_COLUMNS);
+    const pragmaTables = [...POST_MIGRATION_COLUMN_SQL.matchAll(/pragma_table_info\('([^']+)'\)/gu)]
+      .map((match) => match[1]);
+    expect(pragmaTables).toEqual(requiredTables);
+    expect(POST_MIGRATION_COLUMN_SQL).not.toContain("pragma_table_info(tables.name)");
+
+    const groups = [...POST_MIGRATION_COLUMN_SQL.matchAll(/SELECT \* FROM \(\n([\s\S]*?)\n\)/gu)]
+      .map((match) => match[1]);
+    expect(groups).toHaveLength(Math.ceil(requiredTables.length / 5));
+    for (const group of groups) {
+      const termCount = group.match(/pragma_table_info\(/gu)?.length ?? 0;
+      expect(termCount).toBeGreaterThan(0);
+      expect(termCount).toBeLessThanOrEqual(5);
+      expect(findCompoundSelectLimitViolations(group)).toEqual([]);
+    }
+  });
+
   it("runs all four checks with the pinned remote D1 invocation", () => {
     const runner = vi.fn((args: string[], _options: { cwd: string; env?: NodeJS.ProcessEnv }) => {
       void _options;

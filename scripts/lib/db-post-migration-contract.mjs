@@ -239,12 +239,14 @@ ORDER BY type, name;
 `;
 // D1 rejects correlated pragma table-valued joins against sqlite_master. Keep
 // the admission query deterministic by expanding the reviewed table set into
-// constant pragma_table_info calls instead.
+// constant pragma_table_info calls. Keep each compound group within D1's
+// five-term limit.
+const D1_MAX_COMPOUND_SELECT_TERMS = 5;
 const POST_MIGRATION_COLUMN_SELECTS = Object.keys(REQUIRED_POST_MIGRATION_COLUMNS)
   .map((table) => `SELECT ${quoteSqlString(table)} AS table_name, name AS column_name, cid FROM pragma_table_info(${quoteSqlString(table)})`);
 const POST_MIGRATION_COLUMN_GROUPS = [];
-for (let index = 0; index < POST_MIGRATION_COLUMN_SELECTS.length; index += 5) {
-  POST_MIGRATION_COLUMN_GROUPS.push(`SELECT * FROM (\n${POST_MIGRATION_COLUMN_SELECTS.slice(index, index + 5).join("\nUNION ALL\n")}\n)`);
+for (let index = 0; index < POST_MIGRATION_COLUMN_SELECTS.length; index += D1_MAX_COMPOUND_SELECT_TERMS) {
+  POST_MIGRATION_COLUMN_GROUPS.push(`SELECT * FROM (\n${POST_MIGRATION_COLUMN_SELECTS.slice(index, index + D1_MAX_COMPOUND_SELECT_TERMS).join("\nUNION ALL\n")}\n)`);
 }
 export const POST_MIGRATION_COLUMN_SQL = `
 SELECT table_name, column_name
