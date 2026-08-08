@@ -13,9 +13,9 @@ migration, deploy, provider action, or pilot action occurred. See
 
 ## Phase 4 review update (2026-08-04)
 
-Current decision: `local_ready_remote_blocked` for candidate
-`bff69f9d26a04b1318fd9862afa6eaffb8c003f4` (tree
-`c5c52c0b7ed9f174b65fb5969b3f5beeaa4c386`). No explicit staging
+Current decision: `local_ready_remote_blocked` for the current candidate
+`3c598fcf242127891e8fe4112720938cc3592c4e` (tree
+`3bf5cb32aab3d23060042aabd3f97ac7d20ff696`). No explicit staging
 mutation approval was supplied for P4, so no remote command was executed.
 
 The mutation contract now requires a live ledger that is an exact ordered prefix
@@ -45,7 +45,7 @@ manifest is generated from the final clean HEAD. It does not authorize execution
   `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`; execution uses the P4 candidate
   above and never substitutes an historical commit.
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
-- Source migration ledger: current candidate `0001`-`0080`
+- Source migration ledger: current candidate `0001`-`0086`
 - Exact P4 changed-file manifest and local verification:
   `docs/PHASE_4_REVIEW_PACKAGE_R0.md`
 - Candidate-bound local restore report:
@@ -77,11 +77,12 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 - Backup evidence: report-v2, non-empty artifact, checksum, bookmark, freshness
   <= 60 minutes, exact account/D1 identity
 - Restore drill: isolated disposable target from the exact reviewed tree and
-  complete `0001`-`0080` ledger; integrity/FK/schema/count checks required;
+  complete `0001`-`0086` ledger; integrity/FK/schema/count checks required;
   every non-local drill requires `--reviewed-commit`
 - Pre-`0066` OAuth pending-row policy: revoke/expire or explicitly resolve
-- Dodo `0070`-`0079` and activation timestamp migration `0080`: local
-  source/tests are recorded in R2; remote cutover review remains `TBD`
+- Dodo `0070`-`0081`, activation timestamp migration `0080`, and non-payment
+  migrations `0082`-`0086`: local source/tests are recorded; remote cutover
+  review remains `TBD`
 
 ## Commands after approval
 

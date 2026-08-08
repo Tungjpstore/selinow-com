@@ -22,7 +22,7 @@ Last updated: 2026-08-08
   `0028`. No remote migration, backup/restore drill, staging deploy, Dodo
   webhook registration, or PayOS staging tenant setup has been performed.
 - Current admission result: Cloudflare account/D1/resource identity passes,
-  but live `*/*` still binds `selinow-com-staging` while the final route
+  but live `*/*` now binds `selinow-com-production` while the final route
   contract requires the production handoff. Therefore staging mutation and
   all provider UAT remain blocked. Production remains **NO-GO** on route,
   backup/restore, evidence, monitoring, pilot, ownership and other non-Dodo
@@ -37,7 +37,7 @@ checks all 32 staging UAT scenarios against the exact commit, tree, release
 manifest and Worker version; see `docs/DODO_PAYMENTS_RELEASE.md`.
 
 Remote staging execution remains blocked, not skipped: the live Cloudflare
-inventory currently sends `*/*` to `selinow-com-staging` while the checked-in
+inventory currently sends `*/*` to `selinow-com-production` while the checked-in
 staging admission contract treats that shared route as production-owned, and
 the canonical Dodo webhook probe still returns `404`. No remote migration,
 deploy, webhook registration, webhook secret, or live charge was performed.
@@ -60,8 +60,9 @@ augmentation, reducing TypeScript failures to one payment-owned Dodo diagnostic.
 Route inventory/privacy and provider-pending expectations are reconciled. Root
 must rerun the complete serial matrix after the final source/payment merge.
 
-The source migration directory currently contains untracked `0081`-`0086` files
-with a contiguous numeric ledger, but migration admission must remain fail-closed
+The current candidate commit `3c598fcf242127891e8fe4112720938cc3592c4e` (tree
+`3bf5cb32aab3d23060042aabd3f97ac7d20ff696`) contains the committed `0081`-`0086`
+files with a contiguous numeric ledger, but migration admission must remain fail-closed
 until both workstreams are reviewed together. No staging or
 production migration, seed, deploy, route, DNS, queue/trigger, secret or
 provider mutation was performed. Release doctor remains correctly blocked on
@@ -70,7 +71,7 @@ monitoring, pilot and provider acceptance (including the explicit payment-thread
 handoff for PayOS and Dodo UAT evidence). This pass does not claim production
 readiness.
 
-## Current operational reconciliation (2026-08-04)
+## Historical operational reconciliation (2026-08-04)
 
 The authoritative source migration chain is contiguous through `0080`; the
 accepted remote ledgers remain staging through `0028` and production through

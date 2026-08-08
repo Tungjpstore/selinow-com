@@ -2,10 +2,10 @@
 
 ## Candidate identity
 
-- Base commit: `0f740dfd923faf7d4140bd68575997b8703ba70b`
-- Base tree: `91b4b6871e1febb4966b073e5647ad432a8ae075`
-- Candidate state: uncommitted shared worktree. A final commit/tree must be recorded after payment and non-payment changes are reviewed together.
-- Production readiness: not claimed. No staging/production migration, deploy, DNS, route, queue, secret or provider mutation was performed.
+- Runtime implementation commit: `3c598fcf242127891e8fe4112720938cc3592c4e`
+- Runtime implementation tree: `3bf5cb32aab3d23060042aabd3f97ac7d20ff696`
+- Handoff identity: the final release manifest must bind the clean reviewed HEAD that contains this document; a committed file cannot safely self-record its own commit hash.
+- Production readiness: not claimed. A protected staging backup and candidate-bound isolated restore drill were executed as pre-admission evidence; authoritative staging/production databases, Workers, routes, DNS, queues and provider configuration were not mutated by that drill.
 
 ## Non-payment changed files
 
@@ -138,9 +138,9 @@ Values must remain in Cloudflare secrets or reviewed environment configuration a
 ## Verification
 
 - Targeted Agent F integration/release contracts: 14/14 pass, including isolated replay of all 86 source migrations with `integrity_check=ok` and zero foreign-key violations.
-- `npx tsc --noEmit`: one remaining payment-owned Dodo test diagnostic after the typegen wrapper removed the generated `ProcessEnv` cascade.
-- `npm run lint`: remaining diagnostics are payment-owned Dodo source/webhook checks; Agent F scripts and tests are clean.
-- Full build/deploy/audit results are inherited from the prior serial evidence; root must rerun the final matrix after all source agents converge.
+- `npm run check`, `npm run lint` and `npx tsc --noEmit`: pass on the runtime implementation candidate.
+- `npm test`: 270 files / 1,923 tests pass on the runtime implementation candidate.
+- Production/staging builds, both deploy dry-runs and `npm audit --audit-level=high`: pass on the runtime implementation candidate; rerun them against the final handoff HEAD before release admission.
 - `npm run release:doctor -- --json`: fail-closed as expected on missing approvals, backup/restore evidence, candidate identity, monitoring, pilot, secrets and PayOS/Dodo acceptance.
 - `git diff --check`: pass.
 
@@ -150,4 +150,4 @@ Values must remain in Cloudflare secrets or reviewed environment configuration a
 - Refund provider execution remains unsupported until the payment handoff supplies it.
 - Seller pagination uses validated offset cursors, not snapshot-stable keyset pagination.
 - TXT ownership and CNAME setup remain manual; Selinow automates only hostname/SSL polling after DNS is correct.
-- Production and staging migrations remain blocked until contiguous-ledger review through `0086`, protected backup/restore evidence, staging UAT and a clean combined commit/tree are available.
+- Production and staging migrations remain blocked until contiguous-ledger review through `0086`, protected backup/restore evidence, approved staging execution and UAT evidence, and a generated manifest bound to this candidate are available.

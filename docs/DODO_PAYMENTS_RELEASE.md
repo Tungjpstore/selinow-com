@@ -30,11 +30,7 @@ Validate it against the exact release manifest and Worker version:
 ```bash
 npm run dodo:uat:validate -- \
   --evidence .wrangler/releases/staging/<release-id>/dodo-uat-evidence.json \
-  --commit <40-hex-commit> \
-  --tree <40-hex-tree> \
-  --release-id <stg_release_id> \
-  --manifest-ref .wrangler/releases/staging/<release-id>/release-manifest.json \
-  --manifest-sha256 <64-hex-sha256> \
+  --manifest .wrangler/releases/staging/<release-id>/release-manifest.json \
   --worker-version <provider-worker-version> \
   --json
 ```

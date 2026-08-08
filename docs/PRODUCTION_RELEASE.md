@@ -2,7 +2,7 @@
 
 Phase 10 uses a prepare, backup, deploy, verify, confirm-or-rollback sequence. Repository tooling is fail-closed: production configuration, secret names, backup evidence, security status, monitoring ownership and pilot evidence must be complete before a release manifest can be written.
 
-Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. Production currently serves Worker version `e2a4bc53...`, tagged `release_20260802_mobilefix`, on the apex/wildcard routes and the exact `app.selinow.com`/`api.selinow.com` Worker Domains; `6ca9c890-ed04-44dc-ac32-44b36881f2dc` remains the historical first-production baseline. Production D1 is at the applied `0001`-`0052` ledger; source migrations `0053`-`0080` are pending and have not been applied remotely. The Phase 2 review-fix runtime is commit `ec50cde50c1ecdc8264a07c3261e2962c7e568d6`; its evidence is recorded in `docs/PHASE_2_REVIEW_PACKAGE_R2.md`. Any production continuation still requires a fresh production manifest, backup, and restore bound to the final clean execution HEAD. The older bootstrap evidence is pinned to a different historical commit and must not be treated as evidence for this continuation candidate.
+Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. Production currently serves Worker version `e2a4bc53...`, tagged `release_20260802_mobilefix`, on the apex/wildcard routes and the exact `app.selinow.com`/`api.selinow.com` Worker Domains; `6ca9c890-ed04-44dc-ac32-44b36881f2dc` remains the historical first-production baseline. Production D1 is at the applied `0001`-`0052` ledger; current candidate source migrations `0053`-`0086` are pending and have not been applied remotely. The current candidate is commit `3c598fcf242127891e8fe4112720938cc3592c4e` with tree `3bf5cb32aab3d23060042aabd3f97ac7d20ff696`; it still requires a fresh production manifest, backup, and restore bound to that exact clean execution identity. The older bootstrap evidence and Phase 2 review-fix runtime are historical and must not be treated as continuation evidence.
 
 The platform handoff evidence is private and non-secret: `.wrangler/bootstrap/production-evidence.json`, `.wrangler/bootstrap/bootstrap_20260730_first_release/production-smoke.json` and `promotion-applied.json`. It proves platform routing and frontend/health smoke only. PayOS settlement/refunds, Telegram bot acceptance, provider-backed fulfillment, external customer-domain/Turnstile admission, channel-expansion providers (Zalo, WhatsApp and Discord), controlled seller pilots, support/legal ownership and rollback evidence for the current candidate remain incomplete. No provider activation or full-commerce GO is claimed.
 
@@ -71,7 +71,7 @@ The first production Worker cannot honestly provide a previous Worker version. I
 
 1. `resources`: admit the exact account, zone, Git commit/tree, staging traffic inventory, production names and secret names; plan only create/reuse actions for the eight named production resources.
 2. `canary`: require the reconciled resource manifest, a fresh empty-D1 baseline backup/bookmark, a successful isolated restore drill and the exact forward-only migration list before the first Worker version may bind only `canary.selinow.com`.
-3. `promote`: require accepted canary smoke and monitoring evidence before the route-only shared-zone handoff may move the production apex and platform wildcard to the accepted Worker version while preserving the exact staging wildcard and existing `*/* -> selinow-com-staging` fallback. This release uses platform-only routing: it does not claim an external custom-domain cutover or Turnstile admission, and it does not add or mutate a Worker Domain. Before the first stable version exists, rollback means restoring the private pre-bootstrap traffic inventory, not naming a nonexistent previous Worker version. After successful promotion, the first stable version becomes the rollback baseline for normal releases.
+3. `promote`: require accepted canary smoke and monitoring evidence before the route-only shared-zone handoff may move the production apex and platform wildcard to the accepted Worker version while preserving the exact staging wildcard and the historical pre-promotion `*/* -> selinow-com-staging` fallback. This release uses platform-only routing: it does not claim an external custom-domain cutover or Turnstile admission, and it does not add or mutate a Worker Domain. Before the first stable version exists, rollback means restoring the private pre-bootstrap traffic inventory, not naming a nonexistent previous Worker version. After successful promotion, the first stable version becomes the rollback baseline for normal releases.
 
 Start from these additional non-secret templates:
 
@@ -123,9 +123,9 @@ npm run release:production:bootstrap:migrate -- --env production --dry-run --jso
 
 If backup, generated-manifest, Git, account, D1, migration-ledger or confirmation evidence changes between checks, the command stops before Wrangler. Record the migration completion timestamp and exact applied ledger in the private bootstrap evidence before moving to the canary phase.
 
-### Continuation migration admission (`0053`-`0080`)
+### Continuation migration admission (`0053`-`0086`)
 
-The first-production executor above is historical and must not be reused for the non-empty continuation. For migrations `0053`-`0080`, create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports:
+The first-production executor above is historical and must not be reused for the non-empty continuation. For current candidate migrations `0053`-`0086`, create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports:
 
 ```bash
 npm run backup:create -- --env production --confirm-production --json
@@ -142,6 +142,7 @@ The normal production migration sink is then admitted only with a canonical rele
 npm run db:migrate -- \
   --env production \
   --confirm-production \
+  --confirm-maintenance-drain \
   --release-manifest .wrangler/releases/<release-id>/release-manifest.json
 ```
 
@@ -250,7 +251,7 @@ The write command produces `.wrangler/bootstrap/<ceremony-id>/promote-plan.json`
 
 `--phase promote` is pinned to `infra/release/production-promotion-staging.json`. That checked-in release contract must remain an exact derivation of `infra/environments/staging.json` with only `sharedZoneDisabledRoutes` changed to an empty array. Both the planner and executor verify this relationship before admission and reject a `--staging-spec` override that differs from the canonical promotion contract. The normal staging deployment spec retains those operator-managed pattern identifiers, while live continuation admission requires the exact completed production handoff; null guards, mixed ownership and unknown routes fail closed.
 
-The executor recomputes cutover blockers, requires a fresh live route/domain/trigger inventory to match the saved canary state, and rejects every route pattern outside `buildProductionRouteHandoff`. In the current platform-only mode, the initial `*/*` route must already point to `selinow-com-staging`; the executor fails closed on fallback drift and leaves that route untouched. It changes only the production apex and platform wildcard to `selinow-com-production` while preserving `*.staging.selinow.com/*`; it never recreates the three deleted exact staging routes. Creates use one-route `POST`, replacements use ID-bound per-route `PUT`, and deletions use captured-ID `DELETE`; it never sends a zone-wide Worker Routes replacement and never changes Worker Domains, DNS, queues, cron, versions, secrets or D1:
+The executor recomputes cutover blockers, requires a fresh live route/domain/trigger inventory to match the saved canary state, and rejects every route pattern outside `buildProductionRouteHandoff`. In the historical platform-only promotion mode, the initial `*/*` route had to point to `selinow-com-staging`; the executor fails closed on fallback drift and leaves that route untouched. It changes only the production apex and platform wildcard to `selinow-com-production` while preserving `*.staging.selinow.com/*`; it never recreates the three deleted exact staging routes. Creates use one-route `POST`, replacements use ID-bound per-route `PUT`, and deletions use captured-ID `DELETE`; it never sends a zone-wide Worker Routes replacement and never changes Worker Domains, DNS, queues, cron, versions, secrets or D1:
 
 Use separate temporary tokens for this route-only ceremony:
 
@@ -279,7 +280,7 @@ The default mode is a read-only plan against a supplied saved live inventory (`-
 
 ### Empty-baseline restore drill
 
-The empty-baseline drill below is historical first-production bootstrap procedure. It was used before the `0001`-`0052` platform migration and must not be substituted for the normal non-empty backup/restore gate when applying `0053`-`0080`. A create timeout is reconciled through bounded D1 relists so an uncertain temporary target is not silently orphaned. The private mode-`0600` report records metadata and safe error codes only; it never records provider bookmarks, credentials or exported SQL:
+The empty-baseline drill below is historical first-production bootstrap procedure. It was used before the `0001`-`0052` platform migration and must not be substituted for the normal non-empty backup/restore gate when applying current candidate migrations `0053`-`0086`. A create timeout is reconciled through bounded D1 relists so an uncertain temporary target is not silently orphaned. The private mode-`0600` report records metadata and safe error codes only; it never records provider bookmarks, credentials or exported SQL:
 
 ```bash
 npm run release:production:bootstrap:empty-baseline -- \
@@ -304,10 +305,10 @@ The planner deliberately allows resource and canary preparation while listing st
 
 For this platform-only release, the apex/wildcard route handoff and canary acceptance are complete; the blockers below are for the next candidate and for future external-domain/provider activation. The external-host inventory and Turnstile lifecycle items remain mandatory gates and are not inferred from the platform handoff.
 
-- The live platform route matrix is exactly `selinow.com/*` and `*.selinow.com/*` -> `selinow-com-production`, `*.staging.selinow.com/*` and `*/*` -> `selinow-com-staging`. The three former exact staging Worker Routes were removed as redundant; their Worker Custom Domains remain active. Reconcile the matrix again before any future route mutation; do not treat the checked-in staging null-guard identifiers as evidence that production traffic is absent.
-- The checked-in staging `*/*` route intentionally sends otherwise unmatched external custom domains to `selinow-com-staging`. External custom-domain traffic therefore remains on staging. Because Worker route patterns must belong to the zone, a future external cutover still requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher; that pending inventory is not silently treated as production admission in this platform-only release.
+- The live platform route matrix sends `*/*` to `selinow-com-production` and preserves the more-specific `*.staging.selinow.com/*` exception on `selinow-com-staging`. Exact platform custom domains remain pinned to their reviewed Workers. Reconcile the live inventory before every mutation; never restore the historical broad staging catch-all.
+- External customer hostnames therefore reach the production Worker. Application admission must still fail closed unless the hostname is attached to the correct tenant and its Cloudflare hostname, SSL, DNS target, plan entitlement and Turnstile admission are all active.
 - The production Turnstile widget is authorized for `selinow.com`, which covers its subdomains. Turnstile does not support wildcard hostnames; every external custom hostname must be admitted explicitly before activation (or the account must use Enterprise Any Hostname). The current application has no runtime hostname-admission lifecycle evidence, so external custom-domain checkout remains blocked and no external-domain activation is claimed by the platform-only handoff.
-- Production migrations are forward-only. The current remote baseline is `0001`-`0052`; migrations `0053_seller_operations_contracts.sql` through `0080_catalog_activation_timestamps.sql` require a fresh backup, reviewed clean commit and an approved, separately recorded mutation window before application. Before `0066`, revoke or expire pending OAuth rows created without a lookup hash; before `0076`, confirm Dodo provider references and tax/merchant decisions without recording secret values; before `0077`, confirm activation-event retention ownership and analytics policy; review the `0078`-`0079` billing/activation hardening invariants and the conservative `0080` activation-timestamp backfill with the same candidate.
+- Production migrations are forward-only. The current remote baseline is `0001`-`0052`; current candidate migrations `0053_seller_operations_contracts.sql` through `0086_platform_admin_bootstrap_receipt.sql` require a fresh backup, reviewed clean commit and an approved, separately recorded mutation window before application. Before `0066`, revoke or expire pending OAuth rows created without a lookup hash; before `0076`, confirm Dodo provider references and tax/merchant decisions without recording secret values; before `0077`, confirm activation-event retention ownership and analytics policy; review the `0078`-`0080` billing/activation invariants and the `0081`-`0086` payment, account-security, recovery, privacy and platform-admin constraints with the same candidate.
 - The continuation requires the exact clean Phase 2 execution commit, fresh evidence and a new release manifest pinned to that reviewed commit before deploying or migrating. Local dry-runs and R2 do not authorize production mutation.
 
 Do not remove these blockers by broadening a shared-zone wildcard without the exact in-zone staging exceptions, routing an external staging hostname through production, or disabling Turnstile. Keep the platform-only route contracts explicit, and before any future external-domain cutover capture a fresh read-only external-host inventory, rerun staging acceptance and add tenant-routing/Turnstile lifecycle evidence. The route handoff is documented in `buildProductionRouteHandoff`; it is a plan-only helper and performs no Cloudflare mutation.
@@ -414,7 +415,7 @@ Rollback authority and support ownership must be named before the change window 
 
 Phase 10 is not complete until:
 
-- The reviewed production baseline is explicitly recorded as `0001`-`0052`; any continuation migration (`0053`-`0080`) has a fresh protected backup, isolated restore evidence and forward-only apply record.
+- The reviewed production baseline is explicitly recorded as `0001`-`0052`; any current-candidate continuation migration (`0053`-`0086`) has a fresh protected backup, isolated restore evidence and forward-only apply record.
 - Staging acceptance for the candidate migrations and Worker version is recorded.
 - The production doctor and reviewed release manifest pass for the exact candidate commit and rollback Worker version.
 - A production D1 export/bookmark is less than 24 hours old and the isolated restore-drill evidence is less than 30 days old.
