@@ -12,6 +12,7 @@ export interface ReleaseCloseoutManifest {
   treeSha: string | null;
   createdAt: string | null;
   expiresAt: string | null;
+  manifestSha256: string;
   schemaVersion: unknown;
 }
 
@@ -34,6 +35,7 @@ export interface ReleaseCloseoutReport {
     manifestCount: number;
     manifestFresh: boolean;
     candidateMatchesLatestStaging: boolean;
+    bindingMatchesLatest: boolean;
     eligibleForCurrentCandidate: boolean;
   };
   failedChecks: ReleaseCloseoutCheck[];
@@ -48,6 +50,9 @@ export function buildCloseoutReport(input?: {
   workerSecretNames?: string[];
   wranglerConfig?: unknown;
   now?: Date;
+  continuationEvidenceImplementation?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  inspectReadinessImplementation?: (input: Record<string, unknown>) => { checks: Array<Record<string, unknown>>; missing: string[]; ok: boolean };
+  repositoryStateImplementation?: () => { dirty: string | null; headSha: string | null; treeSha: string | null };
   stagingReleaseRoot?: string;
 }): Promise<ReleaseCloseoutReport>;
 

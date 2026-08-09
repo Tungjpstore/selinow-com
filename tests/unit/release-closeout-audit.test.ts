@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +63,119 @@ describe("release closeout audit", () => {
         schemaVersion: 3,
       });
       expect(JSON.stringify(report)).not.toContain("must-not-appear");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks an otherwise-ready closeout when staging or continuation evidence is not bound", async () => {
+    const root = join(tmpdir(), `selinow-closeout-binding-${String(Date.now())}`);
+    const releaseId = "stg_20260809T010203Z_0123456789ab";
+    const manifestPath = join(root, releaseId, "release-manifest.json");
+    await mkdir(join(root, releaseId), { recursive: true });
+    await writeFile(manifestPath, JSON.stringify({
+      releaseId,
+      commitSha: "a".repeat(40),
+      treeSha: "b".repeat(40),
+      createdAt: "2026-08-09T01:02:03.000Z",
+      expiresAt: "2026-08-09T01:03:03.000Z",
+      schemaVersion: 3,
+    }));
+
+    try {
+      const report = await buildCloseoutReport({
+        evidence: {
+          backup: {
+            completedAt: "2026-08-09T01:02:03.000Z",
+            restoreDrillCompletedAt: "2026-08-09T01:02:03.000Z",
+            restoreDrillReportRef: "/missing/restore.json",
+            snapshotReportRef: "/missing/backup.json",
+          },
+          commitSha: "a".repeat(40),
+          staging: {
+            manifestRef: manifestPath,
+            manifestSha256: "0".repeat(64),
+            releaseId,
+          },
+        },
+        inspectReadinessImplementation: () => ({ checks: [], missing: [], ok: true }),
+        now: new Date("2026-08-09T01:02:30.000Z"),
+        productionSpec: { accountId: "c".repeat(32) },
+        repositoryStateImplementation: () => ({
+          dirty: "",
+          headSha: "a".repeat(40),
+          treeSha: "b".repeat(40),
+        }),
+        stagingReleaseRoot: root,
+        continuationEvidenceImplementation: () => Promise.reject(new Error("missing")),
+        workerSecretNames: [],
+        wranglerConfig: { env: { production: { d1_databases: [{ binding: "PLATFORM_DB", database_id: "d", database_name: "db" }] } } },
+      });
+
+      expect(report.ok).toBe(false);
+      expect(report.failedChecks.map((check) => check.name)).toEqual(expect.arrayContaining([
+        "evidence.continuationFiles",
+        "evidence.staging.currentCandidate",
+      ]));
+      expect(report.staging.eligibleForCurrentCandidate).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("passes closeout metadata only when staging and continuation artifacts match", async () => {
+    const root = join(tmpdir(), `selinow-closeout-ready-${String(Date.now())}`);
+    const releaseId = "stg_20260809T010203Z_0123456789ab";
+    const manifestPath = join(root, releaseId, "release-manifest.json");
+    const backupRef = join(root, "backup.json");
+    const restoreRef = join(root, "restore.json");
+    const manifest = JSON.stringify({
+      releaseId,
+      commitSha: "a".repeat(40),
+      treeSha: "b".repeat(40),
+      createdAt: "2026-08-09T01:02:03.000Z",
+      expiresAt: "2026-08-09T02:02:03.000Z",
+      schemaVersion: 3,
+    });
+    await mkdir(join(root, releaseId), { recursive: true });
+    await writeFile(manifestPath, manifest);
+
+    try {
+      const report = await buildCloseoutReport({
+        evidence: {
+          backup: {
+            completedAt: "2026-08-09T01:00:00.000Z",
+            restoreDrillCompletedAt: "2026-08-09T01:01:00.000Z",
+            restoreDrillReportRef: restoreRef,
+            snapshotReportRef: backupRef,
+          },
+          commitSha: "a".repeat(40),
+          staging: {
+            manifestRef: manifestPath,
+            manifestSha256: createHash("sha256").update(manifest).digest("hex"),
+            releaseId,
+          },
+        },
+        continuationEvidenceImplementation: () => Promise.resolve({
+          backup: { completedAt: "2026-08-09T01:00:00.000Z", reportRef: backupRef },
+          restore: { completedAt: "2026-08-09T01:01:00.000Z", reportRef: restoreRef },
+        }),
+        inspectReadinessImplementation: () => ({ checks: [], missing: [], ok: true }),
+        now: new Date("2026-08-09T01:30:00.000Z"),
+        productionSpec: { accountId: "c".repeat(32) },
+        repositoryStateImplementation: () => ({
+          dirty: "",
+          headSha: "a".repeat(40),
+          treeSha: "b".repeat(40),
+        }),
+        stagingReleaseRoot: root,
+        workerSecretNames: [],
+        wranglerConfig: { env: { production: { d1_databases: [{ binding: "PLATFORM_DB", database_id: "d", database_name: "db" }] } } },
+      });
+
+      expect(report.ok).toBe(true);
+      expect(report.failedChecks).toEqual([]);
+      expect(report.staging.eligibleForCurrentCandidate).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

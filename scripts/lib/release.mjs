@@ -574,9 +574,10 @@ export function inspectProductionReadiness(input) {
   ));
   const commerceEvidenceValidation = input.commerceEvidenceValidation
     ?? (canonicalCommerceRefs ? validateCommerceUatArtifactsSync({
-      evidence,
-      repositoryRoot: input.repositoryRoot ?? repositoryRoot,
-    }) : undefined);
+        evidence,
+        now: input.now,
+        repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+      }) : undefined);
   const releaseScope = evaluateReleaseScope(evidence);
   const rollbackCandidate = evaluateProductionRollbackCandidate(evidence, input.now, migrationNames);
   const checks = [
@@ -707,8 +708,13 @@ export function inspectProductionReadiness(input) {
     "evidence.migrationLedgerPrefix",
     Array.isArray(migrationLedgerPrefix)
       && migrationLedgerPrefix.length > 0
+      && migrationLedgerPrefix.length <= migrationNames.length
       && new Set(migrationLedgerPrefix).size === migrationLedgerPrefix.length
-      && migrationLedgerPrefix.every((name) => typeof name === "string" && /^\d{4}_[a-z0-9_]+\.sql$/u.test(name)),
+      && migrationLedgerPrefix.every((name, index) => (
+        typeof name === "string"
+        && /^\d{4}_[a-z0-9_]+\.sql$/u.test(name)
+        && name === migrationNames[index]
+      )),
   ));
   const now = input.now ?? new Date();
   const recent = (value, maximumAgeMs) => {
@@ -810,18 +816,10 @@ export function buildProductionRollbackRehearsalArtifact(input) {
   const expectedMigrationName = migrationNames.at(-1);
   const expectedMigrationLedgerSha256 = fingerprint(migrationNames);
   const now = input?.now instanceof Date ? input.now.getTime() : Date.now();
-  const rehearsedAt = safeDate(candidate?.rehearsedAt);
-  const rehearsalAge = rehearsedAt === null ? Number.POSITIVE_INFINITY : now - rehearsedAt;
   const invariants = Array.isArray(candidate?.invariants) ? candidate.invariants : [];
   if (!RELEASE_ID_PATTERN.test(evidence?.releaseId ?? "")
     || PLACEHOLDER_PATTERN.test(evidence.releaseId)
-    || candidate?.accepted !== true
-    || candidate?.rehearsalPassed !== true
     || candidate?.schemaVersion !== 2
-    || evidence?.rollback?.rehearsedAt !== candidate?.rehearsedAt
-    || rehearsedAt === null
-    || rehearsalAge < 0
-    || rehearsalAge > 30 * 24 * 60 * 60_000
     || candidate?.migrationName !== expectedMigrationName
     || candidate?.migrationLedgerSha256 !== expectedMigrationLedgerSha256
     || invariants.length < REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS.length
@@ -847,8 +845,10 @@ export function buildProductionRollbackRehearsalArtifact(input) {
       sha256: expectedMigrationLedgerSha256,
     },
     rehearsal: {
-      completedAt: candidate.rehearsedAt,
-      result: "passed",
+      authorizesProductionAdmission: false,
+      completedAt: new Date(now).toISOString(),
+      kind: "schema_compatibility_validation",
+      result: "validated",
     },
     releaseSource: {
       commitSha: evidence.commitSha,
@@ -915,6 +915,7 @@ export function buildReleaseArtifacts(input) {
   const commerceEvidenceValidation = input.commerceEvidenceValidation
     ?? (canonicalCommerceRefs ? validateCommerceUatArtifactsSync({
       evidence: input.evidence,
+      now: input.now,
       repositoryRoot: input.repositoryRoot ?? repositoryRoot,
     }) : undefined);
   const releaseInput = { ...input, commerceEvidenceValidation };
@@ -1137,6 +1138,8 @@ export function validateProductionRollbackArtifact(input) {
     },
     rehearsal: {
       completedAt: evidence.rollback.rehearsedAt,
+      authorizesProductionAdmission: true,
+      kind: "live_rollback_rehearsal",
       result: "passed",
     },
     releaseSource: {
@@ -1203,6 +1206,7 @@ export async function assertProductionDeployAdmission(input) {
   });
   const commerceEvidenceValidation = await validateCommerceUatArtifacts({
     evidence,
+    now: input.now ?? new Date(),
     repositoryRoot: root,
   });
   const admission = validateProductionDeployAdmission({

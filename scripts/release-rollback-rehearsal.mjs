@@ -42,13 +42,14 @@ try {
       evidenceRef: `.wrangler/releases/${evidence.releaseId}/rollback-rehearsal.json`,
     };
   const output = {
+    authorizesProductionAdmission: false,
     artifactSha256: result.artifactSha256,
     environment: "production",
     evidenceRef: result.evidenceRef,
-    mode: options.write ? "written" : "validated",
+    mode: "schema_compatibility_validation",
     ok: true,
   };
-  process.stdout.write(options.json ? `${JSON.stringify(output, null, 2)}\n` : `PASS rollback rehearsal ${output.mode}: ${output.evidenceRef}\n`);
+  process.stdout.write(options.json ? `${JSON.stringify(output, null, 2)}\n` : `PASS rollback compatibility validation ${options.write ? "written" : "validated"}: ${output.evidenceRef}\n`);
 } catch (error) {
   const code = error instanceof Error && /^[a-z0-9_:.-]{1,220}$/u.test(error.message)
     ? error.message

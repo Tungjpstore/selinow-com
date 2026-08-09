@@ -11,6 +11,21 @@ const GIT_SHA = /^[a-f0-9]{40}$/u;
 const RELEASE_ID = /^stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}$/u;
 const SAFE_REF = /^\.wrangler\/releases\/staging\/[A-Za-z0-9._/-]+\.json$/u;
 
+function assertStagingManifestWindow(manifest, now = new Date()) {
+  const createdAt = new Date(manifest?.createdAt ?? "");
+  const expiresAt = new Date(manifest?.expiresAt ?? "");
+  if (!Number.isFinite(createdAt.getTime())
+    || !Number.isFinite(expiresAt.getTime())
+    || createdAt.toISOString() !== manifest?.createdAt
+    || expiresAt.toISOString() !== manifest?.expiresAt
+    || createdAt.getTime() > now.getTime() + 5 * 60_000
+    || expiresAt.getTime() <= createdAt.getTime()
+    || expiresAt.getTime() - createdAt.getTime() > 7 * 24 * 60 * 60_000) {
+    throw new Error("commerce_uat_staging_manifest_window_invalid");
+  }
+  if (now.getTime() > expiresAt.getTime()) throw new Error("commerce_uat_staging_manifest_expired");
+}
+
 function git(root, args, issue) {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
   if (result.error || result.status !== 0) throw new Error(issue);
@@ -69,7 +84,7 @@ function assertScenarioArtifacts(root, evidence, provider) {
   return fingerprints;
 }
 
-export function readTrustedStagingUatBinding({ evidence, manifestPath: requestedManifestPath, repositoryRoot, workerVersion }) {
+export function readTrustedStagingUatBinding({ evidence, manifestPath: requestedManifestPath, now = new Date(), repositoryRoot, workerVersion }) {
   const root = repositoryRoot;
   const release = evidence?.release;
   if (typeof release?.manifestRef !== "string") throw new Error("commerce_uat_release_binding_missing");
@@ -97,6 +112,7 @@ export function readTrustedStagingUatBinding({ evidence, manifestPath: requested
   if (manifest.schemaVersion !== 3 || manifest.environment !== "staging" || manifest.releaseId !== release.releaseId) {
     throw new Error("commerce_uat_manifest_invalid");
   }
+  assertStagingManifestWindow(manifest, now);
   const commitSha = git(root, ["rev-parse", "--verify", "HEAD"], "commerce_uat_commit_unavailable");
   const treeSha = git(root, ["rev-parse", "--verify", "HEAD^{tree}"], "commerce_uat_tree_unavailable");
   if (commitSha !== release.commitSha) throw new Error("commerce_uat_commit_mismatch");
@@ -112,7 +128,7 @@ export function readTrustedStagingUatBinding({ evidence, manifestPath: requested
   };
 }
 
-export function validateCommerceUatArtifactsSync({ evidence, repositoryRoot }) {
+export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), repositoryRoot }) {
   const root = repositoryRoot;
   const result = {};
   for (const [provider, validator] of [["dodo", assertDodoStagingUatEvidence], ["payos", assertPayosStagingUatEvidence]]) {
@@ -131,7 +147,7 @@ export function validateCommerceUatArtifactsSync({ evidence, repositoryRoot }) {
       }
       const scenarioArtifactFingerprints = assertScenarioArtifacts(root, artifact, provider);
       const binding = {
-        ...readTrustedStagingUatBinding({ evidence: artifact, repositoryRoot: root }),
+        ...readTrustedStagingUatBinding({ evidence: artifact, now, repositoryRoot: root }),
         requireArtifactProof: true,
         scenarioArtifactFingerprints,
       };

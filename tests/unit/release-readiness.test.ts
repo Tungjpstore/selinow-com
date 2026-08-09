@@ -18,6 +18,7 @@ import {
   REQUIRED_WORKER_SECRET_NAMES,
   runPilotSmoke,
   validateProductionDeployAdmission,
+  validateProductionRollbackArtifact,
   validatePilotSmokePlan,
   writeProductionRollbackRehearsalArtifact,
 } from "../../scripts/lib/release.mjs";
@@ -208,7 +209,7 @@ function readyEvidence(migrationNames = sourceMigrationNames): Record<string, un
       telegram: true,
       website: true,
     },
-    migrationLedgerPrefix: ["0001_first.sql"],
+    migrationLedgerPrefix: [migrationNames[0]],
     monitoring: {
       alertsReady: true,
       budgetAlertsReady: true,
@@ -673,6 +674,11 @@ describe("production release readiness", () => {
       expect(artifact).toMatchObject({
         releaseSource: { commitSha, treeSha },
         rollbackSource: { commitSha: rollbackCommitSha, treeSha: rollbackTreeSha },
+        rehearsal: {
+          authorizesProductionAdmission: false,
+          kind: "schema_compatibility_validation",
+          result: "validated",
+        },
         schemaVersion: 1,
       });
 
@@ -684,6 +690,18 @@ describe("production release readiness", () => {
       });
       expect(written.artifactSha256).toMatch(/^[a-f0-9]{64}$/u);
       expect(written.evidenceRef).toBe(`.wrangler/releases/${String(releaseEvidence.releaseId)}/rollback-rehearsal.json`);
+      const rollbackEvidence = releaseEvidence.rollback as {
+        candidate: Record<string, unknown>;
+        rehearsalEvidenceRef: string;
+      };
+      rollbackEvidence.candidate.artifactSha256 = written.artifactSha256;
+      rollbackEvidence.candidate.evidenceRef = written.evidenceRef;
+      rollbackEvidence.rehearsalEvidenceRef = written.evidenceRef;
+      expect(() => validateProductionRollbackArtifact({
+        evidence: releaseEvidence,
+        migrationNames: ["0001_first.sql"],
+        repositoryRoot: root,
+      })).toThrow("production_rollback_artifact_binding_mismatch");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -703,6 +721,23 @@ describe("production release readiness", () => {
       workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
       wranglerConfig: readyWranglerConfig(),
     })).toThrow("release_prerequisites_incomplete:evidence.migrationLedgerPrefix");
+  });
+
+  it("rejects an observed migration list that is not the exact source prefix", () => {
+    const migrationNames = ["0001_first.sql", "0002_second.sql"];
+    const evidence = readyEvidence(migrationNames);
+    evidence.migrationLedgerPrefix = ["0002_second.sql"];
+
+    const result = inspectProductionReadiness({
+      evidence,
+      migrationNames,
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig: readyWranglerConfig(),
+    });
+
+    expect(result.missing).toContain("evidence.migrationLedgerPrefix");
   });
 
   it("projects only allowlisted acceptance fields into the release manifest", () => {
@@ -880,7 +915,9 @@ describe("production release readiness", () => {
       const stagingManifestRef = `.wrangler/releases/staging/${stagingReleaseId}/release-manifest.json`;
       const stagingManifest = JSON.stringify({
         commitSha,
+        createdAt: "2026-07-25T11:00:00.000Z",
         environment: "staging",
+        expiresAt: "2026-07-26T11:00:00.000Z",
         releaseId: stagingReleaseId,
         schemaVersion: 3,
         treeSha,
@@ -982,7 +1019,9 @@ describe("production release readiness", () => {
           sha256: rollback.candidate.migrationLedgerSha256,
         },
         rehearsal: {
+          authorizesProductionAdmission: true,
           completedAt: rollback.rehearsedAt,
+          kind: "live_rollback_rehearsal",
           result: "passed",
         },
         releaseSource: { commitSha, treeSha },

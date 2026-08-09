@@ -12,6 +12,7 @@ export type CommerceUatArtifactValidation = Record<"dodo" | "payos", {
 export function readTrustedStagingUatBinding(input: {
   evidence: unknown;
   manifestPath?: string;
+  now?: Date;
   repositoryRoot: string;
   workerVersion?: string;
 }): {
@@ -23,5 +24,5 @@ export function readTrustedStagingUatBinding(input: {
   workerVersion: string;
 };
 
-export function validateCommerceUatArtifactsSync(input: { evidence: unknown; repositoryRoot: string }): CommerceUatArtifactValidation;
-export function validateCommerceUatArtifacts(input: { evidence: unknown; repositoryRoot: string }): Promise<CommerceUatArtifactValidation>;
+export function validateCommerceUatArtifactsSync(input: { evidence: unknown; now?: Date; repositoryRoot: string }): CommerceUatArtifactValidation;
+export function validateCommerceUatArtifacts(input: { evidence: unknown; now?: Date; repositoryRoot: string }): Promise<CommerceUatArtifactValidation>;

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -7,6 +8,7 @@ import {
   inspectProductionReadiness,
   readOptionalJson,
 } from "./release.mjs";
+import { assertFreshProductionContinuationEvidence } from "./backup.mjs";
 import { repositoryRoot } from "./platform.mjs";
 
 const STAGING_RELEASE_ROOT = resolve(repositoryRoot, ".wrangler/releases/staging");
@@ -21,6 +23,11 @@ const CHECK_GROUPS = [
     prefix: "evidence.backup.",
     category: "production_backup_restore",
     nextAction: "Run a fresh protected production backup and isolated restore drill for the exact reviewed tree.",
+  },
+  {
+    prefix: "evidence.continuationFiles",
+    category: "production_backup_restore",
+    nextAction: "Verify the release-bound production backup and isolated restore artifacts before admission.",
   },
   {
     prefix: "evidence.commerceAcceptance.",
@@ -173,6 +180,12 @@ async function loadStagingManifests(root = STAGING_RELEASE_ROOT) {
     const path = join(root, entry.name, "release-manifest.json");
     const manifest = await readOptionalJson(path);
     if (manifest === null) continue;
+    let manifestSha256;
+    try {
+      manifestSha256 = createHash("sha256").update(await readFile(path)).digest("hex");
+    } catch {
+      continue;
+    }
     manifests.push({
       path: path.replace(`${repositoryRoot}/`, ""),
       releaseId: typeof manifest.releaseId === "string" ? manifest.releaseId : null,
@@ -180,6 +193,7 @@ async function loadStagingManifests(root = STAGING_RELEASE_ROOT) {
       treeSha: typeof manifest.treeSha === "string" ? manifest.treeSha : null,
       createdAt: typeof manifest.createdAt === "string" ? manifest.createdAt : null,
       expiresAt: typeof manifest.expiresAt === "string" ? manifest.expiresAt : null,
+      manifestSha256,
       schemaVersion: manifest.schemaVersion ?? null,
     });
   }
@@ -200,9 +214,12 @@ export async function buildCloseoutReport({
   workerSecretNames,
   wranglerConfig,
   now = new Date(),
+  continuationEvidenceImplementation = assertFreshProductionContinuationEvidence,
+  inspectReadinessImplementation = inspectProductionReadiness,
+  repositoryStateImplementation,
   stagingReleaseRoot = STAGING_RELEASE_ROOT,
 } = {}) {
-  const readiness = inspectProductionReadiness({
+  const readiness = inspectReadinessImplementation({
     evidence,
     now,
     productionSpec,
@@ -211,32 +228,84 @@ export async function buildCloseoutReport({
     wranglerConfig,
   });
   const checks = readiness.checks.map(classifyReleaseCheck);
-  const failedChecks = checks.filter((check) => !check.ok);
-  const categoryCounts = Object.fromEntries(
-    [...new Set(checks.map((check) => check.category))]
+  const stagingManifests = await loadStagingManifests(stagingReleaseRoot);
+  const repositoryState = repositoryStateImplementation?.() ?? {
+    headSha: gitValue(["rev-parse", "HEAD"]),
+    treeSha: gitValue(["rev-parse", "HEAD^{tree}"]),
+    dirty: gitValue(["status", "--porcelain"]),
+  };
+  const headSha = repositoryState.headSha;
+  const treeSha = repositoryState.treeSha;
+  const dirty = repositoryState.dirty;
+  const latestStaging = stagingManifests[0] ?? null;
+  const latestStagingCreatedAt = Date.parse(latestStaging?.createdAt ?? "");
+  const latestStagingExpiry = Date.parse(latestStaging?.expiresAt ?? "");
+  const manifestFresh = latestStaging?.schemaVersion === 3
+    && Number.isFinite(latestStagingCreatedAt)
+    && Number.isFinite(latestStagingExpiry)
+    && latestStagingCreatedAt <= now.getTime() + 5 * 60_000
+    && latestStagingExpiry > now.getTime()
+    && latestStagingExpiry > latestStagingCreatedAt
+    && latestStagingExpiry - latestStagingCreatedAt <= 7 * 24 * 60 * 60_000;
+  const candidateMatchesLatestStaging = latestStaging?.commitSha === headSha
+    && latestStaging?.treeSha === treeSha;
+  const repositoryClean = dirty === "";
+  const stagingBindingMatchesLatest = latestStaging !== null
+    && evidence?.staging?.releaseId === latestStaging.releaseId
+    && evidence?.staging?.manifestRef === latestStaging.path
+    && evidence?.staging?.manifestSha256 === latestStaging.manifestSha256;
+  const stagingEligibleForCurrentCandidate = repositoryClean
+    && manifestFresh
+    && candidateMatchesLatestStaging
+    && stagingBindingMatchesLatest;
+
+  let continuationFiles = false;
+  if (evidence !== null && productionSpec !== null) {
+    try {
+      const production = wranglerConfig?.env?.production;
+      const database = Array.isArray(production?.d1_databases)
+        ? production.d1_databases.find((item) => item?.binding === "PLATFORM_DB")
+        : null;
+      const continuation = await continuationEvidenceImplementation({
+        accountId: productionSpec.accountId,
+        databaseId: database?.database_id,
+        databaseName: database?.database_name,
+        now,
+        repositoryRoot,
+        reviewedCommitSha: evidence.commitSha,
+      });
+      const expectedBackupRef = resolve(repositoryRoot, evidence.backup?.snapshotReportRef ?? "");
+      const expectedRestoreRef = resolve(repositoryRoot, evidence.backup?.restoreDrillReportRef ?? "");
+      continuationFiles = resolve(continuation.backup?.reportRef ?? "") === expectedBackupRef
+        && resolve(continuation.restore?.reportRef ?? "") === expectedRestoreRef
+        && continuation.backup?.completedAt === evidence.backup?.completedAt
+        && continuation.restore?.completedAt === evidence.backup?.restoreDrillCompletedAt;
+    } catch {
+      continuationFiles = false;
+    }
+  }
+  const closeoutChecks = [
+    { name: "evidence.staging.currentCandidate", ok: stagingEligibleForCurrentCandidate },
+    { name: "evidence.continuationFiles", ok: continuationFiles },
+  ].map(classifyReleaseCheck);
+  const allChecks = [...checks, ...closeoutChecks];
+  const allFailedChecks = allChecks.filter((check) => !check.ok);
+  const allCategoryCounts = Object.fromEntries(
+    [...new Set(allChecks.map((check) => check.category))]
       .sort()
       .map((category) => [category, {
-        failed: checks.filter((check) => check.category === category && !check.ok).length,
-        passed: checks.filter((check) => check.category === category && check.ok).length,
+        failed: allChecks.filter((check) => check.category === category && !check.ok).length,
+        passed: allChecks.filter((check) => check.category === category && check.ok).length,
       }]),
   );
-  const stagingManifests = await loadStagingManifests(stagingReleaseRoot);
-  const headSha = gitValue(["rev-parse", "HEAD"]);
-  const treeSha = gitValue(["rev-parse", "HEAD^{tree}"]);
-  const dirty = gitValue(["status", "--porcelain"]);
-  const latestStaging = stagingManifests[0] ?? null;
-  const latestStagingExpiry = Date.parse(latestStaging?.expiresAt ?? "");
-  const manifestFresh = Number.isFinite(latestStagingExpiry) && latestStagingExpiry >= now.getTime();
-  const candidateMatchesLatestStaging = latestStaging?.commitSha === headSha;
-  const repositoryClean = dirty === "";
   return {
     generatedAt: now.toISOString(),
-    ok: readiness.ok,
+    ok: readiness.ok && allFailedChecks.length === 0,
     summary: {
-      failed: failedChecks.length,
-      passed: checks.length - failedChecks.length,
-      total: checks.length,
-      categoryCounts,
+      failed: allFailedChecks.length,
+      passed: allChecks.length - allFailedChecks.length,
+      total: allChecks.length,
+      categoryCounts: allCategoryCounts,
     },
     repository: {
       headSha,
@@ -248,10 +317,11 @@ export async function buildCloseoutReport({
       manifestCount: stagingManifests.length,
       manifestFresh,
       candidateMatchesLatestStaging,
-      eligibleForCurrentCandidate: repositoryClean && manifestFresh && candidateMatchesLatestStaging,
+      bindingMatchesLatest: stagingBindingMatchesLatest,
+      eligibleForCurrentCandidate: stagingEligibleForCurrentCandidate,
     },
-    failedChecks,
-    missing: readiness.missing,
+    failedChecks: allFailedChecks,
+    missing: [...readiness.missing, ...allFailedChecks.filter((check) => !readiness.missing.includes(check.name)).map((check) => check.name)],
   };
 }
 

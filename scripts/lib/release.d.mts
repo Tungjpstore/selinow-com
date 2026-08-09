@@ -7,9 +7,12 @@ export const RELEASE_CHANNEL_KEYS: string[];
 export const REQUIRED_COMMERCE_ACCEPTANCE_KEYS: string[];
 export function evaluateBackupPrerequisites(evidence: Record<string, unknown> | null, now?: Date): ReleaseCheck[];
 export function inspectProductionReadiness(input: {
+  commerceEvidenceValidation?: Record<string, unknown>;
   evidence: Record<string, unknown> | null;
+  migrationNames?: string[];
   now: Date;
   productionSpec: Record<string, unknown> | null;
+  repositoryRoot?: string;
   workerSecretNames: string[];
   wranglerConfig: Record<string, unknown>;
 }): { checks: ReleaseCheck[]; missing: string[]; ok: boolean };
@@ -29,6 +32,16 @@ export function writeProductionRollbackRehearsalArtifact(input: {
   artifactSha256: string;
   evidenceRef: string;
 }>;
+export function validateProductionRollbackArtifact(input: {
+  evidence: Record<string, unknown>;
+  migrationNames: string[];
+  repositoryRoot?: string;
+}): {
+  accepted: boolean;
+  artifactSha256: string;
+  migrationLedgerSha256: string;
+  rollbackCandidateWorkerVersion: string;
+};
 export function buildProductionWorkerVersionMessage(input: {
   commitSha: string;
   manifestRef: string;
@@ -43,6 +56,7 @@ export function assertProductionWorkerUploadResult(input: {
     commitSha: string;
     manifestRef: string;
     releaseId: string;
+    role?: "candidate" | "rollback";
     treeSha: string;
   };
 }): { binding: Record<string, string>; workerVersion: string };
