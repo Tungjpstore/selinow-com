@@ -36,6 +36,7 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
   let healthUpdated = false;
   let providerCalls = 0;
   let activeCredentialId = "credential-a";
+  const staleAudits: Array<{ metadata: unknown; requestId: string }> = [];
 
   const database = {
     prepare(sql: string) {
@@ -44,9 +45,13 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
         bind(...values: unknown[]) {
           return {
             first() {
+              if (sql.includes("telegram_integrations.active_credential_id = ?")) {
+                return Promise.resolve(activeCredentialId === values[2] ? { activeCredentialId } : null);
+              }
               if (sql.includes("FROM telegram_integrations") && sql.includes("INNER JOIN telegram_credentials")) {
                 return Promise.resolve({
                   ...encrypted,
+                  activeCredentialId,
                   botDisplayName: "Draft Bot",
                   botUsername: "draft_bot",
                   credentialId: "credential-a",
@@ -66,8 +71,9 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
               return Promise.resolve(null);
             },
             run() {
-              if (sql.includes("SET last_health_update_at")) healthUpdated = activeCredentialId === String(values[5]);
+              if (sql.includes("SET last_health_update_at")) healthUpdated = activeCredentialId === String(values[6]);
               if (sql.includes("UPDATE telegram_updates SET status = 'processed'")) resultCodes.push(String(values[0]));
+              if (sql.includes("telegram.update_stale_generation")) staleAudits.push({ metadata: JSON.parse(String(values[3])), requestId: String(values[4]) });
               return Promise.resolve({ meta: { changes: 1 } });
             },
           };
@@ -96,6 +102,8 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
     fetcher,
     getHealthUpdated: () => healthUpdated,
     getProviderCalls: () => providerCalls,
+    getStaleAudits: () => staleAudits,
+    rotateCredential: () => { activeCredentialId = "credential-rotated"; },
     resultCodes,
     sqlHistory,
   };

@@ -31,6 +31,7 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
   let providerCalls = 0;
   let activeCredentialId = "credential-active";
   let updateReadCount = 0;
+  const staleAudits: Array<{ metadata: unknown; requestId: string }> = [];
 
   const database = {
     prepare(sql: string) {
@@ -38,9 +39,13 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
         bind(...values: unknown[]) {
           return {
             first() {
+              if (sql.includes("telegram_integrations.active_credential_id = ?")) {
+                return Promise.resolve(activeCredentialId === values[2] ? { activeCredentialId } : null);
+              }
               if (sql.includes("FROM telegram_integrations") && sql.includes("INNER JOIN telegram_credentials")) {
                 return Promise.resolve({
                   ...encrypted,
+                  activeCredentialId,
                   botDisplayName: "Active Bot",
                   botUsername: "active_bot",
                   credentialId: "credential-active",
@@ -65,9 +70,10 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
                 throw new Error("forced_telegram_update_failure");
               }
               if (sql.includes("last_health_update_at = COALESCE") && typeof values[1] === "string") {
-                healthUpdated = activeCredentialId === String(values[4]);
+                healthUpdated = activeCredentialId === String(values[5]);
               }
               if (sql.includes("UPDATE telegram_updates SET status = 'processed'")) resultCodes.push(String(values[0]));
+              if (sql.includes("telegram.update_stale_generation")) staleAudits.push({ metadata: JSON.parse(String(values[3])), requestId: String(values[4]) });
               return Promise.resolve({ meta: { changes: 1 } });
             },
           };
@@ -96,8 +102,10 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
     fetcher,
     getHealthUpdated: () => healthUpdated,
     getProviderCalls: () => providerCalls,
+    getStaleAudits: () => staleAudits,
     getUpdateReadCount: () => updateReadCount,
     resultCodes,
+    rotateCredential: () => { activeCredentialId = "credential-rotated"; },
   };
 }
 
@@ -172,6 +180,34 @@ describe("active Telegram health evidence", () => {
 
     expect(result).toMatchObject({ processed: true, state: "telegram_start" });
     expect(runtime.getHealthUpdated()).toBe(false);
+  });
+
+  it("discards an update when the credential generation changes during commerce", async () => {
+    const runtime = await activeEnvironment();
+    commerce.handle.mockImplementationOnce(() => {
+      runtime.rotateCredential();
+      return Promise.resolve({
+        identity: { chatId: "42", identityId: "identity-active" },
+        reply: { text: "stale reply must not be sent" },
+        resultCode: "telegram_start",
+      });
+    });
+
+    const result = await processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/start"),
+      requestId: "request-active-generation-race",
+      webhookPublicId: "tgwh_active",
+    });
+
+    expect(result).toMatchObject({ processed: false, state: "stale_generation" });
+    expect(commerce.handle).toHaveBeenCalledOnce();
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getStaleAudits()).toEqual([{
+      metadata: { updateId: 100 },
+      requestId: "request-active-generation-race",
+    }]);
   });
 
   it("fails closed after one collision re-read when an update receipt cannot be stored", async () => {
