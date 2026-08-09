@@ -141,8 +141,11 @@ const landingCopy = {
   finalSecondary: mt("marketing.home.hero.secondary"),
   footerTagline: mt("marketing.footer.tagline"),
   footer: {
+    legal: mt("marketing.footer.legal"),
+    privacy: mt("marketing.footer.privacy"),
     product: mt("marketing.header.product"),
     solutions: mt("marketing.header.solutions"),
+    support: mt("marketing.footer.support"),
     resources: mt("marketing.header.resources"),
   },
 };
@@ -310,7 +313,7 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
 
         <section class="final-cta-kit"><div class="platform-shell final-cta-inner"><img src="/brand/logo/selinow-mark-black.svg" class="final-cta-mark" alt="" width="56" height="56" /><div><p class="kit-kicker">{landingCopy.finalEyebrow}</p><h2>{landingCopy.finalTitle}</h2><p>{landingCopy.finalDescription}</p></div><div class="final-cta-actions"><a class="kit-button kit-button-light" href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.finalPrimary}<span aria-hidden="true">→</span></a><a class="kit-button kit-button-outline-light" href="#workflow">{landingCopy.finalSecondary}<span aria-hidden="true">▶</span></a></div></div></section>
       </main>
-      <footer class="landing-footer"><div class="platform-shell footer-grid"><div class="footer-brand"><img src="/brand/logo/selinow-logo-black.svg" alt="Selinow" width="132" height="36" /><p>{landingCopy.footerTagline}</p><small>© {new Date().getFullYear()} Selinow. All rights reserved.</small></div><div><h2>{landingCopy.footer.product}</h2><a href="#channels">{landingCopy.channelsTitle}</a><a href="#workflow">{landingCopy.workflowTitle}</a><a href="#architecture">{landingCopy.architectureTitle}</a></div><div><h2>{landingCopy.footer.solutions}</h2><a href="#use-cases">{landingCopy.uses[0]?.[1] ?? ""}</a><a href="#use-cases">{landingCopy.uses[1]?.[1] ?? ""}</a><a href="#use-cases">{landingCopy.uses[3]?.[1] ?? ""}</a></div><div><h2>{landingCopy.footer.resources}</h2><a href="#faq">{landingCopy.faqTitle}</a><a href="/pricing">{landingCopy.pricingCompare}</a><a href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.heroPrimary}</a></div></div></footer>
+      <footer class="landing-footer"><div class="platform-shell footer-grid"><div class="footer-brand"><img src="/brand/logo/selinow-logo-black.svg" alt="Selinow" width="132" height="36" /><p>{landingCopy.footerTagline}</p><small>© {new Date().getFullYear()} Selinow. All rights reserved.</small></div><div><h2>{landingCopy.footer.product}</h2><a href="#channels">{landingCopy.channelsTitle}</a><a href="#workflow">{landingCopy.workflowTitle}</a><a href="#architecture">{landingCopy.architectureTitle}</a></div><div><h2>{landingCopy.footer.solutions}</h2><a href="#use-cases">{landingCopy.uses[0]?.[1] ?? ""}</a><a href="#use-cases">{landingCopy.uses[1]?.[1] ?? ""}</a><a href="#use-cases">{landingCopy.uses[3]?.[1] ?? ""}</a></div><div><h2>{landingCopy.footer.resources}</h2><a href="#faq">{landingCopy.faqTitle}</a><a href="/pricing">{landingCopy.pricingCompare}</a><a href="/legal">{landingCopy.footer.legal}</a><a href="/privacy">{landingCopy.footer.privacy}</a><a href="/support">{landingCopy.footer.support}</a><a href={`${env.DASHBOARD_ORIGIN}/login`}>{landingCopy.heroPrimary}</a></div></div></footer>
     </div>
   </PlatformLayout>
 )}
