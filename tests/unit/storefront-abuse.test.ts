@@ -171,7 +171,13 @@ describe("storefront anonymous request limits", () => {
       ) VALUES (
         'shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z',
         'active', 'active', 'active',
-        '{"turnstile":{"hostname":"shop.example.com","mode":"operator_managed","source":"cloudflare_widget_domains","status":"active"}}',
+        json_object('turnstile', json_object(
+          'checkedAt', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute'),
+          'hostname', 'shop.example.com',
+          'mode', 'operator_managed',
+          'source', 'cloudflare_widget_domains',
+          'status', 'active'
+        )),
         NULL, NULL
       );
     `);
@@ -199,6 +205,46 @@ describe("storefront anonymous request limits", () => {
       shop: shop("shop-a"),
       turnstileToken: "turnstile-token-123",
     })).resolves.toBeUndefined();
+    fetchMock.mockRestore();
+  });
+
+  it("rejects stale production Turnstile admission before calling the provider", async () => {
+    database.exec(`
+      INSERT INTO shop_domains (
+        shop_id, hostname_normalized, type, status, ownership_verified_at,
+        hostname_status, ssl_status, dns_status, validation_metadata_json,
+        delete_requested_at, deleted_at
+      ) VALUES (
+        'shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z',
+        'active', 'active', 'active',
+        json_object('turnstile', json_object(
+          'checkedAt', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-13 hours'),
+          'hostname', 'shop.example.com',
+          'mode', 'operator_managed',
+          'source', 'cloudflare_widget_domains',
+          'status', 'active'
+        )),
+        NULL, NULL
+      );
+    `);
+    const env = bindings(database, {
+      APP_ENV: "production",
+      STOREFRONT_CHECKOUT_RATE_LIMIT: "10",
+      STOREFRONT_TURNSTILE_THRESHOLD: "1",
+      TURNSTILE_SECRET_KEY: "0xSecretKeyThatLooksConfigured123456",
+      TURNSTILE_SITE_KEY: "0xSiteKeyThatLooksConfigured123456",
+    });
+    const checkoutRequest = new Request("https://shop.example.com/api/store/checkout", { method: "POST" });
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await guardAnonymousCheckout({ env, request: checkoutRequest, shop: shop("shop-a"), turnstileToken: null });
+    await expect(guardAnonymousCheckout({
+      env,
+      request: checkoutRequest,
+      shop: shop("shop-a"),
+      turnstileToken: "turnstile-token-123",
+    })).rejects.toMatchObject({ code: "turnstile_invalid", status: 403 });
+    expect(fetchMock).not.toHaveBeenCalled();
     fetchMock.mockRestore();
   });
 

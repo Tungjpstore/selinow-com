@@ -5,6 +5,7 @@ import type { AppBindings } from "../../src/lib/platform/bindings";
 
 type DomainRow = {
   domainId: string;
+  domainValidationMetadataJson: string;
   domainVersion: number;
   hostnameNormalized: string;
   publishedVersion: number;
@@ -13,8 +14,6 @@ type DomainRow = {
   shopStatus: string;
   status: string;
   subscriptionState: string | null;
-  turnstileHostname: string | null;
-  turnstileStatus: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
 } | null;
@@ -46,6 +45,15 @@ const cacheKeyInput = {
 function activeDomain(overrides: Partial<Exclude<DomainRow, null>> = {}): Exclude<DomainRow, null> {
   return {
     domainId: "domain-current",
+    domainValidationMetadataJson: JSON.stringify({
+      turnstile: {
+        checkedAt: new Date(Date.now() - 60_000).toISOString(),
+        hostname: "shop.example.com",
+        mode: "operator_managed",
+        source: "cloudflare_widget_domains",
+        status: "active",
+      },
+    }),
     domainVersion: 7,
     defaultLocale: "vi",
     domainType: "custom",
@@ -54,8 +62,6 @@ function activeDomain(overrides: Partial<Exclude<DomainRow, null>> = {}): Exclud
     shopStatus: "active",
     status: "active",
     subscriptionState: "active",
-    turnstileHostname: "shop.example.com",
-    turnstileStatus: "active",
     trialEndsAt: null,
     graceEndsAt: null,
     ...overrides,
@@ -76,6 +82,8 @@ describe("storefront cache domain gate", () => {
     expect(queries()[0]?.sql).toContain("shop_domains.ownership_verified_at IS NOT NULL");
     expect(queries()[0]?.sql).toContain("$.turnstile.status");
     expect(queries()[0]?.sql).toContain("$.turnstile.hostname");
+    expect(queries()[0]?.sql).toContain("$.turnstile.checkedAt");
+    expect(queries()[0]?.sql).toContain("'-12 hours'");
     expect(queries()[0]?.sql).toContain("shops.status = 'active'");
     expect(queries()[0]?.sql).toContain("ORDER BY created_at DESC, id DESC");
     expect(queries()[0]?.sql).toContain("trial_ends_at");
@@ -162,8 +170,24 @@ describe("storefront cache domain gate", () => {
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ domainId: "" })).env, ...cacheKeyInput })).resolves.toBeNull();
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ domainVersion: 0 })).env, ...cacheKeyInput })).resolves.toBeNull();
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ publishedVersion: 0 })).env, ...cacheKeyInput })).resolves.toBeNull();
-    await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ turnstileStatus: "pending" })).env, ...cacheKeyInput })).resolves.toBeNull();
-    await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ turnstileHostname: "other.example.com" })).env, ...cacheKeyInput })).resolves.toBeNull();
+    await expect(resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({ domainValidationMetadataJson: "{}" })).env,
+      ...cacheKeyInput,
+    })).resolves.toBeNull();
+    await expect(resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({
+        domainValidationMetadataJson: JSON.stringify({
+          turnstile: {
+            checkedAt: new Date(Date.now() - 13 * 60 * 60_000).toISOString(),
+            hostname: "shop.example.com",
+            mode: "operator_managed",
+            source: "cloudflare_widget_domains",
+            status: "active",
+          },
+        }),
+      })).env,
+      ...cacheKeyInput,
+    })).resolves.toBeNull();
   });
 
   it("keeps non-storefront and local requests outside the Cache API path", () => {

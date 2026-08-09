@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import { hmacToken } from "../core/crypto";
 import type { AppBindings } from "../platform/bindings";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import type { StorefrontShop } from "./store";
 import { resolveTurnstileConfiguration, type TurnstileConfiguration } from "./turnstile";
 
@@ -57,10 +58,7 @@ async function assertTurnstileHostnameAdmission(input: { env: AppBindings; reque
           OR (
             type = 'custom' AND ownership_verified_at IS NOT NULL
             AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'
-            AND json_extract(validation_metadata_json, '$.turnstile.status') = 'active'
-            AND json_extract(validation_metadata_json, '$.turnstile.hostname') = hostname_normalized
-            AND json_extract(validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
-            AND json_extract(validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+            AND ${customDomainTurnstileAdmissionSql()}
           )
         )
       LIMIT 1

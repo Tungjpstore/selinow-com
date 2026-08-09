@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CloudflareCustomHostname } from "../../src/lib/domains/cloudflare";
+import { hasFreshExactTurnstileAdmission } from "../../src/lib/domains/readiness";
 import { reconcileCustomDomains } from "../../src/lib/domains/reconciliation";
 import { checkCustomDomain, createCustomDomain as createCustomDomainClaim, customDomainBackoffSeconds, deleteCustomDomain, listShopDomains, setPrimaryDomain, type DomainProvider } from "../../src/lib/domains/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
@@ -33,17 +34,10 @@ type FakeDomain = {
 };
 
 function hasExactTurnstileAdmission(row: FakeDomain): boolean {
-  try {
-    const metadata = JSON.parse(row.validationMetadataJson) as {
-      turnstile?: { hostname?: unknown; mode?: unknown; source?: unknown; status?: unknown };
-    };
-    return metadata.turnstile?.hostname === row.hostname
-      && metadata.turnstile.mode === "operator_managed"
-      && metadata.turnstile.source === "cloudflare_widget_domains"
-      && metadata.turnstile.status === "active";
-  } catch {
-    return false;
-  }
+  return hasFreshExactTurnstileAdmission({
+    hostname: row.hostname,
+    validationMetadataJson: row.validationMetadataJson,
+  });
 }
 
 type FakeClaim = {
@@ -708,6 +702,14 @@ async function createCustomDomain(input: Parameters<typeof createCustomDomainCla
 }
 
 describe("custom domain store", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it("lists platform domains without requiring the custom-hostname provider token", async () => {
     const database = new DomainDatabase();
     const env = environment(database) as AppBindings & { CLOUDFLARE_API_TOKEN?: string };
@@ -1042,7 +1044,15 @@ describe("custom domain store", () => {
         status: "active",
         type: "custom",
         updatedAt: verifiedAt,
-        validationMetadataJson: '{"turnstile":{"hostname":"shop.customer.com","mode":"operator_managed","source":"cloudflare_widget_domains","status":"active"}}',
+        validationMetadataJson: JSON.stringify({
+          turnstile: {
+            checkedAt: verifiedAt,
+            hostname: "shop.customer.com",
+            mode: "operator_managed",
+            source: "cloudflare_widget_domains",
+            status: "active",
+          },
+        }),
         version: 1,
       });
     };
@@ -1216,6 +1226,44 @@ describe("custom domain store", () => {
       userId: "user-a",
     });
     expect(checked).toMatchObject({ status: "active", turnstileStatus: "active" });
+  });
+
+  it("refuses primary promotion after Turnstile evidence expires without a reconciliation poll", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({
+      env,
+      hostname: "shop.customer.com",
+      requestId: "request-stale-admission",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    const row = database.domains.get(created.domain.id);
+    expect(row).toBeDefined();
+    if (row === undefined) return;
+    const metadata = JSON.parse(row.validationMetadataJson) as Record<string, unknown>;
+    row.validationMetadataJson = JSON.stringify({
+      ...metadata,
+      turnstile: {
+        checkedAt: new Date(NOW.getTime() - 13 * 60 * 60_000).toISOString(),
+        hostname: row.hostname,
+        mode: "operator_managed",
+        source: "cloudflare_widget_domains",
+        status: "active",
+      },
+    });
+
+    await expect(setPrimaryDomain({
+      domainId: created.domain.id,
+      env,
+      requestId: "request-stale-primary",
+      runtime: { now: NOW },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "domain_not_ready", status: 409 });
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
   });
 
   it("falls back atomically when Turnstile admission is removed", async () => {

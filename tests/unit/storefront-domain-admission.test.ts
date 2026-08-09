@@ -8,6 +8,7 @@ type StorefrontRow = {
   canonicalHostname: string | null;
   currency: string;
   currentDomainType: "custom" | "platform_subdomain";
+  currentDomainValidationMetadataJson: string;
   currentHostname: string;
   defaultLocale: string;
   graceEndsAt: string | null;
@@ -26,9 +27,24 @@ type StorefrontRow = {
   supportContact: string | null;
   termsUrl: string | null;
   trialEndsAt: string | null;
-  turnstileHostname: string | null;
-  turnstileStatus: string | null;
 };
+
+function admissionMetadata(overrides: Partial<{
+  checkedAt: string;
+  hostname: string;
+  status: string;
+}> = {}): string {
+  return JSON.stringify({
+    turnstile: {
+      checkedAt: new Date(Date.now() - 60_000).toISOString(),
+      hostname: "shop.customer.com",
+      mode: "operator_managed",
+      source: "cloudflare_widget_domains",
+      status: "active",
+      ...overrides,
+    },
+  });
+}
 
 function row(overrides: Partial<StorefrontRow> = {}): StorefrontRow {
   return {
@@ -36,6 +52,7 @@ function row(overrides: Partial<StorefrontRow> = {}): StorefrontRow {
     canonicalHostname: "shop.customer.com",
     currency: "VND",
     currentDomainType: "custom",
+    currentDomainValidationMetadataJson: admissionMetadata(),
     currentHostname: "shop.customer.com",
     defaultLocale: "vi",
     graceEndsAt: null,
@@ -54,8 +71,6 @@ function row(overrides: Partial<StorefrontRow> = {}): StorefrontRow {
     supportContact: null,
     termsUrl: null,
     trialEndsAt: null,
-    turnstileHostname: "shop.customer.com",
-    turnstileStatus: "active",
     ...overrides,
   };
 }
@@ -86,15 +101,19 @@ describe("storefront custom-domain Turnstile admission", () => {
     });
     expect(runtime.sql()).toContain("$.turnstile.status");
     expect(runtime.sql()).toContain("$.turnstile.hostname");
+    expect(runtime.sql()).toContain("$.turnstile.checkedAt");
+    expect(runtime.sql()).toContain("'-12 hours'");
     expect(runtime.sql()).toContain("hostname_status = 'active'");
     expect(runtime.sql()).toContain("ssl_status = 'active'");
     expect(runtime.sql()).toContain("dns_status = 'active'");
   });
 
   it.each([
-    ["missing evidence", { turnstileHostname: null, turnstileStatus: null }],
-    ["pending admission", { turnstileStatus: "pending" }],
-    ["other hostname evidence", { turnstileHostname: "other.customer.com" }],
+    ["missing evidence", { currentDomainValidationMetadataJson: "{}" }],
+    ["pending admission", { currentDomainValidationMetadataJson: admissionMetadata({ status: "pending" }) }],
+    ["other hostname evidence", { currentDomainValidationMetadataJson: admissionMetadata({ hostname: "other.customer.com" }) }],
+    ["stale admission", { currentDomainValidationMetadataJson: admissionMetadata({ checkedAt: new Date(Date.now() - 13 * 60 * 60_000).toISOString() }) }],
+    ["future admission", { currentDomainValidationMetadataJson: admissionMetadata({ checkedAt: new Date(Date.now() + 5 * 60_000).toISOString() }) }],
   ])("rejects a legacy or mismatched custom domain with %s", async (_label, overrides) => {
     const runtime = environment(row(overrides));
     await expect(resolveStorefrontShop(new Request("https://shop.customer.com/"), runtime.env))
@@ -105,9 +124,8 @@ describe("storefront custom-domain Turnstile admission", () => {
     const runtime = environment(row({
       canonicalHostname: "seller.selinow.com",
       currentDomainType: "platform_subdomain",
+      currentDomainValidationMetadataJson: "{}",
       currentHostname: "seller.selinow.com",
-      turnstileHostname: null,
-      turnstileStatus: null,
     }));
     await expect(resolveStorefrontShop(new Request("https://seller.selinow.com/"), runtime.env)).resolves.toMatchObject({
       currentHostname: "seller.selinow.com",

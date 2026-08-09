@@ -12,6 +12,7 @@ import {
 } from "./cloudflare";
 import { verifyCustomDomainOwnership, verifyCustomHostnameDns, type DnsVerificationResult } from "./dns";
 import { isCloudflareHostnameReady, normalizeCustomHostname } from "./policy";
+import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } from "./readiness";
 
 const DOMAIN_SELECT = `
   SELECT
@@ -206,7 +207,7 @@ function safeJsonObject(value: string): Record<string, unknown> {
   }
 }
 
-function turnstileAdmissionStatus(metadata: Record<string, unknown>, hostname: string): DomainView["turnstileStatus"] {
+function turnstileAdmissionStatus(metadata: Record<string, unknown>, hostname: string, now = new Date()): DomainView["turnstileStatus"] {
   const value = metadata.turnstile;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const admission = value as Record<string, unknown>;
@@ -216,11 +217,10 @@ function turnstileAdmissionStatus(metadata: Record<string, unknown>, hostname: s
     || admission.source !== "cloudflare_widget_domains"
     || !["active", "error", "pending"].includes(String(admission.status))
   ) return null;
+  if (admission.status === "active" && !hasFreshExactTurnstileAdmission({ hostname, now, validationMetadataJson: metadata })) {
+    return "pending";
+  }
   return admission.status as DomainView["turnstileStatus"];
-}
-
-function hasExactTurnstileAdmission(row: Pick<DomainRow, "hostname" | "validationMetadataJson">): boolean {
-  return turnstileAdmissionStatus(safeJsonObject(row.validationMetadataJson), row.hostname) === "active";
 }
 
 function mapDomain(row: DomainRow, saasTarget: string): DomainView {
@@ -1051,6 +1051,7 @@ export async function setPrimaryDomain(input: {
   domainId: string;
   env: AppBindings;
   requestId: string;
+  runtime?: Pick<DomainRuntime, "now">;
   shopPublicId: string;
   userId: string;
 }): Promise<DomainView> {
@@ -1066,9 +1067,14 @@ export async function setPrimaryDomain(input: {
     hostnameStatus: row.hostnameStatus ?? "",
     sslStatus: row.sslStatus ?? "",
   })) throw new AppError("domain_not_ready", 409);
-  if (row.type === "custom" && !hasExactTurnstileAdmission(row)) throw new AppError("domain_not_ready", 409);
+  const nowDate = input.runtime?.now ?? new Date();
+  if (row.type === "custom" && !hasFreshExactTurnstileAdmission({
+    hostname: row.hostname,
+    now: nowDate,
+    validationMetadataJson: row.validationMetadataJson,
+  })) throw new AppError("domain_not_ready", 409);
 
-  const now = new Date().toISOString();
+  const now = nowDate.toISOString();
   const shop = await input.env.PLATFORM_DB.prepare(`
     SELECT canonical_domain_id AS canonicalDomainId FROM shops WHERE id = ? LIMIT 1
   `).bind(shopId).first<{ canonicalDomainId: string | null }>();
@@ -1080,10 +1086,7 @@ export async function setPrimaryDomain(input: {
   `).bind(shopId).first<{ id: string }>();
   const providerReadiness = row.type === "custom"
     ? ` AND ownership_verified_at IS NOT NULL AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'
-        AND json_extract(validation_metadata_json, '$.turnstile.status') = 'active'
-        AND json_extract(validation_metadata_json, '$.turnstile.hostname') = hostname_normalized
-        AND json_extract(validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
-        AND json_extract(validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'`
+        AND ${customDomainTurnstileAdmissionSql()}`
     : "";
   const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
@@ -1120,6 +1123,9 @@ export async function setPrimaryDomain(input: {
         WHERE target.id = ? AND target.shop_id = shops.id AND target.is_primary = 1
           AND target.status = 'active' AND target.deleted_at IS NULL
           AND target.delete_requested_at IS NULL AND target.version = ?
+          ${row.type === "custom" ? `AND target.ownership_verified_at IS NOT NULL
+          AND target.hostname_status = 'active' AND target.ssl_status = 'active' AND target.dns_status = 'active'
+          AND ${customDomainTurnstileAdmissionSql("target")}` : ""}
       )
     `).bind(row.id, now, shopId, row.id, row.version + 1),
     input.env.PLATFORM_DB.prepare(`

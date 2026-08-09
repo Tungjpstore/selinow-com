@@ -1,11 +1,13 @@
 import type { AppBindings } from "../platform/bindings";
 import { subscriptionAllows } from "../billing/entitlements";
+import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } from "../domains/readiness";
 import { normalizeSupportedLocale } from "../i18n/locale";
 import { buildStorefrontCacheKey, isPrivateStorefrontPath, isPublicStorefrontPath, normalizeHostname, type PlatformHostKind } from "./routing";
 
 type ActiveDomainRow = {
   domainId: string;
   domainType: string;
+  domainValidationMetadataJson: string;
   domainVersion: number;
   defaultLocale: string;
   hostnameNormalized: string;
@@ -15,8 +17,6 @@ type ActiveDomainRow = {
   trialEndsAt: string | null;
   graceEndsAt: string | null;
   subscriptionState: string | null;
-  turnstileHostname: string | null;
-  turnstileStatus: string | null;
 };
 
 export function isStorefrontCacheCandidate(input: {
@@ -46,8 +46,7 @@ export async function resolveActiveStorefrontCacheKey(input: {
     SELECT shop_domains.id AS domainId,
       shop_domains.hostname_normalized AS hostnameNormalized, shop_domains.status,
       shop_domains.type AS domainType,
-      json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') AS turnstileHostname,
-      json_extract(shop_domains.validation_metadata_json, '$.turnstile.status') AS turnstileStatus,
+      shop_domains.validation_metadata_json AS domainValidationMetadataJson,
       shop_domains.version AS domainVersion,
       shop_settings.published_version AS publishedVersion,
       shops.default_locale AS defaultLocale, shops.status AS shopStatus,
@@ -85,10 +84,7 @@ export async function resolveActiveStorefrontCacheKey(input: {
           AND shop_domains.hostname_status = 'active'
           AND shop_domains.ssl_status = 'active'
           AND shop_domains.dns_status = 'active'
-          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.status') = 'active'
-          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') = shop_domains.hostname_normalized
-          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
-          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+          AND ${customDomainTurnstileAdmissionSql("shop_domains")}
         )
       )
     LIMIT 1
@@ -97,7 +93,10 @@ export async function resolveActiveStorefrontCacheKey(input: {
   if (row === null
     || row.status !== "active"
     || row.shopStatus !== "active"
-    || (row.domainType === "custom" && (row.turnstileStatus !== "active" || normalizeHostname(row.turnstileHostname ?? "") !== hostname))
+    || (row.domainType === "custom" && !hasFreshExactTurnstileAdmission({
+      hostname,
+      validationMetadataJson: row.domainValidationMetadataJson,
+    }))
     || (row.domainType !== "custom" && row.domainType !== "platform_subdomain")
     || row.subscriptionState === null
     || !subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })

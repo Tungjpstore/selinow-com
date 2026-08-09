@@ -4,6 +4,7 @@ import { parseCookies } from "../http/cookies";
 import { LOCALE_COOKIE_NAME, resolveLocale } from "../i18n/locale";
 import type { AppBindings } from "../platform/bindings";
 import { assertCheckoutAllowed } from "../tenants/policy";
+import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } from "../domains/readiness";
 import { classifyPlatformHost, getCanonicalStorefrontUrl, normalizeHostname } from "./routing";
 import { parseStorefrontPublicDetails, type StorefrontPublicDetails } from "./public-details";
 import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, type StorefrontTheme } from "./theme";
@@ -13,6 +14,7 @@ type StorefrontShopRow = {
   canonicalHostname: string | null;
   currency: string;
   currentDomainType: string;
+  currentDomainValidationMetadataJson: string;
   currentHostname: string;
   defaultLocale: string;
   id: string;
@@ -31,8 +33,6 @@ type StorefrontShopRow = {
   graceEndsAt: string | null;
   subscriptionState: string | null;
   termsUrl: string | null;
-  turnstileHostname: string | null;
-  turnstileStatus: string | null;
 };
 
 type CatalogRow = {
@@ -132,8 +132,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
       shops.default_locale AS defaultLocale, shops.currency,
       shop_domains.hostname_normalized AS currentHostname,
       shop_domains.type AS currentDomainType,
-      json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') AS turnstileHostname,
-      json_extract(shop_domains.validation_metadata_json, '$.turnstile.status') AS turnstileStatus,
+      shop_domains.validation_metadata_json AS currentDomainValidationMetadataJson,
       COALESCE(shop_settings.published_branding_json, '{}') AS brandingJson,
       COALESCE(shop_settings.published_storefront_json, '{}') AS storefrontJson,
       shop_settings.support_contact AS supportContact,
@@ -162,10 +161,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
           AND canonical_domain.hostname_status = 'active'
           AND canonical_domain.ssl_status = 'active'
           AND canonical_domain.dns_status = 'active'
-          AND json_extract(canonical_domain.validation_metadata_json, '$.turnstile.status') = 'active'
-          AND json_extract(canonical_domain.validation_metadata_json, '$.turnstile.hostname') = canonical_domain.hostname_normalized
-          AND json_extract(canonical_domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
-          AND json_extract(canonical_domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+          AND ${customDomainTurnstileAdmissionSql("canonical_domain")}
         )
       )
     WHERE shop_domains.hostname_normalized = ?
@@ -178,10 +174,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
           AND shop_domains.hostname_status = 'active'
           AND shop_domains.ssl_status = 'active'
           AND shop_domains.dns_status = 'active'
-          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.status') = 'active'
-          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') = shop_domains.hostname_normalized
-          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
-          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+          AND ${customDomainTurnstileAdmissionSql("shop_domains")}
         )
       )
     LIMIT 1
@@ -191,8 +184,10 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     row.currentDomainType === "platform_subdomain"
     || (
       row.currentDomainType === "custom"
-      && row.turnstileStatus === "active"
-      && normalizeHostname(row.turnstileHostname ?? "") === hostname
+      && hasFreshExactTurnstileAdmission({
+        hostname,
+        validationMetadataJson: row.currentDomainValidationMetadataJson,
+      })
     )
   );
   if (!currentDomainReady || normalizeHostname(row.currentHostname) !== hostname) throw new AppError("storefront_not_found", 404);
