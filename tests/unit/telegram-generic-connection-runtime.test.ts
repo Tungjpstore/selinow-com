@@ -102,6 +102,8 @@ it("keeps Telegram grant sources within D1's compound SELECT limit", () => {
 
 function createRuntime(): {
   commandPayloads(): Array<{ commands: Array<{ command: string; description: string }>; language_code?: string }>;
+  webhookPayloads(): Array<Record<string, unknown>>;
+  deleteWebhookPayloads(): Array<Record<string, unknown>>;
   database: SqliteD1;
   env: AppBindings;
   fetcher: typeof fetch;
@@ -131,12 +133,16 @@ function createRuntime(): {
   let deliveryError = false;
   let webhookFailure = false;
   const commandPayloads: Array<{ commands: Array<{ command: string; description: string }>; language_code?: string }> = [];
+  const webhookPayloads: Array<Record<string, unknown>> = [];
+  const deleteWebhookPayloads: Array<Record<string, unknown>> = [];
   const fetcher: typeof fetch = (request, init) => {
     const url = request instanceof Request ? request.url : request.toString();
     const method = url.slice(url.lastIndexOf("/") + 1);
     if (method === "setMyCommands" && typeof init?.body === "string") {
       commandPayloads.push(JSON.parse(init.body) as { commands: Array<{ command: string; description: string }>; language_code?: string });
     }
+    if (method === "setWebhook" && typeof init?.body === "string") webhookPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
+    if (method === "deleteWebhook" && typeof init?.body === "string") deleteWebhookPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
     if (method === "setWebhook" && webhookFailure) {
       return Promise.resolve(new Response(JSON.stringify({ description: "provider detail", ok: false }), { status: 400 }));
     }
@@ -168,9 +174,11 @@ function createRuntime(): {
   } as unknown as AppBindings;
   return {
     commandPayloads: () => commandPayloads,
+    deleteWebhookPayloads: () => deleteWebhookPayloads,
     database,
     env,
     fetcher,
+    webhookPayloads: () => webhookPayloads,
     setDeliveryError: (value) => { deliveryError = value; },
     setWebhookFailure: (value) => { webhookFailure = value; },
   };
@@ -214,6 +222,8 @@ describe("Telegram generic connection runtime bridge", () => {
       userId: "user-telegram-runtime",
     });
 
+    expect(runtime.webhookPayloads().at(-1)).toMatchObject({ drop_pending_updates: true });
+
     expect(runtime.database.database.prepare("SELECT status, safe_result_code AS resultCode FROM telegram_updates WHERE id = 'update-rotation-pending'").get()).toEqual({ resultCode: "telegram_update_stale_generation", status: "rejected" });
     expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM telegram_credentials WHERE integration_id = ? AND status = 'revoked'").get(integration.id)).toEqual({ count: 1 });
 
@@ -227,6 +237,7 @@ describe("Telegram generic connection runtime bridge", () => {
 
     expect(runtime.database.database.prepare("SELECT status, safe_result_code AS resultCode FROM telegram_updates WHERE id = 'update-disconnect-pending'").get()).toEqual({ resultCode: "telegram_update_stale_generation", status: "rejected" });
     expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'telegram.update_generation_fenced'").get(integration.id)).toEqual({ count: 2 });
+    expect(runtime.deleteWebhookPayloads().at(-1)).toEqual({ drop_pending_updates: true });
   });
 
   it("registers the shop locale as default with explicit English and Vietnamese scopes", async () => {

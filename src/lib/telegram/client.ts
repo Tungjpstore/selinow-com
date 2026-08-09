@@ -102,10 +102,10 @@ export class TelegramClient {
     await this.request("setChatMenuButton", { menu_button: { type: "commands" } });
   }
 
-  async setWebhook(input: { allowedUpdates: string[]; maxConnections: number; secretToken: string; url: string }): Promise<void> {
+  async setWebhook(input: { allowedUpdates: string[]; dropPendingUpdates?: boolean; maxConnections: number; secretToken: string; url: string }): Promise<void> {
     await this.request("setWebhook", {
       allowed_updates: input.allowedUpdates,
-      drop_pending_updates: false,
+      drop_pending_updates: input.dropPendingUpdates === true,
       max_connections: input.maxConnections,
       secret_token: input.secretToken,
       url: input.url,

@@ -191,14 +191,14 @@ function webhookAllowedUpdatesMatch(allowedUpdates: readonly string[]): boolean 
     && allowedUpdates.includes("callback_query");
 }
 
-async function configureProvider(client: TelegramClient, env: AppBindings, integration: IntegrationRow, secret: string, shopDefaultLocale: string): Promise<TelegramWebhookInfo> {
+async function configureProvider(client: TelegramClient, env: AppBindings, integration: IntegrationRow, secret: string, shopDefaultLocale: string, dropPendingUpdates = false): Promise<TelegramWebhookInfo> {
   await client.setMyCommands(telegramCommands(shopDefaultLocale));
   await client.setMyCommands(telegramCommands("en"), "en");
   await client.setMyCommands(telegramCommands("vi-VN"), "vi");
   await client.setChatMenuButton();
   const url = webhookUrl(env, integration.webhookPublicId);
   const maxConnections = webhookMaxConnections(env);
-  await client.setWebhook({ allowedUpdates: ["message", "callback_query"], maxConnections, secretToken: secret, url });
+  await client.setWebhook({ allowedUpdates: ["message", "callback_query"], dropPendingUpdates, maxConnections, secretToken: secret, url });
   const info = await client.getWebhookInfo();
   if (info.url !== url || info.maxConnections !== maxConnections || !webhookAllowedUpdatesMatch(info.allowedUpdates)) throw new AppError("telegram_webhook_failed", 409);
   return info;
@@ -360,9 +360,11 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
     });
     return mapIntegration(integration);
   }
+  const rotated = integration.activeCredentialId !== null && integration.activeCredentialId !== credential.credentialId;
+  const botChanged = integration.botId !== null && integration.botId !== bot.id;
   let info: TelegramWebhookInfo;
   try {
-    info = await configureProvider(client, input.env, integration, credential.secret, actor.defaultLocale);
+    info = await configureProvider(client, input.env, integration, credential.secret, actor.defaultLocale, rotated);
   } catch (error) {
     await input.env.PLATFORM_DB.batch([
       input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'error' WHERE id = ? AND shop_id = ? AND status = 'pending'").bind(credential.credentialId, shopId),
@@ -371,8 +373,6 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
     throw error instanceof AppError ? error : new AppError("telegram_webhook_failed", 409);
   }
   const activatedAt = new Date().toISOString();
-  const rotated = integration.activeCredentialId !== null && integration.activeCredentialId !== credential.credentialId;
-  const botChanged = integration.botId !== null && integration.botId !== bot.id;
   try {
     await input.env.PLATFORM_DB.batch([
       input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'revoked', revoked_at = ? WHERE integration_id = ? AND shop_id = ? AND status = 'active' AND id != ?").bind(activatedAt, integration.id, shopId, credential.credentialId),
@@ -383,11 +383,11 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
       input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) SELECT ?, ?, 'user', ?, 'telegram.credentials_connected', 'telegram_integration', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM telegram_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)`).bind(createId("aud"), shopId, input.userId, integration.id, JSON.stringify({ botChanged, credentialVersion: credential.version, rotated }), input.requestId, activatedAt, credential.credentialId, integration.id, shopId, activatedAt),
     ]);
   } catch {
-    try { await client.deleteWebhook(false); } catch { /* Best-effort cleanup after an activation race. */ }
+    try { await client.deleteWebhook(true); } catch { /* Best-effort cleanup after an activation race. */ }
     throw new AppError("telegram_activation_failed", 409);
   }
   if (previous !== null && integration.botId !== null && integration.botId !== bot.id) {
-    try { await new TelegramClient(previous.credentials.botToken, input.fetcher).deleteWebhook(false); } catch { /* The previous bot may already be revoked. */ }
+    try { await new TelegramClient(previous.credentials.botToken, input.fetcher).deleteWebhook(true); } catch { /* The previous bot may already be revoked. */ }
   }
   const active = await findIntegration(input.env, shopId);
   if (active === null) throw new AppError("internal_error", 500);
@@ -447,7 +447,7 @@ async function retryTelegramSetup(input: {
       input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) SELECT ?, ?, 'user', ?, 'telegram.credentials_connected', 'telegram_integration', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM telegram_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)`).bind(createId("aud"), input.shopId, input.userId, input.integration.id, JSON.stringify({ credentialVersion: row.version, retry: true, rotated: false }), input.requestId, activatedAt, row.credentialId, input.integration.id, input.shopId, activatedAt),
     ]);
   } catch {
-    try { await client.deleteWebhook(false); } catch { /* Best-effort cleanup after an activation failure. */ }
+    try { await client.deleteWebhook(true); } catch { /* Best-effort cleanup after an activation failure. */ }
     throw new AppError("telegram_activation_failed", 409);
   }
   if (!info.hasDeliveryError) {
@@ -511,7 +511,7 @@ export async function disconnectTelegram(input: { env: AppBindings; fetcher?: ty
   if (integration === null || integration.activeCredentialId === null) throw new AppError("telegram_not_configured", 409);
   try {
     const credential = await loadActiveTelegramCredential(input.env, integration.id, shopId);
-    await new TelegramClient(credential.credentials.botToken, input.fetcher).deleteWebhook(false);
+    await new TelegramClient(credential.credentials.botToken, input.fetcher).deleteWebhook(true);
   } catch {
     // Disconnect remains authoritative even when the provider token was revoked.
   }
