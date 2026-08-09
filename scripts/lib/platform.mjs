@@ -16,6 +16,7 @@ const d1DatabaseIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-
 const workerVersionIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME = "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
 export const CLOUDFLARE_D1_TOKEN_NAME = "CLOUDFLARE_D1_API_TOKEN";
+export const CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_TOKEN_NAME = "CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN";
 
 const SAFE_BUILD_ENVIRONMENT_NAMES = new Set([
   "CI",
@@ -88,6 +89,15 @@ export function requireCloudflareD1Token(environment = process.env) {
   const token = environment[CLOUDFLARE_D1_TOKEN_NAME]?.trim();
   if (!token) {
     throw new Error("cloudflare_d1_api_token_missing");
+  }
+  return token;
+}
+
+/** Worker version/deployment inventory requires account-level promotion-read scope. */
+function requireCloudflareProductionPromotionAuditToken(environment = process.env) {
+  const token = environment[CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_TOKEN_NAME]?.trim();
+  if (!token) {
+    throw new Error("cloudflare_production_promotion_audit_api_token_missing");
   }
   return token;
 }
@@ -1007,7 +1017,7 @@ function workerVersionMessageBinding(annotations) {
   } catch {
     // Wrangler messages also support a compact key=value provenance format.
   }
-  return Object.fromEntries([...message.matchAll(/\b(commitSha|manifestRef|manifestSha256|releaseId|treeSha)=([^\s]+)\b/gu)]
+  return Object.fromEntries([...message.matchAll(/\b(commitSha|manifestRef|manifestSha256|releaseId|role|treeSha)=([^\s]+)\b/gu)]
     .map((match) => [match[1], match[2]]));
 }
 
@@ -1038,6 +1048,10 @@ function normalizeWorkerVersionBinding(version) {
     releaseId: metadataValue(["releaseId", "release_id"])
       ?? annotation(["selinow/release-id", "selinow_release_id", "releaseId", "release_id"])
       ?? messageBinding.releaseId
+      ?? null,
+    role: metadataValue(["role", "workerRole", "worker_role", "releaseRole", "release_role"])
+      ?? annotation(["selinow/role", "selinow_role", "selinow/worker-role", "selinow_worker_role", "role", "workerRole"])
+      ?? messageBinding.role
       ?? null,
     treeSha: metadataValue(["treeSha", "tree_sha", "reviewedTreeSha", "reviewed_tree_sha"])
       ?? annotation(["selinow/tree-sha", "selinow_tree_sha", "treeSha", "tree_sha"])
@@ -1076,6 +1090,10 @@ function assertWorkerVersionBinding(actual, expected, issue) {
   const required = ["commitSha", "treeSha", "releaseId"];
   if (expected.manifestSha256 !== undefined) required.push("manifestSha256");
   if (expected.manifestRef !== undefined) required.push("manifestRef");
+  if (expected.role !== undefined) {
+    if (!new Set(["candidate", "rollback"]).has(expected.role)) throw new Error(`${issue}_invalid`);
+    required.push("role");
+  }
   if (actual === null || typeof actual !== "object" || required.some((key) => typeof expected[key] !== "string" || expected[key].length === 0
     || actual[key] !== expected[key])) {
     throw new Error(`${issue}_mismatch`);
@@ -1260,9 +1278,16 @@ export function validateProductionWorkerRouteInventory(
 
 export async function assertProductionWorkerIdentityAdmission(input) {
   const operatorEnvironment = input.environment ?? process.env;
-  const token = input.token === undefined
+  const routeAuditToken = input.token === undefined
     ? requireCloudflareRouteAuditToken(operatorEnvironment)
     : requireCloudflareRouteAuditToken({ CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: input.token });
+  const promotionAuditToken = input.requireCurrentWorkerVersion === true
+    ? input.promotionAuditToken === undefined
+      ? requireCloudflareProductionPromotionAuditToken(operatorEnvironment)
+      : requireCloudflareProductionPromotionAuditToken({
+        [CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_TOKEN_NAME]: input.promotionAuditToken,
+      })
+    : null;
   const contract = productionWorkerRouteContract(
     input.productionSpec,
     input.stagingSpec,
@@ -1302,22 +1327,22 @@ export async function assertProductionWorkerIdentityAdmission(input) {
   );
 
   const [liveRoutes, liveDomains, deploymentsResult, deployableVersionsResult] = await Promise.all([
-    cloudflareApiRequest(token, `/zones/${contract.zoneId}/workers/routes`, {
+    cloudflareApiRequest(routeAuditToken, `/zones/${contract.zoneId}/workers/routes`, {
       fetchImplementation: input.fetchImplementation,
     }),
-    cloudflareApiRequest(token, `/accounts/${input.productionSpec.accountId}/workers/domains`, {
+    cloudflareApiRequest(routeAuditToken, `/accounts/${input.productionSpec.accountId}/workers/domains`, {
       fetchImplementation: input.fetchImplementation,
     }),
     input.requireCurrentWorkerVersion === true
       ? cloudflareApiRequest(
-        token,
+        promotionAuditToken,
         `/accounts/${input.productionSpec.accountId}/workers/scripts/${encodeURIComponent(contract.productionWorkerName)}/deployments`,
         { fetchImplementation: input.fetchImplementation },
       )
       : Promise.resolve(null),
     input.requireCurrentWorkerVersion === true
       ? cloudflareApiRequest(
-        token,
+        promotionAuditToken,
         `/accounts/${input.productionSpec.accountId}/workers/scripts/${encodeURIComponent(contract.productionWorkerName)}/versions?deployable=true`,
         { fetchImplementation: input.fetchImplementation },
       )

@@ -188,9 +188,12 @@ The migration and normal Worker deploy admissions revalidate the exact account/D
 
 Keep the normal Worker deploy token separate from D1 and audit credentials.
 `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` is read-only admission for the production
-route/domain inventory, and `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` is the dedicated
-Workers Scripts credential mapped only to the final deploy sink. Neither token,
-nor the D1-capable operator token, may enter the application build or runtime.
+route/domain inventory. Worker deployment and deployable-version inventory use
+the separate read-only `CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN`
+because the route-audit token is not assumed to have Workers Scripts version
+scope. `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` is the dedicated Workers Scripts
+credential mapped only to the final deploy sink. Neither audit token, nor the
+D1-capable operator token, may enter the application build or runtime.
 After the migration evidence and all production release gates pass, use the exact
 manifest-bound command:
 
@@ -421,7 +424,19 @@ npm run release:manifest -- --write --json
 
 The manifest records the reviewed commit, previous/candidate Worker versions, migration filenames, config fingerprint, quality gates, backup timestamps and the count of pilot shops. It excludes credentials, bookmark values, customer identifiers and exported data.
 
-Before any real Worker deploy, temporarily provide the least-privilege `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`. The deploy admission runs only read operations: account-pinned `wrangler whoami --json`, production D1 inventory, the shared-zone Worker Routes inventory and the account Worker Domains inventory. It requires the exact reviewed production account, D1 name+UUID, Worker name and domains while explicitly preserving the checked-in staging route/guard contract in the same `selinow.com` zone. It repeats the full gate after build, rejects target drift, strips the audit token from child environments and pins the final Wrangler process with the admitted `CLOUDFLARE_ACCOUNT_ID`. Production dry-runs remain offline and do not require this token.
+Before any real Worker deploy, temporarily provide the least-privilege
+`CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` and
+`CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN`. The deploy admission runs
+only read operations: account-pinned `wrangler whoami --json`, production D1
+inventory, the shared-zone Worker Routes and account Worker Domains inventories
+(route-audit token), plus active deployment and deployable-version inventories
+(promotion-audit token). It requires the exact reviewed production account,
+D1 name+UUID, Worker name and domains while explicitly preserving the
+checked-in staging route/guard contract in the same `selinow.com` zone. It
+repeats the full gate after build, rejects target drift, strips both audit
+tokens from child environments and pins the final Wrangler process with the
+admitted `CLOUDFLARE_ACCOUNT_ID`. Production dry-runs remain offline and do
+not require these tokens.
 
 ## 4. Controlled pilot
 

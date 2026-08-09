@@ -31,7 +31,7 @@ describe("production Worker upload binding", () => {
         ],
       },
       before: { items: [{ id: current }] },
-      expectedBinding: binding,
+      expectedBinding: { ...binding, role: "candidate" },
     })).toMatchObject({ workerVersion: candidate });
   });
 
@@ -41,12 +41,27 @@ describe("production Worker upload binding", () => {
     expect(() => assertProductionWorkerUploadResult({
       after: { items: [{ id: current }, { id: candidate }] },
       before: { items: [{ id: current }] },
-      expectedBinding: binding,
+      expectedBinding: { ...binding, role: "candidate" },
     })).toThrow("production_worker_upload_binding_mismatch");
     expect(() => assertProductionWorkerUploadResult({
       after: { items: [{ id: current }] },
       before: { items: [{ id: current }] },
-      expectedBinding: binding,
+      expectedBinding: { ...binding, role: "candidate" },
     })).toThrow("production_worker_upload_version_delta_invalid");
+  });
+
+  it("rejects a version uploaded under the wrong release role", () => {
+    const current = "11111111-1111-4111-8111-111111111111";
+    const candidate = "22222222-2222-4222-8222-222222222222";
+    expect(() => assertProductionWorkerUploadResult({
+      after: {
+        items: [
+          { id: current },
+          { annotations: { "workers/message": JSON.stringify({ ...binding, role: "rollback" }) }, id: candidate },
+        ],
+      },
+      before: { items: [{ id: current }] },
+      expectedBinding: { ...binding, role: "candidate" },
+    })).toThrow("production_worker_upload_binding_mismatch");
   });
 });

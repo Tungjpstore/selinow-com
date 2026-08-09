@@ -92,8 +92,10 @@ reports, synthetic webhooks, or local-only test output.
      execute the separately approved production migration and deploy ceremony.
    - Use a short-lived D1-capable `CLOUDFLARE_D1_API_TOKEN` for normal continuation
      (mapped to `CLOUDFLARE_API_TOKEN` only inside child Wrangler), read-only
-     `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` for inventory admission, and dedicated
-     `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` for the Worker deploy sink; the
+     `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` for route/domain admission, read-only
+     `CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN` for deployment/version
+     inventory admission, and dedicated `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` for
+     the Worker deploy sink; the
      historical bootstrap migration token is never a continuation token and the
      runtime Worker secret is never operator input.
      The exact deploy command is

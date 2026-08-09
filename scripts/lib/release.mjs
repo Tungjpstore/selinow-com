@@ -1295,6 +1295,7 @@ export async function assertProductionWorkerDeployAdmission(input) {
         commitSha: releaseAdmission.commitSha,
         manifestRef: `.wrangler/releases/${releaseAdmission.releaseId}/release-manifest.json`,
         releaseId: releaseAdmission.releaseId,
+        role: "candidate",
         treeSha: releaseAdmission.treeSha,
       }
       : undefined,
@@ -1303,7 +1304,9 @@ export async function assertProductionWorkerDeployAdmission(input) {
     deployableWorkerVersionInventory: workerAdmission.deployableWorkerVersionInventory,
     previousWorkerVersion: releaseAdmission.previousWorkerVersion,
     rollbackCandidateWorkerVersion: releaseAdmission.rollbackCandidateWorkerVersion,
-    rollbackWorkerVersionBinding,
+    rollbackWorkerVersionBinding: input.requireWorkerVersionBinding === true
+      ? { ...rollbackWorkerVersionBinding, role: "rollback" }
+      : rollbackWorkerVersionBinding,
   });
   return {
     ...releaseAdmission,
@@ -1349,6 +1352,12 @@ export function assertProductionWorkerUploadResult(input) {
   const expected = input?.expectedBinding;
   const actual = additions[0].binding;
   const required = ["commitSha", "treeSha", "releaseId", "manifestRef"];
+  if (expected?.role !== undefined) {
+    if (!new Set(["candidate", "rollback"]).has(expected.role)) {
+      throw new Error("production_worker_upload_binding_invalid");
+    }
+    required.push("role");
+  }
   if (expected === null || typeof expected !== "object"
     || actual === null || typeof actual !== "object"
     || required.some((key) => typeof expected[key] !== "string" || actual[key] !== expected[key])) {

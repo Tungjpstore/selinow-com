@@ -198,7 +198,13 @@ describe("production rollback schema compatibility admission", () => {
         items: [
           {
             annotations: {
-              "workers/message": `selinow-release commitSha=${"a".repeat(40)} treeSha=${"b".repeat(40)} releaseId=release_20260809_abcdef12 manifestRef=.wrangler/releases/release_20260809_abcdef12/release-manifest.json`,
+              "workers/message": JSON.stringify({
+                commitSha: "a".repeat(40),
+                manifestRef: ".wrangler/releases/release_20260809_abcdef12/release-manifest.json",
+                releaseId: "release_20260809_abcdef12",
+                role: "candidate",
+                treeSha: "b".repeat(40),
+              }),
             },
             id: candidateWorkerVersion,
           },
@@ -207,6 +213,7 @@ describe("production rollback schema compatibility admission", () => {
               commitSha: "a".repeat(40),
               manifestRef: ".wrangler/releases/release_20260809_rollback12/release-manifest.json",
               releaseId: "release_20260809_rollback12",
+              role: "rollback",
               treeSha: "b".repeat(40),
             },
             id: rollbackWorkerVersion,
@@ -220,6 +227,7 @@ describe("production rollback schema compatibility admission", () => {
         commitSha: "a".repeat(40),
         manifestRef: ".wrangler/releases/release_20260809_abcdef12/release-manifest.json",
         releaseId: "release_20260809_abcdef12",
+        role: "candidate",
         treeSha: "b".repeat(40),
       },
       currentWorkerVersion,
@@ -227,6 +235,13 @@ describe("production rollback schema compatibility admission", () => {
       deployableWorkerVersionInventory: inventory,
       previousWorkerVersion: currentWorkerVersion,
       rollbackCandidateWorkerVersion: rollbackWorkerVersion,
+      rollbackWorkerVersionBinding: {
+        commitSha: "a".repeat(40),
+        manifestRef: ".wrangler/releases/release_20260809_rollback12/release-manifest.json",
+        releaseId: "release_20260809_rollback12",
+        role: "rollback",
+        treeSha: "b".repeat(40),
+      },
     })).not.toThrow();
     expect(() => (assertVersion as (input: Record<string, unknown>) => unknown)({
       candidateWorkerVersion,
@@ -234,6 +249,23 @@ describe("production rollback schema compatibility admission", () => {
         commitSha: "c".repeat(40),
         manifestRef: ".wrangler/releases/release_20260809_abcdef12/release-manifest.json",
         releaseId: "release_20260809_abcdef12",
+        role: "candidate",
+        treeSha: "b".repeat(40),
+      },
+      currentWorkerVersion,
+      deployableWorkerVersionIds: [candidateWorkerVersion, rollbackWorkerVersion],
+      deployableWorkerVersionInventory: inventory,
+      previousWorkerVersion: currentWorkerVersion,
+      rollbackCandidateWorkerVersion: rollbackWorkerVersion,
+    })).toThrow("production_candidate_worker_version_binding_mismatch");
+
+    expect(() => (assertVersion as (input: Record<string, unknown>) => unknown)({
+      candidateWorkerVersion,
+      candidateWorkerVersionBinding: {
+        commitSha: "a".repeat(40),
+        manifestRef: ".wrangler/releases/release_20260809_abcdef12/release-manifest.json",
+        releaseId: "release_20260809_abcdef12",
+        role: "rollback",
         treeSha: "b".repeat(40),
       },
       currentWorkerVersion,

@@ -591,6 +591,99 @@ describe("Cloudflare for SaaS platform configuration", () => {
     ].sort());
   });
 
+  it("uses the promotion audit token only for Worker deployment/version inventory", async () => {
+    const currentWorkerVersion = "11111111-1111-4111-8111-111111111111";
+    const candidateWorkerVersion = "22222222-2222-4222-8222-222222222222";
+    const rollbackWorkerVersion = "33333333-3333-4333-8333-333333333333";
+    const requests: Array<{ authorization: string; path: string }> = [];
+    const fetchImplementation: typeof fetch = (input, init) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+      requests.push({
+        authorization: init?.headers instanceof Headers
+          ? init.headers.get("Authorization") ?? ""
+          : new Headers(init?.headers).get("Authorization") ?? "",
+        path: url.replace("https://api.cloudflare.com/client/v4", ""),
+      });
+      const result = url.endsWith("/workers/routes")
+        ? exactSharedZoneRouteInventory()
+        : url.endsWith("/workers/domains")
+          ? exactSharedZoneDomainInventory()
+          : url.endsWith("/deployments")
+            ? {
+              deployments: [{
+                created_on: "2026-08-08T12:00:00.000Z",
+                id: "44444444-4444-4444-8444-444444444444",
+                versions: [{ percentage: 100, version_id: currentWorkerVersion }],
+              }],
+            }
+            : { items: [{ id: candidateWorkerVersion }, { id: rollbackWorkerVersion }] };
+      return Promise.resolve(new Response(JSON.stringify({ result, success: true }), { status: 200 }));
+    };
+    const runWranglerImplementation = (args: string[]) => args[0] === "whoami"
+      ? { stderr: "", stdout: JSON.stringify({ accounts: [{ id: stagingSpec.accountId }] }) }
+      : {
+        stderr: "",
+        stdout: JSON.stringify([{ name: "selinow-production", uuid: PRODUCTION_DATABASE_ID }]),
+      };
+
+    await expect(assertProductionWorkerIdentityAdmission({
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+        CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: "promotion-audit-token",
+      },
+      fetchImplementation,
+      productionSpec: productionSpec(),
+      requireCurrentWorkerVersion: true,
+      runWranglerImplementation,
+      stagingSpec,
+      wranglerConfig: productionWranglerConfig(),
+    })).resolves.toMatchObject({
+      currentWorkerVersion,
+      deployableWorkerVersionIds: [candidateWorkerVersion, rollbackWorkerVersion],
+    });
+
+    expect(requests).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        authorization: "Bearer route-audit-token",
+        path: `/zones/${stagingSpec.zoneId}/workers/routes`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer route-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/domains`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer promotion-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/deployments`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer promotion-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/versions?deployable=true`,
+      }),
+    ]));
+  });
+
+  it("fails Worker version admission when the promotion-read token is absent", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    await expect(assertProductionWorkerIdentityAdmission({
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+      },
+      fetchImplementation,
+      productionSpec: productionSpec(),
+      requireCurrentWorkerVersion: true,
+      runWranglerImplementation: vi.fn(),
+      stagingSpec,
+      wranglerConfig: productionWranglerConfig(),
+    })).rejects.toThrow("cloudflare_production_promotion_audit_api_token_missing");
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
   it("fails production Worker admission before route reads on missing token or D1 drift", async () => {
     const runner = vi.fn();
     const fetchImplementation = vi.fn<typeof fetch>();

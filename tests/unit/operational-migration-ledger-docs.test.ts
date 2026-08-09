@@ -36,6 +36,8 @@ describe("operational migration-ledger documentation", () => {
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("reviewed live `migrationLedgerPrefix`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Continuation migration admission (`0053`-`0090`)");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("npm run deploy -- --env production --confirm-production --release-manifest");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("`CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN`");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("active deployment and deployable-version inventories");
     expect(content["docs/PROVIDER_GATE_AUDIT.md"]).toContain("source has the contiguous forward-only chain through `0090`");
     expect(content["docs/RUNBOOKS.md"]).toContain("complete source ledger ends at `0090_payos_provider_claim_clear_guard.sql`");
     expect(content["docs/RUNBOOKS.md"]).toContain("npm run db:complete-release");
