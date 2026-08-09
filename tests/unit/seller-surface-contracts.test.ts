@@ -43,7 +43,9 @@ class FakeDatabase {
     const { calls } = this;
     const readState = () => ({ branding: this.branding, storefront: this.storefront, version: this.version, publishedVersion: this.publishedVersion, publishedAt: this.publishedAt });
     const writeState = (branding: string, storefront: string) => { this.branding = branding; this.storefront = storefront; this.version += 1; };
+    const all = () => Promise.resolve({ results: [] });
     return {
+      all,
       bind: (...values: unknown[]) => {
         calls.push({ sql, values });
         return {
@@ -65,6 +67,8 @@ class FakeDatabase {
             }
             if (sql.includes("FROM order_items")) return Promise.resolve({ results: [{ id: "item-a", productTitle: "Product A", variantTitle: "Key", sku: "A-1", unitPriceMinor: 199000, quantity: 1, lineTotalMinor: 199000, fulfillmentType: "license_key" }] });
             if (sql.includes("FROM payment_attempts")) return Promise.resolve({ results: [{ provider: "payos", state: "paid_exact", expectedAmountMinor: 199000, expiresAt: "2026-07-28T01:00:00.000Z", lastSafeErrorCode: null, createdAt: "2026-07-28T00:00:00.000Z", updatedAt: "2026-07-28T00:00:00.000Z" }] });
+            if (sql.includes("FROM payment_exceptions")) return Promise.resolve({ results: values[0] === "shop-a" && values[1] === "internal-a" ? [{ createdAt: "2026-07-28T00:02:00.000Z", currency: "VND", id: "pex-a", paymentAttemptId: "payatt-a", status: "open", type: "partial" }] : [] });
+            if (sql.includes("FROM payment_remediation_requests")) return Promise.resolve({ results: values[0] === "shop-a" && values[1] === "internal-a" ? [{ amountMinor: 0, createdAt: "2026-07-28T00:03:00.000Z", currency: "VND", exceptionId: "pex-a", failureCode: null, kind: "manual_review", reasonCode: "seller_requested", requestPublicId: "prem-a", reviewedAt: null, status: "requested", updatedAt: "2026-07-28T00:03:00.000Z", version: 1 }] : [] });
             if (sql.includes("FROM fulfillments")) return Promise.resolve({ results: [{ type: "digital_keys", state: "fulfilled", createdAt: "2026-07-28T00:00:00.000Z", fulfilledAt: "2026-07-28T00:01:00.000Z", failedAt: null }] });
             if (sql.includes("FROM audit_logs")) return Promise.resolve({ results: [{ action: "order.fulfilled", createdAt: "2026-07-28T00:01:00.000Z" }] });
             return Promise.resolve({ results: [] });
@@ -182,6 +186,34 @@ describe("seller surface contracts", () => {
     expect(orderListCall?.sql).not.toContain("OFFSET");
     expect(orderListCall?.sql).toContain("orders.created_at < ?");
     await expect(getSellerOrder({ env: env(database), shopPublicId: "shop-b", orderPublicId: "order-a", userId: "user-b" })).rejects.toMatchObject({ code: "order_not_found" });
+  });
+
+  it("projects order-specific payment exceptions and remediation without cross-tenant queries", async () => {
+    const database = new FakeDatabase();
+    const detail = await getSellerOrder({ env: env(database), shopPublicId: "shop-a", orderPublicId: "order-a", userId: "user-a" });
+
+    expect(detail.paymentExceptions).toEqual([expect.objectContaining({ id: "pex-a", paymentAttemptId: "payatt-a", status: "open", type: "partial" })]);
+    expect(detail.remediationRequests).toEqual([expect.objectContaining({ exceptionId: "pex-a", kind: "manual_review", requestPublicId: "prem-a", status: "requested" })]);
+    for (const table of ["payment_exceptions", "payment_remediation_requests"]) {
+      const call = database.calls.find((candidate) => candidate.sql.includes(`FROM ${table}`));
+      expect(call?.sql).toContain("shop_id = ?");
+      expect(call?.sql).toContain("order_id = ?");
+      expect(call?.values).toEqual(["shop-a", "internal-a"]);
+    }
+    expect(JSON.stringify(detail)).not.toContain("safe_evidence_json");
+    expect(JSON.stringify(detail)).not.toContain("provider_reference");
+  });
+
+  it("keeps seller remediation UI manual-review-only and surfaces safe request identifiers", async () => {
+    const orderPage = await readFile("src/pages/app/orders/[id].astro", "utf8");
+
+    expect(orderPage).toContain("data-payment-remediation");
+    expect(orderPage).toContain('kind: "manual_review"');
+    expect(orderPage).not.toContain('kind: "partial_refund"');
+    expect(orderPage).not.toContain('kind: "refund"');
+    expect(orderPage).toContain("body.code");
+    expect(orderPage).toContain("body.requestId");
+    expect(orderPage).toContain("data-idempotency-key");
   });
 
   it("sanitizes storefront settings and permits clearing optional announcement", async () => {

@@ -106,6 +106,9 @@ export async function createPaymentRemediationRequest(input: {
   if (!["manual_review", "partial_refund", "refund"].includes(input.kind)) throw new AppError("validation_failed", 400, ["remediation_kind_invalid"]);
   const reasonCode = requireReasonCode(input.reasonCode);
   const actor = await getShopForMember({ capability: "payments:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  if (input.kind === "refund" || input.kind === "partial_refund") {
+    throw new AppError("provider_unsupported", 503);
+  }
   const exception = await input.env.PLATFORM_DB.prepare(`
     SELECT payment_exceptions.id, payment_exceptions.order_id AS orderId,
       payment_exceptions.status, orders.public_id AS orderPublicId,
@@ -116,10 +119,7 @@ export async function createPaymentRemediationRequest(input: {
     LIMIT 1
   `).bind(actor.row.shop_id, input.exceptionPublicId).first<{ currency: string; id: string; orderId: string; orderPublicId: string; status: string; totalMinor: number }>();
   if (exception === null) throw new AppError("payment_exception_not_found", 404);
-  if (input.kind !== "manual_review" && (input.amountMinor < 1 || input.amountMinor > exception.totalMinor || input.currency !== exception.currency)) {
-    throw new AppError("remediation_amount_invalid", 400);
-  }
-  if (input.kind === "manual_review" && (input.amountMinor !== 0 || input.currency !== exception.currency)) {
+  if (input.amountMinor !== 0 || input.currency !== exception.currency) {
     throw new AppError("remediation_amount_invalid", 400);
   }
   const now = input.now ?? new Date();

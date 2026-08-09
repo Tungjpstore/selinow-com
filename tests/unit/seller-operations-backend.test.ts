@@ -534,7 +534,7 @@ describe("seller operations backend contracts", () => {
     })).rejects.toMatchObject({ code: "billing_change_requires_request", status: 409 });
   });
 
-  it("keeps payment remediation requests auditable and provider-bound", async () => {
+  it("keeps manual review requests auditable and rejects unsupported provider remediation", async () => {
     database.exec(`
       INSERT INTO payment_integrations (id, public_id, webhook_public_id, shop_id, provider, status, webhook_status, created_at, updated_at)
       VALUES ('pay-int-ops-a', 'payint_ops_a', 'webhook_ops_a', '${SHOP_A}', 'payos', 'active', 'verified', '${NOW.toISOString()}', '${NOW.toISOString()}');
@@ -546,12 +546,14 @@ describe("seller operations backend contracts", () => {
       INSERT INTO payment_exceptions (id, shop_id, order_id, payment_attempt_id, type, status, safe_evidence_json, created_at)
       VALUES ('pex-ops-a', '${SHOP_A}', '${ORDER_A}', 'pay-att-ops-a', 'partial', 'open', '{"amount":500,"expectedAmount":1000}', '${NOW.toISOString()}');
     `);
-    const request = await createPaymentRemediationRequest({ amountMinor: 500, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-1", kind: "partial_refund", reasonCode: "buyer_requested", requestId: "request-remediation", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
-    expect(request).toMatchObject({ amountMinor: 500, kind: "partial_refund", status: "requested", version: 1 });
-    const replay = await createPaymentRemediationRequest({ amountMinor: 500, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-1", kind: "partial_refund", reasonCode: "buyer_requested", requestId: "request-remediation-retry", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
+    await expect(createPaymentRemediationRequest({ amountMinor: 500, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-refund", kind: "partial_refund", reasonCode: "buyer_requested", requestId: "request-remediation-refund", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "provider_unsupported", status: 503 });
+    await expect(createPaymentRemediationRequest({ amountMinor: 1000, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-refund-full", kind: "refund", reasonCode: "buyer_requested", requestId: "request-remediation-refund-full", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "provider_unsupported", status: 503 });
+    const request = await createPaymentRemediationRequest({ amountMinor: 0, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-1", kind: "manual_review", reasonCode: "seller_requested", requestId: "request-remediation", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
+    expect(request).toMatchObject({ amountMinor: 0, kind: "manual_review", status: "requested", version: 1 });
+    const replay = await createPaymentRemediationRequest({ amountMinor: 0, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-1", kind: "manual_review", reasonCode: "seller_requested", requestId: "request-remediation-retry", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
     expect(replay).toEqual(request);
-    await expect(createPaymentRemediationRequest({ amountMinor: 400, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-1", kind: "partial_refund", reasonCode: "buyer_requested", requestId: "request-remediation-conflict", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "idempotency_conflict" });
-    await expect(createPaymentRemediationRequest({ amountMinor: 500, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-pending", kind: "partial_refund", reasonCode: "buyer_requested", requestId: "request-remediation-pending", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "payment_remediation_pending" });
+    await expect(createPaymentRemediationRequest({ amountMinor: 0, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-1", kind: "manual_review", reasonCode: "seller_followup", requestId: "request-remediation-conflict", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(createPaymentRemediationRequest({ amountMinor: 0, currency: "USD", env: bindings, exceptionPublicId: "pex-ops-a", idempotencyKey: "payment-remediation-pending", kind: "manual_review", reasonCode: "seller_requested", requestId: "request-remediation-pending", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW })).rejects.toMatchObject({ code: "payment_remediation_pending" });
     await expect(listSellerPaymentRemediationRequests({ env: bindings, shopPublicId: SHOP_B_PUBLIC, userId: OWNER_B })).resolves.toEqual([]);
     const queue = await listAdminPaymentRemediationRequests({ env: bindings, status: "requested", userId: ADMIN });
     expect(queue).toEqual([expect.objectContaining({ requestPublicId: request.requestPublicId, shopPublicId: SHOP_A_PUBLIC })]);

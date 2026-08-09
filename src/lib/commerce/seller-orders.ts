@@ -55,7 +55,29 @@ export type SellerOrderDetail = SellerOrderSummary & {
   }>;
   notes: SellerOrderNote[];
   paidAt: string | null;
+  paymentExceptions: Array<{
+    createdAt: string;
+    currency: string;
+    id: string;
+    paymentAttemptId: string;
+    status: string;
+    type: string;
+  }>;
   payments: Array<{ createdAt: string; expectedAmountMinor: number; expiresAt: string; lastSafeErrorCode: string | null; provider: string; state: string; updatedAt: string }>;
+  remediationRequests: Array<{
+    amountMinor: number;
+    createdAt: string;
+    currency: string;
+    exceptionId: string;
+    failureCode: string | null;
+    kind: "manual_review" | "partial_refund" | "refund";
+    reasonCode: string;
+    requestPublicId: string;
+    reviewedAt: string | null;
+    status: "canceled" | "completed" | "failed" | "provider_pending" | "rejected" | "requested";
+    updatedAt: string;
+    version: number;
+  }>;
 };
 
 type SellerPrivateDownloadRow = {
@@ -211,7 +233,7 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
   `).bind(shopId, input.orderPublicId).first<SellerOrderSummary & { expiresAt: string; fulfilledAt: string | null; internalId: string; paidAt: string | null }>();
   if (row === null) throw new AppError("order_not_found", 404);
 
-  const [items, payments, fulfillment, audit, notes, privateDownloads] = await Promise.all([
+  const [items, payments, paymentExceptions, remediationRequests, fulfillment, audit, notes, privateDownloads] = await Promise.all([
     input.env.PLATFORM_DB.prepare(`
       SELECT id, product_title AS productTitle, variant_title AS variantTitle, sku,
         unit_price_minor AS unitPriceMinor, quantity, line_total_minor AS lineTotalMinor,
@@ -229,6 +251,31 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
       ORDER BY created_at DESC, id DESC
       LIMIT 20
     `).bind(shopId, row.internalId).all<SellerOrderDetail["payments"][number]>(),
+    visibility === "full" ? input.env.PLATFORM_DB.prepare(`
+      SELECT exceptions.id, exceptions.type, exceptions.status,
+        exceptions.created_at AS createdAt, attempts.currency,
+        attempts.public_id AS paymentAttemptId
+      FROM payment_exceptions AS exceptions
+      INNER JOIN payment_attempts AS attempts
+        ON attempts.id = exceptions.payment_attempt_id
+        AND attempts.shop_id = exceptions.shop_id
+      WHERE exceptions.shop_id = ? AND exceptions.order_id = ?
+      ORDER BY exceptions.created_at DESC, exceptions.id DESC
+      LIMIT 50
+    `).bind(shopId, row.internalId).all<SellerOrderDetail["paymentExceptions"][number]>() : Promise.resolve({ results: [] as SellerOrderDetail["paymentExceptions"] }),
+    visibility === "full" ? input.env.PLATFORM_DB.prepare(`
+      SELECT requests.public_id AS requestPublicId,
+        requests.payment_exception_id AS exceptionId,
+        requests.kind, requests.status, requests.amount_minor AS amountMinor,
+        requests.currency, requests.reason_code AS reasonCode,
+        requests.failure_code AS failureCode, requests.reviewed_at AS reviewedAt,
+        requests.created_at AS createdAt, requests.updated_at AS updatedAt,
+        requests.version
+      FROM payment_remediation_requests AS requests
+      WHERE requests.shop_id = ? AND requests.order_id = ?
+      ORDER BY requests.created_at DESC, requests.id DESC
+      LIMIT 50
+    `).bind(shopId, row.internalId).all<SellerOrderDetail["remediationRequests"][number]>() : Promise.resolve({ results: [] as SellerOrderDetail["remediationRequests"] }),
     input.env.PLATFORM_DB.prepare(`
       SELECT fulfillment_type AS type, state, created_at AS createdAt,
         fulfilled_at AS fulfilledAt, failed_at AS failedAt
@@ -284,6 +331,8 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
       updatedAt: note.updatedAt,
       version: note.version,
     })),
+    paymentExceptions: paymentExceptions.results,
     payments: visibility === "full" ? payments.results : [],
+    remediationRequests: remediationRequests.results,
   };
 }
