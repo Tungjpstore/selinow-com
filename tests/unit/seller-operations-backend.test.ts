@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { appendOrderNote, redactOrderNote } from "../../src/lib/commerce/order-notes";
-import { appendOrderMessage, redactOrderMessage } from "../../src/lib/commerce/order-messages";
+import { appendOrderMessage, markOrderMessageDelivered, redactOrderMessage } from "../../src/lib/commerce/order-messages";
 import { cancelChannelConnectorRequest, createChannelConnectorRequest, listChannelConnectorRequests } from "../../src/lib/channels/connector-requests";
 import { listAdminAuditEntries, listAdminOrderInvestigations } from "../../src/lib/operations/admin-investigations";
 import { createPaymentRemediationRequest, listAdminPaymentRemediationRequests, listSellerPaymentRemediationRequests, reviewPaymentRemediationRequest } from "../../src/lib/payments/remediation";
@@ -67,7 +67,7 @@ class SqliteStatement {
 class SqliteD1 {
   private batchQueue = Promise.resolve();
 
-  constructor(readonly database: DatabaseSync) {}
+  constructor(readonly database: DatabaseSync, private readonly beforeBatch?: () => Promise<void> | void) {}
 
   prepare(sql: string): SqliteStatement {
     return new SqliteStatement(this.database, sql);
@@ -75,6 +75,7 @@ class SqliteD1 {
 
   batch(statements: SqliteStatement[]): Promise<Array<{ meta: { changes: number } }>> {
     const operation = this.batchQueue.then(async () => {
+      await this.beforeBatch?.();
       this.database.exec("BEGIN IMMEDIATE");
       try {
         const results = [];
@@ -107,6 +108,7 @@ function env(database: SqliteD1, send = vi.fn(() => Promise.resolve())): AppBind
     EMAIL_FROM_ADDRESS: "no-reply@example.test",
     EMAIL_FROM_NAME: "Selinow",
     MAGIC_LINK_SECRET: "magic-secret",
+    IDENTIFIER_HMAC_SECRET: "seller-operations-identifier-secret",
     PLATFORM_DB: database,
     SESSION_SECRET: "session-secret",
   } as unknown as AppBindings;
@@ -332,6 +334,51 @@ describe("seller operations backend contracts", () => {
     expect(redacted).toMatchObject({ body: "", status: "redacted", version: 2 });
     expect(database.prepare("SELECT body, status FROM order_messages WHERE id = ?").get(message.messagePublicId)).toEqual({ body: "", status: "redacted" });
     expect(() => database.prepare("DELETE FROM order_messages WHERE id = ?").run(message.messagePublicId)).toThrow("order_message_immutable");
+  });
+
+  it("marks delivery only once for the owning tenant and only from provider_pending", async () => {
+    const message = await appendOrderMessage({ body: "Delivery evidence arrives.", env: bindings, idempotencyKey: "order-message-delivery-1", orderPublicId: ORDER_A_PUBLIC, requestId: "request-message-delivery", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
+    await expect(markOrderMessageDelivered({ env: bindings, messageId: message.messagePublicId, now: NOW, providerReference: "provider-reference-a", shopId: SHOP_B })).resolves.toBe(false);
+    expect(database.prepare("SELECT status, version FROM order_messages WHERE id = ?").get(message.messagePublicId)).toEqual({ status: "provider_pending", version: 1 });
+
+    await expect(markOrderMessageDelivered({ env: bindings, messageId: message.messagePublicId, now: NOW, providerReference: "provider-reference-a", shopId: SHOP_A })).resolves.toBe(true);
+    await expect(markOrderMessageDelivered({ env: bindings, messageId: message.messagePublicId, now: NOW, providerReference: "provider-reference-a-replay", shopId: SHOP_A })).resolves.toBe(false);
+    const deliveredRow = database.prepare(`
+      SELECT status, version, sent_at AS sentAt, provider_reference_hash AS providerReferenceHash, body
+      FROM order_messages WHERE id = ?
+    `).get(message.messagePublicId) as { body: string; providerReferenceHash: string | null; sentAt: string | null; status: string; version: number };
+    expect(deliveredRow.body).toBe("Delivery evidence arrives.");
+    expect(deliveredRow.providerReferenceHash).toEqual(expect.any(String));
+    expect(deliveredRow.sentAt).toBe(NOW.toISOString());
+    expect(deliveredRow.status).toBe("sent");
+    expect(deliveredRow.version).toBe(2);
+    expect(database.prepare("SELECT provider_reference_hash AS providerReferenceHash FROM order_messages WHERE id = ?").get(message.messagePublicId))
+      .not.toEqual({ providerReferenceHash: "provider-reference-a" });
+
+    const redacted = await appendOrderMessage({ body: "Redact before delivery.", env: bindings, idempotencyKey: "order-message-delivery-2", orderPublicId: ORDER_A_PUBLIC, requestId: "request-message-delivery-2", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
+    await redactOrderMessage({ env: bindings, expectedVersion: redacted.version, idempotencyKey: "order-message-delivery-redact", messagePublicId: redacted.messagePublicId, orderPublicId: ORDER_A_PUBLIC, requestId: "request-message-delivery-redact", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
+    await expect(markOrderMessageDelivered({ env: bindings, messageId: redacted.messagePublicId, now: NOW, providerReference: "provider-reference-redacted", shopId: SHOP_A })).resolves.toBe(false);
+    expect(database.prepare("SELECT status, body FROM order_messages WHERE id = ?").get(redacted.messagePublicId)).toEqual({ body: "", status: "redacted" });
+  });
+
+  it("fences redaction against a concurrent delivery claim", async () => {
+    const message = await appendOrderMessage({ body: "Delivery and redaction race.", env: bindings, idempotencyKey: "order-message-contention-1", orderPublicId: ORDER_A_PUBLIC, requestId: "request-message-contention", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
+    let releaseBatch!: () => void;
+    let batchReached!: () => void;
+    const batchReady = new Promise<void>((resolve) => { batchReached = resolve; });
+    const allowBatch = new Promise<void>((resolve) => { releaseBatch = resolve; });
+    const contentionBindings = env(new SqliteD1(database, async () => {
+      batchReached();
+      await allowBatch;
+    }));
+    const redaction = redactOrderMessage({ env: contentionBindings, expectedVersion: message.version, idempotencyKey: "order-message-contention-redact", messagePublicId: message.messagePublicId, orderPublicId: ORDER_A_PUBLIC, requestId: "request-message-contention-redact", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A, now: NOW });
+    await batchReady;
+    await expect(markOrderMessageDelivered({ env: contentionBindings, messageId: message.messagePublicId, now: NOW, providerReference: "provider-reference-contention", shopId: SHOP_A })).resolves.toBe(true);
+    releaseBatch();
+    await expect(redaction).rejects.toMatchObject({ code: "version_conflict", status: 409 });
+
+    expect(database.prepare("SELECT status, body, version FROM order_messages WHERE id = ?").get(message.messagePublicId)).toEqual({ body: "Delivery and redaction race.", status: "sent", version: 2 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'order.message_redacted'").get()).toEqual({ count: 0 });
   });
 
   it("records expansion connector intent without claiming provider activation", async () => {
