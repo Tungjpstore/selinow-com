@@ -9,9 +9,12 @@ change, secret write, provider mutation, pilot, or live charge.
 
 The current continuation work adds provider-specific PayOS evidence admission,
 safe Dodo pre-payment lifecycle acknowledgements, and release-trigger
-hardening. These changes are not yet bound to a clean commit or Worker version;
-the next staging ceremony must generate all manifests, backup/restore records,
-and acceptance artifacts again.
+hardening. The clean source candidate is commit
+`a02e098e9a05454261770d3c90c9aeaed151a2af`, tree
+`14f9f68afd6fbadbb689171a4ad6bbc9cb405652`. It has not been deployed to a
+new staging Worker version; the next staging ceremony must generate fresh
+manifest, backup/restore, deployment, and acceptance artifacts for this exact
+identity.
 
 - Reviewed runtime baseline before this documentation-only handoff commit:
   commit
@@ -41,6 +44,45 @@ and acceptance artifacts again.
 - Current non-secret Dodo setup evidence is retained at
   `.wrangler/evidence/dodo-provider-20260809/dodo-reconciliation-redacted.json`;
   it records the configured catalog/webhook view, not completed UAT.
+
+## Candidate handoff details
+
+- Schema changes in this commit: none. The source migration ledger remains
+  contiguous through `0090_payos_provider_claim_clear_guard.sql`.
+- Runtime contracts changed: Dodo signed-event rejection/replay behavior,
+  PayOS UAT schema-v2 owner-attestation and scenario-artifact validation,
+  production trigger plan/evidence/rollback validation, opaque seller order and
+  customer cursors, retry-safe Website recovery, and fail-closed WhatsApp
+  ingress admission.
+- Principal changed files: `src/lib/billing/service.ts`,
+  `src/lib/channels/whatsapp-webhooks.ts`,
+  `src/lib/commerce/seller-orders.ts`,
+  `src/lib/commerce/website-checkout-recovery.ts`,
+  `src/lib/tenants/seller-management.ts`,
+  `scripts/lib/payos-uat-evidence.mjs`,
+  `scripts/lib/commerce-uat-evidence.mjs`,
+  `scripts/lib/production-trigger-ceremony.mjs`,
+  `scripts/production-trigger.mjs`, and their unit/visual contracts.
+- Required secret/env names only: existing Worker secret inventory plus
+  `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, temporary scoped
+  Cloudflare staging/production admission tokens, and the non-secret PayOS
+  owner-attestation public-key binding
+  `SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID` /
+  `SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64`. No value is recorded
+  in this handoff.
+- Verification on the clean candidate: `npm run check` (0 errors, 3 hints),
+  `npm run lint`, `npx tsc --noEmit`, `npm test` (282 files / 2,094 tests),
+  `npm run build`, `npm run build:staging`, `npm audit --audit-level=high` (0
+  vulnerabilities), both deploy dry-runs, and `git diff --check` pass.
+- Known limitations: staging backup/restore and deploy evidence are not bound to
+  this commit; Dodo TEST UAT is not accepted; PayOS controlled real-transaction
+  UAT and owner signature are absent; legal/support decisions, named approvals,
+  pilots, monitoring, production backup/restore, rollback, secrets, migrations,
+  and production deploy remain blocked.
+- Integration assumptions: billing/provider acceptance stays fail-closed;
+  unsupported expansion channels remain `provider_pending`; refund provider
+  execution is not claimed; no return URL or synthetic payload can mark an
+  order or subscription paid.
 
 ## Payment lane contract
 

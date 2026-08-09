@@ -23,6 +23,21 @@ transaction for provider acceptance; no such transfer has been executed, and
 refund/chargeback webhook scenarios remain explicitly unsupported by the public
 PayOS contract. Both payment lanes therefore remain fail-closed.
 
+Candidate hardening commit (2026-08-09): `a02e098e9a05454261770d3c90c9aeaed151a2af`,
+tree `14f9f68afd6fbadbb689171a4ad6bbc9cb405652`. This candidate closes buyer
+recovery response-loss replay, replaces seller order/customer offsets with
+opaque keyset cursors, rejects all WhatsApp `provider_pending` ingress before
+credential or receipt access, hardens Dodo pre-payment lifecycle/replay
+handling, requires trusted detached PayOS owner attestation for provider
+acceptance, and makes production trigger plans/evidence/rollback fail closed.
+Local gates on this exact tree: `npm run check` (0 errors, 3 hints), `npm run
+lint`, `npx tsc --noEmit`, `npm test` (282 files / 2,094 tests), production and
+staging builds, both deploy dry-runs, `npm audit --audit-level=high` (0
+vulnerabilities), and `git diff --cached --check` all pass. No remote mutation
+was made by this candidate. Staging deploy/backup/restore remain blocked until
+the required temporary Cloudflare admission tokens and fresh manifest are
+available.
+
 - The reviewed runtime baseline for this snapshot, before the documentation-only
   reconciliation commit, is commit
   `dcfe4a62e98551083710ae32df0004f2336e6524`, tree
