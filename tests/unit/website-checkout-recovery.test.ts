@@ -187,14 +187,50 @@ describe("website checkout recovery", () => {
       recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() }),
       recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() }),
     ]);
-    const fulfilled = attempts.filter((attempt) => attempt.status === "fulfilled");
-    const rejected = attempts.filter((attempt) => attempt.status === "rejected");
-    expect(fulfilled).toHaveLength(1);
-    expect(fulfilled[0]).toMatchObject({ value: { orderId: "order_33333333-3333-4333-8333-333333333333", orderToken, paymentStatus: "unpaid" } });
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0]).toMatchObject({ reason: { code: "checkout_recovery_consumed", status: 409 } });
-    await expect(recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() })).rejects.toMatchObject({ code: "checkout_recovery_consumed", status: 409 });
+    expect(attempts).toHaveLength(2);
+    for (const attempt of attempts) {
+      expect(attempt.status).toBe("fulfilled");
+      if (attempt.status !== "fulfilled") throw new Error("checkout_recovery_concurrent_retry_rejected");
+      expect(attempt.value).toMatchObject({ orderId: "order_33333333-3333-4333-8333-333333333333", orderToken, paymentStatus: "unpaid" });
+    }
+    await expect(recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() })).resolves.toMatchObject({
+      orderId: "order_33333333-3333-4333-8333-333333333333",
+      orderToken,
+      paymentStatus: "unpaid",
+    });
     expect(database.database.prepare("SELECT consumed_order_id AS consumedOrderId FROM checkout_recovery_capabilities WHERE shop_id = ?").get("shop_recovery")).toEqual({ consumedOrderId: "order_recovery" });
+  });
+
+  it("does not replay a capability consumed by a different order", async () => {
+    const database = createDatabase();
+    await seedCart(database);
+    const env = envFor(database);
+    const idempotencyKey = "checkout-recovery-cross-order-0001";
+    const quoteEvidence = await createQuote(env.IDENTIFIER_HMAC_SECRET);
+    const recovery = await prepareWebsiteCheckoutRecovery({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, quoteEvidence, shop: shop() });
+    const checkoutSubjectHash = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "checkout:shop_recovery", idempotencyKey);
+    const requestHash = await websiteCheckoutFingerprint({ cartId, customerEmail: null, discountCode: null, discountMinor: 0, expected, totalMinor: 9000 });
+    const orderToken = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "order-access-token:shop_recovery", idempotencyKey);
+    const orderTokenHash = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "order-access", orderToken);
+    await seedOrder(database, { requestHash, subjectHash: checkoutSubjectHash, tokenHash: orderTokenHash });
+    database.database.prepare(`INSERT INTO orders (
+      id, public_id, shop_id, customer_id, order_number, source_channel, status,
+      payment_status, fulfillment_status, subtotal_minor, discount_minor, total_minor,
+      currency, locale, customer_email_masked, checkout_subject_hash, order_token_hash,
+      expires_at, created_at, updated_at
+    ) VALUES (?, ?, ?, NULL, ?, 'web', 'pending_payment', 'unpaid', 'reserved', 9000, 0, 9000,
+      'VND', 'en', NULL, ?, ?, ?, ?, ?)`)
+      .run("order_other", "order_44444444-4444-4444-8444-444444444444", "shop_recovery", "SO-RECOVERY-2", "other-subject", "other-token", quoteExpiresAt, quoteIssuedAt, quoteIssuedAt);
+    database.database.prepare(`
+      UPDATE checkout_recovery_capabilities
+      SET consumed_at = ?, consumed_order_id = ?
+      WHERE shop_id = ?
+    `).run(quoteIssuedAt, "order_other", "shop_recovery");
+
+    await expect(recoverWebsiteCheckout({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, recoveryEvidence: recovery.evidence, shop: shop() })).rejects.toMatchObject({
+      code: "checkout_recovery_consumed",
+      status: 409,
+    });
   });
 
   it("fails closed on order request/cart conflicts and token-hash mismatch", async () => {

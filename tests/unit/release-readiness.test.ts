@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -23,10 +23,24 @@ import {
   writeProductionRollbackRehearsalArtifact,
 } from "../../scripts/lib/release.mjs";
 import { DODO_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/dodo-uat-evidence.mjs";
-import { PAYOS_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/payos-uat-evidence.mjs";
+import { PAYOS_STAGING_UAT_SCENARIO_IDS, serializePayosOwnerAttestationPayload } from "../../scripts/lib/payos-uat-evidence.mjs";
 
 const now = new Date("2026-07-26T03:00:00.000Z");
 const providerAcceptanceKeys = ["telegramBot", "telegramMiniApp", "zaloMiniApp", "zaloOa", "whatsappCloud", "discord"] as const;
+const payosProviderRequiredScenarioIds = ["signed_exact_payment", "direct_reconciliation"] as const;
+const payosLocalAssuranceScenarioIds = [
+  "invalid_signature",
+  "duplicate_replay",
+  "conflicting_replay",
+  "partial_payment",
+  "overpayment",
+  "late_payment",
+  "amount_mismatch",
+  "currency_mismatch",
+  "tenant_isolation",
+  "fulfillment_exactly_once",
+] as const;
+const payosProviderUnsupportedScenarioIds = ["signed_refund", "signed_chargeback"] as const;
 const rollbackInvariants = [
   "billing_checkout_sessions_scope_guard",
   "billing_checkout_sessions_scope_update_guard",
@@ -870,6 +884,8 @@ describe("production release readiness", () => {
 
   it("checks the canonical private manifest and clean Git identity at deploy admission", async () => {
     const root = await mkdtemp(join(tmpdir(), "selinow-release-admission-"));
+    const previousAttestationKeyId = process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID;
+    const previousAttestationPublicKey = process.env.SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64;
     try {
       const releaseId = "release_20260726_abcdef12";
       await Promise.all([
@@ -944,7 +960,13 @@ describe("production release readiness", () => {
         evidenceFingerprintSha256: string;
         observedAt: string;
         requestReference: string;
-        status: "passed";
+        status: "passed" | "unsupported";
+      };
+      type PayosScenarioRecord = ScenarioRecord & {
+        classification: "provider_supported" | "provider_unsupported" | "selinow_local_assurance";
+        reasonCode: "payos_signed_chargeback_not_supported" | "payos_signed_refund_not_supported" | null;
+        status: "passed" | "unsupported";
+        verificationMethod: "local_contract" | "provider_capability_audit" | "signed_webhook" | "verified_provider_response";
       };
       const scenarioRecord = async (provider: string, id: string): Promise<ScenarioRecord> => {
         const artifactRef = `.wrangler/releases/staging/${stagingReleaseId}/scenarios/${provider}-${id}.json`;
@@ -963,9 +985,57 @@ describe("production release readiness", () => {
       for (const id of DODO_STAGING_UAT_SCENARIO_IDS) {
         dodoScenarios[id] = { ...(await scenarioRecord("dodo", id)), sessionReference: null };
       }
-      const payosScenarios: Record<string, ScenarioRecord> = {};
+      const payosControlledAccountFingerprintSha256 = "a".repeat(64);
+      const payosTransactionEvidenceFingerprintSha256 = "b".repeat(64);
+      const payosScenarios: Record<string, PayosScenarioRecord> = {};
       for (const id of PAYOS_STAGING_UAT_SCENARIO_IDS) {
-        payosScenarios[id] = await scenarioRecord("payos", id);
+        const providerRequired = payosProviderRequiredScenarioIds.includes(id as typeof payosProviderRequiredScenarioIds[number]);
+        const providerUnsupported = payosProviderUnsupportedScenarioIds.includes(id as typeof payosProviderUnsupportedScenarioIds[number]);
+        const classification = providerUnsupported
+          ? "provider_unsupported"
+          : providerRequired
+            ? "provider_supported"
+            : "selinow_local_assurance";
+        const status = providerUnsupported ? "unsupported" : "passed";
+        const verificationMethod = id === "signed_exact_payment"
+          ? "signed_webhook"
+          : id === "direct_reconciliation"
+            ? "verified_provider_response"
+            : providerUnsupported
+              ? "provider_capability_audit"
+              : "local_contract";
+        const observedAt = "2026-07-25T12:00:00.000Z";
+        const artifactRef = `.wrangler/releases/staging/${stagingReleaseId}/scenarios/payos-${id}.json`;
+        const artifact = JSON.stringify({
+          classification,
+          controlledAccountFingerprintSha256: providerRequired ? payosControlledAccountFingerprintSha256 : null,
+          evidenceKind: "provider_acceptance",
+          environment: "staging",
+          observedAt,
+          provider: "payos",
+          proofOfExecutionFingerprintSha256: providerRequired ? payosTransactionEvidenceFingerprintSha256 : null,
+          redaction: { noRawPayload: true, noSensitiveValues: true },
+          release: releaseBinding,
+          result: status,
+          scenarioId: id,
+          schemaVersion: 1,
+          verificationMethod,
+        });
+        await writeFile(join(root, artifactRef), artifact, { mode: 0o600 });
+        payosScenarios[id] = {
+          classification,
+          eventReference: `artifact:${artifactRef}`,
+          evidenceFingerprintSha256: createHash("sha256").update(artifact).digest("hex"),
+          observedAt,
+          reasonCode: id === "signed_refund"
+            ? "payos_signed_refund_not_supported"
+            : id === "signed_chargeback"
+              ? "payos_signed_chargeback_not_supported"
+              : null,
+          requestReference: `artifact:${artifactRef}`,
+          status,
+          verificationMethod,
+        };
       }
       const dodoArtifact = {
         completedAt: "2026-07-25T13:00:00.000Z",
@@ -985,18 +1055,58 @@ describe("production release readiness", () => {
         scenarios: dodoScenarios,
         schemaVersion: 1,
       };
+      const payosOwnerKeyId = "release-owner-test";
+      const payosOwnerKeys = generateKeyPairSync("ed25519");
       const payosArtifact = {
+        acceptanceReasonCode: null,
         channel: "seller_payment",
         completedAt: "2026-07-25T13:00:00.000Z",
         createdAt: "2026-07-25T11:00:00.000Z",
         environment: "staging",
+        evidenceKind: "provider_acceptance",
+        ownerAttestation: {
+          algorithm: "ed25519",
+          keyId: payosOwnerKeyId,
+          signatureBase64: "",
+          signedAt: "2026-07-25T13:00:00.000Z",
+        },
         provider: "payos",
-        providerEnvironment: "test_mode",
+        providerEnvironment: "production_controlled",
+        providerExecution: {
+          controlledAccountFingerprintSha256: payosControlledAccountFingerprintSha256,
+          paymentInstrument: "controlled_real_bank",
+          realLowValueTransactionObserved: true,
+          signatureSource: "provider_signed_webhook_and_verified_response",
+          syntheticSignatureUsed: false,
+          transactionEvidenceFingerprintSha256: payosTransactionEvidenceFingerprintSha256,
+        },
         redaction: { auditNoSensitiveValues: true, d1NoRawPayload: true, d1NoSecretValues: true, evidenceFingerprintSha256: "f".repeat(64), logsNoSensitiveValues: true, queuesNoSensitiveValues: true },
         release: releaseBinding,
+        scenarioPolicy: {
+          localRequired: payosLocalAssuranceScenarioIds,
+          providerRequired: payosProviderRequiredScenarioIds,
+          providerUnsupported: payosProviderUnsupportedScenarioIds,
+        },
         scenarios: payosScenarios,
-        schemaVersion: 1,
+        schemaVersion: 2,
+        unsupportedCapabilities: {
+          signedChargeback: {
+            documentationReference: "payos_docs:payment_webhook",
+            reasonCode: "payos_signed_chargeback_not_supported",
+            status: "unsupported",
+          },
+          signedRefund: {
+            documentationReference: "payos_docs:payment_webhook",
+            reasonCode: "payos_signed_refund_not_supported",
+            status: "unsupported",
+          },
+        },
       };
+      payosArtifact.ownerAttestation.signatureBase64 = sign(
+        null,
+        Buffer.from(serializePayosOwnerAttestationPayload(payosArtifact)),
+        payosOwnerKeys.privateKey,
+      ).toString("base64");
       const commerce = evidence.commerceAcceptance as Record<string, Record<string, unknown>>;
       const dodoCommerce = commerce.dodo;
       const payosCommerce = commerce.payos;
@@ -1035,6 +1145,10 @@ describe("production release readiness", () => {
       });
       rollback.candidate.artifactSha256 = createHash("sha256").update(rollbackArtifact).digest("hex");
       await writeFile(join(root, rollback.rehearsalEvidenceRef), rollbackArtifact, { mode: 0o600 });
+      process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID = payosOwnerKeyId;
+      process.env.SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64 = Buffer.from(
+        payosOwnerKeys.publicKey.export({ format: "pem", type: "spki" }),
+      ).toString("base64");
       const manifest = buildReleaseArtifacts({
         evidence,
         migrationNames: ["0001_first.sql"],
@@ -1084,6 +1198,10 @@ describe("production release readiness", () => {
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
       })).rejects.toThrow("production_release_source_dirty");
     } finally {
+      if (previousAttestationKeyId === undefined) delete process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID;
+      else process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID = previousAttestationKeyId;
+      if (previousAttestationPublicKey === undefined) delete process.env.SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64;
+      else process.env.SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64 = previousAttestationPublicKey;
       await rm(root, { force: true, recursive: true });
     }
   });

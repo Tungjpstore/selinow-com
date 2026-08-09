@@ -5,6 +5,7 @@ import { readBoundedBytes } from "../http/request";
 import type { AppBindings } from "../platform/bindings";
 import type { ProviderReceiptStore } from "./ingress";
 import { D1ProviderReceiptStore } from "./provider-event-receipts";
+import { assertExpansionProviderPending } from "./expansion";
 import { normalizeProviderEvent, verifyProviderWebhook, getProviderRuntimeContract } from "./provider-contracts";
 import { verifyWhatsAppWebhookChallenge } from "./provider-routes";
 import { decryptWhatsAppCloudCredential, type WhatsAppCloudCredential } from "./whatsapp-credentials";
@@ -21,6 +22,15 @@ const WABA_LEVEL_FIELDS = new Set([
   "message_template_status_update",
 ]);
 const encoder = new TextEncoder();
+
+/**
+ * WhatsApp is contract-only until provider execution is reviewed and enabled.
+ * Keep this guard before every context lookup so pending ingress cannot cause
+ * credential decryption, provider verification, or durable receipt writes.
+ */
+export function assertWhatsAppIngressAdmitted(): void {
+  assertExpansionProviderPending(PROVIDER_CODE);
+}
 
 type WhatsAppCredentialRow = {
   connectionId: string;
@@ -89,7 +99,8 @@ async function payloadDigest(rawBody: Uint8Array): Promise<string> {
   return toBase64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", owned.buffer)));
 }
 
-async function extractEventDescriptor(
+/** @internal Pure parser retained for provider-contract regression tests. */
+export async function extractWhatsAppEventDescriptor(
   rawBody: Uint8Array,
   expectedBusinessAccountId: string,
   expectedPhoneNumberId: string,
@@ -178,6 +189,7 @@ async function extractEventDescriptor(
 }
 
 export async function loadWhatsAppWebhookContext(env: AppBindings, connectionPublicId: string): Promise<WhatsAppWebhookContext> {
+  assertWhatsAppIngressAdmitted();
   const publicIdValue = publicId(connectionPublicId);
   const row = await env.PLATFORM_DB.prepare(`
     SELECT
@@ -231,6 +243,7 @@ export async function processWhatsAppWebhook(input: {
   receiptStore?: ProviderReceiptStore;
   request: Request;
 }): Promise<WhatsAppWebhookResult> {
+  assertWhatsAppIngressAdmitted();
   const context = await loadWhatsAppWebhookContext(input.env, input.connectionPublicId);
   const rawBody = await readBoundedBytes(input.request, getProviderRuntimeContract(PROVIDER_CODE).maxInboundBodyBytes);
   await verifyProviderWebhook({
@@ -239,7 +252,7 @@ export async function processWhatsAppWebhook(input: {
     rawBody,
     signature: input.request.headers.get("X-Hub-Signature-256"),
   });
-  const descriptor = await extractEventDescriptor(rawBody, context.businessAccountId, context.phoneNumberId);
+  const descriptor = await extractWhatsAppEventDescriptor(rawBody, context.businessAccountId, context.phoneNumberId);
   const event = await normalizeProviderEvent({
     action: descriptor.action,
     connectionId: context.connectionId,
@@ -261,6 +274,7 @@ export async function verifyWhatsAppChallengeRequest(input: {
   connectionPublicId: string;
   request: Request;
 }): Promise<string> {
+  assertWhatsAppIngressAdmitted();
   const context = await loadWhatsAppWebhookContext(input.env, input.connectionPublicId);
   const query = new URL(input.request.url).searchParams;
   const single = (name: string): string | null => {

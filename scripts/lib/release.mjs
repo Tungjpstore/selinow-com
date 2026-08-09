@@ -78,6 +78,21 @@ export const REQUIRED_PROVIDER_ACCEPTANCE_KEYS = [
 
 export const RELEASE_CHANNEL_KEYS = ["website", ...REQUIRED_PROVIDER_ACCEPTANCE_KEYS];
 export const REQUIRED_COMMERCE_ACCEPTANCE_KEYS = ["payos", "dodo"];
+export const REQUIRED_LEGAL_SUPPORT_DECISION_KEYS = Object.freeze([
+  "contractingLegalEntity",
+  "registeredAddressTaxIdentity",
+  "governingLawDisputeForum",
+  "digitalGoodsRefundRules",
+  "abuseCopyrightTakedown",
+  "sellerResponsibility",
+  "payosSettlementBoundary",
+  "dodoMerchantOfRecord",
+  "privacyRolesDsar",
+  "retentionDeletionExceptions",
+  "platformSupportContact",
+  "sellerBuyerSupportBoundary",
+]);
+export const REQUIRED_SECRET_INVENTORY_SCHEMA_VERSION = 1;
 export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "billing_checkout_sessions_scope_guard",
   "billing_checkout_sessions_scope_update_guard",
@@ -257,6 +272,10 @@ const REQUIRED_EVIDENCE_PATHS = [
 const PLACEHOLDER_PATTERN = /(?:change-me|not-provisioned|placeholder|replace-with|<[^>]+>)/iu;
 const RELEASE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{7,80}$/u;
 const SAFE_NAME_PATTERN = /^[a-z][a-z0-9._-]{2,80}$/u;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const PRIVATE_RELEASE_ARTIFACT_REF_PATTERN = /^\.wrangler\/releases\/[a-z0-9][a-z0-9._-]{7,80}\/[A-Za-z0-9._/-]+\.json$/u;
+const PRIVATE_EVIDENCE_REF_PATTERN = /^(?:private\/|\.wrangler\/releases\/)[A-Za-z0-9._/-]+$/u;
+const LEGAL_SUPPORT_ARTIFACT_MODE = "legal_support_decision_checklist";
 const MAX_SMOKE_RESPONSE_BYTES = 256 * 1024;
 
 function getPath(value, path) {
@@ -339,6 +358,164 @@ function validHttpsOrigin(value) {
   } catch {
     return false;
   }
+}
+
+function isSafeReleaseArtifactReference(value, releaseId) {
+  return typeof value === "string"
+    && PRIVATE_RELEASE_ARTIFACT_REF_PATTERN.test(value)
+    && value.startsWith(`.wrangler/releases/${releaseId}/`)
+    && !value.includes("..")
+    && !value.includes("\\");
+}
+
+function readPrivateReleaseArtifactSync(root, reference) {
+  if (typeof reference !== "string") return null;
+  if (!isSafeReleaseArtifactReference(reference, reference.split("/")[2] ?? "")) return null;
+  const artifactPath = resolve(root, reference);
+  let stat;
+  try {
+    stat = lstatSync(artifactPath);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) return null;
+  try {
+    const bytes = readFileSync(artifactPath);
+    return { bytes, value: JSON.parse(bytes.toString("utf8")) };
+  } catch {
+    return null;
+  }
+}
+
+function expectedLegalSupportArtifactRef(releaseId) {
+  return `.wrangler/releases/${releaseId}/legal-support-decisions.json`;
+}
+
+/**
+ * Validate the owner-approved legal/support checklist without storing legal
+ * values in release evidence. The artifact is reference-only and mode 0600.
+ */
+export function validateLegalSupportDecisionEvidence({ evidence, now = new Date(), repositoryRoot: root = repositoryRoot } = {}) {
+  const entry = evidence?.legalSupport;
+  const checks = [
+    makeCheck("evidence.legalSupport.accepted", entry?.accepted === true),
+    makeCheck("evidence.legalSupport.evidenceRef", isSafeReleaseArtifactReference(entry?.evidenceRef, evidence?.releaseId)),
+    makeCheck("evidence.legalSupport.artifactSha256", typeof entry?.artifactSha256 === "string" && SHA256_PATTERN.test(entry.artifactSha256)),
+    makeCheck("evidence.legalSupport.artifactSchemaVersion", entry?.artifactSchemaVersion === 1),
+    makeCheck("evidence.legalSupport.observedAt", safeDate(entry?.observedAt) !== null),
+    makeCheck(
+      "evidence.legalSupport.requiredDecisionKeys",
+      Array.isArray(entry?.requiredDecisionKeys)
+        && isDeepStrictEqual([...entry.requiredDecisionKeys].sort(), [...REQUIRED_LEGAL_SUPPORT_DECISION_KEYS].sort()),
+    ),
+  ];
+  const expectedRef = expectedLegalSupportArtifactRef(evidence?.releaseId ?? "");
+  checks.push(makeCheck("evidence.legalSupport.canonicalRef", entry?.evidenceRef === expectedRef));
+
+  const observedAt = safeDate(entry?.observedAt);
+  checks.push(makeCheck(
+    "evidence.legalSupport.observedAtFresh",
+    observedAt !== null && observedAt <= now.getTime() && now.getTime() - observedAt <= 30 * 24 * 60 * 60_000,
+  ));
+
+  const loaded = entry?.evidenceRef === expectedRef
+    ? readPrivateReleaseArtifactSync(root, entry.evidenceRef)
+    : null;
+  checks.push(makeCheck("evidence.legalSupport.artifactPresent", loaded !== null));
+  checks.push(makeCheck("evidence.legalSupport.artifactMode", loaded?.value?.mode === LEGAL_SUPPORT_ARTIFACT_MODE));
+  checks.push(makeCheck("evidence.legalSupport.artifactHash", loaded !== null
+    && typeof entry?.artifactSha256 === "string"
+    && createHash("sha256").update(loaded.bytes).digest("hex") === entry.artifactSha256));
+
+  const artifact = loaded?.value;
+  const artifactKeys = artifact && typeof artifact === "object" && !Array.isArray(artifact)
+    ? Object.keys(artifact).sort()
+    : [];
+  const expectedArtifactKeys = ["commitSha", "decisions", "environment", "mode", "observedAt", "releaseId", "schemaVersion", "treeSha"];
+  checks.push(makeCheck("evidence.legalSupport.artifactSchema", artifact?.schemaVersion === 1
+    && isDeepStrictEqual(artifactKeys, expectedArtifactKeys)));
+  checks.push(makeCheck("evidence.legalSupport.artifactBinding", artifact?.environment === "production"
+    && artifact?.releaseId === evidence?.releaseId
+    && artifact?.commitSha === evidence?.commitSha
+    && artifact?.treeSha === evidence?.treeSha
+    && artifact?.observedAt === entry?.observedAt));
+
+  const decisions = artifact?.decisions;
+  const decisionKeys = decisions && typeof decisions === "object" && !Array.isArray(decisions)
+    ? Object.keys(decisions).sort()
+    : [];
+  const decisionsShape = isDeepStrictEqual(decisionKeys, [...REQUIRED_LEGAL_SUPPORT_DECISION_KEYS].sort())
+    && REQUIRED_LEGAL_SUPPORT_DECISION_KEYS.every((key) => {
+      const decision = decisions?.[key];
+      if (!decision || typeof decision !== "object" || Array.isArray(decision)) return false;
+      const keys = Object.keys(decision).sort();
+      return isDeepStrictEqual(keys, ["effectiveAt", "evidenceRef", "ownerRef", "status"])
+        && decision.status === "approved"
+        && PRIVATE_EVIDENCE_REF_PATTERN.test(decision.ownerRef)
+        && PRIVATE_EVIDENCE_REF_PATTERN.test(decision.evidenceRef)
+        && safeDate(decision.effectiveAt) !== null
+        && safeDate(decision.effectiveAt) <= now.getTime();
+    });
+  checks.push(makeCheck("evidence.legalSupport.decisions", decisionsShape));
+
+  return {
+    checks,
+    missing: checks.filter((check) => !check.ok).map((check) => check.name),
+    ok: checks.every((check) => check.ok),
+  };
+}
+
+export function validateSecretInventoryEvidence({ evidence, workerSecretNames, repositoryRoot: root = repositoryRoot } = {}) {
+  const inventory = evidence?.secretInventory;
+  const expectedNames = [...REQUIRED_WORKER_SECRET_NAMES].sort();
+  const actualNames = Array.isArray(inventory?.requiredNames) ? [...inventory.requiredNames].sort() : [];
+  const observedNames = Array.isArray(workerSecretNames) ? [...new Set(workerSecretNames)].sort() : [];
+  const validNameSet = (names) => names.length > 0
+    && new Set(names).size === names.length
+    && names.every((name) => typeof name === "string" && /^[A-Z][A-Z0-9_]{1,127}$/u.test(name));
+  const includesRequiredNames = (names) => validNameSet(names)
+    && expectedNames.every((name) => names.includes(name));
+  const expectedRef = `.wrangler/releases/${evidence?.releaseId ?? ""}/production-secret-inventory.json`;
+  const inventoryKeys = inventory && typeof inventory === "object" && !Array.isArray(inventory)
+    ? Object.keys(inventory).sort()
+    : [];
+  const checks = [
+    makeCheck("evidence.secretInventory.schema", isDeepStrictEqual(inventoryKeys, ["artifactSha256", "evidenceRef", "mode", "requiredNames", "schemaVersion"])),
+    makeCheck("evidence.secretInventory.schemaVersion", inventory?.schemaVersion === REQUIRED_SECRET_INVENTORY_SCHEMA_VERSION),
+    makeCheck("evidence.secretInventory.mode", inventory?.mode === "name_only"),
+    makeCheck("evidence.secretInventory.evidenceRef", inventory?.evidenceRef === expectedRef
+      && isSafeReleaseArtifactReference(inventory.evidenceRef, evidence?.releaseId)),
+    makeCheck("evidence.secretInventory.artifactSha256", typeof inventory?.artifactSha256 === "string" && SHA256_PATTERN.test(inventory.artifactSha256)),
+    makeCheck("evidence.secretInventory.requiredNames", includesRequiredNames(actualNames)),
+    makeCheck("evidence.secretInventory.matchesWorker", includesRequiredNames(observedNames)),
+  ];
+  const loaded = inventory?.evidenceRef === expectedRef
+    ? readPrivateReleaseArtifactSync(root, inventory.evidenceRef)
+    : null;
+  checks.push(makeCheck("evidence.secretInventory.artifactPresent", loaded !== null));
+  checks.push(makeCheck("evidence.secretInventory.artifactHash", loaded !== null
+    && typeof inventory?.artifactSha256 === "string"
+    && createHash("sha256").update(loaded.bytes).digest("hex") === inventory.artifactSha256));
+  const artifact = loaded?.value;
+  const artifactKeys = artifact && typeof artifact === "object" && !Array.isArray(artifact)
+    ? Object.keys(artifact).sort()
+    : [];
+  checks.push(makeCheck("evidence.secretInventory.artifactSchema", artifact?.schemaVersion === REQUIRED_SECRET_INVENTORY_SCHEMA_VERSION
+    && isDeepStrictEqual(artifactKeys, ["commitSha", "environment", "mode", "releaseId", "schemaVersion", "secretNames", "treeSha"])));
+  checks.push(makeCheck("evidence.secretInventory.artifactBinding", artifact?.environment === "production"
+    && artifact?.mode === "name_only"
+    && artifact?.releaseId === evidence?.releaseId
+    && artifact?.commitSha === evidence?.commitSha
+    && artifact?.treeSha === evidence?.treeSha));
+  const artifactNames = Array.isArray(artifact?.secretNames) ? [...artifact.secretNames].sort() : [];
+  checks.push(makeCheck("evidence.secretInventory.artifactNames", includesRequiredNames(artifactNames)));
+  checks.push(makeCheck("evidence.secretInventory.namesMatchEvidence", isDeepStrictEqual(artifactNames, actualNames)));
+  checks.push(makeCheck("evidence.secretInventory.namesMatchWorker", isDeepStrictEqual(artifactNames, observedNames)));
+  return {
+    checks,
+    missing: checks.filter((check) => !check.ok).map((check) => check.name),
+    ok: checks.every((check) => check.ok),
+  };
 }
 
 function validProductionVar(name, value) {
@@ -426,7 +603,7 @@ function evaluateReleaseScope(evidence) {
   };
 }
 
-function evaluateCommerceAcceptance(evidence, artifactValidation) {
+export function evaluateCommerceAcceptance(evidence, artifactValidation, requireArtifactHash = false) {
   return REQUIRED_COMMERCE_ACCEPTANCE_KEYS.flatMap((provider) => [
     makeCheck(
       `evidence.commerceAcceptance.${provider}.accepted`,
@@ -440,9 +617,19 @@ function evaluateCommerceAcceptance(evidence, artifactValidation) {
       `evidence.commerceAcceptance.${provider}.observedAt`,
       validEvidencePath(`commerceAcceptance.${provider}.observedAt`, evidence?.commerceAcceptance?.[provider]?.observedAt),
     ),
-    ...(artifactValidation === undefined ? [] : [
+    ...((requireArtifactHash || evidence?.commerceAcceptance?.[provider]?.artifactSha256 !== undefined) ? [
+      makeCheck(
+        `evidence.commerceAcceptance.${provider}.artifactSha256`,
+        typeof evidence?.commerceAcceptance?.[provider]?.artifactSha256 === "string"
+          && SHA256_PATTERN.test(evidence.commerceAcceptance[provider].artifactSha256),
+      ),
+    ] : []),
+    ...(artifactValidation === undefined && !requireArtifactHash ? [] : [
+      makeCheck(`evidence.commerceAcceptance.${provider}.artifactRefCanonical`, typeof evidence?.commerceAcceptance?.[provider]?.evidenceRef === "string"
+        && evidence.commerceAcceptance[provider].evidenceRef.startsWith(".wrangler/releases/staging/")),
       makeCheck(`evidence.commerceAcceptance.${provider}.artifactAccepted`, artifactValidation?.[provider]?.accepted === true),
-      makeCheck(`evidence.commerceAcceptance.${provider}.artifactFingerprintSha256`, typeof artifactValidation?.[provider]?.artifactFingerprintSha256 === "string" && /^[a-f0-9]{64}$/u.test(artifactValidation[provider].artifactFingerprintSha256)),
+      makeCheck(`evidence.commerceAcceptance.${provider}.artifactFingerprintSha256`, typeof artifactValidation?.[provider]?.artifactFingerprintSha256 === "string" && SHA256_PATTERN.test(artifactValidation[provider].artifactFingerprintSha256)),
+      makeCheck(`evidence.commerceAcceptance.${provider}.artifactSha256Binding`, artifactValidation?.[provider]?.artifactFingerprintSha256 === evidence?.commerceAcceptance?.[provider]?.artifactSha256),
       makeCheck(`evidence.commerceAcceptance.${provider}.artifactReleaseBinding`, artifactValidation?.[provider]?.releaseId === evidence?.staging?.releaseId
         && artifactValidation?.[provider]?.manifestRef === evidence?.staging?.manifestRef
         && artifactValidation?.[provider]?.manifestSha256 === evidence?.staging?.manifestSha256
@@ -455,6 +642,7 @@ function acceptanceEntry(source, key) {
   const entry = source?.[key] ?? {};
   return {
     accepted: entry.accepted === true,
+    ...(typeof entry.artifactSha256 === "string" ? { artifactSha256: entry.artifactSha256 } : {}),
     evidenceRef: typeof entry.evidenceRef === "string" ? entry.evidenceRef : null,
     observedAt: typeof entry.observedAt === "string" ? entry.observedAt : null,
   };
@@ -560,6 +748,9 @@ export function inspectProductionReadiness(input) {
   const production = input.wranglerConfig?.env?.production;
   const spec = input.productionSpec;
   const evidence = input.evidence;
+  const requiresReleaseHardening = input.requireReleaseHardening === true
+    || evidence?.legalSupport !== undefined
+    || evidence?.secretInventory !== undefined;
   let migrationNames = [];
   try {
     migrationNames = input.migrationNames === undefined
@@ -631,6 +822,13 @@ export function inspectProductionReadiness(input) {
     makeCheck("evidence.commerceAcceptance.evidenceRefsUnique", new Set(commerceRefs).size === commerceRefs.length),
     makeCheck("evidence.acceptanceRefs.crossLaneUnique", new Set([...activeRefs, ...commerceRefs]).size === activeRefs.length + commerceRefs.length),
   );
+  if (requiresReleaseHardening) {
+    const legalRef = evidence?.legalSupport?.evidenceRef;
+    checks.push(makeCheck(
+      "evidence.acceptanceRefs.legalSupportUnique",
+      typeof legalRef !== "string" || !new Set([...activeRefs, ...commerceRefs]).has(legalRef),
+    ));
+  }
 
   for (const name of REQUIRED_PRODUCTION_VARS) {
     const value = production?.vars?.[name];
@@ -692,7 +890,23 @@ export function inspectProductionReadiness(input) {
     name: `evidence.${check.name}`,
     ok: check.ok,
   })));
-  checks.push(...releaseScope.checks, ...rollbackCandidate.checks, ...evaluateCommerceAcceptance(evidence, commerceEvidenceValidation));
+  checks.push(...releaseScope.checks, ...rollbackCandidate.checks, ...evaluateCommerceAcceptance(
+    evidence,
+    commerceEvidenceValidation,
+    requiresReleaseHardening,
+  ));
+  if (requiresReleaseHardening) {
+    checks.push(...validateLegalSupportDecisionEvidence({
+      evidence,
+      now: input.now,
+      repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+    }).checks);
+    checks.push(...validateSecretInventoryEvidence({
+      evidence,
+      repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+      workerSecretNames: input.workerSecretNames,
+    }).checks);
+  }
   if (commerceEvidenceValidation !== undefined) {
     const dodo = commerceEvidenceValidation.dodo;
     const payos = commerceEvidenceValidation.payos;
@@ -908,6 +1122,8 @@ export function buildReleaseArtifacts(input) {
   if (!RELEASE_ID_PATTERN.test(input.evidence?.releaseId ?? "") || PLACEHOLDER_PATTERN.test(input.evidence.releaseId)) {
     throw new Error("release_id_invalid");
   }
+  const migrationNames = validateSourceMigrationNames(input.migrationNames);
+  const requiresCurrentChainHardening = migrationNames.includes("0090_payos_provider_claim_clear_guard.sql");
   const canonicalCommerceRefs = REQUIRED_COMMERCE_ACCEPTANCE_KEYS.every((provider) => (
     typeof input.evidence?.commerceAcceptance?.[provider]?.evidenceRef === "string"
     && input.evidence.commerceAcceptance[provider].evidenceRef.startsWith(".wrangler/releases/staging/")
@@ -918,10 +1134,13 @@ export function buildReleaseArtifacts(input) {
       now: input.now,
       repositoryRoot: input.repositoryRoot ?? repositoryRoot,
     }) : undefined);
-  const releaseInput = { ...input, commerceEvidenceValidation };
+  const releaseInput = {
+    ...input,
+    commerceEvidenceValidation,
+    requireReleaseHardening: input.requireReleaseHardening === true || requiresCurrentChainHardening,
+  };
   const readiness = inspectProductionReadiness(releaseInput);
   if (!readiness.ok) throw new Error(`release_prerequisites_incomplete:${readiness.missing[0] ?? "unknown"}`);
-  const migrationNames = validateSourceMigrationNames(input.migrationNames);
   const migrationLedgerPrefix = Array.isArray(input.evidence.migrationLedgerPrefix)
     ? [...input.evidence.migrationLedgerPrefix]
     : [];
@@ -954,6 +1173,23 @@ export function buildReleaseArtifacts(input) {
       telegram: input.evidence.manualAcceptance.telegram === true,
       website: input.evidence.manualAcceptance.website === true,
     },
+    ...((input.evidence.legalSupport !== undefined || input.evidence.secretInventory !== undefined) ? {
+      legalSupport: {
+        accepted: input.evidence.legalSupport.accepted === true,
+        artifactSchemaVersion: input.evidence.legalSupport.artifactSchemaVersion,
+        artifactSha256: input.evidence.legalSupport.artifactSha256,
+        evidenceRef: input.evidence.legalSupport.evidenceRef,
+        observedAt: input.evidence.legalSupport.observedAt,
+      },
+      releaseEvidenceHardeningVersion: 1,
+      secretInventory: {
+        artifactSha256: input.evidence.secretInventory.artifactSha256,
+        evidenceRef: input.evidence.secretInventory.evidenceRef,
+        mode: input.evidence.secretInventory.mode,
+        requiredNames: [...input.evidence.secretInventory.requiredNames].sort(),
+        schemaVersion: input.evidence.secretInventory.schemaVersion,
+      },
+    } : {}),
     providerAcceptance: projectAcceptance(input.evidence.providerAcceptance, RELEASE_CHANNEL_KEYS.slice(1)),
     releaseScope: {
       activeChannels: [...input.evidence.releaseScope.activeChannels],

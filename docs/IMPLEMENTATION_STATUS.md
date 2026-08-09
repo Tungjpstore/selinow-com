@@ -4,6 +4,25 @@ Last updated: 2026-08-09
 
 ## Current source of truth
 
+Continuation audit (2026-08-09): the source chain is contiguous through
+`0090_payos_provider_claim_clear_guard.sql`. Staging D1 is already at `0090`,
+but the latest deployed staging Worker (`b7492055-a44b-4c8c-8ab2-c31002dbdd02`)
+predates the current uncommitted release-evidence, PayOS-contract, visual, and
+Dodo webhook fixes. A fresh candidate-bound staging ceremony is required.
+Read-only production audit confirms Worker version
+`f8cee1ef-2050-4d04-980a-9921645703fa`/phase 6, D1 through `0052`, zero queue
+consumers, no `*/15 * * * *` schedule, missing Dodo webhook runtime bindings,
+canonical Dodo POST still `404`, and production Turnstile admitting only
+`selinow.com`. Production custom-domain activation remains closed.
+
+The staging Dodo TEST checkout reached the provider, but the first signed
+`payment.succeeded` delivery was rejected with `409`; the subscription remained
+`pending_payment`. The event was not replayed as accepted evidence. PayOS has a
+schema-v2 contract that requires a real low-value production-controlled VND
+transaction for provider acceptance; no such transfer has been executed, and
+refund/chargeback webhook scenarios remain explicitly unsupported by the public
+PayOS contract. Both payment lanes therefore remain fail-closed.
+
 - The reviewed runtime baseline for this snapshot, before the documentation-only
   reconciliation commit, is commit
   `dcfe4a62e98551083710ae32df0004f2336e6524`, tree

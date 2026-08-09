@@ -227,15 +227,7 @@ export async function recoverWebsiteCheckout(input: {
   const orderToken = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `order-access-token:${input.shop.id}`, input.idempotencyKey);
   const orderTokenHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, "order-access", orderToken);
   if (!constantTimeEqual(order.orderTokenHash, orderTokenHash)) throw new AppError("checkout_recovery_invalid", 409);
-  const consumed = await input.env.PLATFORM_DB.prepare(`
-    UPDATE checkout_recovery_capabilities
-    SET consumed_at = ?, consumed_order_id = ?
-    WHERE id = ? AND shop_id = ? AND cart_id = ?
-      AND checkout_subject_hash = ? AND request_hash = ?
-      AND expires_at > ? AND consumed_at IS NULL
-  `).bind(new Date().toISOString(), order.internalId, claims.capabilityId, input.shop.id, input.cartId, checkoutSubjectHash, requestHash, new Date().toISOString()).run();
-  if (consumed.meta.changes !== 1) throw new AppError("checkout_recovery_consumed", 409);
-  return {
+  const recoveredOrder: RecoveredWebsiteOrder = {
     currency: order.currency,
     expiresAt: order.expiresAt,
     fulfillmentStatus: order.fulfillmentStatus,
@@ -246,4 +238,25 @@ export async function recoverWebsiteCheckout(input: {
     status: order.status,
     totalMinor: order.totalMinor,
   };
+  const consumed = await input.env.PLATFORM_DB.prepare(`
+    UPDATE checkout_recovery_capabilities
+    SET consumed_at = ?, consumed_order_id = ?
+    WHERE id = ? AND shop_id = ? AND cart_id = ?
+      AND checkout_subject_hash = ? AND request_hash = ?
+      AND expires_at > ? AND consumed_at IS NULL
+  `).bind(new Date().toISOString(), order.internalId, claims.capabilityId, input.shop.id, input.cartId, checkoutSubjectHash, requestHash, new Date().toISOString()).run();
+  if (consumed.meta.changes === 1) return recoveredOrder;
+
+  // A lost response may cause the same signed capability to be retried. Replay the
+  // already-authorized order only when this capability was consumed by that order.
+  const priorConsumption = await input.env.PLATFORM_DB.prepare(`
+    SELECT consumed_order_id AS consumedOrderId
+    FROM checkout_recovery_capabilities
+    WHERE id = ? AND shop_id = ? AND cart_id = ?
+      AND checkout_subject_hash = ? AND request_hash = ?
+      AND consumed_at IS NOT NULL
+    LIMIT 1
+  `).bind(claims.capabilityId, input.shop.id, input.cartId, checkoutSubjectHash, requestHash).first<{ consumedOrderId: string | null }>();
+  if (priorConsumption?.consumedOrderId === order.internalId) return recoveredOrder;
+  throw new AppError("checkout_recovery_consumed", 409);
 }

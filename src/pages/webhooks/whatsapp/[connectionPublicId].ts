@@ -3,10 +3,15 @@ import type { APIRoute } from "astro";
 import { AppError } from "../../../lib/core/errors";
 import { createCaughtErrorResponse } from "../../../lib/http/security";
 import { getBindings } from "../../../lib/platform/bindings";
-import { processWhatsAppWebhook, verifyWhatsAppChallengeRequest } from "../../../lib/channels/whatsapp-webhooks";
+import {
+  assertWhatsAppIngressAdmitted,
+  processWhatsAppWebhook,
+  verifyWhatsAppChallengeRequest,
+} from "../../../lib/channels/whatsapp-webhooks";
 
 export const GET: APIRoute = async ({ locals, params, request }) => {
   try {
+    assertWhatsAppIngressAdmitted();
     const connectionPublicId = params.connectionPublicId;
     if (connectionPublicId === undefined) throw new AppError("webhook_not_found", 404);
     const challenge = await verifyWhatsAppChallengeRequest({ env: getBindings(), connectionPublicId, request });
@@ -24,6 +29,7 @@ export const GET: APIRoute = async ({ locals, params, request }) => {
 
 export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
+    assertWhatsAppIngressAdmitted();
     const connectionPublicId = params.connectionPublicId;
     if (connectionPublicId === undefined) throw new AppError("webhook_not_found", 404);
     const result = await processWhatsAppWebhook({ env: getBindings(), connectionPublicId, request });

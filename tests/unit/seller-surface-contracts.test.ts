@@ -21,9 +21,10 @@ vi.mock("../../src/lib/tenants/store", () => ({
   }),
 }));
 
-import { getSellerOrder, listSellerOrders } from "../../src/lib/commerce/seller-orders";
+import { getSellerOrder, listSellerOrders, listSellerOrdersPage } from "../../src/lib/commerce/seller-orders";
+import { parsePublicApiPage } from "../../src/lib/api/pagination";
 import { listSellerAuditEntries } from "../../src/lib/operations/seller-audit";
-import { getSellerBilling, listSellerCustomers, listSellerMembers } from "../../src/lib/tenants/seller-management";
+import { getSellerBilling, listSellerCustomers, listSellerCustomersPage, listSellerMembers } from "../../src/lib/tenants/seller-management";
 import { getSellerCustomer } from "../../src/lib/tenants/customer-management";
 import { getSellerStorefrontSettings, updateSellerStorefrontSettings } from "../../src/lib/tenants/storefront-settings";
 import { getShopForMember } from "../../src/lib/tenants/store";
@@ -95,7 +96,47 @@ class FakeDatabase {
   }
 }
 
-function env(database: FakeDatabase): AppBindings {
+class KeysetDatabase {
+  readonly calls: Call[] = [];
+
+  prepare(sql: string): D1PreparedStatement {
+    return {
+      bind: (...values: unknown[]) => {
+        this.calls.push({ sql, values });
+        return {
+          all: () => {
+            if (sql.includes("FROM orders")) {
+              const rows = values[1] === null
+                ? [
+                  { orderId: "order-new", orderNumber: "A-2", customerEmail: null, status: "pending", paymentStatus: "pending", fulfillmentStatus: "pending", sourceChannel: "web", totalMinor: 200, currency: "USD", createdAt: "2026-07-28T00:02:00.000Z", updatedAt: "2026-07-28T00:02:00.000Z", itemCount: 1, primaryItem: "New" },
+                  { orderId: "order-old", orderNumber: "A-1", customerEmail: null, status: "completed", paymentStatus: "paid", fulfillmentStatus: "fulfilled", sourceChannel: "web", totalMinor: 100, currency: "USD", createdAt: "2026-07-28T00:01:00.000Z", updatedAt: "2026-07-28T00:01:00.000Z", itemCount: 1, primaryItem: "Old" },
+                ]
+                : [{ orderId: "order-old", orderNumber: "A-1", customerEmail: null, status: "completed", paymentStatus: "paid", fulfillmentStatus: "fulfilled", sourceChannel: "web", totalMinor: 100, currency: "USD", createdAt: "2026-07-28T00:01:00.000Z", updatedAt: "2026-07-28T00:01:00.000Z", itemCount: 1, primaryItem: "Old" }];
+              return { results: rows };
+            }
+            if (sql.includes("FROM customer_summary")) {
+              const rows = values[1] === null
+                ? [
+                  { id: "customer-new", publicId: "customer-new", version: 1, displayName: "New", email: "new@example.test", locale: "en", status: "active", createdAt: "2026-07-28T00:00:00.000Z", orderCount: 1, lastOrderAt: "2026-07-28T00:02:00.000Z", cursorCreatedAt: "2026-07-28T00:02:00.000Z" },
+                  { id: "customer-old", publicId: "customer-old", version: 1, displayName: "Old", email: "old@example.test", locale: "en", status: "active", createdAt: "2026-07-28T00:00:00.000Z", orderCount: 0, lastOrderAt: null, cursorCreatedAt: "2026-07-28T00:00:00.000Z" },
+                ]
+                : [{ id: "customer-old", publicId: "customer-old", version: 1, displayName: "Old", email: "old@example.test", locale: "en", status: "active", createdAt: "2026-07-28T00:00:00.000Z", orderCount: 0, lastOrderAt: null, cursorCreatedAt: "2026-07-28T00:00:00.000Z" }];
+              return { results: rows };
+            }
+            return { results: [] };
+          },
+        };
+      },
+    } as unknown as D1PreparedStatement;
+  }
+}
+
+type SellerTestDatabase = {
+  batch?: (statements: D1PreparedStatement[]) => unknown;
+  prepare(sql: string): D1PreparedStatement;
+};
+
+function env(database: SellerTestDatabase): AppBindings {
   return { PLATFORM_DB: database } as unknown as AppBindings;
 }
 
@@ -104,11 +145,42 @@ afterEach(() => {
 });
 
 describe("seller surface contracts", () => {
+  it("uses opaque keyset cursors for order pages", async () => {
+    const database = new KeysetDatabase();
+    const first = await listSellerOrdersPage({ env: env(database), limit: 1, shopPublicId: "shop-a", userId: "user-a" });
+    expect(first.orders.map((order) => order.orderId)).toEqual(["order-new"]);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(database.calls[0]?.sql).not.toContain("OFFSET");
+
+    const cursor = parsePublicApiPage(new URL(`https://seller.selinow.invalid/?cursor=${encodeURIComponent(first.nextCursor ?? "")}`)).cursor;
+    expect(cursor).toEqual({ createdAt: "2026-07-28T00:02:00.000Z", id: "order-new" });
+    const second = await listSellerOrdersPage({ cursor: first.nextCursor, env: env(database), limit: 1, shopPublicId: "shop-a", userId: "user-a" });
+    expect(second.orders.map((order) => order.orderId)).toEqual(["order-old"]);
+    expect(database.calls[1]?.values).toEqual(["shop-a", cursor?.createdAt, cursor?.createdAt, cursor?.createdAt, cursor?.id, 2]);
+  });
+
+  it("uses the recency keyset for customer pages without offset scans", async () => {
+    const database = new KeysetDatabase();
+    const first = await listSellerCustomersPage({ env: env(database), limit: 1, shopPublicId: "shop-a", userId: "user-a" });
+    expect(first.customers.map((customer) => customer.publicId)).toEqual(["customer-new"]);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(database.calls[0]?.sql).not.toContain("OFFSET");
+
+    const cursor = parsePublicApiPage(new URL(`https://seller.selinow.invalid/?cursor=${encodeURIComponent(first.nextCursor ?? "")}`)).cursor;
+    expect(cursor).toEqual({ createdAt: "2026-07-28T00:02:00.000Z", id: "customer-new" });
+    const second = await listSellerCustomersPage({ cursor: first.nextCursor, env: env(database), limit: 1, shopPublicId: "shop-a", userId: "user-a" });
+    expect(second.customers.map((customer) => customer.publicId)).toEqual(["customer-old"]);
+    expect(database.calls[1]?.values).toEqual(["shop-a", cursor?.createdAt, cursor?.createdAt, cursor?.createdAt, cursor?.id, 2]);
+  });
+
   it("keeps order list/detail queries bound to the resolved tenant", async () => {
     const database = new FakeDatabase();
     const result = await listSellerOrders({ env: env(database), shopPublicId: "shop-a", userId: "user-a" });
     expect(result).toHaveLength(1);
     expect(database.calls.every((call) => call.values[0] === "shop-a")).toBe(true);
+    const orderListCall = database.calls.find((call) => call.sql.includes("FROM orders"));
+    expect(orderListCall?.sql).not.toContain("OFFSET");
+    expect(orderListCall?.sql).toContain("orders.created_at < ?");
     await expect(getSellerOrder({ env: env(database), shopPublicId: "shop-b", orderPublicId: "order-a", userId: "user-b" })).rejects.toMatchObject({ code: "order_not_found" });
   });
 
@@ -153,7 +225,10 @@ describe("seller surface contracts", () => {
     }]);
     expect(customers[0]).not.toHaveProperty("email");
     expect(customers[0]).not.toHaveProperty("id");
-    expect(database.calls.find((call) => call.sql.includes("FROM shop_customers"))?.values).toEqual(["shop-a", 101, 0]);
+    const customerListCall = database.calls.find((call) => call.sql.includes("FROM shop_customers"));
+    expect(customerListCall?.values).toEqual(["shop-a", null, null, null, null, 101]);
+    expect(customerListCall?.sql).not.toContain("OFFSET");
+    expect(customerListCall?.sql).toContain("cursorCreatedAt < ?");
     await expect(listSellerCustomers({ env: env(database), shopPublicId: "shop-b", userId: "user-b" })).resolves.toEqual([]);
   });
 

@@ -957,13 +957,22 @@ async function loadCheckoutForEvent(env: AppBindings, event: DodoBillingEvent): 
   const candidates: BillingCheckoutSession[] = [];
   const shopPredicate = shopId === null ? "" : "sessions.shop_id = ? AND ";
   const shopValue = shopId === null ? [] : [shopId];
+  const isSubscriptionLifecycleEvent = event.eventType.startsWith("subscription.");
   let sessionLookupFound = sessionId === null;
   // The first payment carries a new subscription/payment reference before
   // D1 has stored either ref; the signed checkout-session identity is the
   // authoritative bridge for that one event.
   const initialPaymentWithLocalSession = sessionId !== null && event.eventType === "payment.succeeded";
   if (initialPaymentWithLocalSession && providerCheckoutId === null) throw new AppError("billing_webhook_identity_mismatch", 409);
-  let subscriptionLookupFound = event.providerSubscriptionId === null || initialPaymentWithLocalSession;
+  // Dodo's subscription events carry the original checkout metadata, but the
+  // first `subscription.active` delivery can arrive before the payment event
+  // has bound `shop_subscriptions.provider_subscription_ref`. In that narrow
+  // pre-payment window, the signed local checkout identity is the durable
+  // tenant bridge; requiring the provider subscription lookup would reject a
+  // harmless informational event and cause endless provider retries.
+  let subscriptionLookupFound = event.providerSubscriptionId === null
+    || initialPaymentWithLocalSession
+    || (isSubscriptionLifecycleEvent && sessionId !== null);
   let transactionLookupFound = providerCheckoutId === null && !initialPaymentWithLocalSession;
   if (sessionId !== null) {
     const row = await env.PLATFORM_DB.prepare(`${select} WHERE ${shopPredicate}(sessions.id = ? OR sessions.public_id = ?) LIMIT 1`).bind(...shopValue, sessionId, sessionId).first<BillingCheckoutSession>();
@@ -1121,14 +1130,16 @@ async function markEvent(env: AppBindings, eventId: string, result: "processed" 
   await env.PLATFORM_DB.prepare("UPDATE billing_provider_events SET status = ?, processed_at = ? WHERE id = ? AND status = 'received' AND processed_at = ?").bind(result, nowIso, eventId, leaseToken).run();
 }
 
-async function markIdentityMismatchEvent(input: {
+async function markRejectedWebhookEvent(input: {
   env: AppBindings;
   event: DodoBillingEvent;
   eventId: string;
+  failureCode: string;
   leaseToken: string | null;
   nowIso: string;
-  shopId: string;
+  shopId: string | null;
 }): Promise<void> {
+  const identityMismatch = input.failureCode === "billing_webhook_identity_mismatch";
   await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
       UPDATE billing_provider_events
@@ -1140,14 +1151,15 @@ async function markIdentityMismatchEvent(input: {
         id, shop_id, actor_type, actor_id, action, resource_type, resource_id,
         safe_metadata_json, request_id, source_kind, retention_class, created_at
       )
-      SELECT ?, ?, 'system', NULL, 'billing.webhook_identity_mismatch',
+      SELECT ?, ?, 'system', NULL, ?,
         'billing_provider_event', ?, ?, ?, 'http', 'financial', ?
       WHERE changes() = 1
     `).bind(
       createId("aud"),
       input.shopId,
+      identityMismatch ? "billing.webhook_identity_mismatch" : "billing.webhook_rejected",
       input.eventId,
-      JSON.stringify({ eventType: input.event.eventType, failureCode: "billing_webhook_identity_mismatch" }),
+      JSON.stringify({ eventType: input.event.eventType, failureCode: input.failureCode }),
       `dodo-webhook:${input.event.eventId}`,
       input.nowIso,
     ),
@@ -1179,7 +1191,27 @@ export async function processDodoWebhook(input: {
   const event = parseDodoEvent(payload, input.webhookId);
   const payloadHash = await sha256Json(payload);
   const nowIso = (input.now ?? new Date()).toISOString();
-  const session = await loadCheckoutForEvent(input.env, event);
+  let session: BillingCheckoutSession | null;
+  try {
+    session = await loadCheckoutForEvent(input.env, event);
+  } catch (error) {
+    // Persist signed identity failures even when no tenant can be trusted from
+    // the payload. This makes replay behavior deterministic without assigning
+    // an unverified shop scope to the event.
+    if (!(error instanceof AppError && error.code.startsWith("billing_webhook_"))) throw error;
+    const rejected = await recordEvent(input.env, event, payloadHash, nowIso, null, null);
+    if (rejected.duplicate && !rejected.retryable) return { duplicate: true, processed: false, state: rejected.event.status };
+    await markRejectedWebhookEvent({
+      env: input.env,
+      event,
+      eventId: rejected.event.id,
+      failureCode: error.code,
+      leaseToken: rejected.leaseToken,
+      nowIso,
+      shopId: null,
+    }).catch(() => undefined);
+    throw error;
+  }
   const recorded = await recordEvent(input.env, event, payloadHash, nowIso, session?.shopId ?? null, session?.subscriptionId ?? null);
   if (recorded.duplicate && !recorded.retryable) return { duplicate: true, processed: false, state: recorded.event.status };
   try {
@@ -1211,12 +1243,14 @@ export async function processDodoWebhook(input: {
       || (customCurrency !== null && customCurrency !== session.currency.toUpperCase())
       || (customAmountMinor !== null && Number(customAmountMinor) !== session.amountMinor)
       || (customProviderPriceRef !== null && customProviderPriceRef !== session.providerPriceRef)) throw new AppError("billing_webhook_identity_mismatch", 409);
-    // Dodo emits subscription.active when the mandate is authorized. That
-    // event can precede the actual charge, so it is intentionally informational
-    // until a signed payment.succeeded event confirms the first payment.
-    if (event.eventType === "subscription.active" && session.status !== "completed") {
+    // Dodo can emit active subscription projections before the initial charge.
+    // They are informational until a signed payment.succeeded event confirms
+    // the first payment, regardless of whether the checkout is open or expired.
+    if (event.eventType.startsWith("subscription.")
+      && session.status !== "completed"
+      && targetStateForEvent(event) === "active") {
       await markEvent(input.env, recorded.event.id, "ignored", nowIso, recorded.leaseToken);
-      return { duplicate: false, processed: false, state: "pending_payment" };
+      return { duplicate: false, processed: false, state: subscription.state };
     }
     if (event.providerCheckoutId !== null && session.providerCheckoutRef !== null && event.providerCheckoutId !== session.providerCheckoutRef) throw new AppError("billing_webhook_identity_mismatch", 409);
     if (event.providerSubscriptionId !== null && subscription.providerSubscriptionRef !== null && event.providerSubscriptionId !== subscription.providerSubscriptionRef) throw new AppError("billing_webhook_identity_mismatch", 409);
@@ -1283,7 +1317,12 @@ export async function processDodoWebhook(input: {
       return { duplicate: false, processed: false, state: "stale" };
     }
     const periodChanged = event.periodStart !== null || event.periodEnd !== null;
-    const providerRefChanged = event.providerSubscriptionId !== subscription.providerSubscriptionRef;
+    // A pre-payment failure/cancellation is tenant-bound by checkout metadata,
+    // but must not claim a provider subscription before payment succeeds.
+    const providerSubscriptionRefForBinding = session.status === "completed" || event.eventType === "payment.succeeded"
+      ? event.providerSubscriptionId
+      : null;
+    const providerRefChanged = providerSubscriptionRefForBinding !== subscription.providerSubscriptionRef;
     const priceChanged = target === "active" && (subscription.planId !== verifiedPrice.planId || subscription.priceId !== verifiedPrice.id);
     const transitionNeeded = target !== null && (subscription.state !== target || periodChanged || providerRefChanged || priceChanged);
     const statements: D1PreparedStatement[] = [];
@@ -1320,7 +1359,7 @@ export async function processDodoWebhook(input: {
         target, verifiedPrice.id,
         graceEndsAt, target, target === "canceled" ? nowIso : null,
         target, target, event.periodStart, target, event.periodEnd,
-        event.providerSubscriptionId, nowIso, subscription.id, subscription.version, event.providerSubscriptionId,
+        providerSubscriptionRefForBinding, nowIso, subscription.id, subscription.version, event.providerSubscriptionId,
       ));
       // A zero-row identity/version guard must abort the whole D1 batch before
       // this event can insert transition evidence or mark itself processed.
@@ -1414,8 +1453,8 @@ export async function processDodoWebhook(input: {
     return { duplicate: false, processed: target !== null, state: target ?? "ignored" };
   } catch (error) {
     const result = error instanceof AppError && error.code.startsWith("billing_webhook_") ? "conflict" : "failed";
-    if (error instanceof AppError && error.code === "billing_webhook_identity_mismatch" && session !== null) {
-      await markIdentityMismatchEvent({ env: input.env, event, eventId: recorded.event.id, leaseToken: recorded.leaseToken, nowIso, shopId: session.shopId }).catch(() => undefined);
+    if (error instanceof AppError && error.code.startsWith("billing_webhook_") && session !== null) {
+      await markRejectedWebhookEvent({ env: input.env, event, eventId: recorded.event.id, failureCode: error.code, leaseToken: recorded.leaseToken, nowIso, shopId: session.shopId }).catch(() => undefined);
     } else {
       await markEvent(input.env, recorded.event.id, result, nowIso, recorded.leaseToken).catch(() => undefined);
     }

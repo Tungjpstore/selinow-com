@@ -504,7 +504,13 @@ describe("canonical commerce channel parity on local D1", () => {
       expected: prepared.command.expected,
       idempotencyKey: prepared.command.idempotencyKey,
       recoveryEvidence: recovery.evidence,
-    })).rejects.toMatchObject({ code: "checkout_recovery_consumed", status: 409 });
+    })).resolves.toMatchObject({
+      access: created.access,
+      orderId: created.orderId,
+      paymentStatus: created.paymentStatus,
+      status: created.status,
+      totalMinor: expectedTotal,
+    });
     expect(runtime.database.database.prepare(`
       SELECT COUNT(*) AS count FROM checkout_recovery_capabilities
       WHERE shop_id = ? AND consumed_at IS NOT NULL

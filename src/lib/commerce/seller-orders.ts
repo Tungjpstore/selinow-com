@@ -1,4 +1,5 @@
 import { AppError } from "../core/errors";
+import { encodePublicApiCursor, parsePublicApiPage, type PublicApiPage } from "../api/pagination";
 import type { AppBindings } from "../platform/bindings";
 import { assertRoleCapability } from "../tenants/policy";
 import { getShopForMember } from "../tenants/store";
@@ -22,12 +23,11 @@ export type SellerOrderSummary = {
 
 export type SellerOrderPage = { nextCursor: string | null; orders: SellerOrderSummary[] };
 
-function sellerPage(input: { cursor?: string | null; limit?: number }): { limit: number; offset: number } {
-  const limit = input.limit ?? 50;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AppError("validation_failed", 400, ["page_limit_invalid"]);
-  if (input.cursor === undefined || input.cursor === null || input.cursor === "") return { limit, offset: 0 };
-  if (!/^(?:0|[1-9][0-9]{0,8})$/u.test(input.cursor)) throw new AppError("validation_failed", 400, ["page_cursor_invalid"]);
-  return { limit, offset: Number(input.cursor) };
+function sellerPage(input: { cursor?: string | null; limit?: number }): PublicApiPage {
+  const url = new URL("https://seller.selinow.invalid/");
+  if (input.cursor !== undefined && input.cursor !== null) url.searchParams.set("cursor", input.cursor);
+  if (input.limit !== undefined) url.searchParams.set("limit", String(input.limit));
+  return parsePublicApiPage(url);
 }
 
 export type SellerOrderDetail = SellerOrderSummary & {
@@ -146,10 +146,19 @@ export async function listSellerOrdersPage(input: { cursor?: string | null; env:
       ON order_items.order_id = orders.id
       AND order_items.shop_id = orders.shop_id
     WHERE orders.shop_id = ?
+      AND (? IS NULL OR orders.created_at < ?
+        OR (orders.created_at = ? AND orders.public_id < ?))
     GROUP BY orders.id
-    ORDER BY orders.created_at DESC, orders.id DESC
-    LIMIT ? OFFSET ?
-  `).bind(shopId, page.limit + 1, page.offset).all<SellerOrderSummary>();
+    ORDER BY orders.created_at DESC, orders.public_id DESC
+    LIMIT ?
+  `).bind(
+    shopId,
+    page.cursor?.createdAt ?? null,
+    page.cursor?.createdAt ?? null,
+    page.cursor?.createdAt ?? null,
+    page.cursor?.id ?? null,
+    page.limit + 1,
+  ).all<SellerOrderSummary>();
   const hasNext = rows.results.length > page.limit;
   const visibleRows = rows.results.slice(0, page.limit);
   const orders = visibility !== "summary" ? visibleRows : visibleRows.map((row) => ({
@@ -157,7 +166,13 @@ export async function listSellerOrdersPage(input: { cursor?: string | null; env:
     customerEmail: null,
     primaryItem: null,
   }));
-  return { nextCursor: hasNext ? String(page.offset + page.limit) : null, orders };
+  const last = visibleRows.at(-1);
+  return {
+    nextCursor: hasNext && last !== undefined
+      ? encodePublicApiCursor({ createdAt: last.createdAt, id: last.orderId })
+      : null,
+    orders,
+  };
 }
 
 export async function listSellerOrders(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerOrderSummary[]> {

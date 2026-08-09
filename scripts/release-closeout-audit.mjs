@@ -5,6 +5,7 @@ import {
   buildCloseoutReport,
   loadCloseoutInputs,
 } from "./lib/release-closeout.mjs";
+import { inspectProductionReadiness } from "./lib/release.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
 function parseArguments(argv) {
@@ -23,7 +24,13 @@ function parseArguments(argv) {
 try {
   const options = parseArguments(process.argv.slice(2));
   const inputs = await loadCloseoutInputs(options);
-  const report = await buildCloseoutReport(inputs);
+  const report = await buildCloseoutReport({
+    ...inputs,
+    inspectReadinessImplementation: (input) => inspectProductionReadiness({
+      ...input,
+      requireReleaseHardening: true,
+    }),
+  });
   process.stdout.write(options.json
     ? `${JSON.stringify(report, null, 2)}\n`
     : `${report.ok ? "PASS" : "FAIL"} production closeout (${report.summary.failed}/${report.summary.total} checks blocked)\n`

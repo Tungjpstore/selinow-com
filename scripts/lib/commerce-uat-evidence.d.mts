@@ -24,5 +24,15 @@ export function readTrustedStagingUatBinding(input: {
   workerVersion: string;
 };
 
-export function validateCommerceUatArtifactsSync(input: { evidence: unknown; now?: Date; repositoryRoot: string }): CommerceUatArtifactValidation;
-export function validateCommerceUatArtifacts(input: { evidence: unknown; now?: Date; repositoryRoot: string }): Promise<CommerceUatArtifactValidation>;
+export function validateCommerceUatArtifactsSync(input: {
+  evidence: unknown;
+  now?: Date;
+  repositoryRoot: string;
+  payosOwnerAttestationPublicKeys?: Record<string, string>;
+}): CommerceUatArtifactValidation;
+export function validateCommerceUatArtifacts(input: {
+  evidence: unknown;
+  now?: Date;
+  repositoryRoot: string;
+  payosOwnerAttestationPublicKeys?: Record<string, string>;
+}): Promise<CommerceUatArtifactValidation>;

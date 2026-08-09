@@ -18,7 +18,10 @@ async function expectHydratedCart(page: Page): Promise<void> {
   await expect(cartItems).toHaveCount(1);
   await expect(cartItems).toBeVisible();
   await expect(page.locator("#cart-empty")).toBeHidden();
+  await expect(page.locator("#cart-quote-status")).toHaveAttribute("data-state", "ready");
+  await expect(page.locator("#cart-total")).toHaveText("249.000 ₫");
   await expect(page.locator("#checkout-link")).toBeVisible();
+  await expect(page.locator("#checkout-link")).not.toHaveAttribute("aria-disabled", "true");
 }
 
 test("storefront home", async ({ page }) => {
@@ -80,7 +83,7 @@ test("cart and checkout", async ({ page }) => {
 test("unauthenticated dashboard boundary", async ({ page }) => {
   await page.goto(`${appOrigin}/app`);
   await expect(page).toHaveURL(`${appOrigin}/login`);
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Một đường dẫn.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Đăng nhập để tiếp tục");
   await expectStablePage(page);
   await expect(page).toHaveScreenshot(publicVisualScreenshots[4], { fullPage: true });
 });

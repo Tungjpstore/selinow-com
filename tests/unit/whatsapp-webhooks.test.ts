@@ -1,319 +1,187 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { toBase64Url } from "../../src/lib/core/ids";
-import { encryptWhatsAppCloudCredential } from "../../src/lib/channels/whatsapp-credentials";
-import { processWhatsAppWebhook, verifyWhatsAppChallengeRequest } from "../../src/lib/channels/whatsapp-webhooks";
+import {
+  extractWhatsAppEventDescriptor,
+  loadWhatsAppWebhookContext,
+  processWhatsAppWebhook,
+  verifyWhatsAppChallengeRequest,
+} from "../../src/lib/channels/whatsapp-webhooks";
 import type { ProviderReceiptClaim, ProviderReceiptStore } from "../../src/lib/channels/ingress";
 import type { AppBindings } from "../../src/lib/platform/bindings";
+import { GET, POST } from "../../src/pages/webhooks/whatsapp/[connectionPublicId]";
 
-const NOW = new Date("2026-08-02T12:00:00.000Z");
-const SHOP_ID = "shop-001";
-const CONNECTION_ID = "connection-001";
+// Astro route imports bindings at module load; keep this unit test on the
+// admission boundary and prove getBindings is never reached while pending.
+vi.mock("../../src/lib/platform/bindings", () => ({
+  getBindings: vi.fn(() => {
+    throw new Error("provider-pending route must not resolve runtime bindings");
+  }),
+}));
+
 const CONNECTION_PUBLIC_ID = "whatsapp-connection-001";
-const CREDENTIAL_ID = "credential-001";
-const APP_SECRET = "whatsapp-app-secret-123456";
-const VERIFY_TOKEN = "whatsapp-verify-token-123456";
-const HMAC_SECRET = "identifier-hmac-secret";
-const KEK = toBase64Url(new Uint8Array(32).fill(7));
+const REQUEST_ID = "request-whatsapp-pending-0001";
 
-async function hmacSignature(body: string): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(APP_SECRET), { hash: "SHA-256", name: "HMAC" }, false, ["sign"]);
-  const digest = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)));
-  return `sha256=${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+function bodyBytes(value: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(value));
 }
 
-function fakeDatabase(row: Record<string, unknown>) {
-  const prepare = vi.fn((sql: string) => ({
-    bind: (...values: unknown[]) => {
-      void values;
-      return {
-        first: <T>() => Promise.resolve(sql.includes("FROM channel_connections") ? row as T : null),
-        run: () => Promise.resolve({ meta: { changes: 1 } }),
-      };
-    },
-  }));
-  return { prepare };
-}
-
-function bindings(database: ReturnType<typeof fakeDatabase>): AppBindings {
-  return {
-    ACTIVE_CREDENTIAL_KEY_VERSION: "v1",
-    APP_ENV: "local",
-    CREDENTIAL_KEK_V1: KEK,
-    IDENTIFIER_HMAC_SECRET: HMAC_SECRET,
-    PLATFORM_DB: database,
-  } as unknown as AppBindings;
-}
-
-function receiptStore() {
-  const claim = vi.fn((event: ProviderReceiptClaim["event"]): Promise<ProviderReceiptClaim> => Promise.resolve({ event, result: "accepted" }));
-  return { claim } satisfies ProviderReceiptStore;
-}
-
-function conflictReceiptStore() {
-  const claim = vi.fn((event: ProviderReceiptClaim["event"]): Promise<ProviderReceiptClaim> => Promise.resolve({ event, result: "conflict" }));
-  return { claim } satisfies ProviderReceiptStore;
-}
-
-async function contextRow() {
-  const envelope = await encryptWhatsAppCloudCredential({
-    appSecret: APP_SECRET,
-    businessAccountId: "waba-001",
-    connectionId: CONNECTION_ID,
-    credentialId: CREDENTIAL_ID,
-    hmacSecret: HMAC_SECRET,
-    kek: KEK,
-    keyVersion: "v1",
-    shopId: SHOP_ID,
-    phoneNumberId: "phone-001",
-    verifyToken: VERIFY_TOKEN,
+function blockedBindings() {
+  const prepare = vi.fn(() => {
+    throw new Error("provider-pending ingress must not query D1");
   });
   return {
-    connectionId: CONNECTION_ID,
-    connectionPublicId: CONNECTION_PUBLIC_ID,
-    credentialEnvelopeCiphertextB64: envelope.credentialEnvelopeCiphertextB64,
-    credentialEnvelopeIvB64: envelope.credentialEnvelopeIvB64,
-    credentialFingerprint: envelope.credentialFingerprint,
-    credentialId: CREDENTIAL_ID,
-    credentialStatus: "active",
-    keyVersion: envelope.keyVersion,
-    providerCode: "whatsapp.cloud",
-    shopId: SHOP_ID,
-    subscriptionState: "active",
-    trialEndsAt: null,
-    graceEndsAt: null,
+    env: { PLATFORM_DB: { prepare } } as unknown as AppBindings,
+    prepare,
   };
 }
 
-function webhookBody(businessAccountId = "waba-001", phoneNumberId = "phone-001"): string {
-  return JSON.stringify({
-    entry: [{ id: businessAccountId, changes: [{ field: "messages", value: { metadata: { phone_number_id: phoneNumberId }, messages: [{ id: "wamid.abc" }] } }] }],
-    object: "whatsapp_business_account",
-  });
+function receiptStore() {
+  const claim = vi.fn((event: ProviderReceiptClaim["event"]): Promise<ProviderReceiptClaim> => Promise.resolve({
+    event,
+    result: "accepted",
+  }));
+  return { claim } satisfies ProviderReceiptStore;
 }
 
-function accountWebhookBody(): string {
-  return JSON.stringify({
-    entry: [{ id: "waba-001", changes: [{ field: "account_update", value: { event: "PARTNER_APP_INSTALLED" } }] }],
-    object: "whatsapp_business_account",
-  });
-}
-
-function statusWebhookBody(businessAccountId = "waba-001", phoneNumberId = "phone-001"): string {
-  return JSON.stringify({
-    entry: [{ id: businessAccountId, changes: [{ field: "messages", value: { metadata: { phone_number_id: phoneNumberId }, statuses: [{ id: "wamid.abc", status: "delivered" }] } }] }],
-    object: "whatsapp_business_account",
-  });
-}
-
-function templateQualityWebhookBody(): string {
-  return JSON.stringify({
-    entry: [{ id: "waba-001", changes: [{ field: "message_template_quality_update", value: { message_template_id: 123, new_quality: "GREEN" } }] }],
-    object: "whatsapp_business_account",
-  });
-}
-
-function unknownWabaChangeBody(): string {
-  return JSON.stringify({
-    entry: [{ id: "waba-001", changes: [{ field: "phone_number_quality_update", value: { quality: "GREEN" } }] }],
-    object: "whatsapp_business_account",
-  });
-}
-
-describe("WhatsApp Cloud webhook route service", () => {
-  it("verifies raw bytes, binds the connection, and claims a reference-only receipt", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    const env = bindings(database);
+describe("WhatsApp Cloud provider-pending ingress", () => {
+  it("rejects POST before D1 lookup, credential decryption, body verification, or receipt persistence", async () => {
+    const { env, prepare } = blockedBindings();
     const store = receiptStore();
-    const body = webhookBody();
-    const result = await processWhatsAppWebhook({
+    const request = new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}`, {
+      body: JSON.stringify({ credential: "must-not-be-read", object: "whatsapp_business_account" }),
+      headers: { "X-Hub-Signature-256": "sha256=must-not-be-verified" },
+      method: "POST",
+    });
+
+    await expect(processWhatsAppWebhook({
       connectionPublicId: CONNECTION_PUBLIC_ID,
       env,
-      now: NOW,
       receiptStore: store,
-      request: new Request("https://api.test/webhooks/whatsapp", { body, headers: { "X-Hub-Signature-256": await hmacSignature(body) }, method: "POST" }),
+      request,
+    })).rejects.toMatchObject({
+      code: "channel_provider_pending",
+      issues: ["whatsapp.cloud"],
+      status: 409,
     });
-    expect(result).toEqual({ action: "message.received", eventId: "wamid.abc", result: "accepted" });
-    expect(store.claim).toHaveBeenCalledOnce();
-    expect(JSON.stringify(store.claim.mock.calls[0]?.[0])).not.toContain("messages");
-  });
 
-  it("does not claim when the raw-body signature is invalid", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    const store = receiptStore();
-    const body = webhookBody();
-    await expect(processWhatsAppWebhook({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(database),
-      receiptStore: store,
-      request: new Request("https://api.test/webhooks/whatsapp", { body: `${body} `, headers: { "X-Hub-Signature-256": await hmacSignature(body) }, method: "POST" }),
-    })).rejects.toMatchObject({ code: "channel_webhook_invalid", status: 401 });
+    expect(prepare).not.toHaveBeenCalled();
     expect(store.claim).not.toHaveBeenCalled();
+    expect(request.bodyUsed).toBe(false);
   });
 
-  it("rejects a changed-payload receipt conflict instead of acknowledging it", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    const body = webhookBody();
-    await expect(processWhatsAppWebhook({
+  it("rejects GET verification before D1 lookup or credential decryption", async () => {
+    const { env, prepare } = blockedBindings();
+    const request = new Request(
+      `https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}?hub.mode=subscribe&hub.verify_token=must-not-be-read&hub.challenge=123456789`,
+    );
+
+    await expect(verifyWhatsAppChallengeRequest({
       connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(database),
-      receiptStore: conflictReceiptStore(),
-      request: new Request("https://api.test/webhooks/whatsapp", {
-        body,
-        headers: { "X-Hub-Signature-256": await hmacSignature(body) },
-        method: "POST",
-      }),
-    })).rejects.toMatchObject({ code: "channel_provider_event_conflict", status: 409 });
-  });
-
-  it("rejects a signed event from a different WABA or phone number", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    const body = webhookBody("waba-other", "phone-other");
-    await expect(processWhatsAppWebhook({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(database),
-      receiptStore: receiptStore(),
-      request: new Request("https://api.test/webhooks/whatsapp", {
-        body,
-        headers: { "X-Hub-Signature-256": await hmacSignature(body) },
-        method: "POST",
-      }),
-    })).rejects.toMatchObject({ code: "channel_tenant_mismatch", status: 403 });
-  });
-
-  it("accepts WABA-level account and template events without phone metadata", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    for (const body of [accountWebhookBody(), templateQualityWebhookBody()]) {
-      const result = await processWhatsAppWebhook({
-        connectionPublicId: CONNECTION_PUBLIC_ID,
-        env: bindings(database),
-        receiptStore: receiptStore(),
-        request: new Request("https://api.test/webhooks/whatsapp", {
-          body,
-          headers: { "X-Hub-Signature-256": await hmacSignature(body) },
-          method: "POST",
-        }),
-      });
-      expect(result.action).toBe("event.received");
-    }
-  });
-
-  it("rejects unrecognized changes without phone metadata instead of claiming a cross-phone event", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    const body = unknownWabaChangeBody();
-    const store = receiptStore();
-    await expect(processWhatsAppWebhook({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(database),
-      receiptStore: store,
-      request: new Request("https://api.test/webhooks/whatsapp", {
-        body,
-        headers: { "X-Hub-Signature-256": await hmacSignature(body) },
-        method: "POST",
-      }),
-    })).rejects.toMatchObject({ code: "channel_webhook_invalid", status: 400 });
-    expect(store.claim).not.toHaveBeenCalled();
-  });
-
-  it("keeps a status update distinct from the message id it references", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    const store = receiptStore();
-    const body = statusWebhookBody();
-    const result = await processWhatsAppWebhook({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(database),
-      receiptStore: store,
-      request: new Request("https://api.test/webhooks/whatsapp", {
-        body,
-        headers: { "X-Hub-Signature-256": await hmacSignature(body) },
-        method: "POST",
-      }),
+      env,
+      request,
+    })).rejects.toMatchObject({
+      code: "channel_provider_pending",
+      issues: ["whatsapp.cloud"],
+      status: 409,
     });
-    expect(result).toEqual({ action: "message.status", eventId: "status:wamid.abc", result: "accepted" });
+
+    expect(prepare).not.toHaveBeenCalled();
   });
 
-  it("rejects phone-scoped changes with malformed metadata", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    const body = JSON.stringify({
-      entry: [{ id: "waba-001", changes: [{ field: "messages", value: { metadata: {}, messages: [{ id: "wamid.abc" }] } }] }],
+  it("keeps direct context loading fail-closed so future callers cannot bypass admission", async () => {
+    const { env, prepare } = blockedBindings();
+    await expect(loadWhatsAppWebhookContext(env, CONNECTION_PUBLIC_ID)).rejects.toMatchObject({
+      code: "channel_provider_pending",
+      status: 409,
+    });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["GET", GET, new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}?hub.mode=subscribe&hub.verify_token=route-secret&hub.challenge=123456789`)],
+    ["POST", POST, new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}`, {
+      body: JSON.stringify({ credential: "route-secret" }),
+      method: "POST",
+    })],
+  ] as const)("returns a safe request-correlated 409 from the public %s route", async (_method, handler, request) => {
+    const response = await handler({
+      locals: { requestId: REQUEST_ID },
+      params: { connectionPublicId: CONNECTION_PUBLIC_ID },
+      request,
+    } as unknown as Parameters<typeof handler>[0]);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("Cache-Control")).toContain("no-store");
+    expect(body).toEqual({
+      code: "channel_provider_pending",
+      issues: ["whatsapp.cloud"],
+      ok: false,
+      requestId: REQUEST_ID,
+    });
+    expect(JSON.stringify(body)).not.toMatch(/route-secret|verify_token|credential/i);
+  });
+});
+
+describe("WhatsApp Cloud pure inbound contract", () => {
+  it("binds message events to both the expected WABA and phone number", async () => {
+    const valid = bodyBytes({
+      entry: [{
+        changes: [{
+          field: "messages",
+          value: { metadata: { phone_number_id: "phone-001" }, messages: [{ id: "wamid.abc" }] },
+        }],
+        id: "waba-001",
+      }],
       object: "whatsapp_business_account",
     });
-    await expect(processWhatsAppWebhook({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(database),
-      receiptStore: receiptStore(),
-      request: new Request("https://api.test/webhooks/whatsapp", {
-        body,
-        headers: { "X-Hub-Signature-256": await hmacSignature(body) },
-        method: "POST",
-      }),
-    })).rejects.toMatchObject({ code: "channel_webhook_invalid", status: 400 });
-  });
-
-  it("returns the verified GET challenge without exposing credential material", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase(row);
-    const challenge = await verifyWhatsAppChallengeRequest({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(database),
-      request: new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(VERIFY_TOKEN)}&hub.challenge=123456789`),
+    await expect(extractWhatsAppEventDescriptor(valid, "waba-001", "phone-001")).resolves.toEqual({
+      action: "message.received",
+      eventId: "wamid.abc",
     });
-    expect(challenge).toBe("123456789");
-    expect(challenge).not.toContain(APP_SECRET);
+    await expect(extractWhatsAppEventDescriptor(valid, "waba-other", "phone-001")).rejects.toMatchObject({
+      code: "channel_tenant_mismatch",
+      status: 403,
+    });
+    await expect(extractWhatsAppEventDescriptor(valid, "waba-001", "phone-other")).rejects.toMatchObject({
+      code: "channel_tenant_mismatch",
+      status: 403,
+    });
   });
 
-  it("rejects an invalid GET mode or verification token", async () => {
-    const row = await contextRow();
-    const env = bindings(fakeDatabase(row));
-    await expect(verifyWhatsAppChallengeRequest({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env,
-      request: new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}?hub.mode=unsubscribe&hub.verify_token=${encodeURIComponent(VERIFY_TOKEN)}&hub.challenge=123456789`),
-    })).rejects.toMatchObject({ code: "channel_route_invalid", status: 401 });
-    await expect(verifyWhatsAppChallengeRequest({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env,
-      request: new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}?hub.mode=subscribe&hub.verify_token=wrong-token-value&hub.challenge=123456789`),
-    })).rejects.toMatchObject({ code: "channel_route_invalid", status: 401 });
-    await expect(verifyWhatsAppChallengeRequest({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env,
-      request: new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}?hub.mode=subscribe&hub.verify_token=${"x".repeat(513)}&hub.challenge=123456789`),
-    })).rejects.toMatchObject({ code: "channel_route_invalid", status: 401 });
-    await expect(verifyWhatsAppChallengeRequest({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env,
-      request: new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(VERIFY_TOKEN)}&hub.verify_token=duplicate&hub.challenge=123456789`),
-    })).rejects.toMatchObject({ code: "channel_route_invalid", status: 401 });
+  it("permits documented WABA-level events but rejects unknown phone-less changes", async () => {
+    const accountUpdate = bodyBytes({
+      entry: [{ changes: [{ field: "account_update", value: { event: "PARTNER_APP_INSTALLED" } }], id: "waba-001" }],
+      object: "whatsapp_business_account",
+    });
+    await expect(extractWhatsAppEventDescriptor(accountUpdate, "waba-001", "phone-001")).resolves.toMatchObject({
+      action: "event.received",
+    });
+
+    const unknown = bodyBytes({
+      entry: [{ changes: [{ field: "phone_number_quality_update", value: { quality: "GREEN" } }], id: "waba-001" }],
+      object: "whatsapp_business_account",
+    });
+    await expect(extractWhatsAppEventDescriptor(unknown, "waba-001", "phone-001")).rejects.toMatchObject({
+      code: "channel_webhook_invalid",
+      status: 400,
+    });
   });
 
-  it("does not verify a challenge when the connection has no active credential", async () => {
-    const row = await contextRow();
-    await expect(verifyWhatsAppChallengeRequest({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(fakeDatabase({ ...row, credentialStatus: null })),
-      request: new Request(`https://api.test/webhooks/whatsapp/${CONNECTION_PUBLIC_ID}?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(VERIFY_TOKEN)}&hub.challenge=123456789`),
-    })).rejects.toMatchObject({ code: "channel_credential_unavailable", status: 503 });
-  });
-
-  it("fails closed when the connection has no active credential", async () => {
-    const row = await contextRow();
-    const database = fakeDatabase({ ...row, credentialStatus: null });
-    const store = receiptStore();
-    await expect(processWhatsAppWebhook({
-      connectionPublicId: CONNECTION_PUBLIC_ID,
-      env: bindings(database),
-      receiptStore: store,
-      request: new Request("https://api.test/webhooks/whatsapp", { body: webhookBody(), method: "POST" }),
-    })).rejects.toMatchObject({ code: "channel_credential_unavailable", status: 503 });
-    expect(store.claim).not.toHaveBeenCalled();
+  it("keeps a status delivery distinct from the original message receipt", async () => {
+    const status = bodyBytes({
+      entry: [{
+        changes: [{
+          field: "messages",
+          value: { metadata: { phone_number_id: "phone-001" }, statuses: [{ id: "wamid.abc", status: "delivered" }] },
+        }],
+        id: "waba-001",
+      }],
+      object: "whatsapp_business_account",
+    });
+    await expect(extractWhatsAppEventDescriptor(status, "waba-001", "phone-001")).resolves.toEqual({
+      action: "message.status",
+      eventId: "status:wamid.abc",
+    });
   });
 });

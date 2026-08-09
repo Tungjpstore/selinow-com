@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { lstatSync, readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { spawnSync } from "node:child_process";
+import process from "node:process";
 
 import { assertDodoStagingUatEvidence } from "./dodo-uat-evidence.mjs";
 import { assertPayosStagingUatEvidence } from "./payos-uat-evidence.mjs";
@@ -58,6 +60,13 @@ function readPrivateJson(root, reference, missingIssue) {
   }
 }
 
+function exactObjectKeys(value, expected, issue) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(issue);
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) throw new Error(issue);
+}
+
 function assertScenarioArtifacts(root, evidence, provider) {
   const fingerprints = {};
   const ids = provider === "dodo"
@@ -77,6 +86,44 @@ function assertScenarioArtifacts(root, evidence, provider) {
       if (artifact.value?.provider !== provider || artifact.value?.environment !== "staging"
         || artifact.value?.release?.releaseId !== evidence.release.releaseId) {
         throw new Error(`${provider}_uat_scenario_artifact_binding_mismatch`);
+      }
+      if (provider === "payos") {
+        const providerExecutionScenario = evidence.evidenceKind === "provider_acceptance"
+          && (id === "signed_exact_payment" || id === "direct_reconciliation");
+        exactObjectKeys(artifact.value, [
+          "classification",
+          "controlledAccountFingerprintSha256",
+          "evidenceKind",
+          "environment",
+          "observedAt",
+          "provider",
+          "proofOfExecutionFingerprintSha256",
+          "redaction",
+          "release",
+          "result",
+          "scenarioId",
+          "schemaVersion",
+          "verificationMethod",
+        ], "payos_uat_scenario_artifact_invalid");
+        if (artifact.value.schemaVersion !== 1
+          || artifact.value.evidenceKind !== evidence.evidenceKind
+          || artifact.value.scenarioId !== id
+          || artifact.value.classification !== record.classification
+          || artifact.value.result !== record.status
+          || artifact.value.verificationMethod !== record.verificationMethod
+          || artifact.value.observedAt !== record.observedAt
+          || artifact.value.controlledAccountFingerprintSha256 !== (providerExecutionScenario ? evidence.providerExecution.controlledAccountFingerprintSha256 : null)
+          || artifact.value.proofOfExecutionFingerprintSha256 !== (providerExecutionScenario ? evidence.providerExecution.transactionEvidenceFingerprintSha256 : null)) {
+          throw new Error("payos_uat_scenario_artifact_binding_mismatch");
+        }
+        exactObjectKeys(artifact.value.redaction, ["noRawPayload", "noSensitiveValues"], "payos_uat_scenario_artifact_redaction_invalid");
+        if (artifact.value.redaction.noRawPayload !== true || artifact.value.redaction.noSensitiveValues !== true) {
+          throw new Error("payos_uat_scenario_artifact_redaction_invalid");
+        }
+        exactObjectKeys(artifact.value.release, ["commitSha", "manifestRef", "manifestSha256", "releaseId", "treeSha", "workerVersion"], "payos_uat_scenario_artifact_binding_mismatch");
+        for (const key of ["commitSha", "manifestRef", "manifestSha256", "releaseId", "treeSha", "workerVersion"]) {
+          if (artifact.value.release[key] !== evidence.release[key]) throw new Error("payos_uat_scenario_artifact_binding_mismatch");
+        }
       }
       fingerprints[id] = digest;
     }
@@ -128,7 +175,19 @@ export function readTrustedStagingUatBinding({ evidence, manifestPath: requested
   };
 }
 
-export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), repositoryRoot }) {
+function resolvePayosOwnerAttestationPublicKeys(explicit) {
+  if (explicit !== undefined) return explicit;
+  const keyId = process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID;
+  const encoded = process.env.SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64;
+  if (typeof keyId !== "string" || keyId.length === 0 || typeof encoded !== "string" || encoded.length === 0) return {};
+  try {
+    return { [keyId]: Buffer.from(encoded, "base64").toString("utf8") };
+  } catch {
+    return {};
+  }
+}
+
+export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), repositoryRoot, payosOwnerAttestationPublicKeys }) {
   const root = repositoryRoot;
   const result = {};
   for (const [provider, validator] of [["dodo", assertDodoStagingUatEvidence], ["payos", assertPayosStagingUatEvidence]]) {
@@ -142,7 +201,8 @@ export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), r
       }
       const artifactSha256 = createHash("sha256").update(loaded.bytes).digest("hex");
       if (artifactSha256 !== declaredArtifactSha256) throw new Error(`${provider}_uat_artifact_hash_mismatch`);
-      if (artifact.provider !== provider || artifact.providerEnvironment !== "test_mode") {
+      const expectedProviderEnvironment = provider === "dodo" ? "test_mode" : "production_controlled";
+      if (artifact.provider !== provider || artifact.providerEnvironment !== expectedProviderEnvironment) {
         throw new Error(`${provider}_uat_provider_binding_mismatch`);
       }
       const scenarioArtifactFingerprints = assertScenarioArtifacts(root, artifact, provider);
@@ -150,6 +210,7 @@ export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), r
         ...readTrustedStagingUatBinding({ evidence: artifact, now, repositoryRoot: root }),
         requireArtifactProof: true,
         scenarioArtifactFingerprints,
+        ...(provider === "payos" ? { ownerAttestationPublicKeys: resolvePayosOwnerAttestationPublicKeys(payosOwnerAttestationPublicKeys) } : {}),
       };
       const accepted = validator(artifact, binding);
       result[provider] = {

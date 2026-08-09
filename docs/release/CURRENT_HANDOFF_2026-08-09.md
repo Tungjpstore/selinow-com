@@ -7,6 +7,12 @@ change, secret write, provider mutation, pilot, or live charge.
 
 ## Candidate and staging state
 
+The current continuation work adds provider-specific PayOS evidence admission,
+safe Dodo pre-payment lifecycle acknowledgements, and release-trigger
+hardening. These changes are not yet bound to a clean commit or Worker version;
+the next staging ceremony must generate all manifests, backup/restore records,
+and acceptance artifacts again.
+
 - Reviewed runtime baseline before this documentation-only handoff commit:
   commit
   `dcfe4a62e98551083710ae32df0004f2336e6524`, tree
@@ -62,10 +68,13 @@ Required PayOS controlled-staging evidence:
 
 1. Admit one controlled seller channel with the exact tenant-owned credential
    fingerprint and canonical webhook identity.
-2. Complete the 14-scenario evidence contract: signed exact payment, invalid
-   signature, duplicate/conflicting replay, partial payment, overpayment, late
-   payment, amount/currency mismatch, tenant isolation, signed refund, signed
-   chargeback, direct reconciliation, and exactly-once fulfillment.
+2. Complete the provider-required scenarios `signed_exact_payment` and
+   `direct_reconciliation` with a real low-value VND transaction using the
+   controlled production API. Local assurance scenarios (signature/replay,
+   mismatch, tenant isolation, and exactly-once fulfillment) are recorded
+   separately. `signed_refund` and `signed_chargeback` are explicit
+   `provider_unsupported` capability gaps; they must never be fabricated or
+   relabeled as provider acceptance.
 3. Bind the redacted artifact to the same release ID, manifest hash, commit,
    tree, and Worker version used by Dodo and the non-payment lane.
 

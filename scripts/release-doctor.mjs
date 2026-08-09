@@ -86,6 +86,7 @@ try {
     evidence,
     now: new Date(),
     productionSpec,
+    requireReleaseHardening: true,
     workerSecretNames: await loadSecretNames(options.secretNamesPath),
     wranglerConfig,
   });

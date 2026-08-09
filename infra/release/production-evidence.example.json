@@ -27,6 +27,45 @@
     "securityOwner": "replace-with-security-owner",
     "supportOwner": "replace-with-support-owner"
   },
+  "legalSupport": {
+    "accepted": false,
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-legal-support-decision-artifact-sha256",
+    "evidenceRef": "replace-with-.wrangler/releases/<release-id>/legal-support-decisions.json",
+    "observedAt": null,
+    "requiredDecisionKeys": [
+      "contractingLegalEntity",
+      "registeredAddressTaxIdentity",
+      "governingLawDisputeForum",
+      "digitalGoodsRefundRules",
+      "abuseCopyrightTakedown",
+      "sellerResponsibility",
+      "payosSettlementBoundary",
+      "dodoMerchantOfRecord",
+      "privacyRolesDsar",
+      "retentionDeletionExceptions",
+      "platformSupportContact",
+      "sellerBuyerSupportBoundary"
+    ]
+  },
+  "secretInventory": {
+    "schemaVersion": 1,
+    "mode": "name_only",
+    "evidenceRef": "replace-with-.wrangler/releases/<release-id>/production-secret-inventory.json",
+    "artifactSha256": "replace-with-name-only-secret-inventory-artifact-sha256",
+    "requiredNames": [
+      "CLOUDFLARE_API_TOKEN",
+      "CREDENTIAL_KEK_V1",
+      "DODO_PAYMENTS_API_KEY",
+      "DODO_PAYMENTS_WEBHOOK_KEY",
+      "EXPORT_KEK_V1",
+      "IDENTIFIER_HMAC_SECRET",
+      "INVENTORY_KEK_V1",
+      "MAGIC_LINK_SECRET",
+      "SESSION_SECRET",
+      "TURNSTILE_SECRET_KEY"
+    ]
+  },
   "quality": {
     "schemaVersion": 2,
     "check": false,
@@ -84,11 +123,13 @@
     "payos": {
       "accepted": false,
       "evidenceRef": "replace-with-private-payos-acceptance-report-reference",
+      "artifactSha256": "replace-with-payos-acceptance-artifact-sha256",
       "observedAt": null
     },
     "dodo": {
       "accepted": false,
       "evidenceRef": "replace-with-private-dodo-acceptance-report-reference",
+      "artifactSha256": "replace-with-dodo-acceptance-artifact-sha256",
       "observedAt": null
     }
   },

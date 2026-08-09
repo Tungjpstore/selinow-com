@@ -1,5 +1,6 @@
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { encodePublicApiCursor, parsePublicApiPage, type PublicApiPage } from "../api/pagination";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "./store";
 import type { ShopRole } from "./policy";
@@ -18,12 +19,11 @@ export type SellerCustomerView = {
 
 export type SellerCustomerPage = { customers: SellerCustomerView[]; nextCursor: string | null };
 
-function sellerPage(input: { cursor?: string | null; limit?: number }): { limit: number; offset: number } {
-  const limit = input.limit ?? 50;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AppError("validation_failed", 400, ["page_limit_invalid"]);
-  if (input.cursor === undefined || input.cursor === null || input.cursor === "") return { limit, offset: 0 };
-  if (!/^(?:0|[1-9][0-9]{0,8})$/u.test(input.cursor)) throw new AppError("validation_failed", 400, ["page_cursor_invalid"]);
-  return { limit, offset: Number(input.cursor) };
+function sellerPage(input: { cursor?: string | null; limit?: number }): PublicApiPage {
+  const url = new URL("https://seller.selinow.invalid/");
+  if (input.cursor !== undefined && input.cursor !== null) url.searchParams.set("cursor", input.cursor);
+  if (input.limit !== undefined) url.searchParams.set("limit", String(input.limit));
+  return parsePublicApiPage(url);
 }
 
 export type SellerMemberView = {
@@ -94,20 +94,36 @@ export async function listSellerCustomersPage(input: { cursor?: string | null; e
   const visibility = customerVisibility(member.row.role);
   const page = sellerPage(input);
   const rows = await input.env.PLATFORM_DB.prepare(`
-    SELECT shop_customers.id, shop_customers.id AS publicId, shop_customers.version,
+    WITH customer_summary AS (
+      SELECT shop_customers.id, shop_customers.id AS publicId, shop_customers.version,
       shop_customers.display_name AS displayName,
       shop_customers.email_normalized AS email,
       shop_customers.locale, shop_customers.status,
       shop_customers.created_at AS createdAt,
       COUNT(orders.id) AS orderCount,
-      MAX(orders.created_at) AS lastOrderAt
-    FROM shop_customers
-    LEFT JOIN orders ON orders.customer_id = shop_customers.id AND orders.shop_id = shop_customers.shop_id
-    WHERE shop_customers.shop_id = ?
-    GROUP BY shop_customers.id
-    ORDER BY lastOrderAt DESC, shop_customers.created_at DESC, shop_customers.id DESC
-    LIMIT ? OFFSET ?
-  `).bind(member.row.shop_id, page.limit + 1, page.offset).all<{ createdAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; publicId?: string; status: string; version?: number }>();
+      MAX(orders.created_at) AS lastOrderAt,
+      COALESCE(MAX(orders.created_at), shop_customers.created_at) AS cursorCreatedAt
+      FROM shop_customers
+      LEFT JOIN orders
+        ON orders.customer_id = shop_customers.id
+        AND orders.shop_id = shop_customers.shop_id
+      WHERE shop_customers.shop_id = ?
+      GROUP BY shop_customers.id
+    )
+    SELECT *
+    FROM customer_summary
+    WHERE (? IS NULL OR cursorCreatedAt < ?
+      OR (cursorCreatedAt = ? AND id < ?))
+    ORDER BY cursorCreatedAt DESC, id DESC
+    LIMIT ?
+  `).bind(
+    member.row.shop_id,
+    page.cursor?.createdAt ?? null,
+    page.cursor?.createdAt ?? null,
+    page.cursor?.createdAt ?? null,
+    page.cursor?.id ?? null,
+    page.limit + 1,
+  ).all<{ createdAt: string; cursorCreatedAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; publicId?: string; status: string; version?: number }>();
   const hasNext = rows.results.length > page.limit;
   const customers = rows.results.slice(0, page.limit).map((row) => {
     const version = Number.isSafeInteger(row.version) && (row.version ?? 0) > 0 ? (row.version ?? 1) : 1;
@@ -136,7 +152,13 @@ export async function listSellerCustomersPage(input: { cursor?: string | null; e
       version,
     };
   });
-  return { customers, nextCursor: hasNext ? String(page.offset + page.limit) : null };
+  const last = rows.results.slice(0, page.limit).at(-1);
+  return {
+    customers,
+    nextCursor: hasNext && last !== undefined
+      ? encodePublicApiCursor({ createdAt: last.cursorCreatedAt, id: last.id })
+      : null,
+  };
 }
 
 export async function listSellerCustomers(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerCustomerView[]> {
