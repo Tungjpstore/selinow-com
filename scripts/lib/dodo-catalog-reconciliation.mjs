@@ -389,7 +389,6 @@ WHERE p.id = ${sqlString(offer.id)} AND p.provider_price_ref = ${sqlString(sourc
   AND p.is_active = 0 AND p.effective_to IS NOT NULL AND p.effective_to = p.updated_at
   AND NOT EXISTS (SELECT 1 FROM plan_prices AS existing WHERE existing.id = ${sqlString(offer.rotatedId)})`).join("\nUNION ALL");
   return `
-BEGIN IMMEDIATE;
 WITH state AS (SELECT CASE WHEN ${openCount} = ${DODO_CATALOG_OFFERS.length} AND ${v2Count} = 0 THEN 'rotated' ELSE 'already_rotated' END AS rotation_mode)
 INSERT INTO plan_prices (id)
 SELECT NULL FROM state WHERE NOT (${validState});
@@ -404,7 +403,6 @@ SELECT changes() AS inserted_count;
 WITH state AS (SELECT 1 AS valid_state)
 INSERT INTO plan_prices (id)
 SELECT NULL FROM state WHERE NOT (${closedCount} = ${DODO_CATALOG_OFFERS.length} AND ${targetCount} = ${DODO_CATALOG_OFFERS.length} AND ${v2Count} = ${DODO_CATALOG_OFFERS.length});
-COMMIT;
 `;
 }
 

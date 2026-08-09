@@ -142,6 +142,17 @@ describe("Dodo catalog reconciliation", () => {
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
+  it("emits catalog rotation SQL compatible with remote D1 execution", () => {
+    const sql = dodoCatalogRotationSql(LIVE_REFERENCES, REFERENCES);
+
+    expect(sql).not.toMatch(/\bBEGIN(?:\s+IMMEDIATE)?\b/iu);
+    expect(sql).not.toMatch(/\bCOMMIT\b/iu);
+    expect(sql).toContain("WITH state");
+    expect(parseDodoCatalogRotationCommandOutput(JSON.stringify([
+      { success: true, results: [{ rotation_mode: "rotated", closed_count: 4, inserted_count: 4 }] },
+    ]))).toEqual({ mode: "rotated", closedCount: 4, insertedCount: 4 });
+  });
+
   it("replays rotation idempotently and rolls back when the observed v1 source is stale", () => {
     database.exec(dodoCatalogUpdateSql(LIVE_REFERENCES));
     const rotationSql = dodoCatalogRotationSql(LIVE_REFERENCES, REFERENCES);
