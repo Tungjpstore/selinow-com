@@ -12,6 +12,7 @@ type StorefrontShopRow = {
   brandingJson: string;
   canonicalHostname: string | null;
   currency: string;
+  currentDomainType: string;
   currentHostname: string;
   defaultLocale: string;
   id: string;
@@ -30,6 +31,8 @@ type StorefrontShopRow = {
   graceEndsAt: string | null;
   subscriptionState: string | null;
   termsUrl: string | null;
+  turnstileHostname: string | null;
+  turnstileStatus: string | null;
 };
 
 type CatalogRow = {
@@ -128,6 +131,9 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     SELECT shops.id, shops.public_id AS publicId, shops.slug, shops.name, shops.status,
       shops.default_locale AS defaultLocale, shops.currency,
       shop_domains.hostname_normalized AS currentHostname,
+      shop_domains.type AS currentDomainType,
+      json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') AS turnstileHostname,
+      json_extract(shop_domains.validation_metadata_json, '$.turnstile.status') AS turnstileStatus,
       COALESCE(shop_settings.published_branding_json, '{}') AS brandingJson,
       COALESCE(shop_settings.published_storefront_json, '{}') AS storefrontJson,
       shop_settings.support_contact AS supportContact,
@@ -151,18 +157,45 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
       AND canonical_domain.deleted_at IS NULL
       AND (
         canonical_domain.type = 'platform_subdomain'
-        OR canonical_domain.ownership_verified_at IS NOT NULL
+        OR (
+          canonical_domain.ownership_verified_at IS NOT NULL
+          AND canonical_domain.hostname_status = 'active'
+          AND canonical_domain.ssl_status = 'active'
+          AND canonical_domain.dns_status = 'active'
+          AND json_extract(canonical_domain.validation_metadata_json, '$.turnstile.status') = 'active'
+          AND json_extract(canonical_domain.validation_metadata_json, '$.turnstile.hostname') = canonical_domain.hostname_normalized
+          AND json_extract(canonical_domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+          AND json_extract(canonical_domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+        )
       )
     WHERE shop_domains.hostname_normalized = ?
       AND shop_domains.status = 'active'
       AND shop_domains.deleted_at IS NULL
       AND (
         shop_domains.type = 'platform_subdomain'
-        OR shop_domains.ownership_verified_at IS NOT NULL
+        OR (
+          shop_domains.ownership_verified_at IS NOT NULL
+          AND shop_domains.hostname_status = 'active'
+          AND shop_domains.ssl_status = 'active'
+          AND shop_domains.dns_status = 'active'
+          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.status') = 'active'
+          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') = shop_domains.hostname_normalized
+          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+        )
       )
     LIMIT 1
   `).bind(hostname).first<StorefrontShopRow>();
-  if (row === null || normalizeHostname(row.currentHostname) !== hostname) throw new AppError("storefront_not_found", 404);
+  if (row === null) throw new AppError("storefront_not_found", 404);
+  const currentDomainReady = (
+    row.currentDomainType === "platform_subdomain"
+    || (
+      row.currentDomainType === "custom"
+      && row.turnstileStatus === "active"
+      && normalizeHostname(row.turnstileHostname ?? "") === hostname
+    )
+  );
+  if (!currentDomainReady || normalizeHostname(row.currentHostname) !== hostname) throw new AppError("storefront_not_found", 404);
   const subscriptionState = row.subscriptionState ?? "canceled";
   // Resolve the same buyer hint order as middleware so locale-dependent
   // storefront defaults match the rendered document and cache dimension.

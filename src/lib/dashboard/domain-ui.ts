@@ -30,6 +30,7 @@ export type DomainReadiness = {
   hostnameStatus: string | null;
   sslStatus: string | null;
   status: string;
+  turnstileStatus: string | null;
   type: "custom" | "platform_subdomain";
 };
 
@@ -38,7 +39,7 @@ export type DomainLifecycleInput = DomainReadiness & {
   ownershipStatus: "pending" | "verified" | null;
 };
 
-export type DomainLifecycleKey = "ownership" | "hostname" | "dns" | "ssl" | "primary" | "routing";
+export type DomainLifecycleKey = "ownership" | "hostname" | "dns" | "ssl" | "turnstile" | "primary" | "routing";
 
 export type DomainLifecycleStep = {
   key: DomainLifecycleKey;
@@ -51,6 +52,7 @@ export const DOMAIN_LIFECYCLE_ORDER: readonly DomainLifecycleKey[] = [
   "hostname",
   "dns",
   "ssl",
+  "turnstile",
   "primary",
   "routing",
 ] as const;
@@ -122,7 +124,8 @@ export function isDomainReady(domain: DomainReadiness): boolean {
   return domain.status === "active"
     && domain.hostnameStatus === "active"
     && domain.sslStatus === "active"
-    && domain.dnsStatus === "active";
+    && domain.dnsStatus === "active"
+    && domain.turnstileStatus === "active";
 }
 
 export function deriveDomainLifecycle(domain: DomainLifecycleInput, locale?: unknown): readonly DomainLifecycleStep[] {
@@ -140,6 +143,7 @@ export function deriveDomainLifecycle(domain: DomainLifecycleInput, locale?: unk
     { key: "hostname", label: t("dashboard.domains.lifecycle.hostname"), status: domain.hostnameStatus },
     { key: "dns", label: t("dashboard.domains.lifecycle.dns"), status: domain.dnsStatus },
     { key: "ssl", label: t("dashboard.domains.lifecycle.ssl"), status: domain.sslStatus },
+    { key: "turnstile", label: t("dashboard.domains.lifecycle.turnstile"), status: domain.turnstileStatus },
     { key: "primary", label: t("dashboard.domains.lifecycle.primary"), status: domain.isPrimary ? "primary" : routingReady ? "available" : "pending" },
     { key: "routing", label: t("dashboard.domains.lifecycle.routing"), status: routingStatus },
   ];

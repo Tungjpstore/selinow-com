@@ -96,6 +96,7 @@ describe("storefront anonymous request limits", () => {
         hostname_status TEXT,
         ssl_status TEXT,
         dns_status TEXT,
+        validation_metadata_json TEXT NOT NULL DEFAULT '{}',
         delete_requested_at TEXT,
         deleted_at TEXT
       );
@@ -165,8 +166,14 @@ describe("storefront anonymous request limits", () => {
     database.exec(`
       INSERT INTO shop_domains (
         shop_id, hostname_normalized, type, status, ownership_verified_at,
-        hostname_status, ssl_status, dns_status, delete_requested_at, deleted_at
-      ) VALUES ('shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z', 'active', 'active', 'active', NULL, NULL);
+        hostname_status, ssl_status, dns_status, validation_metadata_json,
+        delete_requested_at, deleted_at
+      ) VALUES (
+        'shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z',
+        'active', 'active', 'active',
+        '{"turnstile":{"hostname":"shop.example.com","mode":"operator_managed","source":"cloudflare_widget_domains","status":"active"}}',
+        NULL, NULL
+      );
     `);
     const env = bindings(database, {
       APP_ENV: "production",
@@ -195,12 +202,39 @@ describe("storefront anonymous request limits", () => {
     fetchMock.mockRestore();
   });
 
+  it("rejects a production custom hostname whose Turnstile admission evidence is missing", async () => {
+    database.exec(`
+      INSERT INTO shop_domains (
+        shop_id, hostname_normalized, type, status, ownership_verified_at,
+        hostname_status, ssl_status, dns_status, validation_metadata_json,
+        delete_requested_at, deleted_at
+      ) VALUES ('shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z', 'active', 'active', 'active', '{}', NULL, NULL);
+    `);
+    const env = bindings(database, {
+      APP_ENV: "production",
+      STOREFRONT_CHECKOUT_RATE_LIMIT: "10",
+      STOREFRONT_TURNSTILE_THRESHOLD: "1",
+      TURNSTILE_SECRET_KEY: "0xSecretKeyThatLooksConfigured123456",
+      TURNSTILE_SITE_KEY: "0xSiteKeyThatLooksConfigured123456",
+    });
+    const checkoutRequest = new Request("https://shop.example.com/api/store/checkout", { method: "POST" });
+
+    await guardAnonymousCheckout({ env, request: checkoutRequest, shop: shop("shop-a"), turnstileToken: null });
+    await expect(guardAnonymousCheckout({
+      env,
+      request: checkoutRequest,
+      shop: shop("shop-a"),
+      turnstileToken: "turnstile-token-123",
+    })).rejects.toMatchObject({ code: "turnstile_invalid", status: 403 });
+  });
+
   it("fails closed when production custom hostname readiness is incomplete", async () => {
     database.exec(`
       INSERT INTO shop_domains (
         shop_id, hostname_normalized, type, status, ownership_verified_at,
-        hostname_status, ssl_status, dns_status, delete_requested_at, deleted_at
-      ) VALUES ('shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z', 'active', 'pending_validation', 'active', NULL, NULL);
+        hostname_status, ssl_status, dns_status, validation_metadata_json,
+        delete_requested_at, deleted_at
+      ) VALUES ('shop-a', 'shop.example.com', 'custom', 'active', '2026-07-26T00:00:00.000Z', 'active', 'pending_validation', 'active', '{}', NULL, NULL);
     `);
     const env = bindings(database, {
       APP_ENV: "production",

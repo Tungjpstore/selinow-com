@@ -9,9 +9,12 @@ type DomainRow = {
   hostnameNormalized: string;
   publishedVersion: number;
   defaultLocale: string;
+  domainType: "custom" | "platform_subdomain";
   shopStatus: string;
   status: string;
   subscriptionState: string | null;
+  turnstileHostname: string | null;
+  turnstileStatus: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
 } | null;
@@ -45,11 +48,14 @@ function activeDomain(overrides: Partial<Exclude<DomainRow, null>> = {}): Exclud
     domainId: "domain-current",
     domainVersion: 7,
     defaultLocale: "vi",
+    domainType: "custom",
     hostnameNormalized: "shop.example.com",
     publishedVersion: 3,
     shopStatus: "active",
     status: "active",
     subscriptionState: "active",
+    turnstileHostname: "shop.example.com",
+    turnstileStatus: "active",
     trialEndsAt: null,
     graceEndsAt: null,
     ...overrides,
@@ -68,6 +74,8 @@ describe("storefront cache domain gate", () => {
     expect(queries()[0]?.sql).toContain("shop_domains.deleted_at IS NULL");
     expect(queries()[0]?.sql).toContain("shop_domains.type = 'platform_subdomain'");
     expect(queries()[0]?.sql).toContain("shop_domains.ownership_verified_at IS NOT NULL");
+    expect(queries()[0]?.sql).toContain("$.turnstile.status");
+    expect(queries()[0]?.sql).toContain("$.turnstile.hostname");
     expect(queries()[0]?.sql).toContain("shops.status = 'active'");
     expect(queries()[0]?.sql).toContain("ORDER BY created_at DESC, id DESC");
     expect(queries()[0]?.sql).toContain("trial_ends_at");
@@ -154,6 +162,8 @@ describe("storefront cache domain gate", () => {
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ domainId: "" })).env, ...cacheKeyInput })).resolves.toBeNull();
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ domainVersion: 0 })).env, ...cacheKeyInput })).resolves.toBeNull();
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ publishedVersion: 0 })).env, ...cacheKeyInput })).resolves.toBeNull();
+    await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ turnstileStatus: "pending" })).env, ...cacheKeyInput })).resolves.toBeNull();
+    await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ turnstileHostname: "other.example.com" })).env, ...cacheKeyInput })).resolves.toBeNull();
   });
 
   it("keeps non-storefront and local requests outside the Cache API path", () => {

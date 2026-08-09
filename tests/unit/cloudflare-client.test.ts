@@ -115,4 +115,49 @@ describe("Cloudflare for SaaS client", () => {
       retryAfter: 17,
     });
   });
+
+  it("verifies an exact manually admitted Turnstile hostname without accepting wildcards", async () => {
+    const ACCOUNT_ID = "abcdef0123456789abcdef0123456789";
+    const SITE_KEY = "0xSiteKeyThatLooksConfigured123456";
+    const requested: string[] = [];
+    const fetcher: typeof fetch = (input) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      requested.push(url);
+      if (url === `https://api.cloudflare.com/client/v4/zones/${ZONE_ID}`) {
+        return Promise.resolve(success({ account: { id: ACCOUNT_ID }, id: ZONE_ID }));
+      }
+      expect(url).toBe(`https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/challenges/widgets/${SITE_KEY}`);
+      return Promise.resolve(success({
+        domains: ["*.customer.com", "shop.customer.com", "other.customer.com"],
+        sitekey: SITE_KEY,
+      }));
+    };
+    const client = new CloudflareSaaSClient(TOKEN, ZONE_ID, fetcher);
+
+    await expect(client.verifyTurnstileHostnameAdmission(SITE_KEY, "SHOP.CUSTOMER.COM.")).resolves.toEqual({
+      hostname: "shop.customer.com",
+      mode: "operator_managed",
+      source: "cloudflare_widget_domains",
+      status: "active",
+    });
+    await expect(client.verifyTurnstileHostnameAdmission(SITE_KEY, "nested.customer.com")).resolves.toMatchObject({
+      hostname: "nested.customer.com",
+      status: "pending",
+    });
+    expect(requested.filter((url) => url.endsWith(`/zones/${ZONE_ID}`))).toHaveLength(1);
+  });
+
+  it("fails closed on malformed Turnstile widget admission evidence", async () => {
+    const ACCOUNT_ID = "abcdef0123456789abcdef0123456789";
+    const SITE_KEY = "0xSiteKeyThatLooksConfigured123456";
+    const fetcher: typeof fetch = (input) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url.endsWith(`/zones/${ZONE_ID}`)) return Promise.resolve(success({ account: { id: ACCOUNT_ID } }));
+      return Promise.resolve(success({ domains: "shop.customer.com", sitekey: SITE_KEY }));
+    };
+
+    await expect(new CloudflareSaaSClient(TOKEN, ZONE_ID, fetcher)
+      .verifyTurnstileHostnameAdmission(SITE_KEY, "shop.customer.com"))
+      .rejects.toMatchObject({ code: "provider_response_invalid" });
+  });
 });

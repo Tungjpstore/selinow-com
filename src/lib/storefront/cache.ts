@@ -5,6 +5,7 @@ import { buildStorefrontCacheKey, isPrivateStorefrontPath, isPublicStorefrontPat
 
 type ActiveDomainRow = {
   domainId: string;
+  domainType: string;
   domainVersion: number;
   defaultLocale: string;
   hostnameNormalized: string;
@@ -14,6 +15,8 @@ type ActiveDomainRow = {
   trialEndsAt: string | null;
   graceEndsAt: string | null;
   subscriptionState: string | null;
+  turnstileHostname: string | null;
+  turnstileStatus: string | null;
 };
 
 export function isStorefrontCacheCandidate(input: {
@@ -42,6 +45,9 @@ export async function resolveActiveStorefrontCacheKey(input: {
   const row = await input.env.PLATFORM_DB.prepare(`
     SELECT shop_domains.id AS domainId,
       shop_domains.hostname_normalized AS hostnameNormalized, shop_domains.status,
+      shop_domains.type AS domainType,
+      json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') AS turnstileHostname,
+      json_extract(shop_domains.validation_metadata_json, '$.turnstile.status') AS turnstileStatus,
       shop_domains.version AS domainVersion,
       shop_settings.published_version AS publishedVersion,
       shops.default_locale AS defaultLocale, shops.status AS shopStatus,
@@ -74,7 +80,16 @@ export async function resolveActiveStorefrontCacheKey(input: {
       AND shop_domains.deleted_at IS NULL
       AND (
         shop_domains.type = 'platform_subdomain'
-        OR shop_domains.ownership_verified_at IS NOT NULL
+        OR (
+          shop_domains.ownership_verified_at IS NOT NULL
+          AND shop_domains.hostname_status = 'active'
+          AND shop_domains.ssl_status = 'active'
+          AND shop_domains.dns_status = 'active'
+          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.status') = 'active'
+          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') = shop_domains.hostname_normalized
+          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+          AND json_extract(shop_domains.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+        )
       )
     LIMIT 1
   `).bind(hostname).first<ActiveDomainRow>();
@@ -82,6 +97,8 @@ export async function resolveActiveStorefrontCacheKey(input: {
   if (row === null
     || row.status !== "active"
     || row.shopStatus !== "active"
+    || (row.domainType === "custom" && (row.turnstileStatus !== "active" || normalizeHostname(row.turnstileHostname ?? "") !== hostname))
+    || (row.domainType !== "custom" && row.domainType !== "platform_subdomain")
     || row.subscriptionState === null
     || !subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })
     || !/^[a-z0-9][a-z0-9_-]{0,127}$/iu.test(row.domainId)

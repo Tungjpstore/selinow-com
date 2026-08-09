@@ -1,6 +1,6 @@
 # Domains
 
-Platform storefronts use `{slug}.selinow.com` through wildcard routing. Paid custom domains use Cloudflare for SaaS and are not active until hostname, DNS and SSL checks pass.
+Platform storefronts use `{slug}.selinow.com` through wildcard routing. Paid custom domains use Cloudflare for SaaS and are not active until ownership, hostname, DNS, SSL and exact Turnstile hostname-admission checks pass.
 
 ## Current implementation status
 
@@ -35,6 +35,7 @@ Do not use `wrangler deploy --env production`, `wrangler triggers deploy` or a b
 | Fallback origin | `proxy-fallback.selinow.com`, Cloudflare status `active` |
 | Customer instruction | `shop.customer.example CNAME customers.selinow.com` |
 | Runtime API secret | `CLOUDFLARE_API_TOKEN` as a least-privilege staging Worker secret |
+| Turnstile admission | Operator adds the exact hostname to the widget allowlist; Selinow reads it back but does not mutate the widget |
 
 `CLOUDFLARE_ZONE_ID` and `SAAS_CNAME_TARGET` are identifiers, not credentials, and are stored in staging `vars`. The API token must never be written to `wrangler.jsonc`, environment manifests, generated manifests, source, test fixtures with real values or command output.
 
@@ -66,7 +67,7 @@ unset CLOUDFLARE_D1_API_TOKEN
 unset CLOUDFLARE_ROUTE_AUDIT_API_TOKEN
 ```
 
-The operator token scope should be restricted to the DNS and fallback-origin setup required for the `selinow.com` zone and should remain in an approved operator secret manager. Use a separate least-privilege custom-hostname token for the staging Worker:
+The operator token scope should be restricted to the DNS and fallback-origin setup required for the `selinow.com` zone and should remain in an approved operator secret manager. Use a separate least-privilege runtime token for the staging Worker. It needs only the custom-hostname operations already used by the domain lifecycle plus Zone Read and Turnstile Widget Read for exact-host admission evidence; it does not receive Turnstile Widget Edit:
 
 ```bash
 wrangler secret put CLOUDFLARE_API_TOKEN --env staging
@@ -112,23 +113,29 @@ The active fallback origin and deployed route matrix prove the shared-zone confi
 
 ## Customer readiness
 
-A custom domain is ready only when all three conditions are true:
+A custom domain is ready only when all five conditions are true:
 
-1. Cloudflare custom hostname status is `active`.
-2. Cloudflare SSL status is `active`.
-3. Customer DNS resolves to `SAAS_CNAME_TARGET`.
+1. The seller-created TXT record proves ownership for the current tenant claim.
+2. Cloudflare custom hostname status is `active`.
+3. Cloudflare SSL status is `active`.
+4. The seller-created CNAME resolves exactly to `SAAS_CNAME_TARGET`.
+5. The exact hostname appears in the configured Turnstile widget domain allowlist and Selinow has read it back as `active`.
 
-TLS success, fallback-origin status or a single successful provider poll is insufficient by itself. The platform subdomain remains available until the custom domain is fully ready and selected as primary.
+TXT and CNAME creation remain manual because Selinow has no registrar API integration. After DNS is correct, Selinow automates Cloudflare custom-hostname/SSL polling and Turnstile allowlist read-back. Adding or removing a hostname from the Turnstile widget remains an operator action; the product must not claim that this mutation is automatic.
+
+TLS success, fallback-origin status, a wildcard Turnstile entry or a single successful custom-hostname poll is insufficient by itself. Wildcard widget domains never satisfy exact-host admission. The platform subdomain remains available until the custom domain is fully ready and selected as primary.
+
+Migration `0092_custom_domain_turnstile_admission.sql` marks every pre-admission custom domain `pending`, demotes legacy custom primaries, restores a safe platform canonical domain when one exists and schedules reconciliation. Rows without exact admission evidence remain non-routable under the new runtime.
 
 ## Seller lifecycle
 
 - `POST /api/app/shops/{shopPublicId}/domains` normalizes and claims a hostname idempotently, then starts a leased provider check.
-- `GET /api/app/shops/{shopPublicId}/domains` returns tenant-scoped DNS, hostname and SSL readiness plus the exact CNAME target.
-- `POST /api/app/shops/{shopPublicId}/domains/{domainId}/checks` performs an owner-authorized leased retry.
+- `GET /api/app/shops/{shopPublicId}/domains` returns tenant-scoped ownership, DNS, hostname, SSL and Turnstile admission readiness plus the exact manual TXT/CNAME instructions.
+- `POST /api/app/shops/{shopPublicId}/domains/{domainId}/checks` performs an owner-authorized leased retry and reads back the exact Turnstile widget hostname after the operator has admitted it.
 - `PUT /api/app/shops/{shopPublicId}/domains/{domainId}/primary` atomically updates primary and canonical routing only after all readiness signals pass.
 - `DELETE /api/app/shops/{shopPublicId}/domains/{domainId}` removes routing atomically, blocks while an active payment attempt depends on the domain and retries provider deletion through reconciliation.
 
-All mutations require owner capability, recent authentication, JSON content type and CSRF. Provider checks persist only while holding the matching lease, so polling cannot reactivate a hostname after deletion begins.
+All mutations require owner capability, recent authentication, JSON content type and CSRF. Provider checks persist only while holding the matching lease, so polling cannot reactivate a hostname after deletion begins. Deletion removes Selinow routing and the Cloudflare custom hostname; DNS records and the operator-managed Turnstile allowlist entry are not represented as automatically deleted.
 
 Create and restore transitions use optimistic version compare-and-swap in addition to lease fencing. When a concurrent request commits first, the losing request re-reads and returns the current live domain instead of reporting a false conflict; transition audit is written only for the request that actually commits. Primary/canonical updates and domain deletion also re-check the current row version and active payment-origin dependency inside the guarded transition.
 

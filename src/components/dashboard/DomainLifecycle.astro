@@ -20,6 +20,7 @@ const lifecycleLabels: Readonly<Record<(typeof DOMAIN_LIFECYCLE_ORDER)[number], 
   hostname: t("dashboard.domains.lifecycle.hostname"),
   dns: t("dashboard.domains.lifecycle.dns"),
   ssl: t("dashboard.domains.lifecycle.ssl"),
+  turnstile: t("dashboard.domains.lifecycle.turnstile"),
   primary: t("dashboard.domains.lifecycle.primary"),
   routing: t("dashboard.domains.lifecycle.routing"),
 };
@@ -47,7 +48,7 @@ const iconFor = (status: string | null): string => {
 </ol>
 
 <style>
-  .domain-lifecycle { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin: 16px 0 0; padding: 0; border-block: 1px solid var(--selinow-border); list-style: none; }
+  .domain-lifecycle { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin: 16px 0 0; padding: 0; border-block: 1px solid var(--selinow-border); list-style: none; }
   .domain-lifecycle li { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 14px 8px; border-right: 1px solid var(--selinow-border); }
   .domain-lifecycle li:last-child { border-right: 0; }
   .domain-lifecycle strong, .domain-lifecycle small { display: block; }
@@ -59,14 +60,14 @@ const iconFor = (status: string | null): string => {
   .lifecycle-icon[data-tone="error"] { border-color: var(--selinow-danger-text); background: var(--selinow-danger-soft); color: var(--selinow-danger-text); }
 
   @media (max-width: 1080px) {
-    .domain-lifecycle { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .domain-lifecycle li:nth-child(3) { border-right: 0; }
-    .domain-lifecycle li:nth-child(-n + 3) { border-bottom: 1px solid var(--selinow-border); }
+    .domain-lifecycle { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .domain-lifecycle li:nth-child(4) { border-right: 0; }
+    .domain-lifecycle li:nth-child(-n + 4) { border-bottom: 1px solid var(--selinow-border); }
   }
 
   @media (max-width: 650px) {
     .domain-lifecycle { grid-template-columns: 1fr; }
-    .domain-lifecycle li, .domain-lifecycle li:nth-child(3) { border-right: 0; border-bottom: 1px solid var(--selinow-border); }
+    .domain-lifecycle li, .domain-lifecycle li:nth-child(4) { border-right: 0; border-bottom: 1px solid var(--selinow-border); }
     .domain-lifecycle li:last-child { border-bottom: 0; }
     .domain-lifecycle small { white-space: normal; }
   }

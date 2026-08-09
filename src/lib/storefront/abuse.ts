@@ -57,6 +57,10 @@ async function assertTurnstileHostnameAdmission(input: { env: AppBindings; reque
           OR (
             type = 'custom' AND ownership_verified_at IS NOT NULL
             AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'
+            AND json_extract(validation_metadata_json, '$.turnstile.status') = 'active'
+            AND json_extract(validation_metadata_json, '$.turnstile.hostname') = hostname_normalized
+            AND json_extract(validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+            AND json_extract(validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
           )
         )
       LIMIT 1

@@ -32,6 +32,20 @@ type FakeDomain = {
   version: number;
 };
 
+function hasExactTurnstileAdmission(row: FakeDomain): boolean {
+  try {
+    const metadata = JSON.parse(row.validationMetadataJson) as {
+      turnstile?: { hostname?: unknown; mode?: unknown; source?: unknown; status?: unknown };
+    };
+    return metadata.turnstile?.hostname === row.hostname
+      && metadata.turnstile.mode === "operator_managed"
+      && metadata.turnstile.source === "cloudflare_widget_domains"
+      && metadata.turnstile.status === "active";
+  } catch {
+    return false;
+  }
+}
+
 type FakeClaim = {
   challengeHash: string;
   checkAttempts: number;
@@ -452,7 +466,7 @@ class DomainDatabase {
               runBeforePrimaryGuard();
               const row = domains.get(String(values[0]));
               const ready = row !== undefined && row.shopId === values[1] && row.status === "active" && row.deletedAt === null && row.deleteRequestedAt === null && row.version === values[2]
-                && (row.type !== "custom" || (row.ownershipVerifiedAt != null && row.hostnameStatus === "active" && row.sslStatus === "active" && row.dnsStatus === "active"));
+                && (row.type !== "custom" || (row.ownershipVerifiedAt != null && row.hostnameStatus === "active" && row.sslStatus === "active" && row.dnsStatus === "active" && hasExactTurnstileAdmission(row)));
               return Promise.resolve({ meta: { changes: ready ? 1 : 0 } });
             }
             if (sql.includes("domain:demote-primary")) {
@@ -471,7 +485,7 @@ class DomainDatabase {
             if (sql.includes("domain:promote-primary")) {
               const row = domains.get(String(values[1]));
               const ready = row !== undefined && row.shopId === values[2] && row.status === "active" && row.deletedAt === null && row.deleteRequestedAt === null && row.version === values[3]
-                && (row.type !== "custom" || (row.ownershipVerifiedAt != null && row.hostnameStatus === "active" && row.sslStatus === "active" && row.dnsStatus === "active"));
+                && (row.type !== "custom" || (row.ownershipVerifiedAt != null && row.hostnameStatus === "active" && row.sslStatus === "active" && row.dnsStatus === "active" && hasExactTurnstileAdmission(row)));
               if (!ready) return Promise.resolve({ meta: { changes: 0 } });
               row.isPrimary = 1;
               row.updatedAt = String(values[0]);
@@ -632,6 +646,7 @@ class Provider implements DomainProvider {
 
   nextStatus: string;
   nextSslStatus: string;
+  nextTurnstileStatus: "active" | "pending" = "active";
 
   createCustomHostname(hostname: string): Promise<CloudflareCustomHostname> {
     this.creates += 1;
@@ -645,6 +660,15 @@ class Provider implements DomainProvider {
     if (this.current === null) throw new Error("missing");
     this.current = { ...this.current, ssl: { status: this.nextSslStatus }, status: this.nextStatus };
     return Promise.resolve(this.current);
+  }
+
+  verifyTurnstileHostnameAdmission(_siteKey: string, hostname: string) {
+    return Promise.resolve({
+      hostname,
+      mode: "operator_managed" as const,
+      source: "cloudflare_widget_domains" as const,
+      status: this.nextTurnstileStatus,
+    });
   }
 }
 
@@ -660,6 +684,7 @@ function environment(database: DomainDatabase): AppBindings {
     PLATFORM_ORIGIN: "https://staging.selinow.com",
     SAAS_CNAME_TARGET: "customers.selinow.com",
     SESSION_SECRET: "domain-store-test-session-secret",
+    TURNSTILE_SITE_KEY: "0xSiteKeyThatLooksConfigured123456",
   } as unknown as AppBindings;
 }
 
@@ -1017,7 +1042,7 @@ describe("custom domain store", () => {
         status: "active",
         type: "custom",
         updatedAt: verifiedAt,
-        validationMetadataJson: "{}",
+        validationMetadataJson: '{"turnstile":{"hostname":"shop.customer.com","mode":"operator_managed","source":"cloudflare_widget_domains","status":"active"}}',
         version: 1,
       });
     };
@@ -1147,6 +1172,86 @@ describe("custom domain store", () => {
     expect(checked.status).toBe("active");
   });
 
+  it("keeps a custom domain non-routable until exact Turnstile admission is verified", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    provider.nextTurnstileStatus = "pending";
+    const env = environment(database);
+    const created = await createCustomDomain({
+      env,
+      hostname: "shop.customer.com",
+      requestId: "request-turnstile-pending",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+
+    expect(created.domain).toMatchObject({
+      isPrimary: false,
+      lastSafeErrorCode: "domain_turnstile_admission_pending",
+      status: "validating",
+      turnstileStatus: "pending",
+    });
+    expect(created.domain.validation.turnstile).toMatchObject({
+      hostname: "shop.customer.com",
+      mode: "operator_managed",
+      source: "cloudflare_widget_domains",
+      status: "pending",
+    });
+    await expect(setPrimaryDomain({
+      domainId: created.domain.id,
+      env,
+      requestId: "request-primary-too-early",
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "domain_not_ready", status: 409 });
+
+    provider.nextTurnstileStatus = "active";
+    const checked = await checkCustomDomain({
+      domainId: created.domain.id,
+      env,
+      requestId: "request-turnstile-admitted",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    expect(checked).toMatchObject({ status: "active", turnstileStatus: "active" });
+  });
+
+  it("falls back atomically when Turnstile admission is removed", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    await setPrimaryDomain({ domainId: created.domain.id, env, requestId: "request-primary", shopPublicId: "shop_public_a", userId: "user-a" });
+    provider.nextTurnstileStatus = "pending";
+
+    const checked = await checkCustomDomain({ domainId: created.domain.id, env, requestId: "request-check", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    expect(checked).toMatchObject({ isPrimary: false, status: "validating", turnstileStatus: "pending" });
+    expect(database.domains.get("dom_platform_shop-a")?.isPrimary).toBe(1);
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+  });
+
+  it("persists a safe retry state when Turnstile admission read-back is unavailable", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    provider.verifyTurnstileHostnameAdmission = () => Promise.reject(new Error("provider detail must stay private"));
+    const created = await createCustomDomain({
+      env: environment(database),
+      hostname: "shop.customer.com",
+      requestId: "request-turnstile-error",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+
+    expect(created.domain).toMatchObject({
+      isPrimary: false,
+      lastSafeErrorCode: "domain_turnstile_admission_lookup_failed",
+      status: "validating",
+    });
+  });
+
   it("atomically falls back from a primary custom domain when provider readiness becomes pending", async () => {
     const database = new DomainDatabase();
     const provider = new Provider();
@@ -1236,6 +1341,32 @@ describe("custom domain store", () => {
     await expect(setPrimaryDomain({ domainId: created.domain.id, env, requestId: "request-primary", shopPublicId: "shop_public_a", userId: "user-a" })).rejects.toMatchObject({ code: "domain_not_ready", status: 409 });
     expect(database.domains.get(created.domain.id)?.isPrimary).toBe(0);
     expect(database.domains.get("dom_platform_shop-a")?.isPrimary).toBe(1);
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+  });
+
+  it("does not promote a domain whose Turnstile evidence changes inside the primary CAS", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    database.beforePrimaryGuard = () => {
+      const row = database.domains.get(created.domain.id);
+      if (row === undefined) return;
+      const metadata = JSON.parse(row.validationMetadataJson) as Record<string, unknown>;
+      row.validationMetadataJson = JSON.stringify({
+        ...metadata,
+        turnstile: {
+          hostname: row.hostname,
+          mode: "operator_managed",
+          source: "cloudflare_widget_domains",
+          status: "pending",
+        },
+      });
+    };
+
+    await expect(setPrimaryDomain({ domainId: created.domain.id, env, requestId: "request-primary", shopPublicId: "shop_public_a", userId: "user-a" }))
+      .rejects.toMatchObject({ code: "domain_not_ready", status: 409 });
+    expect(database.domains.get(created.domain.id)?.isPrimary).toBe(0);
     expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
   });
 

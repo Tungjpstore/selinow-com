@@ -37,12 +37,14 @@ describe("seller custom-domain UI policy", () => {
       hostnameStatus: "active",
       sslStatus: "active",
       status: "active",
+      turnstileStatus: "active",
       type: "custom" as const,
     };
 
     expect(isDomainReady(active)).toBe(true);
     expect(isDomainReady({ ...active, sslStatus: "pending_validation" })).toBe(false);
     expect(isDomainReady({ ...active, dnsStatus: "pending" })).toBe(false);
+    expect(isDomainReady({ ...active, turnstileStatus: "pending" })).toBe(false);
   });
 
   it("treats an active platform subdomain as ready without provider checks", () => {
@@ -51,6 +53,7 @@ describe("seller custom-domain UI policy", () => {
       hostnameStatus: null,
       sslStatus: null,
       status: "active",
+      turnstileStatus: null,
       type: "platform_subdomain",
     })).toBe(true);
   });
@@ -63,6 +66,7 @@ describe("seller custom-domain UI policy", () => {
       ownershipStatus: "verified",
       sslStatus: "active",
       status: "active",
+      turnstileStatus: "active",
       type: "custom",
     });
 
@@ -71,11 +75,13 @@ describe("seller custom-domain UI policy", () => {
       "hostname",
       "dns",
       "ssl",
+      "turnstile",
       "primary",
       "routing",
     ]);
     expect(steps.map((step) => step.status)).toEqual([
       "verified",
+      "active",
       "active",
       "active",
       "active",
@@ -92,6 +98,7 @@ describe("seller custom-domain UI policy", () => {
       ownershipStatus: "verified",
       sslStatus: "pending_validation",
       status: "validating",
+      turnstileStatus: "pending",
       type: "custom",
     });
 
@@ -108,6 +115,7 @@ describe("seller custom-domain UI policy", () => {
       ownershipStatus: "verified",
       sslStatus: "pending_validation",
       status: "validating",
+      turnstileStatus: "pending",
       type: "custom",
     }, "vi-VN").find((step) => step.key === "ownership")?.label).toBe("Quyền sở hữu");
   });

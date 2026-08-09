@@ -8,6 +8,7 @@ import {
   CloudflareProviderError,
   CloudflareSaaSClient,
   type CloudflareCustomHostname,
+  type CloudflareTurnstileHostnameAdmission,
 } from "./cloudflare";
 import { verifyCustomDomainOwnership, verifyCustomHostnameDns, type DnsVerificationResult } from "./dns";
 import { isCloudflareHostnameReady, normalizeCustomHostname } from "./policy";
@@ -74,6 +75,7 @@ type DomainBindings = AppBindings & {
   CLOUDFLARE_API_TOKEN: string;
   CLOUDFLARE_ZONE_ID: string;
   SAAS_CNAME_TARGET: string;
+  TURNSTILE_SITE_KEY: string;
 };
 
 type DomainRow = {
@@ -145,6 +147,7 @@ export type DomainView = {
   ownershipStatus: "pending" | "verified" | null;
   sslStatus: string | null;
   status: string;
+  turnstileStatus: "active" | "error" | "pending" | null;
   type: "custom" | "platform_subdomain";
   updatedAt: string;
   validation: Record<string, unknown>;
@@ -153,7 +156,7 @@ export type DomainView = {
 
 export type DomainProvider = Pick<
   CloudflareSaaSClient,
-  "createCustomHostname" | "deleteCustomHostname" | "findCustomHostname" | "getCustomHostname"
+  "createCustomHostname" | "deleteCustomHostname" | "findCustomHostname" | "getCustomHostname" | "verifyTurnstileHostnameAdmission"
 >;
 
 export type DomainRuntime = {
@@ -203,7 +206,25 @@ function safeJsonObject(value: string): Record<string, unknown> {
   }
 }
 
+function turnstileAdmissionStatus(metadata: Record<string, unknown>, hostname: string): DomainView["turnstileStatus"] {
+  const value = metadata.turnstile;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const admission = value as Record<string, unknown>;
+  if (
+    admission.hostname !== hostname
+    || admission.mode !== "operator_managed"
+    || admission.source !== "cloudflare_widget_domains"
+    || !["active", "error", "pending"].includes(String(admission.status))
+  ) return null;
+  return admission.status as DomainView["turnstileStatus"];
+}
+
+function hasExactTurnstileAdmission(row: Pick<DomainRow, "hostname" | "validationMetadataJson">): boolean {
+  return turnstileAdmissionStatus(safeJsonObject(row.validationMetadataJson), row.hostname) === "active";
+}
+
 function mapDomain(row: DomainRow, saasTarget: string): DomainView {
+  const validation = safeJsonObject(row.validationMetadataJson);
   return {
     activatedAt: row.activatedAt,
     createdAt: row.createdAt,
@@ -222,9 +243,10 @@ function mapDomain(row: DomainRow, saasTarget: string): DomainView {
     ownershipStatus: row.type === "custom" ? (row.ownershipVerifiedAt === null ? "pending" : "verified") : null,
     sslStatus: row.sslStatus,
     status: row.status,
+    turnstileStatus: row.type === "custom" ? turnstileAdmissionStatus(validation, row.hostname) : null,
     type: row.type,
     updatedAt: row.updatedAt,
-    validation: safeJsonObject(row.validationMetadataJson),
+    validation,
     version: row.version,
   };
 }
@@ -259,6 +281,7 @@ async function mapClaim(env: AppBindings, row: DomainClaimRow, now = new Date())
     ownershipStatus: row.verifiedAt === null ? "pending" : "verified",
     sslStatus: null,
     status: row.verifiedAt !== null ? "active" : expired ? "ownership_expired" : "ownership_pending",
+    turnstileStatus: null,
     type: "custom",
     updatedAt: row.updatedAt,
     validation: { expiresAt: row.expiresAt, ownershipChallenge: true },
@@ -330,18 +353,24 @@ function requireDomain(row: DomainRow | null): DomainRow {
   return row;
 }
 
-function validationMetadata(provider: CloudflareCustomHostname, dns: DnsVerificationResult): string {
+function validationMetadata(
+  provider: CloudflareCustomHostname,
+  dns: DnsVerificationResult,
+  turnstile: CloudflareTurnstileHostnameAdmission,
+  checkedAt: string,
+): string {
   return JSON.stringify({
     dns: { observedTargets: dns.observedTargets },
     ownershipVerification: provider.ownership_verification ?? null,
     ownershipVerificationHttp: provider.ownership_verification_http ?? null,
     sslDcvDelegationRecords: provider.ssl.dcv_delegation_records ?? [],
     sslValidationRecords: provider.ssl.validation_records ?? [],
+    turnstile: { ...turnstile, checkedAt },
   });
 }
 
-export function customDomainState(input: { dnsStatus: string; hostnameStatus: string; sslStatus: string }): "active" | "failed" | "validating" {
-  if (isCloudflareHostnameReady(input)) return "active";
+export function customDomainState(input: { dnsStatus: string; hostnameStatus: string; sslStatus: string; turnstileStatus: string }): "active" | "failed" | "validating" {
+  if (isCloudflareHostnameReady(input) && input.turnstileStatus === "active") return "active";
   if (TERMINAL_HOSTNAME_STATUSES.has(input.hostnameStatus) || TERMINAL_SSL_STATUSES.has(input.sslStatus)) return "failed";
   return "validating";
 }
@@ -578,19 +607,23 @@ async function persistProviderCheck(input: {
   now: Date;
   provider: CloudflareCustomHostname;
   row: DomainRow;
+  turnstile: CloudflareTurnstileHostnameAdmission;
 }): Promise<DomainRow> {
   if (input.provider.hostname.toLowerCase() !== input.row.hostname) throw new AppError("domain_provider_conflict", 409);
   const status = customDomainState({
     dnsStatus: input.dns.status,
     hostnameStatus: input.provider.status,
     sslStatus: input.provider.ssl.status,
+    turnstileStatus: input.turnstile.status,
   });
   const attempts = input.row.checkAttempts + 1;
   const errorCode = input.dns.status === "error"
     ? "domain_dns_lookup_failed"
     : input.dns.status === "pending"
       ? "domain_dns_pending"
-      : null;
+      : input.turnstile.status === "pending"
+        ? "domain_turnstile_admission_pending"
+        : null;
   return persistCheckTransition({
     env: input.env,
     leaseToken: input.leaseToken,
@@ -620,7 +653,7 @@ async function persistProviderCheck(input: {
       input.dns.status,
       status,
       status === "active" ? row.isPrimary : 0,
-      validationMetadata(input.provider, input.dns),
+      validationMetadata(input.provider, input.dns, input.turnstile, input.now.toISOString()),
       input.now.toISOString(),
       status,
       input.now.toISOString(),
@@ -651,14 +684,18 @@ async function runProviderCheck(input: {
 }): Promise<ProviderCheckResult> {
   const now = input.runtime.now ?? new Date();
   try {
-    const provider = await recoverOrCreateProviderHostname(createProvider(input.env, input.runtime), input.row);
+    const client = createProvider(input.env, input.runtime);
+    const provider = await recoverOrCreateProviderHostname(client, input.row);
     const dns = await (input.runtime.dnsVerifier ?? verifyCustomHostnameDns)({
       expectedTarget: getSaasTarget(input.env),
       hostname: input.row.hostname,
     });
+    const turnstile = await client
+      .verifyTurnstileHostnameAdmission(bindingString(input.env, "TURNSTILE_SITE_KEY"), input.row.hostname)
+      .catch(() => { throw new AppError("domain_turnstile_admission_lookup_failed", 503); });
     return {
       outcome: "checked",
-      row: await persistProviderCheck({ dns, env: input.env, leaseToken: input.leaseToken, now, provider, row: input.row }),
+      row: await persistProviderCheck({ dns, env: input.env, leaseToken: input.leaseToken, now, provider, row: input.row, turnstile }),
     };
   } catch (error) {
     return {
@@ -1003,7 +1040,7 @@ export async function checkCustomDomain(input: {
     shopId,
     input.userId,
     checked.id,
-    JSON.stringify({ dnsStatus: checked.dnsStatus, hostnameStatus: checked.hostnameStatus, sslStatus: checked.sslStatus, status: checked.status }),
+    JSON.stringify({ dnsStatus: checked.dnsStatus, hostnameStatus: checked.hostnameStatus, sslStatus: checked.sslStatus, status: checked.status, turnstileStatus: mapDomain(checked, getSaasTarget(input.env)).turnstileStatus }),
     input.requestId,
     checkedAt,
   ).run();
@@ -1029,6 +1066,7 @@ export async function setPrimaryDomain(input: {
     hostnameStatus: row.hostnameStatus ?? "",
     sslStatus: row.sslStatus ?? "",
   })) throw new AppError("domain_not_ready", 409);
+  if (row.type === "custom" && !hasExactTurnstileAdmission(row)) throw new AppError("domain_not_ready", 409);
 
   const now = new Date().toISOString();
   const shop = await input.env.PLATFORM_DB.prepare(`
@@ -1041,7 +1079,11 @@ export async function setPrimaryDomain(input: {
     LIMIT 1
   `).bind(shopId).first<{ id: string }>();
   const providerReadiness = row.type === "custom"
-    ? " AND ownership_verified_at IS NOT NULL AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'"
+    ? ` AND ownership_verified_at IS NOT NULL AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'
+        AND json_extract(validation_metadata_json, '$.turnstile.status') = 'active'
+        AND json_extract(validation_metadata_json, '$.turnstile.hostname') = hostname_normalized
+        AND json_extract(validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+        AND json_extract(validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'`
     : "";
   const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
