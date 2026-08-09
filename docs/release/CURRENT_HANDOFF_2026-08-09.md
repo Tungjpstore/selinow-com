@@ -7,9 +7,12 @@ change, secret write, provider mutation, pilot, or live charge.
 
 ## Candidate and staging state
 
-- Current source candidate: commit
+- Reviewed runtime baseline before this documentation-only handoff commit:
+  commit
   `dcfe4a62e98551083710ae32df0004f2336e6524`, tree
-  `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`.
+  `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. This is not a deployment
+  admission identity after the documentation lands; the next ceremony must
+  recapture the final clean commit and tree.
 - Source migration ledger: contiguous `0001`-`0090`.
 - Staging D1 post-migration evidence: release
   `stg_20260808T235913Z_73d0c27493ea`, commit
@@ -25,8 +28,8 @@ change, secret write, provider mutation, pilot, or live charge.
   `17922377aa6bd0893c5c4aae206ac78d0208875d`, tree
   `9d44eb6a9318a1b5c94fc012c3573b3f4e31611a`.
 - The staging D1 continuation and the retained Worker deployment are different
-  candidate identities, and both predate the current source candidate. The
-  current source is therefore not staging-deployed or staging-accepted.
+  candidate identities, and both predate the reviewed runtime baseline. That
+  baseline is therefore not staging-deployed or staging-accepted.
 - Production remains at the admitted `0001`-`0052` D1 baseline and remains
   **NO-GO**.
 - Current non-secret Dodo setup evidence is retained at

@@ -4,10 +4,12 @@ Last updated: 2026-08-09
 
 ## Current source of truth
 
-- Current repository identity is commit
+- The reviewed runtime baseline for this snapshot, before the documentation-only
+  reconciliation commit, is commit
   `dcfe4a62e98551083710ae32df0004f2336e6524`, tree
-  `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. This identity is current source,
-  not a claim that the same tree is deployed.
+  `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. It is not a post-documentation
+  HEAD or a deployed identity; the next release ceremony must recapture the
+  final clean commit and tree.
 - Current operational source migration chain: contiguous `0001`-`0090`.
   Staging post-migration evidence for release
   `stg_20260808T235913Z_73d0c27493ea` records all 90 migrations through
