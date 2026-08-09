@@ -3,7 +3,13 @@ import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
-import { listChannelExpansionCatalog, requireChannelExpansion, type ChannelExpansionStage } from "./expansion";
+import {
+  isChannelCatalogPublishingAllowed,
+  isChannelSellerActivationAllowed,
+  listChannelExpansionCatalog,
+  requireChannelExpansion,
+  type ChannelExpansionStage,
+} from "./expansion";
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60_000;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,128}$/u;
@@ -71,7 +77,12 @@ async function loadRequest(env: AppBindings, shopId: string, requestPublicId: st
 }
 
 export function listAvailableChannelExpansions() {
-  return listChannelExpansionCatalog().map((entry) => ({ ...entry, capabilities: [...entry.capabilities] }));
+  return listChannelExpansionCatalog().map((entry) => ({
+    ...entry,
+    capabilities: [...entry.capabilities],
+    catalogPublishingAllowed: isChannelCatalogPublishingAllowed(entry.code),
+    sellerActivationAllowed: isChannelSellerActivationAllowed(entry.code),
+  }));
 }
 
 export async function listChannelConnectorRequests(input: {

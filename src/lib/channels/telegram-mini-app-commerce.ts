@@ -10,6 +10,7 @@ import type { CommerceContext } from "../commerce/contracts";
 import { AppError } from "../core/errors";
 import { loadTelegramShop } from "../telegram/commerce";
 import { TELEGRAM_CHANNEL_CODE } from "./builtins";
+import { assertChannelProviderExecutionReady, TELEGRAM_MINI_APP_CHANNEL_CODE } from "./expansion";
 import type { AppBindings } from "../platform/bindings";
 import type { TelegramMiniAppSessionContext } from "./telegram-mini-app-session";
 import { hmacToken } from "../core/crypto";
@@ -60,6 +61,7 @@ export async function createTelegramMiniAppCommerceRuntime(input: {
 }): Promise<TelegramMiniAppCommerceRuntime> {
   const connectionId = input.session.channelConnectionId;
   if (connectionId === null) throw new AppError("channel_mini_app_commerce_unavailable", 409, ["telegram_connection_required"]);
+  assertChannelProviderExecutionReady(TELEGRAM_MINI_APP_CHANNEL_CODE);
   const idempotencyKey = assertIdempotencyKey(input.idempotencyKey ?? "telegram-mini-app-read-0001");
   const shop = await loadTelegramShop(input.env, input.session.shopId);
   const updateId = await updateIdFromKey({ env: input.env, integrationId: input.session.integrationId, shopId: input.session.shopId, value: idempotencyKey });

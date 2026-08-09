@@ -44,6 +44,10 @@ describe("channel dashboard surfaces", () => {
     expect(script).toContain("capabilitiesDetails");
     expect(script).toContain("capabilitiesSummary.textContent");
     expect(script).toContain("request.requestPublicId");
+    expect(script).toContain("const sellerActivationAllowed = expansion.sellerActivationAllowed;");
+    expect(script).toContain('typeof object.sellerActivationAllowed !== "boolean"');
+    expect(script).toContain("sellerActivationAllowed: object.sellerActivationAllowed");
+    expect(script).toContain("sellerActivationAllowed && (request === null || request.status === \"canceled\" || request.status === \"rejected\")");
     expect(page).toContain("data-copy={JSON.stringify(integrationClientCopy)}");
     expect(page).not.toContain("data-channel-secret");
     expect(page).not.toContain("data-provider-token");

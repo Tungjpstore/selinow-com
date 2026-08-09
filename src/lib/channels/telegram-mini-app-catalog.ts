@@ -1,5 +1,6 @@
 import { AppError } from "../core/errors";
 import type { AppBindings } from "../platform/bindings";
+import { assertChannelProviderExecutionReady, TELEGRAM_MINI_APP_CHANNEL_CODE } from "./expansion";
 
 export type TelegramMiniAppCatalog = {
   categories: { description: string; id: string; name: string; slug: string }[];
@@ -64,6 +65,7 @@ export async function getTelegramMiniAppCatalog(input: {
   env: AppBindings;
   shopId: string;
 }): Promise<TelegramMiniAppCatalog> {
+  assertChannelProviderExecutionReady(TELEGRAM_MINI_APP_CHANNEL_CODE);
   const categories = await input.env.PLATFORM_DB.prepare(`
     SELECT categories.id, categories.slug, categories.name, categories.description
     FROM product_categories AS categories

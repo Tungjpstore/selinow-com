@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { setCatalogChannelVisibility } from "../../src/lib/catalog/channel-visibility";
+import { listCatalogChannelVisibility, setCatalogChannelVisibility } from "../../src/lib/catalog/channel-visibility";
 import { getStorefrontCatalog, type StorefrontShop } from "../../src/lib/storefront/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
@@ -122,10 +122,10 @@ describe("catalog channel visibility", () => {
     expect(() => database.prepare("DELETE FROM catalog_channel_visibility WHERE shop_id = 'shop-visibility-a' AND product_id = ? AND channel_code = 'website'").run(PRODUCT_A)).toThrow(/catalog_channel_visibility_immutable/u);
   });
 
-  it("supports owner/manager mutations, idempotent replay, and stale-version conflicts", async () => {
+  it("supports built-in channel mutations while provider-pending channels fail closed", async () => {
     const runtime = createRuntime();
     const first = await setCatalogChannelVisibility({
-      channelCode: "zalo.mini_app",
+      channelCode: "telegram",
       env: runtime.env,
       expectedVersion: 0,
       idempotencyKey: "visibility-write-0001",
@@ -135,9 +135,9 @@ describe("catalog channel visibility", () => {
       userId: "user-visibility-owner",
       visible: true,
     });
-    expect(first).toMatchObject({ replayed: false, projection: { channelCode: "zalo.mini_app", status: "visible", version: 1 } });
+    expect(first).toMatchObject({ replayed: false, projection: { channelCode: "telegram", status: "visible", version: 1 } });
     const replay = await setCatalogChannelVisibility({
-      channelCode: "zalo.mini_app",
+      channelCode: "telegram",
       env: runtime.env,
       expectedVersion: 0,
       idempotencyKey: "visibility-write-0001",
@@ -149,7 +149,7 @@ describe("catalog channel visibility", () => {
     });
     expect(replay).toMatchObject({ replayed: true, projection: { version: 1 } });
     await expect(setCatalogChannelVisibility({
-      channelCode: "zalo.mini_app",
+      channelCode: "telegram",
       env: runtime.env,
       expectedVersion: 0,
       idempotencyKey: "visibility-write-0001",
@@ -160,7 +160,7 @@ describe("catalog channel visibility", () => {
       visible: false,
     })).rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
     const managerWrite = await setCatalogChannelVisibility({
-      channelCode: "zalo.mini_app",
+      channelCode: "telegram",
       env: runtime.env,
       expectedVersion: 1,
       idempotencyKey: "visibility-write-0002",
@@ -176,7 +176,7 @@ describe("catalog channel visibility", () => {
       { action: "catalog.channel_visibility.updated", resource_type: "catalog_channel_visibility", resource_id: PRODUCT_A },
     ]);
     await expect(setCatalogChannelVisibility({
-      channelCode: "zalo.mini_app",
+      channelCode: "telegram",
       env: runtime.env,
       expectedVersion: 1,
       idempotencyKey: "visibility-write-0003",
@@ -208,6 +208,32 @@ describe("catalog channel visibility", () => {
       userId: "user-visibility-other",
       visible: true,
     })).rejects.toMatchObject({ code: "resource_not_found", status: 404 });
+
+    for (const channelCode of ["telegram.mini_app", "zalo.mini_app", "zalo.oa", "whatsapp.cloud", "discord.bot"] as const) {
+      await expect(setCatalogChannelVisibility({
+        channelCode,
+        env: runtime.env,
+        expectedVersion: 0,
+        idempotencyKey: `visibility-pending-${channelCode.replaceAll(".", "-")}`,
+        productId: PRODUCT_A,
+        requestId: `request-pending-${channelCode.replaceAll(".", "-")}`,
+        shopPublicId: "shop-visibility-public-a",
+        userId: "user-visibility-owner",
+        visible: true,
+      })).rejects.toMatchObject({ code: "channel_provider_pending", status: 409 });
+    }
+
+    runtime.database.prepare(`
+      INSERT INTO catalog_channel_visibility (
+        shop_id, product_id, channel_code, status, version,
+        updated_by_user_id, created_at, updated_at
+      ) VALUES (?, ?, 'telegram.mini_app', 'visible', 1, ?, ?, ?)
+    `).run("shop-visibility-a", PRODUCT_A, "user-visibility-owner", NOW, NOW);
+    expect((await listCatalogChannelVisibility({
+      env: runtime.env,
+      shopPublicId: "shop-visibility-public-a",
+      userId: "user-visibility-owner",
+    })).find((row) => row.channelCode === "telegram.mini_app")).toMatchObject({ status: "hidden", version: 1 });
   });
 
   it("does not expose products hidden from the website projection", async () => {

@@ -146,6 +146,25 @@ export function requireChannelExpansion(code: string): ChannelExpansionCatalogEn
   return entry;
 }
 
+export function isChannelCatalogPublishingAllowed(code: string): boolean {
+  const expansion = CHANNEL_EXPANSION_CATALOG.find((candidate) => candidate.code === code);
+  if (expansion !== undefined) return false;
+  return builtInChannelRegistry.get(code) !== null;
+}
+
+export function isChannelSellerActivationAllowed(code: string): boolean {
+  return isChannelCatalogPublishingAllowed(code);
+}
+
+export function assertChannelProviderExecutionReady(code: string): void {
+  const expansion = CHANNEL_EXPANSION_CATALOG.find((candidate) => candidate.code === code);
+  if (expansion === undefined) {
+    if (builtInChannelRegistry.get(code) === null) throw new AppError("channel_adapter_unknown", 404);
+    return;
+  }
+  throw new AppError("channel_provider_pending", 409, [expansion.code]);
+}
+
 export function assertExpansionProviderPending(code: string): never {
   const entry = requireChannelExpansion(code);
   throw new AppError("channel_provider_pending", 409, [entry.code]);

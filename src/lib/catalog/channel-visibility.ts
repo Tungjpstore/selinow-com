@@ -3,7 +3,11 @@ import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
-import { platformChannelRegistry } from "../channels/expansion";
+import {
+  assertChannelProviderExecutionReady,
+  isChannelCatalogPublishingAllowed,
+  platformChannelRegistry,
+} from "../channels/expansion";
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,128}$/u;
 
@@ -66,7 +70,7 @@ function mapRow(row: VisibilityRow): CatalogChannelVisibility {
     productSlug: row.productSlug,
     productStatus: row.productStatus,
     productTitle: row.productTitle,
-    status: row.status,
+    status: isChannelCatalogPublishingAllowed(row.channelCode) ? row.status : "hidden",
     updatedAt: row.updatedAt,
     updatedByUserId: row.updatedByUserId,
     version: row.version,
@@ -192,6 +196,7 @@ export async function setCatalogChannelVisibility(input: {
     LIMIT 1
   `).bind(productId, actor.row.shop_id).first<{ id: string; productSlug: string; productStatus: string; productTitle: string }>();
   if (product === null) throw new AppError("resource_not_found", 404);
+  if (input.visible) assertChannelProviderExecutionReady(channelCode);
 
   const namespace = `catalog-channel-visibility.set.v1:${actor.row.shop_id}:${productId}:${channelCode}`;
   const keyHash = await hmacToken(input.env.SESSION_SECRET, "catalog-channel-visibility-idempotency:v1", idempotencyKey);

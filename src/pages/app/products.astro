@@ -11,6 +11,7 @@ import { getBindings } from "../../lib/platform/bindings";
 import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
 import { createDashboardTranslator } from "../../lib/i18n";
 import { currencyInputStep, formatMinorAmountForInput } from "../../lib/i18n/currency";
+import { isChannelCatalogPublishingAllowed } from "../../lib/channels/expansion";
 
 const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
@@ -47,7 +48,7 @@ const catalogVisibilityChannels = [
   { code: "zalo.oa", label: t("dashboard.integrations.channel_expansion.name.zalo_oa") },
   { code: "whatsapp.cloud", label: t("dashboard.integrations.channel_expansion.name.whatsapp_cloud") },
   { code: "discord.bot", label: t("dashboard.integrations.channel_expansion.name.discord_bot") },
-] as const;
+].map((channel) => ({ ...channel, providerPending: !isChannelCatalogPublishingAllowed(channel.code) }));
 const productRows = products.map((product, index) => {
   const productId = String(product.id ?? "");
   const rows = productVariants.get(productId) ?? [];
@@ -97,8 +98,8 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
                 <div class="visibility-product-heading"><div><strong>{String(product.title ?? t("dashboard.products.product.untitled"))}</strong><small>/{String(product.slug ?? "")}</small></div><StatusBadge label={labelForStatus[String(product.status)] ?? t("dashboard.products.status.unknown")} tone={toneForStatus(product.status)} /></div>
                 <div class="visibility-channel-grid" role="group" aria-label={t("dashboard.products.visibility.product_aria", { product: String(product.title ?? t("dashboard.products.product.untitled")) })}>
                   {catalogVisibilityChannels.map((channel) => (
-                    <button class="visibility-toggle" type="button" data-visibility-toggle data-product-id={productId} data-channel-code={channel.code} data-channel-label={channel.label} data-visible="false" data-version="0" aria-pressed="false" disabled>
-                      <span class="visibility-channel-name">{channel.label}</span><span class="visibility-state" data-visibility-state>{t("dashboard.products.visibility.hidden")}</span>
+                    <button class="visibility-toggle" type="button" data-visibility-toggle data-product-id={productId} data-channel-code={channel.code} data-channel-label={channel.label} data-provider-pending={channel.providerPending ? "true" : "false"} data-visible="false" data-version="0" aria-pressed="false" aria-disabled={channel.providerPending ? "true" : undefined} disabled>
+                      <span class="visibility-channel-name">{channel.label}</span><span class="visibility-state" data-visibility-state>{channel.providerPending ? t("dashboard.integrations.channel_expansion.status_provider_pending") : t("dashboard.products.visibility.hidden")}</span>
                     </button>
                   ))}
                 </div>

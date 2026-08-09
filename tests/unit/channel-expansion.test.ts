@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { AppError } from "../../src/lib/core/errors";
 import {
+  assertChannelProviderExecutionReady,
   CHANNEL_EXPANSION_CATALOG,
   DISCORD_BOT_CHANNEL_CODE,
+  isChannelCatalogPublishingAllowed,
+  isChannelSellerActivationAllowed,
   platformChannelRegistry,
   TELEGRAM_MINI_APP_CHANNEL_CODE,
   WHATSAPP_CLOUD_CHANNEL_CODE,
@@ -12,6 +15,7 @@ import {
 } from "../../src/lib/channels/expansion";
 import { verifyTelegramMiniAppInitData } from "../../src/lib/channels/mini-app";
 import { decideOutboundMessagePolicy } from "../../src/lib/channels/messaging-policy";
+import { listAvailableChannelExpansions } from "../../src/lib/channels/connector-requests";
 
 const BOT_TOKEN = "123456789:mini-app-test-token";
 const AUTH_DATE = 1_780_000_000;
@@ -67,6 +71,21 @@ describe("channel expansion contracts", () => {
       "provider_pending",
       "provider_pending",
     ]);
+    expect(isChannelCatalogPublishingAllowed("website")).toBe(true);
+    expect(isChannelCatalogPublishingAllowed("telegram")).toBe(true);
+    expect(isChannelSellerActivationAllowed("website")).toBe(true);
+    expect(isChannelSellerActivationAllowed("telegram")).toBe(true);
+    for (const entry of CHANNEL_EXPANSION_CATALOG) {
+      expect(isChannelCatalogPublishingAllowed(entry.code)).toBe(false);
+      expect(isChannelSellerActivationAllowed(entry.code)).toBe(false);
+      expect(() => { assertChannelProviderExecutionReady(entry.code); }).toThrow(expect.objectContaining({
+        code: "channel_provider_pending",
+        status: 409,
+      }));
+    }
+    expect(listAvailableChannelExpansions().every((entry) => (
+      !entry.catalogPublishingAllowed && !entry.sellerActivationAllowed
+    ))).toBe(true);
   });
 
   it("enforces WhatsApp windows and keeps secrets on authorized reveal paths", () => {

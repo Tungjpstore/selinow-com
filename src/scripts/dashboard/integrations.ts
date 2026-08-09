@@ -17,6 +17,7 @@ type ChannelConnectorStatus = "active" | "canceled" | "provider_pending" | "reje
 type ChannelExpansionStage = "contract_ready" | "provider_pending";
 type ChannelExpansion = {
   capabilities: string[];
+  catalogPublishingAllowed: boolean;
   code: string;
   family: string;
   inlineSecretDelivery: false;
@@ -24,6 +25,7 @@ type ChannelExpansion = {
   providerExecution: ChannelExpansionStage;
   requiredSellerAction: "connect_provider" | "create_app" | "create_bot";
   safeDescriptionKey: string;
+  sellerActivationAllowed: boolean;
   version: number;
 };
 type ChannelConnectorRequest = {
@@ -213,17 +215,20 @@ if (root !== null) {
     if (normalizedCapabilities.length !== capabilities.length) return null;
     if (
       typeof object.code !== "string"
+      || typeof object.catalogPublishingAllowed !== "boolean"
       || typeof object.family !== "string"
       || object.inlineSecretDelivery !== false
       || typeof object.providerCode !== "string"
       || (object.providerExecution !== "contract_ready" && object.providerExecution !== "provider_pending")
       || (object.requiredSellerAction !== "connect_provider" && object.requiredSellerAction !== "create_app" && object.requiredSellerAction !== "create_bot")
       || typeof object.safeDescriptionKey !== "string"
+      || typeof object.sellerActivationAllowed !== "boolean"
       || typeof object.version !== "number"
       || !Number.isSafeInteger(object.version)
     ) return null;
     return {
       capabilities: normalizedCapabilities,
+      catalogPublishingAllowed: object.catalogPublishingAllowed,
       code: object.code,
       family: object.family,
       inlineSecretDelivery: false,
@@ -231,6 +236,7 @@ if (root !== null) {
       providerExecution: object.providerExecution,
       requiredSellerAction: object.requiredSellerAction,
       safeDescriptionKey: object.safeDescriptionKey,
+      sellerActivationAllowed: object.sellerActivationAllowed,
       version: object.version,
     };
   };
@@ -356,6 +362,7 @@ if (root !== null) {
     if (channelExpansionEmpty !== null) channelExpansionEmpty.hidden = expansions.length > 0;
     for (const expansion of expansions) {
       const request = requests.find((candidate) => candidate.channelCode === expansion.code) ?? null;
+      const sellerActivationAllowed = expansion.sellerActivationAllowed;
       const card = document.createElement("article");
       card.className = `channel-expansion-card channel-expansion-card--${channelSurfaceSlug(expansion.code)}`;
       card.id = `channel-${channelSurfaceSlug(expansion.code)}`;
@@ -416,6 +423,7 @@ if (root !== null) {
       const note = document.createElement("span");
       note.className = "provider-note";
       if (!canManageChannelConnectors) note.textContent = text("channelExpansionReadOnly");
+      else if (!sellerActivationAllowed) note.textContent = text("channelExpansionStageProviderPending");
       else if (request !== null) note.textContent = `${request.requestPublicId} · ${channelDate(request.updatedAt)}`;
       else note.textContent = requiredSellerAction(expansion.requiredSellerAction);
       actions.appendChild(note);
@@ -429,7 +437,7 @@ if (root !== null) {
           cancel.dataset.requestVersion = String(request.version);
           cancel.textContent = text("channelExpansionCancel");
           actions.appendChild(cancel);
-        } else if (request === null || request.status === "canceled" || request.status === "rejected") {
+        } else if (sellerActivationAllowed && (request === null || request.status === "canceled" || request.status === "rejected")) {
           const create = document.createElement("button");
           create.type = "button";
           create.className = "app-button app-button-secondary";

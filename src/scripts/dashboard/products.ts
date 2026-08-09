@@ -521,17 +521,20 @@ if (visibilityPanel !== null && visibilityShopId !== undefined && visibilityCsrf
       && Number.isSafeInteger((row as JsonObject).version));
   };
   const setVisibilityToggle = (button: HTMLButtonElement, status: "hidden" | "visible", version: number): void => {
-    const visible = status === "visible";
+    const providerPending = button.dataset.providerPending === "true";
+    const visible = !providerPending && status === "visible";
     button.dataset.visible = String(visible);
     button.dataset.version = String(version);
     button.classList.toggle("is-visible", visible);
     button.setAttribute("aria-pressed", String(visible));
     const state = button.querySelector<HTMLElement>("[data-visibility-state]");
-    if (state !== null) state.textContent = visible ? t("dashboard.products.visibility.visible") : t("dashboard.products.visibility.hidden");
+    if (state !== null) state.textContent = providerPending
+      ? t("dashboard.integrations.channel_expansion.status_provider_pending")
+      : visible ? t("dashboard.products.visibility.visible") : t("dashboard.products.visibility.hidden");
   };
   const setVisibilityReady = (ready: boolean): void => {
     visibilityReady = ready;
-    for (const button of visibilityToggles) button.disabled = !ready;
+    for (const button of visibilityToggles) button.disabled = !visibilityReady || button.dataset.providerPending === "true";
   };
   const loadVisibility = async (): Promise<boolean> => {
     setVisibilityReady(false);
@@ -562,6 +565,7 @@ if (visibilityPanel !== null && visibilityShopId !== undefined && visibilityCsrf
     }
   };
   const setVisibility = async (button: HTMLButtonElement): Promise<void> => {
+    if (button.dataset.providerPending === "true") return;
     const productId = button.dataset.productId;
     const channelCode = button.dataset.channelCode;
     if (productId === undefined || channelCode === undefined) return;
@@ -614,7 +618,7 @@ if (visibilityPanel !== null && visibilityShopId !== undefined && visibilityCsrf
           : t("dashboard.products.visibility.save_error_generic");
       }
     } finally {
-      button.disabled = !visibilityReady;
+      button.disabled = !visibilityReady || button.dataset.providerPending === "true";
     }
   };
   for (const button of visibilityToggles) button.addEventListener("click", () => { void setVisibility(button); });

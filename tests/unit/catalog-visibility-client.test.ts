@@ -32,6 +32,55 @@ afterEach(() => {
 });
 
 describe("catalog visibility client", () => {
+  it("keeps provider-pending channels disabled even when stale data says visible", async () => {
+    const feedback = element();
+    const retry = element();
+    retry.hidden = true;
+    const state = element();
+    const toggle = element({
+      channelCode: "telegram.mini_app",
+      productId: "prd_11111111-1111-4111-8111-111111111111",
+      providerPending: "true",
+      version: "0",
+      visible: "false",
+    });
+    toggle.disabled = true;
+    toggle.querySelector = (selector) => selector === "[data-visibility-state]" ? state : null;
+    const panel = element({ csrfCookieName: "csrf", shopPublicId: "shop-public-a" });
+    panel.querySelector = (selector) => selector === "[data-channel-visibility-feedback]"
+      ? feedback
+      : selector === "[data-channel-visibility-retry]" ? retry : null;
+    panel.querySelectorAll = (selector) => selector === "[data-visibility-toggle]" ? [toggle] : [];
+    const documentMock = {
+      cookie: "",
+      documentElement: { lang: "en" },
+      querySelector: (selector: string) => selector === "[data-channel-visibility-panel]" ? panel : null,
+      querySelectorAll: () => [],
+    } as unknown as Document;
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        visibility: [{
+          channelCode: "telegram.mini_app",
+          productId: "prd_11111111-1111-4111-8111-111111111111",
+          status: "visible",
+          version: 7,
+        }],
+      }),
+      ok: true,
+    });
+    vi.stubGlobal("document", documentMock);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await import("../../src/scripts/dashboard/products");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.dataset.visible).toBe("false");
+    expect(toggle.dataset.version).toBe("7");
+    expect(state.textContent).toBe("Provider pending");
+    expect(toggle.classList.toggle).toHaveBeenCalledWith("is-visible", false);
+  });
+
   it("keeps controls disabled and offers retry when the initial read fails", async () => {
     const feedback = element();
     const retry = element();
