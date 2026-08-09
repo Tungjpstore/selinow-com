@@ -104,4 +104,47 @@ describe("buyer privacy route", () => {
       requestId: "privacy-route-request",
     });
   });
+
+  it("requires an explicit anonymization phrase before calling the service", async () => {
+    dependencies.recent = true;
+    dependencies.execute.mockReset();
+    const invalid = context();
+    invalid.request = new Request("https://app.example.test/privacy", {
+      body: JSON.stringify({ confirmation: "delete", kind: "anonymize" }),
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "privacy-route-key" },
+      method: "POST",
+    });
+
+    const response = await POST(invalid);
+
+    expect(response.status).toBe(400);
+    expect(dependencies.execute).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      code: "validation_failed",
+      issues: ["privacy_confirmation_invalid"],
+      requestId: "privacy-route-request",
+    });
+  });
+
+  it("accepts the exact anonymization phrase without forwarding it to storage", async () => {
+    dependencies.recent = true;
+    dependencies.execute.mockReset();
+    dependencies.execute.mockResolvedValueOnce({
+      privacyRequestPublicId: "pvr_00000000-0000-4000-8000-000000000002",
+      safeResultCode: "anonymized_financial_audit_retained",
+      status: "completed",
+    });
+    const accepted = context();
+    accepted.request = new Request("https://app.example.test/privacy", {
+      body: JSON.stringify({ confirmation: "ANONYMIZE", kind: "anonymize" }),
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "privacy-route-key" },
+      method: "POST",
+    });
+
+    const response = await POST(accepted);
+
+    expect(response.status).toBe(200);
+    expect(dependencies.execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "anonymize" }));
+    expect(dependencies.execute.mock.calls[0]?.[0]).not.toHaveProperty("confirmation");
+  });
 });

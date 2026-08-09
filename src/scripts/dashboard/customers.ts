@@ -4,7 +4,7 @@ type JsonObject = Record<string, unknown>;
 type CustomerPointer = { publicId: string; version: number };
 
 class CustomerApiError extends Error {
-  constructor(readonly code: string) {
+  constructor(readonly code: string, readonly requestId: string | null = null) {
     super(code);
     this.name = "CustomerApiError";
   }
@@ -21,6 +21,8 @@ if (root !== null && root.dataset.canManage === "true") {
   const form = root.querySelector<HTMLFormElement>("[data-customer-form]");
   const noteForm = root.querySelector<HTMLFormElement>("[data-customer-note-form]");
   const notes = root.querySelector<HTMLElement>("[data-customer-notes]");
+  const privacyStatus = root.querySelector<HTMLElement>("[data-customer-privacy-status]");
+  const anonymizeForm = root.querySelector<HTMLFormElement>("[data-customer-anonymize-form]");
   const copy = (() => {
     try { const parsed: unknown = JSON.parse(root.dataset.copy ?? "{}"); return typeof parsed === "object" && parsed !== null ? parsed as Record<string, string> : {}; }
     catch { return {}; }
@@ -46,6 +48,12 @@ if (root !== null && root.dataset.canManage === "true") {
     feedback.dataset.tone = tone;
     feedback.hidden = message.length === 0;
   };
+  const showPrivacyStatus = (message: string, tone: "danger" | "info" | "success" = "info"): void => {
+    if (privacyStatus === null) return;
+    privacyStatus.textContent = message;
+    privacyStatus.dataset.tone = tone;
+    privacyStatus.hidden = message.length === 0;
+  };
   const request = async (url: string, options: RequestInit = {}, idempotent = false): Promise<JsonObject | null> => {
     const headers = new Headers(options.headers);
     headers.set("Accept", "application/json");
@@ -61,24 +69,38 @@ if (root !== null && root.dataset.canManage === "true") {
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       const code = typeof payload === "object" && payload !== null && typeof (payload as { code?: unknown }).code === "string" ? (payload as { code: string }).code : "request_failed";
-      throw new CustomerApiError(code);
+      const requestId = typeof payload === "object" && payload !== null && typeof (payload as { requestId?: unknown }).requestId === "string" ? (payload as { requestId: string }).requestId : null;
+      throw new CustomerApiError(code, requestId);
     }
     return typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload as JsonObject : null;
   };
   const customerFrom = (payload: JsonObject | null): JsonObject | null => typeof payload?.customer === "object" && payload.customer !== null && !Array.isArray(payload.customer) ? payload.customer as JsonObject : null;
+  const privacyFrom = (payload: JsonObject | null): JsonObject | null => typeof payload?.privacy === "object" && payload.privacy !== null && !Array.isArray(payload.privacy) ? payload.privacy as JsonObject : null;
+  const requestIdFrom = (payload: JsonObject | null): string | null => typeof payload?.requestId === "string" ? payload.requestId : null;
+  const requestReference = (requestId: string | null): string => requestId === null ? "" : ` ${text("requestId").replace("{requestId}", requestId)}`;
   const errorMessage = (error: unknown): string => {
     const code = error instanceof CustomerApiError ? error.code : error instanceof Error ? error.message : "";
-    if (code === "recent_auth_required") return text("errorRecentAuth") || text("error");
-    if (code === "version_conflict" || code === "idempotency_conflict") return text("errorConflict") || text("error");
-    if (code === "forbidden" || code === "authorization_denied") return text("errorForbidden") || text("error");
-    if (code === "customer_not_found") return text("errorNotFound") || text("unavailable");
-    return text("error");
+    let message = text("error");
+    if (code === "recent_auth_required") message = text("errorRecentAuth") || message;
+    else if (code === "version_conflict" || code === "idempotency_conflict" || code === "privacy_request_conflict") message = text("errorConflict") || message;
+    else if (code === "forbidden" || code === "authorization_denied") message = text("errorForbidden") || message;
+    else if (code === "customer_not_found") message = text("errorNotFound") || text("unavailable");
+    else if (code === "customer_anonymized") message = text("errorAnonymized") || message;
+    return `${message}${requestReference(error instanceof CustomerApiError ? error.requestId : null)}`;
+  };
+  const setMutationControlsDisabled = (disabled: boolean): void => {
+    for (const control of [...(form?.elements ?? []), ...(noteForm?.elements ?? []), ...(anonymizeForm?.elements ?? [])]) {
+      if (control instanceof HTMLButtonElement || control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement) control.disabled = disabled;
+    }
   };
   const clearDetail = (): void => {
     form?.reset();
     noteForm?.reset();
+    anonymizeForm?.reset();
     if (email !== null) email.textContent = "";
     notes?.replaceChildren();
+    showPrivacyStatus("");
+    setMutationControlsDisabled(false);
   };
   const syncLedgerRow = (customer: JsonObject): void => {
     const publicId = typeof customer.publicId === "string" ? customer.publicId : null;
@@ -112,6 +134,9 @@ if (root !== null && root.dataset.canManage === "true") {
     if (name instanceof HTMLInputElement) name.value = typeof customer.displayName === "string" ? customer.displayName : "";
     if (locale instanceof HTMLSelectElement) locale.value = typeof customer.locale === "string" ? customer.locale : "en";
     if (status instanceof HTMLSelectElement) status.value = customer.status === "blocked" ? "blocked" : "active";
+    const anonymized = typeof customer.anonymizedAt === "string";
+    setMutationControlsDisabled(anonymized);
+    if (anonymized) showPrivacyStatus(text("privacyAnonymized"), "success");
     if (notes === null) return;
     notes.replaceChildren();
     const values = Array.isArray(customer.notes) ? customer.notes : [];
@@ -131,6 +156,20 @@ if (root !== null && root.dataset.canManage === "true") {
       if (note.status === "redacted") body.textContent = text("redacted");
       notes.appendChild(article);
     }
+  };
+  const downloadPrivacyExport = (privacy: JsonObject, customerPublicId: string): void => {
+    const projection = privacy.projection;
+    const privacyRequestPublicId = privacy.privacyRequestPublicId;
+    if (typeof projection !== "object" || projection === null || Array.isArray(projection) || typeof privacyRequestPublicId !== "string") {
+      throw new CustomerApiError("invalid_response");
+    }
+    const blob = new Blob([JSON.stringify({ privacyRequestPublicId, projection, schemaVersion: 1 }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `selinow-customer-${customerPublicId}-export.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
   const load = async (publicId: string): Promise<void> => {
     if (shopPublicId === undefined || loading) return;
@@ -158,6 +197,18 @@ if (root !== null && root.dataset.canManage === "true") {
     const open = target.closest<HTMLElement>("[data-customer-open]");
     if (open !== null) { const row = open.closest<HTMLElement>("[data-customer-row]"); const id = row?.dataset.customerPublicId; if (id !== undefined) void load(id); return; }
     if (target.closest("[data-customer-close]") !== null) { loadSequence += 1; if (detail !== null) detail.hidden = true; current = null; clearDetail(); return; }
+    if (target.closest("[data-customer-export]") !== null) {
+      if (current === null || pending || loading || shopPublicId === undefined) return;
+      const customerPublicId = current.publicId;
+      pending = true; showPrivacyStatus(text("privacyExporting"), "info");
+      void request(`/api/app/shops/${encodeURIComponent(shopPublicId)}/customers/${encodeURIComponent(customerPublicId)}/privacy`, { method: "POST", body: JSON.stringify({ kind: "export" }) }, true).then((payload) => {
+        const privacy = privacyFrom(payload);
+        if (privacy === null || privacy.safeResultCode !== "export_ready") throw new CustomerApiError("invalid_response", requestIdFrom(payload));
+        downloadPrivacyExport(privacy, customerPublicId);
+        showPrivacyStatus(`${text("privacyExported")}${requestReference(requestIdFrom(payload))}`, "success");
+      }).catch((error: unknown) => { showPrivacyStatus(errorMessage(error), "danger"); }).finally(() => { pending = false; });
+      return;
+    }
     const redact = target.closest<HTMLButtonElement>("[data-note-redact]");
     if (redact === null || current === null || pending || loading) return;
     const note = redact.closest<HTMLElement>("[data-note-public-id]");
@@ -180,5 +231,24 @@ if (root !== null && root.dataset.canManage === "true") {
     const customerPublicId = current.publicId;
     pending = true; showFeedback(text("addingNote"), "info");
     void request(`/api/app/shops/${encodeURIComponent(shopPublicId)}/customers/${encodeURIComponent(customerPublicId)}/notes`, { method: "POST", body: JSON.stringify({ body }) }, true).then(() => { noteForm.reset(); showFeedback(text("noteAdded"), "success"); void load(customerPublicId); }).catch((error: unknown) => { showFeedback(errorMessage(error), "danger"); }).finally(() => { pending = false; });
+  });
+  anonymizeForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (current === null || pending || loading || shopPublicId === undefined || !anonymizeForm.reportValidity()) return;
+    const confirmation = new FormData(anonymizeForm).get("confirmation");
+    if (confirmation !== "ANONYMIZE") return;
+    const customerPublicId = current.publicId;
+    pending = true; showPrivacyStatus(text("privacyAnonymizing"), "info");
+    void request(`/api/app/shops/${encodeURIComponent(shopPublicId)}/customers/${encodeURIComponent(customerPublicId)}/privacy`, { method: "POST", body: JSON.stringify({ confirmation, kind: "anonymize" }) }, true).then(async (payload) => {
+      const privacy = privacyFrom(payload);
+      if (privacy === null) throw new CustomerApiError("invalid_response", requestIdFrom(payload));
+      if (privacy.safeResultCode === "active_records_blocked") {
+        showPrivacyStatus(`${text("errorPrivacyBlocked")}${requestReference(requestIdFrom(payload))}`, "danger");
+        return;
+      }
+      if (privacy.safeResultCode !== "anonymized_financial_audit_retained") throw new CustomerApiError("invalid_response", requestIdFrom(payload));
+      await load(customerPublicId);
+      showPrivacyStatus(`${text("privacyAnonymized")}${requestReference(requestIdFrom(payload))}`, "success");
+    }).catch((error: unknown) => { showPrivacyStatus(errorMessage(error), "danger"); }).finally(() => { pending = false; });
   });
 }

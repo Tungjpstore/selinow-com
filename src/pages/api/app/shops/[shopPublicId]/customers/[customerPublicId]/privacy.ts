@@ -13,9 +13,15 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     const auth = await requireCsrfSession(request, env);
     requireRecentAuth(auth);
     const body = await readJsonObject(request, 2 * 1024);
-    rejectUnknownFields(body, ["kind"]);
+    rejectUnknownFields(body, ["confirmation", "kind"]);
     if (body.kind !== "export" && body.kind !== "anonymize") {
       return Response.json({ ok: false, code: "validation_failed", issues: ["privacy_kind_invalid"], requestId: locals.requestId }, { status: 400, headers: PRIVATE_RESPONSE_HEADERS });
+    }
+    if (body.kind === "anonymize" && body.confirmation !== "ANONYMIZE") {
+      return Response.json({ ok: false, code: "validation_failed", issues: ["privacy_confirmation_invalid"], requestId: locals.requestId }, { status: 400, headers: PRIVATE_RESPONSE_HEADERS });
+    }
+    if (body.kind === "export" && Object.hasOwn(body, "confirmation")) {
+      return Response.json({ ok: false, code: "validation_failed", issues: ["privacy_confirmation_unexpected"], requestId: locals.requestId }, { status: 400, headers: PRIVATE_RESPONSE_HEADERS });
     }
     const privacy = await executeBuyerPrivacyRequest({
       customerPublicId: requireResourceId(params.customerPublicId, "cus"),

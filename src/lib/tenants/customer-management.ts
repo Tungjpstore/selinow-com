@@ -100,6 +100,7 @@ export type SellerCustomerOrder = {
 };
 
 export type SellerCustomerDetail = {
+  anonymizedAt: string | null;
   createdAt: string;
   displayName: string | null;
   emailMasked: string | null;
@@ -197,6 +198,7 @@ export async function getSellerCustomer(input: {
     input.env.PLATFORM_DB.prepare("SELECT COUNT(*) AS orderCount FROM orders WHERE shop_id = ? AND customer_id = ?").bind(actor.row.shop_id, customer.id).first<{ orderCount: number }>(),
   ]);
   return {
+    anonymizedAt: customer.anonymizedAt,
     createdAt: customer.createdAt,
     displayName: actor.row.role === "support" ? maskDisplayName(customer.displayName) : customer.displayName,
     emailMasked: maskEmail(customer.email),
@@ -427,65 +429,97 @@ export async function executeBuyerPrivacyRequest(input: {
     ]);
     return { privacyRequestPublicId: privacyRequestId, projection, safeResultCode: "export_ready", status: "completed" };
   }
-
-  const blockers = await input.env.PLATFORM_DB.prepare(`
-    SELECT COUNT(*) AS count FROM orders
-    WHERE shop_id = ? AND customer_id = ? AND (
-      status NOT IN ('completed', 'canceled', 'expired')
-      OR payment_status IN ('pending', 'partial', 'overpaid')
-      OR fulfillment_status = 'reserved'
-    )
-  `).bind(actor.row.shop_id, input.customerPublicId).first<{ count: number }>();
-  if ((blockers?.count ?? 0) > 0) {
-    await input.env.PLATFORM_DB.prepare(`
-      INSERT INTO buyer_privacy_requests (
-        id, public_id, shop_id, customer_id, kind, status, requested_by_user_id,
-        idempotency_key_hash, request_hash, safe_result_code, retained_records_json,
-        request_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'anonymize', 'blocked', ?, ?, ?, 'active_records_blocked', ?, ?, ?, ?)
-    `).bind(privacyRequestId, privacyRequestId, actor.row.shop_id, input.customerPublicId, input.userId, keyHash, requestHash, JSON.stringify({ activeOrderCount: blockers?.count ?? 0 }), input.requestId, nowIso, nowIso).run();
-    return { privacyRequestPublicId: privacyRequestId, safeResultCode: "active_records_blocked", status: "blocked" };
-  }
-
-  const retained = await input.env.PLATFORM_DB.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM orders WHERE shop_id = ? AND customer_id = ?) AS orderCount,
-      (SELECT COUNT(*) FROM audit_logs WHERE shop_id = ? AND resource_type = 'customer' AND resource_id = ?) AS auditCount
-  `).bind(actor.row.shop_id, input.customerPublicId, actor.row.shop_id, input.customerPublicId).first<{ auditCount: number; orderCount: number }>();
   const mutation = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
       UPDATE shop_customers SET email_normalized = NULL, display_name = NULL, status = 'blocked',
         anonymized_at = ?, updated_at = ?, version = version + 1
       WHERE shop_id = ? AND id = ? AND anonymized_at IS NULL
-    `).bind(nowIso, nowIso, actor.row.shop_id, input.customerPublicId),
-    input.env.PLATFORM_DB.prepare(`
-      UPDATE orders SET customer_email_masked = NULL, updated_at = ?
-      WHERE shop_id = ? AND customer_id = ?
-    `).bind(nowIso, actor.row.shop_id, input.customerPublicId),
-    input.env.PLATFORM_DB.prepare(`
-      UPDATE customer_notes SET body = '[redacted]', status = 'redacted', redacted_at = ?, updated_at = ?, version = version + 1
-      WHERE shop_id = ? AND customer_id = ? AND status = 'active'
-    `).bind(nowIso, nowIso, actor.row.shop_id, input.customerPublicId),
-    input.env.PLATFORM_DB.prepare("DELETE FROM customer_identities WHERE shop_id = ? AND customer_id = ?").bind(actor.row.shop_id, input.customerPublicId),
-    input.env.PLATFORM_DB.prepare("DELETE FROM channel_customer_identities WHERE shop_id = ? AND customer_id = ?").bind(actor.row.shop_id, input.customerPublicId),
+        AND NOT EXISTS (
+          SELECT 1 FROM orders
+          WHERE shop_id = ? AND customer_id = ? AND (
+            status NOT IN ('completed', 'canceled', 'expired')
+            OR payment_status IN ('pending', 'partial', 'overpaid')
+            OR fulfillment_status = 'reserved'
+          )
+        )
+    `).bind(nowIso, nowIso, actor.row.shop_id, input.customerPublicId, actor.row.shop_id, input.customerPublicId),
     input.env.PLATFORM_DB.prepare(`
       INSERT INTO buyer_privacy_requests (
         id, public_id, shop_id, customer_id, kind, status, requested_by_user_id,
         idempotency_key_hash, request_hash, safe_result_code, retained_records_json,
         request_id, completed_at, created_at, updated_at
       ) SELECT ?, ?, ?, ?, 'anonymize', 'completed', ?, ?, ?,
-        'anonymized_financial_audit_retained', ?, ?, ?, ?, ?
-      WHERE EXISTS (SELECT 1 FROM shop_customers WHERE shop_id = ? AND id = ? AND anonymized_at = ?)
-    `).bind(privacyRequestId, privacyRequestId, actor.row.shop_id, input.customerPublicId, input.userId, keyHash, requestHash, JSON.stringify(retained ?? { auditCount: 0, orderCount: 0 }), input.requestId, nowIso, nowIso, nowIso, actor.row.shop_id, input.customerPublicId, nowIso),
+        'anonymized_financial_audit_retained', json_object(
+          'orderCount', (SELECT COUNT(*) FROM orders WHERE shop_id = ? AND customer_id = ?),
+          'auditCount', (SELECT COUNT(*) FROM audit_logs WHERE shop_id = ? AND resource_type = 'customer' AND resource_id = ?)
+        ), ?, ?, ?, ?
+      WHERE changes() = 1
+        AND EXISTS (SELECT 1 FROM shop_customers WHERE shop_id = ? AND id = ? AND anonymized_at = ?)
+    `).bind(privacyRequestId, privacyRequestId, actor.row.shop_id, input.customerPublicId, input.userId, keyHash, requestHash, actor.row.shop_id, input.customerPublicId, actor.row.shop_id, input.customerPublicId, input.requestId, nowIso, nowIso, nowIso, actor.row.shop_id, input.customerPublicId, nowIso),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE orders SET customer_email_masked = NULL, updated_at = ?
+      WHERE shop_id = ? AND customer_id = ?
+        AND EXISTS (
+          SELECT 1 FROM buyer_privacy_requests
+          WHERE id = ? AND shop_id = ? AND status = 'completed'
+        )
+    `).bind(nowIso, actor.row.shop_id, input.customerPublicId, privacyRequestId, actor.row.shop_id),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE customer_notes SET body = '[redacted]', status = 'redacted', redacted_at = ?, updated_at = ?, version = version + 1
+      WHERE shop_id = ? AND customer_id = ? AND status = 'active'
+        AND EXISTS (
+          SELECT 1 FROM buyer_privacy_requests
+          WHERE id = ? AND shop_id = ? AND status = 'completed'
+        )
+    `).bind(nowIso, nowIso, actor.row.shop_id, input.customerPublicId, privacyRequestId, actor.row.shop_id),
+    input.env.PLATFORM_DB.prepare(`
+      DELETE FROM customer_identities
+      WHERE shop_id = ? AND customer_id = ?
+        AND EXISTS (
+          SELECT 1 FROM buyer_privacy_requests
+          WHERE id = ? AND shop_id = ? AND status = 'completed'
+        )
+    `).bind(actor.row.shop_id, input.customerPublicId, privacyRequestId, actor.row.shop_id),
+    input.env.PLATFORM_DB.prepare(`
+      DELETE FROM channel_customer_identities
+      WHERE shop_id = ? AND customer_id = ?
+        AND EXISTS (
+          SELECT 1 FROM buyer_privacy_requests
+          WHERE id = ? AND shop_id = ? AND status = 'completed'
+        )
+    `).bind(actor.row.shop_id, input.customerPublicId, privacyRequestId, actor.row.shop_id),
     input.env.PLATFORM_DB.prepare(`
       INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type,
         resource_id, safe_metadata_json, request_id, source_kind, retention_class, created_at)
-      SELECT ?, ?, 'user', ?, 'customer.anonymized', 'customer', ?, ?, ?, 'http', 'security', ?
-      WHERE EXISTS (SELECT 1 FROM buyer_privacy_requests WHERE id = ? AND shop_id = ? AND status = 'completed')
-    `).bind(createId("aud"), actor.row.shop_id, input.userId, input.customerPublicId, JSON.stringify({ retainedAuditRecords: retained?.auditCount ?? 0, retainedOrderRecords: retained?.orderCount ?? 0 }), input.requestId, nowIso, privacyRequestId, actor.row.shop_id),
+      SELECT ?, ?, 'user', ?, 'customer.anonymized', 'customer', ?, retained_records_json,
+        ?, 'http', 'security', ?
+      FROM buyer_privacy_requests
+      WHERE id = ? AND shop_id = ? AND status = 'completed'
+    `).bind(createId("aud"), actor.row.shop_id, input.userId, input.customerPublicId, input.requestId, nowIso, privacyRequestId, actor.row.shop_id),
   ]);
-  if (mutation[0]?.meta.changes !== 1 || mutation[5]?.meta.changes !== 1 || mutation[6]?.meta.changes !== 1) {
-    throw new AppError("privacy_request_conflict", 409);
+  if (mutation[0]?.meta.changes === 1 && mutation[1]?.meta.changes === 1 && mutation[6]?.meta.changes === 1) {
+    return { privacyRequestPublicId: privacyRequestId, safeResultCode: "anonymized_financial_audit_retained", status: "completed" };
   }
-  return { privacyRequestPublicId: privacyRequestId, safeResultCode: "anonymized_financial_audit_retained", status: "completed" };
+
+  const current = await loadCustomer(input.env, actor.row.shop_id, input.customerPublicId);
+  if (current.anonymizedAt !== null) throw new AppError("privacy_request_conflict", 409);
+  const blocked = await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO buyer_privacy_requests (
+      id, public_id, shop_id, customer_id, kind, status, requested_by_user_id,
+      idempotency_key_hash, request_hash, safe_result_code, retained_records_json,
+      request_id, created_at, updated_at
+    ) SELECT ?, ?, ?, ?, 'anonymize', 'blocked', ?, ?, ?, 'active_records_blocked',
+      json_object('activeOrderCount', COUNT(*)), ?, ?, ?
+    FROM orders
+    WHERE shop_id = ? AND customer_id = ? AND (
+      status NOT IN ('completed', 'canceled', 'expired')
+      OR payment_status IN ('pending', 'partial', 'overpaid')
+      OR fulfillment_status = 'reserved'
+    )
+    HAVING COUNT(*) > 0
+  `).bind(privacyRequestId, privacyRequestId, actor.row.shop_id, input.customerPublicId, input.userId, keyHash, requestHash, input.requestId, nowIso, nowIso, actor.row.shop_id, input.customerPublicId).run();
+  if (blocked.meta.changes === 1) {
+    return { privacyRequestPublicId: privacyRequestId, safeResultCode: "active_records_blocked", status: "blocked" };
+  }
+  throw new AppError("privacy_request_conflict", 409);
 }

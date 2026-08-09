@@ -193,6 +193,8 @@ describe("seller operations backend contracts", () => {
     expect(JSON.stringify(exported.projection)).not.toContain("token-a");
     expect(JSON.stringify(exported.projection)).not.toContain("subject-a");
     expect(await executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-export-a1", kind: "export", now: NOW, requestId: "request-privacy-replay", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A })).toEqual(exported);
+    await expect(executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-export-manager", kind: "export", now: NOW, requestId: "request-privacy-manager", shopPublicId: SHOP_A_PUBLIC, userId: MANAGER_A })).resolves.toMatchObject({ safeResultCode: "export_ready", status: "completed" });
+    await expect(executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-export-support", kind: "export", now: NOW, requestId: "request-privacy-support", shopPublicId: SHOP_A_PUBLIC, userId: SUPPORT_A })).rejects.toMatchObject({ code: "authorization_denied", status: 403 });
     await expect(executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-export-cross", kind: "export", now: NOW, requestId: "request-privacy-cross", shopPublicId: SHOP_B_PUBLIC, userId: OWNER_B })).rejects.toMatchObject({ code: "customer_not_found" });
   });
 
@@ -237,6 +239,58 @@ describe("seller operations backend contracts", () => {
       email: null,
       status: "blocked",
     });
+  });
+
+  it("rechecks active orders inside the anonymization mutation and leaves collateral untouched", async () => {
+    const note = await appendCustomerNote({ body: "Must survive a blocked privacy race", customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-race-note", now: NOW, requestId: "request-privacy-race-note", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
+    database.prepare("UPDATE orders SET status = 'completed', payment_status = 'paid', fulfillment_status = 'fulfilled' WHERE id = ?").run(ORDER_A);
+    let injected = false;
+    const racingD1 = new SqliteD1(database, () => {
+      if (injected) return;
+      injected = true;
+      database.prepare(`
+        INSERT INTO orders (
+          id, public_id, shop_id, customer_id, order_number, source_channel, status,
+          payment_status, fulfillment_status, subtotal_minor, discount_minor, total_minor,
+          currency, locale, customer_email_masked, checkout_subject_hash, order_token_hash,
+          expires_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'web', 'processing', 'pending', 'unfulfilled', 500, 0,
+          500, 'USD', 'en', 'bu***@example.test', 'privacy-race-subject',
+          'privacy-race-token', '2026-08-02T05:00:00.000Z', ?, ?)
+      `).run("order-privacy-race", "order_00000000-0000-4000-8000-0000000000c1", SHOP_A, CUSTOMER_A, "OPS-A-RACE", NOW.toISOString(), NOW.toISOString());
+    });
+
+    const blocked = await executeBuyerPrivacyRequest({
+      customerPublicId: CUSTOMER_A,
+      env: env(racingD1),
+      idempotencyKey: "privacy-race-anonymize",
+      kind: "anonymize",
+      now: NOW,
+      requestId: "request-privacy-race",
+      shopPublicId: SHOP_A_PUBLIC,
+      userId: OWNER_A,
+    });
+
+    expect(blocked).toMatchObject({ safeResultCode: "active_records_blocked", status: "blocked" });
+    expect(database.prepare("SELECT email_normalized AS email, anonymized_at AS anonymizedAt FROM shop_customers WHERE id = ?").get(CUSTOMER_A)).toEqual({ anonymizedAt: null, email: "buyer-a@example.test" });
+    expect(database.prepare("SELECT body, status FROM customer_notes WHERE id = ?").get(note.notePublicId)).toEqual({ body: "Must survive a blocked privacy race", status: "active" });
+    expect(database.prepare("SELECT customer_email_masked AS email FROM orders WHERE id = ?").get(ORDER_A)).toEqual({ email: "bu***@example.test" });
+    expect(database.prepare("SELECT status, retained_records_json AS retained FROM buyer_privacy_requests WHERE public_id = ?").get(blocked.privacyRequestPublicId)).toEqual({ retained: JSON.stringify({ activeOrderCount: 1 }), status: "blocked" });
+  });
+
+  it("allows only one concurrent anonymization authority for a customer", async () => {
+    database.prepare("UPDATE orders SET status = 'completed', payment_status = 'paid', fulfillment_status = 'fulfilled' WHERE id = ?").run(ORDER_A);
+
+    const attempts = await Promise.allSettled([
+      executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-concurrent-a", kind: "anonymize", now: NOW, requestId: "request-privacy-concurrent-a", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A }),
+      executeBuyerPrivacyRequest({ customerPublicId: CUSTOMER_A, env: bindings, idempotencyKey: "privacy-concurrent-b", kind: "anonymize", now: NOW, requestId: "request-privacy-concurrent-b", shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A }),
+    ]);
+
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+    expect(attempts.find((attempt) => attempt.status === "rejected")).toMatchObject({ reason: { code: "privacy_request_conflict", status: 409 } });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM buyer_privacy_requests WHERE shop_id = ? AND customer_id = ? AND kind = 'anonymize' AND status = 'completed'").get(SHOP_A, CUSTOMER_A)).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE shop_id = ? AND resource_id = ? AND action = 'customer.anonymized'").get(SHOP_A, CUSTOMER_A)).toEqual({ count: 1 });
   });
 
   it("keeps member mutations tenant-bound, owner-protected, versioned and replay-safe", async () => {
