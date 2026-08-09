@@ -2,111 +2,99 @@
 
 Last updated: 2026-08-09
 
-## Final staging release evidence (2026-08-08)
+## Current source of truth
 
-- Final staging candidate: commit `17922377aa6bd0893c5c4aae206ac78d0208875d`,
-  tree `9d44eb6a9318a1b5c94fc012c3573b3f4e31611a`, and manifest
-  `stg_20260808T172324Z_17922377aa6b`. The pre-migration backup
-  `bkp_20260808172147_c2b52d57c662` and post-migration backup
-  `bkp_20260808172407_dc9c5b57486c` each have candidate-bound passing restore
-  drills. Staging has applied the complete contiguous `0001`-`0086` ledger.
-- Deployment `2400fc01-fd71-4c91-93e7-7a93a44a4216` serves Worker version
-  `6688b21f-401e-43b2-95b5-a0e9434167a2`. The captured staging rollback target
-  is deployment `65a8d605-78e4-4a85-91b8-bb6e9e2ea37c`, version
-  `14381227-1f9f-4719-9eb4-98404595764c`.
-- The exact seven-route inventory passed: production owns `selinow.com/*` and
-  `*.selinow.com/*`; staging owns `staging.selinow.com/*`,
-  `app-staging.selinow.com/*`, `api-staging.selinow.com/*`,
-  `*.staging.selinow.com/*`, and `*/*`. The Phase 10 staging smoke passed.
-  This is staging deployment/health evidence only, not production acceptance.
-- Dodo's staging endpoint/key is registered and the published catalog is 4/4.
-  The canonical JSON `POST` returns `401` for unauthenticated input. Synthetic
-  probes prove route/signature admission only; genuine Dodo UAT still requires
-  provider-created test checkout/events, authoritative D1 subscription state
-  transitions, and exact release-bound private evidence.
-- The controlled PayOS fingerprint endpoint completed with request ID
-  `094fdcff-e55d-435e-ad70-b9673ecba828`. No installed fingerprint secret,
-  controlled credential, signed PayOS event, or PayOS UAT is proven.
-- Production remains **NO-GO**: required approvals, a fresh production backup
-  and restore drill, monitoring/acknowledgement evidence, controlled pilots,
-  and Dodo/PayOS UAT remain absent. No production migration, deployment,
-  provider activation, or production-readiness claim follows from this staging
-  release.
+- Current repository identity is commit
+  `dcfe4a62e98551083710ae32df0004f2336e6524`, tree
+  `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. This identity is current source,
+  not a claim that the same tree is deployed.
+- Current operational source migration chain: contiguous `0001`-`0090`.
+  Staging post-migration evidence for release
+  `stg_20260808T235913Z_73d0c27493ea` records all 90 migrations through
+  `0090_payos_provider_claim_clear_guard.sql`, bound to commit
+  `73d0c27493ea10fbeacd2e4b6b6f2f923cc99cfd` and tree
+  `d445e8409dc1f2b537c39b2e08dad69a228db9f7`. Its pre-migration manifest
+  correctly records the then-live prefix through `0086`; the later migration
+  completion and post-migration evidence record the resulting `0090` ledger.
+- The same staging ceremony retained pre-migration backup
+  `bkp_20260808235109_63ea5cf3c278`, post-migration backup
+  `bkp_20260809000127_bd8c6b2f2402`, and passing candidate-bound isolated
+  restore reports. This proves the staging D1 continuation only; it does not
+  bind a current Worker deployment or provider acceptance. The private source
+  artifacts are the release's `migration-completion.json` and
+  `post-migration-evidence.json` files under `.wrangler/releases/staging/`.
+- The latest retained staging Worker deployment evidence remains deployment
+  `2400fc01-fd71-4c91-93e7-7a93a44a4216`, Worker version
+  `6688b21f-401e-43b2-95b5-a0e9434167a2`, from commit
+  `17922377aa6bd0893c5c4aae206ac78d0208875d` and tree
+  `9d44eb6a9318a1b5c94fc012c3573b3f4e31611a`. It predates the `0090`
+  staging continuation and the final source commits. No current-HEAD staging
+  deployment, current Worker version, or current-candidate smoke is claimed.
+- Production D1 remains at the admitted `0001`-`0052` baseline. No production
+  continuation migration or current-candidate Worker deployment is claimed.
 
-## Current payment handoff (2026-08-08)
+## Current provider state
 
-- Dodo merchant approval is confirmed as **live payments active**. Test and
-  live mode each contain four distinct monthly SaaS products: Starter/Pro in
-  VND 99,000/299,000 and USD 5/15. Product tax category is SaaS, pricing is
-  tax-inclusive, and provider trial is configured for 7 days on all eight
-  products. No live charge has been made.
-- A Dodo live API key has been created and stored as the production Worker
-  secret `DODO_PAYMENTS_API_KEY`; secret values are not retained in evidence.
-  Staging already has its API key. Neither environment has a webhook signing
-  secret or registered endpoint because the canonical routes still return
-  `404` until the shared Cloudflare route handoff completes.
-- PayOS runtime now fails closed in staging without the attested controlled
-  channel fingerprint `PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT`, and checks
-  provider-identity ownership before any webhook-registration mutation. This
-  prevents a rotated credential set from redirecting another shop's channel.
-- Source migrations are contiguous through `0090`; retained staging evidence has
-  the applied `0001`-`0086` ledger under the final staging evidence below, while
-  `0087`-`0090` are not covered by that historical manifest. Production remains
-  at `0052`; no production migration or deploy has been performed.
-- Current admission result: the retained staging route, backup/restore,
-  migration, deploy and smoke evidence pass only for the historical `0086`
-  package; they are not current-HEAD/`0090` admission. A fresh current
-  candidate ceremony is required. Genuine provider UAT remains blocked, and
-  production remains **NO-GO** on approvals, backup/restore, monitoring,
-  pilot, ownership and provider gates.
+- The Dodo TEST catalog has been rotated to four distinct monthly offers:
+  Starter/Pro in VND 99,000/299,000 and USD 5/15. The staging Dodo webhook is
+  registered and enabled on the canonical staging endpoint, and its signing
+  secret is present through the approved secret channel. Secret values are not
+  retained in documentation or evidence. The current non-secret provider view
+  is `.wrangler/evidence/dodo-provider-20260809/dodo-reconciliation-redacted.json`.
+- Dodo provider UAT is **not complete**. The retained provider view has an empty
+  delivery log, and no accepted release-bound artifact proves a provider-created
+  checkout, signed event delivery, authoritative D1 subscription transition,
+  replay behavior, mismatch handling, lifecycle completion, or the required
+  32-scenario validator result. Catalog and webhook configuration are setup
+  evidence only.
+- PayOS remains unaccepted. Source admission and tenant-ownership guards exist,
+  but no accepted release-bound artifact proves a controlled staging channel,
+  signed exact payment, replay handling, partial/overpaid/late/mismatched
+  payment handling, refund/chargeback, reconciliation, or exactly-once
+  fulfillment.
+- Telegram Mini App, Zalo Mini App, Zalo OA, WhatsApp Cloud, Discord, and other
+  expansion channels remain `provider_pending`. Local contracts, verified
+  parsers, or ingress probes do not make a channel active.
+- Return URLs, QR rendering, product catalogs, registered webhooks, secret-name
+  inventory, synthetic signatures, and `provider_pending` responses never prove
+  a paid order, provider acceptance, or production readiness.
 
-## Dodo deep-lane continuation (2026-08-08)
+## Handoff and release decision
 
-The Dodo adapter/webhook hardening is committed in `2f1e6b2`. The source lane
-passes `npm run check`, `npm run lint`, `npm run build`, both deploy dry-runs and
-the full Vitest suite (265 files / 1,892 tests). A bounded CLI validator now
-checks all 32 staging UAT scenarios against the exact commit, tree, release
-manifest and Worker version; see `docs/DODO_PAYMENTS_RELEASE.md`.
+The exact payment/non-payment ownership contract and external gates are recorded
+in `docs/release/CURRENT_HANDOFF_2026-08-09.md`.
 
-The final staging execution is recorded in the handoff evidence below. The
-canonical Dodo JSON `POST` returns `401` for unauthenticated input; genuine
-provider-created checkout/event UAT remains pending. No live charge was made.
+- The payment lane must deliver genuine Dodo TEST and controlled PayOS staging
+  UAT, redacted and bound to one exact release ID, manifest hash, commit, tree,
+  and Worker version. Payment setup cannot promote non-payment surfaces or
+  authorize production.
+- The non-payment lane must deliver a fresh deployment of the exact combined
+  candidate plus route/health, Website, Telegram, custom-domain, queue/cron,
+  tenant-isolation, bootstrap, privacy, monitoring, pilot, rollback, support,
+  legal, and owner evidence. It cannot infer subscription/payment readiness.
+- Release admission is conjunctive: neither lane is accepted alone, and all
+  evidence must bind to the same candidate. Any mismatch returns the handoff to
+  `provider_pending`/blocked.
+- Production remains **NO-GO**. Missing current-candidate staging deployment,
+  genuine Dodo/PayOS UAT, named approvals, fresh protected production
+  backup/restore, monitoring acknowledgement, controlled pilots, manual
+  acceptance, rollback rehearsal, and production release evidence must be
+  closed through the real operator/provider workflows. No production migration,
+  deployment, provider activation, live charge, or payment-readiness claim is
+  authorized by this status document.
 
-## Release admission and customer-journey verification (2026-08-08)
+## Documentation verification
 
-Agent F completed a non-mutating release verification pass. The customer-flow
-regression suite now uses wall-clock-independent trial fixtures and asserts the
-current fail-closed mixed-fulfillment contract for Website, Telegram and free
-checkout paths; the focused 4-file run passed 95/95 tests. The repository lockfile
-was refreshed only for non-billing transitive security patches (`js-yaml` 4.3.1
-and `nanoid` 3.3.18); `npm audit --audit-level=high` reports zero vulnerabilities.
+- `git diff --check -- docs/IMPLEMENTATION_STATUS.md
+  docs/release/CURRENT_HANDOFF_2026-08-09.md` passed.
+- `npx vitest run tests/unit/operational-migration-ledger-docs.test.ts` passed
+  (2 tests). No runtime source, migration, provider, secret, staging, or
+  production mutation was performed for this documentation reconciliation.
 
-The focused Agent F integration/release contracts pass 14/14: all 86 source
-migrations replay on isolated SQLite with `integrity_check=ok` and zero foreign-key
-violations; first-admin bootstrap is exact and one-time; expansion channels fail
-closed without runtime proofs; and checkout recovery rejects a second consume.
-The Wrangler typegen wrapper removes only the generated global `ProcessEnv`
-augmentation, reducing TypeScript failures to one payment-owned Dodo diagnostic.
-Route inventory/privacy and provider-pending expectations are reconciled. Root
-must rerun the complete serial matrix after the final source/payment merge.
-
-The historical review candidate commit `3c598fcf242127891e8fe4112720938cc3592c4e`
-(tree `3bf5cb32aab3d23060042aabd3f97ac7d20ff696`) contains the committed
-`0081`-`0086` files with a contiguous numeric ledger, but it is not current-candidate
-identity. Current migration admission must remain fail-closed until the clean
-`0090` tree and both workstreams are reviewed together. No staging or
-production migration, seed, deploy, route, DNS, queue/trigger, secret or
-provider mutation was performed. Release doctor remains correctly blocked on
-fresh protected backup/restore evidence, candidate identity, approvals,
-monitoring, pilot and provider acceptance (including the explicit payment-thread
-handoff for PayOS and Dodo UAT evidence). This pass does not claim production
-readiness.
-
-Current operational source migration chain: contiguous `0001`-`0090`; retained
-staging evidence has applied the guarded continuation through `0086`, while
-`0087`-`0090` need a fresh two-phase backup/restore ceremony and
-`db:complete-release`. Production remains at `0052` pending its own backup,
-restore, manifest and release gates for `0053`-`0090`.
+> Historical scope: every remaining section is retained checkpoint history.
+> Terms such as "current", "complete", "live", migration counts, deployment
+> state, and provider setup below describe their dated checkpoint and are
+> superseded by the three current sections above.
 
 ## Historical operational reconciliation (2026-08-04)
 
