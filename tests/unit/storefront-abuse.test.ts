@@ -222,4 +222,42 @@ describe("storefront anonymous request limits", () => {
       turnstileToken: "turnstile-token-123",
     })).rejects.toMatchObject({ code: "turnstile_invalid", status: 403 });
   });
+
+  it("fails closed after the production challenge threshold when Turnstile is not configured", async () => {
+    const env = bindings(database, {
+      APP_ENV: "production",
+      STOREFRONT_CHECKOUT_RATE_LIMIT: "10",
+      STOREFRONT_TURNSTILE_THRESHOLD: "1",
+      TURNSTILE_SECRET_KEY: "",
+      TURNSTILE_SITE_KEY: "",
+    });
+    const checkoutRequest = new Request("https://shop.example.com/api/store/checkout", { method: "POST" });
+
+    await guardAnonymousCheckout({ env, request: checkoutRequest, shop: shop("shop-a"), turnstileToken: null });
+    await expect(guardAnonymousCheckout({
+      env,
+      request: checkoutRequest,
+      shop: shop("shop-a"),
+      turnstileToken: null,
+    })).rejects.toMatchObject({ code: "turnstile_unavailable", status: 503 });
+  });
+
+  it("keeps local checkout testable without Turnstile configuration", async () => {
+    const env = bindings(database, {
+      APP_ENV: "local",
+      STOREFRONT_CHECKOUT_RATE_LIMIT: "10",
+      STOREFRONT_TURNSTILE_THRESHOLD: "1",
+      TURNSTILE_SECRET_KEY: "",
+      TURNSTILE_SITE_KEY: "",
+    });
+    const checkoutRequest = new Request("https://shop.example.com/api/store/checkout", { method: "POST" });
+
+    await guardAnonymousCheckout({ env, request: checkoutRequest, shop: shop("shop-a"), turnstileToken: null });
+    await expect(guardAnonymousCheckout({
+      env,
+      request: checkoutRequest,
+      shop: shop("shop-a"),
+      turnstileToken: null,
+    })).resolves.toBeUndefined();
+  });
 });

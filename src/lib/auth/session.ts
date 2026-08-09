@@ -11,6 +11,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
 const SESSION_LAST_SEEN_WRITE_INTERVAL_MS = 5 * 60_000;
 const MAGIC_LINK_TTL_MINUTES = 15;
 const MAGIC_LINK_INITIATION_TTL_SECONDS = MAGIC_LINK_TTL_MINUTES * 60;
+const MAGIC_LINK_CONFIRMATION_TTL_SECONDS = 5 * 60;
 
 type SessionRow = {
   authenticated_at: string;
@@ -56,10 +57,23 @@ export type SessionSummary = {
 };
 
 export type MagicLinkRequestResult = {
+  challengeRequired: boolean;
   debugMagicLink?: string;
   expiresAt: string;
   initiationBinding: string;
 };
+
+export type BrowserMagicLinkConsumptionResult =
+  | {
+    confirmationBinding: string;
+    confirmationRequired: true;
+    maskedDestination: string;
+  }
+  | {
+    auth: Omit<AuthContext, "csrfTokenHash">;
+    confirmationRequired: false;
+    credentials: SessionCredentials;
+  };
 
 export function createSessionCredentials(): SessionCredentials {
   return {
@@ -69,6 +83,7 @@ export function createSessionCredentials(): SessionCredentials {
 }
 
 export async function requestMagicLink(input: {
+  challengePassed?: boolean;
   displayName: string;
   email: string;
   env: AppBindings;
@@ -79,17 +94,19 @@ export async function requestMagicLink(input: {
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + MAGIC_LINK_TTL_MINUTES * 60_000).toISOString();
   const admission = await claimMagicLinkAdmission({
+    ...(input.challengePassed === undefined ? {} : { challengePassed: input.challengePassed }),
     email: input.email,
     env: input.env,
     now,
     requesterAddress: input.requesterAddress,
   });
+  const token = createOpaqueToken();
+  const initiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", token);
+  if (!admission.deliveryPermitted) return { challengeRequired: true, expiresAt, initiationBinding };
+
   const userId = createId("usr");
   const tokenId = createId("mlt");
-  const token = createOpaqueToken();
   const tokenHash = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link", token);
-  const initiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", token);
-  if (!admission.deliveryPermitted) return { expiresAt, initiationBinding };
 
   const user = await input.env.PLATFORM_DB.prepare(`
     INSERT INTO platform_users (
@@ -116,7 +133,8 @@ export async function requestMagicLink(input: {
 
   if (input.env.APP_ENV === "local") {
     return {
-      debugMagicLink: `/api/auth/magic-link/consume?token=${encodeURIComponent(token)}`,
+      challengeRequired: false,
+      debugMagicLink: `/login#${new URLSearchParams({ magic: token }).toString()}`,
       expiresAt,
       initiationBinding,
     };
@@ -129,30 +147,17 @@ export async function requestMagicLink(input: {
     token,
   });
 
-  return { expiresAt, initiationBinding };
+  return { challengeRequired: false, expiresAt, initiationBinding };
 }
 
-export async function consumeMagicLink(input: {
-  env: AppBindings;
-  initiationBinding: string;
-  token: string;
-}): Promise<{ auth: Omit<AuthContext, "csrfTokenHash">; credentials: SessionCredentials }> {
-  if (input.token.length < 20 || input.token.length > 256) {
-    throw new AppError("authentication_required", 401);
-  }
+function assertMagicLinkToken(token: string): void {
+  if (token.length < 20 || token.length > 256) throw new AppError("authentication_required", 401);
+}
 
-  const expectedInitiationBinding = await hmacToken(
-    input.env.MAGIC_LINK_SECRET,
-    "magic-link-initiation",
-    input.token,
-  );
-  if (!constantTimeEqual(input.initiationBinding, expectedInitiationBinding)) {
-    throw new AppError("authentication_required", 401);
-  }
-
-  const now = new Date();
-  const tokenHash = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link", input.token);
-  const magicLink = await input.env.PLATFORM_DB.prepare(`
+async function loadMagicLink(env: AppBindings, token: string, now: Date): Promise<MagicLinkRow> {
+  assertMagicLinkToken(token);
+  const tokenHash = await hmacToken(env.MAGIC_LINK_SECRET, "magic-link", token);
+  const magicLink = await env.PLATFORM_DB.prepare(`
     SELECT
       magic_link_tokens.id AS token_id,
       magic_link_tokens.user_id,
@@ -171,12 +176,20 @@ export async function consumeMagicLink(input: {
   if (magicLink === null || magicLink.user_status === "suspended") {
     throw new AppError("authentication_required", 401);
   }
+  return magicLink;
+}
 
+async function consumeLoadedMagicLink(input: {
+  env: AppBindings;
+  magicLink: MagicLinkRow;
+  now: Date;
+}): Promise<{ auth: Omit<AuthContext, "csrfTokenHash">; credentials: SessionCredentials }> {
   const credentials = createSessionCredentials();
   const sessionId = createId("ses");
   const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
   const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
-  const expiresAt = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
+  const expiresAt = new Date(input.now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
+  const nowIso = input.now.toISOString();
 
   const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
@@ -189,26 +202,26 @@ export async function consumeMagicLink(input: {
       WHERE id = ? AND consumed_at IS NULL AND expires_at > ?
     `).bind(
       sessionId,
-      magicLink.user_id,
+      input.magicLink.user_id,
       sessionTokenHash,
       csrfTokenHash,
-      now.toISOString(),
+      nowIso,
       expiresAt,
-      now.toISOString(),
-      now.toISOString(),
-      magicLink.token_id,
-      now.toISOString(),
+      nowIso,
+      nowIso,
+      input.magicLink.token_id,
+      nowIso,
     ),
     input.env.PLATFORM_DB.prepare(`
       UPDATE magic_link_tokens
       SET consumed_at = ?
       WHERE id = ? AND consumed_at IS NULL AND expires_at > ?
-    `).bind(now.toISOString(), magicLink.token_id, now.toISOString()),
+    `).bind(nowIso, input.magicLink.token_id, nowIso),
     input.env.PLATFORM_DB.prepare(`
       UPDATE platform_users
       SET status = 'active', last_login_at = ?, updated_at = ?
       WHERE id = ? AND status != 'suspended'
-    `).bind(now.toISOString(), now.toISOString(), magicLink.user_id),
+    `).bind(nowIso, nowIso, input.magicLink.user_id),
   ]);
 
   if ((results[0]?.meta.changes ?? 0) !== 1 || (results[1]?.meta.changes ?? 0) !== 1) {
@@ -217,13 +230,106 @@ export async function consumeMagicLink(input: {
 
   return {
     auth: {
-      authenticatedAt: now.toISOString(),
-      displayName: magicLink.display_name,
-      email: magicLink.email_normalized,
+      authenticatedAt: nowIso,
+      displayName: input.magicLink.display_name,
+      email: input.magicLink.email_normalized,
       sessionId,
-      userId: magicLink.user_id,
+      userId: input.magicLink.user_id,
     },
     credentials,
+  };
+}
+
+function maskEmailDestination(email: string): string {
+  const separator = email.lastIndexOf("@");
+  if (separator <= 0 || separator === email.length - 1) return "***";
+  const local = email.slice(0, separator);
+  const domain = email.slice(separator + 1);
+  const labels = domain.split(".");
+  const domainName = labels.shift() ?? "";
+  const suffix = labels.length > 0 ? `.${labels.join(".")}` : "";
+  return `${local.slice(0, 1)}***@${domainName.slice(0, 1)}***${suffix}`;
+}
+
+async function createMagicLinkConfirmationBinding(env: AppBindings, token: string, now: Date): Promise<string> {
+  const expiresAt = Math.floor(now.getTime() / 1_000) + MAGIC_LINK_CONFIRMATION_TTL_SECONDS;
+  const expiresAtText = String(expiresAt);
+  const signature = await hmacToken(env.MAGIC_LINK_SECRET, "magic-link-confirmation", `${expiresAtText}:${token}`);
+  return `${expiresAtText}.${signature}`;
+}
+
+async function confirmationBindingMatches(input: {
+  binding: string;
+  env: AppBindings;
+  now: Date;
+  token: string;
+}): Promise<boolean> {
+  const separator = input.binding.indexOf(".");
+  if (separator <= 0) return false;
+  const expiresAtText = input.binding.slice(0, separator);
+  const providedSignature = input.binding.slice(separator + 1);
+  if (!/^\d{10,13}$/u.test(expiresAtText) || providedSignature.length < 32 || providedSignature.length > 128) return false;
+  const expiresAt = Number.parseInt(expiresAtText, 10);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt < Math.floor(input.now.getTime() / 1_000)) return false;
+  const expectedSignature = await hmacToken(
+    input.env.MAGIC_LINK_SECRET,
+    "magic-link-confirmation",
+    `${String(expiresAt)}:${input.token}`,
+  );
+  return constantTimeEqual(providedSignature, expectedSignature);
+}
+
+export async function consumeMagicLink(input: {
+  env: AppBindings;
+  initiationBinding: string;
+  token: string;
+}): Promise<{ auth: Omit<AuthContext, "csrfTokenHash">; credentials: SessionCredentials }> {
+  assertMagicLinkToken(input.token);
+  const expectedInitiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", input.token);
+  if (!constantTimeEqual(input.initiationBinding, expectedInitiationBinding)) {
+    throw new AppError("authentication_required", 401);
+  }
+  const now = new Date();
+  return consumeLoadedMagicLink({ env: input.env, magicLink: await loadMagicLink(input.env, input.token, now), now });
+}
+
+export async function consumeMagicLinkFromBrowser(input: {
+  confirmationBinding: string;
+  confirm: boolean;
+  env: AppBindings;
+  existingSession: boolean;
+  initiationBinding: string;
+  token: string;
+}): Promise<BrowserMagicLinkConsumptionResult> {
+  const now = new Date();
+  const magicLink = await loadMagicLink(input.env, input.token, now);
+  const expectedInitiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", input.token);
+  const initiationMatches = constantTimeEqual(input.initiationBinding, expectedInitiationBinding);
+
+  if (input.confirm) {
+    if (!await confirmationBindingMatches({
+      binding: input.confirmationBinding,
+      env: input.env,
+      now,
+      token: input.token,
+    })) throw new AppError("authentication_required", 401);
+    return {
+      confirmationRequired: false,
+      ...await consumeLoadedMagicLink({ env: input.env, magicLink, now }),
+    };
+  }
+
+  if (input.existingSession || !initiationMatches) {
+    return {
+      confirmationBinding: await createMagicLinkConfirmationBinding(input.env, input.token, now),
+      confirmationRequired: true,
+      maskedDestination: maskEmailDestination(magicLink.email_normalized),
+    };
+  }
+
+  return {
+    confirmationRequired: false,
+    ...await consumeLoadedMagicLink({ env: input.env, magicLink, now }),
   };
 }
 
@@ -330,6 +436,10 @@ export function magicLinkInitiationCookieName(env: AppBindings): string {
   return `${env.SESSION_COOKIE_NAME}_magic_link`;
 }
 
+export function magicLinkConfirmationCookieName(env: AppBindings): string {
+  return `${env.SESSION_COOKIE_NAME}_magic_link_confirm`;
+}
+
 export function appendMagicLinkInitiationCookie(headers: Headers, binding: string, env: AppBindings): void {
   headers.append("Set-Cookie", serializeCookie(magicLinkInitiationCookieName(env), binding, {
     httpOnly: true,
@@ -341,6 +451,19 @@ export function appendMagicLinkInitiationCookie(headers: Headers, binding: strin
 
 export function appendClearedMagicLinkInitiationCookie(headers: Headers, env: AppBindings): void {
   headers.append("Set-Cookie", clearCookie(magicLinkInitiationCookieName(env), env.APP_ENV !== "local", true));
+}
+
+export function appendMagicLinkConfirmationCookie(headers: Headers, binding: string, env: AppBindings): void {
+  headers.append("Set-Cookie", serializeCookie(magicLinkConfirmationCookieName(env), binding, {
+    httpOnly: true,
+    maxAge: MAGIC_LINK_CONFIRMATION_TTL_SECONDS,
+    sameSite: "Lax",
+    secure: env.APP_ENV !== "local",
+  }));
+}
+
+export function appendClearedMagicLinkConfirmationCookie(headers: Headers, env: AppBindings): void {
+  headers.append("Set-Cookie", clearCookie(magicLinkConfirmationCookieName(env), env.APP_ENV !== "local", true));
 }
 
 export function appendSessionCookies(headers: Headers, credentials: SessionCredentials, env: AppBindings): void {

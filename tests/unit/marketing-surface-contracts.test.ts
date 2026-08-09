@@ -107,7 +107,7 @@ describe("PromptOS marketing surfaces", () => {
     expect(page).toContain('aria-live="polite" aria-atomic="true"');
     expect(page).toContain('Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow")');
     expect(controller).toContain('hostname.endsWith(".localhost")');
-    expect(controller).toContain('linkUrl.pathname !== "/api/auth/magic-link/consume"');
+    expect(controller).toContain('linkUrl.pathname !== "/login"');
     expect(controller).toContain('link.textContent = t("auth.login.debug_link")');
     expect(controller).toContain("rate_limited");
     expect(controller).toContain("provider_unavailable");

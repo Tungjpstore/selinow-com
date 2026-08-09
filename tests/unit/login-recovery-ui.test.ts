@@ -26,7 +26,7 @@ describe("magic-link cross-browser recovery UI", () => {
 
   it("keeps local debug navigation origin-bound without rendering token text", () => {
     expect(controller).toContain("linkUrl.origin !== window.location.origin");
-    expect(controller).toContain('linkUrl.pathname !== "/api/auth/magic-link/consume"');
+    expect(controller).toContain('linkUrl.pathname !== "/login"');
     expect(controller).toContain('link.textContent = t("auth.login.debug_link")');
     expect(controller).not.toContain("link.textContent = token");
   });
@@ -39,5 +39,27 @@ describe("magic-link cross-browser recovery UI", () => {
   it("shows the safe request ID returned by failed login requests", () => {
     expect(controller).toContain('response.headers.get("X-Request-Id")');
     expect(controller).toContain('t("auth.login.request_id", { requestId })');
+  });
+
+  it("renders the adaptive challenge only after the server requests it", () => {
+    expect(page).toContain("data-login-challenge");
+    expect(page).toContain("data-login-turnstile");
+    expect(page).toContain('data-action="magic_link_request"');
+    expect(controller).toContain("body.challengeRequired === true");
+    expect(controller).toContain('data.get("cf-turnstile-response")');
+    expect(controller).toContain("turnstile.render");
+    expect(controller).not.toContain("challengePassed");
+  });
+
+  it("clears fragment tokens before the confirmation flow and keeps them memory-only", () => {
+    expect(page).toContain("data-login-confirmation");
+    expect(page).toContain("data-login-confirm-destination");
+    expect(page).toContain("data-login-confirm");
+    expect(controller).toContain('new URLSearchParams(window.location.hash.slice(1)).get("magic")');
+    expect(controller).toContain("window.history.replaceState");
+    expect(controller).toContain('method: "POST"');
+    expect(controller).toContain("body.confirmationRequired === true");
+    expect(controller).not.toContain("localStorage");
+    expect(controller).not.toContain("sessionStorage");
   });
 });

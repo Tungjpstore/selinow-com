@@ -4,6 +4,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppBindings } from "../../src/lib/platform/bindings";
+import { hmacToken } from "../../src/lib/core/crypto";
 
 const routeDependencies = vi.hoisted<{ env: AppBindings | null; warnings: unknown[] }>(() => ({ env: null, warnings: [] }));
 
@@ -19,14 +20,28 @@ import {
   authenticateRequest,
   consumeMagicLink,
   listSessions,
+  magicLinkConfirmationCookieName,
   magicLinkInitiationCookieName,
   requestMagicLink,
   revokeAllSessions,
 } from "../../src/lib/auth/session";
-import { GET as consumeMagicLinkRoute } from "../../src/pages/api/auth/magic-link/consume";
+import {
+  GET as consumeMagicLinkRoute,
+  POST as consumeMagicLinkPostRoute,
+} from "../../src/pages/api/auth/magic-link/consume";
 import { POST as requestMagicLinkRoute } from "../../src/pages/api/auth/magic-link/request";
 
 const NOW = new Date("2026-07-26T04:00:00.000Z");
+
+function tokenFromMagicLink(link: string | undefined, origin: string): string {
+  const url = new URL(link ?? "", origin);
+  return new URLSearchParams(url.hash.slice(1)).get("magic") ?? url.searchParams.get("token") ?? "";
+}
+
+function cookieValue(setCookie: string | null, name: string): string {
+  const match = setCookie?.match(new RegExp(`(?:^|,\\s*)${name}=([^;]+)`, "u"));
+  return match?.[1] ?? "";
+}
 
 class SqliteStatement {
   constructor(
@@ -69,7 +84,8 @@ function applyMigrations(database: DatabaseSync): void {
 }
 
 type TestBindingOverrides = Partial<Record<
-  "MAGIC_LINK_EMAIL_RATE_LIMIT" | "MAGIC_LINK_GLOBAL_RATE_LIMIT" | "MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS" | "MAGIC_LINK_REQUESTER_RATE_LIMIT",
+  "MAGIC_LINK_EMAIL_RATE_LIMIT" | "MAGIC_LINK_GLOBAL_RATE_LIMIT" | "MAGIC_LINK_RATE_LIMIT_WINDOW_SECONDS" | "MAGIC_LINK_REQUESTER_RATE_LIMIT"
+  | "TURNSTILE_SECRET_KEY" | "TURNSTILE_SITE_KEY",
   string
 >> & {
   APP_ENV?: AppBindings["APP_ENV"];
@@ -107,6 +123,8 @@ function bindings(database: DatabaseSync, overrides: TestBindingOverrides = {}):
     } as D1Database,
     SESSION_COOKIE_NAME: "selinow_staging_session",
     SESSION_SECRET: "session-secret-for-magic-link-tests",
+    TURNSTILE_SECRET_KEY: overrides.TURNSTILE_SECRET_KEY,
+    TURNSTILE_SITE_KEY: overrides.TURNSTILE_SITE_KEY,
   } as unknown as AppBindings;
 }
 
@@ -139,6 +157,115 @@ describe("magic-link issuance rate limit", () => {
     expect(results.filter((result) => result.status === "fulfilled" && result.value.debugMagicLink !== undefined)).toHaveLength(5);
     expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 5 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM auth_request_admissions WHERE delivery_permitted = 0").get()).toEqual({ count: 3 });
+  });
+
+  it("requires a server-verified adaptive challenge after the per-email delivery budget", async () => {
+    const currentWindow = new Date();
+    for (let index = 0; index < 5; index += 1) {
+      await requestMagicLink({
+        displayName: "Seller",
+        email: "challenge@example.test",
+        env,
+        requesterAddress: "203.0.113.12",
+        now: currentWindow,
+      });
+    }
+
+    const routeContext = (turnstileToken?: string) => ({
+      locals: { locale: "en-US", requestId: "request-adaptive-challenge" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/request`, {
+        body: JSON.stringify({
+          displayName: "Seller",
+          email: "challenge@example.test",
+          ...(turnstileToken === undefined ? {} : { turnstileToken }),
+        }),
+        headers: {
+          "CF-Connecting-IP": "203.0.113.12",
+          "Content-Type": "application/json",
+          Origin: env.DASHBOARD_ORIGIN,
+        },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof requestMagicLinkRoute>[0]);
+
+    const challenged = await requestMagicLinkRoute(routeContext());
+    expect(challenged.status).toBe(202);
+    await expect(challenged.json()).resolves.toMatchObject({
+      accepted: true,
+      challengeRequired: true,
+      requestId: "request-adaptive-challenge",
+    });
+    expect(challenged.headers.get("Set-Cookie")).toBeNull();
+    expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 5 });
+
+    env = bindings(database, {
+      TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA",
+      TURNSTILE_SITE_KEY: "1x00000000000000000000AA",
+    });
+    routeDependencies.env = env;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      action: "magic_link_request",
+      hostname: "app-staging.selinow.com",
+      success: true,
+    }), { status: 200 }));
+
+    const admitted = await requestMagicLinkRoute(routeContext("turnstile-token-123"));
+    expect(admitted.status).toBe(202);
+    await expect(admitted.json()).resolves.toMatchObject({ accepted: true, challengeRequired: false });
+    expect(admitted.headers.get("Set-Cookie")).toContain(`${magicLinkInitiationCookieName(env)}=`);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 6 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const verificationRequest = fetchMock.mock.calls[0]?.[1];
+    expect(verificationRequest?.body).toBeInstanceOf(FormData);
+    expect((verificationRequest?.body as FormData).get("remoteip")).toBe("203.0.113.12");
+    fetchMock.mockRestore();
+  });
+
+  it("fails a challenged production request closed when Turnstile configuration is missing", async () => {
+    const currentWindow = new Date();
+    for (let index = 0; index < 5; index += 1) {
+      await requestMagicLink({
+        displayName: "Seller",
+        email: "production-challenge@example.test",
+        env,
+        requesterAddress: "203.0.113.13",
+        now: currentWindow,
+      });
+    }
+    env = bindings(database, { APP_ENV: "production" });
+    routeDependencies.env = env;
+
+    const requestContext = (turnstileToken?: string) => ({
+      locals: { locale: "en-US", requestId: "request-missing-turnstile" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/request`, {
+        body: JSON.stringify({
+          email: "production-challenge@example.test",
+          ...(turnstileToken === undefined ? {} : { turnstileToken }),
+        }),
+        headers: {
+          "CF-Connecting-IP": "203.0.113.13",
+          "Content-Type": "application/json",
+          Origin: env.DASHBOARD_ORIGIN,
+        },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof requestMagicLinkRoute>[0]);
+
+    const unchallengedResponse = await requestMagicLinkRoute(requestContext());
+    expect(unchallengedResponse.status).toBe(503);
+    await expect(unchallengedResponse.json()).resolves.toMatchObject({
+      code: "turnstile_unavailable",
+      requestId: "request-missing-turnstile",
+    });
+
+    const challengedResponse = await requestMagicLinkRoute(requestContext("turnstile-token-123"));
+    expect(challengedResponse.status).toBe(503);
+    await expect(challengedResponse.json()).resolves.toMatchObject({
+      code: "turnstile_unavailable",
+      requestId: "request-missing-turnstile",
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 5 });
+    expect(JSON.stringify(routeDependencies.warnings)).not.toContain("production-challenge@example.test");
   });
 
   it("allows exactly one request when four tokens already exist", async () => {
@@ -285,10 +412,11 @@ describe("magic-link issuance rate limit", () => {
     });
     const link = message.text.split("\n").find((line) => line.startsWith("https://app-staging.selinow.com/"));
     expect(link).toBeDefined();
-    expect(new URL(link ?? "").pathname).toBe("/api/auth/magic-link/consume");
-    expect(new URL(link ?? "").searchParams.get("token")).toHaveLength(43);
-    expect(message.html).toContain("app-staging.selinow.com/api/auth/magic-link/consume");
-    expect(JSON.stringify(result)).not.toContain(new URL(link ?? "").searchParams.get("token") ?? "");
+    expect(new URL(link ?? "").pathname).toBe("/login");
+    expect(new URL(link ?? "").search).toBe("");
+    expect(new URLSearchParams(new URL(link ?? "").hash.slice(1)).get("magic")).toHaveLength(43);
+    expect(message.html).toContain("app-staging.selinow.com/login#magic=");
+    expect(JSON.stringify(result)).not.toContain(new URLSearchParams(new URL(link ?? "").hash.slice(1)).get("magic") ?? "");
   });
 
   it("maps Cloudflare Email Sending failures to a safe provider error", async () => {
@@ -339,6 +467,204 @@ describe("magic-link issuance rate limit", () => {
     expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 1 });
   });
 
+  it("redirects legacy GET links into the fragment flow without consuming the token", async () => {
+    const requested = await requestMagicLink({
+      displayName: "Legacy",
+      email: "legacy-link@example.test",
+      env,
+      requesterAddress: "203.0.113.65",
+      now: new Date(),
+    });
+    const token = tokenFromMagicLink(requested.debugMagicLink, env.DASHBOARD_ORIGIN);
+
+    const response = await consumeMagicLinkRoute({
+      locals: { requestId: "request-legacy-fragment" },
+      redirect: (location: string, status: number) => new Response(null, { headers: { Location: location }, status }),
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume?token=${encodeURIComponent(token)}`),
+    } as unknown as Parameters<typeof consumeMagicLinkRoute>[0]);
+
+    expect(response.status).toBe(303);
+    const location = response.headers.get("Location") ?? "";
+    expect(new URL(location, env.DASHBOARD_ORIGIN).pathname).toBe("/login");
+    expect(new URL(location, env.DASHBOARD_ORIGIN).search).toBe("");
+    expect(new URLSearchParams(new URL(location, env.DASHBOARD_ORIGIN).hash.slice(1)).get("magic")).toBe(token);
+    expect(database.prepare("SELECT consumed_at AS consumedAt FROM magic_link_tokens").get()).toEqual({ consumedAt: null });
+  });
+
+  it("consumes a fragment token immediately only with the matching initiation cookie and no existing session", async () => {
+    const requested = await requestMagicLink({
+      displayName: "Same Browser",
+      email: "same-browser@example.test",
+      env,
+      requesterAddress: "203.0.113.66",
+      now: new Date(),
+    });
+    const token = tokenFromMagicLink(requested.debugMagicLink, env.DASHBOARD_ORIGIN);
+    const response = await consumeMagicLinkPostRoute({
+      locals: { requestId: "request-same-browser-consume" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume`, {
+        body: JSON.stringify({ token }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${magicLinkInitiationCookieName(env)}=${requested.initiationBinding}`,
+          Origin: env.DASHBOARD_ORIGIN,
+        },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof consumeMagicLinkPostRoute>[0]);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ authenticated: true, ok: true, redirectTo: "/app" });
+    expect(response.headers.get("Set-Cookie")).toContain(`${env.SESSION_COOKIE_NAME}=`);
+    expect(database.prepare("SELECT consumed_at IS NOT NULL AS consumed FROM magic_link_tokens").get()).toEqual({ consumed: 1 });
+  });
+
+  it("requires an explicit short-lived confirmation for cross-browser consumption and rejects replay", async () => {
+    const requested = await requestMagicLink({
+      displayName: "Cross Browser",
+      email: "cross-browser@example.test",
+      env,
+      requesterAddress: "203.0.113.67",
+      now: new Date(),
+    });
+    const token = tokenFromMagicLink(requested.debugMagicLink, env.DASHBOARD_ORIGIN);
+    const post = (confirm: boolean, cookie?: string) => consumeMagicLinkPostRoute({
+      locals: { requestId: "request-cross-browser-consume" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume`, {
+        body: JSON.stringify({ confirm, token }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(cookie === undefined ? {} : { Cookie: cookie }),
+          Origin: env.DASHBOARD_ORIGIN,
+        },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof consumeMagicLinkPostRoute>[0]);
+
+    const confirmation = await post(false);
+    expect(confirmation.status).toBe(202);
+    const confirmationBody: Record<string, unknown> = await confirmation.json();
+    expect(confirmationBody).toMatchObject({ confirmationRequired: true, ok: true });
+    expect(confirmationBody.maskedDestination).toMatch(/^c\*+@e\*+\.test$/u);
+    expect(JSON.stringify(confirmationBody)).not.toContain("cross-browser@example.test");
+    expect(database.prepare("SELECT consumed_at AS consumedAt FROM magic_link_tokens").get()).toEqual({ consumedAt: null });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 0 });
+
+    const confirmationCookieName = magicLinkConfirmationCookieName(env);
+    const confirmationCookie = cookieValue(confirmation.headers.get("Set-Cookie"), confirmationCookieName);
+    expect(confirmationCookie.length).toBeGreaterThan(40);
+    const expiredAt = 1_000_000_000;
+    const expiredSignature = await hmacToken(
+      env.MAGIC_LINK_SECRET,
+      "magic-link-confirmation",
+      `${String(expiredAt)}:${token}`,
+    );
+    const expiredConfirmation = await post(true, `${confirmationCookieName}=${String(expiredAt)}.${expiredSignature}`);
+    expect(expiredConfirmation.status).toBe(401);
+    expect(database.prepare("SELECT consumed_at AS consumedAt FROM magic_link_tokens").get()).toEqual({ consumedAt: null });
+
+    const consumed = await post(true, `${confirmationCookieName}=${confirmationCookie}`);
+    expect(consumed.status).toBe(200);
+    expect(consumed.headers.get("Set-Cookie")).toContain(`${env.SESSION_COOKIE_NAME}=`);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 1 });
+
+    const replay = await post(true, `${confirmationCookieName}=${confirmationCookie}`);
+    expect(replay.status).toBe(401);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 1 });
+  });
+
+  it("never replaces an existing session without explicit confirmation", async () => {
+    const existingLink = await requestMagicLink({
+      displayName: "Existing",
+      email: "existing-session@example.test",
+      env,
+      requesterAddress: "203.0.113.68",
+      now: new Date(),
+    });
+    const existing = await consumeMagicLink({
+      env,
+      initiationBinding: existingLink.initiationBinding,
+      token: tokenFromMagicLink(existingLink.debugMagicLink, env.DASHBOARD_ORIGIN),
+    });
+    const replacementLink = await requestMagicLink({
+      displayName: "Replacement",
+      email: "replacement-session@example.test",
+      env,
+      requesterAddress: "203.0.113.68",
+      now: new Date(),
+    });
+    const replacementToken = tokenFromMagicLink(replacementLink.debugMagicLink, env.DASHBOARD_ORIGIN);
+    const firstResponse = await consumeMagicLinkPostRoute({
+      locals: { requestId: "request-existing-session-confirm" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume`, {
+        body: JSON.stringify({ token: replacementToken }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: [
+            `${env.SESSION_COOKIE_NAME}=${existing.credentials.sessionToken}`,
+            `${magicLinkInitiationCookieName(env)}=${replacementLink.initiationBinding}`,
+          ].join("; "),
+          Origin: env.DASHBOARD_ORIGIN,
+        },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof consumeMagicLinkPostRoute>[0]);
+
+    expect(firstResponse.status).toBe(202);
+    await expect(firstResponse.json()).resolves.toMatchObject({ confirmationRequired: true });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT consumed_at AS consumedAt FROM magic_link_tokens WHERE token_hash = ?")
+      .get(await hmacToken(env.MAGIC_LINK_SECRET, "magic-link", replacementToken))).toEqual({ consumedAt: null });
+
+    const confirmationCookieName = magicLinkConfirmationCookieName(env);
+    const confirmationCookie = cookieValue(firstResponse.headers.get("Set-Cookie"), confirmationCookieName);
+    const confirmedResponse = await consumeMagicLinkPostRoute({
+      locals: { requestId: "request-existing-session-confirmed" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume`, {
+        body: JSON.stringify({ confirm: true, token: replacementToken }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: [
+            `${env.SESSION_COOKIE_NAME}=${existing.credentials.sessionToken}`,
+            `${confirmationCookieName}=${confirmationCookie}`,
+          ].join("; "),
+          Origin: env.DASHBOARD_ORIGIN,
+        },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof consumeMagicLinkPostRoute>[0]);
+    expect(confirmedResponse.status).toBe(200);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 2 });
+  });
+
+  it("rejects login CSRF and expired fragment tokens before session creation", async () => {
+    const requested = await requestMagicLink({
+      displayName: "Expired",
+      email: "expired-fragment@example.test",
+      env,
+      requesterAddress: "203.0.113.69",
+      now: new Date(),
+    });
+    const token = tokenFromMagicLink(requested.debugMagicLink, env.DASHBOARD_ORIGIN);
+    const routeContext = (origin: string) => ({
+      locals: { requestId: "request-fragment-security" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume`, {
+        body: JSON.stringify({ token }),
+        headers: { "Content-Type": "application/json", Origin: origin },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof consumeMagicLinkPostRoute>[0]);
+
+    const csrfResponse = await consumeMagicLinkPostRoute(routeContext("https://evil.example.test"));
+    expect(csrfResponse.status).toBe(403);
+    expect(database.prepare("SELECT consumed_at AS consumedAt FROM magic_link_tokens").get()).toEqual({ consumedAt: null });
+
+    database.prepare("UPDATE magic_link_tokens SET expires_at = '2000-01-01T00:00:00.000Z'").run();
+    const expiredResponse = await consumeMagicLinkPostRoute(routeContext(env.DASHBOARD_ORIGIN));
+    expect(expiredResponse.status).toBe(401);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 0 });
+  });
+
   it("records only safe request telemetry when magic-link initiation fails", async () => {
     const response = await requestMagicLinkRoute({
       locals: { requestId: "request-safe-auth-log" },
@@ -376,10 +702,8 @@ describe("magic-link issuance rate limit", () => {
       requesterAddress: "203.0.113.71",
       now,
     });
-    const tokenFrom = (link: string | undefined): string => new URL(link ?? "", env.DASHBOARD_ORIGIN)
-      .searchParams.get("token") ?? "";
-    const victimToken = tokenFrom(victimRequest.debugMagicLink);
-    const attackerToken = tokenFrom(attackerRequest.debugMagicLink);
+    const victimToken = tokenFromMagicLink(victimRequest.debugMagicLink, env.DASHBOARD_ORIGIN);
+    const attackerToken = tokenFromMagicLink(attackerRequest.debugMagicLink, env.DASHBOARD_ORIGIN);
 
     const victimSession = await consumeMagicLink({
       env,
@@ -389,39 +713,39 @@ describe("magic-link issuance rate limit", () => {
     expect(victimSession.auth.email).toBe("victim@example.test");
     expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 1 });
 
-    const forcedLoginResponse = await consumeMagicLinkRoute({
+    const forcedLoginResponse = await consumeMagicLinkPostRoute({
       locals: { requestId: "request-forced-login" },
-      redirect: (location: string, status: number) => new Response(null, {
-        headers: { Location: location },
-        status,
-      }),
-      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume?token=${encodeURIComponent(attackerToken)}`, {
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume`, {
+        body: JSON.stringify({ token: attackerToken }),
         headers: {
+          "Content-Type": "application/json",
           Cookie: [
             `${env.SESSION_COOKIE_NAME}=${victimSession.credentials.sessionToken}`,
             `${magicLinkInitiationCookieName(env)}=${victimRequest.initiationBinding}`,
           ].join("; "),
+          Origin: env.DASHBOARD_ORIGIN,
         },
+        method: "POST",
       }),
-    } as unknown as Parameters<typeof consumeMagicLinkRoute>[0]);
-    expect(forcedLoginResponse.status).toBe(401);
-    expect(forcedLoginResponse.headers.get("Set-Cookie")).toBeNull();
+    } as unknown as Parameters<typeof consumeMagicLinkPostRoute>[0]);
+    expect(forcedLoginResponse.status).toBe(202);
+    await expect(forcedLoginResponse.json()).resolves.toMatchObject({ confirmationRequired: true });
+    expect(forcedLoginResponse.headers.get("Set-Cookie")).toContain(`${magicLinkConfirmationCookieName(env)}=`);
     expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 1 });
 
-    const legitimateResponse = await consumeMagicLinkRoute({
+    const legitimateResponse = await consumeMagicLinkPostRoute({
       locals: { requestId: "request-legitimate-login" },
-      redirect: (location: string, status: number) => new Response(null, {
-        headers: { Location: location },
-        status,
-      }),
-      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume?token=${encodeURIComponent(attackerToken)}`, {
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/consume`, {
+        body: JSON.stringify({ token: attackerToken }),
         headers: {
+          "Content-Type": "application/json",
           Cookie: `${magicLinkInitiationCookieName(env)}=${attackerRequest.initiationBinding}`,
+          Origin: env.DASHBOARD_ORIGIN,
         },
+        method: "POST",
       }),
-    } as unknown as Parameters<typeof consumeMagicLinkRoute>[0]);
-    expect(legitimateResponse.status).toBe(303);
-    expect(legitimateResponse.headers.get("Location")).toBe("/app");
+    } as unknown as Parameters<typeof consumeMagicLinkPostRoute>[0]);
+    expect(legitimateResponse.status).toBe(200);
     expect(legitimateResponse.headers.get("Set-Cookie")).toContain(`${env.SESSION_COOKIE_NAME}=`);
     expect(legitimateResponse.headers.get("Set-Cookie")).toContain(`${magicLinkInitiationCookieName(env)}=`);
     expect(legitimateResponse.headers.get("Set-Cookie")).toContain("Max-Age=0");
@@ -450,9 +774,16 @@ describe("magic-link issuance rate limit", () => {
       requesterAddress: "203.0.113.80",
       now,
     });
-    const token = (link: string | undefined) => new URL(link ?? "", env.DASHBOARD_ORIGIN).searchParams.get("token") ?? "";
-    await consumeMagicLink({ env, initiationBinding: firstLink.initiationBinding, token: token(firstLink.debugMagicLink) });
-    const current = await consumeMagicLink({ env, initiationBinding: secondLink.initiationBinding, token: token(secondLink.debugMagicLink) });
+    await consumeMagicLink({
+      env,
+      initiationBinding: firstLink.initiationBinding,
+      token: tokenFromMagicLink(firstLink.debugMagicLink, env.DASHBOARD_ORIGIN),
+    });
+    const current = await consumeMagicLink({
+      env,
+      initiationBinding: secondLink.initiationBinding,
+      token: tokenFromMagicLink(secondLink.debugMagicLink, env.DASHBOARD_ORIGIN),
+    });
     const auth = { ...current.auth, csrfTokenHash: "test-csrf-hash" };
 
     const sessions = await listSessions(auth, env);
@@ -473,7 +804,7 @@ describe("magic-link issuance rate limit", () => {
       requesterAddress: "203.0.113.81",
       now: activityStartedAt,
     });
-    const magicToken = new URL(requested.debugMagicLink ?? "", env.DASHBOARD_ORIGIN).searchParams.get("token") ?? "";
+    const magicToken = tokenFromMagicLink(requested.debugMagicLink, env.DASHBOARD_ORIGIN);
     const session = await consumeMagicLink({ env, initiationBinding: requested.initiationBinding, token: magicToken });
     database.prepare("UPDATE auth_sessions SET last_seen_at = '2000-01-01T00:00:00.000Z' WHERE id = ?")
       .run(session.auth.sessionId);

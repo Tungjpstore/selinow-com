@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 
-import { magicLinkRequesterAddress } from "../../../../lib/auth/admission";
+import { magicLinkRequesterAddress, verifyMagicLinkChallenge } from "../../../../lib/auth/admission";
 import { assertDashboardOrigin, normalizeDisplayName, normalizeEmail } from "../../../../lib/auth/policy";
 import { appendMagicLinkInitiationCookie, requestMagicLink } from "../../../../lib/auth/session";
 import { isAppError } from "../../../../lib/core/errors";
@@ -14,19 +14,25 @@ export const POST: APIRoute = async ({ locals, request }) => {
   try {
     assertDashboardOrigin(request, env.DASHBOARD_ORIGIN);
     const body = await readJsonObject(request);
-    rejectUnknownFields(body, ["displayName", "email"]);
+    rejectUnknownFields(body, ["displayName", "email", "turnstileToken"]);
     const email = normalizeEmail(body.email);
     const displayName = normalizeDisplayName(body.displayName, email);
-    const { initiationBinding, ...result } = await requestMagicLink({
+    const challengePassed = body.turnstileToken !== undefined;
+    if (challengePassed) {
+      await verifyMagicLinkChallenge({ env, request, token: body.turnstileToken });
+    }
+    const result = await requestMagicLink({
+      challengePassed,
       displayName,
       email,
       env,
       locale: locals.locale,
       requesterAddress: magicLinkRequesterAddress(request),
     });
+    const { initiationBinding, ...publicResult } = result;
 
     const response = Response.json(
-      { ok: true, accepted: true, ...result, requestId: locals.requestId },
+      { ok: true, accepted: true, ...publicResult, requestId: locals.requestId },
       {
         status: 202,
         headers: {
@@ -35,7 +41,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
         },
       },
     );
-    appendMagicLinkInitiationCookie(response.headers, initiationBinding, env);
+    if (!result.challengeRequired) appendMagicLinkInitiationCookie(response.headers, initiationBinding, env);
     return response;
   } catch (error) {
     const failure = isAppError(error)

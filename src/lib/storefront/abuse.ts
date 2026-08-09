@@ -107,8 +107,12 @@ export async function guardAnonymousCheckout(input: { env: AppBindings; request:
   const requestCount = await incrementLimit({ action: "checkout", shopId: input.shop.id, ...input, windowSeconds });
   if (requestCount > positiveInteger(input.env.STOREFRONT_CHECKOUT_RATE_LIMIT, 8)) throw new AppError("rate_limited", 429);
   const threshold = positiveInteger(input.env.STOREFRONT_TURNSTILE_THRESHOLD, 3);
+  if (requestCount <= threshold) return;
   const configuration = resolveTurnstileConfiguration(input.env);
-  if (requestCount <= threshold || configuration === null) return;
+  if (configuration === null) {
+    if (input.env.APP_ENV === "production") throw new AppError("turnstile_unavailable", 503);
+    return;
+  }
   if (typeof input.turnstileToken !== "string" || input.turnstileToken.length < 10 || input.turnstileToken.length > 2_048) throw new AppError("turnstile_required", 403);
   await verifyTurnstile({ ...input, configuration, token: input.turnstileToken });
 }

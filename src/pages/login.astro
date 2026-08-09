@@ -4,6 +4,7 @@ import "../styles/selinow-a11y.css";
 import { authenticateRequest } from "../lib/auth/session";
 import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
+import { resolveTurnstileConfiguration } from "../lib/storefront/turnstile";
 
 const env = getBindings();
 if (Astro.url.origin !== env.DASHBOARD_ORIGIN) {
@@ -12,9 +13,10 @@ if (Astro.url.origin !== env.DASHBOARD_ORIGIN) {
   return Astro.redirect(canonicalLogin.toString(), 308);
 }
 
+let hasAuthenticatedSession = false;
 try {
   await authenticateRequest(Astro.request, env);
-  return Astro.redirect("/app");
+  hasAuthenticatedSession = true;
 } catch {
   // Anonymous visitors continue to the login form.
 }
@@ -23,6 +25,7 @@ Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
 const locale = resolvePresentationLocale(Astro.locals.locale ?? DEFAULT_LOCALE);
 const t = createSystemTranslator(locale);
+const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
 ---
 
 <!doctype html>
@@ -42,15 +45,29 @@ const t = createSystemTranslator(locale);
       <a class="brand" href="/" aria-label={t("auth.login.brand_aria")}><img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="152" height="40" /></a>
       <section class="login-panel" aria-labelledby="login-title">
         <div class="login-heading"><p class="eyebrow">{t("auth.login.eyebrow")}</p><h1 id="login-title">{t("auth.login.heading")}</h1><p>{t("auth.login.intro")}</p></div>
-        <form id="login-form" data-login-form>
+        <form id="login-form" data-login-form data-authenticated-session={String(hasAuthenticatedSession)}>
           <label for="email">{t("auth.login.email_label")}</label>
           <input id="email" name="email" type="email" inputmode="email" autocomplete="email" required maxlength="254" aria-describedby="email-help status" data-login-email />
           <p class="field-help" id="email-help">{t("auth.login.email_help")}</p>
           <label for="display-name">{t("auth.login.display_name_label")} <span>{t("auth.login.optional")}</span></label>
           <input id="display-name" name="displayName" autocomplete="name" maxlength="80" data-login-display-name />
+          <div class="login-challenge" data-login-challenge hidden>
+            <p>{t("auth.login.challenge_required")}</p>
+            <div
+              data-login-turnstile
+              data-sitekey={turnstileSiteKey ?? undefined}
+              data-action="magic_link_request"
+            ></div>
+          </div>
           <button type="submit" data-login-submit><span data-login-submit-label>{t("auth.login.submit")}</span><span aria-hidden="true">→</span></button>
           <p id="status" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
         </form>
+        <section class="login-confirmation" aria-labelledby="login-confirmation-title" data-login-confirmation hidden>
+          <p class="recovery-kicker">{t("auth.login.confirmation_kicker")}</p>
+          <h2 id="login-confirmation-title">{t("auth.login.confirmation_title")}</h2>
+          <p>{t("auth.login.confirmation_intro")} <strong data-login-confirm-destination></strong></p>
+          <button type="button" data-login-confirm>{t("auth.login.confirmation_action")}</button>
+        </section>
         <section class="login-recovery" aria-labelledby="login-recovery-title" data-login-recovery hidden>
           <p class="recovery-kicker">{t("auth.login.recovery_kicker")}</p>
           <h2 id="login-recovery-title">{t("auth.login.recovery_title")}</h2>
@@ -72,6 +89,7 @@ const t = createSystemTranslator(locale);
     <script>
       import "../scripts/marketing/login";
     </script>
+    {turnstileSiteKey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>}
   </body>
 </html>
 
@@ -93,6 +111,9 @@ const t = createSystemTranslator(locale);
   input { width: 100%; min-height: 48px; border: 1px solid var(--selinow-border-control); border-radius: var(--sln-radius-md); padding: 12px 14px; background: var(--sln-bg-surface); color: var(--sln-text-primary); outline: none; }
   input:focus { border-color: var(--sln-focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 22%, transparent); }
   .field-help { margin: 8px 0 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .login-challenge { display: grid; gap: 12px; margin-top: 20px; padding: 14px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-subtle); }
+  .login-challenge[hidden] { display: none; }
+  .login-challenge p { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
   button { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 50px; margin-top: 24px; border: 1px solid var(--sln-action-primary); border-radius: var(--sln-radius-md); padding: 12px 20px; background: var(--sln-action-primary); color: var(--sln-white); font: var(--sln-font-label); cursor: pointer; }
   button:hover { background: var(--sln-action-primary-hover); }
   button:disabled { cursor: wait; opacity: .68; }
@@ -113,6 +134,11 @@ const t = createSystemTranslator(locale);
   .recovery-secondary { border-color: var(--sln-border-strong); background: transparent; color: var(--sln-text-primary); }
   .recovery-secondary:hover { background: var(--sln-bg-surface); }
   .recovery-privacy { margin: 14px 0 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .login-confirmation { margin-top: 20px; padding: 20px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-subtle); }
+  .login-confirmation[hidden] { display: none; }
+  .login-confirmation h2 { margin: 0; font: var(--sln-font-h4); }
+  .login-confirmation p:not(.recovery-kicker) { margin: 8px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .login-confirmation button { margin-top: 16px; }
   .login-help { display: grid; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--sln-border-default); color: var(--sln-text-muted); font: var(--sln-font-caption); text-align: center; }
   .login-help a { color: var(--sln-action-primary); font-weight: 700; }
   :global(:focus-visible) { outline: 3px solid var(--sln-focus-ring); outline-offset: 3px; }

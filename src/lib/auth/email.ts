@@ -22,8 +22,8 @@ export async function sendMagicLinkEmail(input: {
   locale?: unknown;
   token: string;
 }): Promise<void> {
-  const magicLink = new URL("/api/auth/magic-link/consume", input.env.DASHBOARD_ORIGIN);
-  magicLink.searchParams.set("token", input.token);
+  const magicLink = new URL("/login", input.env.DASHBOARD_ORIGIN);
+  magicLink.hash = new URLSearchParams({ magic: input.token }).toString();
   const link = magicLink.toString();
   const t = createSystemTranslator(input.locale);
 
