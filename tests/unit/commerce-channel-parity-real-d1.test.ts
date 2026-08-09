@@ -749,19 +749,25 @@ describe("canonical commerce channel parity on local D1", () => {
     expect(runtime.database.database.prepare("SELECT status, reservation_token AS reservationToken FROM inventory_keys WHERE shop_id = ? AND variant_id = 'variant-paid'").all(SHOP_ID)).toEqual(before.inventory);
   });
 
-  it("applies exact payment through the canonical event seam for Website, Telegram and fake orders", async () => {
+  it("applies exact payment through the canonical event seam, including on-demand private files", async () => {
     const runtime = createRuntime();
     const website = await prepareWebsiteCheckout(runtime, "variant-paid", "parity-payment-event-web-0001");
+    const privateWebsite = await prepareWebsiteCheckout(runtime, "variant-private-paid", "parity-payment-event-private-web-0001");
     const telegram = await prepareTelegramCheckout(runtime, "variant-paid", 2201);
     const fake = await prepareFakeCheckout(runtime, "variant-paid", "parity-payment-event-fake-0001");
     const checkouts = [
-      { channelCode: "website", prepared: website },
-      { channelCode: "telegram", prepared: telegram },
-      { channelCode: FAKE_CHANNEL_CODE, prepared: fake },
+      { channelCode: "website", expectedFulfillmentItems: 1, prepared: website },
+      { channelCode: "website", expectedFulfillmentItems: 0, prepared: privateWebsite },
+      { channelCode: "telegram", expectedFulfillmentItems: 1, prepared: telegram },
+      { channelCode: FAKE_CHANNEL_CODE, expectedFulfillmentItems: 1, prepared: fake },
     ] as const;
 
+    const checkedOut: Array<(typeof checkouts)[number] & { view: CommerceCheckoutView }> = [];
     for (const checkout of checkouts) {
-      await checkout.prepared.app.checkoutCart(checkout.prepared.context, checkout.prepared.command);
+      checkedOut.push({
+        ...checkout,
+        view: await checkout.prepared.app.checkoutCart(checkout.prepared.context, checkout.prepared.command),
+      });
     }
 
     runtime.database.database.exec(`
@@ -785,12 +791,11 @@ describe("canonical commerce channel parity on local D1", () => {
       );
     `);
 
-    const paymentRows: Array<{ attempt: CommercePaymentAttempt; eventId: string; orderId: string; channelCode: string }> = [];
-    for (const [index, checkout] of checkouts.entries()) {
-      const order = runtime.database.database.prepare("SELECT id, public_id AS publicId FROM orders WHERE shop_id = ? AND source_channel = ? ORDER BY created_at DESC, id DESC LIMIT 1 OFFSET ?").get(
+    const paymentRows: Array<{ attempt: CommercePaymentAttempt; eventId: string; expectedAmount: number; expectedFulfillmentItems: number; orderId: string; channelCode: string }> = [];
+    for (const [index, checkout] of checkedOut.entries()) {
+      const order = runtime.database.database.prepare("SELECT id, public_id AS publicId FROM orders WHERE shop_id = ? AND public_id = ? LIMIT 1").get(
         SHOP_ID,
-        checkout.channelCode === "telegram" ? "telegram" : "web",
-        checkout.channelCode === "telegram" ? 0 : checkout.channelCode === "website" ? 0 : 1,
+        checkout.view.orderId,
       ) as { id: string; publicId: string } | undefined;
       if (order === undefined) throw new Error(`payment_event_order_missing:${checkout.channelCode}`);
       const attemptId = `attempt-parity-payment-${String(index)}`;
@@ -801,8 +806,8 @@ describe("canonical commerce channel parity on local D1", () => {
           provider_order_code, state, expected_amount_minor, currency,
           expected_description, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, 'integration-parity-payment', 'credential-parity-payment',
-          'payos', ?, 'pending', 9000, 'VND', 'Parity payment', ?, ?, ?)
-      `).run(attemptId, `${attemptId}-public`, SHOP_ID, order.id, 88001 + index, "2026-07-30T06:00:00.000Z", NOW, NOW);
+          'payos', ?, 'pending', ?, 'VND', 'Parity payment', ?, ?, ?)
+      `).run(attemptId, `${attemptId}-public`, SHOP_ID, order.id, 88001 + index, checkout.view.totalMinor, "2026-07-30T06:00:00.000Z", NOW, NOW);
       runtime.database.database.prepare(`
         INSERT INTO payment_events (
           id, shop_id, payment_attempt_id, integration_id, provider,
@@ -816,6 +821,8 @@ describe("canonical commerce channel parity on local D1", () => {
         attempt: { id: attemptId, integrationId: "integration-parity-payment", orderId: order.id, shopId: SHOP_ID, state: "pending" },
         channelCode: checkout.channelCode,
         eventId,
+        expectedAmount: checkout.view.totalMinor,
+        expectedFulfillmentItems: checkout.expectedFulfillmentItems,
         orderId: order.publicId,
       });
     }
@@ -827,7 +834,7 @@ describe("canonical commerce channel parity on local D1", () => {
         decision: "paid_exact",
         env: runtime.env,
         eventId: row.eventId,
-        evidence: { amount: 9000, expectedAmount: 9000, occurredAt: NOW, reference: `reference-${row.eventId}` },
+        evidence: { amount: row.expectedAmount, expectedAmount: row.expectedAmount, occurredAt: NOW, reference: `reference-${row.eventId}` },
         integrationId: "integration-parity-payment",
       })).resolves.toEqual({ processed: true, state: "paid_exact" });
 
@@ -837,7 +844,8 @@ describe("canonical commerce channel parity on local D1", () => {
       `).get(SHOP_ID, row.orderId)).toEqual({ fulfillmentStatus: "fulfilled", paymentStatus: "paid", status: "completed" });
       expect(runtime.database.database.prepare("SELECT state FROM payment_attempts WHERE id = ? AND shop_id = ?").get(row.attempt.id, SHOP_ID)).toEqual({ state: "paid_exact" });
       expect(runtime.database.database.prepare("SELECT normalized_state AS normalizedState, process_result AS processResult, processed_at AS processedAt FROM payment_events WHERE id = ? AND shop_id = ?").get(row.eventId, SHOP_ID)).toMatchObject({ normalizedState: "paid_exact", processResult: "fulfilled" });
-      expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM fulfillment_items WHERE shop_id = ? AND fulfillment_id IN (SELECT id FROM fulfillments WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?))").get(SHOP_ID, SHOP_ID, SHOP_ID, row.orderId)).toEqual({ count: 1 });
+      expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM fulfillments WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?)").get(SHOP_ID, SHOP_ID, row.orderId)).toEqual({ count: row.expectedFulfillmentItems });
+      expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM fulfillment_items WHERE shop_id = ? AND fulfillment_id IN (SELECT id FROM fulfillments WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?))").get(SHOP_ID, SHOP_ID, SHOP_ID, row.orderId)).toEqual({ count: row.expectedFulfillmentItems });
     }
 
     expect(runtime.database.database.prepare("SELECT status, COUNT(*) AS count FROM inventory_keys WHERE shop_id = ? AND variant_id = 'variant-paid' GROUP BY status ORDER BY status").all(SHOP_ID)).toEqual([
@@ -847,7 +855,7 @@ describe("canonical commerce channel parity on local D1", () => {
     expect(runtime.database.database.prepare("SELECT channel_code AS channelCode, COUNT(*) AS count FROM order_channel_attributions WHERE shop_id = ? GROUP BY channel_code ORDER BY channel_code").all(SHOP_ID)).toEqual([
       { channelCode: FAKE_CHANNEL_CODE, count: 1 },
       { channelCode: "telegram", count: 1 },
-      { channelCode: "website", count: 1 },
+      { channelCode: "website", count: 2 },
     ]);
   });
 
@@ -1416,6 +1424,11 @@ describe("canonical commerce channel parity on local D1", () => {
       policyId: "policy-private-parity-v1",
       policyVersion: 1,
     }]);
+    expect(first.view).toMatchObject({ fulfillmentStatus: "fulfilled", paymentStatus: "paid", status: "completed" });
+    expect(runtime.database.database.prepare(`
+      SELECT COUNT(*) AS count FROM fulfillments
+      WHERE shop_id = ? AND order_id = ? AND fulfillment_type = 'manual'
+    `).get(SHOP_ID, order.id)).toEqual({ count: 0 });
     expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM digital_entitlements WHERE shop_id = ? AND order_id = ?").get(SHOP_ID, order.id)).toEqual({ count: 0 });
 
     await expect(prepared.app.checkoutCart(prepared.context, prepared.command)).resolves.toEqual(first.view);

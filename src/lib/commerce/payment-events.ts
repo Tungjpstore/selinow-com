@@ -235,7 +235,8 @@ async function fulfillExactPayment(
   }
   const now = new Date().toISOString();
   const hasManual = orderItems.results.some((item) => item.fulfillmentType === "manual"
-    && (item.hasPrivateRequirement === 1 || item.hasGenericRequirement !== 1));
+    && item.hasPrivateRequirement !== 1
+    && item.hasGenericRequirement !== 1);
   const hasGeneratedLicense = orderItems.results.some((item) => item.hasGeneratedLicenseRequirement === 1);
   const hasAsyncFulfillment = hasManual || hasGeneratedLicense;
   const digitalFulfillmentId = expectedKeys > 0 ? createId("ful") : null;

@@ -458,11 +458,13 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     shopId: input.shopId,
   });
   const isFree = input.totalMinor === 0;
+  const hasPrivateFileFulfillment = orderItems.some((item) =>
+    privateFileRequirementState.snapshots.has(item.line.productId));
   const hasManualFulfillment = orderItems.some((item) => {
     if (item.line.fulfillmentType !== "manual") return false;
     const hasPrivateFilePolicy = privateFileRequirementState.snapshots.has(item.line.productId);
     const hasGenericPolicy = (genericEntitlementPolicyState.snapshots.get(item.line.productId)?.length ?? 0) > 0;
-    return hasPrivateFilePolicy || !hasGenericPolicy;
+    return !hasPrivateFilePolicy && !hasGenericPolicy;
   });
   const hasGeneratedLicenseFulfillment = orderItems.some((item) =>
     genericEntitlementPolicyState.snapshots.get(item.line.productId)
@@ -471,7 +473,7 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
   const isAutoFulfilled = isFree
     && !hasManualFulfillment
     && !hasGeneratedLicenseFulfillment
-    && (requiredLicenseKeys > 0 || genericEntitlementRequirements.length > 0);
+    && (requiredLicenseKeys > 0 || genericEntitlementRequirements.length > 0 || hasPrivateFileFulfillment);
   const orderCreatedEvent = await prepareDomainEventAppend({
     aggregateId: input.orderId,
     aggregateType: "order",
