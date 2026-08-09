@@ -199,7 +199,15 @@ describe("Dodo billing adapter", () => {
       expect(init?.method).toBe("GET");
       return Promise.resolve(new Response(JSON.stringify({ id: "sub_dodo_test", product_id: "prod_test_pro", status: "active" }), { status: 200 }));
     };
-    await expect(retrieveDodoSubscription({ config, fetcher, providerSubscriptionId: "sub_dodo_test" })).resolves.toEqual({ priceId: "prod_test_pro", providerSubscriptionId: "sub_dodo_test", status: "active" });
+    await expect(retrieveDodoSubscription({ config, fetcher, providerSubscriptionId: "sub_dodo_test" })).resolves.toEqual({
+      createdAt: null,
+      nextBillingDate: null,
+      priceId: "prod_test_pro",
+      providerSubscriptionId: "sub_dodo_test",
+      status: "active",
+      trialAmountMinor: null,
+      trialPeriodDays: null,
+    });
   });
 
   it("uses the verified Dodo subscription mutation paths with stable idempotency", async () => {

@@ -21,9 +21,13 @@ export type DodoSubscriptionOperation = {
 };
 
 export type DodoSubscription = {
+  createdAt: string | null;
+  nextBillingDate: string | null;
   priceId: string | null;
   providerSubscriptionId: string;
   status: string | null;
+  trialAmountMinor: number | null;
+  trialPeriodDays: number | null;
 };
 
 export type DodoBillingEvent = {
@@ -180,6 +184,15 @@ function minorAmount(value: unknown, currency: string | null): number | null {
     return Number.isSafeInteger(amount) ? amount : null;
   }
   return decimalToMinor(value, currency);
+}
+
+function nonNegativeInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^\d+$/u.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function findPriceId(data: Record<string, unknown>): string | null {
@@ -404,7 +417,16 @@ export async function retrieveDodoSubscription(input: {
   const data = asObject(body);
   const providerSubscriptionId = readProviderReference(data.subscription_id) ?? readProviderReference(data.id) ?? requestedSubscriptionId;
   if (providerSubscriptionId !== requestedSubscriptionId) throw new AppError("billing_provider_invalid", 502, ["subscription_identity"]);
-  return { priceId: findPriceId(data), providerSubscriptionId, status: readString(data.status) };
+  const currency = (readString(data.currency) ?? readString(data.billing_currency))?.toUpperCase() ?? null;
+  return {
+    createdAt: readDate(data.created_at),
+    nextBillingDate: readDate(data.next_billing_date),
+    priceId: findPriceId(data),
+    providerSubscriptionId,
+    status: readString(data.status),
+    trialAmountMinor: data.trial_amount === null ? null : minorAmount(data.trial_amount, currency),
+    trialPeriodDays: nonNegativeInteger(data.trial_period_days),
+  };
 }
 
 async function dodoSubscriptionOperation(input: {

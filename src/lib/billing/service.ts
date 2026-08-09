@@ -15,6 +15,7 @@ import {
   resumeDodoSubscription,
   verifyDodoWebhookSignature,
   type DodoBillingEvent,
+  type DodoSubscription,
 } from "./dodo";
 
 export const BILLING_GRACE_PERIOD_MS = 3 * 24 * 60 * 60_000;
@@ -80,6 +81,8 @@ type BillingEventRow = {
 // be reclaimed after this interval; the final guarded update prevents the old
 // worker from committing after its lease has been taken over.
 const DODO_EVENT_LEASE_MS = 2 * 60_000;
+const DODO_PROVIDER_TRIAL_DAYS = 7;
+const DODO_PROVIDER_TRIAL_TOLERANCE_MS = 60 * 60_000;
 
 export type CheckoutResult = {
   amountMinor: number;
@@ -1027,6 +1030,35 @@ function targetStateForEvent(event: DodoBillingEvent): BillingState | null {
   return null;
 }
 
+function requireProviderManagedTrial(input: {
+  event: DodoBillingEvent;
+  nowIso: string;
+  providerPriceRef: string;
+  providerSubscription: DodoSubscription;
+}): string {
+  const provider = input.providerSubscription;
+  if (provider.status !== "active"
+    || provider.priceId !== input.providerPriceRef
+    || provider.trialPeriodDays !== DODO_PROVIDER_TRIAL_DAYS
+    || (provider.trialAmountMinor !== null && provider.trialAmountMinor !== 0)
+    || provider.nextBillingDate === null) {
+    throw new AppError("billing_webhook_trial_invalid", 409);
+  }
+  const trialEnd = new Date(provider.nextBillingDate);
+  const now = new Date(input.nowIso);
+  if (!Number.isFinite(trialEnd.getTime()) || trialEnd.getTime() <= now.getTime()) throw new AppError("billing_webhook_trial_invalid", 409);
+  const trialStart = new Date(provider.createdAt ?? input.event.periodStart ?? input.event.occurredAt);
+  if (!Number.isFinite(trialStart.getTime())) throw new AppError("billing_webhook_trial_invalid", 409);
+  const expectedDuration = DODO_PROVIDER_TRIAL_DAYS * 24 * 60 * 60_000;
+  const duration = trialEnd.getTime() - trialStart.getTime();
+  if (Math.abs(duration - expectedDuration) > DODO_PROVIDER_TRIAL_TOLERANCE_MS) throw new AppError("billing_webhook_trial_invalid", 409);
+  if (input.event.periodEnd !== null) {
+    const eventTrialEnd = new Date(input.event.periodEnd);
+    if (!Number.isFinite(eventTrialEnd.getTime()) || eventTrialEnd.getTime() !== trialEnd.getTime()) throw new AppError("billing_webhook_trial_invalid", 409);
+  }
+  return trialEnd.toISOString();
+}
+
 async function loadEvent(env: AppBindings, providerEventId: string): Promise<BillingEventRow | null> {
   return env.PLATFORM_DB.prepare("SELECT id, payload_hash AS payloadHash, status, processed_at AS processedAt FROM billing_provider_events WHERE provider_code = 'dodo' AND provider_event_id = ? LIMIT 1").bind(providerEventId).first<BillingEventRow>();
 }
@@ -1230,6 +1262,7 @@ export async function processDodoWebhook(input: {
     const customAmountMinor = customValue(event.customData, "amountMinor", "amount_minor");
     const customProviderPriceRef = customValue(event.customData, "providerPriceRef", "provider_price_ref");
     const initialPayment = event.eventType === "payment.succeeded" && session.status !== "completed";
+    if (event.eventType === "payment.succeeded" && ["expired", "failed", "canceled"].includes(session.status)) throw new AppError("billing_webhook_checkout_expired", 409);
     if (initialPayment && (customShopId === null || customPlanCode === null || customMarketCode === null
       || customCheckoutSessionId === null || customSubscriptionId === null || customCurrency === null
       || customAmountMinor === null || customProviderPriceRef === null)) {
@@ -1256,15 +1289,17 @@ export async function processDodoWebhook(input: {
     if (event.providerSubscriptionId !== null && subscription.providerSubscriptionRef !== null && event.providerSubscriptionId !== subscription.providerSubscriptionRef) throw new AppError("billing_webhook_identity_mismatch", 409);
     let target = targetStateForEvent(event);
     let providerPriceRef = event.priceId;
-    if (target === "active" && providerPriceRef === null && (initialPayment || pendingChange?.action === "change_plan")) {
+    const zeroAmountTrialMandate = initialPayment && event.amountMinor === 0;
+    let providerSubscription: DodoSubscription | null = null;
+    if (target === "active" && (providerPriceRef === null && (initialPayment || pendingChange?.action === "change_plan") || zeroAmountTrialMandate)) {
       if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
-      const providerSubscription = await retrieveDodoSubscription({
+      providerSubscription = await retrieveDodoSubscription({
         config,
         providerSubscriptionId: event.providerSubscriptionId,
         ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
       });
       if (providerSubscription.status !== null && providerSubscription.status !== "active") throw new AppError("billing_webhook_price_mismatch", 409);
-      providerPriceRef = providerSubscription.priceId;
+      providerPriceRef = providerPriceRef ?? providerSubscription.priceId;
       if (providerPriceRef === null) throw new AppError("billing_webhook_price_mismatch", 409);
     }
     const checkoutPrice = await loadBillingPriceById(input.env, session.priceId);
@@ -1282,9 +1317,18 @@ export async function processDodoWebhook(input: {
     } else if (eventPrice !== null && eventPrice.id !== verifiedPrice.id) {
       throw new AppError("billing_webhook_price_mismatch", 409);
     }
+    let providerTrialEndsAt: string | null = null;
+    if (zeroAmountTrialMandate) {
+      if (event.currency !== verifiedPrice.currency.toUpperCase() || providerPriceRef !== verifiedPrice.providerPriceRef || providerSubscription === null) {
+        throw new AppError("billing_webhook_amount_mismatch", 409);
+      }
+      providerTrialEndsAt = requireProviderManagedTrial({ event, nowIso, providerPriceRef, providerSubscription });
+      target = "trialing";
+    }
     if (requiresPaidAmount(event.eventType)) {
-      if (["expired", "failed", "canceled"].includes(session.status)) throw new AppError("billing_webhook_checkout_expired", 409);
       if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
+    }
+    if (requiresPaidAmount(event.eventType) && !zeroAmountTrialMandate) {
       if (event.amountMinor === null || event.currency === null || providerPriceRef === null || event.amountMinor !== verifiedPrice.amountMinor || event.currency !== verifiedPrice.currency.toUpperCase() || providerPriceRef !== verifiedPrice.providerPriceRef) throw new AppError("billing_webhook_amount_mismatch", 409);
     }
     if (initialPayment && (customCurrency !== verifiedPrice.currency.toUpperCase()
@@ -1323,7 +1367,8 @@ export async function processDodoWebhook(input: {
       ? event.providerSubscriptionId
       : null;
     const providerRefChanged = providerSubscriptionRefForBinding !== subscription.providerSubscriptionRef;
-    const priceChanged = target === "active" && (subscription.planId !== verifiedPrice.planId || subscription.priceId !== verifiedPrice.id);
+    const appliesPriceSnapshot = target === "active" || target === "trialing";
+    const priceChanged = appliesPriceSnapshot && (subscription.planId !== verifiedPrice.planId || subscription.priceId !== verifiedPrice.id);
     const transitionNeeded = target !== null && (subscription.state !== target || periodChanged || providerRefChanged || priceChanged);
     const statements: D1PreparedStatement[] = [];
     if (transitionNeeded && target !== null) {
@@ -1334,15 +1379,15 @@ export async function processDodoWebhook(input: {
         : null;
       statements.push(input.env.PLATFORM_DB.prepare(`
         UPDATE shop_subscriptions
-        SET state = ?, plan_id = CASE WHEN ? = 'active' THEN ? ELSE plan_id END,
-          market_code = CASE WHEN ? = 'active' THEN ? ELSE market_code END,
-          price_currency = CASE WHEN ? = 'active' THEN ? ELSE price_currency END,
-          price_amount_minor = CASE WHEN ? = 'active' THEN ? ELSE price_amount_minor END,
-          price_interval = CASE WHEN ? = 'active' THEN 'month' ELSE price_interval END,
-          price_version = CASE WHEN ? = 'active' THEN ? ELSE price_version END,
-          price_id = CASE WHEN ? = 'active' THEN ? ELSE price_id END,
+        SET state = ?, plan_id = CASE WHEN ? IN ('active', 'trialing') THEN ? ELSE plan_id END,
+          market_code = CASE WHEN ? IN ('active', 'trialing') THEN ? ELSE market_code END,
+          price_currency = CASE WHEN ? IN ('active', 'trialing') THEN ? ELSE price_currency END,
+          price_amount_minor = CASE WHEN ? IN ('active', 'trialing') THEN ? ELSE price_amount_minor END,
+          price_interval = CASE WHEN ? IN ('active', 'trialing') THEN 'month' ELSE price_interval END,
+          price_version = CASE WHEN ? IN ('active', 'trialing') THEN ? ELSE price_version END,
+          price_id = CASE WHEN ? IN ('active', 'trialing') THEN ? ELSE price_id END,
           grace_ends_at = ?, canceled_at = CASE WHEN ? = 'canceled' THEN ? ELSE canceled_at END,
-          trial_ends_at = CASE WHEN ? = 'active' THEN NULL ELSE trial_ends_at END,
+          trial_ends_at = CASE WHEN ? = 'trialing' THEN ? WHEN ? = 'active' THEN NULL ELSE trial_ends_at END,
           current_period_start = CASE WHEN ? = 'active' THEN COALESCE(?, current_period_start) ELSE current_period_start END,
           current_period_end = CASE WHEN ? = 'active' THEN COALESCE(?, current_period_end) ELSE current_period_end END,
           provider_subscription_ref = COALESCE(provider_subscription_ref, ?),
@@ -1358,7 +1403,8 @@ export async function processDodoWebhook(input: {
         target, verifiedPrice.version,
         target, verifiedPrice.id,
         graceEndsAt, target, target === "canceled" ? nowIso : null,
-        target, target, event.periodStart, target, event.periodEnd,
+        target, providerTrialEndsAt, target,
+        target, event.periodStart, target, event.periodEnd,
         providerSubscriptionRefForBinding, nowIso, subscription.id, subscription.version, event.providerSubscriptionId,
       ));
       // A zero-row identity/version guard must abort the whole D1 batch before

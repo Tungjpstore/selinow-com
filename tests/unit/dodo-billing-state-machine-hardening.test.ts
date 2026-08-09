@@ -105,7 +105,7 @@ function fixture(input: { providerSubscriptionRef: string | null; state: "active
   };
 }
 
-function addCheckout(database: DatabaseSync, input: { status: "completed" | "open"; id?: string; providerCheckoutRef?: string }): void {
+function addCheckout(database: DatabaseSync, input: { status: "completed" | "expired" | "open"; id?: string; providerCheckoutRef?: string }): void {
   const id = input.id ?? "bchk-hardening";
   const providerCheckoutRef = input.providerCheckoutRef ?? "chk_test_hardening";
   database.prepare(`
@@ -144,9 +144,16 @@ function signed(body: string, webhookId: string): string {
   return `v1,${createHmac("sha256", SECRET).update(`${webhookId}.${String(NOW_SECONDS)}.${body}`).digest("base64")}`;
 }
 
-async function webhook(fixtureValue: ReturnType<typeof fixture>, body: string, webhookId: string, now = NOW_ISO): Promise<unknown> {
+async function webhook(
+  fixtureValue: ReturnType<typeof fixture>,
+  body: string,
+  webhookId: string,
+  now = NOW_ISO,
+  fetcher?: typeof fetch,
+): Promise<unknown> {
   return processDodoWebhook({
     env: fixtureValue.env,
+    ...(fetcher === undefined ? {} : { fetcher }),
     now: new Date(now),
     rawBody: body,
     signature: signed(body, webhookId),
@@ -154,6 +161,23 @@ async function webhook(fixtureValue: ReturnType<typeof fixture>, body: string, w
     webhookPublicId: WEBHOOK_PUBLIC_ID,
     webhookTimestamp: String(NOW_SECONDS),
   });
+}
+
+function trialSubscriptionFetcher(input: {
+  createdAt?: string;
+  nextBillingDate?: string;
+  trialAmount?: number | null;
+  trialPeriodDays?: number;
+} = {}): typeof fetch {
+  return () => Promise.resolve(new Response(JSON.stringify({
+    created_at: input.createdAt ?? NOW_ISO,
+    id: "sub_test_trial",
+    next_billing_date: input.nextBillingDate ?? "2026-08-15T00:00:00.000Z",
+    product_id: "prod_test_pro",
+    status: "active",
+    trial_amount: input.trialAmount ?? null,
+    trial_period_days: input.trialPeriodDays ?? 7,
+  }), { status: 200 }));
 }
 
 const exactMetadata = {
@@ -213,6 +237,96 @@ describe("Dodo billing state-machine hardening", () => {
       { eventType: "subscription.active", status: "ignored" },
       { eventType: "subscription.updated", status: "ignored" },
     ]);
+    testFixture.database.close();
+  });
+
+  it("accepts an explicitly verified zero-amount trial mandate without granting paid-active access", async () => {
+    const testFixture = fixture();
+    testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment', plan_id = 'plan_starter_v1' WHERE id = 'billing-sub-hardening'").run();
+    addCheckout(testFixture.database, { status: "open" });
+    const activeBody = bodyFor({
+      checkoutSessionId: "",
+      eventType: "subscription.active",
+      metadata: exactMetadata,
+      status: "active",
+      subscriptionId: "sub_test_trial",
+    });
+    const updatedBody = bodyFor({
+      checkoutSessionId: "",
+      eventType: "subscription.updated",
+      metadata: exactMetadata,
+      occurredAt: "2026-08-08T00:00:01.000Z",
+      status: "active",
+      subscriptionId: "sub_test_trial",
+    });
+    await expect(webhook(testFixture, activeBody, "msg_trial_subscription_active")).resolves.toMatchObject({ processed: false, state: "pending_payment" });
+    await expect(webhook(testFixture, updatedBody, "msg_trial_subscription_updated")).resolves.toMatchObject({ processed: false, state: "pending_payment" });
+
+    const mandateBody = bodyFor({
+      amount: 0,
+      eventType: "payment.succeeded",
+      metadata: exactMetadata,
+      paymentId: "pay_test_trial_mandate",
+      periodEnd: "2026-08-15T00:00:00Z",
+      periodStart: NOW_ISO,
+      subscriptionId: "sub_test_trial",
+    });
+    const fetcher = trialSubscriptionFetcher();
+    await expect(webhook(testFixture, mandateBody, "msg_trial_mandate", NOW_ISO, fetcher)).resolves.toEqual({ duplicate: false, processed: true, state: "trialing" });
+    expect(testFixture.database.prepare("SELECT state, plan_id AS planId, price_id AS priceId, price_amount_minor AS amountMinor, trial_ends_at AS trialEndsAt, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ amountMinor: 1500, planId: "plan_pro_v1", priceId: "price_pro_global_v1", providerSubscriptionRef: "sub_test_trial", state: "trialing", trialEndsAt: "2026-08-15T00:00:00.000Z" });
+    expect(testFixture.database.prepare("SELECT status FROM billing_checkout_sessions WHERE id = 'bchk-hardening'").get()).toEqual({ status: "completed" });
+    expect(testFixture.database.prepare("SELECT from_state AS fromState, to_state AS toState FROM subscription_events WHERE event_type = 'payment.succeeded'").get()).toEqual({ fromState: "pending_payment", toState: "trialing" });
+
+    await expect(webhook(testFixture, mandateBody, "msg_trial_mandate", NOW_ISO, fetcher)).resolves.toEqual({ duplicate: true, processed: false, state: "processed" });
+    const conflictingBody = bodyFor({
+      amount: 1,
+      eventType: "payment.succeeded",
+      metadata: exactMetadata,
+      paymentId: "pay_test_trial_mandate",
+      periodEnd: "2026-08-15T00:00:00.000Z",
+      periodStart: NOW_ISO,
+      subscriptionId: "sub_test_trial",
+    });
+    await expect(webhook(testFixture, conflictingBody, "msg_trial_mandate", NOW_ISO, fetcher)).rejects.toMatchObject({ code: "billing_webhook_conflict", status: 409 });
+    expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM subscription_events WHERE event_type = 'payment.succeeded'").get()).toEqual({ count: 1 });
+    testFixture.database.close();
+  });
+
+  it("rejects expired or unproven zero-amount trial mandates", async () => {
+    for (const [webhookId, fetcher] of [
+      ["msg_trial_expired", trialSubscriptionFetcher({ createdAt: "2026-08-01T00:00:00.000Z", nextBillingDate: NOW_ISO })],
+      ["msg_trial_unproven", trialSubscriptionFetcher({ trialPeriodDays: 0 })],
+    ] as const) {
+      const testFixture = fixture();
+      testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment' WHERE id = 'billing-sub-hardening'").run();
+      addCheckout(testFixture.database, { status: "open" });
+      const body = bodyFor({
+        amount: 0,
+        eventType: "payment.succeeded",
+        metadata: exactMetadata,
+        paymentId: "pay_test_invalid_trial",
+        subscriptionId: "sub_test_trial",
+      });
+      await expect(webhook(testFixture, body, webhookId, NOW_ISO, fetcher)).rejects.toMatchObject({ code: "billing_webhook_trial_invalid", status: 409 });
+      expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: null, state: "pending_payment" });
+      expect(testFixture.database.prepare("SELECT status FROM billing_checkout_sessions WHERE id = 'bchk-hardening'").get()).toEqual({ status: "open" });
+      testFixture.database.close();
+    }
+  });
+
+  it("still rejects a nonzero amount that does not match the catalog price", async () => {
+    const testFixture = fixture();
+    testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment' WHERE id = 'billing-sub-hardening'").run();
+    addCheckout(testFixture.database, { status: "open" });
+    const body = bodyFor({
+      amount: 1,
+      eventType: "payment.succeeded",
+      metadata: exactMetadata,
+      paymentId: "pay_test_nonzero_mismatch",
+      subscriptionId: "sub_test_nonzero_mismatch",
+    });
+    await expect(webhook(testFixture, body, "msg_nonzero_mismatch")).rejects.toMatchObject({ code: "billing_webhook_amount_mismatch", status: 409 });
+    expect(testFixture.database.prepare("SELECT state FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "pending_payment" });
     testFixture.database.close();
   });
 
