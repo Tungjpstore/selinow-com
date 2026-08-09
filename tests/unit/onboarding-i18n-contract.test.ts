@@ -89,12 +89,18 @@ describe("onboarding localization contract", () => {
     const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
     const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
-    expect(component).toContain('<option value="starter">');
-    expect(component).toContain('<option value="pro">');
-    for (const legacy of ["bot", "store", "business"]) {
-      expect(component).not.toContain(`<option value="${legacy}">`);
-    }
+    expect(component).toContain('data-public-plan-codes={JSON.stringify(PUBLIC_PLAN_CODES)}');
+    expect(component).toContain('data-shop-plan disabled');
+    expect(component).not.toContain('<option value="starter">');
+    expect(component).not.toContain('<option value="pro">');
+    expect(client).toContain("parsePublicPlanCodes(root.dataset.publicPlanCodes)");
+    expect(client).toContain("renderPlanOptions(root, plans, planCodes)");
+    expect(client).toContain("planFeatureLabel(feature, plan.features[feature])");
+    expect(client).not.toContain('shop.planCode === "bot"');
     expect(route).toContain("PUBLIC_PLAN_CODES");
+    expect(route).toContain(".bind(...PUBLIC_PLAN_CODES)");
+    expect(route).toContain(".bind(...PUBLIC_PLAN_CODES, nowIso, nowIso)");
+    expect(route).not.toContain("code IN ('starter', 'pro')");
     expect(route).toContain("is_public = 1 AND is_assignable = 1");
     expect(client).toContain('requestApi(root, "/api/app/shops", { method: "GET" })');
     expect(client).toContain("formatMoney(offer.amountMinor, offer.currency, activeLocale)");

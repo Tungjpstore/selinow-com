@@ -46,22 +46,20 @@ export const GET: APIRoute = async ({ locals, request }) => {
         SELECT code, name, feature_flags_json, limits_json
         FROM plans
         WHERE is_active = 1 AND is_public = 1 AND is_assignable = 1
-          AND code IN ('starter', 'pro')
-        ORDER BY CASE code WHEN 'starter' THEN 0 ELSE 1 END
-      `).all<PublicPlanRow>(),
+          AND code IN (?, ?)
+      `).bind(...PUBLIC_PLAN_CODES).all<PublicPlanRow>(),
       env.PLATFORM_DB.prepare(`
         SELECT plans.code AS plan_code, prices.market_code, prices.currency,
           prices.amount_minor, prices.interval
         FROM plan_prices AS prices
         INNER JOIN plans ON plans.id = prices.plan_id
         WHERE plans.is_active = 1 AND plans.is_public = 1 AND plans.is_assignable = 1
-          AND plans.code IN ('starter', 'pro')
+          AND plans.code IN (?, ?)
           AND prices.is_active = 1
           AND prices.effective_from <= ?
           AND (prices.effective_to IS NULL OR prices.effective_to > ?)
-        ORDER BY CASE plans.code WHEN 'starter' THEN 0 ELSE 1 END,
-          prices.market_code, prices.currency
-      `).bind(nowIso, nowIso).all<PublicPlanOfferRow>(),
+        ORDER BY prices.market_code, prices.currency
+      `).bind(...PUBLIC_PLAN_CODES, nowIso, nowIso).all<PublicPlanOfferRow>(),
     ]);
     const offersByPlan = new Map<string, PublicPlanOfferRow[]>();
     for (const offer of offersResult.results) {
@@ -69,9 +67,10 @@ export const GET: APIRoute = async ({ locals, request }) => {
       offers.push(offer);
       offersByPlan.set(offer.plan_code, offers);
     }
-    const plans = plansResult.results
-      .filter((plan) => (PUBLIC_PLAN_CODES as readonly string[]).includes(plan.code))
-      .map((plan) => ({
+    const planRowsByCode = new Map(plansResult.results.map((plan) => [plan.code, plan]));
+    const plans = PUBLIC_PLAN_CODES.flatMap((code) => {
+      const plan = planRowsByCode.get(code);
+      return plan === undefined ? [] : [{
         code: plan.code,
         features: safeJsonObject(plan.feature_flags_json),
         limits: safeJsonObject(plan.limits_json),
@@ -82,7 +81,8 @@ export const GET: APIRoute = async ({ locals, request }) => {
           interval: offer.interval,
           marketCode: offer.market_code,
         })),
-      }));
+      }];
+    });
     return Response.json({ ok: true, plans, requestId: locals.requestId }, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     });

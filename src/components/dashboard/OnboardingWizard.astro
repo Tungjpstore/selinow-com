@@ -1,5 +1,6 @@
 ---
 import { WIZARD_STEPS } from "../../lib/dashboard/onboarding-ui";
+import { PUBLIC_PLAN_CODES } from "../../lib/billing/plan-catalog";
 import { currencyInputStep, formatMinorAmountForInput, SUPPORTED_CURRENCY_CODES } from "../../lib/i18n/currency";
 import { createOnboardingTranslator, getOnboardingClientCopy } from "../../lib/i18n/catalogs/onboarding";
 import type { ShopView } from "../../lib/tenants/store";
@@ -18,6 +19,11 @@ const t = createOnboardingTranslator(locale);
 const clientCopy = getOnboardingClientCopy(locale);
 const wizardSteps = WIZARD_STEPS.map((step) => ({ ...step, label: t(step.labelKey) }));
 const initialShop = shops[0];
+const initialPlanLabel = initialShop?.planCode === "starter"
+  ? t("onboarding.form.plan_starter")
+  : initialShop?.planCode === "pro"
+    ? t("onboarding.form.plan_pro")
+    : t("onboarding.shop.existing_plan");
 ---
 
 <div
@@ -29,6 +35,7 @@ const initialShop = shops[0];
   data-default-locale={defaultLocale}
   data-locale={locale ?? "en"}
   data-platform-base-domain={platformBaseDomain}
+  data-public-plan-codes={JSON.stringify(PUBLIC_PLAN_CODES)}
   data-shops={JSON.stringify(shops)}
 >
   <section class="onboarding-intro" aria-labelledby="onboarding-title">
@@ -123,7 +130,7 @@ const initialShop = shops[0];
             </select>
             <button type="button" class="secondary-action" data-refresh-shop>{t("onboarding.button.refresh")}</button>
           </div>
-          <p class="selection-summary" data-shop-summary>{initialShop === undefined ? "" : `${initialShop.slug}.${platformBaseDomain} · ${initialShop.planCode}`}</p>
+          <p class="selection-summary" data-shop-summary>{initialShop === undefined ? "" : `${initialShop.slug}.${platformBaseDomain} · ${initialPlanLabel}`}</p>
           <form class="shop-rename-form" data-shop-rename-form hidden novalidate>
             <label for="onboarding-shop-name">{t("onboarding.form.rename_label")}</label>
             <div class="select-row">
@@ -148,11 +155,10 @@ const initialShop = shops[0];
             </label>
             <label class="field">
               <span>{t("onboarding.form.plan_label")}</span>
-              <select name="planCode" data-shop-plan>
-                <option value="starter">{t("onboarding.form.plan_starter")}</option>
-                <option value="pro">{t("onboarding.form.plan_pro")}</option>
+              <select name="planCode" data-shop-plan disabled aria-describedby="onboarding-plan-summary">
+                <option value="">{t("onboarding.form.plan_loading")}</option>
               </select>
-              <small data-plan-summary>{t("onboarding.form.plan_loading")}</small>
+              <small id="onboarding-plan-summary" data-plan-summary>{t("onboarding.form.plan_loading")}</small>
             </label>
             <label class="field">
               <span>{t("onboarding.form.merchant_country")}</span>

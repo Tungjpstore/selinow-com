@@ -85,10 +85,29 @@ type Shop = {
 };
 
 type PublicPlan = {
-  code: "pro" | "starter";
+  code: PublicPlanCode;
   features: Record<string, unknown>;
+  name: string;
   offers: Array<{ amountMinor: number; currency: string; interval: string; marketCode: string }>;
 };
+
+type PublicPlanCode = "pro" | "starter";
+
+const PLAN_FEATURE_ORDER = [
+  "storefront",
+  "telegram",
+  "catalog",
+  "inventory",
+  "sellerPayments",
+  "manualFulfillment",
+  "privateDownloads",
+  "automation",
+  "dataExport",
+  "audit",
+  "api",
+  "customDomain",
+  "analytics",
+] as const;
 
 type CatalogProduct = {
   description: string;
@@ -239,13 +258,25 @@ function parseShops(value: string | undefined): Shop[] {
   }
 }
 
-function parsePublicPlans(value: unknown): PublicPlan[] {
+function parsePublicPlanCodes(value: string | undefined): PublicPlanCode[] {
+  if (value === undefined) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== 2) return [];
+    const codes = parsed.filter((code): code is PublicPlanCode => code === "starter" || code === "pro");
+    return codes.length === parsed.length && new Set(codes).size === codes.length ? codes : [];
+  } catch {
+    return [];
+  }
+}
+
+function parsePublicPlans(value: unknown, planCodes: readonly PublicPlanCode[]): PublicPlan[] {
   const root = asRecord(value);
-  if (root === null || !Array.isArray(root.plans)) return [];
+  if (root === null || !Array.isArray(root.plans) || planCodes.length === 0) return [];
   const plans: PublicPlan[] = [];
   for (const item of root.plans) {
     const row = asRecord(item);
-    if (row === null || (row.code !== "starter" && row.code !== "pro")) continue;
+    if (row === null || (row.code !== "starter" && row.code !== "pro") || !planCodes.includes(row.code) || typeof row.name !== "string") continue;
     const offers = Array.isArray(row.offers) ? row.offers.flatMap((item) => {
       const offer = asRecord(item);
       return offer !== null
@@ -256,9 +287,72 @@ function parsePublicPlans(value: unknown): PublicPlan[] {
         ? [{ amountMinor: offer.amountMinor, currency: offer.currency, interval: offer.interval, marketCode: offer.marketCode }]
         : [];
     }) : [];
-    plans.push({ code: row.code, features: asRecord(row.features) ?? {}, offers });
+    plans.push({ code: row.code, features: asRecord(row.features) ?? {}, name: row.name, offers });
   }
-  return plans;
+  if (plans.length !== planCodes.length) return [];
+  const byCode = new Map(plans.map((plan) => [plan.code, plan]));
+  if (byCode.size !== planCodes.length) return [];
+  return planCodes.flatMap((code) => {
+    const plan = byCode.get(code);
+    return plan === undefined ? [] : [plan];
+  });
+}
+
+function planLabel(code: PublicPlanCode): string {
+  return code === "pro"
+    ? copy("onboarding.form.plan_pro", "Pro")
+    : copy("onboarding.form.plan_starter", "Starter");
+}
+
+function shopPlanLabel(code: string): string {
+  if (code === "starter" || code === "pro") return planLabel(code);
+  return copy("onboarding.shop.existing_plan", "Existing plan");
+}
+
+function planFeatureLabel(feature: (typeof PLAN_FEATURE_ORDER)[number], value: unknown): string | null {
+  if (feature === "analytics") {
+    if (value === "advanced") return copy("onboarding.form.plan_feature.analytics_advanced", "Advanced analytics");
+    if (value === "basic") return copy("onboarding.form.plan_feature.analytics_basic", "Basic analytics");
+    return null;
+  }
+  if (value !== true) return null;
+  const labels: Readonly<Record<Exclude<(typeof PLAN_FEATURE_ORDER)[number], "analytics">, readonly [string, string]>> = {
+    api: ["onboarding.form.plan_feature.api", "API"],
+    audit: ["onboarding.form.plan_feature.audit", "Audit history"],
+    automation: ["onboarding.form.plan_feature.automation", "Automation"],
+    catalog: ["onboarding.form.plan_feature.catalog", "Catalog"],
+    customDomain: ["onboarding.form.plan_feature.custom_domain", "Custom domain"],
+    dataExport: ["onboarding.form.plan_feature.data_export", "Data export"],
+    inventory: ["onboarding.form.plan_feature.inventory", "Inventory"],
+    manualFulfillment: ["onboarding.form.plan_feature.manual_fulfillment", "Manual fulfillment"],
+    privateDownloads: ["onboarding.form.plan_feature.private_downloads", "Private downloads"],
+    sellerPayments: ["onboarding.form.plan_feature.seller_payments", "Seller payments"],
+    storefront: ["onboarding.form.plan_feature.storefront", "Storefront"],
+    telegram: ["onboarding.form.plan_feature.telegram", "Telegram"],
+  };
+  const [key, fallback] = labels[feature];
+  return copy(key, fallback);
+}
+
+function renderPlanOptions(root: HTMLElement, plans: readonly PublicPlan[], planCodes: readonly PublicPlanCode[]): boolean {
+  const select = query<HTMLSelectElement>(root, "[data-shop-plan]");
+  const submit = query<HTMLButtonElement>(root, "[data-shop-submit]");
+  if (select === null) return false;
+  const previous = select.value;
+  select.replaceChildren();
+  const ready = plans.length === planCodes.length
+    && plans.every((plan, index) => plan.code === planCodes[index]);
+  if (!ready) {
+    select.add(new Option(copy("onboarding.form.plan_unavailable", "Plan details are temporarily unavailable."), ""));
+    select.disabled = true;
+    if (submit !== null) submit.disabled = true;
+    return false;
+  }
+  for (const plan of plans) select.add(new Option(planLabel(plan.code), plan.code));
+  select.value = plans.some((plan) => plan.code === previous) ? previous : planCodes[0] ?? "";
+  select.disabled = false;
+  if (submit !== null) submit.disabled = false;
+  return true;
 }
 
 function renderPlanSummary(root: HTMLElement, plans: readonly PublicPlan[]): void {
@@ -271,22 +365,27 @@ function renderPlanSummary(root: HTMLElement, plans: readonly PublicPlan[]): voi
   const merchantCountry = query<HTMLInputElement>(root, "[data-shop-merchant-country]")?.value.trim().toUpperCase() ?? "";
   const market = merchantCountry === "VN" ? "vn" : "global";
   const offer = plan.offers.find((item) => item.marketCode === market);
-  const featureKey = plan.code === "pro" ? "onboarding.form.plan_pro_features" : "onboarding.form.plan_starter_features";
-  const featureFallback = plan.code === "pro"
-    ? "Starter features plus API, advanced analytics, and a custom domain."
-    : "Storefront, Telegram, inventory, automation, and basic analytics.";
+  const features = PLAN_FEATURE_ORDER.flatMap((feature) => {
+    const label = planFeatureLabel(feature, plan.features[feature]);
+    return label === null ? [] : [label];
+  });
   const price = offer === undefined
     ? copy("onboarding.form.plan_price_unavailable", "Price unavailable")
     : copy("onboarding.form.plan_price", "{price}/month", { price: formatMoney(offer.amountMinor, offer.currency, activeLocale) });
-  setText(root, "[data-plan-summary]", `${price} · ${copy(featureKey, featureFallback)}`);
+  const featureSummary = features.length === 0
+    ? copy("onboarding.form.plan_features_unavailable", "Feature details are temporarily unavailable.")
+    : copy("onboarding.form.plan_features", "Includes: {features}", { features: features.join(", ") });
+  setText(root, "[data-plan-summary]", `${price} · ${featureSummary}`);
 }
 
-async function loadPublicPlans(root: HTMLElement): Promise<PublicPlan[]> {
+async function loadPublicPlans(root: HTMLElement, planCodes: readonly PublicPlanCode[]): Promise<PublicPlan[]> {
   try {
-    const plans = parsePublicPlans(await requestApi(root, "/api/app/shops", { method: "GET" }));
+    const plans = parsePublicPlans(await requestApi(root, "/api/app/shops", { method: "GET" }), planCodes);
+    renderPlanOptions(root, plans, planCodes);
     renderPlanSummary(root, plans);
     return plans;
   } catch {
+    renderPlanOptions(root, [], planCodes);
     renderPlanSummary(root, []);
     return [];
   }
@@ -661,7 +760,7 @@ function apiBase(shopId: string): string {
 function initialProfile(shop: Shop): OnboardingProfileView {
   return {
     customDomainPreference: "later",
-    telegramEnabled: shop.planCode === "bot",
+    telegramEnabled: shop.featureFlags.telegram === true,
     websiteEnabled: shop.featureFlags.storefront === true,
   };
 }
@@ -719,7 +818,7 @@ function renderShopSelection(root: HTMLElement, state: PageState, shops: readonl
   const baseDomain = root.dataset.platformBaseDomain ?? "selinow.com";
   setText(root, "[data-shop-summary]", shop === null
     ? copy("onboarding.shop.none", "No store selected.")
-    : copy("onboarding.shop.summary", "{slug}.{domain} · {plan} · {state}", { domain: baseDomain, plan: shop.planCode, slug: shop.slug, state: shop.subscriptionState }));
+    : copy("onboarding.shop.summary", "{slug}.{domain} · {plan} · {state}", { domain: baseDomain, plan: shopPlanLabel(shop.planCode), slug: shop.slug, state: shop.subscriptionState }));
   setText(root, "[data-product-price-label]", copy("onboarding.catalog.price_label", { currency: shop?.currency ?? "—" }, "Price ({currency})"));
   const currency = normalizeCurrencyCode(shop?.currency ?? root.dataset.defaultCurrency);
   const priceInput = query<HTMLInputElement>(root, "[data-product-price]");
@@ -1400,7 +1499,8 @@ function addShopOption(root: HTMLElement, shop: Shop): void {
 async function initialize(root: HTMLElement): Promise<void> {
   configureLocalization(root);
   const shops = parseShops(root.dataset.shops);
-  const publicPlans = await loadPublicPlans(root);
+  const publicPlanCodes = parsePublicPlanCodes(root.dataset.publicPlanCodes);
+  const publicPlans = await loadPublicPlans(root, publicPlanCodes);
   const state: PageState = {
     automationTasks: [],
     catalogProducts: [],
