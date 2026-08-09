@@ -257,6 +257,7 @@ export class WebsiteCommercePort implements CommerceApplicationPort {
       env: this.env,
       grantId: input.command.grantId,
       grantToken: input.command.grantToken,
+      idempotencyKey: input.command.idempotencyKey,
       orderPublicId: input.command.order.orderId,
       orderToken: opaqueToken(input.command.order.access),
       requestId: input.context.requestId,

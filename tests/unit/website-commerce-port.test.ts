@@ -214,7 +214,7 @@ describe("WebsiteCommercePort", () => {
       order,
       orderItemId,
     })).resolves.toMatchObject({ grantId, grantToken });
-    await expect(service.consumePrivateDownloadGrant(context, { grantId, grantToken, order })).resolves.toMatchObject({
+    await expect(service.consumePrivateDownloadGrant(context, { grantId, grantToken, idempotencyKey: "private-download-0001", order })).resolves.toMatchObject({
       contentType: "application/pdf",
       filename: "manual.pdf",
     });
@@ -234,6 +234,7 @@ describe("WebsiteCommercePort", () => {
       env,
       grantId,
       grantToken,
+      idempotencyKey: "private-download-0001",
       orderPublicId: order.orderId,
       orderToken: order.access.token,
       requestId: context.requestId,

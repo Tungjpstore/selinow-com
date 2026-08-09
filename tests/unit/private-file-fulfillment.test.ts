@@ -402,6 +402,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: first.grantId,
       grantToken: first.grantToken,
+      idempotencyKey: "request-consume-1",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-consume-1",
@@ -414,6 +415,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: second.grantId,
       grantToken: second.grantToken,
+      idempotencyKey: "request-consume-2",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-consume-2",
@@ -565,6 +567,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: requestId,
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId,
@@ -574,7 +577,7 @@ describe("private file fulfillment", () => {
 
     const digestSpy = vi.spyOn(globalThis.crypto.subtle, "digest");
     try {
-      const results = await Promise.allSettled([consume("request-race-a"), consume("request-race-b")]);
+      const results = await Promise.allSettled([consume("request-consume-race-a"), consume("request-consume-race-b")]);
       expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
       expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
       expect(results.find((result) => result.status === "rejected"))
@@ -599,6 +602,7 @@ describe("private file fulfillment", () => {
         env,
         grantId: grant.grantId,
         grantToken: grant.grantToken,
+        idempotencyKey: "request-legitimate-consume",
         orderPublicId: ORDER_PUBLIC_ID,
         orderToken: ORDER_TOKEN,
         requestId: "request-legitimate-consume",
@@ -619,11 +623,12 @@ describe("private file fulfillment", () => {
   it("replays a durable consumption after response loss without consuming quota twice", async () => {
     const asset = await provision(1);
     const grant = await issue(asset.assetVersionId);
-    const requestId = "request-consume-response-loss";
-    const consume = () => consumeWebsitePrivateDownloadGrant({
+    const idempotencyKey = "private-consume-response-loss-0001";
+    const consume = (requestId: string) => consumeWebsitePrivateDownloadGrant({
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey,
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId,
@@ -631,14 +636,15 @@ describe("private file fulfillment", () => {
       shopId: SHOP_ID,
     });
 
-    await expect(consume()).resolves.toMatchObject({ bytes: FILE_BYTES, contentType: "application/pdf", filename: "Private Guide.pdf" });
+    await expect(consume("request-consume-response-loss-first")).resolves.toMatchObject({ bytes: FILE_BYTES, contentType: "application/pdf", filename: "Private Guide.pdf" });
     const readsAfterFirstServe = r2.getCalls;
-    await expect(consume()).resolves.toMatchObject({ bytes: FILE_BYTES, contentType: "application/pdf", filename: "Private Guide.pdf" });
+    await expect(consume("request-consume-response-loss-retry")).resolves.toMatchObject({ bytes: FILE_BYTES, contentType: "application/pdf", filename: "Private Guide.pdf" });
 
     expect(r2.getCalls).toBe(readsAfterFirstServe + 1);
     expect(r2.arrayBufferCalls).toBe(2);
     expect(database.prepare("SELECT download_count AS downloadCount, status FROM digital_entitlements").get()).toEqual({ downloadCount: 1, status: "exhausted" });
     expect(database.prepare("SELECT status FROM delivery_grants").get()).toEqual({ status: "consumed" });
+    expect(database.prepare("SELECT request_id AS requestId FROM delivery_grant_consumptions").get()).toEqual({ requestId: idempotencyKey });
     expect(database.prepare("SELECT COUNT(*) AS count FROM delivery_grant_consumptions").get()).toEqual({ count: 1 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM delivery_grant_claims").get()).toEqual({ count: 0 });
 
@@ -646,6 +652,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: "request-consume-response-loss-mismatch",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-consume-response-loss-mismatch",
@@ -656,9 +663,10 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: `${grant.grantToken.slice(0, -1)}${grant.grantToken.endsWith("x") ? "y" : "x"}`,
+      idempotencyKey,
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
-      requestId,
+      requestId: "request-consume-response-loss-bad-token",
       runtime: { now: NOW },
       shopId: SHOP_ID,
     })).rejects.toMatchObject({ code: "private_download_grant_not_found", status: 404 });
@@ -684,6 +692,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: "request-stale-claim-retry",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-stale-claim-retry",
@@ -713,6 +722,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: "request-wrong-order-token",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: "wrong-order-token-private-123456789",
       requestId: "request-wrong-order-token",
@@ -723,6 +733,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: `${grant.grantToken.slice(0, -1)}x`,
+      idempotencyKey: "request-wrong-grant-token",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-wrong-grant-token",
@@ -733,6 +744,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: "request-expired-grant",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-expired-grant",
@@ -746,6 +758,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: "request-revoked-grant",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-revoked-grant",
@@ -764,6 +777,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: "request-integrity-failure",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-integrity-failure",
@@ -797,6 +811,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: "request-payment-race-consume",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-payment-race-consume",
@@ -817,6 +832,7 @@ describe("private file fulfillment", () => {
       env,
       grantId: grant.grantId,
       grantToken: grant.grantToken,
+      idempotencyKey: "request-redaction",
       orderPublicId: ORDER_PUBLIC_ID,
       orderToken: ORDER_TOKEN,
       requestId: "request-redaction",

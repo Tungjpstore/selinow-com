@@ -238,6 +238,17 @@ describe("Telegram generic connection runtime bridge", () => {
     expect(runtime.database.database.prepare("SELECT status, safe_result_code AS resultCode FROM telegram_updates WHERE id = 'update-disconnect-pending'").get()).toEqual({ resultCode: "telegram_update_stale_generation", status: "rejected" });
     expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'telegram.update_generation_fenced'").get(integration.id)).toEqual({ count: 2 });
     expect(runtime.deleteWebhookPayloads().at(-1)).toEqual({ drop_pending_updates: true });
+    const deleteWebhookCount = runtime.deleteWebhookPayloads().length;
+
+    await expect(disconnectTelegram({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "telegram-generation-disconnect-retry",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    })).resolves.toBeUndefined();
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'telegram.update_generation_fenced'").get(integration.id)).toEqual({ count: 2 });
+    expect(runtime.deleteWebhookPayloads()).toHaveLength(deleteWebhookCount);
   });
 
   it("registers the shop locale as default with explicit English and Vietnamese scopes", async () => {

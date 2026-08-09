@@ -310,10 +310,11 @@ function validatePrivateDownloadGrant(input: CommercePrivateDownloadGrantCommand
 
 function validatePrivateDownloadConsume(input: CommercePrivateDownloadConsumeCommand): CommercePrivateDownloadConsumeCommand {
   if (!isRecord(input)) invalid("private_download_consume_invalid");
-  assertExactKeys(input, ["grantId", "grantToken", "order"], "private_download_consume_invalid");
+  assertExactKeys(input, ["grantId", "grantToken", "idempotencyKey", "order"], "private_download_consume_invalid");
   assertIdentifier(input.grantId, "grant_id_invalid");
   if (typeof input.grantToken !== "string" || input.grantToken.length < 20 || input.grantToken.length > 512) invalid("grant_token_invalid");
-  return { grantId: input.grantId, grantToken: input.grantToken, order: validateOrderReference(input.order) };
+  if (typeof input.idempotencyKey !== "string" || !/^[A-Za-z0-9._:-]{16,128}$/u.test(input.idempotencyKey)) invalid("idempotency_key_invalid");
+  return { grantId: input.grantId, grantToken: input.grantToken, idempotencyKey: input.idempotencyKey, order: validateOrderReference(input.order) };
 }
 
 function validateIsoDate(value: unknown, issue: string): asserts value is string {

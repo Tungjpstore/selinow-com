@@ -95,7 +95,7 @@ type DownloadGrantRow = GrantRow & {
 };
 
 type DownloadConsumptionRow = {
-  requestId: string;
+  idempotencyKey: string;
 };
 
 export type PrivateDigitalAssetView = {
@@ -371,7 +371,7 @@ async function loadWebsitePrivateDownloadConsumption(input: {
   shopId: string;
 }): Promise<DownloadConsumptionRow | null> {
   return input.env.PLATFORM_DB.prepare(`
-    SELECT request_id AS requestId
+    SELECT request_id AS idempotencyKey
     FROM delivery_grant_consumptions
     WHERE shop_id = ? AND grant_id = ?
     LIMIT 1
@@ -1020,12 +1020,14 @@ export async function consumeWebsitePrivateDownloadGrant(input: {
   env: AppBindings;
   grantId: string;
   grantToken: string;
+  idempotencyKey: string;
   orderPublicId: string;
   orderToken: string;
   requestId: string;
   runtime?: PrivateFileRuntime;
   shopId: string;
 }): Promise<PrivateDownloadPayload> {
+  assertIdempotencyKey(input.idempotencyKey);
   assertGrantTokenShape(input.grantId, input.grantToken);
   const order = await authorizeWebsiteOrder(input);
   assertOrderDownloadEligible(order);
@@ -1086,7 +1088,7 @@ export async function consumeWebsitePrivateDownloadGrant(input: {
       throw new AppError("private_download_grant_not_found", 404);
     }
     const consumption = await loadWebsitePrivateDownloadConsumption({ env: input.env, grantId: row.id, shopId: input.shopId });
-    if (consumption === null || consumption.requestId !== input.requestId) {
+    if (consumption === null || consumption.idempotencyKey !== input.idempotencyKey) {
       throw new AppError("private_download_grant_not_found", 404);
     }
     return readPrivateDownloadPayload({ env: input.env, row });
@@ -1155,7 +1157,7 @@ export async function consumeWebsitePrivateDownloadGrant(input: {
           )
       `).bind(
         consumptionId,
-        input.requestId,
+        input.idempotencyKey,
         finalizedIso,
         claimId,
         finalizedIso,

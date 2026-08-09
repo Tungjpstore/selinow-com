@@ -577,6 +577,13 @@ describe("provider connection resumability", () => {
       shopPublicId: "shop-public-a",
       userId: "owner-a",
     });
+    await expect(disconnectTelegram({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-telegram-disconnect-retry",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).resolves.toBeUndefined();
 
     expect(runtime.integration).toMatchObject({
       activeCredentialId: null,
@@ -609,6 +616,17 @@ describe("provider connection resumability", () => {
     expect(runtime.credentials).toHaveLength(2);
     expect(runtime.credentials.find((row) => row.credentialId === "telegram-credential-old")?.status).toBe("revoked");
     expect(runtime.credentials.find((row) => row.credentialId === runtime.integration.activeCredentialId)?.status).toBe("active");
+
+    await expect(connectTelegram({
+      botToken: TELEGRAM_REPLACEMENT_TOKEN,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      replaceBot: true,
+      requestId: "request-telegram-replace-retry",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(runtime.credentials).toHaveLength(2);
   });
 
   it("clears Telegram health evidence when credentials rotate for the same bot", async () => {

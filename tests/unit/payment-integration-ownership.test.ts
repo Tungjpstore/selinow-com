@@ -227,15 +227,26 @@ describe("PayOS provider identity ownership", () => {
   it("retains channel ownership across same-shop secret rotation and disconnect", async () => {
     const fetchCount = { value: 0 };
     const fetcher = provider(fetchCount);
+    const rotatedChannel = { ...CHANNEL_A, apiKey: "rotated-api-key", checksumKey: "rotated-checksum-key" };
     await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-connect", shopPublicId: SHOP_A, userId: "owner-a" });
     await connectPayOS({
-      credentials: { ...CHANNEL_A, apiKey: "rotated-api-key", checksumKey: "rotated-checksum-key" },
+      credentials: rotatedChannel,
       env,
       fetcher,
       requestId: "request-rotate",
       shopPublicId: SHOP_A,
       userId: "owner-a",
     });
+    const rotatedGeneration = database.prepare("SELECT provider_claim_generation AS generation FROM payment_integrations WHERE shop_id = 'shop-a'").get();
+    await expect(connectPayOS({
+      credentials: rotatedChannel,
+      env,
+      fetcher,
+      requestId: "request-rotate-retry",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(database.prepare("SELECT provider_claim_generation AS generation FROM payment_integrations WHERE shop_id = 'shop-a'").get()).toEqual(rotatedGeneration);
     await disconnectPayOS({ env, requestId: "request-disconnect", shopPublicId: SHOP_A, userId: "owner-a" });
     await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-reconnect", shopPublicId: SHOP_A, userId: "owner-a" });
 
@@ -248,6 +259,40 @@ describe("PayOS provider identity ownership", () => {
       .toEqual({ count: 1 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials WHERE shop_id = 'shop-b'").get())
       .toEqual({ count: 0 });
+  });
+
+  it("makes a settled disconnect retry a no-op without advancing the provider generation", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-connect", shopPublicId: SHOP_A, userId: "owner-a" });
+    await disconnectPayOS({ env, requestId: "request-disconnect", shopPublicId: SHOP_A, userId: "owner-a" });
+    const settled = database.prepare(`
+      SELECT active_credential_id AS activeCredentialId,
+        provider_claim_generation AS generation,
+        provider_claim_nonce AS nonce,
+        provider_claim_state AS claimState,
+        provider_claim_target_fingerprint AS targetFingerprint,
+        status, webhook_status AS webhookStatus
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get();
+
+    await expect(disconnectPayOS({
+      env,
+      requestId: "request-disconnect-retry",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toBeUndefined();
+
+    expect(database.prepare(`
+      SELECT active_credential_id AS activeCredentialId,
+        provider_claim_generation AS generation,
+        provider_claim_nonce AS nonce,
+        provider_claim_state AS claimState,
+        provider_claim_target_fingerprint AS targetFingerprint,
+        status, webhook_status AS webhookStatus
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get()).toEqual(settled);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE shop_id = 'shop-a' AND action = 'payos.disconnected'").get()).toEqual({ count: 1 });
   });
 
   it("does not let an unverified client-id claim block legitimate credentials", async () => {

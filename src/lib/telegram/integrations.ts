@@ -508,7 +508,11 @@ export async function refreshTelegramHealth(input: { env: AppBindings; fetcher?:
 export async function disconnectTelegram(input: { env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<void> {
   const { shopId } = await requireIntegrationCredential(input.env, input.shopPublicId, input.userId);
   const integration = await findIntegration(input.env, shopId);
-  if (integration === null || integration.activeCredentialId === null) throw new AppError("telegram_not_configured", 409);
+  if (integration === null) throw new AppError("telegram_not_configured", 409);
+  if (integration.activeCredentialId === null) {
+    if (integration.status === "disabled" && integration.webhookStatus === "disabled") return;
+    throw new AppError("telegram_not_configured", 409);
+  }
   try {
     const credential = await loadActiveTelegramCredential(input.env, integration.id, shopId);
     await new TelegramClient(credential.credentials.botToken, input.fetcher).deleteWebhook(true);

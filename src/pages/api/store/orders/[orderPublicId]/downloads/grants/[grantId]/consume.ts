@@ -14,6 +14,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     const env = getBindings();
     const shop = await resolveStorefrontShop(request, env);
     const orderPublicId = params.orderPublicId;
+    const idempotencyKey = request.headers.get("Idempotency-Key") ?? "";
     const orderToken = request.headers.get("X-Order-Access-Token");
     const grantToken = request.headers.get("X-Delivery-Grant-Token");
     if (orderPublicId === undefined || !/^order_[0-9a-f-]{36}$/u.test(orderPublicId) || orderToken === null || orderToken.length < 20 || orderToken.length > 512 || grantToken === null || grantToken.length < 20 || grantToken.length > 512) {
@@ -28,6 +29,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     }, {
       grantId: requireResourceId(params.grantId, "dgr"),
       grantToken,
+      idempotencyKey,
       order: { access: { kind: "opaque_token", token: orderToken }, orderId: orderPublicId },
     });
     return new Response(result.bytes, {

@@ -208,9 +208,10 @@ async function consumePrivateDownload(download: PrivateDownload, button: HTMLBut
   button.textContent = t("storefront.order.downloads.preparing");
   setDownloadStatus(t("storefront.order.downloads.requesting"));
   try {
+    const idempotencyKey = downloadIntentKey(download);
     const grantResponse = await fetch(`/api/store/orders/${encodeURIComponent(orderId)}/downloads/${encodeURIComponent(download.assetVersionId)}/grant`, {
       headers: {
-        "Idempotency-Key": downloadIntentKey(download),
+        "Idempotency-Key": idempotencyKey,
         "X-Order-Access-Token": token,
         "X-Order-Item-Id": download.orderItemId,
       },
@@ -222,6 +223,7 @@ async function consumePrivateDownload(download: PrivateDownload, button: HTMLBut
     if (grant === undefined || typeof grant.grantId !== "string" || typeof grant.grantToken !== "string") throw new Error("private_download_grant_invalid");
     const consumeResponse = await fetch(`/api/store/orders/${encodeURIComponent(orderId)}/downloads/grants/${encodeURIComponent(grant.grantId)}/consume`, {
       headers: {
+        "Idempotency-Key": idempotencyKey,
         "X-Delivery-Grant-Token": grant.grantToken,
         "X-Order-Access-Token": token,
       },

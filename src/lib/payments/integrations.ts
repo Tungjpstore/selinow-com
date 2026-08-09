@@ -816,6 +816,14 @@ export async function disconnectPayOS(input: { env: AppBindings; requestId: stri
   const shopId = await requirePaymentManager(input.env, input.shopPublicId, input.userId);
   const integration = await findIntegration(input.env, shopId);
   if (integration === null) throw new AppError("payment_not_configured", 409);
+  if (integration.status === "disconnected"
+    && integration.webhookStatus === "disconnected"
+    && integration.activeCredentialId === null
+    && integration.providerClaimNonce === null
+    && integration.providerClaimState === "idle"
+    && integration.providerClaimTargetFingerprint === null) {
+    return;
+  }
   const now = new Date().toISOString();
   await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare("UPDATE payment_integrations SET status = 'disconnected', webhook_status = 'disconnected', active_credential_id = NULL, provider_claim_generation = provider_claim_generation + 1, provider_claim_nonce = NULL, provider_claim_state = 'idle', provider_claim_target_fingerprint = NULL, updated_at = ? WHERE id = ? AND shop_id = ?").bind(now, integration.id, shopId),

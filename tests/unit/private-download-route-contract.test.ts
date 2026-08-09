@@ -311,6 +311,7 @@ describe("private download route contracts", () => {
 
     const response = await consumeRoute.POST(context(
       request(`/api/store/orders/${orderPublicId}/downloads/grants/${grantId}/consume`, "POST", {
+        "Idempotency-Key": "private-download-consume-001",
         "X-Delivery-Grant-Token": grantToken,
         "X-Order-Access-Token": orderToken,
       }),
@@ -331,11 +332,26 @@ describe("private download route contracts", () => {
       env: dependencies.env,
       grantId,
       grantToken,
+      idempotencyKey: "private-download-consume-001",
       orderPublicId,
       orderToken,
       requestId: "request-private-download",
       shopId: shop.id,
     });
+  });
+
+  it("requires an explicit idempotency key for consume recovery", async () => {
+    const response = await consumeRoute.POST(context(
+      request(`/api/store/orders/${orderPublicId}/downloads/grants/${grantId}/consume`, "POST", {
+        "X-Delivery-Grant-Token": grantToken,
+        "X-Order-Access-Token": orderToken,
+      }),
+      { grantId, orderPublicId },
+    ));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: "validation_failed", ok: false });
+    expect(dependencies.consumeGrant).not.toHaveBeenCalled();
   });
 
   it("does not accept either consume token from the URL", async () => {
