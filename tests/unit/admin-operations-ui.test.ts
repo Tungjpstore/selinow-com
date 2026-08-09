@@ -45,6 +45,9 @@ describe("admin operations PromptOS surface", () => {
     expect(systems).toContain("data-rotation-process");
     expect(systems).toContain("item.retryCount");
     expect(systems).toContain("item.retryRequestedAt");
+    expect(systems).toContain("deadLetterOverview.hasMore");
+    expect(systems).toContain("incidentOverview.hasMore");
+    expect(systems).toContain('t("admin.operations.visibility.truncated_warning"');
     expect(systems).toContain("max=\"100\"");
     expect(systems).toContain("listActiveDeletionRequests");
     expect(systems).toContain("data-deletion-legal-hold-form");
@@ -56,6 +59,9 @@ describe("admin operations PromptOS surface", () => {
     expect(systems).not.toContain("Xem run details");
     expect(systems).not.toMatch(/name="(?:shopId|requestedByUserId|requestId|leaseToken|providerPayload|secretMaterialDestroyedJson)"/);
     expect(operationsApi).toContain("deletionOverview");
+    expect(operationsApi).toContain("deadLettersHasMore");
+    expect(operationsApi).toContain("incidentsHasMore");
+    expect(operationsApi).toContain("operationsListLimit");
     expect(operationsApi).toContain("listActiveDeletionRequests({ env, userId: auth.userId })");
     expect(moderation).toContain("Idempotency-Key");
     expect(moderation).toContain("recent_auth_required");
@@ -109,5 +115,13 @@ describe("admin operations PromptOS surface", () => {
     expect(systems).toContain("/admin/investigations?tab=orders");
     expect(systems).toContain("/admin/investigations?tab=audit");
     expect(systems).toContain("investigationUnavailable");
+    for (const key of [
+      "admin.operations.visibility.complete_count",
+      "admin.operations.visibility.truncated_count",
+      "admin.operations.visibility.truncated_warning",
+    ] as const) {
+      expect(adminCatalogs.en[key]).toBeTypeOf("string");
+      expect(adminCatalogs["vi-VN"][key]).toBeTypeOf("string");
+    }
   });
 });

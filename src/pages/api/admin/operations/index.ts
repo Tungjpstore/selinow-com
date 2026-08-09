@@ -16,12 +16,24 @@ export const GET: APIRoute = async ({ locals, request }) => {
     if (!(await isPlatformAdmin({ env, userId: auth.userId }))) {
       throw new AppError("authorization_denied", 403);
     }
-    const [deadLetters, deletionOverview, incidents] = await Promise.all([
+    const [deadLetterOverview, deletionOverview, incidentOverview] = await Promise.all([
       listActiveDeadLetters({ env }),
       listActiveDeletionRequests({ env, userId: auth.userId }),
       listActiveIncidents({ env }),
     ]);
-    return Response.json({ deadLetters, deletionOverview, incidents, ok: true, requestId: locals.requestId }, {
+    return Response.json({
+      deadLetters: deadLetterOverview.items,
+      deadLettersHasMore: deadLetterOverview.hasMore,
+      deletionOverview,
+      incidents: incidentOverview.items,
+      incidentsHasMore: incidentOverview.hasMore,
+      ok: true,
+      operationsListLimit: {
+        deadLetters: deadLetterOverview.limit,
+        incidents: incidentOverview.limit,
+      },
+      requestId: locals.requestId,
+    }, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     });
   } catch (error) {

@@ -69,6 +69,12 @@ export type IncidentView = Omit<IncidentRow, "safeContextJson"> & {
   safeContext: Record<string, string>;
 };
 
+export type ActiveIncidentList = {
+  hasMore: boolean;
+  items: IncidentView[];
+  limit: number;
+};
+
 const INCIDENT_SELECT = `
   SELECT id, shop_id AS shopId, incident_key AS incidentKey, category, severity,
     status, source_kind AS sourceKind, source_ref AS sourceRef,
@@ -163,7 +169,7 @@ function requireIncident(row: IncidentRow | null): IncidentRow {
 export async function listActiveIncidents(input: {
   env: AppBindings;
   limit?: number;
-}): Promise<IncidentView[]> {
+}): Promise<ActiveIncidentList> {
   const limit = input.limit ?? 100;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new AppError("operations_validation_failed", 400, ["limit_invalid"]);
@@ -177,8 +183,12 @@ export async function listActiveIncidents(input: {
       ELSE 1
     END DESC, last_seen_at DESC, id
     LIMIT ?
-  `).bind(limit).all<IncidentRow>();
-  return result.results.map(mapIncident);
+  `).bind(limit + 1).all<IncidentRow>();
+  return {
+    hasMore: result.results.length > limit,
+    items: result.results.slice(0, limit).map(mapIncident),
+    limit,
+  };
 }
 
 export async function upsertOpenIncident(input: {

@@ -13,7 +13,7 @@ import {
 } from "../../../../../lib/operations/dead-letters";
 import { safeOperationsReference } from "../../../../../lib/operations/incidents";
 import { getBindings } from "../../../../../lib/platform/bindings";
-import { isPlatformAdmin } from "../../../../../lib/tenants/store";
+import { getPlatformAdminRole } from "../../../../../lib/tenants/store";
 
 function requireExpectedVersion(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
@@ -31,7 +31,8 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
     requireRecentAuth(auth);
-    if (!(await isPlatformAdmin({ env, userId: auth.userId }))) {
+    const adminRole = await getPlatformAdminRole({ env, userId: auth.userId });
+    if (adminRole === null) {
       throw new AppError("authorization_denied", 403);
     }
     const body = await readJsonObject(request, 2 * 1_024);
@@ -57,6 +58,9 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
         resolutionCode: safeOperationsReference(body.resolutionCode, "resolution_code_invalid"),
       });
     } else if (body.action === "replay") {
+      if (adminRole !== "owner" && adminRole !== "risk") {
+        throw new AppError("authorization_denied", 403);
+      }
       if (common.shopId === null) {
         throw new AppError("operations_validation_failed", 400, ["shop_id_required"]);
       }

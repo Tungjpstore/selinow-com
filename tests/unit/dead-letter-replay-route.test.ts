@@ -4,6 +4,7 @@ const dependencies = vi.hoisted(() => ({
   acknowledge: vi.fn(),
   env: {},
   isAdmin: vi.fn(),
+  role: vi.fn(),
   replay: vi.fn(),
   requestRetry: vi.fn(),
   requireCsrf: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("../../src/lib/platform/bindings", () => ({
 }));
 
 vi.mock("../../src/lib/tenants/store", () => ({
+  getPlatformAdminRole: dependencies.role,
   isPlatformAdmin: dependencies.isAdmin,
 }));
 
@@ -54,6 +56,7 @@ beforeEach(() => {
   for (const dependency of [
     dependencies.acknowledge,
     dependencies.isAdmin,
+    dependencies.role,
     dependencies.replay,
     dependencies.requestRetry,
     dependencies.requireCsrf,
@@ -61,6 +64,7 @@ beforeEach(() => {
     dependencies.resolve,
   ]) dependency.mockReset();
   dependencies.isAdmin.mockResolvedValue(true);
+  dependencies.role.mockResolvedValue("risk");
   dependencies.requireCsrf.mockResolvedValue(auth);
   dependencies.replay.mockResolvedValue({
     deadLetter: { id: "dlq_route_test", status: "retry_requested" },
@@ -139,5 +143,40 @@ describe("dead-letter replay route", () => {
     if (!(missingScope instanceof Response)) throw new Error("response_missing");
     expect(missingScope.status).toBe(400);
     expect(dependencies.replay).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies replay to support admins while preserving acknowledgement access", async () => {
+    dependencies.role.mockResolvedValue("support");
+    dependencies.acknowledge.mockResolvedValueOnce({ id: "dlq_route_test", status: "acknowledged" });
+
+    const replay = await POST(context(new Request(
+      "https://app.test/api/admin/operations/dead-letters/dlq_route_test",
+      {
+        body: JSON.stringify({ action: "replay", expectedVersion: 3, shopId: "shop-route-test" }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "dead-letter-route-support-replay" },
+        method: "POST",
+      },
+    )));
+    expect(replay).toBeInstanceOf(Response);
+    if (!(replay instanceof Response)) throw new Error("response_missing");
+    expect(replay.status).toBe(403);
+    await expect(replay.json()).resolves.toMatchObject({
+      code: "authorization_denied",
+      requestId: "request-dead-letter-route",
+    });
+    expect(dependencies.replay).not.toHaveBeenCalled();
+
+    const acknowledge = await POST(context(new Request(
+      "https://app.test/api/admin/operations/dead-letters/dlq_route_test",
+      {
+        body: JSON.stringify({ action: "acknowledge", expectedVersion: 3, shopId: "shop-route-test" }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    )));
+    expect(acknowledge).toBeInstanceOf(Response);
+    if (!(acknowledge instanceof Response)) throw new Error("response_missing");
+    expect(acknowledge.status).toBe(200);
+    expect(dependencies.acknowledge).toHaveBeenCalledOnce();
   });
 });

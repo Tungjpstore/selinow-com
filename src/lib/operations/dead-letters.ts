@@ -72,6 +72,12 @@ export type DeadLetterView = Omit<DeadLetterRow, "safeEnvelopeJson"> & {
   safeEnvelope: Record<string, string>;
 };
 
+export type ActiveDeadLetterList = {
+  hasMore: boolean;
+  items: DeadLetterView[];
+  limit: number;
+};
+
 const DEAD_LETTER_SELECT = `
   SELECT id, shop_id AS shopId, queue_name AS queueName, message_id AS messageId,
     message_kind AS messageKind, reference_type AS referenceType,
@@ -256,7 +262,7 @@ async function ensureOutboxReplayLink(input: {
 export async function listActiveDeadLetters(input: {
   env: AppBindings;
   limit?: number;
-}): Promise<DeadLetterView[]> {
+}): Promise<ActiveDeadLetterList> {
   const limit = input.limit ?? 100;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new AppError("operations_validation_failed", 400, ["limit_invalid"]);
@@ -269,8 +275,12 @@ export async function listActiveDeadLetters(input: {
       ELSE 1
     END DESC, last_seen_at DESC, id
     LIMIT ?
-  `).bind(limit).all<DeadLetterRow>();
-  return result.results.map(mapDeadLetter);
+  `).bind(limit + 1).all<DeadLetterRow>();
+  return {
+    hasMore: result.results.length > limit,
+    items: result.results.slice(0, limit).map(mapDeadLetter),
+    limit,
+  };
 }
 
 async function attachIncident(

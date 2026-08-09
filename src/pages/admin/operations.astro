@@ -34,9 +34,9 @@ try {
 if (roleLookupFailed) Astro.response.status = 503;
 else if (adminRole === null) Astro.response.status = 403;
 
-let deadLetters: Awaited<ReturnType<typeof listActiveDeadLetters>> = [];
+let deadLetterOverview: Awaited<ReturnType<typeof listActiveDeadLetters>> = { hasMore: false, items: [], limit: 100 };
 let deletionOverview: Awaited<ReturnType<typeof listActiveDeletionRequests>> = { canOperate: false, requests: [] };
-let incidents: Awaited<ReturnType<typeof listActiveIncidents>> = [];
+let incidentOverview: Awaited<ReturnType<typeof listActiveIncidents>> = { hasMore: false, items: [], limit: 100 };
 let rotationOverview: Awaited<ReturnType<typeof listEncryptionRotationRuns>> = { canOperate: false, runs: [] };
 let dataUnavailable = false;
 let investigationOrders: Awaited<ReturnType<typeof listAdminOrderInvestigations>> = { nextCursor: null, orders: [] };
@@ -44,7 +44,7 @@ let investigationAudit: Awaited<ReturnType<typeof listAdminAuditEntries>> = { ne
 let investigationUnavailable = false;
 if (adminRole !== null) {
   try {
-    [deadLetters, deletionOverview, incidents, rotationOverview] = await Promise.all([
+    [deadLetterOverview, deletionOverview, incidentOverview, rotationOverview] = await Promise.all([
       listActiveDeadLetters({ env }),
       listActiveDeletionRequests({ env, userId: auth.userId }),
       listActiveIncidents({ env }),
@@ -73,6 +73,8 @@ if (adminRole !== null) {
   }
 }
 
+const deadLetters = deadLetterOverview.items;
+const incidents = incidentOverview.items;
 const canReplayDeadLetters = adminRole === "owner" || adminRole === "risk";
 const providerIncidents = incidents.filter((item) => ["provider_degraded", "outbox_failure"].includes(item.category));
 const safeDate = (value: string): Date | null => {
@@ -239,8 +241,8 @@ const operationsClientCopy = {
           <p>{t("admin.operations.header.description")}</p>
         </div>
         <div class="admin-summary" aria-label={t("admin.operations.header.summary_aria")}>
-          <div><span>{t("admin.operations.summary.dead_letter")}</span><strong>{deadLetters.length}</strong></div>
-          <div><span>{t("admin.operations.summary.incident")}</span><strong>{incidents.length}</strong></div>
+          <div><span>{t("admin.operations.summary.dead_letter")}</span><strong>{t(deadLetterOverview.hasMore ? "admin.operations.visibility.truncated_count" : "admin.operations.visibility.complete_count", { count: deadLetters.length })}</strong></div>
+          <div><span>{t("admin.operations.summary.incident")}</span><strong>{t(incidentOverview.hasMore ? "admin.operations.visibility.truncated_count" : "admin.operations.visibility.complete_count", { count: incidents.length })}</strong></div>
           <div><span>{t("admin.operations.summary.deletion_active")}</span><strong>{deletionOverview.requests.length}</strong></div>
         </div>
       </header>
@@ -476,8 +478,9 @@ const operationsClientCopy = {
       <section class="admin-section" aria-labelledby="dead-letter-title">
         <div class="admin-section-heading">
           <div><h2 id="dead-letter-title">{t("admin.operations.dead_letter.title")}</h2><p>{t("admin.operations.dead_letter.description")}</p></div>
-          <span>{t("admin.operations.dead_letter.count", { count: deadLetters.length })}</span>
+          <span>{t(deadLetterOverview.hasMore ? "admin.operations.visibility.truncated_count" : "admin.operations.visibility.complete_count", { count: deadLetters.length })}</span>
         </div>
+        {deadLetterOverview.hasMore && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: deadLetterOverview.limit })}</div>}
         {deadLetters.length === 0 ? (
           <div class="admin-empty"><strong>{t("admin.operations.dead_letter.empty_title")}</strong><span>{t("admin.operations.dead_letter.empty_description")}</span></div>
         ) : (
@@ -530,8 +533,9 @@ const operationsClientCopy = {
       <section class="admin-section" aria-labelledby="incident-title">
         <div class="admin-section-heading">
           <div><h2 id="incident-title">{t("admin.operations.incident.title")}</h2><p>{t("admin.operations.incident.description")}</p></div>
-          <span>{t("admin.operations.incident.count", { count: incidents.length })}</span>
+          <span>{t(incidentOverview.hasMore ? "admin.operations.visibility.truncated_count" : "admin.operations.visibility.complete_count", { count: incidents.length })}</span>
         </div>
+        {incidentOverview.hasMore && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: incidentOverview.limit })}</div>}
         {incidents.length === 0 ? (
           <div class="admin-empty"><strong>{t("admin.operations.incident.empty_title")}</strong><span>{t("admin.operations.incident.empty_description")}</span></div>
         ) : (
