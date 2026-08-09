@@ -30,8 +30,10 @@ function safeError(error) {
     : "dodo_webhook_registration_failed";
 }
 
-function putWorkerSecret(environment, workerName, secret, childEnvironment) {
-  const result = spawnSync("npx", ["--no-install", "wrangler", "secret", "put", "DODO_PAYMENTS_WEBHOOK_KEY", "--env", environment, "--name", workerName], {
+function putWorkerSecret(environment, secret, childEnvironment) {
+  // The configured Wrangler environment owns the exact Worker name. Passing
+  // --name alongside --env causes Wrangler to append the environment twice.
+  const result = spawnSync("npx", ["--no-install", "wrangler", "secret", "put", "DODO_PAYMENTS_WEBHOOK_KEY", "--env", environment], {
     encoding: "utf8",
     input: `${secret}\n`,
     env: childEnvironment,
@@ -66,7 +68,7 @@ try {
     assertDodoCanonicalRouteProbe(probe, probePayload, requestId);
     const apiBaseUrl = providerEnvironment === "live_mode" ? "https://live.dodopayments.com" : "https://test.dodopayments.com";
     const result = await ensureDodoWebhook({ apiBaseUrl, apiKey, endpointUrl, fetcher: globalThis.fetch });
-    putWorkerSecret(options.environment, admission.workerName, result.secret, admission.childEnvironment);
+    putWorkerSecret(options.environment, result.secret, admission.childEnvironment);
     process.stdout.write(`${JSON.stringify({ created: result.created, endpointFingerprintSha256: result.endpointFingerprintSha256, environment: options.environment, providerWebhookFingerprintSha256: result.providerWebhookFingerprintSha256, workerSecretName: "DODO_PAYMENTS_WEBHOOK_KEY" }, null, 2)}\n`);
   }
 } catch (error) {

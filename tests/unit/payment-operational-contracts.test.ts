@@ -14,6 +14,8 @@ describe("payment operational contracts", () => {
     expect(bindings).toContain("PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT?: string");
     expect(registration.indexOf("assertPaymentProviderMutationAdmission")).toBeLessThan(registration.indexOf("ensureDodoWebhook({"));
     expect(registration.indexOf("assertDodoCanonicalRouteProbe")).toBeLessThan(registration.indexOf("ensureDodoWebhook({"));
+    expect(registration).toContain('"--env", environment]');
+    expect(registration).not.toContain('"--name"');
   });
 
   it("keeps provider mutation commands dry-run and secret-free by default", () => {

@@ -98,5 +98,7 @@ describe("PayOS staging attestation secret boundary", () => {
     const source = readFileSync("scripts/payos-staging-attest.mjs", "utf8");
     expect(source.indexOf("assertPaymentProviderMutationAdmission({")).toBeGreaterThan(-1);
     expect(source.indexOf("assertPaymentProviderMutationAdmission({")).toBeLessThan(source.indexOf('spawnSync("npx"'));
+    expect(source).toContain('"--env", "staging"]');
+    expect(source).not.toContain('"--name"');
   });
 });

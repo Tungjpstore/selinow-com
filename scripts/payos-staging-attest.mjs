@@ -62,10 +62,12 @@ try {
     process.stdout.write(`${JSON.stringify({ action: "would_attest_controlled_staging_channel", environment: "staging", workerSecretName: "PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT" }, null, 2)}\n`);
   } else {
     const value = await readFingerprintEvidence(options.evidencePath);
-    const admission = await assertPaymentProviderMutationAdmission({ environment: "staging", manifestPath: options.manifestPath });
-    const result = spawnSync("npx", ["--no-install", "wrangler", "secret", "put", "PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT", "--env", "staging", "--name", admission.workerName], {
+    const { childEnvironment } = await assertPaymentProviderMutationAdmission({ environment: "staging", manifestPath: options.manifestPath });
+    // The configured Wrangler environment owns the exact Worker name. Passing
+    // --name alongside --env causes Wrangler to append the environment twice.
+    const result = spawnSync("npx", ["--no-install", "wrangler", "secret", "put", "PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT", "--env", "staging"], {
       encoding: "utf8",
-      env: admission.childEnvironment,
+      env: childEnvironment,
       input: `${value}\n`,
       stdio: ["pipe", "ignore", "pipe"],
     });
