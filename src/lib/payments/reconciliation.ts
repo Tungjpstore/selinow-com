@@ -1,3 +1,4 @@
+import { sha256Json } from "../core/crypto";
 import { createOpaqueToken } from "../core/ids";
 import { AppError } from "../core/errors";
 import type { AppBindings } from "../platform/bindings";
@@ -15,6 +16,50 @@ type ReconcileAttempt = {
   webhookPublicId: string;
 };
 
+export type PayOSReconciliationAttempt = Pick<ReconcileAttempt, "credentialId" | "id" | "integrationId" | "providerOrderCode" | "shopId" | "webhookPublicId">;
+
+export type PayOSReconciliationResult = {
+  payloadHash: string;
+  result: Awaited<ReturnType<typeof processPayOSWebhook>>;
+};
+
+/**
+ * Reconcile one already-authorized attempt through the same signed response
+ * and webhook state machine used by the scheduled worker.
+ */
+export async function reconcilePayOSAttemptWithProvider(input: {
+  env: AppBindings;
+  attempt: PayOSReconciliationAttempt;
+  fetcher?: typeof fetch;
+}): Promise<PayOSReconciliationResult> {
+  const credential = await loadCredentialById(input.env, input.attempt.credentialId, input.attempt.shopId);
+  const providerStatus = await new PayOSClient(credential.credentials, input.fetcher).getPaymentLink(input.attempt.providerOrderCode);
+  if (providerStatus.orderCode !== input.attempt.providerOrderCode) throw new AppError("provider_identity_mismatch", 409);
+  const normalized = normalizeReconciliation(providerStatus);
+  const data: Record<string, unknown> = {
+    amount: normalized.amount,
+    code: normalized.success ? "00" : normalized.providerStatus,
+    currency: normalized.currency,
+    description: normalized.description,
+    orderCode: normalized.orderCode,
+    paymentLinkId: normalized.paymentLinkId,
+    reference: normalized.reference,
+    transactionDateTime: normalized.occurredAt,
+  };
+  const payloadHash = await sha256Json(data);
+  const result = await processPayOSWebhook({
+    body: {
+      code: "00",
+      data,
+      signature: await createPayOSObjectSignature(data, credential.credentials.checksumKey),
+      success: normalized.success,
+    },
+    env: input.env,
+    webhookPublicId: input.attempt.webhookPublicId,
+  });
+  return { payloadHash, result };
+}
+
 export async function reconcilePendingPayments(env: AppBindings, now = new Date()): Promise<{ failed: number; processed: number }> {
   const nowIso = now.toISOString();
   const due = await env.PLATFORM_DB.prepare(`SELECT payment_attempts.id, payment_attempts.shop_id AS shopId, payment_attempts.integration_id AS integrationId, payment_attempts.credential_id AS credentialId, payment_attempts.provider_order_code AS providerOrderCode, payment_integrations.webhook_public_id AS webhookPublicId FROM payment_attempts INNER JOIN payment_integrations ON payment_integrations.id = payment_attempts.integration_id AND payment_integrations.shop_id = payment_attempts.shop_id WHERE payment_attempts.state IN ('creating', 'pending', 'error') AND payment_attempts.next_reconcile_at IS NOT NULL AND payment_attempts.next_reconcile_at <= ? AND (payment_attempts.lease_expires_at IS NULL OR payment_attempts.lease_expires_at <= ?) ORDER BY payment_attempts.next_reconcile_at, payment_attempts.id LIMIT 25`).bind(nowIso, nowIso).all<ReconcileAttempt>();
@@ -26,25 +71,7 @@ export async function reconcilePendingPayments(env: AppBindings, now = new Date(
     const claimed = await env.PLATFORM_DB.prepare("UPDATE payment_attempts SET lease_token = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND state IN ('creating', 'pending', 'error') AND next_reconcile_at IS NOT NULL AND next_reconcile_at <= ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)").bind(leaseToken, leaseExpiresAt, nowIso, attempt.id, attempt.shopId, nowIso, nowIso).run();
     if (claimed.meta.changes !== 1) continue;
     try {
-      const credential = await loadCredentialById(env, attempt.credentialId, attempt.shopId);
-      const providerStatus = await new PayOSClient(credential.credentials).getPaymentLink(attempt.providerOrderCode);
-      if (providerStatus.orderCode !== attempt.providerOrderCode) throw new AppError("provider_identity_mismatch", 409);
-      const normalized = normalizeReconciliation(providerStatus);
-      const data: Record<string, unknown> = {
-        amount: normalized.amount,
-        code: normalized.success ? "00" : normalized.providerStatus,
-        currency: normalized.currency,
-        description: normalized.description,
-        orderCode: normalized.orderCode,
-        paymentLinkId: normalized.paymentLinkId,
-        reference: normalized.reference,
-        transactionDateTime: normalized.occurredAt,
-      };
-      await processPayOSWebhook({
-        body: { code: "00", data, signature: await createPayOSObjectSignature(data, credential.credentials.checksumKey), success: normalized.success },
-        env,
-        webhookPublicId: attempt.webhookPublicId,
-      });
+      await reconcilePayOSAttemptWithProvider({ env, attempt });
       await env.PLATFORM_DB.prepare("UPDATE payment_attempts SET last_reconciled_at = ?, next_reconcile_at = CASE WHEN state = 'pending' THEN ? ELSE NULL END, reconcile_attempts = reconcile_attempts + 1, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND shop_id = ? AND lease_token = ?").bind(nowIso, new Date(now.getTime() + 5 * 60_000).toISOString(), nowIso, attempt.id, attempt.shopId, leaseToken).run();
       processed += 1;
     } catch {

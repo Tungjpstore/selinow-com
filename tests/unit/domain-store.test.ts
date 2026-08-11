@@ -81,6 +81,7 @@ class DomainDatabase {
   readonly claims = new Map<string, FakeClaim>();
   readonly customDomainFeature = new Map([["shop-a", true], ["shop-b", true]]);
   readonly customDomainLimits = new Map<string, unknown>([["shop-a", 5], ["shop-b", 5]]);
+  readonly membershipRoles = new Map<string, "manager" | "owner" | "support" | "viewer">([["shop-a", "owner"], ["shop-b", "owner"]]);
   failVerifiedClaimAudit = false;
 
   constructor() {
@@ -112,6 +113,7 @@ class DomainDatabase {
     const claims = this.claims;
     const customDomainFeature = this.customDomainFeature;
     const customDomainLimits = this.customDomainLimits;
+    const membershipRoles = this.membershipRoles;
     const domains = this.domains;
     return {
       bind(...values: unknown[]) {
@@ -141,7 +143,7 @@ class DomainDatabase {
               return Promise.resolve(shopId === null ? null : {
                 currency: "VND", default_locale: "vi", feature_flags_json: JSON.stringify({ customDomain: customDomainFeature.get(shopId) }),
                 limits_json: customDomainLimits.has(shopId) ? JSON.stringify({ customDomains: customDomainLimits.get(shopId) }) : "{}",
-                name: shopId, plan_code: "business", public_id: shopPublicId, role: "owner", shop_id: shopId,
+                name: shopId, plan_code: "business", public_id: shopPublicId, role: membershipRoles.get(shopId) ?? "owner", shop_id: shopId,
                 current_period_end: "2099-01-01T00:00:00.000Z", shop_status: "active", slug: shopId,
                 subscription_state: "active", timezone: "Asia/Ho_Chi_Minh",
               });
@@ -950,6 +952,33 @@ describe("custom domain store", () => {
 
     expect(checked.status).toBe("ownership_pending");
     expect(checked.lastSafeErrorCode).toBe("domain_ownership_not_verified");
+    expect(provider.creates).toBe(0);
+  });
+
+  it("allows domain reads but denies provider checks to a read-only domain member", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const claimed = await createCustomDomainClaim({
+      env,
+      hostname: "shop.customer.com",
+      requestId: "request-claim",
+      runtime: { now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    database.membershipRoles.set("shop-a", "manager");
+
+    await expect(listShopDomains({ env, shopPublicId: "shop_public_a", userId: "user-a" }))
+      .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: claimed.domain.id })]));
+    await expect(checkCustomDomain({
+      domainId: claimed.domain.id,
+      env,
+      requestId: "request-check",
+      runtime: { now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "authorization_denied", status: 403 });
     expect(provider.creates).toBe(0);
   });
 

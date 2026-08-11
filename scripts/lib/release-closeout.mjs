@@ -115,6 +115,16 @@ const CHECK_GROUPS = [
     nextAction: "Resolve or formally review open critical/high findings before production admission.",
   },
   {
+    prefix: "evidence.legalSupport.",
+    category: "legal_support_approval",
+    nextAction: "Obtain owner-approved legal/support decisions and retain the private, candidate-bound checklist.",
+  },
+  {
+    prefix: "evidence.secretInventory.",
+    category: "production_secret_inventory",
+    nextAction: "Verify the name-only production Worker secret inventory and retain its candidate-bound artifact.",
+  },
+  {
     prefix: "evidence.",
     category: "release_evidence",
     nextAction: "Populate this release-bound field from an auditable non-secret artifact; do not use placeholders.",

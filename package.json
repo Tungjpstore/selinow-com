@@ -29,6 +29,8 @@
     "dodo:uat:validate": "node scripts/dodo-uat-validate.mjs",
     "dodo:webhook:register": "node scripts/dodo-webhook-register.mjs",
     "payos:staging:attest": "node scripts/payos-staging-attest.mjs",
+    "payos:uat:artifact": "node scripts/payos-uat-artifact.mjs",
+    "payos:uat:sign": "node scripts/payos-uat-sign.mjs",
     "payos:uat:validate": "node scripts/payos-uat-validate.mjs",
     "platform:provision": "node scripts/platform-provision.mjs",
     "platform:admin-bootstrap": "node scripts/platform-admin-bootstrap.mjs",

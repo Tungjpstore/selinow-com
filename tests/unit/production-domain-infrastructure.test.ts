@@ -13,12 +13,21 @@ describe("production custom-domain infrastructure contract", () => {
     const wrangler = readJson("wrangler.jsonc") as {
       env: { production: { routes: Route[] }; staging: { routes: Route[] } };
     };
+    const stagingSpec = readJson("infra/environments/staging.json") as {
+      sharedZoneDisabledRoutes: string[];
+      workerRoutes: Route[];
+    };
     const production = wrangler.env.production.routes;
     const staging = wrangler.env.staging.routes;
 
     expect(production).toContainEqual({ pattern: "*/*", zone_name: "selinow.com" });
-    expect(staging.some((route) => route.pattern === "*/*")).toBe(false);
-    expect(staging.some((route) => route.custom_domain === true && route.pattern === "*/*")).toBe(false);
+    expect(production.filter((route) => route.pattern === "*/*")).toHaveLength(1);
+    expect(staging).toEqual(stagingSpec.workerRoutes);
+    for (const forbiddenPattern of stagingSpec.sharedZoneDisabledRoutes) {
+      expect(staging.some((route) => route.pattern === forbiddenPattern)).toBe(false);
+    }
+    expect(new Set(production.map((route) => route.pattern)).size).toBe(production.length);
+    expect(new Set(staging.map((route) => route.pattern)).size).toBe(staging.length);
   });
 
   it("keeps production and staging resource bindings environment-bound", () => {
@@ -26,7 +35,17 @@ describe("production custom-domain infrastructure contract", () => {
         name: string;
         d1_databases: Array<{ binding: string; database_name: string }>;
         r2_buckets: Array<{ binding: string; bucket_name: string }>;
-        queues: { producers: Array<{ binding: string; queue: string }>; consumers: Array<{ queue: string }> };
+        queues: {
+          producers: Array<{ binding: string; queue: string }>;
+          consumers: Array<{
+            dead_letter_queue?: string;
+            max_batch_size: number;
+            max_batch_timeout: number;
+            max_retries: number;
+            queue: string;
+            retry_delay?: number;
+          }>;
+        };
         triggers: { crons: string[] };
     };
     const wrangler = readJson("wrangler.jsonc") as {
@@ -50,7 +69,16 @@ describe("production custom-domain infrastructure contract", () => {
         `selinow-notification-${environment}`,
         `selinow-dlq-${environment}`,
       ]));
-      expect(config.triggers.crons).toHaveLength(1);
+      expect(config.triggers.crons).toEqual(environment === "production" ? ["*/15 * * * *"] : ["* * * * *"]);
+      for (const consumer of config.queues.consumers.filter((binding) => binding.queue !== `selinow-dlq-${environment}`)) {
+        expect(consumer).toMatchObject({
+          dead_letter_queue: `selinow-dlq-${environment}`,
+          max_batch_size: 10,
+          max_batch_timeout: 5,
+          max_retries: 5,
+          retry_delay: 60,
+        });
+      }
     }
   });
 

@@ -48,6 +48,61 @@ export type DodoStagingUatBinding = Pick<DodoStagingUatEvidence["release"], "com
   scenarioArtifactFingerprints?: Record<string, string>;
 };
 
+export type DodoUatScenarioObservation = {
+  status: "passed";
+  observedAt: string;
+  requestReference: string | null;
+  eventReference: string | null;
+  sessionReference: string | null;
+};
+
+export function buildDodoUatScenarioArtifact(input: DodoUatScenarioObservation & {
+  environment: "staging";
+  provider: "dodo";
+  release: DodoStagingUatEvidence["release"];
+  scenarioId: string;
+}): {
+  artifact: Record<string, unknown>;
+  bytes: Uint8Array;
+  evidenceFingerprintSha256: string;
+  evidenceRef: string;
+};
+
+export function writeDodoUatScenarioArtifact(input: DodoUatScenarioObservation & {
+  environment: "staging";
+  provider: "dodo";
+  release: DodoStagingUatEvidence["release"];
+  repositoryRoot: string;
+  scenarioId: string;
+}): Promise<{
+  artifact: Record<string, unknown>;
+  bytes: Uint8Array;
+  evidenceFingerprintSha256: string;
+  evidenceRef: string;
+  artifactPath: string;
+}>;
+
+export function readDodoUatScenarioArtifacts(input: {
+  evidence: DodoStagingUatEvidence;
+  repositoryRoot: string;
+}): Record<string, string>;
+
+export function collectDodoStagingUatEvidence(input: {
+  completedAt: string;
+  createdAt: string;
+  endpointFingerprintSha256: string;
+  offers: DodoStagingUatEvidence["offers"];
+  release: DodoStagingUatEvidence["release"];
+  repositoryRoot: string;
+  scenarios: Record<string, DodoUatScenarioObservation>;
+}): Promise<{
+  artifactSha256: string;
+  evidence: DodoStagingUatEvidence;
+  evidencePath: string;
+  evidenceRef: string;
+  scenarioArtifactFingerprints: Record<string, string>;
+}>;
+
 export function fingerprintDodoStagingUatEvidence(evidence: unknown): string;
 export function fingerprintDodoUatReference(scope: string, value: string): string;
 export function assertDodoStagingUatEvidence(evidence: unknown, binding: DodoStagingUatBinding): {

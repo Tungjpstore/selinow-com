@@ -1006,7 +1006,9 @@ export async function checkCustomDomain(input: {
   userId: string;
 }): Promise<DomainView> {
   const runtime = input.runtime ?? {};
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "read", false);
+  // Checking a claim/domain mutates provider state and consumes a reconciliation
+  // lease, so read-only members must not be able to trigger it.
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", false);
   const claim = await findClaimById(input.env, shopId, input.domainId);
   if (claim !== null) {
     return verifyAndPromoteClaim({

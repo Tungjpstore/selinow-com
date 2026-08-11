@@ -1,5 +1,6 @@
 import { formatClientMoney, readCart, readCatalog, saveCart } from "./catalog-dom";
 import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+import { createBrowserOrderAccessStorage } from "./order-access-storage";
 
 const locale = document.documentElement.lang || "en";
 const t = createStorefrontTranslator(locale);
@@ -70,6 +71,7 @@ const submit = document.querySelector("#checkout-submit");
 const total = document.querySelector("#checkout-total");
 let recoveryAction: RecoveryAction | null = null;
 let pendingIntent: CheckoutIntent | null = null;
+const accessStorage = createBrowserOrderAccessStorage();
 
 function intentStorageKey(): string {
   return `selinow-checkout-intent:v1:${window.location.host}`;
@@ -77,7 +79,7 @@ function intentStorageKey(): string {
 
 function readPendingIntent(): CheckoutIntent | null {
   try {
-    const value = JSON.parse(sessionStorage.getItem(intentStorageKey()) ?? "null") as unknown;
+    const value = JSON.parse(accessStorage.get(intentStorageKey()) ?? "null") as unknown;
     if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
     const row = value as Record<string, unknown>;
     if (
@@ -117,12 +119,12 @@ function readPendingIntent(): CheckoutIntent | null {
 
 function savePendingIntent(intent: CheckoutIntent): void {
   pendingIntent = intent;
-  sessionStorage.setItem(intentStorageKey(), JSON.stringify(intent));
+  accessStorage.set(intentStorageKey(), JSON.stringify(intent));
 }
 
 function clearPendingIntent(): void {
   pendingIntent = null;
-  sessionStorage.removeItem(intentStorageKey());
+  accessStorage.remove(intentStorageKey());
 }
 
 async function requestOrderRecoveryEmail(orderId: string, customerEmail: string): Promise<void> {
@@ -140,7 +142,7 @@ async function requestOrderRecoveryEmail(orderId: string, customerEmail: string)
 }
 
 function completeOrder(order: { orderId: string; orderToken: string }, customerEmail: string): void {
-  sessionStorage.setItem(`selinow-order-token:v1:${window.location.host}:${order.orderId}`, order.orderToken);
+  accessStorage.set(`selinow-order-token:v1:${window.location.host}:${order.orderId}`, order.orderToken);
   void requestOrderRecoveryEmail(order.orderId, customerEmail);
   clearPendingIntent();
   saveCart([]);

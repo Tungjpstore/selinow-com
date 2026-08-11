@@ -1,13 +1,18 @@
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import { describe, expect, it } from "vitest";
 
 import {
   DODO_STAGING_UAT_SCENARIO_IDS,
   assertDodoStagingUatEvidence,
+  buildDodoUatScenarioArtifact,
+  collectDodoStagingUatEvidence,
   fingerprintDodoStagingUatEvidence,
   fingerprintDodoUatReference,
+  readDodoUatScenarioArtifacts,
 } from "../../scripts/lib/dodo-uat-evidence.mjs";
+import type { DodoStagingUatEvidence } from "../../scripts/lib/dodo-uat-evidence.mjs";
 
 const COMMIT_SHA = "a".repeat(40);
 const TREE_SHA = "b".repeat(40);
@@ -209,5 +214,90 @@ describe("Dodo staging UAT evidence", () => {
 
     expect(Object.keys(example.scenarios ?? {}).sort()).toEqual([...DODO_STAGING_UAT_SCENARIO_IDS].sort());
     expect(source).not.toMatch(/Bearer |whsec_|"(?:apiKey|webhookKey|webhookSecret|rawBody|rawPayload|checkoutUrl|customerEmail|customerPhone|customerAddress)"\s*:/iu);
+  });
+
+  it("builds and collects release-bound mode-0600 scenario artifacts", async () => {
+    const root = mkdtempSync(`${tmpdir()}/dodo-uat-`);
+    try {
+      const source = validEvidence();
+      const collected = await collectDodoStagingUatEvidence({
+        completedAt: source.completedAt,
+        createdAt: source.createdAt,
+        endpointFingerprintSha256: source.endpointFingerprintSha256,
+        offers: source.offers as DodoStagingUatEvidence["offers"],
+        release: source.release,
+        repositoryRoot: root,
+        scenarios: Object.fromEntries(DODO_STAGING_UAT_SCENARIO_IDS.map((scenarioId) => {
+          const record = getScenario(source, scenarioId);
+          return [scenarioId, {
+            status: "passed",
+            observedAt: record.observedAt,
+            requestReference: record.requestReference,
+            eventReference: record.eventReference,
+            sessionReference: record.sessionReference,
+          }];
+        })),
+      });
+      const fingerprints = readDodoUatScenarioArtifacts({ evidence: collected.evidence, repositoryRoot: root });
+      expect(Object.keys(fingerprints)).toHaveLength(32);
+      expect(assertDodoStagingUatEvidence(collected.evidence, {
+        ...binding,
+        requireArtifactProof: true,
+        scenarioArtifactFingerprints: fingerprints,
+      })).toMatchObject({ accepted: true, scenarioCount: 32 });
+      expect(statSync(collected.evidencePath).mode & 0o777).toBe(0o600);
+      const scenarioRef = collected.evidence.scenarios.plan_catalog_offers?.requestReference;
+      if (typeof scenarioRef !== "string") throw new Error("missing_collected_scenario_reference");
+      expect(statSync(`${root}/${scenarioRef.replace(/^artifact:/u, "")}`).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsafe scenario fields and non-private artifacts", () => {
+    const value = validEvidence();
+    expect(() => buildDodoUatScenarioArtifact({
+      environment: "staging",
+      eventReference: null,
+      observedAt: NOW,
+      provider: "dodo",
+      rawPayload: "{}",
+      release: value.release,
+      requestReference: "request:req_000001",
+      scenarioId: "plan_catalog_offers",
+      sessionReference: null,
+      status: "passed",
+    } as never)).toThrow("dodo_uat_field_unsafe");
+
+    const root = mkdtempSync(`${tmpdir()}/dodo-uat-permissions-`);
+    try {
+      const built = buildDodoUatScenarioArtifact({
+        environment: "staging",
+        eventReference: null,
+        observedAt: NOW,
+        provider: "dodo",
+        release: value.release,
+        requestReference: "request:req_000001",
+        scenarioId: "plan_catalog_offers",
+        sessionReference: null,
+        status: "passed",
+      });
+      const path = `${root}/${built.evidenceRef.replace(/^artifact:/u, "")}`;
+      mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+      writeFileSync(path, built.bytes, { mode: 0o600 });
+      chmodSync(path, 0o644);
+      const evidence = value;
+      evidence.scenarios.plan_catalog_offers = {
+        status: "passed",
+        observedAt: NOW,
+        evidenceFingerprintSha256: built.evidenceFingerprintSha256,
+        requestReference: built.evidenceRef,
+        eventReference: null,
+        sessionReference: null,
+      };
+      expect(() => readDodoUatScenarioArtifacts({ evidence: evidence as unknown as DodoStagingUatEvidence, repositoryRoot: root })).toThrow("dodo_uat_scenario_artifact_permissions_invalid");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

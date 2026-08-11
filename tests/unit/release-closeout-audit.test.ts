@@ -25,6 +25,23 @@ describe("release closeout audit", () => {
     expect(JSON.stringify(classified)).not.toContain("dodo-secret-value");
   });
 
+  it("classifies candidate-bound legal and secret inventory evidence specifically", () => {
+    expect(classifyReleaseCheck({
+      name: "evidence.legalSupport.decisions",
+      ok: false,
+    })).toMatchObject({
+      category: "legal_support_approval",
+      ok: false,
+    });
+    expect(classifyReleaseCheck({
+      name: "evidence.secretInventory.artifactBinding",
+      ok: false,
+    })).toMatchObject({
+      category: "production_secret_inventory",
+      ok: false,
+    });
+  });
+
   it("reports clean-tree and staging-candidate drift from non-secret metadata", async () => {
     const root = join(tmpdir(), `selinow-closeout-${String(Date.now())}`);
     const releaseId = "stg_20260809T010203Z_0123456789ab";

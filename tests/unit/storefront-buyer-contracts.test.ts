@@ -188,7 +188,7 @@ describe("buyer order status copy", () => {
     expect(script).toContain('t("storefront.order.network_title")');
     expect(script).toContain("copyToClipboard");
     expect(script).toContain('if (!("clipboard" in navigator))');
-    expect(script).toContain('sessionStorage.removeItem(tokenKey)');
+    expect(script).toContain('accessStorage.remove(tokenKey)');
     expect(script).toContain('payment_pending: t("storefront.order.payment.payment_pending")');
     expect(script).toContain("hasKeyDelivery");
     expect(script).toContain("body.fulfillment.keys.length === 0");

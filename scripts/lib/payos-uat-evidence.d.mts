@@ -1,3 +1,6 @@
+export const PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS: readonly string[];
+export const PAYOS_LOCAL_ASSURANCE_SCENARIO_IDS: readonly string[];
+export const PAYOS_PROVIDER_UNSUPPORTED_SCENARIO_IDS: readonly string[];
 export const PAYOS_STAGING_UAT_SCENARIO_IDS: readonly string[];
 
 export type PayosStagingUatBinding = {

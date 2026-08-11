@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { lstatSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 export const DODO_STAGING_UAT_SCENARIO_IDS = Object.freeze([
   "plan_catalog_offers",
@@ -47,6 +51,8 @@ const GIT_SHA_PATTERN = /^[a-f0-9]{40}$/u;
 const RELEASE_ID_PATTERN = /^stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}$/u;
 const WORKER_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/u;
 const SAFE_REFERENCE_PATTERN = /^(?:request|event|session):[A-Za-z0-9._-]{3,128}$|^artifact:[A-Za-z0-9._/-]{3,240}$/u;
+const SAFE_OBSERVATION_REFERENCE_PATTERN = /^(?:request|event|session):[A-Za-z0-9._-]{3,128}$/u;
+const SCENARIO_ARTIFACT_REF_PATTERN = /^artifact:\.wrangler\/releases\/staging\/(stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12})\/dodo-uat-scenarios\/([a-z0-9_]+)\.json$/u;
 const SAFE_MANIFEST_PATTERN = /^\.wrangler\/releases\/staging\/stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}\/release-manifest\.json$/u;
 const PLACEHOLDER_PATTERN = /(?:replace-with|placeholder|change-me|not-provisioned|<[^>]+>)/iu;
 const UNSAFE_VALUE_PATTERNS = [
@@ -160,6 +166,228 @@ function assertScenarios(scenarios, binding) {
   DODO_STAGING_UAT_SCENARIO_IDS.forEach((scenarioId) => assertScenarioRecord(scenarios[scenarioId], scenarioId, binding));
   const fingerprints = DODO_STAGING_UAT_SCENARIO_IDS.map((scenarioId) => scenarios[scenarioId].evidenceFingerprintSha256);
   if (new Set(fingerprints).size !== fingerprints.length) throw new Error("dodo_uat_scenario_fingerprint_duplicate");
+}
+
+function scenarioArtifactReference(releaseId, scenarioId) {
+  return `artifact:.wrangler/releases/staging/${releaseId}/dodo-uat-scenarios/${scenarioId}.json`;
+}
+
+function scenarioArtifactPath(root, releaseId, scenarioId) {
+  return resolve(root, scenarioArtifactReference(releaseId, scenarioId).slice("artifact:".length));
+}
+
+function assertReleaseShape(release, issue = "dodo_uat_scenario_artifact_binding_invalid") {
+  exactKeys(release, ["commitSha", "manifestRef", "manifestSha256", "releaseId", "treeSha", "workerVersion"], issue);
+  if (!GIT_SHA_PATTERN.test(release.commitSha) || /^0+$/u.test(release.commitSha)
+    || !GIT_SHA_PATTERN.test(release.treeSha) || /^0+$/u.test(release.treeSha)
+    || !RELEASE_ID_PATTERN.test(release.releaseId)
+    || !SAFE_MANIFEST_PATTERN.test(release.manifestRef)
+    || !release.manifestRef.includes(release.releaseId)
+    || !SHA256_PATTERN.test(release.manifestSha256)
+    || !WORKER_VERSION_PATTERN.test(release.workerVersion)
+    || PLACEHOLDER_PATTERN.test(release.workerVersion)) {
+    throw new Error(issue);
+  }
+}
+
+function assertObservationReference(value, issue) {
+  if (value !== null && (typeof value !== "string" || !SAFE_OBSERVATION_REFERENCE_PATTERN.test(value))) throw new Error(issue);
+}
+
+function buildScenarioArtifact(input) {
+  const expectedKeys = ["environment", "eventReference", "observedAt", "provider", "release", "requestReference", "scenarioId", "sessionReference", "status"];
+  if (Object.prototype.hasOwnProperty.call(input ?? {}, "repositoryRoot")) expectedKeys.push("repositoryRoot");
+  exactKeys(input, expectedKeys, "dodo_uat_collection_scenario_invalid");
+  const scenarioId = input?.scenarioId;
+  if (typeof scenarioId !== "string" || !DODO_STAGING_UAT_SCENARIO_IDS.includes(scenarioId)) throw new Error("dodo_uat_scenario_id_invalid");
+  assertReleaseShape(input.release);
+  if (input.provider !== "dodo" || input.environment !== "staging") throw new Error("dodo_uat_scenario_artifact_binding_invalid");
+  if (input.status !== "passed") throw new Error("dodo_uat_scenario_not_passed");
+  assertIsoDate(input.observedAt, "dodo_uat_scenario_timestamp_invalid");
+  assertObservationReference(input.requestReference, "dodo_uat_scenario_reference_invalid");
+  assertObservationReference(input.eventReference, "dodo_uat_scenario_reference_invalid");
+  assertObservationReference(input.sessionReference, "dodo_uat_scenario_reference_invalid");
+  const artifact = {
+    schemaVersion: 1,
+    provider: "dodo",
+    environment: "staging",
+    mode: "scenario_observation",
+    scenarioId,
+    release: input.release,
+    observedAt: input.observedAt,
+    evidence: {
+      status: "passed",
+      requestReference: input.requestReference ?? null,
+      eventReference: input.eventReference ?? null,
+      sessionReference: input.sessionReference ?? null,
+    },
+    redaction: { noRawPayload: true, noSensitiveValues: true },
+  };
+  assertSafeStrings(artifact);
+  return artifact;
+}
+
+function scenarioArtifactBytes(artifact) {
+  return Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+}
+
+export function buildDodoUatScenarioArtifact(input) {
+  const artifact = buildScenarioArtifact(input);
+  const bytes = scenarioArtifactBytes(artifact);
+  return {
+    artifact,
+    bytes,
+    evidenceFingerprintSha256: createHash("sha256").update(bytes).digest("hex"),
+    evidenceRef: scenarioArtifactReference(input.release.releaseId, input.scenarioId),
+  };
+}
+
+export async function writeDodoUatScenarioArtifact(input) {
+  const built = buildDodoUatScenarioArtifact(input);
+  const root = input.repositoryRoot;
+  if (typeof root !== "string" || root.length === 0) throw new Error("dodo_uat_repository_root_required");
+  const artifactPath = scenarioArtifactPath(root, input.release.releaseId, input.scenarioId);
+  await mkdir(dirname(artifactPath), { mode: 0o700, recursive: true });
+  try {
+    await writeFile(artifactPath, built.bytes, { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw new Error("dodo_uat_scenario_artifact_write_failed", { cause: error });
+    let existing;
+    try { existing = readFileSync(artifactPath); } catch { throw new Error("dodo_uat_scenario_artifact_read_failed"); }
+    if (!existing.equals(built.bytes)) throw new Error("dodo_uat_scenario_artifact_conflict", { cause: error });
+  }
+  await chmod(artifactPath, 0o600);
+  return { ...built, artifactPath };
+}
+
+function safeRedactionEvidence() {
+  const values = {
+    auditNoSensitiveValues: true,
+    d1NoHostedCheckoutUrl: true,
+    d1NoRawPayload: true,
+    d1NoSecretValues: true,
+    logsNoSensitiveValues: true,
+    queuesNoSensitiveValues: true,
+  };
+  return {
+    ...values,
+    evidenceFingerprintSha256: createHash("sha256").update(`dodo-uat-redaction:v1:${JSON.stringify(canonicalize(values))}`).digest("hex"),
+  };
+}
+
+export async function collectDodoStagingUatEvidence(input) {
+  exactKeys(input, ["completedAt", "createdAt", "endpointFingerprintSha256", "offers", "release", "repositoryRoot", "scenarios"], "dodo_uat_collection_input_invalid");
+  if (typeof input.repositoryRoot !== "string" || input.repositoryRoot.length === 0) throw new Error("dodo_uat_repository_root_required");
+  assertReleaseShape(input.release, "dodo_uat_collection_release_invalid");
+  assertSha256(input.endpointFingerprintSha256, "dodo_uat_endpoint_fingerprint_invalid");
+  assertOffers(input.offers);
+  assertIsoDate(input.createdAt, "dodo_uat_created_at_invalid");
+  assertIsoDate(input.completedAt, "dodo_uat_completed_at_invalid");
+  exactKeys(input.scenarios, DODO_STAGING_UAT_SCENARIO_IDS, "dodo_uat_scenario_set_invalid");
+  assertSafeStrings(input);
+
+  const scenarios = {};
+  const scenarioArtifactFingerprints = {};
+  for (const scenarioId of DODO_STAGING_UAT_SCENARIO_IDS) {
+    const observation = input.scenarios[scenarioId];
+    exactKeys(observation, ["eventReference", "observedAt", "requestReference", "sessionReference", "status"], "dodo_uat_collection_scenario_invalid");
+    const written = await writeDodoUatScenarioArtifact({
+      ...observation,
+      environment: "staging",
+      provider: "dodo",
+      release: input.release,
+      repositoryRoot: input.repositoryRoot,
+      scenarioId,
+    });
+    scenarios[scenarioId] = {
+      status: "passed",
+      observedAt: observation.observedAt,
+      evidenceFingerprintSha256: written.evidenceFingerprintSha256,
+      requestReference: written.evidenceRef,
+      eventReference: null,
+      sessionReference: null,
+    };
+    scenarioArtifactFingerprints[scenarioId] = written.evidenceFingerprintSha256;
+  }
+
+  const evidence = {
+    schemaVersion: 1,
+    environment: "staging",
+    provider: "dodo",
+    providerEnvironment: "test_mode",
+    release: input.release,
+    endpointFingerprintSha256: input.endpointFingerprintSha256,
+    offers: input.offers,
+    scenarios,
+    redaction: safeRedactionEvidence(),
+    createdAt: input.createdAt,
+    completedAt: input.completedAt,
+  };
+  assertDodoStagingUatEvidence(evidence, {
+    ...input.release,
+    requireArtifactProof: true,
+    scenarioArtifactFingerprints,
+  });
+
+  const evidenceRef = `.wrangler/releases/staging/${input.release.releaseId}/dodo-uat-evidence.json`;
+  const evidencePath = resolve(input.repositoryRoot, evidenceRef);
+  const evidenceBytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+  await mkdir(dirname(evidencePath), { mode: 0o700, recursive: true });
+  try {
+    await writeFile(evidencePath, evidenceBytes, { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw new Error("dodo_uat_evidence_write_failed", { cause: error });
+    let existing;
+    try { existing = readFileSync(evidencePath); } catch { throw new Error("dodo_uat_evidence_read_failed"); }
+    if (!existing.equals(evidenceBytes)) throw new Error("dodo_uat_evidence_conflict", { cause: error });
+  }
+  await chmod(evidencePath, 0o600);
+  return {
+    artifactSha256: createHash("sha256").update(evidenceBytes).digest("hex"),
+    evidence,
+    evidencePath,
+    evidenceRef,
+    scenarioArtifactFingerprints,
+  };
+}
+
+export function readDodoUatScenarioArtifacts({ evidence, repositoryRoot }) {
+  if (typeof repositoryRoot !== "string" || repositoryRoot.length === 0) throw new Error("dodo_uat_repository_root_required");
+  assertReleaseShape(evidence?.release);
+  const fingerprints = {};
+  DODO_STAGING_UAT_SCENARIO_IDS.forEach((scenarioId) => {
+    const record = evidence?.scenarios?.[scenarioId];
+    const refs = [record?.requestReference, record?.eventReference, record?.sessionReference].filter((ref) => ref !== null && ref !== undefined);
+    if (refs.length === 0 || refs.some((ref) => typeof ref !== "string" || !SCENARIO_ARTIFACT_REF_PATTERN.test(ref))) throw new Error("dodo_uat_scenario_artifact_reference_required");
+    const expectedRef = scenarioArtifactReference(evidence.release.releaseId, scenarioId);
+    if (refs.some((ref) => ref !== expectedRef)) throw new Error("dodo_uat_scenario_artifact_reference_invalid");
+    const path = scenarioArtifactPath(repositoryRoot, evidence.release.releaseId, scenarioId);
+    let stat;
+    try { stat = lstatSync(path); } catch { throw new Error("dodo_uat_scenario_artifact_missing"); }
+    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) throw new Error("dodo_uat_scenario_artifact_permissions_invalid");
+    let bytes;
+    let artifact;
+    try {
+      bytes = readFileSync(path);
+      artifact = JSON.parse(bytes.toString("utf8"));
+    } catch { throw new Error("dodo_uat_scenario_artifact_invalid"); }
+    exactKeys(artifact, ["environment", "evidence", "mode", "observedAt", "provider", "redaction", "release", "scenarioId", "schemaVersion"], "dodo_uat_scenario_artifact_invalid");
+    exactKeys(artifact.evidence, ["eventReference", "requestReference", "sessionReference", "status"], "dodo_uat_scenario_artifact_invalid");
+    exactKeys(artifact.redaction, ["noRawPayload", "noSensitiveValues"], "dodo_uat_scenario_artifact_redaction_invalid");
+    if (artifact.schemaVersion !== 1 || artifact.provider !== "dodo" || artifact.environment !== "staging" || artifact.mode !== "scenario_observation"
+      || artifact.scenarioId !== scenarioId || artifact.observedAt !== record.observedAt || artifact.evidence.status !== record.status
+      || artifact.redaction.noRawPayload !== true || artifact.redaction.noSensitiveValues !== true) throw new Error("dodo_uat_scenario_artifact_binding_invalid");
+    assertReleaseShape(artifact.release);
+    if (JSON.stringify(artifact.release) !== JSON.stringify(evidence.release)) throw new Error("dodo_uat_scenario_artifact_binding_invalid");
+    assertObservationReference(artifact.evidence.requestReference, "dodo_uat_scenario_artifact_reference_invalid");
+    assertObservationReference(artifact.evidence.eventReference, "dodo_uat_scenario_artifact_reference_invalid");
+    assertObservationReference(artifact.evidence.sessionReference, "dodo_uat_scenario_artifact_reference_invalid");
+    assertSafeStrings(artifact);
+    const fingerprint = createHash("sha256").update(bytes).digest("hex");
+    if (fingerprint !== record.evidenceFingerprintSha256) throw new Error("dodo_uat_scenario_artifact_hash_mismatch");
+    fingerprints[scenarioId] = fingerprint;
+  });
+  return fingerprints;
 }
 
 function assertRedaction(redaction) {

@@ -29,7 +29,7 @@ describe("dashboard information architecture handoff", () => {
     ]) {
       expect(ia).toContain(required);
     }
-    expect(ia).toContain("156-row `API_ENDPOINT_INDEX.csv`");
+    expect(ia).toContain("157-row `API_ENDPOINT_INDEX.csv`");
     expect(ia).toContain("25 logical routes + 2 aliases");
   });
 

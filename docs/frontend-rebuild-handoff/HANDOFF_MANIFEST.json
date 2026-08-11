@@ -13,7 +13,7 @@
     "acceptanceScenarios": 87,
     "traceabilityRecords": 28,
     "sourceMigrations": "0001-0069",
-    "apiEndpoints": 156
+    "apiEndpoints": 157
   },
   "verification": {
     "npm run check": "pass: 0 errors, 3 hints",
@@ -26,7 +26,7 @@
     "csv": "pass: 87 acceptance rows, 28 traceability rows",
     "yaml": "pass: 25 routes, 2 aliases",
     "git diff --check": "pass",
-    "apiEndpointIndex": "pass: 156 method/path rows, source paths and contract metadata",
+    "apiEndpointIndex": "pass: 157 method/path rows, source paths and contract metadata",
     "npm run deploy:staging:dry-run": "pass: 272 modules, 3713.82 KiB upload, no deployment"
   },
   "productionBoundary": {

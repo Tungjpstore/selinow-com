@@ -23,10 +23,30 @@ while only a final staging release can produce accepted provider evidence.
 
 ## Evidence Contract
 
-After a guarded staging deploy, create a private evidence file from
-`infra/release/dodo-uat-evidence.example.json`. Fill only safe fingerprints and
-opaque request/event/session references. Never store secrets, raw payloads,
-hosted checkout URLs, customer details, or payment details.
+After a guarded staging deploy, collect each scenario into a private,
+release-bound artifact. The collector input is an exact mode-`0600` JSON file
+with these keys only: `release`, `endpointFingerprintSha256`, `offers`,
+`scenarios`, `createdAt`, and `completedAt`. Every scenario has only `status`,
+`observedAt`, and nullable opaque `request:`, `event:`, or `session:`
+references. Unknown fields fail closed, including raw payloads, credentials,
+customer data, checkout URLs, and payment details.
+
+Build the canonical evidence file and its 32 scenario artifacts:
+
+```bash
+chmod 0600 .wrangler/releases/staging/<release-id>/dodo-uat-collector-input.json
+node scripts/dodo-uat-collect.mjs \
+  --input .wrangler/releases/staging/<release-id>/dodo-uat-collector-input.json \
+  --json
+```
+
+The collector writes only under
+`.wrangler/releases/staging/<release-id>/`: one canonical
+`dodo-uat-evidence.json` plus
+`dodo-uat-scenarios/<scenario-id>.json`. Every output is mode `0600`, bound to
+the exact release commit/tree/manifest/Worker version, and contains safe opaque
+references rather than raw provider material. Re-running the same input is
+idempotent; conflicting content is rejected instead of overwriting evidence.
 
 Validate it against the exact release manifest and Worker version:
 
@@ -38,10 +58,15 @@ npm run dodo:uat:validate -- \
   --json
 ```
 
-The validator requires all 32 scenarios to be `passed`, exact four-offer
-commercial values, unique provider-reference fingerprints, signed-event
-references, complete redaction checks, and an exact commit/tree/manifest/Worker
-binding. A source test pass or a placeholder example is not staging evidence.
+The standalone validator requires the evidence file and all 32 canonical
+scenario artifacts to exist as exact mode-`0600` files. It recomputes every
+artifact SHA-256, checks the safe schema and release binding, then requires all
+32 scenarios to be `passed`, exact four-offer commercial values, unique
+provider-reference fingerprints, complete redaction checks, and an exact
+commit/tree/manifest/Worker binding. Hash-shaped claims, direct opaque
+references without their scenario artifacts, source test passes, and the
+placeholder example are not staging evidence. Release admission performs the
+same artifact checks.
 
 ## Mutation Order
 

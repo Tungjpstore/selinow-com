@@ -1,6 +1,7 @@
 import { fulfillmentStateView, orderStateLabel, paymentStateView, type OrderStateView } from "../../lib/storefront/order-view";
 import { formatClientMoney } from "./catalog-dom";
 import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+import { createBrowserOrderAccessStorage } from "./order-access-storage";
 
 type ApiError = { code?: string; requestId?: string };
 type OrderItem = { fulfillmentType: string; lineTotalMinor: number; productTitle: string; quantity: number; variantTitle: string };
@@ -19,13 +20,14 @@ const t = createStorefrontTranslator(locale);
 const root = document.querySelector("[data-order-id]");
 const orderId = root instanceof HTMLElement ? root.dataset.orderId : undefined;
 const tokenKey = orderId === undefined ? "" : `selinow-order-token:v1:${window.location.host}:${orderId}`;
+const accessStorage = createBrowserOrderAccessStorage();
 const fragment = new URLSearchParams(window.location.hash.slice(1));
 const fragmentAccessToken = fragment.get("access");
 let fragmentRecoveryToken = fragment.get("recovery");
 if (fragmentAccessToken !== null || fragmentRecoveryToken !== null) {
   history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
 }
-if (fragmentAccessToken !== null && tokenKey !== "") sessionStorage.setItem(tokenKey, fragmentAccessToken);
+if (fragmentAccessToken !== null && tokenKey !== "") accessStorage.set(tokenKey, fragmentAccessToken);
 
 const status = document.querySelector("#order-status");
 const actions = document.querySelector("#order-actions");
@@ -39,7 +41,7 @@ const downloadStatus = document.querySelector("#download-status");
 const downloadRetry = document.querySelector("#download-retry");
 
 function orderToken(): string | null {
-  return tokenKey === "" ? null : sessionStorage.getItem(tokenKey);
+  return tokenKey === "" ? null : accessStorage.get(tokenKey);
 }
 
 async function copyToClipboard(value: string): Promise<void> {
@@ -239,19 +241,15 @@ function downloadIntentStorageKey(download: PrivateDownload): string {
 
 function downloadIntentKey(download: PrivateDownload): string {
   const storageKey = downloadIntentStorageKey(download);
-  try {
-    const stored = sessionStorage.getItem(storageKey);
-    if (stored !== null && /^[A-Za-z0-9._:-]{16,128}$/u.test(stored)) return stored;
-    const next = `private-download:${crypto.randomUUID()}`;
-    sessionStorage.setItem(storageKey, next);
-    return next;
-  } catch {
-    return `private-download:${crypto.randomUUID()}`;
-  }
+  const stored = accessStorage.get(storageKey);
+  if (stored !== null && /^[A-Za-z0-9._:-]{16,128}$/u.test(stored)) return stored;
+  const next = `private-download:${crypto.randomUUID()}`;
+  accessStorage.set(storageKey, next);
+  return next;
 }
 
 function clearDownloadIntent(download: PrivateDownload): void {
-  try { sessionStorage.removeItem(downloadIntentStorageKey(download)); } catch { /* Storage is optional. */ }
+  accessStorage.remove(downloadIntentStorageKey(download));
 }
 
 async function readErrorCode(response: Response): Promise<string> {
@@ -415,7 +413,7 @@ async function loadOrder(): Promise<void> {
     const body: OrderResponse = await response.json();
     if (!response.ok) {
       if (response.status === 404) {
-        if (tokenKey !== "") sessionStorage.removeItem(tokenKey);
+        if (tokenKey !== "") accessStorage.remove(tokenKey);
         if (refreshButton instanceof HTMLButtonElement) refreshButton.hidden = true;
         showAccessRecovery(
           t("storefront.order.open_failed_title"),
@@ -466,7 +464,7 @@ async function consumeRecoveryFragment(): Promise<void> {
       );
       return;
     }
-    sessionStorage.setItem(tokenKey, body.order.orderToken);
+    accessStorage.set(tokenKey, body.order.orderToken);
     await loadOrder();
   } catch {
     showAccessRecovery(

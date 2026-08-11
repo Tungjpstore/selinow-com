@@ -37,6 +37,34 @@ artifact reference and a unique SHA-256 fingerprint. Raw webhook bodies,
 provider credentials, customer data, checkout URLs, and payment details are
 not allowed in evidence, D1, queues, audit metadata, or logs.
 
+Create each normalized scenario artifact with the dedicated builder. It accepts
+only scenario classification, timestamps, release identity and SHA-256 proof
+fingerprints; it has no argument for a PayOS credential, raw payload, customer
+record, checkout URL or bank detail. The output must be inside the exact
+release directory and is created with mode `0600` without overwriting an
+existing file:
+
+```bash
+npm run payos:uat:artifact -- \
+  --manifest .wrangler/releases/staging/<release-id>/release-manifest.json \
+  --worker-version <staging-worker-version> \
+  --scenario-id signed_exact_payment \
+  --classification provider_supported \
+  --status passed \
+  --verification-method signed_webhook \
+  --observed-at <iso-8601-observation> \
+  --controlled-account-fingerprint <sha256> \
+  --proof-of-execution-fingerprint <sha256> \
+  --output .wrangler/releases/staging/<release-id>/scenarios/payos-signed_exact_payment.json
+```
+
+Run the builder once for every scenario. Provider-required scenarios carry the
+two SHA-256 proof fingerprints. Local-assurance and provider-unsupported
+scenarios must omit them. Each top-level scenario record then references the
+generated file with `artifact:<release-relative-path>` and uses the emitted
+artifact fingerprint. The complete unsigned schema-v2 evidence remains a
+private mode-`0600` file outside Git.
+
 The provider execution block is the anti-fabrication fence:
 
 ```json
@@ -66,10 +94,31 @@ the handoff; it never treats a key embedded in the evidence as trusted. Set the
 trust anchor through either the environment (recommended for CI) or the
 validator CLI:
 
+Sign the completed evidence with a private Ed25519 key that is itself a regular
+mode-`0600` file. The signing command validates the release binding and evidence
+contract before writing the canonical evidence file. It never reads PayOS
+credentials or raw provider payloads and never prints the private key or
+signature:
+
+```bash
+npm run payos:uat:sign -- \
+  --evidence .wrangler/private/payos-uat-evidence.unsigned.json \
+  --private-key .wrangler/private/payos-release-owner-ed25519.pem \
+  --key-id release-owner-2026 \
+  --signed-at <iso-8601-completion-time> \
+  --output .wrangler/releases/staging/<release-id>/payos-uat-evidence.json
+```
+
+The validator requires an explicit, canonical release-specific evidence path.
+It reads and SHA-verifies every referenced scenario artifact using the same
+artifact contract as production release admission. A standalone `PASS` can no
+longer be produced from missing, noncanonical or tampered scenario files:
+
 ```bash
 export SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID="release-owner-2026"
 export SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64="$(base64 < owner-public-key.pem | tr -d '\n')"
 npm run payos:uat:validate -- \
+  --evidence .wrangler/releases/staging/<release-id>/payos-uat-evidence.json \
   --manifest .wrangler/releases/staging/<release-id>/release-manifest.json \
   --worker-version <staging-worker-version>
 ```
@@ -77,9 +126,12 @@ npm run payos:uat:validate -- \
 For an explicit key file, pass `--owner-attestation-key-id` together with
 `--owner-attestation-public-key <path>`. The private signing key and PayOS
 provider credentials must remain outside the repository and are never read by
-the validator. A provider acceptance claim is still blocked until a real,
-controlled low-value transaction has been executed and the resulting artifact
-has been signed by the release owner.
+the validator. The JSON output records `paymentLaneAccepted`,
+`fullCommerceAccepted` and the machine-readable unsupported refund/chargeback
+reason codes. A provider acceptance claim is still blocked until a real,
+controlled low-value transaction has been executed, all required local
+assurance artifacts pass, and the resulting evidence has been signed by the
+release owner.
 
 Until that handoff is accepted, the release doctor must report PayOS provider
 acceptance as blocked even when local negative/security tests are green.

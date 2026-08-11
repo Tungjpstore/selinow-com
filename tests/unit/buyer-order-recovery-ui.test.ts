@@ -26,7 +26,7 @@ describe("buyer order recovery UI contract", () => {
     const checkout = await readFile("src/scripts/storefront/checkout.ts", "utf8");
     expect(checkout).toContain(`/recovery`);
     expect(checkout).toContain("keepalive: true");
-    expect(checkout).toContain("sessionStorage.setItem");
+    expect(checkout).toContain("accessStorage.set");
     expect(checkout).toContain("#access=");
     expect(checkout).toMatch(/void requestOrderRecoveryEmail\([^)]+\);/u);
   });
@@ -35,5 +35,17 @@ describe("buyer order recovery UI contract", () => {
     const route = await readFile("src/pages/api/store/orders/[orderPublicId].ts", "utf8");
     expect(route).toContain('"Referrer-Policy": "no-referrer"');
     expect(route).toContain('response.headers.set("Referrer-Policy", "no-referrer")');
+  });
+
+  it("does not make recovered access depend on writable session storage", async () => {
+    const [order, checkout] = await Promise.all([
+      readFile("src/scripts/storefront/order.ts", "utf8"),
+      readFile("src/scripts/storefront/checkout.ts", "utf8"),
+    ]);
+
+    expect(order).toContain("createBrowserOrderAccessStorage");
+    expect(order).not.toMatch(/sessionStorage\.(?:getItem|setItem|removeItem)/u);
+    expect(checkout).toContain("createBrowserOrderAccessStorage");
+    expect(checkout).not.toContain("sessionStorage.setItem(`selinow-order-token");
   });
 });

@@ -85,9 +85,11 @@ reports, synthetic webhooks, or local-only test output.
      `npm run release:worker:upload -- --role rollback --tag <rollback-tag>
      --source-root <clean-rollback-worktree> --execute --confirm-production
      --json`; record both full returned UUIDs. Then run
-     `npm run release:rollback:rehearsal -- --write --json` and record its
-     `evidenceRef`/`artifactSha256`. Deploy admission validates both Cloudflare
-     version bindings.
+     `npm run release:rollback:rehearsal -- --execute --confirm-production
+     --confirm-maintenance-drain --json` and record its
+     `evidenceRef`/`artifactSha256`. The non-mutating `--write` mode validates
+     schema compatibility only and does not authorize production admission.
+     Deploy admission validates both Cloudflare version bindings.
    - Only after all approvals and provider/operations artifacts are accepted,
      execute the separately approved production migration and deploy ceremony.
    - Use a short-lived D1-capable `CLOUDFLARE_D1_API_TOKEN` for normal continuation

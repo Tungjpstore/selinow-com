@@ -48,6 +48,17 @@ describe("operational migration-ledger documentation", () => {
     expect(content["docs/PHASE_4_STAGING_ACCEPTANCE.md"]).toContain("`db:complete-release`");
     expect(content["docs/PRODUCTION_CONTINUATION_GATE_AUDIT_2026-08-09.md"]).toContain("`0053` through `0094`");
     expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain("release:worker:upload");
+    expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain(
+      "release:rollback:rehearsal -- --execute --confirm-production",
+    );
+    expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain(
+      "--confirm-maintenance-drain --json",
+    );
+    expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain(
+      "does not authorize production admission",
+    );
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("DODO_PAYMENTS_API_KEY");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("DODO_PAYMENTS_WEBHOOK_KEY");
     expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0094_shop_creation_admission.sql`");
     expect(content["docs/DOMAINS.md"]).toContain("0093_custom_domain_turnstile_runtime_guard.sql");
     expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0094`");

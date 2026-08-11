@@ -64,7 +64,7 @@ Frontend moi chi duoc coi la dung contract khi:
 | `IMPLEMENTATION_MIGRATION_PLAN.md` | Cach xay, parity, cutover va rollback |
 | `MASTER_REBUILD_PROMPT.md` | Brief hoan chinh de giao cho doi/agent trien khai |
 | `route-contracts.yaml` | Route contract may-doc |
-| `API_ENDPOINT_INDEX.csv` | 156 method/path rows mapped to source, tenant boundary, security gate, capability, authority and contract reference |
+| `API_ENDPOINT_INDEX.csv` | 157 method/path rows mapped to source, tenant boundary, security gate, capability, authority and contract reference |
 | `ACCEPTANCE_MATRIX.csv` | Ma tran nghiem thu theo route/state/viewport |
 | `TRACEABILITY_MATRIX.csv` | Lien ket screen -> page -> API/service -> test |
 | `HANDOFF_MANIFEST.json` | Baseline, file inventory, counts va checksum cua goi |

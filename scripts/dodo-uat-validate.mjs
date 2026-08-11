@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 
-import { assertDodoStagingUatEvidence } from "./lib/dodo-uat-evidence.mjs";
+import { assertDodoStagingUatEvidence, readDodoUatScenarioArtifacts } from "./lib/dodo-uat-evidence.mjs";
 import { readTrustedStagingUatBinding } from "./lib/commerce-uat-evidence.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
@@ -28,6 +28,10 @@ try {
   const options = parseArguments(process.argv.slice(2));
   if (options.manifestPath === null) throw new Error("dodo_uat_manifest_required");
   if (options.workerVersion === null || options.workerVersion.length === 0) throw new Error("dodo_uat_worker_version_required");
+  const evidenceStat = await lstat(options.evidencePath).catch(() => null);
+  if (evidenceStat === null || !evidenceStat.isFile() || (evidenceStat.mode & 0o777) !== 0o600) {
+    throw new Error("dodo_uat_evidence_permissions_invalid");
+  }
   const evidence = JSON.parse(await readFile(options.evidencePath, "utf8"));
   const binding = await readTrustedStagingUatBinding({
     evidence,
@@ -35,7 +39,12 @@ try {
     repositoryRoot,
     workerVersion: options.workerVersion,
   });
-  const result = assertDodoStagingUatEvidence(evidence, binding);
+  const scenarioArtifactFingerprints = readDodoUatScenarioArtifacts({ evidence, repositoryRoot });
+  const result = assertDodoStagingUatEvidence(evidence, {
+    ...binding,
+    requireArtifactProof: true,
+    scenarioArtifactFingerprints,
+  });
   const output = {
     accepted: result.accepted,
     evidenceFingerprintSha256: result.evidenceFingerprintSha256,
