@@ -1418,7 +1418,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(runner).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps operator tokens out of every full-doctor Wrangler subprocess", async () => {
+  it("keeps the D1 token in Wrangler while using the platform token for SaaS API checks", async () => {
     const spec = JSON.parse(
       await readFile(new URL("../../infra/environments/staging.json", import.meta.url), "utf8"),
     ) as PlatformEnvironmentSpec & {
@@ -1469,7 +1469,8 @@ describe("Cloudflare for SaaS platform configuration", () => {
         stdout: JSON.stringify([{ name: "CLOUDFLARE_API_TOKEN" }]),
       };
     };
-    const fetchImplementation: typeof fetch = (input) => {
+    const saasAuthorizationHeaders: string[] = [];
+    const fetchImplementation: typeof fetch = (input, init) => {
       const url = typeof input === "string"
         ? input
         : input instanceof URL
@@ -1489,11 +1490,15 @@ describe("Cloudflare for SaaS platform configuration", () => {
         }), { status: 200 }));
       }
       if (url.includes("/dns_records?")) {
+        saasAuthorizationHeaders.push(String(new Headers(init?.headers).get("authorization")));
         const requestedName = new URL(url).searchParams.get("name");
         const record = spec.saas.dnsRecords.find((candidate) => candidate.name === requestedName);
         return Promise.resolve(new Response(JSON.stringify({ result: [record], success: true }), {
           status: 200,
         }));
+      }
+      if (url.includes("/custom_hostnames/fallback_origin")) {
+        saasAuthorizationHeaders.push(String(new Headers(init?.headers).get("authorization")));
       }
       return Promise.resolve(new Response(JSON.stringify({
         result: { origin: spec.saas.fallbackOrigin, status: "active" },
@@ -1515,11 +1520,13 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(observedEnvironments.length).toBeGreaterThan(0);
     expect(observedEnvironments.every((environment) => (
       environment.CLOUDFLARE_ACCOUNT_ID === spec.accountId
-      && environment.CLOUDFLARE_API_TOKEN === "platform-token"
+      && environment.CLOUDFLARE_API_TOKEN === "d1-token"
       && environment.KEEP_ME === undefined
       && !Object.prototype.hasOwnProperty.call(environment, "CLOUDFLARE_PLATFORM_API_TOKEN")
       && !Object.prototype.hasOwnProperty.call(environment, "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN")
     ))).toBe(true);
+    expect(saasAuthorizationHeaders.length).toBeGreaterThan(0);
+    expect(saasAuthorizationHeaders.every((header) => header === "Bearer platform-token")).toBe(true);
   });
 
   it("fails closed without exposing Wrangler account output", async () => {

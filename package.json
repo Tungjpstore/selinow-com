@@ -23,6 +23,7 @@
     "build": "astro build",
     "build:staging": "node scripts/deploy.mjs --env staging --build-only",
     "platform:doctor": "node scripts/platform-doctor.mjs",
+    "trigger:inventory": "node scripts/trigger-inventory.mjs",
     "platform:route-preflight": "node scripts/staging-route-preflight.mjs --env staging",
     "staging:phase-a:smoke": "node scripts/staging-phase-a-smoke.mjs --env staging",
     "dodo:uat:validate": "node scripts/dodo-uat-validate.mjs",

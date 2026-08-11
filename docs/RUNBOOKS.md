@@ -170,6 +170,19 @@ Run the staging sequence only from the independent Selinow Cloudflare account. I
 
 `db:migrate:status`, `db:preflight`, backup dry-run, staging build-only and deploy dry-run remain read-only/non-deploying checks and do not require route admission. Do not treat their success as permission to mutate staging.
 
+After deployment, run `npm run trigger:inventory -- --env staging --json` with a
+temporary read-only account token in `CLOUDFLARE_STAGING_TRIGGER_AUDIT_API_TOKEN`.
+The helper reads only the three configured queue consumers and the exact Worker
+schedule, compares them with `wrangler.jsonc`, and emits redacted checks without
+consumer IDs or raw provider responses. For production use the same command with
+`--env production` and `CLOUDFLARE_PRODUCTION_TRIGGER_AUDIT_API_TOKEN`; neither
+mode creates, updates or deletes a trigger.
+
+Each trigger-audit token is account-restricted and read-only: Account Settings
+Read, Queues Read and Workers Scripts Read, plus User Memberships Read and User
+Details Read for Wrangler identity admission. DNS, Workers Routes, D1, secret
+write and trigger edit permissions are not required by this helper.
+
 The latest retained staging database evidence is complete through `0090`; the current source ledger is `0001` through `0094`, so a current-candidate release must freshly admit and apply `0091`-`0094` if the live ledger still ends at `0090`. `db:migrate:status`, `db:preflight` and the post-migration schema contract are the read-only sources of truth for the remote ledger. Worker deploy and provider UAT remain separate gates. The route preflight remains fail-closed with `cloudflare_route_audit_api_token_missing` when the temporary audit token is absent. No production migration or provider activation is claimed; production remains `NO-GO` for full commerce/provider activation.
 
 ## Phase A Canonical Commerce Cutover Boundary

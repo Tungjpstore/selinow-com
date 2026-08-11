@@ -182,12 +182,13 @@ describe("remote post-migration database contract", () => {
       for (const filename of migrationNames.filter((name) => name !== "0094_shop_creation_admission.sql")) {
         database.exec(readFileSync(join(migrationDirectory, filename), "utf8"));
       }
-      database.prepare(`
+      const insertExistingAdmission = database.prepare(`
         INSERT INTO auth_request_admissions (
           id, action, requester_hash, window_started_at, window_ends_at, created_at,
           subject_hash, delivery_permitted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
+      `);
+      insertExistingAdmission.run(
         "adm-existing-magic-link",
         "magic_link_request",
         "requester_hash_0094",
@@ -197,23 +198,47 @@ describe("remote post-migration database contract", () => {
         "subject_hash_0094",
         0,
       );
+      insertExistingAdmission.run(
+        "adm-existing-magic-link-default-delivery",
+        "magic_link_request",
+        "requester_hash_default_0094",
+        "2026-08-11T00:00:00.000Z",
+        "2026-08-11T00:01:00.000Z",
+        "2026-08-11T00:00:01.000Z",
+        null,
+        1,
+      );
 
       database.exec(readFileSync(join(migrationDirectory, "0094_shop_creation_admission.sql"), "utf8"));
 
       expect(database.prepare(`
         SELECT id, action, requester_hash, window_started_at, window_ends_at, created_at,
           subject_hash, delivery_permitted
-        FROM auth_request_admissions WHERE id = ?
-      `).get("adm-existing-magic-link")).toMatchObject({
-        action: "magic_link_request",
-        created_at: "2026-08-11T00:00:00.000Z",
-        delivery_permitted: 0,
-        id: "adm-existing-magic-link",
-        requester_hash: "requester_hash_0094",
-        subject_hash: "subject_hash_0094",
-        window_ends_at: "2026-08-11T00:01:00.000Z",
-        window_started_at: "2026-08-11T00:00:00.000Z",
-      });
+        FROM auth_request_admissions
+        WHERE id LIKE 'adm-existing-magic-link%'
+        ORDER BY id
+      `).all()).toEqual([
+        {
+          action: "magic_link_request",
+          created_at: "2026-08-11T00:00:00.000Z",
+          delivery_permitted: 0,
+          id: "adm-existing-magic-link",
+          requester_hash: "requester_hash_0094",
+          subject_hash: "subject_hash_0094",
+          window_ends_at: "2026-08-11T00:01:00.000Z",
+          window_started_at: "2026-08-11T00:00:00.000Z",
+        },
+        {
+          action: "magic_link_request",
+          created_at: "2026-08-11T00:00:01.000Z",
+          delivery_permitted: 1,
+          id: "adm-existing-magic-link-default-delivery",
+          requester_hash: "requester_hash_default_0094",
+          subject_hash: null,
+          window_ends_at: "2026-08-11T00:01:00.000Z",
+          window_started_at: "2026-08-11T00:00:00.000Z",
+        },
+      ]);
       expect(database.prepare(
         "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'auth_request_admissions_legacy_0094'",
       ).get()).toBeUndefined();
@@ -284,11 +309,57 @@ describe("remote post-migration database contract", () => {
       expect(database.prepare(POST_MIGRATION_CROSS_LEDGER_SQL).get()).toMatchObject({ mismatch_count: 0 });
 
       database.prepare(`
-        UPDATE auth_request_admissions
-        SET subject_hash = NULL, delivery_permitted = 0
-        WHERE id = ?
-      `).run("adm-valid-shop-create");
+        INSERT INTO auth_request_admissions (
+          id, action, requester_hash, subject_hash, delivery_permitted,
+          window_started_at, window_ends_at, created_at
+        ) VALUES (?, 'shop_create', ?, NULL, 1, ?, ?, ?)
+      `).run(
+        "adm-shop-create-missing-subject",
+        "requester_hash_missing_subject",
+        "2026-08-11T00:00:00.000Z",
+        "2026-08-11T00:01:00.000Z",
+        "2026-08-11T00:00:00.000Z",
+      );
       expect(database.prepare(POST_MIGRATION_CROSS_LEDGER_SQL).get()).toMatchObject({ mismatch_count: 1 });
+      expect(() => parsePostMigrationCrossLedgerOutput(envelope(
+        database.prepare(POST_MIGRATION_CROSS_LEDGER_SQL).all(),
+      ))).toThrow("post_migration_cross_ledger_mismatch");
+
+      database.prepare("DELETE FROM auth_request_admissions WHERE id = ?")
+        .run("adm-shop-create-missing-subject");
+      database.prepare(`
+        INSERT INTO auth_request_admissions (
+          id, action, requester_hash, subject_hash, delivery_permitted,
+          window_started_at, window_ends_at, created_at
+        ) VALUES (?, 'shop_create', ?, ?, 0, ?, ?, ?)
+      `).run(
+        "adm-shop-create-delivery-denied",
+        "requester_hash_delivery_denied",
+        "subject_hash_delivery_denied",
+        "2026-08-11T00:00:00.000Z",
+        "2026-08-11T00:01:00.000Z",
+        "2026-08-11T00:00:00.000Z",
+      );
+      expect(database.prepare(POST_MIGRATION_CROSS_LEDGER_SQL).get()).toMatchObject({ mismatch_count: 1 });
+      expect(() => parsePostMigrationCrossLedgerOutput(envelope(
+        database.prepare(POST_MIGRATION_CROSS_LEDGER_SQL).all(),
+      ))).toThrow("post_migration_cross_ledger_mismatch");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects a leaked 0094 rebuild table observed from the executable schema query", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      const migrationDirectory = join(process.cwd(), "migrations");
+      for (const filename of readdirSync(migrationDirectory).filter((name) => /^\d{4}_.+\.sql$/u.test(name)).sort()) {
+        database.exec(readFileSync(join(migrationDirectory, filename), "utf8"));
+      }
+      database.exec("CREATE TABLE auth_request_admissions_legacy_0094 (id TEXT PRIMARY KEY) STRICT;");
+      expect(() => parsePostMigrationObjectOutput(envelope(
+        database.prepare(POST_MIGRATION_OBJECT_SQL).all(),
+      ))).toThrow("post_migration_legacy_object_present:auth_request_admissions_legacy_0094");
     } finally {
       database.close();
     }

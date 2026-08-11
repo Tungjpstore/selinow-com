@@ -2395,12 +2395,7 @@ export async function doctor(environment, input = {}) {
   } catch {
     // The check below keeps the missing operator context visible.
   }
-  const wranglerEnvironment = cloudflareApiToken === null
-    ? d1Environment
-    : buildPinnedCloudflareEnvironment({
-        ...operatorEnvironment,
-        CLOUDFLARE_D1_API_TOKEN: cloudflareApiToken,
-      }, accountId);
+  const wranglerEnvironment = d1Environment;
   const runnerOptions = { cwd: repositoryRoot, env: wranglerEnvironment };
   const nodeVersion = process.versions.node;
   checks.push({ code: "node_version", detail: `Node ${nodeVersion}`, ok: Number(nodeVersion.split(".")[0]) >= 22 });

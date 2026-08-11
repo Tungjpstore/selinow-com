@@ -913,6 +913,22 @@ describe("magic-link issuance rate limit", () => {
       initiationBinding: freshRequested.initiationBinding,
       token: tokenFromMagicLink(freshRequested.debugMagicLink, env.DASHBOARD_ORIGIN),
     });
+    const bootstrap = database.prepare(`
+      SELECT created_at AS createdAt
+      FROM platform_admins
+      WHERE user_id = ? AND role = 'owner' AND status = 'active'
+    `).get(priorSession.auth.userId) as { createdAt: string };
+    const postBootstrapAuthenticatedAt = new Date(Date.parse(bootstrap.createdAt) + 1).toISOString();
+    database.prepare(`
+      UPDATE auth_sessions
+      SET authenticated_at = ?, created_at = ?, last_seen_at = ?
+      WHERE id = ?
+    `).run(
+      postBootstrapAuthenticatedAt,
+      postBootstrapAuthenticatedAt,
+      postBootstrapAuthenticatedAt,
+      freshSession.auth.sessionId,
+    );
     const freshRequest = new Request(`${env.DASHBOARD_ORIGIN}/admin`, {
       headers: { Cookie: `${env.SESSION_COOKIE_NAME}=${freshSession.credentials.sessionToken}` },
     });
