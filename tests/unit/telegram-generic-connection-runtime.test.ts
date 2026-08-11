@@ -29,7 +29,11 @@ vi.mock("../../src/lib/tenants/store", () => ({
 class SqliteStatement {
   private values: SQLInputValue[] = [];
 
-  constructor(private readonly database: DatabaseSync, private readonly sql: string) {}
+  constructor(
+    private readonly database: DatabaseSync,
+    private readonly sql: string,
+    private readonly beforeFirst?: () => void,
+  ) {}
 
   get sqlText(): string {
     return this.sql;
@@ -41,6 +45,7 @@ class SqliteStatement {
   }
 
   first<T>(): Promise<T | null> {
+    this.beforeFirst?.();
     return Promise.resolve((this.database.prepare(this.sql).get(...this.values) as T | undefined) ?? null);
   }
 
@@ -56,6 +61,8 @@ class SqliteStatement {
 
 class SqliteD1 {
   private batchFailureFragment: string | null = null;
+  private batchResponseLossFragment: string | null = null;
+  private firstFailureFragment: string | null = null;
 
   constructor(readonly database: DatabaseSync) {}
 
@@ -63,8 +70,21 @@ class SqliteD1 {
     this.batchFailureFragment = fragment;
   }
 
+  failNextFirstOn(fragment: string): void {
+    this.firstFailureFragment = fragment;
+  }
+
+  loseNextBatchResponseAfterCommitOn(fragment: string): void {
+    this.batchResponseLossFragment = fragment;
+  }
+
   prepare(sql: string): SqliteStatement {
-    return new SqliteStatement(this.database, sql);
+    return new SqliteStatement(this.database, sql, () => {
+      if (this.firstFailureFragment !== null && sql.includes(this.firstFailureFragment)) {
+        this.firstFailureFragment = null;
+        throw new Error("injected_authority_read_failure");
+      }
+    });
   }
 
   async batch(statements: SqliteStatement[]): Promise<Array<{ meta: { changes: number } }>> {
@@ -78,9 +98,14 @@ class SqliteD1 {
       const results = [];
       for (const statement of statements) results.push(await statement.run());
       this.database.exec("COMMIT");
+      if (this.batchResponseLossFragment !== null
+        && statements.some((statement) => statement.sqlText.includes(this.batchResponseLossFragment ?? ""))) {
+        this.batchResponseLossFragment = null;
+        throw new Error("injected_activation_batch_response_loss");
+      }
       return results;
     } catch (error) {
-      this.database.exec("ROLLBACK");
+      if (this.database.isTransaction) this.database.exec("ROLLBACK");
       throw error;
     }
   }
@@ -223,6 +248,73 @@ async function connect(runtime: ReturnType<typeof createRuntime>, requestId: str
 }
 
 describe("Telegram generic connection runtime bridge", () => {
+  it("restores the old webhook after an ambiguous delete timeout while old ownership remains authoritative", async () => {
+    const runtime = createRuntime();
+    const webhookByToken = new Map<string, string | null>();
+    let loseOldDeleteResponse = false;
+    const fetcher: typeof fetch = (request, init) => {
+      const url = request instanceof Request ? request.url : request.toString();
+      const token = url.includes(REPLACEMENT_OLD_BOT_TOKEN)
+        ? REPLACEMENT_OLD_BOT_TOKEN
+        : REPLACEMENT_NEW_BOT_TOKEN;
+      const method = url.slice(url.lastIndexOf("/") + 1);
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
+      if (method === "setWebhook") webhookByToken.set(token, String(body.url));
+      if (method === "deleteWebhook") {
+        webhookByToken.set(token, null);
+        if (loseOldDeleteResponse && token === REPLACEMENT_OLD_BOT_TOKEN) {
+          loseOldDeleteResponse = false;
+          return Promise.reject(new Error("injected_delete_response_loss"));
+        }
+      }
+      const botId = token === REPLACEMENT_OLD_BOT_TOKEN ? 111_111_111 : 222_222_222;
+      const botIdText = String(botId);
+      const result: Record<string, unknown> | boolean = method === "getMe"
+        ? { first_name: `Bot ${botIdText}`, id: botId, is_bot: true, username: `bot_${botIdText}_bot` }
+        : method === "getWebhookInfo"
+          ? {
+              allowed_updates: ["message", "callback_query"],
+              max_connections: 20,
+              pending_update_count: 0,
+              url: webhookByToken.get(token) ?? "",
+            }
+          : true;
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, result }), { status: 200 }));
+    };
+
+    const original = await connectTelegram({
+      botToken: REPLACEMENT_OLD_BOT_TOKEN,
+      env: runtime.env,
+      fetcher,
+      replaceBot: false,
+      requestId: "telegram-delete-timeout-old-connect",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    });
+    loseOldDeleteResponse = true;
+
+    await expect(connectTelegram({
+      botToken: REPLACEMENT_NEW_BOT_TOKEN,
+      env: runtime.env,
+      fetcher,
+      replaceBot: true,
+      requestId: "telegram-delete-timeout-new-replace",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    })).rejects.toMatchObject({ code: "telegram_webhook_failed" });
+
+    const integration = runtime.database.database.prepare(`
+      SELECT active_credential_id AS activeCredentialId, bot_id AS botId,
+        webhook_public_id AS webhookPublicId
+      FROM telegram_integrations WHERE shop_id = 'shop-telegram-runtime'
+    `).get() as { activeCredentialId: string; botId: string; webhookPublicId: string };
+    expect(integration.botId).toBe(original.bot?.id);
+    expect(integration.activeCredentialId).not.toBeNull();
+    expect(webhookByToken.get(REPLACEMENT_OLD_BOT_TOKEN))
+      .toBe(`https://api.test/webhooks/telegram/${integration.webhookPublicId}`);
+    expect(webhookByToken.get(REPLACEMENT_NEW_BOT_TOKEN)).toBeNull();
+  });
+
   it("does not let delayed old-bot cleanup delete a concurrently reclaimed tenant webhook", async () => {
     const runtime = createRuntime();
     runtime.database.database.exec(`
@@ -382,6 +474,187 @@ describe("Telegram generic connection runtime bridge", () => {
     expect(webhookByToken.get(REPLACEMENT_OLD_BOT_TOKEN))
       .toBe(`https://api.test/webhooks/telegram/${integration.webhookPublicId}`);
     expect(webhookByToken.get(REPLACEMENT_NEW_BOT_TOKEN)).toBeNull();
+  });
+
+  it("fails non-destructively and degrades the old generation when activation authority cannot be read", async () => {
+    const runtime = createRuntime();
+    const webhookByToken = new Map<string, string | null>();
+    let injectActivationFailure = false;
+    const fetcher: typeof fetch = (request, init) => {
+      const url = request instanceof Request ? request.url : request.toString();
+      const token = url.includes(REPLACEMENT_OLD_BOT_TOKEN)
+        ? REPLACEMENT_OLD_BOT_TOKEN
+        : REPLACEMENT_NEW_BOT_TOKEN;
+      const method = url.slice(url.lastIndexOf("/") + 1);
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
+      if (method === "setWebhook") webhookByToken.set(token, String(body.url));
+      if (method === "deleteWebhook") {
+        webhookByToken.set(token, null);
+        if (injectActivationFailure && token === REPLACEMENT_OLD_BOT_TOKEN) {
+          injectActivationFailure = false;
+          runtime.database.failNextBatchOn("UPDATE telegram_credentials SET status = 'revoked'");
+          runtime.database.failNextFirstOn("active_credential_id AS activeCredentialId");
+        }
+      }
+      const botId = token === REPLACEMENT_OLD_BOT_TOKEN ? 111_111_111 : 222_222_222;
+      const botIdText = String(botId);
+      const result: Record<string, unknown> | boolean = method === "getMe"
+        ? { first_name: `Bot ${botIdText}`, id: botId, is_bot: true, username: `bot_${botIdText}_bot` }
+        : method === "getWebhookInfo"
+          ? {
+              allowed_updates: ["message", "callback_query"],
+              max_connections: 20,
+              pending_update_count: 0,
+              url: webhookByToken.get(token) ?? "",
+            }
+          : true;
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, result }), { status: 200 }));
+    };
+
+    await connectTelegram({
+      botToken: REPLACEMENT_OLD_BOT_TOKEN,
+      env: runtime.env,
+      fetcher,
+      replaceBot: false,
+      requestId: "telegram-readback-old-connect",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    });
+    injectActivationFailure = true;
+
+    await expect(connectTelegram({
+      botToken: REPLACEMENT_NEW_BOT_TOKEN,
+      env: runtime.env,
+      fetcher,
+      replaceBot: true,
+      requestId: "telegram-readback-new-replace",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    })).rejects.toMatchObject({ code: "telegram_activation_failed" });
+
+    const integration = runtime.database.database.prepare(`
+      SELECT status, active_credential_id AS activeCredentialId, bot_id AS botId
+      FROM telegram_integrations WHERE shop_id = 'shop-telegram-runtime'
+    `).get() as { activeCredentialId: string; botId: string; status: string };
+    expect(integration).toMatchObject({ botId: "111111111", status: "degraded" });
+    expect(integration.activeCredentialId).not.toBeNull();
+    expect(webhookByToken.get(REPLACEMENT_OLD_BOT_TOKEN)).toBeNull();
+    expect(webhookByToken.get(REPLACEMENT_NEW_BOT_TOKEN)).toMatch(/^https:\/\/api\.test\/webhooks\/telegram\//u);
+  });
+
+  it("keeps the committed replacement authoritative when the activation response is lost", async () => {
+    const runtime = createRuntime();
+    runtime.database.database.exec(`
+      INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+      VALUES ('user-telegram-reclaim', 'telegram-reclaim@example.test', 'Reclaim owner', 'active', '${NOW}', '${NOW}');
+      INSERT INTO shops (
+        id, public_id, slug, name, status, default_locale, currency, timezone,
+        readiness_version, created_at, updated_at
+      ) VALUES (
+        'shop-telegram-reclaim', 'shop-public-telegram-reclaim', 'telegram-reclaim',
+        'Telegram Reclaim', 'active', 'en', 'VND', 'Asia/Ho_Chi_Minh', 1, '${NOW}', '${NOW}'
+      );
+    `);
+    const webhookByToken = new Map<string, string | null>();
+    let injectActivationResponseLoss = false;
+    const fetcher: typeof fetch = (request, init) => {
+      const url = request instanceof Request ? request.url : request.toString();
+      const token = url.includes(REPLACEMENT_OLD_BOT_TOKEN)
+        ? REPLACEMENT_OLD_BOT_TOKEN
+        : REPLACEMENT_NEW_BOT_TOKEN;
+      const method = url.slice(url.lastIndexOf("/") + 1);
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
+      if (method === "setWebhook") webhookByToken.set(token, String(body.url));
+      if (method === "deleteWebhook") {
+        webhookByToken.set(token, null);
+        if (injectActivationResponseLoss && token === REPLACEMENT_OLD_BOT_TOKEN) {
+          injectActivationResponseLoss = false;
+          runtime.database.loseNextBatchResponseAfterCommitOn("UPDATE telegram_credentials SET status = 'revoked'");
+        }
+      }
+      const botId = token === REPLACEMENT_OLD_BOT_TOKEN ? 111_111_111 : 222_222_222;
+      const botIdText = String(botId);
+      const result: Record<string, unknown> | boolean = method === "getMe"
+        ? { first_name: `Bot ${botIdText}`, id: botId, is_bot: true, username: `bot_${botIdText}_bot` }
+        : method === "getWebhookInfo"
+          ? {
+              allowed_updates: ["message", "callback_query"],
+              max_connections: 20,
+              pending_update_count: 0,
+              url: webhookByToken.get(token) ?? "",
+            }
+          : true;
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, result }), { status: 200 }));
+    };
+
+    await connectTelegram({
+      botToken: REPLACEMENT_OLD_BOT_TOKEN,
+      env: runtime.env,
+      fetcher,
+      replaceBot: false,
+      requestId: "telegram-response-loss-old-connect",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    });
+    injectActivationResponseLoss = true;
+    const replacement = await connectTelegram({
+      botToken: REPLACEMENT_NEW_BOT_TOKEN,
+      env: runtime.env,
+      fetcher,
+      replaceBot: true,
+      requestId: "telegram-response-loss-new-replace",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    });
+    expect(replacement.bot?.id).toBe("222222222");
+    const replacementWebhook = webhookByToken.get(REPLACEMENT_NEW_BOT_TOKEN);
+    expect(replacementWebhook).toMatch(/^https:\/\/api\.test\/webhooks\/telegram\//u);
+
+    await expect(connectTelegram({
+      botToken: REPLACEMENT_OLD_BOT_TOKEN,
+      env: runtime.env,
+      fetcher,
+      replaceBot: false,
+      requestId: "telegram-response-loss-old-reclaim",
+      shopPublicId: "shop-public-telegram-reclaim",
+      userId: "user-telegram-reclaim",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    const reclaimedWebhook = webhookByToken.get(REPLACEMENT_OLD_BOT_TOKEN);
+
+    await expect(connectTelegram({
+      botToken: REPLACEMENT_NEW_BOT_TOKEN,
+      env: runtime.env,
+      fetcher,
+      replaceBot: false,
+      requestId: "telegram-response-loss-new-retry",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    })).resolves.toMatchObject({ bot: { id: "222222222" }, status: "active", webhookStatus: "verified" });
+    expect(webhookByToken.get(REPLACEMENT_NEW_BOT_TOKEN)).toBe(replacementWebhook);
+    expect(webhookByToken.get(REPLACEMENT_OLD_BOT_TOKEN)).toBe(reclaimedWebhook);
+  });
+
+  it("keeps a resumed credential active when its activation response is lost after commit", async () => {
+    const runtime = createRuntime();
+    runtime.setWebhookFailure(true);
+    await expect(connect(runtime, "telegram-resume-response-loss-initial"))
+      .rejects.toMatchObject({ code: "telegram_request_rejected" });
+    runtime.setWebhookFailure(false);
+    runtime.database.loseNextBatchResponseAfterCommitOn("active_credential_id IS NULL AND EXISTS");
+    const deleteCount = runtime.deleteWebhookPayloads().length;
+
+    await expect(refreshTelegramHealth({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "telegram-resume-response-loss-refresh",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(runtime.deleteWebhookPayloads()).toHaveLength(deleteCount);
+
+    await expect(connect(runtime, "telegram-resume-response-loss-retry"))
+      .resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(runtime.deleteWebhookPayloads()).toHaveLength(deleteCount);
   });
 
   it("revokes the old credential and rejects pending updates across rotation and disconnect", async () => {

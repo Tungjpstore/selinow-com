@@ -32,6 +32,12 @@ type IntegrationRow = {
   webhookStatus: string;
 };
 
+type ActivationAuthority = {
+  activeCredentialId: string | null;
+  activeCredentialVersion: number | null;
+  botId: string | null;
+};
+
 export type TelegramIntegrationView = {
   bot: { displayName: string; id: string; username: string } | null;
   connectedAt: string | null;
@@ -174,6 +180,46 @@ async function requireIntegrationCredential(env: AppBindings, shopPublicId: stri
 
 async function findIntegration(env: AppBindings, shopId: string): Promise<IntegrationRow | null> {
   return env.PLATFORM_DB.prepare(`SELECT ${INTEGRATION_SELECT} FROM telegram_integrations WHERE shop_id = ? LIMIT 1`).bind(shopId).first<IntegrationRow>();
+}
+
+async function readActivationAuthority(env: AppBindings, integrationId: string, shopId: string): Promise<ActivationAuthority | null> {
+  return env.PLATFORM_DB.prepare(`
+    SELECT telegram_integrations.active_credential_id AS activeCredentialId,
+      telegram_integrations.bot_id AS botId,
+      telegram_credentials.version AS activeCredentialVersion
+    FROM telegram_integrations
+    LEFT JOIN telegram_credentials
+      ON telegram_credentials.id = telegram_integrations.active_credential_id
+      AND telegram_credentials.integration_id = telegram_integrations.id
+      AND telegram_credentials.shop_id = telegram_integrations.shop_id
+    WHERE telegram_integrations.id = ? AND telegram_integrations.shop_id = ?
+    LIMIT 1
+  `).bind(integrationId, shopId).first<ActivationAuthority>();
+}
+
+function authorityMatches(
+  authority: ActivationAuthority | null,
+  expected: { botId: string; credentialId: string; credentialVersion?: number },
+): boolean {
+  return authority !== null
+    && authority.activeCredentialId === expected.credentialId
+    && authority.botId === expected.botId
+    && authority.activeCredentialVersion !== null
+    && (expected.credentialVersion === undefined || authority.activeCredentialVersion === expected.credentialVersion);
+}
+
+async function degradeOwnedIntegration(env: AppBindings, input: { credentialId: string; integrationId: string; shopId: string }): Promise<void> {
+  try {
+    await env.PLATFORM_DB.prepare(`
+      UPDATE telegram_integrations
+      SET status = 'degraded', webhook_status = 'error',
+        last_safe_error_code = 'telegram_webhook_failed', updated_at = ?
+      WHERE id = ? AND shop_id = ? AND active_credential_id = ?
+        AND status IN ('active', 'degraded')
+    `).bind(new Date().toISOString(), input.integrationId, input.shopId, input.credentialId).run();
+  } catch {
+    // The provider failure can coincide with D1 unavailability.
+  }
 }
 
 function webhookMaxConnections(env: AppBindings): number {
@@ -373,14 +419,44 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
     throw error instanceof AppError ? error : new AppError("telegram_webhook_failed", 409);
   }
   const activatedAt = new Date().toISOString();
-  const replacingBot = previous !== null && integration.botId !== null && integration.botId !== bot.id;
-  if (replacingBot) {
+  const replacement = previous !== null && integration.botId !== null && integration.botId !== bot.id
+    ? { botId: integration.botId, previous }
+    : null;
+  if (replacement !== null) {
     try {
-      await new TelegramClient(previous.credentials.botToken, input.fetcher).deleteWebhook(true);
+      await new TelegramClient(replacement.previous.credentials.botToken, input.fetcher).deleteWebhook(true);
     } catch {
-      // Keep the old D1 ownership authoritative when provider cleanup cannot
-      // be confirmed. The pending replacement credential remains resumable.
-      try { await client.deleteWebhook(true); } catch { /* Best-effort cleanup for the unclaimed replacement bot. */ }
+      let authority: ActivationAuthority | null;
+      try {
+        authority = await readActivationAuthority(input.env, integration.id, shopId);
+      } catch {
+        // Provider rollback is unsafe until D1 ownership can be confirmed.
+        await degradeOwnedIntegration(input.env, { credentialId: replacement.previous.row.credentialId, integrationId: integration.id, shopId });
+        throw new AppError("telegram_webhook_failed", 409);
+      }
+      if (authorityMatches(authority, { botId: replacement.botId, credentialId: replacement.previous.row.credentialId })) {
+        let restored = false;
+        try {
+          await configureProvider(
+            new TelegramClient(replacement.previous.credentials.botToken, input.fetcher),
+            input.env,
+            integration,
+            replacement.previous.credentials.webhookSecret,
+            actor.defaultLocale,
+          );
+          restored = true;
+        } catch {
+          await degradeOwnedIntegration(input.env, { credentialId: replacement.previous.row.credentialId, integrationId: integration.id, shopId });
+        }
+        if (restored) {
+          try {
+            const confirmed = await readActivationAuthority(input.env, integration.id, shopId);
+            if (authorityMatches(confirmed, { botId: replacement.botId, credentialId: replacement.previous.row.credentialId })) {
+              try { await client.deleteWebhook(true); } catch { /* The pending replacement remains safely unclaimed in D1. */ }
+            }
+          } catch { /* Do not mutate the replacement provider without fresh ownership evidence. */ }
+        }
+      }
       throw new AppError("telegram_webhook_failed", 409);
     }
   }
@@ -394,29 +470,48 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
       input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) SELECT ?, ?, 'user', ?, 'telegram.credentials_connected', 'telegram_integration', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM telegram_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)`).bind(createId("aud"), shopId, input.userId, integration.id, JSON.stringify({ botChanged, credentialVersion: credential.version, rotated }), input.requestId, activatedAt, credential.credentialId, integration.id, shopId, activatedAt),
     ]);
   } catch {
-    try { await client.deleteWebhook(true); } catch { /* Best-effort cleanup after an activation race. */ }
-    if (replacingBot) {
+    let authority: ActivationAuthority | null;
+    try {
+      authority = await readActivationAuthority(input.env, integration.id, shopId);
+    } catch {
+      // The activation result is unknown. Preserve provider state until D1 can
+      // authoritatively identify the active credential generation.
+      if (previous !== null) {
+        await degradeOwnedIntegration(input.env, { credentialId: previous.row.credentialId, integrationId: integration.id, shopId });
+      }
+      throw new AppError("telegram_activation_failed", 409);
+    }
+    if (authorityMatches(authority, { botId: bot.id, credentialId: credential.credentialId, credentialVersion: credential.version })) {
+      // D1 committed and only the response was lost. The configured replacement
+      // remains authoritative, so continue through the normal success readback.
+    } else if (replacement !== null && authorityMatches(authority, { botId: replacement.botId, credentialId: replacement.previous.row.credentialId })) {
+      let restored = false;
       try {
         await configureProvider(
-          new TelegramClient(previous.credentials.botToken, input.fetcher),
+          new TelegramClient(replacement.previous.credentials.botToken, input.fetcher),
           input.env,
           integration,
-          previous.credentials.webhookSecret,
+          replacement.previous.credentials.webhookSecret,
           actor.defaultLocale,
         );
+        restored = true;
       } catch {
-        try {
-          await input.env.PLATFORM_DB.prepare(`
-            UPDATE telegram_integrations
-            SET status = 'degraded', webhook_status = 'error',
-              last_safe_error_code = 'telegram_webhook_failed', updated_at = ?
-            WHERE id = ? AND shop_id = ? AND active_credential_id = ?
-              AND status IN ('active', 'degraded')
-          `).bind(new Date().toISOString(), integration.id, shopId, previous.row.credentialId).run();
-        } catch { /* The activation failure may also make D1 unavailable. */ }
+        await degradeOwnedIntegration(input.env, { credentialId: replacement.previous.row.credentialId, integrationId: integration.id, shopId });
       }
+      if (restored) {
+        try {
+          const confirmed = await readActivationAuthority(input.env, integration.id, shopId);
+          if (authorityMatches(confirmed, { botId: replacement.botId, credentialId: replacement.previous.row.credentialId })) {
+            try { await client.deleteWebhook(true); } catch { /* Best-effort cleanup while the replacement credential remains pending. */ }
+          }
+        } catch { /* Do not mutate provider state after an unavailable ownership readback. */ }
+      }
+      throw new AppError("telegram_activation_failed", 409);
+    } else {
+      // Another credential generation won the race; its provider state is not
+      // owned by this activation attempt and must remain untouched.
+      throw new AppError("telegram_activation_failed", 409);
     }
-    throw new AppError("telegram_activation_failed", 409);
   }
   const active = await findIntegration(input.env, shopId);
   if (active === null) throw new AppError("internal_error", 500);
@@ -476,8 +571,17 @@ async function retryTelegramSetup(input: {
       input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) SELECT ?, ?, 'user', ?, 'telegram.credentials_connected', 'telegram_integration', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM telegram_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)`).bind(createId("aud"), input.shopId, input.userId, input.integration.id, JSON.stringify({ credentialVersion: row.version, retry: true, rotated: false }), input.requestId, activatedAt, row.credentialId, input.integration.id, input.shopId, activatedAt),
     ]);
   } catch {
-    try { await client.deleteWebhook(true); } catch { /* Best-effort cleanup after an activation failure. */ }
-    throw new AppError("telegram_activation_failed", 409);
+    let authority: ActivationAuthority | null;
+    try {
+      authority = await readActivationAuthority(input.env, input.integration.id, input.shopId);
+    } catch {
+      throw new AppError("telegram_activation_failed", 409);
+    }
+    if (!authorityMatches(authority, { botId: bot.id, credentialId: row.credentialId, credentialVersion: row.version })) {
+      // Preserve provider state when D1 did not commit or another generation won.
+      // A later retry can safely reconfigure the still-owned pending credential.
+      throw new AppError("telegram_activation_failed", 409);
+    }
   }
   if (!info.hasDeliveryError) {
     await tryRecordActivationMilestone({
