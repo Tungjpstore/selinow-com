@@ -1479,23 +1479,21 @@ function parseRemoteCounts(output, tables = CORE_COUNT_TABLES) {
 }
 
 function remoteCrossLedgerSql() {
-  return `SELECT COUNT(*) AS mismatch_count FROM (
-    SELECT events.id
+  // D1 limits compound SELECTs to five terms, so aggregate each invariant independently.
+  return `SELECT
+    (SELECT COUNT(*)
     FROM subscription_events AS events
     INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
     WHERE events.source_kind = 'provider'
       AND provider.shop_id IS NOT NULL
-      AND provider.shop_id != events.shop_id
-    UNION ALL
-    SELECT events.id FROM subscription_events AS events
-    WHERE events.source_kind = 'provider' AND events.provider_event_id IS NULL
-    UNION ALL
-    SELECT invoices.id
+      AND provider.shop_id != events.shop_id)
+    + (SELECT COUNT(*) FROM subscription_events AS events
+      WHERE events.source_kind = 'provider' AND events.provider_event_id IS NULL)
+    + (SELECT COUNT(*)
     FROM billing_invoices AS invoices
     INNER JOIN billing_accounts AS accounts ON accounts.id = invoices.billing_account_id
-    WHERE invoices.billing_account_id IS NOT NULL AND accounts.shop_id != invoices.shop_id
-    UNION ALL
-    SELECT milestones.id FROM activation_milestones AS milestones
+    WHERE invoices.billing_account_id IS NOT NULL AND accounts.shop_id != invoices.shop_id)
+    + (SELECT COUNT(*) FROM activation_milestones AS milestones
     WHERE milestones.milestone_code = 'trial_converted'
       AND NOT EXISTS (
         SELECT 1
@@ -1506,9 +1504,8 @@ function remoteCrossLedgerSql() {
           AND events.source_kind = 'provider'
           AND provider.shop_id = milestones.shop_id
           AND provider.status = 'processed'
-      )
-    UNION ALL
-    SELECT domain.id
+      ))
+    + (SELECT COUNT(*)
     FROM shop_domains AS domain
     WHERE domain.type = 'custom'
       AND (domain.status = 'active' OR domain.is_primary = 1)
@@ -1527,9 +1524,8 @@ function remoteCrossLedgerSql() {
         AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
         AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
         AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')
-      ), 0)
-    UNION ALL
-    SELECT shop.id
+      ), 0))
+    + (SELECT COUNT(*)
     FROM shops AS shop
     WHERE shop.canonical_domain_id IS NOT NULL
       AND EXISTS (SELECT 1 FROM shop_domains AS candidate
@@ -1553,8 +1549,8 @@ function remoteCrossLedgerSql() {
           AND json_type(canonical.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
           AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
           AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
-          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
-  );`;
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')))
+    AS mismatch_count;`;
 }
 
 function parseRemoteCrossLedgerMismatchCount(output) {
