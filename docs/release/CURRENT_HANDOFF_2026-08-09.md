@@ -8,10 +8,11 @@ change, secret write, provider mutation, pilot, or live charge.
 ## Candidate and staging state
 
 The current continuation work adds provider-specific PayOS evidence admission,
-safe Dodo pre-payment lifecycle acknowledgements, and release-trigger
-hardening. The clean source candidate is commit
-`a02e098e9a05454261770d3c90c9aeaed151a2af`, tree
-`14f9f68afd6fbadbb689171a4ad6bbc9cb405652`. It has not been deployed to a
+safe Dodo pre-payment lifecycle acknowledgements, release-trigger hardening,
+shop-creation admission, subscription deadline enforcement and Telegram
+exact-once delivery fencing. The clean source candidate is commit
+`c812edd79203d23bdb61a833d93c8ca2bde48f4a`, tree
+`b2f924e1ce20c6b9f997ff8e1abaebc8c20b6997`. It has not been deployed to a
 new staging Worker version; the next staging ceremony must generate fresh
 manifest, backup/restore, deployment, and acceptance artifacts for this exact
 identity.
@@ -86,10 +87,16 @@ identity.
   `SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID` /
   `SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64`. No value is recorded
   in this handoff.
-- Verification on the earlier clean candidate: `npm run check` (0 errors, 3 hints),
-  `npm run lint`, `npx tsc --noEmit`, `npm test` (282 files / 2,094 tests),
-  `npm run build`, `npm run build:staging`, `npm audit --audit-level=high` (0
-  vulnerabilities), both deploy dry-runs, and `git diff --check` pass.
+- Verification on the current clean candidate: `npm run check` (0 errors, 3
+  hints), `npm run lint`, `npx tsc --noEmit`, `npm test` (294 files / 2,288
+  tests), `npm run build`, `npm run build:staging`, `npm audit --audit-level=high`
+  (0 vulnerabilities), both deploy dry-runs, and `git diff --check` pass.
+- Local candidate backup/restore evidence is fresh: backup
+  `.wrangler/backups/local/bkp_20260811024847_306dd83a84ac/snapshot.json` and
+  isolated restore
+  `.wrangler/restore-drills/local/rdr_20260811024857_a87798a82946.json` both
+  pass integrity and foreign-key checks. These local artifacts do not replace
+  the required staging or production evidence.
 - The `0091` buyer recovery continuation has focused local
   migration/service/route/UI/release contract evidence, the `0092`-`0093`
   domain continuation has migration/runtime guard coverage, and `0094` has
@@ -97,10 +104,12 @@ identity.
   current full-tree verification and exact clean commit/tree are pending this
   batch's closeout and must replace the earlier totals before release admission.
 - Known limitations: staging backup/restore and deploy evidence are not bound to
-  this commit; Dodo TEST UAT is not accepted; PayOS controlled real-transaction
-  UAT and owner signature are absent; legal/support decisions, named approvals,
-  pilots, monitoring, production backup/restore, rollback, secrets, migrations,
-  and production deploy remain blocked.
+  this commit; staging doctor currently lacks a scoped Cloudflare for SaaS
+  operator token (`cloudflare_saas_api:403`); Dodo TEST UAT is not accepted;
+  PayOS controlled real-transaction UAT and owner signature are absent;
+  legal/support decisions, named approvals, pilots, monitoring, production
+  backup/restore, rollback, secrets, migrations, and production deploy remain
+  blocked.
 - Integration assumptions: billing/provider acceptance stays fail-closed;
   unsupported expansion channels remain `provider_pending`; refund provider
   execution is not claimed; no return URL or synthetic payload can mark an
