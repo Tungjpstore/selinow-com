@@ -58,7 +58,18 @@ describe("production custom-domain infrastructure contract", () => {
     const production = readJson("infra/environments/production.json") as {
       routing: Record<string, string>;
       turnstile: Record<string, string>;
-      saas: { cnameTarget: string };
+      saas: {
+        cnameTarget: string;
+        dnsRecords: Array<{
+          content: string;
+          key: string;
+          name: string;
+          proxied: boolean;
+          ttl: number;
+          type: string;
+        }>;
+        fallbackOrigin: string;
+      };
     };
     expect(production.routing.externalCustomDomainFallbackRoute).toBe("*/*");
     expect(production.routing.externalCustomDomainStrategy).toBe("production_fallback_with_platform_staging_exceptions");
@@ -67,5 +78,23 @@ describe("production custom-domain infrastructure contract", () => {
     expect(production.turnstile.externalCustomDomainAdmission).toBe("verified_before_domain_activation");
     expect(production.turnstile.externalCustomDomainStrategy).toBe("exact_hostname_admission_before_activation");
     expect(production.saas.cnameTarget).toBe("customers.selinow.com");
+    expect(production.saas.dnsRecords).toEqual([
+      {
+        content: "100::",
+        key: "fallbackOrigin",
+        name: production.saas.fallbackOrigin,
+        proxied: true,
+        ttl: 1,
+        type: "AAAA",
+      },
+      {
+        content: production.saas.fallbackOrigin,
+        key: "cnameTarget",
+        name: production.saas.cnameTarget,
+        proxied: true,
+        ttl: 1,
+        type: "CNAME",
+      },
+    ]);
   });
 });

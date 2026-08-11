@@ -46,6 +46,24 @@
   },
   "saas": {
     "fallbackOrigin": "proxy-fallback.selinow.com",
-    "cnameTarget": "customers.selinow.com"
+    "cnameTarget": "customers.selinow.com",
+    "dnsRecords": [
+      {
+        "key": "fallbackOrigin",
+        "type": "AAAA",
+        "name": "proxy-fallback.selinow.com",
+        "content": "100::",
+        "proxied": true,
+        "ttl": 1
+      },
+      {
+        "key": "cnameTarget",
+        "type": "CNAME",
+        "name": "customers.selinow.com",
+        "content": "proxy-fallback.selinow.com",
+        "proxied": true,
+        "ttl": 1
+      }
+    ]
   }
 }
