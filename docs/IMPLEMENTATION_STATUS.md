@@ -4,6 +4,32 @@ Last updated: 2026-08-11
 
 ## Current source of truth
 
+Current staging reconciliation (2026-08-11): the reviewed candidate is commit
+`3a44aadbcbe6a88115eb28743fcb19fa6af1cf5a`, tree
+`2795b2f91c1d9874c1182d56364516047ab358b8`. Release
+`stg_20260811T043926Z_3a44aadbcbe6` applied the contiguous source continuation
+through `0094_shop_creation_admission.sql` to staging D1. Candidate-bound
+pre-migration backup/restore references are
+`bkp_20260811043704_c66884aa6ba2` and
+`rdr_20260811043754_195d99f18aa2`; post-migration references are
+`bkp_20260811044142_68a80a977dbd` and
+`rdr_20260811044225_e9bafe5eeb46`. The known staging Worker version is
+`2f80e24b-e9bc-4c25-9bdc-51916e4d1cb5`.
+
+The combined staging release remains `provider_pending`. Genuine Dodo TEST and
+controlled PayOS staging UAT are not accepted, and their artifacts are not yet
+bound to the exact manifest, commit, tree, and Worker version. Production
+remains **NO-GO** at D1 `0052` and runtime phase 6, with the canonical Dodo
+webhook and current public routes absent from the deployed Worker, queue
+consumers and the current cron schedule missing, and production backup/restore,
+rollback, monitoring, legal/support decisions, pilots, named approvals, secret
+admission, provider handoff, and combined release admission outstanding. The
+authoritative handoff is
+`docs/release/CURRENT_HANDOFF_2026-08-11.md`. No production migration,
+deployment, provider activation, or payment-collection claim is authorized.
+
+## Superseded current checkpoints
+
 Continuation audit (2026-08-09): the source chain is contiguous through
 `0094_shop_creation_admission.sql`. Staging D1 is already at `0090`,
 but the latest deployed staging Worker (`b7492055-a44b-4c8c-8ab2-c31002dbdd02`)

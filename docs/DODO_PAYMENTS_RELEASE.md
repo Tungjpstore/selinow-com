@@ -8,13 +8,16 @@ while only a final staging release can produce accepted provider evidence.
 
 - Four approved test/live offers exist: Starter/Pro in VN/VND and Global/USD.
 - Staging uses `DODO_PAYMENTS_ENVIRONMENT=test_mode` and production uses
-  `live_mode`; both have the API-key secret name configured and production now
-  has a live API key secret. The webhook key and endpoint remain pending.
+  `live_mode`. The current staging Worker has the API-key and webhook-key
+  secret names configured. Production provider secrets remain subject to the
+  production release ceremony and are not implied by staging state.
 - Both test and live catalogs are tax-inclusive SaaS subscriptions with a
   provider-managed 7-day trial. Four products are used per environment so a
   webhook lookup cannot ambiguously cross currency or amount.
-- The canonical staging webhook probe currently returns `404`; Cloudflare route
-  ownership must be reconciled before any staging mutation.
+- The canonical staging webhook route is live and rejects an unsigned probe
+  with `401 webhook_signature_invalid`. The Dodo test account has exactly one
+  usable webhook for that endpoint with the required event contract. This
+  proves registration and signature admission only, not end-to-end UAT.
 - No migration, staging deploy, production deploy, or live charge is authorized
   by this document.
 

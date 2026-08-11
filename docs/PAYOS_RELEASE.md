@@ -6,6 +6,11 @@ PayOS has no separate sandbox or staging provider environment. The official
 documentation requires low-value real bank transfers against the production
 PayOS API: https://payos.vn/docs/moi-truong-test.
 
+The controlled staging channel identity fingerprint is installed and attested
+for the current staging environment. This is readiness evidence only. No real
+low-value VND transfer, provider-signed webhook, or direct-reconciliation UAT
+artifact has been accepted yet.
+
 This repository therefore must never label a synthetic or local fixture as
 `providerEnvironment: "test_mode"`. The PayOS evidence schema is version 2:
 
