@@ -553,7 +553,7 @@ describe("commerce store lifecycle guards", () => {
     const input = {
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected: expectedItems(quote.items),
       idempotencyKey: "checkout-website-replay-0001",
@@ -562,6 +562,72 @@ describe("commerce store lifecycle guards", () => {
     };
     const first = await checkoutCart(input);
     await expect(checkoutCart(input)).resolves.toEqual(first);
+
+    const orderRow = database.database.prepare(`
+      SELECT id, customer_id AS customerId, order_token_hash AS tokenHash
+      FROM orders WHERE shop_id = ? AND public_id = ?
+    `).get(currentShop.id, first.orderId) as {
+      customerId: string;
+      id: string;
+      tokenHash: string;
+    };
+    let previousHash = orderRow.tokenHash;
+    let latestToken = first.orderToken;
+    let firstRecoveredToken = "";
+    for (let generation = 1; generation <= 2; generation += 1) {
+      const recoveryId = `orc_checkout_replay_${String(generation)}`;
+      const issuedAt = `2026-07-26T00:0${String(generation)}:00.000Z`;
+      const expiresAt = `2026-07-26T00:${String(15 + generation).padStart(2, "0")}:00.000Z`;
+      const retentionExpiresAt = `2026-08-26T00:0${String(generation)}:00.000Z`;
+      latestToken = await hmacToken(
+        env.IDENTIFIER_HMAC_SECRET,
+        `buyer-order-recovery-access-token:v1:${currentShop.id}`,
+        recoveryId,
+      );
+      if (generation === 1) firstRecoveredToken = latestToken;
+      const replacementHash = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "order-access", latestToken);
+      database.database.prepare(`
+        INSERT INTO order_access_recovery_tokens (
+          id, shop_id, order_id, customer_id, token_hash, recipient_hash,
+          issued_request_id, issued_at, expires_at, retention_expires_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        recoveryId,
+        currentShop.id,
+        orderRow.id,
+        orderRow.customerId,
+        String(generation).repeat(64),
+        String(generation + 2).repeat(64),
+        `request-checkout-recovery-${String(generation)}`,
+        issuedAt,
+        expiresAt,
+        retentionExpiresAt,
+        issuedAt,
+      );
+      database.database.prepare(`
+        UPDATE order_access_recovery_tokens
+        SET consumed_at = ?, consumed_request_id = ?, previous_order_token_hash = ?,
+          replacement_order_token_hash = ?
+        WHERE id = ? AND shop_id = ?
+      `).run(
+        `2026-07-26T00:0${String(generation)}:01.000Z`,
+        `request-checkout-consume-${String(generation)}`,
+        previousHash,
+        replacementHash,
+        recoveryId,
+        currentShop.id,
+      );
+      previousHash = replacementHash;
+    }
+
+    const recoveredReplay = await checkoutCart(input);
+    expect(recoveredReplay).toEqual({ ...first, orderToken: latestToken });
+    await expect(getOrder({ env, orderPublicId: first.orderId, orderToken: first.orderToken, shop: currentShop }))
+      .rejects.toMatchObject({ code: "order_not_found", status: 404 });
+    await expect(getOrder({ env, orderPublicId: first.orderId, orderToken: firstRecoveredToken, shop: currentShop }))
+      .rejects.toMatchObject({ code: "order_not_found", status: 404 });
+    await expect(getOrder({ env, orderPublicId: first.orderId, orderToken: latestToken, shop: currentShop }))
+      .resolves.toMatchObject({ orderId: first.orderId });
     const refreshedEvidence = await createQuoteEvidence({
       cartId: cart.cartId,
       expected: input.expected,
@@ -570,7 +636,7 @@ describe("commerce store lifecycle guards", () => {
       secret: env.IDENTIFIER_HMAC_SECRET,
       shopId: currentShop.id,
     });
-    await expect(checkoutCart({ ...input, quoteEvidence: refreshedEvidence })).resolves.toEqual(first);
+    await expect(checkoutCart({ ...input, quoteEvidence: refreshedEvidence })).resolves.toEqual(recoveredReplay);
     await expect(checkoutCart({ ...input, cartToken: "invalid-cart-token-for-replay" })).rejects.toMatchObject({ code: "cart_not_found", status: 404 });
     await expect(checkoutCart({
       cartId: input.cartId,
@@ -590,7 +656,7 @@ describe("commerce store lifecycle guards", () => {
       shopId: currentShop.id,
     });
     await expect(checkoutCart({ ...input, quoteEvidence: expiredEvidence })).rejects.toMatchObject({ code: "quote_expired", status: 409 });
-    await expect(checkoutCart({ ...input, customerEmail: "buyer@example.com" })).rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+    await expect(checkoutCart({ ...input, customerEmail: "other@example.test" })).rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
 
     expect(database.database.prepare(
       "SELECT COUNT(*) AS count FROM orders WHERE shop_id = ? AND checkout_subject_hash IS NOT NULL",

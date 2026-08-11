@@ -125,6 +125,25 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "payment_credentials_payos_claim_fingerprint_update_guard",
   "payment_integrations_payos_claim_fingerprint_clear_guard",
   "payment_credentials_payos_claim_fingerprint_clear_guard",
+  "idx_order_access_recovery_tokens_active_order",
+  "idx_order_access_recovery_tokens_previous",
+  "idx_order_access_recovery_tokens_replacement",
+  "idx_order_access_recovery_tokens_retention",
+  "idx_order_access_recovery_tokens_shop_customer",
+  "idx_order_access_recovery_tokens_shop_order",
+  "idx_orders_shop_id_customer",
+  "order_access_recovery_tokens",
+  "order_access_recovery_tokens_consume_rotate_order",
+  "order_access_recovery_tokens_customer_anonymize",
+  "order_access_recovery_tokens_identity_immutable",
+  "order_access_recovery_tokens_redaction_guard",
+  "order_access_recovery_tokens_scope_insert_guard",
+  "order_access_recovery_tokens_terminal_immutable",
+  "shop_domains_identity_update_guard",
+  "shop_domains_turnstile_active_insert_guard",
+  "shop_domains_turnstile_active_update_guard",
+  "shops_turnstile_canonical_insert_guard",
+  "shops_turnstile_canonical_update_guard",
 ]);
 
 const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
@@ -190,6 +209,44 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
     objects: Object.freeze({
       payment_credentials_payos_claim_fingerprint_clear_guard: "8a8848633184c67e65f6eab33eb8d6b8453cc2b05056bc6702cc8c2c3cd322c8",
       payment_integrations_payos_claim_fingerprint_clear_guard: "77977a03b5c5c865420f744e88e05a4b7510c2d39d04537fa710ed457d11a20d",
+    }),
+  }),
+  "0091_buyer_order_access_recovery.sql": Object.freeze({
+    columns: Object.freeze({
+      "order_access_recovery_tokens.previous_order_token_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "order_access_recovery_tokens.redacted_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "order_access_recovery_tokens.replacement_order_token_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "order_access_recovery_tokens.retention_expires_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_order_access_recovery_tokens_active_order: "9c6c8e306c21b200c401df228c8c4d5841c8be131a8a0463eb783ce1304d3080",
+      idx_order_access_recovery_tokens_previous: "fcaab9aa950d7c101b68cd249560abc8c49f5238808389d17c5cb3464c91b9c3",
+      idx_order_access_recovery_tokens_replacement: "5e120c2590220745250211c351884884d89c19278b62caf3e1a3d98777abaef6",
+      idx_order_access_recovery_tokens_retention: "629ba27d7de43e857da598318c7eb45c612b9e47b6cd03bf3f0c1939647b0c31",
+      idx_order_access_recovery_tokens_shop_customer: "ccff1bb6e90ed8664b87ad876be9cb94f64aeab34bacc33aefb5ebe349cc104e",
+      idx_order_access_recovery_tokens_shop_order: "816a119fe4207b6fdf2e9845c0a43d860c113a98b084471424f3e04c7a80fb1b",
+      idx_orders_shop_id_customer: "f9750eb5f6457de006402c43ee9fc727bda2141c2538ba0aec7cef1b1dc55c1a",
+      order_access_recovery_tokens: "ffb9aacd2977e7fa44978b9d2583dd8a21a9b4bee345b0d0e5cfb966186b46f3",
+      order_access_recovery_tokens_consume_rotate_order: "8d9d512b0ba031db1eaad9e9afa8857ce5a4224a2f056e4346bbc9e830342fd5",
+      order_access_recovery_tokens_customer_anonymize: "20b3ad414348178ecd291cd879bae73d454c4fee3ae15add064650869fa9e461",
+      order_access_recovery_tokens_identity_immutable: "cc4a925c176c6e39de2396fbb81757e5e919d7787240bae6a5358de49c04def8",
+      order_access_recovery_tokens_redaction_guard: "fd0880fe0f5466fcc52814086117dcec5c0da5c3a73ef364abc54caf831ceb08",
+      order_access_recovery_tokens_scope_insert_guard: "346b8965a2388eaf1f9c0b856b918c09151be98068ddef4d57a982fa7fd79e89",
+      order_access_recovery_tokens_terminal_immutable: "857c4d2a35552dd2d9987682cad03ab17b8d09ec89b3f2a45c0b200339994625",
+    }),
+  }),
+  "0092_custom_domain_turnstile_admission.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  "0093_custom_domain_turnstile_runtime_guard.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      shop_domains_identity_update_guard: "03683601b987a31d771c1067d9834cc486dc201075d411476db4cdedeca6afab",
+      shop_domains_turnstile_active_insert_guard: "0835ccf4c8c773adeadc52b1dc68871753034d1ad267abfbda05d3a7390293a9",
+      shop_domains_turnstile_active_update_guard: "855a8b76a438bdd1baf1624f7190a51714e522a53c60c13c37c8ffeea1510cd6",
+      shops_turnstile_canonical_insert_guard: "4bee8c8f97f97c94f1db75f6184d5aa1e5975511c55c2413eec7dd82ba2e721f",
+      shops_turnstile_canonical_update_guard: "94522fd8950e45cfca46db8714adaa273f390cdbec1b2c067f13d41ce1b0dc88",
     }),
   }),
 });
@@ -1755,7 +1812,73 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
             AND integration.provider = credential.provider
             AND integration.provider_claim_state = 'quarantined'
             AND integration.provider_claim_nonce IS NOT NULL
-            AND integration.provider_claim_target_fingerprint IS NULL)) AS integrity_0089_unfenced_credential_claim;`;
+            AND integration.provider_claim_target_fingerprint IS NULL)) AS integrity_0089_unfenced_credential_claim,
+    (SELECT COUNT(*) FROM order_access_recovery_tokens AS recovery
+      WHERE NOT EXISTS (SELECT 1 FROM orders AS order_row
+          WHERE order_row.shop_id = recovery.shop_id
+            AND order_row.id = recovery.order_id
+            AND order_row.customer_id = recovery.customer_id)
+        OR NOT EXISTS (SELECT 1 FROM shop_customers AS customer
+          WHERE customer.shop_id = recovery.shop_id
+            AND customer.id = recovery.customer_id)) AS integrity_0091_recovery_scope,
+    (SELECT COUNT(*) FROM order_access_recovery_tokens AS recovery
+      WHERE recovery.expires_at <= recovery.issued_at
+        OR recovery.retention_expires_at <= recovery.expires_at
+        OR (recovery.consumed_at IS NULL) != (recovery.consumed_request_id IS NULL)
+        OR (recovery.consumed_at IS NULL) != (recovery.previous_order_token_hash IS NULL)
+        OR (recovery.consumed_at IS NULL) != (recovery.replacement_order_token_hash IS NULL)
+        OR (recovery.consumed_at IS NOT NULL
+          AND recovery.previous_order_token_hash = recovery.replacement_order_token_hash)
+        OR (recovery.consumed_at IS NOT NULL AND recovery.consumed_at < recovery.issued_at)
+        OR (recovery.revoked_at IS NOT NULL AND recovery.revoked_at < recovery.issued_at)
+        OR (recovery.consumed_at IS NOT NULL AND recovery.revoked_at IS NOT NULL)
+        OR (recovery.redacted_at IS NOT NULL AND recovery.consumed_at IS NULL)
+        OR (recovery.redacted_at IS NOT NULL
+          AND recovery.redacted_at < recovery.retention_expires_at)) AS integrity_0091_recovery_terminal,
+    (SELECT COUNT(*) FROM shop_domains AS domain
+      WHERE domain.type = 'custom'
+        AND (domain.status = 'active' OR domain.is_primary = 1)
+        AND NOT COALESCE((
+          domain.ownership_verified_at IS NOT NULL
+          AND domain.hostname_status = 'active'
+          AND domain.ssl_status = 'active'
+          AND domain.dns_status = 'active'
+          AND domain.delete_requested_at IS NULL
+          AND domain.deleted_at IS NULL
+          AND json_extract(domain.validation_metadata_json, '$.turnstile.status') = 'active'
+          AND json_extract(domain.validation_metadata_json, '$.turnstile.hostname') = domain.hostname_normalized
+          AND json_extract(domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+          AND json_extract(domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+          AND json_type(domain.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+          AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+          AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+          AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')
+        ), 0)) AS integrity_0093_custom_domain_turnstile,
+    (SELECT COUNT(*) FROM shops AS shop
+      WHERE shop.canonical_domain_id IS NOT NULL
+        AND EXISTS (SELECT 1 FROM shop_domains AS candidate
+          WHERE candidate.id = shop.canonical_domain_id AND candidate.type = 'custom')
+        AND NOT EXISTS (SELECT 1 FROM shop_domains AS canonical
+          WHERE canonical.id = shop.canonical_domain_id
+            AND canonical.shop_id = shop.id
+            AND canonical.type = 'custom'
+            AND canonical.status = 'active'
+            AND canonical.is_primary = 1
+            AND canonical.ownership_verified_at IS NOT NULL
+            AND canonical.hostname_status = 'active'
+            AND canonical.ssl_status = 'active'
+            AND canonical.dns_status = 'active'
+            AND canonical.delete_requested_at IS NULL
+            AND canonical.deleted_at IS NULL
+            AND json_extract(canonical.validation_metadata_json, '$.turnstile.status') = 'active'
+            AND json_extract(canonical.validation_metadata_json, '$.turnstile.hostname') = canonical.hostname_normalized
+            AND json_extract(canonical.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+            AND json_extract(canonical.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+            AND json_type(canonical.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+            AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+            AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+            AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
+      ) AS integrity_0093_custom_domain_canonical;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {
@@ -1776,7 +1899,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["payment_credentials", "payment_integrations"].includes(row?.name)) expectedType = "table";
+    if (["order_access_recovery_tokens", "payment_credentials", "payment_integrations"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
@@ -1813,6 +1936,10 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0088_provider_claim_state",
     "integrity_0089_unfenced_credential_claim",
     "integrity_0089_unfenced_integration_claim",
+    "integrity_0091_recovery_scope",
+    "integrity_0091_recovery_terminal",
+    "integrity_0093_custom_domain_canonical",
+    "integrity_0093_custom_domain_turnstile",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

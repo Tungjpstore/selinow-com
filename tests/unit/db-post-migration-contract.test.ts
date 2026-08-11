@@ -69,7 +69,7 @@ describe("remote post-migration database contract", () => {
     );
   });
 
-  it("pins every schema contract introduced by migrations 0081 through 0083", () => {
+  it("pins every schema contract introduced through migration 0093", () => {
     const requiredObjects = [
       ["index", "idx_plan_prices_provider_ref"],
       ["trigger", "plan_prices_published_reference_guard"],
@@ -82,6 +82,25 @@ describe("remote post-migration database contract", () => {
       ["table", "account_trial_claims"],
       ["index", "idx_account_trial_claims_shop"],
       ["index", "idx_auth_request_admissions_subject_window"],
+      ["table", "order_access_recovery_tokens"],
+      ["index", "idx_order_access_recovery_tokens_active_order"],
+      ["index", "idx_order_access_recovery_tokens_previous"],
+      ["index", "idx_order_access_recovery_tokens_replacement"],
+      ["index", "idx_order_access_recovery_tokens_retention"],
+      ["index", "idx_order_access_recovery_tokens_shop_order"],
+      ["index", "idx_order_access_recovery_tokens_shop_customer"],
+      ["index", "idx_orders_shop_id_customer"],
+      ["trigger", "order_access_recovery_tokens_consume_rotate_order"],
+      ["trigger", "order_access_recovery_tokens_customer_anonymize"],
+      ["trigger", "order_access_recovery_tokens_identity_immutable"],
+      ["trigger", "order_access_recovery_tokens_redaction_guard"],
+      ["trigger", "order_access_recovery_tokens_scope_insert_guard"],
+      ["trigger", "order_access_recovery_tokens_terminal_immutable"],
+      ["trigger", "shop_domains_identity_update_guard"],
+      ["trigger", "shop_domains_turnstile_active_insert_guard"],
+      ["trigger", "shop_domains_turnstile_active_update_guard"],
+      ["trigger", "shops_turnstile_canonical_insert_guard"],
+      ["trigger", "shops_turnstile_canonical_update_guard"],
     ] as const;
     for (const [type, name] of requiredObjects) {
       const rows = completeObjects().filter((row) => row.type !== type || row.name !== name);
@@ -96,6 +115,12 @@ describe("remote post-migration database contract", () => {
       ["account_trial_claims", "claimed_at"],
       ["auth_request_admissions", "subject_hash"],
       ["auth_request_admissions", "delivery_permitted"],
+      ["order_access_recovery_tokens", "replacement_order_token_hash"],
+      ["order_access_recovery_tokens", "previous_order_token_hash"],
+      ["order_access_recovery_tokens", "recipient_hash"],
+      ["order_access_recovery_tokens", "redacted_at"],
+      ["order_access_recovery_tokens", "retention_expires_at"],
+      ["order_access_recovery_tokens", "token_hash"],
     ] as const;
     for (const [tableName, columnName] of requiredColumns) {
       const rows = completeColumns().filter((row) => (
@@ -121,6 +146,13 @@ describe("remote post-migration database contract", () => {
     }
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("subscriptions.price_id IS NULL");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("prices.provider_code != subscriptions.billing_provider_code");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("order_access_recovery_tokens AS recovery");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("order_row.customer_id = recovery.customer_id");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("recovery.retention_expires_at <= recovery.expires_at");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("recovery.redacted_at < recovery.retention_expires_at");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("domain.type = 'custom'");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("'$.turnstile.checkedAt'");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("canonical.shop_id = shop.id");
   });
 
   it("enforces complete, catalog-bound subscription price snapshots", () => {

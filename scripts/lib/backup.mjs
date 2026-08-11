@@ -93,6 +93,7 @@ const CORE_COUNT_TABLES = [
   "order_item_fulfillment_requirements",
   "order_item_entitlement_requirements",
   "order_items",
+  "order_access_recovery_tokens",
   "orders",
   "payment_attempts",
   "payment_credentials",
@@ -1151,6 +1152,53 @@ export function readCrossLedgerMismatches(database) {
           AND provider.shop_id = milestones.shop_id
           AND provider.status = 'processed'
       )
+    UNION ALL
+    SELECT 'custom_domain_turnstile_admission_invalid' AS code, domain.id AS id
+    FROM shop_domains AS domain
+    WHERE domain.type = 'custom'
+      AND (domain.status = 'active' OR domain.is_primary = 1)
+      AND NOT COALESCE((
+        domain.ownership_verified_at IS NOT NULL
+        AND domain.hostname_status = 'active'
+        AND domain.ssl_status = 'active'
+        AND domain.dns_status = 'active'
+        AND domain.delete_requested_at IS NULL
+        AND domain.deleted_at IS NULL
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.status') = 'active'
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.hostname') = domain.hostname_normalized
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+        AND json_type(domain.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')
+      ), 0)
+    UNION ALL
+    SELECT 'shop_canonical_custom_domain_invalid' AS code, shop.id AS id
+    FROM shops AS shop
+    WHERE shop.canonical_domain_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM shop_domains AS candidate
+        WHERE candidate.id = shop.canonical_domain_id AND candidate.type = 'custom')
+      AND NOT EXISTS (SELECT 1 FROM shop_domains AS canonical
+        WHERE canonical.id = shop.canonical_domain_id
+          AND canonical.shop_id = shop.id
+          AND canonical.type = 'custom'
+          AND canonical.status = 'active'
+          AND canonical.is_primary = 1
+          AND canonical.ownership_verified_at IS NOT NULL
+          AND canonical.hostname_status = 'active'
+          AND canonical.ssl_status = 'active'
+          AND canonical.dns_status = 'active'
+          AND canonical.delete_requested_at IS NULL
+          AND canonical.deleted_at IS NULL
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.status') = 'active'
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.hostname') = canonical.hostname_normalized
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+          AND json_type(canonical.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
   `).all();
   return rows.map((row) => ({ code: String(row.code), id: String(row.id) }));
 }
@@ -1459,6 +1507,53 @@ function remoteCrossLedgerSql() {
           AND provider.shop_id = milestones.shop_id
           AND provider.status = 'processed'
       )
+    UNION ALL
+    SELECT domain.id
+    FROM shop_domains AS domain
+    WHERE domain.type = 'custom'
+      AND (domain.status = 'active' OR domain.is_primary = 1)
+      AND NOT COALESCE((
+        domain.ownership_verified_at IS NOT NULL
+        AND domain.hostname_status = 'active'
+        AND domain.ssl_status = 'active'
+        AND domain.dns_status = 'active'
+        AND domain.delete_requested_at IS NULL
+        AND domain.deleted_at IS NULL
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.status') = 'active'
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.hostname') = domain.hostname_normalized
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+        AND json_type(domain.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')
+      ), 0)
+    UNION ALL
+    SELECT shop.id
+    FROM shops AS shop
+    WHERE shop.canonical_domain_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM shop_domains AS candidate
+        WHERE candidate.id = shop.canonical_domain_id AND candidate.type = 'custom')
+      AND NOT EXISTS (SELECT 1 FROM shop_domains AS canonical
+        WHERE canonical.id = shop.canonical_domain_id
+          AND canonical.shop_id = shop.id
+          AND canonical.type = 'custom'
+          AND canonical.status = 'active'
+          AND canonical.is_primary = 1
+          AND canonical.ownership_verified_at IS NOT NULL
+          AND canonical.hostname_status = 'active'
+          AND canonical.ssl_status = 'active'
+          AND canonical.dns_status = 'active'
+          AND canonical.delete_requested_at IS NULL
+          AND canonical.deleted_at IS NULL
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.status') = 'active'
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.hostname') = canonical.hostname_normalized
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+          AND json_type(canonical.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
   );`;
 }
 

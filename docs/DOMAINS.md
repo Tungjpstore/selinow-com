@@ -127,6 +127,8 @@ TLS success, fallback-origin status, a wildcard Turnstile entry or a single succ
 
 Migration `0092_custom_domain_turnstile_admission.sql` marks every pre-admission custom domain `pending`, demotes legacy custom primaries, restores a safe platform canonical domain when one exists and schedules reconciliation. Rows without exact admission evidence remain non-routable under the new runtime.
 
+Migration `0093_custom_domain_turnstile_runtime_guard.sql` adds D1 guards that keep custom-domain activation, primary selection, domain identity and canonical routing fail-closed while an older Worker may still be active during migrate-before-deploy or rollback. It also repairs any invalid reactivation written between the `0092` data transition and guard installation.
+
 ## Seller lifecycle
 
 - `POST /api/app/shops/{shopPublicId}/domains` normalizes and claims a hostname idempotently, then starts a leased provider check.

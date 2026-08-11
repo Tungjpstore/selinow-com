@@ -153,7 +153,7 @@ describe("production Worker continuation deploy admission", () => {
     }
   });
 
-  it("proves the reviewed 0087 through 0089 schema definitions and live data invariants", () => {
+  it("proves the reviewed 0087 through 0093 schema definitions and live data invariants", () => {
     const assertInvariants = (releaseModule as Record<string, unknown>).assertProductionDatabaseInvariantContract;
     expect(typeof assertInvariants).toBe("function");
     if (typeof assertInvariants !== "function") return;
@@ -184,6 +184,17 @@ describe("production Worker continuation deploy admission", () => {
       "payment_integrations_payos_claim_state_insert_guard",
       "idx_payment_integrations_provider_claim_nonce",
       "payment_integrations_payos_claim_fingerprint_update_guard",
+      "order_access_recovery_tokens_consume_rotate_order",
+      "order_access_recovery_tokens_customer_anonymize",
+      "idx_order_access_recovery_tokens_active_order",
+      "idx_order_access_recovery_tokens_previous",
+      "idx_order_access_recovery_tokens_replacement",
+      "idx_order_access_recovery_tokens_retention",
+      "shop_domains_identity_update_guard",
+      "shop_domains_turnstile_active_insert_guard",
+      "shop_domains_turnstile_active_update_guard",
+      "shops_turnstile_canonical_insert_guard",
+      "shops_turnstile_canonical_update_guard",
     ]));
     expect(runner).toHaveBeenCalledTimes(3);
     expect(runner.mock.calls.every(([args]) => args[4] === "production")).toBe(true);
@@ -252,6 +263,16 @@ describe("production Worker continuation deploy admission", () => {
       runWranglerImplementation: violation,
     })).toThrow("production_database_invariant_data_violation:integrity_0088_provider_claim_state");
 
+    const invalidDomainAdmission = runner((rows, sql) => {
+      if (sql.includes("integrity_0093_custom_domain_turnstile") && rows[0] !== undefined) {
+        rows[0].integrity_0093_custom_domain_turnstile = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidDomainAdmission,
+    })).toThrow("production_database_invariant_data_violation:integrity_0093_custom_domain_turnstile");
+
     const unreviewedMigration = `${String(migrationNames.length + 1).padStart(4, "0")}_future.sql`;
     expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
       migrationNames: [...migrationNames, unreviewedMigration],
@@ -282,6 +303,17 @@ describe("production Worker continuation deploy admission", () => {
       "shop_subscriptions_price_snapshot_scope_update_guard",
       "payment_integrations_payos_claim_fingerprint_clear_guard",
       "payment_credentials_payos_claim_fingerprint_clear_guard",
+      "order_access_recovery_tokens_consume_rotate_order",
+      "order_access_recovery_tokens_customer_anonymize",
+      "order_access_recovery_tokens_identity_immutable",
+      "order_access_recovery_tokens_redaction_guard",
+      "order_access_recovery_tokens_scope_insert_guard",
+      "order_access_recovery_tokens_terminal_immutable",
+      "shop_domains_identity_update_guard",
+      "shop_domains_turnstile_active_insert_guard",
+      "shop_domains_turnstile_active_update_guard",
+      "shops_turnstile_canonical_insert_guard",
+      "shops_turnstile_canonical_update_guard",
     ];
     for (const triggerName of triggerNames) {
       const runner = vi.fn((args: string[]) => {

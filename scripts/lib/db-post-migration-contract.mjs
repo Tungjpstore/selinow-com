@@ -21,6 +21,7 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "channel_provider_event_receipts",
     "channel_provider_verification_evidence",
     "customer_notes",
+    "order_access_recovery_tokens",
     "order_messages",
     "order_notes",
     "payment_remediation_requests",
@@ -71,7 +72,14 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "idx_order_messages_provider_pending",
     "idx_order_messages_shop_order",
     "idx_order_notes_shop_order",
+    "idx_order_access_recovery_tokens_active_order",
+    "idx_order_access_recovery_tokens_previous",
+    "idx_order_access_recovery_tokens_replacement",
+    "idx_order_access_recovery_tokens_retention",
+    "idx_order_access_recovery_tokens_shop_customer",
+    "idx_order_access_recovery_tokens_shop_order",
     "idx_orders_admin_updated",
+    "idx_orders_shop_id_customer",
     "idx_payment_remediation_requests_active_exception",
     "idx_payment_remediation_requests_admin_status",
     "idx_payment_remediation_requests_shop_status",
@@ -156,6 +164,17 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "order_messages_transition_guard",
     "order_notes_no_delete",
     "order_notes_redaction_guard",
+    "order_access_recovery_tokens_consume_rotate_order",
+    "order_access_recovery_tokens_customer_anonymize",
+    "order_access_recovery_tokens_identity_immutable",
+    "order_access_recovery_tokens_redaction_guard",
+    "order_access_recovery_tokens_scope_insert_guard",
+    "order_access_recovery_tokens_terminal_immutable",
+    "shop_domains_identity_update_guard",
+    "shop_domains_turnstile_active_insert_guard",
+    "shop_domains_turnstile_active_update_guard",
+    "shops_turnstile_canonical_insert_guard",
+    "shops_turnstile_canonical_update_guard",
     "payment_remediation_requests_no_delete",
     "payment_remediation_requests_scope_insert_guard",
     "payment_remediation_requests_transition_guard",
@@ -201,6 +220,13 @@ export const REQUIRED_POST_MIGRATION_COLUMNS = Object.freeze({
   billing_invoices: Object.freeze(["billing_account_id", "currency", "provider_code", "shop_id"]),
   billing_provider_events: Object.freeze(["id", "shop_id", "status", "subscription_id"]),
   channel_oauth_states: Object.freeze(["state_lookup_hash"]),
+  order_access_recovery_tokens: Object.freeze([
+    "id", "shop_id", "order_id", "customer_id", "token_hash", "recipient_hash",
+    "issued_request_id", "issued_at", "expires_at", "consumed_at",
+    "consumed_request_id", "previous_order_token_hash",
+    "replacement_order_token_hash", "retention_expires_at", "revoked_at",
+    "redacted_at", "created_at",
+  ]),
   activation_milestones: Object.freeze(["id", "milestone_code", "projection_json", "shop_id"]),
   plans: Object.freeze(["is_assignable", "is_public", "schema_version"]),
   products: Object.freeze(["activated_at"]),
@@ -257,6 +283,7 @@ ORDER BY table_name, column_name;
 `;
 export const POST_MIGRATION_CROSS_LEDGER_SQL = `
 SELECT COUNT(*) AS mismatch_count FROM (
+  SELECT id FROM (
   SELECT events.id
   FROM subscription_events AS events
   LEFT JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
@@ -376,6 +403,79 @@ SELECT COUNT(*) AS mismatch_count FROM (
           AND provider.status = 'processed'
       )
   )
+  ) AS platform_ledgers
+  UNION ALL
+  SELECT recovery.id
+  FROM order_access_recovery_tokens AS recovery
+  LEFT JOIN orders AS order_row
+    ON order_row.shop_id = recovery.shop_id
+    AND order_row.id = recovery.order_id
+    AND order_row.customer_id = recovery.customer_id
+  LEFT JOIN shop_customers AS customers
+    ON customers.shop_id = recovery.shop_id
+    AND customers.id = recovery.customer_id
+  WHERE order_row.id IS NULL
+    OR customers.id IS NULL
+    OR recovery.expires_at <= recovery.issued_at
+    OR recovery.retention_expires_at <= recovery.expires_at
+    OR (recovery.consumed_at IS NULL) != (recovery.consumed_request_id IS NULL)
+    OR (recovery.consumed_at IS NULL) != (recovery.previous_order_token_hash IS NULL)
+    OR (recovery.consumed_at IS NULL) != (recovery.replacement_order_token_hash IS NULL)
+    OR (recovery.consumed_at IS NOT NULL
+      AND recovery.previous_order_token_hash = recovery.replacement_order_token_hash)
+    OR (recovery.consumed_at IS NOT NULL AND recovery.consumed_at < recovery.issued_at)
+    OR (recovery.revoked_at IS NOT NULL AND recovery.revoked_at < recovery.issued_at)
+    OR (recovery.consumed_at IS NOT NULL AND recovery.revoked_at IS NOT NULL)
+    OR (recovery.redacted_at IS NOT NULL AND recovery.consumed_at IS NULL)
+    OR (recovery.redacted_at IS NOT NULL
+      AND recovery.redacted_at < recovery.retention_expires_at)
+  UNION ALL
+  SELECT domain.id
+  FROM shop_domains AS domain
+  WHERE domain.type = 'custom'
+    AND (domain.status = 'active' OR domain.is_primary = 1)
+    AND NOT COALESCE((
+      domain.ownership_verified_at IS NOT NULL
+      AND domain.hostname_status = 'active'
+      AND domain.ssl_status = 'active'
+      AND domain.dns_status = 'active'
+      AND domain.delete_requested_at IS NULL
+      AND domain.deleted_at IS NULL
+      AND json_extract(domain.validation_metadata_json, '$.turnstile.status') = 'active'
+      AND json_extract(domain.validation_metadata_json, '$.turnstile.hostname') = domain.hostname_normalized
+      AND json_extract(domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+      AND json_extract(domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+      AND json_type(domain.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+      AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+      AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+      AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')
+    ), 0)
+  UNION ALL
+  SELECT shop.id
+  FROM shops AS shop
+  WHERE shop.canonical_domain_id IS NOT NULL
+    AND EXISTS (SELECT 1 FROM shop_domains AS candidate
+      WHERE candidate.id = shop.canonical_domain_id AND candidate.type = 'custom')
+    AND NOT EXISTS (SELECT 1 FROM shop_domains AS canonical
+      WHERE canonical.id = shop.canonical_domain_id
+        AND canonical.shop_id = shop.id
+        AND canonical.type = 'custom'
+        AND canonical.status = 'active'
+        AND canonical.is_primary = 1
+        AND canonical.ownership_verified_at IS NOT NULL
+        AND canonical.hostname_status = 'active'
+        AND canonical.ssl_status = 'active'
+        AND canonical.dns_status = 'active'
+        AND canonical.delete_requested_at IS NULL
+        AND canonical.deleted_at IS NULL
+        AND json_extract(canonical.validation_metadata_json, '$.turnstile.status') = 'active'
+        AND json_extract(canonical.validation_metadata_json, '$.turnstile.hostname') = canonical.hostname_normalized
+        AND json_extract(canonical.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+        AND json_extract(canonical.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+        AND json_type(canonical.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+        AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+        AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+        AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
 );
 `;
 

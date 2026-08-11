@@ -1,14 +1,15 @@
 # Implementation Status
 
-Last updated: 2026-08-09
+Last updated: 2026-08-11
 
 ## Current source of truth
 
 Continuation audit (2026-08-09): the source chain is contiguous through
-`0090_payos_provider_claim_clear_guard.sql`. Staging D1 is already at `0090`,
+`0093_custom_domain_turnstile_runtime_guard.sql`. Staging D1 is already at `0090`,
 but the latest deployed staging Worker (`b7492055-a44b-4c8c-8ab2-c31002dbdd02`)
 predates the current uncommitted release-evidence, PayOS-contract, visual, and
-Dodo webhook fixes. A fresh candidate-bound staging ceremony is required.
+Dodo webhook fixes, and the source-only buyer order recovery migration/runtime.
+A fresh candidate-bound staging ceremony is required.
 Read-only production audit confirms Worker version
 `f8cee1ef-2050-4d04-980a-9921645703fa`/phase 6, D1 through `0052`, zero queue
 consumers, no `*/15 * * * *` schedule, missing Dodo webhook runtime bindings,
@@ -36,7 +37,48 @@ staging builds, both deploy dry-runs, `npm audit --audit-level=high` (0
 vulnerabilities), and `git diff --cached --check` all pass. No remote mutation
 was made by this candidate. Staging deploy/backup/restore remain blocked until
 the required temporary Cloudflare admission tokens and fresh manifest are
-available.
+available. Those totals predate the current `0091`-`0093` continuation set and
+are not verification evidence for the current working tree.
+
+Buyer order recovery continuation (source-only): migration
+`0091_buyer_order_access_recovery.sql` and the Website recovery routes add a
+15-minute signed, single-use email link whose token is carried only in the URL
+fragment. D1 stores hashes only; request responses are non-enumerating; exact
+same-origin plus per-shop and cross-shop requester rate-limit admission run
+before any existence-dependent action; one
+compare-and-set consume atomically rotates `orders.order_token_hash`; and
+replay/concurrent consume permits one winner. Checkout requests the message
+without blocking navigation, while the order page exchanges the fragment,
+restores the rotated token to browser storage and clears sensitive fragments.
+Deterministic replacement tokens let identical checkout replay return the
+latest valid recovered access after multiple rotations. Exact same-order
+binding lineage preserves previously issued private-file grants; 30-day
+maintenance deletes expired/revoked unconsumed rows and scrubs consumed
+recovery-link/recipient hashes. Buyer anonymization rotates Website order
+access hashes and deletes recovery artifacts. Binding hashes are retained only
+as authorization lineage, not as buyer-contact data.
+This slice has local focused evidence only and requires fresh full-tree gates,
+candidate-bound staging migration/deploy and customer-journey acceptance.
+
+Custom-domain Turnstile continuation (source-only): committed migrations
+`0092_custom_domain_turnstile_admission.sql` and
+`0093_custom_domain_turnstile_runtime_guard.sql` demote legacy custom-domain
+routing without exact widget admission, restore a safe platform canonical
+fallback, and add old-runtime-compatible D1 guards. Neither migration is part
+of the retained staging or production ledger evidence.
+
+Buyer recovery/release-registry closeout (2026-08-11): the Website request and
+single-use consume routes are present in both the exact commerce route contract
+and the 156-row frontend API endpoint index. Production invariant admission,
+post-migration validation and backup/restore cross-ledger checks now cover the
+`0091` recovery contract plus the five `0093` custom-domain runtime/rollback
+guards and their live Turnstile/canonical-domain state. Focused verification
+passes 16 test files / 139 tests; targeted ESLint on the owned runtime, scripts
+and tests is clean; `npm run check` passes. No remote database mutation, Worker
+deployment, provider activation or customer-domain admission was performed.
+Staging evidence remains through `0090`, production remains through `0052`, and
+the complete `0091`-`0093` continuation still requires a fresh clean candidate,
+protected backup/restore evidence and an approved mutation window.
 
 - The reviewed runtime baseline for this snapshot, before the documentation-only
   reconciliation commit, is commit
@@ -44,7 +86,7 @@ available.
   `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. It is not a post-documentation
   HEAD or a deployed identity; the next release ceremony must recapture the
   final clean commit and tree.
-- Current operational source migration chain: contiguous `0001`-`0090`.
+- Current operational source migration chain: contiguous `0001`-`0093`.
   Staging post-migration evidence for release
   `stg_20260808T235913Z_73d0c27493ea` records all 90 migrations through
   `0090_payos_provider_claim_clear_guard.sql`, bound to commit
@@ -52,6 +94,8 @@ available.
   `d445e8409dc1f2b537c39b2e08dad69a228db9f7`. Its pre-migration manifest
   correctly records the then-live prefix through `0086`; the later migration
   completion and post-migration evidence record the resulting `0090` ledger.
+  Migrations `0091`-`0093` are not part of that retained ceremony and remain
+  source-only.
 - The same staging ceremony retained pre-migration backup
   `bkp_20260808235109_63ea5cf3c278`, post-migration backup
   `bkp_20260809000127_bd8c6b2f2402`, and passing candidate-bound isolated

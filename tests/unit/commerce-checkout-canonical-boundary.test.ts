@@ -90,6 +90,8 @@ describe("canonical checkout transaction boundary", () => {
       "orders/[orderPublicId]/downloads/grants/[grantId]/consume.ts",
       "orders/[orderPublicId]/keys.ts",
       "orders/[orderPublicId]/payment-link.ts",
+      "orders/[orderPublicId]/recovery.ts",
+      "orders/[orderPublicId]/recovery/consume.ts",
       "quote.ts",
     ].sort();
     const actualRoutes = commerceRouteFiles();

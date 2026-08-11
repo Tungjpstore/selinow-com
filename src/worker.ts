@@ -5,6 +5,7 @@ import { purgeAuthRequestAdmissions } from "./lib/auth/admission";
 import { processScheduledAutomationTasks } from "./lib/automation/scheduler";
 import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, suspendExpiredBillingGracePeriods, suspendExpiredTrials } from "./lib/billing/service";
 import { purgeCartMutationReplays } from "./lib/commerce/cart-mutation";
+import { purgeBuyerOrderRecoveryArtifacts } from "./lib/commerce/buyer-order-recovery";
 import { expireDueGenericEntitlements } from "./lib/commerce/entitlements";
 import {
   enqueueDueGeneratedLicenseRequests,
@@ -416,6 +417,7 @@ export default {
     const expiredOrders = await expireUnpaidOrders(bindings, scheduledAt.toISOString());
     const expiredGenericEntitlements = await expireDueGenericEntitlements({ env: bindings, nowIso: scheduledAt.toISOString() });
     const purgedAuthRequestAdmissions = await purgeAuthRequestAdmissions(bindings, scheduledAt);
+    const purgedBuyerOrderRecovery = await purgeBuyerOrderRecoveryArtifacts({ env: bindings, now: scheduledAt });
     const purgedCartMutationReplays = await purgeCartMutationReplays(bindings, scheduledAt);
     const purgedTelegramUpdates = await purgeTelegramUpdateHistory(bindings, scheduledAt);
     const purgedAnonymousLimits = await purgeAnonymousLimits(bindings, scheduledAt);
@@ -467,6 +469,8 @@ export default {
         paymentReconciliationFailed: reconciliation.failed,
         paymentReconciliationProcessed: reconciliation.processed,
         purgedAuthRequestAdmissions,
+        purgedBuyerOrderRecoveryDeleted: purgedBuyerOrderRecovery.deleted,
+        purgedBuyerOrderRecoveryRedacted: purgedBuyerOrderRecovery.redacted,
         purgedAnonymousLimits,
         purgedCartMutationReplays,
         purgedDataExportCandidates: purgedDataExports.candidates,

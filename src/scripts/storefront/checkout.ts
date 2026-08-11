@@ -125,8 +125,23 @@ function clearPendingIntent(): void {
   sessionStorage.removeItem(intentStorageKey());
 }
 
-function completeOrder(order: { orderId: string; orderToken: string }): void {
+async function requestOrderRecoveryEmail(orderId: string, customerEmail: string): Promise<void> {
+  if (customerEmail.trim() === "") return;
+  try {
+    await fetch(`/api/store/orders/${encodeURIComponent(orderId)}/recovery`, {
+      body: JSON.stringify({ email: customerEmail }),
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      method: "POST",
+    });
+  } catch {
+    // The browser session token remains authoritative when email delivery is unavailable.
+  }
+}
+
+function completeOrder(order: { orderId: string; orderToken: string }, customerEmail: string): void {
   sessionStorage.setItem(`selinow-order-token:v1:${window.location.host}:${order.orderId}`, order.orderToken);
+  void requestOrderRecoveryEmail(order.orderId, customerEmail);
   clearPendingIntent();
   saveCart([]);
   window.location.assign(`/orders/${order.orderId}#access=${encodeURIComponent(order.orderToken)}`);
@@ -389,7 +404,7 @@ async function recoverPendingCheckout(): Promise<boolean> {
     const body = await readJson<{ order?: { orderId: string; orderToken: string } } & ApiError>(response);
     if (response.ok) {
       if (body.order === undefined) throw new ApiResponseError("checkout_recovery_invalid");
-      completeOrder(body.order);
+      completeOrder(body.order, intent.customerEmail);
       return true;
     }
     if (body.code !== "checkout_not_found") throw new ApiResponseError(body.code, body.requestId);
@@ -450,7 +465,7 @@ async function submitCheckout(event: Event): Promise<void> {
     const body = await readJson<CheckoutResponse & ApiError>(response);
     if (!response.ok) throw new ApiResponseError(body.code, body.requestId);
     const order = body.order;
-    completeOrder(order);
+    completeOrder(order, intent.customerEmail);
   } catch (error: unknown) {
     const code = errorCode(error);
     setError(errorMessage(code, errorRequestId(error)), recoveryForCheckout(code));

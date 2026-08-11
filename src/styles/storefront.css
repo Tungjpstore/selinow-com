@@ -397,6 +397,12 @@ button:disabled {
 .order-message[data-tone="danger"] { border-inline-start: 4px solid var(--selinow-danger); padding-inline-start: 16px; }
 .order-message[data-tone="warning"] { border-inline-start: 4px solid var(--selinow-warning); padding-inline-start: 16px; }
 .order-message[data-tone="info"] { border-inline-start: 4px solid var(--selinow-info); padding-inline-start: 16px; }
+.order-recovery-form { display: grid; gap: 14px; margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--selinow-border); }
+.order-recovery-form h2 { margin: 0; font-size: 1.125rem; letter-spacing: -.02em; }
+.order-recovery-form > p { margin: 0; color: var(--selinow-text-secondary); font-size: .875rem; line-height: 1.6; }
+.order-recovery-form label { display: grid; gap: 8px; color: var(--selinow-text-secondary); font-size: .8125rem; font-weight: 700; }
+.order-recovery-form .store-button { justify-self: start; }
+.order-recovery-form .form-status { margin: 0; }
 .order-lines { grid-column: 1 / -1; margin-top: 8px; border-top: 1px solid var(--selinow-border); }
 .order-line { display: flex; justify-content: space-between; gap: 24px; padding: 16px 0; border-bottom: 1px solid var(--selinow-border); }
 .order-timeline { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--selinow-border); }

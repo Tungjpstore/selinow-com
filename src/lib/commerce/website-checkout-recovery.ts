@@ -5,6 +5,7 @@ import { resolveOrderChannelAttribution } from "../channels/attribution";
 import { WEBSITE_CHANNEL_CODE } from "../channels/builtins";
 import type { AppBindings } from "../platform/bindings";
 import type { StorefrontShop } from "../storefront/store";
+import { isBuyerOrderRecoveryBinding, resolveCurrentBuyerOrderRecoveryToken } from "./buyer-order-recovery";
 import { createCheckoutRecoveryEvidence, verifyCheckoutRecoveryCapabilityEvidence } from "./checkout-recovery-evidence";
 import { verifyQuoteEvidence } from "./quote-evidence";
 import { loadWebsiteCheckoutState, websiteCheckoutFingerprint } from "./store";
@@ -226,14 +227,32 @@ export async function recoverWebsiteCheckout(input: {
   }
   const orderToken = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `order-access-token:${input.shop.id}`, input.idempotencyKey);
   const orderTokenHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, "order-access", orderToken);
-  if (!constantTimeEqual(order.orderTokenHash, orderTokenHash)) throw new AppError("checkout_recovery_invalid", 409);
+  let recoveredToken = orderToken;
+  if (!constantTimeEqual(order.orderTokenHash, orderTokenHash)) {
+    const bindingMatches = await isBuyerOrderRecoveryBinding({
+      candidateBindingHash: orderTokenHash,
+      currentOrderTokenHash: order.orderTokenHash,
+      env: input.env,
+      orderId: order.internalId,
+      shopId: input.shop.id,
+    });
+    if (!bindingMatches) throw new AppError("checkout_recovery_invalid", 409);
+    const currentToken = await resolveCurrentBuyerOrderRecoveryToken({
+      currentOrderTokenHash: order.orderTokenHash,
+      env: input.env,
+      orderId: order.internalId,
+      shopId: input.shop.id,
+    });
+    if (currentToken === null) throw new AppError("checkout_recovery_invalid", 409);
+    recoveredToken = currentToken;
+  }
   const recoveredOrder: RecoveredWebsiteOrder = {
     currency: order.currency,
     expiresAt: order.expiresAt,
     fulfillmentStatus: order.fulfillmentStatus,
     orderId: order.orderId,
     orderNumber: order.orderNumber,
-    orderToken,
+    orderToken: recoveredToken,
     paymentStatus: order.paymentStatus,
     status: order.status,
     totalMinor: order.totalMinor,

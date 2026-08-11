@@ -1,6 +1,6 @@
 # Data Model
 
-The authoritative numbered source chain is contiguous through `0090_payos_provider_claim_clear_guard.sql`. Retained staging D1 evidence covers the complete `0001`-`0086` ledger through the guarded backup, isolated restore and migration sequence; `0087`-`0090` require a fresh candidate ceremony before they can be claimed remotely. Production D1 remains admitted through `0052`; continuation migrations `0053` through `0090` remain unapplied and require fresh production backup/restore and mutation-window gates. The reviewed production resource identity and platform deployment are provisioned; provider activation and commerce traffic remain separately fail-closed. The full future schema contract remains in `02_ARCHITECTURE_AND_DATA.md`.
+The authoritative numbered source chain is contiguous through `0093_custom_domain_turnstile_runtime_guard.sql`. Retained staging D1 evidence covers the complete `0001`-`0090` ledger through the guarded backup, isolated restore and migration sequence; migrations `0091`-`0093` require a fresh candidate ceremony before they can be claimed remotely. Production D1 remains admitted through `0052`; continuation migrations `0053` through `0093` remain unapplied and require fresh production backup/restore and mutation-window gates. The reviewed production resource identity and platform deployment are provisioned; provider activation and commerce traffic remain separately fail-closed. The full future schema contract remains in `02_ARCHITECTURE_AND_DATA.md`.
 
 All shop-owned access must resolve active membership first and retain the internal `shop_id` predicate for reads and writes. Public IDs are routing identifiers, not authorization authority.
 
@@ -114,8 +114,40 @@ is idempotent for the same tuple and fails closed if a provider subject is
 remapped to a different customer. Raw external subjects and provider payloads
 never enter D1, queues, exports or logs.
 
-Current operational ledger note: source migrations `0001`-`0090` are contiguous;
-retained staging evidence is admitted through `0086`, and production remains admitted
+Migration `0091_buyer_order_access_recovery.sql` adds tenant-scoped,
+single-use buyer recovery grants for Website orders. D1 stores only the
+purpose-bound token and recipient hashes, safe request ID, customer/order
+references and bounded timestamps; plaintext recovery tokens and buyer emails
+never enter the ledger.
+At most one active grant exists per `(shop_id, order_id)`. Exact composite
+foreign keys and insert/update triggers bind every grant to the same shop,
+order and customer, while terminal state and identity fields are immutable.
+Consumption is a compare-and-set update, and an `AFTER UPDATE` trigger rotates
+the authoritative `orders.order_token_hash` in the same transaction, so replay
+or concurrent consumption has exactly one winner and the previous order token
+cannot remain valid. The runtime sends only a short-lived token in a URL
+fragment and requires exact same-origin request/consume admission. Existing
+hash-only limiter rows bound per-shop requester and platform requester
+constrain abuse without letting fabricated order IDs lock a buyer email out.
+Replacement access tokens are deterministic from the recovery ID, so an exact
+checkout replay returns the latest valid token after one or many rotations.
+Consumed rows retain only the exact same-order binding lineage needed for
+private-file authorization compatibility; after 30 days the recovery-link and
+recipient hashes are replaced with unlinkable values, while expired or revoked
+unconsumed rows are deleted. Customer anonymization rotates Website order
+access hashes and deletes all recovery rows, revoking both prior and recovered
+access. This
+migration is source-only; retained staging evidence ends at `0090`.
+
+Migrations `0092_custom_domain_turnstile_admission.sql` and
+`0093_custom_domain_turnstile_runtime_guard.sql` remove legacy custom-domain
+routing that lacks exact, fresh Turnstile widget admission, restore a safe
+platform-domain canonical fallback when possible, and enforce the boundary in
+D1 during migrate-before-deploy and rollback windows. These migrations are also
+source-only relative to the retained remote evidence.
+
+Current operational ledger note: source migrations `0001`-`0093` are contiguous;
+retained staging evidence is admitted through `0090`, and production remains admitted
 only through `0052`. All later migration descriptions in this document are schema
 contracts or checkpoint history until a protected, exact-target admission and
 remote ledger proof are recorded.

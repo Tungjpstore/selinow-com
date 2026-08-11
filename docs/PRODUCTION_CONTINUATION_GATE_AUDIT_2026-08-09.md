@@ -9,7 +9,7 @@ Cloudflare, D1, DNS, Worker, queue, cron, provider, or secret mutation.
 
 - Historical reviewed source tree: commit `1eab0f62c5a338884d2f9a48d85c660d07c22259`.
 - Historical reviewed Git tree: `66b753e5b245dbb915d28e14ab8d4ba605e21430`.
-- Current source migration chain: contiguous `0001` through `0090` (90 files).
+- Current source migration chain: contiguous `0001` through `0093` (93 files).
 - Production Worker expected by source: `selinow-com-production`.
 - Production D1 expected by source: `selinow-production`, UUID
   `75102e37-45f6-40ed-a32a-9e700fd184db`.
@@ -37,7 +37,7 @@ ends at `0052_generated_license_request_hardening.sql`. This is not a live
 query and must not be treated as current remote proof.
 
 - Latest retained production backup: `.wrangler/backups/production/bkp_20260804113931_e87d7ee5bfa1/` (completed 2026-08-04; source ledger through `0052`).
-- Latest retained passed isolated restore: `.wrangler/restore-drills/production/rdr_20260804114401_67010b1e6913.json` (reviewed commit `72248cc...`; isolated verification through `0080`, not the current `0090` tree).
+- Latest retained passed isolated restore: `.wrangler/restore-drills/production/rdr_20260804114401_67010b1e6913.json` (reviewed commit `72248cc...`; isolated verification through `0080`, not the current `0093` tree).
 - A fresh production backup and isolated restore bound to the current clean HEAD do not exist.
 - A live remote migration-ledger query was not performed because no dedicated
   read/migration token was available to the audit session; no production D1
@@ -47,7 +47,7 @@ query and must not be treated as current remote proof.
 fresh protected production backup, run the isolated restore drill against the
 exact reviewed tree, query the live ledger, verify integrity/FK/preflight, and
 bind all reports to one release manifest. The first irreversible sink is the
-forward-only application of `0053` through `0090` via the guarded migration
+forward-only application of `0053` through `0093` via the guarded migration
 executor.
 
 ## Production Worker names and secret admission
@@ -104,7 +104,7 @@ and revoked after their specific ceremony. The runtime Worker secret named
 3. Create a fresh protected production backup and an isolated restore drill
    bound to the full reviewed commit `$(git rev-parse HEAD)`; query the live migration ledger and run D1
    integrity/preflight checks.
-4. If and only if the evidence is accepted, apply `0053`-`0090` forward-only,
+4. If and only if the evidence is accepted, apply `0053`-`0093` forward-only,
    then verify the complete ledger and restore evidence again.
 5. Complete provider handoff/UAT and owner approvals separately; do not infer
    Dodo/PayOS acceptance from route, secret-name, or health checks.
@@ -117,6 +117,6 @@ and revoked after their specific ceremony. The runtime Worker secret named
 Production deployment and migration remain **NO-GO**. The exact next
 irreversible action is not a Worker deploy or route change: it is the approved,
 fresh production backup plus isolated restore/ledger admission required before
-the forward-only `0053`-`0090` migration sink. Provider UAT, Dodo webhook secret
+the forward-only `0053`-`0093` migration sink. Provider UAT, Dodo webhook secret
 admission, PayOS acceptance, monitoring/budget ownership, and pilot evidence
 remain independent blockers.

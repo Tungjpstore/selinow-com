@@ -5,6 +5,7 @@ import { resolveOrderChannelAttribution } from "../channels/attribution";
 import { WEBSITE_CHANNEL_CODE } from "../channels/builtins";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
+import { isBuyerOrderRecoveryBinding } from "./buyer-order-recovery";
 
 export const MAX_PRIVATE_FILE_BYTES = 50 * 1024 * 1024;
 const TOKEN_KEY_VERSION = "identifier-hmac-v1";
@@ -751,7 +752,17 @@ async function ensureEntitlement(input: {
     WHERE shop_id = ? AND requirement_id = ?
     LIMIT 1
   `).bind(input.shopId, input.requirement.id).first<EntitlementRow>();
-  if (entitlement === null || !constantTimeEqual(entitlement.buyerBindingHash, input.order.buyerBindingHash)) {
+  if (entitlement === null) {
+    throw new AppError("private_download_not_found", 404);
+  }
+  const bindingMatches = await isBuyerOrderRecoveryBinding({
+    candidateBindingHash: entitlement.buyerBindingHash,
+    currentOrderTokenHash: input.order.buyerBindingHash,
+    env: input.env,
+    orderId: input.order.id,
+    shopId: input.shopId,
+  });
+  if (!bindingMatches) {
     throw new AppError("private_download_not_found", 404);
   }
   return entitlement;
@@ -1070,10 +1081,17 @@ export async function consumeWebsitePrivateDownloadGrant(input: {
   if (row === null
     || row.assetStatus !== "active"
     || row.assetVersionStatus !== "active"
-    || !constantTimeEqual(row.buyerBindingHash, order.buyerBindingHash)
     || row.tokenKeyVersion !== TOKEN_KEY_VERSION) {
     throw new AppError("private_download_grant_not_found", 404);
   }
+  const bindingMatches = await isBuyerOrderRecoveryBinding({
+    candidateBindingHash: row.buyerBindingHash,
+    currentOrderTokenHash: order.buyerBindingHash,
+    env: input.env,
+    orderId: order.id,
+    shopId: input.shopId,
+  });
+  if (!bindingMatches) throw new AppError("private_download_grant_not_found", 404);
   const tokenHash = await hashGrantToken(input.env, {
     assetVersionId: row.assetVersionId,
     buyerBindingHash: row.buyerBindingHash,

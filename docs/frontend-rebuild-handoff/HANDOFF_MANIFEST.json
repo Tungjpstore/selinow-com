@@ -13,7 +13,7 @@
     "acceptanceScenarios": 87,
     "traceabilityRecords": 28,
     "sourceMigrations": "0001-0069",
-    "apiEndpoints": 148
+    "apiEndpoints": 156
   },
   "verification": {
     "npm run check": "pass: 0 errors, 3 hints",
@@ -26,7 +26,7 @@
     "csv": "pass: 87 acceptance rows, 28 traceability rows",
     "yaml": "pass: 25 routes, 2 aliases",
     "git diff --check": "pass",
-    "apiEndpointIndex": "pass: 148 method/path rows, source paths and contract metadata",
+    "apiEndpointIndex": "pass: 156 method/path rows, source paths and contract metadata",
     "npm run deploy:staging:dry-run": "pass: 272 modules, 3713.82 KiB upload, no deployment"
   },
   "productionBoundary": {
@@ -42,15 +42,15 @@
     },
     {
       "path": "docs/frontend-rebuild-handoff/API_ENDPOINT_INDEX.csv",
-      "sha256": "954e44592ca9f93928d0ba4fb143d91789aeec2cb8cb8aaddce3948f057f03a1"
+      "sha256": "9f4024ac5d7e055fe558c78713cb942b11d2850f3e43cafed058e7ef22db74bf"
     },
     {
       "path": "docs/frontend-rebuild-handoff/DASHBOARD_INFORMATION_ARCHITECTURE.md",
-      "sha256": "16dc1cb2505eb5972512fff8bf9ff1ae5bb4281424e11b776e7d0eeaa90a80a1"
+      "sha256": "1fbd4e46c768b6a302a3469de7550f297b40576c3989110ee92614c84fb5010d"
     },
     {
       "path": "docs/frontend-rebuild-handoff/DATA_API_AND_SECURITY_CONTRACTS.md",
-      "sha256": "e392447aa172df17e5708710b50d6081d25ded50d3c94611243ec0e969e43362"
+      "sha256": "f2075a48411aab183639151b98695c3e2114b1e169f815a40dbbf0403714a594"
     },
     {
       "path": "docs/frontend-rebuild-handoff/DESIGN_AND_INTERACTION_REQUIREMENTS.md",
@@ -74,11 +74,11 @@
     },
     {
       "path": "docs/frontend-rebuild-handoff/QUICK_START.md",
-      "sha256": "c7f625deeda5b6c326219d2bd1db5f24b178b15e02ee7179c08e7131dd502517"
+      "sha256": "5ba341cfd42c1af967d181fe98d86b87d2cb851c8d22a86871d55a264d6c4db1"
     },
     {
       "path": "docs/frontend-rebuild-handoff/README.md",
-      "sha256": "8af67c3c93df9ea7e112ebf94845263d0e2465228971cd5ba9446a43eab5d115"
+      "sha256": "63aaa68266756d60839ef1f286505cc4c2869ff043b2c5b4f9fc8f2daa873e78"
     },
     {
       "path": "docs/frontend-rebuild-handoff/ROLES_PERMISSIONS_AND_VISIBILITY.md",
@@ -90,7 +90,7 @@
     },
     {
       "path": "docs/frontend-rebuild-handoff/SCREEN_BLUEPRINTS.md",
-      "sha256": "8701820020b67b8ddcb8e5a4504efb0edb0b380f6510f91abdbd14aeab2df5b6"
+      "sha256": "e5b9a506443d0996463e9848fcebfb687c94baa21cc39391690cab775d3f13e6"
     },
     {
       "path": "docs/frontend-rebuild-handoff/SOURCE_OF_TRUTH.md",

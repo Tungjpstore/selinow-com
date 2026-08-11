@@ -302,6 +302,8 @@ describe("operations report compatibility", () => {
       "shop_subscriptions", "billing_accounts", "billing_checkout_sessions",
       "billing_invoices", "billing_provider_events", "subscription_events",
       "usage_counters", "usage_events", "activation_milestones",
+      "order_access_recovery_tokens",
+      "shops", "shop_domains",
     ]));
   });
 
@@ -319,6 +321,13 @@ describe("operations report compatibility", () => {
       CREATE TABLE shop_subscriptions (id TEXT PRIMARY KEY, shop_id TEXT);
       CREATE TABLE plan_prices (id TEXT PRIMARY KEY, plan_id TEXT, provider_code TEXT);
       CREATE TABLE activation_milestones (id TEXT PRIMARY KEY, shop_id TEXT, milestone_code TEXT, projection_json TEXT);
+      CREATE TABLE shops (id TEXT PRIMARY KEY, canonical_domain_id TEXT);
+      CREATE TABLE shop_domains (
+        id TEXT PRIMARY KEY, shop_id TEXT, type TEXT, status TEXT, is_primary INTEGER,
+        ownership_verified_at TEXT, hostname_status TEXT, ssl_status TEXT, dns_status TEXT,
+        validation_metadata_json TEXT, hostname_normalized TEXT,
+        delete_requested_at TEXT, deleted_at TEXT
+      );
       INSERT INTO billing_provider_events VALUES ('provider-1', 'shop-a', 'processed');
       INSERT INTO subscription_events VALUES ('sub-event-1', 'shop-b', 'provider-1', 'provider', 'active');
       INSERT INTO billing_accounts VALUES ('account-1', 'shop-a', 'dodo', 'USD');
@@ -328,6 +337,16 @@ describe("operations report compatibility", () => {
       INSERT INTO billing_checkout_sessions VALUES ('checkout-1', 'shop-a', 'subscription-1', 'plan-starter', 'price-1', 'dodo');
       INSERT INTO activation_milestones VALUES ('activation-1', 'shop-b', 'trial_converted', '{}');
       INSERT INTO activation_milestones VALUES ('activation-2', 'shop-a', 'setup_started', '{"channel":true}');
+      INSERT INTO shops VALUES ('shop-a', NULL), ('shop-canonical', 'domain-canonical');
+      INSERT INTO shop_domains VALUES (
+        'domain-active', 'shop-a', 'custom', 'active', 0, '2026-08-11T00:00:00.000Z',
+        'active', 'active', 'active', '{}', 'store.example.test', NULL, NULL
+      );
+      INSERT INTO shop_domains VALUES (
+        'domain-canonical', 'shop-canonical', 'custom', 'validating', 0,
+        '2026-08-11T00:00:00.000Z', 'active', 'active', 'active', '{}',
+        'canonical.example.test', NULL, NULL
+      );
     `);
     expect(readCrossLedgerMismatches(database)).toEqual([
       { code: "subscription_event_provider_shop", id: "sub-event-1" },
@@ -335,6 +354,8 @@ describe("operations report compatibility", () => {
       { code: "checkout_subscription_plan_price_provider", id: "checkout-1" },
       { code: "activation_projection_invalid", id: "activation-2" },
       { code: "trial_conversion_without_paid_event", id: "activation-1" },
+      { code: "custom_domain_turnstile_admission_invalid", id: "domain-active" },
+      { code: "shop_canonical_custom_domain_invalid", id: "shop-canonical" },
     ]);
     database.close();
   });
@@ -358,6 +379,8 @@ describe("operations report compatibility", () => {
       "channel_provider_verification_evidence",
       "channel_provider_event_receipts",
       "customer_notes",
+      "shop_domains",
+      "shops",
       "shop_channels",
       "channel_connections",
       "channel_connection_grants",
@@ -367,6 +390,7 @@ describe("operations report compatibility", () => {
       "delivery_jobs",
       "digital_assets",
       "digital_asset_versions",
+      "order_access_recovery_tokens",
       "product_fulfillment_policies",
       "order_item_fulfillment_requirements",
       "digital_entitlements",

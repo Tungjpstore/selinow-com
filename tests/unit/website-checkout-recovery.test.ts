@@ -68,6 +68,9 @@ function createDatabase(): SqliteD1 {
     VALUES ('recovery-user', 'recovery@example.test', 'Recovery User', 'active', '${now}', '${now}');
     INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, readiness_version, created_at, updated_at)
     VALUES ('shop_recovery', 'shop_public_recovery', 'recovery', 'Recovery', 'active', 'en', 'VND', 'UTC', 1, '${now}', '${now}');
+    INSERT INTO shop_customers (
+      id, shop_id, email_normalized, display_name, locale, status, created_at, updated_at
+    ) VALUES ('customer_recovery', 'shop_recovery', 'buyer@example.test', 'Buyer', 'en', 'active', '${now}', '${now}');
     INSERT INTO products (id, shop_id, slug, title, description, status, fulfillment_type, version, created_at, updated_at)
     VALUES ('product_recovery', 'shop_recovery', 'recovery-product', 'Recovery product', '', 'active', 'manual', 1, '${now}', '${now}');
     INSERT INTO product_variants (id, shop_id, product_id, sku, title, options_json, price_minor, currency, min_per_order, max_per_order, status, version, created_at, updated_at)
@@ -118,9 +121,35 @@ async function seedOrder(database: SqliteD1, input: { checkoutCartId?: string; d
     payment_status, fulfillment_status, subtotal_minor, discount_minor, total_minor,
     currency, locale, customer_email_masked, checkout_subject_hash, checkout_request_hash,
     checkout_cart_id, order_token_hash, expires_at, paid_at, fulfilled_at, created_at, updated_at
-  ) VALUES (?, ?, ?, NULL, ?, 'web', 'pending_payment', 'unpaid', 'reserved', 9000, ?, ?, 'VND', 'en', NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`) 
+  ) VALUES (?, ?, ?, 'customer_recovery', ?, 'web', 'pending_payment', 'unpaid', 'reserved', 9000, ?, ?, 'VND', 'en', NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`)
     .bind("order_recovery", "order_33333333-3333-4333-8333-333333333333", "shop_recovery", "SO-RECOVERY-1", input.discountMinor ?? 0, input.totalMinor ?? 9000, input.subjectHash, input.requestHash, input.checkoutCartId ?? cartId, input.tokenHash, quoteExpiresAt, quoteIssuedAt, quoteIssuedAt)
     .run();
+}
+
+async function rotateOrderAccess(database: SqliteD1, env: AppBindings, recoveryId: string, previousToken: string, consumedAt: Date): Promise<string> {
+  const previousHash = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "order-access", previousToken);
+  const replacementToken = await hmacToken(
+    env.IDENTIFIER_HMAC_SECRET,
+    "buyer-order-recovery-access-token:v1:shop_recovery",
+    recoveryId,
+  );
+  const replacementHash = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "order-access", replacementToken);
+  const issuedAt = new Date(consumedAt.getTime() - 1_000).toISOString();
+  const expiresAt = new Date(consumedAt.getTime() + 14 * 60_000).toISOString();
+  const retentionExpiresAt = new Date(consumedAt.getTime() + 30 * 24 * 60 * 60_000).toISOString();
+  await database.prepare(`
+    INSERT INTO order_access_recovery_tokens (
+      id, shop_id, order_id, customer_id, token_hash, recipient_hash,
+      issued_request_id, issued_at, expires_at, retention_expires_at, created_at
+    ) VALUES (?, 'shop_recovery', 'order_recovery', 'customer_recovery', ?, ?, ?, ?, ?, ?, ?)
+  `).bind(recoveryId, await hmacToken(env.IDENTIFIER_HMAC_SECRET, "recovery-test-token:v1", recoveryId), "r".repeat(43), `issue-${recoveryId}`, issuedAt, expiresAt, retentionExpiresAt, issuedAt).run();
+  await database.prepare(`
+    UPDATE order_access_recovery_tokens
+    SET consumed_at = ?, consumed_request_id = ?, previous_order_token_hash = ?,
+      replacement_order_token_hash = ?
+    WHERE id = ? AND shop_id = 'shop_recovery'
+  `).bind(consumedAt.toISOString(), `consume-${recoveryId}`, previousHash, replacementHash, recoveryId).run();
+  return replacementToken;
 }
 
 async function createQuote(secret: string, input: { discountCode?: string | null; discountMinor?: number; totalMinor?: number } = {}): Promise<string> {
@@ -199,6 +228,36 @@ describe("website checkout recovery", () => {
       paymentStatus: "unpaid",
     });
     expect(database.database.prepare("SELECT consumed_order_id AS consumedOrderId FROM checkout_recovery_capabilities WHERE shop_id = ?").get("shop_recovery")).toEqual({ consumedOrderId: "order_recovery" });
+  });
+
+  it("returns the current deterministic token after one or multiple buyer recoveries", async () => {
+    const database = createDatabase();
+    await seedCart(database);
+    const env = envFor(database);
+    const idempotencyKey = "checkout-recovery-rotated-0001";
+    const quoteEvidence = await createQuote(env.IDENTIFIER_HMAC_SECRET);
+    const recovery = await prepareWebsiteCheckoutRecovery({ cartId, cartToken, customerEmail: null, env, expected, idempotencyKey, quoteEvidence, shop: shop() });
+    const checkoutSubjectHash = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "checkout:shop_recovery", idempotencyKey);
+    const requestHash = await websiteCheckoutFingerprint({ cartId, customerEmail: null, discountCode: null, discountMinor: 0, expected, totalMinor: 9000 });
+    const originalToken = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "order-access-token:shop_recovery", idempotencyKey);
+    const originalHash = await hmacToken(env.IDENTIFIER_HMAC_SECRET, "order-access", originalToken);
+    await seedOrder(database, { requestHash, subjectHash: checkoutSubjectHash, tokenHash: originalHash });
+    const firstRecoveredToken = await rotateOrderAccess(database, env, "orc_checkout_recovery_0001", originalToken, new Date(testNow + 1_000));
+    const currentToken = await rotateOrderAccess(database, env, "orc_checkout_recovery_0002", firstRecoveredToken, new Date(testNow + 2_000));
+
+    await expect(recoverWebsiteCheckout({
+      cartId,
+      cartToken,
+      customerEmail: null,
+      env,
+      expected,
+      idempotencyKey,
+      recoveryEvidence: recovery.evidence,
+      shop: shop(),
+    })).resolves.toMatchObject({
+      orderId: "order_33333333-3333-4333-8333-333333333333",
+      orderToken: currentToken,
+    });
   });
 
   it("does not replay a capability consumed by a different order", async () => {

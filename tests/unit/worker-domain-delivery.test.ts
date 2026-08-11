@@ -34,6 +34,7 @@ const dependencies = vi.hoisted(() => ({
   paymentReconciliation: vi.fn(),
   purgeAdmissions: vi.fn(),
   purgeAnonymousLimits: vi.fn(),
+  purgeBuyerOrderRecovery: vi.fn(),
   purgeCartMutationReplays: vi.fn(),
   purgeDataExports: vi.fn(),
   purgeDeliveryGrantClaims: vi.fn(),
@@ -61,6 +62,9 @@ vi.mock("../../src/lib/billing/service", () => ({
   suspendExpiredTrials: dependencies.suspendBillingTrials,
 }));
 vi.mock("../../src/lib/commerce/cart-mutation", () => ({ purgeCartMutationReplays: dependencies.purgeCartMutationReplays }));
+vi.mock("../../src/lib/commerce/buyer-order-recovery", () => ({
+  purgeBuyerOrderRecoveryArtifacts: dependencies.purgeBuyerOrderRecovery,
+}));
 vi.mock("../../src/lib/commerce/generated-license", () => ({
   enqueueDueGeneratedLicenseRequests: dependencies.enqueueDueGeneratedLicenseRequests,
   GeneratedLicenseProviderRegistry: dependencies.generatedLicenseProviderRegistry,
@@ -288,6 +292,7 @@ beforeEach(() => {
   dependencies.paymentReconciliation.mockResolvedValue({ failed: 0, processed: 1 });
   dependencies.expireOrders.mockResolvedValue(0);
   dependencies.purgeAdmissions.mockResolvedValue(0);
+  dependencies.purgeBuyerOrderRecovery.mockResolvedValue({ deleted: 0, redacted: 0 });
   dependencies.purgeTelegramUpdates.mockResolvedValue(0);
   dependencies.purgeAnonymousLimits.mockResolvedValue(0);
   dependencies.purgeDataExports.mockResolvedValue({ candidates: 0, deleted: 0, failed: 0, invalidObjectKeys: 0 });
@@ -538,6 +543,7 @@ describe("Worker generic domain delivery contract", () => {
 
   it("uses only the generic event/job queue as the paid-order notification authority", async () => {
     dependencies.purgeDataExports.mockResolvedValueOnce({ candidates: 5, deleted: 3, failed: 1, invalidObjectKeys: 1 });
+    dependencies.purgeBuyerOrderRecovery.mockResolvedValueOnce({ deleted: 2, redacted: 3 });
     dependencies.purgeDeliveryGrantClaims.mockResolvedValueOnce(2);
     dependencies.purgeSecurityRateLimits.mockResolvedValueOnce(4);
     const controller: ScheduledController = {
@@ -563,6 +569,7 @@ describe("Worker generic domain delivery contract", () => {
     expect(dependencies.suspendBillingTrials).toHaveBeenCalledWith({ env: runtimeEnv, limit: 100, now: NOW });
     expect(dependencies.deliverTelegramJob).toHaveBeenCalledOnce();
     expect(dependencies.purgeCartMutationReplays).toHaveBeenCalledWith(expect.any(Object), NOW);
+    expect(dependencies.purgeBuyerOrderRecovery).toHaveBeenCalledWith({ env: runtimeEnv, now: NOW });
     expect(dependencies.purgeDataExports).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.purgeDeliveryGrantClaims).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.purgeSecurityRateLimits).toHaveBeenCalledWith(expect.any(Object), NOW);
@@ -581,6 +588,8 @@ describe("Worker generic domain delivery contract", () => {
       purgedDataExportFailures: 1,
       purgedDataExportInvalidObjectKeys: 1,
       purgedDataExports: 3,
+      purgedBuyerOrderRecoveryDeleted: 2,
+      purgedBuyerOrderRecoveryRedacted: 3,
       purgedDeliveryGrantClaims: 2,
       purgedSecurityRateLimits: 4,
     });
