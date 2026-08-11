@@ -367,6 +367,29 @@ describe("staging release admission", () => {
         throw new Error("provider output");
       },
     })).toThrow("staging_database_preflight_failed");
+
+    const nestedRunner = vi.fn((
+      command: string,
+      args: string[],
+      options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+    ) => {
+      void command;
+      void args;
+      void options;
+      return { stderr: "", stdout: output };
+    });
+    assertStagingDatabasePreflight({
+      environment: {
+        CLOUDFLARE_ACCOUNT_ID: DATABASE_TARGET.accountId,
+        CLOUDFLARE_API_TOKEN: "pinned-d1-token",
+      },
+      runImplementation: nestedRunner,
+    });
+    expect(nestedRunner.mock.calls[0]?.[2]?.env).toMatchObject({
+      CLOUDFLARE_ACCOUNT_ID: DATABASE_TARGET.accountId,
+      CLOUDFLARE_API_TOKEN: "pinned-d1-token",
+      CLOUDFLARE_D1_API_TOKEN: "pinned-d1-token",
+    });
   });
 
   it("never invokes Wrangler migration when the staging preflight fails", async () => {

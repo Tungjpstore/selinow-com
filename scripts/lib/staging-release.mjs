@@ -601,13 +601,21 @@ export function parseStagingDatabasePreflightOutput(output) {
 export function assertStagingDatabasePreflight(input = {}) {
   const root = input.repositoryRoot ?? repositoryRoot;
   const runner = input.runImplementation ?? run;
+  const childEnvironment = input.environment?.CLOUDFLARE_D1_API_TOKEN === undefined
+    && /^[a-f0-9]{32}$/u.test(input.environment?.CLOUDFLARE_ACCOUNT_ID ?? "")
+    && typeof input.environment?.CLOUDFLARE_API_TOKEN === "string"
+    ? {
+        ...input.environment,
+        CLOUDFLARE_D1_API_TOKEN: input.environment.CLOUDFLARE_API_TOKEN,
+      }
+    : input.environment;
   let output;
   try {
     output = runner(process.execPath, [
       "scripts/db.mjs", "preflight", "--env", "staging", "--json",
     ], {
       cwd: root,
-      env: input.environment,
+      env: childEnvironment,
     }).stdout;
   } catch {
     throw new Error("staging_database_preflight_failed");
