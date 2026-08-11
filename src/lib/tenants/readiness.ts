@@ -2,6 +2,7 @@ import { AppError } from "../core/errors";
 import { subscriptionAllows } from "../billing/entitlements";
 import { createId } from "../core/ids";
 import { tryRecordActivationMilestone } from "../analytics/activation";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import { CURRENT_POLICY_ATTESTATION_VERSION } from "../onboarding/policy";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "./store";
@@ -298,9 +299,11 @@ async function loadReadinessRow(env: AppBindings, shopId: string): Promise<Readi
             canonical.type = 'platform_subdomain'
             OR (
               canonical.type = 'custom'
+              AND canonical.ownership_verified_at IS NOT NULL
               AND canonical.hostname_status = 'active'
               AND canonical.ssl_status = 'active'
               AND canonical.dns_status = 'active'
+              AND (${customDomainTurnstileAdmissionSql("canonical")})
             )
           )
       ) AS canonicalDomainReady,
@@ -309,9 +312,11 @@ async function loadReadinessRow(env: AppBindings, shopId: string): Promise<Readi
         WHERE shop_domains.shop_id = shops.id
           AND shop_domains.type = 'custom'
           AND shop_domains.status = 'active'
+          AND shop_domains.ownership_verified_at IS NOT NULL
           AND shop_domains.hostname_status = 'active'
           AND shop_domains.ssl_status = 'active'
           AND shop_domains.dns_status = 'active'
+          AND (${customDomainTurnstileAdmissionSql("shop_domains")})
           AND shop_domains.deleted_at IS NULL
           AND shop_domains.delete_requested_at IS NULL
       ) AS customDomainReady,
@@ -736,9 +741,11 @@ export async function publishReadyStorefront(input: {
                   canonical.type = 'platform_subdomain'
                   OR (
                     canonical.type = 'custom'
+                    AND canonical.ownership_verified_at IS NOT NULL
                     AND canonical.hostname_status = 'active'
                     AND canonical.ssl_status = 'active'
                     AND canonical.dns_status = 'active'
+                    AND (${customDomainTurnstileAdmissionSql("canonical")})
                   )
                 )
             )

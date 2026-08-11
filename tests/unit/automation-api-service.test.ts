@@ -311,6 +311,15 @@ function insertDomain(
   const shopId = input.shopId ?? "shp_automation_a";
   const domainId = input.domainId ?? "dom_a";
   const hostname = input.hostname ?? `shop-${suffix}.example.com`;
+  const validationMetadataJson = JSON.stringify({
+    turnstile: {
+      checkedAt: new Date().toISOString(),
+      hostname,
+      mode: "operator_managed",
+      source: "cloudflare_widget_domains",
+      status: "active",
+    },
+  });
   database.database.prepare(`
     INSERT INTO shop_domains (
       id, shop_id, hostname_normalized, type, status, is_primary,
@@ -318,13 +327,14 @@ function insertDomain(
       last_checked_at, activated_at, created_at, updated_at, dns_status,
       next_check_at, check_attempts, lease_token, lease_expires_at,
       last_safe_error_code, deleted_at, delete_requested_at, version, ownership_verified_at
-    ) VALUES (?, ?, ?, 'custom', 'active', 0, ?, 'active', 'active', '{}', ?, ?, ?, ?,
+    ) VALUES (?, ?, ?, 'custom', 'active', 0, ?, 'active', 'active', ?, ?, ?, ?, ?,
       'active', NULL, 0, NULL, NULL, NULL, NULL, NULL, 1, ?)
   `).run(
     domainId,
     shopId,
     hostname,
     `cf-host-${suffix}`,
+    validationMetadataJson,
     timestamp,
     timestamp,
     timestamp,
@@ -934,6 +944,37 @@ describe("tenant-facing automation service", () => {
       runtime: { now: () => new Date(NOW) },
       shopPublicId: "shop_automation_a",
       taskId: "aut_provider_stale",
+      userId: "usr_automation_a",
+    })).rejects.toMatchObject({ code: "automation_provider_evidence_pending", status: 409 });
+  });
+
+  it.each([
+    ["missing", "{}"],
+    ["stale", JSON.stringify({ turnstile: { checkedAt: OLD, hostname: "shop-a.example.com", mode: "operator_managed", source: "cloudflare_widget_domains", status: "active" } })],
+  ])("rejects %s Turnstile evidence for custom-domain automation", async (_case, validationMetadataJson) => {
+    const database = createDatabase();
+    insertDomain(database, NOW);
+    database.database.exec("DROP TRIGGER shop_domains_turnstile_active_update_guard");
+    database.database.prepare(`
+      UPDATE shop_domains
+      SET validation_metadata_json = ?
+      WHERE id = 'dom_a' AND shop_id = 'shp_automation_a'
+    `).run(validationMetadataJson);
+    insertTask(database, {
+      capabilityCode: "domain.custom.manual_dns",
+      id: "aut_domain_unadmitted",
+      inputReference: "d1:domain/dom_a",
+      status: "waiting_provider",
+    });
+
+    await expect(resumeAutomationTask({
+      env: env(database),
+      expectedVersion: 1,
+      idempotencyKey: "automation-domain-unadmitted",
+      requestId: "request-automation-domain-unadmitted",
+      runtime: { now: () => new Date(NOW) },
+      shopPublicId: "shop_automation_a",
+      taskId: "aut_domain_unadmitted",
       userId: "usr_automation_a",
     })).rejects.toMatchObject({ code: "automation_provider_evidence_pending", status: 409 });
   });

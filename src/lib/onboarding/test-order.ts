@@ -1,5 +1,6 @@
 import { requireResourceId } from "../catalog/policy";
 import { AppError } from "../core/errors";
+import { hasFreshExactTurnstileAdmission } from "../domains/readiness";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
 
@@ -66,9 +67,11 @@ type DomainHealthRow = {
   dns_status: string | null;
   hostname_normalized: string;
   hostname_status: string | null;
+  ownership_verified_at: string | null;
   ssl_status: string | null;
   status: string;
   type: "custom" | "platform_subdomain";
+  validation_metadata_json: string;
 };
 
 export type InventoryDryRun = {
@@ -354,9 +357,14 @@ function isDomainReady(domain: DomainHealthRow | null): boolean {
     return false;
   }
   return domain.type === "platform_subdomain"
-    || (domain.hostname_status === "active"
+    || (domain.ownership_verified_at !== null
+      && domain.hostname_status === "active"
       && domain.ssl_status === "active"
-      && domain.dns_status === "active");
+      && domain.dns_status === "active"
+      && hasFreshExactTurnstileAdmission({
+        hostname: domain.hostname_normalized,
+        validationMetadataJson: domain.validation_metadata_json,
+      }));
 }
 
 async function loadDomainHealth(env: AppBindings, shopId: string): Promise<DomainHealth> {
@@ -365,9 +373,11 @@ async function loadDomainHealth(env: AppBindings, shopId: string): Promise<Domai
       shop_domains.hostname_normalized,
       shop_domains.type,
       shop_domains.status,
+      shop_domains.ownership_verified_at,
       shop_domains.hostname_status,
       shop_domains.ssl_status,
       shop_domains.dns_status,
+      shop_domains.validation_metadata_json,
       shop_domains.deleted_at,
       shop_domains.delete_requested_at
     FROM shops

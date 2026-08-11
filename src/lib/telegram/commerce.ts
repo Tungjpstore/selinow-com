@@ -19,6 +19,7 @@ import { D1ChannelConnectionRepository } from "../channels/store";
 import type { ChannelCapability } from "../channels/types";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import { isSupportedCurrency } from "../i18n/currency";
 import { matchSupportedLocale, type SupportedLocale } from "../i18n/locale";
 import { createOrRecoverPrincipalPaymentHandoff } from "../payments/store";
@@ -195,9 +196,17 @@ export async function loadTelegramShop(env: AppBindings, shopId: string): Promis
       ON canonical_domain.id = shops.canonical_domain_id
       AND canonical_domain.shop_id = shops.id
       AND canonical_domain.status = 'active'
+      AND canonical_domain.deleted_at IS NULL
+      AND canonical_domain.delete_requested_at IS NULL
       AND (
         canonical_domain.type = 'platform_subdomain'
-        OR canonical_domain.ownership_verified_at IS NOT NULL
+        OR (
+          canonical_domain.ownership_verified_at IS NOT NULL
+          AND canonical_domain.hostname_status = 'active'
+          AND canonical_domain.ssl_status = 'active'
+          AND canonical_domain.dns_status = 'active'
+          AND (${customDomainTurnstileAdmissionSql("canonical_domain")})
+        )
       )
     WHERE shops.id = ?
     LIMIT 1

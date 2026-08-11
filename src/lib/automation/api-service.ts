@@ -2,6 +2,7 @@ import { constantTimeEqual, hmacToken } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
 import { assertQuotaAvailable, recordUsage } from "../billing/metering";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
 import { assertRoleCapability, type ShopCapability, type ShopRole } from "../tenants/policy";
@@ -340,6 +341,7 @@ async function resolveProviderEvidence(input: {
         AND cloudflare_hostname_id IS NOT NULL
         AND hostname_status = 'active' AND ssl_status = 'active'
         AND dns_status = 'active' AND activated_at IS NOT NULL
+        AND (${customDomainTurnstileAdmissionSql("shop_domains")})
         AND deleted_at IS NULL AND delete_requested_at IS NULL
         AND lease_token IS NULL
       LIMIT 1

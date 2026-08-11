@@ -16,6 +16,7 @@ type TestDatabaseOptions = {
   availableCount?: number;
   domainType?: "custom" | "platform_subdomain";
   domainReady?: boolean;
+  turnstileEvidence?: "active" | "missing" | "stale" | "wrong_host";
   role?: "manager" | "owner";
   userId?: string;
 };
@@ -31,6 +32,7 @@ class TestOrderDatabase {
       domainReady: options.domainReady ?? true,
       domainType: options.domainType ?? "platform_subdomain",
       role: options.role ?? "owner",
+      turnstileEvidence: options.turnstileEvidence ?? "active",
       userId: options.userId ?? "user-a",
     };
   }
@@ -101,17 +103,34 @@ class TestOrderDatabase {
           }
           if (sql.includes("INNER JOIN shop_domains")) {
             const ready = options.domainReady;
+            const hostname = options.domainType === "custom"
+              ? "shop.customer.example"
+              : "shop-a.staging.selinow.com";
+            const checkedAt = options.turnstileEvidence === "stale"
+              ? "2020-01-01T00:00:00.000Z"
+              : new Date().toISOString();
+            const validationMetadata = options.turnstileEvidence === "missing"
+              ? {}
+              : {
+                  turnstile: {
+                    checkedAt,
+                    hostname: options.turnstileEvidence === "wrong_host" ? "other.customer.example" : hostname,
+                    mode: "operator_managed",
+                    source: "cloudflare_widget_domains",
+                    status: "active",
+                  },
+                };
             return {
               delete_requested_at: null,
               deleted_at: null,
               dns_status: options.domainType === "custom" ? (ready ? "active" : "pending") : null,
-              hostname_normalized: options.domainType === "custom"
-                ? "shop.customer.example"
-                : "shop-a.staging.selinow.com",
+              hostname_normalized: hostname,
               hostname_status: options.domainType === "custom" ? (ready ? "active" : "pending") : null,
+              ownership_verified_at: options.domainType === "custom" ? CHECKED_AT : null,
               ssl_status: options.domainType === "custom" ? (ready ? "active" : "pending") : null,
               status: "active",
               type: options.domainType,
+              validation_metadata_json: JSON.stringify(validationMetadata),
             };
           }
           return null;
@@ -268,6 +287,24 @@ describe("controlled onboarding test order", () => {
     });
     expect(result.passed).toBe(false);
   });
+
+  it.each(["missing", "stale", "wrong_host"] as const)(
+    "rejects %s Turnstile evidence for an otherwise active custom domain",
+    async (turnstileEvidence) => {
+      const database = new TestOrderDatabase({ domainType: "custom", turnstileEvidence });
+      const result = await runControlledTestOrder({
+        body: { variantId: VARIANT_ID },
+        env: createEnv(database),
+        requestId: `request-domain-${turnstileEvidence}`,
+        runReadiness: createReadiness(),
+        shopPublicId: SHOP_PUBLIC_ID,
+        userId: "user-a",
+      });
+
+      expect(result.domainHealth).toMatchObject({ ready: false, type: "custom" });
+      expect(result.passed).toBe(false);
+    },
+  );
 });
 
 describe("inventory dry-run decisions", () => {

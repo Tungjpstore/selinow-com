@@ -134,9 +134,11 @@ type FakeStatement = {
 class PublishDatabase {
   guardChanges = 1;
   memberRole = "owner";
+  readonly queries: string[] = [];
   readinessRuns = 0;
 
   prepare(sql: string) {
+    this.queries.push(sql);
     return {
       bind: (...values: unknown[]): FakeStatement => {
         void values;
@@ -225,6 +227,19 @@ describe("guarded publish transition", () => {
     expect(database.readinessRuns).toBe(1);
     expect(result.ready).toBe(true);
     expect(result.readinessVersion).toBe(5);
+    const readinessQuery = database.queries.find((sql) => sql.includes("AS canonicalDomainReady"));
+    const publishGuard = database.queries.find((sql) => sql.includes("UPDATE shops") && sql.includes("shop_onboarding_profiles.website_enabled = 1"));
+    for (const sql of [readinessQuery, publishGuard]) {
+      expect(sql).toContain("canonical.ownership_verified_at IS NOT NULL");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.status') = 'active'");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.hostname') = canonical.hostname_normalized");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')");
+      expect(sql).toContain("-12 hours");
+    }
+    expect(readinessQuery).toContain("shop_domains.ownership_verified_at IS NOT NULL");
+    expect(readinessQuery).toContain("json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') = shop_domains.hostname_normalized");
   });
 
   it("rejects a manager even when all technical checks pass", async () => {

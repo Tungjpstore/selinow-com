@@ -333,9 +333,28 @@ describe("payment origin snapshots", () => {
     expect(runtime.getInsertSql()).toContain("request_domain.hostname_normalized = ?");
     expect(runtime.getInsertSql()).toContain("request_domain.type = 'platform_subdomain'");
     expect(runtime.getInsertSql()).toContain("request_domain.ownership_verified_at IS NOT NULL");
+    expect(runtime.getInsertSql()).toContain("request_domain.hostname_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("request_domain.ssl_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("request_domain.dns_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.status') = 'active'");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.hostname') = request_domain.hostname_normalized");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.checkedAt')");
+    expect(runtime.getInsertSql()).toContain("request_domain.delete_requested_at IS NULL");
     expect(runtime.getInsertSql()).toContain("canonical_domain.id = shops.canonical_domain_id");
     expect(runtime.getInsertSql()).toContain("canonical_domain.type = 'platform_subdomain'");
     expect(runtime.getInsertSql()).toContain("canonical_domain.ownership_verified_at IS NOT NULL");
+    expect(runtime.getInsertSql()).toContain("canonical_domain.hostname_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("canonical_domain.ssl_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("canonical_domain.dns_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.status') = 'active'");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.hostname') = canonical_domain.hostname_normalized");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.checkedAt')");
+    expect(runtime.getInsertSql()).toContain("canonical_domain.delete_requested_at IS NULL");
+    expect(runtime.getInsertSql()).toContain("-12 hours");
     expect(runtime.getAttempt()).toMatchObject({
       checkoutDomainId: "domain-primary",
       returnOrigin: "https://primary.customer.com",
