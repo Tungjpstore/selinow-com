@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AppError } from "../../src/lib/core/errors";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import { encryptTelegramCredential } from "../../src/lib/telegram/crypto";
 
@@ -15,7 +16,13 @@ const BOT_TOKEN = "123456789:abcdefghijklmnopqrstuvwxyzABCDE";
 const KEK = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const WEBHOOK_SECRET = "active-health-secret_123456789";
 
-async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCredentialOnReply?: boolean } = {}) {
+async function activeEnvironment(options: {
+  failPostSendEvidenceOnce?: boolean;
+  failReplyClaims?: boolean;
+  failReplyFinalizationOnce?: boolean;
+  failUpdateInsert?: boolean;
+  rotateCredentialOnReply?: boolean;
+} = {}) {
   const encrypted = await encryptTelegramCredential({
     botToken: BOT_TOKEN,
     credentialId: "credential-active",
@@ -31,6 +38,9 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
   let providerCalls = 0;
   let activeCredentialId = "credential-active";
   let updateReadCount = 0;
+  let updateRow: { id: string; payloadHash: string; status: string; updatedAt: string } | null = null;
+  let failPostSendEvidence = options.failPostSendEvidenceOnce === true;
+  let failReplyFinalization = options.failReplyFinalizationOnce === true;
   const staleAudits: Array<{ metadata: unknown; requestId: string }> = [];
 
   const database = {
@@ -61,7 +71,7 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
               }
               if (sql.includes("FROM telegram_updates")) {
                 updateReadCount += 1;
-                return Promise.resolve(null);
+                return Promise.resolve(updateRow === null ? null : { ...updateRow });
               }
               return Promise.resolve(null);
             },
@@ -69,10 +79,41 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
               if (options.failUpdateInsert === true && sql.includes("INSERT INTO telegram_updates")) {
                 throw new Error("forced_telegram_update_failure");
               }
+              if (sql.includes("INSERT INTO telegram_updates")) {
+                updateRow = {
+                  id: String(values[0]),
+                  payloadHash: String(values[4]),
+                  status: "processing",
+                  updatedAt: String(values[8]),
+                };
+              }
+              if (sql.includes("UPDATE telegram_updates SET status = 'processing'") && updateRow !== null) {
+                updateRow.status = "processing";
+                updateRow.updatedAt = String(values[0]);
+              }
+              if (failPostSendEvidence && providerCalls > 0 && sql.includes("UPDATE telegram_recipients")) {
+                failPostSendEvidence = false;
+                throw new Error("forced_post_send_evidence_failure");
+              }
               if (sql.includes("last_health_update_at = COALESCE") && typeof values[1] === "string") {
                 healthUpdated = activeCredentialId === String(values[5]);
               }
-              if (sql.includes("UPDATE telegram_updates SET status = 'processed'")) resultCodes.push(String(values[0]));
+              if (failReplyFinalization && providerCalls > 0 && sql.includes("SET status = 'processed'")) {
+                failReplyFinalization = false;
+                throw new Error("forced_reply_finalization_failure");
+              }
+              if (options.failReplyClaims === true && sql.includes("SET status = 'processed'")) {
+                throw new Error("forced_reply_claim_failure");
+              }
+              if (sql.includes("SET status = 'processed'") && updateRow !== null) {
+                updateRow.status = "processed";
+                updateRow.updatedAt = String(values[2]);
+                resultCodes.push(String(values[0]));
+              }
+              if (sql.includes("UPDATE telegram_updates SET status = 'failed'") && updateRow !== null && updateRow.status !== "processed") {
+                updateRow.status = "failed";
+                updateRow.updatedAt = String(values[1]);
+              }
               if (sql.includes("telegram.update_stale_generation")) staleAudits.push({ metadata: JSON.parse(String(values[3])), requestId: String(values[4]) });
               return Promise.resolve({ meta: { changes: 1 } });
             },
@@ -88,7 +129,7 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
     providerCalls += 1;
     const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
     if (body.callback_query_id !== undefined) return Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }));
-    expect(body.chat_id).toBe("42");
+    expect(new Set(["-42", "42"]).has(String(body.chat_id))).toBe(true);
     if (options.rotateCredentialOnReply === true) activeCredentialId = "credential-rotated";
     return Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }));
   };
@@ -109,16 +150,47 @@ async function activeEnvironment(options: { failUpdateInsert?: boolean; rotateCr
   };
 }
 
-function webhookRequest(text: string): Request {
+function webhookRequest(text: string, chatType: "group" | "private" = "private"): Request {
   return new Request("https://api.test/webhooks/telegram/tgwh_active", {
     body: JSON.stringify({
       message: {
-        chat: { id: 42, type: "private" },
+        chat: { id: chatType === "private" ? 42 : -42, type: chatType },
         from: { first_name: "Seller", id: 42, is_bot: false, language_code: "vi", username: "seller" },
         message_id: 7,
         text,
       },
       update_id: 100,
+    }),
+    headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET },
+    method: "POST",
+  });
+}
+
+function inlineCallbackRequest(): Request {
+  return new Request("https://api.test/webhooks/telegram/tgwh_active", {
+    body: JSON.stringify({
+      callback_query: {
+        from: { first_name: "Buyer", id: 42, is_bot: false },
+        id: "callback-inline",
+        inline_message_id: "inline-message-1",
+      },
+      update_id: 106,
+    }),
+    headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET },
+    method: "POST",
+  });
+}
+
+function callbackRequest(): Request {
+  return new Request("https://api.test/webhooks/telegram/tgwh_active", {
+    body: JSON.stringify({
+      callback_query: {
+        data: "cart",
+        from: { first_name: "Buyer", id: 42, is_bot: false },
+        id: "callback-message",
+        message: { chat: { id: 42, type: "private" }, message_id: 8 },
+      },
+      update_id: 107,
     }),
     headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET },
     method: "POST",
@@ -226,23 +298,117 @@ describe("active Telegram health evidence", () => {
     expect(commerce.handle).not.toHaveBeenCalled();
   });
 
+  it("does not resend a reply after provider success when post-send D1 evidence fails", async () => {
+    const runtime = await activeEnvironment({ failPostSendEvidenceOnce: true });
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/start"),
+      requestId: "request-post-send-evidence-failure",
+      webhookPublicId: "tgwh_active",
+    })).rejects.toThrow("forced_post_send_evidence_failure");
+    expect(runtime.getProviderCalls()).toBe(1);
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/start"),
+      requestId: "request-post-send-evidence-replay",
+      webhookPublicId: "tgwh_active",
+    })).resolves.toMatchObject({ duplicate: true, processed: false, state: "duplicate" });
+
+    expect(runtime.getProviderCalls()).toBe(1);
+    expect(commerce.handle).toHaveBeenCalledOnce();
+  });
+
+  it("does not resend a non-private reply when terminal persistence fails after provider success", async () => {
+    const runtime = await activeEnvironment({ failReplyFinalizationOnce: true });
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/start", "group"),
+      requestId: "request-non-private-finalization-failure",
+      webhookPublicId: "tgwh_active",
+    })).resolves.toMatchObject({ processed: true, state: "private_chat_required" });
+    expect(runtime.getProviderCalls()).toBe(1);
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/start", "group"),
+      requestId: "request-non-private-finalization-replay",
+      webhookPublicId: "tgwh_active",
+    })).resolves.toMatchObject({ duplicate: true, processed: false, state: "duplicate" });
+    expect(runtime.getProviderCalls()).toBe(1);
+  });
+
+  it("does not repeat an inline callback answer when post-provider finalization would fail", async () => {
+    const runtime = await activeEnvironment({ failReplyFinalizationOnce: true });
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: inlineCallbackRequest(),
+      requestId: "request-inline-finalization-failure",
+      webhookPublicId: "tgwh_active",
+    })).resolves.toMatchObject({ processed: true, state: "callback_unsupported" });
+    expect(runtime.getProviderCalls()).toBe(1);
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: inlineCallbackRequest(),
+      requestId: "request-inline-finalization-replay",
+      webhookPublicId: "tgwh_active",
+    })).resolves.toMatchObject({ duplicate: true, processed: false, state: "duplicate" });
+    expect(runtime.getProviderCalls()).toBe(1);
+  });
+
+  it("does not repeat an error callback after commerce fails", async () => {
+    const runtime = await activeEnvironment();
+    commerce.handle.mockRejectedValue(new AppError("cart_invalid", 409));
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: callbackRequest(),
+      requestId: "request-error-callback-first",
+      webhookPublicId: "tgwh_active",
+    })).rejects.toMatchObject({ code: "cart_invalid" });
+    expect(runtime.getProviderCalls()).toBe(1);
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: callbackRequest(),
+      requestId: "request-error-callback-replay",
+      webhookPublicId: "tgwh_active",
+    })).resolves.toMatchObject({ duplicate: true, processed: false, state: "duplicate" });
+    expect(runtime.getProviderCalls()).toBe(1);
+    expect(commerce.handle).toHaveBeenCalledOnce();
+  });
+
+  it("does not call the provider when a durable reply attempt cannot be claimed", async () => {
+    const runtime = await activeEnvironment({ failReplyClaims: true });
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: callbackRequest(),
+      requestId: "request-reply-claim-failure",
+      webhookPublicId: "tgwh_active",
+    })).rejects.toThrow("forced_reply_claim_failure");
+    expect(runtime.getProviderCalls()).toBe(0);
+  });
+
   it("acknowledges inline callbacks without entering private-chat commerce", async () => {
     const runtime = await activeEnvironment();
     const result = await processTelegramWebhook({
       env: runtime.env,
       fetcher: runtime.fetcher,
-      request: new Request("https://api.test/webhooks/telegram/tgwh_active", {
-        body: JSON.stringify({
-          callback_query: {
-            from: { first_name: "Buyer", id: 42, is_bot: false },
-            id: "callback-inline",
-            inline_message_id: "inline-message-1",
-          },
-          update_id: 106,
-        }),
-        headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET },
-        method: "POST",
-      }),
+      request: inlineCallbackRequest(),
       requestId: "request-inline-callback",
       webhookPublicId: "tgwh_active",
     });

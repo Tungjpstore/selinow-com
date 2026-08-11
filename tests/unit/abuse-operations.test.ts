@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppError } from "../../src/lib/core/errors";
 import { updateProduct } from "../../src/lib/catalog/store";
@@ -209,6 +209,7 @@ describe("abuse and moderation operations", () => {
 
   afterEach(() => {
     database.close();
+    vi.unstubAllGlobals();
   });
 
   it("redacts credential-like material and URL identity before persistence", () => {
@@ -254,6 +255,55 @@ describe("abuse and moderation operations", () => {
 
     await expect(createPublicAbuseReport({ ...input, summary: "Noi dung khac hoan toan nhung dung lai cung idempotency key." }))
       .rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+  });
+
+  it("fails closed outside local when Turnstile configuration is missing", async () => {
+    env = { ...env, APP_ENV: "production" };
+
+    await expect(createPublicAbuseReport({
+      category: "malware",
+      env,
+      idempotencyKey: "report-turnstile-missing",
+      now: NOW,
+      request: publicRequest(21),
+      requestId: "request-turnstile-missing",
+      shop: shopA(),
+      summary: "Bao cao hop le nhung production Turnstile dang bi thieu cau hinh.",
+      targetKind: "shop",
+    })).rejects.toMatchObject({ code: "turnstile_unavailable", status: 503 });
+
+    expect(database.prepare("SELECT COUNT(*) AS count FROM abuse_reports").get()).toEqual({ count: 0 });
+  });
+
+  it("rejects a production report when Turnstile verification fails", async () => {
+    env = {
+      ...env,
+      APP_ENV: "production",
+      TURNSTILE_SECRET_KEY: "0xabcdefghijklmnopqrstuvwxyz123456",
+      TURNSTILE_SITE_KEY: "0xabcdefghijklmnopqrstuvwxyz123456",
+    };
+    const providerFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      action: "report_abuse",
+      hostname: "shop-a.example.test",
+      success: false,
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+
+    await expect(createPublicAbuseReport({
+      category: "fraud",
+      env,
+      idempotencyKey: "report-turnstile-invalid",
+      now: NOW,
+      request: publicRequest(22),
+      requestId: "request-turnstile-invalid",
+      shop: shopA(),
+      summary: "Bao cao hop le nhung Turnstile provider da tu choi challenge nay.",
+      targetKind: "shop",
+      turnstileToken: "invalid-turnstile-token",
+    })).rejects.toMatchObject({ code: "turnstile_invalid", status: 403 });
+
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(database.prepare("SELECT COUNT(*) AS count FROM abuse_reports").get()).toEqual({ count: 0 });
   });
 
   it("rate limits anonymous reports by tenant and pseudonymous actor", async () => {

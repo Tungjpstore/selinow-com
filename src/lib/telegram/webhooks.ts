@@ -78,6 +78,55 @@ async function markProcessed(env: AppBindings, input: { credentialId: string; in
   ]);
 }
 
+// Telegram sendMessage has no idempotency key. A terminal pre-send claim gives
+// replies at-most-once attempt semantics: ambiguous provider failures may lose
+// a reply, but a webhook retry cannot send the same update again.
+async function claimReplyAttempt(
+  env: AppBindings,
+  input: { credentialId: string; integrationId: string; rowId: string; shopId: string },
+  resultCode: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const results = await env.PLATFORM_DB.batch([
+    env.PLATFORM_DB.prepare(`
+      UPDATE telegram_updates
+      SET status = 'processed', safe_result_code = ?, processed_at = ?, updated_at = ?
+      WHERE id = ? AND integration_id = ? AND shop_id = ? AND status = 'processing'
+        AND EXISTS (
+          SELECT 1 FROM telegram_integrations
+          INNER JOIN telegram_credentials
+            ON telegram_credentials.id = telegram_integrations.active_credential_id
+            AND telegram_credentials.integration_id = telegram_integrations.id
+            AND telegram_credentials.shop_id = telegram_integrations.shop_id
+            AND telegram_credentials.status = 'active'
+          WHERE telegram_integrations.id = ?
+            AND telegram_integrations.shop_id = ?
+            AND telegram_integrations.active_credential_id = ?
+            AND telegram_integrations.status IN ('active', 'degraded')
+        )
+    `).bind(
+      resultCode,
+      now,
+      now,
+      input.rowId,
+      input.integrationId,
+      input.shopId,
+      input.integrationId,
+      input.shopId,
+      input.credentialId,
+    ),
+    env.PLATFORM_DB.prepare(`
+      UPDATE telegram_integrations
+      SET last_update_at = ?,
+        last_safe_error_code = CASE WHEN status = 'active' THEN NULL ELSE last_safe_error_code END,
+        updated_at = ?
+      WHERE id = ? AND shop_id = ? AND active_credential_id = ?
+        AND status IN ('active', 'degraded')
+    `).bind(now, now, input.integrationId, input.shopId, input.credentialId),
+  ]);
+  if (results[0]?.meta.changes !== 1) throw new AppError("telegram_update_claim_lost", 409);
+}
+
 async function markFailed(env: AppBindings, input: { credentialId: string; integrationId: string; rowId: string; shopId: string }, code: string): Promise<void> {
   const now = new Date().toISOString();
   await env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'failed', safe_result_code = ?, updated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND status IN ('processing', 'failed')").bind(code, now, input.rowId, input.integrationId, input.shopId).run();
@@ -146,7 +195,6 @@ async function handleDraftHealthStart(input: {
   env: AppBindings;
   integrationId: string;
   locale: string;
-  rowId: string;
   shopId: string;
   update: TelegramUpdate;
 }): Promise<void> {
@@ -157,7 +205,6 @@ async function handleDraftHealthStart(input: {
   });
   const now = new Date().toISOString();
   await input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET last_health_update_at = ?, last_update_at = ?, last_outbound_at = ?, last_safe_error_code = NULL, updated_at = ? WHERE id = ? AND shop_id = ? AND active_credential_id = ? AND status IN ('active', 'degraded')").bind(now, now, now, now, input.integrationId, input.shopId, input.credentialId).run();
-  await markProcessed(input.env, { credentialId: input.credentialId, integrationId: input.integrationId, rowId: input.rowId, shopId: input.shopId }, "draft_health_confirmed");
 }
 
 export async function processTelegramWebhook(input: { env: AppBindings; fetcher?: typeof fetch; request: Request; requestId: string; webhookPublicId: string }): Promise<TelegramWebhookResult> {
@@ -183,13 +230,13 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
   const client = new TelegramClient(credentials.botToken, input.fetcher);
   const generation = { credentialId: integration.credential.credentialId, env: input.env, integrationId: integration.integrationId, shopId: integration.shopId };
   const updateLedger = { credentialId: integration.credential.credentialId, integrationId: integration.integrationId, rowId: registered.rowId, shopId: integration.shopId };
+  let replyAttemptClaimed = false;
   const rejectIfStale = async (): Promise<boolean> => {
     if (await isCurrentGeneration(generation)) return false;
     await rejectStaleGeneration({ env: input.env, integrationId: integration.integrationId, requestId: input.requestId, rowId: registered.rowId, shopId: integration.shopId, updateId: update.updateId });
     return true;
   };
   if (!registered.shouldProcess) {
-    if (commerceAllowed && await isCurrentGeneration(generation)) await answerCallback(client, update);
     return { duplicate: true, processed: false, state: "duplicate" };
   }
   if (await rejectIfStale()) {
@@ -197,8 +244,8 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
   }
   if (update.kind === "unsupported_callback_query") {
     if (await rejectIfStale()) return { duplicate: registered.duplicate, processed: false, state: "stale_generation" };
+    await claimReplyAttempt(input.env, updateLedger, "callback_unsupported");
     await answerCallback(client, update, telegramText(locale, "webhook.callbackPrivate"));
-    await markProcessed(input.env, updateLedger, "callback_unsupported");
     return { duplicate: registered.duplicate, processed: true, state: "callback_unsupported" };
   }
   if (update.user.isBot) {
@@ -216,7 +263,9 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
     }
     try {
       if (await rejectIfStale()) return { duplicate: registered.duplicate, processed: false, state: "stale_generation" };
-      await handleDraftHealthStart({ client, credentialId: integration.credential.credentialId, env: input.env, integrationId: integration.integrationId, locale, rowId: registered.rowId, shopId: integration.shopId, update });
+      await claimReplyAttempt(input.env, updateLedger, "draft_health_confirmed");
+      replyAttemptClaimed = true;
+      await handleDraftHealthStart({ client, credentialId: integration.credential.credentialId, env: input.env, integrationId: integration.integrationId, locale, shopId: integration.shopId, update });
       return { duplicate: registered.duplicate, processed: true, state: "draft_health_confirmed" };
     } catch (error) {
       const code = error instanceof AppError ? error.code : "internal_error";
@@ -228,14 +277,17 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
   try {
     if (update.chat.type !== "private") {
       if (await rejectIfStale()) return { duplicate: registered.duplicate, processed: false, state: "stale_generation" };
+      await claimReplyAttempt(input.env, updateLedger, "private_chat_required");
+      replyAttemptClaimed = true;
       await handleNonPrivate({ botUsername: integration.botUsername, client, locale, update });
       if (await isCurrentGeneration(generation)) await answerCallback(client, update, telegramText(locale, "webhook.callbackPrivate"));
-      await markProcessed(input.env, updateLedger, "private_chat_required");
       return { duplicate: registered.duplicate, processed: true, state: "private_chat_required" };
     }
     if (await rejectIfStale()) return { duplicate: registered.duplicate, processed: false, state: "stale_generation" };
     const result = await handleTelegramCommerce({ env: input.env, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }), integrationId: integration.integrationId, shopId: integration.shopId, update });
     if (await rejectIfStale()) return { duplicate: registered.duplicate, processed: false, state: "stale_generation" };
+    await claimReplyAttempt(input.env, updateLedger, result.resultCode);
+    replyAttemptClaimed = true;
     await client.sendMessage({ chatId: result.identity.chatId, ...(result.reply.keyboard === undefined ? {} : { keyboard: result.reply.keyboard }), ...(result.reply.protectContent === undefined ? {} : { protectContent: result.reply.protectContent }), text: result.reply.text });
     if (await isCurrentGeneration(generation)) await answerCallback(client, update);
     const now = new Date().toISOString();
@@ -244,11 +296,18 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
       input.env.PLATFORM_DB.prepare("UPDATE telegram_recipients SET last_outbound_at = ?, last_safe_error_code = NULL, status = 'active', updated_at = ? WHERE integration_id = ? AND customer_identity_id = ?").bind(now, now, integration.integrationId, result.identity.identityId),
       input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET last_outbound_at = ?, last_health_update_at = COALESCE(?, last_health_update_at), updated_at = ? WHERE id = ? AND shop_id = ? AND active_credential_id = ? AND status IN ('active', 'degraded')").bind(now, healthAt, now, integration.integrationId, integration.shopId, integration.credential.credentialId),
     ]);
-    await markProcessed(input.env, updateLedger, result.resultCode);
     return { duplicate: registered.duplicate, processed: true, state: result.resultCode };
   } catch (error) {
-    if (await isCurrentGeneration(generation)) await answerCallback(client, update, telegramText(locale, "webhook.callbackError"));
     const code = error instanceof AppError ? error.code : "internal_error";
+    if (!replyAttemptClaimed) {
+      try {
+        await claimReplyAttempt(input.env, updateLedger, code);
+        replyAttemptClaimed = true;
+      } catch { /* Leave the update retryable when the terminal attempt cannot be claimed. */ }
+    }
+    if (replyAttemptClaimed && await isCurrentGeneration(generation)) {
+      await answerCallback(client, update, telegramText(locale, "webhook.callbackError"));
+    }
     await markFailed(input.env, updateLedger, code);
     if (error instanceof TelegramProviderError) {
       const classification = providerResult(error);
