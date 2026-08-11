@@ -303,7 +303,7 @@ describe("PayOS staging UAT evidence", () => {
     expect(fingerprintPayosStagingUatEvidence(value)).toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  it("keeps payment-lane acceptance outside full-commerce acceptance while reversals are unsupported", () => {
+  it("accepts the payment lane while recording unsupported reversals", () => {
     const fixture = writeCommerceProviderFixture();
     try {
       const result = validateCommerceUatArtifactsSync({
@@ -314,8 +314,8 @@ describe("PayOS staging UAT evidence", () => {
       });
 
       expect(result.payos).toMatchObject({
-        accepted: false,
-        error: "payos_full_commerce_unsupported",
+        accepted: true,
+        fullCommerceAccepted: false,
         paymentLaneAccepted: true,
         reasonCodes: [
           "payos_signed_refund_not_supported",

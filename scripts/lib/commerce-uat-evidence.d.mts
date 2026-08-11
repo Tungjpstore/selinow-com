@@ -2,8 +2,11 @@ export type CommerceUatArtifactValidation = Record<"dodo" | "payos", {
   accepted: boolean;
   error?: string;
   artifactFingerprintSha256?: string;
+  fullCommerceAccepted?: boolean;
   manifestRef?: string;
   manifestSha256?: string;
+  paymentLaneAccepted?: boolean;
+  reasonCodes?: readonly string[];
   releaseId?: string;
   scenarioCount?: number;
   workerVersion?: string;

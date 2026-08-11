@@ -213,21 +213,6 @@ export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), r
         ...(provider === "payos" ? { ownerAttestationPublicKeys: resolvePayosOwnerAttestationPublicKeys(payosOwnerAttestationPublicKeys) } : {}),
       };
       const accepted = validator(artifact, binding);
-      if (provider === "payos" && accepted.fullCommerceAccepted !== true) {
-        result[provider] = {
-          accepted: false,
-          artifactFingerprintSha256: artifactSha256,
-          error: "payos_full_commerce_unsupported",
-          manifestRef: binding.manifestRef,
-          manifestSha256: binding.manifestSha256,
-          paymentLaneAccepted: accepted.paymentLaneAccepted === true,
-          reasonCodes: Array.isArray(accepted.fullCommerceReasonCodes) ? [...accepted.fullCommerceReasonCodes] : [],
-          releaseId: binding.releaseId,
-          scenarioCount: accepted.scenarioCount,
-          workerVersion: binding.workerVersion,
-        };
-        continue;
-      }
       result[provider] = {
         accepted: true,
         artifactFingerprintSha256: artifactSha256,
@@ -236,6 +221,11 @@ export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), r
         releaseId: binding.releaseId,
         scenarioCount: accepted.scenarioCount,
         workerVersion: binding.workerVersion,
+        ...(provider === "payos" ? {
+          fullCommerceAccepted: accepted.fullCommerceAccepted === true,
+          paymentLaneAccepted: accepted.paymentLaneAccepted === true,
+          reasonCodes: Array.isArray(accepted.fullCommerceReasonCodes) ? [...accepted.fullCommerceReasonCodes] : [],
+        } : {}),
       };
     } catch (error) {
       result[provider] = {

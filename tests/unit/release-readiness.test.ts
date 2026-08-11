@@ -912,7 +912,7 @@ describe("production release readiness", () => {
     })).toThrow("production_release_manifest_mismatch:configFingerprintSha256");
   });
 
-  it("admits the payment lane while blocking unsupported PayOS full commerce", async () => {
+  it("admits PayOS payment acceptance while preserving unsupported reversal capabilities", async () => {
     const root = await mkdtemp(join(tmpdir(), "selinow-release-admission-"));
     const previousAttestationKeyId = process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID;
     const previousAttestationPublicKey = process.env.SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64;
@@ -1188,15 +1188,15 @@ describe("production release readiness", () => {
         },
       });
       expect(commerceEvidenceValidation.payos).toMatchObject({
-        accepted: false,
-        error: "payos_full_commerce_unsupported",
+        accepted: true,
+        fullCommerceAccepted: false,
         paymentLaneAccepted: true,
         reasonCodes: [
           "payos_signed_refund_not_supported",
           "payos_signed_chargeback_not_supported",
         ],
       });
-      const blockedReleaseInput = {
+      const releaseInput = {
         commerceEvidenceValidation,
         evidence,
         migrationNames: ["0001_first.sql"],
@@ -1207,18 +1207,30 @@ describe("production release readiness", () => {
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
         wranglerConfig: readyWranglerConfig(),
       };
-      expect(() => buildReleaseArtifacts(blockedReleaseInput)).toThrow("release_prerequisites_incomplete:evidence.commerceAcceptance.payos.artifactAccepted");
+      const releaseArtifacts = buildReleaseArtifacts(releaseInput);
+      const projectedCommerce = releaseArtifacts.manifest.commerceAcceptance as Record<string, Record<string, unknown>>;
+      expect(projectedCommerce.payos).toMatchObject({
+        accepted: true,
+        artifactFingerprintSha256: payosCommerce.artifactSha256,
+        artifactReleaseId: stagingReleaseId,
+        paymentLaneAccepted: true,
+        fullCommerceAccepted: false,
+        reasonCodes: [
+          "payos_signed_refund_not_supported",
+          "payos_signed_chargeback_not_supported",
+        ],
+      });
 
       const evidencePath = join(root, ".wrangler/release/production-evidence.json");
       const manifestPath = join(root, ".wrangler/releases", releaseId, "release-manifest.json");
       await writeFile(evidencePath, JSON.stringify(evidence), { mode: 0o600 });
-      await writeFile(manifestPath, JSON.stringify({ createdAt: now.toISOString() }), { mode: 0o600 });
+      await writeFile(manifestPath, JSON.stringify(releaseArtifacts.manifest), { mode: 0o600 });
       await expect(assertProductionDeployAdmission({
         manifestPath,
         now,
         repositoryRoot: root,
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
-      })).rejects.toThrow("release_prerequisites_incomplete:evidence.commerceAcceptance.payos.artifactAccepted");
+      })).resolves.toMatchObject({ releaseId });
 
       await writeFile(join(root, rollback.rehearsalEvidenceRef), `${rollbackArtifact}\n`, { mode: 0o600 });
       await expect(assertProductionDeployAdmission({

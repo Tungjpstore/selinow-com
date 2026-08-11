@@ -19,7 +19,10 @@ export function evaluatePayosStagingUatEvidence(evidence: unknown, binding: Payo
   acceptanceReasonCode: string | null;
   evidenceFingerprintSha256: string;
   evidenceKind: "provider_acceptance" | "contract_gap";
+  fullCommerceAccepted: boolean;
+  fullCommerceReasonCodes: readonly string[];
   localScenarioCount: 10;
+  paymentLaneAccepted: boolean;
   providerScenarioCount: 2;
   releaseId: string;
   scenarioCount: 14;
@@ -33,7 +36,10 @@ export function assertPayosStagingUatEvidence(evidence: unknown, binding: PayosS
   acceptanceReasonCode: null;
   evidenceFingerprintSha256: string;
   evidenceKind: "provider_acceptance";
+  fullCommerceAccepted: boolean;
+  fullCommerceReasonCodes: readonly string[];
   localScenarioCount: 10;
+  paymentLaneAccepted: true;
   providerScenarioCount: 2;
   releaseId: string;
   scenarioCount: 14;

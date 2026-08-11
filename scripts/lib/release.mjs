@@ -875,6 +875,9 @@ function projectAcceptance(source, keys, artifactValidation) {
       artifactManifestSha256: validation.manifestSha256,
       artifactWorkerVersion: validation.workerVersion,
       artifactScenarioCount: validation.scenarioCount,
+      ...(typeof validation.paymentLaneAccepted === "boolean" ? { paymentLaneAccepted: validation.paymentLaneAccepted } : {}),
+      ...(typeof validation.fullCommerceAccepted === "boolean" ? { fullCommerceAccepted: validation.fullCommerceAccepted } : {}),
+      ...(Array.isArray(validation.reasonCodes) ? { reasonCodes: [...validation.reasonCodes] } : {}),
     }];
   }));
 }
