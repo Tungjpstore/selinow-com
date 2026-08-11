@@ -106,13 +106,40 @@ describe("onboarding localization contract", () => {
     expect(client).toContain("formatMoney(offer.amountMinor, offer.currency, activeLocale)");
   });
 
-  it("recovers server-owned onboarding state without relying on the idempotency storage cache", () => {
+  it("uses server-owned creation admission for new shops and canceled billing recovery", () => {
     const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    const page = readFileSync("src/pages/onboarding.astro", "utf8");
+    const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
     expect(component).toContain("data-onboarding-resume-recovery");
     expect(component).toContain("data-onboarding-resume-reload");
+    expect(component).toContain("creationAdmission.allowed");
+    expect(component).toContain("data-creation-admission");
+    expect(page).toContain("getShopCreationAdmission");
+    expect(route).toContain("getShopCreationAdmission");
+    expect(route).toContain("creationAdmission");
+    expect(client).toContain("parseShopCreationAdmission");
+    expect(client).toContain('window.location.assign(`/app/billing?shop=${encodeURIComponent(recoveryShopPublicId)}`)');
     expect(client).toContain('error.issues.includes("trial_already_used")');
-    expect(client).toContain('window.location.assign("/onboarding")');
     expect(client).toContain("return crypto.randomUUID()");
+  });
+
+  it("binds shop creation abuse admission to the authenticated subject and Cloudflare requester signal", () => {
+    const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
+    const store = readFileSync("src/lib/tenants/store.ts", "utf8");
+    expect(route).toContain("cloudflareRequesterAddress(request)");
+    expect(route).toContain("requesterAddress:");
+    expect(store).toContain("claimShopCreationAdmission");
+    expect(route).not.toContain("request.headers.get(\"CF-Connecting-IP\")");
+  });
+
+  it("never invents a platform policy attestation version in the browser", () => {
+    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
+    const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    expect(component).toContain("data-policy-attestation-published");
+    expect(component).toContain("data-policy-attestation-version");
+    expect(component).toContain("disabled={!policyAttestationPublished}");
+    expect(client).toContain("policyAttestationVersion");
+    expect(client).not.toContain("attestationVersion: 1");
   });
 });

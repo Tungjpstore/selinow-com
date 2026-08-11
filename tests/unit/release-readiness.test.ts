@@ -14,6 +14,7 @@ import {
   buildReleaseArtifacts,
   evaluateBackupPrerequisites,
   inspectProductionReadiness,
+  REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS,
   REQUIRED_PRODUCTION_VARS,
   REQUIRED_WORKER_SECRET_NAMES,
   runPilotSmoke,
@@ -23,6 +24,7 @@ import {
   writeProductionRollbackRehearsalArtifact,
 } from "../../scripts/lib/release.mjs";
 import { DODO_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/dodo-uat-evidence.mjs";
+import { validateCommerceUatArtifactsSync } from "../../scripts/lib/commerce-uat-evidence.mjs";
 import { PAYOS_STAGING_UAT_SCENARIO_IDS, serializePayosOwnerAttestationPayload } from "../../scripts/lib/payos-uat-evidence.mjs";
 
 const now = new Date("2026-07-26T03:00:00.000Z");
@@ -41,39 +43,7 @@ const payosLocalAssuranceScenarioIds = [
   "fulfillment_exactly_once",
 ] as const;
 const payosProviderUnsupportedScenarioIds = ["signed_refund", "signed_chargeback"] as const;
-const rollbackInvariants = [
-  "billing_checkout_sessions_scope_guard",
-  "billing_checkout_sessions_scope_update_guard",
-  "shop_subscriptions_provider_ref_guard",
-  "shop_subscriptions_provider_ref_update_guard",
-  "plan_prices_published_reference_guard",
-  "plans_public_assignable_insert_guard",
-  "plans_public_assignable_update_guard",
-  "shop_subscriptions_price_snapshot_presence_guard",
-  "shop_subscriptions_price_snapshot_presence_update_guard",
-  "shop_subscriptions_price_snapshot_scope_guard",
-  "shop_subscriptions_price_snapshot_scope_update_guard",
-  "shop_subscriptions_trial_claim_insert_guard",
-  "shop_subscriptions_trial_claim_update_guard",
-  "shop_customers_anonymized_insert_guard",
-  "shop_customers_anonymized_update_guard",
-  "checkout_recovery_capabilities_tenant_order_insert_guard",
-  "checkout_recovery_capabilities_tenant_order_guard",
-  "payment_integrations_provider_claim_generation",
-  "payment_integrations_provider_claim_nonce",
-  "payment_integrations_provider_claim_state",
-  "payment_integrations_provider_claim_target_fingerprint",
-  "payment_credentials_provider_claim_nonce",
-  "idx_payment_integrations_provider_claim_nonce",
-  "payment_integrations_payos_claim_state_insert_guard",
-  "payment_integrations_payos_claim_state_update_guard",
-  "payment_credentials_payos_claim_scope_insert_guard",
-  "payment_credentials_payos_claim_scope_update_guard",
-  "payment_integrations_payos_claim_fingerprint_update_guard",
-  "payment_credentials_payos_claim_fingerprint_update_guard",
-  "payment_integrations_payos_claim_fingerprint_clear_guard",
-  "payment_credentials_payos_claim_fingerprint_clear_guard",
-];
+const rollbackInvariants = [...REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS];
 const sourceMigrationNames = readdirSync("migrations")
   .filter((name) => name.endsWith(".sql"))
   .sort();
@@ -780,7 +750,40 @@ describe("production release readiness", () => {
     const evidence = readyEvidence(migrationNames);
     const wranglerConfig = readyWranglerConfig();
     const productionSpec = readyProductionSpec();
+    const staging = evidence.staging as {
+      manifestRef: string;
+      manifestSha256: string;
+      releaseId: string;
+      workerVersion: string;
+    };
+    const commerce = evidence.commerceAcceptance as {
+      dodo: Record<string, unknown>;
+      payos: Record<string, unknown>;
+    };
+    commerce.dodo.evidenceRef = `.wrangler/releases/staging/${staging.releaseId}/dodo-uat-evidence.json`;
+    commerce.dodo.artifactSha256 = "c".repeat(64);
+    commerce.payos.evidenceRef = `.wrangler/releases/staging/${staging.releaseId}/payos-uat-evidence.json`;
+    commerce.payos.artifactSha256 = "d".repeat(64);
+    const commerceEvidenceValidation = {
+      dodo: {
+        accepted: true,
+        artifactFingerprintSha256: "c".repeat(64),
+        manifestRef: staging.manifestRef,
+        manifestSha256: staging.manifestSha256,
+        releaseId: staging.releaseId,
+        workerVersion: staging.workerVersion,
+      },
+      payos: {
+        accepted: true,
+        artifactFingerprintSha256: "d".repeat(64),
+        manifestRef: staging.manifestRef,
+        manifestSha256: staging.manifestSha256,
+        releaseId: staging.releaseId,
+        workerVersion: staging.workerVersion,
+      },
+    };
     const manifest = buildReleaseArtifacts({
+      commerceEvidenceValidation,
       evidence,
       migrationNames,
       now,
@@ -791,6 +794,7 @@ describe("production release readiness", () => {
     }).manifest;
 
     expect(validateProductionDeployAdmission({
+      commerceEvidenceValidation,
       evidence,
       manifest,
       migrationNames,
@@ -800,6 +804,8 @@ describe("production release readiness", () => {
       repositoryClean: true,
       repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
       ...{ repositoryTreeSha: evidence.treeSha },
+      requireRollbackArtifact: true,
+      rollbackArtifactValidation: { accepted: true },
       workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
       wranglerConfig,
     })).toEqual({
@@ -815,6 +821,7 @@ describe("production release readiness", () => {
     });
 
     expect(() => validateProductionDeployAdmission({
+      commerceEvidenceValidation,
       evidence,
       manifest,
       migrationNames,
@@ -824,9 +831,32 @@ describe("production release readiness", () => {
       repositoryClean: false,
       repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
       ...{ repositoryTreeSha: evidence.treeSha },
+      requireRollbackArtifact: true,
+      rollbackArtifactValidation: { accepted: true },
       workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
       wranglerConfig,
     })).toThrow("production_release_source_dirty");
+
+    const tamperedManifest = structuredClone(manifest) as {
+      rollbackCandidate: Record<string, unknown>;
+    } & Record<string, unknown>;
+    tamperedManifest.rollbackCandidate.artifactSha256 = "e".repeat(64);
+    expect(() => validateProductionDeployAdmission({
+      commerceEvidenceValidation,
+      evidence,
+      manifest: tamperedManifest,
+      migrationNames,
+      now,
+      packageVersion: "0.0.0",
+      productionSpec,
+      repositoryClean: true,
+      repositoryCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      repositoryTreeSha: evidence.treeSha,
+      requireRollbackArtifact: true,
+      rollbackArtifactValidation: { accepted: true },
+      workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+      wranglerConfig,
+    })).toThrow("production_release_manifest_mismatch:rollbackCandidate");
   });
 
   it("rejects a manifest when reviewed evidence or repository identity drifts", () => {
@@ -882,7 +912,7 @@ describe("production release readiness", () => {
     })).toThrow("production_release_manifest_mismatch:configFingerprintSha256");
   });
 
-  it("checks the canonical private manifest and clean Git identity at deploy admission", async () => {
+  it("admits the payment lane while blocking unsupported PayOS full commerce", async () => {
     const root = await mkdtemp(join(tmpdir(), "selinow-release-admission-"));
     const previousAttestationKeyId = process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID;
     const previousAttestationPublicKey = process.env.SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64;
@@ -1149,37 +1179,46 @@ describe("production release readiness", () => {
       process.env.SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64 = Buffer.from(
         payosOwnerKeys.publicKey.export({ format: "pem", type: "spki" }),
       ).toString("base64");
-      const manifest = buildReleaseArtifacts({
+      const commerceEvidenceValidation = validateCommerceUatArtifactsSync({
+        evidence,
+        now,
+        repositoryRoot: root,
+        payosOwnerAttestationPublicKeys: {
+          [payosOwnerKeyId]: payosOwnerKeys.publicKey.export({ format: "pem", type: "spki" }),
+        },
+      });
+      expect(commerceEvidenceValidation.payos).toMatchObject({
+        accepted: false,
+        error: "payos_full_commerce_unsupported",
+        paymentLaneAccepted: true,
+        reasonCodes: [
+          "payos_signed_refund_not_supported",
+          "payos_signed_chargeback_not_supported",
+        ],
+      });
+      const blockedReleaseInput = {
+        commerceEvidenceValidation,
         evidence,
         migrationNames: ["0001_first.sql"],
         now,
         packageVersion: "0.0.0",
         productionSpec: readyProductionSpec(),
-        workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
         repositoryRoot: root,
+        workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
         wranglerConfig: readyWranglerConfig(),
-      }).manifest;
+      };
+      expect(() => buildReleaseArtifacts(blockedReleaseInput)).toThrow("release_prerequisites_incomplete:evidence.commerceAcceptance.payos.artifactAccepted");
+
       const evidencePath = join(root, ".wrangler/release/production-evidence.json");
       const manifestPath = join(root, ".wrangler/releases", releaseId, "release-manifest.json");
       await writeFile(evidencePath, JSON.stringify(evidence), { mode: 0o600 });
-      await writeFile(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
-
+      await writeFile(manifestPath, JSON.stringify({ createdAt: now.toISOString() }), { mode: 0o600 });
       await expect(assertProductionDeployAdmission({
         manifestPath,
         now,
         repositoryRoot: root,
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
-      })).resolves.toEqual({
-        candidateWorkerVersion: "33333333-3333-4333-8333-333333333333",
-        commitSha,
-        migrationLedgerSha256: fingerprint(["0001_first.sql"]),
-        migrationLedgerPrefix: ["0001_first.sql"],
-        previousWorkerVersion: "11111111-1111-4111-8111-111111111111",
-        releaseId,
-        rollbackArtifactSha256: rollback.candidate.artifactSha256,
-        rollbackCandidateWorkerVersion: "22222222-2222-4222-8222-222222222222",
-        treeSha,
-      });
+      })).rejects.toThrow("release_prerequisites_incomplete:evidence.commerceAcceptance.payos.artifactAccepted");
 
       await writeFile(join(root, rollback.rehearsalEvidenceRef), `${rollbackArtifact}\n`, { mode: 0o600 });
       await expect(assertProductionDeployAdmission({

@@ -67,9 +67,13 @@ describe("remote post-migration database contract", () => {
     expect(() => parsePostMigrationCrossLedgerOutput(envelope([{ mismatch_count: -1 }]))).toThrow(
       "post_migration_cross_ledger_contract_invalid_result",
     );
+    expect(() => parsePostMigrationObjectOutput(envelope([
+      ...completeObjects(),
+      { name: "auth_request_admissions_legacy_0094", type: "table" },
+    ]))).toThrow("post_migration_legacy_object_present:auth_request_admissions_legacy_0094");
   });
 
-  it("pins every schema contract introduced through migration 0093", () => {
+  it("pins every schema contract introduced through migration 0094", () => {
     const requiredObjects = [
       ["index", "idx_plan_prices_provider_ref"],
       ["trigger", "plan_prices_published_reference_guard"],
@@ -81,6 +85,10 @@ describe("remote post-migration database contract", () => {
       ["trigger", "shop_subscriptions_price_snapshot_scope_update_guard"],
       ["table", "account_trial_claims"],
       ["index", "idx_account_trial_claims_shop"],
+      ["table", "auth_request_admissions"],
+      ["index", "idx_auth_request_admissions_window"],
+      ["index", "idx_auth_request_admissions_requester_window"],
+      ["index", "idx_auth_request_admissions_expiry"],
       ["index", "idx_auth_request_admissions_subject_window"],
       ["table", "order_access_recovery_tokens"],
       ["index", "idx_order_access_recovery_tokens_active_order"],
@@ -113,6 +121,12 @@ describe("remote post-migration database contract", () => {
       ["account_trial_claims", "user_id"],
       ["account_trial_claims", "shop_id"],
       ["account_trial_claims", "claimed_at"],
+      ["auth_request_admissions", "id"],
+      ["auth_request_admissions", "action"],
+      ["auth_request_admissions", "requester_hash"],
+      ["auth_request_admissions", "window_started_at"],
+      ["auth_request_admissions", "window_ends_at"],
+      ["auth_request_admissions", "created_at"],
       ["auth_request_admissions", "subject_hash"],
       ["auth_request_admissions", "delivery_permitted"],
       ["order_access_recovery_tokens", "replacement_order_token_hash"],
@@ -153,6 +167,131 @@ describe("remote post-migration database contract", () => {
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("domain.type = 'custom'");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("'$.turnstile.checkedAt'");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("canonical.shop_id = shop.id");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("auth_request_admissions AS admission");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.action NOT IN ('magic_link_request', 'shop_create')");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.delivery_permitted NOT IN (0, 1)");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.action = 'shop_create'");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.subject_hash IS NULL");
+  });
+
+  it("preserves admission rows while rebuilding the ledger for shop creation", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      const migrationDirectory = join(process.cwd(), "migrations");
+      const migrationNames = readdirSync(migrationDirectory).filter((name) => /^\d{4}_.+\.sql$/u.test(name)).sort();
+      for (const filename of migrationNames.filter((name) => name !== "0094_shop_creation_admission.sql")) {
+        database.exec(readFileSync(join(migrationDirectory, filename), "utf8"));
+      }
+      database.prepare(`
+        INSERT INTO auth_request_admissions (
+          id, action, requester_hash, window_started_at, window_ends_at, created_at,
+          subject_hash, delivery_permitted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "adm-existing-magic-link",
+        "magic_link_request",
+        "requester_hash_0094",
+        "2026-08-11T00:00:00.000Z",
+        "2026-08-11T00:01:00.000Z",
+        "2026-08-11T00:00:00.000Z",
+        "subject_hash_0094",
+        0,
+      );
+
+      database.exec(readFileSync(join(migrationDirectory, "0094_shop_creation_admission.sql"), "utf8"));
+
+      expect(database.prepare(`
+        SELECT id, action, requester_hash, window_started_at, window_ends_at, created_at,
+          subject_hash, delivery_permitted
+        FROM auth_request_admissions WHERE id = ?
+      `).get("adm-existing-magic-link")).toMatchObject({
+        action: "magic_link_request",
+        created_at: "2026-08-11T00:00:00.000Z",
+        delivery_permitted: 0,
+        id: "adm-existing-magic-link",
+        requester_hash: "requester_hash_0094",
+        subject_hash: "subject_hash_0094",
+        window_ends_at: "2026-08-11T00:01:00.000Z",
+        window_started_at: "2026-08-11T00:00:00.000Z",
+      });
+      expect(database.prepare(
+        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'auth_request_admissions_legacy_0094'",
+      ).get()).toBeUndefined();
+      expect(database.prepare(`
+        SELECT name FROM sqlite_schema
+        WHERE type = 'index' AND tbl_name = 'auth_request_admissions'
+          AND name LIKE 'idx_auth_request_admissions_%'
+        ORDER BY name
+      `).all().map((row) => row.name)).toEqual([
+        "idx_auth_request_admissions_expiry",
+        "idx_auth_request_admissions_requester_window",
+        "idx_auth_request_admissions_subject_window",
+        "idx_auth_request_admissions_window",
+      ]);
+      expect(() => database.prepare(`
+        INSERT INTO auth_request_admissions (
+          id, action, requester_hash, subject_hash, delivery_permitted,
+          window_started_at, window_ends_at, created_at
+        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+      `).run(
+        "adm-shop-create",
+        "shop_create",
+        "requester_hash_shop_create",
+        "subject_hash_shop_create",
+        "2026-08-11T00:00:00.000Z",
+        "2026-08-11T00:01:00.000Z",
+        "2026-08-11T00:00:00.000Z",
+      )).not.toThrow();
+      expect(() => database.prepare(`
+        INSERT INTO auth_request_admissions (
+          id, action, requester_hash, subject_hash, delivery_permitted,
+          window_started_at, window_ends_at, created_at
+        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+      `).run(
+        "adm-unknown-action",
+        "unknown_action",
+        "requester_hash_unknown",
+        "subject_hash_unknown",
+        "2026-08-11T00:00:00.000Z",
+        "2026-08-11T00:01:00.000Z",
+        "2026-08-11T00:00:00.000Z",
+      )).toThrow(/CHECK constraint failed/u);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("counts semantically unusable shop creation admissions", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      const migrationDirectory = join(process.cwd(), "migrations");
+      for (const filename of readdirSync(migrationDirectory).filter((name) => /^\d{4}_.+\.sql$/u.test(name)).sort()) {
+        database.exec(readFileSync(join(migrationDirectory, filename), "utf8"));
+      }
+      database.prepare(`
+        INSERT INTO auth_request_admissions (
+          id, action, requester_hash, subject_hash, delivery_permitted,
+          window_started_at, window_ends_at, created_at
+        ) VALUES (?, 'shop_create', ?, ?, 1, ?, ?, ?)
+      `).run(
+        "adm-valid-shop-create",
+        "requester_hash_valid_shop_create",
+        "subject_hash_valid_shop_create",
+        "2026-08-11T00:00:00.000Z",
+        "2026-08-11T00:01:00.000Z",
+        "2026-08-11T00:00:00.000Z",
+      );
+      expect(database.prepare(POST_MIGRATION_CROSS_LEDGER_SQL).get()).toMatchObject({ mismatch_count: 0 });
+
+      database.prepare(`
+        UPDATE auth_request_admissions
+        SET subject_hash = NULL, delivery_permitted = 0
+        WHERE id = ?
+      `).run("adm-valid-shop-create");
+      expect(database.prepare(POST_MIGRATION_CROSS_LEDGER_SQL).get()).toMatchObject({ mismatch_count: 1 });
+    } finally {
+      database.close();
+    }
   });
 
   it("enforces complete, catalog-bound subscription price snapshots", () => {

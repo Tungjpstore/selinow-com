@@ -48,6 +48,7 @@ type SubscriptionRow = {
   currency: string | null;
   currentPeriodEnd: string | null;
   currentPeriodStart: string | null;
+  createdAt: string;
   graceEndsAt: string | null;
   id: string;
   marketCode: "global" | "vn" | null;
@@ -122,7 +123,7 @@ function customValue(data: Record<string, unknown>, ...keys: string[]): string |
 
 async function loadSubscription(env: AppBindings, shopId: string): Promise<SubscriptionRow> {
   const row = await env.PLATFORM_DB.prepare(`
-    SELECT id, plan_id AS planId, state, version,
+    SELECT id, plan_id AS planId, state, version, created_at AS createdAt,
       current_period_start AS currentPeriodStart,
       current_period_end AS currentPeriodEnd,
       grace_ends_at AS graceEndsAt,
@@ -133,7 +134,7 @@ async function loadSubscription(env: AppBindings, shopId: string): Promise<Subsc
       price_version AS priceVersion,
       provider_subscription_ref AS providerSubscriptionRef
     FROM shop_subscriptions
-    WHERE shop_id = ? AND state != 'canceled'
+    WHERE shop_id = ?
     ORDER BY created_at DESC, id DESC
     LIMIT 1
   `).bind(shopId).first<SubscriptionRow>();
@@ -301,6 +302,7 @@ export async function createBillingCheckout(input: {
   const planCode = asString(input.planCode, "plan_code_invalid", 32).toLowerCase();
   if (planCode !== "starter" && planCode !== "pro") throw new AppError("plan_not_found", 404);
   const actor = await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  if (actor.row.shop_status === "archived") throw new AppError("tenant_suspended", 403);
   if (input.currency !== undefined || input.market !== undefined) throw new AppError("validation_failed", 400, ["market_server_selected"]);
   const merchantCountry = actor.row.merchant_country_code?.trim().toUpperCase();
   if (merchantCountry === undefined || merchantCountry.length !== 2) throw new AppError("billing_market_unavailable", 409);
@@ -317,26 +319,57 @@ export async function createBillingCheckout(input: {
   const replay = await loadReplay({ config: dodoConfig, env: input.env, idempotencyKey, keyHash, nowIso, requestHash, shopId: actor.row.shop_id, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }) });
   if (replay !== null) return replay;
   const subscription = await loadSubscription(input.env, actor.row.shop_id);
-  if (subscription.state !== "trialing" && subscription.state !== "pending_payment" && subscription.state !== "suspended") {
+  if (subscription.state !== "trialing" && subscription.state !== "pending_payment" && subscription.state !== "suspended" && subscription.state !== "canceled") {
     throw new AppError("billing_change_requires_request", 409);
   }
-  if (subscription.state === "suspended" && !recovery) throw new AppError("subscription_payment_required", 409);
+  if ((subscription.state === "suspended" || subscription.state === "canceled") && !recovery) {
+    throw new AppError("subscription_payment_required", 409);
+  }
   const price = await loadPlanPrice(input.env, { currency, market, nowIso, planCode });
-  if (subscription.state === "suspended" && price.planId !== subscription.planId) throw new AppError("billing_recovery_plan_mismatch", 409);
+  if ((subscription.state === "suspended" || subscription.state === "canceled") && price.planId !== subscription.planId) {
+    throw new AppError("billing_recovery_plan_mismatch", 409);
+  }
   const sessionId = createId("bchk");
+  const subscriptionId = subscription.state === "canceled" ? createId("sub") : subscription.id;
+  const historicalCreatedAt = Date.parse(subscription.createdAt);
+  const recoveryCreatedAt = subscription.state === "canceled"
+    ? new Date(Math.max(now.getTime(), Number.isFinite(historicalCreatedAt) ? historicalCreatedAt + 1 : now.getTime() + 1)).toISOString()
+    : nowIso;
 
   // A trial conversion is only a pending payment until Dodo sends a signed
   // payment.succeeded event. The return URL is never used for entitlement.
   let checkoutSetup: D1Result[];
   try {
+    const subscriptionWrite = subscription.state === "canceled"
+      ? input.env.PLATFORM_DB.prepare(`
+          INSERT INTO shop_subscriptions (
+            id, shop_id, plan_id, state, trial_ends_at, current_period_start,
+            current_period_end, grace_ends_at, canceled_at, created_at, updated_at,
+            version, billing_provider_code, market_code, price_currency,
+            price_amount_minor, price_interval, price_version, price_id,
+            provider_customer_ref, provider_subscription_ref
+          )
+          SELECT ?, ?, ?, 'pending_payment', NULL, NULL, NULL, NULL, NULL, ?, ?,
+            1, 'dodo', ?, ?, ?, 'month', ?, ?, NULL, NULL
+          WHERE EXISTS (
+            SELECT 1 FROM shop_subscriptions
+            WHERE id = ? AND shop_id = ? AND state = 'canceled' AND version = ?
+          )
+        `).bind(
+          subscriptionId, actor.row.shop_id, price.planId, recoveryCreatedAt, nowIso,
+          market, currency, price.amountMinor, price.version, price.id,
+          subscription.id, actor.row.shop_id, subscription.version,
+        )
+      : input.env.PLATFORM_DB.prepare(`
+          UPDATE shop_subscriptions
+          SET state = 'pending_payment', grace_ends_at = NULL, billing_provider_code = 'dodo',
+            market_code = ?, price_currency = ?, price_amount_minor = ?, price_interval = 'month',
+            price_version = ?, price_id = ?, updated_at = ?, version = version + 1
+          WHERE shop_id = ? AND id = ? AND version = ?
+        `).bind(market, currency, price.amountMinor, price.version, price.id, nowIso, actor.row.shop_id, subscription.id, subscription.version);
+    const expectedSubscriptionVersion = subscription.state === "canceled" ? 1 : subscription.version + 1;
     checkoutSetup = await input.env.PLATFORM_DB.batch([
-      input.env.PLATFORM_DB.prepare(`
-      UPDATE shop_subscriptions
-      SET state = 'pending_payment', grace_ends_at = NULL, billing_provider_code = 'dodo',
-        market_code = ?, price_currency = ?, price_amount_minor = ?, price_interval = 'month',
-        price_version = ?, price_id = ?, updated_at = ?, version = version + 1
-      WHERE shop_id = ? AND id = ? AND version = ?
-      `).bind(market, currency, price.amountMinor, price.version, price.id, nowIso, actor.row.shop_id, subscription.id, subscription.version),
+      subscriptionWrite,
       input.env.PLATFORM_DB.prepare(`
       INSERT INTO billing_checkout_sessions (
         id, public_id, shop_id, subscription_id, plan_id, price_id, provider_code,
@@ -352,10 +385,10 @@ export async function createBillingCheckout(input: {
         WHERE shop_id = ? AND subscription_id = ? AND status IN ('pending', 'open')
       )
       `).bind(
-        sessionId, sessionId, actor.row.shop_id, subscription.id, price.planId, price.id, keyHash, requestHash,
+        sessionId, sessionId, actor.row.shop_id, subscriptionId, price.planId, price.id, keyHash, requestHash,
         new Date(now.getTime() + 30 * 60_000).toISOString(), nowIso, nowIso,
-        subscription.id, actor.row.shop_id, subscription.version + 1,
-        actor.row.shop_id, subscription.id,
+        subscriptionId, actor.row.shop_id, expectedSubscriptionVersion,
+        actor.row.shop_id, subscriptionId,
       ),
       // D1 batches commit when a guarded INSERT affects zero rows. Force a
       // constraint failure in that branch so the preceding state update rolls
@@ -363,10 +396,10 @@ export async function createBillingCheckout(input: {
       input.env.PLATFORM_DB.prepare(`
         UPDATE shop_subscriptions SET version = 0
         WHERE id = ? AND changes() = 0
-      `).bind(subscription.id),
+      `).bind(subscriptionId),
     ]);
   } catch (error) {
-    if (error instanceof Error && /(?:CHECK constraint failed|version > 0)/u.test(error.message)) {
+    if (error instanceof Error && /(?:CHECK constraint failed|UNIQUE constraint failed: shop_subscriptions\.shop_id|version > 0)/u.test(error.message)) {
       throw new AppError("billing_subscription_version_conflict", 409);
     }
     throw error;
@@ -390,7 +423,7 @@ export async function createBillingCheckout(input: {
       planCode,
       providerPriceRef: price.providerPriceRef,
       shopId: actor.row.shop_id,
-      subscriptionId: subscription.id,
+      subscriptionId,
     },
     idempotencyKey: providerIdempotencyKey,
     priceId: price.providerPriceRef,
@@ -1252,6 +1285,13 @@ export async function processDodoWebhook(input: {
       return { duplicate: false, processed: false, state: "unmapped" };
     }
     const subscription = await loadSubscription(input.env, session.shopId);
+    // A shop may retain historical canceled rows while a recovery checkout
+    // creates a newer subscription. Provider events are session-bound; never
+    // apply an old checkout's evidence to the newer subscription.
+    if (subscription.id !== session.subscriptionId) {
+      await markEvent(input.env, recorded.event.id, "ignored", nowIso, recorded.leaseToken);
+      return { duplicate: false, processed: false, state: "stale" };
+    }
     const pendingChange = await loadPendingSubscriptionChange(input.env, session.shopId, session.subscriptionId);
     const customShopId = customValue(event.customData, "shopId", "shop_id");
     const customPlanCode = customValue(event.customData, "planCode", "plan_code");

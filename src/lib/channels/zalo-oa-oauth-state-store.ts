@@ -170,6 +170,7 @@ async function assertShopScope(database: D1Database, shopId: string): Promise<vo
   const row = await database.prepare(`
     SELECT shops.id,
       shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
       shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.grace_ends_at AS graceEndsAt
     FROM shops
@@ -177,8 +178,8 @@ async function assertShopScope(database: D1Database, shopId: string): Promise<vo
       ON shop_subscriptions.shop_id = shops.id
     WHERE shops.id = ? AND shops.status = 'active'
     LIMIT 1
-  `).bind(shopId).first<{ graceEndsAt: string | null; id: string; subscriptionState: string; trialEndsAt: string | null }>();
-  if (row === null || !subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
+  `).bind(shopId).first<{ currentPeriodEnd: string | null; graceEndsAt: string | null; id: string; subscriptionState: string; trialEndsAt: string | null }>();
+  if (row === null || !subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
     throw new AppError("zalo_oa_oauth_state_scope_invalid", 409);
   }
 }

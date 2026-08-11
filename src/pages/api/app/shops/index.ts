@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 
+import { cloudflareRequesterAddress } from "../../../../lib/auth/admission";
 import { authenticateRequest, requireCsrfSession } from "../../../../lib/auth/session";
 import { AppError } from "../../../../lib/core/errors";
 import { readJsonObject, rejectUnknownFields } from "../../../../lib/http/request";
@@ -8,7 +9,7 @@ import { getBindings } from "../../../../lib/platform/bindings";
 import { PUBLIC_PLAN_CODES } from "../../../../lib/billing/plan-catalog";
 import { normalizeOptionalCountryCode } from "../../../../lib/tenants/country";
 import { normalizeShopName, normalizeSlug } from "../../../../lib/tenants/policy";
-import { createShop } from "../../../../lib/tenants/store";
+import { createShop, getShopCreationAdmission } from "../../../../lib/tenants/store";
 
 type PublicPlanRow = {
   code: string;
@@ -39,9 +40,9 @@ function safeJsonObject(value: string): Record<string, unknown> {
 export const GET: APIRoute = async ({ locals, request }) => {
   try {
     const env = getBindings();
-    await authenticateRequest(request, env);
+    const auth = await authenticateRequest(request, env);
     const nowIso = new Date().toISOString();
-    const [plansResult, offersResult] = await Promise.all([
+    const [plansResult, offersResult, creationAdmission] = await Promise.all([
       env.PLATFORM_DB.prepare(`
         SELECT code, name, feature_flags_json, limits_json
         FROM plans
@@ -60,6 +61,7 @@ export const GET: APIRoute = async ({ locals, request }) => {
           AND (prices.effective_to IS NULL OR prices.effective_to > ?)
         ORDER BY prices.market_code, prices.currency
       `).bind(...PUBLIC_PLAN_CODES, nowIso, nowIso).all<PublicPlanOfferRow>(),
+      getShopCreationAdmission({ env, userId: auth.userId }),
     ]);
     const offersByPlan = new Map<string, PublicPlanOfferRow[]>();
     for (const offer of offersResult.results) {
@@ -83,7 +85,7 @@ export const GET: APIRoute = async ({ locals, request }) => {
         })),
       }];
     });
-    return Response.json({ ok: true, plans, requestId: locals.requestId }, {
+    return Response.json({ creationAdmission, ok: true, plans, requestId: locals.requestId }, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     });
   } catch (error) {
@@ -112,6 +114,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       ...(merchantCountry === undefined ? {} : { merchantCountry }),
       name: normalizeShopName(body.name),
       planCode,
+      requesterAddress: cloudflareRequesterAddress(request),
       requestId: locals.requestId,
       slug: normalizeSlug(body.slug),
       userId: auth.userId,

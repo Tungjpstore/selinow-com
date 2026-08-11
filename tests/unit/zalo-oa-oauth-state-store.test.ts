@@ -62,8 +62,8 @@ function seedShop(database: DatabaseSync, suffix = "", connectorStatus: "active"
     VALUES ('plan-zalo-oa${suffix}', 'zalo_oa_${suffix === "" ? "base" : suffix}', 'Business', '{}', '{}', '${now}', '${now}');
     INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, readiness_version, created_at, updated_at)
     VALUES ('${shopId}', '${publicId}', 'zalo-oa-shop${suffix}', 'Zalo OA Shop', 'active', 'en', 'VND', 'Asia/Ho_Chi_Minh', 1, '${now}', '${now}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
-    VALUES ('subscription-zalo-oa${suffix}', '${shopId}', 'plan-zalo-oa${suffix}', 'active', '${now}', '${now}');
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
+    VALUES ('subscription-zalo-oa${suffix}', '${shopId}', 'plan-zalo-oa${suffix}', 'active', '2099-01-01T00:00:00.000Z', '${now}', '${now}');
     INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
     VALUES ('user-zalo-oa${suffix}', 'zalo-oa${suffix}@example.com', 'Zalo OA Owner', 'active', '${now}', '${now}');
     INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)

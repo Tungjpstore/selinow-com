@@ -76,6 +76,23 @@ describe("paid plan entitlement evaluator", () => {
     expect(evaluateSubscription({ action: "read", subscriptionState: "suspended", now: NOW }).allowed).toBe(true);
   });
 
+  it.each(["active", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"])(
+    "allows recovery access but blocks mutations after the paid period for %s",
+    (subscriptionState) => {
+      const subscription = {
+        currentPeriodEnd: "2026-08-02T00:00:00.000Z",
+        now: NOW,
+        subscriptionState,
+      };
+      expect(evaluateSubscription({ ...subscription, action: "read" }).allowed).toBe(true);
+      expect(evaluateSubscription({ ...subscription, action: "billing" }).allowed).toBe(true);
+      expect(evaluateSubscription({ ...subscription, action: "mutation" })).toMatchObject({
+        allowed: false,
+        reasonCode: "subscription_payment_required",
+      });
+    },
+  );
+
   it("applies subscription state before feature and quota grants", () => {
     const denied = evaluateFeature({
       action: "checkout",
@@ -89,7 +106,7 @@ describe("paid plan entitlement evaluator", () => {
       action: "checkout",
       metric: "ordersPerMonth",
       plan: PRO_PLAN,
-      subscription: { subscriptionState: "active", now: NOW },
+      subscription: { currentPeriodEnd: "2026-08-04T00:00:00.000Z", subscriptionState: "active", now: NOW },
       used: 4999,
     });
     expect(allowed.allowed).toBe(true);

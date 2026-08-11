@@ -139,6 +139,7 @@ function shop(): StorefrontShop {
     settingsVersion: 1,
     slug: "lifecycle",
     status: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
     theme: {
       accent: "#7C3AED",

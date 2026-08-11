@@ -47,8 +47,10 @@ class InventoryDatabase {
               if (shopId === null || userId !== "user-a") return Promise.resolve(null);
               return Promise.resolve({
                 currency: "VND",
+                current_period_end: null,
                 default_locale: "vi",
                 feature_flags_json: "{}",
+                grace_ends_at: null,
                 limits_json: "{}",
                 name: shopId,
                 plan_code: "store",
@@ -59,6 +61,7 @@ class InventoryDatabase {
                 slug: shopId,
                 subscription_state: "trialing",
                 timezone: "Asia/Ho_Chi_Minh",
+                trial_ends_at: "2099-01-01T00:00:00.000Z",
               });
             }
             if (sql.includes("SELECT id FROM product_variants")) {
@@ -191,8 +194,8 @@ function createAtomicInventoryDatabase(beforeQuery?: InventoryQueryHook): Atomic
     VALUES ('shop-a', 'shop-public-a', 'inventory-a', 'Inventory A', 'draft', 'vi', 'VND', 'Asia/Ho_Chi_Minh', 1, '${now}', '${now}');
     INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
     VALUES ('shop-a', 'user-a', 'owner', 'active', '${now}', '${now}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
-    VALUES ('subscription-inventory-a', 'shop-a', 'plan-inventory', 'active', '${now}', '${now}');
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
+    VALUES ('subscription-inventory-a', 'shop-a', 'plan-inventory', 'active', '2099-01-01T00:00:00.000Z', '${now}', '${now}');
     INSERT INTO products (id, shop_id, slug, title, description, status, fulfillment_type, version, created_at, updated_at)
     VALUES ('product-a', 'shop-a', 'inventory-product', 'Inventory Product', '', 'active', 'license_key', 1, '${now}', '${now}');
     INSERT INTO product_variants (id, shop_id, product_id, sku, title, options_json, price_minor, currency,

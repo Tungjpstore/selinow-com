@@ -22,7 +22,7 @@ candidate deploy; smoke; monitoring; Website-first UAT; confirm or captured-vers
 rollback; reconciliation; exact cleanup.
 
 Manifest creation captures the live `d1_migrations` rows as a non-empty exact
-ordered prefix of the current `0001`-`0093` source chain after read-only account/D1 admission. Migration
+ordered prefix of the current `0001`-`0094` source chain after read-only account/D1 admission. Migration
 requires database preflight to pass and the live ledger to equal that exact
 manifest-bound baseline before Wrangler; after Wrangler it requires the complete
 ordered source ledger and another passing preflight. Seed and deploy require the

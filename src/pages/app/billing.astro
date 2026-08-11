@@ -16,9 +16,15 @@ const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
 if (auth === null) return Astro.redirect("/login");
 let shops: ShopView[] = [];
+let billingShops: ShopView[] = [];
 let state: "ready" | "unavailable" | "forbidden" = "ready";
-try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { state = "unavailable"; }
-const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+try {
+  [shops, billingShops] = await Promise.all([
+    listShopsForMember({ env, userId: auth.userId }),
+    listShopsForMember({ env, includeCanceledForBillingRecovery: true, userId: auth.userId }),
+  ]);
+} catch { state = "unavailable"; }
+const shop = selectShopForMember(billingShops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
 let billing: SellerBillingView | null = null;
 if (shop !== undefined && state === "ready") {
@@ -52,7 +58,6 @@ const billingProjection = billing as BillingProjection | null;
 const currentPrice = billingProjection === null ? null : projectedPrice(billingProjection.currentPrice) ?? projectedPrice(billingProjection.price);
 const currentPriceLabel = currentPrice === null ? null : formatMarketingPrice(currentPrice, locale);
 const conversionHref = workspaceHref("/app/billing");
-const billingMarketSettingsHref = workspaceHref("/onboarding#settings");
 ---
 
 <AppLayout activePath="/app/billing" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.billing.title")}>
@@ -67,17 +72,17 @@ const billingMarketSettingsHref = workspaceHref("/onboarding#settings");
       changePlan: t("dashboard.billing.requests.change_plan"), cancel: t("dashboard.billing.requests.cancel"), request: t("dashboard.billing.requests.submit"), requesting: t("dashboard.billing.requests.requesting"), requested: t("dashboard.billing.requests.requested"),
       reason: t("dashboard.billing.requests.reason"), reasonPlaceholder: t("dashboard.billing.requests.reason_placeholder"), plan: t("dashboard.billing.requests.plan"), cancelConfirm: t("dashboard.billing.requests.cancel_confirm"), error: t("dashboard.billing.requests.error"), pending: t("dashboard.billing.requests.pending"), statusRequested: t("dashboard.billing.requests.status_requested"), statusProviderPending: t("dashboard.billing.requests.status_provider_pending"), statusRejected: t("dashboard.billing.requests.status_rejected"), statusCompleted: t("dashboard.billing.requests.status_completed"), statusCanceled: t("dashboard.billing.requests.status_canceled"),
       statePendingPayment: t("dashboard.billing.state.pending_payment"), stateTrialing: t("dashboard.billing.state.trialing"), stateGrace: t("dashboard.billing.state.grace"), stateSuspended: t("dashboard.billing.state.suspended"),
-      checkoutEyebrow: t("dashboard.billing.checkout.eyebrow"), checkoutTitle: t("dashboard.billing.checkout.title"), checkoutDescription: t("dashboard.billing.checkout.description"), checkoutPlan: t("dashboard.billing.checkout.plan"), checkoutSubmit: t("dashboard.billing.checkout.submit"), checkoutRecoverSubmit: t("dashboard.billing.checkout.recover_submit"), checkoutOpening: t("dashboard.billing.checkout.opening"), checkoutUnavailable: t("dashboard.billing.checkout.unavailable"), checkoutMarketRequired: t("dashboard.billing.checkout.market_required"), checkoutRecentAuthRequired: t("dashboard.billing.checkout.recent_auth_required"), checkoutErrorCode: t("dashboard.billing.checkout.error_code"), checkoutRequestId: t("dashboard.billing.checkout.request_id"), checkoutProvider: t("dashboard.billing.checkout.provider"), checkoutTrial: t("dashboard.billing.checkout.trial"), checkoutPending: t("dashboard.billing.checkout.pending"), checkoutRecovery: t("dashboard.billing.checkout.recovery"),
+      checkoutEyebrow: t("dashboard.billing.checkout.eyebrow"), checkoutTitle: t("dashboard.billing.checkout.title"), checkoutDescription: t("dashboard.billing.checkout.description"), checkoutPlan: t("dashboard.billing.checkout.plan"), checkoutSubmit: t("dashboard.billing.checkout.submit"), checkoutRecoverSubmit: t("dashboard.billing.checkout.recover_submit"), checkoutOpening: t("dashboard.billing.checkout.opening"), checkoutUnavailable: t("dashboard.billing.checkout.unavailable"), checkoutMarketRequired: t("dashboard.billing.checkout.market_required"), checkoutMarketCountry: t("dashboard.billing.checkout.market_country"), checkoutMarketSave: t("dashboard.billing.checkout.market_save"), checkoutMarketSaving: t("dashboard.billing.checkout.market_saving"), checkoutMarketSaved: t("dashboard.billing.checkout.market_saved"), checkoutRecentAuthRequired: t("dashboard.billing.checkout.recent_auth_required"), checkoutErrorCode: t("dashboard.billing.checkout.error_code"), checkoutRequestId: t("dashboard.billing.checkout.request_id"), checkoutProvider: t("dashboard.billing.checkout.provider"), checkoutTrial: t("dashboard.billing.checkout.trial"), checkoutPending: t("dashboard.billing.checkout.pending"), checkoutRecovery: t("dashboard.billing.checkout.recovery"),
     })} data-can-manage={shop.role === "owner" ? "true" : "false"} data-subscription-version={billing.subscriptionVersion} data-current-plan-code={billing.planCode}>
       <section class="plan-hero" aria-labelledby="plan-title" data-tone={subscriptionState?.tone ?? "neutral"}><div><p class="eyebrow">{t("dashboard.billing.current_subscription")}</p><h2 id="plan-title">{billing.planName}</h2><p>{t("dashboard.billing.plan_metadata", { code: billing.planCode, version: billing.planVersion })}</p>{currentPriceLabel !== null && currentPrice !== null && <p class="plan-price"><strong>{currentPriceLabel}</strong> <span>{currentPrice.interval === "month" ? t("dashboard.billing.price_per_month") : currentPrice.interval}</span><small>{currentPrice.marketCode} · {currentPrice.currency}</small></p>}<p class="subscription-impact">{subscriptionState?.impact}</p>{(billing.state === "grace_period" || billing.state === "past_due") && <p class="state-guidance">{t("dashboard.billing.state.grace")}</p>}{billing.state === "suspended" && <p class="state-guidance">{t("dashboard.billing.state.suspended")}</p>}{billing.state === "trialing" && <p class="trial-conversion"><span>{t("dashboard.billing.trial_conversion")}</span> <a class="sln-button sln-button-secondary" href={conversionHref}>{t("dashboard.billing.trial_conversion_cta")}</a></p>}{billing.state === "pending_payment" && <p class="trial-conversion"><span>{t("dashboard.billing.pending_payment_cta")}</span> <a class="sln-button sln-button-secondary" href={conversionHref}>{t("dashboard.billing.choose_paid_plan")}</a></p>}</div><span class="subscription-state">{subscriptionState?.label}</span></section>
       <section class="billing-grid"><article><span>{t("dashboard.billing.trial_ends")}</span><strong>{date(billing.trialEndsAt)}</strong></article><article><span>{t("dashboard.billing.current_period")}</span><strong>{date(billing.currentPeriodEnd)}</strong></article><article><span>{t("dashboard.billing.grace_ends")}</span><strong>{date(billing.graceEndsAt)}</strong></article><article><span>{t("dashboard.billing.canceled_at")}</span><strong>{date(billing.canceledAt)}</strong></article></section>
-      {shop.role === "owner" && (billing.state === "trialing" || billing.state === "pending_payment" || billing.state === "suspended") && <section class="billing-panel billing-checkout-panel" aria-labelledby="billing-checkout-title" data-billing-checkout>
+      {shop.role === "owner" && (billing.state === "trialing" || billing.state === "pending_payment" || billing.state === "suspended" || billing.state === "canceled") && <section class="billing-panel billing-checkout-panel" aria-labelledby="billing-checkout-title" data-billing-checkout>
         <header><div><p class="eyebrow">{t("dashboard.billing.checkout.eyebrow")}</p><h2 id="billing-checkout-title">{t("dashboard.billing.checkout.title")}</h2><p class="billing-request-description">{t("dashboard.billing.checkout.description")}</p></div></header>
-        <p class="checkout-state-note">{billing.state === "trialing" ? t("dashboard.billing.checkout.trial") : billing.state === "suspended" ? t("dashboard.billing.checkout.recovery") : t("dashboard.billing.checkout.pending")}</p>
-        {shop.merchantCountry === null && <p class="checkout-market-note">{t("dashboard.billing.checkout.market_required")} <a href={billingMarketSettingsHref}>{t("dashboard.billing.checkout.market_action")}</a></p>}
+        <p class="checkout-state-note">{billing.state === "trialing" ? t("dashboard.billing.checkout.trial") : billing.state === "suspended" || billing.state === "canceled" ? t("dashboard.billing.checkout.recovery") : t("dashboard.billing.checkout.pending")}</p>
+        {shop.merchantCountry === null && <><p class="checkout-market-note">{t("dashboard.billing.checkout.market_required")}</p><form class="billing-market-form" data-billing-market-form novalidate><label>{t("dashboard.billing.checkout.market_country")}<input name="merchantCountry" type="text" inputmode="text" autocapitalize="characters" maxlength="2" pattern="[A-Za-z]{2}" required /></label><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.billing.checkout.market_save")}</button></form></>}
         <form class="billing-checkout-form" data-billing-checkout-form novalidate>
           <label>{t("dashboard.billing.checkout.plan")}<select name="planCode" data-billing-checkout-plan required></select></label>
-          <button class="sln-button sln-button-primary" type="submit" data-billing-checkout-submit>{billing.state === "suspended" ? t("dashboard.billing.checkout.recover_submit") : t("dashboard.billing.checkout.submit")}</button>
+          <button class="sln-button sln-button-primary" type="submit" data-billing-checkout-submit>{billing.state === "suspended" || billing.state === "canceled" ? t("dashboard.billing.checkout.recover_submit") : t("dashboard.billing.checkout.submit")}</button>
         </form>
         <p class="checkout-provider-note">{t("dashboard.billing.checkout.provider")}</p>
         <p class="workspace-feedback" data-billing-checkout-feedback role="status" aria-live="polite" hidden></p>
@@ -140,6 +145,9 @@ const billingMarketSettingsHref = workspaceHref("/onboarding#settings");
   .checkout-state-note, .checkout-provider-note { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .checkout-market-note { margin:0; border:1px solid var(--sln-state-danger); border-radius:var(--sln-radius-md); padding:12px 14px; background:var(--sln-tint-danger); color:var(--selinow-danger-text); font:var(--sln-font-body-sm); }
   .checkout-market-note a { color:inherit; font-weight:750; }
+  .billing-market-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:end; }
+  .billing-market-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
+  .billing-market-form input { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
   .checkout-provider-note { color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .billing-recent-auth-action { justify-self:start; }
   .billing-recent-auth-action[hidden] { display:none; }
@@ -159,6 +167,6 @@ const billingMarketSettingsHref = workspaceHref("/onboarding#settings");
   .sln-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:9px 14px; font:var(--sln-font-label); cursor:pointer; }
   .sln-button-primary { background:var(--sln-action-primary); color:var(--sln-white); }
   @media (max-width:900px) { .billing-request-form { grid-template-columns:repeat(2,minmax(0,1fr)); } .billing-request-form .sln-button { width:100%; } }
-  @media (max-width:560px) { .billing-request-form, .billing-checkout-form { grid-template-columns:1fr; } .billing-request-row { grid-template-columns:1fr; } .billing-checkout-form .sln-button { width:100%; } }
+  @media (max-width:560px) { .billing-request-form, .billing-checkout-form, .billing-market-form { grid-template-columns:1fr; } .billing-request-row { grid-template-columns:1fr; } .billing-checkout-form .sln-button, .billing-market-form .sln-button { width:100%; } }
   @media (max-width:760px) { .plan-hero { align-items:start; flex-direction:column; padding:24px; } .billing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .billing-grid article:nth-child(2) { border-right:0; } .billing-grid article:nth-child(n+3) { border-top:1px solid var(--sln-border-default); } .kv-ledger { grid-template-columns:1fr; } }
 </style>

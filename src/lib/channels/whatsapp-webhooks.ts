@@ -47,6 +47,7 @@ type WhatsAppCredentialContextRow = WhatsAppCredentialRow & {
   connectionPublicId: string;
   providerCode: string;
   subscriptionState: string;
+  currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
 };
@@ -204,6 +205,7 @@ export async function loadWhatsAppWebhookContext(env: AppBindings, connectionPub
       credential.credential_fingerprint AS credentialFingerprint,
       credential.status AS credentialStatus,
       subscription.state AS subscriptionState,
+      subscription.current_period_end AS currentPeriodEnd,
       subscription.trial_ends_at AS trialEndsAt,
       subscription.grace_ends_at AS graceEndsAt
     FROM channel_connections AS connection
@@ -228,7 +230,7 @@ export async function loadWhatsAppWebhookContext(env: AppBindings, connectionPub
     LIMIT 1
   `).bind(PROVIDER_CODE, publicIdValue, PROVIDER_CODE).first<WhatsAppCredentialContextRow>();
   if (row === null || row.providerCode !== PROVIDER_CODE) throw new AppError("webhook_not_found", 404);
-  if (!subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
+  if (!subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
     throw new AppError("channel_connection_unavailable", 409);
   }
   if (row.credentialStatus !== "active") throw new AppError("channel_credential_unavailable", 503);

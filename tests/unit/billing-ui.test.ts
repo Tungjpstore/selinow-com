@@ -191,11 +191,33 @@ describe("subscription state presentation", () => {
     }).eligible.map((plan) => plan.code)).toEqual(["starter", "pro"]);
   });
 
-  it("links an unknown billing market to the tenant settings flow", () => {
+  it("offers only the current plan for canceled subscription recovery", () => {
+    expect(getBillingCheckoutAdmission({
+      billingState: "canceled",
+      currentPlanCode: "pro",
+      marketReady: true,
+      plans: [{ code: "starter", prices: [{ amountMinor: 500 }] }, { code: "pro", prices: [{ amountMinor: 1500 }] }],
+    }).eligible.map((plan) => plan.code)).toEqual(["pro"]);
+
+    const page = readFileSync("src/pages/app/billing.astro", "utf8");
+    const controller = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
+    expect(page).toContain('billing.state === "canceled"');
+    expect(controller).toContain('billingState === "suspended" || billingState === "canceled"');
+    expect(controller).not.toContain('|| billingState === "canceled") return;');
+  });
+
+  it("provides a guarded merchant-country recovery form when the billing market is unknown", () => {
     const page = readFileSync("src/pages/app/billing.astro", "utf8");
     const controller = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
     expect(page).toContain("data-billing-market-ready");
-    expect(page).toContain('workspaceHref("/onboarding#settings")');
+    expect(page).toContain("data-billing-market-form");
+    expect(page).toContain('name="merchantCountry"');
+    expect(page).not.toContain("/onboarding#settings");
+    expect(controller).toContain('const marketForm = root.querySelector<HTMLFormElement>("[data-billing-market-form]");');
+    expect(controller).toContain('requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}`, {');
+    expect(controller).toContain('JSON.stringify({ merchantCountry: value.trim().toUpperCase() })');
+    expect(controller).toContain('method: "PATCH"');
+    expect(controller).toContain('showCheckoutFeedback(text("checkoutMarketSaved"), "success")');
     expect(controller).toContain("getBillingCheckoutAdmission");
     for (const locale of ["en", "vi-VN"] as const) {
       const translate = createDashboardTranslator(locale);

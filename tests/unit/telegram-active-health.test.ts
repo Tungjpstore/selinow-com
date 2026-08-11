@@ -67,6 +67,7 @@ async function activeEnvironment(options: {
                   shopStatus: "active",
                   status: "active",
                   subscriptionState: "active",
+                  currentPeriodEnd: "2099-01-01T00:00:00.000Z",
                 });
               }
               if (sql.includes("FROM telegram_updates")) {

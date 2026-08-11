@@ -132,9 +132,17 @@ function isDateInFuture(value: string | null | undefined, now: Date | string | u
 function subscriptionDecision(input: SubscriptionContext, action: EntitlementAction): EntitlementDecision {
   const state = subscriptionState(input);
   const now = input.now;
-  if (["active", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"].includes(state)) return { allowed: true, reasonCode: null };
+  if (["active", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"].includes(state)) {
+    if (isDateInFuture(input.currentPeriodEnd, now)) {
+      return { allowed: true, reasonCode: null };
+    }
+    return action === "billing" || action === "dashboard" || action === "read"
+      ? { allowed: true, reasonCode: null }
+      : { allowed: false, reasonCode: "subscription_payment_required" };
+  }
   if (state === "trialing") {
-    return isDateInFuture(input.trialEndsAt, now)
+    if (isDateInFuture(input.trialEndsAt, now)) return { allowed: true, reasonCode: null };
+    return action === "billing" || action === "dashboard" || action === "read"
       ? { allowed: true, reasonCode: null }
       : { allowed: false, reasonCode: "subscription_payment_required" };
   }
@@ -144,7 +152,7 @@ function subscriptionDecision(input: SubscriptionContext, action: EntitlementAct
     return { allowed: true, reasonCode: null };
   }
   if (state === "pending_payment") {
-    return action === "dashboard" || action === "draft_setup"
+    return action === "dashboard" || action === "draft_setup" || action === "read" || action === "billing"
       ? { allowed: true, reasonCode: null }
       : { allowed: false, reasonCode: "subscription_payment_required" };
   }

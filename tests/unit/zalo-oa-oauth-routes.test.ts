@@ -80,8 +80,8 @@ function setup(): { database: DatabaseSync; env: AppBindings } {
     VALUES ('plan-zalo-route', 'zalo_route', 'Route plan', '{}', '{}', '${now}', '${now}');
     INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, readiness_version, created_at, updated_at)
     VALUES ('${SHOP_ID}', '${SHOP_PUBLIC_ID}', 'zalo-route-shop', 'Zalo route shop', 'active', 'en', 'VND', 'Asia/Ho_Chi_Minh', 1, '${now}', '${now}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
-    VALUES ('sub-zalo-route', '${SHOP_ID}', 'plan-zalo-route', 'active', '${now}', '${now}');
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
+    VALUES ('sub-zalo-route', '${SHOP_ID}', 'plan-zalo-route', 'active', '2099-01-01T00:00:00.000Z', '${now}', '${now}');
     INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
     VALUES ('${USER_ID}', 'zalo-route@example.com', 'Zalo route owner', 'active', '${now}', '${now}');
     INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)

@@ -110,8 +110,18 @@ const activeRemediationByException = new Map(
     .filter((request) => request.status === "requested" || request.status === "provider_pending")
     .map((request) => [request.exceptionId, request]) ?? [],
 );
-const knownExceptionTypes = new Set(["failed", "identity_mismatch", "inconsistent", "late", "manual_review", "overpaid", "partial"]);
-const paymentExceptionLabel = (value: string): string => t(`dashboard.orders.exception.type.${knownExceptionTypes.has(value) ? value : "default"}`);
+const paymentExceptionLabel = (value: string): string => {
+  switch (value) {
+    case "failed": return t("dashboard.orders.exception.type.failed");
+    case "identity_mismatch": return t("dashboard.orders.exception.type.identity_mismatch");
+    case "inconsistent": return t("dashboard.orders.exception.type.inconsistent");
+    case "late": return t("dashboard.orders.exception.type.late");
+    case "manual_review": return t("dashboard.orders.exception.type.manual_review");
+    case "overpaid": return t("dashboard.orders.exception.type.overpaid");
+    case "partial": return t("dashboard.orders.exception.type.partial");
+    default: return t("dashboard.orders.exception.type.default");
+  }
+};
 const remediationStatusLabels: Record<string, string> = {
   canceled: t("dashboard.billing.requests.status_canceled"),
   completed: t("dashboard.billing.requests.status_completed"),

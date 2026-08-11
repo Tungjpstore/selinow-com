@@ -49,6 +49,7 @@ export type ReadinessSnapshot = {
   shopStatus: string;
   storefrontEntitled: boolean;
   subscriptionState: string;
+  currentPeriodEnd?: string | null;
   trialEndsAt?: string | null;
   graceEndsAt?: string | null;
   supportContact: string | null;
@@ -82,6 +83,7 @@ type ReadinessRow = {
   shopStatus: string;
   storefrontEntitled: number;
   subscriptionState: string;
+  currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
   supportContact: string | null;
@@ -109,6 +111,7 @@ function isFreshTimestamp(value: string | null, now: Date, maximumAgeMs: number)
 export function evaluateReadinessSnapshot(
   snapshot: ReadinessSnapshot,
   checkedAt = new Date().toISOString(),
+  platformPolicyVersion: number | null = CURRENT_POLICY_ATTESTATION_VERSION,
 ): ReadinessResult {
   const now = new Date(checkedAt);
   if (!Number.isFinite(now.getTime())) throw new AppError("validation_failed", 400, ["checked_at_invalid"]);
@@ -118,6 +121,7 @@ export function evaluateReadinessSnapshot(
     && (!snapshot.telegramEnabled || snapshot.telegramEntitled);
   const shopPublishable = new Set(["draft", "active"]).has(snapshot.shopStatus);
   const subscriptionPublishable = subscriptionAllows({
+    currentPeriodEnd: snapshot.currentPeriodEnd,
     graceEndsAt: snapshot.graceEndsAt,
     now,
     subscriptionState: snapshot.subscriptionState,
@@ -137,7 +141,8 @@ export function evaluateReadinessSnapshot(
     && snapshot.privacyUrl !== null
     && snapshot.refundPolicyUrl !== null
     && snapshot.policyAttestedAt !== null
-    && snapshot.policyAttestationVersion === CURRENT_POLICY_ATTESTATION_VERSION;
+    && platformPolicyVersion !== null
+    && snapshot.policyAttestationVersion === platformPolicyVersion;
 
   const checks: ReadinessCheck[] = [
     check({
@@ -257,6 +262,7 @@ async function loadReadinessRow(env: AppBindings, shopId: string): Promise<Readi
       shops.status AS shopStatus,
       shops.readiness_version AS readinessVersion,
       current_subscription.state AS subscriptionState,
+      current_subscription.current_period_end AS currentPeriodEnd,
       current_subscription.trial_ends_at AS trialEndsAt,
       current_subscription.grace_ends_at AS graceEndsAt,
       CASE WHEN json_extract(plans.feature_flags_json, '$.storefront') = 1 THEN 1 ELSE 0 END AS storefrontEntitled,
@@ -396,6 +402,7 @@ function mapSnapshot(row: ReadinessRow): ReadinessSnapshot {
     shopStatus: row.shopStatus,
     storefrontEntitled: row.storefrontEntitled === 1,
     subscriptionState: row.subscriptionState,
+    currentPeriodEnd: row.currentPeriodEnd,
     trialEndsAt: row.trialEndsAt,
     graceEndsAt: row.graceEndsAt,
     supportContact: row.supportContact,
@@ -410,6 +417,7 @@ function mapSnapshot(row: ReadinessRow): ReadinessSnapshot {
 }
 
 async function requireOwnerActor(input: {
+  action: "draft_setup" | "publish" | "read";
   env: AppBindings;
   shopPublicId: string;
   userId: string;
@@ -418,6 +426,7 @@ async function requireOwnerActor(input: {
     capability: "shop:update",
     env: input.env,
     shopPublicId: input.shopPublicId,
+    subscriptionAction: input.action,
     userId: input.userId,
   });
   if (actor.row.role !== "owner") throw new AppError("authorization_denied", 403);
@@ -429,7 +438,7 @@ export async function getShopReadiness(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<ReadinessResult> {
-  const actor = await requireOwnerActor(input);
+  const actor = await requireOwnerActor({ ...input, action: "read" });
   const row = await loadReadinessRow(input.env, actor.shopId);
   return evaluateReadinessSnapshot(mapSnapshot(row));
 }
@@ -485,15 +494,20 @@ function currentStep(result: ReadinessResult, snapshot: ReadinessSnapshot): stri
 
 export async function runShopReadiness(input: {
   env: AppBindings;
+  platformPolicyVersion?: number | null;
   requestId: string;
   shopPublicId: string;
   trigger: ReadinessTrigger;
   userId: string;
 }): Promise<ReadinessResult> {
-  const actor = await requireOwnerActor(input);
+  const actor = await requireOwnerActor({ ...input, action: "draft_setup" });
   const row = await loadReadinessRow(input.env, actor.shopId);
   const snapshot = mapSnapshot(row);
-  const evaluated = evaluateReadinessSnapshot(snapshot);
+  const evaluated = evaluateReadinessSnapshot(
+    snapshot,
+    new Date().toISOString(),
+    input.platformPolicyVersion === undefined ? CURRENT_POLICY_ATTESTATION_VERSION : input.platformPolicyVersion,
+  );
   const runId = createId("rdy");
   const auditId = createId("aud");
   const failures = evaluated.checks.filter((item) => item.required && item.status === "fail").length;
@@ -589,12 +603,17 @@ export async function runShopReadiness(input: {
 export async function publishReadyStorefront(input: {
   env: AppBindings;
   expectedStorefrontVersion?: number;
+  platformPolicyVersion?: number | null;
   requestId: string;
   shopPublicId: string;
   userId: string;
 }): Promise<ReadinessResult> {
-  const actor = await requireOwnerActor(input);
-  const readiness = await runShopReadiness({ ...input, trigger: "publish" });
+  const actor = await requireOwnerActor({ ...input, action: "publish" });
+  const platformPolicyVersion = input.platformPolicyVersion === undefined
+    ? CURRENT_POLICY_ATTESTATION_VERSION
+    : input.platformPolicyVersion;
+  if (platformPolicyVersion === null) throw new AppError("policy_unpublished", 409);
+  const readiness = await runShopReadiness({ ...input, platformPolicyVersion, trigger: "publish" });
   const failures = readiness.checks
     .filter((item) => item.required && item.status === "fail")
     .map((item) => item.code);
@@ -778,7 +797,7 @@ export async function publishReadyStorefront(input: {
       notAfter,
       telegramFreshAfter,
       notAfter,
-      CURRENT_POLICY_ATTESTATION_VERSION,
+      platformPolicyVersion,
     ),
     input.env.PLATFORM_DB.prepare(`
       UPDATE shop_settings

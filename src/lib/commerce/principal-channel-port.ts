@@ -40,6 +40,7 @@ import type { ChannelCapability } from "../channels/types";
  */
 export type PrincipalChannelShop = {
   currency: string;
+  currentPeriodEnd?: string | null;
   defaultLocale: string;
   graceEndsAt?: string | null;
   id: string;
@@ -323,7 +324,7 @@ export class PrincipalChannelCommercePort implements CommerceApplicationPort {
 
   async checkoutCart(input: { command: CommerceCheckoutCommand; context: CommerceContext }): Promise<CommerceCheckoutView> {
     const subjectHash = await this.assertContext(input.context, "checkout.external_link");
-    assertSubscriptionAllows({ graceEndsAt: this.input.shop.graceEndsAt, subscriptionState: this.input.shop.subscriptionState, trialEndsAt: this.input.shop.trialEndsAt });
+    assertSubscriptionAllows({ currentPeriodEnd: this.input.shop.currentPeriodEnd, graceEndsAt: this.input.shop.graceEndsAt, subscriptionState: this.input.shop.subscriptionState, trialEndsAt: this.input.shop.trialEndsAt });
     assertCheckoutAllowed({ shopStatus: this.input.shop.status, subscriptionState: this.input.shop.subscriptionState });
     const command = input.command;
     if (command.customerEmail !== null || command.cart.access.kind !== "principal" || (this.input.expectedIdempotencyKey !== undefined && command.idempotencyKey !== this.input.expectedIdempotencyKey)) throw new AppError("commerce_context_mismatch", 403, ["principal_checkout_required"]);

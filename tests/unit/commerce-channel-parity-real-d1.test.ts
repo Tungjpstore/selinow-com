@@ -286,11 +286,12 @@ function createRuntime(): { database: SqliteD1; env: AppBindings; fakeShop: Prin
     settingsVersion: 1,
     slug: "parity-shop",
     status: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
     theme: { accent: "#111111", accentInk: "#FFFFFF", brand: "#111111", brandInk: "#FFFFFF", logoUrl: null },
   } as StorefrontShop;
-  const telegramShop: TelegramCheckoutShop = { currency: "VND", defaultLocale: "vi", id: SHOP_ID, orderExpiryMinutes: 30, status: "active", subscriptionState: "active" };
-  const fakeShop: PrincipalChannelShop = { currency: "VND", defaultLocale: "vi", id: SHOP_ID, orderExpiryMinutes: 30, status: "active", subscriptionState: "active" };
+  const telegramShop: TelegramCheckoutShop = { currency: "VND", currentPeriodEnd: "2099-01-01T00:00:00.000Z", defaultLocale: "vi", id: SHOP_ID, orderExpiryMinutes: 30, status: "active", subscriptionState: "active" };
+  const fakeShop: PrincipalChannelShop = { currency: "VND", currentPeriodEnd: "2099-01-01T00:00:00.000Z", defaultLocale: "vi", id: SHOP_ID, orderExpiryMinutes: 30, status: "active", subscriptionState: "active" };
   return { database, env, fakeShop, shop, telegramShop };
 }
 

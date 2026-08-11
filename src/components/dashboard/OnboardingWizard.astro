@@ -3,18 +3,31 @@ import { WIZARD_STEPS } from "../../lib/dashboard/onboarding-ui";
 import { PUBLIC_PLAN_CODES } from "../../lib/billing/plan-catalog";
 import { currencyInputStep, formatMinorAmountForInput, SUPPORTED_CURRENCY_CODES } from "../../lib/i18n/currency";
 import { createOnboardingTranslator, getOnboardingClientCopy } from "../../lib/i18n/catalogs/onboarding";
-import type { ShopView } from "../../lib/tenants/store";
+import type { ShopCreationAdmission, ShopView } from "../../lib/tenants/store";
 
 type Props = {
+  creationAdmission: ShopCreationAdmission;
   csrfCookieName: string;
   defaultCurrency: string;
   defaultLocale: string;
   locale?: string | undefined;
   platformBaseDomain: string;
+  policyAttestationPublished: boolean;
+  policyAttestationVersion: number | null;
   shops: ShopView[];
 };
 
-const { csrfCookieName, defaultCurrency, defaultLocale, locale, platformBaseDomain, shops } = Astro.props;
+const {
+  creationAdmission,
+  csrfCookieName,
+  defaultCurrency,
+  defaultLocale,
+  locale,
+  platformBaseDomain,
+  policyAttestationPublished,
+  policyAttestationVersion,
+  shops,
+} = Astro.props;
 const t = createOnboardingTranslator(locale);
 const clientCopy = getOnboardingClientCopy(locale);
 const wizardSteps = WIZARD_STEPS.map((step) => ({ ...step, label: t(step.labelKey) }));
@@ -31,10 +44,13 @@ const initialPlanLabel = initialShop?.planCode === "starter"
   data-onboarding-root
   data-csrf-cookie-name={csrfCookieName}
   data-copy={JSON.stringify(clientCopy)}
+  data-creation-admission={JSON.stringify(creationAdmission)}
   data-default-currency={defaultCurrency}
   data-default-locale={defaultLocale}
   data-locale={locale ?? "en"}
   data-platform-base-domain={platformBaseDomain}
+  data-policy-attestation-published={policyAttestationPublished ? "true" : "false"}
+  data-policy-attestation-version={policyAttestationVersion === null ? "" : String(policyAttestationVersion)}
   data-public-plan-codes={JSON.stringify(PUBLIC_PLAN_CODES)}
   data-shops={JSON.stringify(shops)}
 >
@@ -53,7 +69,7 @@ const initialPlanLabel = initialShop?.planCode === "starter"
   </section>
 
   <div id="onboarding-global-feedback" class="global-feedback" data-global-feedback role="status" aria-live="polite" aria-atomic="true" hidden></div>
-  <div class="resume-recovery" data-onboarding-resume-recovery hidden>
+  <div class="resume-recovery" data-onboarding-resume-recovery hidden={creationAdmission.recoveryShopPublicId === null}>
     <p>{t("onboarding.feedback.create_recovery")}</p>
     <button type="button" class="secondary-action" data-onboarding-resume-reload>{t("onboarding.button.reload_saved_setup")}</button>
   </div>
@@ -141,7 +157,7 @@ const initialPlanLabel = initialShop?.planCode === "starter"
           </form>
         </div>
 
-        <details class="create-shop-box" open={shops.length === 0} hidden={shops.length > 0} data-create-shop-box>
+        <details class="create-shop-box" open={creationAdmission.allowed && shops.length === 0} hidden={!creationAdmission.allowed} data-create-shop-box>
           <summary>{shops.length === 0 ? t("onboarding.shop.create_first") : t("onboarding.shop.create_more")}</summary>
           <form class="form-grid" data-shop-form novalidate>
             <label class="field field-wide">
@@ -378,7 +394,7 @@ const initialPlanLabel = initialShop?.planCode === "starter"
           <label class="field"><span>{t("onboarding.form.terms")}</span><input name="termsUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/terms" required data-terms-url /></label>
           <label class="field"><span>{t("onboarding.form.privacy")}</span><input name="privacyUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/privacy" required data-privacy-url /></label>
           <label class="field field-wide"><span>{t("onboarding.form.refund")}</span><input name="refundPolicyUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/refund" required data-refund-url /></label>
-          <label class="attestation field-wide"><input name="attestationAccepted" type="checkbox" required data-attestation /><span>{t("onboarding.form.attestation")}</span></label>
+          <label class="attestation field-wide"><input name="attestationAccepted" type="checkbox" required={policyAttestationPublished} disabled={!policyAttestationPublished} data-attestation /><span>{t("onboarding.form.attestation")}</span></label>
           <div class="domain-callout field-wide">
             <div><strong>{t("onboarding.form.domain_optional_title")}</strong><p>{t("onboarding.form.domain_optional_copy")}</p></div>
             <a href={initialShop === undefined ? "/app/domains" : `/app/domains?shop=${encodeURIComponent(initialShop.publicId)}`} data-domain-management-link>{t("onboarding.form.domain_link")}</a>

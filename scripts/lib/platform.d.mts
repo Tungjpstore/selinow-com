@@ -92,6 +92,7 @@ export function validateProductionWorkerRouteInventory(
   wranglerConfig: Record<string, any>,
   liveRoutes: unknown,
   liveDomains: unknown,
+  options?: { admissionMode?: "exact" | "pre_candidate" },
 ): { checks: StagingRouteCheck[]; ok: boolean };
 export function assertProductionWorkerDatabaseIdentity(
   d1ListOutput: unknown,
@@ -116,10 +117,13 @@ export function assertProductionWorkerVersionAdmission(input: Record<string, unk
   rollbackCandidateWorkerVersion: string;
 };
 export function assertProductionWorkerIdentityAdmission(input: {
+  infrastructureAdmissionMode?: "exact" | "pre_candidate";
   expectedCurrentWorkerVersion?: string;
   environment?: NodeJS.ProcessEnv;
   fetchImplementation?: typeof fetch;
+  productionManifest?: Record<string, unknown>;
   productionSpec: Record<string, any>;
+  promotionAuditToken?: string;
   repositoryRoot?: string;
   runWranglerImplementation?: (
     args: string[],
@@ -240,9 +244,14 @@ export function cloudflareApiRequest(
   options?: {
     body?: unknown;
     fetchImplementation?: typeof fetch;
+    includeEnvelope?: boolean;
     method?: string;
   },
 ): Promise<unknown>;
+export function validateProductionLiveInfrastructure(input: Record<string, any>): {
+  checks: StagingRouteCheck[];
+  ok: boolean;
+};
 export function doctor(
   environment: "local" | "production" | "staging",
   input?: {

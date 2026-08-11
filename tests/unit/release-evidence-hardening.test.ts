@@ -23,6 +23,10 @@ const release = releaseModule as unknown as {
     missing: string[];
     ok: boolean;
   };
+  validateCandidateBoundReleaseEvidence: (input: Record<string, unknown>) => {
+    missing: string[];
+    ok: boolean;
+  };
 };
 
 const RELEASE_ID = "release_20260809_abcdef12";
@@ -209,5 +213,112 @@ describe("release evidence hardening", () => {
 
     expect(checks.find((check) => check.name === "evidence.commerceAcceptance.payos.artifactSha256Binding")?.ok).toBe(true);
     expect(checks.find((check) => check.name === "evidence.commerceAcceptance.dodo.artifactSha256Binding")?.ok).toBe(false);
+  });
+
+  it("requires quality, manual, pilot and monitoring evidence to bind to one candidate artifact each", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-release-candidate-evidence-"));
+    const candidateWorkerVersion = "33333333-3333-4333-8333-333333333333";
+    const sections = {
+      manualAcceptance: {
+        customDomain: true,
+        paymentSignedEvent: true,
+        telegram: true,
+        website: true,
+        observedAt: OBSERVED_AT,
+      },
+      monitoring: {
+        alertsReady: true,
+        budgetAlertsReady: true,
+        dashboardReady: true,
+        observedAt: OBSERVED_AT,
+      },
+      pilot: {
+        completedAt: OBSERVED_AT,
+        shopCount: 2,
+      },
+      quality: {
+        auditHigh: true,
+        build: true,
+        buildStaging: true,
+        check: true,
+        deployDryRun: true,
+        deployStagingDryRun: true,
+        gitDiffCheck: true,
+        lint: true,
+        schemaVersion: 2,
+        test: true,
+        tscNoEmit: true,
+        observedAt: OBSERVED_AT,
+      },
+    } as const;
+    const evidence: Record<string, unknown> = {
+      candidateWorkerVersion,
+      commitSha: COMMIT_SHA,
+      releaseId: RELEASE_ID,
+      treeSha: TREE_SHA,
+    };
+    try {
+      for (const [section, values] of Object.entries(sections)) {
+        const fileName = section === "manualAcceptance"
+          ? "manual-acceptance.json"
+          : `${section}-evidence.json`;
+        const ref = `.wrangler/releases/${RELEASE_ID}/${fileName}`;
+        const definitionMode = section === "manualAcceptance"
+          ? "manual_acceptance"
+          : section === "monitoring"
+            ? "monitoring_evidence"
+            : section === "pilot"
+              ? "pilot_evidence"
+              : "quality_evidence";
+        const timestampField = section === "pilot" ? "completedAt" : "observedAt";
+        const evidenceKeys = section === "manualAcceptance"
+          ? ["customDomain", "paymentSignedEvent", "telegram", "website"]
+          : section === "monitoring"
+            ? ["alertsReady", "budgetAlertsReady", "dashboardReady"]
+            : section === "pilot"
+              ? ["shopCount"]
+              : ["auditHigh", "build", "buildStaging", "check", "deployDryRun", "deployStagingDryRun", "gitDiffCheck", "lint", "schemaVersion", "test", "tscNoEmit"];
+        const artifact = {
+          commitSha: COMMIT_SHA,
+          environment: "production",
+          evidence: Object.fromEntries(evidenceKeys.map((key) => [key, values[key as keyof typeof values]])),
+          mode: definitionMode,
+          observedAt: values[timestampField as keyof typeof values],
+          releaseId: RELEASE_ID,
+          schemaVersion: 1,
+          treeSha: TREE_SHA,
+          workerVersion: candidateWorkerVersion,
+        };
+        const artifactSha256 = await writeArtifact(root, ref, artifact);
+        evidence[section] = {
+          ...values,
+          artifactSchemaVersion: 1,
+          artifactSha256,
+          evidenceRef: ref,
+        };
+      }
+
+      const valid = release.validateCandidateBoundReleaseEvidence({ evidence, now: NOW, repositoryRoot: root });
+      expect(valid.ok, JSON.stringify(valid.missing)).toBe(true);
+
+      const tamperedArtifact = {
+        commitSha: COMMIT_SHA,
+        environment: "production",
+        evidence: { alertsReady: true, budgetAlertsReady: true, dashboardReady: true },
+        mode: "monitoring_evidence",
+        observedAt: OBSERVED_AT,
+        releaseId: RELEASE_ID,
+        schemaVersion: 1,
+        treeSha: TREE_SHA,
+        workerVersion: "44444444-4444-4444-8444-444444444444",
+      };
+      const monitoringEvidence = evidence.monitoring as Record<string, unknown>;
+      monitoringEvidence.artifactSha256 = await writeArtifact(root, String(monitoringEvidence.evidenceRef), tamperedArtifact);
+      const rejected = release.validateCandidateBoundReleaseEvidence({ evidence, now: NOW, repositoryRoot: root });
+      expect(rejected.ok).toBe(false);
+      expect(rejected.missing).toContain("evidence.monitoring.artifactBinding");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 });

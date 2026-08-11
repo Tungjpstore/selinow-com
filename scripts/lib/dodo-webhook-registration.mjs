@@ -3,6 +3,20 @@ import { URL } from "node:url";
 
 const PROVIDER_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/u;
 const WEBHOOK_SECRET = /^(?:whsec_)?[A-Za-z0-9_+/=-]{16,512}$/u;
+const REQUIRED_DODO_WEBHOOK_EVENTS = Object.freeze([
+  "payment.failed",
+  "payment.succeeded",
+  "subscription.active",
+  "subscription.cancelled",
+  "subscription.expired",
+  "subscription.failed",
+  "subscription.on_hold",
+  "subscription.plan_changed",
+  "subscription.renewed",
+  "subscription.updated",
+]);
+const WEBHOOK_EVENT_FIELDS = Object.freeze(["events", "event_types", "eventTypes", "filter_types", "filterTypes"]);
+const UNUSABLE_WEBHOOK_STATUSES = new Set(["deleted", "disabled", "error", "failed", "inactive", "paused"]);
 
 function object(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
@@ -25,6 +39,27 @@ function webhookUrl(row) {
 function webhookId(row) {
   const value = object(row).id;
   return typeof value === "string" && PROVIDER_REFERENCE.test(value) ? value : null;
+}
+
+function assertExistingWebhookUsable(row) {
+  const webhook = object(row);
+  const status = typeof webhook.status === "string" ? webhook.status.trim().toLowerCase() : null;
+  if (webhook.disabled === true || webhook.enabled === false || (status !== null && UNUSABLE_WEBHOOK_STATUSES.has(status))) {
+    throw new Error("dodo_webhook_endpoint_unusable");
+  }
+  for (const field of WEBHOOK_EVENT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(webhook, field)) continue;
+    const declaredEvents = webhook[field];
+    // Providers may represent an unrestricted event contract as null.
+    if (declaredEvents === null) continue;
+    if (!Array.isArray(declaredEvents) || declaredEvents.some((eventType) => typeof eventType !== "string")) {
+      throw new Error("dodo_webhook_provider_response_invalid");
+    }
+    const eventTypes = new Set(declaredEvents);
+    if (REQUIRED_DODO_WEBHOOK_EVENTS.some((eventType) => !eventTypes.has(eventType))) {
+      throw new Error("dodo_webhook_event_contract_incomplete");
+    }
+  }
 }
 
 async function requestJson(input) {
@@ -65,6 +100,7 @@ export async function ensureDodoWebhook(input) {
   const listed = await requestJson({ apiBaseUrl, apiKey: input.apiKey, fetcher: input.fetcher, method: "GET", path: "/webhooks" });
   const matching = webhookRows(listed).filter((row) => webhookUrl(row) === endpoint.toString());
   if (matching.length > 1) throw new Error("dodo_webhook_endpoint_duplicate");
+  if (matching.length === 1) assertExistingWebhookUsable(matching[0]);
   let id = matching.length === 1 ? webhookId(matching[0]) : null;
   let created = false;
   if (id === null && matching.length === 1) throw new Error("dodo_webhook_provider_response_invalid");

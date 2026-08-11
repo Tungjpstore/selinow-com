@@ -13,7 +13,7 @@ export const ONBOARDING_STEP_CODES = [
   "published",
 ] as const;
 
-export const CURRENT_POLICY_ATTESTATION_VERSION = 1;
+export const CURRENT_POLICY_ATTESTATION_VERSION: number | null = null;
 
 export type OnboardingStepCode = typeof ONBOARDING_STEP_CODES[number];
 export type CustomDomainPreference = "connect" | "later" | "skip";
@@ -121,6 +121,9 @@ export function parseOnboardingSettings(value: Record<string, unknown>): Onboard
 
   const attestationAccepted = requireBoolean(value.attestationAccepted, "attestation_accepted_required");
   const attestationVersion = value.attestationVersion;
+  if (attestationAccepted && CURRENT_POLICY_ATTESTATION_VERSION === null) {
+    throw new AppError("policy_unpublished", 409);
+  }
   if (
     attestationAccepted
     && (typeof attestationVersion !== "number"

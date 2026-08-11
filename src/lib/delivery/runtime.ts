@@ -1,5 +1,9 @@
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
+import {
+  createOperationsAuditEvent,
+  type OperationsAuditEvent,
+} from "../operations/audit";
 import type { AppBindings } from "../platform/bindings";
 import { sha256Hex } from "../events/append";
 
@@ -53,6 +57,12 @@ export type DeliveryJobClaim = {
   queueKind: QueueKind;
   shopId: string;
   version: number;
+};
+
+export type DeliveryJobTerminalStatus = {
+  attempts: number;
+  errorCode: string | null;
+  status: "dead_letter" | "delivered" | "failed";
 };
 
 export type DomainEventDispatchResult = {
@@ -148,6 +158,55 @@ function assertSafeCode(value: string): void {
 
 function changes(result: D1Result | undefined): number {
   return result?.meta.changes ?? 0;
+}
+
+function providerAttemptAudit(input: {
+  action: "delivery.provider_attempt_claimed" | "delivery.provider_outcome_unknown";
+  claim: Pick<DeliveryJobClaim, "id" | "shopId" | "version">;
+  now: Date;
+  requestId: string;
+}): OperationsAuditEvent {
+  return createOperationsAuditEvent({
+    action: input.action,
+    actorId: null,
+    actorType: "system",
+    metadata: {
+      expectedVersion: input.claim.version,
+      reasonCode: input.action === "delivery.provider_attempt_claimed"
+        ? "provider_attempt_claimed"
+        : "delivery_provider_outcome_unknown",
+    },
+    now: input.now,
+    operationId: input.claim.id,
+    requestId: input.requestId,
+    resourceId: input.claim.id,
+    resourceType: "delivery_job",
+    retentionClass: "security",
+    shopId: input.claim.shopId,
+    sourceKind: "queue",
+  });
+}
+
+async function loadDeliveryJobTerminalStatus(
+  database: D1Database,
+  claim: Pick<DeliveryJobClaim, "id" | "queueKind" | "shopId">,
+): Promise<DeliveryJobTerminalStatus | null> {
+  const row = await database.prepare(`
+    SELECT status, attempts, last_safe_error_code AS errorCode
+    FROM delivery_jobs
+    WHERE id = ? AND shop_id = ? AND queue_kind = ?
+    LIMIT 1
+  `).bind(claim.id, claim.shopId, claim.queueKind).first<{
+    attempts: number;
+    errorCode: string | null;
+    status: string;
+  }>();
+  if (row === null || !new Set(["dead_letter", "delivered", "failed"]).has(row.status)) return null;
+  return {
+    attempts: row.attempts,
+    errorCode: row.errorCode,
+    status: row.status as DeliveryJobTerminalStatus["status"],
+  };
 }
 
 function createQueueEnvelope(input: {
@@ -843,7 +902,8 @@ export async function claimDeliveryJob(input: {
     WHERE id = ? AND shop_id = ? AND queue_kind = ? AND version = ?
       AND (
         (status IN ('pending', 'retryable') AND next_attempt_at <= ?)
-        OR (status = 'processing' AND lease_expires_at <= ?)
+        OR (status = 'processing' AND lease_expires_at <= ?
+          AND last_safe_error_code IS NOT 'delivery_provider_attempt_claimed')
       )
       AND EXISTS (SELECT 1 FROM shops WHERE id = ? AND status = 'active')
       AND EXISTS (
@@ -919,18 +979,216 @@ export async function claimDeliveryJob(input: {
   ).first<DeliveryJobClaim>();
 }
 
+/**
+ * Claims the single durable authority to invoke a provider for this lease.
+ * The marker is written before any network call so a lost settlement cannot
+ * cause a later claimant to invoke the provider a second time.
+ */
+export async function claimDeliveryProviderAttempt(input: {
+  claim: DeliveryJobClaim;
+  env: AppBindings;
+  now: Date;
+  requestId: string;
+}): Promise<DeliveryJobClaim | null> {
+  assertIdentifier(input.claim.id, "delivery_job_id_invalid");
+  assertIdentifier(input.claim.shopId, "shop_id_invalid");
+  assertVersion(input.claim.version);
+  const nowIso = input.now.toISOString();
+  const marked = await input.env.PLATFORM_DB.prepare(`
+    UPDATE delivery_jobs
+    SET last_safe_error_code = 'delivery_provider_attempt_claimed',
+      version = version + 1, updated_at = ?
+    WHERE id = ? AND shop_id = ? AND queue_kind = ?
+      AND status = 'processing' AND lease_token = ?
+      AND version = ? AND last_safe_error_code IS NULL
+  `).bind(
+    nowIso,
+    input.claim.id,
+    input.claim.shopId,
+    input.claim.queueKind,
+    input.claim.leaseToken,
+    input.claim.version,
+  ).run();
+  if (changes(marked) !== 1) return null;
+
+  // The marker itself is the safety control. Audit persistence is best effort
+  // so an observability outage cannot turn a pre-send path into a false unknown.
+  try {
+    const audit = providerAttemptAudit({
+      action: "delivery.provider_attempt_claimed",
+      claim: { ...input.claim, version: input.claim.version + 1 },
+      now: input.now,
+      requestId: input.requestId,
+    });
+    await input.env.PLATFORM_DB.prepare(`
+      INSERT INTO audit_logs (
+        id, shop_id, actor_type, actor_id, action, resource_type, resource_id,
+        safe_metadata_json, request_id, created_at, source_kind, correlation_id,
+        operation_id, metadata_version, retention_class
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).bind(
+      audit.id,
+      audit.shopId,
+      audit.actorType,
+      audit.actorId,
+      audit.action,
+      audit.resourceType,
+      audit.resourceId,
+      audit.metadataJson,
+      audit.requestId,
+      audit.createdAt,
+      audit.sourceKind,
+      audit.correlationId,
+      audit.operationId,
+      audit.retentionClass,
+    ).run();
+  } catch {
+    // The durable marker remains authoritative when audit storage is down.
+  }
+
+  return { ...input.claim, version: input.claim.version + 1 };
+}
+
+/**
+ * Converts a marked provider attempt to a terminal unknown outcome. This is
+ * used when the provider was called but D1 settlement did not become durable.
+ */
+export async function terminalizeDeliveryProviderOutcomeUnknown(input: {
+  claim: DeliveryJobClaim;
+  env: AppBindings;
+  now: Date;
+  requestId: string;
+}): Promise<DeliveryJobTerminalStatus | null> {
+  assertIdentifier(input.claim.id, "delivery_job_id_invalid");
+  assertIdentifier(input.claim.shopId, "shop_id_invalid");
+  assertVersion(input.claim.version);
+  const nowIso = input.now.toISOString();
+  const result = await input.env.PLATFORM_DB.prepare(`
+    UPDATE delivery_jobs
+    SET status = 'dead_letter', next_attempt_at = NULL,
+      lease_token = NULL, lease_expires_at = NULL,
+      last_safe_error_code = 'delivery_provider_outcome_unknown',
+      dead_lettered_at = ?, version = version + 1, updated_at = ?
+    WHERE id = ? AND shop_id = ? AND queue_kind = ?
+      AND status = 'processing' AND lease_token = ? AND version = ?
+      AND last_safe_error_code = 'delivery_provider_attempt_claimed'
+  `).bind(
+    nowIso,
+    nowIso,
+    input.claim.id,
+    input.claim.shopId,
+    input.claim.queueKind,
+    input.claim.leaseToken,
+    input.claim.version,
+  ).run();
+  if (changes(result) === 1) {
+    const audit = providerAttemptAudit({
+      action: "delivery.provider_outcome_unknown",
+      claim: input.claim,
+      now: input.now,
+      requestId: input.requestId,
+    });
+    await input.env.PLATFORM_DB.prepare(`
+      INSERT INTO audit_logs (
+        id, shop_id, actor_type, actor_id, action, resource_type, resource_id,
+        safe_metadata_json, request_id, created_at, source_kind, correlation_id,
+        operation_id, metadata_version, retention_class
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).bind(
+      audit.id,
+      audit.shopId,
+      audit.actorType,
+      audit.actorId,
+      audit.action,
+      audit.resourceType,
+      audit.resourceId,
+      audit.metadataJson,
+      audit.requestId,
+      audit.createdAt,
+      audit.sourceKind,
+      audit.correlationId,
+      audit.operationId,
+      audit.retentionClass,
+    ).run();
+  }
+  return loadDeliveryJobTerminalStatus(input.env.PLATFORM_DB, input.claim);
+}
+
+async function terminalizeExpiredProviderAttempt(input: {
+  env: AppBindings;
+  jobId: string;
+  now: Date;
+  queueKind: QueueKind;
+  requestId: string;
+  shopId: string;
+  version: number;
+}): Promise<boolean> {
+  const nowIso = input.now.toISOString();
+  const result = await input.env.PLATFORM_DB.prepare(`
+    UPDATE delivery_jobs
+    SET status = 'dead_letter', next_attempt_at = NULL,
+      lease_token = NULL, lease_expires_at = NULL,
+      last_safe_error_code = 'delivery_provider_outcome_unknown',
+      dead_lettered_at = ?, version = version + 1, updated_at = ?
+    WHERE id = ? AND shop_id = ? AND queue_kind = ?
+      AND status = 'processing' AND lease_expires_at <= ?
+      AND version = ?
+      AND last_safe_error_code = 'delivery_provider_attempt_claimed'
+  `).bind(
+    nowIso,
+    nowIso,
+    input.jobId,
+    input.shopId,
+    input.queueKind,
+    nowIso,
+    input.version,
+  ).run();
+  if (changes(result) !== 1) return false;
+  const audit = providerAttemptAudit({
+    action: "delivery.provider_outcome_unknown",
+    claim: { id: input.jobId, shopId: input.shopId, version: input.version },
+    now: input.now,
+    requestId: input.requestId,
+  });
+  await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO audit_logs (
+      id, shop_id, actor_type, actor_id, action, resource_type, resource_id,
+      safe_metadata_json, request_id, created_at, source_kind, correlation_id,
+      operation_id, metadata_version, retention_class
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+  `).bind(
+    audit.id,
+    audit.shopId,
+    audit.actorType,
+    audit.actorId,
+    audit.action,
+    audit.resourceType,
+    audit.resourceId,
+    audit.metadataJson,
+    audit.requestId,
+    audit.createdAt,
+    audit.sourceKind,
+    audit.correlationId,
+    audit.operationId,
+    audit.retentionClass,
+  ).run();
+  return true;
+}
+
 export async function claimDeliveryJobReference(input: {
   env: AppBindings;
   jobId: string;
   now?: Date;
   queueKind: QueueKind;
+  requestId?: string;
   shopId: string;
 }): Promise<DeliveryJobClaim | null> {
   const now = input.now ?? new Date();
   assertIdentifier(input.jobId, "delivery_job_id_invalid");
   assertIdentifier(input.shopId, "shop_id_invalid");
   const reference = await input.env.PLATFORM_DB.prepare(`
-    SELECT version FROM delivery_jobs
+    SELECT version, last_safe_error_code AS lastSafeErrorCode
+    FROM delivery_jobs
     WHERE id = ? AND shop_id = ? AND queue_kind = ?
       AND (
         (status IN ('pending', 'retryable') AND next_attempt_at <= ?)
@@ -943,8 +1201,20 @@ export async function claimDeliveryJobReference(input: {
     input.queueKind,
     now.toISOString(),
     now.toISOString(),
-  ).first<{ version: number }>();
+  ).first<{ lastSafeErrorCode: string | null; version: number }>();
   if (reference === null) return null;
+  if (reference.lastSafeErrorCode === "delivery_provider_attempt_claimed") {
+    await terminalizeExpiredProviderAttempt({
+      env: input.env,
+      jobId: input.jobId,
+      now,
+      queueKind: input.queueKind,
+      requestId: input.requestId ?? createId("qreq"),
+      shopId: input.shopId,
+      version: reference.version,
+    });
+    return null;
+  }
   return claimDeliveryJob({
     database: input.env.PLATFORM_DB,
     expectedVersion: reference.version,

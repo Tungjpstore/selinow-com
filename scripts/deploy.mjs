@@ -39,6 +39,48 @@ function databaseTargetFromAdmission(admission) {
   };
 }
 
+function assertProductionAdmissionStable(expected, actual, code) {
+  const keys = [
+    "accountId",
+    "candidateWorkerVersion",
+    "commitSha",
+    "databaseId",
+    "databaseName",
+    "migrationLedgerSha256",
+    "previousWorkerVersion",
+    "releaseId",
+    "rollbackArtifactSha256",
+    "rollbackCandidateWorkerVersion",
+    "treeSha",
+    "workerName",
+    "zoneId",
+    "zoneName",
+  ];
+  if (keys.some((key) => actual?.[key] !== expected?.[key])) throw new Error(code);
+}
+
+function assertProductionContinuationStable(expected, actual) {
+  if (
+    actual?.backupSnapshotId !== expected?.backupSnapshotId
+    || actual?.backupChecksumSha256 !== expected?.backupChecksumSha256
+    || actual?.restoreReportRef !== expected?.restoreReportRef
+    || actual?.restoreSnapshotId !== expected?.restoreSnapshotId
+    || actual?.reviewedCommitSha !== expected?.reviewedCommitSha
+  ) {
+    throw new Error("production_continuation_evidence_changed");
+  }
+}
+
+function assertProductionDatabaseStable(expected, actual) {
+  if (
+    actual?.preflightFingerprintSha256 !== expected?.preflightFingerprintSha256
+    || actual?.postMigrationFingerprintSha256 !== expected?.postMigrationFingerprintSha256
+    || JSON.stringify(actual?.migrationNames) !== JSON.stringify(expected?.migrationNames)
+  ) {
+    throw new Error("production_database_admission_changed");
+  }
+}
+
 try {
   const flags = parseDeployFlags(process.argv.slice(2));
 
@@ -71,11 +113,13 @@ try {
   if (requiresProductionAdmission) {
     productionAdmission = await assertProductionWorkerDeployAdmission({
       environment: process.env,
+      infrastructureAdmissionMode: "pre_candidate",
       manifestPath: flags.releaseManifestPath,
       repositoryRoot,
       workerSecretNames,
       requireDedicatedWorkerDeployToken: true,
       requireWorkerVersionBinding: true,
+      workerVersionAdmissionMode: "pre_candidate",
     });
     productionContinuationAdmission = await assertProductionContinuationDeployAdmission({
       accountId: productionAdmission.accountId,
@@ -159,11 +203,13 @@ try {
     if (productionAdmission === null) throw new Error("production_deploy_admission_missing");
     const finalAdmission = await assertProductionWorkerDeployAdmission({
       environment: process.env,
+      infrastructureAdmissionMode: "pre_candidate",
       manifestPath: flags.releaseManifestPath,
       repositoryRoot,
       workerSecretNames,
       requireDedicatedWorkerDeployToken: true,
       requireWorkerVersionBinding: true,
+      workerVersionAdmissionMode: "pre_candidate",
     });
     const finalContinuationAdmission = await assertProductionContinuationDeployAdmission({
       accountId: finalAdmission.accountId,
@@ -217,11 +263,13 @@ try {
     }
     const sinkAdmission = await assertProductionWorkerDeployAdmission({
       environment: process.env,
+      infrastructureAdmissionMode: "pre_candidate",
       manifestPath: flags.releaseManifestPath,
       repositoryRoot,
       workerSecretNames,
       requireDedicatedWorkerDeployToken: true,
       requireWorkerVersionBinding: true,
+      workerVersionAdmissionMode: "pre_candidate",
     });
     if (
       sinkAdmission.accountId !== finalAdmission.accountId
@@ -350,16 +398,159 @@ try {
     }
     if (requiresProductionAdmission) {
       if (productionAdmission === null) throw new Error("production_deploy_admission_missing");
-      run("npx", [
-        "--no-install",
-        "wrangler",
-        "versions",
-        "deploy",
-        `${productionAdmission.candidateWorkerVersion}@100%`,
-        "--env",
-        "production",
-        "--yes",
-      ], { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
+      const triggerEvidencePath = `.wrangler/releases/${productionAdmission.releaseId}/production-trigger-evidence.json`;
+      const routeStatePath = `.wrangler/releases/${productionAdmission.releaseId}/continuation-route-state.json`;
+      let candidateActivated = false;
+      let triggersApplied = false;
+      let routesApplied = false;
+      try {
+        run("npx", [
+          "--no-install",
+          "wrangler",
+          "versions",
+          "deploy",
+          `${productionAdmission.candidateWorkerVersion}@100%`,
+          "--env",
+          "production",
+          "--yes",
+        ], { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
+        candidateActivated = true;
+
+        const candidateActiveAdmission = await assertProductionWorkerDeployAdmission({
+          environment: process.env,
+          infrastructureAdmissionMode: "pre_candidate",
+          manifestPath: flags.releaseManifestPath,
+          repositoryRoot,
+          workerSecretNames,
+          requireDedicatedWorkerDeployToken: true,
+          requireWorkerVersionBinding: true,
+          workerVersionAdmissionMode: "candidate_active",
+        });
+        assertProductionAdmissionStable(
+          productionAdmission,
+          candidateActiveAdmission,
+          "production_candidate_active_admission_changed",
+        );
+
+        run(process.execPath, [
+          "scripts/production-trigger.mjs",
+          "--apply",
+          "--confirm-production",
+          "--evidence",
+          triggerEvidencePath,
+          "--release-evidence",
+          ".wrangler/release/production-evidence.json",
+        ], { capture: false, cwd: repositoryRoot, env: process.env });
+        triggersApplied = true;
+
+        run(process.execPath, [
+          "scripts/production-continuation-route.mjs",
+          "--apply",
+          "--confirm-production",
+          "--release-manifest",
+          flags.releaseManifestPath,
+        ], { capture: false, cwd: repositoryRoot, env: process.env });
+        routesApplied = true;
+
+        const exactAdmission = await assertProductionWorkerDeployAdmission({
+          environment: process.env,
+          infrastructureAdmissionMode: "exact",
+          manifestPath: flags.releaseManifestPath,
+          repositoryRoot,
+          workerSecretNames,
+          requireDedicatedWorkerDeployToken: true,
+          requireWorkerVersionBinding: true,
+          workerVersionAdmissionMode: "candidate_active",
+        });
+        assertProductionAdmissionStable(
+          productionAdmission,
+          exactAdmission,
+          "production_exact_admission_changed",
+        );
+        const exactContinuationAdmission = await assertProductionContinuationDeployAdmission({
+          accountId: exactAdmission.accountId,
+          databaseId: exactAdmission.databaseId,
+          databaseName: exactAdmission.databaseName,
+          repositoryRoot,
+          reviewedCommitSha: exactAdmission.commitSha,
+        });
+        assertProductionContinuationStable(productionContinuationAdmission, exactContinuationAdmission);
+        const exactDatabaseAdmission = await assertProductionDatabaseDeployAdmission({
+          assertDatabasePreflightImplementation: assertProductionDatabasePreflight,
+          assertMigrationLedgerImplementation: assertProductionMigrationLedger,
+          assertPostMigrationContractImplementation: assertRemotePostMigrationContract,
+          environment: buildPinnedCloudflareEnvironment(process.env, exactAdmission.accountId),
+          repositoryRoot,
+        });
+        assertProductionDatabaseStable(productionDatabaseAdmission, exactDatabaseAdmission);
+        productionAdmission = exactAdmission;
+      } catch (error) {
+        const compensationErrors = [];
+        if (routesApplied) {
+          try {
+            run(process.execPath, [
+              "scripts/production-continuation-route.mjs",
+              "--rollback",
+              "--confirm-production",
+              "--release-manifest",
+              flags.releaseManifestPath,
+              "--state",
+              routeStatePath,
+            ], { capture: false, cwd: repositoryRoot, env: process.env });
+          } catch (compensationError) {
+            compensationErrors.push(compensationError);
+          }
+        }
+        if (triggersApplied) {
+          try {
+            run(process.execPath, [
+              "scripts/production-trigger.mjs",
+              "--rollback",
+              "--confirm-production",
+              "--evidence",
+              triggerEvidencePath,
+              "--release-evidence",
+              ".wrangler/release/production-evidence.json",
+            ], { capture: false, cwd: repositoryRoot, env: process.env });
+          } catch (compensationError) {
+            compensationErrors.push(compensationError);
+          }
+        }
+        if (candidateActivated) {
+          try {
+            run("npx", [
+              "--no-install",
+              "wrangler",
+              "versions",
+              "deploy",
+              `${productionAdmission.previousWorkerVersion}@100%`,
+              "--env",
+              "production",
+              "--yes",
+            ], { capture: false, cwd: repositoryRoot, env: wranglerEnvironment });
+            await assertProductionWorkerIdentityAdmission({
+              environment: process.env,
+              expectedCurrentWorkerVersion: productionAdmission.previousWorkerVersion,
+              infrastructureAdmissionMode: "pre_candidate",
+              productionSpec: await readFile(`${repositoryRoot}/infra/environments/production.json`, "utf8").then((text) => JSON.parse(text)),
+              repositoryRoot,
+              stagingSpec: await readFile(`${repositoryRoot}/infra/environments/staging.json`, "utf8").then((text) => JSON.parse(text)),
+              requireCurrentWorkerVersion: true,
+              wranglerConfig: await readFile(`${repositoryRoot}/wrangler.jsonc`, "utf8").then((text) => JSON.parse(text)),
+            });
+          } catch (compensationError) {
+            compensationErrors.push(compensationError);
+          }
+        }
+        if (compensationErrors.length > 0) {
+          throw new AggregateError(
+            compensationErrors,
+            "production_deploy_compensation_failed",
+            { cause: error },
+          );
+        }
+        throw error;
+      }
     } else {
       const deployArgs = ["wrangler", "deploy"];
       deployArgs.unshift("--no-install");
@@ -381,6 +572,7 @@ try {
         environment: process.env,
         expectedCurrentWorkerVersion: productionAdmission?.candidateWorkerVersion,
         fetchImplementation: undefined,
+        infrastructureAdmissionMode: "exact",
         productionSpec,
         repositoryRoot,
         stagingSpec,

@@ -93,6 +93,7 @@ async function contextRow(publicKeyHex: string) {
     providerCode: "discord.bot",
     shopId: SHOP_ID,
     subscriptionState: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     trialEndsAt: null,
     graceEndsAt: null,
   };

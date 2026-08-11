@@ -614,6 +614,7 @@ export async function authenticatePublicApiRequest(input: {
       shops.status AS shopStatus, shops.default_locale AS defaultLocale,
       shops.currency, shops.timezone,
       shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
       shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.grace_ends_at AS graceEndsAt,
       plans.code AS planCode,
@@ -640,6 +641,7 @@ export async function authenticatePublicApiRequest(input: {
     shopStatus: string;
     status: ApiCredentialStatus;
     subscriptionState: string;
+    currentPeriodEnd: string | null;
     trialEndsAt: string | null;
     graceEndsAt: string | null;
     planCode: string;
@@ -659,7 +661,7 @@ export async function authenticatePublicApiRequest(input: {
   if (row.shopStatus === "suspended" || row.shopStatus === "archived") {
     throw new AppError("tenant_suspended", 403);
   }
-  if (!subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
+  if (!subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
     throw new AppError("subscription_required", 402);
   }
   const scopes = parseScopeJson(row.scopeJson);

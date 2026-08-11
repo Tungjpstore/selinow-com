@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import { getShopReadiness } from "../../src/lib/tenants/readiness";
-import { createShop, getShopForMember, updateShopProfile } from "../../src/lib/tenants/store";
+import {
+  createShop,
+  getShopCreationAdmission,
+  getShopForMember,
+  listShopsForMember,
+  updateShopProfile,
+} from "../../src/lib/tenants/store";
 
 class SqliteStatement {
   constructor(
@@ -67,6 +73,7 @@ function createEnv(database: DatabaseSync): AppBindings {
     DEFAULT_CURRENCY: "VND",
     DEFAULT_LOCALE: "vi",
     DEFAULT_TIMEZONE: "Asia/Ho_Chi_Minh",
+    IDENTIFIER_HMAC_SECRET: "shop-country-admission-secret",
     PLATFORM_BASE_DOMAIN: "staging.selinow.test",
     PLATFORM_DB: createD1(database),
     SESSION_SECRET: "test-session-secret-for-shop-country-service",
@@ -103,6 +110,7 @@ describe("shop country configuration service", () => {
       idempotencyKey: input.idempotencyKey,
       name: `Shop ${input.slug}`,
       planCode: "starter",
+      requesterAddress: `203.0.113.${input.userId === "user-a" ? "10" : "11"}`,
       requestId: `request-${input.slug}`,
       slug: input.slug,
       userId: input.userId,
@@ -114,6 +122,7 @@ describe("shop country configuration service", () => {
       env,
       idempotencyKey: "shop-default-paid-plan",
       name: "Default Paid Plan",
+      requesterAddress: "203.0.113.10",
       requestId: "request-default-paid-plan",
       slug: "default-paid-plan",
       userId: "user-a",
@@ -125,6 +134,7 @@ describe("shop country configuration service", () => {
       idempotencyKey: "shop-legacy-plan-reject",
       name: "Legacy Plan",
       planCode: "store",
+      requesterAddress: "203.0.113.10",
       requestId: "request-legacy-plan-reject",
       slug: "legacy-plan-reject",
       userId: "user-a",
@@ -136,6 +146,7 @@ describe("shop country configuration service", () => {
       idempotencyKey: "shop-nonassignable-plan-reject",
       name: "Nonassignable Plan",
       planCode: "starter",
+      requesterAddress: "203.0.113.10",
       requestId: "request-nonassignable-plan-reject",
       slug: "nonassignable-plan-reject",
       userId: "user-a",
@@ -151,6 +162,7 @@ describe("shop country configuration service", () => {
       merchantCountry: "jp",
       name: "Global Shop",
       planCode: "starter",
+      requesterAddress: "203.0.113.10",
       requestId: "request-create-a",
       slug: "global-shop",
       userId: "user-a",
@@ -165,6 +177,7 @@ describe("shop country configuration service", () => {
       merchantCountry: "JP",
       name: "Global Shop",
       planCode: "starter",
+      requesterAddress: "203.0.113.10",
       requestId: "request-create-a-replay",
       slug: "global-shop",
       userId: "user-a",
@@ -215,10 +228,39 @@ describe("shop country configuration service", () => {
       idempotencyKey: "shop-replay-mismatch",
       name: "Changed replay",
       planCode: "pro",
+      requesterAddress: "203.0.113.10",
       requestId: "request-replay-mismatch",
       slug: "replay-changed",
       userId: "user-a",
     })).rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+  });
+
+  it("does not consume the shop-create requester budget for deterministic validation failures", async () => {
+    const limitedEnv = {
+      ...env,
+      SHOP_CREATE_REQUESTER_RATE_LIMIT: "1",
+    } as unknown as AppBindings;
+    await expect(createShop({
+      env: limitedEnv,
+      idempotencyKey: "shop-invalid-admission-budget",
+      name: "Reserved Shop",
+      planCode: "starter",
+      requesterAddress: "198.51.100.90",
+      requestId: "request-invalid-admission-budget",
+      slug: "admin",
+      userId: "user-b",
+    })).rejects.toMatchObject({ code: "validation_failed", issues: ["slug_reserved"], status: 409 });
+
+    await expect(createShop({
+      env: limitedEnv,
+      idempotencyKey: "shop-valid-after-invalid-budget",
+      name: "Valid Shop",
+      planCode: "starter",
+      requesterAddress: "198.51.100.90",
+      requestId: "request-valid-after-invalid-budget",
+      slug: "valid-after-invalid-budget",
+      userId: "user-b",
+    })).resolves.toMatchObject({ created: true });
   });
 
   it("returns one durable shop for concurrent same-key creates", async () => {
@@ -227,6 +269,7 @@ describe("shop country configuration service", () => {
       idempotencyKey: "shop-concurrent-replay",
       name: "Concurrent Replay",
       planCode: "starter",
+      requesterAddress: "203.0.113.10",
       slug: "concurrent-replay",
       userId: "user-a",
     } as const;
@@ -261,11 +304,155 @@ describe("shop country configuration service", () => {
       .rejects.toMatchObject({ code: "validation_failed", issues: ["trial_already_used"], status: 409 });
   });
 
+  it("allows an invited viewer without a trial claim to create an independent shop", async () => {
+    const ownerShop = await createOwnedShop({ idempotencyKey: "shop-invited-owner", slug: "invited-owner", userId: "user-a" });
+    const shopId = (database.prepare("SELECT id FROM shops WHERE public_id = ?").get(ownerShop.shop.publicId) as { id: string }).id;
+    database.prepare(`
+      INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
+      VALUES (?, 'user-b', 'viewer', 'active', '2026-07-29T00:00:00.000Z', '2026-07-29T00:00:00.000Z')
+    `).run(shopId);
+
+    expect(await listShopsForMember({ env, userId: "user-b" })).toHaveLength(1);
+    await expect(getShopCreationAdmission({ env, userId: "user-b" })).resolves.toEqual({
+      allowed: true,
+      reason: "eligible",
+      recoveryShopPublicId: null,
+    });
+  });
+
+  it("routes a canceled owner to billing recovery without exposing the shop to ordinary navigation", async () => {
+    const created = await createOwnedShop({ idempotencyKey: "shop-canceled-recovery", slug: "canceled-recovery", userId: "user-a" });
+    database.prepare(`
+      UPDATE shop_subscriptions
+      SET state = 'canceled', canceled_at = '2026-08-01T00:00:00.000Z'
+      WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
+    `).run(created.shop.publicId);
+
+    await expect(listShopsForMember({ env, userId: "user-a" })).resolves.toEqual([]);
+    await expect(getShopForMember({
+      capability: "shop:read",
+      env,
+      shopPublicId: created.shop.publicId,
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "authorization_denied", status: 403 });
+    await expect(getShopForMember({
+      capability: "billing:manage",
+      env,
+      shopPublicId: created.shop.publicId,
+      userId: "user-a",
+    })).resolves.toMatchObject({ shop: { publicId: created.shop.publicId, subscriptionState: "canceled" } });
+    await expect(getShopCreationAdmission({ env, userId: "user-a" })).resolves.toEqual({
+      allowed: false,
+      reason: "trial_already_used",
+      recoveryShopPublicId: created.shop.publicId,
+    });
+  });
+
+  it("keeps recovery identifiers private when the trial claimant is no longer an active owner", async () => {
+    const created = await createOwnedShop({ idempotencyKey: "shop-private-recovery", slug: "private-recovery", userId: "user-a" });
+    database.prepare(`
+      UPDATE shop_subscriptions
+      SET state = 'canceled', canceled_at = '2026-08-01T00:00:00.000Z'
+      WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
+    `).run(created.shop.publicId);
+    database.prepare(`
+      UPDATE shop_members SET role = 'viewer'
+      WHERE user_id = 'user-a' AND shop_id = (SELECT id FROM shops WHERE public_id = ?)
+    `).run(created.shop.publicId);
+
+    await expect(getShopCreationAdmission({ env, userId: "user-a" })).resolves.toEqual({
+      allowed: false,
+      reason: "trial_already_used",
+      recoveryShopPublicId: null,
+    });
+  });
+
+  it("allows recovery reads but denies mutations for expired and suspended subscriptions", async () => {
+    const created = await createOwnedShop({ idempotencyKey: "shop-action-aware", slug: "action-aware", userId: "user-a" });
+    database.prepare(`
+      UPDATE shop_subscriptions SET trial_ends_at = '2099-01-01T00:00:00.000Z'
+      WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
+    `).run(created.shop.publicId);
+
+    await expect(getShopForMember({
+      capability: "shop:read",
+      env,
+      now: new Date("2100-01-01T00:00:00.000Z"),
+      shopPublicId: created.shop.publicId,
+      subscriptionAction: "read",
+      userId: "user-a",
+    })).resolves.toMatchObject({ shop: { publicId: created.shop.publicId } });
+    await expect(getShopForMember({
+      capability: "shop:update",
+      env,
+      now: new Date("2100-01-01T00:00:00.000Z"),
+      shopPublicId: created.shop.publicId,
+      subscriptionAction: "mutation",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "subscription_payment_required", status: 402 });
+
+    database.prepare(`
+      UPDATE shop_subscriptions SET state = 'suspended'
+      WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
+    `).run(created.shop.publicId);
+    await expect(getShopForMember({
+      capability: "billing:manage",
+      env,
+      shopPublicId: created.shop.publicId,
+      userId: "user-a",
+    })).resolves.toMatchObject({ shop: { subscriptionState: "suspended" } });
+    await expect(getShopForMember({
+      capability: "shop:update",
+      env,
+      shopPublicId: created.shop.publicId,
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "subscription_payment_required", status: 402 });
+  });
+
+  it.each(["active", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"])(
+    "denies mutations after the authoritative paid period for %s",
+    async (subscriptionState) => {
+      const created = await createOwnedShop({
+        idempotencyKey: `shop-expired-paid-${subscriptionState}`,
+        slug: `expired-paid-${subscriptionState.replaceAll("_", "-")}`,
+        userId: "user-a",
+      });
+      database.prepare(`
+        UPDATE shop_subscriptions
+        SET state = ?, trial_ends_at = NULL,
+          current_period_start = '2026-07-01T00:00:00.000Z',
+          current_period_end = '2026-08-01T00:00:00.000Z'
+        WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
+      `).run(subscriptionState, created.shop.publicId);
+
+      await expect(getShopForMember({
+        capability: "shop:read",
+        env,
+        now: new Date("2026-08-02T00:00:00.000Z"),
+        shopPublicId: created.shop.publicId,
+        userId: "user-a",
+      })).resolves.toMatchObject({ shop: { subscriptionState } });
+      await expect(getShopForMember({
+        capability: "shop:update",
+        env,
+        now: new Date("2026-08-02T00:00:00.000Z"),
+        shopPublicId: created.shop.publicId,
+        userId: "user-a",
+      })).rejects.toMatchObject({ code: "subscription_payment_required", status: 402 });
+    },
+  );
+
   it("keeps globally duplicate slugs opaque across accounts", async () => {
     await createOwnedShop({ idempotencyKey: "shop-shared-slug-a", slug: "shared-slug", userId: "user-a" });
+    const admissionCount = database.prepare(`
+      SELECT COUNT(*) AS count FROM auth_request_admissions WHERE action = 'shop_create'
+    `).get();
     await expect(createOwnedShop({ idempotencyKey: "shop-shared-slug-b", slug: "shared-slug", userId: "user-b" }))
       .rejects.toMatchObject({ code: "validation_failed", issues: ["slug_unavailable"], status: 409 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM account_trial_claims WHERE user_id = 'user-b'").get()).toEqual({ count: 0 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM auth_request_admissions WHERE action = 'shop_create'
+    `).get()).toEqual(admissionCount);
   });
 
   it("rejects an already-expired trial placeholder at the database boundary", () => {
@@ -411,6 +598,7 @@ describe("shop country configuration service", () => {
       idempotencyKey: "shop-invalid-default-currency",
       name: "Invalid Currency",
       planCode: "starter",
+      requesterAddress: "203.0.113.11",
       requestId: "request-invalid-default-currency",
       slug: "invalid-default-currency",
       userId: "user-b",
@@ -449,6 +637,7 @@ describe("shop country configuration service", () => {
       idempotencyKey: "shop-default-locale",
       name: "Locale Shop",
       planCode: "starter",
+      requesterAddress: "203.0.113.10",
       requestId: "request-default-locale",
       slug: "locale-shop",
       userId: "user-a",

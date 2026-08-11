@@ -60,6 +60,7 @@ describe("admin operations PromptOS surface", () => {
     expect(systems).not.toMatch(/name="(?:shopId|requestedByUserId|requestId|leaseToken|providerPayload|secretMaterialDestroyedJson)"/);
     expect(operationsApi).toContain("deletionOverview");
     expect(operationsApi).toContain("deadLettersHasMore");
+    expect(operationsApi).toContain("generatedLicenseDeadLettersHasMore");
     expect(operationsApi).toContain("incidentsHasMore");
     expect(operationsApi).toContain("operationsListLimit");
     expect(operationsApi).toContain("listActiveDeletionRequests({ env, userId: auth.userId })");

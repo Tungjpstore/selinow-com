@@ -14,6 +14,7 @@ const dependencies = vi.hoisted(() => ({
   automation: vi.fn(),
   billingChanges: vi.fn(),
   claimDeliveryJobReference: vi.fn(),
+  claimDeliveryProviderAttempt: vi.fn(),
   consumeDeadLetterQueue: vi.fn(),
   customDomains: vi.fn(),
   deliverTelegramJob: vi.fn(),
@@ -47,6 +48,7 @@ const dependencies = vi.hoisted(() => ({
   suspendBillingGracePeriods: vi.fn(),
   suspendBillingTrials: vi.fn(),
   terminalStatus: null as string | null,
+  terminalizeDeliveryProviderOutcomeUnknown: vi.fn(),
   terminalAttempts: 3,
   terminalErrorCode: "legacy_delivery_failed",
 }));
@@ -78,10 +80,12 @@ vi.mock("../../src/lib/commerce/private-file-maintenance", () => ({
 vi.mock("../../src/lib/commerce/store", () => ({ expireUnpaidOrders: dependencies.expireOrders }));
 vi.mock("../../src/lib/delivery/runtime", () => ({
   claimDeliveryJobReference: dependencies.claimDeliveryJobReference,
+  claimDeliveryProviderAttempt: dependencies.claimDeliveryProviderAttempt,
   dispatchDomainEventReference: dependencies.dispatchDomainEventReference,
   dispatchDueDomainEvents: dependencies.dispatchDueDomainEvents,
   enqueueDueDeliveryJobs: dependencies.enqueueDueDeliveryJobs,
   settleDeliveryJob: dependencies.settleDeliveryJob,
+  terminalizeDeliveryProviderOutcomeUnknown: dependencies.terminalizeDeliveryProviderOutcomeUnknown,
 }));
 vi.mock("../../src/lib/delivery/telegram", () => ({ deliverTelegramJob: dependencies.deliverTelegramJob }));
 vi.mock("../../src/lib/domains/reconciliation", () => ({ reconcileCustomDomains: dependencies.customDomains }));
@@ -255,8 +259,13 @@ beforeEach(() => {
   dependencies.dispatchDomainEventReference.mockResolvedValue(dispatchResult("not_claimed"));
   dependencies.purgeCartMutationReplays.mockResolvedValue(0);
   dependencies.claimDeliveryJobReference.mockResolvedValue(null);
+  dependencies.claimDeliveryProviderAttempt.mockImplementation(({ claim }: { claim: DeliveryJobClaim }) => Promise.resolve({
+    ...claim,
+    version: claim.version + 1,
+  }));
   dependencies.deliverTelegramJob.mockResolvedValue({ kind: "delivered" });
   dependencies.settleDeliveryJob.mockResolvedValue(true);
+  dependencies.terminalizeDeliveryProviderOutcomeUnknown.mockResolvedValue({ attempts: 1, errorCode: "delivery_provider_outcome_unknown", status: "dead_letter" });
   dependencies.recordDeadLetter.mockResolvedValue({});
   dependencies.enqueueDueDeliveryJobs.mockResolvedValue({ candidates: 2, failed: 1, sent: 1 });
   dependencies.enqueueDueGeneratedLicenseRequests.mockResolvedValue({ candidates: 4, failed: 1, sent: 3 });
@@ -491,6 +500,40 @@ describe("Worker generic domain delivery contract", () => {
     for (const message of messages) expect(message.ack).toHaveBeenCalledOnce();
   });
 
+  it("keeps a marked Telegram 429 on the normal retry path", async () => {
+    const claim = deliveryClaim({ attempts: 2, id: "delivery-rate-limited-001" });
+    dependencies.claimDeliveryJobReference.mockResolvedValue(claim);
+    dependencies.deliverTelegramJob.mockImplementationOnce(async (input: {
+      beforeProviderAttempt: () => Promise<void>;
+    }) => {
+      await input.beforeProviderAttempt();
+      return {
+        errorCode: "telegram_rate_limited",
+        kind: "retryable",
+        providerOutcome: "not_sent",
+        retryAfterSeconds: 17,
+      };
+    });
+    const message = trackedMessage(
+      deliveryEnvelope("delivery-rate-limited-001"),
+      "message-rate-limited-001",
+    );
+
+    await worker.queue(messageBatch([message]), testEnv());
+
+    expect(dependencies.claimDeliveryProviderAttempt).toHaveBeenCalledWith(expect.objectContaining({ claim }));
+    expect(dependencies.terminalizeDeliveryProviderOutcomeUnknown).not.toHaveBeenCalled();
+    expect(dependencies.settleDeliveryJob).toHaveBeenCalledWith(expect.objectContaining({
+      claim: { ...claim, version: claim.version + 1 },
+      settlement: {
+        errorCode: "telegram_rate_limited",
+        nextAttemptAt: "2026-07-27T12:00:17.000Z",
+        status: "retryable",
+      },
+    }));
+    expect(message.ack).toHaveBeenCalledOnce();
+  });
+
   it("settles unknown providers retryably and never invokes the Telegram adapter", async () => {
     dependencies.claimDeliveryJobReference.mockResolvedValue(deliveryClaim({
       attempts: 3,
@@ -594,5 +637,44 @@ describe("Worker generic domain delivery contract", () => {
       purgedSecurityRateLimits: 4,
     });
     expect(Object.values(metrics).every((value) => typeof value === "number")).toBe(true);
+  });
+
+  it("isolates scheduled job failures and reports only safe failure metadata", async () => {
+    dependencies.enqueueDueDeliveryJobs.mockRejectedValueOnce(new Error("secret database failure"));
+    const controller: ScheduledController = {
+      cron: "*/5 * * * *",
+      noRetry: vi.fn(),
+      scheduledTime: NOW.getTime(),
+    };
+
+    await worker.scheduled(controller, testEnv());
+
+    expect(dependencies.enqueueDueGeneratedLicenseRequests).toHaveBeenCalledWith(expect.any(Object), NOW);
+    expect(dependencies.dispatchDueDomainEvents).toHaveBeenCalledWith(expect.any(Object), NOW);
+    expect(dependencies.customDomains).toHaveBeenCalledWith(expect.any(Object), NOW);
+    expect(dependencies.paymentReconciliation).toHaveBeenCalledWith(expect.any(Object), NOW);
+    expect(dependencies.purgeDataExports).toHaveBeenCalledWith(expect.any(Object), NOW);
+
+    expect(dependencies.loggerError).toHaveBeenCalledWith({
+      errorCode: "scheduled_delivery_jobs_failed",
+      event: "infrastructure.cron_job_failed",
+      queue: "delivery_jobs",
+      requestId: `cron-${String(NOW.getTime())}`,
+      source: "scheduled",
+    });
+    expect(JSON.stringify(dependencies.loggerError.mock.calls)).not.toContain("secret database failure");
+
+    const completion = dependencies.loggerInfo.mock.calls
+      .map(([entry]) => entry as Record<string, unknown>)
+      .find((entry) => entry.event === "infrastructure.cron_completed");
+    expect(completion).toMatchObject({
+      requestId: `cron-${String(NOW.getTime())}`,
+    });
+    expect(loggedMetrics("infrastructure.cron_completed")).toMatchObject({
+      deliveryJobsCandidates: 0,
+      deliveryJobsFailed: 0,
+      deliveryJobsSent: 0,
+      scheduledJobFailures: 1,
+    });
   });
 });

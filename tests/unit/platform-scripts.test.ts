@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { parseFlags } from "../../scripts/lib/cli.mjs";
+import { parseFlags, run } from "../../scripts/lib/cli.mjs";
 import {
   assertProductionWorkerDatabaseIdentity,
   assertProductionWorkerIdentityAdmission,
@@ -32,6 +32,7 @@ import {
   requireCloudflareRouteAuditToken,
   requireCloudflareWorkerDeployToken,
   type PlatformEnvironmentSpec,
+  validateProductionLiveInfrastructure,
   validateProductionWorkerRouteInventory,
   validateStagingRouteInventory,
   validateStagingRuntimeIdentity,
@@ -39,6 +40,10 @@ import {
 
 const STAGING_DATABASE_ID = "c86d76a0-7407-42b6-ba92-f9f9623d0730";
 const PRODUCTION_DATABASE_ID = "17ea8f2f-4c97-4337-8989-28b25a58ddeb";
+const PRODUCTION_CACHE_KV_ID = "11111111111111111111111111111111";
+const PRODUCTION_SESSION_KV_ID = "22222222222222222222222222222222";
+const PRODUCTION_MANIFEST_VERSION = "fixture-production-v1";
+const PRODUCTION_TURNSTILE_SITE_KEY = "0xSiteKeyThatLooksConfigured123456";
 
 const stagingSpec = {
   accountId: "abcdef0123456789abcdef0123456789",
@@ -151,7 +156,28 @@ function productionSpec() {
       dashboard: "app.selinow.com",
       marketing: "selinow.com",
     },
-    resources: { d1: "selinow-production" },
+    resources: {
+      d1: "selinow-production",
+      deadLetterQueue: "selinow-dlq-production",
+      integrationQueue: "selinow-integration-production",
+      notificationQueue: "selinow-notification-production",
+      platformCacheKv: "selinow-cache-production",
+      privateExports: "selinow-private-exports-production",
+      r2: "selinow-media-production",
+      sessionKv: "selinow-session-production",
+    },
+    routing: {
+      externalCustomDomainFallbackRoute: "*/*",
+    },
+    saas: {
+      cnameTarget: "customers.selinow.com",
+      fallbackOrigin: "proxy-fallback.selinow.com",
+    },
+    turnstile: {
+      externalCustomDomainAdmission: "verified_before_domain_activation",
+      externalCustomDomainStrategy: "exact_hostname_admission_before_activation",
+      platformHostname: "selinow.com",
+    },
     workerName: "selinow-com-production",
     zoneId: stagingSpec.zoneId,
     zoneName: stagingSpec.zoneName,
@@ -174,10 +200,185 @@ function productionWranglerConfig() {
           database_id: PRODUCTION_DATABASE_ID,
           database_name: "selinow-production",
         }],
+        kv_namespaces: [
+          { binding: "PLATFORM_CACHE", id: PRODUCTION_CACHE_KV_ID },
+          { binding: "SESSION", id: PRODUCTION_SESSION_KV_ID },
+        ],
         name: "selinow-com-production",
+        queues: {
+          consumers: [
+            {
+              dead_letter_queue: "selinow-dlq-production",
+              max_batch_size: 10,
+              max_batch_timeout: 5,
+              max_retries: 5,
+              queue: "selinow-integration-production",
+              retry_delay: 60,
+            },
+            {
+              dead_letter_queue: "selinow-dlq-production",
+              max_batch_size: 10,
+              max_batch_timeout: 5,
+              max_retries: 5,
+              queue: "selinow-notification-production",
+              retry_delay: 60,
+            },
+            {
+              max_batch_size: 10,
+              max_batch_timeout: 5,
+              max_retries: 100,
+              queue: "selinow-dlq-production",
+            },
+          ],
+          producers: [
+            { binding: "INTEGRATION_QUEUE", queue: "selinow-integration-production" },
+            { binding: "NOTIFICATION_QUEUE", queue: "selinow-notification-production" },
+          ],
+        },
+        r2_buckets: [
+          { binding: "MEDIA", bucket_name: "selinow-media-production" },
+          { binding: "PRIVATE_EXPORTS", bucket_name: "selinow-private-exports-production" },
+        ],
         routes,
+        triggers: { crons: ["*/15 * * * *"] },
+        vars: {
+          RESOURCE_MANIFEST_VERSION: PRODUCTION_MANIFEST_VERSION,
+          TURNSTILE_SITE_KEY: PRODUCTION_TURNSTILE_SITE_KEY,
+        },
       },
     },
+  };
+}
+
+function productionManifest() {
+  return {
+    accountId: stagingSpec.accountId,
+    environment: "production",
+    resources: {
+      d1: { id: PRODUCTION_DATABASE_ID, name: "selinow-production" },
+      deadLetterQueue: { name: "selinow-dlq-production" },
+      integrationQueue: { name: "selinow-integration-production" },
+      notificationQueue: { name: "selinow-notification-production" },
+      platformCacheKv: { id: PRODUCTION_CACHE_KV_ID, name: "selinow-cache-production" },
+      privateExports: { name: "selinow-private-exports-production" },
+      r2: { name: "selinow-media-production" },
+      sessionKv: { id: PRODUCTION_SESSION_KV_ID, name: "selinow-session-production" },
+    },
+    saas: {
+      cnameTarget: "customers.selinow.com",
+      fallbackOrigin: "proxy-fallback.selinow.com",
+    },
+    version: PRODUCTION_MANIFEST_VERSION,
+    workerName: "selinow-com-production",
+    zoneId: stagingSpec.zoneId,
+    zoneName: stagingSpec.zoneName,
+  };
+}
+
+function exactProductionWorkerBindings() {
+  return [
+    { id: PRODUCTION_DATABASE_ID, name: "PLATFORM_DB", type: "d1" },
+    { name: "PLATFORM_CACHE", namespace_id: PRODUCTION_CACHE_KV_ID, type: "kv_namespace" },
+    { name: "SESSION", namespace_id: PRODUCTION_SESSION_KV_ID, type: "kv_namespace" },
+    { bucket_name: "selinow-media-production", name: "MEDIA", type: "r2_bucket" },
+    { bucket_name: "selinow-private-exports-production", name: "PRIVATE_EXPORTS", type: "r2_bucket" },
+    { name: "INTEGRATION_QUEUE", queue_name: "selinow-integration-production", type: "queue" },
+    { name: "NOTIFICATION_QUEUE", queue_name: "selinow-notification-production", type: "queue" },
+  ];
+}
+
+function exactProductionQueueConsumers(queue: string) {
+  const config = productionWranglerConfig().env.production.queues.consumers.find((entry) => (
+    entry.queue === queue
+  ));
+  if (config === undefined) throw new Error("test_queue_consumer_missing");
+  return [{
+    batch_size: config.max_batch_size,
+    batch_timeout: config.max_batch_timeout,
+    dead_letter_queue: config.dead_letter_queue,
+    max_retries: config.max_retries,
+    retry_delay: config.retry_delay,
+    script: "selinow-com-production",
+  }];
+}
+
+function productionLiveContract() {
+  const config = productionWranglerConfig().env.production;
+  return {
+    consumers: config.queues.consumers.map((consumer) => ({
+      queue: consumer.queue,
+      script: "selinow-com-production",
+      settings: Object.fromEntries(Object.entries({
+        batchSize: consumer.max_batch_size,
+        batchTimeout: consumer.max_batch_timeout,
+        deadLetterQueue: consumer.dead_letter_queue,
+        maxRetries: consumer.max_retries,
+        retryDelaySecs: consumer.retry_delay,
+      }).filter(([, value]) => value !== undefined)),
+    })),
+    criticalBindings: [
+      { id: PRODUCTION_DATABASE_ID, name: "PLATFORM_DB", type: "d1" },
+      { id: PRODUCTION_CACHE_KV_ID, name: "PLATFORM_CACHE", type: "kv_namespace" },
+      { id: PRODUCTION_SESSION_KV_ID, name: "SESSION", type: "kv_namespace" },
+      { id: "selinow-integration-production", name: "INTEGRATION_QUEUE", type: "queue" },
+      { id: "selinow-notification-production", name: "NOTIFICATION_QUEUE", type: "queue" },
+      { id: "selinow-media-production", name: "MEDIA", type: "r2_bucket" },
+      { id: "selinow-private-exports-production", name: "PRIVATE_EXPORTS", type: "r2_bucket" },
+    ].sort((left, right) => `${left.type}:${left.name}`.localeCompare(`${right.type}:${right.name}`)),
+    cron: "*/15 * * * *",
+    fallbackOrigin: "proxy-fallback.selinow.com",
+    manifestVersion: PRODUCTION_MANIFEST_VERSION,
+    platformTurnstileHostname: "selinow.com",
+    turnstileSiteKey: PRODUCTION_TURNSTILE_SITE_KEY,
+  };
+}
+
+function exactProductionLiveInfrastructure() {
+  const contract = productionLiveContract();
+  const customerHostname = "shop.customer.example";
+  const customerHostnameId = "custom-hostname-1";
+  return {
+    contract,
+    customDomainRows: [{
+      cloudflare_hostname_id: customerHostnameId,
+      delete_requested_at: null,
+      deleted_at: null,
+      dns_status: "active",
+      hostname_normalized: customerHostname,
+      hostname_status: "active",
+      is_primary: 1,
+      ownership_verified_at: "2026-08-11T00:00:00.000Z",
+      shop_id: "shop-1",
+      ssl_status: "active",
+      status: "active",
+      validation_metadata_json: JSON.stringify({
+        turnstile: {
+          checkedAt: "2026-08-11T00:00:00.000Z",
+          hostname: customerHostname,
+          mode: "operator_managed",
+          source: "cloudflare_widget_domains",
+          status: "active",
+        },
+      }),
+    }],
+    customHostnames: [{
+      hostname: customerHostname,
+      id: customerHostnameId,
+      ssl: { status: "active" },
+      status: "active",
+    }],
+    fallbackOrigin: { origin: contract.fallbackOrigin, status: "active" },
+    now: "2026-08-11T06:00:00.000Z",
+    queueConsumers: contract.consumers.map((consumer) => ({
+      consumers: [{ script: consumer.script, settings: consumer.settings }],
+      queue: consumer.queue,
+    })),
+    schedules: [{ cron: contract.cron }],
+    turnstileWidget: {
+      domains: [contract.platformTurnstileHostname, customerHostname],
+      sitekey: contract.turnstileSiteKey,
+    },
+    workerSettings: { bindings: exactProductionWorkerBindings() },
   };
 }
 
@@ -255,6 +456,37 @@ describe("platform CLI flags", () => {
       environment: "production",
       ok: false,
     });
+  });
+
+  it("collapses child-process output before an operator CLI can print it", () => {
+    expect(() => run(process.execPath, [
+      "-e",
+      "process.stderr.write('DUMMY_SECRET_MARKER'); process.exit(1)",
+    ])).toThrow("command_failed");
+    try {
+      run(process.execPath, [
+        "-e",
+        "process.stderr.write('DUMMY_SECRET_MARKER'); process.exit(1)",
+      ]);
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("command_failed");
+      expect((error as Error).message).not.toContain("DUMMY_SECRET_MARKER");
+    }
+  });
+
+  it("preserves only an explicitly allowlisted single-line child failure code", () => {
+    expect(() => run(process.execPath, [
+      "-e",
+      "process.stderr.write('platform_child_admission_denied\\n'); process.exit(1)",
+    ], { capture: false, safeFailureCodes: ["platform_child_admission_denied"] }))
+      .toThrow("platform_child_admission_denied");
+
+    expect(() => run(process.execPath, [
+      "-e",
+      "process.stderr.write('platform_child_admission_denied\\nDUMMY_SECRET_MARKER'); process.exit(1)",
+    ], { safeFailureCodes: ["platform_child_admission_denied"] }))
+      .toThrow("command_failed");
   });
 });
 
@@ -523,20 +755,106 @@ describe("Cloudflare for SaaS platform configuration", () => {
     }).toThrow("production_worker_route_contract_invalid");
   });
 
-  it("pins and rechecks production account, D1, routes, and Worker domains", async () => {
+  it("fails closed on binding, trigger, SaaS mapping, fallback, or Turnstile drift", () => {
+    const exact = exactProductionLiveInfrastructure();
+    expect(validateProductionLiveInfrastructure(exact)).toMatchObject({ ok: true });
+
+    const drifts = [
+      {
+        code: "cloudflare_production_worker_binding_inventory_allowlist",
+        input: {
+          ...exact,
+          workerSettings: {
+            bindings: exactProductionWorkerBindings().map((binding) => (
+              binding.name === "PLATFORM_CACHE"
+                ? { ...binding, namespace_id: PRODUCTION_SESSION_KV_ID }
+                : binding
+            )),
+          },
+        },
+      },
+      {
+        code: "cloudflare_production_queue_consumer_inventory_allowlist",
+        input: {
+          ...exact,
+          queueConsumers: exact.queueConsumers.map((entry, index) => index === 0
+            ? { ...entry, consumers: [...entry.consumers, entry.consumers[0]] }
+            : entry),
+        },
+      },
+      {
+        code: "cloudflare_production_schedule_inventory_allowlist",
+        input: { ...exact, schedules: [...exact.schedules, { cron: "0 * * * *" }] },
+      },
+      {
+        code: "cloudflare_production_saas_hostname_mapping",
+        input: {
+          ...exact,
+          customHostnames: [
+            ...exact.customHostnames,
+            {
+              hostname: "unknown.customer.example",
+              id: "unknown-hostname-id",
+              ssl: { status: "active" },
+              status: "active",
+            },
+          ],
+        },
+      },
+      {
+        code: "cloudflare_production_saas_fallback_origin",
+        input: { ...exact, fallbackOrigin: { origin: "wrong.selinow.com", status: "active" } },
+      },
+      {
+        code: "cloudflare_production_turnstile_hostname_allowlist",
+        input: {
+          ...exact,
+          turnstileWidget: {
+            ...exact.turnstileWidget,
+            domains: [exact.contract.platformTurnstileHostname],
+          },
+        },
+      },
+    ];
+
+    for (const drift of drifts) {
+      const result = validateProductionLiveInfrastructure(drift.input);
+      expect(result.ok, drift.code).toBe(false);
+      expect(result.checks).toContainEqual(expect.objectContaining({ code: drift.code, ok: false }));
+    }
+  });
+
+  it("pins and rechecks the exact production identity, bindings, triggers, SaaS inventory, and domains", async () => {
     const requestedUrls: string[] = [];
     const fetchImplementation: typeof fetch = (input, init) => {
       expect(init?.method ?? "GET").toBe("GET");
-      expect(init?.headers).toMatchObject({ Authorization: "Bearer route-audit-token" });
       const url = typeof input === "string"
         ? input
         : input instanceof URL
           ? input.href
           : input.url;
       requestedUrls.push(url);
+      const authorization = new Headers(init?.headers).get("Authorization");
+      if (url.endsWith("/workers/routes") || url.endsWith("/workers/domains")) {
+        expect(authorization).toBe("Bearer route-audit-token");
+      } else {
+        expect(authorization).toBe("Bearer promotion-audit-token");
+      }
       const result = url.endsWith("/workers/routes")
         ? exactSharedZoneRouteInventory()
-        : exactSharedZoneDomainInventory();
+        : url.endsWith("/workers/domains")
+          ? exactSharedZoneDomainInventory()
+          : url.endsWith("/settings")
+            ? { bindings: exactProductionWorkerBindings() }
+            : url.endsWith("/schedules")
+              ? [{ cron: "*/15 * * * *" }]
+              : url.includes("/custom_hostnames?")
+                ? []
+                : url.endsWith("/custom_hostnames/fallback_origin")
+                  ? { origin: "proxy-fallback.selinow.com", status: "active" }
+                  : url.includes("/challenges/widgets/")
+                    ? { domains: ["selinow.com"], sitekey: PRODUCTION_TURNSTILE_SITE_KEY }
+                    : null;
       return Promise.resolve(new Response(JSON.stringify({ result, success: true }), {
         status: 200,
       }));
@@ -553,6 +871,12 @@ describe("Cloudflare for SaaS platform configuration", () => {
       if (args[0] === "whoami") {
         return { stderr: "", stdout: JSON.stringify({ accounts: [{ id: stagingSpec.accountId }] }) };
       }
+      if (args[0] === "queues") {
+        return { stderr: "", stdout: JSON.stringify(exactProductionQueueConsumers(args[3] ?? "")) };
+      }
+      if (args[0] === "d1" && args[1] === "execute") {
+        return { stderr: "", stdout: JSON.stringify([{ results: [], success: true }]) };
+      }
       return {
         stderr: "",
         stdout: JSON.stringify([{
@@ -566,9 +890,11 @@ describe("Cloudflare for SaaS platform configuration", () => {
       environment: {
         CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+        CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: "promotion-audit-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
       },
       fetchImplementation,
+      productionManifest: productionManifest(),
       productionSpec: productionSpec(),
       runWranglerImplementation,
       stagingSpec,
@@ -584,14 +910,23 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(commands).toEqual([
       ["whoami", "--json"],
       ["d1", "list", "--env", "production", "--json"],
+      ["queues", "consumer", "list", "selinow-integration-production", "--env", "production", "--json"],
+      ["queues", "consumer", "list", "selinow-notification-production", "--env", "production", "--json"],
+      ["queues", "consumer", "list", "selinow-dlq-production", "--env", "production", "--json"],
+      expect.arrayContaining(["d1", "execute", "PLATFORM_DB", "--env", "production", "--remote", "--command"]),
     ]);
     expect(requestedUrls.sort()).toEqual([
+      `https://api.cloudflare.com/client/v4/accounts/${stagingSpec.accountId}/challenges/widgets/${PRODUCTION_TURNSTILE_SITE_KEY}`,
+      `https://api.cloudflare.com/client/v4/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/schedules`,
+      `https://api.cloudflare.com/client/v4/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/settings`,
       `https://api.cloudflare.com/client/v4/accounts/${stagingSpec.accountId}/workers/domains`,
+      `https://api.cloudflare.com/client/v4/zones/${stagingSpec.zoneId}/custom_hostnames/fallback_origin`,
+      `https://api.cloudflare.com/client/v4/zones/${stagingSpec.zoneId}/custom_hostnames?page=1&per_page=100`,
       `https://api.cloudflare.com/client/v4/zones/${stagingSpec.zoneId}/workers/routes`,
     ].sort());
   });
 
-  it("uses the promotion audit token only for Worker deployment/version inventory", async () => {
+  it("uses the promotion audit token for the complete account-level production inventory", async () => {
     const currentWorkerVersion = "11111111-1111-4111-8111-111111111111";
     const candidateWorkerVersion = "22222222-2222-4222-8222-222222222222";
     const rollbackWorkerVersion = "33333333-3333-4333-8333-333333333333";
@@ -608,27 +943,44 @@ describe("Cloudflare for SaaS platform configuration", () => {
           : new Headers(init?.headers).get("Authorization") ?? "",
         path: url.replace("https://api.cloudflare.com/client/v4", ""),
       });
-      const result = url.endsWith("/workers/routes")
-        ? exactSharedZoneRouteInventory()
-        : url.endsWith("/workers/domains")
-          ? exactSharedZoneDomainInventory()
-          : url.endsWith("/deployments")
-            ? {
-              deployments: [{
-                created_on: "2026-08-08T12:00:00.000Z",
-                id: "44444444-4444-4444-8444-444444444444",
-                versions: [{ percentage: 100, version_id: currentWorkerVersion }],
-              }],
-            }
-            : { items: [{ id: candidateWorkerVersion }, { id: rollbackWorkerVersion }] };
+      let result: unknown;
+      if (url.endsWith("/workers/routes")) result = exactSharedZoneRouteInventory();
+      else if (url.endsWith("/workers/domains")) result = exactSharedZoneDomainInventory();
+      else if (url.endsWith("/settings")) result = { bindings: exactProductionWorkerBindings() };
+      else if (url.endsWith("/schedules")) result = [{ cron: "*/15 * * * *" }];
+      else if (url.includes("/custom_hostnames?")) result = [];
+      else if (url.endsWith("/custom_hostnames/fallback_origin")) {
+        result = { origin: "proxy-fallback.selinow.com", status: "active" };
+      } else if (url.includes("/challenges/widgets/")) {
+        result = { domains: ["selinow.com"], sitekey: PRODUCTION_TURNSTILE_SITE_KEY };
+      } else if (url.endsWith("/deployments")) {
+        result = {
+          deployments: [{
+            created_on: "2026-08-08T12:00:00.000Z",
+            id: "44444444-4444-4444-8444-444444444444",
+            versions: [{ percentage: 100, version_id: currentWorkerVersion }],
+          }],
+        };
+      } else {
+        result = { items: [{ id: candidateWorkerVersion }, { id: rollbackWorkerVersion }] };
+      }
       return Promise.resolve(new Response(JSON.stringify({ result, success: true }), { status: 200 }));
     };
-    const runWranglerImplementation = (args: string[]) => args[0] === "whoami"
-      ? { stderr: "", stdout: JSON.stringify({ accounts: [{ id: stagingSpec.accountId }] }) }
-      : {
+    const runWranglerImplementation = (args: string[]) => {
+      if (args[0] === "whoami") {
+        return { stderr: "", stdout: JSON.stringify({ accounts: [{ id: stagingSpec.accountId }] }) };
+      }
+      if (args[0] === "queues") {
+        return { stderr: "", stdout: JSON.stringify(exactProductionQueueConsumers(args[3] ?? "")) };
+      }
+      if (args[0] === "d1" && args[1] === "execute") {
+        return { stderr: "", stdout: JSON.stringify([{ results: [], success: true }]) };
+      }
+      return {
         stderr: "",
         stdout: JSON.stringify([{ name: "selinow-production", uuid: PRODUCTION_DATABASE_ID }]),
       };
+    };
 
     await expect(assertProductionWorkerIdentityAdmission({
       environment: {
@@ -637,6 +989,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
         CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: "promotion-audit-token",
       },
       fetchImplementation,
+      productionManifest: productionManifest(),
       productionSpec: productionSpec(),
       requireCurrentWorkerVersion: true,
       runWranglerImplementation,
@@ -664,22 +1017,36 @@ describe("Cloudflare for SaaS platform configuration", () => {
         authorization: "Bearer promotion-audit-token",
         path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/versions?deployable=true`,
       }),
+      expect.objectContaining({
+        authorization: "Bearer promotion-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/settings`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer promotion-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/schedules`,
+      }),
     ]));
   });
 
-  it("fails Worker version admission when the promotion-read token is absent", async () => {
+  it("fails every production live admission when the promotion-read token is absent", async () => {
     const fetchImplementation = vi.fn<typeof fetch>();
-    await expect(assertProductionWorkerIdentityAdmission({
+    const input = {
       environment: {
         CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
       },
       fetchImplementation,
+      productionManifest: productionManifest(),
       productionSpec: productionSpec(),
-      requireCurrentWorkerVersion: true,
       runWranglerImplementation: vi.fn(),
       stagingSpec,
       wranglerConfig: productionWranglerConfig(),
+    };
+    await expect(assertProductionWorkerIdentityAdmission(input))
+      .rejects.toThrow("cloudflare_production_promotion_audit_api_token_missing");
+    await expect(assertProductionWorkerIdentityAdmission({
+      ...input,
+      requireCurrentWorkerVersion: true,
     })).rejects.toThrow("cloudflare_production_promotion_audit_api_token_missing");
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
@@ -701,9 +1068,11 @@ describe("Cloudflare for SaaS platform configuration", () => {
     await expect(assertProductionWorkerIdentityAdmission({
       environment: {
         CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: "promotion-audit-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
       },
       fetchImplementation,
+      productionManifest: productionManifest(),
       productionSpec: productionSpec(),
       runWranglerImplementation: (args) => args[0] === "whoami"
         ? { stderr: "", stdout: `Account ID: ${stagingSpec.accountId}` }

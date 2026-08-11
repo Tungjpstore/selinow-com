@@ -108,8 +108,8 @@ function createDatabase(): SqliteD1 {
       VALUES (?, ?, 'owner', 'active', ?, ?)
     `).run(shopId, userId, now, now);
     database.prepare(`
-      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
-      VALUES (?, ?, 'plan-test', 'active', ?, ?)
+      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
+      VALUES (?, ?, 'plan-test', 'active', '2099-01-01T00:00:00.000Z', ?, ?)
     `).run(`sub-${shopId}`, shopId, now, now);
   }
   return new SqliteD1(database);

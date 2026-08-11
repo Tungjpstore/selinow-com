@@ -33,6 +33,12 @@ import { createSensitiveRequestBody, type SensitiveRequestBody } from "../../lib
 
 type CopyParams = Readonly<Record<string, string | number>>;
 
+type ShopCreationAdmission = {
+  allowed: boolean;
+  reason: "eligible" | "trial_already_used";
+  recoveryShopPublicId: string | null;
+};
+
 let activeCopy: Readonly<Record<string, string>> = {};
 let activeLocale = "en";
 
@@ -258,6 +264,28 @@ function parseShops(value: string | undefined): Shop[] {
   }
 }
 
+function parseShopCreationAdmission(value: unknown): ShopCreationAdmission {
+  let parsed = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value) as unknown; } catch { parsed = null; }
+  }
+  const row = asRecord(parsed);
+  if (row === null
+    || typeof row.allowed !== "boolean"
+    || (row.reason !== "eligible" && row.reason !== "trial_already_used")
+    || (row.recoveryShopPublicId !== null && typeof row.recoveryShopPublicId !== "string")) {
+    return { allowed: false, reason: "trial_already_used", recoveryShopPublicId: null };
+  }
+  if (row.allowed !== (row.reason === "eligible") || (row.allowed && row.recoveryShopPublicId !== null)) {
+    return { allowed: false, reason: "trial_already_used", recoveryShopPublicId: null };
+  }
+  return {
+    allowed: row.allowed,
+    reason: row.reason,
+    recoveryShopPublicId: row.recoveryShopPublicId,
+  };
+}
+
 function parsePublicPlanCodes(value: string | undefined): PublicPlanCode[] {
   if (value === undefined) return [];
   try {
@@ -378,16 +406,18 @@ function renderPlanSummary(root: HTMLElement, plans: readonly PublicPlan[]): voi
   setText(root, "[data-plan-summary]", `${price} · ${featureSummary}`);
 }
 
-async function loadPublicPlans(root: HTMLElement, planCodes: readonly PublicPlanCode[]): Promise<PublicPlan[]> {
+async function loadPublicPlans(root: HTMLElement, planCodes: readonly PublicPlanCode[]): Promise<{ creationAdmission: ShopCreationAdmission; plans: PublicPlan[] }> {
   try {
-    const plans = parsePublicPlans(await requestApi(root, "/api/app/shops", { method: "GET" }), planCodes);
+    const response = await requestApi(root, "/api/app/shops", { method: "GET" });
+    const plans = parsePublicPlans(response, planCodes);
+    const creationAdmission = parseShopCreationAdmission(asRecord(response)?.creationAdmission);
     renderPlanOptions(root, plans, planCodes);
     renderPlanSummary(root, plans);
-    return plans;
+    return { creationAdmission, plans };
   } catch {
     renderPlanOptions(root, [], planCodes);
     renderPlanSummary(root, []);
-    return [];
+    return { creationAdmission: parseShopCreationAdmission(root.dataset.creationAdmission), plans: [] };
   }
 }
 
@@ -686,9 +716,20 @@ function setFeedback(root: HTMLElement, message: string, tone: "error" | "info" 
   if (message.length > 0) feedback.scrollIntoView({ behavior: preferredScrollBehavior(), block: "nearest" });
 }
 
-function showCreateRecovery(root: HTMLElement): void {
+function showCreateRecovery(root: HTMLElement, recoveryShopPublicId: string | null): void {
   const recovery = query<HTMLElement>(root, "[data-onboarding-resume-recovery]");
-  if (recovery !== null) recovery.hidden = false;
+  if (recovery !== null) recovery.hidden = recoveryShopPublicId === null;
+  const action = query<HTMLButtonElement>(root, "[data-onboarding-resume-reload]");
+  if (action !== null) {
+    if (recoveryShopPublicId === null) delete action.dataset.recoveryShopPublicId;
+    else action.dataset.recoveryShopPublicId = recoveryShopPublicId;
+  }
+}
+
+function applyShopCreationAdmission(root: HTMLElement, admission: ShopCreationAdmission): void {
+  const createBox = query<HTMLDetailsElement>(root, "[data-create-shop-box]");
+  if (createBox !== null) createBox.hidden = !admission.allowed;
+  showCreateRecovery(root, admission.recoveryShopPublicId);
 }
 
 function errorMessage(error: unknown): string {
@@ -1275,7 +1316,9 @@ function stepFromHash(hash: string): WizardStepCode | null {
 function renderProgress(root: HTMLElement, state: PageState, shops: readonly Shop[]): void {
   const shop = selectedShop(state, shops);
   const profile = state.onboarding.profile;
-  const settingsReady = state.onboarding.settings !== null && settingsDraftReady(state.onboarding.settings);
+  const settingsReady = root.dataset.policyAttestationPublished === "true"
+    && state.onboarding.settings !== null
+    && settingsDraftReady(state.onboarding.settings);
   const fallback = deriveFallbackProgress({
     activeProductCount: state.catalogProducts.filter((product) => product.status === "active").length,
     availableInventoryCount: state.catalogVariants.reduce((total, variant) => total + Math.max(0, variant.availableStock), 0),
@@ -1499,8 +1542,18 @@ function addShopOption(root: HTMLElement, shop: Shop): void {
 async function initialize(root: HTMLElement): Promise<void> {
   configureLocalization(root);
   const shops = parseShops(root.dataset.shops);
+  let creationAdmission = parseShopCreationAdmission(root.dataset.creationAdmission);
   const publicPlanCodes = parsePublicPlanCodes(root.dataset.publicPlanCodes);
-  const publicPlans = await loadPublicPlans(root, publicPlanCodes);
+  const publicData = await loadPublicPlans(root, publicPlanCodes);
+  const publicPlans = publicData.plans;
+  creationAdmission = publicData.creationAdmission;
+  applyShopCreationAdmission(root, creationAdmission);
+  const policyAttestationVersionValue = Number(root.dataset.policyAttestationVersion);
+  const policyAttestationVersion = root.dataset.policyAttestationPublished === "true"
+    && Number.isSafeInteger(policyAttestationVersionValue)
+    && policyAttestationVersionValue > 0
+    ? policyAttestationVersionValue
+    : null;
   const state: PageState = {
     automationTasks: [],
     catalogProducts: [],
@@ -1554,7 +1607,8 @@ async function initialize(root: HTMLElement): Promise<void> {
   query<HTMLButtonElement>(root, "[data-refresh-shop]")?.addEventListener("click", () => { void loadShopState(root, state, shops); });
   query<HTMLButtonElement>(root, "[data-automation-refresh]")?.addEventListener("click", () => { void loadAutomationTasks(root, state, shops); });
   query<HTMLButtonElement>(root, "[data-onboarding-resume-reload]")?.addEventListener("click", () => {
-    window.location.assign("/onboarding");
+    const recoveryShopPublicId = query<HTMLButtonElement>(root, "[data-onboarding-resume-reload]")?.dataset.recoveryShopPublicId;
+    if (recoveryShopPublicId !== undefined) window.location.assign(`/app/billing?shop=${encodeURIComponent(recoveryShopPublicId)}`);
   });
 
   query<HTMLFormElement>(root, "[data-shop-rename-form]")?.addEventListener("submit", (event) => {
@@ -1652,6 +1706,8 @@ async function initialize(root: HTMLElement): Promise<void> {
         if (!isShop(response.shop)) throw new ApiError("request_failed", 500, [], stringOrNull(response.requestId));
         const shop = response.shop;
         if (!shops.some((item) => item.publicId === shop.publicId)) shops.push(shop);
+        creationAdmission = { allowed: false, reason: "trial_already_used", recoveryShopPublicId: null };
+        applyShopCreationAdmission(root, creationAdmission);
         addShopOption(root, shop);
         state.shopSelectionEpoch += 1;
         state.selectedShopId = shop.publicId;
@@ -1664,7 +1720,15 @@ async function initialize(root: HTMLElement): Promise<void> {
         await loadShopState(root, state, shops);
         showStep(root, state, "channels");
       } catch (error) {
-        if (error instanceof ApiError && error.issues.includes("trial_already_used")) showCreateRecovery(root);
+        if (error instanceof ApiError && error.issues.includes("trial_already_used")) {
+          try {
+            const admissionResponse = await requestApi(root, "/api/app/shops", { method: "GET" });
+            creationAdmission = parseShopCreationAdmission(asRecord(admissionResponse)?.creationAdmission);
+          } catch {
+            creationAdmission = { allowed: false, reason: "trial_already_used", recoveryShopPublicId: null };
+          }
+          applyShopCreationAdmission(root, creationAdmission);
+        }
         setFeedback(root, errorMessage(error), "error");
       } finally {
         setBusy(button, false);
@@ -2125,8 +2189,12 @@ async function initialize(root: HTMLElement): Promise<void> {
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const settings = readSettingsForm(root);
+      settings.attestationAccepted = policyAttestationVersion !== null && settings.attestationAccepted;
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_settings", "Complete the required fields before saving."))) return;
-      if (!settingsDraftReady(settings)) {
+      const sellerPolicyLinksReady = settings.supportContact.trim().length >= 3
+        && settings.supportContact.trim().length <= 180
+        && [settings.termsUrl, settings.privacyUrl, settings.refundPolicyUrl].every(isSafeHttpsUrl);
+      if (!sellerPolicyLinksReady || (policyAttestationVersion !== null && !settingsDraftReady(settings))) {
         const invalidUrlField = [
           [settings.termsUrl, query<HTMLInputElement>(root, "[data-terms-url]")],
           [settings.privacyUrl, query<HTMLInputElement>(root, "[data-privacy-url]")],
@@ -2136,7 +2204,7 @@ async function initialize(root: HTMLElement): Promise<void> {
           markFieldInvalid(root, invalidUrlField, copy("onboarding.feedback.policy_url", "Use an HTTPS policy URL without credentials or a fragment."));
         } else if (settings.supportContact.trim().length < 3 || settings.supportContact.trim().length > 180) {
           markFieldInvalid(root, query<HTMLInputElement>(root, "[data-support-contact]"), copy("onboarding.feedback.support_length", "Enter a support contact between 3 and 180 characters."));
-        } else {
+        } else if (policyAttestationVersion !== null) {
           markFieldInvalid(root, query<HTMLInputElement>(root, "[data-attestation]"), copy("onboarding.feedback.attestation_required", "Confirm your right to sell and comply with Selinow policy."));
         }
         return;
@@ -2145,7 +2213,10 @@ async function initialize(root: HTMLElement): Promise<void> {
       setBusy(button, true, copy("onboarding.busy.saving", "Saving…"));
       try {
         const response = await requestApi(root, `${apiBase(shop.publicId)}/onboarding/settings`, {
-          body: JSON.stringify({ ...settings, attestationVersion: 1 }),
+          body: JSON.stringify({
+            ...settings,
+            attestationVersion: settings.attestationAccepted ? policyAttestationVersion : null,
+          }),
           method: "PUT",
         });
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;

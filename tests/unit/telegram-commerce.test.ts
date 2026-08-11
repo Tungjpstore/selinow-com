@@ -32,6 +32,7 @@ describe("Telegram shop routing", () => {
       orderExpiryMinutes: 30,
       status: "active",
       subscriptionState: "active",
+      currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     });
 
     await expect(loadTelegramShop(env, "shop_internal")).resolves.toMatchObject({

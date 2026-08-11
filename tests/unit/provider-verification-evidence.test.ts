@@ -22,6 +22,7 @@ const contextRow = {
   shopId: "shop-001",
   shopStatus: "active",
   subscriptionState: "active",
+  currentPeriodEnd: "2099-01-01T00:00:00.000Z",
 };
 
 type EvidenceFixture = {

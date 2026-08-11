@@ -14,6 +14,7 @@ type ActiveDomainRow = {
   publishedVersion: number;
   shopStatus: string;
   status: string;
+  currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
   subscriptionState: string | null;
@@ -58,6 +59,13 @@ export async function resolveActiveStorefrontCacheKey(input: {
         LIMIT 1
       ) AS subscriptionState
       ,(
+        SELECT current_period_end
+        FROM shop_subscriptions
+        WHERE shop_id = shops.id
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      ) AS currentPeriodEnd
+      ,(
         SELECT trial_ends_at
         FROM shop_subscriptions
         WHERE shop_id = shops.id
@@ -99,7 +107,7 @@ export async function resolveActiveStorefrontCacheKey(input: {
     }))
     || (row.domainType !== "custom" && row.domainType !== "platform_subdomain")
     || row.subscriptionState === null
-    || !subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })
+    || !subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })
     || !/^[a-z0-9][a-z0-9_-]{0,127}$/iu.test(row.domainId)
     || normalizeHostname(row.hostnameNormalized) !== hostname
     || !Number.isSafeInteger(row.domainVersion)

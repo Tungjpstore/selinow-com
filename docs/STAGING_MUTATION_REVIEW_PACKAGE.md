@@ -44,7 +44,7 @@ manifest is generated from the final clean HEAD. It does not authorize execution
   `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`; execution uses the final clean
   committed HEAD and never substitutes an historical commit.
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
-- Source migration ledger: current candidate `0001`-`0093`
+- Source migration ledger: current candidate `0001`-`0094`
 - Exact P4 changed-file manifest and local verification:
   `docs/PHASE_4_REVIEW_PACKAGE_R0.md`
 - Candidate-bound local restore report:
@@ -69,7 +69,7 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 ## Migration and backup
 
 - Latest retained staging database evidence: complete through `0090`; reverify
-  the live ledger before using it as the `0091`-`0093` candidate baseline
+  the live ledger before using it as the `0091`-`0094` candidate baseline
 - Exact pending range: captured as a non-empty ordered prefix in the private
   schema-3 manifest; no current staging ledger is claimed until fresh read-only
   evidence exists
@@ -77,12 +77,12 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 - Backup evidence: report-v2, non-empty artifact, checksum, bookmark, freshness
   <= 60 minutes, exact account/D1 identity
 - Restore drill: isolated disposable target from the exact reviewed tree and
-  complete `0001`-`0093` ledger; integrity/FK/schema/count checks required;
+  complete `0001`-`0094` ledger; integrity/FK/schema/count checks required;
   every non-local drill requires `--reviewed-commit`
 - Pre-`0066` OAuth pending-row policy: revoke/expire or explicitly resolve
 - Dodo `0070`-`0081`, activation timestamp migration `0080`, and non-payment
-  migrations `0082`-`0093`: source/tests are recorded; only `0082`-`0090` have
-  retained staging database evidence, while the `0091`-`0093` cutover review
+  migrations `0082`-`0094`: source/tests are recorded; only `0082`-`0090` have
+  retained staging database evidence, while the `0091`-`0094` cutover review
   remains `TBD`
 
 ## Commands after approval

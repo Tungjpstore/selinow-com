@@ -28,30 +28,30 @@ const productionEvidenceExample = JSON.parse(readFileSync("infra/release/product
 };
 
 describe("operational migration-ledger documentation", () => {
-  it("keeps current operational sections on the complete 0093 source chain", () => {
-    expect(content["docs/RELEASE.md"]).toContain("source tree is now `0001`-`0093`");
+  it("keeps current operational sections on the complete 0094 source chain", () => {
+    expect(content["docs/RELEASE.md"]).toContain("source tree is now `0001`-`0094`");
     expect(content["docs/RELEASE.md"]).toContain("retained staging evidence covers `0001`-`0090`");
-    expect(content["docs/RELEASE.md"]).toContain("production remains at `0052` with `0053`-`0093` pending");
-    expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).toContain("Exact pending migrations: `0053`-`0093`");
+    expect(content["docs/RELEASE.md"]).toContain("production remains at `0052` with `0053`-`0094` pending");
+    expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).toContain("Exact pending migrations: `0053`-`0094`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("explicit `releaseScope`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("reviewed live `migrationLedgerPrefix`");
-    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Continuation migration admission (`0053`-`0093`)");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Continuation migration admission (`0053`-`0094`)");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("npm run deploy -- --env production --confirm-production --release-manifest");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("`CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("active deployment and deployable-version inventories");
-    expect(content["docs/PROVIDER_GATE_AUDIT.md"]).toContain("source has the contiguous forward-only chain through `0093`");
-    expect(content["docs/RUNBOOKS.md"]).toContain("complete source ledger ends at `0093_custom_domain_turnstile_runtime_guard.sql`");
+    expect(content["docs/PROVIDER_GATE_AUDIT.md"]).toContain("source has the contiguous forward-only chain through `0094`");
+    expect(content["docs/RUNBOOKS.md"]).toContain("complete source ledger ends at `0094_shop_creation_admission.sql`");
     expect(content["docs/RUNBOOKS.md"]).toContain("npm run db:complete-release");
     expect(content["docs/RUNBOOKS.md"]).toContain("CLOUDFLARE_WORKER_DEPLOY_API_TOKEN");
     expect(content["docs/RUNBOOKS.md"]).toContain("restore:drill -- --env production --confirm-production --reviewed-commit");
-    expect(content["docs/STAGING_MUTATION_REVIEW_PACKAGE.md"]).toContain("complete `0001`-`0093` ledger");
+    expect(content["docs/STAGING_MUTATION_REVIEW_PACKAGE.md"]).toContain("complete `0001`-`0094` ledger");
     expect(content["docs/PHASE_4_STAGING_ACCEPTANCE.md"]).toContain("`db:complete-release`");
-    expect(content["docs/PRODUCTION_CONTINUATION_GATE_AUDIT_2026-08-09.md"]).toContain("`0053` through `0093`");
+    expect(content["docs/PRODUCTION_CONTINUATION_GATE_AUDIT_2026-08-09.md"]).toContain("`0053` through `0094`");
     expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain("release:worker:upload");
-    expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0093_custom_domain_turnstile_runtime_guard.sql`");
+    expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0094_shop_creation_admission.sql`");
     expect(content["docs/DOMAINS.md"]).toContain("0093_custom_domain_turnstile_runtime_guard.sql");
-    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0093`");
-    expect(content["docs/release/CURRENT_HANDOFF_2026-08-09.md"]).toContain("`0091`-`0093` over the retained `0090` staging ledger");
+    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0094`");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-09.md"]).toContain("`0091`-`0094` over the retained `0090` staging ledger");
     expect(packageJson.scripts?.["db:complete-release"]).toBe("node scripts/db.mjs complete-release");
     expect(packageJson.scripts?.["release:rollback:rehearsal"]).toBe("node scripts/release-rollback-rehearsal.mjs");
     expect(packageJson.scripts?.["release:worker:upload"]).toBe("node scripts/release-worker-upload.mjs");

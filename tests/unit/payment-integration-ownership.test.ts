@@ -105,6 +105,15 @@ function seed(database: DatabaseSync): void {
       ('shop-a', ?, 'shop-a', 'Shop A', 'active', 'vi', 'VND', 'Asia/Ho_Chi_Minh', 1, ?, ?),
       ('shop-b', ?, 'shop-b', 'Shop B', 'active', 'vi', 'VND', 'Asia/Ho_Chi_Minh', 1, ?, ?)
   `).run(SHOP_A, now, now, SHOP_B, now, now);
+  if (database.prepare("SELECT id FROM plans WHERE id = 'plan_starter_v1'").get() !== undefined) {
+    database.prepare(`
+      INSERT INTO shop_subscriptions (
+        id, shop_id, plan_id, state, current_period_end, created_at, updated_at
+      ) VALUES
+        ('subscription-a', 'shop-a', 'plan_starter_v1', 'active', '2099-01-01T00:00:00.000Z', ?, ?),
+        ('subscription-b', 'shop-b', 'plan_starter_v1', 'active', '2099-01-01T00:00:00.000Z', ?, ?)
+    `).run(now, now, now, now);
+  }
 }
 
 function provider(fetchCount: { value: number }): typeof fetch {

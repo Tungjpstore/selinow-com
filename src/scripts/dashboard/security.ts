@@ -177,7 +177,9 @@ if (root !== null) {
 
   const loadSessions = async (refreshing = false): Promise<void> => {
     refresh?.setAttribute("disabled", "true");
-    setFeedback(t(refreshing ? "dashboard.security.client.refreshing" : "dashboard.security.client.loading"));
+    setFeedback(refreshing
+      ? t("dashboard.security.client.refreshing")
+      : t("dashboard.security.client.loading"));
     if (reauthenticate !== null) reauthenticate.hidden = true;
     try {
       const payload = await requestSessions("GET");

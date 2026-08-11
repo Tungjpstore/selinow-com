@@ -153,7 +153,7 @@ describe("production Worker continuation deploy admission", () => {
     }
   });
 
-  it("proves the reviewed 0087 through 0093 schema definitions and live data invariants", () => {
+  it("proves the reviewed 0087 through 0094 schema definitions and live data invariants", () => {
     const assertInvariants = (releaseModule as Record<string, unknown>).assertProductionDatabaseInvariantContract;
     expect(typeof assertInvariants).toBe("function");
     if (typeof assertInvariants !== "function") return;
@@ -195,6 +195,11 @@ describe("production Worker continuation deploy admission", () => {
       "shop_domains_turnstile_active_update_guard",
       "shops_turnstile_canonical_insert_guard",
       "shops_turnstile_canonical_update_guard",
+      "auth_request_admissions",
+      "idx_auth_request_admissions_window",
+      "idx_auth_request_admissions_requester_window",
+      "idx_auth_request_admissions_expiry",
+      "idx_auth_request_admissions_subject_window",
     ]));
     expect(runner).toHaveBeenCalledTimes(3);
     expect(runner.mock.calls.every(([args]) => args[4] === "production")).toBe(true);
@@ -273,6 +278,16 @@ describe("production Worker continuation deploy admission", () => {
       runWranglerImplementation: invalidDomainAdmission,
     })).toThrow("production_database_invariant_data_violation:integrity_0093_custom_domain_turnstile");
 
+    const invalidAuthAdmission = runner((rows, sql) => {
+      if (sql.includes("integrity_0094_auth_request_admission") && rows[0] !== undefined) {
+        rows[0].integrity_0094_auth_request_admission = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidAuthAdmission,
+    })).toThrow("production_database_invariant_data_violation:integrity_0094_auth_request_admission");
+
     const unreviewedMigration = `${String(migrationNames.length + 1).padStart(4, "0")}_future.sql`;
     expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
       migrationNames: [...migrationNames, unreviewedMigration],
@@ -280,7 +295,7 @@ describe("production Worker continuation deploy admission", () => {
     })).toThrow(`production_database_invariant_registry_incomplete:${unreviewedMigration}`);
   });
 
-  it("rejects same-name replacements for the reviewed billing, catalog and PayOS guards", () => {
+  it("rejects same-name replacements for the reviewed billing, catalog, PayOS and admission guards", () => {
     const assertInvariants = (releaseModule as Record<string, unknown>).assertProductionDatabaseInvariantContract;
     expect(typeof assertInvariants).toBe("function");
     if (typeof assertInvariants !== "function") return;
@@ -329,6 +344,28 @@ describe("production Worker continuation deploy admission", () => {
         runWranglerImplementation: runner,
       })).toThrow(`production_database_invariant_definition_mismatch:trigger:${triggerName}`);
     }
+
+    const admissionObjectReplacements = [
+      ["table", "auth_request_admissions", "CREATE TABLE auth_request_admissions (id TEXT)"],
+      ["index", "idx_auth_request_admissions_window", "CREATE INDEX idx_auth_request_admissions_window ON auth_request_admissions(id)"],
+      ["index", "idx_auth_request_admissions_requester_window", "CREATE INDEX idx_auth_request_admissions_requester_window ON auth_request_admissions(id)"],
+      ["index", "idx_auth_request_admissions_expiry", "CREATE INDEX idx_auth_request_admissions_expiry ON auth_request_admissions(id)"],
+      ["index", "idx_auth_request_admissions_subject_window", "CREATE INDEX idx_auth_request_admissions_subject_window ON auth_request_admissions(id)"],
+    ] as const;
+    for (const [type, name, replacementSql] of admissionObjectReplacements) {
+      const runner = vi.fn((args: string[]) => {
+        const sql = args[args.indexOf("--command") + 1];
+        if (sql === undefined) throw new Error("missing_sql");
+        const rows = database.prepare(sql).all() as Array<Record<string, unknown>>;
+        const row = rows.find((entry) => entry.name === name);
+        if (row !== undefined) row.sql = replacementSql;
+        return { stdout: JSON.stringify([{ results: rows, success: true }]) };
+      });
+      expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+        migrationNames,
+        runWranglerImplementation: runner,
+      })).toThrow(`production_database_invariant_definition_mismatch:${type}:${name}`);
+    }
   });
 
   it("places complete production database admission before and after the build", () => {
@@ -367,11 +404,28 @@ describe("production Worker continuation deploy admission", () => {
     const sinkDriftGuard = source.indexOf("production_sink_admission_changed", sinkAdmission);
     expect(sinkDriftGuard).toBeGreaterThan(sinkAdmission);
     expect(sinkDriftGuard).toBeLessThan(deploySink);
-    expect(source.slice(deploySink - 80, deploySink + 160)).toContain('"versions",\n        "deploy"');
-    expect(source.slice(deploySink, deploySink + 180)).toContain('"--env",\n        "production",\n        "--yes"');
+    const deployCommand = source.slice(deploySink - 120, deploySink + 240);
+    expect(deployCommand).toContain('"versions"');
+    expect(deployCommand).toContain('"deploy"');
+    expect(deployCommand).toContain('"--env"');
+    expect(deployCommand).toContain('"production"');
+    expect(deployCommand).toContain('"--yes"');
     expect(genericDeploy).toBeGreaterThan(deploySink);
-    expect(source.match(/assertMigrationLedgerImplementation: assertProductionMigrationLedger/gu)).toHaveLength(2);
-    expect(source.match(/assertDatabasePreflightImplementation: assertProductionDatabasePreflight/gu)).toHaveLength(2);
-    expect(source.match(/assertPostMigrationContractImplementation: assertRemotePostMigrationContract/gu)).toHaveLength(2);
+    expect(source.match(/assertMigrationLedgerImplementation: assertProductionMigrationLedger/gu)).toHaveLength(3);
+    expect(source.match(/assertDatabasePreflightImplementation: assertProductionDatabasePreflight/gu)).toHaveLength(3);
+    expect(source.match(/assertPostMigrationContractImplementation: assertRemotePostMigrationContract/gu)).toHaveLength(3);
+    const candidateActiveAdmission = source.indexOf('workerVersionAdmissionMode: "candidate_active"', deploySink);
+    const triggerHandoff = source.indexOf('"scripts/production-trigger.mjs"', candidateActiveAdmission);
+    const routeHandoff = source.indexOf('"scripts/production-continuation-route.mjs"', triggerHandoff);
+    const exactAdmission = source.indexOf('infrastructureAdmissionMode: "exact"', routeHandoff);
+    const postHandoffDatabaseAdmission = source.indexOf(
+      "await assertProductionDatabaseDeployAdmission",
+      exactAdmission,
+    );
+    expect(candidateActiveAdmission).toBeGreaterThan(deploySink);
+    expect(triggerHandoff).toBeGreaterThan(candidateActiveAdmission);
+    expect(routeHandoff).toBeGreaterThan(triggerHandoff);
+    expect(exactAdmission).toBeGreaterThan(routeHandoff);
+    expect(postHandoffDatabaseAdmission).toBeGreaterThan(exactAdmission);
   });
 });

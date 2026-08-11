@@ -13,6 +13,7 @@ type StorefrontShopRow = {
   brandingJson: string;
   canonicalHostname: string | null;
   currency: string;
+  currentPeriodEnd: string | null;
   currentDomainType: string;
   currentDomainValidationMetadataJson: string;
   currentHostname: string;
@@ -104,14 +105,15 @@ export type StorefrontShop = {
   slug: string;
   status: string;
   subscriptionState: string;
+  currentPeriodEnd?: string | null;
   trialEndsAt?: string | null;
   graceEndsAt?: string | null;
   theme: StorefrontTheme;
 };
 
-function storefrontAccess(status: string, subscriptionState: string, trialEndsAt: string | null, graceEndsAt: string | null): StorefrontAccess {
+function storefrontAccess(status: string, subscriptionState: string, trialEndsAt: string | null, graceEndsAt: string | null, currentPeriodEnd: string | null): StorefrontAccess {
   if (status === "draft") return "coming_soon";
-  if (status === "active" && subscriptionAllows({ graceEndsAt, subscriptionState, trialEndsAt })) return "live";
+  if (status === "active" && subscriptionAllows({ currentPeriodEnd, graceEndsAt, subscriptionState, trialEndsAt })) return "live";
   return "suspended";
 }
 
@@ -143,6 +145,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
       shop_settings.low_stock_threshold AS lowStockThreshold,
       shop_settings.published_version AS settingsVersion,
       (SELECT state FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS subscriptionState,
+      (SELECT current_period_end FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS currentPeriodEnd,
       (SELECT trial_ends_at FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS trialEndsAt,
       (SELECT grace_ends_at FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS graceEndsAt,
       canonical_domain.hostname_normalized AS canonicalHostname
@@ -203,7 +206,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
   });
   const content = parseStorefrontContent(row.storefrontJson, row.name, locale);
   return {
-    access: storefrontAccess(row.status, subscriptionState, row.trialEndsAt, row.graceEndsAt),
+    access: storefrontAccess(row.status, subscriptionState, row.trialEndsAt, row.graceEndsAt, row.currentPeriodEnd),
     canonicalHostname: row.canonicalHostname === null ? null : normalizeHostname(row.canonicalHostname),
     content,
     currency: row.currency,
@@ -227,6 +230,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     slug: row.slug,
     status: row.status,
     subscriptionState,
+    currentPeriodEnd: row.currentPeriodEnd,
     trialEndsAt: row.trialEndsAt,
     graceEndsAt: row.graceEndsAt,
     theme: parseStorefrontTheme(row.brandingJson),
@@ -237,7 +241,7 @@ export function assertStorefrontLive(shop: StorefrontShop): void {
   if (shop.access === "coming_soon") throw new AppError("tenant_not_ready", 409);
   if (shop.access === "suspended") {
     if (shop.status === "active") {
-      assertSubscriptionAllows({ graceEndsAt: shop.graceEndsAt, subscriptionState: shop.subscriptionState, trialEndsAt: shop.trialEndsAt });
+      assertSubscriptionAllows({ currentPeriodEnd: shop.currentPeriodEnd, graceEndsAt: shop.graceEndsAt, subscriptionState: shop.subscriptionState, trialEndsAt: shop.trialEndsAt });
     }
     assertCheckoutAllowed({ shopStatus: shop.status, subscriptionState: shop.subscriptionState });
     throw new AppError("tenant_suspended", 403);
@@ -245,7 +249,7 @@ export function assertStorefrontLive(shop: StorefrontShop): void {
 }
 
 export function assertStorefrontCheckout(shop: StorefrontShop): void {
-  assertSubscriptionAllows({ graceEndsAt: shop.graceEndsAt, subscriptionState: shop.subscriptionState, trialEndsAt: shop.trialEndsAt });
+  assertSubscriptionAllows({ currentPeriodEnd: shop.currentPeriodEnd, graceEndsAt: shop.graceEndsAt, subscriptionState: shop.subscriptionState, trialEndsAt: shop.trialEndsAt });
   assertCheckoutAllowed({ shopStatus: shop.status, subscriptionState: shop.subscriptionState });
 }
 

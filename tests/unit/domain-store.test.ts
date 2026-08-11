@@ -142,7 +142,8 @@ class DomainDatabase {
                 currency: "VND", default_locale: "vi", feature_flags_json: JSON.stringify({ customDomain: customDomainFeature.get(shopId) }),
                 limits_json: customDomainLimits.has(shopId) ? JSON.stringify({ customDomains: customDomainLimits.get(shopId) }) : "{}",
                 name: shopId, plan_code: "business", public_id: shopPublicId, role: "owner", shop_id: shopId,
-                shop_status: "active", slug: shopId, subscription_state: "active", timezone: "Asia/Ho_Chi_Minh",
+                current_period_end: "2099-01-01T00:00:00.000Z", shop_status: "active", slug: shopId,
+                subscription_state: "active", timezone: "Asia/Ho_Chi_Minh",
               });
             }
             if (sql.includes("AS liveCount") && sql.includes("custom_domain_claims")) {

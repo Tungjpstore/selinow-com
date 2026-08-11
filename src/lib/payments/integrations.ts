@@ -2,6 +2,7 @@ import { AppError } from "../core/errors";
 import { hmacToken } from "../core/crypto";
 import { createId } from "../core/ids";
 import { tryRecordActivationMilestone } from "../analytics/activation";
+import { evaluateSubscription, subscriptionAllows } from "../billing/entitlements";
 import { resolveActiveEncryptionKey, resolveEncryptionKey } from "../crypto/keyring";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
@@ -26,6 +27,13 @@ type IntegrationRow = {
   status: string;
   webhookPublicId: string;
   webhookStatus: string;
+};
+
+type ProviderSetupSubscriptionRow = {
+  currentPeriodEnd: string | null;
+  graceEndsAt: string | null;
+  subscriptionState: string;
+  trialEndsAt: string | null;
 };
 
 export type PaymentIntegrationView = {
@@ -57,6 +65,38 @@ async function requirePaymentOwner(env: AppBindings, shopPublicId: string, userI
   const member = await getShopForMember({ capability: "payments:manage", env, shopPublicId, userId });
   if (member.row.role !== "owner") throw new AppError("authorization_denied", 403);
   return member.row.shop_id;
+}
+
+async function assertPayOSProviderSetupAllowed(env: AppBindings, shopId: string): Promise<void> {
+  const subscription = await env.PLATFORM_DB.prepare(`
+    SELECT
+      state AS subscriptionState,
+      trial_ends_at AS trialEndsAt,
+      current_period_end AS currentPeriodEnd,
+      grace_ends_at AS graceEndsAt
+    FROM shop_subscriptions
+    WHERE shop_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).bind(shopId).first<ProviderSetupSubscriptionRow>();
+  const decision = evaluateSubscription({
+    action: "provider_setup",
+    currentPeriodEnd: subscription?.currentPeriodEnd,
+    graceEndsAt: subscription?.graceEndsAt,
+    subscriptionState: subscription?.subscriptionState ?? "",
+    trialEndsAt: subscription?.trialEndsAt,
+  });
+  if (!decision.allowed) {
+    throw new AppError(decision.reasonCode ?? "subscription_payment_required", 402);
+  }
+  if (!subscriptionAllows({
+    currentPeriodEnd: subscription?.currentPeriodEnd,
+    graceEndsAt: subscription?.graceEndsAt,
+    subscriptionState: subscription?.subscriptionState ?? "",
+    trialEndsAt: subscription?.trialEndsAt,
+  })) {
+    throw new AppError("subscription_payment_required", 402);
+  }
 }
 
 async function findIntegration(env: AppBindings, shopId: string): Promise<IntegrationRow | null> {
@@ -608,6 +648,7 @@ export async function getPaymentIntegration(input: { env: AppBindings; shopPubli
 
 export async function connectPayOS(input: { credentials: PayOSCredentials; env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<PaymentIntegrationView> {
   const shopId = await requirePaymentManager(input.env, input.shopPublicId, input.userId);
+  await assertPayOSProviderSetupAllowed(input.env, shopId);
   let integration = await findIntegration(input.env, shopId);
   await assertPayOSChannelAdmitted(input.env, input.credentials);
   await assertPaymentProviderIdentityOwnership(input.env, shopId, input.credentials, integration);
@@ -675,6 +716,7 @@ async function retryPayOSSetup(input: {
   shopId: string;
   userId: string;
 }): Promise<void> {
+  await assertPayOSProviderSetupAllowed(input.env, input.shopId);
   const row = await findRetryablePaymentCredential(input.env, input.integration.id, input.shopId);
   if (row === null) throw new AppError("payment_not_configured", 409);
   const key = resolveEncryptionKey(input.env, "credential", row.keyVersion);
@@ -772,6 +814,7 @@ export async function refreshPayOSHealth(input: { env: AppBindings; fetcher?: ty
     if (retried === null) throw new AppError("internal_error", 500);
     return mapIntegration(retried);
   }
+  await assertPayOSProviderSetupAllowed(input.env, shopId);
   const credential = await loadCredentialById(input.env, integration.activeCredentialId, shopId);
   const webhookUrl = `${input.env.API_ORIGIN}/webhooks/payos/${integration.webhookPublicId}`;
   try {

@@ -189,6 +189,7 @@ describe("PromptOS marketing surfaces", () => {
     expect(controller).toContain("checkoutUrl");
     expect(controller).toContain('billingState === "pending_payment"');
     expect(controller).toContain('billingState === "suspended"');
-    expect(controller).toContain('recovery: billingState === "suspended"');
+    expect(controller).toContain('const checkoutRecovery = billingState === "suspended" || billingState === "canceled"');
+    expect(controller).toContain("recovery: checkoutRecovery");
   });
 });

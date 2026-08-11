@@ -62,6 +62,7 @@ type ProviderCredentialRow = {
   channelStatus: string;
   shopStatus: string;
   subscriptionState: string;
+  currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
   credentialId: string;
@@ -160,7 +161,7 @@ function assertLiveRow(row: ProviderCredentialRow, providerCode: ProviderRuntime
   }
   if (row.connectionStatus !== "active" && row.connectionStatus !== "degraded") unavailable();
   if (row.channelStatus !== "enabled" || row.shopStatus !== "active") unavailable();
-  if (!subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) unavailable();
+  if (!subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) unavailable();
   if (row.credentialStatus !== "active") unavailable();
   requireReference(row.connectionId, "connection_id_invalid");
   requireReference(row.shopId, "shop_id_invalid");
@@ -203,6 +204,7 @@ export async function loadProviderRuntimeContext(
       shops.public_id AS shopPublicId,
       shops.status AS shopStatus,
       subscription.state AS subscriptionState,
+      subscription.current_period_end AS currentPeriodEnd,
       subscription.trial_ends_at AS trialEndsAt,
       subscription.grace_ends_at AS graceEndsAt,
       credential.id AS credentialId,

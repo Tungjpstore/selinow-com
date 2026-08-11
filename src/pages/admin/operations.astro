@@ -95,6 +95,9 @@ const age = (value: string): string => {
   if (hours < 48) return t("admin.common.hours", { count: hours });
   return t("admin.common.days", { count: Math.floor(hours / 24) });
 };
+const visibilityCount = (hasMore: boolean, count: number): string => hasMore
+  ? t("admin.operations.visibility.truncated_count", { count })
+  : t("admin.operations.visibility.complete_count", { count });
 
 const incidentCategoryLabels: Record<string, string> = {
   backup_failure: t("admin.operations.incident.category.backup_failure"),
@@ -241,8 +244,8 @@ const operationsClientCopy = {
           <p>{t("admin.operations.header.description")}</p>
         </div>
         <div class="admin-summary" aria-label={t("admin.operations.header.summary_aria")}>
-          <div><span>{t("admin.operations.summary.dead_letter")}</span><strong>{t(deadLetterOverview.hasMore ? "admin.operations.visibility.truncated_count" : "admin.operations.visibility.complete_count", { count: deadLetters.length })}</strong></div>
-          <div><span>{t("admin.operations.summary.incident")}</span><strong>{t(incidentOverview.hasMore ? "admin.operations.visibility.truncated_count" : "admin.operations.visibility.complete_count", { count: incidents.length })}</strong></div>
+          <div><span>{t("admin.operations.summary.dead_letter")}</span><strong>{visibilityCount(deadLetterOverview.hasMore, deadLetters.length)}</strong></div>
+          <div><span>{t("admin.operations.summary.incident")}</span><strong>{visibilityCount(incidentOverview.hasMore, incidents.length)}</strong></div>
           <div><span>{t("admin.operations.summary.deletion_active")}</span><strong>{deletionOverview.requests.length}</strong></div>
         </div>
       </header>
@@ -478,7 +481,7 @@ const operationsClientCopy = {
       <section class="admin-section" aria-labelledby="dead-letter-title">
         <div class="admin-section-heading">
           <div><h2 id="dead-letter-title">{t("admin.operations.dead_letter.title")}</h2><p>{t("admin.operations.dead_letter.description")}</p></div>
-          <span>{t(deadLetterOverview.hasMore ? "admin.operations.visibility.truncated_count" : "admin.operations.visibility.complete_count", { count: deadLetters.length })}</span>
+          <span>{visibilityCount(deadLetterOverview.hasMore, deadLetters.length)}</span>
         </div>
         {deadLetterOverview.hasMore && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: deadLetterOverview.limit })}</div>}
         {deadLetters.length === 0 ? (
@@ -533,7 +536,7 @@ const operationsClientCopy = {
       <section class="admin-section" aria-labelledby="incident-title">
         <div class="admin-section-heading">
           <div><h2 id="incident-title">{t("admin.operations.incident.title")}</h2><p>{t("admin.operations.incident.description")}</p></div>
-          <span>{t(incidentOverview.hasMore ? "admin.operations.visibility.truncated_count" : "admin.operations.visibility.complete_count", { count: incidents.length })}</span>
+          <span>{visibilityCount(incidentOverview.hasMore, incidents.length)}</span>
         </div>
         {incidentOverview.hasMore && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: incidentOverview.limit })}</div>}
         {incidents.length === 0 ? (

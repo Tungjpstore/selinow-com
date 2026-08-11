@@ -26,6 +26,7 @@ type MiniAppContextRow = TelegramCredentialRow & {
   shopId: string;
   shopStatus: string;
   subscriptionState: string;
+  currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
 };
@@ -56,6 +57,7 @@ export type TelegramMiniAppSession = {
 
 export type TelegramMiniAppSessionContext = SessionRow & {
   connectorStatus: "active";
+  currentPeriodEnd?: string | null;
   graceEndsAt?: string | null;
   subscriptionState?: string;
   trialEndsAt?: string | null;
@@ -115,6 +117,7 @@ async function loadContext(env: AppBindings, shopPublicId: string): Promise<Mini
       shops.public_id AS publicShopId,
       shops.status AS shopStatus,
       shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
       shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.grace_ends_at AS graceEndsAt,
       telegram_integrations.id AS integrationId,
@@ -163,7 +166,7 @@ async function loadContext(env: AppBindings, shopPublicId: string): Promise<Mini
     LIMIT 1
   `).bind(requireResourceId(shopPublicId, "shop")).first<MiniAppContextRow>();
   if (row === null) throw new AppError("channel_mini_app_unavailable", 409);
-  if (!subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
+  if (!subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
     throw new AppError("channel_mini_app_unavailable", 409);
   }
   return row;
@@ -338,6 +341,7 @@ export async function authenticateTelegramMiniAppSession(input: {
       sessions.expires_at AS expiresAt,
       sessions.last_seen_at AS lastSeenAt,
       shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
       shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.grace_ends_at AS graceEndsAt,
       channel_connector_requests.status AS connectorStatus
@@ -381,7 +385,7 @@ export async function authenticateTelegramMiniAppSession(input: {
     LIMIT 1
   `).bind(tokenDigest, now.toISOString(), requireResourceId(input.shopPublicId, "shop")).first<TelegramMiniAppSessionContext>();
   if (row === null) throw new AppError("authentication_required", 401);
-  if (!subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState ?? "canceled", trialEndsAt: row.trialEndsAt })) {
+  if (!subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState ?? "canceled", trialEndsAt: row.trialEndsAt })) {
     throw new AppError("authentication_required", 401);
   }
   await input.env.PLATFORM_DB.prepare(`

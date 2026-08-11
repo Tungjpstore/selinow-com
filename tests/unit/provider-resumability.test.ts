@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hmacToken } from "../../src/lib/core/crypto";
 import type { AppBindings } from "../../src/lib/platform/bindings";
-import { connectPayOS, refreshPayOSHealth } from "../../src/lib/payments/integrations";
+import { connectPayOS, disconnectPayOS, getPaymentIntegration, refreshPayOSHealth } from "../../src/lib/payments/integrations";
 import { encryptPayOSCredentials, type PayOSCredentials } from "../../src/lib/payments/crypto";
 import { payOSProviderIdentityFingerprint } from "../../src/lib/payments/payos-admission";
 import { connectTelegram, disconnectTelegram, refreshTelegramHealth } from "../../src/lib/telegram/integrations";
@@ -28,6 +28,11 @@ const PAYOS_CREDENTIALS: PayOSCredentials = {
   apiKey: "payos-api-key",
   checksumKey: "payos-checksum-key",
   clientId: "payos-client-id",
+};
+const PAYOS_ROTATED_CREDENTIALS: PayOSCredentials = {
+  apiKey: "payos-rotated-api-key",
+  checksumKey: "payos-rotated-checksum-key",
+  clientId: PAYOS_CREDENTIALS.clientId,
 };
 const TELEGRAM_BOT_TOKEN = "123456789:abcdefghijklmnopqrstuvwxyzABCDE";
 const TELEGRAM_REPLACEMENT_TOKEN = "987654321:ZYXWVUTSRQPONMLKJIHGFEDCBAabcde";
@@ -222,7 +227,17 @@ async function telegramRuntime() {
   };
 }
 
-async function payOSRuntime(input: { active?: boolean; pending?: boolean; providerFails?: boolean } = {}) {
+async function payOSRuntime(input: {
+  active?: boolean;
+  currentPeriodEnd?: string | null | undefined;
+  graceEndsAt?: string | null;
+  pending?: boolean;
+  providerFails?: boolean;
+  subscriptionQueryFails?: boolean;
+  subscriptionState?: "pending_payment" | "trialing" | "active" | "past_due" | "grace_period" | "suspended" | "cancel_scheduled" | "upgrade_pending" | "downgrade_scheduled";
+  trialEndsAt?: string | null | undefined;
+  withoutSubscription?: boolean;
+} = {}) {
   const database = new DatabaseSync(":memory:");
   payOSDatabases.push(database);
   applyAllMigrations(database);
@@ -277,6 +292,26 @@ async function payOSRuntime(input: { active?: boolean; pending?: boolean; provid
       'Asia/Ho_Chi_Minh', 1, ?, ?
     )
   `).run(now, now);
+  if (input.subscriptionState === "trialing" && input.trialEndsAt != null
+    && Date.parse(input.trialEndsAt) <= Date.now()) {
+    // Simulate a valid trial row whose deadline elapsed after it was created.
+    database.exec("DROP TRIGGER shop_subscriptions_trialing_insert_guard");
+  }
+  if (input.withoutSubscription !== true) {
+    database.prepare(`
+      INSERT INTO shop_subscriptions (
+        id, shop_id, plan_id, state, trial_ends_at, current_period_end,
+        grace_ends_at, created_at, updated_at
+      ) VALUES ('subscription-a', 'shop-a', 'plan_starter_v1', ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.subscriptionState ?? "active",
+      input.trialEndsAt ?? null,
+      input.currentPeriodEnd === undefined ? "2099-01-01T00:00:00.000Z" : input.currentPeriodEnd,
+      input.graceEndsAt ?? null,
+      now,
+      now,
+    );
+  }
   database.prepare(`
     INSERT INTO payment_integrations (
       id, public_id, webhook_public_id, shop_id, provider, status,
@@ -347,6 +382,17 @@ async function payOSRuntime(input: { active?: boolean; pending?: boolean; provid
     prepare(sql: string) {
       sqlHistory.push(sql);
       if (sql.includes("INSERT INTO payment_credentials")) credentialInsertCount += 1;
+      if (input.subscriptionQueryFails === true && sql.includes("FROM shop_subscriptions")) {
+        const failedStatement = {
+          bind() {
+            return failedStatement;
+          },
+          first() {
+            return Promise.reject(new Error("subscription_query_failed"));
+          },
+        };
+        return failedStatement as unknown as D1PreparedStatement;
+      }
       return new ResumabilitySqliteStatement(database, sql) as unknown as D1PreparedStatement;
     },
     async batch(statements: D1PreparedStatement[]) {
@@ -689,6 +735,67 @@ describe("provider connection resumability", () => {
     expect(runtime.getCredentialInsertCount()).toBe(0);
     expect(runtime.sqlHistory.join("\n")).not.toContain("SELECT COALESCE(MAX(version)");
   });
+
+  it.each([
+    { currentPeriodEnd: "2000-01-01T00:00:00.000Z", graceEndsAt: null, name: "expired active period", subscriptionState: "active" as const, expectedCode: "subscription_payment_required" },
+    { currentPeriodEnd: "2000-01-01T00:00:00.000Z", graceEndsAt: null, name: "expired scheduled period", subscriptionState: "cancel_scheduled" as const, expectedCode: "subscription_payment_required" },
+    { currentPeriodEnd: null, graceEndsAt: null, name: "missing active period", subscriptionState: "active" as const, expectedCode: "subscription_payment_required" },
+    { graceEndsAt: null, name: "pending payment", subscriptionState: "pending_payment" as const, expectedCode: "subscription_payment_required" },
+    { graceEndsAt: null, name: "expired trial", subscriptionState: "trialing" as const, trialEndsAt: "2000-01-01T00:00:00.000Z", expectedCode: "subscription_payment_required" },
+    { graceEndsAt: "2099-01-01T00:00:00.000Z", name: "past due grace", subscriptionState: "past_due" as const, expectedCode: "provider_not_ready" },
+    { graceEndsAt: "2099-01-01T00:00:00.000Z", name: "renewal grace", subscriptionState: "grace_period" as const, expectedCode: "provider_not_ready" },
+    { graceEndsAt: "2000-01-01T00:00:00.000Z", name: "expired renewal grace", subscriptionState: "grace_period" as const, expectedCode: "subscription_grace_expired" },
+    { graceEndsAt: null, name: "suspended", subscriptionState: "suspended" as const, expectedCode: "subscription_payment_required" },
+  ])("blocks PayOS connection for a $name subscription", async ({ currentPeriodEnd, expectedCode, graceEndsAt, subscriptionState, trialEndsAt }) => {
+    const runtime = await payOSRuntime({ active: true, currentPeriodEnd, graceEndsAt, subscriptionState, trialEndsAt });
+
+    await expect(connectPayOS({
+      credentials: PAYOS_ROTATED_CREDENTIALS,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: `request-payos-block-${subscriptionState}`,
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: expectedCode });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getCredentialInsertCount()).toBe(0);
+    expect(runtime.credential.status).toBe("active");
+  });
+
+  it("fails closed when the authoritative subscription row is missing", async () => {
+    const runtime = await payOSRuntime({ active: true, withoutSubscription: true });
+
+    await expect(connectPayOS({
+      credentials: PAYOS_ROTATED_CREDENTIALS,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-missing-subscription",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "subscription_payment_required" });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getCredentialInsertCount()).toBe(0);
+    expect(runtime.sqlHistory.join("\n")).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/u);
+  });
+
+  it("propagates subscription database failure before provider calls or writes", async () => {
+    const runtime = await payOSRuntime({ active: true, subscriptionQueryFails: true });
+
+    await expect(connectPayOS({
+      credentials: PAYOS_ROTATED_CREDENTIALS,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-subscription-db-failure",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toThrow("subscription_query_failed");
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getCredentialInsertCount()).toBe(0);
+    expect(runtime.sqlHistory.join("\n")).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/u);
+  });
 });
 
 describe("PayOS health refresh", () => {
@@ -710,6 +817,25 @@ describe("PayOS health refresh", () => {
     expect(JSON.stringify(result)).not.toContain(PAYOS_CREDENTIALS.apiKey);
     expect(JSON.stringify(result)).not.toContain(PAYOS_CREDENTIALS.checksumKey);
     expect(JSON.stringify(result)).not.toContain(PAYOS_CREDENTIALS.clientId);
+  });
+
+  it("blocks pending setup retry during renewal grace before calling PayOS", async () => {
+    const runtime = await payOSRuntime({
+      graceEndsAt: "2099-01-01T00:00:00.000Z",
+      pending: true,
+      subscriptionState: "past_due",
+    });
+
+    await expect(refreshPayOSHealth({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-blocked-retry",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "provider_not_ready" });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.credential.status).toBe("pending");
   });
 
   it("keeps a failed pending retry sanitized and retryable", async () => {
@@ -746,6 +872,38 @@ describe("PayOS health refresh", () => {
     expect(Date.parse(result.lastCheckedAt ?? "")).not.toBeNaN();
     expect(result.lastCheckedAt).not.toBe(previousCheckedAt);
     expect(result.lastWebhookVerifiedAt).toBe(result.lastCheckedAt);
+  });
+
+  it("blocks provider-mutating health refresh for a suspended subscription", async () => {
+    const runtime = await payOSRuntime({ active: true, subscriptionState: "suspended" });
+
+    await expect(refreshPayOSHealth({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-blocked-health",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "subscription_payment_required" });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+  });
+
+  it("keeps integration reads and disconnect available while suspended", async () => {
+    const runtime = await payOSRuntime({ active: true, subscriptionState: "suspended" });
+
+    await expect(getPaymentIntegration({
+      env: runtime.env,
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    await expect(disconnectPayOS({
+      env: runtime.env,
+      requestId: "request-payos-disconnect-suspended",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).resolves.toBeUndefined();
+
+    expect(runtime.getProviderCalls()).toBe(0);
   });
 
   it("rejects a manager before loading credentials or calling PayOS", async () => {

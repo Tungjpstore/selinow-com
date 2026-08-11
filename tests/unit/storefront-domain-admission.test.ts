@@ -7,6 +7,7 @@ type StorefrontRow = {
   brandingJson: string;
   canonicalHostname: string | null;
   currency: string;
+  currentPeriodEnd: string | null;
   currentDomainType: "custom" | "platform_subdomain";
   currentDomainValidationMetadataJson: string;
   currentHostname: string;
@@ -51,6 +52,7 @@ function row(overrides: Partial<StorefrontRow> = {}): StorefrontRow {
     brandingJson: "{}",
     canonicalHostname: "shop.customer.com",
     currency: "VND",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     currentDomainType: "custom",
     currentDomainValidationMetadataJson: admissionMetadata(),
     currentHostname: "shop.customer.com",
@@ -108,6 +110,24 @@ describe("storefront custom-domain Turnstile admission", () => {
     expect(runtime.sql()).toContain("dns_status = 'active'");
   });
 
+  it.each(["active", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"])(
+    "suspends %s storefront access when the paid period has ended",
+    async (subscriptionState) => {
+      const runtime = environment(row({
+        currentPeriodEnd: "2020-01-01T00:00:00.000Z",
+        subscriptionState,
+      }));
+
+      await expect(resolveStorefrontShop(new Request("https://shop.customer.com/"), runtime.env)).resolves.toMatchObject({
+        access: "suspended",
+        currentHostname: "shop.customer.com",
+        subscriptionState,
+      });
+      expect(runtime.sql()).toContain("current_period_end");
+      expect(runtime.sql()).toContain("shop_id = shops.id");
+    },
+  );
+
   it.each([
     ["missing evidence", { currentDomainValidationMetadataJson: "{}" }],
     ["pending admission", { currentDomainValidationMetadataJson: admissionMetadata({ status: "pending" }) }],
@@ -128,6 +148,7 @@ describe("storefront custom-domain Turnstile admission", () => {
       currentHostname: "seller.selinow.com",
     }));
     await expect(resolveStorefrontShop(new Request("https://seller.selinow.com/"), runtime.env)).resolves.toMatchObject({
+      access: "live",
       currentHostname: "seller.selinow.com",
     });
   });

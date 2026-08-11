@@ -749,7 +749,7 @@ describe("Telegram generic connection runtime bridge", () => {
       VALUES ('cart-telegram-runtime', 'shop-telegram-runtime', 'variant-telegram-runtime', 1);
     `);
     const identity: TelegramIdentity = { chatId: "123", customerId: "customer-telegram-runtime", identityId: "identity-runtime", subjectHash: "subject-telegram-runtime" };
-    const shop: TelegramShop = { currency: "VND", defaultLocale: "vi", id: "shop-telegram-runtime", name: "Runtime", orderExpiryMinutes: 30, origin: "https://runtime.selinow.com", status: "active", subscriptionState: "active" };
+    const shop: TelegramShop = { currency: "VND", currentPeriodEnd: "2099-01-01T00:00:00.000Z", defaultLocale: "vi", id: "shop-telegram-runtime", name: "Runtime", orderExpiryMinutes: 30, origin: "https://runtime.selinow.com", status: "active", subscriptionState: "active" };
     const quoteUpdateId = 1;
     const quoteKey = await createTelegramCartMutationApplicationKey(runtime.env, shop.id, first.integrationId, quoteUpdateId);
     const quoteContext = { actor: { customerId: identity.customerId, kind: "customer" as const }, channel: { code: "telegram" as const, connectionId: first.connectionId }, locale: shop.defaultLocale, requestId: quoteKey, shopId: shop.id };

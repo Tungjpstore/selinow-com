@@ -59,6 +59,7 @@ function baseRow(providerCode: string, envelope: { credentialEnvelopeCiphertextB
     shopPublicId: SHOP_PUBLIC_ID,
     shopStatus: "active",
     subscriptionState: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
   };
 }
 

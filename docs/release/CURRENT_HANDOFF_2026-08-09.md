@@ -22,7 +22,7 @@ identity.
   `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. This is not a deployment
   admission identity after the documentation lands; the next ceremony must
   recapture the final clean commit and tree.
-- Source migration ledger: contiguous `0001`-`0093`.
+- Source migration ledger: contiguous `0001`-`0094`.
 - Staging D1 post-migration evidence: release
   `stg_20260808T235913Z_73d0c27493ea`, commit
   `73d0c27493ea10fbeacd2e4b6b6f2f923cc99cfd`, tree
@@ -40,7 +40,7 @@ identity.
   candidate identities, and both predate the reviewed runtime baseline. That
   baseline is therefore not staging-deployed or staging-accepted.
 - Migrations `0091_buyer_order_access_recovery.sql` through
-  `0093_custom_domain_turnstile_runtime_guard.sql` and their runtimes are newer
+  `0094_shop_creation_admission.sql` and their runtimes are newer
   than both retained staging artifacts. Staging therefore remains at `0090`
   until a fresh exact-candidate migration/backup/restore/deploy ceremony passes.
 - Production remains at the admitted `0001`-`0052` D1 baseline and remains
@@ -51,19 +51,20 @@ identity.
 
 ## Candidate handoff details
 
-- Additional uncommitted schema change after the recorded clean candidate:
-  `0091_buyer_order_access_recovery.sql`. The subsequent `0092` and `0093`
-  custom-domain Turnstile migrations are committed, so the worktree source
-  migration ledger is contiguous through `0093`; no remote database contains
-  `0091`-`0093` as a result of this handoff update.
+- Additional schema changes after the recorded clean candidate include
+  `0091_buyer_order_access_recovery.sql`, the `0092` and `0093` custom-domain
+  Turnstile migrations, and `0094_shop_creation_admission.sql`. The worktree
+  source migration ledger is contiguous through `0094`; no remote database
+  contains `0091`-`0094` as a result of this handoff update.
 - Runtime contracts changed: Dodo signed-event rejection/replay behavior,
   PayOS UAT schema-v2 owner-attestation and scenario-artifact validation,
   production trigger plan/evidence/rollback validation, opaque seller order and
   customer cursors, retry-safe Website checkout recovery, signed single-use
   buyer order recovery with atomic order-token rotation, deterministic current
   token replay, exact-order binding lineage, 30-day contact/link hash scrubbing
-  and anonymization revocation, and fail-closed
-  WhatsApp ingress admission.
+  and anonymization revocation, fail-closed WhatsApp ingress admission,
+  server-authoritative shop-creation admission, and hash-only requester,
+  subject and global provisioning budgets.
 - Principal changed files: `src/lib/billing/service.ts`,
   `src/lib/channels/whatsapp-webhooks.ts`,
   `src/lib/commerce/seller-orders.ts`,
@@ -72,6 +73,8 @@ identity.
   `src/pages/api/store/orders/[orderPublicId]/recovery.ts`,
   `src/pages/api/store/orders/[orderPublicId]/recovery/consume.ts`,
   `src/lib/tenants/seller-management.ts`,
+  `src/lib/auth/admission.ts`,
+  `src/lib/tenants/store.ts`,
   `scripts/lib/payos-uat-evidence.mjs`,
   `scripts/lib/commerce-uat-evidence.mjs`,
   `scripts/lib/production-trigger-ceremony.mjs`,
@@ -88,8 +91,9 @@ identity.
   `npm run build`, `npm run build:staging`, `npm audit --audit-level=high` (0
   vulnerabilities), both deploy dry-runs, and `git diff --check` pass.
 - The `0091` buyer recovery continuation has focused local
-  migration/service/route/UI/release contract evidence, and the committed
-  `0092`-`0093` domain continuation has migration/runtime guard coverage, but
+  migration/service/route/UI/release contract evidence, the `0092`-`0093`
+  domain continuation has migration/runtime guard coverage, and `0094` has
+  shop-creation admission and release-invariant coverage, but
   current full-tree verification and exact clean commit/tree are pending this
   batch's closeout and must replace the earlier totals before release admission.
 - Known limitations: staging backup/restore and deploy evidence are not bound to
@@ -151,9 +155,9 @@ and customer-journey evidence for the exact combined candidate.
 Required staging evidence:
 
 1. Generate a fresh manifest from the clean current candidate, admit and apply
-   `0091`-`0093` over the retained `0090` staging ledger, complete the two-phase
+   `0091`-`0094` over the retained `0090` staging ledger, complete the two-phase
    backup/restore evidence, deploy that exact tree, and bind the resulting
-   Worker version and deployment ID to the complete `0093` D1 ledger.
+   Worker version and deployment ID to the complete `0094` D1 ledger.
 2. Re-run route/domain inventory, health, Website and Telegram flows,
    custom-domain and Turnstile admission, queue consumers, DLQ, cron, and
    tenant-isolation checks. Capture a schema-compatible rollback target.
@@ -183,7 +187,7 @@ Before any production continuation, the release owner must additionally obtain:
 - named release, data, payment, security, legal, support, domain, and incident
   approvals;
 - a fresh protected production backup and provider bookmark plus an isolated
-  restore drill for the exact candidate and `0053`-`0093` continuation;
+  restore drill for the exact candidate and `0053`-`0094` continuation;
 - accepted production secret-name inventory through the approved secret channel;
 - current monitoring, pilot, manual Website/Telegram/payment/custom-domain
   acceptance, and rollback rehearsal evidence;

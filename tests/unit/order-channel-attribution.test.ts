@@ -210,6 +210,7 @@ function storefrontShop(): StorefrontShop {
     settingsVersion: 1,
     slug: "attribution-a",
     status: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
     theme: {
       accent: "#7C3AED",
@@ -230,6 +231,7 @@ function telegramShop(): TelegramShop {
     orderExpiryMinutes: 30,
     origin: "https://attribution-b.selinow.com",
     status: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
   };
 }
@@ -664,6 +666,7 @@ describe("built-in channel attribution contract", () => {
     };
     const telegramShop: TelegramShop = {
       currency: shop.currency,
+      currentPeriodEnd: shop.currentPeriodEnd ?? null,
       defaultLocale: shop.defaultLocale,
       id: shop.id,
       name: shop.name,
@@ -862,6 +865,7 @@ describe("built-in channel attribution contract", () => {
       orderExpiryMinutes: 30,
       origin: "https://attribution-b.selinow.com",
       status: "active",
+      currentPeriodEnd: "2099-01-01T00:00:00.000Z",
       subscriptionState: "active",
     };
     await seedTelegramQuote({ cartId: "cart_attribution_telegram", env, identity, integrationId: "integration_attribution_telegram", shop, updateId: 1001 });
@@ -1014,6 +1018,7 @@ describe("built-in channel attribution contract", () => {
       orderExpiryMinutes: 30,
       origin: "https://attribution-b.selinow.com",
       status: "active",
+      currentPeriodEnd: "2099-01-01T00:00:00.000Z",
       subscriptionState: "active",
     };
     await seedTelegramQuote({ cartId: "cart_attribution_telegram_free", env, identity, integrationId: "integration_attribution_telegram_free", shop, updateId: 1002 });

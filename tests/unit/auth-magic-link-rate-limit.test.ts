@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import { hmacToken } from "../../src/lib/core/crypto";
+import { buildPlatformAdminBootstrapSql } from "../../scripts/lib/platform-admin-bootstrap.mjs";
 
 const routeDependencies = vi.hoisted<{ env: AppBindings | null; warnings: unknown[] }>(() => ({ env: null, warnings: [] }));
 
@@ -15,7 +16,12 @@ vi.mock("../../src/lib/operations/logger", () => ({
   loggerFor: () => ({ warn: (event: unknown) => { routeDependencies.warnings.push(event); } }),
 }));
 
-import { magicLinkRequesterAddress, purgeAuthRequestAdmissions } from "../../src/lib/auth/admission";
+import {
+  claimProvisioningAdmission,
+  cloudflareRequesterAddress,
+  magicLinkRequesterAddress,
+  purgeAuthRequestAdmissions,
+} from "../../src/lib/auth/admission";
 import {
   authenticateRequest,
   consumeMagicLink,
@@ -367,6 +373,12 @@ describe("magic-link issuance rate limit", () => {
   });
 
   it("uses only the bounded Cloudflare client-address signal for requester identity", () => {
+    expect(cloudflareRequesterAddress(new Request("https://app.example.test", {
+      headers: {
+        "CF-Connecting-IP": " 203.0.113.50 ",
+        "X-Forwarded-For": "198.51.100.1",
+      },
+    }))).toBe("203.0.113.50");
     expect(magicLinkRequesterAddress(new Request("https://app.example.test", {
       headers: {
         "CF-Connecting-IP": " 203.0.113.50 ",
@@ -379,6 +391,74 @@ describe("magic-link issuance rate limit", () => {
     expect(magicLinkRequesterAddress(new Request("https://app.example.test", {
       headers: { "CF-Connecting-IP": "x".repeat(129) },
     }))).toBe("unknown");
+  });
+
+  it("atomically enforces requester, subject, and global provisioning budgets", async () => {
+    const limits = { global: 5, requester: 2, subject: 2, windowSeconds: 60 } as const;
+    const claim = (requesterAddress: string, subject: string) => claimProvisioningAdmission({
+      action: "shop_create",
+      env,
+      limits,
+      now: NOW,
+      requesterAddress,
+      subject,
+    });
+
+    await expect(claim("203.0.113.70", "user-a")).resolves.toBeUndefined();
+    await expect(claim("203.0.113.70", "user-b")).resolves.toBeUndefined();
+    await expect(claim("203.0.113.70", "user-c"))
+      .rejects.toMatchObject({ code: "rate_limited", status: 429 });
+
+    await expect(claim("203.0.113.71", "user-a")).resolves.toBeUndefined();
+    await expect(claim("203.0.113.72", "user-a"))
+      .rejects.toMatchObject({ code: "rate_limited", status: 429 });
+
+    const distributed = await Promise.allSettled([
+      claim("203.0.113.73", "user-d"),
+      claim("203.0.113.74", "user-e"),
+      claim("203.0.113.75", "user-f"),
+    ]);
+    expect(distributed.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+    expect(distributed.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM auth_request_admissions
+      WHERE action = 'shop_create' AND window_started_at = '2026-07-26T04:00:00.000Z'
+    `).get()).toEqual({ count: 5 });
+  });
+
+  it("stores only keyed provisioning identities and fails closed when admission is unavailable", async () => {
+    await claimProvisioningAdmission({
+      action: "shop_create",
+      env,
+      limits: { global: 5, requester: 5, subject: 5, windowSeconds: 60 },
+      now: NOW,
+      requesterAddress: "198.51.100.77",
+      subject: "user-sensitive-subject",
+    });
+    const stored = database.prepare(`
+      SELECT requester_hash AS requesterHash, subject_hash AS subjectHash
+      FROM auth_request_admissions WHERE action = 'shop_create'
+    `).get() as { requesterHash: string; subjectHash: string };
+    expect(stored.requesterHash).not.toBe("198.51.100.77");
+    expect(stored.subjectHash).not.toBe("user-sensitive-subject");
+    expect(JSON.stringify(stored)).not.toContain("198.51.100.77");
+
+    const unavailable = {
+      ...env,
+      PLATFORM_DB: {
+        prepare() {
+          throw new Error("database connection contains 198.51.100.88");
+        },
+      } as unknown as D1Database,
+    };
+    await expect(claimProvisioningAdmission({
+      action: "shop_create",
+      env: unavailable,
+      limits: { global: 5, requester: 5, subject: 5, windowSeconds: 60 },
+      now: NOW,
+      requesterAddress: "198.51.100.88",
+      subject: "user-a",
+    })).rejects.toMatchObject({ code: "provisioning_admission_unavailable", status: 503 });
   });
 
   it("sends staging magic links through the canonical dashboard origin without disclosing the token", async () => {
@@ -793,6 +873,58 @@ describe("magic-link issuance rate limit", () => {
 
     expect(await revokeAllSessions(auth, env)).toBe(2);
     expect(await listSessions(auth, env)).toEqual([]);
+  });
+
+  it("denies every pre-bootstrap session and accepts only a fresh post-bootstrap login", async () => {
+    const now = new Date();
+    const requested = await requestMagicLink({
+      displayName: "Platform Owner",
+      email: "platform-owner@example.test",
+      env,
+      requesterAddress: "203.0.113.82",
+      now,
+    });
+    const priorSession = await consumeMagicLink({
+      env,
+      initiationBinding: requested.initiationBinding,
+      token: tokenFromMagicLink(requested.debugMagicLink, env.DASHBOARD_ORIGIN),
+    });
+    database.exec(buildPlatformAdminBootstrapSql({
+      requestId: "platform-admin-bootstrap-session-revocation",
+      userEmail: priorSession.auth.email,
+      userId: priorSession.auth.userId,
+    }));
+
+    const priorRequest = new Request(`${env.DASHBOARD_ORIGIN}/admin`, {
+      headers: { Cookie: `${env.SESSION_COOKIE_NAME}=${priorSession.credentials.sessionToken}` },
+    });
+    await expect(authenticateRequest(priorRequest, env))
+      .rejects.toMatchObject({ code: "authentication_required", status: 401 });
+
+    const freshRequested = await requestMagicLink({
+      displayName: "Platform Owner",
+      email: "platform-owner@example.test",
+      env,
+      requesterAddress: "203.0.113.82",
+      now: new Date(now.getTime() + 1_000),
+    });
+    const freshSession = await consumeMagicLink({
+      env,
+      initiationBinding: freshRequested.initiationBinding,
+      token: tokenFromMagicLink(freshRequested.debugMagicLink, env.DASHBOARD_ORIGIN),
+    });
+    const freshRequest = new Request(`${env.DASHBOARD_ORIGIN}/admin`, {
+      headers: { Cookie: `${env.SESSION_COOKIE_NAME}=${freshSession.credentials.sessionToken}` },
+    });
+    await expect(authenticateRequest(freshRequest, env))
+      .resolves.toMatchObject({ sessionId: freshSession.auth.sessionId });
+    database.exec(buildPlatformAdminBootstrapSql({
+      requestId: "platform-admin-bootstrap-session-revocation-retry",
+      userEmail: priorSession.auth.email,
+      userId: priorSession.auth.userId,
+    }));
+    await expect(authenticateRequest(freshRequest, env))
+      .resolves.toMatchObject({ sessionId: freshSession.auth.sessionId });
   });
 
   it("refreshes stale session activity without making it part of authentication authority", async () => {

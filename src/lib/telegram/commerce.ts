@@ -32,6 +32,7 @@ import { formatTelegramMoney, formatTelegramTimestamp, resolveTelegramLocale, te
 
 export type TelegramShop = {
   currency: string;
+  currentPeriodEnd?: string | null;
   defaultLocale: string;
   id: string;
   name: string;
@@ -128,6 +129,7 @@ async function loadTelegramEffectiveCapabilities(input: {
     SELECT plans.feature_flags_json AS featureFlagsJson,
       plans.is_active AS planActive,
       shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
       shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.grace_ends_at AS graceEndsAt
     FROM shop_subscriptions
@@ -141,14 +143,14 @@ async function loadTelegramEffectiveCapabilities(input: {
         LIMIT 1
       )
     LIMIT 1
-  `).bind(input.shopId).first<{ featureFlagsJson: string; graceEndsAt: string | null; planActive: number; subscriptionState: string; trialEndsAt: string | null }>();
+  `).bind(input.shopId).first<{ currentPeriodEnd: string | null; featureFlagsJson: string; graceEndsAt: string | null; planActive: number; subscriptionState: string; trialEndsAt: string | null }>();
   const adapterCapabilities = new Set<ChannelCapability>(builtInChannelRegistry.require(TELEGRAM_CHANNEL_CODE).capabilities);
   const planEntitlements = plan !== null && hasFeature(plan.featureFlagsJson, "telegram")
     ? adapterCapabilities
     : new Set<ChannelCapability>();
   const policyAllowsCommerce = plan !== null
     && plan.planActive === 1
-    && subscriptionAllows({ graceEndsAt: plan.graceEndsAt, subscriptionState: plan.subscriptionState, trialEndsAt: plan.trialEndsAt });
+    && subscriptionAllows({ currentPeriodEnd: plan.currentPeriodEnd, graceEndsAt: plan.graceEndsAt, subscriptionState: plan.subscriptionState, trialEndsAt: plan.trialEndsAt });
   const projection = await new D1ChannelConnectionRepository(input.env.PLATFORM_DB, builtInChannelRegistry).projectCapabilities({
     connectionId: input.connectionId,
     planEntitlements,
@@ -185,6 +187,7 @@ export async function loadTelegramShop(env: AppBindings, shopId: string): Promis
     SELECT shops.id, shops.name, shops.status, shops.default_locale AS defaultLocale, shops.currency,
       shop_settings.order_expiry_minutes AS orderExpiryMinutes,
       shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
       shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.grace_ends_at AS graceEndsAt,
       canonical_domain.hostname_normalized AS hostname
@@ -212,7 +215,7 @@ export async function loadTelegramShop(env: AppBindings, shopId: string): Promis
     LIMIT 1
   `).bind(shopId).first<Omit<TelegramShop, "origin"> & { hostname: string }>();
   if (row === null) throw new AppError("tenant_not_found", 404);
-  if (!subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
+  if (!subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
     throw new AppError("subscription_required", 402);
   }
   assertCheckoutAllowed({ shopStatus: row.status, subscriptionState: row.subscriptionState });

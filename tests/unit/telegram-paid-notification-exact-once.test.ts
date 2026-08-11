@@ -92,6 +92,10 @@ class SqliteStatement {
     private readonly database: DatabaseSync,
     private readonly sql: string,
     private readonly values: SQLInputValue[] = [],
+    private readonly hooks?: {
+      before?: (sql: string) => void;
+      after?: (sql: string) => void;
+    },
   ) {}
 
   bind(...values: unknown[]): SqliteStatement {
@@ -99,7 +103,7 @@ class SqliteStatement {
       if (value === null || typeof value === "string" || typeof value === "number"
         || typeof value === "bigint" || value instanceof Uint8Array) return value;
       throw new TypeError("unsupported_sqlite_binding");
-    }));
+    }), this.hooks);
   }
 
   first<T>(): Promise<T | null> {
@@ -111,7 +115,9 @@ class SqliteStatement {
   }
 
   run(): Promise<{ meta: { changes: number } }> {
+    this.hooks?.before?.(this.sql);
     const result = this.database.prepare(this.sql).run(...this.values);
+    this.hooks?.after?.(this.sql);
     return Promise.resolve({ meta: { changes: Number(result.changes) } });
   }
 }
@@ -128,10 +134,25 @@ class MemoryQueue {
 }
 
 class SqliteD1 {
+  failNextDeliverySettlementAfterCommit = false;
+  failNextDeliverySettlementBeforeCommit = false;
+
   constructor(private readonly database: DatabaseSync) {}
 
   prepare(sql: string): D1PreparedStatement {
-    return new SqliteStatement(this.database, sql) as unknown as D1PreparedStatement;
+    const isSettlement = /UPDATE delivery_jobs\s+SET status = \?, next_attempt_at = \?/u.test(sql);
+    return new SqliteStatement(this.database, sql, [], {
+      before: () => {
+        if (!isSettlement || !this.failNextDeliverySettlementBeforeCommit) return;
+        this.failNextDeliverySettlementBeforeCommit = false;
+        throw new Error("settlement_response_lost_before_commit");
+      },
+      after: () => {
+        if (!isSettlement || !this.failNextDeliverySettlementAfterCommit) return;
+        this.failNextDeliverySettlementAfterCommit = false;
+        throw new Error("settlement_response_lost_after_commit");
+      },
+    }) as unknown as D1PreparedStatement;
   }
 
   async batch(statements: D1PreparedStatement[]): Promise<D1Result[]> {
@@ -146,6 +167,7 @@ class SqliteD1 {
       throw error;
     }
   }
+
 }
 
 function applyMigrations(database: DatabaseSync): void {
@@ -257,13 +279,18 @@ function seedPaidTelegramOrder(database: DatabaseSync): void {
   `);
 }
 
-function trackedMessage(body: DomainDeliveryQueueEnvelope, id: string): Message {
+type TrackedMessage = Omit<Message, "ack" | "retry"> & {
+  ack: ReturnType<typeof vi.fn<() => void>>;
+  retry: ReturnType<typeof vi.fn<(options?: QueueRetryOptions) => void>>;
+};
+
+function trackedMessage(body: DomainDeliveryQueueEnvelope, id: string): TrackedMessage {
   return {
-    ack: vi.fn(),
+    ack: vi.fn<() => void>(),
     attempts: 1,
     body,
     id,
-    retry: vi.fn(),
+    retry: vi.fn<(options?: QueueRetryOptions) => void>(),
     timestamp: NOW,
   };
 }
@@ -374,5 +401,77 @@ describe("Telegram paid-order exact-once authority", () => {
     expect(database.prepare("SELECT COUNT(*) AS count FROM delivery_jobs").get()).toEqual({ count: 1 });
     expect(database.prepare("SELECT status FROM outbox_jobs WHERE id = 'legacy-exact-once'").get())
       .toEqual({ status: "completed" });
+  });
+
+  it("does not resend when provider success is followed by a lost D1 settlement response", async () => {
+    const providerFetch = vi.fn<typeof fetch>(() => Promise.resolve(new Response(
+      JSON.stringify({ ok: true, result: { message_id: 2 } }),
+      { status: 200 },
+    )));
+    vi.stubGlobal("fetch", providerFetch);
+    const controller: ScheduledController = {
+      cron: "*/5 * * * *",
+      noRetry: vi.fn(),
+      scheduledTime: NOW.getTime(),
+    };
+    await worker.scheduled(controller, env as unknown as Env);
+    const deliveryEnvelope = notificationQueue.sent[0];
+    if (deliveryEnvelope === undefined) throw new Error("delivery_envelope_missing");
+    const firstDelivery = trackedMessage(deliveryEnvelope, "message-delivery-settlement-loss");
+    const databaseBinding = env.PLATFORM_DB as unknown as SqliteD1;
+    databaseBinding.failNextDeliverySettlementAfterCommit = true;
+
+    await worker.queue(messageBatch(firstDelivery, "selinow-notification-staging"), env as unknown as Env);
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(firstDelivery.ack).toHaveBeenCalledOnce();
+    expect(database.prepare("SELECT status, attempts FROM delivery_jobs").get()).toEqual({
+      attempts: 1,
+      status: "delivered",
+    });
+
+    const replay = trackedMessage(deliveryEnvelope, "message-delivery-settlement-replay");
+    await worker.queue(messageBatch(replay, "selinow-notification-staging"), env as unknown as Env);
+    await worker.scheduled({ ...controller, scheduledTime: NOW.getTime() + 300_000 }, env as unknown as Env);
+
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(replay.ack).toHaveBeenCalledOnce();
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM audit_logs
+      WHERE action = 'delivery.provider_attempt_claimed'
+    `).get()).toEqual({ count: 1 });
+  });
+
+  it("dead-letters a marked provider attempt when settlement cannot commit", async () => {
+    const providerFetch = vi.fn<typeof fetch>(() => Promise.resolve(new Response(
+      JSON.stringify({ ok: true, result: { message_id: 3 } }),
+      { status: 200 },
+    )));
+    vi.stubGlobal("fetch", providerFetch);
+    const controller: ScheduledController = {
+      cron: "*/5 * * * *",
+      noRetry: vi.fn(),
+      scheduledTime: NOW.getTime(),
+    };
+    await worker.scheduled(controller, env as unknown as Env);
+    const deliveryEnvelope = notificationQueue.sent[0];
+    if (deliveryEnvelope === undefined) throw new Error("delivery_envelope_missing");
+    const firstDelivery = trackedMessage(deliveryEnvelope, "message-delivery-settlement-failure");
+    const databaseBinding = env.PLATFORM_DB as unknown as SqliteD1;
+    databaseBinding.failNextDeliverySettlementBeforeCommit = true;
+
+    await worker.queue(messageBatch(firstDelivery, "selinow-notification-staging"), env as unknown as Env);
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(firstDelivery.ack).toHaveBeenCalledOnce();
+    expect(database.prepare("SELECT status, last_safe_error_code AS errorCode FROM delivery_jobs").get())
+      .toEqual({ errorCode: "delivery_provider_outcome_unknown", status: "dead_letter" });
+
+    const replay = trackedMessage(deliveryEnvelope, "message-delivery-settlement-failure-replay");
+    await worker.queue(messageBatch(replay, "selinow-notification-staging"), env as unknown as Env);
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(replay.ack).toHaveBeenCalledOnce();
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM audit_logs
+      WHERE action = 'delivery.provider_outcome_unknown'
+    `).get()).toEqual({ count: 1 });
   });
 });

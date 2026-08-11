@@ -64,6 +64,7 @@ type ConnectionEvidenceContext = {
   shopId: string;
   shopStatus: string;
   subscriptionState: string;
+  currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
 };
@@ -215,6 +216,7 @@ async function loadConnectionEvidenceContext(env: AppBindings, input: {
       channel.status AS channelStatus,
       shops.status AS shopStatus,
       subscription.state AS subscriptionState,
+      subscription.current_period_end AS currentPeriodEnd,
       subscription.trial_ends_at AS trialEndsAt,
       subscription.grace_ends_at AS graceEndsAt,
       credential.id AS credentialId,
@@ -238,7 +240,7 @@ async function loadConnectionEvidenceContext(env: AppBindings, input: {
   `).bind(input.shopId, input.connectionId, input.providerCode).first<ConnectionEvidenceContext>();
   if (row === null) throw new AppError("channel_connection_not_found", 404);
   if (row.providerCode !== input.providerCode) throw new AppError("channel_provider_mismatch", 403);
-  if (row.channelStatus !== "enabled" || row.shopStatus !== "active" || !subscriptionAllows({ graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
+  if (row.channelStatus !== "enabled" || row.shopStatus !== "active" || !subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
     throw new AppError("channel_connection_unavailable", 409);
   }
   if (!Number.isSafeInteger(row.credentialVersion) || row.credentialVersion < 1) throw new AppError("channel_credential_invalid", 500);
@@ -587,6 +589,7 @@ export async function promoteProviderConnectionFromEvidence(input: {
   const connection = await input.env.PLATFORM_DB.prepare(`
     SELECT connection.status AS connectionStatus, connection.version AS connectionVersion,
       subscription.state AS subscriptionState,
+      subscription.current_period_end AS currentPeriodEnd,
       subscription.trial_ends_at AS trialEndsAt,
       subscription.grace_ends_at AS graceEndsAt,
       credential.status AS credentialStatus, credential.version AS credentialVersion,
@@ -606,10 +609,10 @@ export async function promoteProviderConnectionFromEvidence(input: {
       AND credential.status = 'active'
     WHERE connection.shop_id = ? AND connection.id = ? AND connection.provider_code = ? LIMIT 1
   `).bind(input.shopId, input.connectionId, providerCode).first<{
-    channelStatus: string; connectionStatus: string; connectionVersion: number; credentialFingerprint: string; credentialStatus: string; credentialVersion: number; graceEndsAt: string | null; subscriptionState: string; trialEndsAt: string | null;
+    channelStatus: string; connectionStatus: string; connectionVersion: number; credentialFingerprint: string; credentialStatus: string; credentialVersion: number; currentPeriodEnd: string | null; graceEndsAt: string | null; subscriptionState: string; trialEndsAt: string | null;
   }>();
   if (connection === null) throw new AppError("channel_connection_not_found", 404);
-  if (!subscriptionAllows({ graceEndsAt: connection.graceEndsAt, subscriptionState: connection.subscriptionState, trialEndsAt: connection.trialEndsAt })) {
+  if (!subscriptionAllows({ currentPeriodEnd: connection.currentPeriodEnd, graceEndsAt: connection.graceEndsAt, subscriptionState: connection.subscriptionState, trialEndsAt: connection.trialEndsAt })) {
     throw new AppError("channel_connection_unavailable", 409);
   }
   if (connection.channelStatus !== "enabled" || connection.credentialStatus !== "active" || connection.connectionStatus !== "pending") {

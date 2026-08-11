@@ -19,6 +19,7 @@ vi.mock("../../src/lib/platform/bindings", () => ({
 import { GET as catalogRoute } from "../../src/pages/api/v1/catalog";
 
 const NOW = new Date("2026-07-29T06:00:00.000Z");
+const PAID_PERIOD_END = "2099-01-01T00:00:00.000Z";
 const SHOP_A_PUBLIC_ID = "shop_00000000-0000-4000-8000-000000000001";
 const SHOP_B_PUBLIC_ID = "shop_00000000-0000-4000-8000-000000000002";
 
@@ -100,10 +101,10 @@ function createRuntime(): { database: DatabaseSync; env: AppBindings } {
         'en', 'USD', 'UTC', 1, '${now}', '${now}');
     INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
     VALUES ('shop-a', 'user-owner-a', 'owner', 'active', '${now}', '${now}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
     VALUES
-      ('subscription-a', 'shop-a', 'plan-api-catalog', 'active', '${now}', '${now}'),
-      ('subscription-b', 'shop-b', 'plan-api-catalog', 'active', '${now}', '${now}');
+      ('subscription-a', 'shop-a', 'plan-api-catalog', 'active', '${PAID_PERIOD_END}', '${now}', '${now}'),
+      ('subscription-b', 'shop-b', 'plan-api-catalog', 'active', '${PAID_PERIOD_END}', '${now}', '${now}');
     INSERT INTO shop_settings (
       shop_id, branding_json, storefront_json, order_expiry_minutes,
       low_stock_threshold, version, updated_at

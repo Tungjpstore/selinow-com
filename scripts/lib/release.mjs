@@ -144,6 +144,11 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "shop_domains_turnstile_active_update_guard",
   "shops_turnstile_canonical_insert_guard",
   "shops_turnstile_canonical_update_guard",
+  "auth_request_admissions",
+  "idx_auth_request_admissions_window",
+  "idx_auth_request_admissions_requester_window",
+  "idx_auth_request_admissions_expiry",
+  "idx_auth_request_admissions_subject_window",
 ]);
 
 const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
@@ -249,6 +254,16 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       shops_turnstile_canonical_update_guard: "94522fd8950e45cfca46db8714adaa273f390cdbec1b2c067f13d41ce1b0dc88",
     }),
   }),
+  "0094_shop_creation_admission.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      auth_request_admissions: "772097f5ae0b7bd25b9204cd23b3585f2377400f438b47f82cf951164e34fb54",
+      idx_auth_request_admissions_expiry: "c1d1f0912034e724af8c68488f77bae0f9dcf9439fdf9eef0bd69b956180ef06",
+      idx_auth_request_admissions_requester_window: "0eae88a37e6f001da33ac076fa37527c747d327580fa25b191e13b050d164734",
+      idx_auth_request_admissions_subject_window: "fd963cf7fdc62169d6f43742b5d0b8e5dea620fd15feed6b6962675bf61682ac",
+      idx_auth_request_admissions_window: "948c62c46ee63a42a09d18ba42f18a352c1c267c6ab23e102944d5c1e68ea73e",
+    }),
+  }),
 });
 
 const REQUIRED_SPEC_PATHS = [
@@ -333,6 +348,49 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const PRIVATE_RELEASE_ARTIFACT_REF_PATTERN = /^\.wrangler\/releases\/[a-z0-9][a-z0-9._-]{7,80}\/[A-Za-z0-9._/-]+\.json$/u;
 const PRIVATE_EVIDENCE_REF_PATTERN = /^(?:private\/|\.wrangler\/releases\/)[A-Za-z0-9._/-]+$/u;
 const LEGAL_SUPPORT_ARTIFACT_MODE = "legal_support_decision_checklist";
+const CANDIDATE_BOUND_EVIDENCE_SCHEMA_VERSION = 1;
+const CANDIDATE_BOUND_EVIDENCE_DEFINITIONS = Object.freeze({
+  manualAcceptance: Object.freeze({
+    artifactFile: "manual-acceptance.json",
+    evidenceKeys: Object.freeze(["customDomain", "paymentSignedEvent", "telegram", "website"]),
+    maximumAgeMs: 30 * 24 * 60 * 60_000,
+    mode: "manual_acceptance",
+    timestampField: "observedAt",
+  }),
+  monitoring: Object.freeze({
+    artifactFile: "monitoring-evidence.json",
+    evidenceKeys: Object.freeze(["alertsReady", "budgetAlertsReady", "dashboardReady"]),
+    maximumAgeMs: 24 * 60 * 60_000,
+    mode: "monitoring_evidence",
+    timestampField: "observedAt",
+  }),
+  pilot: Object.freeze({
+    artifactFile: "pilot-evidence.json",
+    evidenceKeys: Object.freeze(["shopCount"]),
+    maximumAgeMs: 30 * 24 * 60 * 60_000,
+    mode: "pilot_evidence",
+    timestampField: "completedAt",
+  }),
+  quality: Object.freeze({
+    artifactFile: "quality-evidence.json",
+    evidenceKeys: Object.freeze([
+      "auditHigh",
+      "build",
+      "buildStaging",
+      "check",
+      "deployDryRun",
+      "deployStagingDryRun",
+      "gitDiffCheck",
+      "lint",
+      "schemaVersion",
+      "test",
+      "tscNoEmit",
+    ]),
+    maximumAgeMs: 30 * 24 * 60 * 60_000,
+    mode: "quality_evidence",
+    timestampField: "observedAt",
+  }),
+});
 const MAX_SMOKE_RESPONSE_BYTES = 256 * 1024;
 
 function getPath(value, path) {
@@ -573,6 +631,105 @@ export function validateSecretInventoryEvidence({ evidence, workerSecretNames, r
     missing: checks.filter((check) => !check.ok).map((check) => check.name),
     ok: checks.every((check) => check.ok),
   };
+}
+
+function candidateBoundEvidenceRef(releaseId, definition) {
+  return `.wrangler/releases/${releaseId}/${definition.artifactFile}`;
+}
+
+function candidateBoundEvidenceArtifactKeys() {
+  return [
+    "commitSha",
+    "environment",
+    "evidence",
+    "mode",
+    "observedAt",
+    "releaseId",
+    "schemaVersion",
+    "treeSha",
+    "workerVersion",
+  ];
+}
+
+/**
+ * Require operational evidence to be a private, candidate-bound artifact.
+ * Root booleans remain useful projections, but never authorize admission by
+ * themselves when the strict release gate is enabled.
+ */
+export function validateCandidateBoundReleaseEvidence({ evidence, now = new Date(), repositoryRoot: root = repositoryRoot } = {}) {
+  const results = Object.entries(CANDIDATE_BOUND_EVIDENCE_DEFINITIONS).map(([section, definition]) => {
+    const entry = evidence?.[section];
+    const timestamp = safeDate(entry?.[definition.timestampField]);
+    const expectedRef = candidateBoundEvidenceRef(evidence?.releaseId ?? "", definition);
+    const rootChecks = [
+      makeCheck(`evidence.${section}.artifactSchemaVersion`, entry?.artifactSchemaVersion === CANDIDATE_BOUND_EVIDENCE_SCHEMA_VERSION),
+      makeCheck(`evidence.${section}.artifactSha256`, typeof entry?.artifactSha256 === "string" && SHA256_PATTERN.test(entry.artifactSha256)),
+      makeCheck(`evidence.${section}.evidenceRef`, entry?.evidenceRef === expectedRef
+        && isSafeReleaseArtifactReference(entry.evidenceRef, evidence?.releaseId)),
+      makeCheck(`evidence.${section}.observedAt`, timestamp !== null),
+      makeCheck(
+        `evidence.${section}.observedAtFresh`,
+        timestamp !== null && timestamp <= now.getTime() && now.getTime() - timestamp <= definition.maximumAgeMs,
+      ),
+    ];
+    const loaded = entry?.evidenceRef === expectedRef
+      ? readPrivateReleaseArtifactSync(root, entry.evidenceRef)
+      : null;
+    const artifact = loaded?.value;
+    const artifactKeys = artifact && typeof artifact === "object" && !Array.isArray(artifact)
+      ? Object.keys(artifact).sort()
+      : [];
+    const expectedArtifactKeys = [...candidateBoundEvidenceArtifactKeys()].sort();
+    const expectedEvidence = Object.fromEntries(definition.evidenceKeys.map((key) => [key, entry?.[key]]));
+    const artifactEvidence = artifact?.evidence;
+    const artifactEvidenceKeys = artifactEvidence && typeof artifactEvidence === "object" && !Array.isArray(artifactEvidence)
+      ? Object.keys(artifactEvidence).sort()
+      : [];
+    const checks = [
+      ...rootChecks,
+      makeCheck(`evidence.${section}.artifactPresent`, loaded !== null),
+      makeCheck(`evidence.${section}.artifactMode`, artifact?.mode === definition.mode),
+      makeCheck(`evidence.${section}.artifactHash`, loaded !== null
+        && typeof entry?.artifactSha256 === "string"
+        && createHash("sha256").update(loaded.bytes).digest("hex") === entry.artifactSha256),
+      makeCheck(`evidence.${section}.artifactSchema`, artifact?.schemaVersion === CANDIDATE_BOUND_EVIDENCE_SCHEMA_VERSION
+        && isDeepStrictEqual(artifactKeys, expectedArtifactKeys)
+        && isDeepStrictEqual(artifactEvidenceKeys, [...definition.evidenceKeys].sort())),
+      makeCheck(`evidence.${section}.artifactBinding`, artifact?.environment === "production"
+        && artifact?.releaseId === evidence?.releaseId
+        && artifact?.commitSha === evidence?.commitSha
+        && artifact?.treeSha === evidence?.treeSha
+        && artifact?.workerVersion === evidence?.candidateWorkerVersion
+        && artifact?.observedAt === entry?.[definition.timestampField]),
+      makeCheck(`evidence.${section}.artifactEvidence`, isDeepStrictEqual(artifactEvidence, expectedEvidence)),
+    ];
+    return {
+      checks,
+      missing: checks.filter((check) => !check.ok).map((check) => check.name),
+      ok: checks.every((check) => check.ok),
+      ref: typeof entry?.evidenceRef === "string" ? entry.evidenceRef : null,
+    };
+  });
+  const refs = results.map((result) => result.ref).filter((ref) => typeof ref === "string");
+  const uniqueCheck = makeCheck("evidence.candidateBoundArtifacts.uniqueRefs", new Set(refs).size === refs.length);
+  const checks = [...results.flatMap((result) => result.checks), uniqueCheck];
+  return {
+    checks,
+    missing: checks.filter((check) => !check.ok).map((check) => check.name),
+    ok: checks.every((check) => check.ok),
+  };
+}
+
+function projectCandidateBoundReleaseEvidence(evidence) {
+  return Object.fromEntries(Object.keys(CANDIDATE_BOUND_EVIDENCE_DEFINITIONS).map((section) => {
+    const entry = evidence?.[section] ?? {};
+    return [section, {
+      artifactSchemaVersion: entry.artifactSchemaVersion,
+      artifactSha256: entry.artifactSha256,
+      evidenceRef: entry.evidenceRef,
+      observedAt: entry[CANDIDATE_BOUND_EVIDENCE_DEFINITIONS[section].timestampField],
+    }];
+  }));
 }
 
 function validProductionVar(name, value) {
@@ -881,9 +1038,24 @@ export function inspectProductionReadiness(input) {
   );
   if (requiresReleaseHardening) {
     const legalRef = evidence?.legalSupport?.evidenceRef;
+    const secretInventoryRef = evidence?.secretInventory?.evidenceRef;
+    const candidateBoundRefs = Object.keys(CANDIDATE_BOUND_EVIDENCE_DEFINITIONS)
+      .map((section) => evidence?.[section]?.evidenceRef)
+      .filter((value) => typeof value === "string");
+    const allArtifactRefs = [
+      ...activeRefs,
+      ...commerceRefs,
+      ...(typeof legalRef === "string" ? [legalRef] : []),
+      ...(typeof secretInventoryRef === "string" ? [secretInventoryRef] : []),
+      ...candidateBoundRefs,
+    ];
     checks.push(makeCheck(
       "evidence.acceptanceRefs.legalSupportUnique",
       typeof legalRef !== "string" || !new Set([...activeRefs, ...commerceRefs]).has(legalRef),
+    ));
+    checks.push(makeCheck(
+      "evidence.acceptanceRefs.allArtifactsUnique",
+      new Set(allArtifactRefs).size === allArtifactRefs.length,
     ));
   }
 
@@ -962,6 +1134,11 @@ export function inspectProductionReadiness(input) {
       evidence,
       repositoryRoot: input.repositoryRoot ?? repositoryRoot,
       workerSecretNames: input.workerSecretNames,
+    }).checks);
+    checks.push(...validateCandidateBoundReleaseEvidence({
+      evidence,
+      now: input.now,
+      repositoryRoot: input.repositoryRoot ?? repositoryRoot,
     }).checks);
   }
   if (commerceEvidenceValidation !== undefined) {
@@ -1246,6 +1423,9 @@ export function buildReleaseArtifacts(input) {
         requiredNames: [...input.evidence.secretInventory.requiredNames].sort(),
         schemaVersion: input.evidence.secretInventory.schemaVersion,
       },
+    } : {}),
+    ...(releaseInput.requireReleaseHardening ? {
+      candidateBoundEvidence: projectCandidateBoundReleaseEvidence(input.evidence),
     } : {}),
     providerAcceptance: projectAcceptance(input.evidence.providerAcceptance, RELEASE_CHANNEL_KEYS.slice(1)),
     releaseScope: {
@@ -1583,6 +1763,7 @@ export async function assertProductionWorkerDeployAdmission(input) {
     stagingSpec,
     token: input.token,
     requireCurrentWorkerVersion: true,
+    infrastructureAdmissionMode: input.infrastructureAdmissionMode ?? "exact",
     wranglerConfig,
   });
   assertProductionWorkerVersionAdmission({
@@ -1604,6 +1785,7 @@ export async function assertProductionWorkerDeployAdmission(input) {
     rollbackWorkerVersionBinding: input.requireWorkerVersionBinding === true
       ? { ...rollbackWorkerVersionBinding, role: "rollback" }
       : rollbackWorkerVersionBinding,
+    workerVersionAdmissionMode: input.workerVersionAdmissionMode ?? "pre_candidate",
   });
   return {
     ...releaseAdmission,
@@ -1878,7 +2060,17 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
             AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
             AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
             AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
-      ) AS integrity_0093_custom_domain_canonical;`;
+      ) AS integrity_0093_custom_domain_canonical,
+    (SELECT COUNT(*) FROM auth_request_admissions AS admission
+      WHERE admission.action NOT IN ('magic_link_request', 'shop_create')
+        OR length(admission.requester_hash) NOT BETWEEN 16 AND 128
+        OR admission.window_ends_at <= admission.window_started_at
+        OR (admission.subject_hash IS NOT NULL
+          AND length(admission.subject_hash) NOT BETWEEN 16 AND 128)
+        OR admission.delivery_permitted NOT IN (0, 1)
+        OR (admission.action = 'shop_create'
+          AND (admission.subject_hash IS NULL OR admission.delivery_permitted != 1))
+      ) AS integrity_0094_auth_request_admission;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {
@@ -1899,7 +2091,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["order_access_recovery_tokens", "payment_credentials", "payment_integrations"].includes(row?.name)) expectedType = "table";
+    if (["auth_request_admissions", "order_access_recovery_tokens", "payment_credentials", "payment_integrations"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
@@ -1940,6 +2132,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0091_recovery_terminal",
     "integrity_0093_custom_domain_canonical",
     "integrity_0093_custom_domain_turnstile",
+    "integrity_0094_auth_request_admission",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

@@ -1,11 +1,34 @@
 export type ReleaseCheck = { name: string; ok: boolean };
 
 export const REQUIRED_PRODUCTION_VARS: string[];
+export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS: readonly string[];
 export const REQUIRED_WORKER_SECRET_NAMES: string[];
 export const REQUIRED_PROVIDER_ACCEPTANCE_KEYS: string[];
 export const RELEASE_CHANNEL_KEYS: string[];
 export const REQUIRED_COMMERCE_ACCEPTANCE_KEYS: string[];
+export const REQUIRED_LEGAL_SUPPORT_DECISION_KEYS: readonly string[];
+export const REQUIRED_SECRET_INVENTORY_SCHEMA_VERSION: 1;
 export function evaluateBackupPrerequisites(evidence: Record<string, unknown> | null, now?: Date): ReleaseCheck[];
+export function evaluateCommerceAcceptance(
+  evidence: Record<string, unknown> | null,
+  artifactValidation?: Record<string, unknown>,
+  requireArtifactHash?: boolean,
+): ReleaseCheck[];
+export function validateCandidateBoundReleaseEvidence(input?: {
+  evidence?: Record<string, unknown> | null;
+  now?: Date;
+  repositoryRoot?: string;
+}): { checks: ReleaseCheck[]; missing: string[]; ok: boolean };
+export function validateLegalSupportDecisionEvidence(input?: {
+  evidence?: Record<string, unknown> | null;
+  now?: Date;
+  repositoryRoot?: string;
+}): { checks: ReleaseCheck[]; missing: string[]; ok: boolean };
+export function validateSecretInventoryEvidence(input?: {
+  evidence?: Record<string, unknown> | null;
+  repositoryRoot?: string;
+  workerSecretNames?: string[];
+}): { checks: ReleaseCheck[]; missing: string[]; ok: boolean };
 export function inspectProductionReadiness(input: {
   commerceEvidenceValidation?: Record<string, unknown>;
   evidence: Record<string, unknown> | null;
@@ -13,6 +36,7 @@ export function inspectProductionReadiness(input: {
   now: Date;
   productionSpec: Record<string, unknown> | null;
   repositoryRoot?: string;
+  requireReleaseHardening?: boolean;
   workerSecretNames: string[];
   wranglerConfig: Record<string, unknown>;
 }): { checks: ReleaseCheck[]; missing: string[]; ok: boolean };
@@ -61,16 +85,19 @@ export function assertProductionWorkerUploadResult(input: {
   };
 }): { binding: Record<string, string>; workerVersion: string };
 export function buildReleaseArtifacts(input: {
+  commerceEvidenceValidation?: Record<string, unknown>;
   evidence: Record<string, unknown>;
   migrationNames: string[];
   now: Date;
   packageVersion: string;
   productionSpec: Record<string, unknown>;
   repositoryRoot?: string;
+  requireReleaseHardening?: boolean;
   workerSecretNames: string[];
   wranglerConfig: Record<string, unknown>;
 }): { manifest: Record<string, unknown>; rollbackMatrix: Array<Record<string, string>> };
 export function validateProductionDeployAdmission(input: {
+  commerceEvidenceValidation?: Record<string, unknown>;
   evidence: Record<string, unknown>;
   manifest: unknown;
   migrationNames: string[];
@@ -79,6 +106,9 @@ export function validateProductionDeployAdmission(input: {
   productionSpec: Record<string, unknown>;
   repositoryClean: boolean;
   repositoryCommitSha: string;
+  repositoryTreeSha?: unknown;
+  requireRollbackArtifact?: boolean;
+  rollbackArtifactValidation?: { accepted?: boolean };
   workerSecretNames: string[];
   wranglerConfig: Record<string, unknown>;
 }): { commitSha: string; migrationLedgerPrefix: string[]; releaseId: string };
@@ -98,6 +128,7 @@ export function assertProductionWorkerDeployAdmission(input: {
     workerSecretNames: string[];
   }) => Promise<{ commitSha: string; releaseId: string }>;
   environment?: NodeJS.ProcessEnv;
+  infrastructureAdmissionMode?: "exact" | "pre_candidate";
   fetchImplementation?: typeof fetch;
   manifestPath: string;
   now?: Date;
@@ -129,6 +160,7 @@ export function assertProductionWorkerDeployAdmission(input: {
     zoneName: string;
   }>;
   workerSecretNames: string[];
+  workerVersionAdmissionMode?: "pre_candidate" | "candidate_active";
   wranglerConfig?: Record<string, unknown>;
 }): Promise<{
   accountId: string;

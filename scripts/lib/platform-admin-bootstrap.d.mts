@@ -62,7 +62,12 @@ export function assertPlatformAdminBootstrapContinuationFreshness<T extends Prod
 ): T;
 export function safePlatformAdminBootstrapErrorCode(error: unknown): string;
 export function buildPlatformAdminBootstrapSql(input: { requestId: string; userEmail: string; userId: string }): string;
-export function parsePlatformAdminBootstrapOutput(output: string): { adminCount: number; candidateOwnerCount: number; receiptCount: number };
+export function parsePlatformAdminBootstrapOutput(output: string): {
+  adminCount: number;
+  candidateOwnerCount: number;
+  candidatePreBootstrapActiveSessionCount: number;
+  receiptCount: number;
+};
 export function runPlatformAdminBootstrap(input: {
   environment?: NodeJS.ProcessEnv;
   flags: PlatformAdminBootstrapFlags;

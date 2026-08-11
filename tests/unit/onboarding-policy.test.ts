@@ -32,17 +32,29 @@ describe("onboarding policy", () => {
     })).toThrow(expect.objectContaining({ issues: ["unknown_field:ready"] }));
   });
 
-  it("normalizes HTTPS policy URLs and seller attestation", () => {
-    expect(parseOnboardingSettings({
+  it("rejects seller attestation while the platform policy is unpublished", () => {
+    expect(CURRENT_POLICY_ATTESTATION_VERSION).toBeNull();
+    expect(() => parseOnboardingSettings({
       attestationAccepted: true,
-      attestationVersion: CURRENT_POLICY_ATTESTATION_VERSION,
+      attestationVersion: 1,
+      privacyUrl: "https://seller.example/privacy",
+      refundPolicyUrl: "https://seller.example/refunds",
+      supportContact: "  support@example.com  ",
+      termsUrl: "https://seller.example/terms",
+    })).toThrow(expect.objectContaining({ code: "policy_unpublished", status: 409 }));
+  });
+
+  it("normalizes seller policy links without inventing an attestation", () => {
+    expect(parseOnboardingSettings({
+      attestationAccepted: false,
+      attestationVersion: null,
       privacyUrl: "https://seller.example/privacy",
       refundPolicyUrl: "https://seller.example/refunds",
       supportContact: "  support@example.com  ",
       termsUrl: "https://seller.example/terms",
     })).toEqual({
-      attestationAccepted: true,
-      attestationVersion: CURRENT_POLICY_ATTESTATION_VERSION,
+      attestationAccepted: false,
+      attestationVersion: null,
       privacyUrl: "https://seller.example/privacy",
       refundPolicyUrl: "https://seller.example/refunds",
       supportContact: "support@example.com",
@@ -56,8 +68,8 @@ describe("onboarding policy", () => {
     ["https://seller.example/terms#secret", "terms_url_invalid"],
   ])("rejects unsafe policy URL %s", (termsUrl, issue) => {
     expect(() => parseOnboardingSettings({
-      attestationAccepted: true,
-      attestationVersion: CURRENT_POLICY_ATTESTATION_VERSION,
+      attestationAccepted: false,
+      attestationVersion: null,
       privacyUrl: "https://seller.example/privacy",
       refundPolicyUrl: "https://seller.example/refunds",
       supportContact: "support@example.com",

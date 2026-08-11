@@ -21,7 +21,7 @@ describe("seller shop-name frontend contract", () => {
     expect(controller).toContain("if (!isShop(updated))");
     expect(route).toContain("requireCsrfSession(request, env)");
     expect(route).toContain("normalizeShopName(body.name)");
-    expect(store).toContain('capability: "shop:update"');
+    expect(store).toContain('billingMarketOnly ? "billing:manage" : "shop:update"');
     expect(store).toContain("'shop.updated'");
   });
 });

@@ -1,6 +1,6 @@
 # Data Model
 
-The authoritative numbered source chain is contiguous through `0093_custom_domain_turnstile_runtime_guard.sql`. Retained staging D1 evidence covers the complete `0001`-`0090` ledger through the guarded backup, isolated restore and migration sequence; migrations `0091`-`0093` require a fresh candidate ceremony before they can be claimed remotely. Production D1 remains admitted through `0052`; continuation migrations `0053` through `0093` remain unapplied and require fresh production backup/restore and mutation-window gates. The reviewed production resource identity and platform deployment are provisioned; provider activation and commerce traffic remain separately fail-closed. The full future schema contract remains in `02_ARCHITECTURE_AND_DATA.md`.
+The authoritative numbered source chain is contiguous through `0094_shop_creation_admission.sql`. Retained staging D1 evidence covers the complete `0001`-`0090` ledger through the guarded backup, isolated restore and migration sequence; migrations `0091`-`0094` require a fresh candidate ceremony before they can be claimed remotely. Production D1 remains admitted through `0052`; continuation migrations `0053` through `0094` remain unapplied and require fresh production backup/restore and mutation-window gates. The reviewed production resource identity and platform deployment are provisioned; provider activation and commerce traffic remain separately fail-closed. The full future schema contract remains in `02_ARCHITECTURE_AND_DATA.md`.
 
 All shop-owned access must resolve active membership first and retain the internal `shop_id` predicate for reads and writes. Public IDs are routing identifiers, not authorization authority.
 
@@ -146,7 +146,14 @@ platform-domain canonical fallback when possible, and enforce the boundary in
 D1 during migrate-before-deploy and rollback windows. These migrations are also
 source-only relative to the retained remote evidence.
 
-Current operational ledger note: source migrations `0001`-`0093` are contiguous;
+Migration `0094_shop_creation_admission.sql` rebuilds the hash-only auth
+admission ledger to admit authenticated `shop_create` claims while preserving
+existing magic-link rows and requester/subject window indexes. Shop creation
+claims require a subject hash and permitted delivery marker; raw requester and
+user identifiers remain outside D1. This migration is source-only relative to
+the retained remote evidence.
+
+Current operational ledger note: source migrations `0001`-`0094` are contiguous;
 retained staging evidence is admitted through `0090`, and production remains admitted
 only through `0052`. All later migration descriptions in this document are schema
 contracts or checkpoint history until a protected, exact-target admission and

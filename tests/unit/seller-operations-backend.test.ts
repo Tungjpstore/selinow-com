@@ -131,9 +131,9 @@ function seed(database: DatabaseSync): void {
     INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, readiness_version, created_at, updated_at) VALUES
       ('${SHOP_A}', '${SHOP_A_PUBLIC}', 'ops-a', 'Operations A', 'active', 'en', 'USD', 'UTC', 1, '${now}', '${now}'),
       ('${SHOP_B}', '${SHOP_B_PUBLIC}', 'ops-b', 'Operations B', 'active', 'en', 'USD', 'UTC', 1, '${now}', '${now}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at) VALUES
-      ('sub-ops-a', '${SHOP_A}', 'plan-ops', 'active', '${now}', '${now}'),
-      ('sub-ops-b', '${SHOP_B}', 'plan-ops', 'active', '${now}', '${now}');
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at) VALUES
+      ('sub-ops-a', '${SHOP_A}', 'plan-ops', 'active', '2099-01-01T00:00:00.000Z', '${now}', '${now}'),
+      ('sub-ops-b', '${SHOP_B}', 'plan-ops', 'active', '2099-01-01T00:00:00.000Z', '${now}', '${now}');
     INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at, member_public_id) VALUES
       ('${SHOP_A}', '${OWNER_A}', 'owner', 'active', '${now}', '${now}', '${MEMBER_OWNER}'),
       ('${SHOP_A}', '${MANAGER_A}', 'manager', 'active', '${now}', '${now}', '${MEMBER_MANAGER}'),

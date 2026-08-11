@@ -314,6 +314,8 @@ export function evaluatePayosStagingUatEvidence(evidence, binding) {
   const common = {
     evidenceFingerprintSha256: fingerprintPayosStagingUatEvidence(evidence),
     evidenceKind: evidence.evidenceKind,
+    fullCommerceAccepted: false,
+    fullCommerceReasonCodes: PAYOS_PROVIDER_UNSUPPORTED_SCENARIO_IDS.map((id) => UNSUPPORTED_REASONS[id]),
     localScenarioCount: PAYOS_LOCAL_ASSURANCE_SCENARIO_IDS.length,
     providerScenarioCount: PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS.length,
     releaseId: evidence.release.releaseId,
@@ -328,9 +330,10 @@ export function evaluatePayosStagingUatEvidence(evidence, binding) {
       accepted: false,
       acceptanceReasonCode: evidence.acceptanceReasonCode,
       error: "payos_uat_contract_gap",
+      paymentLaneAccepted: false,
     };
   }
-  return { ...common, accepted: true, acceptanceReasonCode: null };
+  return { ...common, accepted: true, acceptanceReasonCode: null, paymentLaneAccepted: true };
 }
 
 export function assertPayosStagingUatEvidence(evidence, binding) {

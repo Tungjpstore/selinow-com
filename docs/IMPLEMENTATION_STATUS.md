@@ -5,7 +5,7 @@ Last updated: 2026-08-11
 ## Current source of truth
 
 Continuation audit (2026-08-09): the source chain is contiguous through
-`0093_custom_domain_turnstile_runtime_guard.sql`. Staging D1 is already at `0090`,
+`0094_shop_creation_admission.sql`. Staging D1 is already at `0090`,
 but the latest deployed staging Worker (`b7492055-a44b-4c8c-8ab2-c31002dbdd02`)
 predates the current uncommitted release-evidence, PayOS-contract, visual, and
 Dodo webhook fixes, and the source-only buyer order recovery migration/runtime.
@@ -37,7 +37,7 @@ staging builds, both deploy dry-runs, `npm audit --audit-level=high` (0
 vulnerabilities), and `git diff --cached --check` all pass. No remote mutation
 was made by this candidate. Staging deploy/backup/restore remain blocked until
 the required temporary Cloudflare admission tokens and fresh manifest are
-available. Those totals predate the current `0091`-`0093` continuation set and
+available. Those totals predate the current `0091`-`0094` continuation set and
 are not verification evidence for the current working tree.
 
 Buyer order recovery continuation (source-only): migration
@@ -67,6 +67,33 @@ routing without exact widget admission, restore a safe platform canonical
 fallback, and add old-runtime-compatible D1 guards. Neither migration is part
 of the retained staging or production ledger evidence.
 
+Shop-creation admission continuation (source-only): migration
+`0094_shop_creation_admission.sql` rebuilds the hash-only auth admission ledger
+to support authenticated shop provisioning with requester, subject, global and
+time-window budgets. Raw requester addresses and user identifiers are not
+persisted. Shop creation claims fail closed when D1 admission is unavailable,
+and the release registry pins the rebuilt table definition plus invalid
+`shop_create` row checks. This migration is not part of retained staging or
+production ledger evidence.
+
+Onboarding and billing recovery closeout (2026-08-11): canceled owners can
+recover through the billing surface, including a guarded merchant-country-only
+profile update when no billing market is configured. Archived shops remain
+closed. Expired trials and expired active/scheduled paid periods allow recovery
+reads and billing actions but deny mutations. Late Dodo events for historical
+checkout sessions cannot mutate a newer recovery subscription. Shop creation
+admission now runs only after deterministic validation, including an opaque
+global-slug preflight, while the transactional unique constraint remains the
+race-safe fallback. Focused evidence passes 7 files / 115 tests for auth,
+billing, entitlement, onboarding, UI and operational docs plus 3 files / 29
+tests for production invariant, rollback and post-migration admission. `npm run
+check`, `npm run lint`, `npm run build`, `npm run deploy:dry-run` and `git diff
+--check` pass on the shared working tree. The build retains the existing Vite
+dynamic-import warning. No remote database mutation, Worker deployment,
+provider change, secret write or production admission was performed. Fresh
+candidate-bound staging migration/backup/restore/deploy evidence through
+`0094`, provider UAT and production approvals remain external requirements.
+
 Buyer recovery/release-registry closeout (2026-08-11): the Website request and
 single-use consume routes are present in both the exact commerce route contract
 and the 156-row frontend API endpoint index. Production invariant admission,
@@ -77,7 +104,7 @@ passes 16 test files / 139 tests; targeted ESLint on the owned runtime, scripts
 and tests is clean; `npm run check` passes. No remote database mutation, Worker
 deployment, provider activation or customer-domain admission was performed.
 Staging evidence remains through `0090`, production remains through `0052`, and
-the complete `0091`-`0093` continuation still requires a fresh clean candidate,
+the complete `0091`-`0094` continuation still requires a fresh clean candidate,
 protected backup/restore evidence and an approved mutation window.
 
 - The reviewed runtime baseline for this snapshot, before the documentation-only
@@ -86,7 +113,7 @@ protected backup/restore evidence and an approved mutation window.
   `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. It is not a post-documentation
   HEAD or a deployed identity; the next release ceremony must recapture the
   final clean commit and tree.
-- Current operational source migration chain: contiguous `0001`-`0093`.
+- Current operational source migration chain: contiguous `0001`-`0094`.
   Staging post-migration evidence for release
   `stg_20260808T235913Z_73d0c27493ea` records all 90 migrations through
   `0090_payos_provider_claim_clear_guard.sql`, bound to commit
@@ -94,7 +121,7 @@ protected backup/restore evidence and an approved mutation window.
   `d445e8409dc1f2b537c39b2e08dad69a228db9f7`. Its pre-migration manifest
   correctly records the then-live prefix through `0086`; the later migration
   completion and post-migration evidence record the resulting `0090` ledger.
-  Migrations `0091`-`0093` are not part of that retained ceremony and remain
+  Migrations `0091`-`0094` are not part of that retained ceremony and remain
   source-only.
 - The same staging ceremony retained pre-migration backup
   `bkp_20260808235109_63ea5cf3c278`, post-migration backup

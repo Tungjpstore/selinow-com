@@ -38,6 +38,7 @@ export type TelegramCartShop = {
 };
 
 export type TelegramCheckoutShop = TelegramCartShop & {
+  currentPeriodEnd?: string | null;
   graceEndsAt?: string | null;
   orderExpiryMinutes: number;
   status: string;
@@ -515,7 +516,7 @@ export class TelegramCheckoutOrderPort implements CommercePort {
 
   async checkoutCart(input: { command: CommerceCheckoutCommand; context: CommerceContext }): Promise<CommerceCheckoutView> {
     assertTelegramCheckoutContext(input.context, { connectionId: this.input.connectionId, customerId: this.input.identity.customerId, shop: this.input.shop });
-    assertSubscriptionAllows({ graceEndsAt: this.input.shop.graceEndsAt, subscriptionState: this.input.shop.subscriptionState, trialEndsAt: this.input.shop.trialEndsAt });
+    assertSubscriptionAllows({ currentPeriodEnd: this.input.shop.currentPeriodEnd, graceEndsAt: this.input.shop.graceEndsAt, subscriptionState: this.input.shop.subscriptionState, trialEndsAt: this.input.shop.trialEndsAt });
     assertCheckoutAllowed({ shopStatus: this.input.shop.status, subscriptionState: this.input.shop.subscriptionState });
     const command = input.command;
     let snapshot = this.input.requestedSnapshot;

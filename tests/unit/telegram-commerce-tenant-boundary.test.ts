@@ -98,10 +98,10 @@ function createRuntime(): { database: SqliteD1; env: AppBindings } {
     ) VALUES
       ('shop-a', '{}', '{}', 30, 5, 1, '${NOW}'),
       ('shop-b', '{}', '{}', 30, 5, 1, '${NOW}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
     VALUES
-      ('subscription-a', 'shop-a', 'plan-telegram-boundary', 'active', '${NOW}', '${NOW}'),
-      ('subscription-b', 'shop-b', 'plan-telegram-boundary', 'active', '${NOW}', '${NOW}');
+      ('subscription-a', 'shop-a', 'plan-telegram-boundary', 'active', '2099-01-01T00:00:00.000Z', '${NOW}', '${NOW}'),
+      ('subscription-b', 'shop-b', 'plan-telegram-boundary', 'active', '2099-01-01T00:00:00.000Z', '${NOW}', '${NOW}');
     INSERT INTO shop_domains (
       id, shop_id, hostname_normalized, type, status, is_primary,
       validation_metadata_json, dns_status, version, activated_at, created_at, updated_at

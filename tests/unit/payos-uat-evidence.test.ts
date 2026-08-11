@@ -245,7 +245,8 @@ function writeCommerceProviderFixture(tamper: "hash" | "release" | "redaction" |
       verificationMethod: record.verificationMethod,
     };
     if (tamper === "release" && id === "signed_exact_payment") {
-      artifactValue.release = { ...release, releaseId: releaseId.slice(0, -1) + "b" };
+      const replacement = releaseId.endsWith("a") ? "b" : "a";
+      artifactValue.release = { ...release, releaseId: releaseId.slice(0, -1) + replacement };
     }
     if (tamper === "redaction" && id === "signed_exact_payment") {
       artifactValue.redaction = { noRawPayload: true, noSensitiveValues: false };
@@ -287,13 +288,43 @@ describe("PayOS staging UAT evidence", () => {
     expect(assertPayosStagingUatEvidence(value, { ...binding, ownerAttestationPublicKeys: { [ownerKeyId]: ownerPublicKey } })).toMatchObject({
       accepted: true,
       evidenceKind: "provider_acceptance",
+      fullCommerceAccepted: false,
+      fullCommerceReasonCodes: [
+        "payos_signed_refund_not_supported",
+        "payos_signed_chargeback_not_supported",
+      ],
       localScenarioCount: 10,
+      paymentLaneAccepted: true,
       providerScenarioCount: 2,
       releaseId,
       scenarioCount: 14,
       unsupportedScenarioCount: 2,
     });
     expect(fingerprintPayosStagingUatEvidence(value)).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("keeps payment-lane acceptance outside full-commerce acceptance while reversals are unsupported", () => {
+    const fixture = writeCommerceProviderFixture();
+    try {
+      const result = validateCommerceUatArtifactsSync({
+        evidence: fixture.evidence,
+        now: new Date("2026-08-08T09:30:00.000Z"),
+        payosOwnerAttestationPublicKeys: { [ownerKeyId]: ownerPublicKey },
+        repositoryRoot: fixture.root,
+      });
+
+      expect(result.payos).toMatchObject({
+        accepted: false,
+        error: "payos_full_commerce_unsupported",
+        paymentLaneAccepted: true,
+        reasonCodes: [
+          "payos_signed_refund_not_supported",
+          "payos_signed_chargeback_not_supported",
+        ],
+      });
+    } finally {
+      rmSync(fixture.root, { force: true, recursive: true });
+    }
   });
 
   it("rejects the legacy fictional test-mode provider claim", () => {

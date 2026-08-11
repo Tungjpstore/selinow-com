@@ -8,6 +8,10 @@ const DEFAULT_GLOBAL_LIMIT = 200;
 const DEFAULT_EMAIL_LIMIT = 5;
 const DEFAULT_REQUESTER_LIMIT = 20;
 const DEFAULT_WINDOW_SECONDS = 15 * 60;
+const DEFAULT_SHOP_CREATE_GLOBAL_LIMIT = 100;
+const DEFAULT_SHOP_CREATE_REQUESTER_LIMIT = 10;
+const DEFAULT_SHOP_CREATE_SUBJECT_LIMIT = 5;
+const DEFAULT_SHOP_CREATE_WINDOW_SECONDS = 15 * 60;
 const TURNSTILE_RESPONSE_MAX_BYTES = 16_384;
 
 type TurnstileEnvelope = {
@@ -21,9 +25,124 @@ function positiveInteger(value: string | undefined, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export function magicLinkRequesterAddress(request: Request): string {
+export function cloudflareRequesterAddress(request: Request): string {
   const address = request.headers.get("CF-Connecting-IP")?.trim();
   return address !== undefined && address.length > 0 && address.length <= 128 ? address : "unknown";
+}
+
+export const magicLinkRequesterAddress = cloudflareRequesterAddress;
+
+type ProvisioningAdmissionAction = "shop_create";
+
+type ProvisioningAdmissionLimits = {
+  global: number;
+  requester: number;
+  subject: number;
+  windowSeconds: number;
+};
+
+function validAdmissionLimit(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+export async function claimProvisioningAdmission(input: {
+  action: ProvisioningAdmissionAction;
+  env: AppBindings;
+  limits: ProvisioningAdmissionLimits;
+  now: Date;
+  requesterAddress: string;
+  subject: string;
+}): Promise<void> {
+  try {
+    if (!Number.isFinite(input.now.getTime())
+      || !validAdmissionLimit(input.limits.global)
+      || !validAdmissionLimit(input.limits.requester)
+      || !validAdmissionLimit(input.limits.subject)
+      || !validAdmissionLimit(input.limits.windowSeconds)) {
+      throw new AppError("provisioning_admission_unavailable", 503);
+    }
+    const requesterAddress = input.requesterAddress.trim();
+    const subject = input.subject.trim();
+    if (subject.length === 0 || subject.length > 128) {
+      throw new AppError("provisioning_admission_unavailable", 503);
+    }
+    const windowMs = input.limits.windowSeconds * 1_000;
+    const windowStartMs = Math.floor(input.now.getTime() / windowMs) * windowMs;
+    const windowStartedAt = new Date(windowStartMs).toISOString();
+    const windowEndsAt = new Date(windowStartMs + windowMs).toISOString();
+    const requesterHash = await hmacToken(
+      input.env.IDENTIFIER_HMAC_SECRET,
+      `provisioning-requester:${input.action}:v1`,
+      requesterAddress.length > 0 && requesterAddress.length <= 128 ? requesterAddress : "unknown",
+    );
+    const subjectHash = await hmacToken(
+      input.env.IDENTIFIER_HMAC_SECRET,
+      `provisioning-subject:${input.action}:v1`,
+      subject,
+    );
+    const claimed = await input.env.PLATFORM_DB.prepare(`
+      INSERT INTO auth_request_admissions (
+        id, action, requester_hash, subject_hash, delivery_permitted,
+        window_started_at, window_ends_at, created_at
+      )
+      SELECT ?, ?, ?, ?, 1, ?, ?, ?
+      WHERE (
+        SELECT COUNT(*) FROM auth_request_admissions
+        WHERE action = ? AND window_started_at = ?
+      ) < ? AND (
+        SELECT COUNT(*) FROM auth_request_admissions
+        WHERE action = ? AND requester_hash = ? AND window_started_at = ?
+      ) < ? AND (
+        SELECT COUNT(*) FROM auth_request_admissions
+        WHERE action = ? AND subject_hash = ? AND window_started_at = ?
+      ) < ?
+      RETURNING id
+    `).bind(
+      createId("adm"),
+      input.action,
+      requesterHash,
+      subjectHash,
+      windowStartedAt,
+      windowEndsAt,
+      input.now.toISOString(),
+      input.action,
+      windowStartedAt,
+      input.limits.global,
+      input.action,
+      requesterHash,
+      windowStartedAt,
+      input.limits.requester,
+      input.action,
+      subjectHash,
+      windowStartedAt,
+      input.limits.subject,
+    ).first<{ id: string }>();
+    if (claimed === null) throw new AppError("rate_limited", 429);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError("provisioning_admission_unavailable", 503);
+  }
+}
+
+export async function claimShopCreationAdmission(input: {
+  env: AppBindings;
+  now?: Date;
+  requesterAddress: string;
+  userId: string;
+}): Promise<void> {
+  return claimProvisioningAdmission({
+    action: "shop_create",
+    env: input.env,
+    limits: {
+      global: positiveInteger(input.env.SHOP_CREATE_GLOBAL_RATE_LIMIT, DEFAULT_SHOP_CREATE_GLOBAL_LIMIT),
+      requester: positiveInteger(input.env.SHOP_CREATE_REQUESTER_RATE_LIMIT, DEFAULT_SHOP_CREATE_REQUESTER_LIMIT),
+      subject: positiveInteger(input.env.SHOP_CREATE_SUBJECT_RATE_LIMIT, DEFAULT_SHOP_CREATE_SUBJECT_LIMIT),
+      windowSeconds: positiveInteger(input.env.SHOP_CREATE_RATE_LIMIT_WINDOW_SECONDS, DEFAULT_SHOP_CREATE_WINDOW_SECONDS),
+    },
+    now: input.now ?? new Date(),
+    requesterAddress: input.requesterAddress,
+    subject: input.userId,
+  });
 }
 
 export async function claimMagicLinkAdmission(input: {
@@ -117,7 +236,7 @@ export async function verifyMagicLinkChallenge(input: {
   const body = new FormData();
   body.set("secret", configuration.secretKey);
   body.set("response", input.token);
-  body.set("remoteip", magicLinkRequesterAddress(input.request));
+  body.set("remoteip", cloudflareRequesterAddress(input.request));
   body.set("idempotency_key", crypto.randomUUID());
 
   let response: Response;

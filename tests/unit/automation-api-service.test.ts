@@ -127,9 +127,9 @@ function createDatabase(interceptBatch?: SqliteBatchInterceptor): SqliteD1 {
       ('shp_automation_a', 'usr_automation_manager', 'manager', 'active', '${NOW}', '${NOW}'),
       ('shp_automation_a', 'usr_automation_support', 'support', 'active', '${NOW}', '${NOW}'),
       ('shp_automation_a', 'usr_automation_viewer', 'viewer', 'active', '${NOW}', '${NOW}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at) VALUES
-      ('sub_automation_a', 'shp_automation_a', 'plan_automation', 'active', '${NOW}', '${NOW}'),
-      ('sub_automation_b', 'shp_automation_b', 'plan_automation', 'active', '${NOW}', '${NOW}');
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at) VALUES
+      ('sub_automation_a', 'shp_automation_a', 'plan_automation', 'active', '2099-01-01T00:00:00.000Z', '${NOW}', '${NOW}'),
+      ('sub_automation_b', 'shp_automation_b', 'plan_automation', 'active', '2099-01-01T00:00:00.000Z', '${NOW}', '${NOW}');
   `);
   return new SqliteD1(database, interceptBatch);
 }

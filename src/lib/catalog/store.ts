@@ -22,8 +22,8 @@ import {
 
 type ShopActor = { currency: string; limits: Record<string, unknown>; shopId: string };
 
-async function requireCatalogActor(env: AppBindings, shopPublicId: string, userId: string): Promise<ShopActor> {
-  const member = await getShopForMember({ capability: "catalog:manage", env, shopPublicId, userId });
+async function requireCatalogActor(env: AppBindings, shopPublicId: string, userId: string, subscriptionAction: "draft_setup" | "read" = "draft_setup"): Promise<ShopActor> {
+  const member = await getShopForMember({ capability: "catalog:manage", env, shopPublicId, subscriptionAction, userId });
   // Older unit/test adapters only project the membership row; an empty limit
   // map preserves their catalog-currency behavior while live D1 always carries
   // the canonical plan snapshot.
@@ -109,7 +109,7 @@ type ProductWithInitialVariantResult = {
 };
 
 export async function listSellerCatalog(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<{ categories: unknown[]; products: unknown[]; variants: unknown[] }> {
-  const actor = await requireCatalogActor(input.env, input.shopPublicId, input.userId);
+  const actor = await requireCatalogActor(input.env, input.shopPublicId, input.userId, "read");
   const [categories, products, variants] = await Promise.all([
     input.env.PLATFORM_DB.prepare(`SELECT id, slug, name, description, sort_order AS sortOrder, status, created_at AS createdAt, updated_at AS updatedAt FROM product_categories WHERE shop_id = ? ORDER BY sort_order, id LIMIT 500`).bind(actor.shopId).all(),
     input.env.PLATFORM_DB.prepare(`SELECT id, category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, version, created_at AS createdAt, updated_at AS updatedAt FROM products WHERE shop_id = ? ORDER BY created_at, id LIMIT 500`).bind(actor.shopId).all(),

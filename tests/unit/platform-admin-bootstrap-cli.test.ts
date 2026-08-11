@@ -50,7 +50,12 @@ function productionFlags(
 }
 
 function successOutput() {
-  return JSON.stringify([{ results: [{ adminCount: 1, candidateOwnerCount: 1, receiptCount: 1 }] }]);
+  return JSON.stringify([{ results: [{
+    adminCount: 1,
+    candidateOwnerCount: 1,
+    candidatePreBootstrapActiveSessionCount: 0,
+    receiptCount: 1,
+  }] }]);
 }
 
 function executeBootstrapSql(database: DatabaseSync, input: { requestId: string; userEmail: string; userId: string }) {
@@ -58,8 +63,8 @@ function executeBootstrapSql(database: DatabaseSync, input: { requestId: string;
     .split(";")
     .map((statement) => statement.trim())
     .filter(Boolean);
-  database.exec(`${statements[0] ?? ""};${statements[1] ?? ""};`);
-  return database.prepare(statements[2] ?? "").get();
+  database.exec(statements.slice(0, -1).map((statement) => `${statement};`).join(""));
+  return database.prepare(statements.at(-1) ?? "").get();
 }
 
 afterEach(() => {
@@ -102,10 +107,12 @@ describe("platform admin bootstrap guard", () => {
     expect(sql).toContain("(SELECT COUNT(*) FROM platform_admins) = 0");
     expect(sql).toContain("(SELECT COUNT(*) FROM platform_admin_bootstrap_receipts) = 0");
     expect(sql).toContain("email_normalized = 'owner@example.test' AND status = 'active'");
+    expect(sql).toContain("UPDATE auth_sessions");
+    expect(sql).toContain("SET status = 'revoked', revoked_at =");
     expect(sql).not.toMatch(/secret|token|password|credential/iu);
   });
 
-  it("does not report a repeated ceremony with a different request as successful", () => {
+  it("revokes every existing candidate session before the new admin session is created", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec(`
@@ -114,6 +121,13 @@ describe("platform admin bootstrap guard", () => {
           id TEXT PRIMARY KEY NOT NULL,
           email_normalized TEXT NOT NULL UNIQUE,
           status TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE auth_sessions (
+          id TEXT PRIMARY KEY NOT NULL,
+          user_id TEXT NOT NULL REFERENCES platform_users(id),
+          status TEXT NOT NULL,
+          authenticated_at TEXT NOT NULL,
+          revoked_at TEXT
         ) STRICT;
         CREATE TABLE platform_admins (
           user_id TEXT PRIMARY KEY NOT NULL REFERENCES platform_users(id),
@@ -131,20 +145,191 @@ describe("platform admin bootstrap guard", () => {
         ) WITHOUT ROWID, STRICT;
         INSERT INTO platform_users (id, email_normalized, status)
         VALUES ('user-bootstrap-owner', 'owner@example.test', 'active');
+        INSERT INTO auth_sessions (id, user_id, status, authenticated_at, revoked_at) VALUES
+          ('session-old-a', 'user-bootstrap-owner', 'active', '2026-08-09T00:00:00.000Z', NULL),
+          ('session-old-b', 'user-bootstrap-owner', 'active', '2026-08-09T00:01:00.000Z', NULL);
+      `);
+
+      expect(executeBootstrapSql(database, {
+        requestId: REQUEST_ID,
+        userEmail: EMAIL,
+        userId: USER_ID,
+      })).toEqual({
+        adminCount: 1,
+        candidateOwnerCount: 1,
+        candidatePreBootstrapActiveSessionCount: 0,
+        receiptCount: 1,
+      });
+      expect(database.prepare(`
+        SELECT status, COUNT(*) AS count
+        FROM auth_sessions WHERE user_id = ? GROUP BY status
+      `).all(USER_ID)).toEqual([{ count: 2, status: "revoked" }]);
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count FROM auth_sessions
+        WHERE user_id = ? AND revoked_at IS NOT NULL
+      `).get(USER_ID)).toEqual({ count: 2 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reuses an exact candidate receipt across retries but rejects another candidate", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec(`
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE platform_users (
+          id TEXT PRIMARY KEY NOT NULL,
+          email_normalized TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE platform_admins (
+          user_id TEXT PRIMARY KEY NOT NULL REFERENCES platform_users(id),
+          role TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        ) WITHOUT ROWID, STRICT;
+        CREATE TABLE auth_sessions (
+          id TEXT PRIMARY KEY NOT NULL,
+          user_id TEXT NOT NULL REFERENCES platform_users(id),
+          status TEXT NOT NULL,
+          authenticated_at TEXT NOT NULL,
+          revoked_at TEXT
+        ) STRICT;
+        CREATE TABLE platform_admin_bootstrap_receipts (
+          ceremony_key TEXT PRIMARY KEY NOT NULL,
+          user_id TEXT NOT NULL UNIQUE REFERENCES platform_users(id),
+          role TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        ) WITHOUT ROWID, STRICT;
+        INSERT INTO platform_users (id, email_normalized, status)
+        VALUES ('user-bootstrap-owner', 'owner@example.test', 'active');
       `);
 
       expect(executeBootstrapSql(database, {
         requestId: "bootstrap-request-one",
         userEmail: EMAIL,
         userId: USER_ID,
-      })).toEqual({ adminCount: 1, candidateOwnerCount: 1, receiptCount: 1 });
+      })).toEqual({
+        adminCount: 1,
+        candidateOwnerCount: 1,
+        candidatePreBootstrapActiveSessionCount: 0,
+        receiptCount: 1,
+      });
       expect(executeBootstrapSql(database, {
         requestId: "bootstrap-request-two",
         userEmail: EMAIL,
         userId: USER_ID,
-      })).toEqual({ adminCount: 1, candidateOwnerCount: 1, receiptCount: 0 });
+      })).toEqual({
+        adminCount: 1,
+        candidateOwnerCount: 1,
+        candidatePreBootstrapActiveSessionCount: 0,
+        receiptCount: 1,
+      });
+
+      database.prepare(`
+        INSERT INTO platform_users (id, email_normalized, status)
+        VALUES ('user-bootstrap-other', 'other@example.test', 'active')
+      `).run();
+      expect(executeBootstrapSql(database, {
+        requestId: "bootstrap-request-other",
+        userEmail: "other@example.test",
+        userId: "user-bootstrap-other",
+      })).toEqual({
+        adminCount: 1,
+        candidateOwnerCount: 0,
+        candidatePreBootstrapActiveSessionCount: 0,
+        receiptCount: 0,
+      });
     } finally {
       database.close();
+    }
+  });
+
+  it("resumes safely after receipt, revocation, or admin insertion", () => {
+    for (const stopAfter of [1, 2, 3]) {
+      const database = new DatabaseSync(":memory:");
+      try {
+        database.exec(`
+          PRAGMA foreign_keys = ON;
+          CREATE TABLE platform_users (
+            id TEXT PRIMARY KEY NOT NULL,
+            email_normalized TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL
+          ) STRICT;
+          CREATE TABLE auth_sessions (
+            id TEXT PRIMARY KEY NOT NULL,
+            user_id TEXT NOT NULL REFERENCES platform_users(id),
+            status TEXT NOT NULL,
+            authenticated_at TEXT NOT NULL,
+            revoked_at TEXT
+          ) STRICT;
+          CREATE TABLE platform_admins (
+            user_id TEXT PRIMARY KEY NOT NULL REFERENCES platform_users(id),
+            role TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          ) WITHOUT ROWID, STRICT;
+          CREATE TABLE platform_admin_bootstrap_receipts (
+            ceremony_key TEXT PRIMARY KEY NOT NULL,
+            user_id TEXT NOT NULL UNIQUE REFERENCES platform_users(id),
+            role TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          ) WITHOUT ROWID, STRICT;
+          INSERT INTO platform_users (id, email_normalized, status)
+          VALUES ('user-bootstrap-owner', 'owner@example.test', 'active');
+          INSERT INTO auth_sessions (id, user_id, status, authenticated_at, revoked_at) VALUES
+            ('session-resume-old', 'user-bootstrap-owner', 'active', '2026-08-09T00:00:00.000Z', NULL);
+        `);
+        const statements = buildPlatformAdminBootstrapSql({
+          requestId: REQUEST_ID,
+          userEmail: EMAIL,
+          userId: USER_ID,
+        }).split(";").map((statement) => statement.trim()).filter(Boolean);
+        database.exec(statements.slice(0, stopAfter).map((statement) => `${statement};`).join(""));
+        if (stopAfter === 1) {
+          database.prepare(`
+            INSERT INTO auth_sessions (id, user_id, status, authenticated_at, revoked_at)
+            VALUES ('session-resume-during-partial', 'user-bootstrap-owner', 'active', '9999-01-01T00:00:00.000Z', NULL)
+          `).run();
+        }
+        if (stopAfter === 3) {
+          database.prepare(`
+            INSERT INTO auth_sessions (id, user_id, status, authenticated_at, revoked_at)
+            VALUES ('session-resume-post-admin', 'user-bootstrap-owner', 'active', '9999-01-01T00:00:00.000Z', NULL)
+          `).run();
+        }
+        const resumed = executeBootstrapSql(database, {
+          requestId: `resume-request-${String(stopAfter)}`,
+          userEmail: EMAIL,
+          userId: USER_ID,
+        });
+        expect(resumed).toEqual({
+          adminCount: 1,
+          candidateOwnerCount: 1,
+          candidatePreBootstrapActiveSessionCount: 0,
+          receiptCount: 1,
+        });
+        expect(database.prepare(`
+          SELECT status FROM auth_sessions WHERE id = 'session-resume-old'
+        `).get()).toEqual({ status: "revoked" });
+        if (stopAfter === 1) {
+          expect(database.prepare(`
+            SELECT status FROM auth_sessions WHERE id = 'session-resume-during-partial'
+          `).get()).toEqual({ status: "revoked" });
+        }
+        if (stopAfter === 3) {
+          expect(database.prepare(`
+            SELECT status FROM auth_sessions WHERE id = 'session-resume-post-admin'
+          `).get()).toEqual({ status: "active" });
+        }
+      } finally {
+        database.close();
+      }
     }
   });
 
@@ -268,10 +453,25 @@ describe("platform admin bootstrap guard", () => {
   });
 
   it("accepts only the exact single-owner verification result", async () => {
-    const output = JSON.stringify([{ results: [{ adminCount: 1, candidateOwnerCount: 1, receiptCount: 1 }] }]);
-    expect(parsePlatformAdminBootstrapOutput(output)).toEqual({ adminCount: 1, candidateOwnerCount: 1, receiptCount: 1 });
+    const output = JSON.stringify([{ results: [{
+      adminCount: 1,
+      candidateOwnerCount: 1,
+      candidatePreBootstrapActiveSessionCount: 0,
+      receiptCount: 1,
+    }] }]);
+    expect(parsePlatformAdminBootstrapOutput(output)).toEqual({
+      adminCount: 1,
+      candidateOwnerCount: 1,
+      candidatePreBootstrapActiveSessionCount: 0,
+      receiptCount: 1,
+    });
     expect(() => parsePlatformAdminBootstrapOutput(JSON.stringify([{
-      results: [{ adminCount: true, candidateOwnerCount: true, receiptCount: true }],
+      results: [{
+        adminCount: true,
+        candidateOwnerCount: true,
+        candidatePreBootstrapActiveSessionCount: true,
+        receiptCount: true,
+      }],
     }]))).toThrow("platform_admin_bootstrap_output_invalid");
     await expect(runPlatformAdminBootstrap({
       flags: {
@@ -285,7 +485,12 @@ describe("platform admin bootstrap guard", () => {
         userId: USER_ID,
       },
       requestId: REQUEST_ID,
-      runner: () => ({ stdout: JSON.stringify([{ results: [{ adminCount: 2, candidateOwnerCount: 0, receiptCount: 0 }] }]) }),
+      runner: () => ({ stdout: JSON.stringify([{ results: [{
+        adminCount: 2,
+        candidateOwnerCount: 0,
+        candidatePreBootstrapActiveSessionCount: 0,
+        receiptCount: 0,
+      }] }]) }),
     })).rejects.toThrow("platform_admin_bootstrap_exact_empty_state_required");
   });
 

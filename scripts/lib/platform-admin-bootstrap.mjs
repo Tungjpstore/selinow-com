@@ -125,16 +125,44 @@ FROM platform_users
 WHERE id = ${sqlLiteral(userId)} AND email_normalized = ${sqlLiteral(userEmail)} AND status = 'active'
   AND (SELECT COUNT(*) FROM platform_admins) = 0
   AND (SELECT COUNT(*) FROM platform_admin_bootstrap_receipts) = 0;
+UPDATE auth_sessions
+SET status = 'revoked', revoked_at = ${now}
+WHERE user_id = ${sqlLiteral(userId)} AND status = 'active' AND revoked_at IS NULL
+  AND EXISTS (
+    SELECT 1 FROM platform_admin_bootstrap_receipts
+    WHERE ceremony_key = 'first_platform_admin' AND user_id = ${sqlLiteral(userId)}
+  )
+  AND (
+    (SELECT COUNT(*) FROM platform_admins) = 0
+    OR authenticated_at <= (
+      SELECT created_at FROM platform_admins
+      WHERE user_id = ${sqlLiteral(userId)} AND role = 'owner' AND status = 'active'
+    )
+  );
 INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
 SELECT user_id, 'owner', 'active', ${now}, ${now}
 FROM platform_admin_bootstrap_receipts
 WHERE ceremony_key = 'first_platform_admin' AND user_id = ${sqlLiteral(userId)}
-  AND request_id = ${sqlLiteral(requestId)}
-  AND (SELECT COUNT(*) FROM platform_admins) = 0;
+  AND (SELECT COUNT(*) FROM platform_admins) = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM auth_sessions
+    WHERE user_id = ${sqlLiteral(userId)} AND status = 'active' AND revoked_at IS NULL
+      AND authenticated_at <= platform_admin_bootstrap_receipts.created_at
+  );
 SELECT
   (SELECT COUNT(*) FROM platform_admins) AS adminCount,
   (SELECT COUNT(*) FROM platform_admins WHERE user_id = ${sqlLiteral(userId)} AND role = 'owner' AND status = 'active') AS candidateOwnerCount,
-  (SELECT COUNT(*) FROM platform_admin_bootstrap_receipts WHERE ceremony_key = 'first_platform_admin' AND user_id = ${sqlLiteral(userId)} AND request_id = ${sqlLiteral(requestId)}) AS receiptCount;`;
+  (SELECT COUNT(*) FROM platform_admin_bootstrap_receipts WHERE ceremony_key = 'first_platform_admin' AND user_id = ${sqlLiteral(userId)}) AS receiptCount,
+  (SELECT COUNT(*) FROM auth_sessions
+    WHERE user_id = ${sqlLiteral(userId)} AND status = 'active' AND revoked_at IS NULL
+      AND (
+        (SELECT COUNT(*) FROM platform_admins
+          WHERE user_id = ${sqlLiteral(userId)} AND role = 'owner' AND status = 'active') = 0
+        OR authenticated_at <= (
+          SELECT created_at FROM platform_admins
+          WHERE user_id = ${sqlLiteral(userId)} AND role = 'owner' AND status = 'active'
+        )
+      )) AS candidatePreBootstrapActiveSessionCount;`;
 }
 
 export function parsePlatformAdminBootstrapOutput(output) {
@@ -145,11 +173,17 @@ export function parsePlatformAdminBootstrapOutput(output) {
     const item = queue.shift();
     if (Array.isArray(item)) queue.push(...item);
     else if (item !== null && typeof item === "object") {
-      const counts = [item.adminCount, item.candidateOwnerCount, item.receiptCount];
+      const counts = [
+        item.adminCount,
+        item.candidateOwnerCount,
+        item.receiptCount,
+        item.candidatePreBootstrapActiveSessionCount,
+      ];
       if (counts.every((count) => Number.isSafeInteger(count) && count >= 0)) {
         return {
           adminCount: item.adminCount,
           candidateOwnerCount: item.candidateOwnerCount,
+          candidatePreBootstrapActiveSessionCount: item.candidatePreBootstrapActiveSessionCount,
           receiptCount: item.receiptCount,
         };
       }
@@ -226,7 +260,12 @@ export async function runPlatformAdminBootstrap(input) {
   const result = parsePlatformAdminBootstrapOutput(runner([
     "d1", "execute", "PLATFORM_DB", ...target, "--command", sql, "--json",
   ], runnerOptions).stdout);
-  if (result.adminCount !== 1 || result.candidateOwnerCount !== 1 || result.receiptCount !== 1) {
+  if (
+    result.adminCount !== 1
+    || result.candidateOwnerCount !== 1
+    || result.receiptCount !== 1
+    || result.candidatePreBootstrapActiveSessionCount !== 0
+  ) {
     throw new Error("platform_admin_bootstrap_exact_empty_state_required");
   }
   return { actions: [{ code: "first_platform_admin_created", ok: true }], environment: flags.environment, ok: true };

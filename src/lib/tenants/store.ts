@@ -2,10 +2,12 @@ import { AppError } from "../core/errors";
 import { hmacToken, sha256Json } from "../core/crypto";
 import { createId } from "../core/ids";
 import { backfillActivationMilestones, tryRecordActivationMilestone } from "../analytics/activation";
+import { claimShopCreationAdmission } from "../auth/admission";
 import { normalizeCurrencyCode } from "../i18n/currency";
 import { DEFAULT_LOCALE, matchSupportedLocale } from "../i18n/locale";
 import { ONBOARDING_STEP_CODES } from "../onboarding/policy";
 import type { AppBindings } from "../platform/bindings";
+import { evaluateSubscription, type EntitlementAction } from "../billing/entitlements";
 import { PUBLIC_PLAN_CODES, PUBLIC_TRIAL_DAYS } from "../billing/plan-catalog";
 import { normalizeOptionalCountryCode } from "./country";
 import { assertRoleCapability, type ShopCapability, type ShopRole } from "./policy";
@@ -21,9 +23,11 @@ type AccountTrialClaim = {
 
 type MembershipShopRow = {
   business_country_code: string | null;
+  current_period_end: string | null;
   currency: string;
   default_locale: string;
   feature_flags_json: string;
+  grace_ends_at: string | null;
   limits_json: string;
   name: string;
   plan_code: string;
@@ -35,6 +39,7 @@ type MembershipShopRow = {
   slug: string;
   subscription_state: string;
   timezone: string;
+  trial_ends_at: string | null;
 };
 
 export type ShopView = {
@@ -52,6 +57,12 @@ export type ShopView = {
   status: string;
   subscriptionState: string;
   timezone: string;
+};
+
+export type ShopCreationAdmission = {
+  allowed: boolean;
+  reason: "eligible" | "trial_already_used";
+  recoveryShopPublicId: string | null;
 };
 
 function safeJsonObject(value: string): Record<string, unknown> {
@@ -114,6 +125,7 @@ export async function createShop(input: {
   merchantCountry?: string | null;
   name: string;
   planCode?: string;
+  requesterAddress: string;
   requestId: string;
   slug: string;
   userId: string;
@@ -187,6 +199,22 @@ export async function createShop(input: {
   if (priorTrial !== null) {
     throw new AppError("validation_failed", 409, ["trial_already_used"]);
   }
+
+  const conflictingSlug = await input.env.PLATFORM_DB.prepare(`
+    SELECT id
+    FROM shops
+    WHERE slug = ?
+    LIMIT 1
+  `).bind(input.slug).first<{ id: string }>();
+  if (conflictingSlug !== null) {
+    throw new AppError("validation_failed", 409, ["slug_unavailable"]);
+  }
+
+  await claimShopCreationAdmission({
+    env: input.env,
+    requesterAddress: input.requesterAddress,
+    userId: input.userId,
+  });
 
   const now = new Date();
   const nowIso = now.toISOString();
@@ -344,7 +372,9 @@ export async function createShop(input: {
 export async function getShopForMember(input: {
   capability: ShopCapability;
   env: AppBindings;
+  now?: Date;
   shopPublicId: string;
+  subscriptionAction?: EntitlementAction;
   userId: string;
 }): Promise<{ row: MembershipShopRow; shop: ShopView }> {
   let row: MembershipShopRow | null;
@@ -363,6 +393,9 @@ export async function getShopForMember(input: {
       shops.business_country_code,
       shop_members.role,
       shop_subscriptions.state AS subscription_state,
+      shop_subscriptions.trial_ends_at,
+      shop_subscriptions.current_period_end,
+      shop_subscriptions.grace_ends_at,
       plans.code AS plan_code,
       plans.feature_flags_json,
       plans.limits_json
@@ -372,8 +405,13 @@ export async function getShopForMember(input: {
       AND shop_members.user_id = ?
       AND shop_members.status = 'active'
     INNER JOIN shop_subscriptions
-      ON shop_subscriptions.shop_id = shops.id
-      AND shop_subscriptions.state != 'canceled'
+      ON shop_subscriptions.id = (
+        SELECT latest_subscription.id
+        FROM shop_subscriptions AS latest_subscription
+        WHERE latest_subscription.shop_id = shops.id
+        ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+        LIMIT 1
+      )
     INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
     WHERE shops.public_id = ?
     LIMIT 1
@@ -394,6 +432,9 @@ export async function getShopForMember(input: {
         NULL AS business_country_code,
         shop_members.role,
         shop_subscriptions.state AS subscription_state,
+        shop_subscriptions.trial_ends_at,
+        shop_subscriptions.current_period_end,
+        shop_subscriptions.grace_ends_at,
         plans.code AS plan_code,
         plans.feature_flags_json,
         plans.limits_json
@@ -403,8 +444,13 @@ export async function getShopForMember(input: {
         AND shop_members.user_id = ?
         AND shop_members.status = 'active'
       INNER JOIN shop_subscriptions
-        ON shop_subscriptions.shop_id = shops.id
-        AND shop_subscriptions.state != 'canceled'
+        ON shop_subscriptions.id = (
+          SELECT latest_subscription.id
+          FROM shop_subscriptions AS latest_subscription
+          WHERE latest_subscription.shop_id = shops.id
+          ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+          LIMIT 1
+        )
       INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
       WHERE shops.public_id = ?
       LIMIT 1
@@ -415,13 +461,38 @@ export async function getShopForMember(input: {
     throw new AppError("authorization_denied", 403);
   }
   assertRoleCapability(row.role, input.capability);
+  if (row.subscription_state === "canceled" && (input.capability !== "billing:manage" || row.role !== "owner")) {
+    throw new AppError("authorization_denied", 403);
+  }
+  const readCapabilities = new Set<ShopCapability>([
+    "shop:read", "catalog:read", "orders:read", "orders:read:masked", "orders:read:summary",
+    "customers:read", "customers:read:masked", "customers:read:summary", "fulfillment:read",
+    "automation:read", "integrations:read", "payments:read", "domains:read",
+  ]);
+  const action = input.subscriptionAction
+    ?? (input.capability === "billing:manage" ? "billing" : readCapabilities.has(input.capability) ? "read" : "mutation");
+  const subscription = evaluateSubscription({
+    action,
+    currentPeriodEnd: row.current_period_end,
+    graceEndsAt: row.grace_ends_at,
+    now: input.now,
+    subscriptionState: row.subscription_state,
+    trialEndsAt: row.trial_ends_at,
+  });
+  if (!subscription.allowed) {
+    throw new AppError(subscription.reasonCode ?? "subscription_payment_required", 402);
+  }
   return { row, shop: mapShop(row) };
 }
 
 export async function listShopsForMember(input: {
   env: AppBindings;
+  includeCanceledForBillingRecovery?: boolean;
   userId: string;
 }): Promise<ShopView[]> {
+  const canceledAdmission = input.includeCanceledForBillingRecovery === true
+    ? "AND shops.status != 'archived' AND (shop_subscriptions.state != 'canceled' OR shop_members.role = 'owner')"
+    : "AND shop_subscriptions.state != 'canceled'";
   let result: { results: MembershipShopRow[] };
   try {
     result = await input.env.PLATFORM_DB.prepare(`
@@ -438,16 +509,24 @@ export async function listShopsForMember(input: {
       shops.business_country_code,
       shop_members.role,
       shop_subscriptions.state AS subscription_state,
+      shop_subscriptions.trial_ends_at,
+      shop_subscriptions.grace_ends_at,
       plans.code AS plan_code,
       plans.feature_flags_json,
       plans.limits_json
     FROM shop_members
     INNER JOIN shops ON shops.id = shop_members.shop_id
     INNER JOIN shop_subscriptions
-      ON shop_subscriptions.shop_id = shops.id
-      AND shop_subscriptions.state != 'canceled'
+      ON shop_subscriptions.id = (
+        SELECT latest_subscription.id
+        FROM shop_subscriptions AS latest_subscription
+        WHERE latest_subscription.shop_id = shops.id
+        ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+        LIMIT 1
+      )
     INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
     WHERE shop_members.user_id = ? AND shop_members.status = 'active'
+      ${canceledAdmission}
     ORDER BY shops.created_at ASC, shops.id ASC
     LIMIT 100
     `).bind(input.userId).all<MembershipShopRow>();
@@ -467,22 +546,69 @@ export async function listShopsForMember(input: {
         NULL AS business_country_code,
         shop_members.role,
         shop_subscriptions.state AS subscription_state,
+        shop_subscriptions.trial_ends_at,
+        shop_subscriptions.grace_ends_at,
         plans.code AS plan_code,
         plans.feature_flags_json,
         plans.limits_json
       FROM shop_members
       INNER JOIN shops ON shops.id = shop_members.shop_id
       INNER JOIN shop_subscriptions
-        ON shop_subscriptions.shop_id = shops.id
-        AND shop_subscriptions.state != 'canceled'
+        ON shop_subscriptions.id = (
+          SELECT latest_subscription.id
+          FROM shop_subscriptions AS latest_subscription
+          WHERE latest_subscription.shop_id = shops.id
+          ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+          LIMIT 1
+        )
       INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
       WHERE shop_members.user_id = ? AND shop_members.status = 'active'
+        ${canceledAdmission}
       ORDER BY shops.created_at ASC, shops.id ASC
       LIMIT 100
     `).bind(input.userId).all<MembershipShopRow>();
   }
 
   return result.results.map(mapShop);
+}
+
+export async function getShopCreationAdmission(input: {
+  env: AppBindings;
+  userId: string;
+}): Promise<ShopCreationAdmission> {
+  const claim = await input.env.PLATFORM_DB.prepare(`
+    SELECT claims.shop_id AS shopId,
+      CASE
+        WHEN shops.status != 'archived'
+          AND members.user_id IS NOT NULL
+          AND subscriptions.state = 'canceled'
+        THEN shops.public_id
+        ELSE NULL
+      END AS recoveryShopPublicId
+    FROM account_trial_claims AS claims
+    LEFT JOIN shops ON shops.id = claims.shop_id
+    LEFT JOIN shop_members AS members
+      ON members.shop_id = claims.shop_id
+      AND members.user_id = claims.user_id
+      AND members.role = 'owner'
+      AND members.status = 'active'
+    LEFT JOIN shop_subscriptions AS subscriptions
+      ON subscriptions.id = (
+        SELECT latest_subscription.id
+        FROM shop_subscriptions AS latest_subscription
+        WHERE latest_subscription.shop_id = claims.shop_id
+        ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+        LIMIT 1
+      )
+    WHERE claims.user_id = ?
+    LIMIT 1
+  `).bind(input.userId).first<{ recoveryShopPublicId: string | null; shopId: string }>();
+  if (claim === null) return { allowed: true, reason: "eligible", recoveryShopPublicId: null };
+  return {
+    allowed: false,
+    reason: "trial_already_used",
+    recoveryShopPublicId: claim.recoveryShopPublicId,
+  };
 }
 
 /** Select only from the already-authorized membership projection. */
@@ -539,12 +665,15 @@ export async function updateShopProfile(input: {
   const defaultLocale = hasDefaultLocale ? matchSupportedLocale(input.defaultLocale) : null;
   if (hasDefaultLocale && defaultLocale === null) throw new AppError("validation_failed", 400, ["locale_invalid"]);
   const merchantCountry = normalizeOptionalCountryCode(input.merchantCountry, "merchant_country_invalid");
+  const billingMarketOnly = hasMerchantCountry && !hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale;
   const current = await getShopForMember({
-    capability: "shop:update",
+    capability: billingMarketOnly ? "billing:manage" : "shop:update",
     env: input.env,
     shopPublicId: input.shopPublicId,
+    subscriptionAction: billingMarketOnly ? "billing" : "draft_setup",
     userId: input.userId,
   });
+  if (current.row.shop_status === "archived") throw new AppError("tenant_suspended", 403);
   if (hasCurrency && currency !== null) {
     const mismatch = await input.env.PLATFORM_DB.prepare(`
       SELECT COUNT(*) AS count

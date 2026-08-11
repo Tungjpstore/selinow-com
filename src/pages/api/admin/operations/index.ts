@@ -3,7 +3,10 @@ import type { APIRoute } from "astro";
 import { authenticateRequest } from "../../../../lib/auth/session";
 import { AppError } from "../../../../lib/core/errors";
 import { createCaughtErrorResponse } from "../../../../lib/http/security";
-import { listActiveDeadLetters } from "../../../../lib/operations/dead-letters";
+import {
+  listActiveDeadLetters,
+  listActiveGeneratedLicenseDeadLetters,
+} from "../../../../lib/operations/dead-letters";
 import { listActiveDeletionRequests } from "../../../../lib/operations/deletion";
 import { listActiveIncidents } from "../../../../lib/operations/incidents";
 import { getBindings } from "../../../../lib/platform/bindings";
@@ -16,8 +19,9 @@ export const GET: APIRoute = async ({ locals, request }) => {
     if (!(await isPlatformAdmin({ env, userId: auth.userId }))) {
       throw new AppError("authorization_denied", 403);
     }
-    const [deadLetterOverview, deletionOverview, incidentOverview] = await Promise.all([
+    const [deadLetterOverview, generatedLicenseDeadLetterOverview, deletionOverview, incidentOverview] = await Promise.all([
       listActiveDeadLetters({ env }),
+      listActiveGeneratedLicenseDeadLetters({ env }),
       listActiveDeletionRequests({ env, userId: auth.userId }),
       listActiveIncidents({ env }),
     ]);
@@ -25,11 +29,14 @@ export const GET: APIRoute = async ({ locals, request }) => {
       deadLetters: deadLetterOverview.items,
       deadLettersHasMore: deadLetterOverview.hasMore,
       deletionOverview,
+      generatedLicenseDeadLetters: generatedLicenseDeadLetterOverview.items,
+      generatedLicenseDeadLettersHasMore: generatedLicenseDeadLetterOverview.hasMore,
       incidents: incidentOverview.items,
       incidentsHasMore: incidentOverview.hasMore,
       ok: true,
       operationsListLimit: {
         deadLetters: deadLetterOverview.limit,
+        generatedLicenseDeadLetters: generatedLicenseDeadLetterOverview.limit,
         incidents: incidentOverview.limit,
       },
       requestId: locals.requestId,

@@ -19,7 +19,7 @@ export type TelegramDeliveryJobReference = {
 export type TelegramDeliveryResult =
   | { kind: "delivered" }
   | { errorCode: string; kind: "failed" }
-  | { errorCode: string; kind: "retryable"; retryAfterSeconds?: number };
+  | { errorCode: string; kind: "retryable"; providerOutcome?: "not_sent" | "unknown"; retryAfterSeconds?: number };
 
 type JobContextRow = {
   aggregateId: string | null;
@@ -73,16 +73,20 @@ function failed(errorCode: string): TelegramDeliveryResult {
   return { errorCode, kind: "failed" };
 }
 
-function retryable(errorCode: string, retryAfterSeconds?: number): TelegramDeliveryResult {
+function retryable(
+  errorCode: string,
+  retryAfterSeconds?: number,
+  providerOutcome: "not_sent" | "unknown" = "unknown",
+): TelegramDeliveryResult {
   return retryAfterSeconds === undefined
-    ? { errorCode, kind: "retryable" }
-    : { errorCode, kind: "retryable", retryAfterSeconds };
+    ? { errorCode, kind: "retryable", providerOutcome }
+    : { errorCode, kind: "retryable", providerOutcome, retryAfterSeconds };
 }
 
 function classifyProviderError(error: unknown): TelegramDeliveryResult {
   if (error instanceof TelegramProviderError) {
     if (error.code === "telegram_rate_limited") {
-      return retryable(error.code, error.retryAfter ?? undefined);
+      return retryable(error.code, error.retryAfter ?? undefined, "not_sent");
     }
     if (
       error.code === "provider_timeout"
@@ -305,6 +309,7 @@ async function loadRecipient(
 }
 
 export async function deliverTelegramJob(input: {
+  beforeProviderAttempt?: () => Promise<void>;
   env: AppBindings;
   fetcher?: typeof fetch;
   job: TelegramDeliveryJobReference;
@@ -388,6 +393,7 @@ export async function deliverTelegramJob(input: {
       shopDefaultLocale: jobContext.shopDefaultLocale,
     });
     const notification = telegramPaidOrderNotification(locale, jobContext.orderNumber, jobContext.orderPublicId);
+    if (input.beforeProviderAttempt !== undefined) await input.beforeProviderAttempt();
     await new TelegramClient(botToken, input.fetcher).sendMessage({
       chatId,
       keyboard: notification.keyboard,

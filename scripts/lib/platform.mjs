@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { runWrangler } from "./cli.mjs";
@@ -13,7 +14,27 @@ const cloudflareResponseLimit = 256 * 1024;
 const cloudflareTimeoutMs = 10_000;
 const cloudflareAccountIdPattern = /^[a-f0-9]{32}$/u;
 const d1DatabaseIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+const kvNamespaceIdPattern = /^[a-f0-9]{32}$/u;
 const workerVersionIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+const productionCron = "*/15 * * * *";
+const productionCustomDomainInventorySql = `SELECT
+  shop_id,
+  hostname_normalized,
+  cloudflare_hostname_id,
+  status,
+  is_primary,
+  hostname_status,
+  ssl_status,
+  dns_status,
+  ownership_verified_at,
+  delete_requested_at,
+  deleted_at,
+  validation_metadata_json
+FROM shop_domains
+WHERE type = 'custom'
+  AND deleted_at IS NULL
+  AND status <> 'deleted'
+ORDER BY hostname_normalized, shop_id;`;
 export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME = "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
 export const CLOUDFLARE_D1_TOKEN_NAME = "CLOUDFLARE_D1_API_TOKEN";
 export const CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_TOKEN_NAME = "CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN";
@@ -320,6 +341,12 @@ export async function cloudflareApiRequest(token, path, options = {}) {
 
   if (!response.ok || payload?.success !== true) {
     throw new CloudflareApiError(response.status, safeCloudflareErrorCode(payload));
+  }
+  if (options.includeEnvelope === true) {
+    return {
+      result: payload.result,
+      resultInfo: payload.result_info ?? null,
+    };
   }
   return payload.result;
 }
@@ -1101,11 +1128,19 @@ function assertWorkerVersionBinding(actual, expected, issue) {
 }
 
 export function assertProductionWorkerVersionAdmission(input) {
+  const admissionMode = input.workerVersionAdmissionMode ?? "pre_candidate";
+  if (!new Set(["pre_candidate", "candidate_active"]).has(admissionMode)) {
+    throw new Error("production_worker_version_admission_mode_invalid");
+  }
   if (typeof input.currentWorkerVersion !== "string"
     || !workerVersionIdPattern.test(input.currentWorkerVersion)) {
     throw new Error("production_worker_current_version_invalid");
   }
-  if (input.previousWorkerVersion !== input.currentWorkerVersion) {
+  if (typeof input.previousWorkerVersion !== "string"
+    || !workerVersionIdPattern.test(input.previousWorkerVersion)) {
+    throw new Error("production_previous_worker_version_invalid");
+  }
+  if (admissionMode === "pre_candidate" && input.previousWorkerVersion !== input.currentWorkerVersion) {
     throw new Error("production_previous_worker_version_mismatch");
   }
   if (typeof input.candidateWorkerVersion !== "string"
@@ -1116,8 +1151,14 @@ export function assertProductionWorkerVersionAdmission(input) {
     || !workerVersionIdPattern.test(input.rollbackCandidateWorkerVersion)) {
     throw new Error("production_rollback_candidate_version_invalid");
   }
-  if (input.candidateWorkerVersion === input.currentWorkerVersion) {
+  if (admissionMode === "pre_candidate" && input.candidateWorkerVersion === input.currentWorkerVersion) {
     throw new Error("production_candidate_worker_version_is_current");
+  }
+  if (admissionMode === "candidate_active" && input.currentWorkerVersion !== input.candidateWorkerVersion) {
+    throw new Error("production_candidate_worker_version_not_active");
+  }
+  if (admissionMode === "candidate_active" && input.previousWorkerVersion === input.currentWorkerVersion) {
+    throw new Error("production_previous_worker_version_not_distinct");
   }
   if (input.rollbackCandidateWorkerVersion === input.currentWorkerVersion) {
     throw new Error("production_rollback_candidate_is_current_worker");
@@ -1188,6 +1229,7 @@ export function validateProductionWorkerRouteInventory(
   wranglerConfig,
   liveRoutes,
   liveDomains,
+  options = {},
 ) {
   const contract = productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConfig);
   if (!Array.isArray(liveRoutes)) {
@@ -1202,6 +1244,10 @@ export function validateProductionWorkerRouteInventory(
     ...[...contract.zoneRoutes].map((pattern) => [pattern, contract.productionWorkerName]),
   ]);
   const routeKeys = new Set();
+  const admissionMode = options.admissionMode ?? "exact";
+  if (!new Set(["exact", "pre_candidate"]).has(admissionMode)) {
+    throw new Error("cloudflare_production_worker_route_admission_mode_invalid");
+  }
   let routeInventoryOk = true;
   for (const route of liveRoutes) {
     if (
@@ -1212,16 +1258,24 @@ export function validateProductionWorkerRouteInventory(
       || (route.script !== null && typeof route.script !== "string")
       || routeKeys.has(route.pattern)
       || !allowedRoutes.has(route.pattern)
-      || allowedRoutes.get(route.pattern) !== route.script
+      || (admissionMode === "exact"
+        ? allowedRoutes.get(route.pattern) !== route.script
+        : contract.stagingZoneRoutes.has(route.pattern)
+          ? allowedRoutes.get(route.pattern) !== route.script
+          : !new Set([contract.productionWorkerName, contract.stagingWorkerName, null]).has(route.script))
     ) {
       routeInventoryOk = false;
     } else {
       routeKeys.add(route.pattern);
     }
   }
-  const requiredRoutesPresent = [...allowedRoutes].every(([pattern, script]) => (
-    liveRoutes.some((route) => route?.pattern === pattern && route?.script === script)
-  ));
+  const requiredRoutesPresent = admissionMode === "exact"
+    ? [...allowedRoutes].every(([pattern, script]) => (
+      liveRoutes.some((route) => route?.pattern === pattern && route?.script === script)
+    ))
+    : [...contract.stagingZoneRoutes].every(([pattern, script]) => (
+      liveRoutes.some((route) => route?.pattern === pattern && route?.script === script)
+    ));
 
   const domainsInZone = liveDomains
     .map(liveWorkerDomainIdentity)
@@ -1241,7 +1295,15 @@ export function validateProductionWorkerRouteInventory(
     [contract.canaryDnsCarrier.hostname, contract.canaryDnsCarrier.service],
   ]);
   const domainKeys = new Set();
-  let domainInventoryOk = liveDomains.every((domain) => liveWorkerDomainIdentity(domain) !== null);
+  let domainInventoryOk = liveDomains.every((domain) => {
+    const identity = liveWorkerDomainIdentity(domain);
+    return identity !== null && (
+      identity.zoneId === contract.zoneId
+      || identity.zoneName === contract.zoneName
+      || identity.hostname === contract.zoneName
+      || identity.hostname.endsWith(`.${contract.zoneName}`)
+    );
+  });
   for (const domain of domainsInZone) {
     if (
       domainKeys.has(domain.hostname)
@@ -1261,7 +1323,9 @@ export function validateProductionWorkerRouteInventory(
     {
       code: "cloudflare_production_worker_route_inventory_allowlist",
       detail: routeInventoryOk && requiredRoutesPresent
-        ? "Live shared-zone routes match the reviewed production and staging contracts"
+        ? admissionMode === "exact"
+          ? "Live shared-zone routes match the reviewed production and staging contracts"
+          : "Live shared-zone routes are owned by the reviewed production/staging Workers"
         : "Live shared-zone routes contain a missing, duplicate, malformed, or unapproved binding",
       ok: routeInventoryOk && requiredRoutesPresent,
     },
@@ -1276,34 +1340,585 @@ export function validateProductionWorkerRouteInventory(
   return { checks, ok: checks.every((check) => check.ok) };
 }
 
+function productionConsumerContract(resources) {
+  return [
+    {
+      queue: resources.integrationQueue,
+      script: null,
+      settings: {
+        batchSize: 10,
+        batchTimeout: 5,
+        deadLetterQueue: resources.deadLetterQueue,
+        maxRetries: 5,
+        retryDelaySecs: 60,
+      },
+    },
+    {
+      queue: resources.notificationQueue,
+      script: null,
+      settings: {
+        batchSize: 10,
+        batchTimeout: 5,
+        deadLetterQueue: resources.deadLetterQueue,
+        maxRetries: 5,
+        retryDelaySecs: 60,
+      },
+    },
+    {
+      queue: resources.deadLetterQueue,
+      script: null,
+      settings: {
+        batchSize: 10,
+        batchTimeout: 5,
+        maxRetries: 100,
+      },
+    },
+  ];
+}
+
+function criticalBindingSort(left, right) {
+  return `${left.type}:${left.name}`.localeCompare(`${right.type}:${right.name}`);
+}
+
+function configConsumerShape(consumer, workerName) {
+  const settings = {
+    batchSize: consumer?.max_batch_size,
+    batchTimeout: consumer?.max_batch_timeout,
+    deadLetterQueue: consumer?.dead_letter_queue,
+    maxConcurrency: consumer?.max_concurrency,
+    maxRetries: consumer?.max_retries,
+    retryDelaySecs: consumer?.retry_delay,
+  };
+  for (const key of Object.keys(settings)) {
+    if (settings[key] === undefined) delete settings[key];
+  }
+  return { queue: consumer?.queue, script: workerName, settings };
+}
+
+function productionWorkerResourceContract(productionSpec, wranglerConfig, productionManifest) {
+  const production = wranglerConfig?.env?.production;
+  const resources = productionSpec?.resources;
+  const manifestResources = productionManifest?.resources;
+  const resourceKeys = [
+    "d1",
+    "deadLetterQueue",
+    "integrationQueue",
+    "notificationQueue",
+    "platformCacheKv",
+    "privateExports",
+    "r2",
+    "sessionKv",
+  ];
+  const resourceNamesMatch = resourceKeys.every((key) => (
+    typeof resources?.[key] === "string"
+    && resources[key].length > 0
+    && manifestResources?.[key]?.name === resources[key]
+  ));
+  const expectedManifestKeys = [
+    "accountId",
+    "environment",
+    "resources",
+    "saas",
+    "version",
+    "workerName",
+    "zoneId",
+    "zoneName",
+  ];
+  if (
+    !isDeepStrictEqual(Object.keys(productionManifest ?? {}).sort(), expectedManifestKeys.sort())
+    || !isDeepStrictEqual(Object.keys(manifestResources ?? {}).sort(), resourceKeys.sort())
+    || !isDeepStrictEqual(Object.keys(resources ?? {}).sort(), resourceKeys.sort())
+    || productionManifest?.environment !== "production"
+    || productionManifest?.accountId !== productionSpec?.accountId
+    || productionManifest?.workerName !== productionSpec?.workerName
+    || productionManifest?.zoneId !== productionSpec?.zoneId
+    || productionManifest?.zoneName !== productionSpec?.zoneName
+    || typeof productionManifest?.version !== "string"
+    || productionManifest.version.length < 8
+    || productionManifest.version.length > 128
+    || !resourceNamesMatch
+    || !d1DatabaseIdPattern.test(manifestResources?.d1?.id ?? "")
+    || !kvNamespaceIdPattern.test(manifestResources?.platformCacheKv?.id ?? "")
+    || !kvNamespaceIdPattern.test(manifestResources?.sessionKv?.id ?? "")
+    || productionManifest?.saas?.cnameTarget !== productionSpec?.saas?.cnameTarget
+    || productionManifest?.saas?.fallbackOrigin !== productionSpec?.saas?.fallbackOrigin
+    || productionSpec?.routing?.externalCustomDomainFallbackRoute !== "*/*"
+    || productionSpec?.turnstile?.platformHostname !== productionSpec?.zoneName
+    || productionSpec?.turnstile?.externalCustomDomainAdmission !== "verified_before_domain_activation"
+    || productionSpec?.turnstile?.externalCustomDomainStrategy !== "exact_hostname_admission_before_activation"
+    || production?.vars?.RESOURCE_MANIFEST_VERSION !== productionManifest.version
+    || typeof production?.vars?.TURNSTILE_SITE_KEY !== "string"
+    || production.vars.TURNSTILE_SITE_KEY.trim() !== production.vars.TURNSTILE_SITE_KEY
+    || production.vars.TURNSTILE_SITE_KEY.length < 8
+    || production.vars.TURNSTILE_SITE_KEY.length > 128
+  ) {
+    throw new Error("production_worker_resource_contract_invalid");
+  }
+
+  const expectedBindings = [
+    { id: manifestResources.d1.id, name: "PLATFORM_DB", type: "d1" },
+    { id: manifestResources.platformCacheKv.id, name: "PLATFORM_CACHE", type: "kv_namespace" },
+    { id: manifestResources.sessionKv.id, name: "SESSION", type: "kv_namespace" },
+    { id: manifestResources.r2.name, name: "MEDIA", type: "r2_bucket" },
+    { id: manifestResources.privateExports.name, name: "PRIVATE_EXPORTS", type: "r2_bucket" },
+    { id: manifestResources.integrationQueue.name, name: "INTEGRATION_QUEUE", type: "queue" },
+    { id: manifestResources.notificationQueue.name, name: "NOTIFICATION_QUEUE", type: "queue" },
+  ].sort(criticalBindingSort);
+  const configuredBindings = [
+    ...(Array.isArray(production?.d1_databases) ? production.d1_databases.map((binding) => ({
+      id: binding?.database_id,
+      name: binding?.binding,
+      type: "d1",
+    })) : []),
+    ...(Array.isArray(production?.kv_namespaces) ? production.kv_namespaces.map((binding) => ({
+      id: binding?.id,
+      name: binding?.binding,
+      type: "kv_namespace",
+    })) : []),
+    ...(Array.isArray(production?.r2_buckets) ? production.r2_buckets.map((binding) => ({
+      id: binding?.bucket_name,
+      name: binding?.binding,
+      type: "r2_bucket",
+    })) : []),
+    ...(Array.isArray(production?.queues?.producers) ? production.queues.producers.map((binding) => ({
+      id: binding?.queue,
+      name: binding?.binding,
+      type: "queue",
+    })) : []),
+  ].sort(criticalBindingSort);
+  const expectedConsumers = productionConsumerContract(resources)
+    .map((consumer) => ({ ...consumer, script: productionSpec.workerName }));
+  const configuredConsumers = Array.isArray(production?.queues?.consumers)
+    ? production.queues.consumers.map((consumer) => configConsumerShape(consumer, productionSpec.workerName))
+    : [];
+  if (
+    !isDeepStrictEqual(configuredBindings, expectedBindings)
+    || !isDeepStrictEqual(configuredConsumers, expectedConsumers)
+    || !isDeepStrictEqual(production?.triggers?.crons, [productionCron])
+  ) {
+    throw new Error("production_worker_resource_contract_invalid");
+  }
+
+  return {
+    consumers: expectedConsumers,
+    criticalBindings: expectedBindings,
+    cron: productionCron,
+    fallbackOrigin: productionSpec.saas.fallbackOrigin,
+    manifestVersion: productionManifest.version,
+    platformTurnstileHostname: productionSpec.turnstile.platformHostname,
+    turnstileSiteKey: production.vars.TURNSTILE_SITE_KEY,
+  };
+}
+
+async function loadProductionManifest(input) {
+  if (input.productionManifest !== undefined) return input.productionManifest;
+  try {
+    return await readFile(
+      resolve(input.repositoryRoot ?? repositoryRoot, "infra/generated/production.json"),
+      "utf8",
+    ).then((text) => parseJson(text, "generated_production"));
+  } catch (error) {
+    if (error instanceof Error && error.message === "invalid_json_from_generated_production") throw error;
+    throw new Error("production_worker_resource_manifest_unavailable", { cause: error });
+  }
+}
+
+function normalizeLiveCriticalBindings(value) {
+  const rawBindings = Array.isArray(value)
+    ? value
+    : value?.bindings ?? value?.settings?.bindings;
+  if (!Array.isArray(rawBindings)) {
+    throw new Error("production_worker_binding_inventory_invalid");
+  }
+  const criticalTypes = new Set(["d1", "kv_namespace", "r2_bucket", "queue"]);
+  const bindings = [];
+  for (const binding of rawBindings) {
+    if (!criticalTypes.has(binding?.type)) continue;
+    const id = binding.type === "d1"
+      ? binding.id ?? binding.database_id
+      : binding.type === "kv_namespace"
+        ? binding.namespace_id ?? binding.id
+        : binding.type === "r2_bucket"
+          ? binding.bucket_name
+          : binding.queue_name ?? binding.queue;
+    if (typeof binding?.name !== "string" || typeof id !== "string") {
+      throw new Error("production_worker_binding_inventory_invalid");
+    }
+    bindings.push({ id, name: binding.name, type: binding.type });
+  }
+  const keys = bindings.map((binding) => `${binding.type}:${binding.name}`);
+  if (new Set(keys).size !== keys.length) {
+    throw new Error("production_worker_binding_inventory_invalid");
+  }
+  return bindings.sort(criticalBindingSort);
+}
+
+function normalizedSetting(value, aliases) {
+  for (const alias of aliases) {
+    if (value?.[alias] !== undefined) return value[alias];
+  }
+  return undefined;
+}
+
+function normalizeLiveConsumer(raw) {
+  if (raw === null || typeof raw !== "object") {
+    throw new Error("production_worker_queue_consumer_inventory_invalid");
+  }
+  const settingsSource = raw.settings ?? raw;
+  const script = normalizedSetting(raw, ["script", "script_name", "scriptName", "worker", "worker_name"]);
+  const settings = {
+    batchSize: normalizedSetting(settingsSource, ["batchSize", "batch_size"]),
+    batchTimeout: normalizedSetting(settingsSource, ["batchTimeout", "batch_timeout"]),
+    deadLetterQueue: normalizedSetting(settingsSource, ["deadLetterQueue", "dead_letter_queue"]),
+    maxConcurrency: normalizedSetting(settingsSource, ["maxConcurrency", "max_concurrency"]),
+    maxRetries: normalizedSetting(settingsSource, ["maxRetries", "max_retries", "messageRetries"]),
+    retryDelaySecs: normalizedSetting(settingsSource, ["retryDelaySecs", "retry_delay_secs", "retry_delay"]),
+  };
+  for (const key of Object.keys(settings)) {
+    if (settings[key] === undefined) delete settings[key];
+  }
+  if (typeof script !== "string" || Object.entries(settings).some(([key, setting]) => (
+    key === "deadLetterQueue"
+      ? typeof setting !== "string"
+      : !Number.isInteger(setting) || setting < 1
+  ))) {
+    throw new Error("production_worker_queue_consumer_inventory_invalid");
+  }
+  return { script, settings };
+}
+
+function parseLiveQueueConsumers(output, expected, admissionMode = "exact") {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(output ?? ""));
+  } catch {
+    throw new Error("production_worker_queue_consumer_inventory_invalid");
+  }
+  const consumers = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.consumers)
+      ? parsed.consumers
+      : parsed?.result;
+  if (!Array.isArray(consumers)) {
+    throw new Error("production_worker_queue_consumer_inventory_invalid");
+  }
+  const normalized = consumers.map(normalizeLiveConsumer);
+  const expectedShape = [{ script: expected.script, settings: expected.settings }];
+  const accepted = admissionMode === "pre_candidate"
+    ? (normalized.length === 0 || isDeepStrictEqual(normalized, expectedShape))
+    : isDeepStrictEqual(normalized, expectedShape);
+  if (!accepted) {
+    throw new Error("production_worker_queue_consumer_inventory_mismatch");
+  }
+  return { consumers: normalized, queue: expected.queue };
+}
+
+function normalizeLiveSchedules(value) {
+  const schedules = Array.isArray(value) ? value : value?.schedules;
+  if (!Array.isArray(schedules)) {
+    throw new Error("production_worker_schedule_inventory_invalid");
+  }
+  const crons = schedules.map((schedule) => typeof schedule === "string" ? schedule : schedule?.cron);
+  if (crons.some((cron) => typeof cron !== "string") || new Set(crons).size !== crons.length) {
+    throw new Error("production_worker_schedule_inventory_invalid");
+  }
+  return crons.sort();
+}
+
+function parseProductionCustomDomainRows(output) {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(output ?? ""));
+  } catch {
+    throw new Error("production_custom_domain_mapping_inventory_invalid");
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0
+    || parsed.some((entry) => entry?.success !== true || !Array.isArray(entry?.results))) {
+    throw new Error("production_custom_domain_mapping_inventory_invalid");
+  }
+  return parsed.flatMap((entry) => entry.results);
+}
+
+async function discoverProductionCustomHostnames(input) {
+  const inventory = [];
+  for (let page = 1; page <= 100; page += 1) {
+    const envelope = await cloudflareApiRequest(
+      input.token,
+      `/zones/${input.zoneId}/custom_hostnames?page=${page}&per_page=100`,
+      { fetchImplementation: input.fetchImplementation, includeEnvelope: true },
+    );
+    if (!Array.isArray(envelope?.result)) {
+      throw new Error("production_saas_custom_hostname_inventory_invalid");
+    }
+    inventory.push(...envelope.result);
+    const resultInfo = envelope.resultInfo;
+    if (resultInfo === null) {
+      if (envelope.result.length >= 100) {
+        throw new Error("production_saas_custom_hostname_pagination_unverifiable");
+      }
+      return inventory;
+    }
+    const currentPage = resultInfo?.page;
+    const totalPages = resultInfo?.total_pages;
+    if (!Number.isInteger(currentPage) || !Number.isInteger(totalPages)
+      || currentPage !== page || totalPages < page || totalPages > 100) {
+      throw new Error("production_saas_custom_hostname_pagination_invalid");
+    }
+    if (page === totalPages) return inventory;
+  }
+  throw new Error("production_saas_custom_hostname_pagination_invalid");
+}
+
+function normalizeCustomHostname(hostname) {
+  if (hostname === null || typeof hostname !== "object"
+    || typeof hostname.id !== "string" || hostname.id.length === 0
+    || typeof hostname.hostname !== "string" || hostname.hostname.length === 0
+    || typeof hostname.status !== "string"
+    || typeof hostname.ssl?.status !== "string") {
+    throw new Error("production_saas_custom_hostname_inventory_invalid");
+  }
+  return {
+    hostname: hostname.hostname.toLowerCase().replace(/\.$/u, ""),
+    id: hostname.id,
+    sslStatus: hostname.ssl.status,
+    status: hostname.status,
+  };
+}
+
+function normalizeCustomDomainRow(row) {
+  if (row === null || typeof row !== "object"
+    || typeof row.shop_id !== "string" || row.shop_id.length === 0
+    || typeof row.hostname_normalized !== "string" || row.hostname_normalized.length === 0
+    || typeof row.status !== "string"
+    || !new Set([0, 1]).has(row.is_primary)
+    || (row.cloudflare_hostname_id !== null && typeof row.cloudflare_hostname_id !== "string")) {
+    throw new Error("production_custom_domain_mapping_inventory_invalid");
+  }
+  let metadata;
+  try {
+    metadata = JSON.parse(row.validation_metadata_json);
+  } catch {
+    throw new Error("production_custom_domain_mapping_inventory_invalid");
+  }
+  return {
+    active: row.status === "active" || row.is_primary === 1,
+    cloudflareHostnameId: row.cloudflare_hostname_id,
+    deleteRequestedAt: row.delete_requested_at,
+    deletedAt: row.deleted_at,
+    dnsStatus: row.dns_status,
+    hostname: row.hostname_normalized.toLowerCase().replace(/\.$/u, ""),
+    hostnameStatus: row.hostname_status,
+    ownershipVerifiedAt: row.ownership_verified_at,
+    shopId: row.shop_id,
+    sslStatus: row.ssl_status,
+    status: row.status,
+    turnstile: metadata?.turnstile,
+  };
+}
+
+export function validateProductionLiveInfrastructure(input) {
+  const admissionMode = input?.admissionMode ?? "exact";
+  if (!new Set(["exact", "pre_candidate"]).has(admissionMode)) {
+    throw new Error("production_worker_infrastructure_admission_mode_invalid");
+  }
+  if (!Array.isArray(input?.customHostnames)) {
+    throw new Error("production_saas_custom_hostname_inventory_invalid");
+  }
+  if (!Array.isArray(input?.customDomainRows)) {
+    throw new Error("production_custom_domain_mapping_inventory_invalid");
+  }
+  if (!Array.isArray(input?.queueConsumers)) {
+    throw new Error("production_worker_queue_consumer_inventory_invalid");
+  }
+  if (input?.contract === null || typeof input?.contract !== "object") {
+    throw new Error("production_worker_resource_contract_invalid");
+  }
+  const bindings = normalizeLiveCriticalBindings(input.workerSettings);
+  const schedules = normalizeLiveSchedules(input.schedules);
+  const hostnames = input.customHostnames.map(normalizeCustomHostname);
+  const domainRows = input.customDomainRows.map(normalizeCustomDomainRow);
+  const hostnameKeys = hostnames.map((entry) => entry.hostname);
+  const hostnameIds = hostnames.map((entry) => entry.id);
+  const domainKeys = domainRows.map((entry) => entry.hostname);
+  const domainIds = domainRows
+    .map((entry) => entry.cloudflareHostnameId)
+    .filter((entry) => entry !== null);
+  const uniqueInventory = new Set(hostnameKeys).size === hostnameKeys.length
+    && new Set(hostnameIds).size === hostnameIds.length
+    && new Set(domainKeys).size === domainKeys.length
+    && new Set(domainIds).size === domainIds.length;
+  const hostnamesById = new Map(hostnames.map((entry) => [entry.id, entry]));
+  const domainsByName = new Map(domainRows.map((entry) => [entry.hostname, entry]));
+  const liveMappingsComplete = uniqueInventory && hostnames.every((hostname) => {
+    const domain = domainsByName.get(hostname.hostname);
+    return domain?.cloudflareHostnameId === hostname.id;
+  });
+  const databaseMappingsComplete = uniqueInventory && domainRows.every((domain) => (
+    domain.cloudflareHostnameId === null
+      || (hostnamesById.get(domain.cloudflareHostnameId)?.hostname === domain.hostname)
+  ));
+  const activeDomains = domainRows.filter((domain) => domain.active);
+  const nowMs = input.now instanceof Date
+    ? input.now.getTime()
+    : input.now === undefined
+      ? Date.now()
+      : Date.parse(input.now);
+  if (!Number.isFinite(nowMs)) throw new Error("production_custom_domain_mapping_inventory_invalid");
+  const activeDomainsReady = activeDomains.every((domain) => {
+    const hostname = domain.cloudflareHostnameId === null
+      ? null
+      : hostnamesById.get(domain.cloudflareHostnameId);
+    const checkedAtMs = Date.parse(domain.turnstile?.checkedAt ?? "");
+    return domain.status === "active"
+      && domain.ownershipVerifiedAt !== null
+      && domain.hostnameStatus === "active"
+      && domain.sslStatus === "active"
+      && domain.dnsStatus === "active"
+      && domain.deleteRequestedAt === null
+      && domain.deletedAt === null
+      && hostname?.hostname === domain.hostname
+      && hostname.status === "active"
+      && hostname.sslStatus === "active"
+      && domain.turnstile?.status === "active"
+      && domain.turnstile?.hostname === domain.hostname
+      && domain.turnstile?.mode === "operator_managed"
+      && domain.turnstile?.source === "cloudflare_widget_domains"
+      && Number.isFinite(checkedAtMs)
+      && checkedAtMs <= nowMs
+      && nowMs - checkedAtMs <= 12 * 60 * 60_000;
+  });
+  const widgetDomains = input.turnstileWidget?.domains;
+  const normalizedWidgetDomains = Array.isArray(widgetDomains)
+    ? widgetDomains.map((hostname) => typeof hostname === "string"
+      ? hostname.toLowerCase().replace(/\.$/u, "")
+      : null)
+    : [];
+  const expectedWidgetDomains = [
+    input.contract.platformTurnstileHostname,
+    ...activeDomains.map((domain) => domain.hostname),
+  ].sort();
+  const widgetAllowlistExact = input.turnstileWidget?.sitekey === input.contract.turnstileSiteKey
+    && normalizedWidgetDomains.every((hostname) => hostname !== null && !hostname.includes("*"))
+    && new Set(normalizedWidgetDomains).size === normalizedWidgetDomains.length
+    && isDeepStrictEqual([...normalizedWidgetDomains].sort(), expectedWidgetDomains);
+  const fallbackExact = input.fallbackOrigin?.origin === input.contract.fallbackOrigin
+    && input.fallbackOrigin?.status === "active";
+  const expectedQueueNames = input.contract.consumers.map((consumer) => consumer.queue);
+  const queueEntriesValid = Array.isArray(input.queueConsumers)
+    && admissionMode === "pre_candidate"
+    && input.queueConsumers.length === 0
+    ? true
+    : Array.isArray(input.queueConsumers)
+      && new Set(input.queueConsumers.map((entry) => entry?.queue)).size === input.queueConsumers.length
+      && input.queueConsumers.length === expectedQueueNames.length
+      && input.queueConsumers.every((entry) => expectedQueueNames.includes(entry?.queue))
+      && input.contract.consumers.every((consumer) => {
+        const actual = input.queueConsumers.find((entry) => entry?.queue === consumer.queue);
+        if (actual === undefined) return false;
+        const consumers = Array.isArray(actual.consumers) ? actual.consumers : [];
+        return admissionMode === "pre_candidate"
+          ? (consumers.length === 0 || isDeepStrictEqual(consumers, [{ script: consumer.script, settings: consumer.settings }]))
+          : isDeepStrictEqual(consumers, [{ script: consumer.script, settings: consumer.settings }]);
+      });
+  const queueInventoryExact = queueEntriesValid;
+  const scheduleInventoryExact = admissionMode === "pre_candidate"
+    ? (schedules.length === 0 || isDeepStrictEqual(schedules, [input.contract.cron]))
+    : isDeepStrictEqual(schedules, [input.contract.cron]);
+  const checks = [
+    {
+      code: "cloudflare_production_worker_binding_inventory_allowlist",
+      detail: isDeepStrictEqual(bindings, input.contract.criticalBindings)
+        ? "Live critical Worker bindings match the generated production identity"
+        : "Live critical Worker bindings are missing, duplicated, extra, or drifted",
+      ok: isDeepStrictEqual(bindings, input.contract.criticalBindings),
+    },
+    {
+      code: "cloudflare_production_queue_consumer_inventory_allowlist",
+      detail: queueInventoryExact
+        ? admissionMode === "exact"
+          ? "Live queue consumers and settings match the production contract"
+          : "Live queue consumer inventory is empty or exactly production-shaped"
+        : "Live queue consumers or settings are missing, extra, or drifted",
+      ok: queueInventoryExact,
+    },
+    {
+      code: "cloudflare_production_schedule_inventory_allowlist",
+      detail: scheduleInventoryExact
+        ? admissionMode === "exact"
+          ? "Live cron schedule matches the production contract"
+          : "Live cron inventory is empty or exactly the production schedule"
+        : "Live cron schedule is missing, duplicated, extra, or drifted",
+      ok: scheduleInventoryExact,
+    },
+    {
+      code: "cloudflare_production_saas_fallback_origin",
+      detail: fallbackExact
+        ? "The production SaaS fallback origin is active and exact"
+        : "The production SaaS fallback origin is missing, inactive, or drifted",
+      ok: fallbackExact,
+    },
+    {
+      code: "cloudflare_production_saas_hostname_mapping",
+      detail: liveMappingsComplete && databaseMappingsComplete
+        ? "Every live SaaS hostname maps uniquely to the authoritative tenant domain row"
+        : "The live SaaS and tenant-domain inventories contain an unknown, duplicate, or mismatched mapping",
+      ok: liveMappingsComplete && databaseMappingsComplete,
+    },
+    {
+      code: "cloudflare_production_saas_active_domain_readiness",
+      detail: activeDomainsReady
+        ? "Every active tenant domain has live hostname, SSL, DNS, ownership, and Turnstile readiness"
+        : "An active tenant domain is missing live provider or application readiness",
+      ok: activeDomainsReady,
+    },
+    {
+      code: "cloudflare_production_turnstile_hostname_allowlist",
+      detail: widgetAllowlistExact
+        ? "The Turnstile widget contains exactly the reviewed production hostnames"
+        : "The Turnstile widget hostname allowlist is missing, extra, wildcarded, or drifted",
+      ok: widgetAllowlistExact,
+    },
+  ];
+  return { checks, ok: checks.every((check) => check.ok) };
+}
+
 export async function assertProductionWorkerIdentityAdmission(input) {
   const operatorEnvironment = input.environment ?? process.env;
   const routeAuditToken = input.token === undefined
     ? requireCloudflareRouteAuditToken(operatorEnvironment)
     : requireCloudflareRouteAuditToken({ CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: input.token });
-  const promotionAuditToken = input.requireCurrentWorkerVersion === true
-    ? input.promotionAuditToken === undefined
-      ? requireCloudflareProductionPromotionAuditToken(operatorEnvironment)
-      : requireCloudflareProductionPromotionAuditToken({
-        [CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_TOKEN_NAME]: input.promotionAuditToken,
-      })
-    : null;
+  const promotionAuditToken = input.promotionAuditToken === undefined
+    ? requireCloudflareProductionPromotionAuditToken(operatorEnvironment)
+    : requireCloudflareProductionPromotionAuditToken({
+      [CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_TOKEN_NAME]: input.promotionAuditToken,
+    });
+  const productionManifest = await loadProductionManifest(input);
   const contract = productionWorkerRouteContract(
     input.productionSpec,
     input.stagingSpec,
     input.wranglerConfig,
   );
+  const resourceContract = productionWorkerResourceContract(
+    input.productionSpec,
+    input.wranglerConfig,
+    productionManifest,
+  );
   const pinnedEnvironment = buildPinnedCloudflareEnvironment(
     operatorEnvironment,
     input.productionSpec.accountId,
   );
+  const promotionEnvironment = {
+    ...pinnedEnvironment,
+    CLOUDFLARE_API_TOKEN: promotionAuditToken,
+  };
   const runner = input.runWranglerImplementation ?? runWrangler;
+  const runnerOptions = {
+    cwd: input.repositoryRoot ?? repositoryRoot,
+    env: pinnedEnvironment,
+  };
   let whoamiOutput;
   try {
-    whoamiOutput = runner(["whoami", "--json"], {
-      cwd: input.repositoryRoot ?? repositoryRoot,
-      env: pinnedEnvironment,
-    }).stdout;
+    whoamiOutput = runner(["whoami", "--json"], runnerOptions).stdout;
   } catch {
     throw new Error("production_worker_account_identity_unavailable");
   }
@@ -1313,10 +1928,7 @@ export async function assertProductionWorkerIdentityAdmission(input) {
 
   let d1ListOutput;
   try {
-    d1ListOutput = runner(["d1", "list", "--env", "production", "--json"], {
-      cwd: input.repositoryRoot ?? repositoryRoot,
-      env: pinnedEnvironment,
-    }).stdout;
+    d1ListOutput = runner(["d1", "list", "--env", "production", "--json"], runnerOptions).stdout;
   } catch {
     throw new Error("production_worker_database_identity_unavailable");
   }
@@ -1326,35 +1938,116 @@ export async function assertProductionWorkerIdentityAdmission(input) {
     contract.databaseName,
   );
 
-  const [liveRoutes, liveDomains, deploymentsResult, deployableVersionsResult] = await Promise.all([
+  const infrastructureAdmissionMode = input.infrastructureAdmissionMode ?? "exact";
+  if (!new Set(["exact", "pre_candidate"]).has(infrastructureAdmissionMode)) {
+    throw new Error("production_worker_infrastructure_admission_mode_invalid");
+  }
+  const queueConsumers = resourceContract.consumers.map((consumer) => {
+    let output;
+    try {
+      output = runner([
+        "queues", "consumer", "list", consumer.queue, "--env", "production", "--json",
+      ], {
+        cwd: input.repositoryRoot ?? repositoryRoot,
+        env: promotionEnvironment,
+      }).stdout;
+    } catch {
+      throw new Error("production_worker_queue_consumer_inventory_unavailable");
+    }
+    return parseLiveQueueConsumers(output, consumer, infrastructureAdmissionMode);
+  });
+  let customDomainRows;
+  try {
+    const output = runner([
+      "d1", "execute", "PLATFORM_DB", "--env", "production", "--remote",
+      "--command", productionCustomDomainInventorySql, "--json",
+    ], runnerOptions).stdout;
+    customDomainRows = parseProductionCustomDomainRows(output);
+  } catch (error) {
+    if (error instanceof Error && error.message === "production_custom_domain_mapping_inventory_invalid") {
+      throw error;
+    }
+    throw new Error("production_custom_domain_mapping_inventory_unavailable", { cause: error });
+  }
+
+  const workerPath = `/accounts/${input.productionSpec.accountId}/workers/scripts/${encodeURIComponent(contract.productionWorkerName)}`;
+  const [
+    liveRoutes,
+    liveDomains,
+    workerSettings,
+    schedules,
+    customHostnames,
+    fallbackOrigin,
+    turnstileWidget,
+    deploymentsResult,
+    deployableVersionsResult,
+  ] = await Promise.all([
     cloudflareApiRequest(routeAuditToken, `/zones/${contract.zoneId}/workers/routes`, {
       fetchImplementation: input.fetchImplementation,
     }),
     cloudflareApiRequest(routeAuditToken, `/accounts/${input.productionSpec.accountId}/workers/domains`, {
       fetchImplementation: input.fetchImplementation,
     }),
+    cloudflareApiRequest(promotionAuditToken, `${workerPath}/settings`, {
+      fetchImplementation: input.fetchImplementation,
+    }),
+    cloudflareApiRequest(promotionAuditToken, `${workerPath}/schedules`, {
+      fetchImplementation: input.fetchImplementation,
+    }),
+    discoverProductionCustomHostnames({
+      fetchImplementation: input.fetchImplementation,
+      token: promotionAuditToken,
+      zoneId: contract.zoneId,
+    }),
+    cloudflareApiRequest(
+      promotionAuditToken,
+      `/zones/${contract.zoneId}/custom_hostnames/fallback_origin`,
+      { fetchImplementation: input.fetchImplementation },
+    ),
+    cloudflareApiRequest(
+      promotionAuditToken,
+      `/accounts/${input.productionSpec.accountId}/challenges/widgets/${encodeURIComponent(resourceContract.turnstileSiteKey)}`,
+      { fetchImplementation: input.fetchImplementation },
+    ),
     input.requireCurrentWorkerVersion === true
       ? cloudflareApiRequest(
         promotionAuditToken,
-        `/accounts/${input.productionSpec.accountId}/workers/scripts/${encodeURIComponent(contract.productionWorkerName)}/deployments`,
+        `${workerPath}/deployments`,
         { fetchImplementation: input.fetchImplementation },
       )
       : Promise.resolve(null),
     input.requireCurrentWorkerVersion === true
       ? cloudflareApiRequest(
         promotionAuditToken,
-        `/accounts/${input.productionSpec.accountId}/workers/scripts/${encodeURIComponent(contract.productionWorkerName)}/versions?deployable=true`,
+        `${workerPath}/versions?deployable=true`,
         { fetchImplementation: input.fetchImplementation },
       )
       : Promise.resolve(null),
   ]);
-  const audit = validateProductionWorkerRouteInventory(
+  const routeAudit = validateProductionWorkerRouteInventory(
     input.productionSpec,
     input.stagingSpec,
     input.wranglerConfig,
     liveRoutes,
     liveDomains,
+    { admissionMode: infrastructureAdmissionMode },
   );
+  const liveAudit = validateProductionLiveInfrastructure({
+    contract: resourceContract,
+    customDomainRows,
+    customHostnames,
+    fallbackOrigin,
+    queueConsumers,
+    schedules,
+    turnstileWidget,
+    workerSettings,
+    now: input.now,
+    admissionMode: infrastructureAdmissionMode,
+  });
+  const audit = {
+    checks: [...routeAudit.checks, ...liveAudit.checks],
+    ok: routeAudit.ok && liveAudit.ok,
+  };
   if (!audit.ok) {
     const failedChecks = audit.checks
       .filter((check) => !check.ok)

@@ -18,7 +18,7 @@ export function getBillingCheckoutAdmission<T extends BillingCheckoutPlan>(input
   const eligible = input.plans.filter((plan) => (
     (plan.code === "starter" || plan.code === "pro")
     && plan.prices.length > 0
-    && (input.billingState !== "suspended" || plan.code === input.currentPlanCode)
+    && (!new Set(["suspended", "canceled"]).has(input.billingState) || plan.code === input.currentPlanCode)
   ));
   return { eligible, reasonCode: eligible.length === 0 ? "plan_price_unavailable" : null };
 }

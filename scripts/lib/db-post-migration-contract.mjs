@@ -21,6 +21,7 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "channel_provider_event_receipts",
     "channel_provider_verification_evidence",
     "customer_notes",
+    "auth_request_admissions",
     "order_access_recovery_tokens",
     "order_messages",
     "order_notes",
@@ -41,7 +42,10 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "idx_api_credentials_shop_expires",
     "idx_api_credentials_shop_status",
     "idx_audit_logs_admin_created",
+    "idx_auth_request_admissions_expiry",
+    "idx_auth_request_admissions_requester_window",
     "idx_auth_request_admissions_subject_window",
+    "idx_auth_request_admissions_window",
     "idx_billing_accounts_shop_status",
     "idx_billing_checkout_sessions_active_subscription",
     "idx_billing_checkout_sessions_pending",
@@ -212,7 +216,10 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
 
 export const REQUIRED_POST_MIGRATION_COLUMNS = Object.freeze({
   account_trial_claims: Object.freeze(["claimed_at", "shop_id", "user_id"]),
-  auth_request_admissions: Object.freeze(["delivery_permitted", "subject_hash"]),
+  auth_request_admissions: Object.freeze([
+    "id", "action", "requester_hash", "window_started_at", "window_ends_at", "created_at",
+    "subject_hash", "delivery_permitted",
+  ]),
   billing_accounts: Object.freeze(["currency", "provider_code", "shop_id"]),
   billing_checkout_sessions: Object.freeze([
     "expired_at", "plan_id", "price_id", "provider_code", "shop_id", "subscription_id",
@@ -476,6 +483,17 @@ SELECT COUNT(*) AS mismatch_count FROM (
         AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
         AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
         AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
+  UNION ALL
+  SELECT admission.id
+  FROM auth_request_admissions AS admission
+  WHERE admission.action NOT IN ('magic_link_request', 'shop_create')
+    OR length(admission.requester_hash) NOT BETWEEN 16 AND 128
+    OR admission.window_ends_at <= admission.window_started_at
+    OR (admission.subject_hash IS NOT NULL
+      AND length(admission.subject_hash) NOT BETWEEN 16 AND 128)
+    OR admission.delivery_permitted NOT IN (0, 1)
+    OR (admission.action = 'shop_create'
+      AND (admission.subject_hash IS NULL OR admission.delivery_permitted != 1))
 );
 `;
 
@@ -522,7 +540,11 @@ export function parsePostMigrationObjectOutput(output) {
     }
   }
   const forbidden = rows.find((row) => (
-    row.type === "table" && (row.name === "api_credentials_v0068" || /_legacy_00(?:70|76)$/u.test(row.name))
+    row.type === "table" && (
+      row.name === "api_credentials_v0068"
+      || row.name === "auth_request_admissions_legacy_0094"
+      || /_legacy_00(?:70|76)$/u.test(row.name)
+    )
   ));
   if (forbidden) throw new Error(`post_migration_legacy_object_present:${forbidden.name}`);
   return { objectCount: observed.size };

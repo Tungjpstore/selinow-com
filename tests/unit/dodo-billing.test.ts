@@ -706,6 +706,133 @@ describe("Dodo billing adapter", () => {
     fixture.database.close();
   });
 
+  it("recovers a canceled owner through a fresh paid subscription without minting another trial", async () => {
+    const fixture = billingFixture("trialing");
+    fixture.database.prepare(`
+      UPDATE shop_subscriptions
+      SET state = 'canceled', canceled_at = '2026-08-02T00:00:00.000Z'
+      WHERE id = 'billing-sub-a'
+    `).run();
+    const claimBefore = fixture.database.prepare(`
+      SELECT user_id AS userId, shop_id AS shopId, claimed_at AS claimedAt
+      FROM account_trial_claims WHERE user_id = 'billing-user-a'
+    `).get();
+    let postCount = 0;
+    const fetcher: typeof fetch = (_input, init) => {
+      if (init?.method === "GET") {
+        return Promise.resolve(new Response(JSON.stringify({ checkout_url: "https://test.checkout.dodopayments.com/session/cks_canceled_replay", session_id: "cks_canceled_replay" }), { status: 200 }));
+      }
+      postCount += 1;
+      return Promise.resolve(new Response(JSON.stringify({ checkout_url: "https://test.checkout.dodopayments.com/session/cks_canceled_recovery", session_id: "cks_canceled_recovery" }), { status: 200 }));
+    };
+
+    const first = await createBillingRecoveryCheckout({
+      env: fixture.env,
+      fetcher,
+      idempotencyKey: "checkout-canceled-recovery-1",
+      planCode: "pro",
+      requestId: "request-canceled-recovery-1",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+      now: new Date(NOW_ISO),
+    });
+    const replay = await createBillingRecoveryCheckout({
+      env: fixture.env,
+      fetcher,
+      idempotencyKey: "checkout-canceled-recovery-1",
+      planCode: "pro",
+      requestId: "request-canceled-recovery-2",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+      now: new Date(NOW_ISO),
+    });
+
+    expect(first).toMatchObject({ duplicate: false, subscriptionState: "pending_payment" });
+    expect(replay).toMatchObject({ duplicate: true, sessionId: first.sessionId });
+    expect(postCount).toBe(1);
+    expect(fixture.database.prepare(`
+      SELECT id, state, trial_ends_at AS trialEndsAt, canceled_at AS canceledAt, created_at AS createdAt
+      FROM shop_subscriptions WHERE shop_id = 'billing-shop-a'
+      ORDER BY created_at, id
+    `).all()).toEqual([
+      { canceledAt: "2026-08-02T00:00:00.000Z", createdAt: NOW_ISO, id: "billing-sub-a", state: "canceled", trialEndsAt: "2026-08-10T00:00:00.000Z" },
+      expect.objectContaining({ canceledAt: null, state: "pending_payment", trialEndsAt: null }),
+    ]);
+    const subscriptionTimes = fixture.database.prepare(`
+      SELECT created_at AS createdAt FROM shop_subscriptions
+      WHERE shop_id = 'billing-shop-a' ORDER BY created_at, id
+    `).all() as Array<{ createdAt: string }>;
+    expect(Date.parse(subscriptionTimes[1]?.createdAt ?? "")).toBeGreaterThan(Date.parse(subscriptionTimes[0]?.createdAt ?? ""));
+    expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM billing_checkout_sessions WHERE status IN ('pending', 'open')").get()).toEqual({ count: 1 });
+    expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM account_trial_claims WHERE user_id = 'billing-user-a'").get()).toEqual({ count: 1 });
+    expect(fixture.database.prepare(`
+      SELECT user_id AS userId, shop_id AS shopId, claimed_at AS claimedAt
+      FROM account_trial_claims WHERE user_id = 'billing-user-a'
+    `).get()).toEqual(claimBefore);
+    fixture.database.close();
+  });
+
+  it("ignores late events for a historical canceled checkout after a fresh recovery subscription exists", async () => {
+    const fixture = billingFixture("active");
+    insertCompletedCheckout(fixture.database, "bchk-historical-canceled");
+    fixture.database.prepare(`
+      UPDATE shop_subscriptions
+      SET state = 'canceled', canceled_at = '2026-08-02T00:00:00.000Z'
+      WHERE id = 'billing-sub-a'
+    `).run();
+    const recovery = await createBillingRecoveryCheckout({
+      env: fixture.env,
+      fetcher: () => Promise.resolve(new Response(JSON.stringify({
+        checkout_url: "https://test.checkout.dodopayments.com/session/cks_fresh_recovery",
+        session_id: "cks_fresh_recovery",
+      }), { status: 200 })),
+      idempotencyKey: "checkout-late-historical-event-1",
+      planCode: "pro",
+      requestId: "request-late-historical-event",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+      now: new Date(NOW_ISO),
+    });
+    const recoverySubscription = fixture.database.prepare(`
+      SELECT subscription_id AS subscriptionId
+      FROM billing_checkout_sessions WHERE id = ?
+    `).get(recovery.sessionId) as { subscriptionId: string };
+    const payload = {
+      data: {
+        metadata: {
+          checkoutSessionId: "bchk-historical-canceled",
+          shopId: "billing-shop-a",
+          subscriptionId: "billing-sub-a",
+        },
+        status: "failed",
+        subscription_id: "sub_dodo_test",
+      },
+      timestamp: "2026-08-03T00:00:05.000Z",
+      type: "subscription.failed",
+    };
+    const body = JSON.stringify(payload);
+
+    await expect(processDodoWebhook({
+      env: fixture.env,
+      now: new Date(NOW_ISO),
+      rawBody: body,
+      signature: signature(body, "evt_late_historical", NOW_ISO_SECONDS),
+      webhookId: "evt_late_historical",
+      webhookTimestamp: String(NOW_ISO_SECONDS),
+      webhookPublicId: WEBHOOK_PUBLIC_ID,
+    })).resolves.toMatchObject({ processed: false, state: "stale" });
+    const subscriptions = fixture.database.prepare(`
+      SELECT id, state FROM shop_subscriptions
+      WHERE id IN ('billing-sub-a', ?)
+      ORDER BY id
+    `).all(recoverySubscription.subscriptionId);
+    expect(subscriptions).toEqual([
+      { id: "billing-sub-a", state: "canceled" },
+      { id: recoverySubscription.subscriptionId, state: "pending_payment" },
+    ].sort((left, right) => left.id.localeCompare(right.id)));
+    fixture.database.close();
+  });
+
   it("expires a legacy provisional checkout without blocking global expiry or a fresh conversion", async () => {
     const fixture = billingFixture("trialing");
     fixture.database.exec(`

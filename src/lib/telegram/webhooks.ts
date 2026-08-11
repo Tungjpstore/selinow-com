@@ -211,6 +211,7 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
   const integration = await loadTelegramWebhookIntegration(input.env, input.webhookPublicId);
   if (!await verifyTelegramWebhookSecret(input.env, integration, input.request.headers.get("X-Telegram-Bot-Api-Secret-Token"))) throw new AppError("telegram_webhook_invalid", 401);
   const subscriptionAllowsHealth = subscriptionAllows({
+    currentPeriodEnd: integration.currentPeriodEnd,
     graceEndsAt: integration.graceEndsAt,
     subscriptionState: integration.subscriptionState,
     trialEndsAt: integration.trialEndsAt,

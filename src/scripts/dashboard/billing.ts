@@ -137,6 +137,7 @@ if (root !== null && root.dataset.canManage === "true") {
   const form = root.querySelector<HTMLFormElement>("[data-billing-request-form]");
   const ledger = root.querySelector<HTMLElement>("[data-billing-request-ledger]");
   const checkoutForm = root.querySelector<HTMLFormElement>("[data-billing-checkout-form]");
+  const marketForm = root.querySelector<HTMLFormElement>("[data-billing-market-form]");
   const checkoutPlanSelect = root.querySelector<HTMLElement>("[data-billing-checkout-plan]") as HTMLSelectElement | null;
   const checkoutSubmit = root.querySelector<HTMLElement>("[data-billing-checkout-submit]") as HTMLButtonElement | null;
   const checkoutFeedback = root.querySelector<HTMLElement>("[data-billing-checkout-feedback]");
@@ -246,6 +247,31 @@ if (root !== null && root.dataset.canManage === "true") {
     checkoutFeedback.dataset.tone = tone;
     checkoutFeedback.hidden = message.length === 0;
   };
+  marketForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (pending || shopPublicId === undefined || !marketForm.reportValidity()) return;
+    const value = new FormData(marketForm).get("merchantCountry");
+    if (typeof value !== "string" || !/^[A-Za-z]{2}$/u.test(value.trim())) return;
+    const button = marketForm.querySelector<HTMLButtonElement>("button[type=submit]");
+    pending = true;
+    if (button !== null) {
+      button.disabled = true;
+      button.textContent = text("checkoutMarketSaving");
+    }
+    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}`, {
+      body: JSON.stringify({ merchantCountry: value.trim().toUpperCase() }),
+      method: "PATCH",
+    }).then(() => {
+      showCheckoutFeedback(text("checkoutMarketSaved"), "success");
+      window.location.reload();
+    }).catch((error: unknown) => {
+      showCheckoutFeedback(error instanceof Error ? error.message : text("checkoutUnavailable"), "danger");
+      if (button !== null) {
+        button.disabled = false;
+        button.textContent = text("checkoutMarketSave");
+      }
+    }).finally(() => { pending = false; });
+  });
   const billingFailure = (error: unknown): BillingApiFailure => error instanceof BillingApiError
     ? { code: error.code, requestId: error.requestId }
     : { code: error instanceof Error ? error.message : "internal_error", requestId: null };
@@ -329,16 +355,17 @@ if (root !== null && root.dataset.canManage === "true") {
   });
   checkoutForm?.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (pending || shopPublicId === undefined || checkoutPlanSelect === null || checkoutSubmit === null || billingState === "canceled") return;
+    if (pending || shopPublicId === undefined || checkoutPlanSelect === null || checkoutSubmit === null) return;
     const planCode = checkoutPlanSelect.value;
     if (planCode !== "starter" && planCode !== "pro") return;
-    const checkoutAttempt = checkoutAttempts.begin({ planCode, recovery: billingState === "suspended", shopPublicId });
+    const checkoutRecovery = billingState === "suspended" || billingState === "canceled";
+    const checkoutAttempt = checkoutAttempts.begin({ planCode, recovery: checkoutRecovery, shopPublicId });
     pending = true;
     checkoutSubmit.disabled = true;
     checkoutSubmit.setAttribute("aria-busy", "true");
     if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = true;
     showCheckoutFeedback(text("checkoutOpening"), "info");
-    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { method: "POST", body: JSON.stringify({ planCode, recovery: billingState === "suspended" }) }, checkoutAttempt.idempotencyKey).then((payload) => {
+    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { method: "POST", body: JSON.stringify({ planCode, recovery: checkoutRecovery }) }, checkoutAttempt.idempotencyKey).then((payload) => {
       const url = acceptBillingCheckoutResponse(payload, checkoutAttempt, checkoutAttempts);
       showCheckoutFeedback(text("checkoutOpening"), "success");
       window.location.assign(url);

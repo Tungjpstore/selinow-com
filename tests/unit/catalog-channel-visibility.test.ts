@@ -80,9 +80,9 @@ function createRuntime(): { database: DatabaseSync; env: AppBindings } {
       ('shop-visibility-b', 'shop-visibility-public-b', 'visibility-b', 'Visibility B', 'active', 'en', 'USD', 'UTC', 1, '${NOW}', '${NOW}');
     INSERT INTO shop_settings (shop_id, branding_json, storefront_json, version, low_stock_threshold, updated_at)
     VALUES ('shop-visibility-a', '{}', '{}', 1, 5, '${NOW}'), ('shop-visibility-b', '{}', '{}', 1, 5, '${NOW}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
-    VALUES ('sub-visibility-a', 'shop-visibility-a', 'plan-visibility', 'active', '${NOW}', '${NOW}'),
-      ('sub-visibility-b', 'shop-visibility-b', 'plan-visibility', 'active', '${NOW}', '${NOW}');
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
+    VALUES ('sub-visibility-a', 'shop-visibility-a', 'plan-visibility', 'active', '2099-01-01T00:00:00.000Z', '${NOW}', '${NOW}'),
+      ('sub-visibility-b', 'shop-visibility-b', 'plan-visibility', 'active', '2099-01-01T00:00:00.000Z', '${NOW}', '${NOW}');
     INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
     VALUES ('user-visibility-owner', 'owner@visibility.test', 'Owner', 'active', '${NOW}', '${NOW}'),
       ('user-visibility-manager', 'manager@visibility.test', 'Manager', 'active', '${NOW}', '${NOW}'),

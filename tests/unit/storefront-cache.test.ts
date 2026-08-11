@@ -4,6 +4,7 @@ import { isStorefrontCacheCandidate, resolveActiveStorefrontCacheKey } from "../
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
 type DomainRow = {
+  currentPeriodEnd: string | null;
   domainId: string;
   domainValidationMetadataJson: string;
   domainVersion: number;
@@ -44,6 +45,7 @@ const cacheKeyInput = {
 
 function activeDomain(overrides: Partial<Exclude<DomainRow, null>> = {}): Exclude<DomainRow, null> {
   return {
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     domainId: "domain-current",
     domainValidationMetadataJson: JSON.stringify({
       turnstile: {
@@ -86,6 +88,7 @@ describe("storefront cache domain gate", () => {
     expect(queries()[0]?.sql).toContain("'-12 hours'");
     expect(queries()[0]?.sql).toContain("shops.status = 'active'");
     expect(queries()[0]?.sql).toContain("ORDER BY created_at DESC, id DESC");
+    expect(queries()[0]?.sql).toContain("current_period_end");
     expect(queries()[0]?.sql).toContain("trial_ends_at");
     expect(queries()[0]?.sql).toContain("grace_ends_at");
   });
@@ -136,6 +139,24 @@ describe("storefront cache domain gate", () => {
       ...cacheKeyInput,
     });
     expect(key).toContain("/i/domain-current/v7-3/shop.example.com/");
+  });
+
+  it("does not reuse a cached response after the paid period expires", async () => {
+    const activeKey = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain()).env,
+      ...cacheKeyInput,
+    });
+    const sharedCache = new Map([[activeKey, "paid storefront"]]);
+
+    const expiredKey = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({ currentPeriodEnd: "2000-01-01T00:00:00.000Z" })).env,
+      ...cacheKeyInput,
+    });
+
+    expect(activeKey).not.toBeNull();
+    expect(sharedCache.get(activeKey)).toBe("paid storefront");
+    expect(expiredKey).toBeNull();
+    expect(sharedCache.get(expiredKey)).toBeUndefined();
   });
 
   it("misses a stale cache object after the hostname is reassigned", async () => {

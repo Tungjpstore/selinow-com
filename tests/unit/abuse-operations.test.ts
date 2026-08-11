@@ -134,7 +134,7 @@ function seed(database: DatabaseSync): void {
         id, shop_id, plan_id, state, current_period_start, current_period_end,
         created_at, updated_at
       ) VALUES (?, ?, 'plan-test', 'active', ?, ?, ?, ?)
-    `).run(`sub-${id}`, id, now, new Date(NOW.getTime() + 86_400_000).toISOString(), now, now);
+    `).run(`sub-${id}`, id, now, "2099-01-01T00:00:00.000Z", now, now);
     database.prepare(`
       INSERT INTO shop_domains (
         id, shop_id, hostname_normalized, type, status, is_primary,

@@ -25,6 +25,7 @@ export type TelegramWebhookIntegration = {
   defaultLocale: string;
   shopStatus: string;
   subscriptionState: string;
+  currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
 };
@@ -81,6 +82,7 @@ export async function loadTelegramWebhookIntegration(env: AppBindings, webhookPu
       shops.default_locale AS defaultLocale,
       shops.status AS shopStatus,
       shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
       shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.grace_ends_at AS graceEndsAt
     FROM telegram_integrations

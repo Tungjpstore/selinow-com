@@ -5,6 +5,8 @@ import { AppError } from "../core/errors";
  * still valid. Trial and grace rows without a deadline fail closed.
  */
 export type SubscriptionAccessInput = {
+  /** Set when the authoritative paid period was loaded with the subscription row. */
+  currentPeriodEnd?: string | null | undefined;
   graceEndsAt?: string | null | undefined;
   now?: Date | string | undefined;
   subscriptionState: string;
@@ -22,7 +24,11 @@ export function subscriptionAllows(input: SubscriptionAccessInput): boolean {
     ? input.now.getTime()
     : Date.parse(input.now ?? new Date().toISOString());
   if (!Number.isFinite(now)) return false;
-  if (["active", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"].includes(input.subscriptionState)) return true;
+  if (["active", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"].includes(input.subscriptionState)) {
+    if (input.currentPeriodEnd === undefined) return false;
+    const currentPeriodEnd = asTime(input.currentPeriodEnd);
+    return currentPeriodEnd !== null && currentPeriodEnd > now;
+  }
   if (input.subscriptionState === "trialing") {
     const trialEndsAt = asTime(input.trialEndsAt);
     return trialEndsAt !== null && trialEndsAt > now;

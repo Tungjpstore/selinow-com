@@ -154,7 +154,7 @@ describe("tenant storefront draft contract", () => {
     for (const [shopId, userId, subscriptionId] of [["shop-a", "user-a", "sub-a"], ["shop-b", "user-b", "sub-b"]] as const) {
       database.database.prepare("INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at) VALUES (?, ?, 'owner', 'active', ?, ?)")
         .run(shopId, userId, now, now);
-      database.database.prepare("INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at) VALUES (?, ?, 'plan_business_v1', 'active', ?, ?)")
+      database.database.prepare("INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at) VALUES (?, ?, 'plan_business_v1', 'active', '2099-01-01T00:00:00.000Z', ?, ?)")
         .run(subscriptionId, shopId, now, now);
     }
     database.database.prepare(`
