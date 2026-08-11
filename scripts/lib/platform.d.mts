@@ -203,6 +203,14 @@ export function validateStagingRuntimeIdentity(
   manifest: Record<string, any>,
   wranglerConfig: Record<string, any>,
 ): { databaseId: string; databaseName: string };
+export function validateRemoteDatabaseTarget(
+  spec: Record<string, any>,
+  manifest: Record<string, any>,
+  wranglerConfig: Record<string, any>,
+): { accountId: string; databaseId: string; databaseName: string };
+export function loadRemoteDatabaseTarget(
+  environment: "staging" | "production",
+): Promise<{ accountId: string; databaseId: string; databaseName: string }>;
 export function assertStagingAccountIdentity(
   whoamiOutput: unknown,
   accountId: string,

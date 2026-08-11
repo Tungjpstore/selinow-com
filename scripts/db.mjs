@@ -32,6 +32,7 @@ import {
 import {
   assertStagingMutationAdmission,
   buildPinnedCloudflareEnvironment,
+  loadRemoteDatabaseTarget,
   repositoryRoot,
 } from "./lib/platform.mjs";
 import {
@@ -56,6 +57,12 @@ function databaseTargetFromAdmission(admission) {
     databaseId: admission.databaseId,
     databaseName: admission.databaseName,
   };
+}
+
+async function buildReadOnlyDatabaseEnvironment(environment) {
+  if (environment === "local") return process.env;
+  const target = await loadRemoteDatabaseTarget(environment);
+  return buildPinnedCloudflareEnvironment(process.env, target.accountId);
 }
 
 try {
@@ -187,23 +194,34 @@ try {
       ok: true,
     }, flags.json);
   } else if (operation === "preflight") {
+    const commandEnvironment = await buildReadOnlyDatabaseEnvironment(flags.environment);
     const baseArgs = ["d1", "execute", "PLATFORM_DB", ...targetFlags, "--command"];
     const phase7 = evaluatePhase7Preflight(parseD1PreflightOutput(
-      runWrangler([...baseArgs, PHASE7_PREFLIGHT_SQL, "--json"], { cwd: repositoryRoot }).stdout,
+      runWrangler([...baseArgs, PHASE7_PREFLIGHT_SQL, "--json"], {
+        cwd: repositoryRoot,
+        env: commandEnvironment,
+      }).stdout,
     ));
     const payosRelationships = evaluatePayosRelationshipPreflight(
       parsePayosRelationshipPreflightOutput(
         runWrangler([...baseArgs, PAYOS_RELATIONSHIP_PREFLIGHT_SQL, "--json"], {
           cwd: repositoryRoot,
+          env: commandEnvironment,
         }).stdout,
       ),
     );
     const providerSchema = parsePaymentProviderSchemaOutput(
-      runWrangler([...baseArgs, PAYMENT_PROVIDER_SCHEMA_SQL, "--json"], { cwd: repositoryRoot }).stdout,
+      runWrangler([...baseArgs, PAYMENT_PROVIDER_SCHEMA_SQL, "--json"], {
+        cwd: repositoryRoot,
+        env: commandEnvironment,
+      }).stdout,
     );
     const provider = providerSchema.applied
       ? evaluatePaymentProviderPreflight(parsePaymentProviderPreflightOutput(
-          runWrangler([...baseArgs, PAYMENT_PROVIDER_PREFLIGHT_SQL, "--json"], { cwd: repositoryRoot }).stdout,
+          runWrangler([...baseArgs, PAYMENT_PROVIDER_PREFLIGHT_SQL, "--json"], {
+            cwd: repositoryRoot,
+            env: commandEnvironment,
+          }).stdout,
         ))
       : {
           checks: [{ code: "payment_provider_projection", detail: "not_applied", ok: true }],
@@ -216,7 +234,9 @@ try {
     writeOutput({ ...result, environment: flags.environment }, flags.json);
     if (!result.ok) process.exitCode = 1;
   } else {
-    let commandEnvironment = process.env;
+    let commandEnvironment = operation === "status"
+      ? await buildReadOnlyDatabaseEnvironment(flags.environment)
+      : process.env;
     if (requiresProductionMigrationAdmission(operation, flags)) {
       if (!flags.releaseManifestPath) throw new Error("production_release_manifest_required");
       if (requiresMaintenanceDrainConfirmation(operation, flags)) {

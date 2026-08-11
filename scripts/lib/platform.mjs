@@ -288,6 +288,68 @@ export function validateStagingRuntimeIdentity(spec, manifest, wranglerConfig) {
   };
 }
 
+export function validateRemoteDatabaseTarget(spec, manifest, wranglerConfig) {
+  const environment = spec?.environment;
+  if (environment === "staging") {
+    return {
+      accountId: spec.accountId,
+      ...validateStagingRuntimeIdentity(spec, manifest, wranglerConfig),
+    };
+  }
+
+  const manifestDatabase = manifest?.resources?.d1;
+  if (
+    environment !== "production"
+    || manifest?.environment !== environment
+    || manifest?.accountId !== spec.accountId
+    || manifest?.workerName !== spec.workerName
+    || manifest?.zoneId !== spec.zoneId
+    || manifest?.zoneName !== spec.zoneName
+    || manifestDatabase?.name !== spec?.resources?.d1
+    || typeof manifestDatabase?.id !== "string"
+    || !d1DatabaseIdPattern.test(manifestDatabase.id)
+  ) {
+    throw new Error("remote_database_runtime_manifest_invalid");
+  }
+
+  const configuredEnvironment = wranglerConfig?.env?.[environment];
+  const configuredDatabases = configuredEnvironment?.d1_databases;
+  const platformDatabases = Array.isArray(configuredDatabases)
+    ? configuredDatabases.filter((database) => database?.binding === "PLATFORM_DB")
+    : [];
+  const [configuredDatabase] = platformDatabases;
+  if (
+    configuredEnvironment?.name !== spec.workerName
+    || platformDatabases.length !== 1
+    || configuredDatabase?.database_name !== manifestDatabase.name
+    || configuredDatabase?.database_id !== manifestDatabase.id
+    || configuredDatabase?.migrations_dir !== "./migrations"
+    || configuredEnvironment?.vars?.RESOURCE_MANIFEST_VERSION !== manifest.version
+  ) {
+    throw new Error("remote_database_target_mismatch");
+  }
+
+  return {
+    accountId: spec.accountId,
+    databaseId: manifestDatabase.id,
+    databaseName: manifestDatabase.name,
+  };
+}
+
+export async function loadRemoteDatabaseTarget(environment) {
+  if (!new Set(["staging", "production"]).has(environment)) {
+    throw new Error("remote_database_environment_invalid");
+  }
+  const [spec, manifest, wranglerConfig] = await Promise.all([
+    loadEnvironment(environment),
+    readFile(resolve(repositoryRoot, `infra/generated/${environment}.json`), "utf8")
+      .then((text) => parseJson(text, `generated_${environment}`)),
+    readFile(resolve(repositoryRoot, "wrangler.jsonc"), "utf8")
+      .then((text) => parseJson(text, "wrangler_config")),
+  ]);
+  return validateRemoteDatabaseTarget(spec, manifest, wranglerConfig);
+}
+
 async function loadStagingRuntimeIdentity(spec) {
   const [manifest, wranglerConfig] = await Promise.all([
     readFile(resolve(repositoryRoot, "infra/generated/staging.json"), "utf8")

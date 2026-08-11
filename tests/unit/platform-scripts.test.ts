@@ -34,6 +34,7 @@ import {
   type PlatformEnvironmentSpec,
   validateProductionLiveInfrastructure,
   validateProductionWorkerRouteInventory,
+  validateRemoteDatabaseTarget,
   validateStagingRouteInventory,
   validateStagingRuntimeIdentity,
 } from "../../scripts/lib/platform.mjs";
@@ -1322,6 +1323,57 @@ describe("Cloudflare for SaaS platform configuration", () => {
         },
       },
     })).toThrow("staging_database_target_mismatch");
+  });
+
+  it("binds production read-only database access to the generated manifest and Wrangler target", () => {
+    const productionSpec = {
+      accountId: stagingSpec.accountId,
+      environment: "production",
+      resources: { d1: "selinow-production" },
+      workerName: "selinow-com-production",
+      zoneId: stagingSpec.zoneId,
+      zoneName: stagingSpec.zoneName,
+    };
+    const manifest = {
+      accountId: productionSpec.accountId,
+      environment: productionSpec.environment,
+      resources: {
+        d1: { id: PRODUCTION_DATABASE_ID, name: productionSpec.resources.d1 },
+      },
+      version: PRODUCTION_MANIFEST_VERSION,
+      workerName: productionSpec.workerName,
+      zoneId: productionSpec.zoneId,
+      zoneName: productionSpec.zoneName,
+    };
+    const database = {
+      binding: "PLATFORM_DB",
+      database_id: PRODUCTION_DATABASE_ID,
+      database_name: productionSpec.resources.d1,
+      migrations_dir: "./migrations",
+    };
+    const wranglerConfig = {
+      env: {
+        production: {
+          d1_databases: [database],
+          name: productionSpec.workerName,
+          vars: { RESOURCE_MANIFEST_VERSION: manifest.version },
+        },
+      },
+    };
+
+    expect(validateRemoteDatabaseTarget(productionSpec, manifest, wranglerConfig)).toEqual({
+      accountId: productionSpec.accountId,
+      databaseId: PRODUCTION_DATABASE_ID,
+      databaseName: productionSpec.resources.d1,
+    });
+    expect(() => validateRemoteDatabaseTarget(productionSpec, manifest, {
+      env: {
+        production: {
+          ...wranglerConfig.env.production,
+          d1_databases: [{ ...database, database_name: stagingSpec.resources.d1 }],
+        },
+      },
+    })).toThrow("remote_database_target_mismatch");
   });
 
   it("requires exactly one live D1 name and UUID match", () => {
