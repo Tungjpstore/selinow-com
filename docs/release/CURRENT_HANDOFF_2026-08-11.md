@@ -175,37 +175,38 @@ staging Worker version used by the non-payment lane.
 
 ## Production NO-GO
 
-Production remains **NO-GO**. Fresh read-only evidence still shows the old production
-runtime and schema boundary: D1 through `0052`, health phase 6, missing current
-public routes such as `/solutions`, `/sitemap.xml`, and `/llms.txt`, canonical
-Dodo webhook `404`, no production queue consumers, no production cron schedule,
-and nine of ten required Worker secret names with
-`DODO_PAYMENTS_WEBHOOK_KEY` absent. The shared-zone route ownership itself is now
-correct: production owns `*/*`, `selinow.com/*`, and `*.selinow.com/*`; the four
-explicit staging exceptions remain staging-owned. Source-side corrections do not
-change the other remote blockers.
+Production remains **NO-GO** for migration and Worker deploy. Fresh live
+evidence still shows runtime phase 6, D1 through `0052` with `0053`-`0095`
+pending, missing current public routes such as `/solutions` and `/sitemap.xml`,
+canonical Dodo webhook `404`, no production queue consumers, and no production
+cron schedule. Shared-zone route ownership remains correct: production owns
+`*/*`, `selinow.com/*`, and `*.selinow.com/*`; the four explicit staging
+exceptions remain staging-owned.
 
-The following gates remain mandatory before any production continuation:
+A 2026-08-13 continuation-prep ceremony completed without mutating production
+schema or traffic:
 
-1. Accepted Dodo TEST and PayOS controlled-staging UAT bound to the exact
-   combined staging release.
-2. Fresh full staging journey acceptance for onboarding, Website and Telegram
-   commerce, buyer recovery, seller operations, privacy, custom domains,
-   Turnstile, tenant isolation, queues, DLQ, cron, and rollback.
-3. Clean reviewed final commit/tree plus passing full repository verification,
-   release doctor, migration admission, and immutable evidence index.
-4. Fresh protected production backup and isolated restore drill for the
-   `0053`-`0094` continuation, with a reviewed rollback target and mutation
-   window.
-5. Production Worker secret-name inventory, route/domain/hostname/SSL/DNS,
-   Turnstile, queue-consumer, cron, and monitoring admission.
-6. Named release, data, payment, security, legal, support, domain, and incident
-   approvals; owner-approved legal/support/refund/privacy values; controlled
-   pilots; acknowledgement tests; and observation windows.
+- Protected backup: `bkp_20260812221907_59e419a89383`.
+- Isolated restore drill of that backup plus source `0053`-`0095`:
+  `rdr_20260812221923_f9a186a00bf9` (integrity ok, zero foreign-key
+  violations, temporary target removed).
+- Platform doctor for production resources and SaaS DNS: pass.
+- Live Worker secret names observed: nine of ten required names present;
+  `DODO_PAYMENTS_WEBHOOK_KEY` remains absent. No secret values were recorded.
 
-Production must not be migrated or deployed while any item is missing. The
-product must not be described as able to collect payments until the payment
-handoff and combined release admission are accepted.
+The owner deferred genuine Dodo/PayOS UAT. That deferral does not mark
+commerce accepted and does not authorize payment collection. The remaining
+mandatory gates before any production continuation are:
+
+1. Combined release admission, including owner-accepted payment evidence or an
+   explicit fail-closed non-payment release contract that the current doctor
+   does not provide.
+2. `DODO_PAYMENTS_WEBHOOK_KEY` bootstrap, production trigger/queue-consumer
+   convergence, rollback rehearsal, monitoring, legal/support values, named
+   approvals, and controlled pilots.
+
+Production must not be migrated or deployed while those items are missing. The
+product must not be described as able to collect payments.
 
 ## Verification boundary
 

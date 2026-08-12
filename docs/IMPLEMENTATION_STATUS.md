@@ -25,11 +25,15 @@ Local verification on the candidate passed `npm run check` (771 files, zero
 errors), `npm run lint`, `npx tsc --noEmit`, `npm test` (306 files, 2,396
 tests), `npm run build`, `npm run build:staging`,
 `npm audit --audit-level=high` (zero high vulnerabilities), both deploy
-dry-runs, and `git diff --check`. `npm run release:doctor -- --json` remains
-fail-closed: missing production evidence, approvals, backup/restore, rollback,
-pilot, monitoring, legal/support, genuine Dodo/PayOS UAT bound to this
-release, and production Worker secret admission. No production migration or
-deployment was performed.
+dry-runs, and `git diff --check`. A 2026-08-13 production continuation-prep
+ceremony created backup `bkp_20260812221907_59e419a89383` and isolated restore
+`rdr_20260812221923_f9a186a00bf9` for the `0053`-`0095` source chain against
+the live `0052` production D1. Production platform doctor passed. Live Worker
+secret names are nine of ten required names; `DODO_PAYMENTS_WEBHOOK_KEY` is
+absent. Production trigger inventory still has zero queue consumers and no
+cron. The owner deferred genuine Dodo/PayOS UAT. `npm run release:doctor --
+--json` remains fail-closed. No production migration, Worker deploy, trigger
+apply, or payment-collection claim was performed.
 
 The previous 2026-08-11 reconciliation recorded candidate
 `3a44aadbcbe6a88115eb28743fcb19fa6af1cf5a`, tree
