@@ -17,6 +17,7 @@ type DomainRow = {
   subscriptionState: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
+  featureFlagsJson: string;
 } | null;
 
 function fakeEnvironment(row: DomainRow): { env: Pick<AppBindings, "PLATFORM_DB">; queries: () => { sql: string; values: unknown[] }[] } {
@@ -66,6 +67,7 @@ function activeDomain(overrides: Partial<Exclude<DomainRow, null>> = {}): Exclud
     subscriptionState: "active",
     trialEndsAt: null,
     graceEndsAt: null,
+    featureFlagsJson: JSON.stringify({ customDomain: true }),
     ...overrides,
   };
 }
@@ -91,6 +93,8 @@ describe("storefront cache domain gate", () => {
     expect(queries()[0]?.sql).toContain("current_period_end");
     expect(queries()[0]?.sql).toContain("trial_ends_at");
     expect(queries()[0]?.sql).toContain("grace_ends_at");
+    expect(queries()[0]?.sql).toContain("plans.feature_flags_json");
+    expect(queries()[0]?.sql).toContain("$.customDomain");
   });
 
   it("uses the authoritative shop default when no request locale hint is present", async () => {
@@ -157,6 +161,27 @@ describe("storefront cache domain gate", () => {
     expect(sharedCache.get(activeKey)).toBe("paid storefront");
     expect(expiredKey).toBeNull();
     expect(sharedCache.get(expiredKey)).toBeUndefined();
+  });
+
+  it("does not issue a custom-host cache key after downgrade", async () => {
+    const key = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({ featureFlagsJson: JSON.stringify({ customDomain: false }) })).env,
+      ...cacheKeyInput,
+    });
+
+    expect(key).toBeNull();
+  });
+
+  it("keeps platform-subdomain cache admission independent from custom-domain entitlement", async () => {
+    const key = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({
+        domainType: "platform_subdomain",
+        featureFlagsJson: JSON.stringify({ customDomain: false }),
+      })).env,
+      ...cacheKeyInput,
+    });
+
+    expect(key).not.toBeNull();
   });
 
   it("misses a stale cache object after the hostname is reassigned", async () => {

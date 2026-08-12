@@ -6,7 +6,13 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { readTrustedStagingUatBinding } from "./lib/commerce-uat-evidence.mjs";
-import { assertPayosStagingUatEvidence, serializePayosOwnerAttestationPayload } from "./lib/payos-uat-evidence.mjs";
+import {
+  assertPayosStagingUatEvidence,
+  readPayosProviderExecutionArtifacts,
+  readPayosRunnerTrustAnchor,
+  readPayosScenarioArtifactFingerprints,
+  serializePayosOwnerAttestationPayload,
+} from "./lib/payos-uat-evidence.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
 const KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/u;
@@ -20,6 +26,9 @@ function parseArguments(argv) {
     else if (argument === "--private-key") options.privateKeyPath = argv[++index] ?? "";
     else if (argument === "--key-id") options.keyId = argv[++index] ?? "";
     else if (argument === "--signed-at") options.signedAt = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-key-id") options.runnerAttestationKeyId = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-public-key") options.runnerAttestationPublicKeyPath = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-spki-sha256") options.runnerAttestationSpkiSha256 = argv[++index] ?? "";
     else if (argument === "--output") options.output = argv[++index] ?? "";
     else if (argument === "--overwrite") options.overwrite = true;
     else throw new Error("payos_uat_sign_argument_invalid");
@@ -54,6 +63,8 @@ export async function signPayosUatEvidence({
   output,
   overwrite = false,
   root = repositoryRoot,
+  stagingRunnerPublicKeys,
+  stagingRunnerSpkiFingerprints,
 }) {
   if (typeof evidencePath !== "string" || evidencePath.length === 0) throw new Error("payos_uat_evidence_required");
   if (typeof privateKeyPath !== "string" || privateKeyPath.length === 0) throw new Error("payos_uat_owner_private_key_required");
@@ -83,9 +94,19 @@ export async function signPayosUatEvidence({
   const publicKey = createPublicKey(privateKey);
   const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
   const binding = readTrustedStagingUatBinding({ evidence: signedEvidence, repositoryRoot: root });
+  const scenarioArtifactFingerprints = readPayosScenarioArtifactFingerprints({ evidence: signedEvidence, repositoryRoot: root });
+  const providerExecution = readPayosProviderExecutionArtifacts({
+    evidence: signedEvidence,
+    repositoryRoot: root,
+    stagingRunnerPublicKeys,
+    stagingRunnerSpkiFingerprints,
+  });
   assertPayosStagingUatEvidence(signedEvidence, {
     ...binding,
     ownerAttestationPublicKeys: { [keyId]: publicKeyPem },
+    providerExecutionArtifactFingerprints: providerExecution.fingerprints,
+    requireArtifactProof: true,
+    scenarioArtifactFingerprints,
   });
   const outputRelative = relative(resolve(root, ".wrangler", "releases", "staging", evidence.release.releaseId), outputPath);
   if (outputRelative !== "payos-uat-evidence.json") throw new Error("payos_uat_evidence_path_noncanonical");
@@ -112,7 +133,14 @@ export async function signPayosUatEvidence({
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const result = await signPayosUatEvidence(parseArguments(argv));
+  const options = parseArguments(argv);
+  const runnerTrust = readPayosRunnerTrustAnchor({
+    keyId: options.runnerAttestationKeyId,
+    publicKeyPath: options.runnerAttestationPublicKeyPath,
+    repositoryRoot,
+    spkiSha256: options.runnerAttestationSpkiSha256,
+  });
+  const result = await signPayosUatEvidence({ ...options, ...runnerTrust });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return result;
 }

@@ -1,20 +1,36 @@
 # Implementation Status
 
-Last updated: 2026-08-11
+Last updated: 2026-08-13
 
 ## Current source of truth
 
-Current staging reconciliation (2026-08-11): the reviewed candidate is commit
+Continuation after the previous agent quota stop (2026-08-13): the last
+deployed staging identity remains commit
+`92869a04a250b9d0d17941f287ca0024821e0267`, tree
+`c2bce000b0069ba4126b1f53ad5a17aa60109f3e`, release
+`stg_20260811T053816Z_92869a04a250`, and Worker version
+`97639e04-d3d1-49df-9914-94ad906152c6` at 100%. That ceremony applied the
+contiguous `0001`-`0094` ledger. The current dirty working tree continues
+through source migration
+`0095_telegram_generation_and_legacy_outbox_quarantine.sql` and is not a
+reviewed commit/tree. Local verification on this dirty tree passed
+`npm run check` (771 files, zero errors), `npm run lint`, `npx tsc --noEmit`,
+`npm test` (306 files, 2,396 tests), `npm run build`, `npm run build:staging`,
+`npm audit --audit-level=high` (zero high vulnerabilities), both deploy
+dry-runs, and `git diff --check`. `npm run release:doctor -- --json` remains
+fail-closed: missing production evidence, approvals, backup/restore, rollback,
+pilot, monitoring, legal/support, genuine Dodo/PayOS UAT, a clean commit/tree,
+and Worker secret admission. A fresh clean commit, staging manifest,
+backup/restore, deploy, and Cloudflare-observed deployment evidence are
+required before any new staging or production admission. No production
+migration or deployment was performed.
+
+The previous 2026-08-11 reconciliation recorded candidate
 `3a44aadbcbe6a88115eb28743fcb19fa6af1cf5a`, tree
-`2795b2f91c1d9874c1182d56364516047ab358b8`. Release
-`stg_20260811T043926Z_3a44aadbcbe6` applied the contiguous source continuation
-through `0094_shop_creation_admission.sql` to staging D1. Candidate-bound
-pre-migration backup/restore references are
-`bkp_20260811043704_c66884aa6ba2` and
-`rdr_20260811043754_195d99f18aa2`; post-migration references are
-`bkp_20260811044142_68a80a977dbd` and
-`rdr_20260811044225_e9bafe5eeb46`. The known staging Worker version is
-`2f80e24b-e9bc-4c25-9bdc-51916e4d1cb5`.
+`2795b2f91c1d9874c1182d56364516047ab358b8`, and release
+`stg_20260811T043926Z_3a44aadbcbe6` as an earlier staging identity. That
+identity is superseded by the later `92869a04` staging ceremony above and
+must not be reused.
 
 The combined staging release remains `provider_pending`. Genuine Dodo TEST and
 controlled PayOS staging UAT are not accepted, and their artifacts are not yet
@@ -139,7 +155,7 @@ protected backup/restore evidence and an approved mutation window.
   `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. It is not a post-documentation
   HEAD or a deployed identity; the next release ceremony must recapture the
   final clean commit and tree.
-- Current operational source migration chain: contiguous `0001`-`0094`.
+- Current operational source migration chain: contiguous `0001`-`0095`.
   Staging post-migration evidence for release
   `stg_20260808T235913Z_73d0c27493ea` records all 90 migrations through
   `0090_payos_provider_claim_clear_guard.sql`, bound to commit
@@ -412,7 +428,7 @@ or seller pilot was performed for P3.
 | 7 — Custom domains | Complete | External hostname ownership, Cloudflare for SaaS provisioning, SSL/DNS activation, primary switching, tenant rendering, redirect, deletion and DNS cleanup passed on staging |
 | 8 — Automated onboarding | In progress | Repository wizard, readiness, tenant automation API, durable task scheduling, guarded continuation evidence and Selinow-owned executors are live on staging; fresh-seller and external-provider acceptance remain pending |
 | 9 — Operations/security/platform extensibility | In progress | Operations runtime, channel-neutral connections, normalized order attribution, transactional domain events, generic queue fan-out/delivery, DLQ replay, accessibility gates, public-flow axe scans and read-only staging QA are accepted. Phase B globalization and the Phase C entitlement, reversal and generated-license execution slices through migration `0052` are implemented. Migrations `0053`-`0069` add seller operations and channel/provider contract boundaries. Paid Starter/Pro pricing, seven-day trial, three-day paid-renewal grace, Dodo evidence processing, role/plan/state gates, usage metering, activation analytics, Phase 1 billing/restore hardening, and durable catalog activation timestamps are implemented through migration `0080`. Provider activation and remote migration remain pending. Production remains on the previously admitted `0001`-`0052` schema until separately approved migrations are applied. |
-| 10 — Production release | PLATFORM HANDOFF COMPLETE | The guarded first-production ceremony completed on 2026-07-30: D1 migrations `0001`-`0052` are applied forward-only, candidate Worker version `6ca9c890-ed04-44dc-ac32-44b36881f2dc` passed binding/route-neutrality checks, the private canary smoke passed, and the platform-only route handoff is live. `selinow.com/*` and `*.selinow.com/*` point to `selinow-com-production`; exact staging routes and `*/*` remain on `selinow-com-staging`. Exact Worker Custom Domains for `app.selinow.com` and `api.selinow.com` were then attached idempotently to the production Worker, and both now resolve publicly and pass HTTPS health checks. Preview subdomain, queues, cron and secrets were not changed. External customer-domain cutover, Turnstile hostname admission and payment/Telegram/fulfillment activation remain explicitly out of scope |
+| 10 — Production release | CONTINUATION NO-GO | The guarded first-production ceremony completed on 2026-07-30 and production remains on D1 `0001`-`0052` / runtime phase 6. Current route ownership is `selinow.com/*`, `*.selinow.com/*`, and `*/*` on `selinow-com-production`, with only the exact staging exceptions on `selinow-com-staging`. The current source through `0095`, production cron/queue consumers, provider acceptance, legal/support approval, backup/restore, rollback, pilot, and monitoring evidence remain pending; no continuation production deployment is admitted. |
 
 ### Phase 1 completion candidate R3 (2026-08-03)
 
@@ -678,7 +694,7 @@ activation, secret update, DNS/route change, webhook, or seller pilot was perfor
 - The proxied originless fallback `proxy-fallback.selinow.com`, friendly target `customers.selinow.com` and Cloudflare for SaaS fallback origin are provisioned and active; non-secret `CLOUDFLARE_ZONE_ID`/`SAAS_CNAME_TARGET` Worker vars use the live zone contract.
 - Idempotent platform provisioning that reuses exact SaaS DNS/fallback state, creates missing owned records, reconciles same-type drift and fails closed on conflicting DNS records.
 - Platform doctor checks for the staging Worker secret name, temporary operator API context, exact proxied DNS records and an `active` fallback origin without printing the token.
-- Shared-zone routing was initially applied and verified against staging. The completed production handoff now routes `selinow.com/*` and `*.selinow.com/*` to `selinow-com-production`, preserves exact staging routes plus `*/* -> selinow-com-staging`, and leaves external custom-domain activation pending.
+- Shared-zone routing was initially applied with a staging fallback. The current reconciled contract routes `selinow.com/*`, `*.selinow.com/*`, and `*/*` to `selinow-com-production`, preserves only the four exact staging exceptions on `selinow-com-staging`, and leaves external custom-domain activation pending until current entitlement/Turnstile acceptance is complete.
 - Forward-only custom-domain migrations with atomic per-plan quota enforcement (`0014_custom_domain_quotas.sql`), tenant-bound TXT ownership claims (`0018_custom_domain_ownership_claims.sql`), DNS/check/delete lifecycle, provider leases, optimistic versioning, primary uniqueness, canonical repair and payment origin snapshots.
 - Owner-only seller APIs and dashboard UX for create/list/check/primary/delete with TXT-before-CNAME guidance, accessible loading/error states, recent-auth and CSRF enforcement.
 - Bounded Cloudflare custom-hostname client, hostname/IDNA validation, DNS-over-HTTPS readiness checks and exponential reconciliation backoff.
@@ -785,7 +801,7 @@ activation, secret update, DNS/route change, webhook, or seller pilot was perfor
 - The first live read-only smoke run returned 5/6 checks: catalog, storefront home/product and both GET method boundaries passed; `/api/health` returned `200` but `health_contract_mismatch` because the currently deployed Worker predates the new canonical marker. No request body, checkout/payment call or staging mutation occurred.
 - Production migrations `0001`-`0052`, the Worker candidate upload/deploy, route-only platform handoff and exact dashboard/API Worker Domain activation are complete. Continuation migrations `0053`-`0076` remain source/local-only and pending approval. Private artifacts are stored under `.wrangler/bootstrap/bootstrap_20260730_first_release/`: `canary-upload.json`, `canary-applied.json`, `canary-smoke.json`, `promote-live-inventory.json`, `promote-inventory.json`, `promote-plan.json`, `promotion-acceptance.json`, `promotion-applied.json`, `platform-domain-activation.json` and `production-smoke.json`.
 - The first-production canary path is implemented as a guarded three-phase flow: `versions upload --strict` captures exactly one candidate and validates every production binding; version `metadata.has_preview` is informational, while the read-only Worker subdomain inventory must report both `enabled=false` and `previews_enabled=false` before and after each guarded phase; apply also requires `canary.selinow.com` to resolve publicly only to Cloudflare anycast A/AAAA addresses before candidate deployment, checks DNS and subdomain state again immediately before one exact route `POST`, and compensates if either admission changes; rollback deletes only the captured route ID before restoring the exact control version and disabled subdomain state. The completed canary served 200 for `/`, `/api/health`, `/pricing` and `/login`; `/api/health` returned `principal-channel-canonical-v1`.
-- The completed platform-only handoff reconciled staging host routes, replaced the apex and wildcard routes with production, preserved `*/* -> selinow-com-staging`, and deleted the canary route last. A fresh post-promotion inventory confirms the candidate is active, all three production queues have zero consumers, cron schedules are empty, and the Worker subdomain remains disabled. Exact production Worker Domains now provide public DNS/TLS for `app.selinow.com` and `api.selinow.com`; both return the canonical health marker, and the dashboard login page returns 200. No payment, Telegram, fulfillment or external customer-domain behavior was activated.
+- The historical platform-only handoff replaced the apex and wildcard routes with production and initially retained a staging catch-all. That catch-all has since been corrected: current live ownership keeps `*/*` on production and only exact staging exceptions on the staging Worker. Production still has zero queue consumers and no cron schedule, remains on runtime phase 6 / schema `0052`, and has not activated current payment, Telegram, fulfillment, or external custom-domain behavior.
 - Full commerce/provider activation still requires controlled PayOS and Telegram acceptance, two seller pilots, remaining Phase 9 runtime/extensibility/security and external-operations evidence, monitoring/support/legal ownership and a release SHA/tag. A future external-domain cutover additionally requires the pending external-host inventory and Turnstile hostname-admission lifecycle. These gates do not block the completed platform-only frontend handoff.
 
 ## Verification

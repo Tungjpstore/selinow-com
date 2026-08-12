@@ -1385,10 +1385,20 @@ async function cleanupTelegram(input: {
   };
   await assertProviderCleanupFence(context, "telegram_cleanup");
   const integration = await input.env.PLATFORM_DB.prepare(`
-    SELECT id, active_credential_id AS activeCredentialId
+    SELECT id, active_credential_id AS activeCredentialId,
+      generation_state AS generationState, integration_generation AS integrationGeneration,
+      status
     FROM telegram_integrations WHERE shop_id = ? LIMIT 1
-  `).bind(input.shopId).first<{ activeCredentialId: string | null; id: string }>();
+  `).bind(input.shopId).first<{
+    activeCredentialId: string | null;
+    generationState: "active" | "draining";
+    id: string;
+    integrationGeneration: number;
+    status: string;
+  }>();
   if (integration === null) return;
+  const nowIso = input.now.toISOString();
+  const fenceValues = providerCleanupFenceValues(context, "telegram_cleanup");
   if (integration.activeCredentialId !== null) {
     try {
       await assertProviderCleanupFence(context, "telegram_cleanup");
@@ -1401,21 +1411,74 @@ async function cleanupTelegram(input: {
         throw error;
       }
     }
+    if (integration.generationState !== "draining") {
+      const drained = await input.env.PLATFORM_DB.prepare(`
+        UPDATE telegram_integrations
+        SET generation_state = 'draining', updated_at = ?
+        WHERE id = ? AND shop_id = ?
+          AND generation_state = 'active'
+          AND integration_generation = ?
+          AND active_credential_id IS ?
+          AND NOT EXISTS (
+            SELECT 1 FROM telegram_updates
+            WHERE telegram_updates.integration_id = telegram_integrations.id
+              AND telegram_updates.shop_id = telegram_integrations.shop_id
+              AND telegram_updates.integration_generation = telegram_integrations.integration_generation
+              AND telegram_updates.status = 'processing'
+          )
+          AND ${PROVIDER_CLEANUP_FENCE}
+      `).bind(
+        nowIso,
+        integration.id,
+        input.shopId,
+        integration.integrationGeneration,
+        integration.activeCredentialId,
+        ...fenceValues,
+      ).run();
+      if (drained.meta.changes !== 1) throw new AppError("telegram_integration_busy", 409, ["retry"]);
+    }
   }
-  const nowIso = input.now.toISOString();
   await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
       UPDATE telegram_integrations
       SET status = 'disabled', webhook_status = 'disabled', active_credential_id = NULL,
-        last_safe_error_code = NULL, updated_at = ?
-      WHERE id = ? AND shop_id = ? AND ${PROVIDER_CLEANUP_FENCE}
-    `).bind(nowIso, integration.id, input.shopId, ...providerCleanupFenceValues(context, "telegram_cleanup")),
+        integration_generation = CASE
+          WHEN active_credential_id IS NULL THEN integration_generation
+          ELSE integration_generation + 1
+        END,
+        generation_state = 'active', last_safe_error_code = NULL, updated_at = ?
+      WHERE id = ? AND shop_id = ?
+        AND (
+          (active_credential_id IS NULL AND generation_state = 'active')
+          OR (
+            generation_state = 'draining'
+            AND integration_generation = ?
+            AND active_credential_id IS ?
+          )
+        )
+        AND ${PROVIDER_CLEANUP_FENCE}
+    `).bind(
+      nowIso,
+      integration.id,
+      input.shopId,
+      integration.integrationGeneration,
+      integration.activeCredentialId,
+      ...fenceValues,
+    ),
     input.env.PLATFORM_DB.prepare(`
       UPDATE telegram_credentials
       SET status = 'revoked', revoked_at = COALESCE(revoked_at, ?)
       WHERE integration_id = ? AND shop_id = ? AND status IN ('active', 'pending', 'error')
         AND ${PROVIDER_CLEANUP_FENCE}
-    `).bind(nowIso, integration.id, input.shopId, ...providerCleanupFenceValues(context, "telegram_cleanup")),
+    `).bind(nowIso, integration.id, input.shopId, ...fenceValues),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE telegram_updates
+      SET status = 'rejected', safe_result_code = 'telegram_update_stale_generation',
+        processed_at = COALESCE(processed_at, ?), updated_at = ?
+      WHERE integration_id = ? AND shop_id = ? AND integration_generation = ?
+        AND status IN ('accepted', 'failed', 'processing')
+        AND ${PROVIDER_CLEANUP_FENCE}
+    `).bind(nowIso, nowIso, integration.id, input.shopId, integration.integrationGeneration, ...fenceValues),
   ]);
   await assertProviderCleanupFence(context, "telegram_cleanup");
 }

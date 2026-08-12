@@ -31,7 +31,7 @@
     "accepted": false,
     "artifactSchemaVersion": 1,
     "artifactSha256": "replace-with-legal-support-decision-artifact-sha256",
-    "evidenceRef": "replace-with-.wrangler/releases/<release-id>/legal-support-decisions.json",
+    "evidenceRef": ".wrangler/releases/<release-id>/legal-support-decisions.json",
     "observedAt": null,
     "requiredDecisionKeys": [
       "contractingLegalEntity",
@@ -51,7 +51,7 @@
   "secretInventory": {
     "schemaVersion": 1,
     "mode": "name_only",
-    "evidenceRef": "replace-with-.wrangler/releases/<release-id>/production-secret-inventory.json",
+    "evidenceRef": ".wrangler/releases/<release-id>/production-secret-inventory.json",
     "artifactSha256": "replace-with-name-only-secret-inventory-artifact-sha256",
     "requiredNames": [
       "CLOUDFLARE_API_TOKEN",
@@ -67,6 +67,10 @@
     ]
   },
   "quality": {
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-quality-evidence-artifact-sha256",
+    "evidenceRef": ".wrangler/releases/<release-id>/quality-evidence.json",
+    "observedAt": null,
     "schemaVersion": 2,
     "check": false,
     "lint": false,
@@ -100,16 +104,20 @@
     "highOpen": 0
   },
   "pilot": {
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-pilot-evidence-artifact-sha256",
     "shopCount": 0,
-    "evidenceRef": "replace-with-private-pilot-report-reference",
+    "evidenceRef": ".wrangler/releases/<release-id>/pilot-evidence.json",
     "completedAt": null
   },
   "manualAcceptance": {
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-manual-acceptance-artifact-sha256",
     "website": false,
     "telegram": false,
     "paymentSignedEvent": false,
     "customDomain": false,
-    "evidenceRef": "replace-with-private-manual-acceptance-report-reference",
+    "evidenceRef": ".wrangler/releases/<release-id>/manual-acceptance.json",
     "observedAt": null
   },
   "providerAcceptance": {
@@ -134,10 +142,12 @@
     }
   },
   "monitoring": {
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-monitoring-evidence-artifact-sha256",
     "dashboardReady": false,
     "alertsReady": false,
     "budgetAlertsReady": false,
-    "evidenceRef": "replace-with-private-monitoring-report-reference",
+    "evidenceRef": ".wrangler/releases/<release-id>/monitoring-evidence.json",
     "observedAt": null
   },
   "rollback": {

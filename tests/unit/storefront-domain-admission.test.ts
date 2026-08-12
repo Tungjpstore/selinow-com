@@ -4,6 +4,7 @@ import type { AppBindings } from "../../src/lib/platform/bindings";
 import { resolveStorefrontShop } from "../../src/lib/storefront/store";
 
 type StorefrontRow = {
+  canonicalDomainType: "custom" | "platform_subdomain" | null;
   brandingJson: string;
   canonicalHostname: string | null;
   currency: string;
@@ -12,6 +13,7 @@ type StorefrontRow = {
   currentDomainValidationMetadataJson: string;
   currentHostname: string;
   defaultLocale: string;
+  featureFlagsJson: string;
   graceEndsAt: string | null;
   id: string;
   lowStockThreshold: number;
@@ -50,6 +52,7 @@ function admissionMetadata(overrides: Partial<{
 function row(overrides: Partial<StorefrontRow> = {}): StorefrontRow {
   return {
     brandingJson: "{}",
+    canonicalDomainType: "custom",
     canonicalHostname: "shop.customer.com",
     currency: "VND",
     currentPeriodEnd: "2099-01-01T00:00:00.000Z",
@@ -57,6 +60,7 @@ function row(overrides: Partial<StorefrontRow> = {}): StorefrontRow {
     currentDomainValidationMetadataJson: admissionMetadata(),
     currentHostname: "shop.customer.com",
     defaultLocale: "vi",
+    featureFlagsJson: JSON.stringify({ customDomain: true }),
     graceEndsAt: null,
     id: "shop-a",
     lowStockThreshold: 2,
@@ -143,12 +147,39 @@ describe("storefront custom-domain Turnstile admission", () => {
   it("keeps platform subdomains independent from custom-host admission", async () => {
     const runtime = environment(row({
       canonicalHostname: "seller.selinow.com",
+      canonicalDomainType: "platform_subdomain",
       currentDomainType: "platform_subdomain",
       currentDomainValidationMetadataJson: "{}",
       currentHostname: "seller.selinow.com",
+      featureFlagsJson: JSON.stringify({ customDomain: false }),
     }));
     await expect(resolveStorefrontShop(new Request("https://seller.selinow.com/"), runtime.env)).resolves.toMatchObject({
       access: "live",
+      currentHostname: "seller.selinow.com",
+    });
+  });
+
+  it("rejects an active secondary custom hostname after the shop loses its entitlement", async () => {
+    const runtime = environment(row({ featureFlagsJson: JSON.stringify({ customDomain: false }) }));
+
+    await expect(resolveStorefrontShop(new Request("https://shop.customer.com/"), runtime.env))
+      .rejects.toMatchObject({ code: "storefront_not_found", status: 404 });
+    expect(runtime.sql()).toContain("plans.feature_flags_json");
+    expect(runtime.sql()).toContain("$.customDomain");
+  });
+
+  it("does not redirect the platform hostname to an unentitled custom canonical domain", async () => {
+    const runtime = environment(row({
+      canonicalDomainType: "custom",
+      canonicalHostname: "shop.customer.com",
+      currentDomainType: "platform_subdomain",
+      currentDomainValidationMetadataJson: "{}",
+      currentHostname: "seller.selinow.com",
+      featureFlagsJson: JSON.stringify({ customDomain: false }),
+    }));
+
+    await expect(resolveStorefrontShop(new Request("https://seller.selinow.com/"), runtime.env)).resolves.toMatchObject({
+      canonicalHostname: null,
       currentHostname: "seller.selinow.com",
     });
   });

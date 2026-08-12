@@ -84,7 +84,6 @@ vi.mock("../../src/lib/telegram/credentials", () => ({
   decryptTelegramRecipientRow: dependencies.decryptRecipient,
 }));
 
-import { processTelegramOutbox } from "../../src/lib/telegram/outbox";
 import worker from "../../src/worker";
 
 class SqliteStatement {
@@ -230,7 +229,13 @@ function seedPaidTelegramOrder(database: DatabaseSync): void {
       '${digest}', '${digest}', '${nowIso}', 'user-exact-once', '${nowIso}'
     );
     UPDATE telegram_integrations
-    SET active_credential_id = 'credential-exact-once', updated_at = '${nowIso}'
+    SET generation_state = 'draining', updated_at = '${nowIso}'
+    WHERE id = '${INTEGRATION_ID}';
+    UPDATE telegram_integrations
+    SET active_credential_id = 'credential-exact-once',
+      integration_generation = integration_generation + 1,
+      generation_state = 'active',
+      updated_at = '${nowIso}'
     WHERE id = '${INTEGRATION_ID}';
     INSERT INTO customer_identities (
       id, shop_id, customer_id, provider, external_subject,
@@ -352,7 +357,7 @@ describe("Telegram paid-order exact-once authority", () => {
     vi.useRealTimers();
   });
 
-  it("sends at most once across cron dispatch, legacy quarantine, and event/job replays", async () => {
+  it("sends at most once across cron dispatch, durable legacy quarantine, and event/job replays", async () => {
     const providerFetch = vi.fn<typeof fetch>((input, init) => {
       const url = input instanceof Request ? input.url : input.toString();
       const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
@@ -362,11 +367,8 @@ describe("Telegram paid-order exact-once authority", () => {
     });
     vi.stubGlobal("fetch", providerFetch);
 
-    await expect(processTelegramOutbox(env, NOW, providerFetch)).resolves.toEqual({
-      failed: 0,
-      processed: 0,
-      skipped: 1,
-    });
+    expect(database.prepare("SELECT status FROM outbox_jobs WHERE id = 'legacy-exact-once'").get())
+      .toEqual({ status: "completed" });
     expect(providerFetch).not.toHaveBeenCalled();
 
     const controller: ScheduledController = {

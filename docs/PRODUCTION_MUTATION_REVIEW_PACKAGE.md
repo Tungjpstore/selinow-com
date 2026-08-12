@@ -19,7 +19,7 @@ changes.
   `e2a4bc53`; the historical `6ca9c890...` bootstrap version is not current,
   and fresh exact inventory is required
 - Current D1 ledger: `0001`-`0052` must be rechecked live
-- Exact pending migrations: `0053`-`0094`, subject to live ledger
+- Exact pending migrations: `0053`-`0095`, subject to live ledger
 
 ## Production scope
 

@@ -16,6 +16,7 @@ const confirmMagicLink = document.querySelector<HTMLButtonElement>("[data-login-
 const t = createSystemTranslator(document.documentElement.lang);
 
 const messageKeys: Readonly<Record<string, string>> = {
+  authentication_required: "auth.login.link_invalid",
   validation_failed: "auth.login.validation_failed",
   rate_limited: "auth.login.rate_limited",
   provider_unavailable: "auth.login.provider_unavailable",
@@ -61,6 +62,16 @@ function setBusy(busy: boolean): void {
 
 function showRecovery(): void {
   if (recovery !== null) recovery.hidden = false;
+}
+
+function showLinkRecovery(message: string, requestId: string | null): void {
+  pendingMagicToken = null;
+  if (form !== null) form.hidden = false;
+  if (confirmation !== null) confirmation.hidden = true;
+  if (confirmationDestination !== null) confirmationDestination.textContent = "";
+  showRecovery();
+  setStatus("error", requestId === null ? message : `${message} ${t("auth.login.request_id", { requestId })}`);
+  email?.focus();
 }
 
 function clearAdaptiveChallenge(): void {
@@ -174,13 +185,12 @@ async function consumePendingMagicLink(confirm: boolean): Promise<void> {
     }
 
     if (!response.ok) {
-      pendingMagicToken = null;
-      if (form !== null) form.hidden = false;
-      if (confirmation !== null) confirmation.hidden = true;
       const code = typeof body.code === "string" ? body.code : "unknown_error";
       const bodyRequestId = typeof body.requestId === "string" && REQUEST_ID.test(body.requestId) ? body.requestId : null;
+      const headerRequestId = response.headers.get("X-Request-Id");
+      const requestId = bodyRequestId ?? (headerRequestId !== null && REQUEST_ID.test(headerRequestId) ? headerRequestId : null);
       const message = t(messageKeys[code] ?? "auth.login.generic_error");
-      setStatus("error", bodyRequestId === null ? message : `${message} ${t("auth.login.request_id", { requestId: bodyRequestId })}`);
+      showLinkRecovery(message, requestId);
       return;
     }
 
@@ -195,9 +205,7 @@ async function consumePendingMagicLink(confirm: boolean): Promise<void> {
     }
     throw new Error("magic_link_response_invalid");
   } catch {
-    if (form !== null) form.hidden = false;
-    if (confirmation !== null) confirmation.hidden = true;
-    setStatus("error", t("auth.login.generic_error"));
+    showLinkRecovery(t("auth.login.generic_error"), null);
   } finally {
     if (confirmMagicLink !== null) confirmMagicLink.disabled = false;
   }
@@ -208,6 +216,14 @@ function takeMagicTokenFromFragment(): string | null {
   const magic = new URLSearchParams(window.location.hash.slice(1)).get("magic");
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
   return magic !== null && magic.length >= 20 && magic.length <= 256 ? magic : null;
+}
+
+function consumeMagicTokenFromFragment(): boolean {
+  const fragmentToken = takeMagicTokenFromFragment();
+  if (fragmentToken === null) return false;
+  pendingMagicToken = fragmentToken;
+  void consumePendingMagicLink(false);
+  return true;
 }
 
 email?.addEventListener("input", () => {
@@ -298,12 +314,9 @@ form?.addEventListener("submit", (event) => {
 resend?.addEventListener("click", () => { form?.requestSubmit(); });
 restart?.addEventListener("click", restartLogin);
 confirmMagicLink?.addEventListener("click", () => { void consumePendingMagicLink(true); });
+window.addEventListener("hashchange", () => { consumeMagicTokenFromFragment(); });
 
-const fragmentToken = takeMagicTokenFromFragment();
-if (fragmentToken !== null) {
-  pendingMagicToken = fragmentToken;
-  void consumePendingMagicLink(false);
-} else if (form?.dataset.authenticatedSession === "true") {
+if (!consumeMagicTokenFromFragment() && form?.dataset.authenticatedSession === "true") {
   window.location.replace("/app");
 }
 

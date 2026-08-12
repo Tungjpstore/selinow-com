@@ -21,9 +21,14 @@ type PublicPlanRow = {
 type PublicPlanOfferRow = {
   amount_minor: number;
   currency: string;
+  effective_from: string;
+  id: string;
   interval: string;
   market_code: string;
   plan_code: string;
+  provider_code: string;
+  provider_price_ref: string;
+  version: number;
 };
 
 function safeJsonObject(value: string): Record<string, unknown> {
@@ -50,21 +55,43 @@ export const GET: APIRoute = async ({ locals, request }) => {
           AND code IN (?, ?)
       `).bind(...PUBLIC_PLAN_CODES).all<PublicPlanRow>(),
       env.PLATFORM_DB.prepare(`
-        SELECT plans.code AS plan_code, prices.market_code, prices.currency,
-          prices.amount_minor, prices.interval
+        SELECT prices.id, plans.code AS plan_code, prices.market_code, prices.currency,
+          prices.amount_minor, prices.interval, prices.provider_code,
+          prices.provider_price_ref, prices.effective_from, prices.version
         FROM plan_prices AS prices
         INNER JOIN plans ON plans.id = prices.plan_id
         WHERE plans.is_active = 1 AND plans.is_public = 1 AND plans.is_assignable = 1
           AND plans.code IN (?, ?)
           AND prices.is_active = 1
+          AND prices.interval = 'month'
+          AND ((prices.market_code = 'vn' AND prices.currency = 'VND')
+            OR (prices.market_code = 'global' AND prices.currency = 'USD'))
           AND prices.effective_from <= ?
           AND (prices.effective_to IS NULL OR prices.effective_to > ?)
-        ORDER BY prices.market_code, prices.currency
+        ORDER BY plans.code, prices.market_code, prices.currency, prices.interval,
+          prices.effective_from DESC, prices.version DESC, prices.id DESC
       `).bind(...PUBLIC_PLAN_CODES, nowIso, nowIso).all<PublicPlanOfferRow>(),
       getShopCreationAdmission({ env, userId: auth.userId }),
     ]);
-    const offersByPlan = new Map<string, PublicPlanOfferRow[]>();
+    const latestOffers = new Map<string, PublicPlanOfferRow>();
     for (const offer of offersResult.results) {
+      if (offer.interval !== "month"
+        || !((offer.market_code === "vn" && offer.currency === "VND")
+          || (offer.market_code === "global" && offer.currency === "USD"))) continue;
+      const key = `${offer.plan_code}:${offer.market_code}:${offer.currency}:${offer.interval}`;
+      const previous = latestOffers.get(key);
+      if (previous === undefined
+        || offer.effective_from > previous.effective_from
+        || (offer.effective_from === previous.effective_from && offer.version > previous.version)
+        || (offer.effective_from === previous.effective_from && offer.version === previous.version && offer.id > previous.id)) {
+        latestOffers.set(key, offer);
+      }
+    }
+    const offersByPlan = new Map<string, PublicPlanOfferRow[]>();
+    for (const offer of latestOffers.values()) {
+      if (offer.provider_code !== "dodo" || offer.provider_price_ref.length === 0
+        || offer.provider_price_ref.startsWith("pending:")
+        || !Number.isSafeInteger(offer.amount_minor) || offer.amount_minor <= 0) continue;
       const offers = offersByPlan.get(offer.plan_code) ?? [];
       offers.push(offer);
       offersByPlan.set(offer.plan_code, offers);

@@ -24,6 +24,8 @@ export function validatePayosUatEvidenceFile(input: {
   manifestPath: string;
   now?: Date;
   ownerAttestationPublicKeys?: Record<string, string>;
+  stagingRunnerPublicKeys?: Record<string, string>;
+  stagingRunnerSpkiFingerprints?: Record<string, string>;
   workerVersion: string;
   root?: string;
 }): Promise<PayosUatValidationOutput>;

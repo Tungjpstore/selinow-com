@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { lstatSync, readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
-import { assertDodoStagingUatEvidence } from "./dodo-uat-evidence.mjs";
-import { assertPayosStagingUatEvidence } from "./payos-uat-evidence.mjs";
+import { assertDodoStagingUatEvidence, readDodoUatExecutionProofArtifacts } from "./dodo-uat-evidence.mjs";
+import { assertPayosStagingUatEvidence, readPayosProviderExecutionArtifacts } from "./payos-uat-evidence.mjs";
+import { verifyStagingDeploymentEvidence } from "./staging-deployment-evidence.mjs";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 const GIT_SHA = /^[a-f0-9]{40}$/u;
@@ -42,21 +43,60 @@ function safeArtifactPath(root, value, issue) {
   return path;
 }
 
-function readPrivateJson(root, reference, missingIssue) {
-  const path = safeArtifactPath(root, reference, missingIssue);
-  let stat;
+function sameFile(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function readPrivateFile(root, reference, issues) {
+  const path = safeArtifactPath(root, reference, issues.reference ?? issues.path);
+  let descriptor;
   try {
-    stat = lstatSync(path);
-  } catch {
-    throw new Error(missingIssue);
+    const canonicalRoot = realpathSync.native(resolve(root));
+    const canonicalPath = realpathSync.native(path);
+    const expectedCanonicalPath = resolve(canonicalRoot, relative(resolve(root), path));
+    if (canonicalPath !== expectedCanonicalPath) throw new Error(issues.path);
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const openedStat = fstatSync(descriptor, { bigint: true });
+    const pathStat = statSync(path, { bigint: true });
+    if (!openedStat.isFile()
+      || (openedStat.mode & 0o077n) !== 0n
+      || !sameFile(openedStat, pathStat)
+      || realpathSync.native(path) !== canonicalPath) {
+      throw new Error(issues.permissions);
+    }
+    const bytes = readFileSync(descriptor);
+    const closedOverStat = fstatSync(descriptor, { bigint: true });
+    const finalPathStat = statSync(path, { bigint: true });
+    if (!sameFile(openedStat, closedOverStat)
+      || !sameFile(openedStat, finalPathStat)
+      || openedStat.size !== closedOverStat.size
+      || openedStat.mtimeNs !== closedOverStat.mtimeNs
+      || openedStat.ctimeNs !== closedOverStat.ctimeNs
+      || realpathSync.native(path) !== canonicalPath) {
+      throw new Error(issues.path);
+    }
+    return { bytes, path };
+  } catch (error) {
+    if (error instanceof Error && Object.values(issues).includes(error.message)) throw error;
+    if (error?.code === "ELOOP") throw new Error(issues.path, { cause: error });
+    throw new Error(descriptor === undefined ? issues.missing : issues.invalid, { cause: error });
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
-  if (!stat.isFile() || (stat.mode & 0o077) !== 0) throw new Error(`${missingIssue}_permissions_invalid`);
-  let bytes;
+}
+
+function readPrivateJson(root, reference, missingIssue) {
+  const loaded = readPrivateFile(root, reference, {
+    invalid: `${missingIssue}_invalid`,
+    missing: missingIssue,
+    path: `${missingIssue}_path_invalid`,
+    permissions: `${missingIssue}_permissions_invalid`,
+    reference: missingIssue,
+  });
   try {
-    bytes = readFileSync(path);
-    return { value: JSON.parse(bytes.toString("utf8")), bytes, path };
-  } catch {
-    throw new Error(`${missingIssue}_invalid`);
+    return { ...loaded, value: JSON.parse(loaded.bytes.toString("utf8")) };
+  } catch (error) {
+    throw new Error(`${missingIssue}_invalid`, { cause: error });
   }
 }
 
@@ -67,7 +107,33 @@ function exactObjectKeys(value, expected, issue) {
   if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) throw new Error(issue);
 }
 
-function assertScenarioArtifacts(root, evidence, provider) {
+function readDodoExecutionProofPublicKeys(root, releaseId) {
+  const reference = `.wrangler/releases/staging/${releaseId}/dodo-uat-trusted-public-keys.json`;
+  const loaded = readPrivateJson(root, reference, "dodo_uat_trusted_public_keys_missing");
+  exactObjectKeys(loaded.value, ["environment", "keys", "provider", "schemaVersion"], "dodo_uat_trusted_public_keys_invalid");
+  if (loaded.value.schemaVersion !== 1
+    || loaded.value.environment !== "staging"
+    || loaded.value.provider !== "dodo"
+    || !Array.isArray(loaded.value.keys)
+    || loaded.value.keys.length === 0) {
+    throw new Error("dodo_uat_trusted_public_keys_invalid");
+  }
+  const keys = {};
+  for (const entry of loaded.value.keys) {
+    exactObjectKeys(entry, ["keyId", "publicKeyPem"], "dodo_uat_trusted_public_keys_invalid");
+    if (typeof entry.keyId !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/u.test(entry.keyId)
+      || typeof entry.publicKeyPem !== "string"
+      || !/^-----BEGIN PUBLIC KEY-----\n[A-Za-z0-9+/=\n]+-----END PUBLIC KEY-----\n?$/u.test(entry.publicKeyPem)
+      || Object.prototype.hasOwnProperty.call(keys, entry.keyId)) {
+      throw new Error("dodo_uat_trusted_public_keys_invalid");
+    }
+    keys[entry.keyId] = entry.publicKeyPem;
+  }
+  return keys;
+}
+
+function assertScenarioArtifacts(root, evidence, provider, providerExecutionArtifactFingerprints = {}) {
   const fingerprints = {};
   const ids = provider === "dodo"
     ? Object.keys(evidence.scenarios ?? {})
@@ -113,7 +179,7 @@ function assertScenarioArtifacts(root, evidence, provider) {
           || artifact.value.verificationMethod !== record.verificationMethod
           || artifact.value.observedAt !== record.observedAt
           || artifact.value.controlledAccountFingerprintSha256 !== (providerExecutionScenario ? evidence.providerExecution.controlledAccountFingerprintSha256 : null)
-          || artifact.value.proofOfExecutionFingerprintSha256 !== (providerExecutionScenario ? evidence.providerExecution.transactionEvidenceFingerprintSha256 : null)) {
+          || artifact.value.proofOfExecutionFingerprintSha256 !== (providerExecutionScenario ? providerExecutionArtifactFingerprints[id] : null)) {
           throw new Error("payos_uat_scenario_artifact_binding_mismatch");
         }
         exactObjectKeys(artifact.value.redaction, ["noRawPayload", "noSensitiveValues"], "payos_uat_scenario_artifact_redaction_invalid");
@@ -142,12 +208,12 @@ export function readTrustedStagingUatBinding({ evidence, manifestPath: requested
   const manifestPath = safeArtifactPath(root, release.manifestRef, "commerce_uat_manifest_ref_invalid");
   if (requestedManifestPath !== undefined && resolve(root, requestedManifestPath) !== manifestPath) throw new Error("commerce_uat_manifest_ref_mismatch");
   if (workerVersion !== undefined && workerVersion !== release.workerVersion) throw new Error("commerce_uat_worker_version_mismatch");
-  let bytes;
-  try {
-    bytes = readFileSync(manifestPath);
-  } catch {
-    throw new Error("commerce_uat_manifest_missing");
-  }
+  const { bytes } = readPrivateFile(root, release.manifestRef, {
+    invalid: "commerce_uat_manifest_invalid",
+    missing: "commerce_uat_manifest_missing",
+    path: "commerce_uat_manifest_path_invalid",
+    permissions: "commerce_uat_manifest_permissions_invalid",
+  });
   const manifestSha256 = createHash("sha256").update(bytes).digest("hex");
   if (manifestSha256 !== release.manifestSha256) throw new Error("commerce_uat_manifest_hash_mismatch");
   let manifest;
@@ -187,12 +253,64 @@ function resolvePayosOwnerAttestationPublicKeys(explicit) {
   }
 }
 
-export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), repositoryRoot, payosOwnerAttestationPublicKeys }) {
+function resolveDodoApprovedExecutionProofTrust(explicit, environment = process.env) {
+  if (explicit !== undefined) return explicit;
+  return {
+    keyId: environment.SELINOW_DODO_UAT_RUNNER_KEY_ID ?? "",
+    spkiSha256: environment.SELINOW_DODO_UAT_RUNNER_SPKI_SHA256 ?? "",
+  };
+}
+
+function resolvePayosStagingRunnerTrust(publicKeys, spkiFingerprints, environment = process.env) {
+  if (publicKeys !== undefined || spkiFingerprints !== undefined) {
+    return {
+      publicKeys: publicKeys ?? {},
+      spkiFingerprints: spkiFingerprints ?? {},
+    };
+  }
+  const keyId = environment.SELINOW_PAYOS_UAT_RUNNER_KEY_ID;
+  const encoded = environment.SELINOW_PAYOS_UAT_RUNNER_PUBLIC_KEY_PEM_BASE64;
+  const spkiSha256 = environment.SELINOW_PAYOS_UAT_RUNNER_SPKI_SHA256;
+  if (typeof keyId !== "string" || keyId.length === 0
+    || typeof encoded !== "string" || encoded.length === 0
+    || typeof spkiSha256 !== "string" || spkiSha256.length === 0) {
+    return { publicKeys: {}, spkiFingerprints: {} };
+  }
+  try {
+    return {
+      publicKeys: { [keyId]: Buffer.from(encoded, "base64").toString("utf8") },
+      spkiFingerprints: { [keyId]: spkiSha256 },
+    };
+  } catch {
+    return { publicKeys: {}, spkiFingerprints: {} };
+  }
+}
+
+export function validateCommerceUatArtifactsSync({
+  dodoApprovedExecutionProofTrust,
+  environment,
+  evidence,
+  now = new Date(),
+  payosOwnerAttestationPublicKeys,
+  payosStagingRunnerPublicKeys,
+  payosStagingRunnerSpkiFingerprints,
+  repositoryRoot,
+  trustedStagingWorkerVersion,
+}) {
   const root = repositoryRoot;
   const result = {};
+  const dodoTrust = resolveDodoApprovedExecutionProofTrust(dodoApprovedExecutionProofTrust, environment);
+  const payosRunnerTrust = resolvePayosStagingRunnerTrust(
+    payosStagingRunnerPublicKeys,
+    payosStagingRunnerSpkiFingerprints,
+    environment,
+  );
   for (const [provider, validator] of [["dodo", assertDodoStagingUatEvidence], ["payos", assertPayosStagingUatEvidence]]) {
     const reference = evidence?.commerceAcceptance?.[provider]?.evidenceRef;
     try {
+      if (typeof trustedStagingWorkerVersion !== "string" || trustedStagingWorkerVersion.length === 0) {
+        throw new Error("commerce_uat_trusted_worker_version_required");
+      }
       const loaded = readPrivateJson(root, reference, `${provider}_uat_artifact_missing`);
       const artifact = loaded.value;
       const declaredArtifactSha256 = evidence?.commerceAcceptance?.[provider]?.artifactSha256;
@@ -205,12 +323,42 @@ export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), r
       if (artifact.provider !== provider || artifact.providerEnvironment !== expectedProviderEnvironment) {
         throw new Error(`${provider}_uat_provider_binding_mismatch`);
       }
-      const scenarioArtifactFingerprints = assertScenarioArtifacts(root, artifact, provider);
+      let scenarioArtifactFingerprints = {};
+      let providerBinding = {};
+      if (provider === "dodo") {
+        const executionProofPublicKeys = readDodoExecutionProofPublicKeys(root, artifact.release.releaseId);
+        const verifiedExecutionProofs = readDodoUatExecutionProofArtifacts({
+          approvedExecutionProofTrust: dodoTrust,
+          evidence: artifact,
+          executionProofPublicKeys,
+          repositoryRoot: root,
+        });
+        scenarioArtifactFingerprints = Object.fromEntries(Object.entries(verifiedExecutionProofs)
+          .map(([scenarioId, proof]) => [scenarioId, proof.artifactSha256]));
+        providerBinding = { approvedExecutionProofTrust: dodoTrust, verifiedExecutionProofs };
+      } else {
+        const providerExecution = readPayosProviderExecutionArtifacts({
+          evidence: artifact,
+          repositoryRoot: root,
+          stagingRunnerPublicKeys: payosRunnerTrust.publicKeys,
+          stagingRunnerSpkiFingerprints: payosRunnerTrust.spkiFingerprints,
+        });
+        scenarioArtifactFingerprints = assertScenarioArtifacts(root, artifact, provider, providerExecution.fingerprints);
+        providerBinding = {
+          ownerAttestationPublicKeys: resolvePayosOwnerAttestationPublicKeys(payosOwnerAttestationPublicKeys),
+          providerExecutionArtifactFingerprints: providerExecution.fingerprints,
+        };
+      }
       const binding = {
-        ...readTrustedStagingUatBinding({ evidence: artifact, now, repositoryRoot: root }),
+        ...readTrustedStagingUatBinding({
+          evidence: artifact,
+          now,
+          repositoryRoot: root,
+          workerVersion: trustedStagingWorkerVersion,
+        }),
         requireArtifactProof: true,
         scenarioArtifactFingerprints,
-        ...(provider === "payos" ? { ownerAttestationPublicKeys: resolvePayosOwnerAttestationPublicKeys(payosOwnerAttestationPublicKeys) } : {}),
+        ...providerBinding,
       };
       const accepted = validator(artifact, binding);
       result[provider] = {
@@ -238,5 +386,33 @@ export function validateCommerceUatArtifactsSync({ evidence, now = new Date(), r
 }
 
 export async function validateCommerceUatArtifacts(input) {
-  return validateCommerceUatArtifactsSync(input);
+  try {
+    const releaseId = input.evidence?.staging?.releaseId;
+    const manifestPath = input.evidence?.staging?.manifestRef;
+    if (typeof releaseId !== "string" || typeof manifestPath !== "string") {
+      throw new Error("staging_deployment_binding_missing");
+    }
+    const deployment = await verifyStagingDeploymentEvidence({
+      environment: input.environment ?? process.env,
+      evidencePath: `.wrangler/releases/staging/${releaseId}/deployment-evidence.json`,
+      manifestPath,
+      now: input.now ?? new Date(),
+      repositoryRoot: input.repositoryRoot,
+    });
+    if (input.evidence.staging.workerVersion !== deployment.workerVersion) {
+      throw new Error("staging_deployment_claim_mismatch");
+    }
+    return validateCommerceUatArtifactsSync({
+      ...input,
+      trustedStagingWorkerVersion: deployment.workerVersion,
+    });
+  } catch (error) {
+    const code = error instanceof Error && /^[a-z0-9_:.-]{1,220}$/u.test(error.message)
+      ? error.message
+      : "staging_deployment_validation_failed";
+    return {
+      dodo: { accepted: false, error: code },
+      payos: { accepted: false, error: code },
+    };
+  }
 }

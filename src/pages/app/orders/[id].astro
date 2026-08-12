@@ -31,6 +31,7 @@ const systemT = createSystemTranslator(locale);
 const orderParam = Astro.params.id;
 let order: SellerOrderDetail | null = null;
 let state: "ready" | "not_found" | "forbidden" | "error" = "ready";
+let loadRequestId: string | null = null;
 
 if (unauthorizedShopRequest) {
   state = "forbidden";
@@ -43,6 +44,7 @@ if (unauthorizedShopRequest) {
   } catch (error) {
     if (!isAppError(error)) throw error;
     state = error.status === 403 || error.code === "authorization_denied" ? "forbidden" : error.status === 404 ? "not_found" : "error";
+    if (state === "error") loadRequestId = Astro.locals.requestId;
   }
 }
 
@@ -103,7 +105,12 @@ const formatDate = (value: string | null | undefined): string => {
 const formatShortId = (value: string): string => value.replace(/^order_/u, "").slice(0, 8).toUpperCase();
 const canManageFulfillment = shop?.role === "owner" || shop?.role === "manager";
 const canManagePayments = shop?.role === "owner" || shop?.role === "manager";
-const manualItems = order?.items.filter((item) => item.fulfillmentType === "manual" && item.privateDownload === null) ?? [];
+const manualItems = order?.items.filter((item) => item.manualFulfillment?.status === "pending") ?? [];
+const manualFulfillmentTone = (status: "completed" | "pending" | "unsupported"): "neutral" | "success" | "warning" => {
+  if (status === "completed") return "success";
+  if (status === "unsupported") return "warning";
+  return "neutral";
+};
 const openPaymentExceptions = order?.paymentExceptions.filter((exception) => exception.status === "open") ?? [];
 const activeRemediationByException = new Map(
   order?.remediationRequests
@@ -135,7 +142,7 @@ const remediationStatusLabels: Record<string, string> = {
 <AppLayout activePath="/app/orders" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={order ? t("dashboard.order_detail.order_title", { number: order.orderNumber }) : t("dashboard.order_detail.title")}>
   {state === "not_found" && <WorkspaceState eyebrow={t("dashboard.order_detail.not_found.eyebrow")} title={t("dashboard.order_detail.not_found.title")} description={t("dashboard.order_detail.not_found.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.back")} tone="warning" />}
   {state === "forbidden" && <WorkspaceState eyebrow={t("dashboard.order_detail.forbidden.eyebrow")} title={t("dashboard.order_detail.forbidden.title")} description={t("dashboard.order_detail.forbidden.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.back")} tone="danger" />}
-  {state === "error" && <WorkspaceState eyebrow={t("dashboard.order_detail.error.eyebrow")} title={t("dashboard.order_detail.error.title")} description={t("dashboard.order_detail.error.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.error.action")} tone="danger" />}
+  {state === "error" && <WorkspaceState eyebrow={t("dashboard.order_detail.error.eyebrow")} title={t("dashboard.order_detail.error.title")} description={`${t("dashboard.order_detail.error.description")} ${loadRequestId === null ? "" : t("dashboard.state.error.meta_request", { requestId: loadRequestId })}`.trim()} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.error.action")} tone="danger" />}
 
   {state === "ready" && order !== null && shop !== undefined && <>
     <PageHeader eyebrow={t("dashboard.order_detail.header.eyebrow", { id: formatShortId(order.orderId) })} title={t("dashboard.order_detail.order_title", { number: order.orderNumber })} description={t("dashboard.order_detail.header.description")}>
@@ -171,7 +178,7 @@ const remediationStatusLabels: Record<string, string> = {
           {order.items.length === 0 ? <WorkspaceState title={t("dashboard.order_detail.items.empty_title")} description={t("dashboard.order_detail.items.empty_description")} tone="warning" /> : <div class="item-ledger">
             {order.items.map((item, index) => <article class="item-row">
               <span class="item-index">{String(index + 1).padStart(2, "0")}</span>
-              <div class="item-copy"><strong>{item.productTitle}</strong><span>{item.variantTitle} · <code>{item.sku}</code></span><small>{fulfillmentTypeLabels[item.fulfillmentType] ?? item.fulfillmentType} · {t("dashboard.order_detail.quantity", { count: item.quantity })}</small>{item.privateDownload !== null && <span class="private-download-state"><strong>{t("dashboard.order_detail.private_download.title")}</strong><span>{item.privateDownload.filename}</span><small>{item.privateDownload.entitlementStatus === "active" ? t("dashboard.order_detail.private_download.remaining", { count: item.privateDownload.remainingDownloads }) : item.privateDownload.entitlementStatus === "exhausted" ? t("dashboard.order_detail.private_download.exhausted") : t("dashboard.order_detail.private_download.waiting")}</small></span>}</div>
+              <div class="item-copy"><strong>{item.productTitle}</strong><span>{item.variantTitle} · <code>{item.sku}</code></span><small>{fulfillmentTypeLabels[item.fulfillmentType] ?? item.fulfillmentType} · {t("dashboard.order_detail.quantity", { count: item.quantity })}</small>{item.privateDownload !== null && <span class="private-download-state"><strong>{t("dashboard.order_detail.private_download.title")}</strong><span>{item.privateDownload.filename}</span><small>{item.privateDownload.entitlementStatus === "active" ? t("dashboard.order_detail.private_download.remaining", { count: item.privateDownload.remainingDownloads }) : item.privateDownload.entitlementStatus === "exhausted" ? t("dashboard.order_detail.private_download.exhausted") : t("dashboard.order_detail.private_download.waiting")}</small></span>}{item.manualFulfillment !== null && <span class="manual-fulfillment-state"><strong>{fulfillmentTypeLabels.manual}</strong><StatusBadge label={item.manualFulfillment.status} tone={manualFulfillmentTone(item.manualFulfillment.status)} /><small>{item.manualFulfillment.status === "completed" ? t("dashboard.order_detail.fulfillment_done", { time: formatDate(item.manualFulfillment.completedAt) }) : item.manualFulfillment.status === "pending" ? t("dashboard.order_detail.fulfillment_waiting") : <code>{item.manualFulfillment.unsupportedReason ?? "unsupported"}</code>}</small></span>}</div>
               <div class="item-price"><strong><Money value={item.lineTotalMinor} currency={order.currency} locale={locale ?? "en"} /></strong><small><Money value={item.unitPriceMinor} currency={order.currency} locale={locale ?? "en"} /> / {t("dashboard.order_detail.unit")}</small></div>
             </article>)}
             <div class="item-total"><span>{t("dashboard.order_detail.total")}</span><strong><Money value={order.totalMinor} currency={order.currency} locale={locale ?? "en"} /></strong></div>
@@ -409,6 +416,8 @@ const remediationStatusLabels: Record<string, string> = {
   .item-copy span, .item-copy small, .item-price small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .item-copy code { color: var(--sln-text-secondary); }
   .item-copy .private-download-state { display: grid; gap: 3px; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 3px solid var(--sln-state-info); background: var(--sln-tint-info); color: var(--sln-text-secondary); white-space: normal; }
+  .item-copy .manual-fulfillment-state { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 3px solid var(--sln-state-warning); background: var(--sln-tint-warning); color: var(--sln-text-secondary); white-space: normal; }
+  .manual-fulfillment-state small { grid-column: 1 / -1; }
   .private-download-state strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
   .private-download-state span, .private-download-state small { overflow-wrap: anywhere; white-space: normal; }
   .item-price { display: grid; gap: 3px; justify-items: end; text-align: right; }

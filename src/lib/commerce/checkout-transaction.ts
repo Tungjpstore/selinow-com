@@ -3,6 +3,7 @@ import { tryRecordActivationMilestone } from "../analytics/activation";
 import { AppError } from "../core/errors";
 import { parsePlanLimits, PUBLIC_PLAN_CODES } from "../billing/plan-catalog";
 import { prepareOrderChannelAttribution, resolveOrderChannelAttribution, type OrderChannelAttribution } from "../channels/attribution";
+import { WEBSITE_CHANNEL_CODE } from "../channels/builtins";
 import { prepareDomainEventAppend } from "../events/append";
 import { isSupportedCurrency } from "../i18n/currency";
 import type { AppBindings } from "../platform/bindings";
@@ -15,7 +16,7 @@ import {
   type GenericEntitlementRequirementSnapshot,
 } from "./entitlements";
 import { prepareCheckoutReservationPlan, prepareReservedFulfillmentItems } from "./reservations";
-import { assertSupportedFulfillmentComposition } from "./policy";
+import { assertSupportedFulfillmentComposition, normalizeCustomerEmail } from "./policy";
 
 async function resolveOrderUsageLimit(database: D1Database, shopId: string): Promise<number | undefined> {
   try {
@@ -377,6 +378,14 @@ function cartSnapshotGuard(
 }
 
 function assertInputInvariants(input: CanonicalCheckoutTransactionInput): void {
+  if (input.channel.code === WEBSITE_CHANNEL_CODE) {
+    if (input.customer.kind === "anonymous") throw new AppError("validation_failed", 400, ["email_required"]);
+    if (input.customer.kind === "upsert_email") {
+      const normalizedEmail = normalizeCustomerEmail(input.customer.emailNormalized);
+      if (normalizedEmail === null) throw new AppError("validation_failed", 400, ["email_required"]);
+      if (normalizedEmail !== input.customer.emailNormalized) throw new AppError("validation_failed", 400, ["email_invalid"]);
+    }
+  }
   if (input.lines.length === 0 || input.lines.some((line) => !Number.isInteger(line.quantity) || line.quantity <= 0)) throw new Error("canonical_checkout_lines_invalid");
   if (input.lines.some((line) => !Number.isSafeInteger(line.productVersion) || line.productVersion < 1 || !Number.isSafeInteger(line.variantVersion) || line.variantVersion < 1) || new Set(input.lines.map((line) => line.variantId)).size !== input.lines.length) throw new Error("canonical_checkout_lines_invalid");
   const computedSubtotal = input.lines.reduce((sum, line) => sum + line.priceMinor * line.quantity, 0);

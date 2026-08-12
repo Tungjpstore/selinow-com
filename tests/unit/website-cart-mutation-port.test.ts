@@ -173,7 +173,7 @@ describe("Website canonical cart mutation port", () => {
 
     await expect(application.checkoutCart(context(), {
       cart: cartReference,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       expected: quote.items.map((item) => ({ quantity: item.quantity, unitPriceMinor: item.unitPriceMinor, variantId: item.variantId, variantVersion: item.variantVersion })),
       idempotencyKey: "website-checkout-0001",
       quoteEvidence: quote.quoteEvidence,

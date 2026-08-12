@@ -550,7 +550,7 @@ describe("canonical commerce channel parity on local D1", () => {
     if (quote.quoteEvidence === undefined) throw new Error("website_mixed_quote_evidence_missing");
     await expect(app.checkoutCart(context, {
       cart: cartReference,
-      customerEmail: null,
+      customerEmail: "mixed-parity@example.test",
       expected: expectedItems(quote),
       idempotencyKey: "parity-recovery-reordered-0001",
       quoteEvidence: quote.quoteEvidence,
@@ -1864,6 +1864,29 @@ describe("canonical commerce channel parity on local D1", () => {
     const order = await prepared.app.checkoutCart(prepared.context, prepared.command);
     expect(runtime.database.database.prepare("SELECT customer_id AS customerId FROM orders WHERE public_id = ? AND shop_id = ?").get(order.orderId, SHOP_ID)).toEqual({ customerId: "customer-existing-web" });
     expect(runtime.database.database.prepare("SELECT locale FROM shop_customers WHERE id = ? AND shop_id = ?").get("customer-existing-web", SHOP_ID)).toEqual({ locale: "vi" });
+  });
+
+  it("rejects checkout when the customer becomes blocked before the authoritative order batch", async () => {
+    const runtime = createRuntime();
+    const customerEmail = "blocked-race@example.test";
+    const prepared = await prepareWebsiteCheckout(runtime, "variant-paid", "parity-blocked-customer-race-web-0001", customerEmail);
+    const gate = runtime.database.pauseNextBatch();
+    const checkout = prepared.app.checkoutCart(prepared.context, prepared.command);
+    await gate.reached;
+
+    runtime.database.database.prepare(`
+      INSERT INTO shop_customers (
+        id, shop_id, email_normalized, display_name, locale, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, NULL, 'en', 'blocked', ?, ?)
+    `).run("customer-blocked-race-web", SHOP_ID, customerEmail, NOW, NOW);
+    gate.resume();
+
+    await expect(checkout).rejects.toMatchObject({ code: "checkout_failed", status: 409 });
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get(SHOP_ID)).toEqual({ count: 0 });
+    expect(runtime.database.database.prepare("SELECT state FROM carts WHERE id = ? AND shop_id = ?").get(prepared.command.cart.cartId, SHOP_ID)).toEqual({ state: "active" });
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM inventory_keys WHERE shop_id = ? AND variant_id = 'variant-paid' AND status = 'reserved'").get(SHOP_ID)).toEqual({ count: 0 });
+    expect(runtime.database.database.prepare("SELECT status, locale FROM shop_customers WHERE id = ? AND shop_id = ?").get("customer-blocked-race-web", SHOP_ID)).toEqual({ locale: "en", status: "blocked" });
   });
 
   it.each(["website", "telegram"] as const)("recovers the durable winner when same-key retries overlap at the order batch boundary through the %s port", async (channel) => {

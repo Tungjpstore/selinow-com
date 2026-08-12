@@ -21,6 +21,7 @@ async function activeEnvironment(options: {
   failReplyClaims?: boolean;
   failReplyFinalizationOnce?: boolean;
   failUpdateInsert?: boolean;
+  rotateCredentialOnUpdateRead?: boolean;
   rotateCredentialOnReply?: boolean;
 } = {}) {
   const encrypted = await encryptTelegramCredential({
@@ -38,7 +39,7 @@ async function activeEnvironment(options: {
   let providerCalls = 0;
   let activeCredentialId = "credential-active";
   let updateReadCount = 0;
-  let updateRow: { id: string; payloadHash: string; status: string; updatedAt: string } | null = null;
+  let updateRow: { credentialId: string; id: string; integrationGeneration: number; payloadHash: string; status: string; updatedAt: string } | null = null;
   let failPostSendEvidence = options.failPostSendEvidenceOnce === true;
   let failReplyFinalization = options.failReplyFinalizationOnce === true;
   const staleAudits: Array<{ metadata: unknown; requestId: string }> = [];
@@ -59,6 +60,8 @@ async function activeEnvironment(options: {
                   botDisplayName: "Active Bot",
                   botUsername: "active_bot",
                   credentialId: "credential-active",
+                  generationState: "active",
+                  integrationGeneration: 1,
                   integrationId: "integration-active",
                   integrationStatus: "active",
                   keyVersion: "v1",
@@ -72,6 +75,7 @@ async function activeEnvironment(options: {
               }
               if (sql.includes("FROM telegram_updates")) {
                 updateReadCount += 1;
+                if (options.rotateCredentialOnUpdateRead === true && updateReadCount === 1) activeCredentialId = "credential-rotated";
                 return Promise.resolve(updateRow === null ? null : { ...updateRow });
               }
               return Promise.resolve(null);
@@ -81,11 +85,14 @@ async function activeEnvironment(options: {
                 throw new Error("forced_telegram_update_failure");
               }
               if (sql.includes("INSERT INTO telegram_updates")) {
+                if (activeCredentialId !== "credential-active") return Promise.resolve({ meta: { changes: 0 } });
                 updateRow = {
+                  credentialId: String(values[3]),
                   id: String(values[0]),
-                  payloadHash: String(values[4]),
+                  integrationGeneration: Number(values[4]),
+                  payloadHash: String(values[6]),
                   status: "processing",
-                  updatedAt: String(values[8]),
+                  updatedAt: String(values[9]),
                 };
               }
               if (sql.includes("UPDATE telegram_updates SET status = 'processing'") && updateRow !== null) {
@@ -281,6 +288,41 @@ describe("active Telegram health evidence", () => {
       metadata: { updateId: 100 },
       requestId: "request-active-generation-race",
     }]);
+  });
+
+  it("does not enter commerce when the generation drains before the update claim", async () => {
+    const runtime = await activeEnvironment({ rotateCredentialOnUpdateRead: true });
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/start"),
+      requestId: "request-generation-drained-before-claim",
+      webhookPublicId: "tgwh_active",
+    })).rejects.toMatchObject({ code: "telegram_update_stale_generation", status: 409 });
+
+    expect(commerce.handle).not.toHaveBeenCalled();
+    expect(runtime.getProviderCalls()).toBe(0);
+  });
+
+  it("rejects a conflicting payload for the same provider update generation", async () => {
+    const runtime = await activeEnvironment();
+    await processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/start"),
+      requestId: "request-payload-original",
+      webhookPublicId: "tgwh_active",
+    });
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/products"),
+      requestId: "request-payload-conflict",
+      webhookPublicId: "tgwh_active",
+    })).rejects.toMatchObject({ code: "telegram_update_payload_conflict", status: 409 });
+    expect(commerce.handle).toHaveBeenCalledOnce();
   });
 
   it("fails closed after one collision re-read when an update receipt cannot be stored", async () => {

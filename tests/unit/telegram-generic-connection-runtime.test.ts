@@ -16,13 +16,13 @@ import { connectTelegram, disconnectTelegram, refreshTelegramHealth } from "../.
 
 vi.mock("../../src/lib/tenants/store", () => ({
   getShopForMember: vi.fn((input: { shopPublicId: string }) => Promise.resolve(input.shopPublicId === "shop-public-telegram-reclaim"
-    ? {
-        row: { role: "owner", shop_id: "shop-telegram-reclaim" },
-        shop: { defaultLocale: "en" },
+      ? {
+        row: { role: "owner", shop_id: "shop-telegram-reclaim", shop_status: "active" },
+        shop: { defaultLocale: "en", featureFlags: { telegram: true } },
       }
     : {
-        row: { role: "owner", shop_id: "shop-telegram-runtime" },
-        shop: { defaultLocale: "vi-VN" },
+        row: { role: "owner", shop_id: "shop-telegram-runtime", shop_status: "active" },
+        shop: { defaultLocale: "vi-VN", featureFlags: { telegram: true } },
       })),
 }));
 
@@ -660,13 +660,35 @@ describe("Telegram generic connection runtime bridge", () => {
   it("revokes the old credential and rejects pending updates across rotation and disconnect", async () => {
     const runtime = createRuntime();
     await connect(runtime, "telegram-generation-connect");
-    const integration = runtime.database.database.prepare("SELECT id FROM telegram_integrations").get() as { id: string };
+    expect(runtime.webhookPayloads().at(-1)).toMatchObject({ drop_pending_updates: true });
+    const integration = runtime.database.database.prepare(`
+      SELECT id, active_credential_id AS credentialId,
+        integration_generation AS generation
+      FROM telegram_integrations
+    `).get() as { credentialId: string; generation: number; id: string };
     runtime.database.database.prepare(`
       INSERT INTO telegram_updates (
-        id, shop_id, integration_id, update_id, payload_hash, update_kind,
-        status, attempts, received_at, updated_at
-      ) VALUES (?, 'shop-telegram-runtime', ?, ?, ?, 'message', ?, 1, ?, ?)
-    `).run("update-rotation-pending", integration.id, 501, "hash-501", "processing", NOW, NOW);
+        id, shop_id, integration_id, credential_id, integration_generation,
+        update_id, payload_hash, update_kind, status, attempts, received_at, updated_at
+      ) VALUES (?, 'shop-telegram-runtime', ?, ?, ?, ?, ?, 'message', ?, 1, ?, ?)
+    `).run("update-rotation-pending", integration.id, integration.credentialId, integration.generation, 501, "hash-501", "processing", NOW, NOW);
+
+    const webhookCountBeforeBusyRotation = runtime.webhookPayloads().length;
+    await expect(connectTelegram({
+      botToken: ROTATED_BOT_TOKEN,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      replaceBot: false,
+      requestId: "telegram-generation-rotate-busy",
+      shopPublicId: "shop-public-telegram-runtime",
+      userId: "user-telegram-runtime",
+    })).rejects.toMatchObject({ code: "telegram_integration_busy" });
+    expect(runtime.webhookPayloads()).toHaveLength(webhookCountBeforeBusyRotation);
+
+    runtime.database.database.prepare(`
+      UPDATE telegram_updates SET status = 'failed', updated_at = ?
+      WHERE id = 'update-rotation-pending'
+    `).run(NOW);
 
     await connectTelegram({
       botToken: ROTATED_BOT_TOKEN,
@@ -685,10 +707,12 @@ describe("Telegram generic connection runtime bridge", () => {
 
     runtime.database.database.prepare(`
       INSERT INTO telegram_updates (
-        id, shop_id, integration_id, update_id, payload_hash, update_kind,
-        status, attempts, received_at, updated_at
-      ) VALUES (?, 'shop-telegram-runtime', ?, ?, ?, 'message', 'failed', 1, ?, ?)
-    `).run("update-disconnect-pending", integration.id, 502, "hash-502", NOW, NOW);
+        id, shop_id, integration_id, credential_id, integration_generation,
+        update_id, payload_hash, update_kind, status, attempts, received_at, updated_at
+      ) SELECT ?, 'shop-telegram-runtime', id, active_credential_id,
+        integration_generation, ?, ?, 'message', 'failed', 1, ?, ?
+      FROM telegram_integrations WHERE id = ?
+    `).run("update-disconnect-pending", 502, "hash-502", NOW, NOW, integration.id);
     await disconnectTelegram({ env: runtime.env, fetcher: runtime.fetcher, requestId: "telegram-generation-disconnect", shopPublicId: "shop-public-telegram-runtime", userId: "user-telegram-runtime" });
 
     expect(runtime.database.database.prepare("SELECT status, safe_result_code AS resultCode FROM telegram_updates WHERE id = 'update-disconnect-pending'").get()).toEqual({ resultCode: "telegram_update_stale_generation", status: "rejected" });

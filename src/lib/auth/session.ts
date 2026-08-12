@@ -82,6 +82,30 @@ export function createSessionCredentials(): SessionCredentials {
   };
 }
 
+async function activateMagicLinkReplacement(input: {
+  env: AppBindings;
+  expiresAt: string;
+  now: Date;
+  tokenId: string;
+  userId: string;
+}): Promise<void> {
+  const nowIso = input.now.toISOString();
+  const results = await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE magic_link_tokens
+      SET expires_at = ?
+      WHERE user_id = ? AND purpose = 'seller_login' AND id != ?
+        AND consumed_at IS NULL AND expires_at > ?
+    `).bind(nowIso, input.userId, input.tokenId, nowIso),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE magic_link_tokens
+      SET expires_at = ?
+      WHERE id = ? AND user_id = ? AND purpose = 'seller_login' AND consumed_at IS NULL
+    `).bind(input.expiresAt, input.tokenId, input.userId),
+  ]);
+  if ((results[1]?.meta.changes ?? 0) !== 1) throw new AppError("provider_unavailable", 503);
+}
+
 export async function requestMagicLink(input: {
   challengePassed?: boolean;
   displayName: string;
@@ -121,17 +145,16 @@ export async function requestMagicLink(input: {
   `).bind(input.email).first<{ id: string }>();
   if (resolvedUser === null) throw new AppError("provider_unavailable", 503);
 
-  const results = await input.env.PLATFORM_DB.batch([
-    input.env.PLATFORM_DB.prepare(`
-      INSERT INTO magic_link_tokens (
-        id, user_id, token_hash, purpose, expires_at, created_at
-      )
-      VALUES (?, ?, ?, 'seller_login', ?, ?)
-    `).bind(tokenId, resolvedUser.id, tokenHash, expiresAt, now.toISOString()),
-  ]);
-  if ((results[0]?.meta.changes ?? 0) !== 1) throw new AppError("provider_unavailable", 503);
+  const inserted = await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO magic_link_tokens (
+      id, user_id, token_hash, purpose, expires_at, created_at
+    )
+    VALUES (?, ?, ?, 'seller_login', ?, ?)
+  `).bind(tokenId, resolvedUser.id, tokenHash, now.toISOString(), now.toISOString()).run();
+  if (inserted.meta.changes !== 1) throw new AppError("provider_unavailable", 503);
 
   if (input.env.APP_ENV === "local") {
+    await activateMagicLinkReplacement({ env: input.env, expiresAt, now, tokenId, userId: resolvedUser.id });
     return {
       challengeRequired: false,
       debugMagicLink: `/login#${new URLSearchParams({ magic: token }).toString()}`,
@@ -146,6 +169,7 @@ export async function requestMagicLink(input: {
     locale: input.locale,
     token,
   });
+  await activateMagicLinkReplacement({ env: input.env, expiresAt, now, tokenId, userId: resolvedUser.id });
 
   return { challengeRequired: false, expiresAt, initiationBinding };
 }

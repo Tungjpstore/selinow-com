@@ -234,7 +234,7 @@ describe("commerce store lifecycle guards", () => {
     const order = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected: expectedItems(quote.items),
       idempotencyKey: "checkout-tenant-denial-0001",
@@ -367,7 +367,7 @@ describe("commerce store lifecycle guards", () => {
     await expect(checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected: expectedItems(quote.items),
       idempotencyKey: "checkout-expired-cart-0001",
@@ -413,7 +413,7 @@ describe("commerce store lifecycle guards", () => {
     await expect(checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected: expectedItems(quote.items),
       idempotencyKey: "checkout-stale-quote-0001",
@@ -457,7 +457,7 @@ describe("commerce store lifecycle guards", () => {
     await expect(checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected,
       idempotencyKey: "checkout-expired-quote-0001",
@@ -468,7 +468,7 @@ describe("commerce store lifecycle guards", () => {
     await expect(checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected,
       idempotencyKey: "checkout-tampered-quote-0001",
@@ -486,7 +486,7 @@ describe("commerce store lifecycle guards", () => {
     await expect(checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected,
       idempotencyKey: "checkout-mismatched-quote-0001",
@@ -686,7 +686,7 @@ describe("commerce store lifecycle guards", () => {
     const input = {
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected: expectedItems(quote.items),
       idempotencyKey: "checkout-website-attribution-replay-0001",
@@ -783,7 +783,7 @@ describe("commerce store lifecycle guards", () => {
     const order = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected: expectedItems(quote.items),
       idempotencyKey: "checkout-free-fulfillment-0001",
@@ -898,7 +898,7 @@ describe("commerce store lifecycle guards", () => {
     const order = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer-lifecycle@example.test",
       env,
       expected: expectedItems(quote.items),
       idempotencyKey: "checkout-expiry-release-0001",

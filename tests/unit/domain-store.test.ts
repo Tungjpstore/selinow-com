@@ -132,6 +132,16 @@ class DomainDatabase {
             return Promise.resolve({ results: [] });
           },
           first() {
+            if (sql.includes("FROM shop_subscriptions AS domain_subscription")) {
+              const shopId = String(values[0]);
+              return Promise.resolve({
+                currentPeriodEnd: "2099-01-01T00:00:00.000Z",
+                featureFlagsJson: JSON.stringify({ customDomain: customDomainFeature.get(shopId) }),
+                graceEndsAt: null,
+                subscriptionState: "active",
+                trialEndsAt: null,
+              });
+            }
             if (sql.includes("FROM shops") && sql.includes("INNER JOIN shop_members")) {
               const userId = String(values[0]);
               const shopPublicId = String(values[1]);
@@ -186,6 +196,31 @@ class DomainDatabase {
             return Promise.resolve(null);
           },
           run() {
+            if (sql.includes("domain:suspend-missing-entitlement")) {
+              const row = domains.get(String(values[2]));
+              const expectedCanonical = typeof values[8] === "string" ? values[8] : null;
+              if (row === undefined
+                || row.shopId !== values[3]
+                || row.deleteRequestedAt !== null
+                || row.leaseToken !== values[4]
+                || row.version !== values[5]
+                || row.isPrimary !== values[6]
+                || (canonical.get(String(values[7])) ?? null) !== expectedCanonical) {
+                return Promise.resolve({ meta: { changes: 0 } });
+              }
+              Object.assign(row, {
+                isPrimary: 0,
+                lastCheckedAt: values[0],
+                lastSafeErrorCode: "subscription_required",
+                leaseExpiresAt: null,
+                leaseToken: null,
+                nextCheckAt: null,
+                status: "suspended",
+                updatedAt: values[1],
+                version: row.version + 1,
+              });
+              return Promise.resolve({ meta: { changes: 1 } });
+            }
             if (sql.includes("domain:create-ownership-claim")) {
               const [idValue, shopIdValue, hostnameValue, challengeHashValue, expiresAtValue, createdAtValue, updatedAtValue] = values;
               const id = String(idValue);
@@ -913,6 +948,37 @@ describe("custom domain store", () => {
     expect(provider.creates).toBe(0);
   });
 
+  it("does not verify or promote a pending claim after downgrade", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const claimed = await createCustomDomainClaim({
+      env,
+      hostname: "shop.customer.com",
+      requestId: "request-claim",
+      runtime: { now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    database.customDomainFeature.set("shop-a", false);
+
+    await expect(checkCustomDomain({
+      domainId: claimed.domain.id,
+      env,
+      requestId: "request-check",
+      runtime: {
+        now: NOW,
+        ownershipVerifier: ({ expectedValue }) => Promise.resolve({ observedValues: [expectedValue], status: "active" }),
+        provider,
+      },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "subscription_required", status: 402 });
+    expect(Array.from(database.domains.values()).filter((row) => row.type === "custom")).toHaveLength(0);
+    expect(database.claims.get(claimed.domain.id)?.verifiedAt).toBeNull();
+    expect(provider.creates).toBe(0);
+  });
+
   it("allows different shops to hold tenant-bound pending claims for one hostname", async () => {
     const database = new DomainDatabase();
     const provider = new Provider();
@@ -1477,6 +1543,45 @@ describe("custom domain store", () => {
     expect(reconciled?.checkAttempts).toBe(before + 1);
     expect(reconciled?.leaseToken).toBeNull();
     expect(reconciled?.leaseExpiresAt).toBeNull();
+  });
+
+  it("suspends an active secondary custom domain without polling after downgrade", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    database.customDomainFeature.set("shop-a", false);
+    const providerPoll = vi.spyOn(provider, "getCustomHostname");
+
+    const future = new Date(NOW.getTime() + 7 * 60 * 60_000);
+    await expect(reconcileCustomDomains(env, future, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 1, deleted: 0, failed: 0 });
+    expect(database.domains.get(created.domain.id)).toMatchObject({
+      isPrimary: 0,
+      lastSafeErrorCode: "subscription_required",
+      leaseExpiresAt: null,
+      leaseToken: null,
+      nextCheckAt: null,
+      status: "suspended",
+    });
+    expect(providerPoll).not.toHaveBeenCalled();
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+  });
+
+  it("atomically restores the platform canonical domain when a primary custom domain is downgraded", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    await setPrimaryDomain({ domainId: created.domain.id, env, requestId: "request-primary", shopPublicId: "shop_public_a", userId: "user-a" });
+    database.customDomainFeature.set("shop-a", false);
+    const providerPoll = vi.spyOn(provider, "getCustomHostname");
+
+    const future = new Date(NOW.getTime() + 7 * 60 * 60_000);
+    await expect(reconcileCustomDomains(env, future, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 1, deleted: 0, failed: 0 });
+    expect(database.domains.get(created.domain.id)).toMatchObject({ isPrimary: 0, status: "suspended" });
+    expect(database.domains.get("dom_platform_shop-a")?.isPrimary).toBe(1);
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+    expect(providerPoll).not.toHaveBeenCalled();
   });
 
   it("suspends routing immediately and defers provider deletion while a poll owns the lease", async () => {

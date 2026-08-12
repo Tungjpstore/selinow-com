@@ -75,21 +75,32 @@ reports, synthetic webhooks, or local-only test output.
 
 5. **Admission and mutation**
 
-   - Create the production release evidence and run the closeout audit again.
-   - Require `release:doctor` to return `ok: true` and the continuation-file
-     admission to pass for the same commit/tree and migration ledger.
-   - Bind a release manifest and rollback rehearsal to the candidate.
+   - Create the production release evidence draft with every accepted artifact
+     except the not-yet-executed rollback fields. A final doctor failure on those
+     rollback fields is expected at this point; do not fill them with placeholders.
    - Before `release:manifest`, upload route-neutral candidate and rollback
      versions with `npm run release:worker:upload -- --role candidate --tag
      <candidate-tag> --execute --confirm-production --json` and
      `npm run release:worker:upload -- --role rollback --tag <rollback-tag>
      --source-root <clean-rollback-worktree> --execute --confirm-production
-     --json`; record both full returned UUIDs. Then run
+     --json`; record both full returned UUIDs. Create the canonical mode-`0600`
+     `.wrangler/releases/<release-id>/maintenance-drain-evidence.json` only after
+     write admission is closed, queue producers and scheduled work are paused,
+     and in-flight jobs are drained. Then run
      `npm run release:rollback:rehearsal -- --execute --confirm-production
-     --confirm-maintenance-drain --json` and record its
+     --confirm-maintenance-drain --maintenance-drain-evidence
+     .wrangler/releases/<release-id>/maintenance-drain-evidence.json
+     --smoke-storefront-url https://<reviewed-pilot-host>/ --json` and record its
      `evidenceRef`/`artifactSha256`. The non-mutating `--write` mode validates
      schema compatibility only and does not authorize production admission.
-     Deploy admission validates both Cloudflare version bindings.
+     The live rehearsal requires phase-10 health, dashboard, marketing,
+     D1-backed storefront and unsigned-Dodo fail-closed checks, then restores and
+     verifies the exact previous version. Deploy admission validates both
+     Cloudflare version bindings.
+   - Populate the returned rollback fields, run the closeout audit again, and
+     require `release:doctor` to return `ok: true` with continuation-file
+     admission passing for the same commit/tree and migration ledger.
+   - Only then write the candidate-bound release manifest.
    - Only after all approvals and provider/operations artifacts are accepted,
      execute the separately approved production migration and deploy ceremony.
    - Use a short-lived D1-capable `CLOUDFLARE_D1_API_TOKEN` for normal continuation

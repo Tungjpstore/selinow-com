@@ -1,5 +1,7 @@
 import { createHash, createPublicKey, verify as verifySignature } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { relative, resolve, sep } from "node:path";
 
 export const PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS = Object.freeze([
   "signed_exact_payment",
@@ -46,6 +48,15 @@ const UNSUPPORTED_REASONS = Object.freeze({
   signed_chargeback: "payos_signed_chargeback_not_supported",
   signed_refund: "payos_signed_refund_not_supported",
 });
+const PROVIDER_EXECUTION_REF = /^provider:[a-f0-9]{64}$/u;
+const ATTEMPT_REF = /^attempt:pay_[0-9a-f-]{36}$/u;
+const EVENT_REF = /^event:pev_[0-9a-f-]{36}$/u;
+const REQUEST_REF = /^request:[A-Za-z0-9._:-]{8,128}$/u;
+const RUNNER_KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/u;
+const AUTHORITY_SOURCES = Object.freeze({
+  direct_reconciliation: ["staging_exact_attempt_reconciliation", "provider_signed_response"],
+  signed_exact_payment: ["staging_d1_verified_event", "provider_signed_webhook"],
+});
 
 function keys(value, expected, issue) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(issue);
@@ -80,6 +91,359 @@ function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, canonical(nested)]));
+}
+
+export function serializePayosRunnerAttestationPayload(artifact) {
+  const attestation = artifact?.runnerAttestation;
+  return JSON.stringify(canonical({
+    ...artifact,
+    runnerAttestation: attestation === null || attestation === undefined
+      ? null
+      : {
+        algorithm: attestation.algorithm,
+        keyId: attestation.keyId,
+        publicKeySpkiSha256: attestation.publicKeySpkiSha256,
+        signedAt: attestation.signedAt,
+      },
+  }));
+}
+
+export function readPayosRunnerTrustAnchor({ keyId, publicKeyPath, repositoryRoot, spkiSha256 }) {
+  if (!RUNNER_KEY_ID.test(keyId ?? "") || !SHA256.test(spkiSha256 ?? "") || typeof publicKeyPath !== "string" || publicKeyPath.length === 0) {
+    throw new Error("payos_uat_runner_trust_anchor_invalid");
+  }
+  const path = resolve(repositoryRoot, publicKeyPath);
+  const publicKeyPem = readPrivateFile(repositoryRoot, path, {
+    invalid: "payos_uat_runner_public_key_invalid",
+    missing: "payos_uat_runner_public_key_missing",
+    path: "payos_uat_runner_public_key_ancestor_invalid",
+    permissions: "payos_uat_runner_public_key_invalid",
+  }, { requirePrivatePermissions: false }).toString("utf8");
+  let publicKey;
+  try {
+    publicKey = createPublicKey(publicKeyPem);
+  } catch {
+    throw new Error("payos_uat_runner_public_key_invalid");
+  }
+  if (publicKey.asymmetricKeyType !== "ed25519") throw new Error("payos_uat_runner_public_key_invalid");
+  const observed = createHash("sha256").update(publicKey.export({ format: "der", type: "spki" })).digest("hex");
+  if (observed !== spkiSha256) throw new Error("payos_uat_runner_attestation_fingerprint_mismatch");
+  return {
+    stagingRunnerPublicKeys: { [keyId]: publicKeyPem },
+    stagingRunnerSpkiFingerprints: { [keyId]: spkiSha256 },
+  };
+}
+
+export function assertPayosUnsignedProviderExecutionArtifact(value) {
+  const scenarioId = value?.scenarioId;
+  if (!PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS.includes(scenarioId)) {
+    throw new Error("payos_uat_provider_execution_artifact_invalid");
+  }
+  if (value?.runnerAttestation !== null) throw new Error("payos_uat_runner_attestation_already_present");
+  const controlledAccountFingerprintSha256 = value?.controlledAccountFingerprintSha256;
+  sha(controlledAccountFingerprintSha256, "payos_uat_provider_execution_artifact_invalid");
+  const release = value?.release;
+  const evidence = {
+    providerExecution: { controlledAccountFingerprintSha256 },
+    release,
+    scenarios: { [scenarioId]: { observedAt: value?.observedAt } },
+  };
+  assertProviderExecutionArtifact(value, evidence, scenarioId);
+  safe(value);
+  return value;
+}
+
+function fingerprintList(values) {
+  return createHash("sha256").update(JSON.stringify([...values].sort())).digest("hex");
+}
+
+function readPrivateFile(root, path, issues, { requirePrivatePermissions = true } = {}) {
+  const base = resolve(root);
+  const target = resolve(path);
+  const rel = relative(base, target);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`)) throw new Error(issues.path);
+  assertNoSymlinkAncestors(base, target, issues.path);
+  let descriptor;
+  try {
+    const canonicalRoot = realpathSync.native(base);
+    const canonicalPath = realpathSync.native(target);
+    const expectedCanonicalPath = resolve(canonicalRoot, rel);
+    if (canonicalPath !== expectedCanonicalPath) throw new Error(issues.path);
+    descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const openedStat = fstatSync(descriptor, { bigint: true });
+    const pathStat = statSync(target, { bigint: true });
+    if (!openedStat.isFile()
+      || (requirePrivatePermissions && (openedStat.mode & 0o077n) !== 0n)
+      || openedStat.dev !== pathStat.dev
+      || openedStat.ino !== pathStat.ino
+      || realpathSync.native(target) !== canonicalPath) {
+      throw new Error(issues.permissions);
+    }
+    const bytes = readFileSync(descriptor);
+    const closedOverStat = fstatSync(descriptor, { bigint: true });
+    const finalPathStat = statSync(target, { bigint: true });
+    if (openedStat.dev !== closedOverStat.dev
+      || openedStat.ino !== closedOverStat.ino
+      || openedStat.dev !== finalPathStat.dev
+      || openedStat.ino !== finalPathStat.ino
+      || openedStat.size !== closedOverStat.size
+      || openedStat.mtimeNs !== closedOverStat.mtimeNs
+      || openedStat.ctimeNs !== closedOverStat.ctimeNs
+      || realpathSync.native(target) !== canonicalPath) {
+      throw new Error(issues.path);
+    }
+    return bytes;
+  } catch (error) {
+    if (error instanceof Error && Object.values(issues).includes(error.message)) throw error;
+    if (error?.code === "ELOOP") throw new Error(issues.path, { cause: error });
+    throw new Error(descriptor === undefined ? issues.missing : issues.invalid, { cause: error });
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function readPrivateJson(root, path, missingIssue, pathIssue = `${missingIssue}_path_invalid`) {
+  const bytes = readPrivateFile(root, path, {
+    invalid: `${missingIssue}_invalid`,
+    missing: missingIssue,
+    path: pathIssue,
+    permissions: `${missingIssue}_permissions_invalid`,
+  });
+  try {
+    return { bytes, value: JSON.parse(bytes.toString("utf8")) };
+  } catch {
+    throw new Error(`${missingIssue}_invalid`);
+  }
+}
+
+function assertNoSymlinkAncestors(root, path, issue) {
+  const base = resolve(root);
+  const rel = relative(base, path);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`)) throw new Error(issue);
+  let current = base;
+  const parts = rel.split(sep).slice(0, -1);
+  for (const part of parts) {
+    current = resolve(current, part);
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch {
+      throw new Error(issue);
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(issue);
+  }
+}
+
+function canonicalExecutionPath(root, releaseId, scenarioId) {
+  const path = resolve(root, ".wrangler", "releases", "staging", releaseId, "execution", `payos-${scenarioId}.json`);
+  const rel = relative(resolve(root, ".wrangler", "releases", "staging", releaseId), path);
+  if (rel.startsWith("..") || rel.includes("\\")) throw new Error("payos_uat_provider_execution_artifact_path_invalid");
+  return path;
+}
+
+function scenarioArtifactPath(root, reference, releaseId, scenarioId) {
+  const expected = `artifact:.wrangler/releases/staging/${releaseId}/scenarios/payos-${scenarioId}.json`;
+  if (reference !== expected) {
+    throw new Error("payos_uat_scenario_artifact_reference_required");
+  }
+  const path = resolve(root, reference.slice("artifact:".length));
+  const rel = relative(resolve(root, ".wrangler", "releases", "staging"), path);
+  if (rel.startsWith("..") || rel.includes("\\")) throw new Error("payos_uat_scenario_artifact_reference_required");
+  return path;
+}
+
+function assertExecutionRelease(release, expected) {
+  keys(release, ["commitSha", "manifestRef", "manifestSha256", "releaseId", "treeSha", "workerVersion"], "payos_uat_provider_execution_artifact_binding_mismatch");
+  for (const key of ["commitSha", "manifestRef", "manifestSha256", "releaseId", "treeSha", "workerVersion"]) {
+    if (release[key] !== expected[key]) throw new Error("payos_uat_provider_execution_artifact_binding_mismatch");
+  }
+}
+
+function assertProviderExecutionArtifact(value, evidence, scenarioId) {
+  keys(value, [
+    "authority",
+    "controlledAccountFingerprintSha256",
+    "environment",
+    "evidenceKind",
+    "observedAt",
+    "provider",
+    "providerEnvironment",
+    "redaction",
+    "release",
+    "result",
+    "runnerAttestation",
+    "scenarioId",
+    "schemaVersion",
+    "verificationMethod",
+  ], "payos_uat_provider_execution_artifact_invalid");
+  const record = evidence.scenarios[scenarioId];
+  if (value.schemaVersion !== 1
+    || value.evidenceKind !== "provider_execution"
+    || value.environment !== "staging"
+    || value.provider !== "payos"
+    || value.providerEnvironment !== "production_controlled"
+    || value.scenarioId !== scenarioId
+    || value.verificationMethod !== PROVIDER_METHODS[scenarioId]
+    || value.observedAt !== record.observedAt
+    || value.controlledAccountFingerprintSha256 !== evidence.providerExecution.controlledAccountFingerprintSha256) {
+    throw new Error("payos_uat_provider_execution_artifact_binding_mismatch");
+  }
+  assertExecutionRelease(value.release, evidence.release);
+  keys(value.authority, ["attemptReference", "authoritySource", "eventReference", "providerAuthority", "providerReference", "requestReference"], "payos_uat_provider_execution_authority_invalid");
+  const [authoritySource, providerAuthority] = AUTHORITY_SOURCES[scenarioId] ?? [];
+  if (!ATTEMPT_REF.test(value.authority.attemptReference ?? "")
+    || !EVENT_REF.test(value.authority.eventReference ?? "")
+    || !PROVIDER_EXECUTION_REF.test(value.authority.providerReference ?? "")
+    || !REQUEST_REF.test(value.authority.requestReference ?? "")
+    || value.authority.authoritySource !== authoritySource
+    || value.authority.providerAuthority !== providerAuthority) {
+    throw new Error("payos_uat_provider_execution_authority_invalid");
+  }
+  keys(value.result, ["duplicate", "processed", "state"], "payos_uat_provider_execution_result_invalid");
+  if (value.result.duplicate !== false || value.result.processed !== true || value.result.state !== "paid_exact") {
+    throw new Error("payos_uat_provider_execution_result_invalid");
+  }
+  keys(value.redaction, ["noCredentialData", "noCustomerData", "noFinancialDetails", "noRawPayload"], "payos_uat_provider_execution_redaction_invalid");
+  if (Object.values(value.redaction).some((entry) => entry !== true)) {
+    throw new Error("payos_uat_provider_execution_redaction_invalid");
+  }
+  return value.authority;
+}
+
+function assertRunnerAttestation(value, trust) {
+  const attestation = value.runnerAttestation;
+  if (attestation === null) throw new Error("payos_uat_runner_attestation_required");
+  keys(attestation, ["algorithm", "keyId", "publicKeySpkiSha256", "signatureBase64", "signedAt"], "payos_uat_runner_attestation_invalid");
+  if (attestation.algorithm !== "ed25519" || !RUNNER_KEY_ID.test(attestation.keyId ?? "")
+    || !SHA256.test(attestation.publicKeySpkiSha256 ?? "") || !BASE64.test(attestation.signatureBase64 ?? "")) {
+    throw new Error("payos_uat_runner_attestation_invalid");
+  }
+  iso(attestation.signedAt, "payos_uat_runner_attestation_invalid");
+  const observedAt = new Date(value.observedAt).getTime();
+  const signedAt = new Date(attestation.signedAt).getTime();
+  if (signedAt < observedAt || signedAt > observedAt + 15 * 60_000) throw new Error("payos_uat_runner_attestation_invalid");
+  const publicKeyPem = trust?.stagingRunnerPublicKeys?.[attestation.keyId];
+  const pinnedFingerprint = trust?.stagingRunnerSpkiFingerprints?.[attestation.keyId];
+  if (typeof publicKeyPem !== "string" || !SHA256.test(pinnedFingerprint ?? "")) {
+    throw new Error("payos_uat_runner_attestation_untrusted");
+  }
+  let publicKey;
+  try {
+    publicKey = createPublicKey(publicKeyPem);
+  } catch {
+    throw new Error("payos_uat_runner_attestation_untrusted");
+  }
+  if (publicKey.asymmetricKeyType !== "ed25519") throw new Error("payos_uat_runner_attestation_untrusted");
+  const observedFingerprint = createHash("sha256")
+    .update(publicKey.export({ format: "der", type: "spki" }))
+    .digest("hex");
+  if (observedFingerprint !== pinnedFingerprint || attestation.publicKeySpkiSha256 !== pinnedFingerprint) {
+    throw new Error("payos_uat_runner_attestation_fingerprint_mismatch");
+  }
+  const signature = Buffer.from(attestation.signatureBase64, "base64");
+  if (signature.length !== 64
+    || !verifySignature(null, Buffer.from(serializePayosRunnerAttestationPayload(value)), publicKey, signature)) {
+    throw new Error("payos_uat_runner_attestation_invalid");
+  }
+}
+
+export function readPayosProviderExecutionArtifact({
+  executionEvidencePath,
+  observedAt,
+  release,
+  repositoryRoot,
+  scenarioId,
+  stagingRunnerPublicKeys,
+  stagingRunnerSpkiFingerprints,
+  verificationMethod,
+}) {
+  const root = resolve(repositoryRoot);
+  const expectedPath = canonicalExecutionPath(root, release.releaseId, scenarioId);
+  if (resolve(root, executionEvidencePath) !== expectedPath) {
+    throw new Error("payos_uat_provider_execution_artifact_path_invalid");
+  }
+  const loaded = readPrivateJson(
+    root,
+    expectedPath,
+    "payos_uat_provider_execution_artifact_missing",
+    "payos_uat_provider_execution_artifact_ancestor_invalid",
+  );
+  const controlledAccountFingerprintSha256 = loaded.value?.controlledAccountFingerprintSha256;
+  sha(controlledAccountFingerprintSha256, "payos_uat_provider_execution_artifact_invalid");
+  const evidence = {
+    providerExecution: { controlledAccountFingerprintSha256 },
+    release,
+    scenarios: { [scenarioId]: { observedAt } },
+  };
+  if (verificationMethod !== PROVIDER_METHODS[scenarioId]) throw new Error("payos_uat_provider_execution_artifact_binding_mismatch");
+  const authority = assertProviderExecutionArtifact(loaded.value, evidence, scenarioId);
+  assertRunnerAttestation(loaded.value, { stagingRunnerPublicKeys, stagingRunnerSpkiFingerprints });
+  return {
+    authority,
+    controlledAccountFingerprintSha256,
+    fingerprintSha256: createHash("sha256").update(loaded.bytes).digest("hex"),
+    path: expectedPath,
+  };
+}
+
+/** Verify the separate provider-execution artifacts before release admission. */
+export function readPayosProviderExecutionArtifacts({
+  evidence,
+  repositoryRoot,
+  stagingRunnerPublicKeys,
+  stagingRunnerSpkiFingerprints,
+}) {
+  if (evidence?.evidenceKind !== "provider_acceptance") throw new Error("payos_uat_provider_execution_artifact_not_applicable");
+  const root = resolve(repositoryRoot);
+  const fingerprints = {};
+  const authorities = {};
+  const references = new Set();
+  for (const scenarioId of PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS) {
+    const record = evidence?.scenarios?.[scenarioId];
+    const scenarioPath = scenarioArtifactPath(root, record?.requestReference, evidence.release.releaseId, scenarioId);
+    const scenario = readPrivateJson(root, scenarioPath, "payos_uat_scenario_artifact_missing").value;
+    const executionPath = canonicalExecutionPath(root, evidence.release.releaseId, scenarioId);
+    const execution = readPrivateJson(
+      root,
+      executionPath,
+      "payos_uat_provider_execution_artifact_missing",
+      "payos_uat_provider_execution_artifact_ancestor_invalid",
+    );
+    const fingerprint = createHash("sha256").update(execution.bytes).digest("hex");
+    if (scenario?.scenarioId !== scenarioId || scenario?.proofOfExecutionFingerprintSha256 !== fingerprint) {
+      throw new Error("payos_uat_provider_execution_artifact_hash_mismatch");
+    }
+    const authority = assertProviderExecutionArtifact(execution.value, evidence, scenarioId);
+    assertRunnerAttestation(execution.value, { stagingRunnerPublicKeys, stagingRunnerSpkiFingerprints });
+    for (const reference of Object.values(authority)) {
+      if (references.has(reference)) throw new Error("payos_uat_provider_execution_reference_duplicate");
+      references.add(reference);
+    }
+    fingerprints[scenarioId] = fingerprint;
+    authorities[scenarioId] = authority;
+  }
+  const transactionEvidenceFingerprintSha256 = fingerprintList(Object.values(fingerprints));
+  if (transactionEvidenceFingerprintSha256 !== evidence.providerExecution.transactionEvidenceFingerprintSha256) {
+    throw new Error("payos_uat_provider_execution_fingerprint_mismatch");
+  }
+  return { authorities, fingerprints, transactionEvidenceFingerprintSha256 };
+}
+
+export function readPayosScenarioArtifactFingerprints({ evidence, repositoryRoot }) {
+  const fingerprints = {};
+  for (const scenarioId of PAYOS_STAGING_UAT_SCENARIO_IDS) {
+    const record = evidence?.scenarios?.[scenarioId];
+    const path = scenarioArtifactPath(resolve(repositoryRoot), record?.requestReference, evidence.release.releaseId, scenarioId);
+    const loaded = readPrivateJson(resolve(repositoryRoot), path, "payos_uat_scenario_artifact_missing");
+    const fingerprint = createHash("sha256").update(loaded.bytes).digest("hex");
+    if (fingerprint !== record?.evidenceFingerprintSha256) throw new Error("payos_uat_scenario_artifact_hash_mismatch");
+    if (loaded.value?.provider !== "payos" || loaded.value?.environment !== "staging"
+      || loaded.value?.scenarioId !== scenarioId || loaded.value?.release?.releaseId !== evidence?.release?.releaseId) {
+      throw new Error("payos_uat_scenario_artifact_binding_mismatch");
+    }
+    fingerprints[scenarioId] = fingerprint;
+  }
+  return fingerprints;
 }
 
 export function fingerprintPayosStagingUatEvidence(evidence) {

@@ -30,6 +30,8 @@
     "dodo:webhook:register": "node scripts/dodo-webhook-register.mjs",
     "payos:staging:attest": "node scripts/payos-staging-attest.mjs",
     "payos:uat:artifact": "node scripts/payos-uat-artifact.mjs",
+    "payos:uat:collect": "node scripts/payos-uat-collect.mjs",
+    "payos:uat:execution:sign": "node scripts/payos-uat-execution-sign.mjs",
     "payos:uat:sign": "node scripts/payos-uat-sign.mjs",
     "payos:uat:validate": "node scripts/payos-uat-validate.mjs",
     "platform:provision": "node scripts/platform-provision.mjs",

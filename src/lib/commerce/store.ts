@@ -9,7 +9,7 @@ import type { AppBindings } from "../platform/bindings";
 import type { StorefrontShop } from "../storefront/store";
 import { assertCheckoutAllowed } from "../tenants/policy";
 import type { CartItemInput } from "./policy";
-import { maskEmail } from "./policy";
+import { maskEmail, normalizeCustomerEmail } from "./policy";
 import { verifyQuoteEvidence, type QuoteEvidenceCatalogItem } from "./quote-evidence";
 import { executeCanonicalCheckoutTransaction } from "./checkout-transaction";
 import { calculateCartDiscountMinor } from "./pricing";
@@ -153,6 +153,8 @@ export async function websiteCheckoutFingerprint(input: {
 export async function checkoutCart(input: { cartId: string; cartToken: string; customerEmail: string | null; env: AppBindings; expected: ExpectedItem[]; idempotencyKey: string; quoteEvidence?: string; shop: PublicShop }): Promise<{ currency: string; expiresAt: string; fulfillmentStatus: string; orderId: string; orderNumber: string; orderToken: string; paymentStatus: string; status: string; totalMinor: number }> {
   assertSubscriptionAllows({ currentPeriodEnd: input.shop.currentPeriodEnd, graceEndsAt: input.shop.graceEndsAt, subscriptionState: input.shop.subscriptionState, trialEndsAt: input.shop.trialEndsAt });
   assertCheckoutAllowed({ shopStatus: input.shop.status, subscriptionState: input.shop.subscriptionState });
+  const customerEmail = normalizeCustomerEmail(input.customerEmail);
+  if (customerEmail === null) throw new AppError("validation_failed", 400, ["email_required"]);
   if (!/^[A-Za-z0-9._:-]{16,128}$/u.test(input.idempotencyKey)) throw new AppError("validation_failed", 400, ["idempotency_key_invalid"]);
   const checkoutHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `checkout:${input.shop.id}`, input.idempotencyKey);
   // Keep signed proofs out of the business hash, but bind canonical pricing so
@@ -164,7 +166,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
   const hashDiscountMinor = await calculateCartDiscountMinor({ code: hashCart?.discountCode ?? null, env: input.env, shop: input.shop, subtotalMinor: hashSubtotalMinor });
   const requestHash = await websiteCheckoutFingerprint({
     cartId: input.cartId,
-    customerEmail: input.customerEmail,
+    customerEmail,
     discountCode: hashCart?.discountCode ?? null,
     discountMinor: hashDiscountMinor,
     expected: input.expected,
@@ -290,7 +292,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
   const totalMinor = subtotalMinor - discountMinor;
   const authoritativeRequestHash = await websiteCheckoutFingerprint({
     cartId: input.cartId,
-    customerEmail: input.customerEmail,
+    customerEmail,
     discountCode: cart.row.discountCode,
     discountMinor,
     expected: input.expected,
@@ -342,9 +344,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
       checkoutRequestHash: requestHash,
       checkoutSubjectHash: checkoutHash,
       currency: input.shop.currency,
-      customer: input.customerEmail === null
-        ? { kind: "anonymous", maskedEmail: null }
-        : { emailNormalized: input.customerEmail, id: createId("cus"), kind: "upsert_email", locale: cart.row.locale, maskedEmail: maskEmail(input.customerEmail) ?? "" },
+      customer: { emailNormalized: customerEmail, id: createId("cus"), kind: "upsert_email", locale: cart.row.locale, maskedEmail: maskEmail(customerEmail) ?? "" },
       discountMinor,
       env: input.env,
       eventIdempotencyKey: checkoutHash,

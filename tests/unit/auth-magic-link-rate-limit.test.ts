@@ -323,8 +323,11 @@ describe("magic-link issuance rate limit", () => {
       now: NOW,
     })));
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(3);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(5);
+    const fulfilled = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    expect(fulfilled).toHaveLength(8);
+    expect(fulfilled.filter((result) => result.debugMagicLink !== undefined)).toHaveLength(3);
+    expect(fulfilled.filter((result) => result.challengeRequired)).toHaveLength(5);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(0);
     expect(database.prepare("SELECT COUNT(*) AS count FROM auth_request_admissions").get()).toEqual({ count: 3 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM platform_users").get()).toEqual({ count: 3 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 3 });
@@ -345,11 +348,135 @@ describe("magic-link issuance rate limit", () => {
       now: NOW,
     })));
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(5);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(3);
+    const fulfilled = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    expect(fulfilled).toHaveLength(8);
+    expect(fulfilled.filter((result) => result.debugMagicLink !== undefined)).toHaveLength(5);
+    expect(fulfilled.filter((result) => result.challengeRequired)).toHaveLength(3);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(0);
     expect(database.prepare("SELECT COUNT(*) AS count FROM auth_request_admissions").get()).toEqual({ count: 5 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM platform_users").get()).toEqual({ count: 5 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 5 });
+  });
+
+  it("offers a verified adaptive lane after distributed ordinary exhaustion", async () => {
+    env = bindings(database, {
+      APP_ENV: "production",
+      MAGIC_LINK_GLOBAL_RATE_LIMIT: "3",
+      MAGIC_LINK_REQUESTER_RATE_LIMIT: "3",
+      TURNSTILE_SECRET_KEY: "0x12345678901234567890123456789012",
+      TURNSTILE_SITE_KEY: "0x12345678901234567890",
+    });
+    routeDependencies.env = env;
+    const currentWindow = new Date();
+    for (let index = 0; index < 3; index += 1) {
+      await requestMagicLink({
+        displayName: `Ordinary ${String(index)}`,
+        email: `ordinary-${String(index)}@example.test`,
+        env,
+        requesterAddress: `203.0.113.${String(index + 50)}`,
+        now: currentWindow,
+      });
+    }
+
+    const routeContext = (turnstileToken?: string) => ({
+      locals: { locale: "en-US", requestId: "request-global-adaptive" },
+      request: new Request(`${env.DASHBOARD_ORIGIN}/api/auth/magic-link/request`, {
+        body: JSON.stringify({
+          email: "legitimate-after-exhaustion@example.test",
+          ...(turnstileToken === undefined ? {} : { turnstileToken }),
+        }),
+        headers: {
+          "CF-Connecting-IP": "203.0.113.99",
+          "Content-Type": "application/json",
+          Origin: env.DASHBOARD_ORIGIN,
+        },
+        method: "POST",
+      }),
+    } as unknown as Parameters<typeof requestMagicLinkRoute>[0]);
+
+    const challenged = await requestMagicLinkRoute(routeContext());
+    expect(challenged.status).toBe(202);
+    await expect(challenged.json()).resolves.toMatchObject({
+      accepted: true,
+      challengeRequired: true,
+      requestId: "request-global-adaptive",
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_request_admissions").get()).toEqual({ count: 3 });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      action: "magic_link_request",
+      hostname: "app-staging.selinow.com",
+      success: true,
+    }), { status: 200 }));
+    const admitted = await requestMagicLinkRoute(routeContext("turnstile-token-verified"));
+    expect(admitted.status).toBe(202);
+    await expect(admitted.json()).resolves.toMatchObject({ accepted: true, challengeRequired: false });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_request_admissions").get()).toEqual({ count: 4 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 4 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    fetchMock.mockRestore();
+  });
+
+  it("bounds the verified adaptive lane across distributed requesters", async () => {
+    env = bindings(database, {
+      MAGIC_LINK_GLOBAL_RATE_LIMIT: "20",
+      MAGIC_LINK_REQUESTER_RATE_LIMIT: "20",
+    });
+    const results = await Promise.allSettled(Array.from({ length: 5 }, (_, index) => requestMagicLink({
+      challengePassed: true,
+      displayName: `Adaptive ${String(index)}`,
+      email: `adaptive-${String(index)}@example.test`,
+      env,
+      requesterAddress: `198.51.100.${String(index + 10)}`,
+      now: NOW,
+    })));
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(3);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_request_admissions").get()).toEqual({ count: 2 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM magic_link_tokens").get()).toEqual({ count: 2 });
+
+    await expect(requestMagicLink({
+      displayName: "Ordinary remains independent",
+      email: "ordinary-after-adaptive@example.test",
+      env,
+      requesterAddress: "198.51.100.250",
+      now: NOW,
+    })).resolves.toHaveProperty("debugMagicLink");
+  });
+
+  it("bounds verified adaptive requests by requester and email", async () => {
+    const sameEmail = await Promise.allSettled([
+      requestMagicLink({
+        challengePassed: true,
+        displayName: "Adaptive Subject A",
+        email: "adaptive-subject@example.test",
+        env,
+        requesterAddress: "198.51.100.90",
+        now: NOW,
+      }),
+      requestMagicLink({
+        challengePassed: true,
+        displayName: "Adaptive Subject B",
+        email: "adaptive-subject@example.test",
+        env,
+        requesterAddress: "198.51.100.91",
+        now: NOW,
+      }),
+    ]);
+    expect(sameEmail.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(sameEmail.filter((result) => result.status === "rejected")).toHaveLength(1);
+
+    const sameRequester = await Promise.allSettled(Array.from({ length: 3 }, (_, index) => requestMagicLink({
+      challengePassed: true,
+      displayName: `Adaptive Requester ${String(index)}`,
+      email: `adaptive-requester-${String(index)}@example.test`,
+      env,
+      requesterAddress: "198.51.100.100",
+      now: NOW,
+    })));
+    expect(sameRequester.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+    expect(sameRequester.filter((result) => result.status === "rejected")).toHaveLength(1);
   });
 
   it("rolls the admission budget into a new window and purges expired rows", async () => {
@@ -361,7 +488,7 @@ describe("magic-link issuance rate limit", () => {
     await requestMagicLink({ displayName: "Seller A", email: "a@example.test", env, requesterAddress: "203.0.113.40", now: NOW });
     await requestMagicLink({ displayName: "Seller B", email: "b@example.test", env, requesterAddress: "203.0.113.41", now: NOW });
     await expect(requestMagicLink({ displayName: "Seller C", email: "c@example.test", env, requesterAddress: "203.0.113.42", now: NOW }))
-      .rejects.toMatchObject({ code: "rate_limited", status: 429 });
+      .resolves.toMatchObject({ challengeRequired: true });
 
     const nextWindow = new Date(NOW.getTime() + 60_000);
     await expect(requestMagicLink({ displayName: "Seller C", email: "c@example.test", env, requesterAddress: "203.0.113.42", now: nextWindow }))
@@ -597,6 +724,138 @@ describe("magic-link issuance rate limit", () => {
     await expect(response.json()).resolves.toMatchObject({ authenticated: true, ok: true, redirectTo: "/app" });
     expect(response.headers.get("Set-Cookie")).toContain(`${env.SESSION_COOKIE_NAME}=`);
     expect(database.prepare("SELECT consumed_at IS NOT NULL AS consumed FROM magic_link_tokens").get()).toEqual({ consumed: 1 });
+  });
+
+  it("invalidates every older unconsumed link when a replacement is issued", async () => {
+    const first = await requestMagicLink({
+      displayName: "Replacement",
+      email: "replacement@example.test",
+      env,
+      requesterAddress: "203.0.113.161",
+      now: new Date(),
+    });
+    const replacement = await requestMagicLink({
+      displayName: "Replacement",
+      email: "replacement@example.test",
+      env,
+      requesterAddress: "203.0.113.161",
+      now: new Date(Date.now() + 1),
+    });
+    const firstToken = tokenFromMagicLink(first.debugMagicLink, env.DASHBOARD_ORIGIN);
+    const replacementToken = tokenFromMagicLink(replacement.debugMagicLink, env.DASHBOARD_ORIGIN);
+
+    await expect(consumeMagicLink({ env, initiationBinding: first.initiationBinding, token: firstToken }))
+      .rejects.toMatchObject({ code: "authentication_required", status: 401 });
+    expect(database.prepare(`
+      SELECT consumed_at AS consumedAt, expires_at <= ? AS expired
+      FROM magic_link_tokens WHERE token_hash = ?
+    `).get(new Date().toISOString(), await hmacToken(env.MAGIC_LINK_SECRET, "magic-link", firstToken)))
+      .toEqual({ consumedAt: null, expired: 1 });
+    await expect(consumeMagicLink({ env, initiationBinding: replacement.initiationBinding, token: replacementToken }))
+      .resolves.toMatchObject({ auth: { email: "replacement@example.test" } });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM magic_link_tokens
+      WHERE user_id = (SELECT id FROM platform_users WHERE email_normalized = 'replacement@example.test')
+        AND consumed_at IS NULL AND expires_at > ?
+    `).get(new Date().toISOString())).toEqual({ count: 0 });
+  });
+
+  it("leaves exactly one usable link after concurrent replacement requests", async () => {
+    const issuedAt = new Date();
+    const messages: Array<{ text?: string } | undefined> = [];
+    const controlledDeliveries = Array.from({ length: 4 }, (_, index) => {
+      let markSendStarted = (): void => {};
+      let releaseDelivery = (): void => {};
+      const sendStarted = new Promise<void>((resolve) => { markSendStarted = resolve; });
+      const deliveryReleased = new Promise<void>((resolve) => { releaseDelivery = resolve; });
+      const requestEnv = bindings(database, {
+        APP_ENV: "staging",
+        EMAIL: {
+          send(message) {
+            messages[index] = message as { text?: string };
+            markSendStarted();
+            return deliveryReleased.then(() => ({ messageId: `message-${String(index)}` }));
+          },
+        },
+      });
+      return { releaseDelivery, requestEnv, sendStarted };
+    });
+    const requestPromises = controlledDeliveries.map(({ requestEnv }) => requestMagicLink({
+      displayName: "Concurrent Replacement",
+      email: "concurrent-replacement@example.test",
+      env: requestEnv,
+      requesterAddress: "203.0.113.162",
+      now: issuedAt,
+    }));
+    await Promise.all(controlledDeliveries.map(({ sendStarted }) => sendStarted));
+
+    const completionOrder = [2, 0, 1, 3] as const;
+    for (const index of completionOrder) {
+      const delivery = controlledDeliveries[index];
+      const request = requestPromises[index];
+      if (delivery === undefined || request === undefined) throw new Error("concurrent_replacement_fixture_missing");
+      delivery.releaseDelivery();
+      await request;
+    }
+    const requests = await Promise.all(requestPromises);
+    const usableRows = database.prepare(`
+      SELECT id, created_at AS createdAt, expires_at AS expiresAt FROM magic_link_tokens
+      WHERE user_id = (SELECT id FROM platform_users WHERE email_normalized = 'concurrent-replacement@example.test')
+        AND consumed_at IS NULL AND expires_at > ?
+      ORDER BY created_at, id
+    `).all(new Date().toISOString());
+    expect(usableRows).toHaveLength(1);
+
+    const tokens = messages.map((message) => {
+      const link = message?.text?.split("\n").find((line) => line.startsWith(env.DASHBOARD_ORIGIN));
+      return tokenFromMagicLink(link, env.DASHBOARD_ORIGIN);
+    });
+    const lastRequest = requests[3];
+    const lastToken = tokens[3];
+    if (lastRequest === undefined || lastToken === undefined) throw new Error("concurrent_replacement_winner_missing");
+    await expect(consumeMagicLink({
+      env,
+      initiationBinding: lastRequest.initiationBinding,
+      token: lastToken,
+    })).resolves.toMatchObject({ auth: { email: "concurrent-replacement@example.test" } });
+    const superseded = await Promise.allSettled([0, 1, 2].map((index) => {
+      const request = requests[index];
+      const token = tokens[index];
+      if (request === undefined || token === undefined) throw new Error("concurrent_replacement_token_missing");
+      return consumeMagicLink({
+        env,
+        initiationBinding: request.initiationBinding,
+        token,
+      });
+    }));
+    expect(superseded.filter((result) => result.status === "rejected")).toHaveLength(3);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get()).toEqual({ count: 1 });
+  });
+
+  it("keeps the current link usable when replacement delivery fails", async () => {
+    const current = await requestMagicLink({
+      displayName: "Delivery Recovery",
+      email: "delivery-recovery@example.test",
+      env,
+      requesterAddress: "203.0.113.163",
+      now: new Date(),
+    });
+    const currentToken = tokenFromMagicLink(current.debugMagicLink, env.DASHBOARD_ORIGIN);
+    env = bindings(database, {
+      APP_ENV: "staging",
+      EMAIL: { send: () => Promise.reject(new Error("delivery unavailable")) },
+    });
+    routeDependencies.env = env;
+
+    await expect(requestMagicLink({
+      displayName: "Delivery Recovery",
+      email: "delivery-recovery@example.test",
+      env,
+      requesterAddress: "203.0.113.163",
+      now: new Date(),
+    })).rejects.toMatchObject({ code: "provider_unavailable", status: 503 });
+    await expect(consumeMagicLink({ env, initiationBinding: current.initiationBinding, token: currentToken }))
+      .resolves.toMatchObject({ auth: { email: "delivery-recovery@example.test" } });
   });
 
   it("requires an explicit short-lived confirmation for cross-browser consumption and rejects replay", async () => {
@@ -847,17 +1106,17 @@ describe("magic-link issuance rate limit", () => {
       requesterAddress: "203.0.113.80",
       now,
     });
+    const firstSession = await consumeMagicLink({
+      env,
+      initiationBinding: firstLink.initiationBinding,
+      token: tokenFromMagicLink(firstLink.debugMagicLink, env.DASHBOARD_ORIGIN),
+    });
     const secondLink = await requestMagicLink({
       displayName: "Seller",
       email: "sessions@example.test",
       env,
       requesterAddress: "203.0.113.80",
-      now,
-    });
-    await consumeMagicLink({
-      env,
-      initiationBinding: firstLink.initiationBinding,
-      token: tokenFromMagicLink(firstLink.debugMagicLink, env.DASHBOARD_ORIGIN),
+      now: new Date(now.getTime() + 1),
     });
     const current = await consumeMagicLink({
       env,
@@ -869,6 +1128,7 @@ describe("magic-link issuance rate limit", () => {
     const sessions = await listSessions(auth, env);
     expect(sessions).toHaveLength(2);
     expect(sessions.filter((session) => session.isCurrent)).toHaveLength(1);
+    expect(sessions.some((session) => session.sessionId === firstSession.auth.sessionId)).toBe(true);
     expect(sessions.every((session) => !Object.hasOwn(session, "tokenHash"))).toBe(true);
 
     expect(await revokeAllSessions(auth, env)).toBe(2);

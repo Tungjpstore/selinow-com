@@ -37,7 +37,7 @@ const policyLinks = shop === null ? [] : [
       <form id="checkout-form" class="checkout-form">
         <div class="checkout-merchant"><span>{t("storefront.checkout.merchant")}</span><strong>{shop.name}</strong><small>{t("storefront.checkout.provider")}</small></div>
         <h2>{t("storefront.checkout.contact")}</h2>
-        <label>{t("storefront.checkout.email")} <input id="customer-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" /></label>
+        <label>{t("storefront.checkout.email")} <input id="customer-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required /></label>
         <div class="summary-row total"><span>{t("storefront.checkout.total")}</span><strong id="checkout-total">{t("storefront.checking")}</strong></div>
         {turnstileSiteKey && <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-action="storefront_checkout" data-theme="light" data-size="flexible"></div>}
         <p id="checkout-status" class="form-status" aria-live="polite" aria-atomic="true">{t("storefront.checkout.confirming")}</p>

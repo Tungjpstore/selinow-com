@@ -15,14 +15,15 @@ const auth = await authenticateRequest(Astro.request, env).catch(() => null);
 if (auth === null) return Astro.redirect("/login");
 let shops: ShopView[] = [];
 let state: "ready" | "unavailable" | "forbidden" = "ready";
-try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { state = "unavailable"; }
+let loadRequestId: string | null = null;
+try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { state = "unavailable"; loadRequestId = Astro.locals.requestId; }
 const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
 let customers: SellerCustomerView[] = [];
 let nextCursor: string | null = null;
 if (shop !== undefined && state === "ready") {
   try { const page = await listSellerCustomersPage({ cursor: Astro.url.searchParams.get("cursor"), env, shopPublicId: shop.publicId, userId: auth.userId }); customers = page.customers; nextCursor = page.nextCursor; }
-  catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; }
+  catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; if (state === "unavailable") loadRequestId = Astro.locals.requestId; }
 }
 if (state === "forbidden") Astro.response.status = 403;
 if (state === "unavailable") Astro.response.status = 503;
@@ -36,7 +37,7 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
   <PageHeader eyebrow={t("dashboard.customers.eyebrow")} title={t("dashboard.customers.title")} description={t("dashboard.customers.description")}>
     {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app/orders")}>{t("dashboard.customers.open_orders")} <span aria-hidden="true">↗</span></a>}
   </PageHeader>
-  {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.unavailable.title")} description={t("dashboard.customers.unavailable.description")} actionHref={workspaceHref("/app/customers")} actionLabel={t("dashboard.customers.retry")} tone="danger" /></div>
+  {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.unavailable.title")} description={`${t("dashboard.customers.unavailable.description")} ${loadRequestId === null ? "" : t("dashboard.state.error.meta_request", { requestId: loadRequestId })}`.trim()} actionHref={workspaceHref("/app/customers")} actionLabel={t("dashboard.customers.retry")} tone="danger" /></div>
     : shop === undefined ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.no_store.title")} description={t("dashboard.customers.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.customers.no_store.action")} tone="info" /></div>
     : state === "forbidden" ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.forbidden.title")} description={t("dashboard.customers.forbidden.description")} tone="warning" /></div>
     : <div class="customers-workspace" data-customers-root data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-can-manage={shop.role === "owner" || shop.role === "manager" ? "true" : "false"} data-locale={locale ?? "en"} data-copy={JSON.stringify({

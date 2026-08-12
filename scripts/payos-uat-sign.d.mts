@@ -6,6 +6,8 @@ export function signPayosUatEvidence(input: {
   output: string;
   overwrite?: boolean;
   root?: string;
+  stagingRunnerPublicKeys?: Record<string, string>;
+  stagingRunnerSpkiFingerprints?: Record<string, string>;
 }): Promise<{
   artifactFingerprintSha256: string;
   evidencePath: string;

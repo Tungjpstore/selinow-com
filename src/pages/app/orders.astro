@@ -20,10 +20,12 @@ if (auth === null) return Astro.redirect("/login");
 
 let shops: ShopView[] = [];
 let loadState: "forbidden" | "ready" | "unavailable" = "ready";
+let loadRequestId: string | null = null;
 try {
   shops = await listShopsForMember({ env, userId: auth.userId });
 } catch {
   loadState = "unavailable";
+  loadRequestId = Astro.locals.requestId;
 }
 const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
@@ -33,6 +35,7 @@ let orders: SellerOrderSummary[] = [];
 let nextCursor: string | null = null;
 let paymentExceptions: PaymentExceptionView[] = [];
 let paymentExceptionState: "forbidden" | "ready" | "unavailable" = "ready";
+let paymentExceptionRequestId: string | null = null;
 
 if (shop !== undefined && loadState === "ready") {
   try {
@@ -41,12 +44,14 @@ if (shop !== undefined && loadState === "ready") {
     nextCursor = page.nextCursor;
   } catch (error) {
     loadState = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
+    if (loadState === "unavailable") loadRequestId = Astro.locals.requestId;
   }
   try {
     const member = await getShopForMember({ capability: "payments:read", env, shopPublicId: shop.publicId, userId: auth.userId });
     paymentExceptions = await listPaymentExceptions({ env, shopId: member.row.shop_id });
   } catch (error) {
     paymentExceptionState = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
+    if (paymentExceptionState === "unavailable") paymentExceptionRequestId = Astro.locals.requestId;
   }
 }
 
@@ -111,7 +116,7 @@ const filterTags = (order: SellerOrderSummary): string => [
 
   {loadState === "unavailable" ? (
     <div class="state-space">
-      <WorkspaceState eyebrow={t("dashboard.orders.unavailable.eyebrow")} title={t("dashboard.orders.unavailable.title")} description={t("dashboard.orders.unavailable.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.orders.retry")} tone="danger" />
+      <WorkspaceState eyebrow={t("dashboard.orders.unavailable.eyebrow")} title={t("dashboard.orders.unavailable.title")} description={`${t("dashboard.orders.unavailable.description")} ${loadRequestId === null ? "" : t("dashboard.state.error.meta_request", { requestId: loadRequestId })}`.trim()} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.orders.retry")} tone="danger" />
     </div>
   ) : shop === undefined ? (
     <div class="state-space">
@@ -129,6 +134,12 @@ const filterTags = (order: SellerOrderSummary): string => [
         <div><span>{t("dashboard.orders.summary.paid")}</span><strong class="success">{verifiedCount}</strong><small>{t("dashboard.orders.summary.paid_caption")}</small></div>
         <div><span>{t("dashboard.orders.summary.exceptions")}</span><strong class={exceptionCount > 0 ? "danger" : undefined}>{exceptionCount}</strong><small>{t("dashboard.orders.summary.exceptions_caption")}</small></div>
       </section>
+
+      {paymentExceptionState === "unavailable" && (
+        <div class="state-space">
+          <WorkspaceState eyebrow={t("dashboard.orders.unavailable.eyebrow")} title={t("dashboard.orders.unavailable.title")} description={`${t("dashboard.orders.unavailable.description")} ${paymentExceptionRequestId === null ? "" : t("dashboard.state.error.meta_request", { requestId: paymentExceptionRequestId })}`.trim()} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.orders.retry")} tone="danger" />
+        </div>
+      )}
 
       {paymentExceptionState === "ready" && paymentExceptions.length > 0 && (
         <section class="exception-panel" aria-labelledby="payment-exceptions-title">

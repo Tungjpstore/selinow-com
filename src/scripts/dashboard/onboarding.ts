@@ -35,7 +35,8 @@ type CopyParams = Readonly<Record<string, string | number>>;
 
 type ShopCreationAdmission = {
   allowed: boolean;
-  reason: "eligible" | "trial_already_used";
+  creationMode: "paid" | "trial" | null;
+  reason: "billing_recovery" | "eligible";
   recoveryShopPublicId: string | null;
 };
 
@@ -224,6 +225,7 @@ type PageState = {
   selectedShopId: string | null;
   shopSelectionEpoch: number;
   telegram: TelegramIntegration | null;
+  tenantHydrating: boolean;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -272,15 +274,19 @@ function parseShopCreationAdmission(value: unknown): ShopCreationAdmission {
   const row = asRecord(parsed);
   if (row === null
     || typeof row.allowed !== "boolean"
-    || (row.reason !== "eligible" && row.reason !== "trial_already_used")
+    || (row.creationMode !== null && row.creationMode !== "paid" && row.creationMode !== "trial")
+    || (row.reason !== "eligible" && row.reason !== "billing_recovery")
     || (row.recoveryShopPublicId !== null && typeof row.recoveryShopPublicId !== "string")) {
-    return { allowed: false, reason: "trial_already_used", recoveryShopPublicId: null };
+    return { allowed: false, creationMode: null, reason: "billing_recovery", recoveryShopPublicId: null };
   }
-  if (row.allowed !== (row.reason === "eligible") || (row.allowed && row.recoveryShopPublicId !== null)) {
-    return { allowed: false, reason: "trial_already_used", recoveryShopPublicId: null };
+  if (row.allowed !== (row.reason === "eligible")
+    || row.allowed !== (row.creationMode !== null)
+    || (row.allowed && row.recoveryShopPublicId !== null)) {
+    return { allowed: false, creationMode: null, reason: "billing_recovery", recoveryShopPublicId: null };
   }
   return {
     allowed: row.allowed,
+    creationMode: row.creationMode,
     reason: row.reason,
     recoveryShopPublicId: row.recoveryShopPublicId,
   };
@@ -727,6 +733,7 @@ function showCreateRecovery(root: HTMLElement, recoveryShopPublicId: string | nu
 }
 
 function applyShopCreationAdmission(root: HTMLElement, admission: ShopCreationAdmission): void {
+  root.dataset.creationMode = admission.creationMode ?? "blocked";
   const createBox = query<HTMLDetailsElement>(root, "[data-create-shop-box]");
   if (createBox !== null) createBox.hidden = !admission.allowed;
   showCreateRecovery(root, admission.recoveryShopPublicId);
@@ -756,6 +763,15 @@ function setBusy(button: HTMLButtonElement | null, busy: boolean, busyText = "Pr
 
 function selectedShop(state: PageState, shops: readonly Shop[]): Shop | null {
   return shops.find((shop) => shop.publicId === state.selectedShopId) ?? null;
+}
+
+function selectedMutationShop(state: PageState, shops: readonly Shop[]): Shop | null {
+  return state.tenantHydrating ? null : selectedShop(state, shops);
+}
+
+function setShopMutationFence(root: HTMLElement, fenced: boolean): void {
+  root.toggleAttribute("inert", fenced);
+  root.setAttribute("aria-busy", fenced ? "true" : "false");
 }
 
 function selectionIsCurrent(state: PageState, shopId: string, epoch: number): boolean {
@@ -800,6 +816,7 @@ function apiBase(shopId: string): string {
 
 function initialProfile(shop: Shop): OnboardingProfileView {
   return {
+    currentStep: "channel_selected",
     customDomainPreference: "later",
     telegramEnabled: shop.featureFlags.telegram === true,
     websiteEnabled: shop.featureFlags.storefront === true,
@@ -1021,7 +1038,7 @@ async function mutateAutomationTask(
   action: "cancel" | "resume",
   button: HTMLButtonElement,
 ): Promise<void> {
-  const shop = selectedShop(state, shops);
+  const shop = selectedMutationShop(state, shops);
   if (shop === null) { showStep(root, state, "shop"); return; }
   if (action === "cancel" && !window.confirm(copy("onboarding.automation.cancel_confirm", "Cancel this task? The scheduler will stop processing it; completed data will not be deleted."))) return;
   const selectionEpoch = state.shopSelectionEpoch;
@@ -1313,6 +1330,22 @@ function stepFromHash(hash: string): WizardStepCode | null {
   return aliases[hash.replace(/^#/u, "")] ?? null;
 }
 
+function wizardStepFromCurrentStep(currentStep: string | undefined): WizardStepCode | null {
+  const steps: Readonly<Record<string, WizardStepCode>> = {
+    account_ready: "shop",
+    catalog_ready: "catalog",
+    channel_selected: "channels",
+    inventory_ready: "inventory",
+    payos_ready: "payos",
+    policies_ready: "settings",
+    published: "readiness",
+    readiness_passed: "readiness",
+    shop_created: "shop",
+    telegram_ready: "telegram",
+  };
+  return currentStep === undefined ? null : steps[currentStep] ?? null;
+}
+
 function renderProgress(root: HTMLElement, state: PageState, shops: readonly Shop[]): void {
   const shop = selectedShop(state, shops);
   const profile = state.onboarding.profile;
@@ -1395,80 +1428,90 @@ async function optionalRequest(root: HTMLElement, url: string): Promise<unknown>
 
 async function loadShopState(root: HTMLElement, state: PageState, shops: Shop[]): Promise<void> {
   const shop = selectedShop(state, shops);
-  if (shop === null) {
-    state.automationTasks = [];
-    state.onboarding = { profile: null, settings: null, steps: new Map() };
+  const selectionShopId = state.selectedShopId;
+  const selectionEpoch = state.shopSelectionEpoch;
+  state.tenantHydrating = true;
+  setShopMutationFence(root, true);
+  try {
+    if (shop === null) {
+      state.automationTasks = [];
+      state.onboarding = { profile: null, settings: null, steps: new Map() };
+      state.catalogProducts = [];
+      state.catalogVariants = [];
+      state.telegram = null;
+      state.payos = null;
+      state.published = false;
+      state.domains = [];
+      state.readiness = { checkedAt: null, checks: [], ready: false, runId: null };
+      renderShopSelection(root, state, shops);
+      renderCatalog(root, state);
+      renderTelegram(root, null);
+      renderPayos(root, null);
+      renderAutomationTasks(root, state, shops);
+      renderReadiness(root, state);
+      renderProgress(root, state, shops);
+      return;
+    }
+    const currentShopId = shop.publicId;
     state.catalogProducts = [];
+    state.automationTasks = [];
     state.catalogVariants = [];
-    state.telegram = null;
-    state.payos = null;
-    state.published = false;
     state.domains = [];
+    state.inventoryPreview = null;
+    state.onboarding = { profile: initialProfile(shop), settings: null, steps: new Map() };
+    state.payos = null;
+    state.published = shop.status === "active";
     state.readiness = { checkedAt: null, checks: [], ready: false, runId: null };
+    state.telegram = null;
+    setFeedback(root, copy("onboarding.feedback.loading", "Syncing progress from the server…"));
+    const base = apiBase(shop.publicId);
+    const results = await Promise.allSettled([
+      optionalRequest(root, `${base}/onboarding`),
+      requestApi(root, `${base}/catalog`),
+      requestApi(root, `${base}/integrations/telegram`),
+      requestApi(root, `${base}/payments/payos`),
+      requestApi(root, `${base}/domains`),
+      optionalRequest(root, `${base}/readiness`),
+    ]);
+    if (!selectionIsCurrent(state, currentShopId, selectionEpoch)) return;
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) setFeedback(root, errorMessage(failures[0]?.reason), "error");
+    else setFeedback(root, "");
+
+    const onboardingValue = results[0].status === "fulfilled" ? results[0].value : null;
+    state.onboarding = onboardingValue === null
+      ? { profile: initialProfile(shop), settings: null, steps: new Map() }
+      : parseOnboardingSnapshot(onboardingValue);
+    if (state.onboarding.profile === null) state.onboarding.profile = initialProfile(shop);
+    if (state.onboarding.steps.get("published") === "ready") state.published = true;
+    if (results[1].status === "fulfilled") {
+      const catalog = parseCatalog(results[1].value, shop.currency);
+      state.catalogProducts = catalog.products;
+      state.catalogVariants = catalog.variants;
+    }
+    if (results[2].status === "fulfilled") state.telegram = parseTelegram(results[2].value);
+    if (results[3].status === "fulfilled") state.payos = parsePayos(results[3].value);
+    if (results[4].status === "fulfilled") state.domains = parseDomains(results[4].value);
+    const readinessValue = results[5].status === "fulfilled" ? results[5].value : null;
+    state.readiness = readinessValue === null
+      ? { checkedAt: null, checks: [], ready: false, runId: null }
+      : parseReadinessChecks(readinessValue);
+
     renderShopSelection(root, state, shops);
+    prefillProfile(root, state.onboarding.profile);
+    if (state.onboarding.settings !== null) prefillSettings(root, state.onboarding.settings);
     renderCatalog(root, state);
-    renderTelegram(root, null);
-    renderPayos(root, null);
-    renderAutomationTasks(root, state, shops);
+    renderTelegram(root, state.telegram);
+    renderPayos(root, state.payos);
     renderReadiness(root, state);
     renderProgress(root, state, shops);
-    return;
+    await loadAutomationTasks(root, state, shops);
+  } finally {
+    if (state.selectedShopId === selectionShopId && state.shopSelectionEpoch === selectionEpoch) {
+      state.tenantHydrating = false;
+      setShopMutationFence(root, false);
+    }
   }
-  const currentShopId = shop.publicId;
-  const selectionEpoch = state.shopSelectionEpoch;
-  state.catalogProducts = [];
-  state.automationTasks = [];
-  state.catalogVariants = [];
-  state.domains = [];
-  state.inventoryPreview = null;
-  state.onboarding = { profile: initialProfile(shop), settings: null, steps: new Map() };
-  state.payos = null;
-  state.published = shop.status === "active";
-  state.readiness = { checkedAt: null, checks: [], ready: false, runId: null };
-  state.telegram = null;
-  setFeedback(root, copy("onboarding.feedback.loading", "Syncing progress from the server…"));
-  const base = apiBase(shop.publicId);
-  const results = await Promise.allSettled([
-    optionalRequest(root, `${base}/onboarding`),
-    requestApi(root, `${base}/catalog`),
-    requestApi(root, `${base}/integrations/telegram`),
-    requestApi(root, `${base}/payments/payos`),
-    requestApi(root, `${base}/domains`),
-    optionalRequest(root, `${base}/readiness`),
-  ]);
-  if (!selectionIsCurrent(state, currentShopId, selectionEpoch)) return;
-  const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-  if (failures.length > 0) setFeedback(root, errorMessage(failures[0]?.reason), "error");
-  else setFeedback(root, "");
-
-  const onboardingValue = results[0].status === "fulfilled" ? results[0].value : null;
-  state.onboarding = onboardingValue === null
-    ? { profile: initialProfile(shop), settings: null, steps: new Map() }
-    : parseOnboardingSnapshot(onboardingValue);
-  if (state.onboarding.profile === null) state.onboarding.profile = initialProfile(shop);
-  if (state.onboarding.steps.get("published") === "ready") state.published = true;
-  if (results[1].status === "fulfilled") {
-    const catalog = parseCatalog(results[1].value, shop.currency);
-    state.catalogProducts = catalog.products;
-    state.catalogVariants = catalog.variants;
-  }
-  if (results[2].status === "fulfilled") state.telegram = parseTelegram(results[2].value);
-  if (results[3].status === "fulfilled") state.payos = parsePayos(results[3].value);
-  if (results[4].status === "fulfilled") state.domains = parseDomains(results[4].value);
-  const readinessValue = results[5].status === "fulfilled" ? results[5].value : null;
-  state.readiness = readinessValue === null
-    ? { checkedAt: null, checks: [], ready: false, runId: null }
-    : parseReadinessChecks(readinessValue);
-
-  renderShopSelection(root, state, shops);
-  prefillProfile(root, state.onboarding.profile);
-  if (state.onboarding.settings !== null) prefillSettings(root, state.onboarding.settings);
-  renderCatalog(root, state);
-  renderTelegram(root, state.telegram);
-  renderPayos(root, state.payos);
-  renderReadiness(root, state);
-  renderProgress(root, state, shops);
-  await loadAutomationTasks(root, state, shops);
 }
 
 function readSettingsForm(root: HTMLElement): OnboardingSettingsView {
@@ -1568,6 +1611,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     selectedShopId: shops[0]?.publicId ?? null,
     shopSelectionEpoch: 0,
     telegram: null,
+    tenantHydrating: false,
   };
 
   clearLegacyIntentPayloads();
@@ -1615,7 +1659,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     event.preventDefault();
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       const input = query<HTMLInputElement>(root, "[data-shop-rename-name]");
       const submit = query<HTMLButtonElement>(root, "[data-shop-rename-submit]");
       if (shop === null || (shop.role !== "owner" && shop.role !== "manager") || input === null || submit === null) return;
@@ -1706,13 +1750,17 @@ async function initialize(root: HTMLElement): Promise<void> {
         if (!isShop(response.shop)) throw new ApiError("request_failed", 500, [], stringOrNull(response.requestId));
         const shop = response.shop;
         if (!shops.some((item) => item.publicId === shop.publicId)) shops.push(shop);
-        creationAdmission = { allowed: false, reason: "trial_already_used", recoveryShopPublicId: null };
+        clearIntent("shop");
+        if (shop.subscriptionState === "pending_payment") {
+          window.location.assign(`/app/billing?shop=${encodeURIComponent(shop.publicId)}`);
+          return;
+        }
+        creationAdmission = { allowed: true, creationMode: "paid", reason: "eligible", recoveryShopPublicId: null };
         applyShopCreationAdmission(root, creationAdmission);
         addShopOption(root, shop);
         state.shopSelectionEpoch += 1;
         state.selectedShopId = shop.publicId;
         clearTenantBoundDrafts(root, state);
-        clearIntent("shop");
         query<HTMLFormElement>(root, "[data-shop-form]")?.reset();
         const details = query<HTMLDetailsElement>(root, "[data-create-shop-box]");
         if (details !== null) details.open = false;
@@ -1720,12 +1768,12 @@ async function initialize(root: HTMLElement): Promise<void> {
         await loadShopState(root, state, shops);
         showStep(root, state, "channels");
       } catch (error) {
-        if (error instanceof ApiError && error.issues.includes("trial_already_used")) {
+        if (error instanceof ApiError && error.issues.includes("billing_recovery_required")) {
           try {
             const admissionResponse = await requestApi(root, "/api/app/shops", { method: "GET" });
             creationAdmission = parseShopCreationAdmission(asRecord(admissionResponse)?.creationAdmission);
           } catch {
-            creationAdmission = { allowed: false, reason: "trial_already_used", recoveryShopPublicId: null };
+            creationAdmission = { allowed: false, creationMode: null, reason: "billing_recovery", recoveryShopPublicId: null };
           }
           applyShopCreationAdmission(root, creationAdmission);
         }
@@ -1740,7 +1788,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     event.preventDefault();
     void (async () => {
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const websiteEnabled = query<HTMLInputElement>(root, "[data-channel-website]")?.checked === true;
@@ -1759,8 +1807,9 @@ async function initialize(root: HTMLElement): Promise<void> {
         const response = await requestApi(root, `${apiBase(shop.publicId)}/onboarding/channels`, { body, method: "PUT" });
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
         state.onboarding = parseOnboardingSnapshot(response);
-        if (state.onboarding.profile === null) state.onboarding.profile = { customDomainPreference, telegramEnabled, websiteEnabled };
-        prefillProfile(root, state.onboarding.profile);
+        const profile = state.onboarding.profile ?? { currentStep: "catalog_ready", customDomainPreference, telegramEnabled, websiteEnabled };
+        state.onboarding.profile = profile;
+        prefillProfile(root, profile);
         setFeedback(root, copy("onboarding.feedback.channels_saved", "Sales channels and progress updated."), "success");
         renderProgress(root, state, shops);
         showStep(root, state, "catalog");
@@ -1788,7 +1837,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_product", "Check the highlighted fields before creating the product."))) return;
@@ -1910,7 +1959,7 @@ async function initialize(root: HTMLElement): Promise<void> {
   query<HTMLButtonElement>(root, "[data-inventory-preview-button]")?.addEventListener("click", () => {
     void (async () => {
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       const variantId = query<HTMLSelectElement>(root, "[data-inventory-variant]")?.value ?? "";
       const source = query<HTMLSelectElement>(root, "[data-inventory-source]")?.value === "csv" ? "csv" : "paste";
       const data = inventoryData?.value ?? "";
@@ -1966,7 +2015,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     event.preventDefault();
     void (async () => {
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       const variantId = query<HTMLSelectElement>(root, "[data-inventory-variant]")?.value ?? "";
       const source = query<HTMLSelectElement>(root, "[data-inventory-source]")?.value === "csv" ? "csv" : "paste";
       const data = inventoryData?.value ?? "";
@@ -2018,7 +2067,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       const token = query<HTMLInputElement>(root, "[data-telegram-token]");
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
@@ -2048,7 +2097,7 @@ async function initialize(root: HTMLElement): Promise<void> {
 
   query<HTMLButtonElement>(root, "[data-telegram-health]")?.addEventListener("click", () => {
     void (async () => {
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const button = query<HTMLButtonElement>(root, "[data-telegram-health]");
@@ -2075,7 +2124,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const clientId = query<HTMLInputElement>(root, "[data-payos-client-id]");
       const apiKey = query<HTMLInputElement>(root, "[data-payos-api-key]");
@@ -2114,7 +2163,7 @@ async function initialize(root: HTMLElement): Promise<void> {
 
   query<HTMLButtonElement>(root, "[data-payos-health]")?.addEventListener("click", () => {
     void (async () => {
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const button = query<HTMLButtonElement>(root, "[data-payos-health]");
@@ -2148,7 +2197,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_globalization", "Check the regional fields before saving."))) return;
@@ -2185,7 +2234,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const settings = readSettingsForm(root);
@@ -2236,7 +2285,7 @@ async function initialize(root: HTMLElement): Promise<void> {
 
   query<HTMLButtonElement>(root, "[data-readiness-run]")?.addEventListener("click", () => {
     void (async () => {
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const button = query<HTMLButtonElement>(root, "[data-readiness-run]");
@@ -2264,7 +2313,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_test", "Check the test-order quantity before running it."))) return;
@@ -2309,7 +2358,7 @@ async function initialize(root: HTMLElement): Promise<void> {
 
   query<HTMLButtonElement>(root, "[data-publish-button]")?.addEventListener("click", () => {
     void (async () => {
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       if (!state.readiness.ready) { setFeedback(root, copy("onboarding.feedback.publish_blocked", "Run all checks and complete required items before opening for sales."), "error"); return; }
@@ -2342,15 +2391,17 @@ async function initialize(root: HTMLElement): Promise<void> {
   renderShopSelection(root, state, shops);
   updateLocalInventoryPreview(root);
   await loadShopState(root, state, shops);
-  let initialStep: WizardStepCode = shops.length === 0 ? "shop" : "channels";
+  const serverStep = wizardStepFromCurrentStep(state.onboarding.profile?.currentStep);
+  let storedStep: WizardStepCode | null = null;
   const hashStep = stepFromHash(location.hash);
   try {
     const stored = sessionStorage.getItem(`selinow:onboarding:step:${state.selectedShopId ?? "new"}`);
-    if (WIZARD_STEPS.some((step) => step.code === stored)) initialStep = stored as WizardStepCode;
+    if (WIZARD_STEPS.some((step) => step.code === stored)) storedStep = stored as WizardStepCode;
   } catch {
     // Use the first actionable step.
   }
-  showStep(root, state, hashStep ?? initialStep, false);
+  const defaultStep: WizardStepCode = shops.length === 0 ? "shop" : "channels";
+  showStep(root, state, hashStep ?? serverStep ?? storedStep ?? defaultStep, false);
   window.addEventListener("hashchange", () => {
     const nextStep = stepFromHash(location.hash);
     if (nextStep !== null) showStep(root, state, nextStep);

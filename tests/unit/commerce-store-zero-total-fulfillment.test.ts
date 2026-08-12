@@ -174,7 +174,7 @@ async function checkout(input: {
   const orderInput = {
     cartId: cart.cartId,
     cartToken: cart.cartToken,
-    customerEmail: null,
+    customerEmail: "buyer-zero-total@example.test",
     env,
     expected: quote.items,
     idempotencyKey: input.idempotencyKey,

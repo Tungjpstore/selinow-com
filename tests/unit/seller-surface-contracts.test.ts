@@ -216,6 +216,28 @@ describe("seller surface contracts", () => {
     expect(orderPage).toContain("data-idempotency-key");
   });
 
+  it("offers manual fulfillment only for projected pending items", async () => {
+    const orderPage = await readFile("src/pages/app/orders/[id].astro", "utf8");
+
+    expect(orderPage).toContain('item.manualFulfillment?.status === "pending"');
+    expect(orderPage).not.toContain('item.fulfillmentType === "manual" && item.privateDownload === null');
+    expect(orderPage).toContain("item.manualFulfillment.status");
+    expect(orderPage).toContain("item.manualFulfillment.unsupportedReason");
+  });
+
+  it("keeps SSR request identifiers visible on seller load failures", async () => {
+    const pages = await Promise.all([
+      readFile("src/pages/app/orders.astro", "utf8"),
+      readFile("src/pages/app/customers.astro", "utf8"),
+      readFile("src/pages/app/orders/[id].astro", "utf8"),
+    ]);
+
+    for (const page of pages) {
+      expect(page).toContain("Astro.locals.requestId");
+      expect(page).toContain('t("dashboard.state.error.meta_request"');
+    }
+  });
+
   it("sanitizes storefront settings and permits clearing optional announcement", async () => {
     const database = new FakeDatabase();
     const current = await getSellerStorefrontSettings({ env: env(database), shopPublicId: "shop-a", userId: "user-a" });

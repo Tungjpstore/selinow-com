@@ -37,6 +37,23 @@ function checkoutInput(overrides: Partial<CanonicalCheckoutTransactionInput> = {
 }
 
 describe("canonical checkout admission policy", () => {
+  it("requires a durable recovery email for free Website checkout before touching D1", async () => {
+    const prepare = () => { throw new Error("database_must_not_be_touched"); };
+    const input = checkoutInput({
+      customer: { kind: "anonymous", maskedEmail: null },
+      env: { PLATFORM_DB: { prepare } } as unknown as AppBindings,
+      lines: [{ fulfillmentType: "manual", priceMinor: 0, productId: "product-manual", productTitle: "Manual", productVersion: 1, quantity: 1, sku: "MANUAL", title: "Manual", variantId: "variant-manual", variantVersion: 1 }],
+      subtotalMinor: 0,
+      totalMinor: 0,
+    });
+
+    await expect(executeCanonicalCheckoutTransaction(input)).rejects.toMatchObject({
+      code: "validation_failed",
+      issues: ["email_required"],
+      status: 400,
+    });
+  });
+
   it("rejects mixed fulfillment before reading or writing checkout state", async () => {
     const prepare = () => { throw new Error("database_must_not_be_touched"); };
     const input = checkoutInput({

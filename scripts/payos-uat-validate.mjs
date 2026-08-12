@@ -5,12 +5,16 @@ import { isAbsolute, relative, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { validateCommerceUatArtifactsSync } from "./lib/commerce-uat-evidence.mjs";
+import { readTrustedStagingUatBinding } from "./lib/commerce-uat-evidence.mjs";
 import {
+  assertPayosStagingUatEvidence,
   fingerprintPayosStagingUatEvidence,
   PAYOS_LOCAL_ASSURANCE_SCENARIO_IDS,
   PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS,
   PAYOS_PROVIDER_UNSUPPORTED_SCENARIO_IDS,
+  readPayosProviderExecutionArtifacts,
+  readPayosRunnerTrustAnchor,
+  readPayosScenarioArtifactFingerprints,
 } from "./lib/payos-uat-evidence.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
@@ -33,6 +37,9 @@ function parseArguments(argv) {
     else if (argument === "--manifest") options.manifestPath = argv[++index] ?? "";
     else if (argument === "--owner-attestation-key-id") options.ownerAttestationKeyId = argv[++index] ?? "";
     else if (argument === "--owner-attestation-public-key") options.ownerAttestationPublicKeyPath = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-key-id") options.runnerAttestationKeyId = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-public-key") options.runnerAttestationPublicKeyPath = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-spki-sha256") options.runnerAttestationSpkiSha256 = argv[++index] ?? "";
     else if (argument === "--worker-version") options.workerVersion = argv[++index] ?? "";
     else throw new Error(`unknown_argument:${argument}`);
   }
@@ -79,6 +86,8 @@ export async function validatePayosUatEvidenceFile({
   manifestPath,
   now = new Date(),
   ownerAttestationPublicKeys,
+  stagingRunnerPublicKeys,
+  stagingRunnerSpkiFingerprints,
   workerVersion,
   root = repositoryRoot,
 }) {
@@ -88,7 +97,7 @@ export async function validatePayosUatEvidenceFile({
   const resolvedEvidencePath = isAbsolute(evidencePath) ? evidencePath : resolve(root, evidencePath);
   const loaded = await readPrivateEvidence(resolvedEvidencePath);
   const releaseId = loaded.evidence?.release?.releaseId;
-  const evidenceRef = canonicalEvidenceRef(root, resolvedEvidencePath, releaseId);
+  canonicalEvidenceRef(root, resolvedEvidencePath, releaseId);
   const declaredManifestRef = loaded.evidence?.release?.manifestRef;
   if (typeof declaredManifestRef !== "string"
     || resolve(root, declaredManifestRef) !== (isAbsolute(manifestPath) ? resolve(manifestPath) : resolve(root, manifestPath))) {
@@ -97,33 +106,72 @@ export async function validatePayosUatEvidenceFile({
   if (loaded.evidence?.release?.workerVersion !== workerVersion) throw new Error("commerce_uat_worker_version_mismatch");
   const artifactSha256 = createHash("sha256").update(loaded.bytes).digest("hex");
   if (!SHA256.test(artifactSha256)) throw new Error("payos_uat_evidence_hash_invalid");
-  const validation = validateCommerceUatArtifactsSync({
-    evidence: {
-      commerceAcceptance: {
-        payos: { artifactSha256, evidenceRef },
-      },
-    },
-    now,
-    payosOwnerAttestationPublicKeys: ownerAttestationPublicKeys,
-    repositoryRoot: root,
-  }).payos;
+  let trustedBinding;
+  let validation;
+  try {
+    trustedBinding = readTrustedStagingUatBinding({
+      evidence: loaded.evidence,
+      manifestPath,
+      now,
+      repositoryRoot: root,
+      workerVersion,
+    });
+    const scenarioArtifactFingerprints = readPayosScenarioArtifactFingerprints({ evidence: loaded.evidence, repositoryRoot: root });
+    const providerExecution = readPayosProviderExecutionArtifacts({
+      evidence: loaded.evidence,
+      repositoryRoot: root,
+      stagingRunnerPublicKeys,
+      stagingRunnerSpkiFingerprints,
+    });
+    validation = assertPayosStagingUatEvidence(loaded.evidence, {
+      ...trustedBinding,
+      ownerAttestationPublicKeys,
+      providerExecutionArtifactFingerprints: providerExecution.fingerprints,
+      requireArtifactProof: true,
+      scenarioArtifactFingerprints,
+    });
+  } catch (error) {
+    const acceptanceReasonCode = error instanceof Error && /^[a-z0-9_:.-]{1,220}$/u.test(error.message)
+      ? error.message
+      : "payos_uat_validation_failed";
+    return {
+      accepted: false,
+      acceptanceReasonCode,
+      artifactFingerprintSha256: artifactSha256,
+      evidenceFingerprintSha256: fingerprintPayosStagingUatEvidence(loaded.evidence),
+      evidenceKind: loaded.evidence?.evidenceKind ?? null,
+      fullCommerceAccepted: false,
+      fullCommerceReasonCodes: [],
+      localScenarioCount: PAYOS_LOCAL_ASSURANCE_SCENARIO_IDS.length,
+      manifestRef: null,
+      manifestSha256: null,
+      paymentLaneAccepted: false,
+      providerScenarioCount: PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS.length,
+      reasonCodes: [],
+      releaseId: releaseId ?? null,
+      scenarioCount: 0,
+      unsupportedReasonCodes: [],
+      unsupportedScenarioCount: PAYOS_PROVIDER_UNSUPPORTED_SCENARIO_IDS.length,
+      workerVersion,
+    };
+  }
   const output = {
-    accepted: validation.accepted === true,
-    acceptanceReasonCode: validation.accepted === true ? null : validation.error ?? "payos_uat_validation_failed",
-    artifactFingerprintSha256: validation.artifactFingerprintSha256 ?? artifactSha256,
+    accepted: true,
+    acceptanceReasonCode: null,
+    artifactFingerprintSha256: artifactSha256,
     evidenceFingerprintSha256: fingerprintPayosStagingUatEvidence(loaded.evidence),
     evidenceKind: loaded.evidence?.evidenceKind ?? null,
     fullCommerceAccepted: validation.fullCommerceAccepted === true,
-    fullCommerceReasonCodes: validation.reasonCodes ?? [],
+    fullCommerceReasonCodes: validation.fullCommerceReasonCodes ?? [],
     localScenarioCount: PAYOS_LOCAL_ASSURANCE_SCENARIO_IDS.length,
-    manifestRef: validation.manifestRef ?? null,
-    manifestSha256: validation.manifestSha256 ?? null,
+    manifestRef: trustedBinding.manifestRef,
+    manifestSha256: trustedBinding.manifestSha256,
     paymentLaneAccepted: validation.paymentLaneAccepted === true,
     providerScenarioCount: PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS.length,
-    reasonCodes: validation.reasonCodes ?? [],
+    reasonCodes: validation.fullCommerceReasonCodes ?? [],
     releaseId: validation.releaseId ?? releaseId ?? null,
     scenarioCount: validation.scenarioCount ?? 0,
-    unsupportedReasonCodes: validation.reasonCodes ?? [],
+    unsupportedReasonCodes: validation.unsupportedReasonCodes ?? [],
     unsupportedScenarioCount: PAYOS_PROVIDER_UNSUPPORTED_SCENARIO_IDS.length,
     workerVersion: validation.workerVersion ?? workerVersion,
   };
@@ -139,6 +187,12 @@ export async function main(argv = process.argv.slice(2)) {
     evidencePath: options.evidencePath,
     manifestPath: options.manifestPath,
     ownerAttestationPublicKeys: await loadOwnerAttestationPublicKeys(options),
+    ...readPayosRunnerTrustAnchor({
+      keyId: options.runnerAttestationKeyId,
+      publicKeyPath: options.runnerAttestationPublicKeyPath,
+      repositoryRoot,
+      spkiSha256: options.runnerAttestationSpkiSha256,
+    }),
     workerVersion: options.workerVersion,
   });
   if (!result.accepted) {

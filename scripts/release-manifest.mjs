@@ -10,6 +10,7 @@ import {
   writeReleaseArtifacts,
 } from "./lib/release.mjs";
 import { resolveDatabaseTarget } from "./lib/backup.mjs";
+import { validateCommerceUatArtifacts } from "./lib/commerce-uat-evidence.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
 function parseArguments(argv) {
@@ -53,10 +54,18 @@ try {
     .split(",")
     .map((name) => name.trim())
     .filter(Boolean);
+  const now = new Date();
+  const commerceEvidenceValidation = await validateCommerceUatArtifacts({
+    environment: process.env,
+    evidence,
+    now,
+    repositoryRoot,
+  });
   const artifacts = buildReleaseArtifacts({
+    commerceEvidenceValidation,
     evidence,
     migrationNames,
-    now: new Date(),
+    now,
     packageVersion: String(packageJson.version ?? "unknown"),
     productionSpec,
     workerSecretNames,

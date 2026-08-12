@@ -153,7 +153,7 @@ describe("production Worker continuation deploy admission", () => {
     }
   });
 
-  it("proves the reviewed 0087 through 0094 schema definitions and live data invariants", () => {
+  it("proves the reviewed 0087 through 0095 schema definitions and live data invariants", () => {
     const assertInvariants = (releaseModule as Record<string, unknown>).assertProductionDatabaseInvariantContract;
     expect(typeof assertInvariants).toBe("function");
     if (typeof assertInvariants !== "function") return;
@@ -200,6 +200,12 @@ describe("production Worker continuation deploy admission", () => {
       "idx_auth_request_admissions_requester_window",
       "idx_auth_request_admissions_expiry",
       "idx_auth_request_admissions_subject_window",
+      "telegram_updates",
+      "idx_telegram_integrations_shop_generation",
+      "idx_telegram_updates_generation_processing",
+      "outbox_jobs_quarantine_legacy_order_paid_insert",
+      "telegram_integrations_generation_switch_required",
+      "telegram_updates_generation_insert_guard",
     ]));
     expect(runner).toHaveBeenCalledTimes(3);
     expect(runner.mock.calls.every(([args]) => args[4] === "production")).toBe(true);
@@ -287,6 +293,16 @@ describe("production Worker continuation deploy admission", () => {
       migrationNames,
       runWranglerImplementation: invalidAuthAdmission,
     })).toThrow("production_database_invariant_data_violation:integrity_0094_auth_request_admission");
+
+    const invalidTelegramGeneration = runner((rows, sql) => {
+      if (sql.includes("integrity_0095_telegram_update_generation") && rows[0] !== undefined) {
+        rows[0].integrity_0095_telegram_update_generation = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidTelegramGeneration,
+    })).toThrow("production_database_invariant_data_violation:integrity_0095_telegram_update_generation");
 
     const unreviewedMigration = `${String(migrationNames.length + 1).padStart(4, "0")}_future.sql`;
     expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({

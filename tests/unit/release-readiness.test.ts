@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  assertProductionDeployAdmission,
   assertProductionWorkerDeployAdmission,
   buildProductionRollbackRehearsalArtifact,
   buildReleaseArtifacts,
@@ -23,9 +22,19 @@ import {
   validatePilotSmokePlan,
   writeProductionRollbackRehearsalArtifact,
 } from "../../scripts/lib/release.mjs";
-import { DODO_STAGING_UAT_SCENARIO_IDS } from "../../scripts/lib/dodo-uat-evidence.mjs";
+import {
+  collectDodoStagingUatEvidence,
+  DODO_SCENARIO_EXECUTION_CONTRACTS,
+  DODO_STAGING_UAT_SCENARIO_IDS,
+  fingerprintDodoUatExecutionProofPublicKey,
+  serializeDodoUatExecutionProofPayload,
+} from "../../scripts/lib/dodo-uat-evidence.mjs";
 import { validateCommerceUatArtifactsSync } from "../../scripts/lib/commerce-uat-evidence.mjs";
-import { PAYOS_STAGING_UAT_SCENARIO_IDS, serializePayosOwnerAttestationPayload } from "../../scripts/lib/payos-uat-evidence.mjs";
+import {
+  PAYOS_STAGING_UAT_SCENARIO_IDS,
+  serializePayosOwnerAttestationPayload,
+  serializePayosRunnerAttestationPayload,
+} from "../../scripts/lib/payos-uat-evidence.mjs";
 
 const now = new Date("2026-07-26T03:00:00.000Z");
 const providerAcceptanceKeys = ["telegramBot", "telegramMiniApp", "zaloMiniApp", "zaloOa", "whatsappCloud", "discord"] as const;
@@ -985,39 +994,190 @@ describe("production release readiness", () => {
         treeSha,
         workerVersion: "staging-worker-version",
       };
-      type ScenarioRecord = {
+      type PayosScenarioRecord = {
+        classification: "provider_supported" | "provider_unsupported" | "selinow_local_assurance";
         eventReference: string;
         evidenceFingerprintSha256: string;
         observedAt: string;
-        requestReference: string;
-        status: "passed" | "unsupported";
-      };
-      type PayosScenarioRecord = ScenarioRecord & {
-        classification: "provider_supported" | "provider_unsupported" | "selinow_local_assurance";
         reasonCode: "payos_signed_chargeback_not_supported" | "payos_signed_refund_not_supported" | null;
+        requestReference: string;
         status: "passed" | "unsupported";
         verificationMethod: "local_contract" | "provider_capability_audit" | "signed_webhook" | "verified_provider_response";
       };
-      const scenarioRecord = async (provider: string, id: string): Promise<ScenarioRecord> => {
-        const artifactRef = `.wrangler/releases/staging/${stagingReleaseId}/scenarios/${provider}-${id}.json`;
-        const artifact = JSON.stringify({ environment: "staging", provider, release: releaseBinding, scenarioId: id });
-        await mkdir(join(root, ".wrangler/releases/staging", stagingReleaseId, "scenarios"), { recursive: true });
-        await writeFile(join(root, artifactRef), artifact, { mode: 0o600 });
-        return {
-          eventReference: `artifact:${artifactRef}`,
-          evidenceFingerprintSha256: createHash("sha256").update(artifact).digest("hex"),
-          observedAt: "2026-07-25T12:00:00.000Z",
-          requestReference: `artifact:${artifactRef}`,
-          status: "passed",
-        };
+      const dodoRunnerKeyId = "dodo-staging-runner-test";
+      const dodoRunnerKeys = generateKeyPairSync("ed25519");
+      const dodoRunnerPublicKey = dodoRunnerKeys.publicKey.export({ format: "pem", type: "spki" });
+      const dodoApprovedExecutionProofTrust = {
+        keyId: dodoRunnerKeyId,
+        spkiSha256: fingerprintDodoUatExecutionProofPublicKey(dodoRunnerPublicKey),
       };
-      const dodoScenarios: Record<string, ScenarioRecord & { sessionReference: null }> = {};
-      for (const id of DODO_STAGING_UAT_SCENARIO_IDS) {
-        dodoScenarios[id] = { ...(await scenarioRecord("dodo", id)), sessionReference: null };
+      const dodoProofArtifacts: Record<string, { artifactRef: string; artifactSha256: string }> = {};
+      const dodoProofState = new Map<string, {
+        afterSha256: string;
+        eventReference: string | null;
+        providerEventSha256: string | null;
+        providerSignatureSha256: string | null;
+        sessionReference: string | null;
+      }>();
+      for (const [index, id] of DODO_STAGING_UAT_SCENARIO_IDS.entries()) {
+        const contract = DODO_SCENARIO_EXECUTION_CONTRACTS[id];
+        if (contract === undefined) throw new Error("missing_dodo_execution_contract");
+        const providerEvidenceRequired = contract.signatureAuthority !== "none";
+        const relatedProof = contract.relatedScenarioId === null
+          ? undefined
+          : dodoProofState.get(contract.relatedScenarioId);
+        if (contract.relatedScenarioId !== null && relatedProof === undefined) {
+          throw new Error("missing_related_dodo_execution_proof");
+        }
+        const uniqueBeforeSha256 = (index * 10 + 4).toString(16).padStart(64, "0");
+        const d1BeforeSha256 = relatedProof?.afterSha256 ?? uniqueBeforeSha256;
+        const d1AfterSha256 = contract.stateEffect === "no_op"
+          ? d1BeforeSha256
+          : (index * 10 + 5).toString(16).padStart(64, "0");
+        const observedAt = new Date(Date.parse("2026-07-25T12:00:00.000Z") + index * 60_000).toISOString();
+        const isReplay = contract.relationship === "same_event_replay";
+        const isConflict = contract.relationship === "same_event_conflicting_payload";
+        const eventReference = contract.requiresEventReference
+          ? (isReplay || isConflict ? relatedProof?.eventReference : `event:evt_${String(index).padStart(4, "0")}`) ?? null
+          : null;
+        const sessionReference = contract.requiresSessionReference
+          ? relatedProof?.sessionReference ?? `session:ses_${String(index).padStart(4, "0")}`
+          : null;
+        const providerEventSha256 = providerEvidenceRequired
+          ? isReplay
+            ? relatedProof?.providerEventSha256 ?? null
+            : (index * 10 + 2).toString(16).padStart(64, "0")
+          : null;
+        const providerSignatureSha256 = providerEvidenceRequired
+          ? isReplay
+            ? relatedProof?.providerSignatureSha256 ?? null
+            : (index * 10 + 3).toString(16).padStart(64, "0")
+          : null;
+        const proof = {
+          artifactKind: "dodo_uat_execution_proof",
+          attestation: {
+            algorithm: "ed25519",
+            keyId: dodoRunnerKeyId,
+            signatureBase64: "",
+            signedAt: observedAt,
+          },
+          authority: {
+            controlledInjection: contract.controlledInjection,
+            eventSource: contract.eventSource,
+            runnerId: "selinow-dodo-staging-runner-test",
+            signatureAuthority: contract.signatureAuthority,
+          },
+          environment: "staging",
+          executionMode: contract.executionMode,
+          fingerprints: {
+            d1AfterSha256,
+            d1BeforeSha256,
+            d1TransitionSha256: (index * 10 + 6).toString(16).padStart(64, "0"),
+            executionTranscriptSha256: (index * 10 + 1).toString(16).padStart(64, "0"),
+            providerEventSha256,
+            providerSignatureSha256,
+          },
+          observedAt,
+          outcome: contract.outcome,
+          provider: "dodo",
+          providerEnvironment: "test_mode",
+          redaction: { noCustomerData: true, noPaymentInstrumentData: true, noRawPayload: true, noSensitiveValues: true },
+          references: {
+            eventReference,
+            requestReference: `request:req_${String(index).padStart(4, "0")}`,
+            sessionReference,
+          },
+          relatedScenario: contract.relatedScenarioId === null
+            ? null
+            : { relationship: contract.relationship, scenarioId: contract.relatedScenarioId },
+          release: releaseBinding,
+          result: "passed",
+          scenarioId: id,
+          schemaVersion: 2,
+          state: { after: contract.stateAfter, before: contract.stateBefore, effect: contract.stateEffect },
+          verificationMethod: contract.verificationMethod,
+        };
+        proof.attestation.signatureBase64 = sign(
+          null,
+          Buffer.from(serializeDodoUatExecutionProofPayload(proof)),
+          dodoRunnerKeys.privateKey,
+        ).toString("base64");
+        const artifactRef = `artifact:.wrangler/releases/staging/${stagingReleaseId}/dodo-uat-execution-proofs/${id}.json`;
+        const bytes = `${JSON.stringify(proof, null, 2)}\n`;
+        await mkdir(join(root, `.wrangler/releases/staging/${stagingReleaseId}/dodo-uat-execution-proofs`), { recursive: true });
+        await writeFile(join(root, artifactRef.slice("artifact:".length)), bytes, { mode: 0o600 });
+        dodoProofArtifacts[id] = { artifactRef, artifactSha256: createHash("sha256").update(bytes).digest("hex") };
+        dodoProofState.set(id, {
+          afterSha256: d1AfterSha256,
+          eventReference,
+          providerEventSha256,
+          providerSignatureSha256,
+          sessionReference,
+        });
       }
+      await writeFile(join(stagingDirectory, "dodo-uat-trusted-public-keys.json"), JSON.stringify({
+        environment: "staging",
+        keys: [{
+          keyId: dodoRunnerKeyId,
+          publicKeyPem: dodoRunnerPublicKey,
+        }],
+        provider: "dodo",
+        schemaVersion: 1,
+      }), { mode: 0o600 });
       const payosControlledAccountFingerprintSha256 = "a".repeat(64);
-      const payosTransactionEvidenceFingerprintSha256 = "b".repeat(64);
+      const payosRunnerKeyId = "payos-staging-runner-test";
+      const payosRunnerKeys = generateKeyPairSync("ed25519");
+      const payosRunnerPublicKey = payosRunnerKeys.publicKey.export({ format: "pem", type: "spki" });
+      const payosRunnerSpkiSha256 = createHash("sha256")
+        .update(payosRunnerKeys.publicKey.export({ format: "der", type: "spki" }))
+        .digest("hex");
+      const payosExecutionFingerprints: Record<string, string> = {};
+      await mkdir(join(stagingDirectory, "execution"), { recursive: true });
+      for (const [index, id] of payosProviderRequiredScenarioIds.entries()) {
+        const suffix = String(index + 1);
+        const executionArtifact = {
+          authority: {
+            attemptReference: `attempt:pay_00000000-0000-4000-8000-00000000000${suffix}`,
+            authoritySource: id === "signed_exact_payment" ? "staging_d1_verified_event" : "staging_exact_attempt_reconciliation",
+            eventReference: `event:pev_00000000-0000-4000-8000-00000000000${suffix}`,
+            providerAuthority: id === "signed_exact_payment" ? "provider_signed_webhook" : "provider_signed_response",
+            providerReference: `provider:${suffix.repeat(64)}`,
+            requestReference: `request:payos-uat-${id}`,
+          },
+          controlledAccountFingerprintSha256: payosControlledAccountFingerprintSha256,
+          environment: "staging",
+          evidenceKind: "provider_execution",
+          observedAt: "2026-07-25T12:00:00.000Z",
+          provider: "payos",
+          providerEnvironment: "production_controlled",
+          redaction: { noCredentialData: true, noCustomerData: true, noFinancialDetails: true, noRawPayload: true },
+          release: releaseBinding,
+          result: { duplicate: false, processed: true, state: "paid_exact" },
+          runnerAttestation: {
+            algorithm: "ed25519",
+            keyId: payosRunnerKeyId,
+            publicKeySpkiSha256: payosRunnerSpkiSha256,
+            signatureBase64: "",
+            signedAt: "2026-07-25T12:00:00.000Z",
+          },
+          scenarioId: id,
+          schemaVersion: 1,
+          verificationMethod: id === "signed_exact_payment" ? "signed_webhook" : "verified_provider_response",
+        };
+        executionArtifact.runnerAttestation.signatureBase64 = sign(
+          null,
+          Buffer.from(serializePayosRunnerAttestationPayload(executionArtifact)),
+          payosRunnerKeys.privateKey,
+        ).toString("base64");
+        const executionArtifactBytes = JSON.stringify(executionArtifact);
+        await writeFile(join(stagingDirectory, "execution", `payos-${id}.json`), executionArtifactBytes, { mode: 0o600 });
+        payosExecutionFingerprints[id] = createHash("sha256").update(executionArtifactBytes).digest("hex");
+      }
+      const payosTransactionEvidenceFingerprintSha256 = createHash("sha256")
+        .update(JSON.stringify(Object.values(payosExecutionFingerprints).sort()))
+        .digest("hex");
       const payosScenarios: Record<string, PayosScenarioRecord> = {};
+      await mkdir(join(stagingDirectory, "scenarios"), { recursive: true });
       for (const id of PAYOS_STAGING_UAT_SCENARIO_IDS) {
         const providerRequired = payosProviderRequiredScenarioIds.includes(id as typeof payosProviderRequiredScenarioIds[number]);
         const providerUnsupported = payosProviderUnsupportedScenarioIds.includes(id as typeof payosProviderUnsupportedScenarioIds[number]);
@@ -1043,7 +1203,7 @@ describe("production release readiness", () => {
           environment: "staging",
           observedAt,
           provider: "payos",
-          proofOfExecutionFingerprintSha256: providerRequired ? payosTransactionEvidenceFingerprintSha256 : null,
+          proofOfExecutionFingerprintSha256: providerRequired ? payosExecutionFingerprints[id] : null,
           redaction: { noRawPayload: true, noSensitiveValues: true },
           release: releaseBinding,
           result: status,
@@ -1067,24 +1227,24 @@ describe("production release readiness", () => {
           verificationMethod,
         };
       }
-      const dodoArtifact = {
+      const dodoCollected = await collectDodoStagingUatEvidence({
+        approvedExecutionProofTrust: dodoApprovedExecutionProofTrust,
         completedAt: "2026-07-25T13:00:00.000Z",
         createdAt: "2026-07-25T11:00:00.000Z",
         endpointFingerprintSha256: "e".repeat(64),
-        environment: "staging",
+        executionProofPublicKeys: {
+          [dodoRunnerKeyId]: dodoRunnerPublicKey,
+        },
         offers: [
           { planCode: "starter", marketCode: "vn", currency: "VND", amountMinor: 99_000, interval: "month", providerReferenceFingerprintSha256: "1".repeat(64) },
           { planCode: "pro", marketCode: "vn", currency: "VND", amountMinor: 299_000, interval: "month", providerReferenceFingerprintSha256: "2".repeat(64) },
           { planCode: "starter", marketCode: "global", currency: "USD", amountMinor: 500, interval: "month", providerReferenceFingerprintSha256: "3".repeat(64) },
           { planCode: "pro", marketCode: "global", currency: "USD", amountMinor: 1_500, interval: "month", providerReferenceFingerprintSha256: "4".repeat(64) },
         ],
-        provider: "dodo",
-        providerEnvironment: "test_mode",
-        redaction: { auditNoSensitiveValues: true, d1NoHostedCheckoutUrl: true, d1NoRawPayload: true, d1NoSecretValues: true, evidenceFingerprintSha256: "f".repeat(64), logsNoSensitiveValues: true, queuesNoSensitiveValues: true },
+        proofArtifacts: dodoProofArtifacts,
         release: releaseBinding,
-        scenarios: dodoScenarios,
-        schemaVersion: 1,
-      };
+        repositoryRoot: root,
+      });
       const payosOwnerKeyId = "release-owner-test";
       const payosOwnerKeys = generateKeyPairSync("ed25519");
       const payosArtifact = {
@@ -1141,15 +1301,11 @@ describe("production release readiness", () => {
       const dodoCommerce = commerce.dodo;
       const payosCommerce = commerce.payos;
       if (dodoCommerce === undefined || payosCommerce === undefined) throw new Error("missing_commerce_fixture");
-      dodoCommerce.evidenceRef = `.wrangler/releases/staging/${stagingReleaseId}/dodo-uat-evidence.json`;
+      dodoCommerce.evidenceRef = dodoCollected.evidenceRef;
       payosCommerce.evidenceRef = `.wrangler/releases/staging/${stagingReleaseId}/payos-uat-evidence.json`;
-      const dodoBytes = JSON.stringify(dodoArtifact);
       const payosBytes = JSON.stringify(payosArtifact);
-      await Promise.all([
-        writeFile(join(root, String(dodoCommerce.evidenceRef)), dodoBytes, { mode: 0o600 }),
-        writeFile(join(root, String(payosCommerce.evidenceRef)), payosBytes, { mode: 0o600 }),
-      ]);
-      dodoCommerce.artifactSha256 = createHash("sha256").update(dodoBytes).digest("hex");
+      await writeFile(join(root, String(payosCommerce.evidenceRef)), payosBytes, { mode: 0o600 });
+      dodoCommerce.artifactSha256 = dodoCollected.artifactSha256;
       payosCommerce.artifactSha256 = createHash("sha256").update(payosBytes).digest("hex");
       const rollbackArtifact = JSON.stringify({
         environment: "production",
@@ -1180,12 +1336,16 @@ describe("production release readiness", () => {
         payosOwnerKeys.publicKey.export({ format: "pem", type: "spki" }),
       ).toString("base64");
       const commerceEvidenceValidation = validateCommerceUatArtifactsSync({
+        dodoApprovedExecutionProofTrust,
         evidence,
         now,
         repositoryRoot: root,
         payosOwnerAttestationPublicKeys: {
           [payosOwnerKeyId]: payosOwnerKeys.publicKey.export({ format: "pem", type: "spki" }),
         },
+        payosStagingRunnerPublicKeys: { [payosRunnerKeyId]: payosRunnerPublicKey },
+        payosStagingRunnerSpkiFingerprints: { [payosRunnerKeyId]: payosRunnerSpkiSha256 },
+        trustedStagingWorkerVersion: releaseBinding.workerVersion,
       });
       expect(commerceEvidenceValidation.payos).toMatchObject({
         accepted: true,
@@ -1221,33 +1381,41 @@ describe("production release readiness", () => {
         ],
       });
 
-      const evidencePath = join(root, ".wrangler/release/production-evidence.json");
-      const manifestPath = join(root, ".wrangler/releases", releaseId, "release-manifest.json");
-      await writeFile(evidencePath, JSON.stringify(evidence), { mode: 0o600 });
-      await writeFile(manifestPath, JSON.stringify(releaseArtifacts.manifest), { mode: 0o600 });
-      await expect(assertProductionDeployAdmission({
-        manifestPath,
+      const productionDeployInput = {
+        commerceEvidenceValidation,
+        evidence,
+        manifest: releaseArtifacts.manifest,
+        migrationNames: ["0001_first.sql"],
         now,
+        packageVersion: "0.0.0",
+        productionSpec: readyProductionSpec(),
+        repositoryClean: true,
+        repositoryCommitSha: commitSha,
         repositoryRoot: root,
+        repositoryTreeSha: treeSha,
+        requireRollbackArtifact: true,
+        rollbackArtifactValidation: validateProductionRollbackArtifact({
+          evidence,
+          migrationNames: ["0001_first.sql"],
+          repositoryRoot: root,
+        }),
         workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
-      })).resolves.toMatchObject({ releaseId });
+        wranglerConfig: readyWranglerConfig(),
+      };
+      expect(validateProductionDeployAdmission(productionDeployInput)).toMatchObject({ releaseId });
 
       await writeFile(join(root, rollback.rehearsalEvidenceRef), `${rollbackArtifact}\n`, { mode: 0o600 });
-      await expect(assertProductionDeployAdmission({
-        manifestPath,
-        now,
+      expect(() => validateProductionRollbackArtifact({
+        evidence,
+        migrationNames: ["0001_first.sql"],
         repositoryRoot: root,
-        workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
-      })).rejects.toThrow("production_rollback_artifact_hash_mismatch");
+      })).toThrow("production_rollback_artifact_hash_mismatch");
       await writeFile(join(root, rollback.rehearsalEvidenceRef), rollbackArtifact, { mode: 0o600 });
 
-      await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.0.1" }));
-      await expect(assertProductionDeployAdmission({
-        manifestPath,
-        now,
-        repositoryRoot: root,
-        workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
-      })).rejects.toThrow("production_release_source_dirty");
+      expect(() => validateProductionDeployAdmission({
+        ...productionDeployInput,
+        repositoryClean: false,
+      })).toThrow("production_release_source_dirty");
     } finally {
       if (previousAttestationKeyId === undefined) delete process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID;
       else process.env.SELINOW_PAYOS_UAT_ATTESTATION_KEY_ID = previousAttestationKeyId;

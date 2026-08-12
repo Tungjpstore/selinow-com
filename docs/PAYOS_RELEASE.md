@@ -37,12 +37,70 @@ artifact reference and a unique SHA-256 fingerprint. Raw webhook bodies,
 provider credentials, customer data, checkout URLs, and payment details are
 not allowed in evidence, D1, queues, audit metadata, or logs.
 
-Create each normalized scenario artifact with the dedicated builder. It accepts
-only scenario classification, timestamps, release identity and SHA-256 proof
-fingerprints; it has no argument for a PayOS credential, raw payload, customer
-record, checkout URL or bank detail. The output must be inside the exact
-release directory and is created with mode `0600` without overwriting an
-existing file:
+Before building either provider-supported scenario, the approved staging
+runner captures a separate private unsigned execution artifact at
+`.wrangler/releases/staging/<release-id>/execution/payos-<scenario-id>.unsigned.json`.
+It must be a regular mode-`0600` file with the exact release binding and this
+strict redacted shape. Copying operator-authored JSON into this path is not
+provider evidence:
+
+```json
+{
+  "schemaVersion": 1,
+  "evidenceKind": "provider_execution",
+  "environment": "staging",
+  "provider": "payos",
+  "providerEnvironment": "production_controlled",
+  "scenarioId": "signed_exact_payment",
+  "verificationMethod": "signed_webhook",
+  "observedAt": "<iso-8601>",
+  "controlledAccountFingerprintSha256": "<sha256>",
+  "authority": {
+    "attemptReference": "attempt:pay_<uuid>",
+    "authoritySource": "staging_d1_verified_event",
+    "eventReference": "event:pev_<uuid>",
+    "providerAuthority": "provider_signed_webhook",
+    "providerReference": "provider:<sha256-of-opaque-provider-reference>",
+    "requestReference": "request:<safe-request-id>"
+  },
+  "result": { "duplicate": false, "processed": true, "state": "paid_exact" },
+  "redaction": {
+    "noCredentialData": true,
+    "noCustomerData": true,
+    "noFinancialDetails": true,
+    "noRawPayload": true
+  },
+  "runnerAttestation": null,
+  "release": { "commitSha": "...", "treeSha": "...", "releaseId": "...", "manifestRef": "...", "manifestSha256": "...", "workerVersion": "..." }
+}
+```
+
+The two provider scenarios should use two distinct controlled transactions and
+must use distinct attempt, event, provider and request references. The artifact
+contains no raw webhook, checkout URL, bank detail, amount, customer identity
+or credential.
+
+The runner signs each unsigned execution artifact with a separately approved
+Ed25519 staging-runner key. The key must be a regular mode-`0600` file. The
+signer refuses noncanonical paths, symlinked ancestors and overwrite, computes
+the SPKI SHA-256 fingerprint, and writes the canonical signed artifact without
+embedding the public key:
+
+```bash
+npm run payos:uat:execution:sign -- \
+  --input .wrangler/releases/staging/<release-id>/execution/payos-signed_exact_payment.unsigned.json \
+  --private-key .wrangler/private/payos-staging-runner-ed25519.pem \
+  --key-id payos-staging-runner-2026 \
+  --signed-at <iso-8601-within-15-minutes-of-observation> \
+  --output .wrangler/releases/staging/<release-id>/execution/payos-signed_exact_payment.json
+```
+
+Runner trust is out-of-band and requires the approved key ID, public-key PEM,
+and pinned SPKI SHA-256. None may be read from the evidence. The release-owner
+attestation described later is additional approval, not execution authority.
+
+The scenario builder verifies the runner signature and SHA-verifies the signed
+execution artifact; it no longer accepts an operator-supplied proof hash:
 
 ```bash
 npm run payos:uat:artifact -- \
@@ -53,8 +111,10 @@ npm run payos:uat:artifact -- \
   --status passed \
   --verification-method signed_webhook \
   --observed-at <iso-8601-observation> \
-  --controlled-account-fingerprint <sha256> \
-  --proof-of-execution-fingerprint <sha256> \
+  --execution-evidence .wrangler/releases/staging/<release-id>/execution/payos-signed_exact_payment.json \
+  --runner-attestation-key-id payos-staging-runner-2026 \
+  --runner-attestation-public-key .wrangler/trust/payos-staging-runner-public.pem \
+  --runner-attestation-spki-sha256 <approved-spki-sha256> \
   --output .wrangler/releases/staging/<release-id>/scenarios/payos-signed_exact_payment.json
 ```
 
@@ -64,6 +124,23 @@ scenarios must omit them. Each top-level scenario record then references the
 generated file with `artifact:<release-relative-path>` and uses the emitted
 artifact fingerprint. The complete unsigned schema-v2 evidence remains a
 private mode-`0600` file outside Git.
+
+After all 14 scenario artifacts exist, assemble the unsigned schema-v2 file
+with the canonical collector. It re-reads every scenario, verifies both
+provider execution artifacts, derives the aggregate transaction fingerprint
+and refuses overwrite or noncanonical output:
+
+```bash
+npm run payos:uat:collect -- \
+  --manifest .wrangler/releases/staging/<release-id>/release-manifest.json \
+  --worker-version <staging-worker-version> \
+  --created-at <iso-8601-start> \
+  --completed-at <iso-8601-completion> \
+  --runner-attestation-key-id payos-staging-runner-2026 \
+  --runner-attestation-public-key .wrangler/trust/payos-staging-runner-public.pem \
+  --runner-attestation-spki-sha256 <approved-spki-sha256> \
+  --output .wrangler/releases/staging/<release-id>/payos-uat-evidence.unsigned.json
+```
 
 The provider execution block is the anti-fabrication fence:
 
@@ -102,10 +179,13 @@ signature:
 
 ```bash
 npm run payos:uat:sign -- \
-  --evidence .wrangler/private/payos-uat-evidence.unsigned.json \
+  --evidence .wrangler/releases/staging/<release-id>/payos-uat-evidence.unsigned.json \
   --private-key .wrangler/private/payos-release-owner-ed25519.pem \
   --key-id release-owner-2026 \
   --signed-at <iso-8601-completion-time> \
+  --runner-attestation-key-id payos-staging-runner-2026 \
+  --runner-attestation-public-key .wrangler/trust/payos-staging-runner-public.pem \
+  --runner-attestation-spki-sha256 <approved-spki-sha256> \
   --output .wrangler/releases/staging/<release-id>/payos-uat-evidence.json
 ```
 
@@ -120,6 +200,9 @@ export SELINOW_PAYOS_UAT_ATTESTATION_PUBLIC_KEY_PEM_BASE64="$(base64 < owner-pub
 npm run payos:uat:validate -- \
   --evidence .wrangler/releases/staging/<release-id>/payos-uat-evidence.json \
   --manifest .wrangler/releases/staging/<release-id>/release-manifest.json \
+  --runner-attestation-key-id payos-staging-runner-2026 \
+  --runner-attestation-public-key .wrangler/trust/payos-staging-runner-public.pem \
+  --runner-attestation-spki-sha256 <approved-spki-sha256> \
   --worker-version <staging-worker-version>
 ```
 
@@ -135,3 +218,10 @@ release owner.
 
 Until that handoff is accepted, the release doctor must report PayOS provider
 acceptance as blocked even when local negative/security tests are green.
+
+Shared release admission receives the approved runner trust only through
+`SELINOW_PAYOS_UAT_RUNNER_KEY_ID`,
+`SELINOW_PAYOS_UAT_RUNNER_PUBLIC_KEY_PEM_BASE64`, and
+`SELINOW_PAYOS_UAT_RUNNER_SPKI_SHA256`. The public-key file used by standalone
+CLI validation may be the source used to populate that CI/operator environment,
+but the evidence artifact cannot nominate or approve its own runner key.

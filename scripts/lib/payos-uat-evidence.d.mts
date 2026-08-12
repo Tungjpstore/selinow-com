@@ -13,10 +13,48 @@ export type PayosStagingUatBinding = {
   requireArtifactProof?: boolean;
   scenarioArtifactFingerprints?: Record<string, string>;
   ownerAttestationPublicKeys?: Record<string, string>;
+  providerExecutionArtifactFingerprints?: Record<string, string>;
 };
 
 export function fingerprintPayosStagingUatEvidence(evidence: unknown): string;
 export function serializePayosOwnerAttestationPayload(evidence: unknown): string;
+export function serializePayosRunnerAttestationPayload(evidence: unknown): string;
+export function assertPayosUnsignedProviderExecutionArtifact(value: unknown): unknown;
+export function readPayosRunnerTrustAnchor(input: {
+  keyId: string;
+  publicKeyPath: string;
+  repositoryRoot: string;
+  spkiSha256: string;
+}): {
+  stagingRunnerPublicKeys: Record<string, string>;
+  stagingRunnerSpkiFingerprints: Record<string, string>;
+};
+export function readPayosProviderExecutionArtifact(input: {
+  executionEvidencePath: string;
+  observedAt: string;
+  release: Record<string, string>;
+  repositoryRoot: string;
+  scenarioId: string;
+  stagingRunnerPublicKeys?: Record<string, string>;
+  stagingRunnerSpkiFingerprints?: Record<string, string>;
+  verificationMethod: string;
+}): {
+  authority: Record<string, string>;
+  controlledAccountFingerprintSha256: string;
+  fingerprintSha256: string;
+  path: string;
+};
+export function readPayosProviderExecutionArtifacts(input: {
+  evidence: unknown;
+  repositoryRoot: string;
+  stagingRunnerPublicKeys?: Record<string, string>;
+  stagingRunnerSpkiFingerprints?: Record<string, string>;
+}): {
+  authorities: Record<string, Record<string, string>>;
+  fingerprints: Record<string, string>;
+  transactionEvidenceFingerprintSha256: string;
+};
+export function readPayosScenarioArtifactFingerprints(input: { evidence: unknown; repositoryRoot: string }): Record<string, string>;
 export function evaluatePayosStagingUatEvidence(evidence: unknown, binding: PayosStagingUatBinding): {
   accepted: boolean;
   acceptanceReasonCode: string | null;

@@ -73,7 +73,7 @@ describe("remote post-migration database contract", () => {
     ]))).toThrow("post_migration_legacy_object_present:auth_request_admissions_legacy_0094");
   });
 
-  it("pins every schema contract introduced through migration 0094", () => {
+  it("pins every schema contract introduced through migration 0095", () => {
     const requiredObjects = [
       ["index", "idx_plan_prices_provider_ref"],
       ["trigger", "plan_prices_published_reference_guard"],
@@ -109,6 +109,16 @@ describe("remote post-migration database contract", () => {
       ["trigger", "shop_domains_turnstile_active_update_guard"],
       ["trigger", "shops_turnstile_canonical_insert_guard"],
       ["trigger", "shops_turnstile_canonical_update_guard"],
+      ["table", "telegram_updates"],
+      ["index", "idx_telegram_integrations_shop_generation"],
+      ["index", "idx_telegram_updates_generation_processing"],
+      ["index", "idx_telegram_updates_shop_received"],
+      ["index", "idx_telegram_updates_status"],
+      ["trigger", "outbox_jobs_quarantine_legacy_order_paid_insert"],
+      ["trigger", "telegram_integrations_generation_switch_required"],
+      ["trigger", "telegram_integrations_generation_transition_guard"],
+      ["trigger", "telegram_updates_generation_claim_guard"],
+      ["trigger", "telegram_updates_generation_insert_guard"],
     ] as const;
     for (const [type, name] of requiredObjects) {
       const rows = completeObjects().filter((row) => row.type !== type || row.name !== name);
@@ -135,6 +145,10 @@ describe("remote post-migration database contract", () => {
       ["order_access_recovery_tokens", "redacted_at"],
       ["order_access_recovery_tokens", "retention_expires_at"],
       ["order_access_recovery_tokens", "token_hash"],
+      ["telegram_integrations", "generation_state"],
+      ["telegram_integrations", "integration_generation"],
+      ["telegram_updates", "credential_id"],
+      ["telegram_updates", "integration_generation"],
     ] as const;
     for (const [tableName, columnName] of requiredColumns) {
       const rows = completeColumns().filter((row) => (
@@ -172,6 +186,9 @@ describe("remote post-migration database contract", () => {
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.delivery_permitted NOT IN (0, 1)");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.action = 'shop_create'");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.subject_hash IS NULL");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("job.kind = 'order_paid'");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("integration.generation_state NOT IN ('active', 'draining')");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("update_row.integration_generation <= 0");
   });
 
   it("preserves admission rows while rebuilding the ledger for shop creation", () => {
@@ -360,6 +377,11 @@ describe("remote post-migration database contract", () => {
       expect(() => parsePostMigrationObjectOutput(envelope(
         database.prepare(POST_MIGRATION_OBJECT_SQL).all(),
       ))).toThrow("post_migration_legacy_object_present:auth_request_admissions_legacy_0094");
+      database.exec("DROP TABLE auth_request_admissions_legacy_0094;");
+      database.exec("CREATE TABLE telegram_updates_pre_generation (id TEXT PRIMARY KEY) STRICT;");
+      expect(() => parsePostMigrationObjectOutput(envelope(
+        database.prepare(POST_MIGRATION_OBJECT_SQL).all(),
+      ))).toThrow("post_migration_legacy_object_present:telegram_updates_pre_generation");
     } finally {
       database.close();
     }

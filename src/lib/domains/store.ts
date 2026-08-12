@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import { constantTimeEqual, hmacToken } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
+import { subscriptionAllows } from "../billing/entitlements";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
 import { getPlanLimit, hasFeature } from "../tenants/policy";
@@ -426,6 +427,45 @@ type CheckPersistenceGuard = {
   row: DomainRow;
 };
 
+type CustomDomainEntitlementRow = {
+  currentPeriodEnd: string | null;
+  featureFlagsJson: string;
+  graceEndsAt: string | null;
+  subscriptionState: string;
+  trialEndsAt: string | null;
+};
+
+async function shopHasCustomDomainEntitlement(env: AppBindings, shopId: string, now: Date): Promise<boolean> {
+  const row = await env.PLATFORM_DB.prepare(`
+    SELECT
+      domain_subscription.state AS subscriptionState,
+      domain_subscription.current_period_end AS currentPeriodEnd,
+      domain_subscription.trial_ends_at AS trialEndsAt,
+      domain_subscription.grace_ends_at AS graceEndsAt,
+      plans.feature_flags_json AS featureFlagsJson
+    FROM shop_subscriptions AS domain_subscription
+    INNER JOIN plans ON plans.id = domain_subscription.plan_id
+    WHERE domain_subscription.id = (
+      SELECT latest_subscription.id
+      FROM shop_subscriptions AS latest_subscription
+      WHERE latest_subscription.shop_id = ?
+      ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+      LIMIT 1
+    )
+      AND domain_subscription.shop_id = ?
+    LIMIT 1
+  `).bind(shopId, shopId).first<CustomDomainEntitlementRow>();
+  return row !== null
+    && hasFeature(row.featureFlagsJson, "customDomain")
+    && subscriptionAllows({
+      currentPeriodEnd: row.currentPeriodEnd,
+      graceEndsAt: row.graceEndsAt,
+      now,
+      subscriptionState: row.subscriptionState,
+      trialEndsAt: row.trialEndsAt,
+    });
+}
+
 async function persistCheckTransition(input: {
   env: AppBindings;
   leaseToken: string;
@@ -433,7 +473,7 @@ async function persistCheckTransition(input: {
   prepareTarget: (guard: CheckPersistenceGuard) => D1PreparedStatement;
   reasonCode: string | null;
   row: DomainRow;
-  status: "active" | "failed" | "validating";
+  status: "active" | "failed" | "suspended" | "validating";
 }): Promise<DomainRow> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const row = requireDomain(await findDomainById(input.env, input.row.shopId, input.row.id));
@@ -546,6 +586,49 @@ async function persistCheckTransition(input: {
     return requireDomain(await findDomainById(input.env, row.shopId, row.id));
   }
   throw new AppError("domain_lease_lost", 409);
+}
+
+async function persistEntitlementSuspension(input: {
+  env: AppBindings;
+  leaseToken: string;
+  now: Date;
+  row: DomainRow;
+}): Promise<DomainRow> {
+  return persistCheckTransition({
+    env: input.env,
+    leaseToken: input.leaseToken,
+    now: input.now,
+    prepareTarget: ({ canonicalDomainId, fallbackDomainId, needsFailover, row }) => input.env.PLATFORM_DB.prepare(`
+      /* domain:suspend-missing-entitlement */
+      UPDATE shop_domains
+      SET status = 'suspended', is_primary = 0, next_check_at = NULL,
+          last_checked_at = ?, last_safe_error_code = 'subscription_required',
+          lease_token = NULL, lease_expires_at = NULL,
+          version = version + 1, updated_at = ?
+      WHERE id = ? AND shop_id = ? AND type = 'custom' AND deleted_at IS NULL
+        AND delete_requested_at IS NULL AND lease_token = ? AND version = ? AND is_primary = ?
+        AND EXISTS (SELECT 1 FROM shops WHERE id = ? AND canonical_domain_id IS ?)
+        ${needsFailover && fallbackDomainId !== null ? `AND EXISTS (
+          SELECT 1 FROM shop_domains fallback
+          WHERE fallback.id = ? AND fallback.shop_id = ? AND fallback.type = 'platform_subdomain'
+            AND fallback.status = 'active' AND fallback.delete_requested_at IS NULL AND fallback.deleted_at IS NULL
+        )` : ""}
+    `).bind(
+      input.now.toISOString(),
+      input.now.toISOString(),
+      row.id,
+      row.shopId,
+      input.leaseToken,
+      row.version,
+      row.isPrimary,
+      row.shopId,
+      canonicalDomainId,
+      ...(needsFailover && fallbackDomainId !== null ? [fallbackDomainId, row.shopId] : []),
+    ),
+    reasonCode: "subscription_required",
+    row: input.row,
+    status: "suspended",
+  });
 }
 
 async function persistCheckFailure(input: {
@@ -1008,7 +1091,7 @@ export async function checkCustomDomain(input: {
   const runtime = input.runtime ?? {};
   // Checking a claim/domain mutates provider state and consumes a reconciliation
   // lease, so read-only members must not be able to trigger it.
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", false);
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", true);
   const claim = await findClaimById(input.env, shopId, input.domainId);
   if (claim !== null) {
     return verifyAndPromoteClaim({
@@ -1495,6 +1578,10 @@ export async function reconcileCustomDomainRecord(input: {
       await persistDeleteFailure({ env: input.env, error, leaseToken: input.leaseToken, now: input.now, row });
       throw error;
     }
+  }
+  if (!await shopHasCustomDomainEntitlement(input.env, row.shopId, input.now)) {
+    await persistEntitlementSuspension({ env: input.env, leaseToken: input.leaseToken, now: input.now, row });
+    return "checked";
   }
   return (await runProviderCheck({ env: input.env, leaseToken: input.leaseToken, row, runtime })).outcome;
 }

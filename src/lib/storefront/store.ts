@@ -3,7 +3,7 @@ import { assertSubscriptionAllows, subscriptionAllows } from "../billing/entitle
 import { parseCookies } from "../http/cookies";
 import { LOCALE_COOKIE_NAME, resolveLocale } from "../i18n/locale";
 import type { AppBindings } from "../platform/bindings";
-import { assertCheckoutAllowed } from "../tenants/policy";
+import { assertCheckoutAllowed, hasFeature } from "../tenants/policy";
 import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } from "../domains/readiness";
 import { classifyPlatformHost, getCanonicalStorefrontUrl, normalizeHostname } from "./routing";
 import { parseStorefrontPublicDetails, type StorefrontPublicDetails } from "./public-details";
@@ -12,12 +12,14 @@ import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, t
 type StorefrontShopRow = {
   brandingJson: string;
   canonicalHostname: string | null;
+  canonicalDomainType: string | null;
   currency: string;
   currentPeriodEnd: string | null;
   currentDomainType: string;
   currentDomainValidationMetadataJson: string;
   currentHostname: string;
   defaultLocale: string;
+  featureFlagsJson: string;
   id: string;
   lowStockThreshold: number;
   name: string;
@@ -148,7 +150,14 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
       (SELECT current_period_end FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS currentPeriodEnd,
       (SELECT trial_ends_at FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS trialEndsAt,
       (SELECT grace_ends_at FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS graceEndsAt,
-      canonical_domain.hostname_normalized AS canonicalHostname
+      (SELECT plans.feature_flags_json
+        FROM shop_subscriptions AS entitlement_subscription
+        INNER JOIN plans ON plans.id = entitlement_subscription.plan_id
+        WHERE entitlement_subscription.shop_id = shops.id
+        ORDER BY entitlement_subscription.created_at DESC, entitlement_subscription.id DESC
+        LIMIT 1) AS featureFlagsJson,
+      canonical_domain.hostname_normalized AS canonicalHostname,
+      canonical_domain.type AS canonicalDomainType
     FROM shop_domains
     INNER JOIN shops ON shops.id = shop_domains.shop_id
     INNER JOIN shop_settings ON shop_settings.shop_id = shops.id
@@ -165,6 +174,19 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
           AND canonical_domain.ssl_status = 'active'
           AND canonical_domain.dns_status = 'active'
           AND ${customDomainTurnstileAdmissionSql("canonical_domain")}
+          AND EXISTS (
+            SELECT 1
+            FROM shop_subscriptions AS canonical_subscription
+            INNER JOIN plans ON plans.id = canonical_subscription.plan_id
+            WHERE canonical_subscription.id = (
+              SELECT latest_subscription.id
+              FROM shop_subscriptions AS latest_subscription
+              WHERE latest_subscription.shop_id = shops.id
+              ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+              LIMIT 1
+            )
+              AND json_extract(plans.feature_flags_json, '$.customDomain') = 1
+          )
         )
       )
     WHERE shop_domains.hostname_normalized = ?
@@ -178,15 +200,30 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
           AND shop_domains.ssl_status = 'active'
           AND shop_domains.dns_status = 'active'
           AND ${customDomainTurnstileAdmissionSql("shop_domains")}
+          AND EXISTS (
+            SELECT 1
+            FROM shop_subscriptions AS current_domain_subscription
+            INNER JOIN plans ON plans.id = current_domain_subscription.plan_id
+            WHERE current_domain_subscription.id = (
+              SELECT latest_subscription.id
+              FROM shop_subscriptions AS latest_subscription
+              WHERE latest_subscription.shop_id = shops.id
+              ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+              LIMIT 1
+            )
+              AND json_extract(plans.feature_flags_json, '$.customDomain') = 1
+          )
         )
       )
     LIMIT 1
   `).bind(hostname).first<StorefrontShopRow>();
   if (row === null) throw new AppError("storefront_not_found", 404);
+  const customDomainEntitled = hasFeature(row.featureFlagsJson, "customDomain");
   const currentDomainReady = (
     row.currentDomainType === "platform_subdomain"
     || (
       row.currentDomainType === "custom"
+      && customDomainEntitled
       && hasFreshExactTurnstileAdmission({
         hostname,
         validationMetadataJson: row.currentDomainValidationMetadataJson,
@@ -207,7 +244,9 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
   const content = parseStorefrontContent(row.storefrontJson, row.name, locale);
   return {
     access: storefrontAccess(row.status, subscriptionState, row.trialEndsAt, row.graceEndsAt, row.currentPeriodEnd),
-    canonicalHostname: row.canonicalHostname === null ? null : normalizeHostname(row.canonicalHostname),
+    canonicalHostname: row.canonicalHostname === null || (row.canonicalDomainType === "custom" && !customDomainEntitled)
+      ? null
+      : normalizeHostname(row.canonicalHostname),
     content,
     currency: row.currency,
     currentHostname: hostname,

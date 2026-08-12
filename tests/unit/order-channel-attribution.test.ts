@@ -406,7 +406,7 @@ describe("built-in channel attribution contract", () => {
     const order = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-attribution-web-0001",
@@ -465,7 +465,7 @@ describe("built-in channel attribution contract", () => {
     const staleCheckout = checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-cart-race-loser-0001",
@@ -476,7 +476,7 @@ describe("built-in channel attribution contract", () => {
     const winner = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-cart-race-winner-0002",
@@ -688,7 +688,7 @@ describe("built-in channel attribution contract", () => {
     const websiteCheckout = checkoutCart({
       cartId: websiteCart.cartId,
       cartToken: websiteCart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-cross-channel-web-0001",
@@ -768,7 +768,7 @@ describe("built-in channel attribution contract", () => {
     const order = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-attribution-web-free-0001",

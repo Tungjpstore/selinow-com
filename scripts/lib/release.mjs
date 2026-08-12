@@ -15,7 +15,7 @@ import {
 } from "./platform.mjs";
 import { assertFreshProductionContinuationEvidence } from "./backup.mjs";
 import { runWrangler } from "./cli.mjs";
-import { validateCommerceUatArtifacts, validateCommerceUatArtifactsSync } from "./commerce-uat-evidence.mjs";
+import { validateCommerceUatArtifacts } from "./commerce-uat-evidence.mjs";
 
 export const REQUIRED_PRODUCTION_VARS = [
   "ACTIVE_CREDENTIAL_KEY_VERSION",
@@ -149,6 +149,16 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "idx_auth_request_admissions_requester_window",
   "idx_auth_request_admissions_expiry",
   "idx_auth_request_admissions_subject_window",
+  "telegram_updates",
+  "idx_telegram_integrations_shop_generation",
+  "idx_telegram_updates_generation_processing",
+  "idx_telegram_updates_shop_received",
+  "idx_telegram_updates_status",
+  "outbox_jobs_quarantine_legacy_order_paid_insert",
+  "telegram_integrations_generation_switch_required",
+  "telegram_integrations_generation_transition_guard",
+  "telegram_updates_generation_claim_guard",
+  "telegram_updates_generation_insert_guard",
 ]);
 
 const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
@@ -262,6 +272,26 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_auth_request_admissions_requester_window: "0eae88a37e6f001da33ac076fa37527c747d327580fa25b191e13b050d164734",
       idx_auth_request_admissions_subject_window: "fd963cf7fdc62169d6f43742b5d0b8e5dea620fd15feed6b6962675bf61682ac",
       idx_auth_request_admissions_window: "948c62c46ee63a42a09d18ba42f18a352c1c267c6ab23e102944d5c1e68ea73e",
+    }),
+  }),
+  "0095_telegram_generation_and_legacy_outbox_quarantine.sql": Object.freeze({
+    columns: Object.freeze({
+      "telegram_integrations.generation_state": Object.freeze({ defaultValue: "'active'", notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "telegram_integrations.integration_generation": Object.freeze({ defaultValue: "1", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "telegram_updates.credential_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "telegram_updates.integration_generation": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+    }),
+    objects: Object.freeze({
+      idx_telegram_integrations_shop_generation: "8244ab8cce535dbe3b8b489f3082b0fdccdb6112ca238d7b39abb38993956768",
+      idx_telegram_updates_generation_processing: "aa1078199fc96a2f71bbe1f867223fa5ce12386281653c6f5ce9bdf61ccaa30a",
+      idx_telegram_updates_shop_received: "241a38ebc8e45626d8741e2344b3f08f52917d5f9e6e7a08185e2bf5732e0658",
+      idx_telegram_updates_status: "aafd2108d00a368c3cc7e2134099f448916d9f6d8602b7fbbbe4d5ab4b37fbfd",
+      outbox_jobs_quarantine_legacy_order_paid_insert: "f2b3bac3b51c376153836e7436602c68520f80b6f1623c76d0b2c6caa84ef7e4",
+      telegram_integrations_generation_switch_required: "acf381b85e08b6fc3b9ac3851493f24ccbb04b5def9471385c055d3e06fe64ea",
+      telegram_integrations_generation_transition_guard: "2415a487ac7f25b137ad87e0243867b66dce287d646ab0f316e33792ac62ba3c",
+      telegram_updates: "3cd8ab244be5b880252888badca210174ff8fecf0cf303121c7f4a4d5f1b26c2",
+      telegram_updates_generation_claim_guard: "7fb8e1a635bc62712d8c86567a69fa6d4a22be93e90d681779317c80c57ef25b",
+      telegram_updates_generation_insert_guard: "857c2f334d5fdf2742f6c28dae95abe52cc9c3b9b3af2e91d6cf040aa6aaf2d3",
     }),
   }),
 });
@@ -976,16 +1006,8 @@ export function inspectProductionReadiness(input) {
   } catch {
     // Rollback admission reports the invalid source ledger as a missing check.
   }
-  const canonicalCommerceRefs = REQUIRED_COMMERCE_ACCEPTANCE_KEYS.every((provider) => (
-    typeof evidence?.commerceAcceptance?.[provider]?.evidenceRef === "string"
-    && evidence.commerceAcceptance[provider].evidenceRef.startsWith(".wrangler/releases/staging/")
-  ));
-  const commerceEvidenceValidation = input.commerceEvidenceValidation
-    ?? (canonicalCommerceRefs ? validateCommerceUatArtifactsSync({
-        evidence,
-        now: input.now,
-        repositoryRoot: input.repositoryRoot ?? repositoryRoot,
-      }) : undefined);
+  // Live-observed provider validation is injected by async release entrypoints.
+  const commerceEvidenceValidation = input.commerceEvidenceValidation;
   const releaseScope = evaluateReleaseScope(evidence);
   const rollbackCandidate = evaluateProductionRollbackCandidate(evidence, input.now, migrationNames);
   const checks = [
@@ -1361,16 +1383,7 @@ export function buildReleaseArtifacts(input) {
   }
   const migrationNames = validateSourceMigrationNames(input.migrationNames);
   const requiresCurrentChainHardening = migrationNames.includes("0090_payos_provider_claim_clear_guard.sql");
-  const canonicalCommerceRefs = REQUIRED_COMMERCE_ACCEPTANCE_KEYS.every((provider) => (
-    typeof input.evidence?.commerceAcceptance?.[provider]?.evidenceRef === "string"
-    && input.evidence.commerceAcceptance[provider].evidenceRef.startsWith(".wrangler/releases/staging/")
-  ));
-  const commerceEvidenceValidation = input.commerceEvidenceValidation
-    ?? (canonicalCommerceRefs ? validateCommerceUatArtifactsSync({
-      evidence: input.evidence,
-      now: input.now,
-      repositoryRoot: input.repositoryRoot ?? repositoryRoot,
-    }) : undefined);
+  const commerceEvidenceValidation = input.commerceEvidenceValidation;
   const releaseInput = {
     ...input,
     commerceEvidenceValidation,
@@ -2073,7 +2086,25 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
         OR admission.delivery_permitted NOT IN (0, 1)
         OR (admission.action = 'shop_create'
           AND (admission.subject_hash IS NULL OR admission.delivery_permitted != 1))
-      ) AS integrity_0094_auth_request_admission;`;
+      ) AS integrity_0094_auth_request_admission,
+    (SELECT COUNT(*) FROM outbox_jobs AS job
+      WHERE job.kind = 'order_paid' AND job.status != 'completed'
+      ) AS integrity_0095_legacy_order_paid_outbox,
+    (SELECT COUNT(*) FROM telegram_integrations AS integration
+      WHERE integration.integration_generation <= 0
+        OR integration.generation_state NOT IN ('active', 'draining')
+      ) AS integrity_0095_telegram_generation_state,
+    (SELECT COUNT(*) FROM telegram_updates AS update_row
+      LEFT JOIN telegram_integrations AS integration
+        ON integration.id = update_row.integration_id
+        AND integration.shop_id = update_row.shop_id
+      WHERE update_row.integration_generation <= 0
+        OR integration.id IS NULL
+        OR (update_row.status = 'processing'
+          AND (integration.generation_state != 'active'
+            OR integration.integration_generation != update_row.integration_generation
+            OR integration.active_credential_id IS NOT update_row.credential_id))
+      ) AS integrity_0095_telegram_update_generation;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {
@@ -2094,7 +2125,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_request_admissions", "order_access_recovery_tokens", "payment_credentials", "payment_integrations"].includes(row?.name)) expectedType = "table";
+    if (["auth_request_admissions", "order_access_recovery_tokens", "payment_credentials", "payment_integrations", "telegram_updates"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
@@ -2136,6 +2167,9 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0093_custom_domain_canonical",
     "integrity_0093_custom_domain_turnstile",
     "integrity_0094_auth_request_admission",
+    "integrity_0095_legacy_order_paid_outbox",
+    "integrity_0095_telegram_generation_state",
+    "integrity_0095_telegram_update_generation",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

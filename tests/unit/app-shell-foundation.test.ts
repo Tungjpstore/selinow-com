@@ -178,6 +178,17 @@ describe("seller app shell foundation", () => {
     expect(controller).toContain("clearLegacyIntentPayloads");
     expect(controller).toContain("clearTenantBoundDrafts");
     expect(controller).toContain("shopSelectionEpoch");
+    expect(controller).toContain("tenantHydrating");
+    expect(controller).toContain("setShopMutationFence(root, true)");
+    expect(controller).toContain("selectedMutationShop(state, shops)");
+    expect(controller).toContain("state.onboarding.profile?.currentStep");
+    expect(controller).toContain("serverStep ?? storedStep");
+    const hydrationStart = controller.indexOf("async function loadShopState");
+    const hydrationEnd = controller.indexOf("function readSettingsForm", hydrationStart);
+    const hydrationController = controller.slice(hydrationStart, hydrationEnd);
+    expect(hydrationController).toContain("try {");
+    expect(hydrationController).toContain("finally {");
+    expect(hydrationController).toContain("state.selectedShopId === selectionShopId");
     expect(controller).toContain("encodeURIComponent(shop.publicId)");
     expect(controller).not.toContain("JSON.stringify({ key, payload })");
   });

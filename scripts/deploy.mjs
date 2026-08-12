@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import process from "node:process";
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import { parseDeployFlags, run } from "./lib/cli.mjs";
 import { assertStagingContinuationEvidenceByReference } from "./lib/backup.mjs";
+import { buildStagingDeploymentVersionMessage } from "./lib/staging-deployment-evidence.mjs";
 import {
   assertStagingMutationAdmission,
   buildPinnedCloudflareEnvironment,
@@ -110,6 +113,7 @@ try {
   let stagingPostMigrationEvidenceAdmission = null;
   let stagingMigrationAdmission = null;
   let stagingPreflightAdmission = null;
+  let stagingVersionMessage = null;
   if (requiresProductionAdmission) {
     productionAdmission = await assertProductionWorkerDeployAdmission({
       environment: process.env,
@@ -387,6 +391,12 @@ try {
     stagingMigrationCompletionAdmission = finalMigrationCompletionAdmission;
     stagingPostMigrationContinuationAdmission = finalPostMigrationContinuationAdmission;
     stagingPostMigrationEvidenceAdmission = finalPostMigrationEvidenceAdmission;
+    const stagingManifestBytes = await readFile(resolve(repositoryRoot, flags.releaseManifestPath));
+    stagingVersionMessage = buildStagingDeploymentVersionMessage({
+      manifest: finalReleaseAdmission,
+      manifestRef: `.wrangler/releases/staging/${finalReleaseAdmission.releaseId}/release-manifest.json`,
+      manifestSha256: createHash("sha256").update(stagingManifestBytes).digest("hex"),
+    });
   }
   if (!flags.buildOnly) {
     const admittedAccountId = stagingAdmission?.accountId ?? productionAdmission?.accountId;
@@ -556,6 +566,10 @@ try {
       deployArgs.unshift("--no-install");
       if (flags.environment !== "local") {
         deployArgs.push("--env", flags.environment);
+      }
+      if (requiresStagingAdmission) {
+        if (stagingVersionMessage === null) throw new Error("staging_deployment_version_message_missing");
+        deployArgs.push("--message", stagingVersionMessage);
       }
       if (flags.dryRun) {
         deployArgs.push("--dry-run", "--outdir", `.wrangler/dry-run-${flags.environment}`);

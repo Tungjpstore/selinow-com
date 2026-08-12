@@ -2,7 +2,7 @@
 
 Phase 10 uses a prepare, backup, deploy, verify, confirm-or-rollback sequence. Repository tooling is fail-closed: production configuration, secret names, backup evidence, security status, monitoring ownership and pilot evidence must be complete before a release manifest can be written.
 
-Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. Production D1 is at the applied `0001`-`0052` ledger; current source migrations `0053`-`0094` are pending and have not been applied remotely. The release candidate is the final clean committed HEAD used to write the production manifest; it requires a fresh production backup and restore bound to that exact commit/tree. Dated Worker-version observations, older bootstrap evidence and Phase 2 review-fix runtime are historical and must not be treated as continuation evidence.
+Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. Production D1 is at the applied `0001`-`0052` ledger; current source migrations `0053`-`0095` are pending and have not been applied remotely. The release candidate is the final clean committed HEAD used to write the production manifest; it requires a fresh production backup and restore bound to that exact commit/tree. Dated Worker-version observations, older bootstrap evidence and Phase 2 review-fix runtime are historical and must not be treated as continuation evidence.
 
 The platform handoff evidence is private and non-secret: `.wrangler/bootstrap/production-evidence.json`, `.wrangler/bootstrap/bootstrap_20260730_first_release/production-smoke.json` and `promotion-applied.json`. It proves platform routing and frontend/health smoke only. PayOS settlement/refunds, Telegram bot acceptance, provider-backed fulfillment, external customer-domain/Turnstile admission, channel-expansion providers (Zalo, WhatsApp and Discord), controlled seller pilots, support/legal ownership and rollback evidence for the current candidate remain incomplete. No provider activation or full-commerce GO is claimed.
 
@@ -71,7 +71,7 @@ The first production Worker cannot honestly provide a previous Worker version. I
 
 1. `resources`: admit the exact account, zone, Git commit/tree, staging traffic inventory, production names and secret names; plan only create/reuse actions for the eight named production resources.
 2. `canary`: require the reconciled resource manifest, a fresh empty-D1 baseline backup/bookmark, a successful isolated restore drill and the exact forward-only migration list before the first Worker version may bind only `canary.selinow.com`.
-3. `promote`: require accepted canary smoke and monitoring evidence before the route-only shared-zone handoff may move the production apex and platform wildcard to the accepted Worker version while preserving the exact staging wildcard and the historical pre-promotion `*/* -> selinow-com-staging` fallback. This release uses platform-only routing: it does not claim an external custom-domain cutover or Turnstile admission, and it does not add or mutate a Worker Domain. Before the first stable version exists, rollback means restoring the private pre-bootstrap traffic inventory, not naming a nonexistent previous Worker version. After successful promotion, the first stable version becomes the rollback baseline for normal releases.
+3. `promote`: require accepted canary smoke and monitoring evidence before the route-only shared-zone handoff may move the production apex and platform wildcard to the accepted Worker version. The 2026-07-30 bootstrap historically retained `*/* -> selinow-com-staging`; the current production contract supersedes that state and requires `*/* -> selinow-com-production` with only the four exact staging exceptions left on `selinow-com-staging`. Before the first stable version exists, rollback means restoring the private pre-bootstrap traffic inventory, not naming a nonexistent previous Worker version. After successful promotion, the first stable version becomes the rollback baseline for normal releases.
 
 Start from these additional non-secret templates:
 
@@ -123,9 +123,9 @@ npm run release:production:bootstrap:migrate -- --env production --dry-run --jso
 
 If backup, generated-manifest, Git, account, D1, migration-ledger or confirmation evidence changes between checks, the command stops before Wrangler. Record the migration completion timestamp and exact applied ledger in the private bootstrap evidence before moving to the canary phase.
 
-### Continuation migration admission (`0053`-`0094`)
+### Continuation migration admission (`0053`-`0095`)
 
-The first-production executor above is historical and must not be reused for the non-empty continuation. `CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN` remains a first-bootstrap-only credential and must never authorize a continuation. For current candidate migrations `0053`-`0094`, use a short-lived least-privilege `CLOUDFLARE_D1_API_TOKEN` (mapped to `CLOUDFLARE_API_TOKEN` only inside the child Wrangler process), create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports. The runtime Worker secret is never operator input:
+The first-production executor above is historical and must not be reused for the non-empty continuation. `CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN` remains a first-bootstrap-only credential and must never authorize a continuation. For current candidate migrations `0053`-`0095`, use a short-lived least-privilege `CLOUDFLARE_D1_API_TOKEN` (mapped to `CLOUDFLARE_API_TOKEN` only inside the child Wrangler process), create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports. The runtime Worker secret is never operator input:
 
 ```bash
 npm run backup:create -- --env production --confirm-production --json
@@ -159,17 +159,66 @@ npm run release:worker:upload -- \
 ```
 
 Record the exact full `workerVersion` UUID returned by each command in
-`candidateWorkerVersion` and `rollback.candidate.workerVersion`. Then write the
-canonical rollback rehearsal and record its returned `evidenceRef` and
-`artifactSha256` in the production evidence:
+`candidateWorkerVersion` and `rollback.candidate.workerVersion`. Before the live
+rehearsal, close write admission, pause queue producers and scheduled work, and
+drain in-flight jobs. Record those four states in the canonical private mode-
+`0600` file
+`.wrangler/releases/<release-id>/maintenance-drain-evidence.json`, bound to the
+release ID, commit/tree and current Worker version with an observation timestamp
+no older than 15 minutes. This evidence is an operator safety assertion, not an
+owner approval or provider acceptance artifact.
 
-```bash
-npm run release:rollback:rehearsal -- --write --json
-npm run release:manifest -- --write --json
+The drain evidence has this exact schema. Values must describe the observed live
+state; placeholders do not authorize the rehearsal. JSON object key order is not
+significant.
+
+```json
+{
+  "schemaVersion": 1,
+  "mode": "production_maintenance_drain",
+  "environment": "production",
+  "releaseId": "<release-id>",
+  "commitSha": "<40-char-sha>",
+  "treeSha": "<40-char-tree>",
+  "previousWorkerVersion": "<uuid>",
+  "observedAt": "<fresh-iso-time>",
+  "states": {
+    "inFlightJobsDrained": true,
+    "queueProducersPaused": true,
+    "scheduledWorkPaused": true,
+    "writeAdmissionClosed": true
+  }
+}
 ```
 
-Do not write the release manifest before both route-neutral uploads and the
-rollback rehearsal are complete. Normal deploy admission validates both the
+Set the completed file to mode `0600` before invoking the rehearsal.
+
+The live rehearsal temporarily deploys the rollback version at 100%, so it must
+use `--execute`, both production confirmations, the drain evidence, and a
+reviewed public pilot storefront. It requires phase-10 health, dashboard login,
+marketing, the D1-backed storefront marker, and fail-closed unsigned Dodo webhook
+checks before restoring the exact prior Worker version. Record the returned
+`evidenceRef` and `artifactSha256` in production evidence:
+
+```bash
+npm run release:rollback:rehearsal -- --execute --confirm-production \
+  --confirm-maintenance-drain \
+  --maintenance-drain-evidence ".wrangler/releases/<release-id>/maintenance-drain-evidence.json" \
+  --smoke-storefront-url "https://<reviewed-pilot-host>/" \
+  --json
+```
+
+The optional `release:rollback:rehearsal -- --write --json` mode validates and
+writes schema-compatibility structure only. It returns
+`authorizesProductionAdmission: false` and cannot replace the live command.
+
+Do not require a passing final doctor before the rehearsal: the doctor itself
+requires the authorizing rehearsal artifact. Prepare the other evidence first,
+execute the rehearsal, populate its returned bindings, then run the doctor and
+require `ok: true`. Only then write the release manifest with
+`npm run release:manifest -- --write --json`. Do not write the release manifest
+before both route-neutral uploads and the live rollback rehearsal are complete.
+Normal deploy admission validates both the
 candidate and rollback Cloudflare version UUIDs against their commit/tree,
 release ID, manifest reference and role bindings; a missing, active, ambiguous
 or mismatched version fails closed.
@@ -369,13 +418,34 @@ Do not remove these blockers by broadening a shared-zone wildcard without the ex
 
 ## 1. Prepare
 
-The doctor reads local files only. It reports required names and pass/fail state, never configuration or secret values.
+The doctor reads local evidence and repeats read-only Cloudflare observation for
+the staging Worker version, routes, queue consumers, and cron schedule. It
+reports required names and pass/fail state, never token, key, configuration, or
+secret values. It must not be run with mutation-capable provider credentials.
 
 Provide the names returned by the Worker secret inventory, not their values:
 
 ```bash
 SELINOW_WORKER_SECRET_NAMES="SESSION_SECRET,MAGIC_LINK_SECRET,CREDENTIAL_KEK_V1,INVENTORY_KEK_V1,EXPORT_KEK_V1,IDENTIFIER_HMAC_SECRET,TURNSTILE_SECRET_KEY,CLOUDFLARE_API_TOKEN,DODO_PAYMENTS_API_KEY,DODO_PAYMENTS_WEBHOOK_KEY" npm run release:doctor -- --json
 ```
+
+Canonical Dodo/PayOS acceptance additionally requires the independently pinned
+runner trust and the three read-only staging audit tokens used by
+`verifyStagingDeploymentEvidence(...)`:
+
+```bash
+export SELINOW_DODO_UAT_RUNNER_KEY_ID="<approved-runner-key-id>"
+export SELINOW_DODO_UAT_RUNNER_SPKI_SHA256="<approved-runner-spki-sha256>"
+export SELINOW_PAYOS_UAT_RUNNER_KEY_ID="<approved-runner-key-id>"
+export SELINOW_PAYOS_UAT_RUNNER_PUBLIC_KEY_PEM_BASE64="<base64-spki-public-key-pem>"
+export SELINOW_PAYOS_UAT_RUNNER_SPKI_SHA256="<approved-runner-spki-sha256>"
+export CLOUDFLARE_STAGING_DEPLOYMENT_AUDIT_API_TOKEN="<read-only-token>"
+export CLOUDFLARE_ROUTE_AUDIT_API_TOKEN="<read-only-token>"
+export CLOUDFLARE_STAGING_TRIGGER_AUDIT_API_TOKEN="<read-only-token>"
+```
+
+These are operator/CI inputs only. Do not write their values into the evidence,
+manifest, logs, shell history, or repository.
 
 The command above is the current `v1` baseline, not a permanent rotation list. Before release, compare the inventory with the configured active credential and inventory key versions and with every version still referenced by D1 rows. Include `CREDENTIAL_KEK_V2` or `INVENTORY_KEK_V2` whenever `v2` is active or still referenced, and retain the old key name until the controlled rotation scan and backup-retention checks prove it can be retired. Private export objects currently remain `EXPORT_KEY_VERSION=v1` and require `EXPORT_KEK_V1`.
 

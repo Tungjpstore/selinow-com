@@ -8,6 +8,7 @@ import {
   readOptionalJson,
 } from "./lib/release.mjs";
 import { resolveDatabaseTarget } from "./lib/backup.mjs";
+import { validateCommerceUatArtifacts } from "./lib/commerce-uat-evidence.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
 function parseArguments(argv) {
@@ -82,9 +83,19 @@ try {
   const wranglerConfig = JSON.parse(await readFile(resolve(repositoryRoot, "wrangler.jsonc"), "utf8"));
   const productionSpec = await readOptionalJson(options.specPath);
   const evidence = await readOptionalJson(options.evidencePath);
+  const now = new Date();
+  const commerceEvidenceValidation = evidence === null
+    ? undefined
+    : await validateCommerceUatArtifacts({
+        environment: process.env,
+        evidence,
+        now,
+        repositoryRoot,
+      });
   const result = inspectProductionReadiness({
+    commerceEvidenceValidation,
     evidence,
-    now: new Date(),
+    now,
     productionSpec,
     requireReleaseHardening: true,
     workerSecretNames: await loadSecretNames(options.secretNamesPath),

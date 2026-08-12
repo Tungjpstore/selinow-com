@@ -298,7 +298,15 @@ describe("generic entitlement migration and service", () => {
         checkoutRequestHash: HASH_B,
         checkoutSubjectHash: subjectHash,
         currency: "USD",
-        customer: { kind: "anonymous", maskedEmail: null },
+        customer: channel.code === "website"
+          ? {
+            emailNormalized: "buyer@example.test",
+            id: "customer-generic-website",
+            kind: "upsert_email",
+            locale: "en",
+            maskedEmail: "b***@example.test",
+          }
+          : { kind: "anonymous", maskedEmail: null },
         discountMinor: 0,
         env,
         eventIdempotencyKey: channel.eventIdempotencyKey,

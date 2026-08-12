@@ -17,6 +17,12 @@ type ExistingIdempotency = {
   response_json: string;
 };
 
+const PENDING_SHOP_CREATION_RESPONSE = JSON.stringify({ state: "pending" });
+const SHOP_CREATION_ACCOUNT_LOCK_NAMESPACE = "shop.create.account-lock.v1";
+const SHOP_CREATION_REPLAY_ATTEMPTS = 40;
+const SHOP_CREATION_REPLAY_DELAY_MS = 50;
+const SHOP_CREATION_LOCK_TTL_MS = 60_000;
+
 type AccountTrialClaim = {
   shop_id: string;
 };
@@ -61,7 +67,8 @@ export type ShopView = {
 
 export type ShopCreationAdmission = {
   allowed: boolean;
-  reason: "eligible" | "trial_already_used";
+  creationMode: "paid" | "trial" | null;
+  reason: "billing_recovery" | "eligible";
   recoveryShopPublicId: string | null;
 };
 
@@ -105,6 +112,89 @@ function parseStoredShop(value: string): ShopView {
     defaultLocale: matchSupportedLocale(parsed.defaultLocale) ?? DEFAULT_LOCALE,
     merchantCountry: parsed.merchantCountry ?? null,
   } as ShopView;
+}
+
+function isPendingShopCreation(value: string): boolean {
+  return value === PENDING_SHOP_CREATION_RESPONSE;
+}
+
+async function waitForShopCreationReplay(input: {
+  env: AppBindings;
+  keyHash: string;
+  namespace: string;
+  requestHash: string;
+  userId: string;
+}): Promise<{ created: false; shop: ShopView }> {
+  for (let attempt = 0; attempt < SHOP_CREATION_REPLAY_ATTEMPTS; attempt += 1) {
+    const existing = await input.env.PLATFORM_DB.prepare(`
+      SELECT request_hash, response_json
+      FROM idempotency_records
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ?
+      LIMIT 1
+    `).bind(input.userId, input.namespace, input.keyHash).first<ExistingIdempotency>();
+    if (existing === null) throw new AppError("provisioning_admission_unavailable", 503);
+    if (existing.request_hash !== input.requestHash) throw new AppError("idempotency_conflict", 409);
+    if (!isPendingShopCreation(existing.response_json)) {
+      const shop = parseStoredShop(existing.response_json);
+      await recoverShopActivationMilestones(input.env, shop).catch(() => undefined);
+      return { created: false, shop };
+    }
+    await new Promise((resolve) => setTimeout(resolve, SHOP_CREATION_REPLAY_DELAY_MS));
+  }
+  throw new AppError("provisioning_admission_unavailable", 503);
+}
+
+async function acquireShopCreationAccountLock(input: {
+  env: AppBindings;
+  keyHash: string;
+  ownerToken: string;
+  userId: string;
+}): Promise<void> {
+  for (let attempt = 0; attempt < SHOP_CREATION_REPLAY_ATTEMPTS; attempt += 1) {
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const result = await input.env.PLATFORM_DB.batch([
+      input.env.PLATFORM_DB.prepare(`
+        DELETE FROM idempotency_records
+        WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND expires_at <= ?
+      `).bind(input.userId, SHOP_CREATION_ACCOUNT_LOCK_NAMESPACE, input.keyHash, nowIso),
+      input.env.PLATFORM_DB.prepare(`
+        INSERT OR IGNORE INTO idempotency_records (
+          actor_user_id, namespace, key_hash, request_hash, response_json, created_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        input.userId,
+        SHOP_CREATION_ACCOUNT_LOCK_NAMESPACE,
+        input.keyHash,
+        input.ownerToken,
+        PENDING_SHOP_CREATION_RESPONSE,
+        nowIso,
+        new Date(now.getTime() + SHOP_CREATION_LOCK_TTL_MS).toISOString(),
+      ),
+    ]);
+    if ((result[1]?.meta.changes ?? 0) === 1) return;
+    await new Promise((resolve) => setTimeout(resolve, SHOP_CREATION_REPLAY_DELAY_MS));
+  }
+  throw new AppError("provisioning_admission_unavailable", 503);
+}
+
+async function releaseShopCreationAccountLock(input: {
+  env: AppBindings;
+  keyHash: string;
+  ownerToken: string;
+  userId: string;
+}): Promise<void> {
+  await input.env.PLATFORM_DB.prepare(`
+    DELETE FROM idempotency_records
+    WHERE actor_user_id = ? AND namespace = ? AND key_hash = ?
+      AND request_hash = ? AND response_json = ?
+  `).bind(
+    input.userId,
+    SHOP_CREATION_ACCOUNT_LOCK_NAMESPACE,
+    input.keyHash,
+    input.ownerToken,
+    PENDING_SHOP_CREATION_RESPONSE,
+  ).run();
 }
 
 function isPreCountrySchemaError(error: unknown): boolean {
@@ -163,6 +253,9 @@ export async function createShop(input: {
     if (existing.request_hash !== requestHash) {
       throw new AppError("idempotency_conflict", 409);
     }
+    if (isPendingShopCreation(existing.response_json)) {
+      return waitForShopCreationReplay({ env: input.env, keyHash, namespace, requestHash, userId: input.userId });
+    }
     const shop = parseStoredShop(existing.response_json);
     await recoverShopActivationMilestones(input.env, shop).catch(() => undefined);
     return { created: false, shop };
@@ -190,62 +283,92 @@ export async function createShop(input: {
     throw new AppError("validation_failed", 400, ["plan_invalid"]);
   }
 
-  const priorTrial = await input.env.PLATFORM_DB.prepare(`
-    SELECT shop_id
-    FROM account_trial_claims
-    WHERE user_id = ?
-    LIMIT 1
-  `).bind(input.userId).first<AccountTrialClaim>();
-  if (priorTrial !== null) {
-    throw new AppError("validation_failed", 409, ["trial_already_used"]);
-  }
-
-  const conflictingSlug = await input.env.PLATFORM_DB.prepare(`
-    SELECT id
-    FROM shops
-    WHERE slug = ?
-    LIMIT 1
-  `).bind(input.slug).first<{ id: string }>();
-  if (conflictingSlug !== null) {
-    throw new AppError("validation_failed", 409, ["slug_unavailable"]);
-  }
-
-  await claimShopCreationAdmission({
-    env: input.env,
-    requesterAddress: input.requesterAddress,
-    userId: input.userId,
-  });
-
+  const accountLockKeyHash = await hmacToken(input.env.SESSION_SECRET, "idempotency", "shop-creation-account-lock");
   const now = new Date();
   const nowIso = now.toISOString();
+  const pendingExpiresAt = new Date(now.getTime() + SHOP_CREATION_LOCK_TTL_MS).toISOString();
+  const acquisition = await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      DELETE FROM idempotency_records
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND expires_at <= ?
+    `).bind(input.userId, namespace, keyHash, nowIso),
+    input.env.PLATFORM_DB.prepare(`
+      INSERT OR IGNORE INTO idempotency_records (
+        actor_user_id, namespace, key_hash, request_hash, response_json, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(input.userId, namespace, keyHash, requestHash, PENDING_SHOP_CREATION_RESPONSE, nowIso, pendingExpiresAt),
+  ]);
+  if ((acquisition[1]?.meta.changes ?? 0) !== 1) {
+    return waitForShopCreationReplay({ env: input.env, keyHash, namespace, requestHash, userId: input.userId });
+  }
+
+  const accountLockOwner = createId("lock");
   const shopId = createId("shp");
   const shopPublicId = createId("shop");
   const subscriptionId = createId("sub");
   const domainId = createId("dom");
-  // New shops receive only the bounded onboarding trial. Runtime entitlement
-  // checks require this deadline and deny expired or malformed trial rows.
-  const trialEndsAt = new Date(now.getTime() + PUBLIC_TRIAL_DAYS * 24 * 60 * 60_000).toISOString();
-  const hostname = `${input.slug}.${input.env.PLATFORM_BASE_DOMAIN}`;
-  const shop: ShopView = {
-    businessCountry,
-    currency,
-    defaultLocale,
-    featureFlags: safeJsonObject(plan.feature_flags_json),
-    limits: safeJsonObject(plan.limits_json),
-    merchantCountry,
-    name: input.name,
-    planCode: plan.code,
-    publicId: shopPublicId,
-    role: "owner",
-    slug: input.slug,
-    status: "draft",
-    subscriptionState: "trialing",
-    timezone: input.env.DEFAULT_TIMEZONE,
-  };
-  const responseJson = JSON.stringify(shop);
-  const expiresAt = new Date(now.getTime() + 24 * 60 * 60_000).toISOString();
+  let shop: ShopView;
 
   try {
+    await acquireShopCreationAccountLock({
+      env: input.env,
+      keyHash: accountLockKeyHash,
+      ownerToken: accountLockOwner,
+      userId: input.userId,
+    });
+    const priorTrial = await input.env.PLATFORM_DB.prepare(`
+      SELECT shop_id
+      FROM account_trial_claims
+      WHERE user_id = ?
+      LIMIT 1
+    `).bind(input.userId).first<AccountTrialClaim>();
+    if (priorTrial !== null) {
+      const admission = await getShopCreationAdmission({ env: input.env, userId: input.userId });
+      if (!admission.allowed) {
+        throw new AppError("validation_failed", 409, ["billing_recovery_required"]);
+      }
+    }
+    const conflictingSlug = await input.env.PLATFORM_DB.prepare(`
+      SELECT id
+      FROM shops
+      WHERE slug = ?
+      LIMIT 1
+    `).bind(input.slug).first<{ id: string }>();
+    if (conflictingSlug !== null) {
+      throw new AppError("validation_failed", 409, ["slug_unavailable"]);
+    }
+
+    // The account's first owned shop receives the bounded trial. Later shops
+    // start payment-pending and must recover through the shared billing flow.
+    const subscriptionState = priorTrial === null ? "trialing" : "pending_payment";
+    const trialEndsAt = priorTrial === null
+      ? new Date(now.getTime() + PUBLIC_TRIAL_DAYS * 24 * 60 * 60_000).toISOString()
+      : null;
+    const hostname = `${input.slug}.${input.env.PLATFORM_BASE_DOMAIN}`;
+    shop = {
+      businessCountry,
+      currency,
+      defaultLocale,
+      featureFlags: safeJsonObject(plan.feature_flags_json),
+      limits: safeJsonObject(plan.limits_json),
+      merchantCountry,
+      name: input.name,
+      planCode: plan.code,
+      publicId: shopPublicId,
+      role: "owner",
+      slug: input.slug,
+      status: "draft",
+      subscriptionState,
+      timezone: input.env.DEFAULT_TIMEZONE,
+    };
+    const responseJson = JSON.stringify(shop);
+    const expiresAt = new Date(now.getTime() + 24 * 60 * 60_000).toISOString();
+
+    await claimShopCreationAdmission({
+      env: input.env,
+      requesterAddress: input.requesterAddress,
+      userId: input.userId,
+    });
     await input.env.PLATFORM_DB.batch([
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO shops (
@@ -275,8 +398,8 @@ export async function createShop(input: {
       `).bind(shopId, nowIso, nowIso),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO account_trial_claims (user_id, shop_id, claimed_at)
-        VALUES (?, ?, ?)
-      `).bind(input.userId, shopId, nowIso),
+        SELECT ?, ?, ? WHERE ? = 'trialing'
+      `).bind(input.userId, shopId, nowIso, subscriptionState),
       ...ONBOARDING_STEP_CODES.map((stepCode) => {
         const complete = stepCode === "account_ready" || stepCode === "shop_created";
         const inProgress = stepCode === "channel_selected";
@@ -298,8 +421,8 @@ export async function createShop(input: {
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO shop_subscriptions (
           id, shop_id, plan_id, state, trial_ends_at, created_at, updated_at
-        ) VALUES (?, ?, ?, 'trialing', ?, ?, ?)
-      `).bind(subscriptionId, shopId, plan.id, trialEndsAt, nowIso, nowIso),
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).bind(subscriptionId, shopId, plan.id, subscriptionState, trialEndsAt, nowIso, nowIso),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO shop_domains (
           id, shop_id, hostname_normalized, type, status, is_primary,
@@ -307,10 +430,11 @@ export async function createShop(input: {
         ) VALUES (?, ?, ?, 'platform_subdomain', 'active', 1, '{}', ?, ?, ?)
       `).bind(domainId, shopId, hostname, nowIso, nowIso, nowIso),
       input.env.PLATFORM_DB.prepare(`
-        INSERT INTO idempotency_records (
-          actor_user_id, namespace, key_hash, request_hash, response_json, created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(input.userId, namespace, keyHash, requestHash, responseJson, nowIso, expiresAt),
+        UPDATE idempotency_records
+        SET response_json = ?, expires_at = ?
+        WHERE actor_user_id = ? AND namespace = ? AND key_hash = ?
+          AND request_hash = ? AND response_json = ?
+      `).bind(responseJson, expiresAt, input.userId, namespace, keyHash, requestHash, PENDING_SHOP_CREATION_RESPONSE),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO audit_logs (
           id, shop_id, actor_type, actor_id, action, resource_type,
@@ -321,7 +445,13 @@ export async function createShop(input: {
         JSON.stringify({ planCode: plan.code, slug: input.slug }), input.requestId, nowIso,
       ),
     ]);
-  } catch {
+  } catch (error) {
+    await input.env.PLATFORM_DB.prepare(`
+      DELETE FROM idempotency_records
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ?
+        AND request_hash = ? AND response_json = ?
+    `).bind(input.userId, namespace, keyHash, requestHash, PENDING_SHOP_CREATION_RESPONSE).run().catch(() => undefined);
+    if (error instanceof AppError) throw error;
     const replay = await input.env.PLATFORM_DB.prepare(`
       SELECT request_hash, response_json
       FROM idempotency_records
@@ -329,6 +459,9 @@ export async function createShop(input: {
       LIMIT 1
     `).bind(input.userId, namespace, keyHash).first<ExistingIdempotency>();
     if (replay !== null && replay.request_hash === requestHash) {
+      if (isPendingShopCreation(replay.response_json)) {
+        return await waitForShopCreationReplay({ env: input.env, keyHash, namespace, requestHash, userId: input.userId });
+      }
       const replayedShop = parseStoredShop(replay.response_json);
       await recoverShopActivationMilestones(input.env, replayedShop).catch(() => undefined);
       return { created: false, shop: replayedShop };
@@ -336,16 +469,23 @@ export async function createShop(input: {
     if (replay !== null) {
       throw new AppError("idempotency_conflict", 409);
     }
-    const claimed = await input.env.PLATFORM_DB.prepare(`
-      SELECT shop_id
-      FROM account_trial_claims
-      WHERE user_id = ?
+    const slug = await input.env.PLATFORM_DB.prepare(`
+      SELECT id
+      FROM shops
+      WHERE slug = ?
       LIMIT 1
-    `).bind(input.userId).first<AccountTrialClaim>();
-    if (claimed !== null) {
-      throw new AppError("validation_failed", 409, ["trial_already_used"]);
-    }
-    throw new AppError("validation_failed", 409, ["slug_unavailable"]);
+    `).bind(input.slug).first<{ id: string }>();
+    if (slug !== null) throw new AppError("validation_failed", 409, ["slug_unavailable"]);
+    const admission = await getShopCreationAdmission({ env: input.env, userId: input.userId });
+    if (!admission.allowed) throw new AppError("validation_failed", 409, ["billing_recovery_required"]);
+    throw new AppError("provisioning_admission_unavailable", 503);
+  } finally {
+    await releaseShopCreationAccountLock({
+      env: input.env,
+      keyHash: accountLockKeyHash,
+      ownerToken: accountLockOwner,
+      userId: input.userId,
+    }).catch(() => undefined);
   }
 
   await tryRecordActivationMilestone({
@@ -577,38 +717,34 @@ export async function getShopCreationAdmission(input: {
   userId: string;
 }): Promise<ShopCreationAdmission> {
   const claim = await input.env.PLATFORM_DB.prepare(`
-    SELECT claims.shop_id AS shopId,
-      CASE
-        WHEN shops.status != 'archived'
-          AND members.user_id IS NOT NULL
-          AND subscriptions.state = 'canceled'
-        THEN shops.public_id
-        ELSE NULL
-      END AS recoveryShopPublicId
+    SELECT claims.shop_id AS shopId
     FROM account_trial_claims AS claims
-    LEFT JOIN shops ON shops.id = claims.shop_id
-    LEFT JOIN shop_members AS members
-      ON members.shop_id = claims.shop_id
-      AND members.user_id = claims.user_id
-      AND members.role = 'owner'
-      AND members.status = 'active'
-    LEFT JOIN shop_subscriptions AS subscriptions
+    WHERE claims.user_id = ?
+    LIMIT 1
+  `).bind(input.userId).first<{ shopId: string }>();
+  if (claim === null) return { allowed: true, creationMode: "trial", reason: "eligible", recoveryShopPublicId: null };
+
+  const recovery = await input.env.PLATFORM_DB.prepare(`
+    SELECT shops.public_id AS recoveryShopPublicId
+    FROM shop_members AS members
+    INNER JOIN shops ON shops.id = members.shop_id AND shops.status != 'archived'
+    INNER JOIN shop_subscriptions AS subscriptions
       ON subscriptions.id = (
         SELECT latest_subscription.id
         FROM shop_subscriptions AS latest_subscription
-        WHERE latest_subscription.shop_id = claims.shop_id
+        WHERE latest_subscription.shop_id = shops.id
         ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
         LIMIT 1
       )
-    WHERE claims.user_id = ?
+    WHERE members.user_id = ? AND members.role = 'owner' AND members.status = 'active'
+      AND subscriptions.state IN ('pending_payment', 'suspended', 'canceled')
+    ORDER BY CASE subscriptions.state WHEN 'pending_payment' THEN 1 WHEN 'suspended' THEN 2 ELSE 3 END,
+      shops.created_at DESC, shops.id DESC
     LIMIT 1
-  `).bind(input.userId).first<{ recoveryShopPublicId: string | null; shopId: string }>();
-  if (claim === null) return { allowed: true, reason: "eligible", recoveryShopPublicId: null };
-  return {
-    allowed: false,
-    reason: "trial_already_used",
-    recoveryShopPublicId: claim.recoveryShopPublicId,
-  };
+  `).bind(input.userId).first<{ recoveryShopPublicId: string }>();
+  return recovery === null
+    ? { allowed: true, creationMode: "paid", reason: "eligible", recoveryShopPublicId: null }
+    : { allowed: false, creationMode: null, reason: "billing_recovery", recoveryShopPublicId: recovery.recoveryShopPublicId };
 }
 
 /** Select only from the already-authorized membership projection. */

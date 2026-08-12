@@ -28,14 +28,23 @@ export function readTrustedStagingUatBinding(input: {
 };
 
 export function validateCommerceUatArtifactsSync(input: {
+  dodoApprovedExecutionProofTrust?: { keyId: string; spkiSha256: string };
+  environment?: Record<string, string | undefined>;
   evidence: unknown;
   now?: Date;
-  repositoryRoot: string;
   payosOwnerAttestationPublicKeys?: Record<string, string>;
+  payosStagingRunnerPublicKeys?: Record<string, string>;
+  payosStagingRunnerSpkiFingerprints?: Record<string, string>;
+  repositoryRoot: string;
+  trustedStagingWorkerVersion: string;
 }): CommerceUatArtifactValidation;
 export function validateCommerceUatArtifacts(input: {
+  dodoApprovedExecutionProofTrust?: { keyId: string; spkiSha256: string };
+  environment?: Record<string, string | undefined>;
   evidence: unknown;
   now?: Date;
-  repositoryRoot: string;
   payosOwnerAttestationPublicKeys?: Record<string, string>;
+  payosStagingRunnerPublicKeys?: Record<string, string>;
+  payosStagingRunnerSpkiFingerprints?: Record<string, string>;
+  repositoryRoot: string;
 }): Promise<CommerceUatArtifactValidation>;

@@ -120,7 +120,10 @@ describe("onboarding localization contract", () => {
     expect(route).toContain("creationAdmission");
     expect(client).toContain("parseShopCreationAdmission");
     expect(client).toContain('window.location.assign(`/app/billing?shop=${encodeURIComponent(recoveryShopPublicId)}`)');
-    expect(client).toContain('error.issues.includes("trial_already_used")');
+    expect(client).toContain('shop.subscriptionState === "pending_payment"');
+    expect(client).toContain('error.issues.includes("billing_recovery_required")');
+    expect(client).not.toContain('error.issues.includes("trial_already_used")');
+    expect(client).toContain("creationMode");
     expect(client).toContain("return crypto.randomUUID()");
   });
 

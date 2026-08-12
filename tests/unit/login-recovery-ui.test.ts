@@ -5,8 +5,9 @@ import { describe, expect, it } from "vitest";
 describe("magic-link cross-browser recovery UI", () => {
   const page = readFileSync("src/pages/login.astro", "utf8");
   const controller = readFileSync("src/scripts/marketing/login.ts", "utf8");
+  const catalog = readFileSync("src/lib/i18n/catalogs/system.ts", "utf8");
 
-  it("guides the user back to the requesting browser and offers safe recovery actions", () => {
+  it("offers safe recovery actions after a link request", () => {
     expect(page).toContain("data-login-recovery");
     expect(page).toContain("data-login-resend");
     expect(page).toContain("data-login-restart");
@@ -14,6 +15,12 @@ describe("magic-link cross-browser recovery UI", () => {
     expect(page).toContain('t("auth.login.recovery_wrong_device")');
     expect(controller).toContain("form?.requestSubmit()");
     expect(controller).toContain("form?.reset()");
+  });
+
+  it("explains the supported cross-browser confirmation instead of sending users through a resend loop", () => {
+    expect(catalog).toContain("Another browser or device will ask you to confirm before signing in.");
+    expect(catalog).toContain("confirm the masked email and continue");
+    expect(catalog).not.toContain("return here and send a new link");
   });
 
   it("does not persist, print, copy, or request a magic-link token", () => {
@@ -29,6 +36,11 @@ describe("magic-link cross-browser recovery UI", () => {
     expect(controller).toContain('linkUrl.pathname !== "/login"');
     expect(controller).toContain('link.textContent = t("auth.login.debug_link")');
     expect(controller).not.toContain("link.textContent = token");
+  });
+
+  it("consumes a local same-page debug fragment without requiring a reload", () => {
+    expect(controller).toContain('window.addEventListener("hashchange"');
+    expect(controller).toContain("consumeMagicTokenFromFragment()");
   });
 
   it("redirects login to the canonical dashboard origin before submitting", () => {
@@ -61,5 +73,14 @@ describe("magic-link cross-browser recovery UI", () => {
     expect(controller).toContain("body.confirmationRequired === true");
     expect(controller).not.toContain("localStorage");
     expect(controller).not.toContain("sessionStorage");
+  });
+
+  it("renders expired, replayed, and invalid links as one recoverable resend state", () => {
+    expect(controller).toContain('authentication_required: "auth.login.link_invalid"');
+    expect(catalog).toContain('"auth.login.link_invalid": "This sign-in link is invalid, expired, or already used. Enter your email to request a new link."');
+    expect(controller).toContain("showLinkRecovery");
+    expect(controller).toContain("pendingMagicToken = null");
+    expect(controller).toContain("showRecovery()");
+    expect(controller).toContain('t("auth.login.request_id", { requestId })');
   });
 });

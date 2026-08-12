@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import {
   fingerprintPayosStagingUatEvidence,
   PAYOS_STAGING_UAT_SCENARIO_IDS,
   serializePayosOwnerAttestationPayload,
+  serializePayosRunnerAttestationPayload,
 } from "../../scripts/lib/payos-uat-evidence.mjs";
 import { validateCommerceUatArtifactsSync } from "../../scripts/lib/commerce-uat-evidence.mjs";
 
@@ -22,6 +23,16 @@ const binding = { commitSha, treeSha, releaseId, manifestRef, manifestSha256: "c
 const ownerKeyId = "release-owner-test";
 const ownerKeys = generateKeyPairSync("ed25519");
 const ownerPublicKey = ownerKeys.publicKey.export({ format: "pem", type: "spki" });
+const runnerKeyId = "staging-runner-test";
+const runnerKeys = generateKeyPairSync("ed25519");
+const runnerPublicKey = runnerKeys.publicKey.export({ format: "pem", type: "spki" });
+const runnerSpkiSha256 = createHash("sha256")
+  .update(runnerKeys.publicKey.export({ format: "der", type: "spki" }))
+  .digest("hex");
+const runnerTrust = {
+  payosStagingRunnerPublicKeys: { [runnerKeyId]: runnerPublicKey },
+  payosStagingRunnerSpkiFingerprints: { [runnerKeyId]: runnerSpkiSha256 },
+};
 
 const providerRequired = ["signed_exact_payment", "direct_reconciliation"];
 const localRequired = [
@@ -223,6 +234,52 @@ function writeCommerceProviderFixture(tamper: "hash" | "release" | "redaction" |
   const value = providerEvidence();
   const release = { commitSha, treeSha, releaseId, manifestRef, manifestSha256, workerVersion: "worker-20260808" };
   value.release = release;
+  const executionFingerprints: Record<string, string> = {};
+  const executionDirectory = join(root, ".wrangler/releases/staging", releaseId, "execution");
+  mkdirSync(executionDirectory, { recursive: true });
+  for (const [index, id] of providerRequired.entries()) {
+    const suffix = String(index + 1);
+    const executionArtifactValue = {
+      authority: {
+        attemptReference: `attempt:pay_00000000-0000-4000-8000-00000000000${suffix}`,
+        authoritySource: id === "signed_exact_payment" ? "staging_d1_verified_event" : "staging_exact_attempt_reconciliation",
+        eventReference: `event:pev_00000000-0000-4000-8000-00000000000${suffix}`,
+        providerAuthority: id === "signed_exact_payment" ? "provider_signed_webhook" : "provider_signed_response",
+        providerReference: `provider:${suffix.repeat(64)}`,
+        requestReference: `request:payos-uat-${id}`,
+      },
+      controlledAccountFingerprintSha256: value.providerExecution.controlledAccountFingerprintSha256,
+      environment: "staging",
+      evidenceKind: "provider_execution",
+      observedAt: "2026-08-08T09:30:00.000Z",
+      provider: "payos",
+      providerEnvironment: "production_controlled",
+      redaction: { noCredentialData: true, noCustomerData: true, noFinancialDetails: true, noRawPayload: true },
+      release,
+      result: { duplicate: false, processed: true, state: "paid_exact" },
+      runnerAttestation: {
+        algorithm: "ed25519",
+        keyId: runnerKeyId,
+        publicKeySpkiSha256: runnerSpkiSha256,
+        signatureBase64: "",
+        signedAt: "2026-08-08T09:30:00.000Z",
+      },
+      scenarioId: id,
+      schemaVersion: 1,
+      verificationMethod: id === "signed_exact_payment" ? "signed_webhook" : "verified_provider_response",
+    };
+    executionArtifactValue.runnerAttestation.signatureBase64 = sign(
+      null,
+      Buffer.from(serializePayosRunnerAttestationPayload(executionArtifactValue)),
+      runnerKeys.privateKey,
+    ).toString("base64");
+    const executionArtifact = JSON.stringify(executionArtifactValue);
+    writeFileSync(join(executionDirectory, `payos-${id}.json`), executionArtifact, { mode: 0o600 });
+    executionFingerprints[id] = createHash("sha256").update(executionArtifact).digest("hex");
+  }
+  value.providerExecution.transactionEvidenceFingerprintSha256 = createHash("sha256")
+    .update(JSON.stringify(Object.values(executionFingerprints).sort()))
+    .digest("hex");
   const scenarioDirectory = join(root, ".wrangler/releases/staging", releaseId, "scenarios");
   mkdirSync(scenarioDirectory, { recursive: true });
   for (const id of PAYOS_STAGING_UAT_SCENARIO_IDS) {
@@ -236,7 +293,7 @@ function writeCommerceProviderFixture(tamper: "hash" | "release" | "redaction" |
       environment: "staging",
       observedAt: record.observedAt,
       provider: "payos",
-      proofOfExecutionFingerprintSha256: providerScenario ? value.providerExecution.transactionEvidenceFingerprintSha256 : null,
+      proofOfExecutionFingerprintSha256: providerScenario ? executionFingerprints[id] : null,
       redaction: { noRawPayload: true, noSensitiveValues: true },
       release,
       result: record.status,
@@ -310,6 +367,8 @@ describe("PayOS staging UAT evidence", () => {
         evidence: fixture.evidence,
         now: new Date("2026-08-08T09:30:00.000Z"),
         payosOwnerAttestationPublicKeys: { [ownerKeyId]: ownerPublicKey },
+        ...runnerTrust,
+        trustedStagingWorkerVersion: binding.workerVersion,
         repositoryRoot: fixture.root,
       });
 
@@ -322,6 +381,33 @@ describe("PayOS staging UAT evidence", () => {
           "payos_signed_chargeback_not_supported",
         ],
       });
+    } finally {
+      rmSync(fixture.root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects release artifacts reached through an ancestor symlink", () => {
+    const fixture = writeCommerceProviderFixture();
+    try {
+      const payos = fixture.evidence.commerceAcceptance.payos;
+      const evidencePath = join(fixture.root, payos.evidenceRef);
+      const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as { release: { releaseId: string } };
+      const releaseDirectory = join(fixture.root, ".wrangler/releases/staging", evidence.release.releaseId);
+      const scenarios = join(releaseDirectory, "scenarios");
+      const target = join(releaseDirectory, "scenarios-target");
+      renameSync(scenarios, target);
+      symlinkSync(target, scenarios, "dir");
+
+      const result = validateCommerceUatArtifactsSync({
+        evidence: fixture.evidence,
+        now: new Date("2026-08-08T09:30:00.000Z"),
+        payosOwnerAttestationPublicKeys: { [ownerKeyId]: ownerPublicKey },
+        ...runnerTrust,
+        trustedStagingWorkerVersion: binding.workerVersion,
+        repositoryRoot: fixture.root,
+      });
+
+      expect(result.payos).toEqual({ accepted: false, error: "payos_uat_scenario_artifact_missing_path_invalid" });
     } finally {
       rmSync(fixture.root, { force: true, recursive: true });
     }
@@ -380,6 +466,8 @@ describe("PayOS staging UAT evidence", () => {
           },
         },
         now: new Date("2026-08-08T09:30:00.000Z"),
+        ...runnerTrust,
+        trustedStagingWorkerVersion: binding.workerVersion,
         repositoryRoot: root,
       });
       expect(result.payos).toEqual({ accepted: false, error: "payos_uat_provider_binding_mismatch" });
@@ -433,6 +521,8 @@ describe("PayOS staging UAT evidence", () => {
         evidence: fixture.evidence,
         now: new Date("2026-08-08T09:30:00.000Z"),
         payosOwnerAttestationPublicKeys: { [ownerKeyId]: ownerPublicKey },
+        ...runnerTrust,
+        trustedStagingWorkerVersion: binding.workerVersion,
         repositoryRoot: fixture.root,
       });
       expect(result.payos).toEqual({ accepted: false, error: expectedError });

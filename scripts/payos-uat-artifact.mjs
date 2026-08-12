@@ -10,6 +10,8 @@ import {
   PAYOS_LOCAL_ASSURANCE_SCENARIO_IDS,
   PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS,
   PAYOS_PROVIDER_UNSUPPORTED_SCENARIO_IDS,
+  readPayosProviderExecutionArtifact,
+  readPayosRunnerTrustAnchor,
 } from "./lib/payos-uat-evidence.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
@@ -32,15 +34,17 @@ function parseArguments(argv) {
   const options = { output: null };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === "--manifest") options.manifest = argv[++index] ?? "";
+    if (argument === "--manifest") options.manifestPath = argv[++index] ?? "";
     else if (argument === "--worker-version") options.workerVersion = argv[++index] ?? "";
     else if (argument === "--scenario-id") options.scenarioId = argv[++index] ?? "";
     else if (argument === "--classification") options.classification = argv[++index] ?? "";
     else if (argument === "--status") options.status = argv[++index] ?? "";
     else if (argument === "--verification-method") options.verificationMethod = argv[++index] ?? "";
     else if (argument === "--observed-at") options.observedAt = argv[++index] ?? "";
-    else if (argument === "--controlled-account-fingerprint") options.controlledAccountFingerprintSha256 = argv[++index] ?? "";
-    else if (argument === "--proof-of-execution-fingerprint") options.proofOfExecutionFingerprintSha256 = argv[++index] ?? "";
+    else if (argument === "--execution-evidence") options.executionEvidencePath = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-key-id") options.runnerAttestationKeyId = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-public-key") options.runnerAttestationPublicKeyPath = argv[++index] ?? "";
+    else if (argument === "--runner-attestation-spki-sha256") options.runnerAttestationSpkiSha256 = argv[++index] ?? "";
     else if (argument === "--output") options.output = argv[++index] ?? "";
     else throw new Error("payos_uat_artifact_argument_invalid");
   }
@@ -104,10 +108,11 @@ export async function buildPayosScenarioArtifact({
   status,
   verificationMethod,
   observedAt,
-  controlledAccountFingerprintSha256 = null,
-  proofOfExecutionFingerprintSha256 = null,
+  executionEvidencePath = null,
   output,
   root = repositoryRoot,
+  stagingRunnerPublicKeys,
+  stagingRunnerSpkiFingerprints,
 }) {
   if (typeof workerVersion !== "string" || !WORKER_VERSION.test(workerVersion)) throw new Error("payos_uat_worker_version_invalid");
   if (typeof output !== "string" || output.length === 0) throw new Error("payos_uat_artifact_output_required");
@@ -116,8 +121,6 @@ export async function buildPayosScenarioArtifact({
     || manifest.treeSha !== execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: root, encoding: "utf8" }).trim()) {
     throw new Error("payos_uat_manifest_source_mismatch");
   }
-  const input = { classification, controlledAccountFingerprintSha256, proofOfExecutionFingerprintSha256, scenarioId, status, verificationMethod, observedAt };
-  assertScenarioInput(input);
   const release = {
     commitSha: manifest.commitSha,
     manifestRef,
@@ -126,10 +129,33 @@ export async function buildPayosScenarioArtifact({
     treeSha: manifest.treeSha,
     workerVersion,
   };
+  const providerRequired = PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS.includes(scenarioId);
+  if (providerRequired && (typeof executionEvidencePath !== "string" || executionEvidencePath.length === 0)) {
+    throw new Error("payos_uat_provider_execution_artifact_required");
+  }
+  if (!providerRequired && executionEvidencePath !== null) {
+    throw new Error("payos_uat_provider_execution_artifact_scope_invalid");
+  }
+  const execution = providerRequired
+    ? readPayosProviderExecutionArtifact({
+      executionEvidencePath,
+      observedAt,
+      release,
+      repositoryRoot: root,
+      scenarioId,
+      stagingRunnerPublicKeys,
+      stagingRunnerSpkiFingerprints,
+      verificationMethod,
+    })
+    : null;
+  const controlledAccountFingerprintSha256 = execution?.controlledAccountFingerprintSha256 ?? null;
+  const proofOfExecutionFingerprintSha256 = execution?.fingerprintSha256 ?? null;
+  const input = { classification, controlledAccountFingerprintSha256, proofOfExecutionFingerprintSha256, scenarioId, status, verificationMethod, observedAt };
+  assertScenarioInput(input);
   const scenariosRoot = resolve(root, ".wrangler", "releases", "staging", manifest.releaseId, "scenarios");
   const outputPath = resolve(root, output);
-  const outputRelative = relative(scenariosRoot, outputPath);
-  if (outputRelative.startsWith("..") || outputRelative.includes("\\") || !outputPath.endsWith(".json")) throw new Error("payos_uat_artifact_output_noncanonical");
+  const canonicalOutput = resolve(scenariosRoot, `payos-${scenarioId}.json`);
+  if (outputPath !== canonicalOutput) throw new Error("payos_uat_artifact_output_noncanonical");
   const artifact = {
     classification,
     controlledAccountFingerprintSha256,
@@ -158,10 +184,18 @@ export async function buildPayosScenarioArtifact({
 
 export async function main(argv = process.argv.slice(2)) {
   const options = parseArguments(argv);
-  for (const name of ["manifest", "workerVersion", "scenarioId", "classification", "status", "verificationMethod", "observedAt", "output"]) {
-    if (typeof options[name] !== "string" || options[name].length === 0) throw new Error(`payos_uat_${name === "manifest" ? "manifest" : name === "workerVersion" ? "worker_version" : "artifact_argument"}_required`);
+  for (const name of ["manifestPath", "workerVersion", "scenarioId", "classification", "status", "verificationMethod", "observedAt", "output"]) {
+    if (typeof options[name] !== "string" || options[name].length === 0) throw new Error(`payos_uat_${name === "manifestPath" ? "manifest" : name === "workerVersion" ? "worker_version" : "artifact_argument"}_required`);
   }
-  const result = await buildPayosScenarioArtifact(options);
+  const runnerTrust = PAYOS_PROVIDER_REQUIRED_SCENARIO_IDS.includes(options.scenarioId)
+    ? readPayosRunnerTrustAnchor({
+      keyId: options.runnerAttestationKeyId,
+      publicKeyPath: options.runnerAttestationPublicKeyPath,
+      repositoryRoot,
+      spkiSha256: options.runnerAttestationSpkiSha256,
+    })
+    : {};
+  const result = await buildPayosScenarioArtifact({ ...options, ...runnerTrust });
   process.stdout.write(`${JSON.stringify({ artifactFingerprintSha256: result.artifactFingerprintSha256, artifactPath: result.artifactPath, scenarioId: result.artifact.scenarioId }, null, 2)}\n`);
   return result;
 }

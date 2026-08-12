@@ -81,7 +81,7 @@ async function draftEnvironment(options: {
               if (sql.includes("INSERT INTO telegram_updates")) {
                 updateRow = {
                   id: String(values[0]),
-                  payloadHash: String(values[4]),
+                  payloadHash: String(values[6]),
                   status: "processing",
                   updatedAt: String(values[8]),
                 };

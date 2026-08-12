@@ -5,6 +5,7 @@ import {
   buildCloseoutReport,
   loadCloseoutInputs,
 } from "./lib/release-closeout.mjs";
+import { validateCommerceUatArtifacts } from "./lib/commerce-uat-evidence.mjs";
 import { inspectProductionReadiness } from "./lib/release.mjs";
 import { repositoryRoot } from "./lib/platform.mjs";
 
@@ -24,10 +25,21 @@ function parseArguments(argv) {
 try {
   const options = parseArguments(process.argv.slice(2));
   const inputs = await loadCloseoutInputs(options);
+  const now = new Date();
+  const commerceEvidenceValidation = inputs.evidence === null
+    ? undefined
+    : await validateCommerceUatArtifacts({
+        environment: process.env,
+        evidence: inputs.evidence,
+        now,
+        repositoryRoot,
+      });
   const report = await buildCloseoutReport({
     ...inputs,
+    now,
     inspectReadinessImplementation: (input) => inspectProductionReadiness({
       ...input,
+      commerceEvidenceValidation,
       requireReleaseHardening: true,
     }),
   });

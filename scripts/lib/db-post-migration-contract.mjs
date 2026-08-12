@@ -33,6 +33,7 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "subscription_change_requests",
     "subscription_events",
     "telegram_mini_app_sessions",
+    "telegram_updates",
     "usage_events",
   ]),
   index: Object.freeze([
@@ -104,9 +105,13 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "idx_subscription_change_requests_shop_status",
     "idx_subscription_events_shop_created",
     "idx_subscription_events_subscription",
+    "idx_telegram_integrations_shop_generation",
     "idx_telegram_mini_app_sessions_expiry",
     "idx_telegram_mini_app_sessions_integration_launch",
     "idx_telegram_mini_app_sessions_shop_status",
+    "idx_telegram_updates_generation_processing",
+    "idx_telegram_updates_shop_received",
+    "idx_telegram_updates_status",
     "idx_usage_counters_shop_kind_metric",
     "idx_usage_events_shop_period",
     "idx_usage_events_source",
@@ -207,8 +212,13 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "subscription_events_no_delete",
     "subscription_events_no_update",
     "subscription_events_provider_scope_guard",
+    "outbox_jobs_quarantine_legacy_order_paid_insert",
+    "telegram_integrations_generation_switch_required",
+    "telegram_integrations_generation_transition_guard",
     "telegram_mini_app_sessions_identity_immutable",
     "telegram_mini_app_sessions_scope_insert_guard",
+    "telegram_updates_generation_claim_guard",
+    "telegram_updates_generation_insert_guard",
     "usage_events_no_delete",
     "usage_events_no_update",
   ]),
@@ -256,6 +266,8 @@ export const REQUIRED_POST_MIGRATION_COLUMNS = Object.freeze({
     "execution_attempts", "failure_code", "last_attempt_at", "provider_action_ref", "provider_event_id",
   ]),
   subscription_events: Object.freeze(["id", "provider_event_id", "shop_id", "source_kind", "to_state"]),
+  telegram_integrations: Object.freeze(["generation_state", "integration_generation"]),
+  telegram_updates: Object.freeze(["credential_id", "integration_generation"]),
   usage_counters: Object.freeze(["period_kind"]),
 });
 
@@ -290,6 +302,7 @@ ORDER BY table_name, column_name;
 `;
 export const POST_MIGRATION_CROSS_LEDGER_SQL = `
 SELECT COUNT(*) AS mismatch_count FROM (
+  SELECT id FROM (
   SELECT id FROM (
   SELECT events.id
   FROM subscription_events AS events
@@ -494,6 +507,30 @@ SELECT COUNT(*) AS mismatch_count FROM (
     OR admission.delivery_permitted NOT IN (0, 1)
     OR (admission.action = 'shop_create'
       AND (admission.subject_hash IS NULL OR admission.delivery_permitted != 1))
+) AS prior_ledgers
+  UNION ALL
+  SELECT id FROM (
+  SELECT job.id
+  FROM outbox_jobs AS job
+  WHERE job.kind = 'order_paid' AND job.status != 'completed'
+  UNION ALL
+  SELECT integration.id
+  FROM telegram_integrations AS integration
+  WHERE integration.integration_generation <= 0
+    OR integration.generation_state NOT IN ('active', 'draining')
+  UNION ALL
+  SELECT update_row.id
+  FROM telegram_updates AS update_row
+  LEFT JOIN telegram_integrations AS integration
+    ON integration.id = update_row.integration_id
+    AND integration.shop_id = update_row.shop_id
+  WHERE update_row.integration_generation <= 0
+    OR integration.id IS NULL
+    OR (update_row.status = 'processing'
+      AND (integration.generation_state != 'active'
+        OR integration.integration_generation != update_row.integration_generation
+        OR integration.active_credential_id IS NOT update_row.credential_id))
+  ) AS telegram_ledgers
 );
 `;
 
@@ -543,6 +580,7 @@ export function parsePostMigrationObjectOutput(output) {
     row.type === "table" && (
       row.name === "api_credentials_v0068"
       || row.name === "auth_request_admissions_legacy_0094"
+      || row.name === "telegram_updates_pre_generation"
       || /_legacy_00(?:70|76)$/u.test(row.name)
     )
   ));

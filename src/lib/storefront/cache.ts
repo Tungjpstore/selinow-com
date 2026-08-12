@@ -2,6 +2,7 @@ import type { AppBindings } from "../platform/bindings";
 import { subscriptionAllows } from "../billing/entitlements";
 import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } from "../domains/readiness";
 import { normalizeSupportedLocale } from "../i18n/locale";
+import { hasFeature } from "../tenants/policy";
 import { buildStorefrontCacheKey, isPrivateStorefrontPath, isPublicStorefrontPath, normalizeHostname, type PlatformHostKind } from "./routing";
 
 type ActiveDomainRow = {
@@ -17,6 +18,7 @@ type ActiveDomainRow = {
   currentPeriodEnd: string | null;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
+  featureFlagsJson: string;
   subscriptionState: string | null;
 };
 
@@ -79,6 +81,14 @@ export async function resolveActiveStorefrontCacheKey(input: {
         ORDER BY created_at DESC, id DESC
         LIMIT 1
       ) AS graceEndsAt
+      ,(
+        SELECT plans.feature_flags_json
+        FROM shop_subscriptions AS entitlement_subscription
+        INNER JOIN plans ON plans.id = entitlement_subscription.plan_id
+        WHERE entitlement_subscription.shop_id = shops.id
+        ORDER BY entitlement_subscription.created_at DESC, entitlement_subscription.id DESC
+        LIMIT 1
+      ) AS featureFlagsJson
     FROM shop_domains
     INNER JOIN shops ON shops.id = shop_domains.shop_id AND shops.status = 'active'
     INNER JOIN shop_settings ON shop_settings.shop_id = shops.id
@@ -93,6 +103,19 @@ export async function resolveActiveStorefrontCacheKey(input: {
           AND shop_domains.ssl_status = 'active'
           AND shop_domains.dns_status = 'active'
           AND ${customDomainTurnstileAdmissionSql("shop_domains")}
+          AND EXISTS (
+            SELECT 1
+            FROM shop_subscriptions AS current_domain_subscription
+            INNER JOIN plans ON plans.id = current_domain_subscription.plan_id
+            WHERE current_domain_subscription.id = (
+              SELECT latest_subscription.id
+              FROM shop_subscriptions AS latest_subscription
+              WHERE latest_subscription.shop_id = shops.id
+              ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+              LIMIT 1
+            )
+              AND json_extract(plans.feature_flags_json, '$.customDomain') = 1
+          )
         )
       )
     LIMIT 1
@@ -105,6 +128,7 @@ export async function resolveActiveStorefrontCacheKey(input: {
       hostname,
       validationMetadataJson: row.domainValidationMetadataJson,
     }))
+    || (row.domainType === "custom" && !hasFeature(row.featureFlagsJson, "customDomain"))
     || (row.domainType !== "custom" && row.domainType !== "platform_subdomain")
     || row.subscriptionState === null
     || !subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })

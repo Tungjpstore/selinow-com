@@ -12,7 +12,9 @@ import { parseTelegramUpdate } from "./policy";
 import type { TelegramCallbackUpdate, TelegramMessageUpdate, TelegramUpdate } from "./types";
 
 type UpdateRow = {
+  credentialId: string | null;
   id: string;
+  integrationGeneration: number;
   payloadHash: string;
   status: string;
   updatedAt: string;
@@ -24,17 +26,19 @@ export type TelegramWebhookResult = {
   state: string;
 };
 
-async function auditPayloadConflict(input: { env: AppBindings; integrationId: string; requestId: string; shopId: string; updateId: number }): Promise<void> {
+async function auditPayloadConflict(input: { env: AppBindings; integrationGeneration: number; integrationId: string; requestId: string; shopId: string; updateId: number }): Promise<void> {
   const now = new Date().toISOString();
   await input.env.PLATFORM_DB.batch([
-    input.env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'rejected', safe_result_code = 'telegram_update_payload_conflict', processed_at = ?, updated_at = ? WHERE integration_id = ? AND update_id = ?").bind(now, now, input.integrationId, input.updateId),
+    input.env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'rejected', safe_result_code = 'telegram_update_payload_conflict', processed_at = ?, updated_at = ? WHERE integration_id = ? AND integration_generation = ? AND update_id = ?").bind(now, now, input.integrationId, input.integrationGeneration, input.updateId),
     input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'system', NULL, 'telegram.update_payload_conflict', 'telegram_integration', ?, ?, ?, ?)`).bind(createId("aud"), input.shopId, input.integrationId, JSON.stringify({ updateId: input.updateId }), input.requestId, now),
   ]);
 }
 
 async function claimExistingUpdate(input: {
+  credentialId: string;
   env: AppBindings;
   existing: UpdateRow;
+  integrationGeneration: number;
   integrationId: string;
   payloadHash: string;
 }): Promise<{ duplicate: boolean; rowId: string; shouldProcess: boolean }> {
@@ -44,13 +48,28 @@ async function claimExistingUpdate(input: {
   if (input.existing.status === "processed" || input.existing.status === "rejected") {
     return { duplicate: true, rowId: input.existing.id, shouldProcess: false };
   }
-  const staleBefore = new Date(Date.now() - 60_000).toISOString();
-  const claimed = await input.env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'processing', attempts = attempts + 1, updated_at = ? WHERE id = ? AND integration_id = ? AND (status IN ('accepted', 'failed') OR (status = 'processing' AND updated_at <= ?))").bind(new Date().toISOString(), input.existing.id, input.integrationId, staleBefore).run();
+  const staleBefore = new Date(Date.now() - 15 * 60_000).toISOString();
+  const claimed = await input.env.PLATFORM_DB.prepare(`
+    UPDATE telegram_updates
+    SET status = 'processing', attempts = attempts + 1, updated_at = ?
+    WHERE id = ? AND integration_id = ? AND credential_id = ?
+      AND integration_generation = ?
+      AND (status IN ('accepted', 'failed') OR (status = 'processing' AND updated_at <= ?))
+      AND EXISTS (
+        SELECT 1 FROM telegram_integrations
+        WHERE telegram_integrations.id = telegram_updates.integration_id
+          AND telegram_integrations.shop_id = telegram_updates.shop_id
+          AND telegram_integrations.active_credential_id = telegram_updates.credential_id
+          AND telegram_integrations.integration_generation = telegram_updates.integration_generation
+          AND telegram_integrations.generation_state = 'active'
+          AND telegram_integrations.status IN ('active', 'degraded')
+      )
+  `).bind(new Date().toISOString(), input.existing.id, input.integrationId, input.credentialId, input.integrationGeneration, staleBefore).run();
   return { duplicate: true, rowId: input.existing.id, shouldProcess: claimed.meta.changes === 1 };
 }
 
-async function registerUpdate(input: { env: AppBindings; integrationId: string; kind: TelegramUpdate["kind"]; payloadHash: string; requestId: string; shopId: string; updateId: number }): Promise<{ duplicate: boolean; rowId: string; shouldProcess: boolean }> {
-  const existing = await input.env.PLATFORM_DB.prepare("SELECT id, payload_hash AS payloadHash, status, updated_at AS updatedAt FROM telegram_updates WHERE integration_id = ? AND update_id = ? LIMIT 1").bind(input.integrationId, input.updateId).first<UpdateRow>();
+async function registerUpdate(input: { credentialId: string; env: AppBindings; integrationGeneration: number; integrationId: string; kind: TelegramUpdate["kind"]; payloadHash: string; requestId: string; shopId: string; updateId: number }): Promise<{ duplicate: boolean; rowId: string; shouldProcess: boolean }> {
+  const existing = await input.env.PLATFORM_DB.prepare("SELECT id, credential_id AS credentialId, integration_generation AS integrationGeneration, payload_hash AS payloadHash, status, updated_at AS updatedAt FROM telegram_updates WHERE integration_id = ? AND integration_generation = ? AND update_id = ? LIMIT 1").bind(input.integrationId, input.integrationGeneration, input.updateId).first<UpdateRow>();
   if (existing !== null) {
     if (existing.payloadHash !== input.payloadHash) await auditPayloadConflict(input);
     return claimExistingUpdate({ ...input, existing });
@@ -58,23 +77,35 @@ async function registerUpdate(input: { env: AppBindings; integrationId: string; 
   const rowId = createId("tgu");
   const now = new Date().toISOString();
   try {
-    await input.env.PLATFORM_DB.prepare("INSERT INTO telegram_updates (id, shop_id, integration_id, update_id, payload_hash, update_kind, status, attempts, received_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'processing', 1, ?, ?)").bind(rowId, input.shopId, input.integrationId, input.updateId, input.payloadHash, input.kind, now, now).run();
+    const inserted = await input.env.PLATFORM_DB.prepare(`
+      INSERT INTO telegram_updates (
+        id, shop_id, integration_id, credential_id, integration_generation,
+        update_id, payload_hash, update_kind, status, attempts, received_at, updated_at
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'processing', 1, ?, ?
+      FROM telegram_integrations
+      WHERE id = ? AND shop_id = ? AND active_credential_id = ?
+        AND integration_generation = ? AND generation_state = 'active'
+        AND status IN ('active', 'degraded')
+    `).bind(rowId, input.shopId, input.integrationId, input.credentialId, input.integrationGeneration, input.updateId, input.payloadHash, input.kind, now, now, input.integrationId, input.shopId, input.credentialId, input.integrationGeneration).run();
+    if (inserted.meta.changes !== 1) throw new AppError("telegram_update_stale_generation", 409);
     return { duplicate: false, rowId, shouldProcess: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof AppError && error.code === "telegram_update_stale_generation") throw error;
     // A concurrent delivery may have inserted the unique update row. Re-read
     // once; persistent storage failures must remain fail-closed.
-    const raced = await input.env.PLATFORM_DB.prepare("SELECT id, payload_hash AS payloadHash, status, updated_at AS updatedAt FROM telegram_updates WHERE integration_id = ? AND update_id = ? LIMIT 1").bind(input.integrationId, input.updateId).first<UpdateRow>();
+    const raced = await input.env.PLATFORM_DB.prepare("SELECT id, credential_id AS credentialId, integration_generation AS integrationGeneration, payload_hash AS payloadHash, status, updated_at AS updatedAt FROM telegram_updates WHERE integration_id = ? AND integration_generation = ? AND update_id = ? LIMIT 1").bind(input.integrationId, input.integrationGeneration, input.updateId).first<UpdateRow>();
     if (raced === null) throw new AppError("telegram_update_record_failed", 500);
     if (raced.payloadHash !== input.payloadHash) await auditPayloadConflict(input);
     return claimExistingUpdate({ ...input, existing: raced });
   }
 }
 
-async function markProcessed(env: AppBindings, input: { credentialId: string; integrationId: string; rowId: string; shopId: string }, resultCode: string): Promise<void> {
+async function markProcessed(env: AppBindings, input: { credentialId: string; integrationGeneration: number; integrationId: string; rowId: string; shopId: string }, resultCode: string): Promise<void> {
   const now = new Date().toISOString();
   await env.PLATFORM_DB.batch([
-    env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'processed', safe_result_code = ?, processed_at = ?, updated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND status IN ('processing', 'failed')").bind(resultCode, now, now, input.rowId, input.integrationId, input.shopId),
-    env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET last_update_at = ?, last_safe_error_code = CASE WHEN status = 'active' THEN NULL ELSE last_safe_error_code END, updated_at = ? WHERE id = ? AND shop_id = ? AND active_credential_id = ? AND status IN ('active', 'degraded')").bind(now, now, input.integrationId, input.shopId, input.credentialId),
+    env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'processed', safe_result_code = ?, processed_at = ?, updated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND credential_id = ? AND integration_generation = ? AND status IN ('processing', 'failed')").bind(resultCode, now, now, input.rowId, input.integrationId, input.shopId, input.credentialId, input.integrationGeneration),
+    env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET last_update_at = ?, last_safe_error_code = CASE WHEN status = 'active' THEN NULL ELSE last_safe_error_code END, updated_at = ? WHERE id = ? AND shop_id = ? AND active_credential_id = ? AND integration_generation = ? AND generation_state = 'active' AND status IN ('active', 'degraded')").bind(now, now, input.integrationId, input.shopId, input.credentialId, input.integrationGeneration),
   ]);
 }
 
@@ -83,7 +114,7 @@ async function markProcessed(env: AppBindings, input: { credentialId: string; in
 // a reply, but a webhook retry cannot send the same update again.
 async function claimReplyAttempt(
   env: AppBindings,
-  input: { credentialId: string; integrationId: string; rowId: string; shopId: string },
+  input: { credentialId: string; integrationGeneration: number; integrationId: string; rowId: string; shopId: string },
   resultCode: string,
 ): Promise<void> {
   const now = new Date().toISOString();
@@ -91,7 +122,8 @@ async function claimReplyAttempt(
     env.PLATFORM_DB.prepare(`
       UPDATE telegram_updates
       SET status = 'processed', safe_result_code = ?, processed_at = ?, updated_at = ?
-      WHERE id = ? AND integration_id = ? AND shop_id = ? AND status = 'processing'
+      WHERE id = ? AND integration_id = ? AND shop_id = ?
+        AND credential_id = ? AND integration_generation = ? AND status = 'processing'
         AND EXISTS (
           SELECT 1 FROM telegram_integrations
           INNER JOIN telegram_credentials
@@ -102,6 +134,8 @@ async function claimReplyAttempt(
           WHERE telegram_integrations.id = ?
             AND telegram_integrations.shop_id = ?
             AND telegram_integrations.active_credential_id = ?
+            AND telegram_integrations.integration_generation = ?
+            AND telegram_integrations.generation_state = 'active'
             AND telegram_integrations.status IN ('active', 'degraded')
         )
     `).bind(
@@ -111,9 +145,12 @@ async function claimReplyAttempt(
       input.rowId,
       input.integrationId,
       input.shopId,
+      input.credentialId,
+      input.integrationGeneration,
       input.integrationId,
       input.shopId,
       input.credentialId,
+      input.integrationGeneration,
     ),
     env.PLATFORM_DB.prepare(`
       UPDATE telegram_integrations
@@ -121,15 +158,16 @@ async function claimReplyAttempt(
         last_safe_error_code = CASE WHEN status = 'active' THEN NULL ELSE last_safe_error_code END,
         updated_at = ?
       WHERE id = ? AND shop_id = ? AND active_credential_id = ?
+        AND integration_generation = ? AND generation_state = 'active'
         AND status IN ('active', 'degraded')
-    `).bind(now, now, input.integrationId, input.shopId, input.credentialId),
+    `).bind(now, now, input.integrationId, input.shopId, input.credentialId, input.integrationGeneration),
   ]);
   if (results[0]?.meta.changes !== 1) throw new AppError("telegram_update_claim_lost", 409);
 }
 
-async function markFailed(env: AppBindings, input: { credentialId: string; integrationId: string; rowId: string; shopId: string }, code: string): Promise<void> {
+async function markFailed(env: AppBindings, input: { credentialId: string; integrationGeneration: number; integrationId: string; rowId: string; shopId: string }, code: string): Promise<void> {
   const now = new Date().toISOString();
-  await env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'failed', safe_result_code = ?, updated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND status IN ('processing', 'failed')").bind(code, now, input.rowId, input.integrationId, input.shopId).run();
+  await env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'failed', safe_result_code = ?, updated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND credential_id = ? AND integration_generation = ? AND status IN ('processing', 'failed')").bind(code, now, input.rowId, input.integrationId, input.shopId, input.credentialId, input.integrationGeneration).run();
 }
 
 async function answerCallback(client: TelegramClient, update: TelegramUpdate, text?: string): Promise<void> {
@@ -149,7 +187,7 @@ async function markProviderDegraded(env: AppBindings, input: { credentialId: str
   await env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = 'degraded', last_safe_error_code = ?, last_checked_at = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND active_credential_id = ? AND status != 'disabled'").bind(code, now, now, input.integrationId, input.shopId, input.credentialId).run();
 }
 
-async function isCurrentGeneration(input: { env: AppBindings; credentialId: string; integrationId: string; shopId: string }): Promise<boolean> {
+async function isCurrentGeneration(input: { env: AppBindings; credentialId: string; integrationGeneration: number; integrationId: string; shopId: string }): Promise<boolean> {
   const row = await input.env.PLATFORM_DB.prepare(`
     SELECT telegram_integrations.active_credential_id AS activeCredentialId
     FROM telegram_integrations
@@ -161,9 +199,11 @@ async function isCurrentGeneration(input: { env: AppBindings; credentialId: stri
     WHERE telegram_integrations.id = ?
       AND telegram_integrations.shop_id = ?
       AND telegram_integrations.active_credential_id = ?
+      AND telegram_integrations.integration_generation = ?
+      AND telegram_integrations.generation_state = 'active'
       AND telegram_integrations.status IN ('active', 'degraded')
     LIMIT 1
-  `).bind(input.integrationId, input.shopId, input.credentialId).first<{ activeCredentialId: string }>();
+  `).bind(input.integrationId, input.shopId, input.credentialId, input.integrationGeneration).first<{ activeCredentialId: string }>();
   return row?.activeCredentialId === input.credentialId;
 }
 
@@ -226,11 +266,11 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
   // provider update kinds; retain the durable callback bucket for unsupported
   // inline callbacks while returning an explicit ignored state.
   const updateKind = update.kind === "unsupported_callback_query" ? "callback_query" : update.kind;
-  const registered = await registerUpdate({ env: input.env, integrationId: integration.integrationId, kind: updateKind, payloadHash, requestId: input.requestId, shopId: integration.shopId, updateId: update.updateId });
+  const registered = await registerUpdate({ credentialId: integration.credential.credentialId, env: input.env, integrationGeneration: integration.integrationGeneration, integrationId: integration.integrationId, kind: updateKind, payloadHash, requestId: input.requestId, shopId: integration.shopId, updateId: update.updateId });
   const credentials = await decryptTelegramCredentialRow(input.env, integration.credential);
   const client = new TelegramClient(credentials.botToken, input.fetcher);
-  const generation = { credentialId: integration.credential.credentialId, env: input.env, integrationId: integration.integrationId, shopId: integration.shopId };
-  const updateLedger = { credentialId: integration.credential.credentialId, integrationId: integration.integrationId, rowId: registered.rowId, shopId: integration.shopId };
+  const generation = { credentialId: integration.credential.credentialId, env: input.env, integrationGeneration: integration.integrationGeneration, integrationId: integration.integrationId, shopId: integration.shopId };
+  const updateLedger = { credentialId: integration.credential.credentialId, integrationGeneration: integration.integrationGeneration, integrationId: integration.integrationId, rowId: registered.rowId, shopId: integration.shopId };
   let replyAttemptClaimed = false;
   const rejectIfStale = async (): Promise<boolean> => {
     if (await isCurrentGeneration(generation)) return false;

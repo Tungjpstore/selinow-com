@@ -16,8 +16,8 @@ const membership = vi.hoisted(() => ({ role: "owner" }));
 
 vi.mock("../../src/lib/tenants/store", () => ({
   getShopForMember: vi.fn(() => Promise.resolve({
-    row: { role: membership.role, shop_id: "shop-a" },
-    shop: {},
+    row: { role: membership.role, shop_id: "shop-a", shop_status: "active" },
+    shop: { featureFlags: { telegram: true } },
   })),
 }));
 
@@ -113,6 +113,8 @@ async function telegramRuntime() {
     lastOutboundAt: null as string | null,
     lastSafeErrorCode: "telegram_webhook_failed" as string | null,
     lastUpdateAt: null as string | null,
+    generationState: "active" as "active" | "draining",
+    integrationGeneration: 1,
     pendingUpdateCount: 0,
     publicId: "telegram-public-a",
     shopId: "shop-a",
@@ -163,6 +165,7 @@ async function telegramRuntime() {
               if (sql.includes("UPDATE telegram_credentials SET status = 'revoked'") && sql.includes("status IN ('active', 'pending')")) {
                 credential.status = "revoked";
               }
+              if (sql.includes("generation_state = 'draining'")) integration.generationState = "draining";
               if (sql.includes("UPDATE telegram_integrations SET status = CASE")) {
                 integration.status = integration.activeCredentialId === null ? "pending" : integration.status;
                 integration.webhookStatus = integration.activeCredentialId === null ? "pending" : integration.webhookStatus;
@@ -172,6 +175,8 @@ async function telegramRuntime() {
                 integration.status = String(values[0]);
                 integration.webhookStatus = "verified";
                 integration.activeCredentialId = String(values[1]);
+                integration.generationState = "active";
+                integration.integrationGeneration += 1;
                 if (values[2] === 1) integration.lastHealthUpdateAt = null;
                 integration.botId = String(values[3]);
                 integration.botUsername = String(values[4]);
@@ -185,6 +190,8 @@ async function telegramRuntime() {
                 integration.status = "disabled";
                 integration.webhookStatus = "disabled";
                 integration.activeCredentialId = null;
+                integration.generationState = "active";
+                integration.integrationGeneration += 1;
                 if (sql.includes("last_health_update_at = NULL")) integration.lastHealthUpdateAt = null;
                 integration.lastSafeErrorCode = null;
               }

@@ -8,6 +8,12 @@ const DEFAULT_GLOBAL_LIMIT = 200;
 const DEFAULT_EMAIL_LIMIT = 5;
 const DEFAULT_REQUESTER_LIMIT = 20;
 const DEFAULT_WINDOW_SECONDS = 15 * 60;
+const ADAPTIVE_LANE_PREFIX = "adaptive:";
+const ADAPTIVE_GLOBAL_DIVISOR = 10;
+const ADAPTIVE_GLOBAL_MAX = 20;
+const ADAPTIVE_REQUESTER_DIVISOR = 10;
+const ADAPTIVE_REQUESTER_MAX = 2;
+const ADAPTIVE_SUBJECT_LIMIT = 1;
 const DEFAULT_SHOP_CREATE_GLOBAL_LIMIT = 100;
 const DEFAULT_SHOP_CREATE_REQUESTER_LIMIT = 10;
 const DEFAULT_SHOP_CREATE_SUBJECT_LIMIT = 5;
@@ -23,6 +29,10 @@ type TurnstileEnvelope = {
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function adaptiveLimit(baseLimit: number, divisor: number, maximum: number): number {
+  return Math.max(1, Math.min(maximum, Math.floor(baseLimit / divisor)));
 }
 
 export function cloudflareRequesterAddress(request: Request): string {
@@ -158,28 +168,69 @@ export async function claimMagicLinkAdmission(input: {
   const windowStartedAt = new Date(windowStartMs).toISOString();
   const windowEndsAt = new Date(windowStartMs + windowMs).toISOString();
   const requesterAddress = input.requesterAddress.trim();
-  const requesterHash = await hmacToken(
+  const requesterDigest = await hmacToken(
     input.env.IDENTIFIER_HMAC_SECRET,
     "magic-link-requester:v1",
     requesterAddress.length > 0 && requesterAddress.length <= 128 ? requesterAddress : "unknown",
   );
-  const subjectHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, "magic-link-email:v1", input.email);
+  const subjectDigest = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, "magic-link-email:v1", input.email);
   const globalLimit = positiveInteger(input.env.MAGIC_LINK_GLOBAL_RATE_LIMIT, DEFAULT_GLOBAL_LIMIT);
   const emailLimit = positiveInteger(input.env.MAGIC_LINK_EMAIL_RATE_LIMIT, DEFAULT_EMAIL_LIMIT);
   const requesterLimit = positiveInteger(input.env.MAGIC_LINK_REQUESTER_RATE_LIMIT, DEFAULT_REQUESTER_LIMIT);
+  const adaptiveLane = input.challengePassed === true;
+  const requesterHash = adaptiveLane ? `${ADAPTIVE_LANE_PREFIX}${requesterDigest}` : requesterDigest;
+  const subjectHash = adaptiveLane ? `${ADAPTIVE_LANE_PREFIX}${subjectDigest}` : subjectDigest;
+
+  if (adaptiveLane) {
+    const claimed = await input.env.PLATFORM_DB.prepare(`
+      INSERT INTO auth_request_admissions (
+        id, action, requester_hash, subject_hash, delivery_permitted, window_started_at, window_ends_at, created_at
+      )
+      SELECT ?, 'magic_link_request', ?, ?, 1, ?, ?, ?
+      WHERE (
+        SELECT COUNT(*) FROM auth_request_admissions
+        WHERE action = 'magic_link_request' AND requester_hash LIKE ? AND window_started_at = ?
+      ) < ? AND (
+        SELECT COUNT(*) FROM auth_request_admissions
+        WHERE action = 'magic_link_request' AND requester_hash = ? AND window_started_at = ?
+      ) < ? AND (
+        SELECT COUNT(*) FROM auth_request_admissions
+        WHERE action = 'magic_link_request' AND subject_hash = ? AND window_started_at = ?
+      ) < ?
+      RETURNING delivery_permitted AS deliveryPermitted
+    `).bind(
+      createId("adm"),
+      requesterHash,
+      subjectHash,
+      windowStartedAt,
+      windowEndsAt,
+      input.now.toISOString(),
+      `${ADAPTIVE_LANE_PREFIX}%`,
+      windowStartedAt,
+      adaptiveLimit(globalLimit, ADAPTIVE_GLOBAL_DIVISOR, ADAPTIVE_GLOBAL_MAX),
+      requesterHash,
+      windowStartedAt,
+      adaptiveLimit(requesterLimit, ADAPTIVE_REQUESTER_DIVISOR, ADAPTIVE_REQUESTER_MAX),
+      subjectHash,
+      windowStartedAt,
+      ADAPTIVE_SUBJECT_LIMIT,
+    ).first<{ deliveryPermitted: number }>();
+    if (claimed === null) throw new AppError("rate_limited", 429);
+    return { challengeRequired: false, deliveryPermitted: true };
+  }
 
   const claimed = await input.env.PLATFORM_DB.prepare(`
     INSERT INTO auth_request_admissions (
       id, action, requester_hash, subject_hash, delivery_permitted, window_started_at, window_ends_at, created_at
     )
-    SELECT ?, 'magic_link_request', ?, ?, CASE WHEN ? = 1 OR (
+    SELECT ?, 'magic_link_request', ?, ?, CASE WHEN (
       SELECT COUNT(*) FROM auth_request_admissions
       WHERE action = 'magic_link_request' AND subject_hash = ?
         AND window_started_at = ? AND delivery_permitted = 1
     ) < ? THEN 1 ELSE 0 END, ?, ?, ?
     WHERE (
       SELECT COUNT(*) FROM auth_request_admissions
-      WHERE action = 'magic_link_request' AND window_started_at = ?
+      WHERE action = 'magic_link_request' AND requester_hash NOT LIKE ? AND window_started_at = ?
     ) < ? AND (
       SELECT COUNT(*) FROM auth_request_admissions
       WHERE action = 'magic_link_request'
@@ -190,13 +241,13 @@ export async function claimMagicLinkAdmission(input: {
     createId("adm"),
     requesterHash,
     subjectHash,
-    input.challengePassed === true ? 1 : 0,
     subjectHash,
     windowStartedAt,
     emailLimit,
     windowStartedAt,
     windowEndsAt,
     input.now.toISOString(),
+    `${ADAPTIVE_LANE_PREFIX}%`,
     windowStartedAt,
     globalLimit,
     requesterHash,
@@ -204,7 +255,12 @@ export async function claimMagicLinkAdmission(input: {
     requesterLimit,
   ).first<{ deliveryPermitted: number }>();
 
-  if (claimed === null) throw new AppError("rate_limited", 429);
+  if (claimed === null) {
+    if (input.env.APP_ENV !== "local" && resolveTurnstileConfiguration(input.env) === null) {
+      throw new AppError("turnstile_unavailable", 503);
+    }
+    return { challengeRequired: true, deliveryPermitted: false };
+  }
   const deliveryPermitted = claimed.deliveryPermitted === 1;
   if (!deliveryPermitted && input.env.APP_ENV !== "local" && resolveTurnstileConfiguration(input.env) === null) {
     throw new AppError("turnstile_unavailable", 503);

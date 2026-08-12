@@ -3,6 +3,12 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("buyer order recovery UI contract", () => {
+  it("requires a recovery email before any Website checkout can be submitted", async () => {
+    const checkoutPage = await readFile("src/pages/checkout.astro", "utf8");
+
+    expect(checkoutPage).toMatch(/id="customer-email"[^>]*\brequired\b/u);
+  });
+
   it("exchanges a fragment token, clears it immediately, and renders a generic recovery form", async () => {
     const [script, page, catalog] = await Promise.all([
       readFile("src/scripts/storefront/order.ts", "utf8"),

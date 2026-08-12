@@ -23,6 +23,12 @@ export type SellerOrderSummary = {
 
 export type SellerOrderPage = { nextCursor: string | null; orders: SellerOrderSummary[] };
 
+type SellerManualFulfillmentView = {
+  completedAt: string | null;
+  status: "completed" | "pending" | "unsupported";
+  unsupportedReason: "entitlement_policy" | "private_file" | null;
+};
+
 function sellerPage(input: { cursor?: string | null; limit?: number }): PublicApiPage {
   const url = new URL("https://seller.selinow.invalid/");
   if (input.cursor !== undefined && input.cursor !== null) url.searchParams.set("cursor", input.cursor);
@@ -39,6 +45,7 @@ export type SellerOrderDetail = SellerOrderSummary & {
     fulfillmentType: string;
     id: string;
     lineTotalMinor: number;
+    manualFulfillment: SellerManualFulfillmentView | null;
     productTitle: string;
     quantity: number;
     sku: string;
@@ -86,6 +93,13 @@ type SellerPrivateDownloadRow = {
   entitlementStatus: string | null;
   filename: string;
   maxDownloads: number;
+  orderItemId: string;
+};
+
+type SellerManualFulfillmentRow = {
+  completedAt: string | null;
+  hasGenericRequirement: number;
+  hasPrivateFileRequirement: number;
   orderItemId: string;
 };
 
@@ -233,7 +247,7 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
   `).bind(shopId, input.orderPublicId).first<SellerOrderSummary & { expiresAt: string; fulfilledAt: string | null; internalId: string; paidAt: string | null }>();
   if (row === null) throw new AppError("order_not_found", 404);
 
-  const [items, payments, paymentExceptions, remediationRequests, fulfillment, audit, notes, privateDownloads] = await Promise.all([
+  const [items, payments, paymentExceptions, remediationRequests, fulfillment, audit, notes, privateDownloads, manualFulfillments] = await Promise.all([
     input.env.PLATFORM_DB.prepare(`
       SELECT id, product_title AS productTitle, variant_title AS variantTitle, sku,
         unit_price_minor AS unitPriceMinor, quantity, line_total_minor AS lineTotalMinor,
@@ -302,6 +316,33 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
       LIMIT 100
     `).bind(shopId, row.internalId).all<SellerOrderNote & { id: string; authorDisplayName: string }>() : Promise.resolve({ results: [] as Array<SellerOrderNote & { id: string; authorDisplayName: string }> }),
     listSellerPrivateDownloads({ env: input.env, orderId: row.internalId, shopId }),
+    input.env.PLATFORM_DB.prepare(`
+      SELECT order_items.id AS orderItemId,
+        executions.completed_at AS completedAt,
+        EXISTS (
+          SELECT 1
+          FROM order_item_fulfillment_requirements AS private_requirement
+          WHERE private_requirement.shop_id = order_items.shop_id
+            AND private_requirement.order_id = order_items.order_id
+            AND private_requirement.order_item_id = order_items.id
+            AND private_requirement.capability = 'private_file'
+        ) AS hasPrivateFileRequirement,
+        EXISTS (
+          SELECT 1
+          FROM order_item_entitlement_requirements AS generic_requirement
+          WHERE generic_requirement.shop_id = order_items.shop_id
+            AND generic_requirement.order_id = order_items.order_id
+            AND generic_requirement.order_item_id = order_items.id
+        ) AS hasGenericRequirement
+      FROM order_items
+      LEFT JOIN manual_fulfillment_executions AS executions
+        ON executions.shop_id = order_items.shop_id
+        AND executions.order_id = order_items.order_id
+        AND executions.order_item_id = order_items.id
+        AND executions.state = 'completed'
+      WHERE order_items.shop_id = ? AND order_items.order_id = ?
+      ORDER BY order_items.id
+    `).bind(shopId, row.internalId).all<SellerManualFulfillmentRow>(),
   ]);
 
   const { internalId, ...safe } = row;
@@ -316,11 +357,27 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
       ? 0
       : Math.max(0, download.maxDownloads - download.downloadCount),
   }]));
+  const manualFulfillmentByItem = new Map<string, SellerManualFulfillmentView>(manualFulfillments.results.map((projection): [string, SellerManualFulfillmentView] => {
+    if (projection.completedAt !== null) {
+      return [projection.orderItemId, { completedAt: projection.completedAt, status: "completed", unsupportedReason: null }];
+    }
+    if (projection.hasPrivateFileRequirement === 1) {
+      return [projection.orderItemId, { completedAt: null, status: "unsupported", unsupportedReason: "private_file" }];
+    }
+    if (projection.hasGenericRequirement === 1) {
+      return [projection.orderItemId, { completedAt: null, status: "unsupported", unsupportedReason: "entitlement_policy" }];
+    }
+    return [projection.orderItemId, { completedAt: null, status: "pending", unsupportedReason: null }];
+  }));
   return {
     ...safe,
     audit: audit.results,
     fulfillment: fulfillment.results,
-    items: items.results.map((item) => ({ ...item, privateDownload: visibility === "full" ? privateDownloadByItem.get(item.id) ?? null : null })),
+    items: items.results.map((item) => ({
+      ...item,
+      manualFulfillment: item.fulfillmentType === "manual" ? manualFulfillmentByItem.get(item.id) ?? null : null,
+      privateDownload: visibility === "full" ? privateDownloadByItem.get(item.id) ?? null : null,
+    })),
     notes: notes.results.map((note) => ({
       authorDisplayName: note.authorDisplayName,
       body: note.status === "redacted" ? "" : note.body,

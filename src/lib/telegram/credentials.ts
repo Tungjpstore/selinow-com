@@ -19,6 +19,8 @@ export type TelegramWebhookIntegration = {
   botUsername: string | null;
   credential: TelegramCredentialRow;
   integrationId: string;
+  generationState: "active" | "draining";
+  integrationGeneration: number;
   integrationStatus: string;
   shopId: string;
   shopName: string;
@@ -76,6 +78,8 @@ export async function loadTelegramWebhookIntegration(env: AppBindings, webhookPu
       telegram_integrations.active_credential_id AS activeCredentialId,
       telegram_integrations.shop_id AS shopId,
       telegram_integrations.status AS integrationStatus,
+      telegram_integrations.generation_state AS generationState,
+      telegram_integrations.integration_generation AS integrationGeneration,
       telegram_integrations.bot_username_sanitized AS botUsername,
       telegram_integrations.bot_display_name_sanitized AS botDisplayName,
       shops.name AS shopName,
@@ -97,6 +101,7 @@ export async function loadTelegramWebhookIntegration(env: AppBindings, webhookPu
       AND shop_subscriptions.state != 'canceled'
     WHERE telegram_integrations.webhook_public_id = ?
       AND telegram_integrations.status IN ('active', 'degraded')
+      AND telegram_integrations.generation_state = 'active'
     LIMIT 1
   `).bind(webhookPublicId).first<TelegramCredentialRow & Omit<TelegramWebhookIntegration, "credential">>();
   if (row === null) throw new AppError("webhook_not_found", 404);

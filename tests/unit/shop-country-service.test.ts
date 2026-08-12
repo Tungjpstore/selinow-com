@@ -263,9 +263,13 @@ describe("shop country configuration service", () => {
     })).resolves.toMatchObject({ created: true });
   });
 
-  it("returns one durable shop for concurrent same-key creates", async () => {
+  it("returns one durable shop and consumes one admission for concurrent same-key creates", async () => {
+    const limitedEnv = {
+      ...env,
+      SHOP_CREATE_SUBJECT_RATE_LIMIT: "1",
+    } as unknown as AppBindings;
     const input = {
-      env,
+      env: limitedEnv,
       idempotencyKey: "shop-concurrent-replay",
       name: "Concurrent Replay",
       planCode: "starter",
@@ -273,35 +277,71 @@ describe("shop country configuration service", () => {
       slug: "concurrent-replay",
       userId: "user-a",
     } as const;
-    const results = await Promise.all([
-      createShop({ ...input, requestId: "request-concurrent-a" }),
-      createShop({ ...input, requestId: "request-concurrent-b" }),
-    ]);
+    const results = await Promise.all(Array.from({ length: 6 }, (_, index) => createShop({
+      ...input,
+      requestId: `request-concurrent-${String(index)}`,
+    })));
     expect(new Set(results.map((result) => result.shop.publicId)).size).toBe(1);
     expect(results.filter((result) => result.created)).toHaveLength(1);
     expect(database.prepare("SELECT COUNT(*) AS count FROM shops WHERE slug = 'concurrent-replay'").get()).toEqual({ count: 1 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM auth_request_admissions WHERE action = 'shop_create'
+    `).get()).toEqual({ count: 1 });
   });
 
-  it("allows only one account evaluation even across concurrent different shop bodies", async () => {
+  it("serializes concurrent first-shop creates into one trial and one payment-pending shop", async () => {
     const attempts = await Promise.allSettled([
       createOwnedShop({ idempotencyKey: "shop-trial-race-a", slug: "trial-race-a", userId: "user-a" }),
       createOwnedShop({ idempotencyKey: "shop-trial-race-b", slug: "trial-race-b", userId: "user-a" }),
     ]);
-    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
-    const rejected = attempts.find((attempt): attempt is PromiseRejectedResult => attempt.status === "rejected");
-    expect(rejected?.reason).toMatchObject({ code: "validation_failed", issues: ["trial_already_used"], status: 409 });
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(2);
+    expect(attempts.flatMap((attempt) => attempt.status === "fulfilled" ? [attempt.value.shop.subscriptionState] : []).sort())
+      .toEqual(["pending_payment", "trialing"]);
     expect(database.prepare("SELECT COUNT(*) AS count FROM account_trial_claims WHERE user_id = 'user-a'").get()).toEqual({ count: 1 });
   });
 
-  it("does not reissue a trial after the first shop expires or is canceled", async () => {
-    const first = await createOwnedShop({ idempotencyKey: "shop-trial-once", slug: "trial-once", userId: "user-a" });
-    database.prepare(`
-      UPDATE shop_subscriptions
-      SET state = 'canceled', trial_ends_at = '2026-01-01T00:00:00.000Z', canceled_at = '2026-01-01T00:00:00.000Z'
+  it("allows only one concurrent payment-pending shop per account", async () => {
+    await createOwnedShop({ idempotencyKey: "shop-paid-race-trial", slug: "paid-race-trial", userId: "user-a" });
+
+    const attempts = await Promise.allSettled([
+      createOwnedShop({ idempotencyKey: "shop-paid-race-a", slug: "paid-race-a", userId: "user-a" }),
+      createOwnedShop({ idempotencyKey: "shop-paid-race-b", slug: "paid-race-b", userId: "user-a" }),
+    ]);
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    const rejected = attempts.find((attempt): attempt is PromiseRejectedResult => attempt.status === "rejected");
+    expect(rejected?.reason).toMatchObject({ code: "validation_failed", issues: ["billing_recovery_required"], status: 409 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM shop_subscriptions WHERE state = 'pending_payment'
+    `).get()).toEqual({ count: 1 });
+  });
+
+  it("creates every additional shop as payment-pending without issuing another trial", async () => {
+    await createOwnedShop({ idempotencyKey: "shop-trial-once", slug: "trial-once", userId: "user-a" });
+    await expect(getShopCreationAdmission({ env, userId: "user-a" })).resolves.toEqual({
+      allowed: true,
+      creationMode: "paid",
+      reason: "eligible",
+      recoveryShopPublicId: null,
+    });
+
+    const paid = await createOwnedShop({ idempotencyKey: "shop-paid-second", slug: "paid-second", userId: "user-a" });
+    expect(paid.shop.subscriptionState).toBe("pending_payment");
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM account_trial_claims WHERE user_id = 'user-a'
+    `).get()).toEqual({ count: 1 });
+    expect(database.prepare(`
+      SELECT state, trial_ends_at AS trialEndsAt
+      FROM shop_subscriptions
       WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
-    `).run(first.shop.publicId);
-    await expect(createOwnedShop({ idempotencyKey: "shop-trial-twice", slug: "trial-twice", userId: "user-a" }))
-      .rejects.toMatchObject({ code: "validation_failed", issues: ["trial_already_used"], status: 409 });
+    `).get(paid.shop.publicId)).toEqual({ state: "pending_payment", trialEndsAt: null });
+    await expect(getShopCreationAdmission({ env, userId: "user-a" })).resolves.toEqual({
+      allowed: false,
+      creationMode: null,
+      reason: "billing_recovery",
+      recoveryShopPublicId: paid.shop.publicId,
+    });
+    await expect(createOwnedShop({ idempotencyKey: "shop-paid-third", slug: "paid-third", userId: "user-a" }))
+      .rejects.toMatchObject({ code: "validation_failed", issues: ["billing_recovery_required"], status: 409 });
   });
 
   it("allows an invited viewer without a trial claim to create an independent shop", async () => {
@@ -315,6 +355,7 @@ describe("shop country configuration service", () => {
     expect(await listShopsForMember({ env, userId: "user-b" })).toHaveLength(1);
     await expect(getShopCreationAdmission({ env, userId: "user-b" })).resolves.toEqual({
       allowed: true,
+      creationMode: "trial",
       reason: "eligible",
       recoveryShopPublicId: null,
     });
@@ -343,12 +384,13 @@ describe("shop country configuration service", () => {
     })).resolves.toMatchObject({ shop: { publicId: created.shop.publicId, subscriptionState: "canceled" } });
     await expect(getShopCreationAdmission({ env, userId: "user-a" })).resolves.toEqual({
       allowed: false,
-      reason: "trial_already_used",
+      creationMode: null,
+      reason: "billing_recovery",
       recoveryShopPublicId: created.shop.publicId,
     });
   });
 
-  it("keeps recovery identifiers private when the trial claimant is no longer an active owner", async () => {
+  it("allows paid provisioning without exposing the prior shop when the trial claimant is no longer an active owner", async () => {
     const created = await createOwnedShop({ idempotencyKey: "shop-private-recovery", slug: "private-recovery", userId: "user-a" });
     database.prepare(`
       UPDATE shop_subscriptions
@@ -361,8 +403,9 @@ describe("shop country configuration service", () => {
     `).run(created.shop.publicId);
 
     await expect(getShopCreationAdmission({ env, userId: "user-a" })).resolves.toEqual({
-      allowed: false,
-      reason: "trial_already_used",
+      allowed: true,
+      creationMode: "paid",
+      reason: "eligible",
       recoveryShopPublicId: null,
     });
   });

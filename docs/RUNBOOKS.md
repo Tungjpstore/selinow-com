@@ -140,7 +140,7 @@ Run the staging sequence only from the independent Selinow Cloudflare account. I
    runtime Worker secret named `CLOUDFLARE_API_TOKEN` is never operator input.
 
 2. Stop without mutation unless the doctor proves the authenticated Wrangler account matches `infra/environments/staging.json`, the SaaS DNS/fallback contract is ready, the shared-zone apex/wildcard and `*/*` fallback point only to `selinow-com-production`, and all four explicit staging exceptions point only to `selinow-com-staging`. Shared mutation admission additionally requires the live D1 list to contain exactly the generated-manifest database name and UUID. Missing credentials, unreadable inventory or any drift is a failed admission.
-3. After an approved staging change window, use the exact ceremony below. The pre-migration manifest binds the clean commit/tree, exact live ledger prefix, backup checksum/target and isolated restore report. After migration and any separately approved seed, create a second protected backup and restore drill, then run `db:complete-release`; that command writes the immutable post-migration evidence required by `deploy:staging`. The post-migration snapshot must be different from and newer than the manifest-bound pre-migration snapshot. `db:migrate` applies every pending numbered migration in filename order; for the current tree the complete source ledger ends at `0094_shop_creation_admission.sql`. Review the whole pending chain before opening the window and never deploy current source against a partially applied schema.
+3. After an approved staging change window, use the exact ceremony below. The pre-migration manifest binds the clean commit/tree, exact live ledger prefix, backup checksum/target and isolated restore report. After migration and any separately approved seed, create a second protected backup and restore drill, then run `db:complete-release`; that command writes the immutable post-migration evidence required by `deploy:staging`. The post-migration snapshot must be different from and newer than the manifest-bound pre-migration snapshot. `db:migrate` applies every pending numbered migration in filename order; for the current tree the complete source ledger ends at `0095_telegram_generation_and_legacy_outbox_quarantine.sql`. Review the whole pending chain before opening the window and never deploy current source against a partially applied schema.
 
    ```bash
    HEAD_SHA="$(git rev-parse HEAD)"
@@ -164,9 +164,13 @@ Run the staging sequence only from the independent Selinow Cloudflare account. I
 
    npm run platform:doctor -- --env staging --json
    npm run deploy:staging -- --release-manifest "$MANIFEST_REF"
+
+   # Read-only post-deploy binding; requires the three audit tokens documented below.
+   node scripts/staging-deployment-evidence.mjs \
+     --manifest "$MANIFEST_REF" --write --json
    ```
 4. Staging mutation subprocesses are pinned with the admitted `CLOUDFLARE_ACCOUNT_ID`. Neither temporary operator token is forwarded into the application build, D1 mutation or deploy child process.
-5. Re-run migration status, D1 preflight, route/platform admission and bounded staging smoke checks after the change. Require no pending migration from the approved chain, `payment_provider_projection` and generated-license schema checks to reflect the applied ledger, and the same exact route inventory. Unset all temporary operator tokens when the window closes.
+5. Re-run migration status, D1 preflight, route/platform admission and bounded staging smoke checks after the change. Require no pending migration from the approved chain, `payment_provider_projection` and generated-license schema checks to reflect the applied ledger, and the same exact route inventory. The immutable deployment evidence must be created within two hours of the observed 100% deployment and before the manifest expires. Unset all temporary operator tokens when the window closes.
 
 `db:migrate:status`, `db:preflight`, backup dry-run, staging build-only and deploy dry-run remain read-only/non-deploying checks and do not require route admission. Do not treat their success as permission to mutate staging.
 
@@ -178,17 +182,50 @@ consumer IDs or raw provider responses. For production use the same command with
 `--env production` and `CLOUDFLARE_PRODUCTION_TRIGGER_AUDIT_API_TOKEN`; neither
 mode creates, updates or deletes a trigger.
 
-Each trigger-audit token is account-restricted and read-only: Account Settings
-Read, Queues Read and Workers Scripts Read, plus User Memberships Read and User
-Details Read for Wrangler identity admission. DNS, Workers Routes, D1, secret
-write and trigger edit permissions are not required by this helper.
+Every admitted staging deploy now writes a non-secret Cloudflare Worker version
+message containing the exact release ID, commit/tree, canonical manifest
+reference and manifest SHA-256. After deploy, run
+`node scripts/staging-deployment-evidence.mjs --manifest "$MANIFEST_REF" --write --json`.
+The collector performs only read-only Cloudflare inventory: deployment and
+deployable-version reads with `CLOUDFLARE_STAGING_DEPLOYMENT_AUDIT_API_TOKEN`,
+the zone Worker Routes read with `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`, and the
+queue/cron reads with `CLOUDFLARE_STAGING_TRIGGER_AUDIT_API_TOKEN`. It requires
+the newest deployment to contain exactly one Worker version at 100%, verifies
+the version message against the manifest hash, and verifies the exact staging
+route and trigger contracts. It never accepts an operator-entered Worker
+version as evidence.
 
-The latest retained staging database evidence is complete through `0090`; the current source ledger is `0001` through `0094`, so a current-candidate release must freshly admit and apply `0091`-`0094` if the live ledger still ends at `0090`. `db:migrate:status`, `db:preflight` and the post-migration schema contract are the read-only sources of truth for the remote ledger. Worker deploy and provider UAT remain separate gates. The route preflight remains fail-closed with `cloudflare_route_audit_api_token_missing` when the temporary audit token is absent. No production migration or provider activation is claimed; production remains `NO-GO` for full commerce/provider activation.
+The result is the immutable private mode-`0600` artifact
+`.wrangler/releases/staging/<release-id>/deployment-evidence.json`. It records
+the Cloudflare deployment ID, active Worker version, account/Worker, deployment
+and observation timestamps, candidate identity, manifest hash, and canonical
+route/trigger inventory fingerprints. The artifact hash is returned by the
+command and is not embedded into either the artifact or manifest, avoiding a
+self-reference. Noncanonical paths, any symlink ancestor, relaxed permissions,
+stale observations, split traffic, version-message drift, or route/trigger drift
+fail closed. An existing artifact is never overwritten; a stale or superseded
+binding requires a new clean release manifest and deployment.
+
+Release admission must call the exported
+`verifyStagingDeploymentEvidence(...)` helper with the canonical manifest and
+artifact paths plus all three read-only audit tokens. Verification never trusts
+the private artifact alone: it repeats deployment/version, route and trigger
+inventory, revalidates the Worker version message, and compares the fresh
+deployment ID, exact 100% version and both inventory fingerprints. Unavailable
+remote inventory or a forged self-consistent local artifact fails closed.
+
+Each trigger/deployment audit token is account-restricted and read-only: Account
+Settings Read, Queues Read and Workers Scripts Read, plus User Memberships Read
+and User Details Read for Wrangler identity admission. Worker Routes Read remains
+confined to the separate route-audit token. DNS write, D1, secret write and
+trigger edit permissions are not required by either inventory helper.
+
+The latest retained staging database evidence and source ledger are complete through `0094`. Every new candidate must still freshly admit that exact ordered ledger, complete its post-migration evidence and create a new immutable deployment binding. `db:migrate:status`, `db:preflight` and the post-migration schema contract are the read-only sources of truth for the remote ledger. Worker deploy and provider UAT remain separate gates. The route preflight remains fail-closed with `cloudflare_route_audit_api_token_missing` when the temporary audit token is absent. No production migration or provider activation is claimed; production remains `NO-GO` for full commerce/provider activation.
 
 ## Phase A Canonical Commerce Cutover Boundary
 
 - Local acceptance is complete: the Website, Telegram and `fake.third` paths share the canonical checkout transaction; the dedicated five-file real-D1 seam refresh passed `106/106` focused tests, including canonical Website recovery with and without discounts, order-insensitive retry/recovery, replay/conflict, tenant isolation, cart concurrency and last-stock one-winner cases. This is source/local evidence only.
-- Staging has retained database evidence through `0090`; current source continues through `0094`. Do not describe the current Worker or provider UAT as accepted until the exact `0091`-`0094` candidate has its own manifest, post-migration evidence, deploy identity, health, route and provider evidence.
+- Staging has retained database evidence through `0094`. Do not describe a Worker or provider UAT as accepted until the exact candidate has its own manifest, post-migration evidence, immutable deployment identity, health, route and provider evidence.
 - The current database CLI has no migration-range selector: `npm run db:migrate -- --env staging` applies the entire pending numbered chain in order. A partial staging rollout therefore requires a separately reviewed migration/deploy design; never apply the complete chain and report only a subset cutover.
 - The post-deploy evidence command is `npm run staging:phase-a:smoke -- --json`; it is GET-only and checks the canonical runtime marker plus read-only Website/catalog and Telegram method boundaries. A pass does not authorize mutation or imply that the pending migration chain was applied.
 - The current broad Worker is not a valid partial-schema artifact: storefront resolution, scheduled cleanup, Telegram runtime/outbox, payment, buyer order recovery, privacy, PayOS claim fencing, custom-domain Turnstile admission and shop-creation admission depend on later schema/data guards. The supported reviewed cutover is the complete source chain through `0094`; provider activation still requires the combined payment/non-payment handoff.
@@ -211,7 +248,7 @@ Migration `0037` validates legacy relationships before installing guards. If it 
 
 The backup validator must include all `0035` projection tables, `api_credentials`, seller-operation ledgers (`shop_member_invitations`, `customer_notes`, `order_notes`, `subscription_change_requests`, `order_messages`, `payment_remediation_requests`), security-rate-limit retention state, order-currency and Telegram-locale preference state, the `0046` manual execution/reference ledgers, all six `0047` generic entitlement tables, `payment_reversal_events`, all eight `0049` generated-license tables, and the channel-expansion ledgers (`channel_connector_requests`, `telegram_mini_app_sessions`, `channel_provider_event_receipts`, `channel_customer_identities`, `channel_oauth_states`, `channel_provider_verification_evidence`, `catalog_channel_visibility`). Its authoritative row-count contract also covers `order_items`, `fulfillments`, `fulfillment_items`, `manual_fulfillment_executions`, `external_fulfillment_references`, `entitlement_resources`, `product_entitlement_policies`, `order_item_entitlement_requirements`, `entitlements`, `entitlement_grants`, `entitlement_transitions`, `payment_reversal_events`, `generated_license_provider_connections`, `generated_license_provider_credentials`, `generated_license_resource_bindings`, `generated_license_requirement_snapshots`, `generated_license_requests`, `generated_license_attempts`, `generated_license_artifacts`, `generated_license_dead_letters`, `channel_connector_requests`, `telegram_mini_app_sessions`, `channel_provider_event_receipts`, `channel_customer_identities`, `channel_oauth_states`, `channel_provider_verification_evidence`, `catalog_channel_visibility`, `data_export_jobs`, `shop_deletion_requests`, `shop_deletion_steps`, `encryption_rotation_runs` and `encryption_rotation_items`; losing even one row from any of these tables fails the isolated drill with `restore_count_mismatch`. The local restore drill must apply the exact repository ledger through the current numbered migration, pass integrity/FK/schema/count checks and emit a fresh safe report before any staging change is considered ready. The retained local report through `0048` is historical evidence only; the earlier `rdr_20260802093008_62fc355479ae.json` report is historical through `0059`, while no staging migration is claimed and no local report may be substituted for the fresh report-v2 staging backup gate.
 
-The retained local report `.wrangler/restore-drills/local/rdr_20260802132434_f77680c70c88.json` applies the prior `0001`-`0066` source chain, restores 612 items, passes integrity/FK/schema/count checks, records the known alias normalization in the disposable copy and leaves the authoritative local D1 unchanged. The retained candidate-bound staging restore evidence applies the contiguous `0001`-`0090` chain and passes integrity, foreign-key, schema and count checks; current source continues through `0094`, so that report remains historical staging evidence and is not current-candidate or production release evidence.
+The retained local report `.wrangler/restore-drills/local/rdr_20260802132434_f77680c70c88.json` applies the prior `0001`-`0066` source chain, restores 612 items, passes integrity/FK/schema/count checks, records the known alias normalization in the disposable copy and leaves the authoritative local D1 unchanged. Fresh candidate-bound staging restore evidence applies the contiguous `0001`-`0094` chain and passes integrity, foreign-key, schema and count checks. It proves the database continuation only; the Worker still requires the separate immutable deployment-binding artifact and none of this is production release evidence.
 
 ### Seller-attested manual fulfillment
 

@@ -22,10 +22,11 @@ export function buildPayosScenarioArtifact(input: {
   status: string;
   verificationMethod: string;
   observedAt: string;
-  controlledAccountFingerprintSha256?: string | null;
-  proofOfExecutionFingerprintSha256?: string | null;
+  executionEvidencePath?: string | null;
   output: string;
   root?: string;
+  stagingRunnerPublicKeys?: Record<string, string>;
+  stagingRunnerSpkiFingerprints?: Record<string, string>;
 }): Promise<{
   artifact: PayosScenarioArtifact;
   artifactFingerprintSha256: string;
