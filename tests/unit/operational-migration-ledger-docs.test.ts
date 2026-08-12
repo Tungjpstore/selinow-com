@@ -33,8 +33,8 @@ const productionEvidenceExample = JSON.parse(readFileSync("infra/release/product
 
 describe("operational migration-ledger documentation", () => {
   it("keeps current operational sections on the complete 0095 source chain", () => {
-    expect(content["docs/RELEASE.md"]).toContain("source now covers `0001`-`0095`; retained staging database evidence covers `0001`-`0094`");
-    expect(content["docs/RELEASE.md"]).toContain("current staging deployment still requires a fresh manifest-provenance deployment");
+    expect(content["docs/RELEASE.md"]).toContain("source and retained staging database evidence now cover `0001`-`0095`");
+    expect(content["docs/RELEASE.md"]).toContain("The current staging deployment is bound by immutable Cloudflare deployment evidence");
     expect(content["docs/RELEASE.md"]).toContain("production remains at `0052` with `0053`-`0095` pending");
     expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).toContain("Exact pending migrations: `0053`-`0095`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("explicit `releaseScope`");
@@ -72,10 +72,10 @@ describe("operational migration-ledger documentation", () => {
     expect(content["docs/DOMAINS.md"]).toContain("0093_custom_domain_turnstile_runtime_guard.sql");
     expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0095`");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-09.md"]).toContain("`0091`-`0094` over the retained `0090` staging ledger");
-    expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`92869a04a250b9d0d17941f287ca0024821e0267`");
-    expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`c2bce000b0069ba4126b1f53ad5a17aa60109f3e`");
-    expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`stg_20260811T053816Z_92869a04a250`");
-    expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`97639e04-d3d1-49df-9914-94ad906152c6`");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`2df45cf5936755bf4e31fabbb06891de8789c271`");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`34ac903aea8b737fa1860d6e6aaf99c454279eda`");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`stg_20260812T220654Z_2df45cf59367`");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`27f29993-8a4e-422d-95b7-e4741e041c01`");
     expect(packageJson.scripts?.["db:complete-release"]).toBe("node scripts/db.mjs complete-release");
     expect(packageJson.scripts?.["release:rollback:rehearsal"]).toBe("node scripts/release-rollback-rehearsal.mjs");
     expect(packageJson.scripts?.["release:worker:upload"]).toBe("node scripts/release-worker-upload.mjs");

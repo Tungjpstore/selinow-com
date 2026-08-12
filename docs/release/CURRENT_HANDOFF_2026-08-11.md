@@ -7,20 +7,17 @@ route or DNS mutation, provider activation, pilot, or live charge.
 
 ## Candidate identity
 
-- Commit: `92869a04a250b9d0d17941f287ca0024821e0267`.
-- Tree: `c2bce000b0069ba4126b1f53ad5a17aa60109f3e`.
-- Last deployed staging migration ledger: contiguous `0001`-`0094`, ending at
-  `0094_shop_creation_admission.sql`.
-- Current source ledger continues through
-  `0095_telegram_generation_and_legacy_outbox_quarantine.sql` and requires a
-  fresh clean commit, staging ceremony, and deployment evidence.
-- Staging release ID: `stg_20260811T053816Z_92869a04a250`.
+- Commit: `2df45cf5936755bf4e31fabbb06891de8789c271`.
+- Tree: `34ac903aea8b737fa1860d6e6aaf99c454279eda`.
+- Source and staging migration ledger: contiguous `0001`-`0095`, ending at
+  `0095_telegram_generation_and_legacy_outbox_quarantine.sql`.
+- Staging release ID: `stg_20260812T220654Z_2df45cf59367`.
 - Private release manifest:
-  `.wrangler/releases/staging/stg_20260811T053816Z_92869a04a250/release-manifest.json`.
+  `.wrangler/releases/staging/stg_20260812T220654Z_2df45cf59367/release-manifest.json`.
 - Known staging Worker version:
-  `97639e04-d3d1-49df-9914-94ad906152c6`, active at 100% in the live staging
-  deployment inventory. No production deployment is
-  authorized or implied by this staging version.
+  `27f29993-8a4e-422d-95b7-e4741e041c01`, active at 100% in the live staging
+  deployment inventory (`fca770d2-9d3c-46ef-80e0-f715ec086106`). No production
+  deployment is authorized or implied by this staging version.
 
 Documentation changes made after this identity require a fresh clean commit
 and, if release admission binds the documentation commit, a regenerated
@@ -29,19 +26,19 @@ tree, manifest, or Worker-version mismatch.
 
 ## Staging database evidence
 
-The guarded staging release revalidated the already complete `0001`-`0094`
-ledger, recorded all 94 migration names, and completed fresh pre/post backup and
-isolated-restore evidence for the exact candidate.
+The guarded staging release applied `0095` over the retained `0094` prefix,
+recorded the complete `0001`-`0095` ledger, and completed fresh pre/post backup
+and isolated-restore evidence for the exact candidate.
 The candidate-bound evidence references are:
 
-- Pre-migration backup: `bkp_20260811053627_91573bc7fa7e`.
-- Pre-migration isolated restore: `rdr_20260811053655_8206c52ec592`.
-- Migration completion:
-  `.wrangler/releases/staging/stg_20260811T053816Z_92869a04a250/migration-completion.json`.
-- Post-migration backup: `bkp_20260811054007_72a2f95717db`.
-- Post-migration isolated restore: `rdr_20260811054034_63364d08dcce`.
+- Pre-migration backup: `bkp_20260812220540_90c8e42cb6f5`.
+- Pre-migration isolated restore: `rdr_20260812220604_5072afcba031`.
+- Post-migration backup: `bkp_20260812220810_48860113be6d`.
+- Post-migration isolated restore: `rdr_20260812220835_a1d7f430b552`.
 - Post-migration evidence:
-  `.wrangler/releases/staging/stg_20260811T053816Z_92869a04a250/post-migration-evidence.json`.
+  `.wrangler/releases/staging/stg_20260812T220654Z_2df45cf59367/post-migration-evidence.json`.
+- Immutable deployment evidence:
+  `.wrangler/releases/staging/stg_20260812T220654Z_2df45cf59367/deployment-evidence.json`.
 
 These private artifacts contain infrastructure identifiers and remain outside
 version control. They prove the staging D1 continuation and restore drill only;

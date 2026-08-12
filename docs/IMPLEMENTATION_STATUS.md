@@ -4,26 +4,32 @@ Last updated: 2026-08-13
 
 ## Current source of truth
 
-Continuation after the previous agent quota stop (2026-08-13): the last
-deployed staging identity remains commit
-`92869a04a250b9d0d17941f287ca0024821e0267`, tree
-`c2bce000b0069ba4126b1f53ad5a17aa60109f3e`, release
-`stg_20260811T053816Z_92869a04a250`, and Worker version
-`97639e04-d3d1-49df-9914-94ad906152c6` at 100%. That ceremony applied the
-contiguous `0001`-`0094` ledger. The current dirty working tree continues
-through source migration
-`0095_telegram_generation_and_legacy_outbox_quarantine.sql` and is not a
-reviewed commit/tree. Local verification on this dirty tree passed
-`npm run check` (771 files, zero errors), `npm run lint`, `npx tsc --noEmit`,
-`npm test` (306 files, 2,396 tests), `npm run build`, `npm run build:staging`,
+Staging continuation (2026-08-13): the reviewed candidate is commit
+`2df45cf5936755bf4e31fabbb06891de8789c271`, tree
+`34ac903aea8b737fa1860d6e6aaf99c454279eda`. Release
+`stg_20260812T220654Z_2df45cf59367` applied
+`0095_telegram_generation_and_legacy_outbox_quarantine.sql` to staging D1 and
+deployed Worker version `27f29993-8a4e-422d-95b7-e4741e041c01` at 100%
+(deployment `fca770d2-9d3c-46ef-80e0-f715ec086106`). Candidate-bound
+pre-migration backup/restore references are
+`bkp_20260812220540_90c8e42cb6f5` and
+`rdr_20260812220604_5072afcba031`; post-migration references are
+`bkp_20260812220810_48860113be6d` and
+`rdr_20260812220835_a1d7f430b552`. Live staging health reports phase 10 with
+`commerce: provider_pending`. Unsigned canonical Dodo staging webhook returns
+`401 webhook_signature_invalid`. Public smoke returned 200 for `/`,
+`/solutions`, `/sitemap.xml`, `/pricing`, `/login`, and `/api/health`.
+`/llms.txt` is absent from source and remains 404.
+
+Local verification on the candidate passed `npm run check` (771 files, zero
+errors), `npm run lint`, `npx tsc --noEmit`, `npm test` (306 files, 2,396
+tests), `npm run build`, `npm run build:staging`,
 `npm audit --audit-level=high` (zero high vulnerabilities), both deploy
 dry-runs, and `git diff --check`. `npm run release:doctor -- --json` remains
 fail-closed: missing production evidence, approvals, backup/restore, rollback,
-pilot, monitoring, legal/support, genuine Dodo/PayOS UAT, a clean commit/tree,
-and Worker secret admission. A fresh clean commit, staging manifest,
-backup/restore, deploy, and Cloudflare-observed deployment evidence are
-required before any new staging or production admission. No production
-migration or deployment was performed.
+pilot, monitoring, legal/support, genuine Dodo/PayOS UAT bound to this
+release, and production Worker secret admission. No production migration or
+deployment was performed.
 
 The previous 2026-08-11 reconciliation recorded candidate
 `3a44aadbcbe6a88115eb28743fcb19fa6af1cf5a`, tree
