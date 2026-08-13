@@ -64,7 +64,9 @@ const VALID_CONNECTION_ROW = {
   channelStatus: "enabled",
   connectionStatus: "active",
   hasOutboundGrant: 1,
+  generationState: "active",
   integrationId: "integration-a",
+  integrationGeneration: 2,
   integrationStatus: "active",
   providerCode: "telegram",
 };

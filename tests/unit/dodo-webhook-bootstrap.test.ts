@@ -418,8 +418,87 @@ describe("Dodo production webhook bootstrap", () => {
       },
     )).rejects.toThrow("dodo_webhook_bootstrap_artifact_ancestor_invalid");
     const escapedPath = join(external, "releases", releaseId, DODO_BOOTSTRAP_ARTIFACT_FILES.bootstrap);
-    expect((await stat(escapedPath)).size).toBe(0);
-    expect(await readFile(escapedPath, "utf8")).toBe("");
+    await expect(stat(escapedPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps the original artifact intact when an atomic replacement cannot commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-dodo-replace-failure-"));
+    temporaryRoots.push(root);
+    const original = bootstrap();
+    const written = await writePrivateDodoArtifact(root, releaseId, DODO_BOOTSTRAP_ARTIFACT_FILES.reservation, original);
+    const replacement = updateDodoBootstrapReservation(buildDodoBootstrapReservation({
+      admission: assertDodoBootstrapCandidateAdmission({ evidence, repository: { clean: true, commitSha, treeSha }, worker: worker() }),
+      beforeWorkerVersionIds: worker().deployableWorkerVersionIds,
+      observedAt: "2026-08-11T06:00:00.000Z",
+    }), { observedAt: "2026-08-11T06:01:00.000Z", state: { phase: "provider_mutation_pending" } });
+
+    await expect(replacePrivateDodoArtifact(
+      root,
+      releaseId,
+      DODO_BOOTSTRAP_ARTIFACT_FILES.reservation,
+      replacement,
+      written.artifactSha256,
+      { fileSystemHooks: { beforeReplaceCommit() { throw new Error("commit_blocked"); } } },
+    )).rejects.toThrow("dodo_webhook_bootstrap_reservation_update_failed");
+    await expect(readPrivateDodoArtifact(
+      root,
+      written.evidenceRef,
+      DODO_BOOTSTRAP_ARTIFACT_FILES.reservation,
+      written.artifactSha256,
+    )).resolves.toMatchObject({ value: original });
+  });
+
+  it("serializes concurrent artifact CAS writers and never overwrites an interleaved replacement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-dodo-replace-race-"));
+    temporaryRoots.push(root);
+    const admission = assertDodoBootstrapCandidateAdmission({ evidence, repository: { clean: true, commitSha, treeSha }, worker: worker() });
+    const original = buildDodoBootstrapReservation({
+      admission,
+      beforeWorkerVersionIds: worker().deployableWorkerVersionIds,
+      observedAt: "2026-08-11T06:00:00.000Z",
+    });
+    const written = await writePrivateDodoArtifact(root, releaseId, DODO_BOOTSTRAP_ARTIFACT_FILES.reservation, original);
+    const first = updateDodoBootstrapReservation(original, {
+      observedAt: "2026-08-11T06:01:00.000Z",
+      state: { phase: "provider_mutation_pending" },
+    });
+    const second = updateDodoBootstrapReservation(original, {
+      observedAt: "2026-08-11T06:02:00.000Z",
+      state: { phase: "provider_registered", providerWebhookFingerprintSha256: "a".repeat(64) },
+    });
+    const raced = await Promise.allSettled([
+      replacePrivateDodoArtifact(root, releaseId, DODO_BOOTSTRAP_ARTIFACT_FILES.reservation, first, written.artifactSha256),
+      replacePrivateDodoArtifact(root, releaseId, DODO_BOOTSTRAP_ARTIFACT_FILES.reservation, second, written.artifactSha256),
+    ]);
+    expect(raced.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(raced.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const rejectedRace = raced.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(rejectedRace?.reason).toBeInstanceOf(Error);
+    expect((rejectedRace?.reason as Error).message).toBe("dodo_webhook_bootstrap_artifact_cas_mismatch");
+
+    const interleaved = updateDodoBootstrapReservation(first, {
+      observedAt: "2026-08-11T06:03:00.000Z",
+      state: { phase: "provider_registered", providerWebhookFingerprintSha256: "b".repeat(64) },
+    });
+    const winner = raced.find((result) => result.status === "fulfilled") as PromiseFulfilledResult<{ artifactSha256: string }>;
+    const current = await readPrivateDodoArtifact(root, written.evidenceRef, DODO_BOOTSTRAP_ARTIFACT_FILES.reservation, winner.value.artifactSha256);
+    await expect(replacePrivateDodoArtifact(
+      root,
+      releaseId,
+      DODO_BOOTSTRAP_ARTIFACT_FILES.reservation,
+      interleaved,
+      current.artifactSha256,
+      {
+        fileSystemHooks: {
+          async beforeReplaceCommit({ path }) {
+            await rm(path);
+            await writeFile(path, JSON.stringify(original), { mode: 0o600 });
+          },
+        },
+      },
+    )).rejects.toThrow("dodo_webhook_bootstrap_artifact_cas_mismatch");
+    await expect(readPrivateDodoArtifact(root, written.evidenceRef, DODO_BOOTSTRAP_ARTIFACT_FILES.reservation))
+      .resolves.toMatchObject({ value: original });
   });
 
   it("admits exactly one concurrent resume and recovers an expired claim with evidence", async () => {

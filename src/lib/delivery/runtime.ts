@@ -59,6 +59,12 @@ export type DeliveryJobClaim = {
   version: number;
 };
 
+export type TelegramDeliveryAuthority = {
+  credentialId: string;
+  integrationGeneration: number;
+  integrationId: string;
+};
+
 export type DeliveryJobTerminalStatus = {
   attempts: number;
   errorCode: string | null;
@@ -989,6 +995,7 @@ export async function claimDeliveryProviderAttempt(input: {
   env: AppBindings;
   now: Date;
   requestId: string;
+  telegramAuthority?: TelegramDeliveryAuthority;
 }): Promise<DeliveryJobClaim | null> {
   assertIdentifier(input.claim.id, "delivery_job_id_invalid");
   assertIdentifier(input.claim.shopId, "shop_id_invalid");
@@ -1001,6 +1008,25 @@ export async function claimDeliveryProviderAttempt(input: {
     WHERE id = ? AND shop_id = ? AND queue_kind = ?
       AND status = 'processing' AND lease_token = ?
       AND version = ? AND last_safe_error_code IS NULL
+      AND (
+        ? IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM telegram_integrations
+          INNER JOIN telegram_credentials
+            ON telegram_credentials.id = telegram_integrations.active_credential_id
+            AND telegram_credentials.integration_id = telegram_integrations.id
+            AND telegram_credentials.shop_id = telegram_integrations.shop_id
+            AND telegram_credentials.status = 'active'
+          WHERE telegram_integrations.id = ?
+            AND telegram_integrations.shop_id = delivery_jobs.shop_id
+            AND telegram_integrations.channel_connection_id = delivery_jobs.connection_id
+            AND telegram_integrations.active_credential_id = ?
+            AND telegram_integrations.integration_generation = ?
+            AND telegram_integrations.generation_state = 'active'
+            AND telegram_integrations.status IN ('active', 'degraded')
+        )
+      )
   `).bind(
     nowIso,
     input.claim.id,
@@ -1008,6 +1034,10 @@ export async function claimDeliveryProviderAttempt(input: {
     input.claim.queueKind,
     input.claim.leaseToken,
     input.claim.version,
+    input.telegramAuthority === undefined ? null : input.telegramAuthority.integrationId,
+    input.telegramAuthority?.integrationId ?? null,
+    input.telegramAuthority?.credentialId ?? null,
+    input.telegramAuthority?.integrationGeneration ?? null,
   ).run();
   if (changes(marked) !== 1) return null;
 

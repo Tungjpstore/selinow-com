@@ -445,12 +445,13 @@ export default {
             env: bindings,
             job: claim,
             now,
-            beforeProviderAttempt: async () => {
+            beforeProviderAttempt: async (telegramAuthority) => {
               const marked = await claimDeliveryProviderAttempt({
                 claim,
                 env: bindings,
                 now,
                 requestId: envelope.requestId,
+                telegramAuthority,
               });
               if (marked === null) throw new Error("delivery_provider_attempt_not_claimed");
               settlementClaim = marked;

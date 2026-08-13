@@ -22,6 +22,8 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "channel_provider_verification_evidence",
     "customer_notes",
     "auth_request_admissions",
+    "telegram_actions",
+    "telegram_action_history",
     "order_access_recovery_tokens",
     "order_messages",
     "order_notes",
@@ -106,6 +108,8 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "idx_subscription_events_shop_created",
     "idx_subscription_events_subscription",
     "idx_telegram_integrations_shop_generation",
+    "idx_telegram_actions_generation",
+    "idx_telegram_action_history_generation",
     "idx_telegram_mini_app_sessions_expiry",
     "idx_telegram_mini_app_sessions_integration_launch",
     "idx_telegram_mini_app_sessions_shop_status",
@@ -216,12 +220,16 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "telegram_credentials_legacy_generation_busy_guard",
     "telegram_integrations_generation_switch_required",
     "telegram_integrations_generation_transition_guard",
+    "telegram_integrations_delivery_generation_busy_guard",
+    "telegram_integrations_archive_actions_on_generation_change",
     "telegram_integrations_legacy_generation_fence",
     "telegram_mini_app_sessions_identity_immutable",
     "telegram_mini_app_sessions_scope_insert_guard",
     "telegram_updates_generation_claim_guard",
     "telegram_updates_generation_insert_guard",
     "telegram_updates_legacy_generation_attribute",
+    "telegram_actions_generation_insert_guard",
+    "telegram_actions_legacy_generation_attribute",
     "usage_events_no_delete",
     "usage_events_no_update",
   ]),
@@ -270,6 +278,8 @@ export const REQUIRED_POST_MIGRATION_COLUMNS = Object.freeze({
   ]),
   subscription_events: Object.freeze(["id", "provider_event_id", "shop_id", "source_kind", "to_state"]),
   telegram_integrations: Object.freeze(["generation_state", "integration_generation"]),
+  telegram_actions: Object.freeze(["integration_generation"]),
+  telegram_action_history: Object.freeze(["integration_generation"]),
   telegram_updates: Object.freeze(["credential_id", "integration_generation"]),
   usage_counters: Object.freeze(["period_kind"]),
 });
@@ -533,6 +543,23 @@ SELECT COUNT(*) AS mismatch_count FROM (
       AND (integration.generation_state != 'active'
         OR integration.integration_generation != update_row.integration_generation
         OR integration.active_credential_id IS NOT update_row.credential_id))
+  UNION ALL
+  SELECT action_row.id
+  FROM telegram_actions AS action_row
+  LEFT JOIN telegram_integrations AS integration
+    ON integration.id = action_row.integration_id
+    AND integration.shop_id = action_row.shop_id
+  WHERE action_row.integration_generation <= 0
+    OR integration.id IS NULL
+  UNION ALL
+  SELECT history.id
+  FROM telegram_action_history AS history
+  LEFT JOIN telegram_integrations AS integration
+    ON integration.id = history.integration_id
+    AND integration.shop_id = history.shop_id
+  WHERE history.integration_generation <= 0
+    OR integration.id IS NULL
+    OR history.integration_generation > integration.integration_generation
   ) AS telegram_ledgers
 );
 `;

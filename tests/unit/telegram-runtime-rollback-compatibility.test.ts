@@ -4,10 +4,10 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-const MIGRATION = "0096_telegram_runtime_rollback_compatibility.sql";
+const MIGRATION = "0097_telegram_action_generation_and_delivery_interlock.sql";
 const NOW = "2026-08-13T00:00:00.000Z";
 
-function applyThrough0096(database: DatabaseSync): void {
+function applyThrough0097(database: DatabaseSync): void {
   for (const filename of readdirSync(join(process.cwd(), "migrations"))
     .filter((name) => /^\d{4}_.+\.sql$/u.test(name) && name <= MIGRATION)
     .sort()) {
@@ -66,6 +66,14 @@ function oldRuntimeInsert(database: DatabaseSync, id: string, updateId: number, 
   `).run(id, updateId, `hash-${String(updateId)}`, status, NOW, NOW);
 }
 
+function oldRuntimeAction(database: DatabaseSync, id: string, updateId: number): void {
+  database.prepare(`
+    INSERT INTO telegram_actions (
+      id, shop_id, integration_id, update_id, action_kind, result_reference, created_at
+    ) VALUES (?, 'shop-tg-rollback', 'integration-tg-rollback', ?, 'cart_quote:v1', ?, ?)
+  `).run(id, updateId, `reference-${String(updateId)}`, NOW);
+}
+
 function oldRuntimeRotate(database: DatabaseSync): void {
   database.exec(`
     BEGIN IMMEDIATE;
@@ -105,7 +113,7 @@ describe("Telegram pre-0095 runtime rollback compatibility", () => {
     const database = new DatabaseSync(":memory:");
     databases.push(database);
     database.exec("PRAGMA foreign_keys = ON");
-    applyThrough0096(database);
+    applyThrough0097(database);
     seed(database);
     return database;
   }
@@ -118,6 +126,47 @@ describe("Telegram pre-0095 runtime rollback compatibility", () => {
       SELECT credential_id AS credentialId, integration_generation AS generation, status
       FROM telegram_updates WHERE id = 'update-old-runtime'
     `).get()).toEqual({ credentialId: "credential-tg-rollback-1", generation: 2, status: "processing" });
+  });
+
+  it("attributes an old-runtime action insert to the active generation and permits the update ID after rotation", () => {
+    const database = setup();
+    oldRuntimeAction(database, "action-old-runtime", 101);
+
+    expect(database.prepare(`
+      SELECT integration_generation AS generation
+      FROM telegram_actions WHERE id = 'action-old-runtime'
+    `).get()).toEqual({ generation: 2 });
+
+    database.exec(`
+      UPDATE telegram_integrations
+      SET active_credential_id = 'credential-tg-rollback-2', updated_at = '${NOW}'
+      WHERE id = 'integration-tg-rollback' AND shop_id = 'shop-tg-rollback';
+      UPDATE telegram_credentials SET status = 'revoked', revoked_at = '${NOW}'
+      WHERE id = 'credential-tg-rollback-1';
+      UPDATE telegram_credentials SET status = 'active', activated_at = '${NOW}'
+      WHERE id = 'credential-tg-rollback-2';
+    `);
+    oldRuntimeAction(database, "action-new-generation", 101);
+
+    expect(database.prepare(`
+      SELECT integration_generation AS generation
+      FROM telegram_actions WHERE id = 'action-new-generation'
+    `).get()).toEqual({ generation: 3 });
+    // The legacy query has no generation predicate. The rotation trigger
+    // archives the old receipt, leaving only the current-generation action in
+    // telegram_actions; old Worker reads therefore cannot replay old-bot data.
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM telegram_actions
+      WHERE integration_id = 'integration-tg-rollback' AND update_id = 101
+    `).get()).toEqual({ count: 1 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM telegram_action_history
+      WHERE integration_id = 'integration-tg-rollback' AND update_id = 101
+    `).get()).toEqual({ count: 1 });
+    expect(database.prepare(`
+      SELECT integration_generation AS generation
+      FROM telegram_actions WHERE id = 'action-new-generation'
+    `).get()).toEqual({ generation: 3 });
   });
 
   it("auto-fences an idle old-runtime credential switch and invalidates old-bot recipients", () => {

@@ -150,13 +150,21 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "idx_auth_request_admissions_expiry",
   "idx_auth_request_admissions_subject_window",
   "telegram_updates",
+  "telegram_actions",
+  "telegram_action_history",
   "idx_telegram_integrations_shop_generation",
+  "idx_telegram_actions_generation",
+  "idx_telegram_action_history_generation",
   "idx_telegram_updates_generation_processing",
   "idx_telegram_updates_shop_received",
   "idx_telegram_updates_status",
   "outbox_jobs_quarantine_legacy_order_paid_insert",
   "telegram_integrations_generation_switch_required",
   "telegram_integrations_generation_transition_guard",
+  "telegram_integrations_delivery_generation_busy_guard",
+  "telegram_integrations_archive_actions_on_generation_change",
+  "telegram_actions_generation_insert_guard",
+  "telegram_actions_legacy_generation_attribute",
   "telegram_updates_generation_claim_guard",
   "telegram_updates_generation_insert_guard",
 ]);
@@ -302,6 +310,21 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       telegram_updates: "4ce398c15b026424471d6d699e5f8cf8e04c5029c3221f53653f0717e48ae62f",
       telegram_updates_generation_insert_guard: "6178cbde5fd9e714d6325f9a24461331ae0ce9aacbfdf084a4f105221ce8797e",
       telegram_updates_legacy_generation_attribute: "7283ef2b3b6dda1692a2fddbe16cb8960dbd8babfc07a06cbee22e01cf57716d",
+    }),
+  }),
+  "0097_telegram_action_generation_and_delivery_interlock.sql": Object.freeze({
+    columns: Object.freeze({
+      "telegram_actions.integration_generation": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+    }),
+    objects: Object.freeze({
+      idx_telegram_actions_generation: "d6960dedcc5ffcb23b88729065a272d8ae96f4053f675d08c69d63a794d8d455",
+      idx_telegram_action_history_generation: "b6925af5d83920175893f2d79c7681f8984ba0ce288be3e6279c05bcfdfe170f",
+      telegram_actions: "b038d4d99ea3b3e31f9d4765374c59f45db9eec272c6bf9d8639a25802299faf",
+      telegram_action_history: "94ec8b95a332a5a76b430c8a0981b660ecaa99a288303c9c66028a4ae1fecfd8",
+      telegram_actions_generation_insert_guard: "83580b1d23a9ee5add45b43b655d7b221d20ad95fa0b7462c262507c661b18f0",
+      telegram_actions_legacy_generation_attribute: "4cb4075100db19dc6d2e55dd69e95a97391465e296d209f3543d34deede3fc15",
+      telegram_integrations_delivery_generation_busy_guard: "e36a4c112a73f940b10cde02128dfc58763105a99d4a4e91051cce6dd5103030",
+      telegram_integrations_archive_actions_on_generation_change: "7d6c49494aa63ebf9aa37d84dcd8baaf87fca335b42a246f03d7589cd8e500a2",
     }),
   }),
 });
@@ -2120,7 +2143,22 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
           AND (integration.generation_state != 'active'
             OR integration.integration_generation != update_row.integration_generation
             OR integration.active_credential_id IS NOT update_row.credential_id))
-      ) AS integrity_0095_telegram_update_generation;`;
+      ) AS integrity_0095_telegram_update_generation,
+    (SELECT COUNT(*) FROM telegram_actions AS action_row
+      LEFT JOIN telegram_integrations AS integration
+        ON integration.id = action_row.integration_id
+        AND integration.shop_id = action_row.shop_id
+      WHERE action_row.integration_generation <= 0
+        OR integration.id IS NULL
+      ) AS integrity_0097_telegram_action_generation,
+    (SELECT COUNT(*) FROM telegram_action_history AS history
+      LEFT JOIN telegram_integrations AS integration
+        ON integration.id = history.integration_id
+        AND integration.shop_id = history.shop_id
+      WHERE history.integration_generation <= 0
+        OR integration.id IS NULL
+        OR history.integration_generation > integration.integration_generation
+      ) AS integrity_0097_telegram_action_history;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {
@@ -2141,7 +2179,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_request_admissions", "order_access_recovery_tokens", "payment_credentials", "payment_integrations", "telegram_updates"].includes(row?.name)) expectedType = "table";
+    if (["auth_request_admissions", "order_access_recovery_tokens", "payment_credentials", "payment_integrations", "telegram_actions", "telegram_action_history", "telegram_updates"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
@@ -2186,6 +2224,8 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0095_legacy_order_paid_outbox",
     "integrity_0095_telegram_generation_state",
     "integrity_0095_telegram_update_generation",
+    "integrity_0097_telegram_action_generation",
+    "integrity_0097_telegram_action_history",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

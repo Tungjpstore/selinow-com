@@ -53,7 +53,9 @@ type ConnectionContextRow = {
   channelStatus: string | null;
   connectionStatus: string;
   hasOutboundGrant: number;
+  generationState: string | null;
   integrationId: string | null;
+  integrationGeneration: number | null;
   integrationStatus: string | null;
   providerCode: string;
 };
@@ -212,6 +214,8 @@ async function loadConnectionContext(
       telegram_integrations.id AS integrationId,
       telegram_integrations.status AS integrationStatus,
       telegram_integrations.active_credential_id AS activeCredentialId,
+      telegram_integrations.integration_generation AS integrationGeneration,
+      telegram_integrations.generation_state AS generationState,
       EXISTS (
         SELECT 1 FROM channel_connection_grants
         WHERE channel_connection_grants.shop_id = channel_connections.shop_id
@@ -248,6 +252,9 @@ function validateConnectionContext(row: ConnectionContextRow | null): TelegramDe
   if (
     row.integrationId === null
     || row.activeCredentialId === null
+    || row.integrationGeneration === null
+    || row.integrationGeneration <= 0
+    || row.generationState !== "active"
     || !new Set(["active", "degraded"]).has(row.integrationStatus ?? "")
   ) {
     return failed("telegram_delivery_integration_unavailable");
@@ -309,7 +316,7 @@ async function loadRecipient(
 }
 
 export async function deliverTelegramJob(input: {
-  beforeProviderAttempt?: () => Promise<void>;
+  beforeProviderAttempt?: (authority: { credentialId: string; integrationGeneration: number; integrationId: string }) => Promise<void>;
   env: AppBindings;
   fetcher?: typeof fetch;
   job: TelegramDeliveryJobReference;
@@ -337,6 +344,7 @@ export async function deliverTelegramJob(input: {
     || connectionContext === null
     || connectionContext.integrationId === null
     || connectionContext.activeCredentialId === null
+    || connectionContext.integrationGeneration === null
   ) {
     return failed("telegram_delivery_state_invalid");
   }
@@ -393,7 +401,13 @@ export async function deliverTelegramJob(input: {
       shopDefaultLocale: jobContext.shopDefaultLocale,
     });
     const notification = telegramPaidOrderNotification(locale, jobContext.orderNumber, jobContext.orderPublicId);
-    if (input.beforeProviderAttempt !== undefined) await input.beforeProviderAttempt();
+    if (input.beforeProviderAttempt !== undefined) {
+      await input.beforeProviderAttempt({
+        credentialId: connectionContext.activeCredentialId,
+        integrationGeneration: connectionContext.integrationGeneration,
+        integrationId: connectionContext.integrationId,
+      });
+    }
     await new TelegramClient(botToken, input.fetcher).sendMessage({
       chatId,
       keyboard: notification.keyboard,

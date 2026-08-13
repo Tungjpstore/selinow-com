@@ -47,7 +47,7 @@ query and must not be treated as current remote proof.
 fresh protected production backup, run the isolated restore drill against the
 exact reviewed tree, query the live ledger, verify integrity/FK/preflight, and
 bind all reports to one release manifest. The first irreversible sink is the
-forward-only application of `0053` through `0096` via the guarded migration
+forward-only application of `0053` through `0097` via the guarded migration
 executor.
 
 ## Production Worker names and secret admission

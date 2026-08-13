@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -23,6 +24,53 @@ const WEBHOOK_EVENT_FIELDS = Object.freeze(["events", "event_types", "eventTypes
 const UNUSABLE_WEBHOOK_STATUSES = new Set(["deleted", "disabled", "error", "failed", "inactive", "paused"]);
 const REGISTRATION_LOCK_TTL_MS = 30_000;
 const REGISTRATION_LOCK_ATTEMPTS = 500;
+
+function sameInode(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function readRegistrationLease(path) {
+  const before = await lstat(path);
+  if (!before.isFile() || before.isSymbolicLink() || (before.mode & 0o077) !== 0) {
+    throw new Error("dodo_webhook_registration_lock_invalid");
+  }
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await handle.stat();
+    if (!opened.isFile() || !sameInode(before, opened)) throw new Error("dodo_webhook_registration_lock_changed");
+    const bytes = await handle.readFile();
+    const after = await lstat(path);
+    if (!sameInode(after, opened) || after.isSymbolicLink()) throw new Error("dodo_webhook_registration_lock_changed");
+    return { bytes, stat: opened };
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function removeRegistrationLeaseIfOwned(path, expected, hooks = {}) {
+  let current;
+  try { current = await lstat(path); } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!current.isFile() || current.isSymbolicLink() || !sameInode(current, expected)) return false;
+  await hooks.beforeLeaseUnlink?.({ path });
+  // Recheck after any interleaving point. If ownership changed, leave the
+  // replacement alone and let its owner or expiry recovery handle it.
+  try { current = await lstat(path); } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!current.isFile() || current.isSymbolicLink() || !sameInode(current, expected)) return false;
+  // `unlink` only removes one directory entry. It deliberately never performs
+  // recursive cleanup for a lock path that may have been raced by another run.
+  try { await unlink(path); } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  return true;
+}
 
 function object(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
@@ -101,19 +149,42 @@ async function withRegistrationLease(input, operation) {
       mode: "dodo_webhook_registration_lease",
       schemaVersion: 1,
     };
+    let owner;
     try {
-      await writeFile(leasePath, `${JSON.stringify(lease)}\n`, { flag: "wx", mode: 0o600 });
-      try { return await operation(); } finally { await rm(leasePath, { force: true }); }
+      const handle = await open(leasePath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try {
+        owner = await handle.stat();
+        await handle.writeFile(`${JSON.stringify(lease)}\n`);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      try { return await operation(); } finally { await removeRegistrationLeaseIfOwned(leasePath, owner, input.fileSystemHooks); }
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
-      let stale = true;
+      let existing;
       try {
-        const current = JSON.parse(await readFile(leasePath, "utf8"));
-        stale = Date.parse(current.expiresAt ?? "") <= Date.now();
-      } catch {
-        // A missing or malformed lease is treated as abandoned.
+        existing = await readRegistrationLease(leasePath);
+      } catch (readError) {
+        if (readError instanceof Error && readError.message.startsWith("dodo_webhook_registration_lock_")) throw readError;
+        // A concurrent release may have won between O_EXCL and the read.
+        await delay(2);
+        continue;
       }
-      if (stale) await rm(leasePath, { force: true });
+      let current = {};
+      try { current = object(JSON.parse(existing.bytes.toString("utf8"))); } catch {
+        // A malformed private lease is abandoned, but only the observed inode
+        // may be removed. A symlink or replaced path is never reclaimed.
+      }
+      const expiresAt = Date.parse(current.expiresAt ?? "");
+      const valid = current.mode === "dodo_webhook_registration_lease"
+        && current.schemaVersion === 1 && typeof current.id === "string"
+        && Number.isFinite(Date.parse(current.acquiredAt ?? "")) && Number.isFinite(expiresAt)
+        && expiresAt > Date.parse(current.acquiredAt);
+      // Invalid locks are only reclaimed after their file has been proven to be
+      // a private regular file. This prevents a malformed stale file wedging a
+      // production registration forever without following symlinks.
+      if (!valid || expiresAt <= Date.now()) await removeRegistrationLeaseIfOwned(leasePath, existing.stat, input.fileSystemHooks);
       else await delay(2);
     }
   }
@@ -134,7 +205,7 @@ export async function ensureDodoWebhook(input) {
   }
   const apiBaseUrl = input.apiBaseUrl.replace(/\/+$/u, "");
   const defaultLockPath = join(tmpdir(), `selinow-dodo-webhook-${createHash("sha256").update(`${apiBaseUrl}\n${endpoint.toString()}`).digest("hex")}.lock`);
-  return withRegistrationLease({ lockPath: input.lockPath ?? defaultLockPath }, async () => {
+  return withRegistrationLease({ fileSystemHooks: input.fileSystemHooks, lockPath: input.lockPath ?? defaultLockPath }, async () => {
     const listed = await requestJson({ apiBaseUrl, apiKey: input.apiKey, fetcher: input.fetcher, method: "GET", path: "/webhooks" });
   const matching = webhookRows(listed).filter((row) => webhookUrl(row) === endpoint.toString());
   if (matching.length > 1) throw new Error("dodo_webhook_endpoint_duplicate");

@@ -77,7 +77,7 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 - Backup evidence: report-v2, non-empty artifact, checksum, bookmark, freshness
   <= 60 minutes, exact account/D1 identity
 - Restore drill: isolated disposable target from the exact reviewed tree and
-  complete source `0001`-`0096` ledger; integrity/FK/schema/count checks required;
+  complete source `0001`-`0097` ledger; integrity/FK/schema/count checks required;
   every non-local drill requires `--reviewed-commit`
 - Pre-`0066` OAuth pending-row policy: revoke/expire or explicitly resolve
 - Dodo `0070`-`0081`, activation timestamp migration `0080`, and non-payment

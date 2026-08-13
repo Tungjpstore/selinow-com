@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { constants } from "node:fs";
-import { link, lstat, mkdir, open, readdir, realpath, rm, rmdir, unlink } from "node:fs/promises";
+import { link, lstat, mkdir, open, readdir, realpath, rename, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
@@ -161,6 +161,9 @@ async function safeWriteExclusive(root, path, bytes, mode = 0o600, hooks = {}) {
   let opened = null;
   try {
     await hooks.beforeOpen?.({ path });
+    // Recheck after testable/pre-open work: no descriptor has been opened yet,
+    // so an ancestor replacement cannot make this write escape the repository.
+    await safeCanonicalParent(root, path, true);
     handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
     opened = await handle.stat();
     if (!opened.isFile() || (opened.mode & 0o077) !== 0) throw new Error("dodo_webhook_bootstrap_artifact_permissions_invalid");
@@ -801,7 +804,7 @@ export async function writePrivateDodoArtifact(root, releaseId, filename, value,
   return { artifactSha256: fingerprintBytes(bytes), evidenceRef: ref };
 }
 
-export async function replacePrivateDodoArtifact(root, releaseId, filename, value, expectedSha256) {
+async function replacePrivateDodoArtifactUnderLease(root, releaseId, filename, value, expectedSha256, options = {}) {
   const ref = artifactRef(releaseId, filename);
   canonicalArtifactIdentity(ref, filename);
   const path = resolve(root, ref);
@@ -809,31 +812,44 @@ export async function replacePrivateDodoArtifact(root, releaseId, filename, valu
   const current = await safeReadPrivateFile(root, path);
   if (fingerprintBytes(current.bytes) !== expectedSha256) throw new Error("dodo_webhook_bootstrap_artifact_cas_mismatch");
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
-  let handle;
+  const replacementPath = resolve(dirname(path), `.${filename}.replace-${randomUUID()}`);
+  let replacement;
   try {
-    handle = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
-    const opened = await handle.stat();
-    if (!sameInode(opened, current.stat) || !opened.isFile() || (opened.mode & 0o077) !== 0) {
+    replacement = await safeWriteExclusive(root, replacementPath, bytes, 0o600, options.fileSystemHooks);
+    await options.fileSystemHooks?.beforeReplaceCommit?.({ path, replacementPath });
+    await safeCanonicalParent(root, path, false);
+    await safeCanonicalParent(root, replacementPath, false);
+    const [beforeReplace, replacementEntry] = await Promise.all([lstat(path), lstat(replacementPath)]);
+    if (beforeReplace.isSymbolicLink() || !sameInode(beforeReplace, current.stat)
+      || replacementEntry.isSymbolicLink() || !sameInode(replacementEntry, replacement)) {
       throw new Error("dodo_webhook_bootstrap_artifact_cas_mismatch");
     }
+    await rename(replacementPath, path);
     await safeCanonicalParent(root, path, false);
-    const beforeWrite = await lstat(path);
-    if (beforeWrite.isSymbolicLink() || !sameInode(beforeWrite, opened)) {
+    const afterReplace = await lstat(path);
+    if (afterReplace.isSymbolicLink() || !sameInode(afterReplace, replacement)) {
       throw new Error("dodo_webhook_bootstrap_artifact_cas_mismatch");
     }
-    await handle.write(bytes, 0, bytes.byteLength, 0);
-    await handle.truncate(bytes.byteLength);
-    await handle.sync();
-    await safeCanonicalParent(root, path, false);
-    const afterWrite = await lstat(path);
-    if (afterWrite.isSymbolicLink() || !sameInode(afterWrite, opened)) throw new Error("dodo_webhook_bootstrap_artifact_cas_mismatch");
   } catch (error) {
     if (error instanceof Error && error.message === "dodo_webhook_bootstrap_artifact_cas_mismatch") throw error;
     throw new Error("dodo_webhook_bootstrap_reservation_update_failed", { cause: error });
   } finally {
-    await handle?.close().catch(() => undefined);
+    await cleanupExclusiveFile(root, replacementPath, replacement);
   }
   return { artifactSha256: fingerprintBytes(bytes), evidenceRef: ref };
+}
+
+export async function replacePrivateDodoArtifact(root, releaseId, filename, value, expectedSha256, options = {}) {
+  // All legitimate writers share this lease. POSIX offers no conditional
+  // rename primitive, so serializing our CAS writers prevents a second
+  // bootstrap process from replacing the target between inode check and
+  // rename; an untrusted filesystem swap still fails before commit.
+  return withDodoBootstrapClaimMutation(
+    root,
+    releaseId,
+    () => replacePrivateDodoArtifactUnderLease(root, releaseId, filename, value, expectedSha256, options),
+    options.fileSystemHooks,
+  );
 }
 
 async function removeCanonicalClaimIfOwnedUnderLock(root, path, ownerPath) {

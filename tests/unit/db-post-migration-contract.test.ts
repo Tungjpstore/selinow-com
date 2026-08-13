@@ -73,7 +73,7 @@ describe("remote post-migration database contract", () => {
     ]))).toThrow("post_migration_legacy_object_present:auth_request_admissions_legacy_0094");
   });
 
-  it("pins every schema contract introduced through migration 0096", () => {
+  it("pins every schema contract introduced through migration 0097", () => {
     const requiredObjects = [
       ["index", "idx_plan_prices_provider_ref"],
       ["trigger", "plan_prices_published_reference_guard"],
@@ -110,6 +110,7 @@ describe("remote post-migration database contract", () => {
       ["trigger", "shops_turnstile_canonical_insert_guard"],
       ["trigger", "shops_turnstile_canonical_update_guard"],
       ["table", "telegram_updates"],
+      ["index", "idx_telegram_actions_generation"],
       ["index", "idx_telegram_integrations_shop_generation"],
       ["index", "idx_telegram_updates_generation_processing"],
       ["index", "idx_telegram_updates_shop_received"],
@@ -118,7 +119,10 @@ describe("remote post-migration database contract", () => {
       ["trigger", "telegram_credentials_legacy_generation_busy_guard"],
       ["trigger", "telegram_integrations_generation_switch_required"],
       ["trigger", "telegram_integrations_generation_transition_guard"],
+      ["trigger", "telegram_integrations_delivery_generation_busy_guard"],
       ["trigger", "telegram_integrations_legacy_generation_fence"],
+      ["trigger", "telegram_actions_generation_insert_guard"],
+      ["trigger", "telegram_actions_legacy_generation_attribute"],
       ["trigger", "telegram_updates_generation_claim_guard"],
       ["trigger", "telegram_updates_generation_insert_guard"],
       ["trigger", "telegram_updates_legacy_generation_attribute"],
@@ -150,6 +154,7 @@ describe("remote post-migration database contract", () => {
       ["order_access_recovery_tokens", "token_hash"],
       ["telegram_integrations", "generation_state"],
       ["telegram_integrations", "integration_generation"],
+      ["telegram_actions", "integration_generation"],
       ["telegram_updates", "credential_id"],
       ["telegram_updates", "integration_generation"],
     ] as const;

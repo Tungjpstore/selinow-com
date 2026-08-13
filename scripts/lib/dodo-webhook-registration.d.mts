@@ -5,6 +5,9 @@ export function ensureDodoWebhook(input: {
   apiKey: string;
   endpointUrl: string;
   fetcher: typeof fetch;
+  /** Testable local serialization path; production defaults to a namespaced temp lease. */
+  lockPath?: string;
+  fileSystemHooks?: { beforeLeaseUnlink?: (input: { path: string }) => Promise<void> | void };
 }): Promise<{
   created: boolean;
   endpointFingerprintSha256: string;

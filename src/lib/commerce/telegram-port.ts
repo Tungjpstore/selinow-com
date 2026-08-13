@@ -123,7 +123,29 @@ export type TelegramQuoteActionReference = {
 };
 
 async function findAction(env: AppBindings, shopId: string, integrationId: string, updateId: number, kind: string): Promise<TelegramAction | null> {
-  return await env.PLATFORM_DB.prepare("SELECT result_reference AS resultReference FROM telegram_actions WHERE shop_id = ? AND integration_id = ? AND update_id = ? AND action_kind = ? LIMIT 1").bind(shopId, integrationId, updateId, kind).first<TelegramAction>();
+  // Update IDs may be reused after a credential rotation. Only the active
+  // generation can own an idempotency receipt for a live commerce request.
+  try {
+    return await env.PLATFORM_DB.prepare(`
+      SELECT telegram_actions.result_reference AS resultReference
+      FROM telegram_actions
+      INNER JOIN telegram_integrations
+        ON telegram_integrations.id = telegram_actions.integration_id
+        AND telegram_integrations.shop_id = telegram_actions.shop_id
+        AND telegram_integrations.integration_generation = telegram_actions.integration_generation
+        AND telegram_integrations.generation_state = 'active'
+        AND telegram_integrations.status IN ('active', 'degraded')
+      WHERE telegram_actions.shop_id = ?
+        AND telegram_actions.integration_id = ?
+        AND telegram_actions.update_id = ?
+        AND telegram_actions.action_kind = ?
+      LIMIT 1
+    `).bind(shopId, integrationId, updateId, kind).first<TelegramAction>();
+  } catch {
+    // During a rolling migration the old schema has no generation columns;
+    // preserve its tenant-bound replay behavior until 0097 is admitted.
+    return await env.PLATFORM_DB.prepare("SELECT result_reference AS resultReference FROM telegram_actions WHERE shop_id = ? AND integration_id = ? AND update_id = ? AND action_kind = ? LIMIT 1").bind(shopId, integrationId, updateId, kind).first<TelegramAction>();
+  }
 }
 
 /**
@@ -213,19 +235,7 @@ export async function persistTelegramQuoteAction(input: {
     subjectHash: input.identity.subjectHash,
   };
   const nowIso = new Date().toISOString();
-  await input.env.PLATFORM_DB.prepare(`
-    INSERT OR IGNORE INTO telegram_actions (
-      id, shop_id, integration_id, update_id, action_kind, result_reference, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    createId("tga"),
-    input.shop.id,
-    input.integrationId,
-    input.updateId,
-    TELEGRAM_QUOTE_ACTION_KIND,
-    JSON.stringify(proposed),
-    nowIso,
-  ).run();
+  await input.env.PLATFORM_DB.prepare("INSERT OR IGNORE INTO telegram_actions (id, shop_id, integration_id, update_id, action_kind, result_reference, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(createId("tga"), input.shop.id, input.integrationId, input.updateId, TELEGRAM_QUOTE_ACTION_KIND, JSON.stringify(proposed), nowIso).run();
   const stored = parseQuoteReference((await findAction(
     input.env,
     input.shop.id,

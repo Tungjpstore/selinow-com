@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDodoWebhook, fingerprintDodoWebhookReference } from "../../scripts/lib/dodo-webhook-registration.mjs";
 
@@ -16,6 +20,11 @@ const REQUIRED_EVENTS = [
   "subscription.renewed",
   "subscription.updated",
 ];
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { force: true, recursive: true })));
+});
 
 describe("Dodo webhook registration", () => {
   it("reuses an exact existing endpoint and retrieves its signing key", async () => {
@@ -42,6 +51,95 @@ describe("Dodo webhook registration", () => {
     expect(result.created).toBe(true);
     expect(fetcher.mock.calls[1]?.[1]).toMatchObject({ body: JSON.stringify({ url: ENDPOINT_URL }), method: "POST" });
     expect(result.providerWebhookFingerprintSha256).toBe(fingerprintDodoWebhookReference("provider_webhook", "wh_test_created"));
+  });
+
+  it("serializes concurrent list-create registrations into exactly one provider POST", async () => {
+    const lockDirectory = await mkdtemp(join(tmpdir(), "selinow-dodo-registration-lock-"));
+    temporaryDirectories.push(lockDirectory);
+    const lockPath = join(lockDirectory, "registration.lock");
+    const providerWebhooks: Array<{ id: string; url: string }> = [];
+    let postCount = 0;
+    const fetcher = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      const path = new URL(requestUrl).pathname;
+      if (path === "/webhooks" && init?.method === "GET") return Promise.resolve(Response.json({ items: providerWebhooks }));
+      if (path === "/webhooks" && init?.method === "POST") {
+        postCount += 1;
+        const created = { id: "wh_test_race", url: ENDPOINT_URL };
+        providerWebhooks.push(created);
+        return Promise.resolve(Response.json(created));
+      }
+      if (path === "/webhooks/wh_test_race/secret") return Promise.resolve(Response.json({ secret: "whsec_dGVzdC13ZWJob29rLXNlY3JldA==" }));
+      throw new Error(`unexpected ${path}`);
+    });
+
+    const input = { apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher: fetcher as typeof fetch, lockPath };
+    const results = await Promise.all([ensureDodoWebhook(input), ensureDodoWebhook(input)]);
+
+    expect(postCount).toBe(1);
+    expect(results.filter((result) => result.created)).toHaveLength(1);
+    expect(results.filter((result) => !result.created)).toHaveLength(1);
+  });
+
+  it("reclaims a stale private lease but rejects a symlinked or group-readable one", async () => {
+    const lockDirectory = await mkdtemp(join(tmpdir(), "selinow-dodo-registration-stale-"));
+    const externalDirectory = await mkdtemp(join(tmpdir(), "selinow-dodo-registration-external-"));
+    temporaryDirectories.push(lockDirectory, externalDirectory);
+    const lockPath = join(lockDirectory, "registration.lock");
+    await writeFile(lockPath, `${JSON.stringify({
+      acquiredAt: "2026-08-11T06:00:00.000Z",
+      expiresAt: "2026-08-11T06:00:01.000Z",
+      id: "stale-owner",
+      mode: "dodo_webhook_registration_lease",
+      schemaVersion: 1,
+    })}\n`, { mode: 0o600 });
+    const staleFetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ items: [] }))
+      .mockResolvedValueOnce(Response.json({ id: "wh_test_stale", url: ENDPOINT_URL }))
+      .mockResolvedValueOnce(Response.json({ secret: "whsec_dGVzdC13ZWJob29rLXNlY3JldA==" }));
+    await expect(ensureDodoWebhook({ apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher: staleFetcher, lockPath }))
+      .resolves.toMatchObject({ created: true });
+
+    const externalLock = join(externalDirectory, "registration.lock");
+    await writeFile(externalLock, "{}\n", { mode: 0o600 });
+    await symlink(externalLock, lockPath);
+    await expect(ensureDodoWebhook({ apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher: staleFetcher, lockPath }))
+      .rejects.toThrow("dodo_webhook_registration_lock_invalid");
+    await rm(lockPath);
+    await writeFile(lockPath, "{}\n", { mode: 0o600 });
+    await chmod(lockPath, 0o644);
+    await expect(ensureDodoWebhook({ apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher: staleFetcher, lockPath }))
+      .rejects.toThrow("dodo_webhook_registration_lock_invalid");
+  });
+
+  it("does not unlink a replacement lease that wins immediately before stale cleanup", async () => {
+    const lockDirectory = await mkdtemp(join(tmpdir(), "selinow-dodo-registration-swap-"));
+    const externalDirectory = await mkdtemp(join(tmpdir(), "selinow-dodo-registration-swap-external-"));
+    temporaryDirectories.push(lockDirectory, externalDirectory);
+    const lockPath = join(lockDirectory, "registration.lock");
+    const externalLock = join(externalDirectory, "replacement.lock");
+    await writeFile(lockPath, `${JSON.stringify({
+      acquiredAt: "2026-08-11T06:00:00.000Z",
+      expiresAt: "2026-08-11T06:00:01.000Z",
+      id: "stale-owner",
+      mode: "dodo_webhook_registration_lease",
+      schemaVersion: 1,
+    })}\n`, { mode: 0o600 });
+    await writeFile(externalLock, "do-not-remove\n", { mode: 0o600 });
+    await expect(ensureDodoWebhook({
+      apiBaseUrl: API_BASE_URL,
+      apiKey: "test-api-key-value",
+      endpointUrl: ENDPOINT_URL,
+      fetcher: vi.fn(),
+      fileSystemHooks: {
+        async beforeLeaseUnlink() {
+          await rm(lockPath);
+          await symlink(externalLock, lockPath);
+        },
+      },
+      lockPath,
+    })).rejects.toThrow("dodo_webhook_registration_lock_invalid");
+    await expect(readFile(externalLock, "utf8")).resolves.toBe("do-not-remove\n");
   });
 
   it("reuses an explicitly usable endpoint when the provider declares its event contract", async () => {
