@@ -4,9 +4,13 @@ Last updated: 2026-08-13
 
 ## Current source of truth
 
-Staging continuation (2026-08-13): the reviewed candidate is commit
-`eaef2d2b7640cb791422cfbb507fbdfedd386f06`, tree
-`1feb23c5db5b7f7047c31e0245225a287a912284`. The retained release
+Staging continuation (2026-08-13): the reviewed runtime baseline before this
+documentation reconciliation is commit
+`555ef68dc60210800f02956ddb932a64601f34d5`, tree
+`d81fdf23ea8a4ea2177ed1cd63d179d353e92d19`. It includes an atomic Dodo
+bootstrap mutation-lease publication fix; focused Dodo bootstrap tests pass
+21/21. The release ceremony must recapture the clean post-documentation HEAD
+and tree as the final candidate. The retained release
 `stg_20260812T220654Z_2df45cf59367` applied
 `0095_telegram_generation_and_legacy_outbox_quarantine.sql` remains bound to
 the superseded `2df45cf` candidate; its Worker version
