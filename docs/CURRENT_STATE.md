@@ -1,6 +1,14 @@
 # Selinow Phase 5 Current State
 
-Last verified: 2026-08-04 (Asia/Tokyo)
+Last verified: 2026-08-13 (Asia/Tokyo)
+
+Current continuation state: source is contiguous through `0097`; retained
+staging database/deployment evidence is bound to the clean `0095` candidate,
+and production remains through `0052`. The `0096`-`0097` staging continuation
+has not run. Local staging admission tests and `deploy:staging:dry-run` pass, but
+fresh route/manifest observation fails closed without
+`CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`, and live staging ledger observation fails
+closed without `CLOUDFLARE_D1_API_TOKEN`. No remote mutation was performed.
 
 P5 status: `staging_execution_blocked`. Read-only commands were attempted, but
 no timestamped private report, checksum, or evidence reference was retained.
@@ -58,10 +66,10 @@ Maturity values are intentionally specific: `implemented`, `locally_verified`,
 | Dimension | Source | Local | Staging | Production | Commercial |
 | --- | --- | --- | --- | --- | --- |
 | Commit/tree identity | P4 implementation candidate `bff69f9d26a04b1318fd9862afa6eaffb8c003f4` | `locally_verified`; P4 records the immutable implementation commit and local restore evidence | `blocked`; execution must use a fresh private staging manifest generated from the final clean HEAD | `deployed` platform handoff at historical Worker `6ca9c890-ed04-44dc-ac32-44b36881f2dc`; current tree not proven deployed | `blocked` pending external acceptance |
-| Migration ledger | `0001`-`0080`, contiguous | full source chain exercised by local SQLite-backed tests and isolated restore | `blocked`; manifest captures a non-empty live ordered baseline, migration requires it before the sink and the complete ledger after the sink | `deployed` through `0052`; 28 pending (`0053`-`0080`) | `blocked` pending guarded migration admission |
+| Migration ledger | `0001`-`0097`, contiguous | full source chain exercised by local SQLite-backed tests and post-migration schema contracts | `deployed` through `0095`; `0096`-`0097` require a new guarded continuation | `deployed` through `0052`; `0053`-`0097` pending | `blocked` pending guarded migration/provider admission |
 | Worker version | Current source only | `locally_verified` build/dry-runs | `deployed` historical staging version; current tree not proven there | `deployed` platform-only handoff; current candidate not proven there | `blocked` |
 | Marketing | Phase 1 copy/routes exist in source; Website is current and Telegram is labeled upcoming | `locally_verified` by source/browser gates | `blocked` pending candidate deploy | `deployed` homepage only; current source copy not proven live | `blocked` until truthful claims and routes are deployed |
-| Pricing | Starter/Pro D1 catalog and Dodo fail-closed path | `locally_verified`; pending/invalid Dodo references suppress prices, purchase CTA and structured Offers | `blocked` pending `0070`-`0080` | `blocked`; production pricing is not a migrated commercial catalog | `blocked` pending migrated environment and provider setup |
+| Pricing | Starter/Pro D1 catalog and Dodo fail-closed path | `locally_verified`; pending/invalid Dodo references suppress prices, purchase CTA and structured Offers | `blocked` pending the guarded `0096`-`0097` continuation and provider UAT | `blocked`; production pricing is not a migrated commercial catalog | `blocked` pending migrated environment and provider setup |
 | Auth | Magic-link/session/CSRF controls | `locally_verified` | `deployed` platform baseline; current candidate pending | `deployed` platform login smoke only | `blocked` pending pilot evidence |
 | Website storefront | Shared catalog/cart/quote/checkout/order/fulfillment core | `locally_verified` with local browser and commerce tests | `blocked` pending full schema/candidate deploy | `blocked` for current full commerce candidate | `blocked` pending payment and fulfillment UAT |
 | PayOS | Seller-owned signed payment/reconciliation adapter | `implemented`, `locally_verified` | `blocked` pending controlled channel/UAT | `blocked`; no provider activation claimed | `blocked` |
@@ -70,7 +78,7 @@ Maturity values are intentionally specific: `implemented`, `locally_verified`,
 | Dodo billing | Scheduled subscription operations, response-loss-safe checkout, owner recovery, direct reconciliation and tenant-bound webhook completion | `implemented`, `locally_verified`; provider references remain pending | `blocked` pending migrations and Dodo test environment | `blocked`; no production IDs/secrets configured | `blocked` pending merchant verification and price/webhook setup |
 | Custom domain | Cloudflare for SaaS lifecycle in source | `locally_verified` | `deployed` lifecycle evidence exists | `blocked` pending exact hostname/Turnstile admission | `blocked` |
 | Legal/support | Seller storefront policy/abuse mechanics exist; platform surfaces absent | `blocked` pending owner/legal decisions | `blocked` | `blocked`; no placeholder copy may be published | `blocked` |
-| Analytics | Billing usage metering plus 12-milestone activation ledger, enum-only projections and rotating deterministic backfill | `locally_verified`; inventory readiness now requires active product/variant state and uses durable activation timestamps | `blocked` pending `0077`-`0080` admission | `blocked` | `blocked` pending retention ownership and pilot evidence |
+| Analytics | Billing usage metering plus 12-milestone activation ledger, enum-only projections and rotating deterministic backfill | `locally_verified`; inventory readiness now requires active product/variant state and uses durable activation timestamps | `blocked` pending the guarded `0096`-`0097` continuation | `blocked` | `blocked` pending retention ownership and pilot evidence |
 | Monitoring | Concrete threshold, window, role and stop contract | `locally_verified` by artifact contract; no configured remote alert is claimed | `blocked` pending named owners, dashboards, alerts and acknowledgements | `blocked` beyond platform handoff | `blocked` |
 | Seller activation | `/app` sellability, readiness blockers, onboarding inventory cleanup, and route-safe next actions | `locally_verified`; source/unit/auth-browser evidence only | `blocked` pending candidate admission and UAT | `blocked` | `blocked` pending pilot evidence |
 | Pilot evidence | Phase 4 scorecard, safe evidence allowlist and 18-scenario regression map | `not_started`; local behavior is mapped separately from pilot status | `blocked` pending controlled Website-first and provider UAT | `not_started` | `blocked` |

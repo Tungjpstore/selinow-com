@@ -754,6 +754,36 @@ describe("Cloudflare for SaaS platform configuration", () => {
         exactSharedZoneDomainInventory(),
       );
     }).toThrow("production_worker_route_contract_invalid");
+
+    const unexpectedConfig = productionWranglerConfig();
+    unexpectedConfig.env.production.routes.push({
+      pattern: "legacy.selinow.com/*",
+      zone_name: "selinow.com",
+    });
+    expect(() => {
+      validateProductionWorkerRouteInventory(
+        productionSpec(),
+        stagingSpec,
+        unexpectedConfig,
+        exactSharedZoneRouteInventory(),
+        exactSharedZoneDomainInventory(),
+      );
+    }).toThrow("production_worker_route_contract_invalid");
+
+    const ambiguousMarketingConfig = productionWranglerConfig();
+    ambiguousMarketingConfig.env.production.routes.push({
+      custom_domain: true,
+      pattern: "selinow.com",
+    });
+    expect(() => {
+      validateProductionWorkerRouteInventory(
+        productionSpec(),
+        stagingSpec,
+        ambiguousMarketingConfig,
+        exactSharedZoneRouteInventory(),
+        exactSharedZoneDomainInventory(),
+      );
+    }).toThrow("production_worker_route_contract_invalid");
   });
 
   it("fails closed on binding, trigger, SaaS mapping, fallback, or Turnstile drift", () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
@@ -470,5 +470,37 @@ describe("staging release admission", () => {
       releaseId: manifest.releaseId,
       treeSha: TREE_SHA,
     });
+    await expect(writeStagingReleaseManifest(manifest, root)).rejects.toThrow("staging_release_manifest_exists");
+  });
+
+  it("rejects symlinked manifest paths before opening or writing evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-staging-release-symlink-"));
+    roots.push(root);
+    const manifest = await buildStagingReleaseManifest({
+      continuationEvidence: CONTINUATION_EVIDENCE,
+      databaseTarget: DATABASE_TARGET,
+      migrationLedgerPrefix: MIGRATION_LEDGER_PREFIX,
+      migrationNames: MIGRATIONS,
+      now: NOW,
+      repositoryState: repositoryState(),
+    });
+    const target = join(root, "target");
+    await mkdir(target, { recursive: true });
+    await symlink(target, join(root, ".wrangler"));
+    await expect(writeStagingReleaseManifest(manifest, root)).rejects.toThrow("staging_release_manifest_symlink_invalid");
+
+    const cleanRoot = await mkdtemp(join(tmpdir(), "selinow-staging-release-file-symlink-"));
+    roots.push(cleanRoot);
+    const manifestPath = await writeStagingReleaseManifest(manifest, cleanRoot);
+    const replacement = join(cleanRoot, "replacement.json");
+    await rm(manifestPath);
+    await symlink(replacement, manifestPath);
+    await expect(assertStagingReleaseAdmission({
+      manifestPath: relative(cleanRoot, manifestPath),
+      migrationNames: MIGRATIONS,
+      now: NOW,
+      repositoryRoot: cleanRoot,
+      repositoryState: repositoryState(),
+    })).rejects.toThrow("staging_release_manifest_symlink_invalid");
   });
 });

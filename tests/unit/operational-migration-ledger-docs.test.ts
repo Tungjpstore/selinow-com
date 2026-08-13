@@ -54,6 +54,8 @@ describe("operational migration-ledger documentation", () => {
     expect(content["docs/RUNBOOKS.md"]).toContain("CLOUDFLARE_WORKER_DEPLOY_API_TOKEN");
     expect(content["docs/RUNBOOKS.md"]).toContain("restore:drill -- --env production --confirm-production --reviewed-commit");
     expect(content["docs/STAGING_MUTATION_REVIEW_PACKAGE.md"]).toContain("complete source `0001`-`0097` ledger");
+    expect(content["docs/STAGING_MUTATION_REVIEW_PACKAGE.md"]).toContain("retained staging database evidence: complete through `0095`");
+    expect(content["docs/STAGING_MUTATION_REVIEW_PACKAGE.md"]).toContain("`0096`-`0097` candidate baseline");
     expect(content["docs/PHASE_4_STAGING_ACCEPTANCE.md"]).toContain("`db:complete-release`");
     expect(content["docs/PRODUCTION_CONTINUATION_GATE_AUDIT_2026-08-09.md"]).toContain("`0053` through `0097`");
     expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain("release:worker:upload");

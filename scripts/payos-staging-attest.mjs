@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath, stat } from "node:fs/promises";
 import process from "node:process";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 import { assertPaymentProviderMutationAdmission } from "./lib/payment-provider-mutation-admission.mjs";
 
@@ -24,34 +25,69 @@ function parseArguments(argumentsList) {
 
 async function readFingerprintEvidence(path) {
   const resolvedPath = resolve(path);
-  let stat;
+  let entry;
   try {
-    stat = await lstat(resolvedPath);
+    entry = await lstat(resolvedPath);
   } catch {
     throw new Error("payos_fingerprint_evidence_missing");
   }
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
+  if (!entry.isFile() || entry.isSymbolicLink() || (entry.mode & 0o077) !== 0) {
     throw new Error("payos_fingerprint_evidence_permissions_invalid");
   }
-  let evidence;
+  if ((await lstat(dirname(resolvedPath))).isSymbolicLink()) {
+    throw new Error("payos_fingerprint_evidence_permissions_invalid");
+  }
+  const canonicalPath = resolve(await realpath(dirname(resolvedPath)), basename(resolvedPath));
+  let handle;
   try {
-    evidence = JSON.parse(await readFile(resolvedPath, "utf8"));
-  } catch {
-    throw new Error("payos_fingerprint_evidence_invalid");
+    if (await realpath(resolvedPath) !== canonicalPath) throw new Error("payos_fingerprint_evidence_permissions_invalid");
+    handle = await open(canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    throw new Error("payos_fingerprint_evidence_permissions_invalid", { cause: error });
   }
-  const keys = evidence !== null && typeof evidence === "object" && !Array.isArray(evidence)
-    ? Object.keys(evidence).sort()
-    : [];
-  if (keys.join(",") !== "environment,fingerprint,ok,requestId"
-    || evidence.environment !== "staging"
-    || evidence.ok !== true
-    || typeof evidence.fingerprint !== "string"
-    || !FINGERPRINT.test(evidence.fingerprint)
-    || typeof evidence.requestId !== "string"
-    || !REQUEST_ID.test(evidence.requestId)) {
-    throw new Error("payos_fingerprint_evidence_invalid");
+  try {
+    const opened = await handle.stat({ bigint: true });
+    const pathStat = await stat(canonicalPath, { bigint: true });
+    if (!opened.isFile()
+      || (opened.mode & 0o077n) !== 0n
+      || opened.dev !== pathStat.dev
+      || opened.ino !== pathStat.ino) {
+      throw new Error("payos_fingerprint_evidence_permissions_invalid");
+    }
+    const bytes = await handle.readFile();
+    const closedOver = await handle.stat({ bigint: true });
+    const finalPathStat = await stat(canonicalPath, { bigint: true });
+    if (opened.dev !== closedOver.dev
+      || opened.ino !== closedOver.ino
+      || opened.size !== closedOver.size
+      || opened.mtimeNs !== closedOver.mtimeNs
+      || opened.ctimeNs !== closedOver.ctimeNs
+      || finalPathStat.dev !== opened.dev
+      || finalPathStat.ino !== opened.ino) {
+      throw new Error("payos_fingerprint_evidence_permissions_invalid");
+    }
+    const evidence = JSON.parse(bytes.toString("utf8"));
+    const keys = evidence !== null && typeof evidence === "object" && !Array.isArray(evidence)
+      ? Object.keys(evidence).sort()
+      : [];
+    if (keys.join(",") !== "environment,fingerprint,ok,requestId"
+      || evidence.environment !== "staging"
+      || evidence.ok !== true
+      || typeof evidence.fingerprint !== "string"
+      || !FINGERPRINT.test(evidence.fingerprint)
+      || typeof evidence.requestId !== "string"
+      || !REQUEST_ID.test(evidence.requestId)) {
+      throw new Error("payos_fingerprint_evidence_invalid");
+    }
+    return evidence.fingerprint;
+  } catch (error) {
+    if (error instanceof Error && (error.message === "payos_fingerprint_evidence_permissions_invalid" || error.message === "payos_fingerprint_evidence_invalid")) {
+      throw error;
+    }
+    throw new Error("payos_fingerprint_evidence_invalid", { cause: error });
+  } finally {
+    await handle.close();
   }
-  return evidence.fingerprint;
 }
 
 try {

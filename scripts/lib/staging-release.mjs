@@ -1,5 +1,6 @@
-import { chmod, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { constants } from "node:fs";
+import { chmod, lstat, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
@@ -212,6 +213,24 @@ async function writeImmutableStagingReleaseArtifact(root, releaseId, fileName, v
   }
   await chmod(artifactPath, 0o600);
   return artifactPath;
+}
+
+async function assertCanonicalStagingArtifactPath(path, root, issue) {
+  const absoluteRoot = resolve(root);
+  const absolutePath = resolve(path);
+  const rel = relative(absoluteRoot, absolutePath);
+  if (rel === "" || rel.startsWith(`..${sep}`) || rel.includes(`${sep}..${sep}`)) throw new Error(issue);
+  let current = absoluteRoot;
+  for (const segment of rel.split(sep)) {
+    current = resolve(current, segment);
+    try {
+      if ((await lstat(current)).isSymbolicLink()) throw new Error(issue);
+    } catch (error) {
+      if (error instanceof Error && error.message === issue) throw error;
+      if (error?.code === "ENOENT") return;
+      throw new Error(issue, { cause: error });
+    }
+  }
 }
 
 async function readPrivateStagingReleaseArtifact(path, missingIssue, permissionsIssue) {
@@ -645,10 +664,21 @@ export async function runStagingMigrationWithVerification(input) {
 
 export async function writeStagingReleaseManifest(manifest, root = repositoryRoot) {
   const directory = resolve(root, ".wrangler", "releases", "staging", manifest.releaseId);
+  await assertCanonicalStagingArtifactPath(directory, root, "staging_release_manifest_symlink_invalid");
   await mkdir(directory, { mode: 0o700, recursive: true });
   await chmod(directory, 0o700);
   const manifestPath = resolve(directory, "release-manifest.json");
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await assertCanonicalStagingArtifactPath(manifestPath, root, "staging_release_manifest_symlink_invalid");
+  try {
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    if (error?.code === "EEXIST") throw new Error("staging_release_manifest_exists", { cause: error });
+    throw error;
+  }
   await chmod(manifestPath, 0o600);
   return manifestPath;
 }
@@ -656,18 +686,35 @@ export async function writeStagingReleaseManifest(manifest, root = repositoryRoo
 export async function assertStagingReleaseAdmission(input) {
   const root = input.repositoryRoot ?? repositoryRoot;
   const manifestPath = resolve(root, input.manifestPath);
+  const relativeManifestPath = relative(resolve(root), manifestPath).split(sep).join("/");
+  const releaseMatch = relativeManifestPath.match(/^\.wrangler\/releases\/staging\/(stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12})\/release-manifest\.json$/u);
+  if (releaseMatch === null) throw new Error("staging_release_manifest_path_invalid");
+  const expectedPath = resolve(root, ".wrangler", "releases", "staging", releaseMatch[1], "release-manifest.json");
+  if (manifestPath !== expectedPath) throw new Error("staging_release_manifest_path_invalid");
+  await assertCanonicalStagingArtifactPath(manifestPath, root, "staging_release_manifest_symlink_invalid");
   let manifestStat;
   let manifest;
+  let handle;
   try {
-    [manifestStat, manifest] = await Promise.all([
-      lstat(manifestPath),
-      readFile(manifestPath, "utf8").then((value) => JSON.parse(value)),
-    ]);
-  } catch {
-    throw new Error("staging_release_manifest_missing");
-  }
-  if (!manifestStat.isFile() || (manifestStat.mode & 0o077) !== 0) {
-    throw new Error("staging_release_manifest_permissions_invalid");
+    handle = await open(manifestPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    manifestStat = await handle.stat({ bigint: true });
+    const pathStat = await stat(manifestPath, { bigint: true });
+    if (!manifestStat.isFile() || (manifestStat.mode & 0o077n) !== 0n
+      || manifestStat.dev !== pathStat.dev || manifestStat.ino !== pathStat.ino) {
+      throw new Error("staging_release_manifest_permissions_invalid");
+    }
+    manifest = JSON.parse((await handle.readFile()).toString("utf8"));
+  } catch (error) {
+    if (error instanceof Error && error.message === "staging_release_manifest_permissions_invalid") throw error;
+    if (error?.code === "ELOOP") {
+      throw new Error("staging_release_manifest_symlink_invalid", { cause: error });
+    }
+    if (manifestStat !== undefined) {
+      throw new Error("staging_release_manifest_permissions_invalid", { cause: error });
+    }
+    throw new Error("staging_release_manifest_missing", { cause: error });
+  } finally {
+    await handle?.close();
   }
   const repositoryState = input.repositoryState ?? readStagingRepositoryState(root);
   const migrationNames = input.migrationNames ?? await listMigrationNames(root);
@@ -677,8 +724,8 @@ export async function assertStagingReleaseAdmission(input) {
     now: input.now,
     repositoryState,
   });
-  const canonicalPath = resolve(root, ".wrangler", "releases", "staging", admission.releaseId, "release-manifest.json");
-  if (manifestPath !== canonicalPath || dirname(manifestPath) !== dirname(canonicalPath)) {
+  const admissionPath = resolve(root, ".wrangler", "releases", "staging", admission.releaseId, "release-manifest.json");
+  if (manifestPath !== admissionPath || dirname(manifestPath) !== dirname(admissionPath)) {
     throw new Error("staging_release_manifest_path_invalid");
   }
   return admission;

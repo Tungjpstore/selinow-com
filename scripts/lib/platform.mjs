@@ -1008,6 +1008,28 @@ function productionWorkerRouteContract(productionSpec, stagingSpec, wranglerConf
   if ([...zoneRoutes].some((pattern) => stagingZoneRoutes.has(pattern))) {
     throw new Error("production_worker_route_contract_invalid");
   }
+
+  // Keep the checked-in Worker route contract as narrow as the live admission
+  // contract. An extra production route would otherwise become implicitly
+  // allowlisted by the inventory validator and could shadow the shared-zone
+  // fallback (including diverting custom-host traffic to staging).
+  const expectedZoneRoutes = new Set([
+    `${productionSpec.zoneName}/*`,
+    `*.${productionSpec.zoneName}/*`,
+    productionSpec.routing.externalCustomDomainFallbackRoute,
+  ]);
+  const expectedCustomDomains = new Set(requiredProductionDomains);
+  const hasMarketingZoneRoute = zoneRoutes.has(`${marketingHostname}/*`);
+  const hasMarketingCustomDomain = customDomains.has(marketingHostname);
+  if (
+    [...zoneRoutes].some((pattern) => !expectedZoneRoutes.has(pattern))
+    || [...customDomains].some((hostname) => !expectedCustomDomains.has(hostname) && hostname !== marketingHostname)
+    || (hasMarketingZoneRoute === hasMarketingCustomDomain)
+    || [...expectedZoneRoutes].some((pattern) => !zoneRoutes.has(pattern))
+    || [...expectedCustomDomains].some((hostname) => !customDomains.has(hostname))
+  ) {
+    throw new Error("production_worker_route_contract_invalid");
+  }
   const stagingAndProductionDomains = [
     ...customDomains,
     ...stagingCustomDomains,

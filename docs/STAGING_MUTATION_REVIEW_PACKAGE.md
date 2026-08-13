@@ -1,5 +1,24 @@
 # STAGING_MUTATION_REVIEW_PACKAGE
 
+## Current continuation audit (2026-08-13)
+
+Current decision: `source_0097_ready_remote_evidence_blocked`. The authoritative
+source ledger is contiguous through
+`0097_telegram_action_generation_and_delivery_interlock.sql`; retained staging
+database and immutable deployment evidence remain bound to the clean `0095`
+candidate recorded in `docs/release/CURRENT_HANDOFF_2026-08-11.md`. Migrations
+`0096`-`0097` therefore require a new clean commit/tree, fresh protected staging
+backup plus candidate-bound isolated restore, a new private schema-3 manifest,
+post-migration backup/restore evidence, deploy, and immutable Worker binding.
+
+Local admission coverage and the staging deploy dry-run pass. The 2026-08-13
+read-only attempts failed closed before any mutation with
+`cloudflare_route_audit_api_token_missing` for route preflight/manifest creation
+and `cloudflare_d1_api_token_missing` for migration status. The canonical release
+manifest is now write-once and rejects symlinked ancestors/files; existing
+manifest bytes cannot be silently replaced. No staging D1, Worker, route, queue,
+cron, DNS, provider, or secret mutation was executed by this audit.
+
 ## Phase 5 read-only execution update (2026-08-04)
 
 Current decision: `staging_execution_blocked`. Read-only commands were attempted,
@@ -44,7 +63,8 @@ manifest is generated from the final clean HEAD. It does not authorize execution
   `ec66a7a909319ac0a4b5b4b8c777836e636e56a5`; execution uses the final clean
   committed HEAD and never substitutes an historical commit.
 - Baseline commit: `4d3081a03a320ea84fdf66c31cf22e97f041a386`
-- Source migration ledger: current candidate `0001`-`0094`
+- Source migration ledger: current candidate `0001`-`0097`; retained staging
+  evidence is the applied `0001`-`0095` prefix
 - Exact P4 changed-file manifest and local verification:
   `docs/PHASE_4_REVIEW_PACKAGE_R0.md`
 - Candidate-bound local restore report:
@@ -68,8 +88,8 @@ manifest is generated from the final clean HEAD. It does not authorize execution
 
 ## Migration and backup
 
-- Latest retained staging database evidence: complete through `0090`; reverify
-  the live ledger before using it as the `0091`-`0094` candidate baseline
+- Latest retained staging database evidence: complete through `0095`; reverify
+  the live ledger before using it as the `0096`-`0097` candidate baseline
 - Exact pending range: captured as a non-empty ordered prefix in the private
   schema-3 manifest; no current staging ledger is claimed until fresh read-only
   evidence exists
@@ -80,10 +100,9 @@ manifest is generated from the final clean HEAD. It does not authorize execution
   complete source `0001`-`0097` ledger; integrity/FK/schema/count checks required;
   every non-local drill requires `--reviewed-commit`
 - Pre-`0066` OAuth pending-row policy: revoke/expire or explicitly resolve
-- Dodo `0070`-`0081`, activation timestamp migration `0080`, and non-payment
-  migrations `0082`-`0094`: source/tests are recorded; only `0082`-`0090` have
-  retained staging database evidence, while the `0091`-`0094` cutover review
-  remains `TBD`
+- Dodo `0070`-`0081`, activation timestamp migration `0080`, and continuation
+  migrations `0082`-`0097`: retained staging evidence covers through `0095`;
+  the `0096`-`0097` cutover remains pending fresh admission and execution
 
 ## Commands after approval
 

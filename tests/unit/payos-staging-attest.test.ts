@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -68,6 +68,25 @@ describe("PayOS staging attestation secret boundary", () => {
       requestId: "payos-fingerprint-test",
     }, 0o640);
     const result = executeWithEvidence(path);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe("payos_fingerprint_evidence_permissions_invalid\n");
+  });
+
+  it("rejects fingerprint evidence reached through a symlinked ancestor", () => {
+    const directory = mkdtempSync(join(tmpdir(), "selinow-payos-attestation-link-"));
+    temporaryDirectories.push(directory);
+    const target = join(directory, "target");
+    const linked = join(directory, "linked");
+    mkdirSync(target, { mode: 0o700 });
+    const evidence = join(target, "fingerprint.json");
+    writeFileSync(evidence, JSON.stringify({
+      environment: "staging",
+      fingerprint: "a".repeat(43),
+      ok: true,
+      requestId: "payos-fingerprint-test",
+    }), { mode: 0o600 });
+    symlinkSync(target, linked, "dir");
+    const result = executeWithEvidence(join(linked, "fingerprint.json"));
     expect(result.status).toBe(1);
     expect(result.stderr).toBe("payos_fingerprint_evidence_permissions_invalid\n");
   });
