@@ -250,9 +250,7 @@ async function acquireClaimMutationLease(root, releaseId, hooks = {}) {
       // path first would expose a zero-byte file to concurrent contenders.
       candidateStat = await safeWriteExclusive(root, candidatePath, bytes);
       await safeCanonicalParent(root, path, true);
-      try { await link(candidatePath, path); } catch (error) {
-        throw error;
-      }
+      await link(candidatePath, path);
       const owner = await safeReadPrivateFile(root, path);
       assertClaimMutationLease(JSON.parse(owner.bytes.toString("utf8")));
       if (!sameInode(owner.stat, candidateStat)) throw new Error("dodo_webhook_bootstrap_resume_claim_lock_race");
