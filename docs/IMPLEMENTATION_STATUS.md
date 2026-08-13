@@ -1386,3 +1386,31 @@ The preceding migration counts are checkpoint-era history. The current source ch
 - The source/local chain is `0001`-`0076`; staging remains at `0028` with 48
   pending migrations and production remains at `0001`-`0052`. No staging or
   production mutation, provider activation or external pilot was performed.
+
+## Production continuation handoff: candidate `b4d2a3e` (2026-08-13)
+
+- Candidate tree `fb9de1e67caa3102bf686c5c4b4b1dc0885a9088` is committed on
+  `codex/landing-page-deploy-20260801`; the source migration ledger is
+  contiguous through `0097`. No `src/lib/billing/**` logic was changed.
+- Release admission, route ownership and provider-attestation tooling now
+  fail closed against symlink/TOCTOU artifacts, stale production routes and
+  untrusted PayOS/Dodo evidence. Local verification passed: `npm run check`,
+  `npm run lint`, `npx tsc --noEmit`, `npm test` (307 files / 2,411 tests),
+  `npm run build`, `npm run build:staging`, high-severity audit, both deploy
+  dry-runs and `git diff --check`.
+- Remote continuation is blocked, with no mutation attempted: staging D1
+  remains at `0095`, production remains at `0052`, the D1/platform/trigger/
+  deploy operator tokens are expired (`9109`), and only the short-lived
+  route-audit token is active. Read-only route admission therefore cannot
+  prove account identity or live route inventory.
+- Live HTTP checks on 2026-08-13 returned `404` for the canonical production
+  and staging Dodo webhook paths and for production `/solutions`,
+  `/sitemap.xml` and `/llms.txt`. The production route UI showed `*/*` bound
+  to the production Worker, but application-level route evidence remains
+  insufficient until a fresh Worker deployment and smoke evidence are bound
+  to this candidate.
+- `release:doctor -- --json` remains intentionally `NO-GO` because fresh
+  staging backup/restore/migration/deploy evidence, Dodo and PayOS UAT,
+  provider secrets, approvals, monitoring, legal/support acceptance, pilot
+  evidence and rollback rehearsal are absent. Do not migrate or deploy
+  production until those artifacts are generated and accepted together.
