@@ -243,12 +243,23 @@ async function acquireClaimMutationLease(root, releaseId, hooks = {}) {
   for (let attempt = 0; attempt < 500; attempt += 1) {
     const lease = claimMutationLease(releaseId, hooks.now instanceof Date ? hooks.now : new Date());
     const bytes = Buffer.from(`${JSON.stringify(lease, null, 2)}\n`, "utf8");
+    const candidatePath = resolve(dirname(path), `.${RESUME_CLAIM_MUTATION_LEASE}.candidate-${randomUUID()}`);
+    let candidateStat = null;
     try {
-      await safeWriteExclusive(root, path, bytes);
+      // Write the lease privately before publishing it. Creating the canonical
+      // path first would expose a zero-byte file to concurrent contenders.
+      candidateStat = await safeWriteExclusive(root, candidatePath, bytes);
+      await safeCanonicalParent(root, path, true);
+      try { await link(candidatePath, path); } catch (error) {
+        throw error;
+      }
       const owner = await safeReadPrivateFile(root, path);
       assertClaimMutationLease(JSON.parse(owner.bytes.toString("utf8")));
+      if (!sameInode(owner.stat, candidateStat)) throw new Error("dodo_webhook_bootstrap_resume_claim_lock_race");
+      await cleanupExclusiveFile(root, candidatePath, candidateStat);
       return { lease, owner, path };
     } catch (error) {
+      await cleanupExclusiveFile(root, candidatePath, candidateStat);
       if (error?.code !== "EEXIST") throw new Error("dodo_webhook_bootstrap_resume_claim_lock_failed", { cause: error });
     }
     let existing;
