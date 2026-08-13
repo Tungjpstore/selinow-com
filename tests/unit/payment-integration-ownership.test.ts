@@ -117,9 +117,16 @@ function seed(database: DatabaseSync): void {
 }
 
 function provider(fetchCount: { value: number }): typeof fetch {
-  return () => {
+  return (_request, init) => {
     fetchCount.value += 1;
-    return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+    const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as { webhookUrl: string };
+    return Promise.resolve(Response.json({ code: "00", data: {
+      accountName: "Selinow Test",
+      accountNumber: "0000006797",
+      name: "Selinow Staging UAT",
+      shortName: "SELINOW",
+      webhookUrl: body.webhookUrl,
+    } }));
   };
 }
 

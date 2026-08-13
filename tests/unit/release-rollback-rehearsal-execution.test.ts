@@ -257,6 +257,7 @@ describe("production rollback rehearsal execution", () => {
         service: "selinow.com",
       }), { headers: { "cache-control": "no-store", "content-type": "application/json" }, status: 200 });
       if (url.endsWith("/solutions")) return new Response("<html><main>Solutions</main></html>", { headers: { "content-type": "text/html" }, status: 200 });
+      if (url.endsWith("/llms.txt")) return new Response("# Selinow\nWebsite and Telegram\n", { headers: { "content-type": "text/plain; charset=utf-8" }, status: 200 });
       if (url.endsWith("/login")) return new Response("<html><main>Login</main></html>", { headers: { "content-type": "text/html", "x-robots-tag": "noindex" }, status: 200 });
       if (url === "https://pilot.selinow.com/") return new Response("<html><body data-storefront-surface></body></html>", { headers: { "content-type": "text/html" }, status: 200 });
       if (url.includes("/api/webhooks/billing/dodo/")) {
@@ -277,14 +278,15 @@ describe("production rollback rehearsal execution", () => {
       storefrontUrl: "https://pilot.selinow.com/",
       webhookPublicId: "ddowh_00000000-0000-4000-8000-000000000001",
     })).resolves.toEqual({
-      checks: ["health", "dashboard", "marketing", "storefront", "dodo_unsigned_webhook"],
+      checks: ["health", "dashboard", "marketing", "llms", "storefront", "dodo_unsigned_webhook"],
       status: "passed",
     });
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(6);
     expect(fetcher.mock.calls.map(([request]) => requestUrl(request))).toEqual([
       "https://api.selinow.com/api/health",
       "https://app.selinow.com/login",
       "https://selinow.com/solutions",
+      "https://selinow.com/llms.txt",
       "https://pilot.selinow.com/",
       "https://api.selinow.com/api/webhooks/billing/dodo/ddowh_00000000-0000-4000-8000-000000000001",
     ]);
@@ -303,6 +305,29 @@ describe("production rollback rehearsal execution", () => {
       storefrontUrl: "https://pilot.selinow.com/",
       webhookPublicId: "ddowh_00000000-0000-4000-8000-000000000001",
     })).rejects.toThrow("production_rollback_health_contract_failed");
+  });
+
+  it("rejects production rollback admission when llms.txt is missing", async () => {
+    const fetcher = vi.fn(async (request: string | URL | Request) => {
+      const url = requestUrl(request);
+      if (url.endsWith("/api/health")) return new Response(JSON.stringify({
+        commerce: { channels: ["telegram", "website"], contract: "principal-channel-canonical-v1" },
+        ok: true,
+        phase: 10,
+        release: { commerce: "provider_pending", platform: "deployed" },
+        requestId: "rollback-health-request",
+        service: "selinow.com",
+      }), { headers: { "cache-control": "no-store", "content-type": "application/json" }, status: 200 });
+      if (url.endsWith("/login")) return new Response("<html><main>Login</main></html>", { headers: { "content-type": "text/html", "x-robots-tag": "noindex" }, status: 200 });
+      if (url.endsWith("/solutions")) return new Response("<html><main>Solutions</main></html>", { headers: { "content-type": "text/html" }, status: 200 });
+      return new Response("Not found\n", { headers: { "content-type": "text/plain; charset=utf-8" }, status: 404 });
+    });
+
+    await expect(smokeRollbackCanary({
+      fetcher,
+      storefrontUrl: "https://pilot.selinow.com/",
+      webhookPublicId: "ddowh_00000000-0000-4000-8000-000000000001",
+    })).rejects.toThrow("production_rollback_llms_smoke_failed");
   });
 
   it("restores the previous version and never writes when canary smoke fails", async () => {

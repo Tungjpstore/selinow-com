@@ -273,6 +273,10 @@ export function doctor(
     spec?: PlatformEnvironmentSpec & { resources: Record<string, string> };
   },
 ): Promise<{ checks: Array<{ code: string; detail: string; ok: boolean }>; environment: string; ok: boolean }>;
+export function buildCloudflareResourceAuditEnvironment(
+  environment: NodeJS.ProcessEnv,
+  accountId: string,
+): NodeJS.ProcessEnv;
 export function discoverSaasState(
   spec: PlatformEnvironmentSpec,
   token: string,
@@ -308,6 +312,7 @@ export function provision(
   manifest?: Record<string, unknown>;
 }>;
 export function requireCloudflarePlatformToken(environment?: NodeJS.ProcessEnv): string;
+export function requireCloudflareStagingResourceAuditToken(environment?: NodeJS.ProcessEnv): string;
 export function requireCloudflareRouteAuditToken(environment?: NodeJS.ProcessEnv): string;
 export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME: "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
 export function requireCloudflareWorkerDeployToken(environment?: NodeJS.ProcessEnv): string;

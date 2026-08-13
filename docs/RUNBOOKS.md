@@ -123,6 +123,9 @@ Run the staging sequence only from the independent Selinow Cloudflare account. I
    # D1-capable operator token mapped to CLOUDFLARE_API_TOKEN only inside
    # backup/restore/migration child Wrangler commands.
    export CLOUDFLARE_D1_API_TOKEN
+   # Read-only account resource and Worker-secret inventory used by doctor.
+   # If omitted, doctor falls back to the D1 token for backward compatibility.
+   export CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN
    export CLOUDFLARE_PLATFORM_API_TOKEN
    export CLOUDFLARE_ROUTE_AUDIT_API_TOKEN
    # Dedicated Workers Scripts token used only by the final Worker deploy sink.
@@ -136,8 +139,11 @@ Run the staging sequence only from the independent Selinow Cloudflare account. I
    ```
 
    `CLOUDFLARE_D1_API_TOKEN` exists only in the operator environment and is
-   mapped to Wrangler's `CLOUDFLARE_API_TOKEN` for the D1 child process. The
-   runtime Worker secret named `CLOUDFLARE_API_TOKEN` is never operator input.
+   mapped to Wrangler's `CLOUDFLARE_API_TOKEN` for D1 identity and mutation
+   child processes. `CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN` is mapped only
+   inside the doctor's read-only KV, R2, Queue and Worker-secret inventory
+   commands. The runtime Worker secret named `CLOUDFLARE_API_TOKEN` is never
+   operator input.
 
 2. Stop without mutation unless the doctor proves the authenticated Wrangler account matches `infra/environments/staging.json`, the SaaS DNS/fallback contract is ready, the shared-zone apex/wildcard and `*/*` fallback point only to `selinow-com-production`, and all four explicit staging exceptions point only to `selinow-com-staging`. Shared mutation admission additionally requires the live D1 list to contain exactly the generated-manifest database name and UUID. Missing credentials, unreadable inventory or any drift is a failed admission.
 3. After an approved staging change window, use the exact ceremony below. The pre-migration manifest binds the clean commit/tree, exact live ledger prefix, backup checksum/target and isolated restore report. After migration and any separately approved seed, create a second protected backup and restore drill, then run `db:complete-release`; that command writes the immutable post-migration evidence required by `deploy:staging`. The post-migration snapshot must be different from and newer than the manifest-bound pre-migration snapshot. `db:migrate` applies every pending numbered migration in filename order; for the current tree the complete source ledger ends at `0097_telegram_action_generation_and_delivery_interlock.sql`. Review the whole pending chain before opening the window and never deploy current source against a partially applied schema.
@@ -169,7 +175,7 @@ Run the staging sequence only from the independent Selinow Cloudflare account. I
    node scripts/staging-deployment-evidence.mjs \
      --manifest "$MANIFEST_REF" --write --json
    ```
-4. Staging mutation subprocesses are pinned with the admitted `CLOUDFLARE_ACCOUNT_ID`. Neither temporary operator token is forwarded into the application build, D1 mutation or deploy child process.
+4. Staging mutation subprocesses are pinned with the admitted `CLOUDFLARE_ACCOUNT_ID`. Platform, route-audit and resource-audit tokens are not forwarded into the application build, D1 mutation or deploy child process.
 5. Re-run migration status, D1 preflight, route/platform admission and bounded staging smoke checks after the change. Require no pending migration from the approved chain, `payment_provider_projection` and generated-license schema checks to reflect the applied ledger, and the same exact route inventory. The immutable deployment evidence must be created within two hours of the observed 100% deployment and before the manifest expires. Unset all temporary operator tokens when the window closes.
 
 `db:migrate:status`, `db:preflight`, backup dry-run, staging build-only and deploy dry-run remain read-only/non-deploying checks and do not require route admission. Do not treat their success as permission to mutate staging.

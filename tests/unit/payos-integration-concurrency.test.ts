@@ -164,7 +164,23 @@ class ControlledProvider {
 }
 
 function accept(call: ProviderCall): void {
-  call.respond({ code: "00", data: true }, 200);
+  call.respond(acceptedWebhookResponse(call.webhookUrl), 200);
+}
+
+function acceptedWebhookResponse(webhookUrl: string): Record<string, unknown> {
+  return { code: "00", data: {
+    accountName: "Selinow Test",
+    accountNumber: "0000006797",
+    name: "Selinow Staging UAT",
+    shortName: "SELINOW",
+    webhookUrl,
+  } };
+}
+
+function acceptProviderRequest(init?: RequestInit): Promise<Response> {
+  if (typeof init?.body !== "string") throw new TypeError("provider_body_required");
+  const body = JSON.parse(init.body) as { webhookUrl: string };
+  return Promise.resolve(Response.json(acceptedWebhookResponse(body.webhookUrl)));
 }
 
 function definitivelyReject(call: ProviderCall): void {
@@ -547,9 +563,9 @@ describe("PayOS integration ownership concurrency", () => {
       await expect(connectPayOS({
         credentials: CHANNEL,
         env,
-        fetcher: () => {
+        fetcher: (_request, init) => {
           crossTenantProviderCalls += 1;
-          return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+          return acceptProviderRequest(init);
         },
         requestId: "request-legacy-cross-tenant",
         shopPublicId: SHOP_B,
@@ -589,9 +605,9 @@ describe("PayOS integration ownership concurrency", () => {
       await expect(connectPayOS({
         credentials: rotatedCredentials,
         env,
-        fetcher: () => {
+        fetcher: (_request, init) => {
           rotatedProviderCalls += 1;
-          return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+          return acceptProviderRequest(init);
         },
         requestId: "request-legacy-rotated",
         shopPublicId: SHOP_A,
@@ -603,9 +619,9 @@ describe("PayOS integration ownership concurrency", () => {
       await expect(connectPayOS({
         credentials: CHANNEL,
         env,
-        fetcher: () => {
+        fetcher: (_request, init) => {
           ownerProviderCalls += 1;
-          return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+          return acceptProviderRequest(init);
         },
         requestId: "request-legacy-owner-recovery",
         shopPublicId: SHOP_A,
@@ -731,9 +747,9 @@ describe("PayOS integration ownership concurrency", () => {
     `).get()).toEqual({ nonce: null, ownership: null, status: "error" });
 
     let successfulCalls = 0;
-    const acceptedProvider: typeof fetch = () => {
+    const acceptedProvider: typeof fetch = (_request, init) => {
       successfulCalls += 1;
-      return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+      return acceptProviderRequest(init);
     };
     await expect(connectPayOS({
       credentials: CHANNEL,
@@ -794,9 +810,9 @@ describe("PayOS integration ownership concurrency", () => {
     await expect(connectPayOS({
       credentials: CHANNEL,
       env,
-      fetcher: () => {
+      fetcher: (_request, init) => {
         secondProviderCalls += 1;
-        return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+        return acceptProviderRequest(init);
       },
       requestId: "request-cross-shop-after-ambiguous",
       shopPublicId: SHOP_B,
@@ -822,7 +838,7 @@ describe("PayOS integration ownership concurrency", () => {
     await expect(connectPayOS({
       credentials: CHANNEL,
       env,
-      fetcher: () => Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 })),
+      fetcher: (_request, init) => acceptProviderRequest(init),
       requestId: "request-reconcile-owner",
       shopPublicId: SHOP_A,
       userId: "owner-a",
@@ -946,7 +962,7 @@ describe("PayOS integration ownership concurrency", () => {
 
   it("preserves verified disconnected ownership and grace when reconnect is rejected", async () => {
     const env = bindings(database);
-    const acceptedProvider: typeof fetch = () => Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+    const acceptedProvider: typeof fetch = (_request, init) => acceptProviderRequest(init);
     await connectPayOS({
       credentials: CHANNEL,
       env,
@@ -1024,9 +1040,9 @@ describe("PayOS integration ownership concurrency", () => {
     `).get()).toEqual({ credentialOwned: 1, status: "pending" });
 
     let secondProviderCalls = 0;
-    const secondProvider: typeof fetch = () => {
+    const secondProvider: typeof fetch = (_request, init) => {
       secondProviderCalls += 1;
-      return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+      return acceptProviderRequest(init);
     };
     await expect(connectPayOS({
       credentials: CHANNEL,

@@ -10,10 +10,46 @@ describe("PayOS crypto contract", () => {
     const credentials = { apiKey: "api-key-test", checksumKey: "checksum-test-key", clientId: "client-id-test" };
     const fetcher = function (this: unknown): Promise<Response> {
       expect(this).toBeUndefined();
-      return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({
+        code: "00",
+        data: {
+          accountName: "Selinow Test",
+          accountNumber: "0000006797",
+          name: "Selinow Staging UAT",
+          shortName: "SELINOW",
+          webhookUrl: "https://api.example.test/webhooks/payos/test",
+        },
+      }), { status: 200 }));
     } as typeof fetch;
 
     await expect(new PayOSClient(credentials, fetcher).confirmWebhook("https://api.example.test/webhooks/payos/test")).resolves.toBeUndefined();
+  });
+
+  it("accepts additive fields in the provider webhook confirmation contract", async () => {
+    const webhookUrl = "https://api.example.test/webhooks/payos/test";
+    const credentials = { apiKey: "api-key-test", checksumKey: "checksum-test-key", clientId: "client-id-test" };
+    const fetcher: typeof fetch = () => Promise.resolve(Response.json({ code: "00", data: {
+      accountName: "Selinow Test",
+      accountNumber: "0000006797",
+      name: "Selinow Staging UAT",
+      providerMetadata: { contractVersion: 2 },
+      shortName: "SELINOW",
+      webhookUrl,
+    } }));
+
+    await expect(new PayOSClient(credentials, fetcher).confirmWebhook(webhookUrl)).resolves.toBeUndefined();
+  });
+
+  it.each([
+    true,
+    "https://api.example.test/webhooks/payos/other",
+    { webhookUrl: "https://api.example.test/webhooks/payos/other" },
+  ])("rejects a successful confirm-webhook response that does not attest the requested URL %#", async (providerData) => {
+    const credentials = { apiKey: "api-key-test", checksumKey: "checksum-test-key", clientId: "client-id-test" };
+    const fetcher: typeof fetch = () => Promise.resolve(Response.json({ code: "00", data: providerData }));
+
+    await expect(new PayOSClient(credentials, fetcher).confirmWebhook("https://api.example.test/webhooks/payos/test"))
+      .rejects.toMatchObject({ code: "provider_response_invalid", writeOutcome: "ambiguous" });
   });
 
   it("matches the official payment request canonical field order", async () => {

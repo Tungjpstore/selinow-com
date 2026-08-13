@@ -24,6 +24,7 @@ const WEBHOOK_EVENT_FIELDS = Object.freeze(["events", "event_types", "eventTypes
 const UNUSABLE_WEBHOOK_STATUSES = new Set(["deleted", "disabled", "error", "failed", "inactive", "paused"]);
 const REGISTRATION_LOCK_TTL_MS = 30_000;
 const REGISTRATION_LOCK_ATTEMPTS = 500;
+const WEBHOOK_LIST_PAGE_LIMIT = 100;
 
 function sameInode(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
@@ -79,10 +80,27 @@ function object(value) {
 function webhookRows(payload) {
   if (Array.isArray(payload)) return payload;
   const envelope = object(payload);
-  for (const key of ["items", "data", "webhooks"]) {
+  for (const key of ["items", "webhooks"]) {
     if (Array.isArray(envelope[key])) return envelope[key];
   }
-  return [];
+  throw new Error("dodo_webhook_provider_response_invalid");
+}
+
+function webhookPage(payload) {
+  const envelope = object(payload);
+  if (!Array.isArray(envelope.data) || typeof envelope.done !== "boolean") {
+    return { iterator: null, rows: webhookRows(payload) };
+  }
+  if (envelope.done) {
+    if (envelope.iterator !== undefined && envelope.iterator !== null && typeof envelope.iterator !== "string") {
+      throw new Error("dodo_webhook_provider_response_invalid");
+    }
+    return { iterator: null, rows: envelope.data };
+  }
+  if (typeof envelope.iterator !== "string" || envelope.iterator.length < 1 || envelope.iterator.length > 2048) {
+    throw new Error("dodo_webhook_provider_response_invalid");
+  }
+  return { iterator: envelope.iterator, rows: envelope.data };
 }
 
 function webhookUrl(row) {
@@ -136,6 +154,28 @@ async function requestJson(input) {
   } catch {
     throw new Error("dodo_webhook_provider_response_invalid");
   }
+}
+
+export async function listDodoWebhooks(input) {
+  const apiBaseUrl = input.apiBaseUrl.replace(/\/+$/u, "");
+  const rows = [];
+  const seenIterators = new Set();
+  let iterator = null;
+  for (let pageNumber = 0; pageNumber < WEBHOOK_LIST_PAGE_LIMIT; pageNumber += 1) {
+    const page = webhookPage(await requestJson({
+      apiBaseUrl,
+      apiKey: input.apiKey,
+      fetcher: input.fetcher,
+      method: "GET",
+      path: iterator === null ? "/webhooks" : `/webhooks?iterator=${encodeURIComponent(iterator)}`,
+    }));
+    rows.push(...page.rows);
+    if (page.iterator === null) return rows;
+    if (seenIterators.has(page.iterator)) throw new Error("dodo_webhook_provider_response_invalid");
+    seenIterators.add(page.iterator);
+    iterator = page.iterator;
+  }
+  throw new Error("dodo_webhook_provider_response_invalid");
 }
 
 async function withRegistrationLease(input, operation) {
@@ -206,8 +246,8 @@ export async function ensureDodoWebhook(input) {
   const apiBaseUrl = input.apiBaseUrl.replace(/\/+$/u, "");
   const defaultLockPath = join(tmpdir(), `selinow-dodo-webhook-${createHash("sha256").update(`${apiBaseUrl}\n${endpoint.toString()}`).digest("hex")}.lock`);
   return withRegistrationLease({ fileSystemHooks: input.fileSystemHooks, lockPath: input.lockPath ?? defaultLockPath }, async () => {
-    const listed = await requestJson({ apiBaseUrl, apiKey: input.apiKey, fetcher: input.fetcher, method: "GET", path: "/webhooks" });
-  const matching = webhookRows(listed).filter((row) => webhookUrl(row) === endpoint.toString());
+  const matching = (await listDodoWebhooks({ apiBaseUrl, apiKey: input.apiKey, fetcher: input.fetcher }))
+    .filter((row) => webhookUrl(row) === endpoint.toString());
   if (matching.length > 1) throw new Error("dodo_webhook_endpoint_duplicate");
   if (matching.length === 1) assertExistingWebhookUsable(matching[0]);
   let id = matching.length === 1 ? webhookId(matching[0]) : null;

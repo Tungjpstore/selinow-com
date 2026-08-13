@@ -84,8 +84,24 @@ async function readBoundedJson(response: Response): Promise<PayOSEnvelope> {
   }
 }
 
+function invalidProviderWriteResponse(): PayOSProviderError {
+  return new PayOSProviderError("provider_response_invalid", 503, 200, "ambiguous");
+}
+
 export type PaymentLinkResponse = { accountName: string; accountNumber: string; amount: number; bin: string; checkoutUrl: string; currency: string; description: string; orderCode: number; paymentLinkId: string; qrCode: string; status: string };
 export type PaymentLinkStatusResponse = { amount: number; amountPaid: number; amountRemaining: number; canceledAt?: string | null; currency: string; description: string; id: string; orderCode: number; status: string; transactions: Array<Record<string, unknown>> };
+
+function parseConfirmedWebhook(value: unknown, expectedUrl: string): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw invalidProviderWriteResponse();
+  }
+  const row = value as Record<string, unknown>;
+  const requiredFields = ["accountName", "accountNumber", "name", "shortName", "webhookUrl"] as const;
+  if (requiredFields.some((field) => typeof row[field] !== "string" || row[field].length === 0)
+    || row.webhookUrl !== expectedUrl) {
+    throw invalidProviderWriteResponse();
+  }
+}
 
 export class PayOSClient {
   readonly credentials: PayOSCredentials;
@@ -137,7 +153,8 @@ export class PayOSClient {
   }
 
   async confirmWebhook(webhookUrl: string): Promise<void> {
-    await this.request("POST", "/confirm-webhook", { webhookUrl }, false, true);
+    const data = await this.request("POST", "/confirm-webhook", { webhookUrl }, false, true);
+    parseConfirmedWebhook(data, webhookUrl);
   }
 
   async createPaymentLink(input: { amount: number; cancelUrl: string; description: string; expiredAt: number; orderCode: number; returnUrl: string }): Promise<PaymentLinkResponse> {

@@ -46,6 +46,7 @@
     "backup:create": "node scripts/backup.mjs",
     "restore:drill": "node scripts/restore-drill.mjs",
     "release:doctor": "node scripts/release-doctor.mjs",
+    "release:quality:evidence": "node scripts/release-quality-evidence.mjs",
     "release:manifest": "node scripts/release-manifest.mjs",
     "release:staging:manifest": "node scripts/staging-release-manifest.mjs",
     "release:production:bootstrap": "node scripts/production-bootstrap.mjs",

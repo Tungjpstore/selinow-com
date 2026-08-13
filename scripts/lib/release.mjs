@@ -714,6 +714,12 @@ function candidateBoundEvidenceArtifactKeys() {
   ];
 }
 
+function candidateBoundEvidenceWorkerVersion(evidence, section) {
+  return section === "quality"
+    ? evidence?.staging?.workerVersion
+    : evidence?.candidateWorkerVersion;
+}
+
 /**
  * Require operational evidence to be a private, candidate-bound artifact.
  * Root booleans remain useful projections, but never authorize admission by
@@ -744,6 +750,7 @@ export function validateCandidateBoundReleaseEvidence({ evidence, now = new Date
       : [];
     const expectedArtifactKeys = [...candidateBoundEvidenceArtifactKeys()].sort();
     const expectedEvidence = Object.fromEntries(definition.evidenceKeys.map((key) => [key, entry?.[key]]));
+    const expectedWorkerVersion = candidateBoundEvidenceWorkerVersion(evidence, section);
     const artifactEvidence = artifact?.evidence;
     const artifactEvidenceKeys = artifactEvidence && typeof artifactEvidence === "object" && !Array.isArray(artifactEvidence)
       ? Object.keys(artifactEvidence).sort()
@@ -762,7 +769,7 @@ export function validateCandidateBoundReleaseEvidence({ evidence, now = new Date
         && artifact?.releaseId === evidence?.releaseId
         && artifact?.commitSha === evidence?.commitSha
         && artifact?.treeSha === evidence?.treeSha
-        && artifact?.workerVersion === evidence?.candidateWorkerVersion
+        && artifact?.workerVersion === expectedWorkerVersion
         && artifact?.observedAt === entry?.[definition.timestampField]),
       makeCheck(`evidence.${section}.artifactEvidence`, isDeepStrictEqual(artifactEvidence, expectedEvidence)),
     ];

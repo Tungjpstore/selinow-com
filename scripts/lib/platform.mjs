@@ -37,6 +37,7 @@ WHERE type = 'custom'
 ORDER BY hostname_normalized, shop_id;`;
 export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME = "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
 export const CLOUDFLARE_D1_TOKEN_NAME = "CLOUDFLARE_D1_API_TOKEN";
+export const CLOUDFLARE_STAGING_RESOURCE_AUDIT_TOKEN_NAME = "CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN";
 export const CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_TOKEN_NAME = "CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN";
 
 const SAFE_BUILD_ENVIRONMENT_NAMES = new Set([
@@ -112,6 +113,11 @@ export function requireCloudflareD1Token(environment = process.env) {
     throw new Error("cloudflare_d1_api_token_missing");
   }
   return token;
+}
+
+export function requireCloudflareStagingResourceAuditToken(environment = process.env) {
+  const token = environment[CLOUDFLARE_STAGING_RESOURCE_AUDIT_TOKEN_NAME]?.trim();
+  return token || requireCloudflareD1Token(environment);
 }
 
 /** Worker version/deployment inventory requires account-level promotion-read scope. */
@@ -241,6 +247,33 @@ export function buildPinnedCloudflareEnvironment(environment, accountId) {
   delete childEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN;
   delete childEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
   delete childEnvironment[CLOUDFLARE_D1_TOKEN_NAME];
+  delete childEnvironment.CLOUDFLARE_API_KEY;
+  delete childEnvironment.CLOUDFLARE_API_USER_SERVICE_KEY;
+  delete childEnvironment.CLOUDFLARE_EMAIL;
+  delete childEnvironment.CLOUDFLARE_OAUTH_TOKEN;
+  delete childEnvironment.CF_API_KEY;
+  delete childEnvironment.CF_API_TOKEN;
+  return childEnvironment;
+}
+
+/** Map the optional resource-audit role to Wrangler without forwarding operator credentials. */
+export function buildCloudflareResourceAuditEnvironment(environment, accountId) {
+  if (typeof accountId !== "string" || !cloudflareAccountIdPattern.test(accountId)) {
+    throw new Error("staging_account_identity_invalid");
+  }
+  const token = requireCloudflareStagingResourceAuditToken(environment);
+  const childEnvironment = Object.fromEntries(Object.entries(environment ?? {}).filter(([name, value]) => (
+    SAFE_BUILD_ENVIRONMENT_NAMES.has(name) && typeof value === "string"
+  )));
+  childEnvironment.CLOUDFLARE_API_TOKEN = token;
+  if (typeof environment?.CLOUDFLARE_ENV === "string") {
+    childEnvironment.CLOUDFLARE_ENV = environment.CLOUDFLARE_ENV;
+  }
+  childEnvironment.CLOUDFLARE_ACCOUNT_ID = accountId;
+  delete childEnvironment[CLOUDFLARE_STAGING_RESOURCE_AUDIT_TOKEN_NAME];
+  delete childEnvironment.CLOUDFLARE_D1_API_TOKEN;
+  delete childEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN;
+  delete childEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
   delete childEnvironment.CLOUDFLARE_API_KEY;
   delete childEnvironment.CLOUDFLARE_API_USER_SERVICE_KEY;
   delete childEnvironment.CLOUDFLARE_EMAIL;
@@ -634,26 +667,50 @@ export function parseQueueNames(output) {
 
 export async function discoverRemoteResources(input = {}) {
   const runner = input.runWranglerImplementation ?? runWrangler;
-  const runnerOptions = {
-    cwd: repositoryRoot,
-    ...(input.environment === undefined ? {} : { env: input.environment }),
-  };
-  const d1 = parseJson(
-    runner(["d1", "list", "--json"], runnerOptions).stdout,
-    "d1_list",
-  );
-  const kv = parseJson(
-    runner(["kv", "namespace", "list"], runnerOptions).stdout,
-    "kv_list",
-  );
-  const r2 = parseR2Names(
-    runner(["r2", "bucket", "list"], runnerOptions).stdout,
-  );
-  const queues = parseQueueNames(
-    runner(["queues", "list"], runnerOptions).stdout,
-  );
-
-  return { d1, kv, queues, r2 };
+  const d1Environment = input.environment;
+  const resourceEnvironment = input.resourceEnvironment ?? d1Environment;
+  const inventory = [
+    {
+      key: "d1",
+      args: ["d1", "list", "--json"],
+      parse: (stdout) => parseJson(stdout, "d1_list"),
+      environment: d1Environment,
+    },
+    {
+      key: "kv",
+      args: ["kv", "namespace", "list"],
+      parse: (stdout) => parseJson(stdout, "kv_list"),
+      environment: resourceEnvironment,
+    },
+    {
+      key: "r2",
+      args: ["r2", "bucket", "list"],
+      parse: parseR2Names,
+      environment: resourceEnvironment,
+    },
+    {
+      key: "queues",
+      args: ["queues", "list"],
+      parse: parseQueueNames,
+      environment: resourceEnvironment,
+    },
+  ];
+  const result = { d1: [], kv: [], queues: [], r2: [] };
+  const errors = {};
+  for (const step of inventory) {
+    const runnerOptions = {
+      cwd: repositoryRoot,
+      ...(step.environment === undefined ? {} : { env: step.environment }),
+    };
+    try {
+      result[step.key] = step.parse(runner(step.args, runnerOptions).stdout);
+    } catch {
+      if (input.collectErrors !== true) throw new Error(`cloudflare_${step.key}_inventory_unavailable`);
+      errors[step.key] = true;
+    }
+  }
+  if (input.collectErrors === true) result.errors = errors;
+  return result;
 }
 
 function findResourceState(spec, remote) {
@@ -2469,18 +2526,12 @@ export async function doctor(environment, input = {}) {
     ? input.spec ?? await loadEnvironment(environment)
     : null;
   const accountId = input.accountId ?? spec?.accountId ?? "00000000000000000000000000000000";
-  const d1Environment = buildPinnedCloudflareEnvironment(
-    operatorEnvironment,
-    accountId,
-  );
   let cloudflareApiToken = null;
   try {
     cloudflareApiToken = requireCloudflarePlatformToken(operatorEnvironment);
   } catch {
     // The check below keeps the missing operator context visible.
   }
-  const wranglerEnvironment = d1Environment;
-  const runnerOptions = { cwd: repositoryRoot, env: wranglerEnvironment };
   const nodeVersion = process.versions.node;
   checks.push({ code: "node_version", detail: `Node ${nodeVersion}`, ok: Number(nodeVersion.split(".")[0]) >= 22 });
 
@@ -2495,19 +2546,38 @@ export async function doctor(environment, input = {}) {
 
   if (environment !== "local") {
     if (spec === null) throw new Error("doctor_environment_spec_missing");
-    const whoami = runner(["whoami", "--json"], runnerOptions).stdout;
-    const accountMatches = accountIdentityMatches(whoami, spec.accountId);
+    const d1Environment = buildPinnedCloudflareEnvironment(operatorEnvironment, accountId);
+    const resourceEnvironment = buildCloudflareResourceAuditEnvironment(operatorEnvironment, accountId);
+    const d1RunnerOptions = { cwd: repositoryRoot, env: d1Environment };
+    const resourceRunnerOptions = { cwd: repositoryRoot, env: resourceEnvironment };
+    let accountMatches = false;
+    try {
+      accountMatches = accountIdentityMatches(
+        runner(["whoami", "--json"], d1RunnerOptions).stdout,
+        spec.accountId,
+      );
+    } catch {
+      checks.push({
+        code: "cloudflare_account_api",
+        detail: "Wrangler account identity failed using CLOUDFLARE_D1_API_TOKEN",
+        ok: false,
+      });
+    }
     checks.push({
       code: "cloudflare_account",
       detail: accountMatches ? "Authenticated account matches environment" : "Authenticated account mismatch",
       ok: accountMatches,
     });
     const remote = await discoverRemoteResources({
-      environment: wranglerEnvironment,
+      collectErrors: true,
+      environment: d1Environment,
+      resourceEnvironment,
       runWranglerImplementation: runner,
     });
     const state = findResourceState(spec, remote);
     for (const resource of desiredResources(spec)) {
+      const inventoryKey = resource.type === "queue" ? "queues" : resource.type === "kv" ? "kv" : resource.type;
+      if (remote.errors?.[inventoryKey] === true) continue;
       checks.push({
         code: `resource_${resource.key}`,
         detail: state[resource.key] ? `${resource.name} ready` : `${resource.name} missing`,
@@ -2515,16 +2585,37 @@ export async function doctor(environment, input = {}) {
       });
     }
 
-    const secretNames = parseSecretNames(
-      runner(["secret", "list", "--env", environment], runnerOptions).stdout,
-    );
-    checks.push({
-      code: "worker_secret_CLOUDFLARE_API_TOKEN",
-      detail: secretNames.includes("CLOUDFLARE_API_TOKEN")
-        ? "Custom-hostname API token binding is present"
-        : "Set CLOUDFLARE_API_TOKEN as a Worker secret",
-      ok: secretNames.includes("CLOUDFLARE_API_TOKEN"),
-    });
+    const inventoryTokenName = operatorEnvironment[CLOUDFLARE_STAGING_RESOURCE_AUDIT_TOKEN_NAME]?.trim()
+      ? CLOUDFLARE_STAGING_RESOURCE_AUDIT_TOKEN_NAME
+      : CLOUDFLARE_D1_TOKEN_NAME;
+    for (const inventoryKey of ["d1", "kv", "r2", "queues"]) {
+      if (remote.errors?.[inventoryKey] !== true) continue;
+      const tokenName = inventoryKey === "d1" ? CLOUDFLARE_D1_TOKEN_NAME : inventoryTokenName;
+      checks.push({
+        code: `cloudflare_${inventoryKey}_inventory_api`,
+        detail: `Wrangler ${inventoryKey.toUpperCase()} inventory failed using ${tokenName}`,
+        ok: false,
+      });
+    }
+
+    try {
+      const secretNames = parseSecretNames(
+        runner(["secret", "list", "--env", environment], resourceRunnerOptions).stdout,
+      );
+      checks.push({
+        code: "worker_secret_CLOUDFLARE_API_TOKEN",
+        detail: secretNames.includes("CLOUDFLARE_API_TOKEN")
+          ? "Custom-hostname API token binding is present"
+          : "Set CLOUDFLARE_API_TOKEN as a Worker secret",
+        ok: secretNames.includes("CLOUDFLARE_API_TOKEN"),
+      });
+    } catch {
+      checks.push({
+        code: "cloudflare_worker_secret_inventory_api",
+        detail: `Wrangler Worker secret inventory failed using ${inventoryTokenName}`,
+        ok: false,
+      });
+    }
 
     if (cloudflareApiToken !== null) {
       checks.push({

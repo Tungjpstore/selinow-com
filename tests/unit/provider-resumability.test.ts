@@ -422,7 +422,13 @@ async function payOSRuntime(input: {
     if (input.providerFails === true) {
       return Promise.resolve(new Response(JSON.stringify({ code: "01", desc: "sensitive provider description" }), { status: 400 }));
     }
-    return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+    return Promise.resolve(Response.json({ code: "00", data: {
+      accountName: "Selinow Test",
+      accountNumber: "0000006797",
+      name: "Selinow Staging UAT",
+      shortName: "SELINOW",
+      webhookUrl: body.webhookUrl,
+    } }));
   };
 
   return {

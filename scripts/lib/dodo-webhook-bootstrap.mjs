@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 import { URL } from "node:url";
 
 import { assertProductionWorkerVersionAdmission } from "./platform.mjs";
+import { listDodoWebhooks } from "./dodo-webhook-registration.mjs";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const SHA = /^[a-f0-9]{40}$/u;
@@ -269,6 +270,16 @@ async function acquireClaimMutationLease(root, releaseId, hooks = {}) {
     }
     let current;
     try { current = assertClaimMutationLease(JSON.parse(existing.bytes.toString("utf8"))); } catch (error) {
+      const observedAt = hooks.now instanceof Date ? hooks.now : new Date();
+      // A process running the pre-atomic implementation could crash after
+      // creating the canonical file but before writing any lease bytes.
+      // Reclaim only that exact, empty inode after a full lease TTL.
+      if (existing.bytes.byteLength === 0
+        && Number.isFinite(existing.stat.mtimeMs)
+        && existing.stat.mtimeMs + RESUME_CLAIM_MUTATION_LEASE_TTL_MS <= observedAt.getTime()
+        && await removeExactPrivateFile(root, path, existing.stat, hooks)) {
+        continue;
+      }
       throw new Error("dodo_webhook_bootstrap_resume_claim_lock_invalid", { cause: error });
     }
     const observedAt = hooks.now instanceof Date ? hooks.now : new Date();
@@ -423,19 +434,8 @@ export function assertDodoWebhookEndpointInventory(payload, endpointUrl) {
 }
 
 export async function inspectDodoWebhookEndpoint(input) {
-  let response;
-  try {
-    response = await input.fetcher(`${input.apiBaseUrl.replace(/\/+$/u, "")}/webhooks`, {
-      headers: { Authorization: `Bearer ${input.apiKey}` },
-      method: "GET",
-    });
-  } catch {
-    throw new Error("dodo_webhook_provider_unavailable");
-  }
-  if (!response.ok) throw new Error(`dodo_webhook_provider_http_${response.status}`);
-  let payload;
-  try { payload = await response.json(); } catch { throw new Error("dodo_webhook_provider_response_invalid"); }
-  return assertDodoWebhookEndpointInventory(payload, input.endpointUrl);
+  const rows = await listDodoWebhooks(input);
+  return assertDodoWebhookEndpointInventory(rows, input.endpointUrl);
 }
 
 export async function readDodoWebhookSigningSecret(input) {
@@ -938,6 +938,16 @@ export async function acquireDodoBootstrapResumeClaim(root, input) {
       }, input.fileSystemHooks);
       if (acquired !== null) return acquired;
     } catch (error) {
+      // The claim link is the authoritative ownership record. If publication
+      // committed but releasing the short mutation lease lost a race, retain
+      // the owner directory and return the still-valid claim instead of
+      // orphaning the canonical hard link.
+      try {
+        const ownership = await assertDodoBootstrapResumeClaimOwnership(root, { claim, now });
+        return { artifactSha256: fingerprintBytes(bytes), claim: ownership, evidenceRef: ref };
+      } catch {
+        // No committed ownership remains, so this attempt can be cleaned up.
+      }
       await removeAttemptDirectory(root, attemptDirectory).catch(() => undefined);
       throw new Error("dodo_webhook_bootstrap_resume_claim_failed", { cause: error });
     }

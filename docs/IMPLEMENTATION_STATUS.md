@@ -1420,3 +1420,36 @@ The preceding migration counts are checkpoint-era history. The current source ch
   provider secrets, approvals, monitoring, legal/support acceptance, pilot
   evidence and rollback rehearsal are absent. Do not migrate or deploy
   production until those artifacts are generated and accepted together.
+
+## One-batch production-readiness remediation (2026-08-13)
+
+- Starting from reviewed parent `f4b0db7`, the code-side continuation blockers
+  were consolidated into one release candidate patch. Cloudflare doctor now
+  keeps D1 identity/inventory on `CLOUDFLARE_D1_API_TOKEN`, uses the optional
+  `CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN` for KV, R2, Queue and Worker
+  secret-name inventory, reports role-specific safe failures, and allows the
+  local doctor to run without remote credentials.
+- PayOS webhook confirmation now requires the official response fields and the
+  exact requested `webhookUrl`; malformed or mismatched HTTP-200 responses are
+  ambiguous failures. Dodo webhook registration and bootstrap now consume the
+  bounded cursor inventory, fail closed on malformed or looping pagination,
+  and safely recover the two reviewed stale-lease/publication race cases.
+- Staging smoke now proves the candidate `/solutions` marker and the intentional
+  private/no-store/noindex `/llms.txt` staging boundary. Production rollback
+  rehearsal requires the public `llms.txt` text contract. These checks do not
+  claim that the currently deployed production Worker already contains the
+  candidate routes.
+- `release:quality:evidence` runs the ten required local gates sequentially,
+  rejects dirty or drifting commit/tree state, binds quality evidence to the
+  accepted staging Worker UUID, writes only canonical private mode-`0600`
+  artifacts without symlink traversal or overwrite, and leaves manual,
+  monitoring and pilot artifacts bound to the later production candidate.
+- The final source checkpoint passes `npm run check` with 0 errors and 4 hints,
+  `npm run lint`, `npx tsc --noEmit`, `npm test` with 308 files / 2,432 tests,
+  both production and staging builds, `npm audit --audit-level=high` with 0
+  vulnerabilities, both deploy dry-runs and `git diff --check`.
+- No remote mutation, provider charge, payout, webhook creation, approval or
+  acceptance evidence was manufactured in this remediation. Production remains
+  `NO-GO` until scoped Cloudflare tokens, staging backup/restore/migrations and
+  deployment, genuine Dodo/PayOS UAT, the missing production Dodo webhook secret,
+  approvals, monitoring, legal/support, pilot and rollback evidence are present.

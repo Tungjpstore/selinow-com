@@ -14,6 +14,7 @@ import {
   assertOwnedName,
   auditStagingRouteInventory,
   buildQueueBindings,
+  buildCloudflareResourceAuditEnvironment,
   buildPinnedCloudflareEnvironment,
   buildWorkerBuildEnvironment,
   buildWorkerDeployEnvironment,
@@ -488,6 +489,13 @@ describe("platform CLI flags", () => {
       "process.stderr.write('platform_child_admission_denied\\nDUMMY_SECRET_MARKER'); process.exit(1)",
     ], { safeFailureCodes: ["platform_child_admission_denied"] }))
       .toThrow("command_failed");
+  });
+
+  it("runs the local doctor without requiring remote operator tokens", async () => {
+    await expect(doctor("local", { environment: {} })).resolves.toMatchObject({
+      environment: "local",
+      ok: true,
+    });
   });
 });
 
@@ -1609,6 +1617,89 @@ describe("Cloudflare for SaaS platform configuration", () => {
     ))).toBe(true);
     expect(saasAuthorizationHeaders.length).toBeGreaterThan(0);
     expect(saasAuthorizationHeaders.every((header) => header === "Bearer platform-token")).toBe(true);
+  });
+
+  it("reports the failing Wrangler inventory role without collapsing to command_failed", async () => {
+    const spec = JSON.parse(
+      await readFile(new URL("../../infra/environments/staging.json", import.meta.url), "utf8"),
+    ) as PlatformEnvironmentSpec;
+    const observedTokens = new Map<string, string | undefined>();
+    const runner = (args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      observedTokens.set(args.slice(0, 3).join(" "), options?.env?.CLOUDFLARE_API_TOKEN);
+      if (args[0] === "whoami") {
+        return { stderr: "", stdout: `Account ID: ${spec.accountId}` };
+      }
+      if (args[0] === "d1") {
+        return { stderr: "", stdout: JSON.stringify([{ name: spec.resources.d1 }]) };
+      }
+      if (args[0] === "kv") {
+        throw new Error("command_failed:provider-output-must-stay-private");
+      }
+      if (args[0] === "r2") return { stderr: "", stdout: "" };
+      if (args[0] === "queues") return { stderr: "", stdout: "" };
+      return { stderr: "", stdout: "[]" };
+    };
+    const fetchImplementation: typeof fetch = (input) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+      if (url.includes("/dns_records?")) {
+        const requestedName = new URL(url).searchParams.get("name");
+        const record = spec.saas.dnsRecords.find((candidate) => candidate.name === requestedName);
+        return Promise.resolve(new Response(JSON.stringify({ result: [record], success: true }), { status: 200 }));
+      }
+      if (url.includes("/custom_hostnames/fallback_origin")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          result: { origin: spec.saas.fallbackOrigin, status: "active" },
+          success: true,
+        }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ result: [], success: true }), { status: 200 }));
+    };
+
+    const result = await doctor("staging", {
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
+        CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN: "resource-audit-token",
+      },
+      fetchImplementation,
+      runWranglerImplementation: runner,
+      spec,
+    });
+
+    expect(result.checks).toContainEqual({
+      code: "cloudflare_kv_inventory_api",
+      detail: "Wrangler KV inventory failed using CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN",
+      ok: false,
+    });
+    expect(JSON.stringify(result)).not.toContain("provider-output-must-stay-private");
+    expect(observedTokens.get("whoami --json")).toBe("d1-token");
+    expect(observedTokens.get("d1 list --json")).toBe("d1-token");
+    expect(observedTokens.get("kv namespace list")).toBe("resource-audit-token");
+  });
+
+  it("maps an optional resource-audit token without forwarding operator credentials", () => {
+    expect(buildCloudflareResourceAuditEnvironment({
+      CLOUDFLARE_D1_API_TOKEN: "d1-token",
+      CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
+      CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN: " resource-audit-token ",
+      KEEP_ME: "must-not-forward",
+      PATH: "/bin",
+    }, stagingSpec.accountId)).toEqual({
+      CLOUDFLARE_ACCOUNT_ID: stagingSpec.accountId,
+      CLOUDFLARE_API_TOKEN: "resource-audit-token",
+      PATH: "/bin",
+    });
+    expect(buildCloudflareResourceAuditEnvironment({
+      CLOUDFLARE_D1_API_TOKEN: "d1-token",
+    }, stagingSpec.accountId)).toMatchObject({
+      CLOUDFLARE_API_TOKEN: "d1-token",
+    });
   });
 
   it("fails closed without exposing Wrangler account output", async () => {

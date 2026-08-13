@@ -379,9 +379,10 @@ describe("authenticated browser gate isolation", () => {
     expect(diagnostic).not.toContain("short-fingerprint");
     expect(diagnostic).not.toContain("short-client");
     const operatorTokens = redactPlaywrightFailure(
-      "CLOUDFLARE_D1_API_TOKEN=d1-secret CLOUDFLARE_WORKER_DEPLOY_API_TOKEN=worker-secret CLOUDFLARE_STAGING_DEPLOYMENT_AUDIT_API_TOKEN=short-deploy CLOUDFLARE_STAGING_TRIGGER_AUDIT_API_TOKEN=short-trigger",
+      "CLOUDFLARE_D1_API_TOKEN=d1-secret CLOUDFLARE_WORKER_DEPLOY_API_TOKEN=worker-secret CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN=resource-read CLOUDFLARE_STAGING_DEPLOYMENT_AUDIT_API_TOKEN=short-deploy CLOUDFLARE_STAGING_TRIGGER_AUDIT_API_TOKEN=short-trigger",
     );
     expect(operatorTokens).toContain("CLOUDFLARE_D1_API_TOKEN=[redacted]");
+    expect(operatorTokens).not.toContain("resource-read");
     expect(operatorTokens).not.toContain("worker-secret");
     expect(operatorTokens).not.toContain("short-deploy");
     expect(operatorTokens).not.toContain("short-trigger");

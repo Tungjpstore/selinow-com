@@ -94,6 +94,11 @@ manifest is generated from the final clean HEAD. It does not authorize execution
   schema-3 manifest; no current staging ledger is claimed until fresh read-only
   evidence exists
 - Backup command: repository `backup:create` guarded script, exact env only
+- Doctor resource inventory: dedicated read-only
+  `CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN` for KV, R2, Queue and Worker
+  secret-name reads. The legacy fallback to `CLOUDFLARE_D1_API_TOKEN` preserves
+  compatibility, but new ceremonies should keep D1 and resource-audit roles
+  separate.
 - Backup evidence: report-v2, non-empty artifact, checksum, bookmark, freshness
   <= 60 minutes, exact account/D1 identity
 - Restore drill: isolated disposable target from the exact reviewed tree and

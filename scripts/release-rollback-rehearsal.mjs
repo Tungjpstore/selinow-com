@@ -152,6 +152,17 @@ export async function smokeRollbackCanary({
     "production_rollback_marketing_smoke_failed",
   );
 
+  const llmsResponse = await fetcher(new URL("/llms.txt", marketing), {
+    redirect: "manual",
+    signal: globalThis.AbortSignal.timeout(15_000),
+  });
+  const llmsBody = await boundedResponseText(llmsResponse, "production_rollback_llms_smoke_failed");
+  if (llmsResponse.status !== 200 || llmsResponse.redirected
+    || !llmsResponse.headers.get("content-type")?.toLowerCase().includes("text/plain")
+    || !llmsBody.includes("# Selinow") || !llmsBody.includes("Website and Telegram")) {
+    throw new Error("production_rollback_llms_smoke_failed");
+  }
+
   const storefrontResponse = await fetcher(storefront, {
     redirect: "manual",
     signal: globalThis.AbortSignal.timeout(15_000),
@@ -183,7 +194,7 @@ export async function smokeRollbackCanary({
   }
 
   return {
-    checks: ["health", "dashboard", "marketing", "storefront", "dodo_unsigned_webhook"],
+    checks: ["health", "dashboard", "marketing", "llms", "storefront", "dodo_unsigned_webhook"],
     status: "passed",
   };
 }

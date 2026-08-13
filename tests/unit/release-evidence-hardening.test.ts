@@ -218,6 +218,7 @@ describe("release evidence hardening", () => {
   it("requires quality, manual, pilot and monitoring evidence to bind to one candidate artifact each", async () => {
     const root = await mkdtemp(join(tmpdir(), "selinow-release-candidate-evidence-"));
     const candidateWorkerVersion = "33333333-3333-4333-8333-333333333333";
+    const stagingWorkerVersion = "22222222-2222-4222-8222-222222222222";
     const sections = {
       manualAcceptance: {
         customDomain: true,
@@ -255,6 +256,7 @@ describe("release evidence hardening", () => {
       candidateWorkerVersion,
       commitSha: COMMIT_SHA,
       releaseId: RELEASE_ID,
+      staging: { workerVersion: stagingWorkerVersion },
       treeSha: TREE_SHA,
     };
     try {
@@ -287,7 +289,7 @@ describe("release evidence hardening", () => {
           releaseId: RELEASE_ID,
           schemaVersion: 1,
           treeSha: TREE_SHA,
-          workerVersion: candidateWorkerVersion,
+          workerVersion: section === "quality" ? stagingWorkerVersion : candidateWorkerVersion,
         };
         const artifactSha256 = await writeArtifact(root, ref, artifact);
         evidence[section] = {

@@ -1,7 +1,7 @@
 export interface StagingPhaseASmokePlan {
   checks: Array<{
     bodyMarker?: string;
-    contentType: "any" | "html" | "json";
+    contentType: "any" | "html" | "json" | "text";
     expectedStatuses: number[];
     kind: string;
     method: "GET" | "HEAD";

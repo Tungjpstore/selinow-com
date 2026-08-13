@@ -53,6 +53,38 @@ describe("Dodo webhook registration", () => {
     expect(result.providerWebhookFingerprintSha256).toBe(fingerprintDodoWebhookReference("provider_webhook", "wh_test_created"));
   });
 
+  it("searches every provider page before deciding whether to create an endpoint", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ data: [{ id: "wh_other", url: "https://api-staging.selinow.com/other" }], done: false, iterator: "page-two" }))
+      .mockResolvedValueOnce(Response.json({ data: [{ id: "wh_test_existing", url: ENDPOINT_URL }], done: true, iterator: null }))
+      .mockResolvedValueOnce(Response.json({ secret: "whsec_dGVzdC13ZWJob29rLXNlY3JldA==" }));
+
+    await expect(ensureDodoWebhook({ apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher }))
+      .resolves.toMatchObject({ created: false });
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls[1]?.[0]).toBe(`${API_BASE_URL}/webhooks?iterator=page-two`);
+    expect(fetcher.mock.calls.some((call) => (call[1] as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
+
+  it("fails closed instead of creating when the provider list envelope is malformed", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ error: "temporarily_unavailable" }));
+
+    await expect(ensureDodoWebhook({ apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher }))
+      .rejects.toThrow("dodo_webhook_provider_response_invalid");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when provider pagination repeats an iterator", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ data: [], done: false, iterator: "repeated" }))
+      .mockResolvedValueOnce(Response.json({ data: [], done: false, iterator: "repeated" }));
+
+    await expect(ensureDodoWebhook({ apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher }))
+      .rejects.toThrow("dodo_webhook_provider_response_invalid");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("serializes concurrent list-create registrations into exactly one provider POST", async () => {
     const lockDirectory = await mkdtemp(join(tmpdir(), "selinow-dodo-registration-lock-"));
     temporaryDirectories.push(lockDirectory);

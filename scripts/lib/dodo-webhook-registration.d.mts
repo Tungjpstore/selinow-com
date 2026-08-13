@@ -1,5 +1,11 @@
 export function fingerprintDodoWebhookReference(scope: "endpoint" | "provider_webhook", value: string): string;
 
+export function listDodoWebhooks(input: {
+  apiBaseUrl: string;
+  apiKey: string;
+  fetcher: typeof fetch;
+}): Promise<unknown[]>;
+
 export function ensureDodoWebhook(input: {
   apiBaseUrl: string;
   apiKey: string;

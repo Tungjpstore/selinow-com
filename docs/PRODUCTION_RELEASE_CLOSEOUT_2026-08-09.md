@@ -37,11 +37,13 @@ reports, synthetic webhooks, or local-only test output.
 
 2. **Quality and staging evidence**
 
-   - Run `npm run check`, `npm run lint`, `npx tsc --noEmit`, `npm test`,
-     `npm run build`, `npm run build:staging`, `npm audit --audit-level=high`,
-     both deploy dry-runs, `npm run release:doctor -- --json`, and
-     `git diff --check` sequentially.
-   - Record command results in a private, release-bound evidence artifact.
+   - Run `npm run release:quality:evidence -- --write --json`. It executes
+     `check`, `lint`, `tsc --noEmit`, the complete test suite, both builds,
+     high-severity audit, both deploy dry-runs and `git diff --check`
+     sequentially. It fails closed if the clean commit/tree changes, writes the
+     mode-`0600` quality artifact, and updates only the quality projection in
+     the private production evidence file. Run `release:doctor` separately;
+     the doctor must keep reporting every still-open external gate.
    - Run staging migration/backup/restore admission and the relevant browser,
      route, health, domain, Website and Telegram smoke checks.
    - After migration (and any separately approved seed), create a newer,

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -614,6 +614,58 @@ describe("Dodo production webhook bootstrap", () => {
     await expect(assertDodoBootstrapResumeClaimOwnership(root, { claim: winner.claim, now: takeoverNow }))
       .resolves.toMatchObject({ attemptId: winnerAttemptId });
     await releaseDodoBootstrapResumeClaim(root, winner);
+  });
+
+  it("recovers a stale empty mutation lease left by the pre-atomic writer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-dodo-empty-mutation-lease-"));
+    temporaryRoots.push(root);
+    const releaseDirectory = join(root, ".wrangler", "releases", releaseId);
+    await mkdir(releaseDirectory, { mode: 0o700, recursive: true });
+    const leasePath = join(releaseDirectory, "dodo-webhook-bootstrap-resume-claim-mutation-lease.json");
+    await writeFile(leasePath, "", { mode: 0o600 });
+    const staleAt = new Date("2026-08-11T05:59:00.000Z");
+    await utimes(leasePath, staleAt, staleAt);
+
+    const acquired = await acquireDodoBootstrapResumeClaim(root, {
+      now: new Date("2026-08-11T06:00:00.000Z"),
+      releaseId,
+      reservationId: "e".repeat(64),
+      reservationSha256: "f".repeat(64),
+    });
+
+    await expect(assertDodoBootstrapResumeClaimOwnership(root, {
+      claim: acquired.claim,
+      now: new Date("2026-08-11T06:00:00.000Z"),
+    })).resolves.toMatchObject({ attemptId: String(acquired.claim.attemptId) });
+    await releaseDodoBootstrapResumeClaim(root, acquired);
+  });
+
+  it("retains a published claim when mutation-lease release loses ownership", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-dodo-mutation-release-race-"));
+    temporaryRoots.push(root);
+    let replaced = false;
+    const acquired = await acquireDodoBootstrapResumeClaim(root, {
+      fileSystemHooks: {
+        async beforeExactUnlink({ path }) {
+          if (replaced || !path.endsWith("dodo-webhook-bootstrap-resume-claim-mutation-lease.json")) return;
+          replaced = true;
+          const replacement = await readFile(path);
+          await rm(path);
+          await writeFile(path, replacement, { mode: 0o600 });
+        },
+      },
+      now: new Date("2026-08-11T06:00:00.000Z"),
+      releaseId,
+      reservationId: "1".repeat(64),
+      reservationSha256: "2".repeat(64),
+    });
+
+    expect(replaced).toBe(true);
+    await expect(assertDodoBootstrapResumeClaimOwnership(root, {
+      claim: acquired.claim,
+      now: new Date("2026-08-11T06:00:00.000Z"),
+    })).resolves.toMatchObject({ attemptId: String(acquired.claim.attemptId) });
+    await releaseDodoBootstrapResumeClaim(root, acquired);
   });
 
   it("does not recursively clean an attempt through a swapped ancestor", async () => {

@@ -54,6 +54,30 @@ export function createStagingPhaseASmokePlan(spec) {
         url: `https://${platformHost}/api/health`,
       },
       {
+        bodyMarker: 'data-marketing-surface="solutions-hub"',
+        contentType: "html",
+        expectedStatuses: [200],
+        kind: "marketing",
+        method: "GET",
+        name: "platform_marketing_solutions",
+        requiredHeaders: [],
+        url: `https://${platformHost}/solutions`,
+      },
+      {
+        bodyMarker: "Not found",
+        contentType: "text",
+        expectedStatuses: [404],
+        kind: "seo_boundary",
+        method: "GET",
+        name: "platform_llms_staging_closed",
+        requiredHeaders: ["cache-control", "x-robots-tag"],
+        requiredHeaderValues: {
+          "cache-control": "private, no-store, max-age=0",
+          "x-robots-tag": "noindex, nofollow",
+        },
+        url: `https://${platformHost}/llms.txt`,
+      },
+      {
         contentType: "json",
         expectedStatuses: [200],
         kind: "catalog",
@@ -130,7 +154,7 @@ export function validateStagingPhaseASmokePlan(plan) {
     if (!Array.isArray(check.expectedStatuses) || check.expectedStatuses.length === 0 || check.expectedStatuses.some((status) => !Number.isSafeInteger(status) || status < 200 || status > 599)) {
       throw new Error(`staging_smoke_status_invalid:${check.name}`);
     }
-    if (!new Set(["any", "html", "json"]).has(check.contentType)) throw new Error(`staging_smoke_content_type_invalid:${check.name}`);
+    if (!new Set(["any", "html", "json", "text"]).has(check.contentType)) throw new Error(`staging_smoke_content_type_invalid:${check.name}`);
     if (!Array.isArray(check.requiredHeaders) || check.requiredHeaders.some((header) => !/^[a-z][a-z0-9-]{1,80}$/u.test(header))) {
       throw new Error(`staging_smoke_header_invalid:${check.name}`);
     }
@@ -189,6 +213,7 @@ async function readBoundedResponse(response) {
 function inspectBody(check, body, contentType) {
   if (check.contentType === "json" && !isJsonContentType(contentType)) return "content_type_mismatch";
   if (check.contentType === "html" && !isHtmlContentType(contentType)) return "content_type_mismatch";
+  if (check.contentType === "text" && String(contentType ?? "").split(";", 1)[0].trim().toLowerCase() !== "text/plain") return "content_type_mismatch";
   if (check.bodyMarker !== undefined && !body.includes(check.bodyMarker)) return "body_marker_missing";
   if (check.kind === "health" || check.kind === "catalog") {
     let payload;
