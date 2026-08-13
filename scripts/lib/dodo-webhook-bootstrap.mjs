@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { constants } from "node:fs";
-import { link, lstat, mkdir, open, readdir, realpath, rename, rm, rmdir } from "node:fs/promises";
+import { link, lstat, mkdir, open, readdir, realpath, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
@@ -22,7 +22,8 @@ const RESERVATION_FILE = "dodo-webhook-bootstrap-reservation.json";
 const RESUME_CLAIM_FILE = "dodo-webhook-bootstrap-resume-claim.json";
 const RESUME_CLAIM_TTL_MS = 15 * 60_000;
 const RESUME_ATTEMPTS_DIRECTORY = "dodo-webhook-bootstrap-resume-attempts";
-const RESUME_CLAIM_MUTATION_LOCK = "dodo-webhook-bootstrap-resume-claim-mutation.lock";
+const RESUME_CLAIM_MUTATION_LEASE = "dodo-webhook-bootstrap-resume-claim-mutation-lease.json";
+const RESUME_CLAIM_MUTATION_LEASE_TTL_MS = 30_000;
 
 function object(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
@@ -114,6 +115,7 @@ async function safeReadPrivateFile(root, path) {
     return { bytes, stat: opened };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("dodo_webhook_bootstrap_")) throw error;
+    if (error?.code === "ENOENT") throw new Error("dodo_webhook_bootstrap_artifact_missing", { cause: error });
     throw new Error("dodo_webhook_bootstrap_artifact_read_failed", { cause: error });
   } finally {
     await handle?.close().catch(() => undefined);
@@ -130,6 +132,27 @@ async function cleanupExclusiveFile(root, path, opened) {
     // A swapped ancestor is left untouched; no payload bytes are written until
     // the canonical target and opened descriptor are proven identical.
   }
+}
+
+async function removeAttemptDirectory(root, path) {
+  await safeCanonicalParent(root, resolve(path, "owner.json"), false);
+  let names;
+  try { names = await readdir(path); } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw new Error("dodo_webhook_bootstrap_resume_claim_cleanup_failed", { cause: error });
+  }
+  for (const name of names) {
+    if (name !== "owner.json" && name !== "released.json" && !/^heartbeat-\d+-[a-f0-9-]{36}\.json$/u.test(name)) {
+      throw new Error("dodo_webhook_bootstrap_resume_claim_cleanup_failed");
+    }
+    const child = resolve(path, name);
+    await safeCanonicalParent(root, child, false);
+    const childStat = await lstat(child);
+    if (!childStat.isFile() || childStat.isSymbolicLink()) throw new Error("dodo_webhook_bootstrap_resume_claim_cleanup_failed");
+    await unlink(child);
+  }
+  await safeCanonicalParent(root, path, false);
+  await rmdir(path);
 }
 
 async function safeWriteExclusive(root, path, bytes, mode = 0o600, hooks = {}) {
@@ -168,33 +191,96 @@ function sameInode(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
-async function withDodoBootstrapClaimMutation(root, releaseId, operation, hooks = {}) {
-  const lockPath = resolve(root, ".wrangler", "releases", releaseId, RESUME_CLAIM_MUTATION_LOCK);
-  await safeCanonicalParent(root, lockPath, true);
-  let acquired = false;
+function claimMutationLease(releaseId, now = new Date()) {
+  return {
+    acquiredAt: now.toISOString(),
+    attemptId: randomUUID(),
+    expiresAt: new Date(now.getTime() + RESUME_CLAIM_MUTATION_LEASE_TTL_MS).toISOString(),
+    mode: "dodo_webhook_bootstrap_claim_mutation_lease",
+    releaseId,
+    schemaVersion: 1,
+  };
+}
+
+function assertClaimMutationLease(value) {
+  exactKeys(value, ["acquiredAt", "attemptId", "expiresAt", "mode", "releaseId", "schemaVersion"], "dodo_webhook_bootstrap_resume_claim_lock_invalid");
+  if (value.schemaVersion !== 1 || value.mode !== "dodo_webhook_bootstrap_claim_mutation_lease"
+    || !RELEASE_ID.test(value.releaseId ?? "") || !UUID.test(value.attemptId ?? "")
+    || !Number.isFinite(Date.parse(value.acquiredAt ?? "")) || !Number.isFinite(Date.parse(value.expiresAt ?? ""))
+    || Date.parse(value.expiresAt) - Date.parse(value.acquiredAt) !== RESUME_CLAIM_MUTATION_LEASE_TTL_MS) {
+    throw new Error("dodo_webhook_bootstrap_resume_claim_lock_invalid");
+  }
+  return value;
+}
+
+async function removeExactPrivateFile(root, path, expectedStat, hooks = {}) {
+  await safeCanonicalParent(root, path, false);
+  let current;
+  try { current = await lstat(path); } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!sameInode(current, expectedStat)) return false;
+  await hooks.beforeExactUnlink?.({ path });
+  let latest;
+  try { latest = await lstat(path); } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!sameInode(latest, expectedStat)) return false;
+  try { await unlink(path); } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  return true;
+}
+
+async function acquireClaimMutationLease(root, releaseId, hooks = {}) {
+  const path = resolve(root, ".wrangler", "releases", releaseId, RESUME_CLAIM_MUTATION_LEASE);
   for (let attempt = 0; attempt < 500; attempt += 1) {
+    const lease = claimMutationLease(releaseId, hooks.now instanceof Date ? hooks.now : new Date());
+    const bytes = Buffer.from(`${JSON.stringify(lease, null, 2)}\n`, "utf8");
     try {
-      await mkdir(lockPath, { mode: 0o700 });
-      acquired = true;
-      break;
+      await safeWriteExclusive(root, path, bytes);
+      const owner = await safeReadPrivateFile(root, path);
+      assertClaimMutationLease(JSON.parse(owner.bytes.toString("utf8")));
+      return { lease, owner, path };
     } catch (error) {
       if (error?.code !== "EEXIST") throw new Error("dodo_webhook_bootstrap_resume_claim_lock_failed", { cause: error });
-      await hooks.onClaimMutationLockBlocked?.({ lockPath });
-      await delay(2);
     }
+    let existing;
+    try {
+      existing = await safeReadPrivateFile(root, path);
+    } catch (error) {
+      if (error instanceof Error && error.message === "dodo_webhook_bootstrap_artifact_missing") continue;
+      throw new Error("dodo_webhook_bootstrap_resume_claim_lock_failed", { cause: error });
+    }
+    let current;
+    try { current = assertClaimMutationLease(JSON.parse(existing.bytes.toString("utf8"))); } catch (error) {
+      throw new Error("dodo_webhook_bootstrap_resume_claim_lock_invalid", { cause: error });
+    }
+    const observedAt = hooks.now instanceof Date ? hooks.now : new Date();
+    if (Date.parse(current.expiresAt) > observedAt.getTime()) {
+      await hooks.onClaimMutationLockBlocked?.({ lockPath: path });
+      await delay(2);
+      continue;
+    }
+    await hooks.beforeStaleMutationLeaseTakeover?.({ lease: current, path });
+    if (await removeExactPrivateFile(root, path, existing.stat, hooks)) continue;
   }
-  if (!acquired) throw new Error("dodo_webhook_bootstrap_resume_claim_lock_failed");
+  throw new Error("dodo_webhook_bootstrap_resume_claim_lock_failed");
+}
+
+async function withDodoBootstrapClaimMutation(root, releaseId, operation, hooks = {}) {
+  const owner = await acquireClaimMutationLease(root, releaseId, hooks);
   let operationError;
   let result;
-  try {
-    await safeCanonicalParent(root, resolve(lockPath, "owner"), false);
-    result = await operation();
-  } catch (error) {
-    operationError = error;
-  }
-  try { await rmdir(lockPath); } catch (error) {
+  try { result = await operation(); } catch (error) { operationError = error; }
+  let released;
+  try { released = await removeExactPrivateFile(root, owner.path, owner.owner.stat, hooks); } catch (error) {
     throw new Error("dodo_webhook_bootstrap_resume_claim_lock_release_failed", { cause: error });
   }
+  if (!released) throw new Error("dodo_webhook_bootstrap_resume_claim_lock_release_failed");
   if (operationError !== undefined) throw operationError;
   return result;
 }
@@ -722,24 +808,30 @@ export async function replacePrivateDodoArtifact(root, releaseId, filename, valu
   if (!SHA256.test(expectedSha256 ?? "")) throw new Error("dodo_webhook_bootstrap_artifact_cas_required");
   const current = await safeReadPrivateFile(root, path);
   if (fingerprintBytes(current.bytes) !== expectedSha256) throw new Error("dodo_webhook_bootstrap_artifact_cas_mismatch");
-  const temporaryPath = `${path}.next-${randomUUID()}`;
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+  let handle;
   try {
-    await safeWriteExclusive(root, temporaryPath, bytes);
-    const latest = await safeReadPrivateFile(root, path);
-    if (!sameInode(current.stat, latest.stat) || fingerprintBytes(latest.bytes) !== expectedSha256) {
+    handle = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
+    const opened = await handle.stat();
+    if (!sameInode(opened, current.stat) || !opened.isFile() || (opened.mode & 0o077) !== 0) {
       throw new Error("dodo_webhook_bootstrap_artifact_cas_mismatch");
     }
     await safeCanonicalParent(root, path, false);
-    await rename(temporaryPath, path);
-    const replaced = await safeReadPrivateFile(root, path);
-    if (fingerprintBytes(replaced.bytes) !== fingerprintBytes(bytes)) {
+    const beforeWrite = await lstat(path);
+    if (beforeWrite.isSymbolicLink() || !sameInode(beforeWrite, opened)) {
       throw new Error("dodo_webhook_bootstrap_artifact_cas_mismatch");
     }
+    await handle.write(bytes, 0, bytes.byteLength, 0);
+    await handle.truncate(bytes.byteLength);
+    await handle.sync();
+    await safeCanonicalParent(root, path, false);
+    const afterWrite = await lstat(path);
+    if (afterWrite.isSymbolicLink() || !sameInode(afterWrite, opened)) throw new Error("dodo_webhook_bootstrap_artifact_cas_mismatch");
   } catch (error) {
-    await rm(temporaryPath, { force: true }).catch(() => undefined);
     if (error instanceof Error && error.message === "dodo_webhook_bootstrap_artifact_cas_mismatch") throw error;
     throw new Error("dodo_webhook_bootstrap_reservation_update_failed", { cause: error });
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
   return { artifactSha256: fingerprintBytes(bytes), evidenceRef: ref };
 }
@@ -821,10 +913,10 @@ export async function acquireDodoBootstrapResumeClaim(root, input) {
       }, input.fileSystemHooks);
       if (acquired !== null) return acquired;
     } catch (error) {
-      await rm(attemptDirectory, { force: true, recursive: true }).catch(() => undefined);
+      await removeAttemptDirectory(root, attemptDirectory).catch(() => undefined);
       throw new Error("dodo_webhook_bootstrap_resume_claim_failed", { cause: error });
     }
-    await rm(attemptDirectory, { force: true, recursive: true }).catch(() => undefined);
+    await removeAttemptDirectory(root, attemptDirectory).catch(() => undefined);
     const takeover = await withDodoBootstrapClaimMutation(root, input.releaseId, async () => {
       let existing;
       let existingFile;

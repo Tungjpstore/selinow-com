@@ -324,7 +324,7 @@ async function authenticateThroughVisibleMagicLink(
       return "navigation_in_progress";
     }
   }, { message: "local magic-link navigation did not reach the dashboard" }).toBe("/app");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Browser Gate");
+  await expect(page.locator("[data-app-shell] .app-topbar-context > strong")).toHaveText("Browser Gate");
 }
 
 test.describe.configure({ mode: "serial" });

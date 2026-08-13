@@ -537,6 +537,27 @@ describe("Dodo production webhook bootstrap", () => {
     await releaseDodoBootstrapResumeClaim(root, winner);
   });
 
+  it("does not recursively clean an attempt through a swapped ancestor", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selinow-dodo-cleanup-swap-root-"));
+    const external = await mkdtemp(join(tmpdir(), "selinow-dodo-cleanup-swap-external-"));
+    temporaryRoots.push(root, external);
+    const input = {
+      now: new Date("2026-08-11T06:00:00.000Z"),
+      releaseId,
+      reservationId: "c".repeat(64),
+      reservationSha256: "d".repeat(64),
+    };
+    await mkdir(join(external, ".wrangler", "releases", releaseId), { recursive: true });
+    const externalAttempt = join(external, ".wrangler", "releases", releaseId, "dodo-webhook-bootstrap-resume-attempts", "external-attempt");
+    await mkdir(externalAttempt, { recursive: true });
+    await writeFile(join(externalAttempt, "sentinel.txt"), "keep\n", { mode: 0o600 });
+    const originalWrangler = join(root, ".wrangler-original");
+    await symlink(external, join(root, ".wrangler"));
+    await expect(acquireDodoBootstrapResumeClaim(root, input)).rejects.toThrow("dodo_webhook_bootstrap_resume_claim_failed");
+    await rename(join(root, ".wrangler"), originalWrangler).catch(() => undefined);
+    expect(await readFile(join(externalAttempt, "sentinel.txt"), "utf8")).toBe("keep\n");
+  });
+
   it("heartbeats a long-running resume so takeover remains blocked past the original expiry", async () => {
     const root = await mkdtemp(join(tmpdir(), "selinow-dodo-resume-heartbeat-"));
     temporaryRoots.push(root);
@@ -568,5 +589,11 @@ describe("Dodo production webhook bootstrap", () => {
     expect(source).toContain('productionWorkerAdmission(wrangler, "pre_candidate")');
     expect(source).toContain("const worker = await productionWorkerAdmission(wrangler);");
     expect(source).not.toContain('boundBootstrapInput(options, wrangler, "pre_candidate",');
+  });
+
+  it("uploads route-neutral production Worker versions under pre-candidate admission", async () => {
+    const source = await readFile("scripts/release-worker-upload.mjs", "utf8");
+    expect(source).toContain('infrastructureAdmissionMode: "pre_candidate"');
+    expect(source).not.toContain('infrastructureAdmissionMode: "exact"');
   });
 });

@@ -99,6 +99,9 @@ async function activeEnvironment(options: {
                 updateRow.status = "processing";
                 updateRow.updatedAt = String(values[0]);
               }
+              if (sql.includes("telegram_update_payload_conflict") && sql.startsWith("UPDATE telegram_updates") && updateRow !== null) {
+                updateRow.status = "rejected";
+              }
               if (failPostSendEvidence && providerCalls > 0 && sql.includes("UPDATE telegram_recipients")) {
                 failPostSendEvidence = false;
                 throw new Error("forced_post_send_evidence_failure");
@@ -152,6 +155,7 @@ async function activeEnvironment(options: {
     getHealthUpdated: () => healthUpdated,
     getProviderCalls: () => providerCalls,
     getStaleAudits: () => staleAudits,
+    getUpdateStatus: () => updateRow?.status ?? null,
     getUpdateReadCount: () => updateReadCount,
     resultCodes,
     rotateCredential: () => { activeCredentialId = "credential-rotated"; },
@@ -323,6 +327,43 @@ describe("active Telegram health evidence", () => {
       webhookPublicId: "tgwh_active",
     })).rejects.toMatchObject({ code: "telegram_update_payload_conflict", status: 409 });
     expect(commerce.handle).toHaveBeenCalledOnce();
+    expect(runtime.getUpdateStatus()).toBe("processed");
+  });
+
+  it("keeps the original processing fence while a conflicting payload is rejected", async () => {
+    const runtime = await activeEnvironment();
+    let releaseCommerce: (() => void) | undefined;
+    const commerceBlocked = new Promise<void>((resolve) => { releaseCommerce = resolve; });
+    commerce.handle.mockImplementationOnce(async () => {
+      await commerceBlocked;
+      return {
+        identity: { chatId: "42", identityId: "identity-active" },
+        reply: { text: "original reply" },
+        resultCode: "telegram_start",
+      };
+    });
+
+    const original = processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/start"),
+      requestId: "request-payload-original-processing",
+      webhookPublicId: "tgwh_active",
+    });
+    await vi.waitFor(() => { expect(commerce.handle).toHaveBeenCalledOnce(); });
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest("/products"),
+      requestId: "request-payload-conflict-processing",
+      webhookPublicId: "tgwh_active",
+    })).rejects.toMatchObject({ code: "telegram_update_payload_conflict", status: 409 });
+    expect(runtime.getUpdateStatus()).toBe("processing");
+
+    releaseCommerce?.();
+    await expect(original).resolves.toMatchObject({ processed: true, state: "telegram_start" });
+    expect(runtime.getProviderCalls()).toBe(1);
   });
 
   it("fails closed after one collision re-read when an update receipt cannot be stored", async () => {

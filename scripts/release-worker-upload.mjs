@@ -99,6 +99,7 @@ try {
   } else {
     const identityInput = {
       environment: process.env,
+      infrastructureAdmissionMode: "pre_candidate",
       productionSpec,
       repositoryRoot,
       requireCurrentWorkerVersion: true,

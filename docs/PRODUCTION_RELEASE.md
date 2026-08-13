@@ -2,7 +2,7 @@
 
 Phase 10 uses a prepare, backup, deploy, verify, confirm-or-rollback sequence. Repository tooling is fail-closed: production configuration, secret names, backup evidence, security status, monitoring ownership and pilot evidence must be complete before a release manifest can be written.
 
-Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. Production D1 is at the applied `0001`-`0052` ledger; current source migrations `0053`-`0095` are pending and have not been applied remotely. The release candidate is the final clean committed HEAD used to write the production manifest; it requires a fresh production backup and restore bound to that exact commit/tree. Dated Worker-version observations, older bootstrap evidence and Phase 2 review-fix runtime are historical and must not be treated as continuation evidence.
+Phase 10 remains NO-GO for the full commerce/provider release, while the platform baseline is live. Production D1 is at the applied `0001`-`0052` ledger; current source migrations `0053`-`0096` are pending and have not been applied remotely. The release candidate is the final clean committed HEAD used to write the production manifest; it requires a fresh production backup and restore bound to that exact commit/tree. Dated Worker-version observations, older bootstrap evidence and Phase 2 review-fix runtime are historical and must not be treated as continuation evidence.
 
 The platform handoff evidence is private and non-secret: `.wrangler/bootstrap/production-evidence.json`, `.wrangler/bootstrap/bootstrap_20260730_first_release/production-smoke.json` and `promotion-applied.json`. It proves platform routing and frontend/health smoke only. PayOS settlement/refunds, Telegram bot acceptance, provider-backed fulfillment, external customer-domain/Turnstile admission, channel-expansion providers (Zalo, WhatsApp and Discord), controlled seller pilots, support/legal ownership and rollback evidence for the current candidate remain incomplete. No provider activation or full-commerce GO is claimed.
 
@@ -123,9 +123,9 @@ npm run release:production:bootstrap:migrate -- --env production --dry-run --jso
 
 If backup, generated-manifest, Git, account, D1, migration-ledger or confirmation evidence changes between checks, the command stops before Wrangler. Record the migration completion timestamp and exact applied ledger in the private bootstrap evidence before moving to the canary phase.
 
-### Continuation migration admission (`0053`-`0095`)
+### Continuation migration admission (`0053`-`0096`)
 
-The first-production executor above is historical and must not be reused for the non-empty continuation. `CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN` remains a first-bootstrap-only credential and must never authorize a continuation. For current candidate migrations `0053`-`0095`, use a short-lived least-privilege `CLOUDFLARE_D1_API_TOKEN` (mapped to `CLOUDFLARE_API_TOKEN` only inside the child Wrangler process), create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports. The runtime Worker secret is never operator input:
+The first-production executor above is historical and must not be reused for the non-empty continuation. `CLOUDFLARE_PRODUCTION_BOOTSTRAP_MIGRATION_API_TOKEN` remains a first-bootstrap-only credential and must never authorize a continuation. For current candidate migrations `0053`-`0096`, use a short-lived least-privilege `CLOUDFLARE_D1_API_TOKEN` (mapped to `CLOUDFLARE_API_TOKEN` only inside the child Wrangler process), create a fresh protected production backup, run an isolated restore drill against the exact reviewed commit, and record the current migration ledger in the private reports. The runtime Worker secret is never operator input:
 
 ```bash
 npm run backup:create -- --env production --confirm-production --json

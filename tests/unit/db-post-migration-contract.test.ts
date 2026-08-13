@@ -73,7 +73,7 @@ describe("remote post-migration database contract", () => {
     ]))).toThrow("post_migration_legacy_object_present:auth_request_admissions_legacy_0094");
   });
 
-  it("pins every schema contract introduced through migration 0095", () => {
+  it("pins every schema contract introduced through migration 0096", () => {
     const requiredObjects = [
       ["index", "idx_plan_prices_provider_ref"],
       ["trigger", "plan_prices_published_reference_guard"],
@@ -115,10 +115,13 @@ describe("remote post-migration database contract", () => {
       ["index", "idx_telegram_updates_shop_received"],
       ["index", "idx_telegram_updates_status"],
       ["trigger", "outbox_jobs_quarantine_legacy_order_paid_insert"],
+      ["trigger", "telegram_credentials_legacy_generation_busy_guard"],
       ["trigger", "telegram_integrations_generation_switch_required"],
       ["trigger", "telegram_integrations_generation_transition_guard"],
+      ["trigger", "telegram_integrations_legacy_generation_fence"],
       ["trigger", "telegram_updates_generation_claim_guard"],
       ["trigger", "telegram_updates_generation_insert_guard"],
+      ["trigger", "telegram_updates_legacy_generation_attribute"],
     ] as const;
     for (const [type, name] of requiredObjects) {
       const rows = completeObjects().filter((row) => row.type !== type || row.name !== name);
@@ -382,6 +385,11 @@ describe("remote post-migration database contract", () => {
       expect(() => parsePostMigrationObjectOutput(envelope(
         database.prepare(POST_MIGRATION_OBJECT_SQL).all(),
       ))).toThrow("post_migration_legacy_object_present:telegram_updates_pre_generation");
+      database.exec("DROP TABLE telegram_updates_pre_generation;");
+      database.exec("CREATE TABLE telegram_updates_pre_rollback (id TEXT PRIMARY KEY) STRICT;");
+      expect(() => parsePostMigrationObjectOutput(envelope(
+        database.prepare(POST_MIGRATION_OBJECT_SQL).all(),
+      ))).toThrow("post_migration_legacy_object_present:telegram_updates_pre_rollback");
     } finally {
       database.close();
     }

@@ -213,12 +213,15 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "subscription_events_no_update",
     "subscription_events_provider_scope_guard",
     "outbox_jobs_quarantine_legacy_order_paid_insert",
+    "telegram_credentials_legacy_generation_busy_guard",
     "telegram_integrations_generation_switch_required",
     "telegram_integrations_generation_transition_guard",
+    "telegram_integrations_legacy_generation_fence",
     "telegram_mini_app_sessions_identity_immutable",
     "telegram_mini_app_sessions_scope_insert_guard",
     "telegram_updates_generation_claim_guard",
     "telegram_updates_generation_insert_guard",
+    "telegram_updates_legacy_generation_attribute",
     "usage_events_no_delete",
     "usage_events_no_update",
   ]),
@@ -581,6 +584,7 @@ export function parsePostMigrationObjectOutput(output) {
       row.name === "api_credentials_v0068"
       || row.name === "auth_request_admissions_legacy_0094"
       || row.name === "telegram_updates_pre_generation"
+      || row.name === "telegram_updates_pre_rollback"
       || /_legacy_00(?:70|76)$/u.test(row.name)
     )
   ));

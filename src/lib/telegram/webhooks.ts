@@ -28,10 +28,11 @@ export type TelegramWebhookResult = {
 
 async function auditPayloadConflict(input: { env: AppBindings; integrationGeneration: number; integrationId: string; requestId: string; shopId: string; updateId: number }): Promise<void> {
   const now = new Date().toISOString();
-  await input.env.PLATFORM_DB.batch([
-    input.env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'rejected', safe_result_code = 'telegram_update_payload_conflict', processed_at = ?, updated_at = ? WHERE integration_id = ? AND integration_generation = ? AND update_id = ?").bind(now, now, input.integrationId, input.integrationGeneration, input.updateId),
-    input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'system', NULL, 'telegram.update_payload_conflict', 'telegram_integration', ?, ?, ?, ?)`).bind(createId("aud"), input.shopId, input.integrationId, JSON.stringify({ updateId: input.updateId }), input.requestId, now),
-  ]);
+  // The first payload owns this receipt and may still fence an active commerce
+  // mutation. Preserve its state and record the conflicting replay separately.
+  await input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'system', NULL, 'telegram.update_payload_conflict', 'telegram_integration', ?, ?, ?, ?)`)
+    .bind(createId("aud"), input.shopId, input.integrationId, JSON.stringify({ updateId: input.updateId }), input.requestId, now)
+    .run();
 }
 
 async function claimExistingUpdate(input: {

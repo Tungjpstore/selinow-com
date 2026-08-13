@@ -27,8 +27,10 @@ tests), `npm run build`, `npm run build:staging`,
 `npm audit --audit-level=high` (zero high vulnerabilities), both deploy
 dry-runs, and `git diff --check`. A 2026-08-13 production continuation-prep
 ceremony created backup `bkp_20260812221907_59e419a89383` and isolated restore
-`rdr_20260812221923_f9a186a00bf9` for the `0053`-`0095` source chain against
-the live `0052` production D1. Production platform doctor passed. Live Worker
+`rdr_20260812221923_f9a186a00bf9` for the then-current `0053`-`0095` source chain against
+the live `0052` production D1. Source now continues through
+`0096_telegram_runtime_rollback_compatibility.sql`; that migration is not on
+staging or production and requires a fresh candidate-bound ceremony. Production platform doctor passed. Live Worker
 secret names are nine of ten required names; `DODO_PAYMENTS_WEBHOOK_KEY` is
 absent. Production trigger inventory still has zero queue consumers and no
 cron. The owner deferred genuine Dodo/PayOS UAT. `npm run release:doctor --
@@ -165,7 +167,7 @@ protected backup/restore evidence and an approved mutation window.
   `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. It is not a post-documentation
   HEAD or a deployed identity; the next release ceremony must recapture the
   final clean commit and tree.
-- Current operational source migration chain: contiguous `0001`-`0095`.
+- Current operational source migration chain: contiguous `0001`-`0096`.
   Staging post-migration evidence for release
   `stg_20260808T235913Z_73d0c27493ea` records all 90 migrations through
   `0090_payos_provider_claim_clear_guard.sql`, bound to commit
@@ -438,7 +440,7 @@ or seller pilot was performed for P3.
 | 7 — Custom domains | Complete | External hostname ownership, Cloudflare for SaaS provisioning, SSL/DNS activation, primary switching, tenant rendering, redirect, deletion and DNS cleanup passed on staging |
 | 8 — Automated onboarding | In progress | Repository wizard, readiness, tenant automation API, durable task scheduling, guarded continuation evidence and Selinow-owned executors are live on staging; fresh-seller and external-provider acceptance remain pending |
 | 9 — Operations/security/platform extensibility | In progress | Operations runtime, channel-neutral connections, normalized order attribution, transactional domain events, generic queue fan-out/delivery, DLQ replay, accessibility gates, public-flow axe scans and read-only staging QA are accepted. Phase B globalization and the Phase C entitlement, reversal and generated-license execution slices through migration `0052` are implemented. Migrations `0053`-`0069` add seller operations and channel/provider contract boundaries. Paid Starter/Pro pricing, seven-day trial, three-day paid-renewal grace, Dodo evidence processing, role/plan/state gates, usage metering, activation analytics, Phase 1 billing/restore hardening, and durable catalog activation timestamps are implemented through migration `0080`. Provider activation and remote migration remain pending. Production remains on the previously admitted `0001`-`0052` schema until separately approved migrations are applied. |
-| 10 — Production release | CONTINUATION NO-GO | The guarded first-production ceremony completed on 2026-07-30 and production remains on D1 `0001`-`0052` / runtime phase 6. Current route ownership is `selinow.com/*`, `*.selinow.com/*`, and `*/*` on `selinow-com-production`, with only the exact staging exceptions on `selinow-com-staging`. The current source through `0095`, production cron/queue consumers, provider acceptance, legal/support approval, backup/restore, rollback, pilot, and monitoring evidence remain pending; no continuation production deployment is admitted. |
+| 10 — Production release | CONTINUATION NO-GO | The guarded first-production ceremony completed on 2026-07-30 and production remains on D1 `0001`-`0052` / runtime phase 6. Current route ownership is `selinow.com/*`, `*.selinow.com/*`, and `*/*` on `selinow-com-production`, with only the exact staging exceptions on `selinow-com-staging`. The current source through `0096`, production cron/queue consumers, provider acceptance, legal/support approval, backup/restore, rollback, pilot, and monitoring evidence remain pending; no continuation production deployment is admitted. |
 
 ### Phase 1 completion candidate R3 (2026-08-03)
 

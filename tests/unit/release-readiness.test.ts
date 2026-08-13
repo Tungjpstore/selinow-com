@@ -266,6 +266,29 @@ function readyEvidence(migrationNames = sourceMigrationNames): Record<string, un
   };
 }
 
+it("rejects pending owner approvals", () => {
+  const evidence = readyEvidence();
+  evidence.approvals = {
+    dataOwner: "pending",
+    paymentOwner: "pending",
+    releaseOwner: "pending",
+    securityOwner: "pending",
+    supportOwner: "pending",
+  };
+
+  const result = inspectProductionReadiness({
+    evidence,
+    now: new Date("2026-07-26T03:00:00.000Z"),
+    productionSpec: readyProductionSpec(),
+    workerSecretNames: REQUIRED_WORKER_SECRET_NAMES,
+    wranglerConfig: readyWranglerConfig(),
+  });
+
+  for (const owner of ["dataOwner", "paymentOwner", "releaseOwner", "securityOwner", "supportOwner"]) {
+    expect(result.checks).toContainEqual({ name: `evidence.approvals.${owner}`, ok: false });
+  }
+});
+
 function smokePlan(): Record<string, unknown> {
   return {
     checks: [

@@ -287,11 +287,21 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_telegram_updates_shop_received: "241a38ebc8e45626d8741e2344b3f08f52917d5f9e6e7a08185e2bf5732e0658",
       idx_telegram_updates_status: "aafd2108d00a368c3cc7e2134099f448916d9f6d8602b7fbbbe4d5ab4b37fbfd",
       outbox_jobs_quarantine_legacy_order_paid_insert: "f2b3bac3b51c376153836e7436602c68520f80b6f1623c76d0b2c6caa84ef7e4",
-      telegram_integrations_generation_switch_required: "acf381b85e08b6fc3b9ac3851493f24ccbb04b5def9471385c055d3e06fe64ea",
       telegram_integrations_generation_transition_guard: "2415a487ac7f25b137ad87e0243867b66dce287d646ab0f316e33792ac62ba3c",
-      telegram_updates: "3cd8ab244be5b880252888badca210174ff8fecf0cf303121c7f4a4d5f1b26c2",
       telegram_updates_generation_claim_guard: "7fb8e1a635bc62712d8c86567a69fa6d4a22be93e90d681779317c80c57ef25b",
-      telegram_updates_generation_insert_guard: "857c2f334d5fdf2742f6c28dae95abe52cc9c3b9b3af2e91d6cf040aa6aaf2d3",
+    }),
+  }),
+  "0096_telegram_runtime_rollback_compatibility.sql": Object.freeze({
+    columns: Object.freeze({
+      "telegram_updates.integration_generation": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+    }),
+    objects: Object.freeze({
+      telegram_credentials_legacy_generation_busy_guard: "b47451f2e2498ee5aaddc7e994e4c014d4df8dc45de2c9ec57537683ab36a354",
+      telegram_integrations_generation_switch_required: "61ea60a286589437f7001f8ea30e90ba5e68cea8d774d450ae02928a41507c36",
+      telegram_integrations_legacy_generation_fence: "03e8cd6547ea6c89a1d443f4cca80545fffec4504a2b396f1ed339687186ab02",
+      telegram_updates: "4ce398c15b026424471d6d699e5f8cf8e04c5029c3221f53653f0717e48ae62f",
+      telegram_updates_generation_insert_guard: "6178cbde5fd9e714d6325f9a24461331ae0ce9aacbfdf084a4f105221ce8797e",
+      telegram_updates_legacy_generation_attribute: "7283ef2b3b6dda1692a2fddbe16cb8960dbd8babfc07a06cbee22e01cf57716d",
     }),
   }),
 });
@@ -783,6 +793,12 @@ function validSpecPath(path, value) {
 }
 
 function validEvidencePath(path, value) {
+  if (path.startsWith("approvals.")) {
+    return typeof value === "string"
+      && value.trim().length > 0
+      && !PLACEHOLDER_PATTERN.test(value)
+      && !/^(?:pending|tbd|todo|unapproved|unknown)$/iu.test(value.trim());
+  }
   if (path.endsWith(".evidenceRef")) return isConfigured(value);
   if (path === "manualAcceptance.observedAt" || path === "monitoring.observedAt" || path === "pilot.completedAt" || path === "rollback.rehearsedAt") {
     return safeDate(value) !== null;

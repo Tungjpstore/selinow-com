@@ -33,29 +33,29 @@ const productionEvidenceExample = JSON.parse(readFileSync("infra/release/product
 
 describe("operational migration-ledger documentation", () => {
   it("keeps current operational sections on the complete 0095 source chain", () => {
-    expect(content["docs/RELEASE.md"]).toContain("source and retained staging database evidence now cover `0001`-`0095`");
+    expect(content["docs/RELEASE.md"]).toContain("source covers `0001`-`0096`");
     expect(content["docs/RELEASE.md"]).toContain("The current staging deployment is bound by immutable Cloudflare deployment evidence");
-    expect(content["docs/RELEASE.md"]).toContain("production remains at `0052` with `0053`-`0095` pending");
-    expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).toContain("Exact pending migrations: `0053`-`0095`");
+    expect(content["docs/RELEASE.md"]).toContain("production remains at `0052` with `0053`-`0096` pending");
+    expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).toContain("Exact pending migrations: `0053`-`0096`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("explicit `releaseScope`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("reviewed live `migrationLedgerPrefix`");
-    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Continuation migration admission (`0053`-`0095`)");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Continuation migration admission (`0053`-`0096`)");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("npm run deploy -- --env production --confirm-production --release-manifest");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("release:rollback:rehearsal -- --execute --confirm-production");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("--maintenance-drain-evidence");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("--smoke-storefront-url");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("`CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("active deployment and deployable-version inventories");
-    expect(content["docs/PROVIDER_GATE_AUDIT.md"]).toContain("source has the contiguous forward-only chain through `0095`");
-    expect(content["docs/RUNBOOKS.md"]).toContain("complete source ledger ends at `0095_telegram_generation_and_legacy_outbox_quarantine.sql`");
+    expect(content["docs/PROVIDER_GATE_AUDIT.md"]).toContain("source has the contiguous forward-only chain through `0096`");
+    expect(content["docs/RUNBOOKS.md"]).toContain("complete source ledger ends at `0096_telegram_runtime_rollback_compatibility.sql`");
     expect(content["docs/RUNBOOKS.md"]).toContain("npm run db:complete-release");
     expect(content["docs/RUNBOOKS.md"]).toContain("staging-deployment-evidence.mjs");
     expect(content["docs/RUNBOOKS.md"]).toContain("CLOUDFLARE_STAGING_DEPLOYMENT_AUDIT_API_TOKEN");
     expect(content["docs/RUNBOOKS.md"]).toContain("CLOUDFLARE_WORKER_DEPLOY_API_TOKEN");
     expect(content["docs/RUNBOOKS.md"]).toContain("restore:drill -- --env production --confirm-production --reviewed-commit");
-    expect(content["docs/STAGING_MUTATION_REVIEW_PACKAGE.md"]).toContain("complete source `0001`-`0095` ledger");
+    expect(content["docs/STAGING_MUTATION_REVIEW_PACKAGE.md"]).toContain("complete source `0001`-`0096` ledger");
     expect(content["docs/PHASE_4_STAGING_ACCEPTANCE.md"]).toContain("`db:complete-release`");
-    expect(content["docs/PRODUCTION_CONTINUATION_GATE_AUDIT_2026-08-09.md"]).toContain("`0053` through `0095`");
+    expect(content["docs/PRODUCTION_CONTINUATION_GATE_AUDIT_2026-08-09.md"]).toContain("`0053` through `0096`");
     expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain("release:worker:upload");
     expect(content["docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md"]).toContain(
       "release:rollback:rehearsal -- --execute --confirm-production",
@@ -68,9 +68,9 @@ describe("operational migration-ledger documentation", () => {
     );
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("DODO_PAYMENTS_API_KEY");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("DODO_PAYMENTS_WEBHOOK_KEY");
-    expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0095_telegram_generation_and_legacy_outbox_quarantine.sql`");
+    expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0096_telegram_runtime_rollback_compatibility.sql`");
     expect(content["docs/DOMAINS.md"]).toContain("0093_custom_domain_turnstile_runtime_guard.sql");
-    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0095`");
+    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0096`");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-09.md"]).toContain("`0091`-`0094` over the retained `0090` staging ledger");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`2df45cf5936755bf4e31fabbb06891de8789c271`");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`34ac903aea8b737fa1860d6e6aaf99c454279eda`");
