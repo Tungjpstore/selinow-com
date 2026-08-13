@@ -5,24 +5,26 @@ Last updated: 2026-08-13
 ## Current source of truth
 
 Staging continuation (2026-08-13): the reviewed candidate is commit
-`2df45cf5936755bf4e31fabbb06891de8789c271`, tree
-`34ac903aea8b737fa1860d6e6aaf99c454279eda`. Release
+`eaef2d2b7640cb791422cfbb507fbdfedd386f06`, tree
+`1feb23c5db5b7f7047c31e0245225a287a912284`. The retained release
 `stg_20260812T220654Z_2df45cf59367` applied
-`0095_telegram_generation_and_legacy_outbox_quarantine.sql` to staging D1 and
-deployed Worker version `27f29993-8a4e-422d-95b7-e4741e041c01` at 100%
+`0095_telegram_generation_and_legacy_outbox_quarantine.sql` remains bound to
+the superseded `2df45cf` candidate; its Worker version
+`27f29993-8a4e-422d-95b7-e4741e041c01` cannot be reused for this tree.
 (deployment `fca770d2-9d3c-46ef-80e0-f715ec086106`). Candidate-bound
 pre-migration backup/restore references are
 `bkp_20260812220540_90c8e42cb6f5` and
 `rdr_20260812220604_5072afcba031`; post-migration references are
 `bkp_20260812220810_48860113be6d` and
-`rdr_20260812220835_a1d7f430b552`. Live staging health reports phase 10 with
-`commerce: provider_pending`. Unsigned canonical Dodo staging webhook returns
-`401 webhook_signature_invalid`. Public smoke returned 200 for `/`,
-`/solutions`, `/sitemap.xml`, `/pricing`, `/login`, and `/api/health`.
-`/llms.txt` is absent from source and remains 404.
+`rdr_20260812220835_a1d7f430b552`. Those health and smoke observations belong
+to the superseded candidate and are not evidence for the current tree. The
+current source includes `/solutions`, `/sitemap.xml`, and `/llms.txt`; any
+current public 404s remain expected until a fresh candidate-bound staging
+deployment is completed. Unsigned canonical Dodo staging webhook rejection
+remains the expected fail-closed contract (`401 webhook_signature_invalid`).
 
-Local verification on the candidate passed `npm run check` (771 files, zero
-errors), `npm run lint`, `npx tsc --noEmit`, `npm test` (306 files, 2,396
+Local verification on the candidate passed `npm run check` (772 files, zero
+errors), `npm run lint`, `npx tsc --noEmit`, `npm test` (307 files, 2,411
 tests), `npm run build`, `npm run build:staging`,
 `npm audit --audit-level=high` (zero high vulnerabilities), both deploy
 dry-runs, and `git diff --check`. A 2026-08-13 production continuation-prep
