@@ -41,6 +41,7 @@ export const CLOUDFLARE_STAGING_RESOURCE_AUDIT_TOKEN_NAME = "CLOUDFLARE_STAGING_
 export const CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_TOKEN_NAME = "CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN";
 
 const SAFE_BUILD_ENVIRONMENT_NAMES = new Set([
+  "ASTRO_TELEMETRY_DISABLED",
   "CI",
   "COREPACK_HOME",
   "FORCE_COLOR",
@@ -138,6 +139,7 @@ export function buildWorkerBuildEnvironment(environment = process.env, environme
     SAFE_BUILD_ENVIRONMENT_NAMES.has(name) && typeof value === "string"
   )));
   child.CI = "1";
+  child.ASTRO_TELEMETRY_DISABLED = "1";
   if (environmentName === "local") delete child.CLOUDFLARE_ENV;
   else child.CLOUDFLARE_ENV = environmentName;
   return child;
