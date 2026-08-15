@@ -105,6 +105,35 @@ export async function getSellerStorefrontSettings(input: { env: AppBindings; sho
   return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
 }
 
+export const LOW_STOCK_THRESHOLD_MAX = 1000;
+
+export async function updateShopLowStockThreshold(input: {
+  env: AppBindings;
+  expectedVersion?: number;
+  shopPublicId: string;
+  threshold: number;
+  userId: string;
+}): Promise<{ lowStockThreshold: number; version: number }> {
+  const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  // Matches the shop_settings CHECK constraint (low_stock_threshold >= 0);
+  // the column already exists in migration 0002, so no schema change is needed.
+  if (!Number.isSafeInteger(input.threshold) || input.threshold < 0 || input.threshold > LOW_STOCK_THRESHOLD_MAX) {
+    throw new AppError("validation_failed", 400, ["low_stock_threshold_invalid"]);
+  }
+  const now = new Date().toISOString();
+  if (input.expectedVersion === undefined) {
+    const updated = await input.env.PLATFORM_DB.prepare(`UPDATE shop_settings SET low_stock_threshold = ?, version = version + 1, updated_at = ? WHERE shop_id = ? RETURNING low_stock_threshold AS lowStockThreshold, version`).bind(input.threshold, now, member.row.shop_id).first<{ lowStockThreshold: number; version: number }>();
+    if (updated === null) throw new AppError("resource_not_found", 404);
+    return updated;
+  }
+  if (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1) {
+    throw new AppError("validation_failed", 400, ["storefront_version_invalid"]);
+  }
+  const updated = await input.env.PLATFORM_DB.prepare(`UPDATE shop_settings SET low_stock_threshold = ?, version = version + 1, updated_at = ? WHERE shop_id = ? AND version = ? RETURNING low_stock_threshold AS lowStockThreshold, version`).bind(input.threshold, now, member.row.shop_id, input.expectedVersion).first<{ lowStockThreshold: number; version: number }>();
+  if (updated === null) throw new AppError("resource_conflict", 409, ["settings_version_stale"]);
+  return updated;
+}
+
 export async function updateSellerStorefrontSettings(input: {
   data: Record<string, unknown>;
   env: AppBindings;

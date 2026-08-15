@@ -95,6 +95,13 @@ const clientCopy = {
             {canReview && request.status === "requested" && <div class="appeal-actions"><button type="button" data-appeal-decision="provider_pending">{t("admin.appeals.approve")}</button><button type="button" data-appeal-decision="rejected" class="danger-action">{t("admin.appeals.reject")}</button></div>}
           </article>)}
         </div></section>}
+      <dialog class="sln-dialog" id="appeal-confirm-dialog" aria-labelledby="appeal-confirm-title" aria-describedby="appeal-confirm-impact" data-appeal-confirm-dialog>
+        <div class="sln-dialog__body"><h2 id="appeal-confirm-title" data-appeal-confirm-title></h2><p id="appeal-confirm-impact" data-appeal-confirm-impact></p></div>
+        <form class="sln-dialog__actions" method="dialog" data-appeal-confirm-form>
+          <button class="sln-button" data-variant="secondary" type="submit" value="cancel">{t("admin.appeals.dialog.cancel")}</button>
+          <button class="sln-button" data-variant="danger" type="submit" value="confirm" data-appeal-confirm-action>{t("admin.appeals.dialog.confirm")}</button>
+        </form>
+      </dialog>
     </div>}
 </AdminLayout>
 

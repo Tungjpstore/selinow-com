@@ -1,41 +1,106 @@
 ---
 import AppLayout from "../../layouts/AppLayout.astro";
+import Button from "../../components/primitives/Button.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import DataTable from "../../components/workspace/DataTable.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
 import { authenticateRequest } from "../../lib/auth/session";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { isAppError } from "../../lib/core/errors";
 import { createDashboardTranslator } from "../../lib/i18n";
 import { getBindings } from "../../lib/platform/bindings";
-import { listSellerCustomersPage, type SellerCustomerView } from "../../lib/tenants/seller-management";
+import { listSellerCustomersPage, parseSellerCustomerSort, type SellerCustomerView } from "../../lib/tenants/seller-management";
 import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
 
 const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
 if (auth === null) return Astro.redirect("/login");
 let shops: ShopView[] = [];
-let state: "ready" | "unavailable" | "forbidden" = "ready";
+let state: "forbidden" | "ready" | "unavailable" = "ready";
 let loadRequestId: string | null = null;
 try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { state = "unavailable"; loadRequestId = Astro.locals.requestId; }
 const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+
+// The Astro page parses the table URL contract itself (q/sort/page/pageSize)
+// and passes explicit values into the service; parsePublicApiPage only accepts
+// cursor/limit, so the raw URL is never forwarded.
+const searchParams = Astro.url.searchParams;
+const parsedPage = Number.parseInt(searchParams.get("page") ?? "", 10);
+const requestedPage = Number.isSafeInteger(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
+const parsedPageSize = Number.parseInt(searchParams.get("pageSize") ?? "", 10);
+const requestedPageSize = parsedPageSize === 25 || parsedPageSize === 50 || parsedPageSize === 100 ? parsedPageSize : 25;
+const sort = parseSellerCustomerSort(searchParams.get("sort"));
+const query = searchParams.get("q")?.trim().slice(0, 64) ?? "";
+const hasActiveFilters = query !== "";
+
 let customers: SellerCustomerView[] = [];
-let nextCursor: string | null = null;
+let currentPage = requestedPage;
+let pageSize = requestedPageSize;
+let totalCount = 0;
+let totalPages = 1;
 if (shop !== undefined && state === "ready") {
-  try { const page = await listSellerCustomersPage({ cursor: Astro.url.searchParams.get("cursor"), env, shopPublicId: shop.publicId, userId: auth.userId }); customers = page.customers; nextCursor = page.nextCursor; }
-  catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; if (state === "unavailable") loadRequestId = Astro.locals.requestId; }
+  try {
+    const result = await listSellerCustomersPage({ env, page: requestedPage, pageSize: requestedPageSize, search: query === "" ? null : query, shopPublicId: shop.publicId, sort, userId: auth.userId });
+    customers = result.customers;
+    currentPage = result.page ?? requestedPage;
+    pageSize = result.pageSize ?? requestedPageSize;
+    totalCount = result.totalCount ?? customers.length;
+    totalPages = result.totalPages ?? 1;
+  } catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; if (state === "unavailable") loadRequestId = Astro.locals.requestId; }
 }
 if (state === "forbidden") Astro.response.status = 403;
 if (state === "unavailable") Astro.response.status = 503;
-const locale = Astro.locals.locale;
-const t = createDashboardTranslator(locale);
+
+const buildHref = (params: Record<string, number | string | null | undefined>): string => {
+  const next = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === "") continue;
+    next.set(key, String(value));
+  }
+  const suffix = next.toString();
+  return workspaceHref(`/app/customers${suffix === "" ? "" : `?${suffix}`}`);
+};
+const pageHref = (page: number): string => buildHref({
+  page,
+  pageSize,
+  q: query === "" ? null : query,
+  sort: searchParams.get("sort"),
+});
+
 const formatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeStyle: "short", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
 const date = (value: string | null): string => value === null ? t("dashboard.customers.no_orders") : formatter.format(new Date(value));
+
+const sortBase: string = sort.endsWith("_desc") ? sort.slice(0, -5) : sort;
+const sortDirection: "asc" | "desc" = sort.endsWith("_desc") ? "desc" : "asc";
+const tableColumns = [
+  { label: t("dashboard.customers.table.name") },
+  { align: "end" as const, key: "orders", label: t("dashboard.customers.orders") },
+  { key: "created", label: t("dashboard.customers.last_activity") },
+  { label: t("dashboard.customers.table.status") },
+  { label: t("dashboard.customers.table.actions") },
+];
+type CustomerExportRow = { email: string; lastActivity: string; name: string; orders: string; status: string };
+const exportRows: CustomerExportRow[] = customers.map((customer) => ({
+  email: customer.emailMasked ?? "",
+  lastActivity: customer.lastOrderAt ?? "",
+  name: customer.displayName ?? "",
+  orders: String(customer.orderCount),
+  status: customer.status,
+}));
+const exportHeaders = [
+  t("dashboard.customers.table.name"),
+  t("dashboard.customers.orders"),
+  t("dashboard.customers.last_activity"),
+  t("dashboard.customers.table.status"),
+];
 ---
 
 <AppLayout activePath="/app/customers" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.customers.title")}>
   <PageHeader eyebrow={t("dashboard.customers.eyebrow")} title={t("dashboard.customers.title")} description={t("dashboard.customers.description")}>
-    {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app/orders")}>{t("dashboard.customers.open_orders")} <span aria-hidden="true">↗</span></a>}
+    {shop !== undefined && <a slot="actions" class="sln-button" data-variant="secondary" href={workspaceHref("/app/orders")}>{t("dashboard.customers.open_orders")} <span aria-hidden="true">↗</span></a>}
   </PageHeader>
   {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.unavailable.title")} description={`${t("dashboard.customers.unavailable.description")} ${loadRequestId === null ? "" : t("dashboard.state.error.meta_request", { requestId: loadRequestId })}`.trim()} actionHref={workspaceHref("/app/customers")} actionLabel={t("dashboard.customers.retry")} tone="danger" /></div>
     : shop === undefined ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.no_store.title")} description={t("dashboard.customers.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.customers.no_store.action")} tone="info" /></div>
@@ -43,21 +108,60 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
     : <div class="customers-workspace" data-customers-root data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-can-manage={shop.role === "owner" || shop.role === "manager" ? "true" : "false"} data-locale={locale ?? "en"} data-copy={JSON.stringify({
       loading: t("dashboard.customers.detail.loading"), loaded: t("dashboard.customers.detail.loaded"), unavailable: t("dashboard.customers.detail.unavailable"), save: t("dashboard.customers.detail.save"), saving: t("dashboard.customers.detail.saving"), saved: t("dashboard.customers.detail.saved"), addNote: t("dashboard.customers.detail.add_note"), addingNote: t("dashboard.customers.detail.adding_note"), noteAdded: t("dashboard.customers.detail.note_added"), redact: t("dashboard.customers.detail.redact"), redactConfirm: t("dashboard.customers.detail.redact_confirm"), redacting: t("dashboard.customers.detail.redacting"), redacted: t("dashboard.customers.detail.redacted"), emptyNotes: t("dashboard.customers.detail.empty_notes"), error: t("dashboard.customers.detail.error"), errorRecentAuth: t("dashboard.customers.detail.error_recent_auth"), errorConflict: t("dashboard.customers.detail.error_conflict"), errorForbidden: t("dashboard.customers.detail.error_forbidden"), errorNotFound: t("dashboard.customers.detail.error_not_found"), errorAnonymized: t("dashboard.customers.detail.error_anonymized"), errorPrivacyBlocked: t("dashboard.customers.privacy.blocked"), requestId: t("dashboard.customers.detail.request_id"), privacyExporting: t("dashboard.customers.privacy.exporting"), privacyExported: t("dashboard.customers.privacy.exported"), privacyAnonymizing: t("dashboard.customers.privacy.anonymizing"), privacyAnonymized: t("dashboard.customers.privacy.anonymized"), statusActive: t("dashboard.customers.status.active"), statusBlocked: t("dashboard.customers.status.blocked"), unnamed: t("dashboard.customers.unnamed"), noEmail: t("dashboard.customers.no_email"),
     })}>
-    <section class="customer-panel" aria-labelledby="customer-ledger-title" data-customer-panel>
-      <header><div><p class="eyebrow">{t("dashboard.customers.ledger.eyebrow")}</p><h2 id="customer-ledger-title">{t("dashboard.customers.ledger.title", { shop: shop.name })}</h2></div><span>{t("dashboard.customers.record_count", { count: customers.length })}</span></header>
-      {customers.length === 0 ? <WorkspaceState title={t("dashboard.customers.empty.title")} description={t("dashboard.customers.empty.description")} actionHref={workspaceHref("/app/products")} actionLabel={t("dashboard.customers.empty.action")} tone="info" /> : <>
-        <label class="search-field"><span class="sr-only">{t("dashboard.customers.search.label")}</span><input type="search" placeholder={t("dashboard.customers.search.placeholder")} data-customer-search /></label>
-        <div class="customer-ledger" role="list" aria-label={t("dashboard.customers.list_aria")}>
-          {customers.map((customer) => <article role="listitem" data-customer-row data-customer-public-id={customer.publicId} data-customer-version={customer.version} data-search={`${customer.emailMasked ?? ""} ${customer.displayName ?? ""}`.toLocaleLowerCase(locale ?? "en")}>
-            <div class="customer-mark" aria-hidden="true">{(customer.displayName ?? customer.emailMasked ?? "?").slice(0, 1).toUpperCase()}</div>
-            <div><strong data-customer-name>{customer.displayName ?? t("dashboard.customers.unnamed")}</strong><span>{customer.emailMasked ?? t("dashboard.customers.no_email")}</span></div>
-            <div><span>{t("dashboard.customers.orders")}</span><strong>{customer.orderCount}</strong></div>
-            <div><span>{t("dashboard.customers.last_activity")}</span>{customer.lastOrderAt === null ? <strong>{t("dashboard.customers.no_orders")}</strong> : <time datetime={customer.lastOrderAt}>{date(customer.lastOrderAt)}</time>}</div>
-            <span class={`status-chip status-${customer.status}`} data-customer-status>{customer.status === "active" ? t("dashboard.customers.status.active") : t("dashboard.customers.status.blocked")}</span>
-            {shop.role === "owner" || shop.role === "manager" ? <button class="text-action" type="button" data-customer-open>{t("dashboard.customers.detail.open")}</button> : null}
-          </article>)}
-        </div>
-        <p class="customer-no-results" data-customer-no-results hidden role="status" aria-live="polite">{t("dashboard.customers.no_results")}</p>
+    <section
+      class="customer-panel"
+      aria-labelledby="customer-ledger-title"
+      data-customer-panel
+      data-customer-ledger
+      data-locale={locale ?? "en"}
+      data-export-copy={JSON.stringify({ headers: exportHeaders })}
+      data-export-rows={JSON.stringify(exportRows)}
+    >
+      <header><div><p class="eyebrow">{t("dashboard.customers.ledger.eyebrow")}</p><h2 id="customer-ledger-title">{t("dashboard.customers.ledger.title", { shop: shop.name })}</h2></div><div class="panel-heading-tools"><span class="record-count">{t("dashboard.customers.record_count", { count: totalCount })}</span>{customers.length > 0 && <Button type="button" variant="secondary" data-customer-table-export>{t("dashboard.table.export")}</Button>}</div></header>
+      {totalCount === 0 && !hasActiveFilters ? <WorkspaceState title={t("dashboard.customers.empty.title")} description={t("dashboard.customers.empty.description")} actionHref={workspaceHref("/app/products")} actionLabel={t("dashboard.customers.empty.action")} tone="info" /> : <>
+        <form class="customer-controls" method="get" aria-label={t("dashboard.customers.filters.aria")}>
+          {searchParams.get("shop") !== null && <input type="hidden" name="shop" value={searchParams.get("shop") ?? ""} aria-label="shop" />}
+          <label class="search-field"><span class="sr-only">{t("dashboard.customers.search.label")}</span><input type="search" name="q" value={query} placeholder={t("dashboard.customers.search.placeholder")} autocomplete="off" maxlength="64" /></label>
+          <Button type="submit" variant="secondary">{t("dashboard.table.apply")}</Button>
+        </form>
+        {customers.length === 0 ? (
+          <p class="customer-no-results" data-customer-no-results role="status" aria-live="polite">{t("dashboard.customers.no_results")}</p>
+        ) : (
+          <DataTable
+            caption={t("dashboard.customers.table.aria")}
+            columns={tableColumns}
+            currentSort={sortBase}
+            currentSortDirection={sortDirection}
+            currentUrl={Astro.url}
+          >
+            <tbody>
+              {customers.map((customer) => (
+                <tr data-customer-row data-customer-public-id={customer.publicId} data-customer-version={customer.version}>
+                  <td data-label={t("dashboard.customers.table.name")}><strong data-customer-name>{customer.displayName ?? t("dashboard.customers.unnamed")}</strong><span>{customer.emailMasked ?? t("dashboard.customers.no_email")}</span></td>
+                  <td class="cell-end" data-label={t("dashboard.customers.orders")}><strong>{customer.orderCount}</strong></td>
+                  <td data-label={t("dashboard.customers.last_activity")}>{customer.lastOrderAt === null ? <span>{t("dashboard.customers.no_orders")}</span> : <time datetime={customer.lastOrderAt}>{date(customer.lastOrderAt)}</time>}</td>
+                  <td data-label={t("dashboard.customers.table.status")}><span class={`status-chip status-${customer.status}`} data-customer-status>{customer.status === "active" ? t("dashboard.customers.status.active") : t("dashboard.customers.status.blocked")}</span></td>
+                  <td class="cell-end" data-label={t("dashboard.customers.table.actions")}>{shop.role === "owner" || shop.role === "manager" ? <button class="text-action" type="button" data-customer-open>{t("dashboard.customers.detail.open")}</button> : <span aria-hidden="true">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+            <nav slot="pagination" class="table-pagination" aria-label={t("dashboard.customers.pagination.aria")}>
+              {currentPage > 1 && <a href={pageHref(currentPage - 1)}>← {t("dashboard.table.previous")}</a>}
+              <span>{t("dashboard.table.page_info", { page: currentPage, totalPages })}</span>
+              {currentPage < totalPages && <a href={pageHref(currentPage + 1)}>{t("dashboard.table.next")} →</a>}
+              <form class="page-size-form" method="get">
+                {searchParams.get("shop") !== null && <input type="hidden" name="shop" value={searchParams.get("shop") ?? ""} aria-label="shop" />}
+                {query !== "" && <input type="hidden" name="q" value={query} aria-label="q" />}
+                {searchParams.get("sort") !== null && <input type="hidden" name="sort" value={sort} aria-label="sort" />}
+                <label>{t("dashboard.table.rows_per_page")}
+                  <select name="pageSize" data-page-size-select>
+                    {[25, 50, 100].map((size) => <option value={size} selected={pageSize === size}>{size}</option>)}
+                  </select>
+                </label>
+              </form>
+            </nav>
+          </DataTable>
+        )}
         <p class="scope-note">{t("dashboard.customers.scope")}</p>
       </>}
     </section>
@@ -68,70 +172,99 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
         <label>{t("dashboard.customers.detail.name")}<input name="displayName" maxlength="120" /></label>
         <label>{t("dashboard.customers.detail.locale")}<select name="locale"><option value="en">en</option><option value="vi-VN">vi-VN</option></select></label>
         <label>{t("dashboard.customers.detail.status")}<select name="status"><option value="active">{t("dashboard.customers.status.active")}</option><option value="blocked">{t("dashboard.customers.status.blocked")}</option></select></label>
-        <button class="sln-button sln-button-primary" type="submit">{t("dashboard.customers.detail.save")}</button>
+        <button class="sln-button" data-variant="primary" type="submit">{t("dashboard.customers.detail.save")}</button>
       </form>
       <div class="customer-notes" data-customer-notes></div>
-      <form class="customer-note-form" data-customer-note-form novalidate><label>{t("dashboard.customers.detail.note")}<textarea name="body" maxlength="4000" required></textarea></label><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.customers.detail.add_note")}</button></form>
+      <form class="customer-note-form" data-customer-note-form novalidate><label>{t("dashboard.customers.detail.note")}<textarea name="body" maxlength="4000" required></textarea></label><button class="sln-button" data-variant="secondary" type="submit">{t("dashboard.customers.detail.add_note")}</button></form>
       <section class="customer-privacy" aria-labelledby="customer-privacy-title">
         <div><p class="eyebrow">{t("dashboard.customers.privacy.eyebrow")}</p><h3 id="customer-privacy-title">{t("dashboard.customers.privacy.title")}</h3><p>{t("dashboard.customers.privacy.description")}</p><p class="scope-note">{t("dashboard.customers.privacy.self_service_blocked")}</p></div>
         <div class="customer-privacy-actions">
-          <button class="sln-button sln-button-secondary" type="button" data-customer-export>{t("dashboard.customers.privacy.export")}</button>
+          <button class="sln-button" data-variant="secondary" type="button" data-customer-export>{t("dashboard.customers.privacy.export")}</button>
           <form class="customer-anonymize-form" data-customer-anonymize-form novalidate>
             <p>{t("dashboard.customers.privacy.anonymize_warning")}</p>
             <label>{t("dashboard.customers.privacy.confirm_label")} <code>ANONYMIZE</code><input name="confirmation" type="text" required pattern="ANONYMIZE" autocomplete="off" autocapitalize="characters" spellcheck="false" /></label>
-            <button class="sln-button sln-button-danger" type="submit" data-customer-anonymize>{t("dashboard.customers.privacy.anonymize")}</button>
+            <button class="sln-button" data-variant="danger" type="submit" data-customer-anonymize>{t("dashboard.customers.privacy.anonymize")}</button>
           </form>
         </div>
         <p class="workspace-feedback" data-customer-privacy-status role="status" aria-live="polite" hidden></p>
       </section>
+      <dialog class="sln-dialog" id="customer-note-redact-dialog" data-note-redact-dialog aria-labelledby="customer-note-redact-title" aria-describedby="customer-note-redact-impact">
+        <div class="sln-dialog__body"><h2 id="customer-note-redact-title">{t("dashboard.customers.detail.redact")}</h2><p id="customer-note-redact-impact">{t("dashboard.customers.detail.redact_confirm")}</p></div>
+        <form class="sln-dialog__actions" method="dialog" data-note-redact-form>
+          <button class="sln-button" data-variant="secondary" type="submit" value="cancel">{t("dashboard.customers.dialog.cancel")}</button>
+          <button class="sln-button" data-variant="danger" type="submit" value="confirm">{t("dashboard.customers.detail.redact")}</button>
+        </form>
+      </dialog>
     </section> : null}
-    {nextCursor !== null && <a class="sln-button sln-button-secondary" href={workspaceHref(`/app/customers?cursor=${encodeURIComponent(nextCursor)}`)}>{t("dashboard.customers.pagination.next")} →</a>}
     </div>}
 </AppLayout>
 
-{customers.length > 0 && <script>
-  const input = document.querySelector<HTMLInputElement>("[data-customer-search]");
+<script>
+  import { buildCsv, downloadCsv } from "../../lib/dashboard/csv-export";
+
+  type ExportRow = { email: string; lastActivity: string; name: string; orders: string; status: string };
+
   const panel = document.querySelector<HTMLElement>("[data-customer-panel]");
-  const rows = [...document.querySelectorAll<HTMLElement>("[data-customer-row]")];
-  const noResults = document.querySelector<HTMLElement>("[data-customer-no-results]");
-  input?.addEventListener("input", () => {
-    const query = input.value.trim().toLocaleLowerCase(panel?.dataset.locale ?? "en");
-    let visible = 0;
-    for (const row of rows) {
-      row.hidden = query.length > 0 && !(row.dataset.search ?? "").includes(query);
-      if (!row.hidden) visible += 1;
+  if (panel !== null) {
+    const normalize = (value: string): string => value.trim().toLocaleLowerCase(panel?.dataset.locale ?? "en");
+    const copy: { headers?: readonly string[] } = (() => {
+      try { return JSON.parse(panel.dataset.exportCopy ?? "{}") as { headers?: readonly string[] }; }
+      catch { return {}; }
+    })();
+    const rows: ExportRow[] = (() => {
+      try {
+        const parsed: unknown = JSON.parse(panel.dataset.exportRows ?? "[]");
+        return Array.isArray(parsed) ? parsed as ExportRow[] : [];
+      } catch { return []; }
+    })();
+    const headers = copy.headers ?? [];
+
+    panel.querySelector("[data-customer-table-export]")?.addEventListener("click", () => {
+      const csv = buildCsv(rows, [
+        { header: headers[0] ?? "", value: (row: ExportRow) => `${row.name}${row.email === "" ? "" : ` / ${row.email}`}` },
+        { header: headers[1] ?? "", value: (row: ExportRow) => row.orders },
+        { header: headers[2] ?? "", value: (row: ExportRow) => row.lastActivity },
+        { header: headers[3] ?? "", value: (row: ExportRow) => row.status },
+      ]);
+      const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+      downloadCsv(`${normalize("customers")}-${stamp}.csv`, csv);
+    });
+
+    const pageSizeSelect = panel.querySelector("[data-page-size-select]");
+    if (pageSizeSelect instanceof HTMLSelectElement) {
+      pageSizeSelect.addEventListener("change", () => {
+        pageSizeSelect.form?.requestSubmit();
+      });
     }
-    if (noResults !== null) noResults.hidden = query.length === 0 || visible > 0;
-  });
-</script>}
+  }
+</script>
 
 <script src="../../scripts/dashboard/customers.ts"></script>
 
 <style>
-  .sln-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:10px 16px; font:var(--sln-font-label); text-decoration:none; }
-  .sln-button-secondary { border-color:var(--sln-border-strong); background:var(--sln-bg-surface); color:var(--sln-text-primary); }
-  .sln-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:9px 14px; font:var(--sln-font-label); cursor:pointer; }
-  .sln-button-primary { background:var(--sln-action-primary); color:var(--sln-white); }
   .state-space { margin-top:var(--sln-space-8); }
   .customer-panel { display:grid; gap:20px; margin-top:var(--sln-space-8); border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); padding:var(--sln-space-6); background:var(--sln-bg-surface); }
   .customer-panel > header { display:flex; align-items:end; justify-content:space-between; gap:16px; padding-bottom:16px; border-bottom:1px solid var(--sln-border-default); }
   .customer-panel h2 { margin:0; font:var(--sln-font-h3); letter-spacing:-.035em; }
-  .customer-panel header > span, .customer-panel span, .customer-panel time { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .customer-panel span, .customer-panel time { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .panel-heading-tools { display:flex; flex-wrap:wrap; align-items:center; gap:14px; }
+  .record-count { color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
-  .search-field { display:block; max-width:360px; }
+  .customer-controls { display:flex; flex-wrap:wrap; align-items:center; gap:14px; }
+  .search-field { display:block; width:min(100%, 360px); }
   .search-field input { width:100%; min-height:44px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 12px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
-  .customer-ledger { display:grid; overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); }
-  .customer-ledger article { display:grid; grid-template-columns:40px minmax(0,1.4fr) minmax(90px,.5fr) minmax(170px,.8fr) auto auto; gap:14px; align-items:center; min-height:78px; padding:14px 16px; border-top:1px solid var(--sln-border-default); }
-  .customer-ledger article:first-child { border-top:0; }
-  .customer-ledger article[hidden] { display:none; }
-  .customer-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:var(--sln-tint-indigo); color:var(--sln-action-primary-strong); font-weight:800; }
-  .customer-ledger article > div:not(.customer-mark) { display:grid; gap:4px; min-width:0; }
-  .customer-ledger strong { overflow:hidden; color:var(--sln-text-primary); font:var(--sln-font-label); text-overflow:ellipsis; white-space:nowrap; }
-  .customer-ledger article > div:nth-of-type(n+2) span { color:var(--sln-text-muted); font:var(--sln-font-caption); }
-  .status-chip { white-space:nowrap; border-radius:var(--sln-radius-pill); padding:6px 9px; background:var(--sln-tint-success); color:var(--sln-state-success) !important; }
+  .customer-panel td strong { display:block; overflow:hidden; color:var(--sln-text-primary); font:var(--sln-font-label); text-overflow:ellipsis; white-space:nowrap; }
+  .customer-panel td span, .customer-panel td time { display:block; overflow:hidden; color:var(--sln-text-muted); font:var(--sln-font-caption); text-overflow:ellipsis; white-space:nowrap; }
+  .cell-end { text-align:end; }
+  .status-chip { display:inline-block; white-space:nowrap; border-radius:var(--sln-radius-pill); padding:6px 9px; background:var(--sln-tint-success); color:var(--sln-state-success) !important; }
   .status-suspended, .status-blocked { background:var(--sln-tint-danger); color:var(--sln-state-danger) !important; }
   .scope-note { margin:0; color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .customer-no-results { margin:0; border:1px dashed var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:18px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); text-align:center; }
+  .table-pagination { display:flex; flex-wrap:wrap; align-items:center; gap:14px; margin-top:var(--sln-space-4); color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .table-pagination a { display:inline-flex; align-items:center; min-height:44px; color:var(--sln-action-primary); font:var(--sln-font-label); text-decoration:none; }
+  .page-size-form { margin-left:auto; }
+  .page-size-form label { display:inline-flex; align-items:center; gap:8px; color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .page-size-form select { min-height:40px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:6px 10px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); }
   .customer-detail-panel { scroll-margin-top:88px; }
   .customer-detail-email { margin:6px 0 0; color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .customer-detail-form, .customer-note-form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) auto; gap:12px; align-items:end; }
@@ -152,7 +285,6 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
   .customer-anonymize-form p { color:var(--sln-state-danger); font:var(--sln-font-body-sm); }
   .customer-anonymize-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
   .customer-anonymize-form input { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
-  .sln-button-danger { border-color:var(--sln-state-danger); background:var(--sln-tint-danger); color:var(--sln-state-danger); }
   .workspace-feedback { padding:12px 14px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .workspace-feedback[data-tone="danger"] { border-color:var(--sln-state-danger); color:var(--sln-state-danger); }
   .workspace-feedback[data-tone="success"] { border-color:var(--sln-state-success); color:var(--sln-state-success); }
@@ -161,5 +293,5 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
   .danger-text { color:var(--sln-state-danger); }
   .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
   @media (max-width:900px) { .customer-detail-form { grid-template-columns:repeat(2,minmax(0,1fr)); } .customer-detail-form .sln-button { width:100%; } }
-  @media (max-width:760px) { .customer-panel { padding:16px; } .customer-panel > header { align-items:start; flex-direction:column; } .search-field { max-width:none; } .customer-ledger article { grid-template-columns:40px minmax(0,1fr) auto; gap:10px; } .customer-ledger article > div:nth-of-type(n+3) { grid-column:2 / -1; display:flex; flex-wrap:wrap; gap:8px; } .customer-ledger article > .status-chip, .customer-ledger article > [data-customer-open] { grid-column:2 / -1; justify-self:start; } .customer-detail-form, .customer-note-form, .customer-privacy-actions { grid-template-columns:1fr; } .customer-anonymize-form { border-top:1px solid var(--sln-border-default); border-left:0; padding-top:18px; padding-left:0; } }
+  @media (max-width:760px) { .customer-panel { padding:16px; } .customer-panel > header { align-items:start; flex-direction:column; } .customer-controls { flex-direction:column; align-items:stretch; } .search-field { width:100%; } .customer-detail-form, .customer-note-form, .customer-privacy-actions { grid-template-columns:1fr; } .customer-anonymize-form { border-top:1px solid var(--sln-border-default); border-left:0; padding-top:18px; padding-left:0; } .page-size-form { margin-left:0; } }
 </style>

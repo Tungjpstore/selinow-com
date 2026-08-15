@@ -109,12 +109,6 @@ if (root !== null) {
           text("feedbackUpdated"),
         );
       }
-      if (target.closest("[data-member-suspend]") !== null && window.confirm(text("suspendConfirm"))) {
-        void reloadAfter(
-          () => request(`/api/app/shops/${encodeURIComponent(shopPublicId ?? "")}/members/${encodeURIComponent(memberPublicId)}`, { method: "DELETE", body: JSON.stringify({ expectedVersion: version }) }),
-          text("feedbackUpdated"),
-        );
-      }
       return;
     }
     const invitationRow = target.closest<HTMLElement>("[data-invitation-row]");
@@ -128,11 +122,66 @@ if (root !== null) {
         text("feedbackUpdated"),
       );
     }
-    if (target.closest("[data-invitation-revoke]") !== null && window.confirm(text("invitationConfirm"))) {
-      void reloadAfter(
+  });
+
+  type ConfirmDetail = { complete: () => void; fail: () => void };
+
+  const runConfirmed = (detail: ConfirmDetail, operation: () => Promise<void>, success: string): void => {
+    if (pending || shopPublicId === undefined || !canManage) {
+      detail.fail();
+      return;
+    }
+    pending = true;
+    void operation()
+      .then(() => {
+        detail.complete();
+        showFeedback(success, "success");
+        window.location.reload();
+      })
+      .catch((error: unknown) => {
+        detail.fail();
+        showFeedback(error instanceof Error ? error.message : text("errorGeneric"), "danger");
+      })
+      .finally(() => {
+        pending = false;
+      });
+  };
+
+  for (const dialogRoot of Array.from(root.querySelectorAll<HTMLElement>("[data-member-suspend-dialog]"))) {
+    dialogRoot.addEventListener("sln:confirm", (event) => {
+      if (!(event instanceof CustomEvent)) return;
+      event.preventDefault();
+      const detail = event.detail as ConfirmDetail;
+      const memberPublicId = dialogRoot.dataset.memberPublicId;
+      const version = Number(dialogRoot.dataset.version);
+      if (memberPublicId === undefined || !Number.isSafeInteger(version)) {
+        detail.fail();
+        return;
+      }
+      runConfirmed(
+        detail,
+        () => request(`/api/app/shops/${encodeURIComponent(shopPublicId ?? "")}/members/${encodeURIComponent(memberPublicId)}`, { method: "DELETE", body: JSON.stringify({ expectedVersion: version }) }),
+        text("feedbackUpdated"),
+      );
+    });
+  }
+
+  for (const dialogRoot of Array.from(root.querySelectorAll<HTMLElement>("[data-invitation-revoke-dialog]"))) {
+    dialogRoot.addEventListener("sln:confirm", (event) => {
+      if (!(event instanceof CustomEvent)) return;
+      event.preventDefault();
+      const detail = event.detail as ConfirmDetail;
+      const invitationPublicId = dialogRoot.dataset.invitationPublicId;
+      const version = Number(dialogRoot.dataset.version);
+      if (invitationPublicId === undefined || !Number.isSafeInteger(version)) {
+        detail.fail();
+        return;
+      }
+      runConfirmed(
+        detail,
         () => request(`/api/app/shops/${encodeURIComponent(shopPublicId ?? "")}/members/invitations/${encodeURIComponent(invitationPublicId)}`, { method: "DELETE", body: JSON.stringify({ expectedVersion: version }) }),
         text("feedbackUpdated"),
       );
-    }
-  });
+    });
+  }
 }

@@ -1,11 +1,13 @@
 ---
 import AppLayout from "../../layouts/AppLayout.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
+import DataTable from "../../components/workspace/DataTable.astro";
+import Button from "../../components/primitives/Button.astro";
 import StatusBadge from "../../components/primitives/StatusBadge.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
 import Money from "../../components/commerce/Money.astro";
 import { authenticateRequest } from "../../lib/auth/session";
-import { listSellerCatalog } from "../../lib/catalog/store";
+import { listSellerCatalog, listSellerProductsPage, parseSellerProductSort, parseSellerProductStatusFilter } from "../../lib/catalog/store";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { getBindings } from "../../lib/platform/bindings";
 import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
@@ -21,11 +23,35 @@ const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
 const locale = Astro.locals.locale;
 const t = createDashboardTranslator(locale);
+// The product ledger parses the table URL contract itself (q/status/sort/
+// page/pageSize) and passes explicit values into the service; the full
+// catalog load below still feeds the summary, visibility and category panels.
+const searchParams = Astro.url.searchParams;
+const ledgerQuery = searchParams.get("q")?.trim().slice(0, 64) ?? "";
+const ledgerStatus = parseSellerProductStatusFilter(searchParams.get("status"));
+const ledgerSort = parseSellerProductSort(searchParams.get("sort"));
 let catalog: { categories: unknown[]; products: unknown[]; variants: unknown[] } = { categories: [], products: [], variants: [] };
+let ledgerPage = 1;
+let ledgerPageSize = 25;
+let ledgerProducts: Array<Record<string, unknown>> = [];
+let ledgerTotalCount = 0;
+let ledgerTotalPages = 1;
 let canManage = false;
 if (shop !== undefined && (shop.role === "owner" || shop.role === "manager")) {
   canManage = true;
   catalog = await listSellerCatalog({ env, shopPublicId: shop.publicId, userId: auth.userId }).catch(() => catalog);
+  const parsedLedgerPage = Number.parseInt(searchParams.get("page") ?? "", 10);
+  const requestedLedgerPage = Number.isSafeInteger(parsedLedgerPage) && parsedLedgerPage >= 1 ? parsedLedgerPage : 1;
+  const parsedLedgerPageSize = Number.parseInt(searchParams.get("pageSize") ?? "", 10);
+  const requestedLedgerPageSize = parsedLedgerPageSize === 25 || parsedLedgerPageSize === 50 || parsedLedgerPageSize === 100 ? parsedLedgerPageSize : 25;
+  const result = await listSellerProductsPage({ env, page: requestedLedgerPage, pageSize: requestedLedgerPageSize, search: ledgerQuery === "" ? null : ledgerQuery, shopPublicId: shop.publicId, sort: ledgerSort, status: ledgerStatus, userId: auth.userId }).catch(() => null);
+  if (result !== null) {
+    ledgerPage = result.page;
+    ledgerPageSize = result.pageSize;
+    ledgerProducts = result.products as Array<Record<string, unknown>>;
+    ledgerTotalCount = result.totalCount;
+    ledgerTotalPages = result.totalPages;
+  }
 }
 const products = catalog.products as Array<Record<string, unknown>>;
 const categories = catalog.categories as Array<Record<string, unknown>>;
@@ -39,6 +65,12 @@ for (const variant of variants) {
 }
 const labelForStatus: Record<string, string> = { active: t("dashboard.products.status.active"), archived: t("dashboard.products.status.archived"), draft: t("dashboard.products.status.draft"), suspended: t("dashboard.products.status.suspended") };
 const toneForStatus = (status: unknown): "danger" | "neutral" | "success" | "warning" => status === "active" ? "success" : status === "suspended" ? "danger" : status === "draft" ? "warning" : "neutral";
+// Low-stock threshold is shop-level (shop_settings.low_stock_threshold,
+// migration 0002); the catalog projects it per variant.
+const lowStockThreshold = variants.reduce<number>((threshold, variant) => {
+  const value = Number(variant.lowStockThreshold);
+  return Number.isSafeInteger(value) && value >= 0 ? value : threshold;
+}, 5);
 const updatedAtFormatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeStyle: "short", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
 const catalogVisibilityChannels = [
   { code: "website", label: t("dashboard.nav.website") },
@@ -63,6 +95,58 @@ const productRows = products.map((product, index) => {
   const updatedLabel = updatedAt === "" ? t("dashboard.commerce.not_recorded") : updatedAtFormatter.format(updatedDate);
   return { product, productId, rows, lowest, stock, index, updatedAt, updatedLabel };
 });
+const ledgerRows = ledgerProducts.map((product, index) => {
+  const productId = String(product.id ?? "");
+  const lowest = typeof product.lowestPriceMinor === "number" ? product.lowestPriceMinor : null;
+  const stock = Number(product.stock ?? 0);
+  const variantCount = Number(product.variantCount ?? 0);
+  const projectedUpdatedAt = typeof product.updatedAt === "string" ? product.updatedAt : "";
+  const updatedDate = new Date(projectedUpdatedAt);
+  const updatedAt = projectedUpdatedAt !== "" && !Number.isNaN(updatedDate.getTime()) ? projectedUpdatedAt : "";
+  const updatedLabel = updatedAt === "" ? t("dashboard.commerce.not_recorded") : updatedAtFormatter.format(updatedDate);
+  return { product, productId, index, lowest, stock, variantCount, updatedAt, updatedLabel };
+});
+const ledgerHref = (params: Record<string, number | string | null | undefined>): string => {
+  const next = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === "") continue;
+    next.set(key, String(value));
+  }
+  const suffix = next.toString();
+  return workspaceHref(`/app/products${suffix === "" ? "" : `?${suffix}`}`);
+};
+const ledgerPageHref = (page: number): string => ledgerHref({
+  page,
+  pageSize: ledgerPageSize,
+  q: ledgerQuery === "" ? null : ledgerQuery,
+  sort: searchParams.get("sort"),
+  status: ledgerStatus === "all" ? null : ledgerStatus,
+});
+const ledgerSortBase = ledgerSort.endsWith("_desc") ? ledgerSort.slice(0, -5) : ledgerSort.slice(0, -4);
+const ledgerSortDirection: "asc" | "desc" = ledgerSort.endsWith("_desc") ? "desc" : "asc";
+const productTableColumns = [
+  { key: "title", label: t("dashboard.products.table.product") },
+  { label: t("dashboard.products.table.price_variant") },
+  { key: "stock", label: t("dashboard.products.table.stock") },
+  { label: t("dashboard.products.table.status") },
+  { key: "updated", label: t("dashboard.products.table.updated") },
+  { label: t("dashboard.products.table.actions") },
+];
+type ProductExportRow = { lowest: string; status: string; stock: string; title: string; updated: string };
+const productExportRows: ProductExportRow[] = shop === undefined ? [] : ledgerRows.map(({ product, lowest, stock, updatedAt }) => ({
+  lowest: lowest === null ? "" : `${lowest} ${shop.currency}`,
+  status: String(product.status ?? ""),
+  stock: String(stock),
+  title: String(product.title ?? ""),
+  updated: updatedAt,
+}));
+const productExportHeaders = [
+  t("dashboard.products.table.product"),
+  t("dashboard.products.table.price_variant"),
+  t("dashboard.products.table.stock"),
+  t("dashboard.products.table.status"),
+  t("dashboard.products.table.updated"),
+];
 const selectedProductId = Astro.url.searchParams.get("product");
 const selectedProduct = selectedProductId === null ? undefined : products.find((product) => product.id === selectedProductId);
 const selectedVariants = selectedProduct === undefined ? [] : productVariants.get(String(selectedProduct.id)) ?? [];
@@ -70,7 +154,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
 
 <AppLayout activePath="/app/products" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.products.title")}>
   <PageHeader eyebrow={t("dashboard.products.eyebrow")} title={t("dashboard.products.title")} description={t("dashboard.products.description")}>
-    {canManage && <div slot="actions" class="header-actions"><button class="sln-button sln-button-secondary" type="button" data-open-category-form>{t("dashboard.products.action.add_category")}</button><button class="sln-button sln-button-primary" type="button" data-open-product-form>{t("dashboard.products.action.add_product")} <span aria-hidden="true">+</span></button></div>}
+    {canManage && <div slot="actions" class="header-actions"><button class="sln-button" data-variant="secondary" type="button" data-open-category-form>{t("dashboard.products.action.add_category")}</button><button class="sln-button" data-variant="primary" type="button" data-open-product-form>{t("dashboard.products.action.add_product")} <span aria-hidden="true">+</span></button></div>}
   </PageHeader>
 
   {shop === undefined ? (
@@ -83,7 +167,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
         <div><span>{t("dashboard.products.summary.products")}</span><strong>{products.length}</strong><small>{t("dashboard.products.summary.products_caption")}</small></div>
         <div><span>{t("dashboard.products.summary.variants")}</span><strong>{variants.length}</strong><small>{t("dashboard.products.summary.variants_caption")}</small></div>
         <div><span>{t("dashboard.products.summary.active")}</span><strong>{products.filter((product) => product.status === "active").length}</strong><small>{t("dashboard.products.summary.active_caption")}</small></div>
-        <div><span>{t("dashboard.products.summary.low_stock")}</span><strong class="warn">{variants.filter((variant) => Number(variant.availableStock ?? 0) < 5).length}</strong><small>{t("dashboard.products.summary.low_stock_caption")}</small></div>
+        <div><span>{t("dashboard.products.summary.low_stock")}</span><strong class="warn">{variants.filter((variant) => Number(variant.availableStock ?? 0) <= lowStockThreshold).length}</strong><small>{t("dashboard.products.summary.low_stock_caption")}</small></div>
       </section>
 
       <section class="visibility-panel" data-channel-visibility-panel data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-labelledby="catalog-visibility-title">
@@ -124,35 +208,68 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
                 <label>{t("dashboard.products.category.field.status")}<select name="status"><option value="active" selected={category.status === "active"}>{t("dashboard.products.category.status.active")}</option><option value="draft" selected={category.status === "draft"}>{t("dashboard.products.category.status.draft")}</option>{category.status === "archived" && <option value="archived" selected>{t("dashboard.products.category.status.archived")}</option>}</select></label>
                 <label class="category-description">{t("dashboard.products.category.field.description")}<textarea name="description" rows="2" maxlength="10000">{String(category.description ?? "")}</textarea></label>
               </div>
-              <div class="category-actions"><button class="sln-button sln-button-secondary" type="button" data-save-category>{t("dashboard.products.category.action.save")}</button><button class="sln-button sln-button-secondary" type="button" data-request-category-archive aria-controls={`category-archive-${String(category.id)}`} aria-expanded="false" disabled={category.status === "archived"}>{t("dashboard.products.category.action.archive")}</button></div>
-              <div id={`category-archive-${String(category.id)}`} class="archive-confirmation" data-category-archive-confirm hidden role="alert"><p>{t("dashboard.products.category.archive.description")}</p><div><button class="sln-button sln-button-secondary" type="button" data-cancel-category-archive>{t("dashboard.products.category.action.cancel_archive")}</button><button class="sln-button sln-button-danger" type="button" data-confirm-category-archive>{t("dashboard.products.category.action.confirm_archive")}</button></div></div>
+              <div class="category-actions"><button class="sln-button" data-variant="secondary" type="button" data-save-category>{t("dashboard.products.category.action.save")}</button><button class="sln-button" data-variant="secondary" type="button" data-request-category-archive aria-controls={`category-archive-${String(category.id)}`} aria-expanded="false" disabled={category.status === "archived"}>{t("dashboard.products.category.action.archive")}</button></div>
+              <div id={`category-archive-${String(category.id)}`} class="archive-confirmation" data-category-archive-confirm hidden role="alert"><p>{t("dashboard.products.category.archive.description")}</p><div><button class="sln-button" data-variant="secondary" type="button" data-cancel-category-archive>{t("dashboard.products.category.action.cancel_archive")}</button><button class="sln-button" data-variant="danger" type="button" data-confirm-category-archive>{t("dashboard.products.category.action.confirm_archive")}</button></div></div>
               <p class="form-feedback" data-category-editor-feedback role="status" aria-live="polite"></p>
             </article>)}
           </div>
         )}
       </section>
 
-      <section class="ledger-panel" aria-labelledby="product-ledger-title">
-        <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.products.ledger.eyebrow")}</p><h2 id="product-ledger-title">{t("dashboard.products.ledger.title")}</h2></div><span class="record-count">{t("dashboard.products.ledger.count", { count: products.length })}</span></div>
+      <section class="ledger-panel" aria-labelledby="product-ledger-title" data-product-ledger data-locale={locale ?? "en"} data-export-copy={JSON.stringify({ headers: productExportHeaders })} data-export-rows={JSON.stringify(productExportRows)}>
+        <div class="panel-heading">
+          <div><p class="eyebrow">{t("dashboard.products.ledger.eyebrow")}</p><h2 id="product-ledger-title">{t("dashboard.products.ledger.title")}</h2></div>
+          <div class="panel-heading-tools">
+            <span class="record-count">{t("dashboard.products.ledger.count", { count: ledgerTotalCount })}</span>
+            {ledgerRows.length > 0 && <Button type="button" variant="secondary" data-product-export>{t("dashboard.table.export")}</Button>}
+          </div>
+        </div>
         {products.length === 0 ? (
           <WorkspaceState title={t("dashboard.products.ledger.empty.title")} description={t("dashboard.products.ledger.empty.description")} tone="info" />
         ) : (
-          <><div class="catalog-toolbar">
-            <label>{t("dashboard.products.search.label")}<input type="search" placeholder={t("dashboard.products.search.placeholder")} data-product-search /></label>
-            <label>{t("dashboard.products.filter.status_label")}<select data-product-status><option value="">{t("dashboard.products.filter.all")}</option><option value="active">{t("dashboard.products.filter.active")}</option><option value="draft">{t("dashboard.products.filter.draft")}</option><option value="suspended">{t("dashboard.products.filter.suspended")}</option><option value="archived">{t("dashboard.products.filter.archived")}</option><option value="out_of_stock">{t("dashboard.products.filter.out_of_stock")}</option></select></label>
-          </div><div class="product-table" role="table" aria-label={t("dashboard.products.table.aria")}>
-            <div class="table-head" role="row"><span role="columnheader">{t("dashboard.products.table.product")}</span><span role="columnheader">{t("dashboard.products.table.price_variant")}</span><span role="columnheader">{t("dashboard.products.table.stock")}</span><span role="columnheader">{t("dashboard.products.table.status")}</span><span role="columnheader">{t("dashboard.products.table.updated")}</span><span role="columnheader">{t("dashboard.products.table.actions")}</span></div>
-            {productRows.map(({ product, productId, rows, lowest, stock, index, updatedAt, updatedLabel }) => (
-              <article class="table-row" role="row" data-product-row data-product-status={String(product.status ?? "")} data-product-stock={stock === 0 ? "out_of_stock" : "available"} data-product-search-text={`${String(product.title ?? "")} ${String(product.slug ?? "")} ${rows.map((row) => `${String(row.sku ?? "")} ${String(row.title ?? "")}`).join(" ")}`}>
-                <div class="product-cell" role="cell"><span class="product-index">{String(index + 1).padStart(2, "0")}</span><div><strong>{String(product.title ?? t("dashboard.products.product.untitled"))}</strong><small>/{String(product.slug ?? "")}</small></div></div>
-                <div class="price-cell" role="cell">{lowest === null ? <span>{t("dashboard.products.price.none")}</span> : <Money value={lowest} currency={shop.currency} locale={locale ?? "en"} />}<small>{t("dashboard.products.variant.count", { count: rows.length })}</small></div>
-                <div class="stock-cell" role="cell"><strong>{stock}</strong><small>{stock === 0 ? t("dashboard.products.stock.out") : stock < 5 ? t("dashboard.products.stock.low") : t("dashboard.products.stock.available")}</small></div>
-                <div role="cell"><StatusBadge label={labelForStatus[String(product.status)] ?? t("dashboard.products.status.unknown")} tone={toneForStatus(product.status)} /></div>
-                <div class="updated-cell" role="cell">{updatedAt === "" ? <span>{updatedLabel}</span> : <time datetime={updatedAt}>{updatedLabel}</time>}<small>{t("dashboard.products.updated.record")}</small></div>
-                <div class="row-action" role="cell"><a href={workspaceHref(`/app/products?product=${encodeURIComponent(productId)}`)} aria-label={t("dashboard.products.row.open_aria", { product: String(product.title ?? t("dashboard.products.product.untitled")) })}>{t("dashboard.products.row.open")} <span aria-hidden="true">→</span></a></div>
-              </article>
-            ))}
-          </div><p class="catalog-no-results" data-product-no-results hidden>{t("dashboard.products.no_results")}</p></>
+          <>
+            <form class="catalog-toolbar" method="get" aria-label={t("dashboard.products.filters.aria")}>
+              {searchParams.get("shop") !== null && <input type="hidden" name="shop" value={searchParams.get("shop") ?? ""} aria-label="shop" />}
+              <label>{t("dashboard.products.search.label")}<input type="search" name="q" value={ledgerQuery} placeholder={t("dashboard.products.search.placeholder")} maxlength="64" autocomplete="off" data-product-search /></label>
+              <label>{t("dashboard.products.filter.status_label")}<select name="status" data-product-status><option value="" selected={ledgerStatus === "all"}>{t("dashboard.products.filter.all")}</option><option value="active" selected={ledgerStatus === "active"}>{t("dashboard.products.filter.active")}</option><option value="draft" selected={ledgerStatus === "draft"}>{t("dashboard.products.filter.draft")}</option><option value="suspended" selected={ledgerStatus === "suspended"}>{t("dashboard.products.filter.suspended")}</option><option value="archived" selected={ledgerStatus === "archived"}>{t("dashboard.products.filter.archived")}</option><option value="out_of_stock" selected={ledgerStatus === "out_of_stock"}>{t("dashboard.products.filter.out_of_stock")}</option></select></label>
+              <Button type="submit" variant="secondary">{t("dashboard.table.apply")}</Button>
+            </form>
+            {ledgerRows.length === 0 ? (
+              <p class="catalog-no-results">{t("dashboard.products.no_results")}</p>
+            ) : (
+              <DataTable caption={t("dashboard.products.table.aria")} columns={productTableColumns} currentSort={ledgerSortBase} currentSortDirection={ledgerSortDirection} currentUrl={Astro.url}>
+                <tbody>
+                  {ledgerRows.map(({ product, productId, index, lowest, stock, variantCount, updatedAt, updatedLabel }) => (
+                    <tr data-product-row data-product-status={String(product.status ?? "")} data-product-stock={stock === 0 ? "out_of_stock" : "available"} data-product-search-text={`${String(product.title ?? "")} ${String(product.slug ?? "")}`}>
+                      <td data-label={t("dashboard.products.table.product")}><span class="product-index">{String((ledgerPage - 1) * ledgerPageSize + index + 1).padStart(2, "0")}</span><div class="product-cell-title"><strong>{String(product.title ?? t("dashboard.products.product.untitled"))}</strong><small>/{String(product.slug ?? "")}</small></div></td>
+                      <td data-label={t("dashboard.products.table.price_variant")}>{lowest === null ? <span>{t("dashboard.products.price.none")}</span> : <Money value={lowest} currency={shop.currency} locale={locale ?? "en"} />}<small>{t("dashboard.products.variant.count", { count: variantCount })}</small></td>
+                      <td data-label={t("dashboard.products.table.stock")}><strong>{stock}</strong><small>{stock === 0 ? t("dashboard.products.stock.out") : stock <= lowStockThreshold ? t("dashboard.products.stock.low") : t("dashboard.products.stock.available")}</small></td>
+                      <td data-label={t("dashboard.products.table.status")}><StatusBadge label={labelForStatus[String(product.status)] ?? t("dashboard.products.status.unknown")} tone={toneForStatus(product.status)} /></td>
+                      <td data-label={t("dashboard.products.table.updated")}>{updatedAt === "" ? <span>{updatedLabel}</span> : <time datetime={updatedAt}>{updatedLabel}</time>}<small>{t("dashboard.products.updated.record")}</small></td>
+                      <td class="cell-end" data-label={t("dashboard.products.table.actions")}><a href={workspaceHref(`/app/products?product=${encodeURIComponent(productId)}`)} aria-label={t("dashboard.products.row.open_aria", { product: String(product.title ?? t("dashboard.products.product.untitled")) })}>{t("dashboard.products.row.open")} <span aria-hidden="true">→</span></a></td>
+                    </tr>
+                  ))}
+                </tbody>
+                <nav slot="pagination" class="table-pagination" aria-label={t("dashboard.products.pagination.aria")}>
+                  {ledgerPage > 1 && <a href={ledgerPageHref(ledgerPage - 1)}>← {t("dashboard.table.previous")}</a>}
+                  <span>{t("dashboard.table.page_info", { page: ledgerPage, totalPages: ledgerTotalPages })}</span>
+                  {ledgerPage < ledgerTotalPages && <a href={ledgerPageHref(ledgerPage + 1)}>{t("dashboard.table.next")} →</a>}
+                  <form class="page-size-form" method="get">
+                    {searchParams.get("shop") !== null && <input type="hidden" name="shop" value={searchParams.get("shop") ?? ""} aria-label="shop" />}
+                    {ledgerQuery !== "" && <input type="hidden" name="q" value={ledgerQuery} aria-label="q" />}
+                    {ledgerStatus !== "all" && <input type="hidden" name="status" value={ledgerStatus} aria-label="status" />}
+                    {searchParams.get("sort") !== null && <input type="hidden" name="sort" value={searchParams.get("sort") ?? ""} aria-label="sort" />}
+                    <label>{t("dashboard.table.rows_per_page")}
+                      <select name="pageSize" data-page-size-select>
+                        {[25, 50, 100].map((size) => <option value={size} selected={ledgerPageSize === size}>{size}</option>)}
+                      </select>
+                    </label>
+                  </form>
+                </nav>
+              </DataTable>
+            )}
+            <p class="catalog-no-results" data-product-no-results hidden>{t("dashboard.products.no_results")}</p>
+          </>
         )}
       </section>
 
@@ -168,7 +285,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
           <label>{t("dashboard.products.dialog.product_create.field.first_sku")}<input name="sku" required maxlength="64" placeholder={t("dashboard.products.dialog.product_create.placeholder.first_sku")} /></label>
            <label>{t("dashboard.products.dialog.product_create.field.variant_title")}<input name="variantTitle" required maxlength="120" value={t("dashboard.products.dialog.product_create.default_variant_title")} /></label>
           <label>{t("dashboard.products.dialog.product_create.field.price", { currency: shop.currency })}<input name="priceMajor" type="number" inputmode="decimal" min="0" step={currencyInputStep(shop.currency)} required placeholder={formatMinorAmountForInput(199000, shop.currency)} /></label>
-          <div class="dialog-actions"><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.products.dialog.actions.cancel")}</button><button class="sln-button sln-button-primary" type="button" data-create-product>{t("dashboard.products.dialog.actions.create_draft")}</button></div>
+          <div class="dialog-actions"><button class="sln-button" data-variant="secondary" type="submit">{t("dashboard.products.dialog.actions.cancel")}</button><button class="sln-button" data-variant="primary" type="button" data-create-product>{t("dashboard.products.dialog.actions.create_draft")}</button></div>
           <p class="form-feedback" data-form-feedback role="status" aria-live="polite"></p>
         </form>
       </dialog>
@@ -181,7 +298,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
           <label>{t("dashboard.products.dialog.category_create.field.slug")}<input name="slug" required minlength="2" maxlength="80" pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" placeholder={t("dashboard.products.dialog.category_create.placeholder.slug")} /></label>
           <label>{t("dashboard.products.dialog.category_create.field.description")}<textarea name="description" rows="3" maxlength="10000" placeholder={t("dashboard.products.dialog.category_create.placeholder.description")}></textarea></label>
           <label>{t("dashboard.products.dialog.category_create.field.status")}<select name="status"><option value="active">{t("dashboard.products.category.status.active")}</option><option value="draft">{t("dashboard.products.category.status.draft")}</option></select></label>
-          <div class="dialog-actions"><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.products.dialog.actions.cancel")}</button><button class="sln-button sln-button-primary" type="button" data-create-category>{t("dashboard.products.dialog.actions.create_category")}</button></div>
+          <div class="dialog-actions"><button class="sln-button" data-variant="secondary" type="submit">{t("dashboard.products.dialog.actions.cancel")}</button><button class="sln-button" data-variant="primary" type="button" data-create-category>{t("dashboard.products.dialog.actions.create_category")}</button></div>
           <p class="form-feedback" data-category-feedback role="status" aria-live="polite"></p>
         </form>
       </dialog>
@@ -205,7 +322,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
               <label>{t("dashboard.products.dialog.private_file.grant_ttl")}<input type="number" min="60" max="86400" step="1" value="600" data-private-file-grant-ttl /></label>
               <label>{t("dashboard.products.dialog.private_file.entitlement_ttl")}<input type="number" min="300" max="31536000" step="1" placeholder={t("dashboard.products.dialog.private_file.entitlement_ttl_placeholder")} data-private-file-entitlement-ttl /></label>
             </div>
-            <div class="private-file-actions"><button class="sln-button sln-button-secondary" type="button" data-upload-private-file>{t("dashboard.products.dialog.private_file.upload")}</button><button class="sln-button sln-button-primary" type="button" data-save-private-file-policy disabled>{t("dashboard.products.dialog.private_file.activate")}</button></div>
+            <div class="private-file-actions"><button class="sln-button" data-variant="secondary" type="button" data-upload-private-file>{t("dashboard.products.dialog.private_file.upload")}</button><button class="sln-button" data-variant="primary" type="button" data-save-private-file-policy disabled>{t("dashboard.products.dialog.private_file.activate")}</button></div>
             <p class="private-file-metadata" data-private-file-metadata hidden></p>
             <p class="form-feedback" data-private-file-feedback role="status" aria-live="polite"></p>
           </fieldset>
@@ -233,8 +350,8 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
               <label>{t("dashboard.products.dialog.variants.new.field.status")}<select name="newVariantStatus"><option value="active">{t("dashboard.products.status.active")}</option><option value="archived">{t("dashboard.products.status.archived")}</option></select></label>
             </fieldset>
           </div>
-          <div class="dialog-actions"><a class="sln-button sln-button-secondary" href={`/app/products?shop=${encodeURIComponent(shop.publicId)}`}>{t("dashboard.products.dialog.actions.cancel")}</a><button class="sln-button sln-button-secondary" type="button" data-archive-product aria-controls="product-archive-confirmation" aria-expanded="false" disabled={selectedProduct.status === "archived"}>{t("dashboard.products.dialog.actions.archive_product")}</button><button class="sln-button sln-button-primary" type="button" data-save-product>{t("dashboard.products.dialog.actions.save_changes")}</button></div>
-          <div id="product-archive-confirmation" class="archive-confirmation" data-product-archive-confirm hidden role="alert"><p>{t("dashboard.products.dialog.archive_product.description")}</p><div><button class="sln-button sln-button-secondary" type="button" data-cancel-product-archive>{t("dashboard.products.category.action.cancel_archive")}</button><button class="sln-button sln-button-danger" type="button" data-confirm-product-archive>{t("dashboard.products.category.action.confirm_archive")}</button></div></div>
+          <div class="dialog-actions"><a class="sln-button" data-variant="secondary" href={`/app/products?shop=${encodeURIComponent(shop.publicId)}`}>{t("dashboard.products.dialog.actions.cancel")}</a><button class="sln-button" data-variant="secondary" type="button" data-archive-product aria-controls="product-archive-confirmation" aria-expanded="false" disabled={selectedProduct.status === "archived"}>{t("dashboard.products.dialog.actions.archive_product")}</button><button class="sln-button" data-variant="primary" type="button" data-save-product>{t("dashboard.products.dialog.actions.save_changes")}</button></div>
+          <div id="product-archive-confirmation" class="archive-confirmation" data-product-archive-confirm hidden role="alert"><p>{t("dashboard.products.dialog.archive_product.description")}</p><div><button class="sln-button" data-variant="secondary" type="button" data-cancel-product-archive>{t("dashboard.products.category.action.cancel_archive")}</button><button class="sln-button" data-variant="danger" type="button" data-confirm-product-archive>{t("dashboard.products.category.action.confirm_archive")}</button></div></div>
           <p class="form-feedback" data-editor-feedback role="status" aria-live="polite"></p>
         </form>
       </dialog>}
@@ -244,11 +361,47 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
 
 <script src="../../scripts/dashboard/products.ts"></script>
 
+<script>
+  import { buildCsv, downloadCsv } from "../../lib/dashboard/csv-export";
+
+  type ProductExportRow = { lowest: string; status: string; stock: string; title: string; updated: string };
+
+  const ledger = document.querySelector<HTMLElement>("[data-product-ledger]");
+  if (ledger !== null) {
+    const copy: { headers?: readonly string[] } = (() => {
+      try { return JSON.parse(ledger.dataset.exportCopy ?? "{}") as { headers?: readonly string[] }; }
+      catch { return {}; }
+    })();
+    const rows: ProductExportRow[] = (() => {
+      try {
+        const parsed: unknown = JSON.parse(ledger.dataset.exportRows ?? "[]");
+        return Array.isArray(parsed) ? parsed as ProductExportRow[] : [];
+      } catch { return []; }
+    })();
+    const headers = copy.headers ?? [];
+
+    ledger.querySelector<HTMLButtonElement>("[data-product-export]")?.addEventListener("click", () => {
+      const csv = buildCsv(rows, [
+        { header: headers[0] ?? "", value: (row: ProductExportRow) => row.title },
+        { header: headers[1] ?? "", value: (row: ProductExportRow) => row.lowest },
+        { header: headers[2] ?? "", value: (row: ProductExportRow) => row.stock },
+        { header: headers[3] ?? "", value: (row: ProductExportRow) => row.status },
+        { header: headers[4] ?? "", value: (row: ProductExportRow) => row.updated },
+      ]);
+      const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+      downloadCsv(`products-${stamp}.csv`, csv);
+    });
+
+    const pageSizeSelect = ledger.querySelector("[data-page-size-select]");
+    if (pageSizeSelect instanceof HTMLSelectElement) {
+      pageSizeSelect.addEventListener("change", () => {
+        pageSizeSelect.form?.requestSubmit();
+      });
+    }
+  }
+</script>
+
 <style>
-  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); cursor: pointer; }
-  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
-  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
-  .sln-button-danger { background: var(--sln-state-danger); color: var(--sln-white); }
   .header-actions { display: flex; flex-wrap: wrap; gap: 10px; }
   .catalog-summary { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: var(--sln-space-8); border-block: 1px solid var(--sln-border-default); }
   .catalog-summary > div { display: grid; gap: 5px; min-width: 0; padding: 18px 20px; border-right: 1px solid var(--sln-border-default); }
@@ -295,22 +448,26 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
   h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
   .record-count { color: var(--sln-text-muted); font: var(--sln-font-caption); }
-  .product-table { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
-  .catalog-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; margin-bottom: 16px; }
+  .panel-heading-tools { display: flex; align-items: center; gap: 14px; }
+  .catalog-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; align-items: end; gap: 12px; margin-bottom: 16px; }
   .catalog-toolbar label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
   .catalog-toolbar input, .catalog-toolbar select { width: 100%; min-height: 42px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
   .catalog-no-results { margin: 16px 0 0; padding: 20px; border: 1px dashed var(--sln-border-strong); border-radius: var(--sln-radius-md); color: var(--sln-text-secondary); }
-  .table-head, .table-row { display: grid; grid-template-columns: minmax(210px, 1.8fr) minmax(120px, .9fr) minmax(80px, .6fr) minmax(120px, .8fr) minmax(130px, .9fr) minmax(120px, .7fr); gap: 18px; align-items: center; padding: 15px 18px; }
-  .table-head { background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
-  .table-row { min-height: 78px; border-top: 1px solid var(--sln-border-default); }
-  .product-cell, .price-cell, .stock-cell { display: flex; align-items: center; gap: 11px; min-width: 0; }
-  .product-cell > div, .price-cell, .stock-cell, .updated-cell { display: grid; gap: 3px; }
-  .product-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .product-cell small, .price-cell small, .stock-cell small, .updated-cell small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
-  .updated-cell { min-width: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .catalog-no-results[hidden] { display: none; }
+  .ledger-panel .product-index { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: 10px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 750; vertical-align: middle; }
+  .product-cell-title { display: inline-grid; gap: 3px; max-width: calc(100% - 48px); vertical-align: middle; }
+  .product-cell-title strong { overflow: hidden; color: var(--sln-text-primary); text-overflow: ellipsis; white-space: nowrap; }
+  .product-cell-title small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .ledger-panel td strong { color: var(--sln-text-primary); font-variant-numeric: tabular-nums; }
+  .ledger-panel td > small { display: block; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .cell-end { text-align: end; }
+  .cell-end a { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .table-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: var(--sln-space-4); color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .table-pagination a { display: inline-flex; align-items: center; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .page-size-form { margin-left: auto; }
+  .page-size-form label { display: inline-flex; align-items: center; gap: 8px; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .page-size-form select { min-height: 40px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 6px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
   .product-index { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 750; }
-  .stock-cell strong { font-variant-numeric: tabular-nums; }
-  .row-action a { color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
   .product-dialog { width: min(100% - 32px, 480px); border: 0; border-radius: var(--sln-radius-xl); padding: 0; background: transparent; }
   .product-dialog[open] { position: fixed; inset: 16px; z-index: var(--sln-z-dialog); max-height: calc(100dvh - 32px); margin: auto; overflow-y: auto; box-shadow: 0 0 0 100vmax rgb(8 11 20 / 52%); }
   .product-dialog::backdrop { background: rgb(8 11 20 / 52%); backdrop-filter: blur(4px); }
@@ -334,7 +491,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .variant-editor-list .new-variant-fieldset { border-style: dashed; background: var(--sln-bg-subtle); }
   .variant-number-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .dialog-actions { display: flex; justify-content: end; gap: 10px; margin-top: 6px; }
-  @media (max-width: 760px) { .catalog-summary { grid-template-columns: repeat(2, 1fr); } .catalog-summary > div:nth-child(2) { border-right: 0; } .catalog-summary > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); } .visibility-panel, .category-panel { padding: 16px; } .visibility-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .category-fields { grid-template-columns: 1fr 1fr; } .category-description { grid-column: 1 / -1; } .archive-confirmation { align-items: stretch; flex-direction: column; } .archive-confirmation > div { justify-content: end; } .table-head { display: none; } .table-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 16px; } .table-row > div:nth-child(2), .table-row > div:nth-child(3), .table-row > div:nth-child(4), .table-row > div:nth-child(5) { grid-column: 1; } .table-row > div:nth-child(6) { grid-column: 2; grid-row: 2 / span 4; } .price-cell, .stock-cell { display: flex; } .product-cell { grid-column: 1 / -1; } .ledger-panel { padding: 16px; } .catalog-toolbar { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .catalog-summary { grid-template-columns: repeat(2, 1fr); } .catalog-summary > div:nth-child(2) { border-right: 0; } .catalog-summary > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); } .visibility-panel, .category-panel { padding: 16px; } .visibility-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .category-fields { grid-template-columns: 1fr 1fr; } .category-description { grid-column: 1 / -1; } .archive-confirmation { align-items: stretch; flex-direction: column; } .archive-confirmation > div { justify-content: end; } .ledger-panel { padding: 16px; } .panel-heading { align-items: start; flex-direction: column; } .catalog-toolbar { grid-template-columns: 1fr; } .page-size-form { margin-left: 0; } }
   @media (max-width: 560px) { .private-file-grid { grid-template-columns: 1fr; } .private-file-actions { justify-content: stretch; } .private-file-actions .sln-button { flex: 1; } }
   @media (max-width: 440px) { .catalog-summary strong { font-size: 24px; } .panel-heading { align-items: start; flex-direction: column; } .category-fields { grid-template-columns: 1fr; } .category-description { grid-column: auto; } .category-actions, .archive-confirmation > div { flex-direction: column; } .variant-number-grid { grid-template-columns: 1fr; } }
 </style>

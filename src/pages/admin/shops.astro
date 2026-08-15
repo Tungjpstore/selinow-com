@@ -1,6 +1,7 @@
 ---
 import AdminState from "../../components/admin/AdminState.astro";
 import AdminLayout from "../../layouts/AdminLayout.astro";
+import DataTable from "../../components/workspace/DataTable.astro";
 import { authenticateRequest } from "../../lib/auth/session";
 import { isAppError } from "../../lib/core/errors";
 import {
@@ -40,6 +41,9 @@ const queryValue = Astro.url.searchParams.get("q") ?? "";
 const statusValue = Astro.url.searchParams.get("status") ?? "";
 const subscriptionValue = Astro.url.searchParams.get("subscription") ?? "";
 const cursorValue = Astro.url.searchParams.get("cursor");
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+const requestedPageSize = Number.parseInt(Astro.url.searchParams.get("pageSize") ?? "", 10);
+const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(requestedPageSize) ? requestedPageSize : 25;
 
 let shops: AdminShopDirectoryItem[] = [];
 let nextCursor: string | null = null;
@@ -51,6 +55,7 @@ if (adminRole !== null) {
       env,
       filters: {
         cursor: cursorValue,
+        limit: pageSize,
         query: queryValue,
         shopStatus: parseAdminShopStatus(statusValue),
         subscriptionState: parseAdminSubscriptionState(subscriptionValue),
@@ -103,10 +108,53 @@ const buildHref = (cursor: string | null): string => {
   if (queryValue !== "") parameters.set("q", queryValue);
   if (statusValue !== "") parameters.set("status", statusValue);
   if (subscriptionValue !== "") parameters.set("subscription", subscriptionValue);
+  if (pageSize !== 25) parameters.set("pageSize", String(pageSize));
   if (cursor !== null) parameters.set("cursor", cursor);
   const query = parameters.toString();
   return query.length === 0 ? "/admin/shops" : `/admin/shops?${query}`;
 };
+
+const directoryColumns = [
+  { label: t("admin.shops.column.state") },
+  { label: t("admin.shops.column.shop") },
+  { label: t("admin.shops.column.subscription") },
+  { label: t("admin.shops.column.sellers") },
+  { label: t("admin.shops.column.channels") },
+  { label: t("admin.shops.column.products") },
+  { label: t("admin.shops.column.updated") },
+];
+
+type AdminShopExportRow = {
+  channels: string;
+  name: string;
+  products: string;
+  sellers: string;
+  slug: string;
+  state: string;
+  subscription: string;
+  updated: string;
+};
+const shopExportHeaders = [
+  t("admin.shops.column.state"),
+  t("admin.shops.column.shop"),
+  t("admin.shops.column.subscription"),
+  t("admin.shops.column.sellers"),
+  t("admin.shops.column.channels"),
+  t("admin.shops.column.products"),
+  t("admin.shops.column.updated"),
+];
+const shopExportRows: AdminShopExportRow[] = shops.map((shop) => ({
+  channels: t("admin.shops.channels.following", { count: shop.openConnectionCount, degraded: shop.degradedConnectionCount }),
+  name: shop.name,
+  products: t("admin.shops.products.active", { count: shop.activeProductCount }),
+  sellers: t("admin.shops.sellers.count", { active: shop.activeMemberCount, owners: shop.activeOwnerCount }),
+  slug: shop.slug,
+  state: statusLabels[shop.status].label,
+  subscription: shop.subscriptionState === null
+    ? t("admin.shops.subscription.none")
+    : subscriptionLabels[shop.subscriptionState].label,
+  updated: formatTime(shop.updatedAt),
+}));
 ---
 
 <AdminLayout activePath="/admin/shops" email={auth.email} role={adminRole} title={t("admin.shops.title")}>
@@ -175,6 +223,7 @@ const buildHref = (cursor: string | null): string => {
         </div>
         <div class="admin-form-panel">
           <form class="admin-form admin-directory-filters" method="get" action="/admin/shops">
+            <input type="hidden" name="pageSize" value={String(pageSize)} aria-label="pageSize" />
             <label>
               {t("admin.shops.filter.shop_query")}
               <input name="q" type="search" value={queryValue} maxlength="64" autocomplete="off" placeholder={t("admin.shops.filter.placeholder")} />
@@ -209,13 +258,16 @@ const buildHref = (cursor: string | null): string => {
         </div>
       </section>
 
-      <section class="admin-section" aria-labelledby="directory-title">
+      <section class="admin-section" aria-labelledby="directory-title" data-admin-shop-export-root data-export-copy={JSON.stringify({ headers: shopExportHeaders })} data-export-rows={JSON.stringify(shopExportRows)}>
         <div class="admin-section-heading">
           <div>
             <h2 id="directory-title">{t("admin.shops.ledger.title")}</h2>
             <p>{t("admin.shops.ledger.description")}</p>
           </div>
-          <span>{t("admin.shops.ledger.count", { count: shops.length })}</span>
+          <div class="ledger-tools">
+            <span>{t("admin.shops.ledger.count", { count: shops.length, max: pageSize })}</span>
+            {shops.length > 0 && <button class="admin-button" type="button" data-admin-shop-export>{t("admin.common.export_csv")}</button>}
+          </div>
         </div>
 
         {shops.length === 0 ? (
@@ -224,61 +276,122 @@ const buildHref = (cursor: string | null): string => {
             <span>{t("admin.shops.empty.description")}</span>
           </div>
         ) : (
-          <div class="admin-records" role="list" aria-label={t("admin.shops.list_aria")}>
-            <div class="admin-record-header" aria-hidden="true">
-              <span>{t("admin.shops.column.state")}</span><span>{t("admin.shops.column.shop")}</span><span>{t("admin.shops.column.subscription")}</span><span>{t("admin.shops.column.sellers")}</span><span>{t("admin.shops.column.channels")}</span><span>{t("admin.shops.column.products")}</span><span>{t("admin.shops.column.updated")}</span>
-            </div>
-            {shops.map((shop) => {
-              const shopState = statusLabels[shop.status];
-              const subscription = shop.subscriptionState === null
-                ? { label: t("admin.shops.subscription.none"), tone: "neutral" as const }
-                : subscriptionLabels[shop.subscriptionState];
-              const ownerTone = shop.activeOwnerCount === 0 ? "warning" : "neutral";
-              const channelTone = shop.degradedConnectionCount > 0 ? "warning" : shop.openConnectionCount > 0 ? "success" : "neutral";
-              return (
-                <article class="admin-record" role="listitem">
-                  <div class="admin-record-summary">
-                    <div><small class="admin-cell-label">{t("admin.shops.column.state")}</small><span class="admin-badge" data-tone={shopState.tone}>{shopState.label}</span></div>
-                    <div><small class="admin-cell-label">{t("admin.shops.column.shop")}</small><strong>{shop.name}</strong><span>{shop.slug}</span></div>
-                    <div><small class="admin-cell-label">{t("admin.shops.column.subscription")}</small><span class="admin-badge" data-tone={subscription.tone}>{subscription.label}</span><span>{shop.planCode ?? t("admin.common.no_plan")}</span></div>
-                    <div><small class="admin-cell-label">{t("admin.shops.column.sellers")}</small><span class="admin-badge" data-tone={ownerTone}>{t("admin.shops.sellers.count", { active: shop.activeMemberCount, owners: shop.activeOwnerCount })}</span></div>
-                    <div><small class="admin-cell-label">{t("admin.shops.column.channels")}</small><span class="admin-badge" data-tone={channelTone}>{t("admin.shops.channels.following", { count: shop.openConnectionCount, degraded: shop.degradedConnectionCount })}</span></div>
-                    <div><small class="admin-cell-label">{t("admin.shops.column.products")}</small><span>{t("admin.shops.products.active", { count: shop.activeProductCount })}</span></div>
-                    <div><small class="admin-cell-label">{t("admin.shops.column.updated")}</small><span>{formatTime(shop.updatedAt)}</span></div>
-                  </div>
-                  <details>
-                    <summary>{t("admin.shops.detail.summary")}</summary>
-                    <div class="admin-record-detail admin-directory-detail">
-                      <div>
-                        <p>{t("admin.shops.detail.description")}</p>
-                        <dl class="admin-safe-facts">
-                          <div><dt>{t("admin.shops.detail.public_id")}</dt><dd><code>{shop.publicId}</code></dd></div>
-                          <div><dt>{t("admin.shops.detail.storefront_slug")}</dt><dd><code>{shop.slug}</code></dd></div>
-                          <div><dt>{t("admin.shops.detail.locale_currency")}</dt><dd>{shop.defaultLocale} · {shop.currency}</dd></div>
-                          <div><dt>{t("admin.shops.detail.created")}</dt><dd>{formatTime(shop.createdAt)}</dd></div>
-                          <div><dt>{t("admin.shops.detail.updated")}</dt><dd>{formatTime(shop.updatedAt)}</dd></div>
-                        </dl>
-                      </div>
-                      <div class="admin-readonly-note" role="note">
-                        <strong>{t("admin.shops.detail.readonly")}</strong>
-                        <span>{t("admin.shops.detail.readonly_description")}</span>
-                      </div>
-                    </div>
-                  </details>
-                </article>
-              );
-            })}
-          </div>
+          <DataTable caption={t("admin.shops.ledger.title")} columns={directoryColumns}>
+            <tbody>
+              {shops.map((shop) => {
+                const shopState = statusLabels[shop.status];
+                const subscription = shop.subscriptionState === null
+                  ? { label: t("admin.shops.subscription.none"), tone: "neutral" as const }
+                  : subscriptionLabels[shop.subscriptionState];
+                const ownerTone = shop.activeOwnerCount === 0 ? "warning" : "neutral";
+                const channelTone = shop.degradedConnectionCount > 0 ? "warning" : shop.openConnectionCount > 0 ? "success" : "neutral";
+                return (
+                  <>
+                    <tr data-admin-shop-row data-shop-public-id={shop.publicId}>
+                      <td data-label={t("admin.shops.column.state")}><span class="admin-badge" data-tone={shopState.tone}>{shopState.label}</span></td>
+                      <td data-label={t("admin.shops.column.shop")}><strong>{shop.name}</strong><span class="cell-sub">{shop.slug}</span></td>
+                      <td data-label={t("admin.shops.column.subscription")}><span class="admin-badge" data-tone={subscription.tone}>{subscription.label}</span><span class="cell-sub">{shop.planCode ?? t("admin.common.no_plan")}</span></td>
+                      <td data-label={t("admin.shops.column.sellers")}><span class="admin-badge" data-tone={ownerTone}>{t("admin.shops.sellers.count", { active: shop.activeMemberCount, owners: shop.activeOwnerCount })}</span></td>
+                      <td data-label={t("admin.shops.column.channels")}><span class="admin-badge" data-tone={channelTone}>{t("admin.shops.channels.following", { count: shop.openConnectionCount, degraded: shop.degradedConnectionCount })}</span></td>
+                      <td data-label={t("admin.shops.column.products")}>{t("admin.shops.products.active", { count: shop.activeProductCount })}</td>
+                      <td data-label={t("admin.shops.column.updated")}>{formatTime(shop.updatedAt)}</td>
+                    </tr>
+                    <tr class="admin-shop-detail-row">
+                      <td colspan={directoryColumns.length} data-label={t("admin.shops.detail.summary")}>
+                        <details>
+                          <summary>{t("admin.shops.detail.summary")}</summary>
+                          <div class="admin-record-detail admin-directory-detail">
+                            <div>
+                              <p>{t("admin.shops.detail.description")}</p>
+                              <dl class="admin-safe-facts">
+                                <div><dt>{t("admin.shops.detail.public_id")}</dt><dd><code>{shop.publicId}</code></dd></div>
+                                <div><dt>{t("admin.shops.detail.storefront_slug")}</dt><dd><code>{shop.slug}</code></dd></div>
+                                <div><dt>{t("admin.shops.detail.locale_currency")}</dt><dd>{shop.defaultLocale} · {shop.currency}</dd></div>
+                                <div><dt>{t("admin.shops.detail.created")}</dt><dd>{formatTime(shop.createdAt)}</dd></div>
+                                <div><dt>{t("admin.shops.detail.updated")}</dt><dd>{formatTime(shop.updatedAt)}</dd></div>
+                              </dl>
+                            </div>
+                            <div class="admin-readonly-note" role="note">
+                              <strong>{t("admin.shops.detail.readonly")}</strong>
+                              <span>{t("admin.shops.detail.readonly_description")}</span>
+                            </div>
+                          </div>
+                        </details>
+                      </td>
+                    </tr>
+                  </>
+                );
+              })}
+            </tbody>
+            <nav slot="pagination" class="admin-pagination" aria-label={t("admin.shops.pagination.aria")}>
+              <span>{t("admin.shops.pagination.description")}</span>
+              <div class="pagination-tools">
+                <form class="page-size-form" method="get" action="/admin/shops">
+                  {queryValue !== "" && <input type="hidden" name="q" value={queryValue} aria-label="q" />}
+                  {statusValue !== "" && <input type="hidden" name="status" value={statusValue} aria-label="status" />}
+                  {subscriptionValue !== "" && <input type="hidden" name="subscription" value={subscriptionValue} aria-label="subscription" />}
+                  <label>
+                    {t("admin.shops.pagination.page_size")}
+                    <select name="pageSize">
+                      {PAGE_SIZE_OPTIONS.map((option) => <option value={String(option)} selected={option === pageSize}>{option}</option>)}
+                    </select>
+                  </label>
+                  <button class="admin-button" type="submit">{t("admin.shops.filter.apply")}</button>
+                </form>
+                {cursorValue !== null && <a class="admin-button" href={buildHref(null)}>{t("admin.shops.pagination.first")}</a>}
+                {nextCursor !== null && <a class="admin-button admin-button-primary" href={buildHref(nextCursor)}>{t("admin.shops.pagination.next")}</a>}
+              </div>
+            </nav>
+          </DataTable>
         )}
-
-        <nav class="admin-pagination" aria-label={t("admin.shops.pagination.aria")}>
-          <span>{t("admin.shops.pagination.description")}</span>
-          <div>
-            {cursorValue !== null && <a class="admin-button" href={buildHref(null)}>{t("admin.shops.pagination.first")}</a>}
-            {nextCursor !== null && <a class="admin-button admin-button-primary" href={buildHref(nextCursor)}>{t("admin.shops.pagination.next")}</a>}
-          </div>
-        </nav>
       </section>
     </div>
   )}
 </AdminLayout>
+
+<script>
+  import { buildCsv, downloadCsv } from "../../lib/dashboard/csv-export";
+
+  type ShopExportRow = {
+    channels: string;
+    name: string;
+    products: string;
+    sellers: string;
+    slug: string;
+    state: string;
+    subscription: string;
+    updated: string;
+  };
+  const exportRoot = document.querySelector<HTMLElement>("[data-admin-shop-export-root]");
+  if (exportRoot !== null) {
+    const readJson = (value: string | undefined, fallback: unknown): unknown => {
+      try { return JSON.parse(value ?? "null") ?? fallback; } catch { return fallback; }
+    };
+    const headers = readJson(exportRoot.dataset.exportCopy, null) as { headers?: string[] } | null;
+    const rows = readJson(exportRoot.dataset.exportRows, []) as ShopExportRow[];
+    const columnHeaders = headers?.headers ?? [];
+    exportRoot.querySelector("[data-admin-shop-export]")?.addEventListener("click", () => {
+      const csv = buildCsv(rows, [
+        { header: columnHeaders[0] ?? "", value: (row: ShopExportRow) => row.state },
+        { header: columnHeaders[1] ?? "", value: (row: ShopExportRow) => row.name },
+        { header: columnHeaders[2] ?? "", value: (row: ShopExportRow) => row.subscription },
+        { header: columnHeaders[3] ?? "", value: (row: ShopExportRow) => row.sellers },
+        { header: columnHeaders[4] ?? "", value: (row: ShopExportRow) => row.channels },
+        { header: columnHeaders[5] ?? "", value: (row: ShopExportRow) => row.products },
+        { header: columnHeaders[6] ?? "", value: (row: ShopExportRow) => row.updated },
+      ]);
+      const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+      downloadCsv(`admin-shops-${stamp}.csv`, csv);
+    });
+  }
+</script>
+
+<style>
+  .ledger-tools { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+  .cell-sub { display:block; color:var(--sln-text-muted); font-size:12px; overflow-wrap:anywhere; }
+  .admin-shop-detail-row td { background:var(--sln-bg-subtle); }
+  .pagination-tools { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+  .page-size-form { display:flex; align-items:center; gap:8px; }
+  .page-size-form label { display:flex; align-items:center; gap:8px; color:var(--sln-text-muted); font-size:12px; }
+  .page-size-form select { min-height:40px; border:1px solid var(--sln-border-default); border-radius:8px; padding:6px 10px; background:var(--sln-bg-surface); color:var(--sln-text-primary); }
+</style>

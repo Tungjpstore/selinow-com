@@ -3,10 +3,13 @@ import AppLayout from "../../layouts/AppLayout.astro";
 import FulfillmentState from "../../components/commerce/FulfillmentState.astro";
 import Money from "../../components/commerce/Money.astro";
 import PaymentState from "../../components/commerce/PaymentState.astro";
+import Button from "../../components/primitives/Button.astro";
+import LinkButton from "../../components/primitives/LinkButton.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import DataTable from "../../components/workspace/DataTable.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
 import { authenticateRequest } from "../../lib/auth/session";
-import { listSellerOrdersPage, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
+import { listSellerOrdersPage, parseSellerOrderSort, parseSellerOrderStatusFilter, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
 import { isAppError } from "../../lib/core/errors";
 import { listPaymentExceptions, parsePaymentExceptionEvidence, type PaymentExceptionEvidence, type PaymentExceptionView } from "../../lib/payments/reconciliation";
 import { getBindings } from "../../lib/platform/bindings";
@@ -31,17 +34,37 @@ const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
 const locale = Astro.locals.locale;
 const t = createDashboardTranslator(locale);
+
+// The Astro page parses the table URL contract itself (q/status/sort/page/
+// pageSize) and passes explicit values into the service; parsePublicApiPage
+// only accepts cursor/limit, so the raw URL is never forwarded.
+const searchParams = Astro.url.searchParams;
+const parsedPage = Number.parseInt(searchParams.get("page") ?? "", 10);
+const requestedPage = Number.isSafeInteger(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
+const parsedPageSize = Number.parseInt(searchParams.get("pageSize") ?? "", 10);
+const requestedPageSize = parsedPageSize === 25 || parsedPageSize === 50 || parsedPageSize === 100 ? parsedPageSize : 25;
+const statusFilter = parseSellerOrderStatusFilter(searchParams.get("status"));
+const sort = parseSellerOrderSort(searchParams.get("sort"));
+const query = searchParams.get("q")?.trim().slice(0, 64) ?? "";
+const hasActiveFilters = query !== "" || statusFilter !== "all";
+
 let orders: SellerOrderSummary[] = [];
-let nextCursor: string | null = null;
+let currentPage = requestedPage;
+let pageSize = requestedPageSize;
+let totalCount = 0;
+let totalPages = 1;
 let paymentExceptions: PaymentExceptionView[] = [];
 let paymentExceptionState: "forbidden" | "ready" | "unavailable" = "ready";
 let paymentExceptionRequestId: string | null = null;
 
 if (shop !== undefined && loadState === "ready") {
   try {
-    const page = await listSellerOrdersPage({ cursor: Astro.url.searchParams.get("cursor"), env, shopPublicId: shop.publicId, userId: auth.userId });
-    orders = page.orders;
-    nextCursor = page.nextCursor;
+    const result = await listSellerOrdersPage({ env, page: requestedPage, pageSize: requestedPageSize, search: query === "" ? null : query, shopPublicId: shop.publicId, sort, statusFilter, userId: auth.userId });
+    orders = result.orders;
+    currentPage = result.page ?? requestedPage;
+    pageSize = result.pageSize ?? requestedPageSize;
+    totalCount = result.totalCount ?? orders.length;
+    totalPages = result.totalPages ?? 1;
   } catch (error) {
     loadState = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
     if (loadState === "unavailable") loadRequestId = Astro.locals.requestId;
@@ -55,16 +78,29 @@ if (shop !== undefined && loadState === "ready") {
   }
 }
 
+const buildHref = (params: Record<string, number | string | null | undefined>): string => {
+  const next = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === "") continue;
+    next.set(key, String(value));
+  }
+  const suffix = next.toString();
+  return workspaceHref(`/app/orders${suffix === "" ? "" : `?${suffix}`}`);
+};
+const pageHref = (page: number): string => buildHref({
+  page,
+  pageSize,
+  q: query === "" ? null : query,
+  sort: searchParams.get("sort"),
+  status: statusFilter === "all" ? null : statusFilter,
+});
+
 const paymentPending = new Set(["unpaid", "pending"]);
 const exceptionPayments = new Set(["partial", "overpaid", "failed"]);
 const exceptionFulfillments = new Set(["failed", "manual_review"]);
 const isException = (order: SellerOrderSummary): boolean => order.status === "exception"
   || exceptionPayments.has(order.paymentStatus)
   || exceptionFulfillments.has(order.fulfillmentStatus);
-const isFulfillmentProcessing = (order: SellerOrderSummary): boolean => order.paymentStatus === "paid"
-  && new Set(["reserved", "unfulfilled"]).has(order.fulfillmentStatus);
-const isFulfilled = (order: SellerOrderSummary): boolean => order.paymentStatus === "paid"
-  && order.fulfillmentStatus === "fulfilled";
 
 const pendingCount = orders.filter((order) => paymentPending.has(order.paymentStatus)).length;
 const verifiedCount = orders.filter((order) => order.paymentStatus === "paid").length;
@@ -99,19 +135,42 @@ const paymentExceptionRecords = paymentExceptions.map(({ safeEvidenceJson, ...ex
   exception,
 }));
 const channelLabel = (value: string): string => value === "telegram" ? "Telegram" : value === "web" ? "Website" : value;
-const filterTags = (order: SellerOrderSummary): string => [
-  "all",
-  paymentPending.has(order.paymentStatus) ? "payment-pending" : "",
-  order.paymentStatus === "paid" ? "payment-paid" : "",
-  isFulfillmentProcessing(order) ? "fulfillment-processing" : "",
-  isFulfilled(order) ? "fulfilled" : "",
-  isException(order) ? "exception" : "",
-].filter(Boolean).join(" ");
+
+const sortBase: string = sort.endsWith("_desc") ? sort.slice(0, -5) : sort;
+const sortDirection: "asc" | "desc" = sort.endsWith("_desc") ? "desc" : "asc";
+const tableColumns = [
+  { key: "order_number", label: t("dashboard.orders.table.order") },
+  { label: t("dashboard.orders.table.customer_product") },
+  { align: "end" as const, key: "total", label: t("dashboard.orders.table.total") },
+  { label: t("dashboard.orders.table.payment") },
+  { label: t("dashboard.orders.table.fulfillment") },
+  { key: "created", label: t("dashboard.orders.table.channel_time") },
+  { label: t("dashboard.orders.table.actions") },
+];
+type OrderExportRow = { channel: string; createdAt: string; customer: string; fulfillment: string; order: string; payment: string; product: string; total: string };
+const exportRows: OrderExportRow[] = orders.map((order) => ({
+  channel: channelLabel(order.sourceChannel),
+  createdAt: order.createdAt,
+  customer: order.customerEmail ?? "",
+  fulfillment: order.fulfillmentStatus,
+  order: `#${order.orderNumber} (${order.orderId})`,
+  payment: order.paymentStatus,
+  product: order.primaryItem ?? "",
+  total: `${order.totalMinor} ${order.currency}`,
+}));
+const exportHeaders = [
+  t("dashboard.orders.table.order"),
+  t("dashboard.orders.table.customer_product"),
+  t("dashboard.orders.table.total"),
+  t("dashboard.orders.table.payment"),
+  t("dashboard.orders.table.fulfillment"),
+  t("dashboard.orders.table.channel_time"),
+];
 ---
 
 <AppLayout activePath="/app/orders" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.orders.title")}>
   <PageHeader eyebrow={t("dashboard.orders.eyebrow")} title={t("dashboard.orders.title")} description={t("dashboard.orders.description")}>
-    {shop !== undefined && loadState === "ready" && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app/integrations")}>{t("dashboard.orders.check_channels")} <span aria-hidden="true">↗</span></a>}
+    {shop !== undefined && loadState === "ready" && <LinkButton slot="actions" variant="secondary" href={workspaceHref("/app/integrations")}>{t("dashboard.orders.check_channels")} <span aria-hidden="true">↗</span></LinkButton>}
   </PageHeader>
 
   {loadState === "unavailable" ? (
@@ -129,7 +188,7 @@ const filterTags = (order: SellerOrderSummary): string => [
   ) : (
     <>
       <section class="order-rail" aria-label={t("dashboard.orders.summary.aria")}>
-        <div><span>{t("dashboard.orders.summary.recent")}</span><strong>{orders.length}</strong><small>{t("dashboard.orders.summary.recent_caption")}</small></div>
+        <div><span>{t("dashboard.orders.summary.recent")}</span><strong>{totalCount}</strong><small>{t("dashboard.orders.summary.recent_caption")}</small></div>
         <div><span>{t("dashboard.orders.summary.pending")}</span><strong class="warning">{pendingCount}</strong><small>{t("dashboard.orders.summary.pending_caption")}</small></div>
         <div><span>{t("dashboard.orders.summary.paid")}</span><strong class="success">{verifiedCount}</strong><small>{t("dashboard.orders.summary.paid_caption")}</small></div>
         <div><span>{t("dashboard.orders.summary.exceptions")}</span><strong class={exceptionCount > 0 ? "danger" : undefined}>{exceptionCount}</strong><small>{t("dashboard.orders.summary.exceptions_caption")}</small></div>
@@ -172,118 +231,138 @@ const filterTags = (order: SellerOrderSummary): string => [
         </section>
       )}
 
-      {orders.length === 0 ? (
+      {totalCount === 0 && !hasActiveFilters ? (
         <div class="state-space state-space-ledger">
           <WorkspaceState eyebrow={t("dashboard.orders.empty.eyebrow")} title={t("dashboard.orders.empty.title")} description={t("dashboard.orders.empty.description")} actionHref={workspaceHref("/app/products")} actionLabel={t("dashboard.orders.empty.action")} tone="info" />
         </div>
       ) : (
-        <section class="ledger-panel" aria-labelledby="order-ledger-title" data-order-ledger data-locale={locale ?? "en"}>
+        <section
+          class="ledger-panel"
+          aria-labelledby="order-ledger-title"
+          data-order-ledger
+          data-locale={locale ?? "en"}
+          data-export-copy={JSON.stringify({ headers: exportHeaders })}
+          data-export-rows={JSON.stringify(exportRows)}
+        >
           <div class="panel-heading">
             <div><p class="eyebrow">{t("dashboard.orders.ledger.eyebrow")}</p><h2 id="order-ledger-title">{t("dashboard.orders.ledger.title")}</h2></div>
-            <span class="record-count" data-record-count data-record-template={t("dashboard.orders.record_count", { count: "__COUNT__" })}>{t("dashboard.orders.record_count", { count: orders.length })}</span>
+            <div class="panel-heading-tools">
+              <span class="record-count" data-record-count data-record-template={t("dashboard.orders.record_count", { count: "__COUNT__" })}>{t("dashboard.orders.record_count", { count: totalCount })}</span>
+              {orders.length > 0 && <Button type="button" variant="secondary" data-order-export>{t("dashboard.table.export")}</Button>}
+            </div>
           </div>
 
-          <div class="order-controls" aria-label={t("dashboard.orders.filters.aria")}>
-            <div class="order-filters" role="group" aria-label={t("dashboard.orders.filters.status_aria")}>
-              {[
-                ["all", t("dashboard.orders.filters.all")],
-                ["payment-pending", t("dashboard.orders.filters.payment_pending")],
-                ["payment-paid", t("dashboard.orders.filters.payment_paid")],
-                ["fulfillment-processing", t("dashboard.orders.filters.fulfillment_processing")],
-                ["fulfilled", t("dashboard.orders.filters.fulfilled")],
-                ["exception", t("dashboard.orders.filters.exception")],
-              ].map(([value, label], index) => <button type="button" data-order-filter={value} aria-pressed={index === 0 ? "true" : "false"}>{label}</button>)}
-            </div>
+          <form class="order-controls" method="get" aria-label={t("dashboard.orders.filters.aria")}>
+            {searchParams.get("shop") !== null && <input type="hidden" name="shop" value={searchParams.get("shop") ?? ""} aria-label="shop" />}
             <label class="order-search">
               <span class="sr-only">{t("dashboard.orders.search.label")}</span>
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
-              <input type="search" placeholder={t("dashboard.orders.search.placeholder")} autocomplete="off" data-order-search />
+              <input type="search" name="q" value={query} placeholder={t("dashboard.orders.search.placeholder")} autocomplete="off" maxlength="64" data-order-search />
             </label>
-          </div>
+            <label class="order-status">
+              <span class="sr-only">{t("dashboard.orders.filters.status_aria")}</span>
+              <select name="status" aria-label={t("dashboard.orders.filters.status_aria")}>
+                <option value="all" selected={statusFilter === "all"}>{t("dashboard.orders.filters.all")}</option>
+                <option value="payment-pending" selected={statusFilter === "payment-pending"}>{t("dashboard.orders.filters.payment_pending")}</option>
+                <option value="payment-paid" selected={statusFilter === "payment-paid"}>{t("dashboard.orders.filters.payment_paid")}</option>
+                <option value="fulfillment-processing" selected={statusFilter === "fulfillment-processing"}>{t("dashboard.orders.filters.fulfillment_processing")}</option>
+                <option value="fulfilled" selected={statusFilter === "fulfilled"}>{t("dashboard.orders.filters.fulfilled")}</option>
+                <option value="exception" selected={statusFilter === "exception"}>{t("dashboard.orders.filters.exception")}</option>
+              </select>
+            </label>
+            <Button type="submit" variant="secondary">{t("dashboard.orders.filters.apply")}</Button>
+          </form>
 
-          <p class="scope-note">{t("dashboard.orders.scope", { count: orders.length })}</p>
-
-          <p class="filter-loading" data-filter-loading role="status" aria-live="polite" hidden>{t("dashboard.orders.filter_loading")}</p>
-
-          <div class="order-table" role="table" aria-label={t("dashboard.orders.table.aria")} data-order-table>
-            <div class="table-head" role="row">
-              <span role="columnheader">{t("dashboard.orders.table.order")}</span><span role="columnheader">{t("dashboard.orders.table.customer_product")}</span><span role="columnheader">{t("dashboard.orders.table.total")}</span><span role="columnheader">{t("dashboard.orders.table.payment")}</span><span role="columnheader">{t("dashboard.orders.table.fulfillment")}</span><span role="columnheader">{t("dashboard.orders.table.channel_time")}</span><span role="columnheader">{t("dashboard.orders.table.actions")}</span>
-            </div>
-            {orders.map((order) => (
-              <article
-                class="order-row"
-                role="row"
-                data-order-row
-                data-order-tags={filterTags(order)}
-                data-order-search-value={`${order.orderNumber} ${order.orderId} ${order.customerEmail ?? ""} ${order.primaryItem ?? ""}`.toLocaleLowerCase(locale ?? "en")}
-              >
-                <div class="order-id-cell" role="cell"><strong>#{order.orderNumber}</strong><code>{order.orderId}</code></div>
-                <div class="order-subject-cell" role="cell"><strong>{order.customerEmail ?? t("dashboard.orders.unknown_customer")}</strong><span>{order.primaryItem ?? t("dashboard.orders.unknown_product")}{order.itemCount > 1 ? ` +${order.itemCount - 1} ${t("dashboard.orders.items")}` : ""}</span></div>
-                <div class="order-total-cell" role="cell"><Money value={order.totalMinor} currency={order.currency} locale={locale ?? "en"} /><small>{order.itemCount} {t("dashboard.orders.items")}</small></div>
-                <div role="cell"><PaymentState locale={locale} value={order.paymentStatus} /></div>
-                <div role="cell"><FulfillmentState locale={locale} value={order.fulfillmentStatus} /></div>
-                <div class="order-channel-cell" role="cell"><strong>{channelLabel(order.sourceChannel)}</strong><time datetime={order.createdAt}>{formatDate(order.createdAt)}</time></div>
-                <div class="order-action" role="cell"><a href={workspaceHref(`/app/orders/${order.orderId}`)} aria-label={t("dashboard.orders.open_detail_aria", { number: order.orderNumber })}>{t("dashboard.orders.open_detail")} <span aria-hidden="true">→</span></a></div>
-              </article>
-            ))}
-          </div>
-
-          <div class="no-results" data-no-results hidden aria-live="polite">
-            <WorkspaceState eyebrow={t("dashboard.orders.no_results.eyebrow")} title={t("dashboard.orders.no_results.title")} description={t("dashboard.orders.no_results.description")} tone="neutral" />
-          </div>
-          {nextCursor !== null && <a class="sln-button sln-button-secondary" href={workspaceHref(`/app/orders?cursor=${encodeURIComponent(nextCursor)}`)}>{t("dashboard.orders.pagination.next")} →</a>}
+          {orders.length === 0 ? (
+            <p class="table-empty" data-no-results>{t("dashboard.table.empty")}</p>
+          ) : (
+            <DataTable
+              caption={t("dashboard.orders.table.aria")}
+              columns={tableColumns}
+              currentSort={sortBase}
+              currentSortDirection={sortDirection}
+              currentUrl={Astro.url}
+            >
+              <tbody>
+                {orders.map((order) => (
+                  <tr data-order-row>
+                    <td data-label={t("dashboard.orders.table.order")}><strong>#{order.orderNumber}</strong><code>{order.orderId}</code></td>
+                    <td data-label={t("dashboard.orders.table.customer_product")}><strong>{order.customerEmail ?? t("dashboard.orders.unknown_customer")}</strong><span>{order.primaryItem ?? t("dashboard.orders.unknown_product")}{order.itemCount > 1 ? ` +${order.itemCount - 1} ${t("dashboard.orders.items")}` : ""}</span></td>
+                    <td class="cell-end" data-label={t("dashboard.orders.table.total")}><Money value={order.totalMinor} currency={order.currency} locale={locale ?? "en"} /><small>{order.itemCount} {t("dashboard.orders.items")}</small></td>
+                    <td data-label={t("dashboard.orders.table.payment")}><PaymentState locale={locale} value={order.paymentStatus} /></td>
+                    <td data-label={t("dashboard.orders.table.fulfillment")}><FulfillmentState locale={locale} value={order.fulfillmentStatus} /></td>
+                    <td data-label={t("dashboard.orders.table.channel_time")}><strong>{channelLabel(order.sourceChannel)}</strong><time datetime={order.createdAt}>{formatDate(order.createdAt)}</time></td>
+                    <td class="cell-end" data-label={t("dashboard.orders.table.actions")}><a href={workspaceHref(`/app/orders/${order.orderId}`)} aria-label={t("dashboard.orders.open_detail_aria", { number: order.orderNumber })}>{t("dashboard.orders.open_detail")} <span aria-hidden="true">→</span></a></td>
+                  </tr>
+                ))}
+              </tbody>
+              <nav slot="pagination" class="table-pagination" aria-label={t("dashboard.orders.pagination.aria")}>
+                {currentPage > 1 && <a href={pageHref(currentPage - 1)}>← {t("dashboard.table.previous")}</a>}
+                <span>{t("dashboard.table.page_info", { page: currentPage, totalPages })}</span>
+                {currentPage < totalPages && <a href={pageHref(currentPage + 1)}>{t("dashboard.table.next")} →</a>}
+                <form class="page-size-form" method="get">
+                  {searchParams.get("shop") !== null && <input type="hidden" name="shop" value={searchParams.get("shop") ?? ""} aria-label="shop" />}
+                  {query !== "" && <input type="hidden" name="q" value={query} aria-label="q" />}
+                  {statusFilter !== "all" && <input type="hidden" name="status" value={statusFilter} aria-label="status" />}
+                  {searchParams.get("sort") !== null && <input type="hidden" name="sort" value={sort} aria-label="sort" />}
+                  <label>{t("dashboard.table.rows_per_page")}
+                    <select name="pageSize" data-page-size-select>
+                      {[25, 50, 100].map((size) => <option value={size} selected={pageSize === size}>{size}</option>)}
+                    </select>
+                  </label>
+                </form>
+              </nav>
+            </DataTable>
+          )}
         </section>
       )}
     </>
   )}
 </AppLayout>
 
-{orders.length > 0 && <script>
+<script>
+  import { buildCsv, downloadCsv } from "../../lib/dashboard/csv-export";
+
+  type ExportRow = { channel: string; createdAt: string; customer: string; fulfillment: string; order: string; payment: string; product: string; total: string };
+
   const ledger = document.querySelector<HTMLElement>("[data-order-ledger]");
-  const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-order-row]"));
-  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-order-filter]"));
-  const search = document.querySelector<HTMLInputElement>("[data-order-search]");
-  const count = document.querySelector<HTMLElement>("[data-record-count]");
-  const noResults = document.querySelector<HTMLElement>("[data-no-results]");
-  const table = document.querySelector<HTMLElement>("[data-order-table]");
-  const loading = document.querySelector<HTMLElement>("[data-filter-loading]");
-  let activeFilter = "all";
+  if (ledger !== null) {
+    const normalize = (value: string): string => value.trim().toLocaleLowerCase(ledger?.dataset.locale ?? "en");
+    const copy: { headers?: readonly string[] } = (() => {
+      try { return JSON.parse(ledger.dataset.exportCopy ?? "{}") as { headers?: readonly string[] }; }
+      catch { return {}; }
+    })();
+    const rows: ExportRow[] = (() => {
+      try {
+        const parsed: unknown = JSON.parse(ledger.dataset.exportRows ?? "[]");
+        return Array.isArray(parsed) ? parsed as ExportRow[] : [];
+      } catch { return []; }
+    })();
+    const headers = copy.headers ?? [];
 
-  const normalize = (value: string): string => value.trim().toLocaleLowerCase(ledger?.dataset.locale ?? "en");
-  const applyFilters = () => {
-    if (ledger) ledger.setAttribute("aria-busy", "true");
-    if (loading) loading.hidden = false;
-    const query = normalize(search?.value ?? "");
-    window.requestAnimationFrame(() => {
-      let visible = 0;
-      for (const row of rows) {
-        const tags = new Set((row.dataset.orderTags ?? "").split(" "));
-        const matchesState = tags.has(activeFilter);
-        const matchesQuery = query.length === 0 || (row.dataset.orderSearchValue ?? "").includes(query);
-        row.hidden = !(matchesState && matchesQuery);
-        if (!row.hidden) visible += 1;
-      }
-      if (count) count.textContent = (count.dataset.recordTemplate ?? "__COUNT__").replace("__COUNT__", String(visible));
-      if (noResults) noResults.hidden = visible !== 0;
-      if (table) table.hidden = visible === 0;
-      if (loading) loading.hidden = true;
-      if (ledger) ledger.setAttribute("aria-busy", "false");
+    ledger.querySelector<HTMLButtonElement>("[data-order-export]")?.addEventListener("click", () => {
+      const csv = buildCsv(rows, [
+        { header: headers[0] ?? "", value: (row: ExportRow) => row.order },
+        { header: headers[1] ?? "", value: (row: ExportRow) => `${row.customer}${row.product === "" ? "" : ` / ${row.product}`}` },
+        { header: headers[2] ?? "", value: (row: ExportRow) => row.total },
+        { header: headers[3] ?? "", value: (row: ExportRow) => row.payment },
+        { header: headers[4] ?? "", value: (row: ExportRow) => row.fulfillment },
+        { header: headers[5] ?? "", value: (row: ExportRow) => `${row.channel} · ${row.createdAt}` },
+      ]);
+      const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+      downloadCsv(`${normalize("orders")}-${stamp}.csv`, csv);
     });
-  };
 
-  for (const button of buttons) {
-    button.addEventListener("click", () => {
-      activeFilter = button.dataset.orderFilter ?? "all";
-      for (const candidate of buttons) candidate.setAttribute("aria-pressed", candidate === button ? "true" : "false");
-      applyFilters();
-    });
+    const pageSizeSelect = ledger.querySelector("[data-page-size-select]");
+    if (pageSizeSelect instanceof HTMLSelectElement) {
+      pageSizeSelect.addEventListener("change", () => {
+        pageSizeSelect.form?.requestSubmit();
+      });
+    }
   }
-  search?.addEventListener("input", applyFilters);
-</script>}
+</script>
 
 <style>
-  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); text-decoration: none; }
-  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .state-space { margin-top: var(--sln-space-8); }
   .state-space-ledger { margin-top: var(--sln-space-10); }
   .order-rail { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: var(--sln-space-8); border-block: 1px solid var(--sln-border-default); }
@@ -291,7 +370,7 @@ const filterTags = (order: SellerOrderSummary): string => [
   .order-rail > div:last-child { border-right: 0; }
   .order-rail span, .order-rail small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .order-rail strong { font-size: 30px; line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
-  .order-rail strong.warning { color: #9a5004; }
+  .order-rail strong.warning { color: var(--sln-state-warning); }
   .order-rail strong.success { color: var(--sln-state-success); }
   .order-rail strong.danger { color: var(--sln-state-danger); }
   .exception-panel { display: grid; gap: 14px; margin-top: var(--sln-space-8); border: 1px solid color-mix(in srgb, var(--sln-state-warning) 32%, var(--sln-border-default)); border-radius: var(--sln-radius-lg); padding: var(--sln-space-6); background: var(--sln-tint-warning); }
@@ -317,71 +396,43 @@ const filterTags = (order: SellerOrderSummary): string => [
   .exception-footnote { margin: 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .ledger-panel { margin-top: var(--sln-space-10); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
   .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+  .panel-heading-tools { display: flex; align-items: center; gap: 14px; }
   .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
   h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
   .record-count { color: var(--sln-text-muted); font: var(--sln-font-caption); }
-  .order-controls { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: var(--sln-space-6); padding-block: 14px; border-block: 1px solid var(--sln-border-default); }
-  .order-filters { display: flex; flex-wrap: wrap; gap: 6px; }
-  .order-filters button { min-height: 38px; border: 1px solid transparent; border-radius: var(--sln-radius-pill); padding: 7px 12px; background: transparent; color: var(--sln-text-secondary); font: var(--sln-font-label); cursor: pointer; }
-  .order-filters button:hover { background: var(--sln-bg-subtle); color: var(--sln-text-primary); }
-  .order-filters button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--sln-action-primary) 24%, transparent); background: var(--sln-tint-indigo); color: var(--sln-action-primary-strong); }
+  .order-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: var(--sln-space-6); padding-block: 14px; border-block: 1px solid var(--sln-border-default); }
   .order-search { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: center; width: min(100%, 290px); min-height: 42px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 0 12px; background: var(--sln-bg-canvas); color: var(--sln-text-muted); }
   .order-search:focus-within { border-color: var(--sln-action-primary); box-shadow: 0 0 0 3px var(--sln-focus-ring); }
   .order-search svg { width: 18px; height: 18px; stroke: currentcolor; stroke-width: 1.8; fill: none; }
   .order-search input { min-width: 0; height: 40px; border: 0; outline: 0; background: transparent; color: var(--sln-text-primary); font: var(--sln-font-body-sm); }
   .order-search input::placeholder { color: var(--sln-text-muted); }
-  .scope-note { margin: 12px 0 18px; color: var(--sln-text-muted); font: var(--sln-font-caption); }
-  .filter-loading { margin: 0 0 14px; color: var(--sln-action-primary); font: var(--sln-font-caption); }
-  .filter-loading[hidden] { display: none; }
+  .order-status select { min-height: 42px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 8px 12px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); font: var(--sln-font-body-sm); }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-  .order-table { overflow: hidden; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); }
-  .table-head, .order-row { display: grid; grid-template-columns: minmax(150px, 1.05fr) minmax(180px, 1.35fr) minmax(100px, .75fr) minmax(130px, 1fr) minmax(120px, .95fr) minmax(120px, .8fr) minmax(95px, .65fr); gap: 14px; align-items: center; padding: 14px 16px; }
-  .table-head { background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
-  .order-row { min-height: 86px; border-top: 1px solid var(--sln-border-default); }
-  .order-row[hidden] { display: none; }
-  .order-row:hover { background: color-mix(in srgb, var(--sln-tint-indigo) 32%, var(--sln-bg-surface)); }
-  .order-id-cell, .order-subject-cell, .order-total-cell, .order-channel-cell { display: grid; gap: 4px; min-width: 0; }
-  .order-id-cell strong, .order-subject-cell strong, .order-channel-cell strong { overflow: hidden; color: var(--sln-text-primary); font: var(--sln-font-label); text-overflow: ellipsis; white-space: nowrap; }
-  .order-id-cell code { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-  .order-subject-cell span, .order-total-cell small, .order-channel-cell time { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
-  .order-total-cell :global(.sln-money) { color: var(--sln-text-primary); font-weight: 750; }
-  .order-action { text-align: right; }
-  .order-action a { display: inline-flex; align-items: center; justify-content: end; gap: 7px; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
-  .no-results { margin-top: 18px; }
-  .no-results[hidden] { display: none; }
-  @media (max-width: 1140px) {
-    .table-head { display: none; }
-    .order-row { grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.3fr) minmax(100px, .8fr) minmax(120px, .9fr); }
-    .order-row > div:nth-child(4), .order-row > div:nth-child(5) { grid-row: 2; }
-    .order-row > div:nth-child(6) { grid-column: 3; grid-row: 2; }
-    .order-row > div:nth-child(7) { grid-column: 4; grid-row: 1 / span 2; }
-  }
+  .table-empty { margin: var(--sln-space-6) 0; color: var(--sln-text-muted); font: var(--sln-font-body-sm); }
+  .ledger-panel td strong { display: block; overflow: hidden; color: var(--sln-text-primary); font: var(--sln-font-label); text-overflow: ellipsis; white-space: nowrap; }
+  .ledger-panel td code { overflow: hidden; color: var(--sln-text-muted); font-family: var(--sln-font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: anywhere; }
+  .ledger-panel td span, .ledger-panel td small, .ledger-panel td time { display: block; overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
+  .cell-end { text-align: end; }
+  .cell-end a { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .table-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: var(--sln-space-4); color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .table-pagination a { display: inline-flex; align-items: center; min-height: 44px; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .page-size-form { margin-left: auto; }
+  .page-size-form label { display: inline-flex; align-items: center; gap: 8px; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .page-size-form select { min-height: 40px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 6px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
   @media (max-width: 760px) {
     .order-rail { grid-template-columns: repeat(2, 1fr); }
     .order-rail > div:nth-child(2) { border-right: 0; }
     .order-rail > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); }
     .ledger-panel { padding: 16px; }
-    .panel-heading { align-items: start; }
-    .order-controls { align-items: stretch; flex-direction: column; }
-    .order-filters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
-    .order-filters button { flex: 0 0 auto; min-height: 44px; }
+    .panel-heading { align-items: start; flex-direction: column; }
+    .order-controls { flex-direction: column; align-items: stretch; }
     .order-search { width: 100%; }
     .exception-panel { padding: 16px; }
     .exception-list article { grid-template-columns: 34px minmax(0, 1fr); gap: 10px; }
     .exception-list article > div:nth-of-type(n + 2) { grid-column: 2; grid-template-columns: 100px minmax(0, 1fr); }
-    .order-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 16px; }
-    .order-row > div:nth-child(1), .order-row > div:nth-child(2), .order-row > div:nth-child(3), .order-row > div:nth-child(4), .order-row > div:nth-child(5), .order-row > div:nth-child(6) { grid-column: 1; grid-row: auto; }
-    .order-row > div:nth-child(4), .order-row > div:nth-child(5) { display: inline-flex; }
-    .order-row > div:nth-child(7) { grid-column: 2; grid-row: 1 / span 6; align-self: center; }
-    .order-subject-cell { padding-bottom: 4px; border-bottom: 1px solid var(--sln-border-default); }
-    .order-total-cell { display: flex; align-items: baseline; gap: 8px; }
-    .order-channel-cell { display: flex; flex-wrap: wrap; gap: 6px 10px; }
-    .order-action a { width: 44px; overflow: hidden; color: transparent; white-space: nowrap; }
-    .order-action a span { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--sln-border-default); border-radius: 50%; color: var(--sln-action-primary); font-size: 18px; }
+    .page-size-form { margin-left: 0; }
   }
   @media (max-width: 440px) {
     .order-rail strong { font-size: 24px; }
-    .panel-heading { flex-direction: column; }
-    .order-id-cell code { max-width: 220px; }
   }
 </style>

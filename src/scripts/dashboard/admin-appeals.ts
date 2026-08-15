@@ -105,15 +105,15 @@ async function review(root: HTMLElement, row: HTMLElement, decision: Decision): 
 const root = document.querySelector<HTMLElement>("[data-admin-appeals]");
 if (root !== null) {
   const copy = readCopy(root);
-  root.addEventListener("click", (event) => {
-    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-appeal-decision]") : null;
-    if (button === null) return;
-    const row = button.closest<HTMLElement>("[data-appeal-row]");
-    if (row === null) return;
-    const decision = button.dataset.appealDecision;
-    if (decision !== "provider_pending" && decision !== "rejected") return;
-    const confirmation = decision === "provider_pending" ? copy.confirmApprove : copy.confirmReject;
-    if (!window.confirm(confirmation)) return;
+  const dialog = root.querySelector<HTMLDialogElement>("[data-appeal-confirm-dialog]");
+  const dialogForm = root.querySelector<HTMLFormElement>("[data-appeal-confirm-form]");
+  const dialogTitle = root.querySelector<HTMLElement>("[data-appeal-confirm-title]");
+  const dialogImpact = root.querySelector<HTMLElement>("[data-appeal-confirm-impact]");
+  const dialogConfirm = root.querySelector<HTMLButtonElement>("[data-appeal-confirm-action]");
+  type PendingReview = { button: HTMLButtonElement; decision: Decision; row: HTMLElement };
+  let pendingReview: PendingReview | null = null;
+
+  const startReview = ({ button, decision, row }: PendingReview): void => {
     const original = button.textContent;
     button.disabled = true;
     button.textContent = decision === "provider_pending" ? copy.approve : copy.reject;
@@ -140,5 +140,32 @@ if (root !== null) {
         button.textContent = original;
         root.setAttribute("aria-busy", "false");
       });
+  };
+
+  root.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button[data-appeal-decision]") : null;
+    if (button === null) return;
+    const row = button.closest<HTMLElement>("[data-appeal-row]");
+    if (row === null) return;
+    const decision = button.dataset.appealDecision;
+    if (decision !== "provider_pending" && decision !== "rejected") return;
+    if (dialog === null || dialogTitle === null || dialogImpact === null || dialogConfirm === null) return;
+    pendingReview = { button, decision, row };
+    const label = button.textContent.trim();
+    dialogTitle.textContent = label;
+    dialogImpact.textContent = decision === "provider_pending" ? copy.confirmApprove : copy.confirmReject;
+    dialogConfirm.textContent = label;
+    dialogConfirm.dataset.variant = decision === "provider_pending" ? "primary" : "danger";
+    dialog.showModal();
   });
+  dialogForm?.addEventListener("submit", (event) => {
+    const submitter = event.submitter;
+    const pending = pendingReview;
+    pendingReview = null;
+    if (!(submitter instanceof HTMLButtonElement) || submitter.value !== "confirm" || pending === null) return;
+    event.preventDefault();
+    dialog?.close();
+    startReview(pending);
+  });
+  dialog?.addEventListener("close", () => { pendingReview = null; });
 }

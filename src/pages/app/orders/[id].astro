@@ -147,8 +147,8 @@ const remediationStatusLabels: Record<string, string> = {
   {state === "ready" && order !== null && shop !== undefined && <>
     <PageHeader eyebrow={t("dashboard.order_detail.header.eyebrow", { id: formatShortId(order.orderId) })} title={t("dashboard.order_detail.order_title", { number: order.orderNumber })} description={t("dashboard.order_detail.header.description")}>
       <div slot="actions" class="header-actions">
-        <a class="sln-button sln-button-secondary" href={workspaceHref("/app/orders")}>← {t("dashboard.order_detail.order_list")}</a>
-        <a class="sln-button sln-button-primary" href={`https://${shop.slug}.${env.PLATFORM_BASE_DOMAIN}`}>{t("dashboard.order_detail.open_storefront")} <span aria-hidden="true">↗</span></a>
+        <a class="sln-button" data-variant="secondary" href={workspaceHref("/app/orders")}>← {t("dashboard.order_detail.order_list")}</a>
+        <a class="sln-button" data-variant="primary" href={`https://${shop.slug}.${env.PLATFORM_BASE_DOMAIN}`}>{t("dashboard.order_detail.open_storefront")} <span aria-hidden="true">↗</span></a>
       </div>
     </PageHeader>
 
@@ -176,7 +176,7 @@ const remediationStatusLabels: Record<string, string> = {
         <section class="ledger-panel" aria-labelledby="items-title">
           <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.items.eyebrow")}</p><h2 id="items-title">{t("dashboard.order_detail.items.title")}</h2></div><span class="record-count">{t("dashboard.order_detail.items.count", { count: order.itemCount })}</span></div>
           {order.items.length === 0 ? <WorkspaceState title={t("dashboard.order_detail.items.empty_title")} description={t("dashboard.order_detail.items.empty_description")} tone="warning" /> : <div class="item-ledger">
-            {order.items.map((item, index) => <article class="item-row">
+            {order.items.map((item, index) => <article class="item-row" data-order-item-id={item.id}>
               <span class="item-index">{String(index + 1).padStart(2, "0")}</span>
               <div class="item-copy"><strong>{item.productTitle}</strong><span>{item.variantTitle} · <code>{item.sku}</code></span><small>{fulfillmentTypeLabels[item.fulfillmentType] ?? item.fulfillmentType} · {t("dashboard.order_detail.quantity", { count: item.quantity })}</small>{item.privateDownload !== null && <span class="private-download-state"><strong>{t("dashboard.order_detail.private_download.title")}</strong><span>{item.privateDownload.filename}</span><small>{item.privateDownload.entitlementStatus === "active" ? t("dashboard.order_detail.private_download.remaining", { count: item.privateDownload.remainingDownloads }) : item.privateDownload.entitlementStatus === "exhausted" ? t("dashboard.order_detail.private_download.exhausted") : t("dashboard.order_detail.private_download.waiting")}</small></span>}{item.manualFulfillment !== null && <span class="manual-fulfillment-state"><strong>{fulfillmentTypeLabels.manual}</strong><StatusBadge label={item.manualFulfillment.status} tone={manualFulfillmentTone(item.manualFulfillment.status)} /><small>{item.manualFulfillment.status === "completed" ? t("dashboard.order_detail.fulfillment_done", { time: formatDate(item.manualFulfillment.completedAt) }) : item.manualFulfillment.status === "pending" ? t("dashboard.order_detail.fulfillment_waiting") : <code>{item.manualFulfillment.unsupportedReason ?? "unsupported"}</code>}</small></span>}</div>
               <div class="item-price"><strong><Money value={item.lineTotalMinor} currency={order.currency} locale={locale ?? "en"} /></strong><small><Money value={item.unitPriceMinor} currency={order.currency} locale={locale ?? "en"} /> / {t("dashboard.order_detail.unit")}</small></div>
@@ -207,14 +207,14 @@ const remediationStatusLabels: Record<string, string> = {
           </section>
         </div>
 
-        <section class="ledger-panel" aria-labelledby="messages-title">
-          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.messages.eyebrow")}</p><h2 id="messages-title">{t("dashboard.order_detail.messages.title")}</h2></div><span class="safe-note">{t("dashboard.order_detail.not_connected")}</span></div>
-          <WorkspaceState title={t("dashboard.order_detail.messages.empty_title")} description={t("dashboard.order_detail.messages.empty_description")} tone="info" />
-        </section>
-
         <section class="ledger-panel" aria-labelledby="notes-title">
           <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.notes.eyebrow")}</p><h2 id="notes-title">{t("dashboard.order_detail.notes.title")}</h2></div><span class="safe-note">{t("dashboard.order_detail.read_only")}</span></div>
-          <WorkspaceState title={t("dashboard.order_detail.notes.empty_title")} description={t("dashboard.order_detail.notes.empty_description")} tone="info" />
+          {order.notes.length === 0 ? <WorkspaceState title={t("dashboard.order_detail.notes.empty_title")} description={t("dashboard.order_detail.notes.empty_description")} tone="info" /> : <ol class="notes-list">
+            {order.notes.map((note) => <li data-note-status={note.status}>
+              <div class="note-top"><strong>{note.authorDisplayName}</strong><time datetime={note.createdAt}>{formatDate(note.createdAt)}</time></div>
+              <p>{note.status === "redacted" ? t("dashboard.order_detail.notes.redacted") : note.body}</p>
+            </li>)}
+          </ol>}
         </section>
       </div>
 
@@ -246,7 +246,7 @@ const remediationStatusLabels: Record<string, string> = {
                 {activeRequest !== undefined && <p class="remediation-state">{t("dashboard.order_detail.exceptions.review_status", { status: remediationStatusLabels[activeRequest.status] ?? activeRequest.status })} <code>{activeRequest.requestPublicId}</code></p>}
                 {canManagePayments && exception.status === "open" && activeRequest === undefined && <form class="remediation-form" data-remediation-form data-exception-id={exception.id} data-currency={exception.currency} data-idempotency-key="">
                   <p>{t("dashboard.order_detail.exceptions.manual_review_description")}</p>
-                  <button class="sln-button sln-button-secondary" type="submit">{t("dashboard.order_detail.exceptions.manual_review")}</button>
+                  <button class="sln-button" data-variant="secondary" type="submit">{t("dashboard.order_detail.exceptions.manual_review")}</button>
                   <p class="workspace-feedback" data-remediation-feedback hidden aria-live="polite"></p>
                 </form>}
               </article>;
@@ -255,13 +255,13 @@ const remediationStatusLabels: Record<string, string> = {
           {openPaymentExceptions.length === 0 && <p class="privacy-copy">{t("dashboard.order_detail.exceptions.no_open")}</p>}
         </section>}
 
-        {canManageFulfillment && manualItems.length > 0 && <section class="side-panel" aria-labelledby="manual-action-title" data-manual-fulfillment data-shop-public-id={shop.publicId} data-order-public-id={order.orderId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-submitting={t("dashboard.order_detail.manual.submitting")} data-failed={t("dashboard.order_detail.manual.failed")} data-error-code-label={t("dashboard.order_detail.action.error_code_label")} data-request-id-label={t("dashboard.order_detail.action.request_id_label")} data-idempotency-key="">
+        {canManageFulfillment && manualItems.length > 0 && <section class="side-panel" aria-labelledby="manual-action-title" data-manual-fulfillment data-shop-public-id={shop.publicId} data-order-public-id={order.orderId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-submitting={t("dashboard.order_detail.manual.submitting")} data-failed={t("dashboard.order_detail.manual.failed")} data-error-code-label={t("dashboard.order_detail.action.error_code_label")} data-request-id-label={t("dashboard.order_detail.action.request_id_label")} data-completed={t("dashboard.order_detail.manual.completed")} data-idempotency-key="">
           <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.manual.eyebrow")}</p><h2 id="manual-action-title">{t("dashboard.order_detail.manual.title")}</h2></div></div>
           <p class="privacy-copy">{order.paymentStatus === "paid" ? t("dashboard.order_detail.manual.ready") : t("dashboard.order_detail.manual.payment_required")}</p>
           <form class="manual-form" data-manual-form>
             <label>{t("dashboard.order_detail.manual.item")}<select name="orderItemId" required>{manualItems.map((item) => <option value={item.id}>{item.productTitle} · {item.variantTitle}</option>)}</select></label>
             <label>{t("dashboard.order_detail.manual.reference")}<input name="reference" maxlength="512" required /></label>
-            <button class="sln-button sln-button-primary" type="submit" disabled={order.paymentStatus !== "paid"}>{t("dashboard.order_detail.manual.complete")}</button>
+            <button class="sln-button" data-variant="primary" type="submit" disabled={order.paymentStatus !== "paid"}>{t("dashboard.order_detail.manual.complete")}</button>
           </form>
           <p class="workspace-feedback" data-manual-feedback hidden aria-live="polite"></p>
         </section>}
@@ -322,7 +322,19 @@ const remediationStatusLabels: Record<string, string> = {
       });
       const body = await readActionResponse(response);
       if (!response.ok) throw new Error(actionError(manualRoot, body));
-      window.location.reload();
+      // In-place update: no full-page reload. The form is locked and the
+      // affected item row reflects the recorded fulfillment until the
+      // seller navigates away or reloads manually.
+      manualFeedback.textContent = manualRoot.dataset.completed ?? "";
+      for (const control of Array.from(manualForm.elements)) {
+        if (control instanceof HTMLButtonElement || control instanceof HTMLInputElement || control instanceof HTMLSelectElement) control.disabled = true;
+      }
+      const selectedItemId = values.get("orderItemId");
+      if (typeof selectedItemId === "string" && selectedItemId !== "") {
+        const itemRow = document.querySelector(`[data-order-item-id="${CSS.escape(selectedItemId)}"]`);
+        const note = itemRow?.querySelector(".manual-fulfillment-state small");
+        if (note !== null && note !== undefined) note.textContent = manualRoot.dataset.completed ?? "";
+      }
     } catch (error) {
       manualFeedback.textContent = error instanceof Error && error.message.startsWith(manualRoot.dataset.failed ?? "")
         ? error.message
@@ -368,9 +380,6 @@ const remediationStatusLabels: Record<string, string> = {
 
 <style>
   .header-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 10px; }
-  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 16px; font: var(--sln-font-label); text-decoration: none; }
-  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
-  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .order-status-rail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: var(--sln-space-8); border-block: 1px solid var(--sln-border-default); }
   .order-status-rail > div { display: grid; gap: 6px; min-width: 0; padding: 18px 18px; border-right: 1px solid var(--sln-border-default); }
   .order-status-rail > div:last-child { border-right: 0; }
@@ -447,6 +456,14 @@ const remediationStatusLabels: Record<string, string> = {
   .audit-list > li > div { display: grid; gap: 4px; min-width: 0; }
   .audit-list strong { overflow-wrap: anywhere; font: var(--sln-font-label); }
   .audit-list small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .notes-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .notes-list > li { display: grid; gap: 6px; padding: 14px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .notes-list > li:last-child { border-bottom: 0; }
+  .note-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .note-top strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .note-top time { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .notes-list p { overflow-wrap: anywhere; margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); white-space: pre-wrap; }
+  .notes-list [data-note-status="redacted"] p { color: var(--sln-text-muted); font-style: italic; }
   @media (max-width: 980px) { .order-layout { grid-template-columns: 1fr; }.order-side { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
   @media (max-width: 760px) { .order-status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }.order-status-rail > div:nth-child(2n) { border-right: 0; }.order-status-rail > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); }.timeline-grid, .order-side { grid-template-columns: 1fr; }.ledger-panel { padding: 18px; }.customer-grid { grid-template-columns: 1fr; }.customer-grid > div:nth-child(odd) { margin-right: 0; }.item-row { grid-template-columns: 30px minmax(0, 1fr); }.item-price { grid-column: 2; display: flex; align-items: baseline; justify-content: space-between; justify-items: initial; text-align: left; }.item-total { padding: 14px; } }
   @media (max-width: 470px) { .header-actions { width: 100%; }.header-actions .sln-button { flex: 1; }.order-status-rail > div { padding: 14px 12px; }.order-status-rail strong, .order-status-rail .rail-total { font-size: 16px; }.panel-heading { align-items: start; flex-direction: column; gap: 8px; }.timeline-top { align-items: start; flex-direction: column; }.timeline-top .sln-status { order: 2; } }

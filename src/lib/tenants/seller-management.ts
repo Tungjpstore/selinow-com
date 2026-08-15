@@ -19,6 +19,31 @@ export type SellerCustomerView = {
 
 export type SellerCustomerPage = { customers: SellerCustomerView[]; nextCursor: string | null; page?: number; pageSize?: number; totalCount?: number; totalPages?: number };
 
+export type SellerCustomerSort = "created_asc" | "created_desc" | "orders_asc" | "orders_desc";
+
+const SELLER_CUSTOMER_SORTS: readonly SellerCustomerSort[] = ["created_asc", "created_desc", "orders_asc", "orders_desc"];
+
+export function parseSellerCustomerSort(value: string | null): SellerCustomerSort {
+  return value !== null && (SELLER_CUSTOMER_SORTS as readonly string[]).includes(value) ? value as SellerCustomerSort : "created_desc";
+}
+
+function sellerCustomerSortSql(sort: SellerCustomerSort): string {
+  switch (sort) {
+    case "created_asc": return "cursorCreatedAt ASC, id ASC";
+    case "orders_desc": return "orderCount DESC, cursorCreatedAt DESC, id DESC";
+    case "orders_asc": return "orderCount ASC, cursorCreatedAt DESC, id DESC";
+    default: return "cursorCreatedAt DESC, id DESC";
+  }
+}
+
+const SELLER_CUSTOMER_SEARCH_MAX = 64;
+
+export function normalizeSellerCustomerSearch(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed.slice(0, SELLER_CUSTOMER_SEARCH_MAX);
+}
+
 function sellerPage(input: { cursor?: string | null; limit?: number }): PublicApiPage {
   const url = new URL("https://seller.selinow.invalid/");
   if (input.cursor !== undefined && input.cursor !== null) url.searchParams.set("cursor", input.cursor);
@@ -89,11 +114,53 @@ function customerVisibility(role: ShopRole): CustomerVisibility {
   return "summary";
 }
 
-export async function listSellerCustomersPage(input: { cursor?: string | null; env: AppBindings; limit?: number; shopPublicId: string; userId: string }): Promise<SellerCustomerPage> {
+type CustomerSummaryRow = { createdAt: string; cursorCreatedAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; publicId?: string; status: string; version?: number };
+
+function projectCustomerRow(row: CustomerSummaryRow, visibility: CustomerVisibility): SellerCustomerView {
+  const version = Number.isSafeInteger(row.version) && (row.version ?? 0) > 0 ? (row.version ?? 1) : 1;
+  if (visibility === "summary") {
+    return {
+      createdAt: null,
+      displayName: null,
+      emailMasked: null,
+      lastOrderAt: row.lastOrderAt,
+      locale: null,
+      orderCount: row.orderCount,
+      publicId: row.publicId ?? row.id,
+      status: row.status,
+      version,
+    };
+  }
+  return {
+    createdAt: row.createdAt,
+    displayName: visibility === "masked" ? maskDisplayName(row.displayName) : row.displayName,
+    emailMasked: maskEmail(row.email),
+    lastOrderAt: row.lastOrderAt,
+    locale: row.locale,
+    orderCount: row.orderCount,
+    publicId: row.publicId ?? row.id,
+    status: row.status,
+    version,
+  };
+}
+
+export async function listSellerCustomersPage(input: {
+  cursor?: string | null;
+  env: AppBindings;
+  limit?: number;
+  page?: number;
+  pageSize?: number;
+  search?: string | null;
+  shopPublicId: string;
+  sort?: SellerCustomerSort;
+  userId: string;
+}): Promise<SellerCustomerPage> {
   const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   const visibility = customerVisibility(member.row.role);
-  const page = sellerPage(input);
-  const rows = await input.env.PLATFORM_DB.prepare(`
+
+  if (input.page === undefined) {
+    const page = sellerPage(input);
+    const rows = await input.env.PLATFORM_DB.prepare(`
     WITH customer_summary AS (
       SELECT shop_customers.id, shop_customers.id AS publicId, shop_customers.version,
       shop_customers.display_name AS displayName,
@@ -117,47 +184,75 @@ export async function listSellerCustomersPage(input: { cursor?: string | null; e
     ORDER BY cursorCreatedAt DESC, id DESC
     LIMIT ?
   `).bind(
-    member.row.shop_id,
-    page.cursor?.createdAt ?? null,
-    page.cursor?.createdAt ?? null,
-    page.cursor?.createdAt ?? null,
-    page.cursor?.id ?? null,
-    page.limit + 1,
-  ).all<{ createdAt: string; cursorCreatedAt: string; displayName: string | null; email: string | null; id: string; lastOrderAt: string | null; locale: string; orderCount: number; publicId?: string; status: string; version?: number }>();
-  const hasNext = rows.results.length > page.limit;
-  const customers = rows.results.slice(0, page.limit).map((row) => {
-    const version = Number.isSafeInteger(row.version) && (row.version ?? 0) > 0 ? (row.version ?? 1) : 1;
-    if (visibility === "summary") {
-      return {
-        createdAt: null,
-        displayName: null,
-        emailMasked: null,
-        lastOrderAt: row.lastOrderAt,
-        locale: null,
-        orderCount: row.orderCount,
-        publicId: row.publicId ?? row.id,
-        status: row.status,
-        version,
-      };
-    }
+      member.row.shop_id,
+      page.cursor?.createdAt ?? null,
+      page.cursor?.createdAt ?? null,
+      page.cursor?.createdAt ?? null,
+      page.cursor?.id ?? null,
+      page.limit + 1,
+    ).all<CustomerSummaryRow>();
+    const hasNext = rows.results.length > page.limit;
+    const customers = rows.results.slice(0, page.limit).map((row) => projectCustomerRow(row, visibility));
+    const last = rows.results.slice(0, page.limit).at(-1);
     return {
-      createdAt: row.createdAt,
-      displayName: visibility === "masked" ? maskDisplayName(row.displayName) : row.displayName,
-      emailMasked: maskEmail(row.email),
-      lastOrderAt: row.lastOrderAt,
-      locale: row.locale,
-      orderCount: row.orderCount,
-      publicId: row.publicId ?? row.id,
-      status: row.status,
-      version,
+      customers,
+      nextCursor: hasNext && last !== undefined
+        ? encodePublicApiCursor({ createdAt: last.cursorCreatedAt, id: last.id })
+        : null,
     };
-  });
-  const last = rows.results.slice(0, page.limit).at(-1);
+  }
+
+  // Search/sort must be correct across the whole tenant-scoped result set,
+  // not just a forward-only keyset page, so this branch uses bounded offset
+  // pagination mirroring listSellerOrdersPage.
+  const pageNumber = typeof input.page === "number" && Number.isSafeInteger(input.page) && input.page >= 1 ? input.page : 1;
+  const pageSize = typeof input.pageSize === "number" && Number.isSafeInteger(input.pageSize) && input.pageSize >= 1 && input.pageSize <= 100 ? input.pageSize : 25;
+  const search = normalizeSellerCustomerSearch(input.search);
+  const sort = input.sort ?? "created_desc";
+  const likeTerm = search === null ? null : `%${search}%`;
+  const offset = (pageNumber - 1) * pageSize;
+  const whereValues = [member.row.shop_id, likeTerm, likeTerm, likeTerm];
+
+  const summarySql = `
+    WITH customer_summary AS (
+      SELECT shop_customers.id, shop_customers.id AS publicId, shop_customers.version,
+      shop_customers.display_name AS displayName,
+      shop_customers.email_normalized AS email,
+      shop_customers.locale, shop_customers.status,
+      shop_customers.created_at AS createdAt,
+      COUNT(orders.id) AS orderCount,
+      MAX(orders.created_at) AS lastOrderAt,
+      COALESCE(MAX(orders.created_at), shop_customers.created_at) AS cursorCreatedAt
+      FROM shop_customers
+      LEFT JOIN orders
+        ON orders.customer_id = shop_customers.id
+        AND orders.shop_id = shop_customers.shop_id
+      WHERE shop_customers.shop_id = ?
+        AND (? IS NULL OR shop_customers.display_name LIKE ? OR shop_customers.email_normalized LIKE ?)
+      GROUP BY shop_customers.id
+    )
+  `;
+
+  const countRow = await input.env.PLATFORM_DB.prepare(`${summarySql}
+    SELECT COUNT(*) AS total FROM customer_summary
+  `).bind(...whereValues).first<{ total: number }>();
+  const totalCount = countRow !== null && Number.isSafeInteger(countRow.total) ? countRow.total : 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  const rows = await input.env.PLATFORM_DB.prepare(`${summarySql}
+    SELECT *
+    FROM customer_summary
+    ORDER BY ${sellerCustomerSortSql(sort)}
+    LIMIT ? OFFSET ?
+  `).bind(...whereValues, pageSize, offset).all<CustomerSummaryRow>();
+
   return {
-    customers,
-    nextCursor: hasNext && last !== undefined
-      ? encodePublicApiCursor({ createdAt: last.cursorCreatedAt, id: last.id })
-      : null,
+    customers: rows.results.map((row) => projectCustomerRow(row, visibility)),
+    nextCursor: null,
+    page: pageNumber,
+    pageSize,
+    totalCount,
+    totalPages,
   };
 }
 
