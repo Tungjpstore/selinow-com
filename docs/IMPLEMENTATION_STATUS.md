@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-08-15
+Last updated: 2026-08-16
 
 ## Current source of truth
 
@@ -1621,3 +1621,80 @@ Known limitations: wizard copy is hardcoded Vietnamese (consistent with the
 previous quickstart); i18n catalog keys for the 8-step legacy wizard remain
 unused by this route; manual browser walkthrough of the 5-step flow still
 recommended before deploy.
+
+Dashboard Redesign Takeover — closeout (2026-08-16):
+Branch `dashboard-redesign-takeover`. Full takeover handoff: `docs/DASHBOARD_REDESIGN_TAKEOVER_HANDOFF_2026-08-16.md`.
+Original plan and briefs: `docs/DASHBOARD_REDESIGN_HANDOFF_2026-08-15.md`,
+audit: `docs/DASHBOARD_UI_AUDIT_AND_REDESIGN_PLAN_2026-08-15.md`.
+
+Milestones (all committed):
+- M0 checkpoint `bcf9692` — pre-takeover WIP checkpoint (base for review diffs).
+- M1 `a26f0f4` — unblock build and repair broken WIP clusters (payments page,
+  telegram mini-app, seller helpers, session, contract registries).
+- M2-D2 `5dff07f` — D2: consolidate Channels IA (`/app/integrations` hub),
+  new `/app/developer` page, split `DomainManager.astro` into
+  `components/dashboard/domains/*` (DomainList etc.), token migration of the
+  domains surface to `--sln-*`.
+- M3-D1 `ec919a5` + follow-up `3ac8e16` — D1: DataTable standardization
+  (`components/workspace/DataTable.astro`), server-side search/sort/pagination
+  for products/orders/inventory/customers/members + admin shops/investigations/
+  appeals, `listSellerProductsPage` ledger query in `lib/catalog/store.ts`
+  (tenant-scoped `shop_id` CTE, LIMIT/OFFSET), low-stock threshold from
+  `shop_settings`, client-side CSV export of fetched page rows
+  (`lib/dashboard/csv-export.ts`). Follow-up commit `3ac8e16` contains the
+  catalog store helpers that the committed D1 page/test already imported.
+- M4-D3A `421a007` + fixup `74c51fc` — D3-A: migration `0099`
+  account security hardening; 2FA email-OTP UI, password change, login
+  history, billing invoice history (`pages/app/security.astro`,
+  `pages/app/billing.astro`, `lib/auth/*`, `pages/api/app/account/*`);
+  fixup adds the a11y gate on security tabs.
+- M5-D3B `d750297` — D3-B: migration `0100` automation rule builder;
+  `lib/automation/rules/*` with 5 trigger types / 4 action types, allow-list
+  payload evaluator that fails closed, SSRF webhook guard, orchestrator-backed
+  dispatch, rule CRUD API + builder UI in `pages/app/automation.astro`.
+- M6-D0/D4 (this wave): dead-code cleanup + token unification.
+  - Deleted dead `src/components/dashboard/OnboardingWizard.astro` (904
+    lines; `/onboarding` uses `OnboardingShell` + step components) and
+    updated the 6 test files that read it to assert on the live components
+    instead (wizard-only assertions removed; all other assertions kept).
+  - Deleted 7 zero-import wrappers in `src/components/states/`:
+    BlockedState, ErrorState, LoadingState, SuccessState,
+    WaitingProviderState, WaitingUserState, WarningState (verified by grep:
+    zero imports anywhere in `src/`). Kept the 6 still imported:
+    WorkspaceState, EmptyState, PermissionState, PlanLimitState,
+    SuspendedState, StatePanel. (Handoff estimated 11/13; the D streams
+    since wired more states into DomainManager/RuleList/AutomationLedger.)
+  - Unified CSS tokens: migrated 446 `--selinow-*` usages across 22 source
+    files to `--sln-*` (170 storefront.css, 129 admin.css, 8 primitives.css,
+    4 selinow-a11y.css, 2 app-shell.css, plus components/pages), added 8
+    canonical tokens that existed only as aliases (`--sln-success-text`,
+    `--sln-warning-text`, `--sln-danger-text`, `--sln-info-text`,
+    `--sln-action-primary-ink`, `--sln-disabled-ink`, `--sln-disabled-bg`,
+    `--sln-focus`) with dark-theme overrides, and removed the entire 70-line
+    legacy alias block from `selinow-tokens.css`. Remaining `--selinow-*`
+    usages in `src/` and `tests/`: 0 (plus a regression guard in
+    `promptos-foundation.test.ts`).
+
+Verification gate (2026-08-16, run from repo root on this branch):
+- `npm run check` — PASS: 855 files, 0 errors, 0 warnings (4 hints).
+- `npm run lint` — PASS: 0 errors.
+- `npm run test` — PASS: 330 test files, 2589 tests, all passing
+  (unit + integration combined).
+- `npm run build` — PASS: production Cloudflare Worker build complete
+  (1 pre-existing INEFFECTIVE_DYNAMIC_IMPORT warning, unchanged).
+- `npm run deploy:dry-run` — PASS: worker bundle, bindings, routes and
+  manifests validated; exited cleanly with `--dry-run`.
+
+Known limitations carried forward:
+- Webhook SSRF guard (`lib/automation/rules/webhook-guard.ts`) is
+  pattern-based; DNS-rebinding of a public hostname onto a private IP is a
+  residual TOCTOU risk (noted in code; follow-up v2 = domain allowlist).
+- `rule_create_task` capability stays at `approval_required` level (inline
+  executor stub, no autonomous task creation).
+- `inventory.low_stock` is a derived trigger computed from paid orders; no
+  independent stock hook exists.
+- `src/scripts/dashboard/onboarding.ts` is only reachable through the deleted
+  wizard; it is still read by contract tests and left in place intentionally
+  (separate cleanup candidate).
+- The legacy `--selinow-*` alias layer is fully removed; any external
+  stylesheet referencing those names must migrate to `--sln-*`.
