@@ -4,6 +4,7 @@ import FulfillmentState from "../../components/commerce/FulfillmentState.astro";
 import Money from "../../components/commerce/Money.astro";
 import PaymentState from "../../components/commerce/PaymentState.astro";
 import StatusBadge from "../../components/primitives/StatusBadge.astro";
+import LaunchChecklist from "../../components/workspace/LaunchChecklist.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
 import { authenticateRequest } from "../../lib/auth/session";
@@ -312,6 +313,58 @@ const channelRows = Array.from(orders.reduce((channels, order) => {
   return channels;
 }, new Map<string, { count: number; fulfilled: number; paidValue: number }>()).entries());
 const channelLabel = (value: string): string => value === "telegram" ? "Telegram" : value === "web" ? "Website" : value;
+
+const payosCheck = readinessChecks.get("payos_ready");
+const telegramCheck = readinessChecks.get("telegram_ready");
+const hasProducts = catalog.products.length > 0;
+const hasInventory = hasProducts && stockoutVariants.length === 0;
+const payosReady = payosCheck?.status === "pass";
+const telegramReady = telegramCheck?.status === "pass";
+
+const launchChecklistItems = shop === undefined ? [] : [
+  {
+    actionLabel: "Cấu hình",
+    actionUrl: workspaceHref("/onboarding"),
+    completed: true,
+    description: "Định danh và khởi tạo cửa hàng số",
+    id: "shop_created",
+    title: "Tạo cửa hàng",
+  },
+  {
+    actionLabel: "Thêm sản phẩm",
+    actionUrl: workspaceHref("/app/products"),
+    completed: hasProducts,
+    description: "Tạo ít nhất 1 sản phẩm kỹ thuật số để bày bán",
+    id: "catalog_product",
+    title: "Thêm sản phẩm đầu tiên",
+  },
+  {
+    actionLabel: "Nhập kho",
+    actionUrl: workspaceHref("/app/inventory"),
+    completed: hasInventory,
+    description: "Nhập mã thẻ / license key sẵn sàng giao tự động",
+    id: "inventory_stock",
+    title: "Nhập kho sản phẩm",
+  },
+  {
+    actionLabel: "Kết nối PayOS",
+    actionUrl: workspaceHref("/app/integrations"),
+    completed: payosReady,
+    description: "Kết nối tài khoản VietQR để nhận tiền tự động",
+    id: "payos_payment",
+    title: "Cổng thanh toán PayOS",
+  },
+  {
+    actionLabel: "Kết nối Bot",
+    actionUrl: workspaceHref("/app/telegram"),
+    completed: telegramReady,
+    description: "Thiết lập Bot Telegram trả key tự động cho khách",
+    id: "telegram_bot",
+    title: "Bot Telegram",
+  },
+];
+const checklistCompleted = launchChecklistItems.filter((i) => i.completed).length;
+const checklistPercent = launchChecklistItems.length === 0 ? 100 : Math.round((checklistCompleted / launchChecklistItems.length) * 100);
 ---
 
 <AppLayout activePath="/app" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.overview.title")}>
@@ -324,6 +377,14 @@ const channelLabel = (value: string): string => value === "telegram" ? "Telegram
     {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/onboarding")}>{t("dashboard.overview.action.view_readiness")}</a>}
     {sellability === "ready" && storefrontUrl !== null && <a slot="actions" class="sln-button sln-button-primary" href={storefrontUrl}>{t("dashboard.overview.action.open_storefront")} <span aria-hidden="true">↗</span></a>}
   </PageHeader>
+
+  {shop !== undefined && (
+    <LaunchChecklist
+      items={launchChecklistItems}
+      percent={checklistPercent}
+      shopName={shop.name}
+    />
+  )}
 
   {workspaceState === "unavailable" ? (
     <div class="state-space">

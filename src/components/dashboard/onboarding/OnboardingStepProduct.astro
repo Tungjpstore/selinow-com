@@ -1,0 +1,381 @@
+---
+import { ONBOARDING_PRODUCT_PRESETS } from "../../../lib/onboarding/presets";
+
+type Props = {
+  defaultCurrency?: string;
+};
+
+const { defaultCurrency = "VND" } = Astro.props;
+---
+
+<div class="onboarding-step-pane" data-step-pane="product" hidden>
+  <div class="step-intro-header">
+    <span class="step-num-badge">BƯỚC 02/04</span>
+    <h2>Thêm Sản phẩm Đầu tiên</h2>
+    <p>Chọn nhanh một mẫu sản phẩm phổ biến hoặc tự tạo sản phẩm theo ý bạn trong 30 giây.</p>
+  </div>
+
+  <!-- Mode Switcher -->
+  <div class="product-mode-tabs" role="tablist">
+    <button type="button" class="mode-tab active" data-product-mode="preset" role="tab" aria-selected="true">
+      <span>✨ Chọn Mẫu Có Sẵn (1-Click)</span>
+    </button>
+    <button type="button" class="mode-tab" data-product-mode="custom" role="tab" aria-selected="false">
+      <span>✏️ Tự Nhập Sản Phẩm Mới</span>
+    </button>
+  </div>
+
+  <!-- Presets Grid -->
+  <div class="presets-section" data-presets-container>
+    <p class="section-sublabel">Chọn một mẫu dưới đây để tự động điền giá, mô tả & key mẫu:</p>
+    <div class="presets-grid">
+      {ONBOARDING_PRODUCT_PRESETS.map((preset, index) => (
+        <button
+          type="button"
+          class={`preset-card ${index === 0 ? "selected" : ""}`}
+          data-preset-card={preset.id}
+          data-preset-title={preset.title}
+          data-preset-price={preset.priceMinor}
+          data-preset-currency={preset.currency}
+          data-preset-icon={preset.icon}
+          data-preset-fulfillment={preset.fulfillmentType}
+          data-preset-desc={preset.description}
+          data-preset-sample-keys={JSON.stringify(preset.sampleKeys)}
+        >
+          <span class="preset-icon">{preset.icon}</span>
+          <div class="preset-details">
+            <strong class="preset-title">{preset.title}</strong>
+            <span class="preset-price">{preset.priceMinor.toLocaleString("vi-VN")} {preset.currency}</span>
+            <small class="preset-type">
+              {preset.fulfillmentType === "license_key" ? "🔑 Tự động giao key" : "📁 Giao thủ công"}
+            </small>
+          </div>
+          <span class="preset-badge-check">✓</span>
+        </button>
+      ))}
+    </div>
+  </div>
+
+  <!-- Custom Product Form -->
+  <form class="step-form-grid" data-product-form hidden novalidate>
+    <div class="form-group full-width">
+      <label for="product-title-input">Tên sản phẩm <span class="required-star">*</span></label>
+      <input
+        id="product-title-input"
+        name="title"
+        type="text"
+        minlength="2"
+        maxlength="120"
+        placeholder="Ví dụ: Windows 11 Pro Bản Quyền, Netflix 1 Tháng..."
+        value="Windows 11 Pro Retail Bản Quyền"
+        required
+        data-input-product-title
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="product-price-input">Giá bán ({defaultCurrency}) <span class="required-star">*</span></label>
+      <input
+        id="product-price-input"
+        name="price"
+        type="number"
+        min="0"
+        step="1000"
+        placeholder="199000"
+        value="199000"
+        required
+        data-input-product-price
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="product-fulfillment-select">Hình thức giao hàng <span class="required-star">*</span></label>
+      <select id="product-fulfillment-select" name="fulfillmentType" data-input-product-fulfillment>
+        <option value="license_key" selected>🔑 Giao License Key / Mã thẻ tự động</option>
+        <option value="manual">📁 Giao thủ công (Tài khoản / Link tải / Liên hệ)</option>
+      </select>
+    </div>
+
+    <div class="form-group full-width">
+      <label for="product-desc-input">Mô tả ngắn sản phẩm</label>
+      <textarea
+        id="product-desc-input"
+        name="description"
+        rows="2"
+        maxlength="500"
+        placeholder="Thời hạn, quyền lợi và bảo hành..."
+        data-input-product-desc
+      >Khóa kích hoạt bản quyền Windows 11 Pro Retail vĩnh viễn, nhận key và kích hoạt ngay.</textarea>
+    </div>
+  </form>
+
+  <div class="step-actions split-actions">
+    <button type="button" class="btn-secondary-back" data-step-back="store">
+      ← Quay lại
+    </button>
+    <button type="button" class="btn-primary-next" data-step-submit="product">
+      <span data-btn-label>Tiếp Tục: Nhập Kho Key</span>
+      <span class="btn-arrow" aria-hidden="true">→</span>
+    </button>
+  </div>
+</div>
+
+<style>
+  .onboarding-step-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    animation: fadeInSlide 0.3s ease;
+  }
+
+  .step-intro-header {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .step-num-badge {
+    align-self: flex-start;
+    padding: 3px 10px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+  }
+
+  .step-intro-header h2 {
+    margin: 0;
+    font-size: clamp(22px, 3.5vw, 28px);
+    font-weight: 750;
+    color: var(--sln-text-primary);
+    letter-spacing: -0.03em;
+  }
+
+  .step-intro-header p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--sln-text-secondary);
+    line-height: 1.5;
+  }
+
+  /* Mode Switcher */
+  .product-mode-tabs {
+    display: flex;
+    background: var(--sln-bg-subtle);
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-pill);
+    padding: 3px;
+    align-self: flex-start;
+  }
+
+  .mode-tab {
+    padding: 8px 16px;
+    border-radius: var(--sln-radius-pill);
+    border: none;
+    background: transparent;
+    color: var(--sln-text-secondary);
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .mode-tab.active {
+    background: var(--sln-bg-surface);
+    color: var(--sln-action-primary);
+    box-shadow: var(--sln-shadow-xs);
+  }
+
+  .section-sublabel {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: var(--sln-text-muted);
+  }
+
+  /* Presets Grid */
+  .presets-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+
+  .preset-card {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+    border: 1.5px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .preset-card:hover {
+    border-color: var(--sln-border-strong);
+    background: var(--sln-bg-subtle);
+    transform: translateY(-1px);
+  }
+
+  .preset-card.selected {
+    border-color: var(--sln-action-primary);
+    background: color-mix(in srgb, var(--sln-action-primary) 4%, var(--sln-bg-surface));
+    box-shadow: 0 0 0 1px var(--sln-action-primary);
+  }
+
+  .preset-icon {
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  .preset-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .preset-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--sln-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .preset-price {
+    font-size: 13px;
+    font-weight: 750;
+    color: var(--sln-state-success);
+  }
+
+  .preset-type {
+    font-size: 11px;
+    color: var(--sln-text-muted);
+  }
+
+  .preset-badge-check {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--sln-border-strong);
+    color: transparent;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  .preset-card.selected .preset-badge-check {
+    background: var(--sln-action-primary);
+    border-color: var(--sln-action-primary);
+    color: var(--sln-white);
+  }
+
+  /* Form */
+  .step-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 4px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .form-group.full-width {
+    grid-column: 1 / -1;
+  }
+
+  label {
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--sln-text-primary);
+  }
+
+  .required-star {
+    color: var(--sln-state-danger);
+  }
+
+  input[type="text"], input[type="number"], select, textarea {
+    width: 100%;
+    min-height: 46px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-md);
+    padding: 10px 14px;
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-primary);
+    font-size: 14px;
+    outline: none;
+  }
+
+  textarea {
+    min-height: 72px;
+    resize: vertical;
+    line-height: 1.45;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--sln-focus-ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+  }
+
+  /* Actions */
+  .step-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--sln-border-default);
+  }
+
+  .btn-secondary-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-secondary-back:hover {
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-primary);
+  }
+
+  .btn-primary-next {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 12px 24px;
+    border: none;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+
+  .btn-primary-next:hover {
+    background: var(--sln-action-primary-hover);
+    transform: translateX(2px);
+  }
+</style>

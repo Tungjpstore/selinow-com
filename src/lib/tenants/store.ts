@@ -5,7 +5,7 @@ import { backfillActivationMilestones, tryRecordActivationMilestone } from "../a
 import { claimShopCreationAdmission } from "../auth/admission";
 import { normalizeCurrencyCode } from "../i18n/currency";
 import { DEFAULT_LOCALE, matchSupportedLocale } from "../i18n/locale";
-import { ONBOARDING_STEP_CODES } from "../onboarding/policy";
+import { CURRENT_POLICY_ATTESTATION_VERSION, ONBOARDING_STEP_CODES } from "../onboarding/policy";
 import type { AppBindings } from "../platform/bindings";
 import { evaluateSubscription, type EntitlementAction } from "../billing/entitlements";
 import { PUBLIC_PLAN_CODES, PUBLIC_TRIAL_DAYS } from "../billing/plan-catalog";
@@ -387,9 +387,20 @@ export async function createShop(input: {
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO shop_settings (
           shop_id, branding_json, storefront_json, order_expiry_minutes,
-          low_stock_threshold, version, updated_at
-        ) VALUES (?, '{}', '{}', 30, 5, 1, ?)
-      `).bind(shopId, nowIso),
+          low_stock_threshold, support_contact, terms_url, privacy_url, refund_policy_url,
+          policy_attestation_version, policy_attested_at, policy_attested_by_user_id, version, updated_at
+        ) VALUES (
+          ?, '{}', '{}', 30, 5,
+          NULL, NULL, NULL, NULL,
+          ?, ?, ?, 1, ?
+        )
+      `).bind(
+        shopId,
+        CURRENT_POLICY_ATTESTATION_VERSION,
+        CURRENT_POLICY_ATTESTATION_VERSION !== null ? nowIso : null,
+        CURRENT_POLICY_ATTESTATION_VERSION !== null ? input.userId : null,
+        nowIso,
+      ),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO shop_onboarding_profiles (
           shop_id, website_enabled, telegram_enabled, custom_domain_preference,

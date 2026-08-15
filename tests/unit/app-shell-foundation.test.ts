@@ -47,7 +47,7 @@ describe("seller app shell foundation", () => {
     ]);
 
     expect(page).not.toContain('data-theme="dark"');
-    expect(page).toContain("<AppLayout");
+    expect(page).toContain("<OnboardingShell");
     expect(wizard).toContain('role="progressbar"');
     expect(wizard).toContain('aria-valuenow="0"');
     expect(wizard).toContain('t("onboarding.rail.note_copy")');

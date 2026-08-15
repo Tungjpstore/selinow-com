@@ -1,23 +1,25 @@
 ---
-import OnboardingWizard from "../components/dashboard/OnboardingWizard.astro";
+import OnboardingShell from "../components/dashboard/onboarding/OnboardingShell.astro";
 import AppLayout from "../layouts/AppLayout.astro";
 import { authenticateRequest } from "../lib/auth/session";
 import { createOnboardingTranslator } from "../lib/i18n/catalogs/onboarding";
-import { CURRENT_POLICY_ATTESTATION_VERSION } from "../lib/onboarding/policy";
+import { resolvePresentationLocale, DEFAULT_LOCALE } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
 import { getShopCreationAdmission, listShopsForMember, selectShopForMember } from "../lib/tenants/store";
 
 const env = getBindings();
-const locale = Astro.locals.locale;
+const locale = resolvePresentationLocale(Astro.locals.locale ?? DEFAULT_LOCALE);
 const t = createOnboardingTranslator(locale);
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
 if (auth === null) {
   return Astro.redirect("/login");
 }
+
 const [shops, creationAdmission] = await Promise.all([
-  listShopsForMember({ env, userId: auth.userId }),
-  getShopCreationAdmission({ env, userId: auth.userId }),
+  listShopsForMember({ env, userId: auth.userId }).catch(() => []),
+  getShopCreationAdmission({ env, userId: auth.userId }).catch(() => null),
 ]);
+void creationAdmission;
 const requestedShopPublicId = Astro.url.searchParams.get("shop");
 const selectedShop = selectShopForMember(shops, requestedShopPublicId);
 const orderedShops = selectedShop === undefined
@@ -32,17 +34,15 @@ const orderedShops = selectedShop === undefined
   selectedShopName={selectedShop?.name}
   selectedShopPublicId={selectedShop?.publicId}
   shops={shops}
-  title={t("onboarding.shop.page_title")}
+  title="Thiết lập Cửa hàng — Selinow"
 >
-  <OnboardingWizard
-    creationAdmission={creationAdmission}
+  <OnboardingShell
     csrfCookieName={`${env.SESSION_COOKIE_NAME}_csrf`}
     defaultCurrency={env.DEFAULT_CURRENCY}
-    defaultLocale={env.DEFAULT_LOCALE}
+    defaultLocale={locale}
+    displayName={auth.displayName.trim() || t("onboarding.user_fallback")}
+    email={auth.email}
     platformBaseDomain={env.PLATFORM_BASE_DOMAIN}
-    policyAttestationPublished={CURRENT_POLICY_ATTESTATION_VERSION !== null}
-    policyAttestationVersion={CURRENT_POLICY_ATTESTATION_VERSION}
     shops={orderedShops}
-    locale={locale}
   />
 </AppLayout>

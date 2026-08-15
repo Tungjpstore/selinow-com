@@ -1,0 +1,404 @@
+---
+import OnboardingCelebration from "./OnboardingCelebration.astro";
+import OnboardingLivePreview from "./OnboardingLivePreview.astro";
+import OnboardingStepConnect from "./OnboardingStepConnect.astro";
+import OnboardingStepInventory from "./OnboardingStepInventory.astro";
+import OnboardingStepProduct from "./OnboardingStepProduct.astro";
+import OnboardingStepStore from "./OnboardingStepStore.astro";
+
+type ShopView = {
+  name: string;
+  publicId: string;
+  role: string;
+  slug: string;
+};
+
+type Props = {
+  csrfCookieName: string;
+  defaultCurrency?: string;
+  defaultLocale?: string;
+  displayName: string;
+  email: string;
+  platformBaseDomain: string;
+  shops: ShopView[];
+};
+
+const {
+  csrfCookieName,
+  defaultCurrency = "VND",
+  defaultLocale = "vi-VN",
+  displayName,
+  email,
+  platformBaseDomain,
+  shops,
+} = Astro.props;
+
+const initialShop = shops[0];
+---
+
+<div
+  class="onboarding-focus-shell"
+  data-quickstart-root
+  data-csrf-cookie-name={csrfCookieName}
+  data-platform-base-domain={platformBaseDomain}
+  data-default-currency={defaultCurrency}
+  data-default-locale={defaultLocale}
+  data-shops={JSON.stringify(shops)}
+  data-active-shop-public-id={initialShop?.publicId ?? ""}
+>
+  <!-- Top Focus Navigation Bar -->
+  <header class="focus-navbar">
+    <div class="navbar-container">
+      <div class="nav-brand-wrap">
+        <a href="/app" class="brand-link" aria-label="Selinow">
+          <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="120" height="32" />
+        </a>
+        <span class="nav-divider"></span>
+        <span class="nav-mode-badge">⚡ Thiết Lập Bán Hàng</span>
+      </div>
+
+      <!-- Stepper Progress Tracker -->
+      <nav class="onboarding-stepper" aria-label="Tiến trình thiết lập">
+        <ol class="stepper-list">
+          <li class="stepper-item active" data-step-indicator="store">
+            <span class="step-circle">1</span>
+            <span class="step-label">Cửa hàng</span>
+          </li>
+          <li class="stepper-line" aria-hidden="true"></li>
+          <li class="stepper-item" data-step-indicator="product">
+            <span class="step-circle">2</span>
+            <span class="step-label">Sản phẩm</span>
+          </li>
+          <li class="stepper-line" aria-hidden="true"></li>
+          <li class="stepper-item" data-step-indicator="inventory">
+            <span class="step-circle">3</span>
+            <span class="step-label">Kho key</span>
+          </li>
+          <li class="stepper-line" aria-hidden="true"></li>
+          <li class="stepper-item" data-step-indicator="connect">
+            <span class="step-circle">4</span>
+            <span class="step-label">Thanh toán</span>
+          </li>
+        </ol>
+      </nav>
+
+      <!-- User Account & Exit Action -->
+      <div class="nav-account-wrap">
+        <div class="user-info-text">
+          <strong>{displayName}</strong>
+          <small>{email}</small>
+        </div>
+        <a href="/app" class="btn-exit-dashboard" title="Lưu tiến trình và mở Bảng điều khiển">
+          <span>Vào Dashboard</span>
+          <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Global Feedback Toast Notification -->
+  <div class="feedback-toast" data-onboarding-toast role="status" aria-live="polite" hidden></div>
+
+  <!-- Main 2-Column Split Workspace -->
+  <main class="focus-main-layout">
+    <div class="focus-layout-container">
+      <!-- Left Column: Step Interactive Wizard Panes -->
+      <section class="wizard-pane-column">
+        <div class="wizard-pane-card">
+          <OnboardingStepStore
+            defaultCurrency={defaultCurrency}
+            defaultLocale={defaultLocale}
+            initialShopName={initialShop?.name}
+            initialShopSlug={initialShop?.slug}
+            platformBaseDomain={platformBaseDomain}
+            shopsCount={shops.length}
+          />
+          <OnboardingStepProduct defaultCurrency={defaultCurrency} />
+          <OnboardingStepInventory />
+          <OnboardingStepConnect />
+          <OnboardingCelebration platformBaseDomain={platformBaseDomain} />
+        </div>
+      </section>
+
+      <!-- Right Column: Real-time Live Interactive Preview Mockup -->
+      <aside class="live-preview-column">
+        <OnboardingLivePreview
+          defaultCurrency={defaultCurrency}
+          initialShopName={initialShop?.name}
+          initialShopSlug={initialShop?.slug}
+          platformBaseDomain={platformBaseDomain}
+        />
+      </aside>
+    </div>
+  </main>
+</div>
+
+<script>
+  import "../../../scripts/dashboard/onboarding-quickstart";
+</script>
+
+<style>
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(body) {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: var(--sln-bg-canvas);
+    color: var(--sln-text-primary);
+    font-family: var(--sln-font-sans);
+  }
+
+  .onboarding-focus-shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background: var(--sln-bg-canvas);
+  }
+
+  /* Top Navbar */
+  .focus-navbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--sln-bg-surface);
+    border-bottom: 1px solid var(--sln-border-default);
+    box-shadow: var(--sln-shadow-xs);
+  }
+
+  .navbar-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 12px 24px;
+  }
+
+  .nav-brand-wrap {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .brand-link {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+  }
+
+  .nav-divider {
+    width: 1px;
+    height: 22px;
+    background: var(--sln-border-strong);
+  }
+
+  .nav-mode-badge {
+    padding: 3px 10px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.05em;
+  }
+
+  /* Stepper */
+  .stepper-list {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .stepper-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--sln-text-muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .step-circle {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--sln-bg-subtle);
+    border: 1.5px solid var(--sln-border-strong);
+    color: var(--sln-text-muted);
+    font-size: 12px;
+    font-weight: 750;
+    transition: all 0.2s ease;
+  }
+
+  .stepper-item.active {
+    color: var(--sln-action-primary);
+  }
+
+  .stepper-item.active .step-circle {
+    background: var(--sln-action-primary);
+    border-color: var(--sln-action-primary);
+    color: var(--sln-white);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-action-primary) 20%, transparent);
+  }
+
+  .stepper-item.done {
+    color: var(--sln-state-success);
+  }
+
+  .stepper-item.done .step-circle {
+    background: var(--sln-state-success);
+    border-color: var(--sln-state-success);
+    color: var(--sln-white);
+  }
+
+  .stepper-line {
+    width: 24px;
+    height: 2px;
+    background: var(--sln-border-default);
+  }
+
+  /* Account & Exit */
+  .nav-account-wrap {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .user-info-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.3;
+  }
+
+  .user-info-text strong {
+    font-size: 13px;
+    color: var(--sln-text-primary);
+  }
+
+  .user-info-text small {
+    font-size: 11px;
+    color: var(--sln-text-muted);
+  }
+
+  .btn-exit-dashboard {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-secondary);
+    font-size: 12px;
+    font-weight: 650;
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+
+  .btn-exit-dashboard:hover {
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-primary);
+    border-color: var(--sln-action-primary);
+  }
+
+  /* Toast Notification */
+  .feedback-toast {
+    position: fixed;
+    top: 76px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    min-width: 320px;
+    max-width: 90%;
+    padding: 12px 20px;
+    border-radius: var(--sln-radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: var(--sln-shadow-lg);
+    animation: slideDown 0.25s ease;
+  }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translate(-50%, -10px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  .feedback-toast[data-tone="success"] {
+    background: var(--sln-tint-success);
+    color: var(--sln-state-success);
+    border: 1px solid color-mix(in srgb, var(--sln-state-success) 30%, transparent);
+  }
+
+  .feedback-toast[data-tone="error"] {
+    background: var(--sln-tint-danger);
+    color: var(--sln-state-danger);
+    border: 1px solid color-mix(in srgb, var(--sln-state-danger) 30%, transparent);
+  }
+
+  /* Main Split Layout */
+  .focus-main-layout {
+    flex: 1;
+    padding: 32px 24px 64px;
+  }
+
+  .focus-layout-container {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.95fr);
+    gap: 36px;
+    max-width: 1360px;
+    margin: 0 auto;
+    align-items: flex-start;
+  }
+
+  .wizard-pane-card {
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-xl);
+    background: var(--sln-bg-surface);
+    padding: clamp(24px, 4vw, 36px);
+    box-shadow: var(--sln-shadow-sm);
+  }
+
+  /* Responsive Breakpoints */
+  @media (max-width: 1040px) {
+    .focus-layout-container {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    .live-preview-column {
+      order: -1;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .navbar-container {
+      padding: 10px 16px;
+    }
+
+    .onboarding-stepper {
+      display: none;
+    }
+
+    .user-info-text {
+      display: none;
+    }
+
+    .focus-main-layout {
+      padding: 16px 12px 48px;
+    }
+
+    .wizard-pane-card {
+      padding: 20px 16px;
+    }
+  }
+</style>
