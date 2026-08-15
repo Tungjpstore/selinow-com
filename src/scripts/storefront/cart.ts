@@ -61,6 +61,7 @@ function armQuoteExpiry(expiresAt: string, generation: number): void {
     return;
   }
   const delay = expiresAtMs - Date.now();
+  if (delay > 2_147_483_647) return;
   quoteExpiryTimer = window.setTimeout(() => {
     if (generation !== quoteGeneration) return;
     setCheckoutEnabled(false);

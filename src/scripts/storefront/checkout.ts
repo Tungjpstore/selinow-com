@@ -176,10 +176,13 @@ function armQuoteExpiry(expiresAt: string): boolean {
     setError(t("storefront.checkout.quote_expired"), "quote");
     return false;
   }
-  quoteExpiryTimer = window.setTimeout(() => {
-    quote = null;
-    setError(t("storefront.checkout.quote_expired"), "quote");
-  }, Math.max(0, expiresAtMs - Date.now()));
+  const delay = expiresAtMs - Date.now();
+  if (delay <= 2_147_483_647) {
+    quoteExpiryTimer = window.setTimeout(() => {
+      quote = null;
+      setError(t("storefront.checkout.quote_expired"), "quote");
+    }, Math.max(0, delay));
+  }
   return true;
 }
 

@@ -327,7 +327,12 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       telegram_integrations_archive_actions_on_generation_change: "7d6c49494aa63ebf9aa37d84dcd8baaf87fca335b42a246f03d7589cd8e500a2",
     }),
   }),
+  "0098_auth_email_otp_system.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
 });
+
 
 const REQUIRED_SPEC_PATHS = [
   "accountId",

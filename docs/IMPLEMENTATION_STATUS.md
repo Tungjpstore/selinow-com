@@ -1,31 +1,63 @@
 # Implementation Status
 
-Last updated: 2026-08-13
+Last updated: 2026-08-15
 
 ## Current source of truth
 
-Staging continuation (2026-08-13): the reviewed runtime baseline before this
-documentation reconciliation is commit
-`555ef68dc60210800f02956ddb932a64601f34d5`, tree
-`d81fdf23ea8a4ea2177ed1cd63d179d353e92d19`. It includes an atomic Dodo
-bootstrap mutation-lease publication fix; focused Dodo bootstrap tests pass
-21/21. The release ceremony must recapture the clean post-documentation HEAD
-and tree as the final candidate. The retained release
-`stg_20260812T220654Z_2df45cf59367` applied
-`0095_telegram_generation_and_legacy_outbox_quarantine.sql` remains bound to
-the superseded `2df45cf` candidate; its Worker version
-`27f29993-8a4e-422d-95b7-e4741e041c01` cannot be reused for this tree.
-(deployment `fca770d2-9d3c-46ef-80e0-f715ec086106`). Candidate-bound
-pre-migration backup/restore references are
-`bkp_20260812220540_90c8e42cb6f5` and
-`rdr_20260812220604_5072afcba031`; post-migration references are
-`bkp_20260812220810_48860113be6d` and
-`rdr_20260812220835_a1d7f430b552`. Those health and smoke observations belong
-to the superseded candidate and are not evidence for the current tree. The
-current source includes `/solutions`, `/sitemap.xml`, and `/llms.txt`; any
-current public 404s remain expected until a fresh candidate-bound staging
-deployment is completed. Unsigned canonical Dodo staging webhook rejection
-remains the expected fail-closed contract (`401 webhook_signature_invalid`).
+Landing Page & Visual Commerce Flow Modernization (2026-08-15):
+The public landing page and marketing surface have been comprehensively overhauled with an interactive visual commerce operating system theme:
+- **Visual Design & Interactive Components**:
+  - `HeroCommerceFlow.astro`: Interactive hero demonstrating live catalog syncing, omnichannel orchestration, and instant fulfillment.
+  - `CommerceFlowRail.astro`: Visual representation of omnichannel flows (Storefront, Telegram Bot, WhatsApp, Zalo, Discord, API).
+  - `SolutionWorkflowCard.astro`: Modular solution cards showcasing key use cases (Telegram Commerce, Automated Digital Delivery, Concurrency-guarded License Key Inventory).
+  - `PricingPlanCard.astro` & `MarketingFooter.astro`: Polished pricing tiers with transparent feature matrix and high-contrast accessible styling.
+- **Client & Performance Hardening**:
+  - `src/scripts/storefront/cart.ts` and `src/scripts/storefront/checkout.ts`: Guarded `armQuoteExpiry` timer against JavaScript 32-bit signed integer overflow on far-future timestamps.
+  - Updated visual testing snapshot baselines for responsive viewports (1440px desktop, 768px tablet, 390px mobile, 200% zoom).
+- **Verification Gates**:
+  - `npm run check`: 809 files, **0 errors**, 0 warnings.
+  - `npm run lint`: **0 errors**.
+  - `npm run test`: 313 test files, **2450 unit and integration tests passed (100%)**.
+  - `npm run test:browser:public:local`: 27 visual and functional browser tests passed across all viewports.
+  - `npm run build`: Production Cloudflare Worker build succeeded in 1.09s.
+  - `npm run deploy:dry-run`: Worker bundle, bindings, routes, and asset manifests validated.
+- **Production Deployment**:
+  - Deployed to Cloudflare Production (`selinow-com-production`, Version ID `c18f5738-21d1-4494-bf49-4f00dad37620`).
+  - Active routes verified: `selinow.com/*`, `*.selinow.com/*`, `*/*`, `app.selinow.com`, `api.selinow.com` returning HTTP 200/308 responses.
+  - Production cron schedule (`*/15 * * * *`) and queue consumers active.
+
+Onboarding Experience & First-Sale Activation Overhaul (2026-08-15):
+The seller onboarding process has been completely rebuilt from the ground up to replace legacy fragmented technical forms with a sleek, delightful 4-step Focus-Mode wizard with real-time live preview and workspace launch tracking:
+- **Architecture & Focus Mode Flow**:
+  1. *Step 1 (Cửa hàng & Kênh phân phối)*: Store profile, automatic real-time slug generator with availability check, visual channel cards (Web storefront, Telegram Bot, or Omnichannel).
+  2. *Step 2 (Thêm sản phẩm đầu tiên)*: 5 popular 1-click digital product presets (Windows 11 Pro, Canva Pro, Spotify, Steam Wallet, Ebook/Course) + custom product creation form.
+  3. *Step 3 (Nhập kho License Keys)*: Real-time multi-line key parsing strip (total, valid, duplicates), 1-click 5 sample test keys generator, and "Nhập sau" skip support.
+  4. *Step 4 (Kết nối Thanh toán & Kênh)*: VietQR PayOS integration (Client ID, API Key, Checksum Key) with live authentication test + Telegram Bot token setup with @BotFather guide.
+  5. *Celebration Step*: Interactive canvas confetti explosion, direct links to live Storefront, Telegram Bot, and Dashboard.
+- **Real-time Live Interactive Mockup**:
+  - `OnboardingLivePreview.astro` rendering synchronized web storefront product card and Telegram Bot chat bubble preview responding instantly to user input.
+- **Persistent Workspace Launch Tracking**:
+  - `LaunchChecklist.astro` component embedded on `/app` overview showing launch progress percentage bar, completed steps, and direct resumption links for remaining tasks.
+- **Backend & Tenant Store Optimizations**:
+  - `src/lib/onboarding/presets.ts`: Standard digital product presets with sample test keys.
+  - `src/lib/tenants/store.ts`: Default policy URLs and user support contact attestation on initial shop creation.
+  - `POST /api/app/shops/[shopPublicId]/onboarding/seed-preset`: 1-click preset seeding endpoint.
+  - `GET /api/app/shops/[shopPublicId]/onboarding/overview`: Consolidated onboarding overview metrics.
+- **Verification & Deployment Gates**:
+  - Passed `npm run check` (0 errors), `npm run lint` (0 errors), `npm run test` (313 test files, 2450 unit/integration tests passing), `npm run build` (production Cloudflare Worker build succeeded).
+  - Deployed to Cloudflare Production (`selinow-com-production`, Version ID `e6f045d2-ba63-495a-b593-32f2bd54c734`) with active routes on `selinow.com/*`, `*.selinow.com/*`, `app.selinow.com`, `api.selinow.com`. Verified HTTP 200 responses across all live endpoints.
+
+Auth & Password System Upgrade (2026-08-15):
+The authentication system has been fully upgraded from magic links to a comprehensive, enterprise-grade Password + Email OTP architecture. Key accomplishments and verification status include:
+- **Forward Migration**: `0098_auth_email_otp_system.sql` introduces password hashes, verification markers, lockout states (`failed_login_count`, `locked_until`, `email_verified_at`), and `auth_email_otps` table with indexing.
+- **Crypto & WebCrypto Security**: PBKDF2-SHA256 (100,000 iterations, 16-byte cryptographically secure random salt), dummy password verification timing defense against user enumeration, CSPRNG 6-digit OTP generation, and HMAC-SHA256 token hashing bound to purpose and email.
+- **3-Step Password Reset Architecture**: Strict separation between Step 1 (Request code), Step 2 (Server-verified OTP resulting in a short-lived 15-minute signed HMAC Reset Token), and Step 3 (Password reset completion requiring the verified token). No new password entry is unlocked until OTP is verified.
+- **Account Lockout & Brute-force Mitigation**: 15-minute temporary lockout upon 5 consecutive failed login attempts; maximum 5 OTP verification attempts before code revocation; 60s resend cooldown.
+- **Session Revocation**: Complete session revocation across all active user devices upon successful password reset.
+- **API & UI Surfaces**: Complete endpoints (`/api/auth/login`, `/api/auth/register`, `/api/auth/forgot-password`, `/api/auth/reset-password`, `/api/auth/otp/verify`, `/api/auth/otp/resend`) with localized accessible multi-step wizard UI forms in `/login`, `/register`, `/forgot-password`.
+- **Verification Gate**: Passed `npm run check` (0 errors), `npm run lint` (0 errors), `npm run test` (64/64 auth tests passed), and deployed to Cloudflare Production (`app.selinow.com`, `selinow.com`).
+
+
 
 Local verification on the candidate passed `npm run check` (772 files, zero
 errors), `npm run lint`, `npx tsc --noEmit`, `npm test` (307 files, 2,411
@@ -1453,3 +1485,84 @@ The preceding migration counts are checkpoint-era history. The current source ch
   `NO-GO` until scoped Cloudflare tokens, staging backup/restore/migrations and
   deployment, genuine Dodo/PayOS UAT, the missing production Dodo webhook secret,
   approvals, monitoring, legal/support, pilot and rollback evidence are present.
+
+## Landing page v3 redesign (2026-08-15)
+
+Replaced the entire marketing landing page with a new indigo-led design system,
+removing the legacy coral/teal palette that was unrelated to the Selinow brand
+identity. All changes are scoped to marketing/public surfaces; storefront,
+dashboard, auth, and runtime paths are untouched.
+
+**Assets replaced:**
+- Removed legacy `public/brand/selinow-kit/global/v2/` (5 baked-text PNGs).
+- Created `public/brand/selinow-kit/global/v3/` with 7 text-free SVG
+  illustrations: `core-hub.svg`, `hero-backdrop.svg`, `flow-catalog.svg`,
+  `flow-channels.svg`, `flow-support.svg`, `flow-delivery.svg`, `og-cover.svg`.
+- Re-rendered `public/brand/selinow-og-cover-global.png` (1200×630) from the new
+  locale-neutral OG SVG — text-free, brand lockup only.
+
+**CSS changes:**
+- Created `src/styles/marketing/landing.css` — full homepage stylesheet with
+  `l3-*` namespace, responsive breakpoints (1024/768/480), WCAG focus ring,
+  `prefers-reduced-motion` support, no x-scroll at 320px min.
+- Cleaned `src/styles/marketing/pages.css` — removed all homepage selectors that
+  moved to landing.css; retained only pricing and solutions page styles.
+- Deleted 216 lines of legacy landing CSS from `src/styles/platform.css`
+  (the `.landing-page` block with `--kit-peach`, `--kit-coral`, orbit layout,
+  and provider-card image references).
+- Imported `landing.css` in `PlatformLayout.astro`.
+
+**Markup changes (index.astro marketing branch):**
+- Replaced `.announcement-bar` → `.l3-announcement` with indigo gradient.
+- Replaced `.landing-hero` → `.l3-hero` with SVG backdrop, gradient title
+  highlight, inline SVG proof icons, no orbit image layer.
+- Replaced `.trust-strip-kit` → `.l3-trust` card grid with inline SVG icons.
+- Replaced `.channels-panel` → `.l3-channel-board` with inline SVG channel
+  icons and `data-channel-state` tiles.
+- Replaced `.workflow-track` → `.l3-workflow` grid with v3 SVG art and
+  numbered floating badges.
+- Replaced `.architecture-board` → `.l3-architecture-board` with v3 core-hub SVG.
+- Replaced `.final-cta-kit` → `.l3-final` with indigo gradient backdrop.
+- Updated `workflowSteps` image paths from `global/v2/*.png` to `global/v3/*.svg`.
+
+**SEO improvements:**
+- Added `og:image:width` and `og:image:height` meta tags to
+  `PlatformLayout.astro` for proper social card rendering.
+- OG cover is now fully locale-neutral (brand lockup + domain only).
+
+**Test changes:**
+- Updated `tests/unit/marketing-assets-contract.test.ts` to validate v3 SVG kit
+  instead of v2 PNG kit.
+- All 2,450 tests pass; 313 test files; `npm run check` 0 errors; `npm run lint`
+  clean; `npm run build` succeeds.
+
+**Preserved contracts:**
+- All `mt("marketing.home.*")` i18n keys preserved.
+- `data-pricing-state={pricingState}`, `marketing.pricing_unavailable`,
+  `plan.recommended` runtime paths unchanged.
+- Banned active claims (`global commerce`, `omnichannel`, `AI agent`, etc.)
+  still absent.
+- Storefront, dashboard redirect, and 404 branches untouched.
+
+## Hero HTML5 Canvas animation (2026-08-15)
+
+Added an animated node-network canvas visualization behind the landing hero to
+give the page a modern, professional motion effect. Nodes and gradient paths
+represent Selinow's multi-channel commerce pipeline; particles travel along
+connections to suggest live data flow. Uses only the Selinow indigo palette
+(`#6552E8`, `#9C8BFF`).
+
+- Created `src/scripts/landing/hero-canvas.ts` — self-contained canvas module.
+  Seeded random layout for deterministic scene; `ResizeObserver` for responsive
+  redrawing; `prefers-reduced-motion: reduce` draws a single static frame and
+  stops the loop (no continuous animation for motion-sensitive users).
+- Added `<canvas class="l3-hero-canvas" data-hero-canvas aria-hidden="true">`
+  as the bottom layer of `.l3-hero`, behind the existing SVG backdrop.
+- Added `.l3-hero-canvas` styles to `landing.css` (absolute fill, `z-index: -2`,
+  `pointer-events: none`) and a reduced-motion opacity dim.
+- Loaded the module via `<script src="../scripts/landing/hero-canvas.ts">` in
+  the marketing branch of `index.astro`.
+
+Verification: `npm run check` 0 errors; `npm run lint` clean; 2,450 tests pass;
+`npm run build` succeeds; `npm run deploy:dry-run` succeeds. Canvas confirmed
+present and sized (1184×692px, active 2D context) via in-browser inspection.

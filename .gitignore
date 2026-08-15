@@ -13,3 +13,7 @@ test-results/
 *.log
 .DS_Store
 infra/generated/*.tmp
+
+# Local source archive backups (never commit large binary artifacts)
+selinow-frontend-source.zip
+*.zip
