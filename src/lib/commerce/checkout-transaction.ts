@@ -1,6 +1,7 @@
 import { createId } from "../core/ids";
 import { tryRecordActivationMilestone } from "../analytics/activation";
 import { AppError } from "../core/errors";
+import { fireAutomationTriggers } from "../automation/rules/dispatcher";
 import { parsePlanLimits, PUBLIC_PLAN_CODES } from "../billing/plan-catalog";
 import { prepareOrderChannelAttribution, resolveOrderChannelAttribution, type OrderChannelAttribution } from "../channels/attribution";
 import { WEBSITE_CHANNEL_CODE } from "../channels/builtins";
@@ -626,6 +627,8 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     statements.push(database.prepare("UPDATE inventory_keys SET status = 'sold', sold_order_item_id = reserved_order_item_id, sold_at = ?, reservation_token = NULL, reserved_until = NULL WHERE reservation_token = ? AND shop_id = ? AND status = 'reserved'").bind(input.nowIso, input.reservationToken, input.shopId));
   }
   await database.batch(statements);
+  if (orderPaidEvent !== null) void fireAutomationTriggers(input.env, { aggregateReference: `order:${input.orderId}`, refs: { orderId: input.orderId }, shopId: input.shopId, triggerType: "order.paid" }).catch(() => {});
+  if (input.customer.kind === "upsert_email") void fireAutomationTriggers(input.env, { aggregateReference: `customer:${input.customer.id}`, customerId: input.customer.id, refs: { channel: input.channel.code === "telegram" ? "telegram" : "web" }, shopId: input.shopId, triggerType: "customer.created" }).catch(() => {});
   const channelProjection = input.channel.code === "web"
     ? "website"
     : input.channel.code === "telegram" ? "telegram" : null;

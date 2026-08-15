@@ -17,6 +17,19 @@ export const DEFAULT_AUTOMATION_CAPABILITIES: readonly AutomationCapabilityDefin
   { code: "telegram.bot.create", level: "external_action", retryPolicy: DEFAULT_AUTOMATION_RETRY_POLICY },
   { code: "payments.payos.channel_create", level: "external_action", retryPolicy: DEFAULT_AUTOMATION_RETRY_POLICY },
   { code: "domain.custom.apex", level: "unsupported", retryPolicy: NO_RETRY },
+  // Seller automation rule actions (migration 0100). The three automatic
+  // capabilities run inline via their executors; rule_create_task stays in
+  // waiting_user as a visible manual-review task resumed through the
+  // existing evidence flow.
+  { code: "rule_notify_telegram", level: "automatic", retryPolicy: DEFAULT_AUTOMATION_RETRY_POLICY },
+  { code: "rule_call_webhook", level: "automatic", retryPolicy: DEFAULT_AUTOMATION_RETRY_POLICY },
+  {
+    code: "rule_tag_customer",
+    level: "automatic",
+    // Internal D1 write only; short retry envelope.
+    retryPolicy: { baseDelaySeconds: 30, maxAttempts: 3, maxDelaySeconds: 300 },
+  },
+  { code: "rule_create_task", level: "approval_required", retryPolicy: DEFAULT_AUTOMATION_RETRY_POLICY },
 ];
 
 export class AutomationCapabilityRegistry {

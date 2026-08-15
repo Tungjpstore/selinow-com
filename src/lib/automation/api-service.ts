@@ -41,6 +41,7 @@ const ACTION_URLS: Readonly<Record<string, string>> = {
   "domain.custom.manual_dns": "/app/domains",
   "domain.platform.provision": "/app/domains",
   "payments.payos.channel_create": "/onboarding#payos",
+  "rule_create_task": "/app/automation",
   "shop.provision": "/onboarding",
   "telegram.bot.create": "/onboarding#telegram",
 };

@@ -274,6 +274,62 @@ const DYNAMIC_TRANSLATION_ALLOWLIST: readonly DynamicAllowlistEntry[] = [
     identifier: "t",
     path: "src/scripts/dashboard/security.ts",
   },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.automation.rules.trigger.${type.replace(\".\", \"_\")}`",
+    guard: /RULE_TRIGGER_TYPES\.map\(\(type\) => \(\{ label: t\(`dashboard\.automation\.rules\.trigger\.\$\{type\.replace\("\.", "_"\)\}`\)/u,
+    identifier: "t",
+    path: "src/components/dashboard/automation/RuleList.astro",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.automation.rules.operator.${operator}`",
+    guard: /RULE_CONDITION_OPERATORS\.map\(\(operator\) => \(\{ label: t\(`dashboard\.automation\.rules\.operator\.\$\{operator\}`\)/u,
+    identifier: "t",
+    path: "src/components/dashboard/automation/RuleList.astro",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.automation.rules.action.${type.replace(\"rule_\", \"\")}`",
+    guard: /RULE_ACTION_TYPES\.map\(\(type\) => \(\{ label: t\(`dashboard\.automation\.rules\.action\.\$\{type\.replace\("rule_", ""\)\}`\)/u,
+    identifier: "t",
+    path: "src/components/dashboard/automation/RuleList.astro",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.automation.rules.trigger.${triggerType.replace(\".\", \"_\")}`",
+    guard: /ruleTriggerLabel\(triggerType: RuleTriggerType[\s\S]*`dashboard\.automation\.rules\.trigger\.\$\{triggerType\.replace\("\.", "_"\)\}`/u,
+    identifier: "t",
+    path: "src/lib/dashboard/automation-rules-ui.ts",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.automation.rules.action.${actionType.replace(\"rule_\", \"\")}`",
+    guard: /ruleActionLabel\(actionType: RuleActionType[\s\S]*`dashboard\.automation\.rules\.action\.\$\{actionType\.replace\("rule_", ""\)\}`/u,
+    identifier: "t",
+    path: "src/lib/dashboard/automation-rules-ui.ts",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.automation.rules.operator.${operator}`",
+    guard: /ruleOperatorLabel\(operator: RuleConditionOperator[\s\S]*`dashboard\.automation\.rules\.operator\.\$\{operator\}`/u,
+    identifier: "t",
+    path: "src/lib/dashboard/automation-rules-ui.ts",
+  },
+  {
+    catalog: "dashboard",
+    expression: "enabled ? \"dashboard.automation.rules.status.enabled\" : \"dashboard.automation.rules.status.disabled\"",
+    guard: /ruleStatusLabel\(enabled: boolean[\s\S]*t\(enabled \? "dashboard\.automation\.rules\.status\.enabled" : "dashboard\.automation\.rules\.status\.disabled"\)/u,
+    identifier: "t",
+    path: "src/lib/dashboard/automation-rules-ui.ts",
+  },
+  {
+    catalog: "dashboard",
+    expression: "keys[code] ?? \"dashboard.automation.rules.client.generic_error\"",
+    guard: /const keys: Readonly<Record<string, string>>[\s\S]*t\(keys\[code\] \?\? "dashboard\.automation\.rules\.client\.generic_error"\)/u,
+    identifier: "t",
+    path: "src/lib/dashboard/automation-rules-ui.ts",
+  },
 ] as const;
 
 function sourceFiles(root: string): SourceFile[] {

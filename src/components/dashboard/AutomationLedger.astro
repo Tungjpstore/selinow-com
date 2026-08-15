@@ -1,4 +1,5 @@
 ---
+import EmptyState from "../states/EmptyState.astro";
 import {
   automationTaskImpact,
   automationTaskLabel,
@@ -71,7 +72,7 @@ const actionHref = (task: AutomationTaskView): string | null => {
     </div>
     <div class="automation-ledger__header-actions">
       <span class="automation-count" data-automation-count>{t("dashboard.automation.ledger.count", { count: tasks.length })}</span>
-      <button class="sln-button sln-button-secondary" type="button" data-automation-refresh>{t("dashboard.automation.ledger.refresh")}</button>
+      <button class="sln-button" data-automation-refresh data-variant="secondary" type="button">{t("dashboard.automation.ledger.refresh")}</button>
     </div>
   </header>
 
@@ -79,9 +80,8 @@ const actionHref = (task: AutomationTaskView): string | null => {
 
   <div class="automation-list" data-automation-list aria-live="polite" aria-busy="false">
     {tasks.length === 0 ? (
-      <div class="automation-empty" data-automation-empty>
-        <strong>{t("dashboard.automation.ledger.empty_title")}</strong>
-        <p>{t("dashboard.automation.ledger.empty_description")}</p>
+      <div data-automation-empty>
+        <EmptyState description={t("dashboard.automation.ledger.empty_description")} title={t("dashboard.automation.ledger.empty_title")} />
       </div>
     ) : tasks.map((task) => {
       const status = automationStatusTone(task.status);
@@ -101,10 +101,10 @@ const actionHref = (task: AutomationTaskView): string | null => {
         </div>
         <div class="automation-actions" data-task-actions>
           {taskActionHref && <a class="automation-action-link" href={taskActionHref} data-task-action-link>{t("dashboard.automation.action.open_related")} <span aria-hidden="true">↗</span></a>}
-          {canManage && resumeAllowed && <button class="sln-button sln-button-primary automation-control" type="button" data-automation-action="resume" data-task-version={task.version}>
+          {canManage && resumeAllowed && <button class="sln-button automation-control" data-automation-action="resume" data-task-version={task.version} data-variant="primary" type="button">
             {task.continuation?.kind === "provider_check" ? t("dashboard.automation.action.resume_provider") : t("dashboard.automation.action.resume")}
           </button>}
-          {canManage && task.canCancel && <button class="sln-button sln-button-danger automation-control" type="button" data-automation-action="cancel" data-task-version={task.version}>{t("dashboard.automation.action.cancel")}</button>}
+          {canManage && task.canCancel && <button class="sln-button automation-control" data-automation-action="cancel" data-task-version={task.version} data-variant="danger" type="button">{t("dashboard.automation.action.cancel")}</button>}
         </div>
       </article>;
     })}
@@ -142,14 +142,11 @@ const actionHref = (task: AutomationTaskView): string | null => {
   .automation-actions { justify-items:stretch; }
   .automation-actions .automation-action-link { min-height:36px; color:var(--sln-action-primary); font:var(--sln-font-label); text-align:center; text-underline-offset:3px; }
   .automation-actions .automation-control { width:100%; }
+  /* Retained for the client-rendered fallback empty block (scripts/dashboard/automation.ts). */
   .automation-empty { padding:var(--sln-space-6); }
   .automation-empty strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
   .automation-empty p, .automation-scope-note { margin:var(--sln-space-2) 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .automation-scope-note { margin:0; padding:0 var(--sln-space-6) var(--sln-space-6); color:var(--sln-text-muted); font:var(--sln-font-caption); }
-  .sln-button-primary { border-color:var(--sln-action-primary); background:var(--sln-action-primary); color:var(--sln-white); }
-  .sln-button-primary:hover:not(:disabled) { background:var(--sln-action-primary-hover); }
-  .sln-button-danger { border-color:color-mix(in srgb,var(--sln-state-danger) 30%,var(--sln-border-default)); background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
-  .sln-button-danger:hover:not(:disabled) { border-color:var(--sln-state-danger); }
   @media (max-width:760px) {
     .automation-ledger__header { align-items:start; flex-direction:column; }
     .automation-ledger__header-actions { align-items:stretch; justify-items:stretch; width:100%; }

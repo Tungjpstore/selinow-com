@@ -99,6 +99,14 @@ CREATE TABLE automation_rule_action_runs (
   ),
   aggregate_reference TEXT NOT NULL CHECK (length(aggregate_reference) BETWEEN 1 AND 128),
   created_at TEXT NOT NULL,
+  -- R0: links the run to the automation task executing this action, so the UI
+  -- can show per-action status. NULL until the dispatcher links it after
+  -- orchestrator.start() succeeds.
+  task_id TEXT REFERENCES automation_tasks(id) ON DELETE SET NULL
+    CHECK (task_id IS NULL OR (
+      length(task_id) BETWEEN 8 AND 96
+      AND substr(task_id, 1, 1) GLOB '[A-Za-z0-9]'
+      AND task_id NOT GLOB '*[^A-Za-z0-9._:-]*')),
   UNIQUE (id, shop_id),
   -- The natural key a single (rule, event, action) triggers on; combined with
   -- a deterministically derived id this keeps repeated dispatch attempts
@@ -108,6 +116,10 @@ CREATE TABLE automation_rule_action_runs (
 
 CREATE INDEX idx_automation_rule_action_runs_shop_rule
   ON automation_rule_action_runs(shop_id, rule_id, created_at DESC);
+
+CREATE INDEX idx_automation_rule_action_runs_task
+  ON automation_rule_action_runs(shop_id, task_id)
+  WHERE task_id IS NOT NULL;
 
 -- Links an automation task back to the rule that created it, so the existing
 -- ledger can be filtered/labelled per rule without a second execution log.

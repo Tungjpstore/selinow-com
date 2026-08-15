@@ -1,13 +1,16 @@
 ---
 import AppLayout from "../../layouts/AppLayout.astro";
 import AutomationLedger from "../../components/dashboard/AutomationLedger.astro";
+import RuleList from "../../components/dashboard/automation/RuleList.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
 import { authenticateRequest } from "../../lib/auth/session";
 import { isAppError } from "../../lib/core/errors";
 import { listAutomationTasks } from "../../lib/automation/api-service";
+import { listAutomationRules } from "../../lib/automation/rules/service";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { parseAutomationTasks, type AutomationTaskView } from "../../lib/dashboard/automation-ui";
+import { canManageRules, parseAutomationRules, type RuleView } from "../../lib/dashboard/automation-rules-ui";
 import { createDashboardTranslator } from "../../lib/i18n";
 import { getBindings } from "../../lib/platform/bindings";
 import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
@@ -28,10 +31,13 @@ try {
 
 const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 let tasks: AutomationTaskView[] = [];
+let rules: RuleView[] = [];
 if (shop !== undefined && state === "ready") {
   try {
-    const result = await listAutomationTasks({ env, shopPublicId: shop.publicId, userId: auth.userId });
-    tasks = parseAutomationTasks(result);
+    const taskResult = await listAutomationTasks({ env, shopPublicId: shop.publicId, userId: auth.userId });
+    tasks = parseAutomationTasks(taskResult);
+    const ruleResult = await listAutomationRules({ env, shopPublicId: shop.publicId, userId: auth.userId });
+    rules = parseAutomationRules(ruleResult);
   } catch (error) {
     state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable";
   }
@@ -41,6 +47,10 @@ if (state === "unavailable") Astro.response.status = 503;
 
 const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const tabParam = Astro.url.searchParams.get("tab");
+const requestedTab = tabParam === "rules" || tabParam === "history" ? tabParam : null;
+const activeTab: "history" | "rules" = requestedTab ?? (canManageRules(shop?.role) ? "rules" : "history");
+const tabHref = (tab: "history" | "rules"): string => workspaceHref(`/app/automation?tab=${tab}`);
 ---
 
 <AppLayout activePath="/app/automation" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.automation.title")}>
@@ -55,16 +65,34 @@ const workspaceHref = (href: string): string => withSelectedShop(href, shop?.pub
   ) : state === "forbidden" ? (
     <div class="state-space"><WorkspaceState eyebrow={t("dashboard.automation.forbidden.eyebrow")} title={t("dashboard.automation.forbidden.title")} description={t("dashboard.automation.forbidden.description")} tone="warning" /></div>
   ) : (
-    <AutomationLedger csrfCookieName={`${env.SESSION_COOKIE_NAME}_csrf`} locale={locale ?? shop.defaultLocale} selectedShopPublicId={shop.publicId} shopName={shop.name} shopRole={shop.role} tasks={tasks} timeZone={shop.timezone} />
+    <>
+      <nav aria-label={t("dashboard.automation.title")} class="automation-tabs" data-automation-tabs role="tablist">
+        <a aria-selected={activeTab === "rules" ? "true" : "false"} class:list={["automation-tab", { "is-active": activeTab === "rules" }]} data-automation-tab="rules" href={tabHref("rules")} id="automation-tab-rules" role="tab">{t("dashboard.automation.rules.tab_rules")}</a>
+        <a aria-selected={activeTab === "history" ? "true" : "false"} class:list={["automation-tab", { "is-active": activeTab === "history" }]} data-automation-tab="history" href={tabHref("history")} id="automation-tab-history" role="tab">{t("dashboard.automation.rules.tab_history")}</a>
+      </nav>
+
+      <div aria-labelledby="automation-tab-rules" data-automation-panel="rules" hidden={activeTab !== "rules"} id="automation-panel-rules" role="tabpanel">
+        <RuleList csrfCookieName={`${env.SESSION_COOKIE_NAME}_csrf`} locale={locale ?? shop.defaultLocale} rules={rules} selectedShopPublicId={shop.publicId} shopRole={shop.role} timeZone={shop.timezone} />
+      </div>
+
+      <div aria-labelledby="automation-tab-history" data-automation-panel="history" hidden={activeTab !== "history"} id="automation-panel-history" role="tabpanel">
+        <AutomationLedger csrfCookieName={`${env.SESSION_COOKIE_NAME}_csrf`} locale={locale ?? shop.defaultLocale} selectedShopPublicId={shop.publicId} shopName={shop.name} shopRole={shop.role} tasks={tasks} timeZone={shop.timezone} />
+      </div>
+    </>
   )}
 </AppLayout>
 
 {state === "ready" && shop !== undefined && <script>
   import "../../scripts/dashboard/automation";
+  import "../../scripts/dashboard/automation-rules";
 </script>}
 
 <style>
   .state-space { margin-top:var(--sln-space-8); }
   .sln-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:10px 16px; font:var(--sln-font-label); text-decoration:none; }
   .sln-button-secondary { border-color:var(--sln-border-strong); background:var(--sln-bg-surface); color:var(--sln-text-primary); }
+  .automation-tabs { display:flex; gap:var(--sln-space-2); margin-top:var(--sln-space-8); border-bottom:1px solid var(--sln-border-default); }
+  .automation-tab { display:inline-flex; align-items:center; min-height:44px; border-bottom:2px solid transparent; padding:var(--sln-space-2) var(--sln-space-4); color:var(--sln-text-secondary); font:var(--sln-font-label); text-decoration:none; }
+  .automation-tab:hover { color:var(--sln-text-primary); }
+  .automation-tab.is-active { border-bottom-color:var(--sln-action-primary); color:var(--sln-text-primary); }
 </style>

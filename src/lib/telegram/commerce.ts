@@ -1,5 +1,6 @@
 import { hmacToken } from "../core/crypto";
 import { subscriptionAllows } from "../billing/entitlements";
+import { fireAutomationTriggers } from "../automation/rules/dispatcher";
 import { CommerceApplicationService } from "../commerce/application";
 import { createTelegramCartProjectionPort, type CommerceCartProjection } from "../commerce/cart-projection";
 import type { CommerceContext, CommercePaymentFulfillmentApplication } from "../commerce/contracts";
@@ -267,6 +268,7 @@ async function ensureIdentity(input: {
         input.env.PLATFORM_DB.prepare(`INSERT INTO shop_customers (id, shop_id, email_normalized, display_name, locale, status, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, 'active', ?, ?)`).bind(customerId, input.shop.id, displayHandle(input.user), input.locale, now, now),
         input.env.PLATFORM_DB.prepare(`INSERT INTO customer_identities (id, shop_id, customer_id, provider, external_subject, display_handle_sanitized, language_code, verified_at, created_at, updated_at) VALUES (?, ?, ?, 'telegram', ?, ?, ?, ?, ?, ?)`).bind(identityId, input.shop.id, customerId, input.subjectHash, displayHandle(input.user), input.observedLanguage, now, now, now),
       ]);
+      void fireAutomationTriggers(input.env, { aggregateReference: `customer:${customerId}`, customerId, refs: { channel: "telegram" }, shopId: input.shop.id, triggerType: "customer.created" }).catch(() => {});
       identity = { customerId, identityId, languageCode: input.observedLanguage, preferredLocale: null, verifiedAt: now };
     } catch {
       identity = await findStoredIdentity({ env: input.env, shopId: input.shop.id, subjectHash: input.subjectHash });

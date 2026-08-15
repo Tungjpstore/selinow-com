@@ -1,0 +1,197 @@
+---
+import ConfirmDialog from "../../primitives/ConfirmDialog.astro";
+import StatusBadge from "../../primitives/StatusBadge.astro";
+import EmptyState from "../../states/EmptyState.astro";
+import RuleBuilderDialog from "./RuleBuilderDialog.astro";
+import RuleForm from "./RuleForm.astro";
+import { RULE_ACTION_TYPES, RULE_CONDITION_OPERATORS, RULE_TRIGGER_TYPES } from "../../../lib/automation/rules/types";
+import { automationStatusLabel, automationStatusTone, formatAutomationTime } from "../../../lib/dashboard/automation-ui";
+import { canManageRules, ruleActionLabel, ruleStatusLabel, ruleTriggerLabel, type RuleView } from "../../../lib/dashboard/automation-rules-ui";
+import { createDashboardTranslator } from "../../../lib/i18n";
+import type { ShopRole } from "../../../lib/tenants/policy";
+
+interface Props {
+  csrfCookieName: string;
+  locale?: unknown;
+  rules: readonly RuleView[];
+  selectedShopPublicId: string;
+  shopRole: ShopRole;
+  timeZone: string;
+}
+
+const { csrfCookieName, locale = Astro.locals.locale, rules, selectedShopPublicId, shopRole, timeZone } = Astro.props;
+const t = createDashboardTranslator(locale);
+const canManage = canManageRules(shopRole);
+const triggerOptions = RULE_TRIGGER_TYPES.map((type) => ({ label: t(`dashboard.automation.rules.trigger.${type.replace(".", "_")}`), value: type }));
+const operatorOptions = RULE_CONDITION_OPERATORS.map((operator) => ({ label: t(`dashboard.automation.rules.operator.${operator}`), value: operator }));
+const actionOptions = RULE_ACTION_TYPES.map((type) => ({ label: t(`dashboard.automation.rules.action.${type.replace("rule_", "")}`), value: type }));
+---
+
+<section
+  class="automation-rules-panel"
+  data-rules-root
+  data-csrf-cookie-name={csrfCookieName}
+  data-locale={typeof locale === "string" ? locale : undefined}
+  data-shop-public-id={selectedShopPublicId}
+  data-shop-role={shopRole}
+  data-time-zone={timeZone}
+  data-copy-count={t("dashboard.automation.rules.count", { count: "{count}" })}
+  data-copy-empty-title={t("dashboard.automation.rules.empty_title")}
+  data-copy-empty-description={t("dashboard.automation.rules.empty_description")}
+  data-copy-connection-error={t("dashboard.automation.rules.client.connection_error")}
+  data-copy-invalid-projection={t("dashboard.automation.rules.client.invalid_projection")}
+  data-copy-support-code={t("dashboard.automation.rules.client.support_code", { requestId: "{requestId}" })}
+  data-copy-save-pending={t("dashboard.automation.rules.client.save_pending")}
+  data-copy-save-success={t("dashboard.automation.rules.client.save_success")}
+  data-copy-delete-pending={t("dashboard.automation.rules.client.delete_pending")}
+  data-copy-delete-success={t("dashboard.automation.rules.client.delete_success")}
+  data-copy-toggle-pending={t("dashboard.automation.rules.client.toggle_pending")}
+  data-copy-edit={t("dashboard.automation.rules.edit")}
+  data-copy-delete={t("dashboard.automation.rules.delete")}
+  data-copy-toggle-on={t("dashboard.automation.rules.toggle_on")}
+  data-copy-toggle-off={t("dashboard.automation.rules.toggle_off")}
+  data-copy-conditions-count={t("dashboard.automation.rules.conditions_count", { count: "{count}" })}
+  data-copy-actions-count={t("dashboard.automation.rules.actions_count", { count: "{count}" })}
+  data-copy-last-triggered={t("dashboard.automation.rules.last_triggered", { time: "{time}" })}
+  data-copy-never-triggered={t("dashboard.automation.rules.never_triggered")}
+  aria-labelledby="automation-rules-title"
+>
+  <header class="rules-header">
+    <div>
+      <p class="eyebrow">{t("dashboard.automation.rules.eyebrow")}</p>
+      <h2 id="automation-rules-title">{t("dashboard.automation.rules.title")}</h2>
+      <p>{t("dashboard.automation.rules.description")}</p>
+    </div>
+    <div class="rules-header__actions">
+      <span class="rules-count" data-rules-count>{t("dashboard.automation.rules.count", { count: rules.length })}</span>
+      {canManage && (
+        <RuleBuilderDialog
+          dialogId="automation-rule-create-dialog"
+          submitLabel={t("dashboard.automation.rules.dialog.save")}
+          title={t("dashboard.automation.rules.dialog.create_title")}
+          triggerLabel={t("dashboard.automation.rules.create")}
+        >
+          <RuleForm actionOptions={actionOptions} formId="rule-create-form" mode="create" operatorOptions={operatorOptions} triggerOptions={triggerOptions} />
+        </RuleBuilderDialog>
+      )}
+    </div>
+  </header>
+
+  <p class="rules-feedback" data-rules-feedback role="status" aria-live="polite" aria-atomic="true" hidden></p>
+
+  <div class="rules-list" data-rules-list aria-live="polite" aria-busy="false">
+    {rules.length === 0 ? (
+      <div data-rules-empty>
+        <EmptyState description={t("dashboard.automation.rules.empty_description")} title={t("dashboard.automation.rules.empty_title")} />
+      </div>
+    ) : rules.map((rule) => (
+      <article class="rule-row" data-rule data-rule-id={rule.id} data-rule-version={rule.version} data-rule-json={JSON.stringify(rule)}>
+        <div class="rule-row__copy">
+          <strong data-rule-name>{rule.name}</strong>
+          <p>
+            <span data-rule-trigger>{ruleTriggerLabel(rule.triggerType, locale)}</span>
+            <span aria-hidden="true"> · </span>
+            <span data-rule-conditions-count>{t("dashboard.automation.rules.conditions_count", { count: rule.conditions.length })}</span>
+            <span aria-hidden="true"> · </span>
+            <span data-rule-actions-count>{t("dashboard.automation.rules.actions_count", { count: rule.actions.length })}</span>
+          </p>
+          <small class="rule-row__meta">
+            {rule.lastTriggeredAt === null
+              ? t("dashboard.automation.rules.never_triggered")
+              : t("dashboard.automation.rules.last_triggered", { time: formatAutomationTime(rule.lastTriggeredAt, timeZone, locale) })}
+          </small>
+          {rule.lastRuns.length > 0 && (
+            <span class="rule-runs" data-rule-runs>
+              {rule.lastRuns.map((run) => (
+                <span class="rule-run-chip" data-rule-run data-tone={run.taskStatus === null ? "neutral" : automationStatusTone(run.taskStatus as never)}>
+                  {ruleActionLabel(run.actionType, locale)}{run.taskStatus !== null ? `: ${automationStatusLabel(run.taskStatus as never, locale)}` : ""}
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+        <div class="rule-row__status">
+          <StatusBadge label={ruleStatusLabel(rule.enabled, locale)} tone={rule.enabled ? "success" : "neutral"} />
+        </div>
+        {canManage && (
+          <div class="rule-row__actions">
+            <button class="sln-button" data-rules-action="edit" data-size="sm" data-variant="secondary" type="button">{t("dashboard.automation.rules.edit")}</button>
+            <button class="sln-button" data-rules-action="toggle" data-size="sm" data-variant="secondary" type="button">{rule.enabled ? t("dashboard.automation.rules.toggle_off") : t("dashboard.automation.rules.toggle_on")}</button>
+            <button class="sln-button" data-rules-action="delete" data-size="sm" data-variant="danger" type="button">{t("dashboard.automation.rules.delete")}</button>
+          </div>
+        )}
+      </article>
+    ))}
+  </div>
+
+  {canManage && (
+    <>
+      <div class="rules-edit-dialog" data-rule-edit-slot data-rule-edit-id="" data-rule-edit-version="">
+        <div data-rule-dialog-root data-rule-pending-label={t("dashboard.automation.rules.dialog.saving")}>
+          <dialog class="sln-dialog" id="automation-rule-edit-dialog" aria-labelledby="automation-rule-edit-dialog-title" data-rule-dialog>
+            <div class="sln-dialog__body">
+              <h2 data-rule-dialog-title id="automation-rule-edit-dialog-title">{t("dashboard.automation.rules.dialog.edit_title")}</h2>
+              <RuleForm actionOptions={actionOptions} formId="rule-edit-form" mode="edit" operatorOptions={operatorOptions} triggerOptions={triggerOptions} />
+            </div>
+            <form class="sln-dialog__actions" method="dialog" data-rule-dialog-form>
+              <button class="sln-button" data-rule-dialog-cancel data-variant="secondary" type="submit" value="cancel">{t("dashboard.automation.rules.dialog.cancel")}</button>
+              <button class="sln-button" data-rule-dialog-confirm data-variant="primary" type="submit" value="confirm">{t("dashboard.automation.rules.dialog.save")}</button>
+            </form>
+          </dialog>
+        </div>
+      </div>
+
+      <div class="rules-delete-dialog">
+        <ConfirmDialog
+          confirmLabel={t("dashboard.automation.rules.delete")}
+          dialogId="automation-rule-delete-dialog"
+          impact={t("dashboard.automation.rules.delete_impact")}
+          pendingLabel={t("dashboard.automation.rules.dialog.saving")}
+          title={t("dashboard.automation.rules.delete_title")}
+          triggerLabel={t("dashboard.automation.rules.delete")}
+        />
+      </div>
+    </>
+  )}
+
+  <p class="rules-scope-note">{t("dashboard.automation.ledger.scope")}</p>
+</section>
+
+<style is:global>
+  .automation-rules-panel { display:grid; gap:var(--sln-space-5); margin-top:var(--sln-space-8); overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); background:var(--sln-bg-surface); box-shadow:var(--sln-shadow-xs); }
+  .rules-header { display:flex; align-items:end; justify-content:space-between; gap:24px; padding:var(--sln-space-6); border-bottom:1px solid var(--sln-border-default); }
+  .rules-header > div:first-child { min-width:0; }
+  .rules-header h2 { margin:0; color:var(--sln-text-primary); font:var(--sln-font-h3); letter-spacing:-.035em; }
+  .rules-header > div:first-child > p:last-child { max-width:720px; margin:var(--sln-space-3) 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .rules-header__actions { display:grid; justify-items:end; gap:var(--sln-space-3); min-width:180px; }
+  .rules-count { color:var(--sln-text-muted); font:var(--sln-font-caption); white-space:nowrap; }
+  .rules-feedback { margin:0 var(--sln-space-6); border-left:3px solid var(--sln-state-info); border-radius:var(--sln-radius-sm); padding:var(--sln-space-3) var(--sln-space-4); background:var(--sln-tint-info); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .rules-feedback[data-tone="danger"] { border-left-color:var(--sln-state-danger); background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .rules-feedback[data-tone="success"] { border-left-color:var(--sln-state-success); background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .rules-list { display:grid; overflow:hidden; margin:0 var(--sln-space-6); border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); }
+  .rule-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(110px,auto) minmax(210px,auto); gap:20px; align-items:center; padding:var(--sln-space-5); border-top:1px solid var(--sln-border-default); }
+  .rule-row:first-child { border-top:0; }
+  .rule-row__copy, .rule-row__status, .rule-row__actions { display:grid; gap:var(--sln-space-2); min-width:0; }
+  .rule-row__copy strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .rule-row__copy p { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .rule-row__meta { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .rule-runs { display:flex; flex-wrap:wrap; gap:6px; }
+  .rule-run-chip { display:inline-flex; align-items:center; border-radius:var(--sln-radius-pill); padding:3px 8px; background:var(--sln-bg-subtle); color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .rule-run-chip[data-tone="success"] { background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .rule-run-chip[data-tone="warning"] { background:var(--sln-tint-warning); color:var(--selinow-warning-text); }
+  .rule-run-chip[data-tone="danger"] { background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .rule-run-chip[data-tone="info"] { background:var(--sln-tint-info); color:var(--selinow-info-text); }
+  .rule-row__status { justify-items:start; }
+  .rule-row__actions { display:flex; flex-wrap:wrap; gap:var(--sln-space-2); justify-content:end; }
+  .rules-delete-dialog { display:none; }
+  .rules-scope-note { margin:0; padding:0 var(--sln-space-6) var(--sln-space-6); color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  @media (max-width:760px) {
+    .rules-header { align-items:start; flex-direction:column; }
+    .rules-header__actions { align-items:stretch; justify-items:stretch; width:100%; }
+    .rules-count { text-align:left; }
+    .rules-list { margin-inline:var(--sln-space-4); }
+    .rule-row { grid-template-columns:1fr; gap:var(--sln-space-3); padding:var(--sln-space-4); }
+    .rule-row__actions { justify-content:start; }
+    .rules-scope-note { padding-inline:var(--sln-space-4); }
+  }
+</style>
