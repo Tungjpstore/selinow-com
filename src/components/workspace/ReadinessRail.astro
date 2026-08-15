@@ -43,7 +43,7 @@ const statusLabel: Record<StepStatus, string> = {
   .sln-readiness-rail li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--sln-space-3); align-items: center; padding: var(--sln-space-4) 0; border-bottom: 1px solid var(--sln-border-default); }
   .sln-readiness-rail li:last-child { border-bottom: 0; padding-bottom: 0; }
   .sln-readiness-rail__index { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--sln-border-strong); border-radius: 50%; color: var(--sln-text-muted); font: var(--sln-font-caption); }
-  .sln-readiness-rail li[data-status="ready"] .sln-readiness-rail__index { border-color: var(--sln-state-success); background: var(--sln-tint-success); color: var(--selinow-success-text); }
+  .sln-readiness-rail li[data-status="ready"] .sln-readiness-rail__index { border-color: var(--sln-state-success); background: var(--sln-tint-success); color: var(--sln-success-text); }
   .sln-readiness-rail li[data-status="blocked"] .sln-readiness-rail__index { border-color: var(--sln-state-danger); background: var(--sln-tint-danger); color: var(--sln-state-danger); }
   .sln-readiness-rail strong { font: var(--sln-font-label); }
   .sln-readiness-rail p { margin: var(--sln-space-1) 0 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); }

@@ -1,9 +1,0 @@
----
-import { createDashboardTranslator } from "../../lib/i18n/catalogs/dashboard";
-import StatePanel from "./StatePanel.astro";
-
-interface Props { description?: string; title?: string; }
-const t = createDashboardTranslator(Astro.locals.locale);
-const { description = t("dashboard.state.loading.description"), title = t("dashboard.state.loading.title") } = Astro.props;
----
-<StatePanel description={description} state="loading" title={title} />

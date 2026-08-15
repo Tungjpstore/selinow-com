@@ -4,15 +4,12 @@ import { describe, expect, it } from "vitest";
 
 describe("seller shop-name frontend contract", () => {
   it("exposes the existing tenant-scoped rename mutation only to owner and manager roles", async () => {
-    const [wizard, controller, route, store] = await Promise.all([
-      readFile("src/components/dashboard/OnboardingWizard.astro", "utf8"),
+    const [controller, route, store] = await Promise.all([
       readFile("src/scripts/dashboard/onboarding.ts", "utf8"),
       readFile("src/pages/api/app/shops/[shopPublicId].ts", "utf8"),
       readFile("src/lib/tenants/store.ts", "utf8"),
     ]);
 
-    expect(wizard).toContain("data-shop-rename-form");
-    expect(wizard).toContain('t("onboarding.form.rename_note")');
     expect(controller).toContain('shop.role === "owner" || shop.role === "manager"');
     expect(controller).toContain('shop.role !== "owner" && shop.role !== "manager"');
     expect(controller).toContain('{ body: payload, method: "PATCH" }');

@@ -63,13 +63,10 @@ describe("dashboard shell and shared state localization", () => {
 
   it("localizes shared defaults while preserving explicit prop overrides", async () => {
     const files = [
-      "ErrorState.astro",
-      "LoadingState.astro",
       "PermissionState.astro",
       "PlanLimitState.astro",
       "StatePanel.astro",
       "SuspendedState.astro",
-      "WaitingProviderState.astro",
       "WorkspaceState.astro",
     ];
     const sources = await Promise.all(files.map((file) => readFile(`src/components/states/${file}`, "utf8")));
@@ -78,8 +75,6 @@ describe("dashboard shell and shared state localization", () => {
     for (const source of sources) {
       expect(source).toContain("createDashboardTranslator(Astro.locals.locale)");
     }
-    expect(combined).toContain('actionLabel = t("dashboard.state.error.retry")');
-    expect(combined).toContain('description = t("dashboard.state.loading.description")');
     expect(combined).toContain('eyebrow = t("dashboard.state.eyebrow")');
     expect(combined).toContain('title = t("dashboard.state.suspended.title")');
     expect(combined).toContain("actionLabel={actionLabel}");

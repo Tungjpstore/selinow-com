@@ -86,13 +86,6 @@ const DYNAMIC_TRANSLATION_ALLOWLIST: readonly DynamicAllowlistEntry[] = [
     path: "src/components/commerce/StockLabel.astro",
   },
   {
-    catalog: "onboarding",
-    expression: "step.labelKey",
-    guard: /WIZARD_STEPS\.map\(\(step\) => \(\{ \.\.\.step, label: t\(step\.labelKey\) \}\)\)/u,
-    identifier: "t",
-    path: "src/components/dashboard/OnboardingWizard.astro",
-  },
-  {
     catalog: "admin",
     expression: "`admin.layout.role.${role}`",
     guard: /role === null \? t\("admin\.layout\.role\.unverified"\) : t\(`admin\.layout\.role\.\$\{role\}`\)/u,

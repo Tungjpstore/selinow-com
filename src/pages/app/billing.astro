@@ -158,10 +158,10 @@ const conversionHref = workspaceHref("/app/billing");
   .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
   .subscription-impact { max-width:70ch; }
   .subscription-state { border-radius:var(--sln-radius-pill); padding:8px 12px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-label); white-space:nowrap; }
-  .plan-hero[data-tone="success"] .subscription-state { background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .plan-hero[data-tone="success"] .subscription-state { background:var(--sln-tint-success); color:var(--sln-success-text); }
   .plan-hero[data-tone="info"] .subscription-state { background:var(--sln-tint-info); color:var(--sln-state-info); }
   .plan-hero[data-tone="warning"] .subscription-state { background:var(--sln-tint-warning); color:#9a5004; }
-  .plan-hero[data-tone="danger"] .subscription-state { background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .plan-hero[data-tone="danger"] .subscription-state { background:var(--sln-tint-danger); color:var(--sln-danger-text); }
   .billing-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border-block:1px solid var(--sln-border-default); }
   .billing-grid article { display:grid; gap:5px; padding:16px; border-right:1px solid var(--sln-border-default); }
   .billing-grid article:last-child { border-right:0; }
@@ -177,7 +177,7 @@ const conversionHref = workspaceHref("/app/billing");
   .billing-request-description { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .billing-checkout-panel { border-color:color-mix(in srgb,var(--sln-action-primary) 30%,var(--sln-border-default)); background:linear-gradient(135deg,var(--sln-bg-surface),var(--sln-tint-indigo)); }
   .checkout-state-note, .checkout-provider-note { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
-  .checkout-market-note { margin:0; border:1px solid var(--sln-state-danger); border-radius:var(--sln-radius-md); padding:12px 14px; background:var(--sln-tint-danger); color:var(--selinow-danger-text); font:var(--sln-font-body-sm); }
+  .checkout-market-note { margin:0; border:1px solid var(--sln-state-danger); border-radius:var(--sln-radius-md); padding:12px 14px; background:var(--sln-tint-danger); color:var(--sln-danger-text); font:var(--sln-font-body-sm); }
   .checkout-market-note a { color:inherit; font-weight:750; }
   .billing-market-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:end; }
   .billing-market-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
@@ -196,8 +196,8 @@ const conversionHref = workspaceHref("/app/billing");
   .billing-request-row strong { display:block; color:var(--sln-text-primary); font:var(--sln-font-label); }
   .billing-request-row span { color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .workspace-feedback { padding:12px 14px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
-  .workspace-feedback[data-tone="danger"] { border-color:var(--sln-state-danger); color:var(--selinow-danger-text); }
-  .workspace-feedback[data-tone="success"] { border-color:var(--sln-state-success); color:var(--selinow-success-text); }
+  .workspace-feedback[data-tone="danger"] { border-color:var(--sln-state-danger); color:var(--sln-danger-text); }
+  .workspace-feedback[data-tone="success"] { border-color:var(--sln-state-success); color:var(--sln-success-text); }
   .invoice-ledger { display:grid; gap:10px; }
   .invoice-row { display:flex; justify-content:space-between; align-items:center; gap:14px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:14px; background:var(--sln-bg-canvas); }
   .invoice-copy { display:grid; gap:5px; min-width:0; }
@@ -213,7 +213,7 @@ const conversionHref = workspaceHref("/app/billing");
   .usage-meter-row strong { color:var(--sln-text-primary); font:var(--sln-font-label); white-space:nowrap; }
   .usage-meter-row small { color:var(--sln-text-muted); font:var(--sln-font-caption); white-space:nowrap; }
   .usage-meter-row[data-tone="warning"] strong { color:#9a5004; }
-  .usage-meter-row[data-tone="danger"] strong { color:var(--selinow-danger-text); }
+  .usage-meter-row[data-tone="danger"] strong { color:var(--sln-danger-text); }
   .usage-updated { text-align:right; }
   .sln-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:9px 14px; font:var(--sln-font-label); cursor:pointer; }
   .sln-button-primary { background:var(--sln-action-primary); color:var(--sln-white); }

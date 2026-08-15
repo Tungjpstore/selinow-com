@@ -41,12 +41,7 @@ describe("onboarding localization contract", () => {
     expect(english["onboarding.catalog.price_label"]).toBe("Price ({currency})");
     expect(vietnamese["onboarding.catalog.price_label"]).toBe("Giá bán ({currency})");
 
-    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
-    expect(component).toContain("data-product-price-label");
-    expect(component).toContain("initialShop?.currency ?? \"—\"");
-    expect(component).toContain('name="priceMajor"');
-    expect(component).toContain("currencyInputStep(initialShop.currency)");
     expect(client).toContain("parseCatalog(results[1].value, shop.currency)");
     expect(client).toContain("typeof row.currency === \"string\" ? row.currency : fallbackCurrency");
     expect(client).toContain("data-product-price-label");
@@ -56,43 +51,23 @@ describe("onboarding localization contract", () => {
   });
 
   it("exposes authoritative country, currency, and locale settings on create and update", () => {
-    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
 
-    for (const selector of [
-      "data-shop-merchant-country",
-      "data-shop-business-country",
-      "data-shop-currency",
-      "data-shop-default-locale",
-      "data-settings-merchant-country",
-      "data-settings-business-country",
-      "data-settings-currency",
-      "data-settings-default-locale",
-    ]) expect(component).toContain(selector);
     expect(client).toContain('method: "PATCH"');
     expect(client).toContain("readShopGlobalizationForm");
     expect(client).toContain("Object.assign(shop, profileResponse.shop)");
   });
 
   it("saves regional settings independently from legal readiness", () => {
-    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
-    expect(component).toContain("data-globalization-form");
-    expect(component).toContain("data-globalization-submit");
-    expect(component).toContain("data-settings-form");
     expect(client).toContain("changedShopGlobalization(shop, globalization)");
     expect(client).toContain("body: JSON.stringify(patch)");
     expect(client).not.toContain("const globalizationChanged =");
   });
 
   it("keeps onboarding plan options aligned with the authenticated shop API", () => {
-    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
     const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
-    expect(component).toContain('data-public-plan-codes={JSON.stringify(PUBLIC_PLAN_CODES)}');
-    expect(component).toContain('data-shop-plan disabled');
-    expect(component).not.toContain('<option value="starter">');
-    expect(component).not.toContain('<option value="pro">');
     expect(client).toContain("parsePublicPlanCodes(root.dataset.publicPlanCodes)");
     expect(client).toContain("renderPlanOptions(root, plans, planCodes)");
     expect(client).toContain("planFeatureLabel(feature, plan.features[feature])");
@@ -107,14 +82,9 @@ describe("onboarding localization contract", () => {
   });
 
   it("uses server-owned creation admission for new shops and canceled billing recovery", () => {
-    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
     const page = readFileSync("src/pages/onboarding.astro", "utf8");
     const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
-    expect(component).toContain("data-onboarding-resume-recovery");
-    expect(component).toContain("data-onboarding-resume-reload");
-    expect(component).toContain("creationAdmission.allowed");
-    expect(component).toContain("data-creation-admission");
     expect(page).toContain("getShopCreationAdmission");
     expect(route).toContain("getShopCreationAdmission");
     expect(route).toContain("creationAdmission");
@@ -137,11 +107,7 @@ describe("onboarding localization contract", () => {
   });
 
   it("never invents a platform policy attestation version in the browser", () => {
-    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
     const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
-    expect(component).toContain("data-policy-attestation-published");
-    expect(component).toContain("data-policy-attestation-version");
-    expect(component).toContain("disabled={!policyAttestationPublished}");
     expect(client).toContain("policyAttestationVersion");
     expect(client).not.toContain("attestationVersion: 1");
   });

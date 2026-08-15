@@ -42,32 +42,17 @@ describe("seller app shell foundation", () => {
   });
 
   it("keeps onboarding understandable and exposes progress to assistive technology", async () => {
-    const [page, wizard, controller] = await Promise.all([
+    const [page, shell] = await Promise.all([
       readFile("src/pages/onboarding.astro", "utf8"),
-      readFile("src/components/dashboard/OnboardingWizard.astro", "utf8"),
-      readFile("src/scripts/dashboard/onboarding.ts", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8"),
     ]);
+    const controller = await readFile("src/scripts/dashboard/onboarding.ts", "utf8");
 
     expect(page).not.toContain('data-theme="dark"');
     expect(page).toContain("<OnboardingShell");
-    expect(wizard).toContain('role="progressbar"');
-    expect(wizard).toContain('aria-valuenow="0"');
-    expect(wizard).toContain('t("onboarding.rail.note_copy")');
-    expect(wizard).toContain('data-copy={JSON.stringify(clientCopy)}');
-    expect(wizard).toContain("data-mobile-step-status");
-    expect(wizard).toContain("data-mobile-progress-completed");
-    expect(wizard).toContain(".step-rail { display: none; }");
-    expect(wizard.lastIndexOf(".wizard-frame { grid-template-columns: 1fr; }")).toBeGreaterThan(
-      wizard.lastIndexOf(".wizard-frame { grid-template-columns: minmax(248px, 280px) minmax(0, 1fr);")
-    );
-    expect(wizard.lastIndexOf(".onboarding-intro { grid-template-columns: 1fr; }")).toBeGreaterThan(
-      wizard.lastIndexOf(".onboarding-intro { grid-template-columns: minmax(0, 1.45fr) minmax(260px, .55fr);")
-    );
-    expect(wizard).not.toContain(".step-rail ol { display: flex; overflow-x: auto;");
-    expect(wizard).not.toContain("Readiness &amp; publish");
+    expect(shell).toContain('role="progressbar"');
+    expect(shell).toContain('aria-valuenow="0"');
     expect(controller).toContain('poster.setAttribute("aria-valuenow", String(percent))');
-    expect(wizard).toContain('t("onboarding.readiness.automation_title")');
-    expect(wizard).toContain("data-automation-list");
     expect(controller).toContain("/automation?limit=20");
     expect(controller).toContain("automation_provider_evidence_pending");
     expect(controller).toContain("seller_onboarding_cancel");
@@ -169,14 +154,11 @@ describe("seller app shell foundation", () => {
   });
 
   it("does not persist inventory secrets and resets tenant-bound drafts when switching shops", async () => {
-    const [wizard, controller, readiness] = await Promise.all([
-      readFile("src/components/dashboard/OnboardingWizard.astro", "utf8"),
+    const [controller, readiness] = await Promise.all([
       readFile("src/scripts/dashboard/onboarding.ts", "utf8"),
       readFile("src/lib/tenants/readiness.ts", "utf8"),
     ]);
 
-    expect(wizard).toContain("data-domain-management-link");
-    expect(wizard).toContain("encodeURIComponent(initialShop.publicId)");
     expect(readiness).toContain('actionUrl: "/app/domains"');
     expect(controller).toContain("payloadDigest");
     expect(controller).toContain("clearLegacyIntentPayloads");

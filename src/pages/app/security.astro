@@ -276,8 +276,8 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
   .security-tabpanel { display:grid; gap:22px; }
   .security-tabpanel[hidden] { display:none; }
   .security-feedback { min-height:46px; margin:0; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:12px 14px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
-  .security-feedback[data-tone="danger"] { border-color:color-mix(in srgb, var(--sln-state-danger) 42%, var(--sln-border-default)); background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
-  .security-feedback[data-tone="success"] { border-color:color-mix(in srgb, var(--sln-state-success) 42%, var(--sln-border-default)); background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .security-feedback[data-tone="danger"] { border-color:color-mix(in srgb, var(--sln-state-danger) 42%, var(--sln-border-default)); background:var(--sln-tint-danger); color:var(--sln-danger-text); }
+  .security-feedback[data-tone="success"] { border-color:color-mix(in srgb, var(--sln-state-success) 42%, var(--sln-border-default)); background:var(--sln-tint-success); color:var(--sln-success-text); }
   .security-overview { display:grid; grid-template-columns:auto minmax(0,1fr); gap:18px; align-items:start; border:1px solid color-mix(in srgb, var(--sln-action-primary) 28%, var(--sln-border-default)); border-radius:var(--sln-radius-xl); padding:24px; background:linear-gradient(135deg, var(--sln-bg-surface), color-mix(in srgb, var(--sln-tint-info) 55%, var(--sln-bg-surface))); box-shadow:var(--sln-shadow-sm); }
   .overview-mark { display:grid; place-items:center; width:46px; height:46px; border-radius:14px; background:var(--sln-action-primary); color:var(--sln-white); font-size:22px; font-weight:800; }
   .eyebrow { margin:0 0 6px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:800; letter-spacing:.09em; }
@@ -292,7 +292,7 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
   .session-mark { display:grid; place-items:center; width:40px; height:40px; border-radius:12px; background:var(--sln-bg-subtle); color:var(--sln-action-primary); font-weight:850; }
   .session-copy { display:grid; gap:5px; min-width:0; }
   .session-copy strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
-  .session-copy span { width:max-content; border-radius:var(--sln-radius-pill); padding:4px 8px; background:var(--sln-tint-success); color:var(--selinow-success-text); font:var(--sln-font-caption); font-weight:750; }
+  .session-copy span { width:max-content; border-radius:var(--sln-radius-pill); padding:4px 8px; background:var(--sln-tint-success); color:var(--sln-success-text); font:var(--sln-font-caption); font-weight:750; }
   .session-meta { display:grid; gap:5px; min-width:0; }
   .session-meta span { color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .session-meta time { overflow:hidden; color:var(--sln-text-primary); font:var(--sln-font-body-sm); text-overflow:ellipsis; white-space:nowrap; }
@@ -312,9 +312,9 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
   .history-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:14px; background:var(--sln-bg-canvas); }
   .history-row time { color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
   .history-outcome { display:inline-flex; width:max-content; border-radius:var(--sln-radius-pill); padding:4px 10px; font:var(--sln-font-caption); font-weight:750; }
-  .history-outcome[data-tone="success"] { background:var(--sln-tint-success); color:var(--selinow-success-text); }
-  .history-outcome[data-tone="warning"] { background:var(--sln-tint-warning); color:var(--selinow-warning-text); }
-  .history-outcome[data-tone="danger"] { background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .history-outcome[data-tone="success"] { background:var(--sln-tint-success); color:var(--sln-success-text); }
+  .history-outcome[data-tone="warning"] { background:var(--sln-tint-warning); color:var(--sln-warning-text); }
+  .history-outcome[data-tone="danger"] { background:var(--sln-tint-danger); color:var(--sln-danger-text); }
   .history-outcome[data-tone="neutral"] { background:var(--sln-bg-subtle); color:var(--sln-text-secondary); }
   @keyframes security-pulse { to { background-position:-200% 0; } }
   @media (prefers-reduced-motion: reduce) { .session-loading .session-mark { animation:none; } }

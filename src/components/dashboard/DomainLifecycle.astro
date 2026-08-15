@@ -55,9 +55,9 @@ const iconFor = (status: string | null): string => {
   .domain-lifecycle strong { font-size: .72rem; }
   .domain-lifecycle small { overflow: hidden; margin-top: 3px; color: var(--sln-text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
   .lifecycle-icon { display: grid; flex: 0 0 auto; place-items: center; width: 24px; height: 24px; border: 1px solid var(--sln-border-default); border-radius: 50%; color: var(--sln-text-secondary); font-weight: 700; }
-  .lifecycle-icon[data-tone="success"] { border-color: var(--selinow-success-text); background: var(--sln-tint-success); color: var(--selinow-success-text); }
-  .lifecycle-icon[data-tone="warning"] { border-color: var(--selinow-warning-text); background: var(--sln-tint-warning); color: var(--selinow-warning-text); }
-  .lifecycle-icon[data-tone="error"] { border-color: var(--selinow-danger-text); background: var(--sln-tint-danger); color: var(--selinow-danger-text); }
+  .lifecycle-icon[data-tone="success"] { border-color: var(--sln-success-text); background: var(--sln-tint-success); color: var(--sln-success-text); }
+  .lifecycle-icon[data-tone="warning"] { border-color: var(--sln-warning-text); background: var(--sln-tint-warning); color: var(--sln-warning-text); }
+  .lifecycle-icon[data-tone="error"] { border-color: var(--sln-danger-text); background: var(--sln-tint-danger); color: var(--sln-danger-text); }
 
   @media (max-width: 1080px) {
     .domain-lifecycle { grid-template-columns: repeat(4, minmax(0, 1fr)); }

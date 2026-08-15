@@ -28,7 +28,7 @@
   .sln-button[data-size="lg"] { min-height: 48px; padding: 12px var(--sln-space-6); }
   .sln-button[data-variant="primary"] { background: var(--sln-action-primary); color: var(--sln-white); }
   .sln-button[data-variant="primary"]:hover:not(:disabled) { background: var(--sln-action-primary-hover); }
-  .sln-button[data-variant="secondary"] { border-color: var(--selinow-border-control); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .sln-button[data-variant="secondary"] { border-color: var(--sln-slate-500); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .sln-button[data-variant="secondary"]:hover:not(:disabled) { border-color: var(--sln-action-primary); color: var(--sln-action-primary); }
   .sln-button[data-variant="quiet"] { background: transparent; color: var(--sln-action-primary); }
   .sln-button[data-variant="quiet"]:hover:not(:disabled) { background: var(--sln-tint-indigo); }
@@ -36,7 +36,7 @@
   .sln-button:hover:not(:disabled) { transform: translateY(-1px); }
   .sln-button:active:not(:disabled) { transform: translateY(0); }
   .sln-button:disabled,
-  .sln-button[aria-disabled="true"] { border-color: var(--selinow-border-control); background: var(--selinow-disabled-bg); color: var(--selinow-disabled-ink); }
+  .sln-button[aria-disabled="true"] { border-color: var(--sln-slate-500); background: var(--sln-disabled-bg); color: var(--sln-disabled-ink); }
   .sln-button[data-loading="true"] { cursor: wait; }
   .sln-button[data-loading="true"] .sln-button__content { visibility: hidden; }
 
@@ -59,14 +59,14 @@
     cursor: pointer;
   }
 
-  .sln-icon-button[data-variant="default"] { border-color: var(--selinow-border-control); }
+  .sln-icon-button[data-variant="default"] { border-color: var(--sln-slate-500); }
   .sln-icon-button[data-variant="quiet"] { background: transparent; }
   .sln-icon-button[data-variant="danger"] { border-color: color-mix(in srgb, var(--sln-state-danger) 32%, var(--sln-border-default)); color: var(--sln-state-danger); }
   .sln-icon-button:hover:not(:disabled) { border-color: var(--sln-action-primary); background: var(--sln-tint-indigo); color: var(--sln-action-primary); }
 
   .sln-link-button { min-height: 44px; }
   .sln-link-button[data-variant="primary"] { padding: 10px var(--sln-space-4); background: var(--sln-action-primary); color: var(--sln-white); }
-  .sln-link-button[data-variant="secondary"] { padding: 10px var(--sln-space-4); border-color: var(--selinow-border-control); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  .sln-link-button[data-variant="secondary"] { padding: 10px var(--sln-space-4); border-color: var(--sln-slate-500); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .sln-link-button[data-variant="inline"] { color: var(--sln-action-primary); }
 
   .sln-field {
@@ -86,7 +86,7 @@
   .sln-field :where(input, select, textarea) {
     width: 100%;
     min-height: 44px;
-    border: 1px solid var(--selinow-border-control);
+    border: 1px solid var(--sln-slate-500);
     border-radius: var(--sln-radius-md);
     padding: 10px 12px;
     background: var(--sln-bg-surface);
@@ -98,7 +98,7 @@
   .sln-field :where(input, select, textarea)::placeholder { color: var(--sln-text-muted); }
   .sln-field :where(input, select, textarea):focus-visible { border-color: var(--sln-focus-ring); }
   .sln-field :where(input, select, textarea)[aria-invalid="true"] { border-color: var(--sln-state-danger); }
-  .sln-field :where(input, select, textarea):disabled { background: var(--selinow-disabled-bg); color: var(--selinow-disabled-ink); }
+  .sln-field :where(input, select, textarea):disabled { background: var(--sln-disabled-bg); color: var(--sln-disabled-ink); }
   .sln-field :where(input, textarea):read-only { background: var(--sln-bg-subtle); }
 
   .sln-field__description,
@@ -108,8 +108,8 @@
     font: var(--sln-font-caption);
   }
 
-  .sln-field__error { color: var(--selinow-danger-text); }
-  .sln-field__saved { color: var(--selinow-success-text); }
+  .sln-field__error { color: var(--sln-danger-text); }
+  .sln-field__saved { color: var(--sln-success-text); }
   .sln-secret-field__saved { display: flex; align-items: center; gap: var(--sln-space-2); }
   .sln-secret-field__saved::before { width: 8px; height: 8px; border-radius: 50%; background: var(--sln-state-success); content: ""; }
 

@@ -248,7 +248,7 @@
 
   .app-nav-unavailable { color: var(--sln-slate-500); cursor: not-allowed; }
   .app-nav-unavailable em { margin-inline-start: auto; color: var(--sln-slate-500); font-size: 9px; font-style: normal; font-weight: 650; white-space: nowrap; }
-  .app-shell :where(button:disabled, [aria-disabled="true"]) { border-color: var(--selinow-border-control); cursor: not-allowed; }
+  .app-shell :where(button:disabled, [aria-disabled="true"]) { border-color: var(--sln-slate-500); cursor: not-allowed; }
 
   .app-nav svg,
   .app-mobile-nav svg,
@@ -356,7 +356,7 @@
   .app-shell .app-status { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font-size: 11px; font-weight: 650; }
   .app-shell .app-status::before { width: 7px; height: 7px; border-radius: 50%; background: currentcolor; content: ""; }
   .app-shell .app-status[data-tone="success"] { background: var(--sln-tint-success); color: var(--sln-state-success); }
-  .app-shell .app-status[data-tone="warning"] { background: var(--sln-tint-warning); color: var(--selinow-warning-text); }
+  .app-shell .app-status[data-tone="warning"] { background: var(--sln-tint-warning); color: var(--sln-warning-text); }
   .app-shell .app-status[data-tone="danger"] { background: var(--sln-tint-danger); color: var(--sln-state-danger); }
 }
 

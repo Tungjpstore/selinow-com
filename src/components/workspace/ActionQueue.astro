@@ -49,7 +49,7 @@ const resolvedSeverityLabels: Record<Severity, string> = {
   .sln-action-queue ol { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
   .sln-action-queue li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto auto; gap: var(--sln-space-3); align-items: center; min-width: 0; padding: var(--sln-space-4) 0; border-top: 1px solid var(--sln-border-default); }
   .sln-action-queue__signal { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--sln-tint-info); color: var(--sln-state-info); font: var(--sln-font-label); }
-  .sln-action-queue li[data-severity="warning"] .sln-action-queue__signal { background: var(--sln-tint-warning); color: var(--selinow-warning-text); }
+  .sln-action-queue li[data-severity="warning"] .sln-action-queue__signal { background: var(--sln-tint-warning); color: var(--sln-warning-text); }
   .sln-action-queue li[data-severity="danger"] .sln-action-queue__signal { background: var(--sln-tint-danger); color: var(--sln-state-danger); }
   .sln-action-queue__copy { min-width: 0; }
   .sln-action-queue__copy strong { display: block; color: var(--sln-text-primary); font: var(--sln-font-label); }

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 describe("seller tenant links without JavaScript", () => {
   it("binds high-risk seller actions to the server-selected shop during SSR", async () => {
-    const [overview, catalog, data, store, billing, customers, integrations, inventory, members, orders, orderDetail, wizard, onboarding] = await Promise.all([
+    const [overview, catalog, data, store, billing, customers, integrations, inventory, members, orders, orderDetail, onboarding] = await Promise.all([
       readFile("src/pages/app/index.astro", "utf8"),
       readFile("src/pages/app/products.astro", "utf8"),
       readFile("src/pages/app/data.astro", "utf8"),
@@ -16,7 +16,6 @@ describe("seller tenant links without JavaScript", () => {
       readFile("src/pages/app/members.astro", "utf8"),
       readFile("src/pages/app/orders.astro", "utf8"),
       readFile("src/pages/app/orders/[id].astro", "utf8"),
-      readFile("src/components/dashboard/OnboardingWizard.astro", "utf8"),
       readFile("src/scripts/dashboard/onboarding.ts", "utf8"),
     ]);
 
@@ -46,8 +45,6 @@ describe("seller tenant links without JavaScript", () => {
     expect(orders).toContain('href={workspaceHref("/app/integrations")}');
     expect(orders).toContain('href={workspaceHref(`/app/orders/${order.orderId}`)}');
     expect(orderDetail).toContain('href={workspaceHref("/app/orders")}');
-    expect(wizard).toContain("data-domain-management-link");
-    expect(wizard).toContain("encodeURIComponent(initialShop.publicId)");
     expect(onboarding).toContain('domainManagementLink.href = shop === null');
     expect(onboarding).toContain('`/app/domains?shop=${encodeURIComponent(shop.publicId)}`');
   });
