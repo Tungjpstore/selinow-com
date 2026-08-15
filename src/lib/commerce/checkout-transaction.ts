@@ -16,8 +16,18 @@ import {
   type GenericEntitlementPolicySnapshot,
   type GenericEntitlementRequirementSnapshot,
 } from "./entitlements";
-import { prepareCheckoutReservationPlan, prepareReservedFulfillmentItems } from "./reservations";
+import { prepareCheckoutReservationPlan, preparePhysicalStockPlan, prepareReservedFulfillmentItems } from "./reservations";
 import { assertSupportedFulfillmentComposition, normalizeCustomerEmail } from "./policy";
+import { computeShippingFeeMinor, type ShippingAddress } from "./shipping";
+
+export type PhysicalShippingSnapshot = {
+  address: ShippingAddress;
+  /** Raw method row captured before the batch; the guard proves it unchanged. */
+  methodFreeOverMinor: number | null;
+  methodId: string;
+  methodName: string;
+  methodFeeMinor: number;
+};
 
 async function resolveOrderUsageLimit(database: D1Database, shopId: string): Promise<number | undefined> {
   try {
@@ -43,6 +53,7 @@ async function resolveOrderUsageLimit(database: D1Database, shopId: string): Pro
 
 /** Immutable catalog data copied into an order item during checkout. */
 export type CanonicalCheckoutLine = {
+  deliveryMode: "digital" | "shipping";
   fulfillmentType: "license_key" | "manual";
   priceMinor: number;
   productId: string;
@@ -108,6 +119,8 @@ export type CanonicalCheckoutTransactionInput = {
   currency: string;
   customer: CanonicalCheckoutCustomer;
   discountMinor: number;
+  /** Required for physical carts; rejected for digital-only carts. */
+  shipping?: PhysicalShippingSnapshot;
   reservationToken: string;
   lines: readonly CanonicalCheckoutLine[];
   subtotalMinor: number;
@@ -303,10 +316,10 @@ function cartSnapshotGuard(
     INNER JOIN product_variants AS variant
       ON variant.id = cart_item.variant_id AND variant.shop_id = cart_item.shop_id
     INNER JOIN products AS product
-      ON product.id = variant.product_id AND product.shop_id = variant.shop_id
+      ON product.id = variant.product_id AND product.shop_id = product.shop_id
     WHERE cart_item.cart_id = ? AND cart_item.shop_id = ?
       AND cart_item.variant_id = ? AND cart_item.quantity = ?
-      AND product.id = ? AND product.fulfillment_type = ? AND product.version = ?
+      AND product.id = ? AND product.fulfillment_type = ? AND product.delivery_mode = ? AND product.version = ?
       AND variant.status = 'active' AND product.status = 'active'
       AND cart_item.quantity BETWEEN variant.min_per_order AND variant.max_per_order
       AND variant.price_minor = ? AND variant.version = ?
@@ -342,6 +355,7 @@ function cartSnapshotGuard(
       line.quantity,
       line.productId,
       line.fulfillmentType,
+      line.deliveryMode,
       line.productVersion,
       line.priceMinor,
       line.variantVersion,
@@ -390,7 +404,24 @@ function assertInputInvariants(input: CanonicalCheckoutTransactionInput): void {
   if (input.lines.length === 0 || input.lines.some((line) => !Number.isInteger(line.quantity) || line.quantity <= 0)) throw new Error("canonical_checkout_lines_invalid");
   if (input.lines.some((line) => !Number.isSafeInteger(line.productVersion) || line.productVersion < 1 || !Number.isSafeInteger(line.variantVersion) || line.variantVersion < 1) || new Set(input.lines.map((line) => line.variantId)).size !== input.lines.length) throw new Error("canonical_checkout_lines_invalid");
   const computedSubtotal = input.lines.reduce((sum, line) => sum + line.priceMinor * line.quantity, 0);
-  if (computedSubtotal !== input.subtotalMinor || !Number.isInteger(input.discountMinor) || input.discountMinor < 0 || input.discountMinor > input.subtotalMinor || input.totalMinor !== input.subtotalMinor - input.discountMinor) throw new Error("canonical_checkout_amounts_invalid");
+  const hasShippingLines = input.lines.some((line) => line.deliveryMode === "shipping");
+  const deliveryModes = new Set(input.lines.map((line) => line.deliveryMode));
+  if (deliveryModes.size > 1) throw new AppError("mixed_fulfillment_unsupported", 409, ["split_cart_by_fulfillment"]);
+  if (hasShippingLines) {
+    // Physical goods are website-only and never free: shipping requires a
+    // payment attempt, and Telegram has no address collection surface yet.
+    if (input.channel.code !== WEBSITE_CHANNEL_CODE) throw new AppError("telegram_physical_unsupported", 409, ["use_website_checkout"]);
+    if (input.shipping === undefined) throw new AppError("validation_failed", 400, ["shipping_address_required"]);
+    if (input.totalMinor <= 0) throw new AppError("validation_failed", 400, ["physical_free_unsupported"]);
+  } else if (input.shipping !== undefined) {
+    throw new AppError("validation_failed", 400, ["shipping_method_not_applicable"]);
+  }
+  const shippingFeeMinor = input.shipping?.methodFeeMinor !== undefined
+    ? computeShippingFeeMinor({ feeMinor: input.shipping.methodFeeMinor, freeOverMinor: input.shipping.methodFreeOverMinor, id: input.shipping.methodId, name: input.shipping.methodName }, computedSubtotal - input.discountMinor)
+    : 0;
+  if (computedSubtotal !== input.subtotalMinor
+    || !Number.isInteger(input.discountMinor) || input.discountMinor < 0 || input.discountMinor > input.subtotalMinor
+    || input.totalMinor !== input.subtotalMinor - input.discountMinor + shippingFeeMinor) throw new Error("canonical_checkout_amounts_invalid");
   if (input.currency.length === 0 || input.fulfillmentIdempotencyPrefix.length === 0) throw new Error("canonical_checkout_metadata_invalid");
   assertSupportedFulfillmentComposition(input.lines);
 }
@@ -467,6 +498,33 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     reservationToken: input.reservationToken,
     shopId: input.shopId,
   });
+  const physicalStockPlan = preparePhysicalStockPlan({
+    env: input.env,
+    items: orderItems
+      .filter((item) => item.line.deliveryMode === "shipping")
+      .map((item) => ({ orderItemId: item.id, quantity: item.line.quantity, variantId: item.line.variantId })),
+    nowIso: input.nowIso,
+    reservationToken: input.reservationToken,
+    shopId: input.shopId,
+  });
+  // The shipping guard proves the fee snapshot still matches the live method
+  // row at insert time; a concurrent method edit aborts the whole batch.
+  const shippingGuardSql = input.shipping === undefined ? "1 = 1" : `EXISTS (
+    SELECT 1 FROM shop_shipping_methods AS shipping_method
+    WHERE shipping_method.shop_id = ?
+      AND shipping_method.id = ?
+      AND shipping_method.status = 'active'
+      AND shipping_method.name = ?
+      AND shipping_method.fee_minor = ?
+      AND shipping_method.free_over_minor IS ?
+  )`;
+  const shippingGuardBindings = input.shipping === undefined ? [] : [
+    input.shopId,
+    input.shipping.methodId,
+    input.shipping.methodName,
+    input.shipping.methodFeeMinor,
+    input.shipping.methodFreeOverMinor,
+  ];
   const isFree = input.totalMinor === 0;
   const hasPrivateFileFulfillment = orderItems.some((item) =>
     privateFileRequirementState.snapshots.has(item.line.productId));
@@ -514,6 +572,9 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
   const customerIdBindings = customer.valueBindings;
   const customerLookupBindings = customer.lookupBindings;
   const customerGuardBindings = customer.guardBindings;
+  const shippingFeeMinorForOrder = input.shipping === undefined
+    ? 0
+    : computeShippingFeeMinor({ feeMinor: input.shipping.methodFeeMinor, freeOverMinor: input.shipping.methodFreeOverMinor, id: input.shipping.methodId, name: input.shipping.methodName }, input.subtotalMinor - input.discountMinor);
   const snapshotGuard = cartSnapshotGuard(input, attribution, privateFileRequirementState, genericEntitlementPolicyState);
   const genericEntitlementStatements = await prepareGenericCheckoutEntitlementStatements({
     database,
@@ -527,7 +588,7 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     shopId: input.shopId,
     sourceIdempotencyHash: input.eventIdempotencyKey,
   });
-  const orderInsert = database.prepare(`INSERT INTO orders (id, public_id, shop_id, customer_id, order_number, source_channel, status, payment_status, fulfillment_status, subtotal_minor, discount_minor, total_minor, currency, locale, customer_email_masked, checkout_subject_hash, checkout_request_hash, checkout_cart_id, order_token_hash, expires_at, paid_at, fulfilled_at, created_at, updated_at) SELECT ?, ?, ?, ${customer.lookupSql}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${snapshotGuard.sql} AND ${customer.guardSql} AND ${reservationPlan.guardSql}`).bind(
+  const orderInsert = database.prepare(`INSERT INTO orders (id, public_id, shop_id, customer_id, order_number, source_channel, status, payment_status, fulfillment_status, subtotal_minor, discount_minor, shipping_method_name, shipping_fee_minor, total_minor, currency, locale, customer_email_masked, checkout_subject_hash, checkout_request_hash, checkout_cart_id, order_token_hash, expires_at, paid_at, fulfilled_at, created_at, updated_at) SELECT ?, ?, ?, ${customer.lookupSql}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${snapshotGuard.sql} AND ${customer.guardSql} AND ${reservationPlan.guardSql} AND ${physicalStockPlan.guardSql} AND ${shippingGuardSql}`).bind(
     input.orderId,
     input.orderPublicId,
     input.shopId,
@@ -540,6 +601,8 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     fulfillmentStatus,
     input.subtotalMinor,
     input.discountMinor,
+    input.shipping?.methodName ?? null,
+    shippingFeeMinorForOrder,
     input.totalMinor,
     input.currency,
     input.locale,
@@ -556,10 +619,13 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     ...snapshotGuard.bindings,
     ...customerGuardBindings,
     ...reservationPlan.guardBindings,
+    ...physicalStockPlan.guardBindings,
+    ...shippingGuardBindings,
   );
   const statements: D1PreparedStatement[] = [
     ...(customer.statement === null ? [] : [customer.statement]),
     ...reservationPlan.statements,
+    ...physicalStockPlan.statements,
     // Keep this FK-backed statement immediately after the guarded order insert:
     // a failed cart/customer/reservation guard aborts the whole D1 batch.
     orderInsert,
@@ -573,6 +639,27 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
       shopId: input.shopId,
     }),
     ...orderItems.map((item) => database.prepare("INSERT INTO order_items (id, shop_id, order_id, product_id, variant_id, product_title, variant_title, sku, unit_price_minor, quantity, line_total_minor, fulfillment_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(item.id, input.shopId, input.orderId, item.line.productId, item.line.variantId, item.line.productTitle, item.line.title, item.line.sku, item.line.priceMinor, item.line.quantity, item.line.priceMinor * item.line.quantity, item.line.fulfillmentType, input.nowIso)),
+    ...(input.shipping === undefined ? [] : [database.prepare(`
+      INSERT INTO order_shipping_addresses (
+        id, shop_id, order_id, full_name, phone, address_line,
+        ward, district, province, notes, created_at
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM orders WHERE shop_id = ? AND id = ?)
+    `).bind(
+      createId("osa"),
+      input.shopId,
+      input.orderId,
+      input.shipping.address.fullName,
+      input.shipping.address.phone,
+      input.shipping.address.addressLine,
+      input.shipping.address.ward,
+      input.shipping.address.district,
+      input.shipping.address.province,
+      input.shipping.address.notes,
+      input.nowIso,
+      input.shopId,
+      input.orderId,
+    )]),
     ...orderItems.flatMap((item) => {
       const requirement = privateFileRequirementState.snapshots.get(item.line.productId);
       if (requirement === undefined) return [];

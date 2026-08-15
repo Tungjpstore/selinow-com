@@ -21,7 +21,7 @@ describe("products table server-side contract", () => {
     expect(store).toContain("export async function listSellerProductsPage");
     expect(store).toContain("LIMIT ? OFFSET ?");
     expect(store).toContain("products.shop_id = ?");
-    expect(store).toContain("category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, version, created_at AS createdAt, updated_at AS updatedAt FROM products");
+    expect(store).toContain("category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, delivery_mode AS deliveryMode, version, created_at AS createdAt, updated_at AS updatedAt FROM products");
 
     // Low-stock uses the real shop threshold, never a hardcoded 5.
     expect(page).toContain("lowStockThreshold");

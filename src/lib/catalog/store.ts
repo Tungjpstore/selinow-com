@@ -91,7 +91,7 @@ function mapCatalogCurrencyWriteError(error: unknown): AppError | null {
 }
 
 export type CategoryInput = { description: string; name: string; slug: string; sortOrder: number; status: "active" | "archived" | "draft" };
-export type ProductInput = { categoryId: string | null; description: string; fulfillmentType: "license_key" | "manual"; slug: string; status: "active" | "archived" | "draft" | "suspended"; title: string };
+export type ProductInput = { categoryId: string | null; deliveryMode?: "digital" | "shipping"; description: string; fulfillmentType: "license_key" | "manual"; slug: string; status: "active" | "archived" | "draft" | "suspended"; title: string };
 export type VariantInput = { compareAtMinor: number | null; currency: string | undefined; maxPerOrder: number; minPerOrder: number; optionsJson: string; priceMinor: number; sku: string; status: "active" | "archived" | "suspended"; title: string };
 
 export type ProductView = ProductInput & { createdAt: string; id: string; updatedAt: string; version: number };
@@ -112,7 +112,7 @@ export async function listSellerCatalog(input: { env: AppBindings; shopPublicId:
   const actor = await requireCatalogActor(input.env, input.shopPublicId, input.userId, "read");
   const [categories, products, variants] = await Promise.all([
     input.env.PLATFORM_DB.prepare(`SELECT id, slug, name, description, sort_order AS sortOrder, status, created_at AS createdAt, updated_at AS updatedAt FROM product_categories WHERE shop_id = ? ORDER BY sort_order, id LIMIT 500`).bind(actor.shopId).all(),
-    input.env.PLATFORM_DB.prepare(`SELECT id, category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, version, created_at AS createdAt, updated_at AS updatedAt FROM products WHERE shop_id = ? ORDER BY created_at, id LIMIT 500`).bind(actor.shopId).all(),
+    input.env.PLATFORM_DB.prepare(`SELECT id, category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, delivery_mode AS deliveryMode, version, created_at AS createdAt, updated_at AS updatedAt FROM products WHERE shop_id = ? ORDER BY created_at, id LIMIT 500`).bind(actor.shopId).all(),
     input.env.PLATFORM_DB.prepare(`
       SELECT product_variants.id, product_variants.product_id AS productId,
         product_variants.sku, product_variants.title,
@@ -238,7 +238,7 @@ export async function listSellerProductsPage(input: {
     ),
     product_ledger AS (
       SELECT products.id, products.category_id AS categoryId, products.slug, products.title,
-        products.description, products.status, products.fulfillment_type AS fulfillmentType,
+        products.description, products.status, products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode,
         products.version, products.created_at AS createdAt, products.updated_at AS updatedAt,
         COALESCE(product_stock.stock, 0) AS stock,
         COALESCE(product_stock.variantCount, 0) AS variantCount,
@@ -300,14 +300,17 @@ export async function createProduct(input: { data: ProductInput; env: AppBinding
   }
   const id = createId("prd");
   const now = new Date().toISOString();
+  // Direct store callers (tests, internal tools) may predate the delivery-mode
+  // field; keep the write path tolerant of a missing value.
+  const deliveryMode = input.data.deliveryMode ?? "digital";
   try {
     const limit = planLimit(actor.limits, "products_non_archived");
     const product = await input.env.PLATFORM_DB.prepare(`
-      INSERT INTO products (id, shop_id, category_id, slug, title, description, status, fulfillment_type, version, created_at, updated_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+      INSERT INTO products (id, shop_id, category_id, slug, title, description, status, fulfillment_type, delivery_mode, version, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
       WHERE ? = 'archived' OR ? IS NULL OR (SELECT COUNT(*) FROM products WHERE shop_id = ? AND status != 'archived') < ?
-      RETURNING id, category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, version, created_at AS createdAt, updated_at AS updatedAt
-    `).bind(id, actor.shopId, input.data.categoryId, input.data.slug, input.data.title, input.data.description, input.data.status, input.data.fulfillmentType, now, now, input.data.status, limit, actor.shopId, limit).first<ProductView>();
+      RETURNING id, category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, delivery_mode AS deliveryMode, version, created_at AS createdAt, updated_at AS updatedAt
+    `).bind(id, actor.shopId, input.data.categoryId, input.data.slug, input.data.title, input.data.description, input.data.status, input.data.fulfillmentType, deliveryMode, now, now, input.data.status, limit, actor.shopId, limit).first<ProductView>();
     if (product === null && input.data.status !== "archived") throw new AppError("quota_exceeded", 409, ["products_non_archived"]);
     if (product === null) throw new AppError("catalog_conflict", 409);
     await meterProductCreate({ actor, database: input.env.PLATFORM_DB, limit, now: new Date(now), product });
@@ -454,9 +457,9 @@ export async function createProductWithInitialVariant(input: {
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO products (
           id, shop_id, category_id, slug, title, description, status,
-          fulfillment_type, version, created_at, updated_at
+          fulfillment_type, delivery_mode, version, created_at, updated_at
         )
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
         WHERE ? = 'archived' OR ? IS NULL OR (
           SELECT COUNT(*) FROM products WHERE shop_id = ? AND status != 'archived'
         ) < ?
@@ -469,6 +472,7 @@ export async function createProductWithInitialVariant(input: {
         input.data.description,
         input.data.status,
         input.data.fulfillmentType,
+        input.data.deliveryMode ?? "digital",
         nowIso,
         nowIso,
         input.data.status,
@@ -598,7 +602,7 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
     const row = await input.env.PLATFORM_DB.prepare(`
       UPDATE products AS target
       SET category_id = ?, slug = ?, title = ?, description = ?, status = ?,
-        fulfillment_type = ?, version = version + 1, updated_at = ?
+        fulfillment_type = ?, delivery_mode = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND shop_id = ?
         AND (
           ? = 'archived'
@@ -624,7 +628,7 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
           ), 0) = 0
         )
       RETURNING id, category_id AS categoryId, slug, title, description, status,
-        fulfillment_type AS fulfillmentType, version, created_at AS createdAt, updated_at AS updatedAt
+        fulfillment_type AS fulfillmentType, delivery_mode AS deliveryMode, version, created_at AS createdAt, updated_at AS updatedAt
     `).bind(
       input.data.categoryId,
       input.data.slug,
@@ -632,6 +636,7 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
       input.data.description,
       input.data.status,
       input.data.fulfillmentType,
+      input.data.deliveryMode ?? "digital",
       new Date().toISOString(),
       input.productId,
       actor.shopId,

@@ -8,24 +8,26 @@ import { resolveEncryptionKey } from "../crypto/keyring";
 import type { AppBindings } from "../platform/bindings";
 import type { StorefrontShop } from "../storefront/store";
 import { assertCheckoutAllowed } from "../tenants/policy";
+import type { CommerceQuoteView } from "./contracts";
 import type { CartItemInput } from "./policy";
 import { maskEmail, normalizeCustomerEmail } from "./policy";
 import { verifyQuoteEvidence, type QuoteEvidenceCatalogItem } from "./quote-evidence";
 import { executeCanonicalCheckoutTransaction } from "./checkout-transaction";
 import { calculateCartDiscountMinor } from "./pricing";
+import { computeShippingFeeMinor, parseShippingAddress, resolveShippingMethod, type ShippingAddress, type ShippingMethodSnapshot } from "./shipping";
 import { createCanonicalCart } from "./cart-creation";
 import { projectCanonicalCartQuote } from "./cart-quote";
 import { isBuyerOrderRecoveryBinding, resolveCurrentBuyerOrderRecoveryToken } from "./buyer-order-recovery";
 
 type PublicShop = StorefrontShop;
-type CheckoutVariant = { availableStock: number; currency: string; fulfillmentType: "license_key" | "manual"; maxPerOrder: number; minPerOrder: number; priceMinor: number; productId: string; productStatus: string; productTitle: string; productVersion: number; sku: string; status: string; title: string; variantId: string; version: number };
+type CheckoutVariant = { availableStock: number; currency: string; deliveryMode: "digital" | "shipping"; fulfillmentType: "license_key" | "manual"; maxPerOrder: number; minPerOrder: number; priceMinor: number; productId: string; productStatus: string; productTitle: string; productVersion: number; sku: string; status: string; title: string; variantId: string; version: number };
 type CartRow = { cartId: string; discountCode: string | null; expiresAt: string; locale: string; state: string; subjectHash: string };
 
 const WEBSITE_ORDER_ATTRIBUTION = resolveOrderChannelAttribution(WEBSITE_CHANNEL_CODE);
 
 async function loadVariants(env: AppBindings, shopId: string, ids: string[]): Promise<Map<string, CheckoutVariant>> {
   if (ids.length === 0) return new Map();
-  const result = await env.PLATFORM_DB.prepare(`SELECT product_variants.id AS variantId, product_variants.product_id AS productId, product_variants.sku, product_variants.title, product_variants.price_minor AS priceMinor, product_variants.currency, product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder, product_variants.status, product_variants.version, products.title AS productTitle, products.status AS productStatus, products.version AS productVersion, products.fulfillment_type AS fulfillmentType, COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock FROM product_variants INNER JOIN products ON products.id = product_variants.product_id AND products.shop_id = product_variants.shop_id LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE product_variants.shop_id = ? AND product_variants.id IN (${ids.map(() => "?").join(",")}) GROUP BY product_variants.id`).bind(shopId, ...ids).all<CheckoutVariant>();
+  const result = await env.PLATFORM_DB.prepare(`SELECT product_variants.id AS variantId, product_variants.product_id AS productId, product_variants.sku, product_variants.title, product_variants.price_minor AS priceMinor, product_variants.currency, product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder, product_variants.status, product_variants.version, products.title AS productTitle, products.status AS productStatus, products.version AS productVersion, products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode, CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved FROM variant_stock_levels WHERE variant_stock_levels.shop_id = product_variants.shop_id AND variant_stock_levels.variant_id = product_variants.id), 0) ELSE COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) END AS availableStock FROM product_variants INNER JOIN products ON products.id = product_variants.product_id AND products.shop_id = product_variants.shop_id LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE product_variants.shop_id = ? AND product_variants.id IN (${ids.map(() => "?").join(",")}) GROUP BY product_variants.id`).bind(shopId, ...ids).all<CheckoutVariant>();
   return new Map(result.results.map((row) => [row.variantId, row]));
 }
 
@@ -35,7 +37,7 @@ function assertPurchasable(items: CartItemInput[], variants: Map<string, Checkou
     if (variant === undefined || variant.status !== "active" || variant.productStatus !== "active") throw new AppError("catalog_changed", 409);
     if (variant.currency !== currency) throw new AppError("catalog_changed", 409);
     if (item.quantity < variant.minPerOrder || item.quantity > variant.maxPerOrder) throw new AppError("quantity_unavailable", 409);
-    if (variant.fulfillmentType === "license_key" && variant.availableStock < item.quantity) throw new AppError("inventory_unavailable", 409);
+    if ((variant.fulfillmentType === "license_key" || variant.deliveryMode === "shipping") && variant.availableStock < item.quantity) throw new AppError("inventory_unavailable", 409);
     return variant;
   });
 }
@@ -65,6 +67,7 @@ export async function loadWebsiteCheckoutState(input: {
   cartId: string;
   cartToken: string;
   env: AppBindings;
+  shippingMethodId?: string;
   shop: PublicShop;
 }): Promise<{
   cart: CartRow;
@@ -84,6 +87,7 @@ export async function loadWebsiteCheckoutState(input: {
     discountCode: cart.row.discountCode,
     env: input.env,
     lines,
+    ...(input.shippingMethodId === undefined ? {} : { shippingMethodId: input.shippingMethodId }),
     shop: input.shop,
   });
   return { cart: cart.row, lines, quote };
@@ -114,8 +118,14 @@ async function verifyReplayProof(input: {
   });
 }
 
-export async function quoteCart(input: { cartId: string; cartToken: string; env: AppBindings; shop: PublicShop }): Promise<{ currency: string; discountMinor: number; expiresAt: string; items: Array<{ lineTotalMinor: number; productTitle: string; quantity: number; unitPriceMinor: number; variantId: string; variantTitle: string; variantVersion: number }>; quoteEvidence: string; subtotalMinor: number; totalMinor: number }> {
-  const { quote } = await loadWebsiteCheckoutState(input);
+export async function quoteCart(input: { cartId: string; cartToken: string; env: AppBindings; shippingMethodId?: string; shop: PublicShop }): Promise<CommerceQuoteView & { items: Array<{ lineTotalMinor: number; productTitle: string; quantity: number; unitPriceMinor: number; variantId: string; variantTitle: string; variantVersion: number }>; quoteEvidence: string }> {
+  const { quote } = await loadWebsiteCheckoutState({
+    cartId: input.cartId,
+    cartToken: input.cartToken,
+    env: input.env,
+    ...(input.shippingMethodId === undefined ? {} : { shippingMethodId: input.shippingMethodId }),
+    shop: input.shop,
+  });
   if (quote.quoteEvidence === undefined) throw new AppError("commerce_contract_invalid", 500, ["quote_evidence_invalid"]);
   return { ...quote, items: [...quote.items], quoteEvidence: quote.quoteEvidence };
 }
@@ -136,6 +146,7 @@ export async function websiteCheckoutFingerprint(input: {
   discountCode: string | null;
   discountMinor: number;
   expected: readonly ExpectedItem[];
+  shipping?: { feeMinor: number; methodId: string };
   totalMinor: number;
 }): Promise<string> {
   return sha256Json({
@@ -146,11 +157,12 @@ export async function websiteCheckoutFingerprint(input: {
     // Quote evidence is order-insensitive; keep the durable request hash
     // aligned so semantically identical line order cannot conflict on retry.
     expected: [...input.expected].sort((left, right) => left.variantId.localeCompare(right.variantId)),
+    ...(input.shipping === undefined ? {} : { shippingFeeMinor: input.shipping.feeMinor, shippingMethodId: input.shipping.methodId }),
     totalMinor: input.totalMinor,
   });
 }
 
-export async function checkoutCart(input: { cartId: string; cartToken: string; customerEmail: string | null; env: AppBindings; expected: ExpectedItem[]; idempotencyKey: string; quoteEvidence?: string; shop: PublicShop }): Promise<{ currency: string; expiresAt: string; fulfillmentStatus: string; orderId: string; orderNumber: string; orderToken: string; paymentStatus: string; status: string; totalMinor: number }> {
+export async function checkoutCart(input: { cartId: string; cartToken: string; customerEmail: string | null; env: AppBindings; expected: ExpectedItem[]; idempotencyKey: string; quoteEvidence?: string; shop: PublicShop; shipping?: { address: unknown; methodId: unknown } }): Promise<{ currency: string; expiresAt: string; fulfillmentStatus: string; orderId: string; orderNumber: string; orderToken: string; paymentStatus: string; status: string; totalMinor: number }> {
   assertSubscriptionAllows({ currentPeriodEnd: input.shop.currentPeriodEnd, graceEndsAt: input.shop.graceEndsAt, subscriptionState: input.shop.subscriptionState, trialEndsAt: input.shop.trialEndsAt });
   assertCheckoutAllowed({ shopStatus: input.shop.status, subscriptionState: input.shop.subscriptionState });
   const customerEmail = normalizeCustomerEmail(input.customerEmail);
@@ -164,13 +176,20 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
   ).bind(input.cartId, input.shop.id).first<{ discountCode: string | null }>();
   const hashSubtotalMinor = input.expected.reduce((sum, item) => sum + item.unitPriceMinor * item.quantity, 0);
   const hashDiscountMinor = await calculateCartDiscountMinor({ code: hashCart?.discountCode ?? null, env: input.env, shop: input.shop, subtotalMinor: hashSubtotalMinor });
+  // Physical carts supply a shipping method; resolve it now so the request
+  // hash binds the same fee the authoritative pass recomputes after cart load.
+  const hashShipping = typeof input.shipping?.methodId === "string"
+    ? await resolveShippingMethod(input.env, input.shop.id, input.shipping.methodId)
+    : null;
+  const hashShippingFee = hashShipping === null ? 0 : computeShippingFeeMinor(hashShipping, hashSubtotalMinor - hashDiscountMinor);
   const requestHash = await websiteCheckoutFingerprint({
     cartId: input.cartId,
     customerEmail,
     discountCode: hashCart?.discountCode ?? null,
     discountMinor: hashDiscountMinor,
     expected: input.expected,
-    totalMinor: hashSubtotalMinor - hashDiscountMinor,
+    ...(hashShipping === null ? {} : { shipping: { feeMinor: hashShippingFee, methodId: hashShipping.id } }),
+    totalMinor: hashSubtotalMinor - hashDiscountMinor + hashShippingFee,
   });
   const orderToken = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `order-access-token:${input.shop.id}`, input.idempotencyKey);
   const recoverReplay = async () => {
@@ -289,13 +308,26 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
     return sum + variant.priceMinor * item.quantity;
   }, 0);
   const discountMinor = await calculateCartDiscountMinor({ code: cart.row.discountCode, env: input.env, shop: input.shop, subtotalMinor });
-  const totalMinor = subtotalMinor - discountMinor;
+  const hasPhysicalLines = ordered.some((variant) => variant.deliveryMode === "shipping");
+  if (!hasPhysicalLines && input.shipping !== undefined) throw new AppError("validation_failed", 400, ["shipping_method_not_applicable"]);
+  let shippingAddress: ShippingAddress | null = null;
+  let shippingMethod: ShippingMethodSnapshot | null = null;
+  let shippingFeeMinor = 0;
+  if (hasPhysicalLines) {
+    if (input.shipping === undefined || typeof input.shipping.methodId !== "string") throw new AppError("validation_failed", 400, ["shipping_address_required"]);
+    shippingAddress = parseShippingAddress(input.shipping.address);
+    shippingMethod = await resolveShippingMethod(input.env, input.shop.id, input.shipping.methodId);
+    shippingFeeMinor = computeShippingFeeMinor(shippingMethod, subtotalMinor - discountMinor);
+  }
+  const totalMinor = subtotalMinor - discountMinor + shippingFeeMinor;
+  if (hasPhysicalLines && totalMinor <= 0) throw new AppError("validation_failed", 400, ["physical_free_unsupported"]);
   const authoritativeRequestHash = await websiteCheckoutFingerprint({
     cartId: input.cartId,
     customerEmail,
     discountCode: cart.row.discountCode,
     discountMinor,
     expected: input.expected,
+    ...(shippingMethod === null ? {} : { shipping: { feeMinor: shippingFeeMinor, methodId: shippingMethod.id } }),
     totalMinor,
   });
   if (authoritativeRequestHash !== requestHash) throw new AppError("checkout_changed", 409);
@@ -306,7 +338,12 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
       evidence: input.quoteEvidence,
       catalog: quoteCatalog(input.expected, ordered),
       expected: input.expected,
-      pricing: { discountCode: cart.row.discountCode, discountMinor, totalMinor },
+      pricing: {
+        discountCode: cart.row.discountCode,
+        discountMinor,
+        ...(shippingMethod === null ? {} : { shippingFeeMinor, shippingMethodId: shippingMethod.id }),
+        totalMinor,
+      },
       requireCatalog: true,
       secret: input.env.IDENTIFIER_HMAC_SECRET,
       shopId: input.shop.id,
@@ -323,6 +360,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
     const variant = ordered[index];
     if (variant === undefined) throw new AppError("catalog_changed", 409);
     return {
+      deliveryMode: variant.deliveryMode,
       fulfillmentType: variant.fulfillmentType,
       priceMinor: variant.priceMinor,
       productId: variant.productId,
@@ -357,6 +395,15 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
       orderPublicId,
       orderTokenHash,
       reservationToken,
+      ...(shippingMethod === null || shippingAddress === null ? {} : {
+        shipping: {
+          address: shippingAddress,
+          methodFeeMinor: shippingMethod.feeMinor,
+          methodFreeOverMinor: shippingMethod.freeOverMinor,
+          methodId: shippingMethod.id,
+          methodName: shippingMethod.name,
+        },
+      }),
       shopId: input.shop.id,
       subtotalMinor,
       totalMinor,
@@ -395,6 +442,9 @@ async function authorizeOrder(input: { env: AppBindings; orderPublicId: string; 
       orders.order_number AS orderNumber, orders.source_channel AS sourceChannel,
       orders.status, orders.payment_status AS paymentStatus,
       orders.fulfillment_status AS fulfillmentStatus,
+      orders.subtotal_minor AS subtotalMinor,
+      orders.shipping_method_name AS shippingMethodName,
+      orders.shipping_fee_minor AS shippingFeeMinor,
       orders.total_minor AS totalMinor, orders.currency,
       orders.customer_email_masked AS customerEmail,
       orders.order_token_hash AS orderTokenHash,
@@ -428,10 +478,30 @@ async function authorizeOrder(input: { env: AppBindings; orderPublicId: string; 
 export async function getOrder(input: { env: AppBindings; orderPublicId: string; orderToken: string; shop: PublicShop }): Promise<unknown> {
   const row = await authorizeOrder(input);
   const items = await input.env.PLATFORM_DB.prepare("SELECT id, product_title AS productTitle, variant_title AS variantTitle, sku, unit_price_minor AS unitPriceMinor, quantity, line_total_minor AS lineTotalMinor, fulfillment_type AS fulfillmentType FROM order_items WHERE order_id = ? AND shop_id = ? ORDER BY id").bind(row.id, input.shop.id).all<Record<string, unknown> & { id: string }>();
+  // Shipping projection: the buyer re-reads the address they entered plus the
+  // seller's dispatch progress. Nothing here exposes seller-private state.
+  const shippingAddress = await input.env.PLATFORM_DB.prepare(`
+    SELECT full_name AS fullName, phone, address_line AS addressLine,
+      ward, district, province, notes
+    FROM order_shipping_addresses
+    WHERE shop_id = ? AND order_id = ?
+    LIMIT 1
+  `).bind(input.shop.id, row.id).first();
+  const shipments = await input.env.PLATFORM_DB.prepare(`
+    SELECT shipping_state AS shippingState, carrier, tracking_code AS trackingCode, created_at AS createdAt
+    FROM fulfillments
+    WHERE shop_id = ? AND order_id = ? AND shipping_state IS NOT NULL
+    ORDER BY created_at, id
+  `).bind(input.shop.id, row.id).all();
   const safeOrder: Record<string, unknown> = { ...row };
   delete safeOrder.id;
   delete safeOrder.orderTokenHash;
-  return { ...safeOrder, items: items.results };
+  return {
+    ...safeOrder,
+    ...(shippingAddress === null ? {} : { shippingAddress }),
+    ...(row.shippingMethodName === null ? {} : { shipments: shipments.results }),
+    items: items.results,
+  };
 }
 
 export async function getOrderKeys(input: { env: AppBindings; orderPublicId: string; orderToken: string; shop: PublicShop }): Promise<unknown> {
@@ -492,6 +562,38 @@ export async function expireUnpaidOrders(env: AppBindings, nowIso = new Date().t
     const changed = await env.PLATFORM_DB.prepare("UPDATE orders SET status = 'expired', payment_status = 'expired', fulfillment_status = 'unfulfilled', updated_at = ? WHERE id = ? AND shop_id = ? AND status = 'pending_payment' AND payment_status = 'unpaid' AND expires_at <= ?").bind(nowIso, order.id, order.shopId, nowIso).run();
     if (changed.meta.changes !== 1) continue;
     await env.PLATFORM_DB.prepare(`UPDATE inventory_keys SET status = 'available', reservation_token = NULL, reserved_order_item_id = NULL, reserved_until = NULL WHERE shop_id = ? AND status = 'reserved' AND reserved_order_item_id IN (SELECT id FROM order_items WHERE order_id = ? AND shop_id = ?) AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND shop_id = ? AND status = 'expired' AND payment_status = 'expired')`).bind(order.shopId, order.id, order.shopId, order.id, order.shopId).run();
+    // Release physical stock by the order's item quantities; the availability
+    // predicate keeps the reserved >= 0 invariant even under double release.
+    await env.PLATFORM_DB.prepare(`
+      UPDATE variant_stock_levels
+      SET reserved = reserved - (
+          SELECT COALESCE(SUM(order_items.quantity), 0)
+          FROM order_items
+          WHERE order_items.shop_id = variant_stock_levels.shop_id
+            AND order_items.variant_id = variant_stock_levels.variant_id
+            AND order_items.order_id = ?
+        ),
+        updated_at = ?
+      WHERE shop_id = ?
+        AND EXISTS (
+          SELECT 1 FROM orders
+          WHERE orders.shop_id = variant_stock_levels.shop_id
+            AND orders.id = ? AND orders.status = 'expired' AND orders.payment_status = 'expired'
+        )
+        AND EXISTS (
+          SELECT 1 FROM order_items
+          WHERE order_items.shop_id = variant_stock_levels.shop_id
+            AND order_items.variant_id = variant_stock_levels.variant_id
+            AND order_items.order_id = ?
+        )
+        AND reserved >= (
+          SELECT COALESCE(SUM(order_items.quantity), 0)
+          FROM order_items
+          WHERE order_items.shop_id = variant_stock_levels.shop_id
+            AND order_items.variant_id = variant_stock_levels.variant_id
+            AND order_items.order_id = ?
+        )
+    `).bind(order.id, nowIso, order.shopId, order.id, order.id, order.id).run();
     expired += 1;
   }
   return expired;

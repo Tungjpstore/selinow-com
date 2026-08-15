@@ -392,6 +392,57 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       product_images_transition_guard: "e739b429922139787c62c870159e29cffd199b0b0dc6dd4071f417697616a4b2",
     }),
   }),
+  "0102_physical_goods_vertical.sql": Object.freeze({
+    columns: Object.freeze({
+      "shops.vertical": Object.freeze({ defaultValue: "'digital'", notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "products.delivery_mode": Object.freeze({ defaultValue: "'digital'", notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "orders.shipping_method_name": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "orders.shipping_fee_minor": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "fulfillments.shipping_state": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "fulfillments.carrier": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "fulfillments.tracking_code": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "variant_stock_levels.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "variant_stock_levels.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "variant_stock_levels.variant_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "variant_stock_levels.on_hand": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "variant_stock_levels.reserved": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "variant_stock_levels.active_reservation_token": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "variant_stock_levels.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "shop_shipping_methods.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.name": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.fee_minor": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "shop_shipping_methods.free_over_minor": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "INTEGER" }),
+      "shop_shipping_methods.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.sort_order": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "shop_shipping_methods.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "order_shipping_addresses.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.order_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.full_name": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.phone": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.address_line": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.ward": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.district": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.province": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.notes": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_order_shipping_addresses_order: "d0d92b593f354e03f587ff91212dcae7ff7e8cbf0b147397eaa16e4db60bfe62",
+      idx_product_variants_shop_id: "d4456020e4f70b628a40d33fa9334bd0426cb2f3a764e7a090455968430ce1ac",
+      idx_shop_shipping_methods_shop: "990c4548437975494c6a992d48e2f14327bd380330691e55dc223d4238534ad3",
+      idx_variant_stock_levels_variant: "61b065e97908b93c54efc9d052afc78558508e940d62c3f8cf58a0f669dd6d06",
+      order_shipping_addresses: "b4345def18abc7aa238eb4fdbcf5accc7d9e9622c5c9436eb17934b9e214dda9",
+      order_shipping_addresses_identity_immutable: "336a0c9583630b45d5842e0982066ecade0aede5449a8494a9bc434b301f47ab",
+      shop_shipping_methods: "05bef084e15e6225461b5d47a7060ad6d68b9b2b651f85075e3b004c4af4ec1c",
+      shop_shipping_methods_identity_immutable: "2a14d6bbd1be2dd70d4e78ed03fb79b741ba060da8c6d7dbf51db3150735be21",
+      shop_shipping_methods_transition_guard: "14f088052d0b818aab379c4b94485de650a8a917d9718ed05a62c094e4fd95aa",
+      variant_stock_levels: "af580bdab62db761db5ce0fa25064c337131628811d2a067a7c8ac6874190356",
+      variant_stock_levels_identity_immutable: "5e0c41010514558fc2c18e4afa8a8548dadd88c9338c65ee4b6b8b1563076bc3",
+    }),
+  }),
 });
 
 
@@ -2252,7 +2303,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_request_admissions", "media_assets", "order_access_recovery_tokens", "payment_credentials", "payment_integrations", "product_images", "telegram_actions", "telegram_action_history", "telegram_updates"].includes(row?.name)) expectedType = "table";
+    if (["auth_request_admissions", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "telegram_actions", "telegram_action_history", "telegram_updates", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");

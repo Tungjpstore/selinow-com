@@ -18,10 +18,12 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const shop = await resolveStorefrontShop(request, env);
     assertStorefrontCheckout(shop);
     const body = await readJsonObject(request);
-    rejectUnknownFields(body, ["cartId", "cartToken", "customerEmail", "expected", "quoteEvidence", "turnstileToken"]);
+    rejectUnknownFields(body, ["cartId", "cartToken", "customerEmail", "expected", "quoteEvidence", "shipping", "turnstileToken"]);
     await guardAnonymousCheckout({ env, request, shop, turnstileToken: body.turnstileToken });
     const cart = requireWebsiteCartReference(body.cartId, body.cartToken);
     if (typeof body.quoteEvidence !== "string" || body.quoteEvidence.length < 40 || body.quoteEvidence.length > 4_096) throw new AppError("quote_invalid", 409);
+    if (body.shipping !== undefined && (typeof body.shipping !== "object" || body.shipping === null || Array.isArray(body.shipping))) throw new AppError("validation_failed", 400, ["shipping_address_invalid"]);
+    const shipping = body.shipping === undefined ? undefined : body.shipping as { address?: unknown; methodId?: unknown };
     const order = await createWebsiteCommerceApplication(env, shop).checkoutCart({
       actor: { kind: "anonymous" },
       channel: { code: WEBSITE_CHANNEL_CODE, connectionId: null },
@@ -34,6 +36,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       expected: parseWebsiteCheckoutExpected(body.expected),
       idempotencyKey: request.headers.get("Idempotency-Key") ?? "",
       quoteEvidence: body.quoteEvidence,
+      ...(shipping === undefined ? {} : { shipping: { address: shipping.address, methodId: shipping.methodId } }),
     });
     if (order.access.kind !== "opaque_token") throw new AppError("commerce_contract_invalid", 500, ["website_order_access_invalid"]);
     return Response.json({ ok: true, order: {

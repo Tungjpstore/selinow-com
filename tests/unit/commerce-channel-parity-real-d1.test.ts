@@ -2031,6 +2031,7 @@ describe("canonical commerce channel parity on local D1", () => {
       discountMinor: 0,
       reservationToken: "reservation-core-cross-tenant-0001",
       lines: [{
+        deliveryMode: "digital",
         fulfillmentType: "license_key",
         priceMinor: quoteItem.unitPriceMinor,
         productId: "product-paid",
