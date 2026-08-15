@@ -84,7 +84,7 @@ describe("provider surface audit", () => {
       .split(/\r?\n/)
       .slice(1)
       .map(parseCsvRow);
-    expect(rows).toHaveLength(166);
+    expect(rows).toHaveLength(178);
 
 
 
@@ -106,6 +106,11 @@ describe("provider surface audit", () => {
     expect(inventory).toContain("/api/channels/telegram-mini-app/checkout/:shopPublicId");
     expect(inventory).toContain("/api/channels/telegram-mini-app/orders/:shopPublicId/:orderId");
     expect(inventory).toContain("/api/auth/login-2fa");
+    expect(inventory).toContain("/api/app/account/enable-2fa-request");
+    expect(inventory).toContain("/api/app/account/enable-2fa-verify");
+    expect(inventory).toContain("/api/app/account/disable-2fa");
+    expect(inventory).toContain("/api/app/account/change-password");
+    expect(inventory).toContain("/api/app/account/login-history");
     expect(inventory).toContain("/api/admin/operations");
     expect(inventory).toContain("/api/admin/operations/dead-letters/:deadLetterId");
     expect(inventory).toContain("/api/admin/operations/deletions/:deletionRequestId/legal-hold");

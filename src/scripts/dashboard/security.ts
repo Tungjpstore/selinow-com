@@ -10,9 +10,20 @@ type SafeSession = {
 
 type ApiPayload = {
   code?: unknown;
+  cooldownSeconds?: unknown;
+  enabledAt?: unknown;
+  entries?: unknown;
+  issues?: unknown;
   requestId?: unknown;
+  revokedSessionCount?: unknown;
   revokedCount?: unknown;
   sessions?: unknown;
+};
+
+type HistoryEntry = {
+  id: string;
+  occurredAt: string;
+  outcome: string;
 };
 
 class SecurityApiError extends Error {
@@ -63,14 +74,35 @@ if (root !== null) {
     feedback.focus({ preventScroll: true });
   };
 
+  const issueMessage = (issue: string): string => {
+    if (issue.startsWith("otp_incorrect_")) return t("dashboard.security.client.error.otp_incorrect");
+    const issueMessages: Readonly<Record<string, string>> = {
+      current_password_invalid: t("dashboard.security.client.error.current_password_invalid"),
+      otp_expired_or_invalid: t("dashboard.security.client.error.otp_expired"),
+      otp_max_attempts_exceeded: t("dashboard.security.client.error.otp_max_attempts"),
+      password_complexity_failed: t("dashboard.security.client.error.password_policy"),
+      password_same_as_current: t("dashboard.security.client.error.password_same_as_current"),
+      password_too_long: t("dashboard.security.client.error.password_policy"),
+      password_too_short: t("dashboard.security.client.error.password_policy"),
+      password_too_weak: t("dashboard.security.client.error.password_policy"),
+      reauthentication_required: t("dashboard.security.client.error.reauthentication_required"),
+      two_factor_challenge_expired: t("dashboard.security.client.error.otp_expired"),
+    };
+    return issueMessages[issue] ?? t("dashboard.security.client.error.generic");
+  };
+
   const errorMessage = (payload: ApiPayload): string => {
     const code = typeof payload.code === "string" ? payload.code : "invalid_response";
+    const issue = Array.isArray(payload.issues) && typeof payload.issues[0] === "string" ? payload.issues[0] : "";
     const messages: Readonly<Record<string, string>> = {
+      account_locked: t("dashboard.security.client.error.account_locked"),
       authentication_required: t("dashboard.security.client.error.authentication_required"),
       csrf_invalid: t("dashboard.security.client.error.csrf_invalid"),
       csrf_missing: t("dashboard.security.client.error.csrf_missing"),
       invalid_response: t("dashboard.security.client.error.invalid_response"),
+      rate_limited: t("dashboard.security.client.error.rate_limited"),
       recent_auth_required: t("dashboard.security.client.error.recent_auth_required"),
+      validation_failed: issueMessage(issue),
     };
     const requestId = safeRequestId(payload.requestId);
     return `${messages[code] ?? t("dashboard.security.client.error.generic")}${requestId === null
@@ -231,7 +263,249 @@ if (root !== null) {
     else window.location.assign("/login");
   });
 
+  // --------------------------------------------------
+  // Account tabs: 2FA enrollment, password, login history
+  // --------------------------------------------------
+  const activeTab = root.dataset.activeTab ?? "sessions";
+
+  const postAccount = async (path: string, body: Record<string, unknown>): Promise<ApiPayload> => {
+    const response = await fetch(path, {
+      body: JSON.stringify(body),
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken(),
+      },
+      method: "POST",
+    });
+    const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload;
+    if (!response.ok) throw new SecurityApiError(payload);
+    return payload;
+  };
+
+  const getAccount = async (path: string): Promise<ApiPayload> => {
+    const response = await fetch(path, {
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "X-CSRF-Token": csrfToken(),
+      },
+      method: "GET",
+    });
+    const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload;
+    if (!response.ok) throw new SecurityApiError(payload);
+    return payload;
+  };
+
+  const startCooldown = (button: HTMLButtonElement | null, seconds: unknown, restingLabel: string): void => {
+    if (button === null) return;
+    let remaining = typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0
+      ? Math.min(Math.ceil(seconds), 3600)
+      : 60;
+    button.disabled = true;
+    const tick = (): void => {
+      button.textContent = t("dashboard.security.two_factor.cooldown", { seconds: String(remaining) });
+    };
+    tick();
+    const intervalId = window.setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        window.clearInterval(intervalId);
+        button.disabled = false;
+        button.textContent = restingLabel;
+      } else {
+        tick();
+      }
+    }, 1000);
+  };
+
+  const handleAccountError = (error: unknown): void => {
+    const payload = error instanceof SecurityApiError ? error.payload : { code: "invalid_response" };
+    setFeedback(errorMessage(payload), "danger");
+    if (reauthenticate !== null && payload.code === "recent_auth_required") reauthenticate.hidden = false;
+  };
+
+  const runGuarded = (button: HTMLButtonElement | null, action: () => Promise<void>): void => {
+    void (async () => {
+      if (button !== null) button.disabled = true;
+      try {
+        await action();
+      } catch (error) {
+        handleAccountError(error);
+      } finally {
+        if (button !== null) button.disabled = false;
+      }
+    })();
+  };
+
+  const inputValue = (selector: string): string =>
+    root.querySelector<HTMLInputElement>(selector)?.value.trim() ?? "";
+
+  // 2FA enrollment (two_factor_enabled = 0)
+  const enrollButton = root.querySelector<HTMLButtonElement>("[data-two-factor-enable]");
+  const enrollForm = root.querySelector<HTMLElement>("[data-two-factor-enroll-form]");
+  const enrollVerify = root.querySelector<HTMLButtonElement>("[data-two-factor-verify]");
+  const enrollResend = root.querySelector<HTMLButtonElement>("[data-two-factor-resend]");
+
+  const requestEnrollmentOtp = async (cooldownButton: HTMLButtonElement | null): Promise<void> => {
+    const payload = await postAccount("/api/app/account/enable-2fa-request", {});
+    if (enrollForm !== null) enrollForm.hidden = false;
+    setFeedback(t("dashboard.security.two_factor.otp_sent"), "success");
+    startCooldown(cooldownButton, payload.cooldownSeconds, t("dashboard.security.two_factor.resend"));
+  };
+
+  enrollButton?.addEventListener("click", () => {
+    runGuarded(enrollButton, () => requestEnrollmentOtp(enrollResend));
+  });
+  enrollResend?.addEventListener("click", () => {
+    runGuarded(enrollResend, () => requestEnrollmentOtp(enrollResend));
+  });
+  enrollVerify?.addEventListener("click", () => {
+    runGuarded(enrollVerify, async () => {
+      const otp = inputValue("#two-factor-enroll-otp");
+      setFeedback(t("dashboard.security.two_factor.verifying"));
+      const payload = await postAccount("/api/app/account/enable-2fa-verify", { otp });
+      const requestId = safeRequestId(payload.requestId);
+      setFeedback(`${t("dashboard.security.two_factor.enabled_success")}${requestId === null
+        ? ""
+        : t("dashboard.security.client.request_id", { requestId })}`, "success");
+      window.setTimeout(() => { window.location.assign("/app/security?tab=two_factor"); }, 900);
+    });
+  });
+
+  // 2FA disable (two_factor_enabled = 1)
+  const disableBlock = root.querySelector<HTMLElement>("[data-two-factor-disable]");
+  if (disableBlock !== null) {
+    const disableByPassword = disableBlock.querySelector<HTMLButtonElement>("[data-action='two-factor-disable']");
+    const disableOtpRequest = disableBlock.querySelector<HTMLButtonElement>("[data-two-factor-disable-otp-request]");
+    const disableOtpSubmit = disableBlock.querySelector<HTMLButtonElement>("[data-action='two-factor-disable-otp-submit']");
+
+    const finishDisable = (payload: ApiPayload): void => {
+      const requestId = safeRequestId(payload.requestId);
+      setFeedback(`${t("dashboard.security.two_factor.disabled_success")}${requestId === null
+        ? ""
+        : t("dashboard.security.client.request_id", { requestId })}`, "success");
+      window.setTimeout(() => { window.location.assign("/app/security?tab=two_factor"); }, 900);
+    };
+
+    disableByPassword?.addEventListener("click", () => {
+      runGuarded(disableByPassword, async () => {
+        const password = inputValue("#two-factor-disable-password");
+        setFeedback(t("dashboard.security.two_factor.disabling"));
+        finishDisable(await postAccount("/api/app/account/disable-2fa", { password }));
+      });
+    });
+    disableOtpRequest?.addEventListener("click", () => {
+      runGuarded(disableOtpRequest, async () => {
+        const payload = await postAccount("/api/app/account/enable-2fa-request", {});
+        setFeedback(t("dashboard.security.two_factor.otp_sent"), "success");
+        startCooldown(disableOtpRequest, payload.cooldownSeconds, t("dashboard.security.two_factor.send_otp"));
+      });
+    });
+    disableOtpSubmit?.addEventListener("click", () => {
+      runGuarded(disableOtpSubmit, async () => {
+        const otp = inputValue("#two-factor-disable-otp");
+        setFeedback(t("dashboard.security.two_factor.disabling"));
+        finishDisable(await postAccount("/api/app/account/disable-2fa", { otp }));
+      });
+    });
+  }
+
+  // Password change
+  const passwordSubmit = root.querySelector<HTMLButtonElement>("[data-password-submit]");
+  passwordSubmit?.addEventListener("click", () => {
+    runGuarded(passwordSubmit, async () => {
+      const currentPassword = inputValue("#password-current");
+      const newPassword = inputValue("#password-new");
+      setFeedback(t("dashboard.security.password.submitting"));
+      const payload = await postAccount("/api/app/account/change-password", { currentPassword, newPassword });
+      const count = typeof payload.revokedSessionCount === "number" && Number.isSafeInteger(payload.revokedSessionCount)
+        ? payload.revokedSessionCount
+        : 0;
+      const requestId = safeRequestId(payload.requestId);
+      setFeedback(`${t("dashboard.security.password.success", { count: String(count) })}${requestId === null
+        ? ""
+        : t("dashboard.security.client.request_id", { requestId })}`, "success");
+      const currentField = root.querySelector<HTMLInputElement>("#password-current");
+      const newField = root.querySelector<HTMLInputElement>("#password-new");
+      if (currentField !== null) currentField.value = "";
+      if (newField !== null) newField.value = "";
+    });
+  });
+
+  // Login history
+  const historyList = root.querySelector<HTMLElement>("[data-security-history-list]");
+  const historyRefresh = root.querySelector<HTMLButtonElement>("[data-security-history-refresh]");
+
+  const parseHistoryEntry = (value: unknown): HistoryEntry | null => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    const candidate = value as Record<string, unknown>;
+    if (typeof candidate.id !== "string" || candidate.id.length > 64
+      || typeof candidate.occurredAt !== "string" || !Number.isFinite(Date.parse(candidate.occurredAt))
+      || typeof candidate.outcome !== "string" || candidate.outcome.length > 32) return null;
+    return { id: candidate.id, occurredAt: candidate.occurredAt, outcome: candidate.outcome };
+  };
+
+  const outcomeTones: Readonly<Record<string, "danger" | "neutral" | "success" | "warning">> = {
+    account_locked: "danger",
+    account_suspended: "danger",
+    email_unverified: "warning",
+    invalid_credentials: "warning",
+    success: "success",
+    two_factor_failed: "danger",
+    two_factor_required: "neutral",
+  };
+
+  const renderHistory = (entries: HistoryEntry[]): void => {
+    if (historyList === null) return;
+    for (const child of Array.from(historyList.children)) {
+      if (!(child instanceof HTMLElement) || child.dataset.securityHistoryEmpty === undefined) child.remove();
+    }
+    const emptyState = historyList.querySelector<HTMLElement>("[data-security-history-empty]");
+    if (emptyState !== null) emptyState.hidden = entries.length > 0;
+    for (const entry of entries) {
+      const row = document.createElement("div");
+      row.className = "history-row";
+      row.setAttribute("role", "listitem");
+      const time = document.createElement("time");
+      time.dateTime = entry.occurredAt;
+      time.textContent = formatDate(entry.occurredAt);
+      const badge = document.createElement("span");
+      badge.className = "history-outcome";
+      badge.dataset.tone = outcomeTones[entry.outcome] ?? "neutral";
+      badge.textContent = t(`dashboard.security.history.outcome.${entry.outcome}`);
+      row.appendChild(time);
+      row.appendChild(badge);
+      historyList.appendChild(row);
+    }
+  };
+
+  const loadHistory = (): void => {
+    historyRefresh?.setAttribute("disabled", "true");
+    setFeedback(t("dashboard.security.history.loading"));
+    void (async () => {
+      try {
+        const payload = await getAccount("/api/app/account/login-history?limit=20");
+        if (!Array.isArray(payload.entries)) throw new SecurityApiError({ code: "invalid_response", requestId: payload.requestId });
+        const entries = payload.entries.map(parseHistoryEntry);
+        if (entries.some((entry) => entry === null)) {
+          throw new SecurityApiError({ code: "invalid_response", requestId: payload.requestId });
+        }
+        renderHistory(entries as HistoryEntry[]);
+        setFeedback(t("dashboard.security.history.loaded"), "success");
+      } catch (error) {
+        handleAccountError(error);
+      } finally {
+        historyRefresh?.removeAttribute("disabled");
+      }
+    })();
+  };
+
+  historyRefresh?.addEventListener("click", loadHistory);
+
   void loadSessions();
+  if (activeTab === "history") loadHistory();
 }
 
 export {};

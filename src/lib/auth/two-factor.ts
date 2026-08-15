@@ -10,6 +10,11 @@ type TwoFactorAccountRow = {
   twoFactorEnabled: number;
 };
 
+export type TwoFactorStatus = {
+  enabled: boolean;
+  enabledAt: string | null;
+};
+
 async function loadTwoFactorAccount(env: AppBindings, userId: string): Promise<TwoFactorAccountRow | null> {
   const row = await env.PLATFORM_DB.prepare(`
     SELECT password_hash AS passwordHash, status, COALESCE(two_factor_enabled, 0) AS twoFactorEnabled
@@ -18,6 +23,24 @@ async function loadTwoFactorAccount(env: AppBindings, userId: string): Promise<T
     LIMIT 1
   `).bind(userId).first<TwoFactorAccountRow>();
   return row ?? null;
+}
+
+/**
+ * Read-only enrollment status for server-rendered account-security views.
+ * Never mutates state; enrollment itself only changes through the OTP-confirmed
+ * helpers below.
+ */
+export async function getTwoFactorStatus(input: { env: AppBindings; userId: string }): Promise<TwoFactorStatus> {
+  const row = await input.env.PLATFORM_DB.prepare(`
+    SELECT COALESCE(two_factor_enabled, 0) AS twoFactorEnabled, two_factor_enabled_at AS twoFactorEnabledAt
+    FROM platform_users
+    WHERE id = ?
+    LIMIT 1
+  `).bind(input.userId).first<{ twoFactorEnabled: number; twoFactorEnabledAt: string | null }>();
+  return {
+    enabled: row?.twoFactorEnabled === 1,
+    enabledAt: row?.twoFactorEnabledAt ?? null,
+  };
 }
 
 /**

@@ -253,6 +253,27 @@ const DYNAMIC_TRANSLATION_ALLOWLIST: readonly DynamicAllowlistEntry[] = [
     identifier: "t",
     path: "src/pages/app/integrations.astro",
   },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.billing.invoices.status.${invoice.status}`",
+    guard: /draft: "neutral", failed: "danger", open: "info", paid: "success", past_due: "warning", refunded: "danger", void: "neutral"[\s\S]*`dashboard\.billing\.invoices\.status\.\$\{invoice\.status\}`/u,
+    identifier: "t",
+    path: "src/pages/app/billing.astro",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.security.tabs.${tab}`",
+    guard: /tabKeys = \["sessions", "two_factor", "password", "history"\] as const[\s\S]*`dashboard\.security\.tabs\.\$\{tab\}`/u,
+    identifier: "t",
+    path: "src/pages/app/security.astro",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.security.history.outcome.${entry.outcome}`",
+    guard: /account_locked: "danger",[\s\S]*two_factor_required: "neutral",[\s\S]*`dashboard\.security\.history\.outcome\.\$\{entry\.outcome\}`/u,
+    identifier: "t",
+    path: "src/scripts/dashboard/security.ts",
+  },
 ] as const;
 
 function sourceFiles(root: string): SourceFile[] {

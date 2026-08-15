@@ -4,15 +4,19 @@ const lang = document.documentElement.lang || "vi-VN";
 const t = createSystemTranslator(lang);
 
 type AuthApiResponse = {
+  challengeToken?: string;
+  code?: string;
   cooldownSeconds?: number;
   debugOtp?: string;
   error?: string;
   expiresAt?: string;
+  issues?: string[];
   message?: string;
   ok?: boolean;
   requestId?: string;
   requireOtp?: boolean;
   resetToken?: string;
+  twoFactorRequired?: boolean;
   user?: {
     displayName: string;
     email: string;
@@ -227,6 +231,38 @@ if (loginForm) {
   const submitBtn = loginForm.querySelector<HTMLButtonElement>("[data-login-submit]");
   const statusEl = document.querySelector<HTMLElement>("[data-login-status]");
 
+  const twoFactorPanel = document.querySelector<HTMLElement>("[data-login-2fa]");
+  const twoFactorOtpInput = document.querySelector<HTMLInputElement>("[data-login-2fa-otp]");
+  const twoFactorEmailDisplay = document.querySelector<HTMLElement>("[data-login-2fa-email]");
+  const twoFactorSubmitBtn = document.querySelector<HTMLButtonElement>("[data-login-2fa-submit]");
+  const twoFactorResendBtn = document.querySelector<HTMLButtonElement>("[data-login-2fa-resend]");
+  const twoFactorBackBtn = document.querySelector<HTMLButtonElement>("[data-login-2fa-back]");
+  const twoFactorStatusEl = document.querySelector<HTMLElement>("[data-login-2fa-status]");
+
+  // The challenge token lives in this closure only; it is never persisted.
+  let twoFactorChallengeToken = "";
+  let twoFactorEmail = "";
+
+  const showTwoFactorStep = (cooldownSeconds: number | undefined): void => {
+    loginForm.hidden = true;
+    if (twoFactorPanel) twoFactorPanel.hidden = false;
+    if (twoFactorEmailDisplay) twoFactorEmailDisplay.textContent = twoFactorEmail;
+    setStatus(statusEl, "", "");
+    setStatus(twoFactorStatusEl, "pending", t("auth.login.two_factor.pending"));
+    twoFactorOtpInput?.focus();
+    if (twoFactorResendBtn && typeof cooldownSeconds === "number" && cooldownSeconds > 0) {
+      startCooldownTimer(twoFactorResendBtn, cooldownSeconds);
+    }
+  };
+
+  const backToLoginForm = (): void => {
+    twoFactorChallengeToken = "";
+    if (twoFactorPanel) twoFactorPanel.hidden = true;
+    loginForm.hidden = false;
+    setStatus(twoFactorStatusEl, "", "");
+    passwordInput?.focus();
+  };
+
   loginForm.addEventListener("submit", (e) => {
     e.preventDefault();
     void (async () => {
@@ -263,6 +299,14 @@ if (loginForm) {
           return;
         }
 
+        if (data.twoFactorRequired === true && typeof data.challengeToken === "string" && data.challengeToken.length >= 10) {
+          twoFactorChallengeToken = data.challengeToken;
+          twoFactorEmail = email;
+          setBusy(submitBtn, false, t("auth.login.submitting"), t("auth.login.submit"));
+          showTwoFactorStep(data.cooldownSeconds);
+          return;
+        }
+
         setStatus(statusEl, "success", t("auth.login.success"));
         const params = new URLSearchParams(window.location.search);
         const redirectUrl = params.get("redirect") || "/app";
@@ -273,6 +317,81 @@ if (loginForm) {
       }
     })();
   });
+
+  twoFactorSubmitBtn?.addEventListener("click", () => {
+    void (async () => {
+      const otp = twoFactorOtpInput?.value.replace(/\D/gu, "") ?? "";
+      if (otp.length !== 6 || twoFactorChallengeToken === "") {
+        setStatus(twoFactorStatusEl, "error", t("auth.otp.invalid"));
+        return;
+      }
+
+      setBusy(twoFactorSubmitBtn, true, t("auth.login.two_factor.submitting"), t("auth.login.two_factor.submit"));
+      setStatus(twoFactorStatusEl, "pending", t("auth.login.two_factor.submitting"));
+
+      try {
+        const res = await fetch("/api/auth/login-2fa", {
+          body: JSON.stringify({ challengeToken: twoFactorChallengeToken, otp }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+
+        const data = (await res.json().catch(() => ({}))) as AuthApiResponse;
+
+        if (!res.ok) {
+          const issue = Array.isArray(data.issues) ? data.issues[0] ?? "" : "";
+          if (data.code === "two_factor_challenge_expired" || data.code === "challenge_token_invalid") {
+            setStatus(twoFactorStatusEl, "error", t("auth.login.two_factor.expired"));
+            twoFactorChallengeToken = "";
+          } else if (res.status === 423) {
+            setStatus(twoFactorStatusEl, "error", t("auth.login.account_locked"));
+          } else if (issue.startsWith("otp_incorrect")) {
+            setStatus(twoFactorStatusEl, "error", t("auth.otp.invalid"));
+          } else if (issue === "otp_max_attempts_exceeded" || issue === "otp_expired_or_invalid") {
+            setStatus(twoFactorStatusEl, "error", t("auth.otp.expired"));
+          } else {
+            setStatus(twoFactorStatusEl, "error", t("auth.login.generic_error"));
+          }
+          setBusy(twoFactorSubmitBtn, false, t("auth.login.two_factor.submitting"), t("auth.login.two_factor.submit"));
+          return;
+        }
+
+        setStatus(twoFactorStatusEl, "success", t("auth.login.success"));
+        const params = new URLSearchParams(window.location.search);
+        const redirectUrl = params.get("redirect") || "/app";
+        window.location.href = redirectUrl;
+      } catch {
+        setStatus(twoFactorStatusEl, "error", t("auth.login.generic_error"));
+        setBusy(twoFactorSubmitBtn, false, t("auth.login.two_factor.submitting"), t("auth.login.two_factor.submit"));
+      }
+    })();
+  });
+
+  twoFactorResendBtn?.addEventListener("click", () => {
+    void (async () => {
+      if (twoFactorResendBtn.disabled || twoFactorEmail === "") return;
+
+      try {
+        const res = await fetch("/api/auth/otp/resend", {
+          body: JSON.stringify({ email: twoFactorEmail, purpose: "login_2fa" }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+
+        const data = (await res.json().catch(() => ({}))) as AuthApiResponse;
+        if (res.ok && typeof data.cooldownSeconds === "number" && data.cooldownSeconds > 0) {
+          startCooldownTimer(twoFactorResendBtn, data.cooldownSeconds);
+          setStatus(twoFactorStatusEl, "success", t("auth.otp.resend"));
+        } else if (!res.ok) {
+          setStatus(twoFactorStatusEl, "error", t("auth.login.rate_limited"));
+        }
+      } catch {
+        setStatus(twoFactorStatusEl, "error", t("auth.login.generic_error"));
+      }
+    })();
+  });
+
+  twoFactorBackBtn?.addEventListener("click", backToLoginForm);
 }
 
 // ----------------------------------------------------

@@ -113,6 +113,37 @@ const t = createSystemTranslator(locale);
             <p id="status" class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
           </form>
 
+          <div id="login-2fa-panel" class="auth-form" data-login-2fa hidden>
+            <div class="auth-heading two-factor-heading">
+              <h2>{t("auth.login.two_factor.heading")}</h2>
+              <p>{t("auth.login.two_factor.intro")} <strong data-login-2fa-email></strong></p>
+            </div>
+            <div class="field-group">
+              <label for="login-2fa-otp">{t("auth.login.two_factor.otp_label")}</label>
+              <div class="input-control">
+                <input
+                  id="login-2fa-otp"
+                  name="otp"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  maxlength="6"
+                  placeholder="000000"
+                  data-login-2fa-otp
+                />
+              </div>
+            </div>
+            <button type="button" class="btn-primary" data-login-2fa-submit>
+              <span data-submit-label>{t("auth.login.two_factor.submit")}</span>
+              <span class="btn-arrow" aria-hidden="true">→</span>
+            </button>
+            <div class="two-factor-actions">
+              <button type="button" class="link-button" data-login-2fa-resend>{t("auth.login.two_factor.resend")}</button>
+              <button type="button" class="link-button" data-login-2fa-back>{t("auth.login.two_factor.back")}</button>
+            </div>
+            <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-2fa-status></p>
+          </div>
+
           <div class="card-footer">
             <div class="switch-auth">
               <span>{t("auth.login.no_account")}</span>
@@ -383,6 +414,34 @@ const t = createSystemTranslator(locale);
     color: #475467;
     font-size: 12px;
   }
+
+  /* Two-factor step */
+  .two-factor-heading {
+    margin-bottom: 4px;
+  }
+  .two-factor-heading h2 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    color: #0F172A;
+  }
+  .two-factor-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .link-button {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--sln-action-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .link-button:hover { text-decoration: underline; }
+  .link-button:disabled { color: #94A3B8; cursor: wait; text-decoration: none; }
 
   @media (max-width: 960px) {
     .login-split-shell { grid-template-columns: 1fr; }
