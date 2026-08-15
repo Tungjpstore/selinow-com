@@ -73,4 +73,76 @@ describe("onboarding localization contract", () => {
     expect(client).toContain("readShopGlobalizationForm");
     expect(client).toContain("Object.assign(shop, profileResponse.shop)");
   });
+
+  it("saves regional settings independently from legal readiness", () => {
+    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
+    const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    expect(component).toContain("data-globalization-form");
+    expect(component).toContain("data-globalization-submit");
+    expect(component).toContain("data-settings-form");
+    expect(client).toContain("changedShopGlobalization(shop, globalization)");
+    expect(client).toContain("body: JSON.stringify(patch)");
+    expect(client).not.toContain("const globalizationChanged =");
+  });
+
+  it("keeps onboarding plan options aligned with the authenticated shop API", () => {
+    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
+    const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
+    expect(component).toContain('data-public-plan-codes={JSON.stringify(PUBLIC_PLAN_CODES)}');
+    expect(component).toContain('data-shop-plan disabled');
+    expect(component).not.toContain('<option value="starter">');
+    expect(component).not.toContain('<option value="pro">');
+    expect(client).toContain("parsePublicPlanCodes(root.dataset.publicPlanCodes)");
+    expect(client).toContain("renderPlanOptions(root, plans, planCodes)");
+    expect(client).toContain("planFeatureLabel(feature, plan.features[feature])");
+    expect(client).not.toContain('shop.planCode === "bot"');
+    expect(route).toContain("PUBLIC_PLAN_CODES");
+    expect(route).toContain(".bind(...PUBLIC_PLAN_CODES)");
+    expect(route).toContain(".bind(...PUBLIC_PLAN_CODES, nowIso, nowIso)");
+    expect(route).not.toContain("code IN ('starter', 'pro')");
+    expect(route).toContain("is_public = 1 AND is_assignable = 1");
+    expect(client).toContain('requestApi(root, "/api/app/shops", { method: "GET" })');
+    expect(client).toContain("formatMoney(offer.amountMinor, offer.currency, activeLocale)");
+  });
+
+  it("uses server-owned creation admission for new shops and canceled billing recovery", () => {
+    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
+    const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    const page = readFileSync("src/pages/onboarding.astro", "utf8");
+    const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
+    expect(component).toContain("data-onboarding-resume-recovery");
+    expect(component).toContain("data-onboarding-resume-reload");
+    expect(component).toContain("creationAdmission.allowed");
+    expect(component).toContain("data-creation-admission");
+    expect(page).toContain("getShopCreationAdmission");
+    expect(route).toContain("getShopCreationAdmission");
+    expect(route).toContain("creationAdmission");
+    expect(client).toContain("parseShopCreationAdmission");
+    expect(client).toContain('window.location.assign(`/app/billing?shop=${encodeURIComponent(recoveryShopPublicId)}`)');
+    expect(client).toContain('shop.subscriptionState === "pending_payment"');
+    expect(client).toContain('error.issues.includes("billing_recovery_required")');
+    expect(client).not.toContain('error.issues.includes("trial_already_used")');
+    expect(client).toContain("creationMode");
+    expect(client).toContain("return crypto.randomUUID()");
+  });
+
+  it("binds shop creation abuse admission to the authenticated subject and Cloudflare requester signal", () => {
+    const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
+    const store = readFileSync("src/lib/tenants/store.ts", "utf8");
+    expect(route).toContain("cloudflareRequesterAddress(request)");
+    expect(route).toContain("requesterAddress:");
+    expect(store).toContain("claimShopCreationAdmission");
+    expect(route).not.toContain("request.headers.get(\"CF-Connecting-IP\")");
+  });
+
+  it("never invents a platform policy attestation version in the browser", () => {
+    const component = readFileSync("src/components/dashboard/OnboardingWizard.astro", "utf8");
+    const client = readFileSync("src/scripts/dashboard/onboarding.ts", "utf8");
+    expect(component).toContain("data-policy-attestation-published");
+    expect(component).toContain("data-policy-attestation-version");
+    expect(component).toContain("disabled={!policyAttestationPublished}");
+    expect(client).toContain("policyAttestationVersion");
+    expect(client).not.toContain("attestationVersion: 1");
+  });
 });

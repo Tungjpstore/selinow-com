@@ -1,0 +1,45 @@
+---
+import PlatformLayout from "../layouts/PlatformLayout.astro";
+import MarketingHeader from "../components/marketing/MarketingHeader.astro";
+import MarketingFooter from "../components/marketing/MarketingFooter.astro";
+import PublicationGate from "../components/marketing/PublicationGate.astro";
+import { getBindings } from "../lib/platform/bindings";
+import { normalizeSupportedLocale } from "../lib/i18n/locale";
+
+const env = getBindings();
+const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
+Astro.response.headers.set("Cache-Control", "public, max-age=300");
+
+const items = [
+  {
+    title: "Terms",
+    detail: "Blocked pending owner approval and legal review.",
+  },
+  {
+    title: "Refunds",
+    detail: "Blocked. No refund eligibility, window, or process is stated here.",
+  },
+  {
+    title: "Tax",
+    detail: "Blocked. No tax treatment or seller obligation is stated here.",
+  },
+];
+---
+
+<PlatformLayout
+  title="Legal status | Selinow"
+  description="Publication status of Selinow legal terms and seller policies."
+  locale={locale}
+  canonical="https://selinow.com/legal"
+>
+  <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  <PublicationGate
+    eyebrow="LEGAL PUBLICATION GATE"
+    title="No policy values are published yet."
+    detail="Selinow legal and commercial policy documents are currently under governance review. No unapproved commitments are published on this surface."
+    items={items}
+    aside="Owner approval and formal legal review are required before policy terms can take effect."
+    locale={locale}
+  />
+  <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+</PlatformLayout>

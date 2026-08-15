@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { encryptPayOSCredentials } from "../../src/lib/payments/crypto";
 import { createPayOSObjectSignature } from "../../src/lib/payments/payos";
+import { payOSProviderIdentityFingerprint } from "../../src/lib/payments/payos-admission";
 import { createOrRecoverTelegramPaymentLink } from "../../src/lib/payments/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
@@ -38,7 +39,7 @@ type ProviderBindingOverride = Partial<{
   paymentLinkId: string;
 }>;
 
-async function paymentEnvironment(options: { concurrentWinner?: boolean; concurrentWinnerCheckoutUrl?: string; errorDueAt?: string; existingError?: boolean; existingLease?: boolean; orderCurrency?: string; pauseCreatingReread?: boolean; pauseProviderCreate?: boolean; providerCreateOverride?: ProviderBindingOverride; providerGetFails?: boolean; providerRecoveryOverride?: ProviderBindingOverride } = {}) {
+async function paymentEnvironment(options: { concurrentWinner?: boolean; concurrentWinnerCheckoutUrl?: string; errorDueAt?: string; existingError?: boolean; existingLease?: boolean; orderCurrency?: string; pauseCreatingReread?: boolean; pauseProviderCreate?: boolean; providerCreateOverride?: ProviderBindingOverride; providerGetFails?: boolean; providerRecoveryOverride?: ProviderBindingOverride; stagingChannelAttested?: boolean } = {}) {
   const context = {
     credentialId: "credential-a",
     hmacSecret: "identifier-secret",
@@ -252,10 +253,17 @@ async function paymentEnvironment(options: { concurrentWinner?: boolean; concurr
     });
   };
 
+  const identityBindings = { IDENTIFIER_HMAC_SECRET: "identifier-secret" };
+  const stagingFingerprint = await payOSProviderIdentityFingerprint(identityBindings, {
+    apiKey: "api-key-test",
+    checksumKey: "checksum-key-test",
+    clientId: "client-id-test",
+  });
   const env = {
     APP_ENV: "staging",
     CREDENTIAL_KEK_V1: KEK,
-    IDENTIFIER_HMAC_SECRET: "identifier-secret",
+    IDENTIFIER_HMAC_SECRET: identityBindings.IDENTIFIER_HMAC_SECRET,
+    ...(options.stagingChannelAttested === false ? {} : { PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT: stagingFingerprint }),
     PLATFORM_DB: database,
   } as unknown as AppBindings;
 
@@ -294,6 +302,22 @@ describe("payment origin snapshots", () => {
     expect(runtime.getProviderCalls()).toBe(0);
   });
 
+  it("fails staging checkout closed before provider access without channel attestation", async () => {
+    const runtime = await paymentEnvironment({ stagingChannelAttested: false });
+
+    await expect(createOrRecoverTelegramPaymentLink({
+      customerId: "customer-a",
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      orderPublicId: "order-public-a",
+      origin: "https://alias.customer.com",
+      shopId: "shop-a",
+    })).rejects.toMatchObject({ code: "payment_provider_environment_not_admitted", status: 409 });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getAttempt()).toBeNull();
+  });
+
   it("authorizes the entry hostname but snapshots the active canonical domain", async () => {
     const runtime = await paymentEnvironment();
     const link = await createOrRecoverTelegramPaymentLink({
@@ -309,9 +333,28 @@ describe("payment origin snapshots", () => {
     expect(runtime.getInsertSql()).toContain("request_domain.hostname_normalized = ?");
     expect(runtime.getInsertSql()).toContain("request_domain.type = 'platform_subdomain'");
     expect(runtime.getInsertSql()).toContain("request_domain.ownership_verified_at IS NOT NULL");
+    expect(runtime.getInsertSql()).toContain("request_domain.hostname_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("request_domain.ssl_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("request_domain.dns_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.status') = 'active'");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.hostname') = request_domain.hostname_normalized");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'");
+    expect(runtime.getInsertSql()).toContain("json_extract(request_domain.validation_metadata_json, '$.turnstile.checkedAt')");
+    expect(runtime.getInsertSql()).toContain("request_domain.delete_requested_at IS NULL");
     expect(runtime.getInsertSql()).toContain("canonical_domain.id = shops.canonical_domain_id");
     expect(runtime.getInsertSql()).toContain("canonical_domain.type = 'platform_subdomain'");
     expect(runtime.getInsertSql()).toContain("canonical_domain.ownership_verified_at IS NOT NULL");
+    expect(runtime.getInsertSql()).toContain("canonical_domain.hostname_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("canonical_domain.ssl_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("canonical_domain.dns_status = 'active'");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.status') = 'active'");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.hostname') = canonical_domain.hostname_normalized");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'");
+    expect(runtime.getInsertSql()).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.checkedAt')");
+    expect(runtime.getInsertSql()).toContain("canonical_domain.delete_requested_at IS NULL");
+    expect(runtime.getInsertSql()).toContain("-12 hours");
     expect(runtime.getAttempt()).toMatchObject({
       checkoutDomainId: "domain-primary",
       returnOrigin: "https://primary.customer.com",

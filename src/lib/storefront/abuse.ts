@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import { hmacToken } from "../core/crypto";
 import type { AppBindings } from "../platform/bindings";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import type { StorefrontShop } from "./store";
 import { resolveTurnstileConfiguration, type TurnstileConfiguration } from "./turnstile";
 
@@ -38,7 +39,39 @@ async function incrementLimit(input: { action: string; env: AppBindings; request
   return row?.requestCount ?? 1;
 }
 
+async function assertTurnstileHostnameAdmission(input: { env: AppBindings; request: Request; shop: StorefrontShop }): Promise<string> {
+  const hostname = new URL(input.request.url).hostname.toLowerCase().replace(/\.$/u, "");
+  if (input.shop.currentHostname.toLowerCase().replace(/\.$/u, "") !== hostname) {
+    throw new AppError("turnstile_invalid", 403);
+  }
+  if (input.env.APP_ENV !== "production") return hostname;
+
+  let admitted: { hostname: string } | null;
+  try {
+    admitted = await input.env.PLATFORM_DB.prepare(`
+      SELECT hostname_normalized AS hostname
+      FROM shop_domains
+      WHERE shop_id = ? AND hostname_normalized = ? AND status = 'active'
+        AND delete_requested_at IS NULL AND deleted_at IS NULL
+        AND (
+          type = 'platform_subdomain'
+          OR (
+            type = 'custom' AND ownership_verified_at IS NOT NULL
+            AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'
+            AND ${customDomainTurnstileAdmissionSql()}
+          )
+        )
+      LIMIT 1
+    `).bind(input.shop.id, hostname).first<{ hostname: string }>();
+  } catch {
+    throw new AppError("turnstile_unavailable", 503);
+  }
+  if (admitted?.hostname !== hostname) throw new AppError("turnstile_invalid", 403);
+  return hostname;
+}
+
 async function verifyTurnstile(input: { configuration: TurnstileConfiguration; env: AppBindings; request: Request; shop: StorefrontShop; token: string }): Promise<void> {
+  const hostname = await assertTurnstileHostnameAdmission(input);
   const body = new FormData();
   body.set("secret", input.configuration.secretKey);
   body.set("response", input.token);
@@ -60,7 +93,6 @@ async function verifyTurnstile(input: { configuration: TurnstileConfiguration; e
   } catch {
     throw new AppError("turnstile_unavailable", 503);
   }
-  const hostname = new URL(input.request.url).hostname.toLowerCase();
   if (!response.ok || result.success !== true || result.action !== "storefront_checkout" || result.hostname?.toLowerCase() !== hostname) {
     throw new AppError("turnstile_invalid", 403);
   }
@@ -77,8 +109,12 @@ export async function guardAnonymousCheckout(input: { env: AppBindings; request:
   const requestCount = await incrementLimit({ action: "checkout", shopId: input.shop.id, ...input, windowSeconds });
   if (requestCount > positiveInteger(input.env.STOREFRONT_CHECKOUT_RATE_LIMIT, 8)) throw new AppError("rate_limited", 429);
   const threshold = positiveInteger(input.env.STOREFRONT_TURNSTILE_THRESHOLD, 3);
+  if (requestCount <= threshold) return;
   const configuration = resolveTurnstileConfiguration(input.env);
-  if (requestCount <= threshold || configuration === null) return;
+  if (configuration === null) {
+    if (input.env.APP_ENV === "production") throw new AppError("turnstile_unavailable", 503);
+    return;
+  }
   if (typeof input.turnstileToken !== "string" || input.turnstileToken.length < 10 || input.turnstileToken.length > 2_048) throw new AppError("turnstile_required", 403);
   await verifyTurnstile({ ...input, configuration, token: input.turnstileToken });
 }

@@ -11,10 +11,14 @@ export type SubscriptionStatePresentation = {
 const SUBSCRIPTION_STATE_TONES: Readonly<Record<string, SubscriptionStateTone>> = {
   active: "success",
   canceled: "neutral",
+  cancel_scheduled: "success",
+  downgrade_scheduled: "info",
   grace_period: "warning",
+  pending_payment: "info",
   past_due: "warning",
   suspended: "danger",
   trialing: "info",
+  upgrade_pending: "info",
 };
 
 export function subscriptionStatePresentation(state: string, locale?: unknown): SubscriptionStatePresentation {

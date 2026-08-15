@@ -3,7 +3,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createProductWithInitialVariant } from "../../src/lib/catalog/store";
+import { createProduct, createProductWithInitialVariant, updateProduct } from "../../src/lib/catalog/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
 const SHOP_A_PUBLIC_ID = "shop_00000000-0000-4000-8000-000000000001";
@@ -71,6 +71,15 @@ function createDatabase(): SqliteD1 {
   ]) {
     database.exec(readFileSync(filename, "utf8"));
   }
+  database.exec(`
+    CREATE TABLE moderation_actions (
+      target_kind TEXT NOT NULL,
+      target_ref TEXT NOT NULL,
+      action_kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
   const now = "2026-07-29T00:00:00.000Z";
   database.prepare(`
     INSERT INTO plans (id, code, name, feature_flags_json, limits_json, created_at, updated_at)
@@ -99,8 +108,8 @@ function createDatabase(): SqliteD1 {
       VALUES (?, ?, 'owner', 'active', ?, ?)
     `).run(shopId, userId, now, now);
     database.prepare(`
-      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
-      VALUES (?, ?, 'plan-test', 'active', ?, ?)
+      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
+      VALUES (?, ?, 'plan-test', 'active', '2099-01-01T00:00:00.000Z', ?, ?)
     `).run(`sub-${shopId}`, shopId, now, now);
   }
   return new SqliteD1(database);
@@ -206,5 +215,80 @@ describe("atomic product and initial variant creation", () => {
       initialVariant: { ...createInput(database).initialVariant, status: "suspended" },
     })).rejects.toMatchObject({ code: "validation_failed", issues: ["active_variant_required"], status: 409 });
     expect(database.database.prepare("SELECT COUNT(*) AS count FROM products").get()).toEqual({ count: 0 });
+  });
+
+  it("rejects the legacy product-only path for active products", async () => {
+    const database = createDatabase();
+    await expect(createProduct({
+      data: { ...createInput(database).data, status: "active" },
+      env: envFor(database),
+      shopPublicId: SHOP_A_PUBLIC_ID,
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "validation_failed", issues: ["active_variant_required"], status: 409 });
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM products").get()).toEqual({ count: 0 });
+  });
+
+  it("uses current non-archived rows as the quota authority and permits archive/reactivate only when capacity exists", async () => {
+    const database = createDatabase();
+    database.database.prepare("UPDATE plans SET limits_json = ? WHERE id = 'plan-test'").run(JSON.stringify({ products_non_archived: 1 }));
+    const first = await createProductWithInitialVariant(createInput(database));
+    await expect(createProductWithInitialVariant({
+      ...createInput(database),
+      idempotencyKey: "catalog-atomic-create-0002",
+      data: { ...createInput(database).data, slug: "second-product", title: "Second" },
+    })).rejects.toMatchObject({ code: "quota_exceeded", status: 409 });
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM products WHERE slug = 'second-product'").get()).toEqual({ count: 0 });
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM idempotency_records").get()).toEqual({ count: 1 });
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM audit_logs").get()).toEqual({ count: 1 });
+    const archivedSecond = await createProductWithInitialVariant({
+      ...createInput(database),
+      idempotencyKey: "catalog-atomic-create-0003",
+      data: { ...createInput(database).data, slug: "archived-product", status: "archived", title: "Archived" },
+      initialVariant: { ...createInput(database).initialVariant, sku: "ARCHIVED-001" },
+    });
+    await expect(updateProduct({
+      data: { ...createInput(database).data, slug: "archived-product", status: "draft", title: "Archived" },
+      env: envFor(database), productId: archivedSecond.product.id, shopPublicId: SHOP_A_PUBLIC_ID, userId: "user-a",
+    })).rejects.toMatchObject({ code: "quota_exceeded", status: 409 });
+
+    const archived = await updateProduct({
+      data: { ...createInput(database).data, status: "archived" },
+      env: envFor(database), productId: first.product.id, shopPublicId: SHOP_A_PUBLIC_ID, userId: "user-a",
+    });
+    expect((archived as { status: string }).status).toBe("archived");
+    const restored = await updateProduct({
+      data: { ...createInput(database).data, slug: "archived-product", status: "draft", title: "Archived" },
+      env: envFor(database), productId: archivedSecond.product.id, shopPublicId: SHOP_A_PUBLIC_ID, userId: "user-a",
+    });
+    expect((restored as { status: string }).status).toBe("draft");
+  });
+
+  it("does not let one tenant consume another tenant's product capacity", async () => {
+    const database = createDatabase();
+    database.database.prepare("UPDATE plans SET limits_json = ? WHERE id = 'plan-test'").run(JSON.stringify({ products_non_archived: 1 }));
+    await createProductWithInitialVariant(createInput(database));
+    const second = await createProductWithInitialVariant({
+      ...createInput(database),
+      idempotencyKey: "catalog-tenant-b-create-0001",
+      shopPublicId: SHOP_B_PUBLIC_ID,
+      userId: "user-b",
+      data: { ...createInput(database).data, slug: "tenant-b-product" },
+    });
+    expect(second.created).toBe(true);
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM products WHERE shop_id = 'shop-b'").get()).toEqual({ count: 1 });
+  });
+
+  it("admits only one concurrent create at the final tenant quota slot", async () => {
+    const database = createDatabase();
+    database.database.prepare("UPDATE plans SET limits_json = ? WHERE id = 'plan-test'").run(JSON.stringify({ products_non_archived: 1 }));
+    const base = createInput(database);
+    const attempts = await Promise.allSettled([
+      createProduct({ data: { ...base.data, slug: "race-a" }, env: base.env, shopPublicId: SHOP_A_PUBLIC_ID, userId: "user-a" }),
+      createProduct({ data: { ...base.data, slug: "race-b" }, env: base.env, shopPublicId: SHOP_A_PUBLIC_ID, userId: "user-a" }),
+    ]);
+    expect(attempts.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(attempts.find((result) => result.status === "rejected")).toMatchObject({ reason: { code: "quota_exceeded", status: 409 } });
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM products WHERE shop_id = 'shop-a' AND status != 'archived'").get()).toEqual({ count: 1 });
   });
 });

@@ -81,7 +81,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (cacheKey !== null && response.ok && response.headers.get("X-Storefront-Cacheable") === "1") {
       response.headers.delete("X-Storefront-Cacheable");
       response.headers.set("Cache-Control", "public, max-age=0, s-maxage=60, stale-while-revalidate=300");
-      response.headers.set("Vary", "Accept-Language, Host");
+      response.headers.set("Vary", "Accept-Language, Cookie, Host");
       response.headers.set("X-Storefront-Cache", "MISS");
       const cloudflareCache = (caches as CacheStorage & { default: Cache }).default;
       await cloudflareCache.put(cacheKey, response.clone());

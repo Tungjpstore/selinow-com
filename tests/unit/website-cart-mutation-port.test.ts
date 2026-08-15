@@ -85,7 +85,7 @@ function createRuntime(): { database: SqliteD1; env: AppBindings; shop: Storefro
     IDENTIFIER_HMAC_SECRET: "website-cart-mutation-secret",
     PLATFORM_DB: database as unknown as D1Database,
   } as unknown as AppBindings;
-  return { database, env, shop: { currency: "VND", id: "shop-website", orderExpiryMinutes: 30, status: "active", subscriptionState: "active" } as StorefrontShop };
+  return { database, env, shop: { currency: "VND", currentPeriodEnd: "2099-01-01T00:00:00.000Z", id: "shop-website", orderExpiryMinutes: 30, status: "active", subscriptionState: "active" } as StorefrontShop };
 }
 
 function context(shopId = "shop-website"): CommerceContext {
@@ -173,7 +173,7 @@ describe("Website canonical cart mutation port", () => {
 
     await expect(application.checkoutCart(context(), {
       cart: cartReference,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       expected: quote.items.map((item) => ({ quantity: item.quantity, unitPriceMinor: item.unitPriceMinor, variantId: item.variantId, variantVersion: item.variantVersion })),
       idempotencyKey: "website-checkout-0001",
       quoteEvidence: quote.quoteEvidence,

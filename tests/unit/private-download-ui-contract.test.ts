@@ -37,9 +37,10 @@ describe("private downloadable fulfillment UI", () => {
     expect(page).toContain('id="download-section"');
     expect(page).toContain('id="download-retry"');
     expect(script).toContain("/downloads/${encodeURIComponent(download.assetVersionId)}/grant");
-    expect(script).toContain('"Idempotency-Key": downloadIntentKey(download)');
+    expect(script).toContain("const idempotencyKey = downloadIntentKey(download)");
     expect(script).toContain('"X-Order-Item-Id": download.orderItemId');
     expect(script).toContain("/downloads/grants/${encodeURIComponent(grant.grantId)}/consume");
+    expect(script.match(/"Idempotency-Key": idempotencyKey/gu)).toHaveLength(2);
     expect(script).toContain('"X-Delivery-Grant-Token": grant.grantToken');
     expect(script).toContain("URL.createObjectURL(blob)");
     expect(script).toContain("anchor.download = download.filename");

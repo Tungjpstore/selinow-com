@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="og-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1E1B4B"/>
+      <stop offset="0.55" stop-color="#3A3183"/>
+      <stop offset="1" stop-color="#5140C9"/>
+    </linearGradient>
+    <linearGradient id="og-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9C8BFF"/>
+      <stop offset="1" stop-color="#C0B7FF"/>
+    </linearGradient>
+    <pattern id="og-grid" width="52" height="52" patternUnits="userSpaceOnUse">
+      <path d="M52 0H0V52" fill="none" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#og-bg)"/>
+  <rect width="1200" height="630" fill="url(#og-grid)"/>
+
+  <!-- signal paths -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M-20 520 C 300 560 520 430 860 480 S 1180 560 1240 500" stroke="#9C8BFF" stroke-opacity="0.35" stroke-width="2.5"/>
+    <path d="M620 660 C 660 520 700 420 760 300 S 840 120 880 20" stroke="#C0B7FF" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="2 12"/>
+  </g>
+  <circle cx="860" cy="480" r="6" fill="#9C8BFF" fill-opacity="0.6"/>
+  <circle cx="760" cy="300" r="5" fill="#C0B7FF" fill-opacity="0.6"/>
+
+  <!-- brand lockup: mark + wordmark only (locale-neutral) -->
+  <g transform="translate(96 96)">
+    <rect width="96" height="96" rx="24" fill="url(#og-mark)"/>
+    <g stroke="#1E1B4B" stroke-width="7" stroke-linecap="round">
+      <path d="M28 32 h22"/>
+      <path d="M28 50 h40"/>
+      <path d="M28 68 h30"/>
+    </g>
+    <circle cx="68" cy="28" r="8" fill="#1E1B4B"/>
+    <circle cx="68" cy="28" r="3.2" fill="#34D399"/>
+  </g>
+
+  <g transform="translate(96 268)">
+    <text x="0" y="64" font-family="Helvetica, Arial, sans-serif" font-size="72" font-weight="700" fill="#FFFFFF" letter-spacing="-1.5">Selinow</text>
+    <text x="2" y="118" font-family="ui-monospace, Menlo, monospace" font-size="22" font-weight="600" fill="#9C8BFF">selinow.com</text>
+  </g>
+
+  <!-- text-free flow rail -->
+  <g transform="translate(700 132)">
+    <g fill="#FFFFFF" fill-opacity="0.08" stroke="#C0B7FF" stroke-opacity="0.45" stroke-width="1.5">
+      <rect width="380" height="64" rx="18"/>
+      <rect y="90" width="380" height="64" rx="18"/>
+      <rect y="180" width="380" height="64" rx="18"/>
+    </g>
+    <g fill="#34D399">
+      <circle cx="38" cy="32" r="7"/>
+      <circle cx="38" cy="122" r="7"/>
+      <circle cx="38" cy="212" r="7"/>
+    </g>
+    <g fill="#C0B7FF" fill-opacity="0.55">
+      <rect x="64" y="26" width="220" height="12" rx="6"/>
+      <rect x="64" y="116" width="160" height="12" rx="6"/>
+      <rect x="64" y="206" width="250" height="12" rx="6"/>
+    </g>
+    <g fill="#FFFFFF" fill-opacity="0.18">
+      <rect x="320" y="24" width="36" height="16" rx="8"/>
+      <rect x="320" y="114" width="36" height="16" rx="8"/>
+      <rect x="320" y="204" width="36" height="16" rx="8"/>
+    </g>
+    <path d="M38 64 v18 M38 154 v18" stroke="#C0B7FF" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round"/>
+  </g>
+</svg>

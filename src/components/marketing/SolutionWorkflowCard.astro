@@ -1,0 +1,150 @@
+---
+interface Props {
+  slug: string;
+  index: number;
+  eyebrow: string;
+  title: string;
+  lead: string;
+  href: string;
+  locale?: unknown;
+}
+
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import SolutionDiagram from "./SolutionDiagram.astro";
+
+const { slug, index, eyebrow, title, lead, href, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+---
+
+<article class="solution-workflow-card">
+  <div class="card-header">
+    <div class="card-meta">
+      <span class="card-index">{String(index).padStart(2, "0")}</span>
+      <span class="card-eyebrow">{eyebrow}</span>
+    </div>
+    <a href={href} class="card-link" aria-label={`View ${title}`}>
+      <span aria-hidden="true">↗</span>
+    </a>
+  </div>
+
+  <div class="card-body">
+    <h3><a href={href}>{title}</a></h3>
+    <p>{lead}</p>
+  </div>
+
+  <div class="card-diagram">
+    <SolutionDiagram slug={slug} locale={locale} />
+  </div>
+
+  <div class="card-footer">
+    <a class="kit-button kit-button-secondary" href={href}>
+      <span>{locale.toLowerCase().startsWith("vi") ? "Xem chi tiết luồng" : "Explore workflow"}</span>
+      <span aria-hidden="true">→</span>
+    </a>
+  </div>
+</article>
+
+<style>
+  .solution-workflow-card {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-xs);
+    transition: all 0.2s ease;
+  }
+
+  .solution-workflow-card:hover {
+    border-color: var(--brand-300);
+    box-shadow: var(--shadow-md);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-3);
+  }
+
+  .card-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .card-index {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--brand-600);
+    background-color: var(--brand-50);
+    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+  }
+
+  .card-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+  }
+
+  .card-link {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-color: var(--surface-muted);
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-weight: 700;
+    transition: all 0.15s ease;
+  }
+
+  .card-link:hover {
+    background-color: var(--brand-600);
+    color: #FFFFFF;
+  }
+
+  .card-body h3 {
+    margin: 0 0 var(--space-2);
+    font-size: 18px;
+    font-weight: 750;
+    color: var(--text-primary);
+  }
+
+  .card-body h3 a {
+    color: var(--text-primary);
+    text-decoration: none;
+  }
+
+  .card-body h3 a:hover {
+    color: var(--brand-600);
+  }
+
+  .card-body p {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .card-diagram {
+    margin-block: var(--space-4);
+  }
+
+  .card-footer {
+    margin-top: auto;
+    padding-top: var(--space-4);
+    border-top: 1px dashed var(--border-soft);
+  }
+
+  .card-footer .kit-button {
+    width: 100%;
+  }
+</style>

@@ -20,7 +20,10 @@ function messageUpdate(text: string, chatType: "group" | "private" = "private"):
   };
 }
 
-async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } = {}) {
+async function draftEnvironment(options: {
+  failPostSendHealthEvidenceOnce?: boolean;
+  rotateCredentialOnReply?: boolean;
+} = {}) {
   const encrypted = await encryptTelegramCredential({
     botToken: BOT_TOKEN,
     credentialId: "credential-a",
@@ -36,6 +39,9 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
   let healthUpdated = false;
   let providerCalls = 0;
   let activeCredentialId = "credential-a";
+  let updateRow: { id: string; payloadHash: string; status: string; updatedAt: string } | null = null;
+  let failPostSendHealthEvidence = options.failPostSendHealthEvidenceOnce === true;
+  const staleAudits: Array<{ metadata: unknown; requestId: string }> = [];
 
   const database = {
     prepare(sql: string) {
@@ -44,9 +50,13 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
         bind(...values: unknown[]) {
           return {
             first() {
+              if (sql.includes("telegram_integrations.active_credential_id = ?")) {
+                return Promise.resolve(activeCredentialId === values[2] ? { activeCredentialId } : null);
+              }
               if (sql.includes("FROM telegram_integrations") && sql.includes("INNER JOIN telegram_credentials")) {
                 return Promise.resolve({
                   ...encrypted,
+                  activeCredentialId,
                   botDisplayName: "Draft Bot",
                   botUsername: "draft_bot",
                   credentialId: "credential-a",
@@ -58,14 +68,43 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
                   shopStatus: "draft",
                   status: "active",
                   subscriptionState: "trialing",
+                  trialEndsAt: "2099-01-01T00:00:00.000Z",
+                  graceEndsAt: null,
                 });
               }
-              if (sql.includes("FROM telegram_updates")) return Promise.resolve(null);
+              if (sql.includes("FROM telegram_updates")) {
+                return Promise.resolve(updateRow === null ? null : { ...updateRow });
+              }
               return Promise.resolve(null);
             },
             run() {
-              if (sql.includes("SET last_health_update_at")) healthUpdated = activeCredentialId === String(values[5]);
-              if (sql.includes("UPDATE telegram_updates SET status = 'processed'")) resultCodes.push(String(values[0]));
+              if (sql.includes("INSERT INTO telegram_updates")) {
+                updateRow = {
+                  id: String(values[0]),
+                  payloadHash: String(values[6]),
+                  status: "processing",
+                  updatedAt: String(values[8]),
+                };
+              }
+              if (sql.includes("UPDATE telegram_updates SET status = 'processing'") && updateRow !== null) {
+                updateRow.status = "processing";
+                updateRow.updatedAt = String(values[0]);
+              }
+              if (failPostSendHealthEvidence && providerCalls > 0 && sql.includes("SET last_health_update_at")) {
+                failPostSendHealthEvidence = false;
+                throw new Error("forced_post_send_health_evidence_failure");
+              }
+              if (sql.includes("SET last_health_update_at")) healthUpdated = activeCredentialId === String(values[6]);
+              if (sql.includes("SET status = 'processed'") && updateRow !== null) {
+                updateRow.status = "processed";
+                updateRow.updatedAt = String(values[2]);
+                resultCodes.push(String(values[0]));
+              }
+              if (sql.includes("UPDATE telegram_updates SET status = 'failed'") && updateRow !== null && updateRow.status !== "processed") {
+                updateRow.status = "failed";
+                updateRow.updatedAt = String(values[1]);
+              }
+              if (sql.includes("telegram.update_stale_generation")) staleAudits.push({ metadata: JSON.parse(String(values[3])), requestId: String(values[4]) });
               return Promise.resolve({ meta: { changes: 1 } });
             },
           };
@@ -94,6 +133,8 @@ async function draftEnvironment(options: { rotateCredentialOnReply?: boolean } =
     fetcher,
     getHealthUpdated: () => healthUpdated,
     getProviderCalls: () => providerCalls,
+    getStaleAudits: () => staleAudits,
+    rotateCredential: () => { activeCredentialId = "credential-rotated"; },
     resultCodes,
     sqlHistory,
   };
@@ -146,6 +187,28 @@ describe("draft Telegram health", () => {
 
     expect(result).toMatchObject({ processed: true, state: "draft_health_confirmed" });
     expect(runtime.getHealthUpdated()).toBe(false);
+  });
+
+  it("does not resend draft health confirmation after provider success and D1 evidence failure", async () => {
+    const runtime = await draftEnvironment({ failPostSendHealthEvidenceOnce: true });
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest({ message: { chat: { id: 42, type: "private" }, from: { first_name: "Seller", id: 42, is_bot: false, language_code: "vi", username: "seller" }, message_id: 7, text: "/start" }, update_id: 100 }),
+      requestId: "request-draft-health-evidence-failure",
+      webhookPublicId: "tgwh_test",
+    })).rejects.toThrow("forced_post_send_health_evidence_failure");
+    expect(runtime.getProviderCalls()).toBe(1);
+
+    await expect(processTelegramWebhook({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      request: webhookRequest({ message: { chat: { id: 42, type: "private" }, from: { first_name: "Seller", id: 42, is_bot: false, language_code: "vi", username: "seller" }, message_id: 7, text: "/start" }, update_id: 100 }),
+      requestId: "request-draft-health-evidence-replay",
+      webhookPublicId: "tgwh_test",
+    })).resolves.toMatchObject({ duplicate: true, processed: false, state: "duplicate" });
+    expect(runtime.getProviderCalls()).toBe(1);
   });
 
   it.each(["/products", "/cart", "/orders", "/keys"])("blocks draft commerce command %s before provider or commerce work", async (command) => {

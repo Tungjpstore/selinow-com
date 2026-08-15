@@ -1,8 +1,11 @@
 import { handle } from "@astrojs/cloudflare/handler";
 
+import { processActivationMilestoneBackfill } from "./lib/analytics/activation";
 import { purgeAuthRequestAdmissions } from "./lib/auth/admission";
 import { processScheduledAutomationTasks } from "./lib/automation/scheduler";
+import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, suspendExpiredBillingGracePeriods, suspendExpiredTrials } from "./lib/billing/service";
 import { purgeCartMutationReplays } from "./lib/commerce/cart-mutation";
+import { purgeBuyerOrderRecoveryArtifacts } from "./lib/commerce/buyer-order-recovery";
 import { expireDueGenericEntitlements } from "./lib/commerce/entitlements";
 import {
   enqueueDueGeneratedLicenseRequests,
@@ -15,14 +18,17 @@ import { purgeExpiredDeliveryGrantClaims } from "./lib/commerce/private-file-mai
 import { expireUnpaidOrders } from "./lib/commerce/store";
 import {
   claimDeliveryJobReference,
+  claimDeliveryProviderAttempt,
   dispatchDomainEventReference,
   dispatchDueDomainEvents,
   enqueueDueDeliveryJobs,
   settleDeliveryJob,
+  terminalizeDeliveryProviderOutcomeUnknown,
   type DeliveryJobClaim,
   type DeliveryJobSettlement,
   type DomainDeliveryQueueEnvelope,
   type DomainEventDispatchResult,
+  type DeliveryJobTerminalStatus,
 } from "./lib/delivery/runtime";
 import { deliverTelegramJob, type TelegramDeliveryResult } from "./lib/delivery/telegram";
 import { reconcileCustomDomains } from "./lib/domains/reconciliation";
@@ -33,7 +39,7 @@ import { consumeDeadLetterQueue, isDeadLetterQueue } from "./lib/operations/queu
 import { purgeExpiredSecurityRateLimits } from "./lib/operations/security-rate-limit-maintenance";
 import { reconcilePendingPayments } from "./lib/payments/reconciliation";
 import type { AppBindings } from "./lib/platform/bindings";
-import { processTelegramOutbox, purgeTelegramUpdateHistory } from "./lib/telegram/outbox";
+import { purgeTelegramUpdateHistory } from "./lib/telegram/outbox";
 import { purgeAnonymousLimits } from "./lib/storefront/abuse";
 
 const MAX_DELIVERY_ATTEMPTS = 8;
@@ -84,11 +90,34 @@ type QueueMetrics = {
   unsupportedProviders: number;
 };
 
-type TerminalDelivery = {
-  attempts: number;
-  errorCode: string | null;
-  status: "dead_letter" | "failed";
+type ScheduledJobFailure = {
+  errorCode: string;
+  job: string;
 };
+
+async function runScheduledJob<T>(input: {
+  errorCode: string;
+  failures: ScheduledJobFailure[];
+  fallback: T;
+  job: string;
+  logger: ReturnType<typeof loggerFor>;
+  operation: () => Promise<T>;
+  requestId: string;
+}): Promise<T> {
+  try {
+    return await input.operation();
+  } catch {
+    input.failures.push({ errorCode: input.errorCode, job: input.job });
+    input.logger.error({
+      errorCode: input.errorCode,
+      event: "infrastructure.cron_job_failed",
+      queue: input.job,
+      requestId: input.requestId,
+      source: "scheduled",
+    });
+    return input.fallback;
+  }
+}
 
 function isInfrastructureMessage(value: unknown): value is InfrastructureMessage {
   if (typeof value !== "object" || value === null) return false;
@@ -192,7 +221,7 @@ function deliverySettlement(
 async function terminalDeliveryStatus(
   env: AppBindings,
   envelope: DomainDeliveryQueueEnvelope,
-): Promise<TerminalDelivery | null> {
+): Promise<DeliveryJobTerminalStatus | null> {
   const row = await env.PLATFORM_DB.prepare(`
     SELECT status, attempts, last_safe_error_code AS errorCode
     FROM delivery_jobs WHERE id = ? AND shop_id = ? AND queue_kind = ? LIMIT 1
@@ -201,9 +230,12 @@ async function terminalDeliveryStatus(
     errorCode: string | null;
     status: string;
   }>();
-  return row?.status === "failed" || row?.status === "dead_letter"
-    ? { attempts: row.attempts, errorCode: row.errorCode, status: row.status }
-    : null;
+  if (row === null || !new Set(["dead_letter", "delivered", "failed"]).has(row.status)) return null;
+  return {
+    attempts: row.attempts,
+    errorCode: row.errorCode,
+    status: row.status as DeliveryJobTerminalStatus["status"],
+  };
 }
 
 async function recordDeliveryDeadLetter(
@@ -225,6 +257,70 @@ async function recordDeliveryDeadLetter(
     safeEnvelope: { operationId: envelope.operationId, requestId: envelope.requestId },
     shopId: envelope.shopId,
   });
+}
+
+async function acknowledgeTerminalDelivery(input: {
+  bindings: AppBindings;
+  envelope: DomainDeliveryQueueEnvelope;
+  message: Message;
+  metrics: QueueMetrics;
+  terminal: DeliveryJobTerminalStatus;
+}): Promise<void> {
+  if (input.terminal.status === "failed" || input.terminal.status === "dead_letter") {
+    await recordDeliveryDeadLetter(
+      input.bindings,
+      input.message,
+      input.envelope,
+      input.terminal.errorCode ?? (input.terminal.status === "dead_letter"
+        ? "delivery_provider_outcome_unknown"
+        : "delivery_failed"),
+      input.terminal.attempts,
+    );
+  }
+  if (input.terminal.status === "delivered") input.metrics.channelDeliveryDelivered += 1;
+  else if (input.terminal.status === "failed") input.metrics.channelDeliveryFailed += 1;
+  else input.metrics.channelDeliveryDeadLettered += 1;
+  input.message.ack();
+  input.metrics.acknowledged += 1;
+}
+
+async function recoverDeliverySettlementFailure(input: {
+  bindings: AppBindings;
+  claim: DeliveryJobClaim;
+  envelope: DomainDeliveryQueueEnvelope;
+  message: Message;
+  metrics: QueueMetrics;
+  now: Date;
+  providerAttemptClaimed: boolean;
+}): Promise<boolean> {
+  const terminal = await terminalDeliveryStatus(input.bindings, input.envelope);
+  if (terminal !== null) {
+    await acknowledgeTerminalDelivery({
+      bindings: input.bindings,
+      envelope: input.envelope,
+      message: input.message,
+      metrics: input.metrics,
+      terminal,
+    });
+    return true;
+  }
+  if (!input.providerAttemptClaimed) return false;
+
+  const unknown = await terminalizeDeliveryProviderOutcomeUnknown({
+    claim: input.claim,
+    env: input.bindings,
+    now: input.now,
+    requestId: input.envelope.requestId,
+  });
+  if (unknown === null) return false;
+  await acknowledgeTerminalDelivery({
+    bindings: input.bindings,
+    envelope: input.envelope,
+    message: input.message,
+    metrics: input.metrics,
+    terminal: unknown,
+  });
+  return true;
 }
 
 export default {
@@ -309,6 +405,7 @@ export default {
           jobId: envelope.referenceId,
           now,
           queueKind: envelope.kind,
+          requestId: envelope.requestId,
           shopId: envelope.shopId,
         });
       } catch {
@@ -321,18 +418,17 @@ export default {
         try {
           const status = await terminalDeliveryStatus(bindings, envelope);
           if (status !== null) {
-            await recordDeliveryDeadLetter(
+            await acknowledgeTerminalDelivery({
               bindings,
-              message,
               envelope,
-              status.errorCode ?? (status.status === "dead_letter"
-                ? "delivery_attempts_exhausted"
-                : "delivery_failed"),
-              status.attempts,
-            );
+              message,
+              metrics,
+              terminal: status,
+            });
+          } else {
+            message.ack();
+            metrics.acknowledged += 1;
           }
-          message.ack();
-          metrics.acknowledged += 1;
         } catch {
           metrics.databaseErrors += 1;
           retryMessage(message, DATABASE_RETRY_DELAY_SECONDS, metrics);
@@ -341,10 +437,26 @@ export default {
       }
       metrics.channelDeliveryClaimed += 1;
 
+      let settlementClaim = claim;
       let providerResult: TelegramDeliveryResult;
       if (claim.providerCode === "telegram") {
         try {
-          providerResult = await deliverTelegramJob({ env: bindings, job: claim, now });
+          providerResult = await deliverTelegramJob({
+            env: bindings,
+            job: claim,
+            now,
+            beforeProviderAttempt: async (telegramAuthority) => {
+              const marked = await claimDeliveryProviderAttempt({
+                claim,
+                env: bindings,
+                now,
+                requestId: envelope.requestId,
+                telegramAuthority,
+              });
+              if (marked === null) throw new Error("delivery_provider_attempt_not_claimed");
+              settlementClaim = marked;
+            },
+          });
         } catch {
           providerResult = { errorCode: "telegram_delivery_exception", kind: "retryable" };
         }
@@ -353,15 +465,56 @@ export default {
         metrics.unsupportedProviders += 1;
       }
 
-      const settlement = deliverySettlement(claim, providerResult, now);
+      const providerAttemptClaimed = settlementClaim.version !== claim.version;
+      const providerOutcomeUnknown = providerAttemptClaimed
+        && providerResult.kind === "retryable"
+        && providerResult.providerOutcome !== "not_sent";
+      if (providerOutcomeUnknown) {
+        try {
+          const terminal = await terminalizeDeliveryProviderOutcomeUnknown({
+            claim: settlementClaim,
+            env: bindings,
+            now,
+            requestId: envelope.requestId,
+          });
+          if (terminal === null) {
+            metrics.databaseErrors += 1;
+            retryMessage(message, DATABASE_RETRY_DELAY_SECONDS, metrics);
+            continue;
+          }
+          await acknowledgeTerminalDelivery({
+            bindings,
+            envelope,
+            message,
+            metrics,
+            terminal,
+          });
+        } catch {
+          metrics.databaseErrors += 1;
+          retryMessage(message, DATABASE_RETRY_DELAY_SECONDS, metrics);
+        }
+        continue;
+      }
+
+      const settlement = deliverySettlement(settlementClaim, providerResult, now);
       try {
         const settled = await settleDeliveryJob({
-          claim,
+          claim: settlementClaim,
           database: bindings.PLATFORM_DB,
           now,
           settlement,
         });
         if (!settled) {
+          const recovered = await recoverDeliverySettlementFailure({
+            bindings,
+            claim: settlementClaim,
+            envelope,
+            message,
+            metrics,
+            now,
+            providerAttemptClaimed,
+          });
+          if (recovered) continue;
           metrics.databaseErrors += 1;
           retryMessage(message, DATABASE_RETRY_DELAY_SECONDS, metrics);
           continue;
@@ -372,10 +525,24 @@ export default {
             message,
             envelope,
             settlement.errorCode,
-            claim.attempts,
+            settlementClaim.attempts,
           );
         }
       } catch {
+        try {
+          const recovered = await recoverDeliverySettlementFailure({
+            bindings,
+            claim: settlementClaim,
+            envelope,
+            message,
+            metrics,
+            now,
+            providerAttemptClaimed,
+          });
+          if (recovered) continue;
+        } catch {
+          // Retry the queue message when recovery cannot reach durable state.
+        }
         metrics.databaseErrors += 1;
         retryMessage(message, DATABASE_RETRY_DELAY_SECONDS, metrics);
         continue;
@@ -400,23 +567,144 @@ export default {
   async scheduled(controller, env) {
     const bindings = env as unknown as AppBindings;
     const scheduledAt = new Date(controller.scheduledTime);
-    const deliveryJobs = await enqueueDueDeliveryJobs(bindings, scheduledAt);
-    const generatedLicenses = await enqueueDueGeneratedLicenseRequests(bindings, scheduledAt);
-    const domainEvents = await dispatchDueDomainEvents(bindings, scheduledAt);
-    const automation = await processScheduledAutomationTasks(bindings, scheduledAt);
-    const customDomains = await reconcileCustomDomains(bindings, scheduledAt);
-    const reconciliation = await reconcilePendingPayments(bindings, scheduledAt);
-    const telegramOutbox = await processTelegramOutbox(bindings, scheduledAt);
-    const expiredOrders = await expireUnpaidOrders(bindings, scheduledAt.toISOString());
-    const expiredGenericEntitlements = await expireDueGenericEntitlements({ env: bindings, nowIso: scheduledAt.toISOString() });
-    const purgedAuthRequestAdmissions = await purgeAuthRequestAdmissions(bindings, scheduledAt);
-    const purgedCartMutationReplays = await purgeCartMutationReplays(bindings, scheduledAt);
-    const purgedTelegramUpdates = await purgeTelegramUpdateHistory(bindings, scheduledAt);
-    const purgedAnonymousLimits = await purgeAnonymousLimits(bindings, scheduledAt);
-    const purgedDeliveryGrantClaims = await purgeExpiredDeliveryGrantClaims(bindings, scheduledAt);
-    const purgedSecurityRateLimits = await purgeExpiredSecurityRateLimits(bindings, scheduledAt);
-    const purgedDataExports = await purgeExpiredDataExports(bindings, scheduledAt);
-    loggerFor(env).info({
+    const scheduledTimeIso = scheduledAt.toISOString();
+    const logger = loggerFor(env);
+    const requestId = `cron-${String(controller.scheduledTime)}`;
+    const failures: ScheduledJobFailure[] = [];
+    const run = <T>(
+      job: string,
+      errorCode: string,
+      operation: () => Promise<T>,
+      fallback: T,
+    ) => runScheduledJob({ errorCode, failures, fallback, job, logger, operation, requestId });
+
+    const deliveryJobs = await run(
+      "delivery_jobs",
+      "scheduled_delivery_jobs_failed",
+      () => enqueueDueDeliveryJobs(bindings, scheduledAt),
+      { candidates: 0, failed: 0, sent: 0 },
+    );
+    const generatedLicenses = await run(
+      "generated_licenses",
+      "scheduled_generated_licenses_failed",
+      () => enqueueDueGeneratedLicenseRequests(bindings, scheduledAt),
+      { candidates: 0, failed: 0, sent: 0 },
+    );
+    const domainEvents = await run(
+      "domain_events",
+      "scheduled_domain_events_failed",
+      () => dispatchDueDomainEvents(bindings, scheduledAt),
+      { candidates: 0, createdJobs: 0, enqueueFailures: 0, enqueuedJobs: 0, failed: 0, notClaimed: 0, published: 0, retryable: 0 },
+    );
+    const automation = await run(
+      "automation",
+      "scheduled_automation_failed",
+      () => processScheduledAutomationTasks(bindings, scheduledAt),
+      { attempted: 0, canceled: 0, candidates: 0, errors: 0, failed: 0, missingExecutors: 0, recovered: 0, retryable: 0, skipped: 0, succeeded: 0 },
+    );
+    const activationBackfill = await run(
+      "activation_backfill",
+      "scheduled_activation_backfill_failed",
+      () => processActivationMilestoneBackfill({ env: bindings, now: scheduledAt, limit: 25 }),
+      { attempted: 0, created: 0, failed: 0, shops: 0 },
+    );
+    const customDomains = await run(
+      "custom_domains",
+      "scheduled_custom_domains_failed",
+      () => reconcileCustomDomains(bindings, scheduledAt),
+      { checked: 0, deleted: 0, failed: 0 },
+    );
+    const reconciliation = await run(
+      "payment_reconciliation",
+      "scheduled_payment_reconciliation_failed",
+      () => reconcilePendingPayments(bindings, scheduledAt),
+      { failed: 0, processed: 0 },
+    );
+    const billingChanges = await run(
+      "billing_changes",
+      "scheduled_billing_changes_failed",
+      () => processDueDodoSubscriptionChanges({ env: bindings, now: scheduledAt }),
+      { attempted: 0, candidates: 0, failed: 0, providerPending: 0 },
+    );
+    const expiredBillingCheckouts = await run(
+      "billing_checkout_expiration",
+      "scheduled_billing_checkout_expiration_failed",
+      () => expireBillingCheckoutSessions({ env: bindings, now: scheduledAt, limit: 100 }),
+      0,
+    );
+    const expiredBillingGracePeriods = await run(
+      "billing_grace_period_suspension",
+      "scheduled_billing_grace_period_suspension_failed",
+      () => suspendExpiredBillingGracePeriods({ env: bindings, now: scheduledAt, limit: 100 }),
+      0,
+    );
+    const expiredBillingTrials = await run(
+      "billing_trial_suspension",
+      "scheduled_billing_trial_suspension_failed",
+      () => suspendExpiredTrials({ env: bindings, now: scheduledAt, limit: 100 }),
+      0,
+    );
+    const expiredOrders = await run(
+      "order_expiration",
+      "scheduled_order_expiration_failed",
+      () => expireUnpaidOrders(bindings, scheduledTimeIso),
+      0,
+    );
+    const expiredGenericEntitlements = await run(
+      "generic_entitlement_expiration",
+      "scheduled_generic_entitlement_expiration_failed",
+      () => expireDueGenericEntitlements({ env: bindings, nowIso: scheduledTimeIso }),
+      0,
+    );
+    const purgedAuthRequestAdmissions = await run(
+      "auth_request_admission_purge",
+      "scheduled_auth_request_admission_purge_failed",
+      () => purgeAuthRequestAdmissions(bindings, scheduledAt),
+      0,
+    );
+    const purgedBuyerOrderRecovery = await run(
+      "buyer_order_recovery_purge",
+      "scheduled_buyer_order_recovery_purge_failed",
+      () => purgeBuyerOrderRecoveryArtifacts({ env: bindings, now: scheduledAt }),
+      { deleted: 0, redacted: 0 },
+    );
+    const purgedCartMutationReplays = await run(
+      "cart_mutation_replay_purge",
+      "scheduled_cart_mutation_replay_purge_failed",
+      () => purgeCartMutationReplays(bindings, scheduledAt),
+      0,
+    );
+    const purgedTelegramUpdates = await run(
+      "telegram_update_purge",
+      "scheduled_telegram_update_purge_failed",
+      () => purgeTelegramUpdateHistory(bindings, scheduledAt),
+      0,
+    );
+    const purgedAnonymousLimits = await run(
+      "anonymous_limit_purge",
+      "scheduled_anonymous_limit_purge_failed",
+      () => purgeAnonymousLimits(bindings, scheduledAt),
+      0,
+    );
+    const purgedDeliveryGrantClaims = await run(
+      "delivery_grant_claim_purge",
+      "scheduled_delivery_grant_claim_purge_failed",
+      () => purgeExpiredDeliveryGrantClaims(bindings, scheduledAt),
+      0,
+    );
+    const purgedSecurityRateLimits = await run(
+      "security_rate_limit_purge",
+      "scheduled_security_rate_limit_purge_failed",
+      () => purgeExpiredSecurityRateLimits(bindings, scheduledAt),
+      0,
+    );
+    const purgedDataExports = await run(
+      "data_export_purge",
+      "scheduled_data_export_purge_failed",
+      () => purgeExpiredDataExports(bindings, scheduledAt),
+      { candidates: 0, deleted: 0, failed: 0, invalidObjectKeys: 0 },
+    );
+    logger.info({
       event: "infrastructure.cron_completed",
       metrics: {
         automationAttempted: automation.attempted,
@@ -429,6 +717,14 @@ export default {
         automationRetryable: automation.retryable,
         automationSkipped: automation.skipped,
         automationSucceeded: automation.succeeded,
+        activationBackfillAttempts: activationBackfill.attempted,
+        activationBackfillCreated: activationBackfill.created,
+        activationBackfillFailures: activationBackfill.failed,
+        activationBackfillShops: activationBackfill.shops,
+        billingChangeAttempts: billingChanges.attempted,
+        billingChangeCandidates: billingChanges.candidates,
+        billingChangeFailures: billingChanges.failed,
+        billingChangesProviderPending: billingChanges.providerPending,
         customDomainsChecked: customDomains.checked,
         customDomainsDeleted: customDomains.deleted,
         customDomainsFailed: customDomains.failed,
@@ -446,10 +742,15 @@ export default {
         generatedLicenseEnqueueFailed: generatedLicenses.failed,
         generatedLicenseEnqueued: generatedLicenses.sent,
         expiredOrders,
+        expiredBillingCheckouts,
+        expiredBillingGracePeriods,
+        expiredBillingTrials,
         expiredGenericEntitlements,
         paymentReconciliationFailed: reconciliation.failed,
         paymentReconciliationProcessed: reconciliation.processed,
         purgedAuthRequestAdmissions,
+        purgedBuyerOrderRecoveryDeleted: purgedBuyerOrderRecovery.deleted,
+        purgedBuyerOrderRecoveryRedacted: purgedBuyerOrderRecovery.redacted,
         purgedAnonymousLimits,
         purgedCartMutationReplays,
         purgedDataExportCandidates: purgedDataExports.candidates,
@@ -459,10 +760,9 @@ export default {
         purgedDeliveryGrantClaims,
         purgedSecurityRateLimits,
         purgedTelegramUpdates,
-        telegramOutboxFailed: telegramOutbox.failed,
-        telegramOutboxProcessed: telegramOutbox.processed,
-        telegramOutboxSkipped: telegramOutbox.skipped,
+        scheduledJobFailures: failures.length,
       },
+      requestId,
       schedule: controller.cron,
       scheduledTime: controller.scheduledTime,
       source: "scheduled",

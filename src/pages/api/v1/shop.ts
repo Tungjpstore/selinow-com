@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 
-import { authenticatePublicApiRequest } from "../../../lib/api/credentials";
+import { authenticatePublicApiRequest, recordPublicApiUsage } from "../../../lib/api/credentials";
 import { isAppError } from "../../../lib/core/errors";
 import { createCaughtErrorResponse } from "../../../lib/http/security";
 import { getBindings } from "../../../lib/platform/bindings";
@@ -12,11 +12,13 @@ const PRIVATE_HEADERS = {
 
 export const GET: APIRoute = async ({ locals, request }) => {
   try {
+    const env = getBindings();
     const context = await authenticatePublicApiRequest({
-      env: getBindings(),
+      env,
       request,
       requiredScope: "shop:read",
     });
+    await recordPublicApiUsage({ context, env, requestId: locals.requestId });
     return Response.json({
       data: { shop: context.shop },
       ok: true,

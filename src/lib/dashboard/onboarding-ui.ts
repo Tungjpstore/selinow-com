@@ -15,6 +15,7 @@ export type WizardStepCode = typeof WIZARD_STEPS[number]["code"];
 export type WizardStepStatus = "blocked" | "in_progress" | "not_started" | "ready" | "warning";
 
 export type OnboardingProfileView = {
+  currentStep: string;
   customDomainPreference: "connect" | "later" | "skip";
   telegramEnabled: boolean;
   websiteEnabled: boolean;
@@ -125,6 +126,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot {
   const settingsRecord = recordOf(root.settings);
   const preference = profileRecord?.customDomainPreference;
   const profile: OnboardingProfileView | null = profileRecord === null ? null : {
+    currentStep: stringValue(profileRecord.currentStep),
     customDomainPreference: preference === "connect" || preference === "skip" ? preference : "later",
     telegramEnabled: booleanValue(profileRecord.telegramEnabled),
     websiteEnabled: booleanValue(profileRecord.websiteEnabled),
@@ -417,6 +419,8 @@ export function readableErrorKey(code: string, issues: readonly string[] = []): 
     "plan_invalid",
     "publishable_product_required",
     "slug_reserved",
+    "slug_unavailable",
+    "trial_already_used",
   ]);
   for (const issue of issues) {
     if (knownIssues.has(issue)) return `onboarding.error.issue.${issue}`;

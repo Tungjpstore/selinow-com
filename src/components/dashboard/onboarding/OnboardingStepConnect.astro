@@ -1,0 +1,410 @@
+---
+---
+
+<div class="onboarding-step-pane" data-step-pane="connect" hidden>
+  <div class="step-intro-header">
+    <span class="step-num-badge">BƯỚC 04/04</span>
+    <h2>Kết nối Thanh toán & Kênh Phân phối</h2>
+    <p>Liên kết cổng thanh toán QR VietQR (PayOS) và Bot Telegram để vận hành bán hàng tự động 100%.</p>
+  </div>
+
+  <div class="connect-sections-stack">
+    <!-- Section 1: PayOS (VietQR) -->
+    <section class="connect-card payos-card">
+      <div class="connect-card-header">
+        <div class="connect-title-icon">
+          <span class="provider-logo-badge payos-badge">QR</span>
+          <div>
+            <h3>Cổng Thanh Toán VietQR (PayOS)</h3>
+            <p>Khách quét mã QR chuyển khoản ngân hàng, tiền về thẳng STK cá nhân/doanh nghiệp của bạn.</p>
+          </div>
+        </div>
+        <span class="connection-status-pill" data-payos-status-pill data-status="unlinked">Chưa kết nối</span>
+      </div>
+
+      <div class="connect-guide-box">
+        <strong>💡 Hướng dẫn nhanh:</strong>
+        <ol>
+          <li>Đăng nhập <a href="https://payos.vn" target="_blank" rel="noreferrer">payos.vn ↗</a> và tạo <em>Kênh thanh toán</em> mới.</li>
+          <li>Sao chép 3 thông số: <code>Client ID</code>, <code>API Key</code>, <code>Checksum Key</code> và dán vào dưới đây.</li>
+        </ol>
+      </div>
+
+      <form class="credential-form-grid" data-payos-form novalidate>
+        <div class="form-group full-width">
+          <label for="payos-client-id">Client ID <span class="required-star">*</span></label>
+          <input id="payos-client-id" name="clientId" type="password" autocomplete="new-password" placeholder="d827f8a1-xxxx-xxxx-xxxx" required data-input-payos-client-id />
+        </div>
+        <div class="form-group">
+          <label for="payos-api-key">API Key <span class="required-star">*</span></label>
+          <input id="payos-api-key" name="apiKey" type="password" autocomplete="new-password" placeholder="c394d21e-xxxx-xxxx" required data-input-payos-api-key />
+        </div>
+        <div class="form-group">
+          <label for="payos-checksum-key">Checksum Key <span class="required-star">*</span></label>
+          <input id="payos-checksum-key" name="checksumKey" type="password" autocomplete="new-password" placeholder="8b91a74e-xxxx-xxxx" required data-input-payos-checksum-key />
+        </div>
+        <div class="connect-form-actions full-width">
+          <button type="submit" class="btn-verify-connect" data-btn-verify-payos>
+            <span>⚡ Xác thực & Kết nối PayOS</span>
+          </button>
+          <p class="crypto-note">Khóa bí mật được mã hóa AES-256-GCM tại D1, không bao giờ lộ ra ngoài.</p>
+        </div>
+      </form>
+    </section>
+
+    <!-- Section 2: Telegram Bot (Conditional) -->
+    <section class="connect-card telegram-card" data-telegram-connect-section>
+      <div class="connect-card-header">
+        <div class="connect-title-icon">
+          <span class="provider-logo-badge telegram-badge">🤖</span>
+          <div>
+            <h3>Bot Telegram Bán Hàng</h3>
+            <p>Tự động gửi menu sản phẩm, tạo link thanh toán QR và gửi key trong tin nhắn riêng.</p>
+          </div>
+        </div>
+        <span class="connection-status-pill" data-telegram-status-pill data-status="unlinked">Chưa kết nối</span>
+      </div>
+
+      <div class="connect-guide-box">
+        <strong>💡 Hướng dẫn nhanh:</strong>
+        <ol>
+          <li>Mở Telegram, tìm bot <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather ↗</a> và gửi lệnh <code>/newbot</code>.</li>
+          <li>Đặt tên và username cho bot, sau đó sao chép <code>HTTP API Token</code> dán vào đây.</li>
+        </ol>
+      </div>
+
+      <form class="credential-form-grid" data-telegram-form novalidate>
+        <div class="form-group full-width">
+          <label for="telegram-bot-token">HTTP API Token của Bot <span class="required-star">*</span></label>
+          <input id="telegram-bot-token" name="botToken" type="password" autocomplete="new-password" placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz" required data-input-telegram-token />
+        </div>
+        <div class="connect-form-actions full-width">
+          <button type="submit" class="btn-verify-connect" data-btn-verify-telegram>
+            <span>🤖 Kết nối Bot & Cấu hình Webhook</span>
+          </button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div class="step-actions split-actions">
+    <button type="button" class="btn-secondary-back" data-step-back="inventory">
+      ← Quay lại
+    </button>
+    <div class="right-actions">
+      <button type="button" class="btn-skip-link" data-step-skip="connect">
+        Kết nối sau
+      </button>
+      <button type="button" class="btn-primary-launch" data-step-submit="connect">
+        <span>🚀 Hoàn Tất & Mở Bán Ngay</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .onboarding-step-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    animation: fadeInSlide 0.3s ease;
+  }
+
+  .step-intro-header {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .step-num-badge {
+    align-self: flex-start;
+    padding: 3px 10px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+  }
+
+  .step-intro-header h2 {
+    margin: 0;
+    font-size: clamp(22px, 3.5vw, 28px);
+    font-weight: 750;
+    color: var(--sln-text-primary);
+    letter-spacing: -0.03em;
+  }
+
+  .step-intro-header p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--sln-text-secondary);
+    line-height: 1.5;
+  }
+
+  .connect-sections-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .connect-card {
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .connect-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .connect-title-icon {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .provider-logo-badge {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--sln-radius-md);
+    font-size: 16px;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+
+  .payos-badge {
+    background: #0066FF;
+    color: white;
+  }
+
+  .telegram-badge {
+    background: #24A1DE;
+    color: white;
+  }
+
+  .connect-title-icon h3 {
+    margin: 0 0 3px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--sln-text-primary);
+  }
+
+  .connect-title-icon p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--sln-text-secondary);
+    line-height: 1.4;
+  }
+
+  .connection-status-pill {
+    padding: 3px 10px;
+    border-radius: var(--sln-radius-pill);
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .connection-status-pill[data-status="unlinked"] {
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-muted);
+  }
+
+  .connection-status-pill[data-status="verified"] {
+    background: var(--sln-tint-success);
+    color: var(--sln-state-success);
+  }
+
+  .connection-status-pill[data-status="error"] {
+    background: var(--sln-tint-danger);
+    color: var(--sln-state-danger);
+  }
+
+  .connect-guide-box {
+    padding: 10px 14px;
+    border-radius: var(--sln-radius-md);
+    background: var(--sln-bg-subtle);
+    border: 1px solid var(--sln-border-default);
+    font-size: 12px;
+  }
+
+  .connect-guide-box strong {
+    color: var(--sln-text-primary);
+  }
+
+  .connect-guide-box ol {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    color: var(--sln-text-secondary);
+    line-height: 1.5;
+  }
+
+  .connect-guide-box a {
+    color: var(--sln-action-primary);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .connect-guide-box code {
+    background: var(--sln-bg-canvas);
+    padding: 1px 5px;
+    border-radius: var(--sln-radius-sm);
+    font-family: var(--sln-font-mono);
+  }
+
+  .credential-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .form-group.full-width {
+    grid-column: 1 / -1;
+  }
+
+  label {
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--sln-text-primary);
+  }
+
+  .required-star {
+    color: var(--sln-state-danger);
+  }
+
+  input[type="password"] {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-md);
+    padding: 8px 12px;
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-primary);
+    font-family: var(--sln-font-mono);
+    font-size: 13px;
+    outline: none;
+  }
+
+  input[type="password"]:focus {
+    border-color: var(--sln-focus-ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+  }
+
+  .connect-form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 4px;
+  }
+
+  .btn-verify-connect {
+    padding: 9px 18px;
+    border-radius: var(--sln-radius-pill);
+    border: 1px solid var(--sln-action-primary);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-verify-connect:hover {
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+  }
+
+  .crypto-note {
+    margin: 0;
+    font-size: 11px;
+    color: var(--sln-text-muted);
+  }
+
+  /* Actions */
+  .step-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--sln-border-default);
+  }
+
+  .right-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .btn-skip-link {
+    padding: 8px 14px;
+    border: none;
+    background: transparent;
+    color: var(--sln-text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-skip-link:hover {
+    color: var(--sln-text-primary);
+    text-decoration: underline;
+  }
+
+  .btn-secondary-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-secondary-back:hover {
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-primary);
+  }
+
+  .btn-primary-launch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 12px 26px;
+    border: none;
+    border-radius: var(--sln-radius-pill);
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: var(--sln-white);
+    font-size: 14px;
+    font-weight: 750;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  .btn-primary-launch:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+  }
+</style>

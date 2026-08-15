@@ -23,7 +23,7 @@ describe("staging Phase A smoke gate", () => {
 
     expect(plan.environment).toBe("staging");
     expect(plan.readOnly).toBe(true);
-    expect(plan.checks).toHaveLength(6);
+    expect(plan.checks).toHaveLength(8);
     for (const check of plan.checks) {
       const url = new URL(check.url);
       expect(url.protocol).toBe("https:");
@@ -42,6 +42,8 @@ describe("staging Phase A smoke gate", () => {
     }
     expect(plan.checks.map((check) => check.name)).toEqual([
       "platform_health",
+      "platform_marketing_solutions",
+      "platform_llms_staging_closed",
       "website_catalog_read",
       "website_storefront_home",
       "website_product_read",
@@ -60,6 +62,18 @@ describe("staging Phase A smoke gate", () => {
         commerce: { channels: ["telegram", "website"], contract: "principal-channel-canonical-v1" },
         ok: true,
         service: "selinow.com",
+      }));
+      if (url.endsWith("/solutions")) return Promise.resolve(new Response('<html><main data-marketing-surface="solutions-hub"></main></html>', {
+        headers: { "content-type": "text/html; charset=UTF-8" },
+        status: 200,
+      }));
+      if (url.endsWith("/llms.txt")) return Promise.resolve(new Response("Not found\n", {
+        headers: {
+          "cache-control": "private, no-store, max-age=0",
+          "content-type": "text/plain; charset=utf-8",
+          "x-robots-tag": "noindex, nofollow",
+        },
+        status: 404,
       }));
       if (url.endsWith("/api/store/catalog")) return Promise.resolve(jsonResponse({
         categories: [],
@@ -100,6 +114,42 @@ describe("staging Phase A smoke gate", () => {
       ok: false,
       status: 200,
     })]);
+  });
+
+  it("fails closed when the solutions route is missing from the deployed candidate", async () => {
+    const plan = createStagingPhaseASmokePlan(stagingSpec);
+    const solutionsCheck = plan.checks.find((check) => check.name === "platform_marketing_solutions");
+    if (solutionsCheck === undefined) throw new Error("staging_solutions_check_missing");
+
+    const result = await runStagingPhaseASmoke({
+      fetchImplementation: () => Promise.resolve(new Response("Not found", {
+        headers: { "content-type": "text/html; charset=utf-8" },
+        status: 404,
+      })),
+      plan: { ...plan, checks: [solutionsCheck] },
+    });
+
+    expect(result).toMatchObject({
+      actions: [{ code: "status_mismatch", name: "platform_marketing_solutions", ok: false, status: 404 }],
+      ok: false,
+    });
+  });
+
+  it("requires llms.txt to stay closed and noindex outside production", async () => {
+    const plan = createStagingPhaseASmokePlan(stagingSpec);
+    const llmsCheck = plan.checks.find((check) => check.name === "platform_llms_staging_closed");
+    if (llmsCheck === undefined) throw new Error("staging_llms_check_missing");
+
+    const result = await runStagingPhaseASmoke({
+      fetchImplementation: () => Promise.resolve(new Response("# Selinow\n", {
+        headers: { "cache-control": "public, max-age=300", "content-type": "text/plain; charset=utf-8" },
+        status: 200,
+      })),
+      plan: { ...plan, checks: [llmsCheck] },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.actions[0]).toMatchObject({ name: "platform_llms_staging_closed", ok: false });
   });
 
   it("fails closed for production URLs or mutation methods", () => {

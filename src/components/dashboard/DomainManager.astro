@@ -33,6 +33,7 @@ const initialDomainsJson = JSON.stringify(initialDomains.map((domain) => ({
   ownershipStatus: domain.ownershipStatus,
   sslStatus: domain.sslStatus,
   status: domain.status,
+  turnstileStatus: domain.turnstileStatus,
   type: domain.type,
 }))).replaceAll("<", "\\u003c");
 const initialPanelState = !canManage
@@ -160,6 +161,9 @@ const formatCheckedAt = (value: string | null): string => {
                       <p>{domain.dnsInstructions.type === "TXT" ? t("dashboard.domains.card.dns.txt_note") : t("dashboard.domains.card.dns.cname_note")}</p>
                     </div>
                   )}
+                  {domain.type === "custom" && domain.turnstileStatus !== "active" && domain.ownershipStatus === "verified" && domain.hostnameStatus === "active" && domain.sslStatus === "active" && domain.dnsStatus === "active" && (
+                    <p class="turnstile-note">{t("dashboard.domains.card.turnstile_pending")}</p>
+                  )}
                   <div class="domain-meta">
                     <span>{formatCheckedAt(domain.lastCheckedAt)}</span>
                     {(domain.lastSafeErrorCode !== null || domain.status === "ownership_expired") && (
@@ -250,6 +254,8 @@ const formatCheckedAt = (value: string | null): string => {
             <p data-dns-note>{t("dashboard.domains.card.dns.cname_note")}</p>
           </div>
 
+          <p class="turnstile-note" data-turnstile-note hidden>{t("dashboard.domains.card.turnstile_pending")}</p>
+
           <div class="domain-meta">
             <span data-last-checked></span>
             <span data-safe-error hidden></span>
@@ -305,6 +311,7 @@ const formatCheckedAt = (value: string | null): string => {
     ownershipStatus: "pending" | "verified" | null;
     sslStatus: string | null;
     status: string;
+    turnstileStatus: string | null;
     type: "custom" | "platform_subdomain";
   };
 
@@ -427,6 +434,7 @@ const formatCheckedAt = (value: string | null): string => {
     return typeof record.id === "string"
       && typeof record.hostname === "string"
       && typeof record.status === "string"
+      && (record.turnstileStatus === null || typeof record.turnstileStatus === "string")
       && (record.type === "custom" || record.type === "platform_subdomain")
       && typeof record.isPrimary === "boolean";
   }
@@ -564,6 +572,7 @@ const formatCheckedAt = (value: string | null): string => {
       const dnsNote = card.querySelector<HTMLElement>("[data-dns-note]");
       const lastChecked = card.querySelector<HTMLElement>("[data-last-checked]");
       const safeError = card.querySelector<HTMLElement>("[data-safe-error]");
+      const turnstileNote = card.querySelector<HTMLElement>("[data-turnstile-note]");
       const checkButton = card.querySelector<HTMLButtonElement>("[data-action=" + '"check"' + "]");
       const primaryButton = card.querySelector<HTMLButtonElement>("[data-action=" + '"primary"' + "]");
       const deleteButton = card.querySelector<HTMLButtonElement>("[data-action=" + '"delete"' + "]");
@@ -579,6 +588,16 @@ const formatCheckedAt = (value: string | null): string => {
       if (primaryNote !== null) primaryNote.hidden = !domain.isPrimary;
       if (readiness !== null) readiness.hidden = domain.type !== "custom";
       if (lastChecked !== null) lastChecked.textContent = formatCheckedAt(domain.lastCheckedAt);
+      if (turnstileNote !== null) {
+        turnstileNote.hidden = !(
+          domain.type === "custom"
+          && domain.turnstileStatus !== "active"
+          && domain.ownershipStatus === "verified"
+          && domain.hostnameStatus === "active"
+          && domain.sslStatus === "active"
+          && domain.dnsStatus === "active"
+        );
+      }
       if (safeError !== null) {
         const expired = domain.status === "ownership_expired";
         safeError.hidden = domain.lastSafeErrorCode === null && !expired;
@@ -906,6 +925,7 @@ const formatCheckedAt = (value: string | null): string => {
   .dns-record code { min-width: 0; color: var(--selinow-text-primary); font-size: 12px; overflow-wrap: anywhere; white-space: normal; }
   .dns-record button { flex: 0 0 auto; min-height: 44px; border: 0; padding: 6px; background: transparent; color: var(--selinow-action-primary-hover); font-size: 11px; font-weight: 700; cursor: pointer; }
   .dns-record > p { margin: 10px 0 0; color: var(--selinow-text-muted); font-size: 12px; line-height: 1.5; }
+  .turnstile-note { margin: 14px 0 0; padding: 11px 13px; border: 1px solid var(--selinow-warning-text); border-radius: var(--selinow-radius-sm); background: var(--selinow-warning-soft); color: var(--selinow-warning-text); font-size: 12px; line-height: 1.5; }
   .domain-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 14px; color: var(--selinow-text-muted); font-size: 11px; }
   .domain-meta span:last-child { color: var(--selinow-danger); }
   .domain-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }

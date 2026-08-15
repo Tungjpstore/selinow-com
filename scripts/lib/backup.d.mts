@@ -95,8 +95,26 @@ export function assertExactMigrationLedger(
   repositoryMigrationNames: string[],
 ): void;
 
+export function resolvePendingMigrationNames(
+  appliedMigrationNames: string[],
+  repositoryMigrationNames: string[],
+): string[];
+
+export function normalizeHistoricalMigrationAliases(
+  databasePath: string,
+  repositoryMigrationNames: string[],
+): Array<{ canonical: string; historical: string }>;
+
 export const restoreCountValidationTables: readonly string[];
 export const restoreValidationTables: readonly string[];
+export function assertRequiredRestoreTables(tableNames: Iterable<string>): void;
+export function readCrossLedgerMismatches(database: {
+  prepare(sql: string): { all(): Array<Record<string, unknown>> };
+}): Array<{ code: string; id: string }>;
+export function verifyLocalIntegrity(databasePath: string): {
+  foreignKeyViolationCount: number;
+  integrityOk: boolean;
+};
 
 export function buildBackupSnapshotRecord(input: {
   checksumSha256?: string;
@@ -141,7 +159,62 @@ export function assertFreshStagingBackupEvidence(options: {
   databaseId: string;
   databaseName: string;
   now?: Date;
-}): Promise<{ completedAt: string; reportRef: string; snapshotId: string }>;
+}): Promise<{
+  artifactPath: string;
+  checksumSha256: string;
+  completedAt: string;
+  reportRef: string;
+  sizeBytes: number;
+  snapshotId: string;
+}>;
+
+export function assertFreshStagingContinuationEvidence(options: {
+  accountId: string;
+  backupRoot?: string;
+  databaseId: string;
+  databaseName: string;
+  now?: Date;
+  repositoryRoot?: string;
+  restoreRoot?: string;
+  reviewedCommitSha: string;
+}): Promise<{
+  backup: {
+    checksumSha256: string;
+    completedAt: string;
+    reportRef: string;
+    sizeBytes: number;
+    snapshotId: string;
+  };
+  restore: {
+    completedAt: string;
+    reportRef: string;
+    snapshotId: string;
+    targetResourceRef: string;
+  };
+  reviewedCommitSha: string;
+}>;
+
+export function assertStagingContinuationEvidenceByReference(options: {
+  accountId: string;
+  backupRoot?: string;
+  continuationEvidence: {
+    backupChecksumSha256: string;
+    backupCompletedAt: string;
+    backupReportRef: string;
+    backupSizeBytes: number;
+    backupSnapshotId: string;
+    restoreCompletedAt: string;
+    restoreReportRef: string;
+    restoreSnapshotId: string;
+    restoreTargetResourceRef: string;
+  };
+  databaseId: string;
+  databaseName: string;
+  evidenceRecordedAt: Date | string;
+  repositoryRoot?: string;
+  restoreRoot?: string;
+  reviewedCommitSha: string;
+}): ReturnType<typeof assertFreshStagingContinuationEvidence>;
 
 export function assertFreshProductionBootstrapBackupEvidence(options: {
   accountId: string;
@@ -157,6 +230,34 @@ export function assertFreshProductionBootstrapBackupEvidence(options: {
   reportRef: string;
   sizeBytes: number;
   snapshotId: string;
+}>;
+
+export function assertFreshProductionContinuationEvidence(options: {
+  accountId: string;
+  backupRoot?: string;
+  databaseId: string;
+  databaseName: string;
+  now?: Date;
+  repositoryRoot?: string;
+  restoreRoot?: string;
+  reviewedCommitSha: string;
+}): Promise<{
+  backup: {
+    artifactPath: string;
+    completedAt: string;
+    checksumSha256: string;
+    providerBookmarkRecorded: true;
+    reportRef: string;
+    sizeBytes: number;
+    snapshotId: string;
+  };
+  reviewedCommitSha: string;
+  restore: {
+    completedAt: string;
+    reportRef: string;
+    snapshotId: string;
+    targetResourceRef: string;
+  };
 }>;
 
 export function assertProductionBackupAdmission(input: {
@@ -183,8 +284,27 @@ export function runRestoreDrill(options: {
   dryRun: boolean;
   environment: BackupEnvironment;
   now?: Date;
+  reviewedCommitSha?: string;
   randomBytesImplementation?: (size: number) => Buffer;
   runner?: WranglerRunner;
+  stagingBackupEvidenceImplementation?: (options: {
+    accountId: string;
+    backupRoot?: string;
+    databaseId: string;
+    databaseName: string;
+    now?: Date;
+  }) => Promise<{
+    artifactPath: string;
+    checksumSha256: string;
+    completedAt: string;
+    createdAt?: string;
+    expiresAt?: string | null;
+    providerReference?: string | null;
+    reportRef: string;
+    sizeBytes: number;
+    snapshotId: string;
+    snapshotKind?: BackupSnapshotRecord["snapshot_kind"];
+  }>;
 }): Promise<OperationResult>;
 
 export const backupPaths: {

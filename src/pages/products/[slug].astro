@@ -7,6 +7,7 @@ import { canonicalRedirectFor, getStorefrontProduct, resolveStorefrontShop, type
 import { formatMoney, stockLabel } from "../../lib/storefront/view";
 import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
 import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { schemaPrice } from "../../lib/seo";
 
 const env = getBindings();
 let shop: StorefrontShop | null = null;
@@ -35,9 +36,29 @@ const pageTitle = product
   : productUnavailable
     ? t("storefront.product.unavailable_title", { shop: shop?.name ?? t("storefront.product.contact") })
     : t("storefront.product.store_paused_title", { shop: shop?.name ?? t("storefront.product.contact") });
+const productStructuredData = product && shop
+  ? {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.title,
+    description: product.description || t("storefront.product.description_fallback"),
+    sku: product.variants.length === 1 ? product.variants[0]?.sku : undefined,
+    brand: { "@type": "Brand", name: shop.name },
+    url: `https://${shop.currentHostname}/products/${product.slug}`,
+    offers: product.variants.map((variant) => ({
+      "@type": "Offer",
+      url: `https://${shop.currentHostname}/products/${product.slug}`,
+      price: schemaPrice(variant.priceMinor, variant.currency),
+      priceCurrency: variant.currency,
+      availability: variant.stockState === "out_of_stock" ? "https://schema.org/OutOfStock" : "https://schema.org/InStock",
+      itemCondition: "https://schema.org/NewCondition",
+      sku: variant.sku,
+    })),
+  }
+  : undefined;
 ---
 
-{shop && <StorefrontLayout shop={shop} title={pageTitle} noindex={!product} abuseReportProductSlug={product?.slug}>
+{shop && <StorefrontLayout shop={shop} title={pageTitle} noindex={!product} abuseReportProductSlug={product?.slug} structuredData={productStructuredData}>
   {product ? <section class="product-detail">
     <div class="product-detail-visual" aria-hidden="true">{product.title.slice(0, 1).toUpperCase()}</div>
     <div class="product-detail-copy">

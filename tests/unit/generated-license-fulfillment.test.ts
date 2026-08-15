@@ -18,6 +18,10 @@ import {
   type GeneratedLicenseProviderCall,
   type GeneratedLicenseProviderResult,
 } from "../../src/lib/commerce/generated-license";
+import {
+  listActiveGeneratedLicenseDeadLetters,
+  requestGeneratedLicenseDeadLetterRetry as requestAdminGeneratedLicenseDeadLetterRetry,
+} from "../../src/lib/operations/dead-letters";
 import { encryptGeneratedLicenseProviderSecrets } from "../../src/lib/commerce/generated-license-crypto";
 import {
   revealPrincipalDigitalFulfillment,
@@ -1320,6 +1324,210 @@ describe("generated-license fulfillment", () => {
       createGeneratedLicenseQueueEnvelope({ requestId: failed.requestId, shopId: failed.shopId }),
       createGeneratedLicenseQueueEnvelope({ requestId: failed.requestId, shopId: failed.shopId }),
     ]);
+  });
+
+  it("exposes generated-license dead letters and provides an idempotent admin retry", async () => {
+    const graph = await activateAndRequest({
+      d1,
+      graph: await seedGeneratedOrderSkeleton({ database, paid: true, suffix: "admin-dead-letter", totalMinor: 0 }),
+    });
+    const adapter = new FakeGeneratedLicenseAdapter(() => ({
+      errorCode: "provider_request_rejected",
+      kind: "permanent",
+    }));
+    await processGeneratedLicenseRequestReference({
+      env,
+      now: NOW,
+      registry: registry(adapter),
+      requestId: graph.requestId,
+      shopId: graph.shopId,
+    });
+    database.prepare(`
+      INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
+      VALUES ('user-gl-a', 'owner', 'active', ?, ?)
+    `).run(NOW_ISO, NOW_ISO);
+
+    const listed = await listActiveGeneratedLicenseDeadLetters({ env });
+    expect(listed).toMatchObject({ hasMore: false, limit: 100 });
+    expect(listed.items).toHaveLength(1);
+    const deadLetter = listed.items[0];
+    if (deadLetter === undefined) throw new Error("generated_license_dead_letter_missing");
+    expect(deadLetter).toMatchObject({
+      failureCode: "provider_request_rejected",
+      requestId: graph.requestId,
+      requestStatus: "failed",
+      shopId: graph.shopId,
+      status: "open",
+      safeContext: { providerCode: "fake.license", requestId: graph.requestId },
+    });
+    expect(JSON.stringify(deadLetter)).not.toContain("credential-secret");
+
+    const first = await requestAdminGeneratedLicenseDeadLetterRetry({
+      actorUserId: "user-gl-a",
+      env,
+      id: deadLetter.id,
+      idempotencyKey: "generated-license-admin-retry-0001",
+      now: NOW,
+      requestId: "request-generated-license-admin-retry",
+      shopId: graph.shopId,
+    });
+    const replay = await requestAdminGeneratedLicenseDeadLetterRetry({
+      actorUserId: "user-gl-a",
+      env,
+      id: deadLetter.id,
+      idempotencyKey: "generated-license-admin-retry-0001",
+      now: NOW,
+      requestId: "request-generated-license-admin-retry-replay",
+      shopId: graph.shopId,
+    });
+    expect(first.replayed).toBe(false);
+    expect(first.operationId).toMatch(/^gld_/u);
+    expect(replay).toMatchObject({ operationId: first.operationId, replayed: true });
+    expect(queue.messages).toEqual([createGeneratedLicenseQueueEnvelope({ requestId: graph.requestId, shopId: graph.shopId })]);
+
+    const retryKeyHash = await hmacToken(SESSION_SECRET, "idempotency", "generated-license-admin-retry-0001");
+    database.prepare(`
+      UPDATE idempotency_records SET response_json = ?
+      WHERE actor_user_id = 'user-gl-a'
+        AND namespace = 'admin.generated-license-dead-letter-retry.v1'
+        AND key_hash = ?
+    `).run(JSON.stringify({ state: "enqueuing", operationId: first.operationId }), retryKeyHash);
+    await expect(requestAdminGeneratedLicenseDeadLetterRetry({
+      actorUserId: "user-gl-a",
+      env,
+      id: deadLetter.id,
+      idempotencyKey: "generated-license-admin-retry-0001",
+      now: NOW,
+      requestId: "request-generated-license-admin-retry-in-progress",
+      shopId: graph.shopId,
+    })).rejects.toMatchObject({ code: "generated_license_dead_letter_enqueue_in_progress", status: 409 });
+    expect(queue.messages).toHaveLength(1);
+
+    expect(database.prepare(`
+      SELECT status FROM generated_license_requests WHERE id = ? AND shop_id = ?
+    `).get(graph.requestId, graph.shopId)).toEqual({ status: "retryable" });
+    expect(database.prepare(`
+      SELECT status FROM generated_license_dead_letters WHERE id = ? AND shop_id = ?
+    `).get(deadLetter.id, graph.shopId)).toEqual({ status: "retry_requested" });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM audit_logs
+      WHERE resource_id = ? AND action = 'operations.generated_license_dead_letter_retry_requested'
+    `).get(deadLetter.id)).toEqual({ count: 1 });
+    await expect(requestAdminGeneratedLicenseDeadLetterRetry({
+      actorUserId: "user-gl-a",
+      env,
+      id: deadLetter.id,
+      idempotencyKey: "generated-license-admin-retry-cross-tenant",
+      now: NOW,
+      requestId: "request-generated-license-admin-retry-cross-tenant",
+      shopId: "shop-gl-b",
+    })).rejects.toMatchObject({ code: "generated_license_dead_letter_not_found", status: 404 });
+    database.prepare("UPDATE platform_admins SET role = 'support' WHERE user_id = 'user-gl-a'").run();
+    await expect(requestAdminGeneratedLicenseDeadLetterRetry({
+      actorUserId: "user-gl-a",
+      env,
+      id: deadLetter.id,
+      idempotencyKey: "generated-license-admin-retry-support",
+      now: NOW,
+      requestId: "request-generated-license-admin-retry-support",
+      shopId: graph.shopId,
+    })).rejects.toMatchObject({ code: "authorization_denied", status: 403 });
+  });
+
+  it("assigns one atomic owner across competing admin retry keys", async () => {
+    const graph = await activateAndRequest({
+      d1,
+      graph: await seedGeneratedOrderSkeleton({ database, paid: true, suffix: "admin-dead-letter-race", totalMinor: 0 }),
+    });
+    const adapter = new FakeGeneratedLicenseAdapter(() => ({
+      errorCode: "provider_request_rejected",
+      kind: "permanent",
+    }));
+    await processGeneratedLicenseRequestReference({
+      env,
+      now: NOW,
+      registry: registry(adapter),
+      requestId: graph.requestId,
+      shopId: graph.shopId,
+    });
+    database.exec(`
+      INSERT INTO platform_admins (user_id, role, status, created_at, updated_at) VALUES
+        ('user-gl-a', 'owner', 'active', '${NOW_ISO}', '${NOW_ISO}'),
+        ('user-gl-b', 'risk', 'active', '${NOW_ISO}', '${NOW_ISO}');
+    `);
+    const listed = await listActiveGeneratedLicenseDeadLetters({ env });
+    const deadLetter = listed.items.find((item) => item.requestId === graph.requestId);
+    if (deadLetter === undefined) throw new Error("generated_license_dead_letter_missing");
+
+    const raced = await Promise.allSettled([
+      requestAdminGeneratedLicenseDeadLetterRetry({
+        actorUserId: "user-gl-a",
+        env,
+        id: deadLetter.id,
+        idempotencyKey: "generated-license-admin-race-owner-0001",
+        now: NOW,
+        requestId: "request-generated-license-admin-race-owner",
+        shopId: graph.shopId,
+      }),
+      requestAdminGeneratedLicenseDeadLetterRetry({
+        actorUserId: "user-gl-b",
+        env,
+        id: deadLetter.id,
+        idempotencyKey: "generated-license-admin-race-risk-0001",
+        now: NOW,
+        requestId: "request-generated-license-admin-race-risk",
+        shopId: graph.shopId,
+      }),
+    ]);
+    expect(raced.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = raced.find((result) => result.status === "rejected");
+    if (rejected?.status !== "rejected" || typeof rejected.reason !== "object" || rejected.reason === null) {
+      throw new Error("generated_license_retry_race_rejection_missing");
+    }
+    expect((rejected.reason as { code?: unknown }).code).toBe("generated_license_dead_letter_conflict");
+    expect((rejected.reason as { status?: unknown }).status).toBe(409);
+    expect(queue.messages).toEqual([
+      createGeneratedLicenseQueueEnvelope({ requestId: graph.requestId, shopId: graph.shopId }),
+    ]);
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM idempotency_records
+      WHERE namespace = 'admin.generated-license-dead-letter-retry.v1'
+    `).get()).toEqual({ count: 1 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM audit_logs
+      WHERE resource_id = ? AND action = 'operations.generated_license_dead_letter_retry_requested'
+    `).get(deadLetter.id)).toEqual({ count: 1 });
+
+    const orphanKey = "generated-license-admin-race-orphan-0001";
+    const orphanKeyHash = await hmacToken(SESSION_SECRET, "idempotency", orphanKey);
+    const orphanRequestHash = await sha256Json({ deadLetterId: deadLetter.id, shopId: graph.shopId });
+    const orphanOperationId = `gld_${(await hmacToken(
+      SESSION_SECRET,
+      "admin.generated-license-dead-letter-retry.v1",
+      `user-gl-b:${orphanKey}`,
+    )).slice(0, 48)}`;
+    database.prepare(`
+      INSERT INTO idempotency_records (
+        actor_user_id, namespace, key_hash, request_hash, response_json, created_at, expires_at
+      ) VALUES (?, 'admin.generated-license-dead-letter-retry.v1', ?, ?, ?, ?, ?)
+    `).run(
+      "user-gl-b",
+      orphanKeyHash,
+      orphanRequestHash,
+      JSON.stringify({ state: "pending", operationId: orphanOperationId }),
+      NOW_ISO,
+      new Date(NOW.getTime() + 60_000).toISOString(),
+    );
+    await expect(requestAdminGeneratedLicenseDeadLetterRetry({
+      actorUserId: "user-gl-b",
+      env,
+      id: deadLetter.id,
+      idempotencyKey: orphanKey,
+      now: NOW,
+      requestId: "request-generated-license-admin-race-orphan",
+      shopId: graph.shopId,
+    })).rejects.toMatchObject({ code: "generated_license_dead_letter_conflict", status: 409 });
+    expect(queue.messages).toHaveLength(1);
   });
 
   it("denies cross-tenant processing and artifact reveal without disclosing order existence", async () => {

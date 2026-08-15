@@ -1,4 +1,5 @@
 import { AppError } from "../core/errors";
+import { assertSubscriptionAllows } from "../billing/entitlements";
 import { constantTimeEqual, hmacToken, sha256Json } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
 import { resolveOrderChannelAttribution } from "../channels/attribution";
@@ -8,12 +9,13 @@ import type { AppBindings } from "../platform/bindings";
 import type { StorefrontShop } from "../storefront/store";
 import { assertCheckoutAllowed } from "../tenants/policy";
 import type { CartItemInput } from "./policy";
-import { maskEmail } from "./policy";
+import { maskEmail, normalizeCustomerEmail } from "./policy";
 import { verifyQuoteEvidence, type QuoteEvidenceCatalogItem } from "./quote-evidence";
 import { executeCanonicalCheckoutTransaction } from "./checkout-transaction";
 import { calculateCartDiscountMinor } from "./pricing";
 import { createCanonicalCart } from "./cart-creation";
 import { projectCanonicalCartQuote } from "./cart-quote";
+import { isBuyerOrderRecoveryBinding, resolveCurrentBuyerOrderRecoveryToken } from "./buyer-order-recovery";
 
 type PublicShop = StorefrontShop;
 type CheckoutVariant = { availableStock: number; currency: string; fulfillmentType: "license_key" | "manual"; maxPerOrder: number; minPerOrder: number; priceMinor: number; productId: string; productStatus: string; productTitle: string; productVersion: number; sku: string; status: string; title: string; variantId: string; version: number };
@@ -149,7 +151,10 @@ export async function websiteCheckoutFingerprint(input: {
 }
 
 export async function checkoutCart(input: { cartId: string; cartToken: string; customerEmail: string | null; env: AppBindings; expected: ExpectedItem[]; idempotencyKey: string; quoteEvidence?: string; shop: PublicShop }): Promise<{ currency: string; expiresAt: string; fulfillmentStatus: string; orderId: string; orderNumber: string; orderToken: string; paymentStatus: string; status: string; totalMinor: number }> {
+  assertSubscriptionAllows({ currentPeriodEnd: input.shop.currentPeriodEnd, graceEndsAt: input.shop.graceEndsAt, subscriptionState: input.shop.subscriptionState, trialEndsAt: input.shop.trialEndsAt });
   assertCheckoutAllowed({ shopStatus: input.shop.status, subscriptionState: input.shop.subscriptionState });
+  const customerEmail = normalizeCustomerEmail(input.customerEmail);
+  if (customerEmail === null) throw new AppError("validation_failed", 400, ["email_required"]);
   if (!/^[A-Za-z0-9._:-]{16,128}$/u.test(input.idempotencyKey)) throw new AppError("validation_failed", 400, ["idempotency_key_invalid"]);
   const checkoutHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `checkout:${input.shop.id}`, input.idempotencyKey);
   // Keep signed proofs out of the business hash, but bind canonical pricing so
@@ -161,7 +166,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
   const hashDiscountMinor = await calculateCartDiscountMinor({ code: hashCart?.discountCode ?? null, env: input.env, shop: input.shop, subtotalMinor: hashSubtotalMinor });
   const requestHash = await websiteCheckoutFingerprint({
     cartId: input.cartId,
-    customerEmail: input.customerEmail,
+    customerEmail,
     discountCode: hashCart?.discountCode ?? null,
     discountMinor: hashDiscountMinor,
     expected: input.expected,
@@ -170,7 +175,8 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
   const orderToken = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `order-access-token:${input.shop.id}`, input.idempotencyKey);
   const recoverReplay = async () => {
     const replay = await input.env.PLATFORM_DB.prepare(`
-      SELECT orders.public_id AS orderId, orders.order_number AS orderNumber,
+      SELECT orders.id AS internalOrderId,
+        orders.public_id AS orderId, orders.order_number AS orderNumber,
         orders.checkout_request_hash AS requestHash,
         orders.expires_at AS expiresAt,
         orders.fulfillment_status AS fulfillmentStatus,
@@ -194,6 +200,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
       currency: string;
       expiresAt: string;
       fulfillmentStatus: string;
+      internalOrderId: string;
       orderId: string;
       orderNumber: string;
       orderTokenHash: string;
@@ -215,8 +222,26 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
     ) throw new AppError("idempotency_conflict", 409);
     if (replay.requestHash !== requestHash) throw new AppError("idempotency_conflict", 409);
     const replayTokenHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, "order-access", orderToken);
-    if (!constantTimeEqual(replay.orderTokenHash, replayTokenHash)) throw new AppError("idempotency_conflict", 409);
-    return { currency: replay.currency, expiresAt: replay.expiresAt, fulfillmentStatus: replay.fulfillmentStatus, orderId: replay.orderId, orderNumber: replay.orderNumber, orderToken, paymentStatus: replay.paymentStatus, status: replay.status, totalMinor: replay.totalMinor };
+    let responseToken = orderToken;
+    if (!constantTimeEqual(replay.orderTokenHash, replayTokenHash)) {
+      const bindingMatches = await isBuyerOrderRecoveryBinding({
+        candidateBindingHash: replayTokenHash,
+        currentOrderTokenHash: replay.orderTokenHash,
+        env: input.env,
+        orderId: replay.internalOrderId,
+        shopId: input.shop.id,
+      });
+      if (!bindingMatches) throw new AppError("idempotency_conflict", 409);
+      const recoveredToken = await resolveCurrentBuyerOrderRecoveryToken({
+        currentOrderTokenHash: replay.orderTokenHash,
+        env: input.env,
+        orderId: replay.internalOrderId,
+        shopId: input.shop.id,
+      });
+      if (recoveredToken === null) throw new AppError("idempotency_conflict", 409);
+      responseToken = recoveredToken;
+    }
+    return { currency: replay.currency, expiresAt: replay.expiresAt, fulfillmentStatus: replay.fulfillmentStatus, orderId: replay.orderId, orderNumber: replay.orderNumber, orderToken: responseToken, paymentStatus: replay.paymentStatus, status: replay.status, totalMinor: replay.totalMinor };
   };
   const existing = await recoverReplay();
   if (existing !== null) return existing;
@@ -267,7 +292,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
   const totalMinor = subtotalMinor - discountMinor;
   const authoritativeRequestHash = await websiteCheckoutFingerprint({
     cartId: input.cartId,
-    customerEmail: input.customerEmail,
+    customerEmail,
     discountCode: cart.row.discountCode,
     discountMinor,
     expected: input.expected,
@@ -319,9 +344,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
       checkoutRequestHash: requestHash,
       checkoutSubjectHash: checkoutHash,
       currency: input.shop.currency,
-      customer: input.customerEmail === null
-        ? { kind: "anonymous", maskedEmail: null }
-        : { emailNormalized: input.customerEmail, id: createId("cus"), kind: "upsert_email", locale: cart.row.locale, maskedEmail: maskEmail(input.customerEmail) ?? "" },
+      customer: { emailNormalized: customerEmail, id: createId("cus"), kind: "upsert_email", locale: cart.row.locale, maskedEmail: maskEmail(customerEmail) ?? "" },
       discountMinor,
       env: input.env,
       eventIdempotencyKey: checkoutHash,

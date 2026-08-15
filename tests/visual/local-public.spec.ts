@@ -16,12 +16,12 @@ type PublicRoute = {
 
 const routes: readonly PublicRoute[] = [
   {
-    heading: "Bán sản phẩm số ngay trong cuộc trò chuyện.",
+    heading: "Biến mọi cuộc trò chuyện thành đơn hàng.",
     id: "marketing-home",
     origin: marketingOrigin,
     path: "/",
     screenshot: "public-marketing-home.png",
-    title: "Selinow - Bán sản phẩm số ngay trong cuộc trò chuyện",
+    title: "Selinow - Biến mọi cuộc trò chuyện thành đơn hàng",
   },
   {
     heading: "Một gói phù hợp với nhịp vận hành của bạn.",
@@ -168,7 +168,7 @@ for (const route of routes) {
     expect(await page.title()).toBe(route.title);
     expect(await page.evaluate(() => location.origin)).toBe(route.origin);
     expect(await page.evaluate(() => location.pathname)).toBe(route.path);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(route.heading);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName(route.heading);
     if (route.id === "storefront-product-detail") {
       await expect(page.locator("#detail-add")).toBeEnabled();
     }
@@ -182,7 +182,7 @@ for (const route of routes) {
 
     await expect(page).toHaveScreenshot(route.screenshot, { fullPage: route.id === "marketing-home" });
     if (route.id === "marketing-home") {
-      const faq = page.locator(".faq-list details").first();
+      const faq = page.locator(".faq-kit-list details").first();
       await faq.locator("summary").click();
       await expect(faq).toHaveAttribute("open", "");
       await faq.locator("summary").click();

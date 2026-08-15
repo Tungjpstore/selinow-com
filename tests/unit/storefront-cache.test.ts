@@ -4,14 +4,20 @@ import { isStorefrontCacheCandidate, resolveActiveStorefrontCacheKey } from "../
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
 type DomainRow = {
+  currentPeriodEnd: string | null;
   domainId: string;
+  domainValidationMetadataJson: string;
   domainVersion: number;
   hostnameNormalized: string;
   publishedVersion: number;
   defaultLocale: string;
+  domainType: "custom" | "platform_subdomain";
   shopStatus: string;
   status: string;
   subscriptionState: string | null;
+  trialEndsAt: string | null;
+  graceEndsAt: string | null;
+  featureFlagsJson: string;
 } | null;
 
 function fakeEnvironment(row: DomainRow): { env: Pick<AppBindings, "PLATFORM_DB">; queries: () => { sql: string; values: unknown[] }[] } {
@@ -40,14 +46,28 @@ const cacheKeyInput = {
 
 function activeDomain(overrides: Partial<Exclude<DomainRow, null>> = {}): Exclude<DomainRow, null> {
   return {
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     domainId: "domain-current",
+    domainValidationMetadataJson: JSON.stringify({
+      turnstile: {
+        checkedAt: new Date(Date.now() - 60_000).toISOString(),
+        hostname: "shop.example.com",
+        mode: "operator_managed",
+        source: "cloudflare_widget_domains",
+        status: "active",
+      },
+    }),
     domainVersion: 7,
     defaultLocale: "vi",
+    domainType: "custom",
     hostnameNormalized: "shop.example.com",
     publishedVersion: 3,
     shopStatus: "active",
     status: "active",
     subscriptionState: "active",
+    trialEndsAt: null,
+    graceEndsAt: null,
+    featureFlagsJson: JSON.stringify({ customDomain: true }),
     ...overrides,
   };
 }
@@ -64,9 +84,17 @@ describe("storefront cache domain gate", () => {
     expect(queries()[0]?.sql).toContain("shop_domains.deleted_at IS NULL");
     expect(queries()[0]?.sql).toContain("shop_domains.type = 'platform_subdomain'");
     expect(queries()[0]?.sql).toContain("shop_domains.ownership_verified_at IS NOT NULL");
+    expect(queries()[0]?.sql).toContain("$.turnstile.status");
+    expect(queries()[0]?.sql).toContain("$.turnstile.hostname");
+    expect(queries()[0]?.sql).toContain("$.turnstile.checkedAt");
+    expect(queries()[0]?.sql).toContain("'-12 hours'");
     expect(queries()[0]?.sql).toContain("shops.status = 'active'");
     expect(queries()[0]?.sql).toContain("ORDER BY created_at DESC, id DESC");
-    expect(queries()[0]?.sql).toContain("IN ('trialing', 'active', 'past_due')");
+    expect(queries()[0]?.sql).toContain("current_period_end");
+    expect(queries()[0]?.sql).toContain("trial_ends_at");
+    expect(queries()[0]?.sql).toContain("grace_ends_at");
+    expect(queries()[0]?.sql).toContain("plans.feature_flags_json");
+    expect(queries()[0]?.sql).toContain("$.customDomain");
   });
 
   it("uses the authoritative shop default when no request locale hint is present", async () => {
@@ -106,8 +134,54 @@ describe("storefront cache domain gate", () => {
   });
 
   it.each(["trialing", "active", "past_due"])("allows the %s subscription state", async (subscriptionState) => {
-    const key = await resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ subscriptionState })).env, ...cacheKeyInput });
+    const key = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({
+        graceEndsAt: subscriptionState === "past_due" ? "2099-01-01T00:00:00.000Z" : null,
+        subscriptionState,
+        trialEndsAt: subscriptionState === "trialing" ? "2099-01-01T00:00:00.000Z" : null,
+      })).env,
+      ...cacheKeyInput,
+    });
     expect(key).toContain("/i/domain-current/v7-3/shop.example.com/");
+  });
+
+  it("does not reuse a cached response after the paid period expires", async () => {
+    const activeKey = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain()).env,
+      ...cacheKeyInput,
+    });
+    const sharedCache = new Map([[activeKey, "paid storefront"]]);
+
+    const expiredKey = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({ currentPeriodEnd: "2000-01-01T00:00:00.000Z" })).env,
+      ...cacheKeyInput,
+    });
+
+    expect(activeKey).not.toBeNull();
+    expect(sharedCache.get(activeKey)).toBe("paid storefront");
+    expect(expiredKey).toBeNull();
+    expect(sharedCache.get(expiredKey)).toBeUndefined();
+  });
+
+  it("does not issue a custom-host cache key after downgrade", async () => {
+    const key = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({ featureFlagsJson: JSON.stringify({ customDomain: false }) })).env,
+      ...cacheKeyInput,
+    });
+
+    expect(key).toBeNull();
+  });
+
+  it("keeps platform-subdomain cache admission independent from custom-domain entitlement", async () => {
+    const key = await resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({
+        domainType: "platform_subdomain",
+        featureFlagsJson: JSON.stringify({ customDomain: false }),
+      })).env,
+      ...cacheKeyInput,
+    });
+
+    expect(key).not.toBeNull();
   });
 
   it("misses a stale cache object after the hostname is reassigned", async () => {
@@ -142,6 +216,24 @@ describe("storefront cache domain gate", () => {
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ domainId: "" })).env, ...cacheKeyInput })).resolves.toBeNull();
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ domainVersion: 0 })).env, ...cacheKeyInput })).resolves.toBeNull();
     await expect(resolveActiveStorefrontCacheKey({ env: fakeEnvironment(activeDomain({ publishedVersion: 0 })).env, ...cacheKeyInput })).resolves.toBeNull();
+    await expect(resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({ domainValidationMetadataJson: "{}" })).env,
+      ...cacheKeyInput,
+    })).resolves.toBeNull();
+    await expect(resolveActiveStorefrontCacheKey({
+      env: fakeEnvironment(activeDomain({
+        domainValidationMetadataJson: JSON.stringify({
+          turnstile: {
+            checkedAt: new Date(Date.now() - 13 * 60 * 60_000).toISOString(),
+            hostname: "shop.example.com",
+            mode: "operator_managed",
+            source: "cloudflare_widget_domains",
+            status: "active",
+          },
+        }),
+      })).env,
+      ...cacheKeyInput,
+    })).resolves.toBeNull();
   });
 
   it("keeps non-storefront and local requests outside the Cache API path", () => {

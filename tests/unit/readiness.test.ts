@@ -8,6 +8,7 @@ import {
 } from "../../src/lib/tenants/readiness";
 
 const CHECKED_AT = "2026-07-26T00:00:00.000Z";
+const TEST_POLICY_VERSION = 7;
 
 function readySnapshot(overrides: Partial<ReadinessSnapshot> = {}): ReadinessSnapshot {
   return {
@@ -22,7 +23,7 @@ function readySnapshot(overrides: Partial<ReadinessSnapshot> = {}): ReadinessSna
     payosStatus: "active",
     payosWebhookStatus: "verified",
     platformDomainReady: true,
-    policyAttestationVersion: 1,
+    policyAttestationVersion: TEST_POLICY_VERSION,
     policyAttestedAt: CHECKED_AT,
     privacyUrl: "https://seller.example/privacy",
     readinessVersion: 4,
@@ -30,6 +31,7 @@ function readySnapshot(overrides: Partial<ReadinessSnapshot> = {}): ReadinessSna
     shopStatus: "draft",
     storefrontEntitled: true,
     subscriptionState: "active",
+    currentPeriodEnd: "2026-08-04T00:00:00.000Z",
     supportContact: "support@example.com",
     telegramEnabled: false,
     telegramEntitled: true,
@@ -43,12 +45,12 @@ function readySnapshot(overrides: Partial<ReadinessSnapshot> = {}): ReadinessSna
 }
 
 function checkStatus(snapshot: ReadinessSnapshot, code: string) {
-  return evaluateReadinessSnapshot(snapshot, CHECKED_AT).checks.find((item) => item.code === code);
+  return evaluateReadinessSnapshot(snapshot, CHECKED_AT, TEST_POLICY_VERSION).checks.find((item) => item.code === code);
 }
 
 describe("tenant readiness policy", () => {
   it("allows a website-only seller with a healthy canonical storefront", () => {
-    const result = evaluateReadinessSnapshot(readySnapshot(), CHECKED_AT);
+    const result = evaluateReadinessSnapshot(readySnapshot(), CHECKED_AT, TEST_POLICY_VERSION);
     expect(result.ready).toBe(true);
     expect(checkStatus(readySnapshot(), "telegram_ready")).toMatchObject({ required: false, status: "pass" });
   });
@@ -61,7 +63,7 @@ describe("tenant readiness policy", () => {
       telegramStatus: "active",
       telegramWebhookStatus: "verified",
       websiteEnabled: false,
-    }), CHECKED_AT);
+    }), CHECKED_AT, TEST_POLICY_VERSION);
     expect(result.ready).toBe(true);
     expect(result.checks.find((item) => item.code === "storefront_ready")).toMatchObject({ required: false, status: "pass" });
   });
@@ -73,7 +75,7 @@ describe("tenant readiness policy", () => {
       telegramLastHealthUpdateAt: CHECKED_AT,
       telegramStatus: "active",
       telegramWebhookStatus: "verified",
-    }), CHECKED_AT);
+    }), CHECKED_AT, TEST_POLICY_VERSION);
     expect(result.ready).toBe(false);
     expect(result.checks.find((item) => item.code === "channel_entitlements")?.status).toBe("fail");
   });
@@ -85,7 +87,7 @@ describe("tenant readiness policy", () => {
       telegramLastHealthUpdateAt: "2026-06-25T23:59:59.000Z",
       telegramStatus: "active",
       telegramWebhookStatus: "verified",
-    }), CHECKED_AT);
+    }), CHECKED_AT, TEST_POLICY_VERSION);
     expect(result.ready).toBe(false);
     expect(result.checks.filter((item) => item.status === "fail").map((item) => item.code)).toEqual(expect.arrayContaining([
       "payos_ready",
@@ -98,27 +100,36 @@ describe("tenant readiness policy", () => {
   });
 
   it("allows past-due within provider policy but surfaces a warning", () => {
-    const result = evaluateReadinessSnapshot(readySnapshot({ subscriptionState: "past_due" }), CHECKED_AT);
+    const result = evaluateReadinessSnapshot(readySnapshot({
+      graceEndsAt: "2026-07-29T00:00:00.000Z",
+      subscriptionState: "past_due",
+    }), CHECKED_AT, TEST_POLICY_VERSION);
     expect(result.ready).toBe(true);
     expect(result.checks.find((item) => item.code === "subscription_publishable")?.status).toBe("warning");
   });
 
   it("requires support, policy URLs and current seller attestation", () => {
-    const result = evaluateReadinessSnapshot(readySnapshot({ policyAttestationVersion: null, supportContact: null }), CHECKED_AT);
+    const result = evaluateReadinessSnapshot(readySnapshot({ policyAttestationVersion: null, supportContact: null }), CHECKED_AT, TEST_POLICY_VERSION);
     expect(result.ready).toBe(false);
     expect(result.checks.find((item) => item.code === "policies_ready")?.status).toBe("fail");
   });
 
   it("keeps a requested custom domain optional while warning about its state", () => {
-    const result = evaluateReadinessSnapshot(readySnapshot({ customDomainPreference: "connect" }), CHECKED_AT);
+    const result = evaluateReadinessSnapshot(readySnapshot({ customDomainPreference: "connect" }), CHECKED_AT, TEST_POLICY_VERSION);
     expect(result.ready).toBe(true);
     expect(result.checks.find((item) => item.code === "custom_domain_ready")).toMatchObject({ required: false, status: "warning" });
   });
 
   it("fails closed on critical integration state even when cached health fields look valid", () => {
-    const result = evaluateReadinessSnapshot(readySnapshot({ criticalIntegrationError: true }), CHECKED_AT);
+    const result = evaluateReadinessSnapshot(readySnapshot({ criticalIntegrationError: true }), CHECKED_AT, TEST_POLICY_VERSION);
     expect(result.ready).toBe(false);
     expect(result.checks.find((item) => item.code === "integration_health")?.status).toBe("fail");
+  });
+
+  it("blocks readiness while the platform policy is unpublished", () => {
+    const result = evaluateReadinessSnapshot(readySnapshot(), CHECKED_AT);
+    expect(result.ready).toBe(false);
+    expect(result.checks.find((item) => item.code === "policies_ready")).toMatchObject({ required: true, status: "fail" });
   });
 });
 
@@ -131,9 +142,11 @@ type FakeStatement = {
 class PublishDatabase {
   guardChanges = 1;
   memberRole = "owner";
+  readonly queries: string[] = [];
   readinessRuns = 0;
 
   prepare(sql: string) {
+    this.queries.push(sql);
     return {
       bind: (...values: unknown[]): FakeStatement => {
         void values;
@@ -154,6 +167,7 @@ class PublishDatabase {
                 shop_status: "draft",
                 slug: "shop-a",
                 subscription_state: "active",
+                current_period_end: "2099-01-01T00:00:00.000Z",
                 timezone: "Asia/Ho_Chi_Minh",
               });
             }
@@ -164,13 +178,14 @@ class PublishDatabase {
                 criticalIntegrationError: 0,
                 customDomainPreference: "later",
                 customDomainReady: 0,
+                currentPeriodEnd: "2099-01-01T00:00:00.000Z",
                 fulfillmentReady: 1,
                 payosLastCheckedAt: new Date().toISOString(),
                 payosLastWebhookVerifiedAt: new Date().toISOString(),
                 payosStatus: "active",
                 payosWebhookStatus: "verified",
                 platformDomainReady: 1,
-                policyAttestationVersion: 1,
+                policyAttestationVersion: TEST_POLICY_VERSION,
                 policyAttestedAt: new Date().toISOString(),
                 privacyUrl: "https://seller.example/privacy",
                 readinessVersion: 4,
@@ -215,6 +230,7 @@ describe("guarded publish transition", () => {
     const database = new PublishDatabase();
     const result = await publishReadyStorefront({
       env: testEnv(database),
+      platformPolicyVersion: TEST_POLICY_VERSION,
       requestId: "request-test-1",
       shopPublicId: "shop_public_a",
       userId: "user-a",
@@ -222,6 +238,19 @@ describe("guarded publish transition", () => {
     expect(database.readinessRuns).toBe(1);
     expect(result.ready).toBe(true);
     expect(result.readinessVersion).toBe(5);
+    const readinessQuery = database.queries.find((sql) => sql.includes("AS canonicalDomainReady"));
+    const publishGuard = database.queries.find((sql) => sql.includes("UPDATE shops") && sql.includes("shop_onboarding_profiles.website_enabled = 1"));
+    for (const sql of [readinessQuery, publishGuard]) {
+      expect(sql).toContain("canonical.ownership_verified_at IS NOT NULL");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.status') = 'active'");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.hostname') = canonical.hostname_normalized");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'");
+      expect(sql).toContain("json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')");
+      expect(sql).toContain("-12 hours");
+    }
+    expect(readinessQuery).toContain("shop_domains.ownership_verified_at IS NOT NULL");
+    expect(readinessQuery).toContain("json_extract(shop_domains.validation_metadata_json, '$.turnstile.hostname') = shop_domains.hostname_normalized");
   });
 
   it("rejects a manager even when all technical checks pass", async () => {
@@ -229,6 +258,7 @@ describe("guarded publish transition", () => {
     database.memberRole = "manager";
     await expect(publishReadyStorefront({
       env: testEnv(database),
+      platformPolicyVersion: TEST_POLICY_VERSION,
       requestId: "request-test-2",
       shopPublicId: "shop_public_a",
       userId: "user-a",
@@ -241,10 +271,22 @@ describe("guarded publish transition", () => {
     database.guardChanges = 0;
     await expect(publishReadyStorefront({
       env: testEnv(database),
+      platformPolicyVersion: TEST_POLICY_VERSION,
       requestId: "request-test-3",
       shopPublicId: "shop_public_a",
       userId: "user-a",
     })).rejects.toMatchObject({ code: "readiness_changed", issues: ["rerun_readiness_required"] });
     expect(database.readinessRuns).toBe(1);
+  });
+
+  it("rejects publish before persisting readiness when the platform policy is unpublished", async () => {
+    const database = new PublishDatabase();
+    await expect(publishReadyStorefront({
+      env: testEnv(database),
+      requestId: "request-policy-unpublished",
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "policy_unpublished", status: 409 });
+    expect(database.readinessRuns).toBe(0);
   });
 });

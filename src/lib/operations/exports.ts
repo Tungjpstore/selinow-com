@@ -1,6 +1,8 @@
 import { constantTimeEqual, hmacToken } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken, toBase64Url } from "../core/ids";
+import { assertQuotaAvailable, recordUsage } from "../billing/metering";
+import { parsePlanLimits, PUBLIC_PLAN_CODES } from "../billing/plan-catalog";
 import { decryptInventoryKey } from "../crypto/inventory";
 import { resolveActiveEncryptionKey, resolveEncryptionKey } from "../crypto/keyring";
 import type { AppBindings } from "../platform/bindings";
@@ -77,6 +79,12 @@ type ExpiredExportObjectRow = {
   objectKey: string;
   shopId: string;
 };
+
+type ExportQuotaRow = {
+  code: string;
+  limitsJson: string;
+};
+type ExportUsageMetric = "downloads_served" | "exports_created";
 
 export type DataExportPurgeResult = {
   candidates: number;
@@ -230,6 +238,33 @@ async function requireOwnerShop(input: {
   `).bind(input.userId, input.shopPublicId).first<OwnerShop>();
   if (row === null || row.role !== "owner") throw new AppError("authorization_denied", 403);
   return row;
+}
+
+/**
+ * Resolve an export/download allowance from the tenant's authoritative subscription.
+ * Legacy subscriptions retain their historical behavior until their limits
+ * have been migrated; public Starter/Pro plans are always quota checked.
+ */
+async function assertUsageQuota(input: { env: AppBindings; metric: ExportUsageMetric; shopId: string }): Promise<number | null> {
+  const row = await input.env.PLATFORM_DB.prepare(`
+    SELECT plans.code, plans.limits_json AS limitsJson
+    FROM shop_subscriptions AS subscriptions
+    INNER JOIN plans ON plans.id = subscriptions.plan_id
+    WHERE subscriptions.shop_id = ? AND subscriptions.state != 'canceled'
+    ORDER BY subscriptions.created_at DESC, subscriptions.id DESC
+    LIMIT 1
+  `).bind(input.shopId).first<ExportQuotaRow>();
+  if (row === null || !(PUBLIC_PLAN_CODES as readonly string[]).includes(row.code)) return null;
+  const parsed = parsePlanLimits(row.limitsJson);
+  if (!parsed.ok) throw new AppError("quota_unavailable", 503, [input.metric]);
+  const limit = parsed.value[input.metric];
+  await assertQuotaAvailable({
+    database: input.env.PLATFORM_DB,
+    limit,
+    metric: input.metric,
+    shopId: input.shopId,
+  });
+  return limit;
 }
 
 function mapJob(row: ExportJobRow): DataExportView {
@@ -948,6 +983,7 @@ export async function createDataExport(input: {
     LIMIT 1
   `).bind(shop.shopId, input.kind).first<{ id: string }>();
   if (active !== null) throw new AppError("export_already_active", 409);
+  const exportQuotaLimit = await assertUsageQuota({ env: input.env, metric: "exports_created", shopId: shop.shopId });
 
   const exportId = createId("exp");
   const objectKey = dataExportObjectKey(exportId);
@@ -1090,6 +1126,17 @@ export async function createDataExport(input: {
     const row = await input.env.PLATFORM_DB.prepare(`${EXPORT_JOB_SELECT} WHERE id = ? AND shop_id = ? LIMIT 1`)
       .bind(exportId, shop.shopId).first<ExportJobRow>();
     if (row === null) throw new AppError("export_state_conflict", 409);
+    // Count only an export that reached the authoritative available state.
+    await recordUsage({
+      database: input.env.PLATFORM_DB,
+      delta: 1,
+      ...(exportQuotaLimit === null ? {} : { limit: exportQuotaLimit }),
+      metric: "exports_created",
+      occurredAt: completedAt,
+      shopId: shop.shopId,
+      sourceId: exportId,
+      sourceKind: "data_export",
+    });
     return { downloadToken, export: mapJob(row) };
   } catch (error) {
     await persistExportFailure({
@@ -1170,6 +1217,7 @@ export async function consumeDataExportDownload(input: {
     kind: row.kind,
     shopId: shop.shopId,
   });
+  const downloadQuotaLimit = await assertUsageQuota({ env: input.env, metric: "downloads_served", shopId: shop.shopId });
   const consumedAt = new Date().toISOString();
   const consumed = await input.env.PLATFORM_DB.prepare(`
     UPDATE data_export_jobs
@@ -1180,6 +1228,16 @@ export async function consumeDataExportDownload(input: {
       AND retain_until > ?
   `).bind(consumedAt, consumedAt, row.id, shop.shopId, row.downloadTokenHash, nowIso, nowIso).run();
   if (consumed.meta.changes !== 1) throw new AppError("export_download_not_found", 404);
+  await recordUsage({
+    database: input.env.PLATFORM_DB,
+    delta: 1,
+    ...(downloadQuotaLimit === null ? {} : { limit: downloadQuotaLimit }),
+    metric: "downloads_served",
+    occurredAt: consumedAt,
+    shopId: shop.shopId,
+    sourceId: row.id,
+    sourceKind: "data_export_download",
+  });
   let deletedAt: string | null = null;
   try {
     await bindings.PRIVATE_EXPORTS.delete(row.objectKey);

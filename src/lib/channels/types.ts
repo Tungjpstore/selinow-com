@@ -104,6 +104,11 @@ export type ChannelConnectionContext = {
   shopId: string;
 };
 
+/**
+ * Secret-free context resolved by provider webhook routes. Credential
+ * ciphertext and provider payloads are deliberately absent; adapters use the
+ * credential id to enter their own decrypt-and-verify boundary.
+ */
 export type NormalizedChannelEvent = {
   action: string;
   channelCode: string;

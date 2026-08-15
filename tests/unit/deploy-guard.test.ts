@@ -38,39 +38,26 @@ describe("deploy command safety", () => {
       dryRun: true,
       environment: "staging",
     });
-    expect(parseDeployFlags(["--env", "staging"])).toMatchObject({
+    expect(() => parseDeployFlags(["--env", "staging"]))
+      .toThrow("staging_release_manifest_required");
+    expect(parseDeployFlags([
+      "--env", "staging",
+      "--release-manifest", ".wrangler/releases/staging/stg_test/release-manifest.json",
+    ])).toMatchObject({
       dryRun: false,
       environment: "staging",
+      releaseManifestPath: ".wrangler/releases/staging/stg_test/release-manifest.json",
     });
   });
 
-  it("fails a real staging deploy before build when live route audit is unavailable", () => {
-    const environment = { ...process.env };
-    delete environment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
+  it("requires reviewed release evidence before a real staging deploy", () => {
     const result = spawnSync(process.execPath, ["scripts/deploy.mjs", "--env", "staging"], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: environment,
     });
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr.trim()).toBe("cloudflare_route_audit_api_token_missing");
-  });
-
-  it("requires the platform doctor token before a real staging deploy can build", () => {
-    const environment: NodeJS.ProcessEnv = {
-      ...process.env,
-      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
-    };
-    delete environment.CLOUDFLARE_PLATFORM_API_TOKEN;
-    const result = spawnSync(process.execPath, ["scripts/deploy.mjs", "--env", "staging"], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: environment,
-    });
-    expect(result.status).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr.trim()).toBe("cloudflare_platform_api_token_missing");
+    expect(result.stderr.trim()).toBe("staging_release_manifest_required");
   });
 
   it("keeps production behind explicit environment and confirmation flags", () => {
@@ -139,27 +126,86 @@ describe("deploy command safety", () => {
     expect(source).toContain("finalAdmission.databaseId !== productionAdmission.databaseId");
     expect(source).toContain("finalAdmission.databaseName !== productionAdmission.databaseName");
     expect(source).toContain("productionAdmission?.accountId");
-    expect(source).toContain("buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId)");
+    expect(source).not.toContain("buildPinnedCloudflareEnvironment(buildEnvironment, admittedAccountId)");
+    expect(source).toContain("buildPinnedCloudflareEnvironment(process.env, productionAdmission.accountId)");
+    expect(source).toContain("buildWorkerDeployEnvironment(process.env, admittedAccountId)");
+    expect(source).toContain("buildEnvironment.CLOUDFLARE_ENV");
+    expect(source).toContain("buildWorkerBuildEnvironment(process.env, flags.environment)");
+    expect(source).toContain('"--no-install"');
+    expect(source).toContain("requireDedicatedWorkerDeployToken: true");
+    expect(source).toContain("requireWorkerVersionBinding: true");
+    expect(source).toContain("expectedCurrentWorkerVersion: productionAdmission?.candidateWorkerVersion");
   });
 
-  it("enforces backup evidence and final staging admission immediately before deploy", () => {
+  it("enforces immutable pre/post migration evidence before and after the staging build", () => {
     const source = readFileSync("scripts/deploy.mjs", "utf8");
+    expect(source.match(/databaseTarget: databaseTargetFromAdmission\(/gu)).toHaveLength(6);
+    const firstRelease = source.indexOf("await assertStagingReleaseAdmission");
     const firstAdmission = source.indexOf("await assertStagingMutationAdmission");
     const build = source.indexOf('run("npm", ["run", "build"]');
-    const backup = source.indexOf("await assertFreshStagingBackupEvidence", build);
+    const firstPreContinuation = source.indexOf("await assertStagingContinuationEvidenceByReference");
+    const firstMigrationLedger = source.indexOf("await assertStagingMigrationLedger");
+    const firstDatabasePreflight = source.indexOf("stagingPreflightAdmission = assertStagingDatabasePreflight");
+    const firstMigrationCompletion = source.indexOf("await assertStagingMigrationCompletion", firstDatabasePreflight);
+    const firstPostRecord = source.indexOf("await readStagingPostMigrationEvidence", firstMigrationCompletion);
+    const firstPostContinuation = source.indexOf(
+      "await assertStagingContinuationEvidenceByReference",
+      firstPreContinuation + 1,
+    );
+    const firstPostEvidence = source.indexOf("await assertStagingPostMigrationEvidence", firstPostContinuation);
+    const secondRelease = source.indexOf("await assertStagingReleaseAdmission", firstRelease + 1);
+    const secondMigrationLedger = source.indexOf("await assertStagingMigrationLedger", firstMigrationLedger + 1);
+    const secondDatabasePreflight = source.indexOf("finalPreflightAdmission = assertStagingDatabasePreflight");
     const secondAdmission = source.indexOf("await assertStagingMutationAdmission", firstAdmission + 1);
-    const stableTargetGuard = source.indexOf("staging_backup_admission_changed", secondAdmission);
+    const secondPreContinuation = source.indexOf(
+      "await assertStagingContinuationEvidenceByReference",
+      firstPostContinuation + 1,
+    );
+    const secondMigrationCompletion = source.indexOf("await assertStagingMigrationCompletion", firstMigrationCompletion + 1);
+    const secondPostRecord = source.indexOf("await readStagingPostMigrationEvidence", firstPostRecord + 1);
+    const secondPostContinuation = source.indexOf(
+      "await assertStagingContinuationEvidenceByReference",
+      secondPreContinuation + 1,
+    );
+    const secondPostEvidence = source.indexOf("await assertStagingPostMigrationEvidence", firstPostEvidence + 1);
+    const stableTargetGuard = source.indexOf("staging_release_admission_changed", secondAdmission);
     const deploySink = source.indexOf('const deployArgs = ["wrangler", "deploy"]');
 
+    expect(firstRelease).toBeGreaterThan(-1);
+    expect(firstRelease).toBeLessThan(firstAdmission);
     expect(firstAdmission).toBeGreaterThan(-1);
     expect(firstAdmission).toBeLessThan(build);
-    expect(backup).toBeGreaterThan(build);
-    expect(secondAdmission).toBeGreaterThan(backup);
+    expect(firstPreContinuation).toBeGreaterThan(firstAdmission);
+    expect(firstPreContinuation).toBeLessThan(build);
+    expect(firstMigrationLedger).toBeGreaterThan(firstPreContinuation);
+    expect(firstMigrationLedger).toBeLessThan(build);
+    expect(firstDatabasePreflight).toBeGreaterThan(firstMigrationLedger);
+    expect(firstDatabasePreflight).toBeLessThan(build);
+    expect(firstMigrationCompletion).toBeGreaterThan(firstDatabasePreflight);
+    expect(firstPostRecord).toBeGreaterThan(firstMigrationCompletion);
+    expect(firstPostContinuation).toBeGreaterThan(firstPostRecord);
+    expect(firstPostEvidence).toBeGreaterThan(firstPostContinuation);
+    expect(firstPostEvidence).toBeLessThan(build);
+    expect(secondRelease).toBeGreaterThan(build);
+    expect(secondAdmission).toBeGreaterThan(secondRelease);
+    expect(secondPreContinuation).toBeGreaterThan(secondAdmission);
     expect(secondAdmission).toBeLessThan(deploySink);
+    expect(secondMigrationLedger).toBeGreaterThan(secondAdmission);
+    expect(secondMigrationLedger).toBeLessThan(deploySink);
+    expect(secondDatabasePreflight).toBeGreaterThan(secondMigrationLedger);
+    expect(secondDatabasePreflight).toBeLessThan(deploySink);
+    expect(secondMigrationCompletion).toBeGreaterThan(secondDatabasePreflight);
+    expect(secondPostRecord).toBeGreaterThan(secondMigrationCompletion);
+    expect(secondPostContinuation).toBeGreaterThan(secondPostRecord);
+    expect(secondPostEvidence).toBeGreaterThan(secondPostContinuation);
+    expect(secondPostEvidence).toBeLessThan(deploySink);
     expect(stableTargetGuard).toBeGreaterThan(secondAdmission);
     expect(stableTargetGuard).toBeLessThan(deploySink);
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_PLATFORM_API_TOKEN");
     expect(source).toContain("delete buildEnvironment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
-    expect(source).toContain("buildPinnedCloudflareEnvironment");
+    expect(source).toContain("buildPinnedCloudflareEnvironment(process.env, stagingAdmission.accountId)");
+    expect(source).toContain("buildPinnedCloudflareEnvironment(process.env, finalAdmission.accountId)");
+    expect(source).toContain("buildWorkerDeployEnvironment(process.env, admittedAccountId)");
+    expect(source).toContain("JSON.stringify(finalPostMigrationEvidenceAdmission) !== JSON.stringify(stagingPostMigrationEvidenceAdmission)");
   });
 });

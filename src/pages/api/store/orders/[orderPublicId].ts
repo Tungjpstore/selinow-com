@@ -22,6 +22,10 @@ export const GET: APIRoute = async ({ locals, params, request }) => {
       requestId: locals.requestId,
       shopId: shop.id,
     }, { order: { access: { kind: "opaque_token", token: orderToken }, orderId: orderPublicId } });
-    return Response.json({ ok: true, order, requestId: locals.requestId }, { headers: { "Cache-Control": "private, no-store, max-age=0", "X-Robots-Tag": "noindex, nofollow" } });
-  } catch (error) { return createCaughtErrorResponse(error, locals.requestId); }
+    return Response.json({ ok: true, order, requestId: locals.requestId }, { headers: { "Cache-Control": "private, no-store, max-age=0", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow" } });
+  } catch (error) {
+    const response = createCaughtErrorResponse(error, locals.requestId);
+    response.headers.set("Referrer-Policy", "no-referrer");
+    return response;
+  }
 };

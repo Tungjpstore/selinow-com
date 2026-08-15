@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-label="Unified commerce catalog panel">
+  <defs>
+    <linearGradient id="cat-surface" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F6F7FA"/>
+    </linearGradient>
+    <linearGradient id="cat-accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7965F5"/>
+      <stop offset="1" stop-color="#5140C9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- backdrop grid -->
+  <g opacity="0.5">
+    <rect x="0" y="0" width="640" height="420" fill="url(#cat-surface)"/>
+    <g stroke="#E8EAF0" stroke-width="1">
+      <path d="M80 0V420M160 0V420M240 0V420M320 0V420M400 0V420M480 0V420M560 0V420"/>
+      <path d="M0 70H640M0 140H640M0 210H640M0 280H640M0 350H640"/>
+    </g>
+  </g>
+
+  <!-- main catalog panel -->
+  <g transform="translate(96 64)">
+    <rect width="448" height="292" rx="18" fill="#FFFFFF" stroke="#D9DCE5" stroke-width="1.5"/>
+    <rect width="448" height="52" rx="18" fill="#F4F3FF"/>
+    <rect y="34" width="448" height="18" fill="#F4F3FF"/>
+    <circle cx="28" cy="26" r="6" fill="#DCD7FF"/>
+    <circle cx="48" cy="26" r="6" fill="#C0B7FF"/>
+    <circle cx="68" cy="26" r="6" fill="#7965F5"/>
+    <rect x="330" y="16" width="96" height="20" rx="10" fill="#ECE9FF"/>
+    <rect x="342" y="23" width="60" height="6" rx="3" fill="#7965F5" opacity="0.55"/>
+
+    <!-- product rows -->
+    <g>
+      <rect x="24" y="72" width="196" height="94" rx="12" fill="#F8F9FC" stroke="#E8EAF0"/>
+      <rect x="38" y="86" width="34" height="34" rx="8" fill="url(#cat-accent)"/>
+      <rect x="84" y="92" width="96" height="9" rx="4.5" fill="#D9DCE5"/>
+      <rect x="84" y="108" width="64" height="7" rx="3.5" fill="#E8EAF0"/>
+      <rect x="38" y="134" width="56" height="16" rx="8" fill="#ECE9FF"/>
+      <rect x="46" y="139" width="40" height="6" rx="3" fill="#6552E8"/>
+
+      <rect x="228" y="72" width="196" height="94" rx="12" fill="#F8F9FC" stroke="#E8EAF0"/>
+      <rect x="242" y="86" width="34" height="34" rx="8" fill="#0E9F6E" opacity="0.85"/>
+      <rect x="288" y="92" width="96" height="9" rx="4.5" fill="#D9DCE5"/>
+      <rect x="288" y="108" width="64" height="7" rx="3.5" fill="#E8EAF0"/>
+      <rect x="242" y="134" width="56" height="16" rx="8" fill="#ECFDF5"/>
+      <rect x="250" y="139" width="40" height="6" rx="3" fill="#0E9F6E"/>
+
+      <rect x="24" y="178" width="196" height="94" rx="12" fill="#F8F9FC" stroke="#E8EAF0"/>
+      <rect x="38" y="192" width="34" height="34" rx="8" fill="#4436A5"/>
+      <rect x="84" y="198" width="96" height="9" rx="4.5" fill="#D9DCE5"/>
+      <rect x="84" y="214" width="64" height="7" rx="3.5" fill="#E8EAF0"/>
+      <rect x="38" y="240" width="56" height="16" rx="8" fill="#ECE9FF"/>
+      <rect x="46" y="245" width="40" height="6" rx="3" fill="#6552E8"/>
+    </g>
+  </g>
+
+  <!-- floating sync badge -->
+  <g transform="translate(488 300)">
+    <rect width="104" height="48" rx="24" fill="#FFFFFF" stroke="#C0B7FF" stroke-width="1.5"/>
+    <circle cx="26" cy="24" r="10" fill="#ECE9FF"/>
+    <path d="M22 24l3 3 6-6" stroke="#6552E8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="44" y="18" width="44" height="7" rx="3.5" fill="#C0B7FF"/>
+    <rect x="44" y="29" width="30" height="7" rx="3.5" fill="#E8EAF0"/>
+  </g>
+
+  <!-- connector arcs to channels -->
+  <g stroke="#9C8BFF" stroke-width="2" stroke-dasharray="1 8" stroke-linecap="round" fill="none" opacity="0.8">
+    <path d="M96 210 C 40 190 40 120 70 96"/>
+    <path d="M544 210 C 600 190 600 120 570 96"/>
+  </g>
+  <g fill="#9C8BFF">
+    <circle cx="70" cy="96" r="5"/>
+    <circle cx="570" cy="96" r="5"/>
+  </g>
+</svg>

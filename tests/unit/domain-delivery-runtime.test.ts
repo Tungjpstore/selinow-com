@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   claimDeliveryJob,
+  claimDeliveryProviderAttempt,
   claimDeliveryJobReference,
   claimDomainEvent,
   dispatchDomainEventReference,
   dispatchDueDomainEvents,
   enqueueDueDeliveryJobs,
   settleDeliveryJob,
+  terminalizeDeliveryProviderOutcomeUnknown,
   type DeliveryJobClaim,
   type DomainDeliveryQueueEnvelope,
 } from "../../src/lib/delivery/runtime";
@@ -43,6 +45,11 @@ class SqliteStatement {
   }
 
   run(): Promise<{ meta: { changes: number } }> {
+    const testDatabase = this.database as DatabaseSync & { failNextAuditInsert?: boolean };
+    if (testDatabase.failNextAuditInsert && this.sql.includes("INSERT INTO audit_logs")) {
+      testDatabase.failNextAuditInsert = false;
+      return Promise.reject(new Error("audit_unavailable"));
+    }
     const result = this.database.prepare(this.sql).run(...this.values);
     return Promise.resolve({ meta: { changes: Number(result.changes) } });
   }
@@ -837,5 +844,167 @@ describe("generic domain event and delivery runtime", () => {
       status: "dead_letter",
       version: 4,
     });
+  });
+
+  it("claims provider-attempt authority once and settles with the incremented lease version", async () => {
+    seedShop(database, "shop-runtime-provider-marker");
+    seedConnection({
+      connectionId: "connection-runtime-provider-marker",
+      database,
+      shopId: "shop-runtime-provider-marker",
+    });
+    seedPaidOrderEvent({
+      connectionId: "connection-runtime-provider-marker",
+      database,
+      eventId: "event-runtime-provider-marker",
+      hashIndex: 60,
+      orderId: "order-runtime-provider-marker",
+      shopId: "shop-runtime-provider-marker",
+    });
+    await dispatchDueDomainEvents(env, NOW);
+    const job = deliveryJobRow(database);
+    const claim = await claimDeliveryJobReference({
+      env,
+      jobId: job.id,
+      now: NOW,
+      queueKind: "notification",
+      shopId: "shop-runtime-provider-marker",
+    });
+    if (claim === null) throw new Error("provider_marker_claim_missing");
+
+    const marked = await claimDeliveryProviderAttempt({
+      claim,
+      env,
+      now: NOW,
+      requestId: "request-provider-marker-001",
+    });
+    if (marked === null) throw new Error("provider_marker_missing");
+    expect(marked.version).toBe(claim.version + 1);
+    expect(deliveryJobRow(database)).toMatchObject({
+      lastSafeErrorCode: "delivery_provider_attempt_claimed",
+      status: "processing",
+      version: claim.version + 1,
+    });
+    await expect(claimDeliveryProviderAttempt({
+      claim,
+      env,
+      now: NOW,
+      requestId: "request-provider-marker-replay-001",
+    })).resolves.toBeNull();
+    expect(database.prepare(`
+      SELECT action, resource_id AS resourceId, request_id AS requestId
+      FROM audit_logs WHERE action = 'delivery.provider_attempt_claimed'
+    `).get()).toEqual({
+      action: "delivery.provider_attempt_claimed",
+      requestId: "request-provider-marker-001",
+      resourceId: job.id,
+    });
+    await expect(settleDeliveryJob({
+      claim: marked,
+      database: env.PLATFORM_DB,
+      now: new Date(NOW.getTime() + 1_000),
+      settlement: { status: "delivered" },
+    })).resolves.toBe(true);
+  });
+
+  it("keeps the durable provider marker when its audit projection fails", async () => {
+    seedShop(database, "shop-runtime-provider-audit-failure");
+    seedConnection({
+      connectionId: "connection-runtime-provider-audit-failure",
+      database,
+      shopId: "shop-runtime-provider-audit-failure",
+    });
+    seedPaidOrderEvent({
+      connectionId: "connection-runtime-provider-audit-failure",
+      database,
+      eventId: "event-runtime-provider-audit-failure",
+      hashIndex: 62,
+      orderId: "order-runtime-provider-audit-failure",
+      shopId: "shop-runtime-provider-audit-failure",
+    });
+    await dispatchDueDomainEvents(env, NOW);
+    const job = deliveryJobRow(database);
+    const claim = await claimDeliveryJobReference({
+      env,
+      jobId: job.id,
+      now: NOW,
+      queueKind: "notification",
+      shopId: "shop-runtime-provider-audit-failure",
+    });
+    if (claim === null) throw new Error("provider_audit_claim_missing");
+
+    (database as DatabaseSync & { failNextAuditInsert?: boolean }).failNextAuditInsert = true;
+    await expect(claimDeliveryProviderAttempt({
+      claim,
+      env,
+      now: NOW,
+      requestId: "request-provider-audit-failure-001",
+    })).resolves.toMatchObject({ version: claim.version + 1 });
+    expect(deliveryJobRow(database)).toMatchObject({
+      lastSafeErrorCode: "delivery_provider_attempt_claimed",
+      status: "processing",
+      version: claim.version + 1,
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'delivery.provider_attempt_claimed'").get())
+      .toEqual({ count: 0 });
+  });
+
+  it("terminalizes an expired provider marker instead of reclaiming and sending again", async () => {
+    seedShop(database, "shop-runtime-provider-expired");
+    seedConnection({
+      connectionId: "connection-runtime-provider-expired",
+      database,
+      shopId: "shop-runtime-provider-expired",
+    });
+    seedPaidOrderEvent({
+      connectionId: "connection-runtime-provider-expired",
+      database,
+      eventId: "event-runtime-provider-expired",
+      hashIndex: 61,
+      orderId: "order-runtime-provider-expired",
+      shopId: "shop-runtime-provider-expired",
+    });
+    await dispatchDueDomainEvents(env, NOW);
+    const job = deliveryJobRow(database);
+    const claim = await claimDeliveryJobReference({
+      env,
+      jobId: job.id,
+      now: NOW,
+      queueKind: "notification",
+      shopId: "shop-runtime-provider-expired",
+    });
+    if (claim === null) throw new Error("provider_expired_claim_missing");
+    const marked = await claimDeliveryProviderAttempt({
+      claim,
+      env,
+      now: NOW,
+      requestId: "request-provider-expired-001",
+    });
+    if (marked === null) throw new Error("provider_expired_marker_missing");
+    const expiredAt = new Date(marked.leaseExpiresAt);
+
+    await expect(claimDeliveryJobReference({
+      env,
+      jobId: job.id,
+      now: expiredAt,
+      queueKind: "notification",
+      requestId: "request-provider-expired-replay-001",
+      shopId: "shop-runtime-provider-expired",
+    })).resolves.toBeNull();
+    expect(deliveryJobRow(database)).toMatchObject({
+      lastSafeErrorCode: "delivery_provider_outcome_unknown",
+      status: "dead_letter",
+      version: marked.version + 1,
+    });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM audit_logs
+      WHERE action = 'delivery.provider_outcome_unknown'
+    `).get()).toEqual({ count: 1 });
+    await expect(terminalizeDeliveryProviderOutcomeUnknown({
+      claim: marked,
+      env,
+      now: expiredAt,
+      requestId: "request-provider-expired-second-replay-001",
+    })).resolves.toMatchObject({ status: "dead_letter" });
   });
 });

@@ -1,5 +1,9 @@
 # Delivery Plan and Acceptance
 
+## Current continuation overlay (2026-08-03)
+
+The current source acceptance inventory is 25 canonical logical routes, 87 acceptance scenarios, 150 API/webhook method/path rows and migrations `0001`-`0077`. Local `check`, lint, full tests, build and deploy dry-runs are necessary but not sufficient for production. The expanded provider lanes, Dodo billing and activation analytics remain source/local contract evidence until remote migrations, fresh protected backup/restore, credential/UAT, pilot, monitoring, rollback and ownership evidence are recorded.
+
 ## 1. Delivery discipline
 
 Mỗi phase phải tạo:
@@ -211,7 +215,7 @@ Không đánh dấu phase complete chỉ vì route/UI đã tồn tại.
 
 - The current fake/real-D1 seam refresh passed `106/106` tests across five focused files; `tests/unit/commerce-channel-parity-real-d1.test.ts` contributes 72 cases. The same run passed canonical Website recovery with and without discounts, order-insensitive retry/recovery, the canonical checkout boundary, fake adapter acceptance, channel registry and normalized attribution coverage.
 - Fake orders retain `orders.source_channel='web'` only to satisfy the legacy cart/order storage contract. The authoritative attribution is `order_channel_attributions(channel_code='fake.third', adapter_version=1, connection_id=...)`, scoped to the tenant and exact connection.
-- This local evidence does not authorize migrations `0029`-`0052`, a staging deploy, external provider traffic or any production action. Staging remains gated by live route inventory, exact account/D1 identity, fresh report-v2 backup and immediate rechecks.
+- This local evidence does not authorize migrations `0029`-`0077`, a staging deploy, external provider traffic or any continuation production action. Staging remains gated by live route inventory, exact account/D1 identity, fresh report-v2 backup and immediate rechecks.
 
 ### Phase B — Global localization foundation
 
@@ -239,7 +243,7 @@ Không đánh dấu phase complete chỉ vì route/UI đã tồn tại.
 - Exact catalog parity is present for dashboard (1,296 keys), admin (445), storefront (294), marketing (177), onboarding (388), system (173), common (6) and Telegram (82). Focused tests cover English fallback, Vietnamese aliases, locale-aware money/date rendering, Telegram notification copy and HTML `lang`/`dir` roots.
 - The currency registry currently formats USD/EUR with two minor digits and JPY/VND with zero, performs no FX conversion, and D1 guards shop/variant supported-currency matching. ISO country reference and service/D1 validation are covered locally.
 - Phase B source/local acceptance is complete. Source-level translation-key and placeholder detection, unified BCP47 validation across commerce/Telegram boundaries, durable Telegram explicit preference, canonical order/shop currency validation and immutability, seller merchant/business-country controls, paired English/Vietnamese commerce evidence and the RTL logical/render gate are closed locally. The authenticated local browser gate passes `7/7` across desktop/mobile and 1440/768/390/320px plus the 200% geometry project; 42 current-source snapshots at 1440x1024 and 390x844 were regenerated and manually reviewed.
-- The current PromptOS route matrix defines 19 routes and 82 route-state pairs. The active local visual fixtures cover 21 authenticated surface/state IDs and 13 public route/state IDs (42 and 26 exact-viewport snapshots respectively); remaining degraded/loading/blocked variants stay explicitly documented as visual follow-up. Staging hydrated-cart acceptance remains open because the deployed Worker lacks the current selector; no staging baseline was regenerated.
+- The historical PromptOS route matrix defines 19 routes and 82 route-state pairs. The current rebuild handoff supersedes it with 25 canonical routes, 87 acceptance scenarios and 148 API rows; local visual fixtures cover 21 authenticated and 13 public surface/state IDs (42 and 26 exact-viewport snapshots respectively). Staging hydrated-cart acceptance remains open because the deployed Worker lacks the current selector; no staging baseline was regenerated.
 
 ### Phase C — Verified payment-reversal access revocation
 
@@ -253,8 +257,8 @@ Không đánh dấu phase complete chỉ vì route/UI đã tồn tại.
 
 #### Acceptance and admission boundary
 
-- Focused migration/service/lifecycle/backup coverage proves exact refund/chargeback revocation, partial/mismatch manual review, unverified rejection, replay/conflict, concurrent one-winner behavior, tenant isolation, access fencing and retained sold-key/fulfillment/consumption evidence. The post-`0048` source/local gate passes check/lint/tsc, 176 files / 1,287 tests, build, staging build, both deploy dry-runs and an isolated restore through all 48 migrations. This evidence still does not authorize staging mutation.
-- Staging still has 28 applied migrations through `0028` and 24 pending migrations `0029`-`0052`. Apply or deploy only after live route inventory, exact account/D1 identity, fresh report-v2 backup and immediate rechecks pass. Production resources exist only at the empty-bootstrap identity/recovery layer; no production schema or traffic promotion exists, and release remains `NO-GO`.
+- Focused migration/service/lifecycle/backup coverage proves exact refund/chargeback revocation, partial/mismatch manual review, unverified rejection, replay/conflict, concurrent one-winner behavior, tenant isolation, access fencing and retained sold-key/fulfillment/consumption evidence. The post-`0048` source/local gate is a historical checkpoint (176 files / 1,287 tests, build, staging build, both deploy dry-runs and an isolated restore through 48 migrations). This evidence still does not authorize staging mutation.
+- Staging remains accepted through `0028` with 49 pending source migrations `0029`-`0077`. Apply or deploy only after live route inventory, exact account/D1 identity, fresh report-v2 backup and immediate rechecks pass. Production has the admitted platform handoff and schema through `0052`; continuation migrations, provider activation and commerce traffic remain `NO-GO`.
 
 ### Phase C — Generated-license provider execution
 
@@ -269,9 +273,9 @@ Không đánh dấu phase complete chỉ vì route/UI đã tồn tại.
 
 #### Acceptance and admission boundary
 
-- Migration, crypto, service, provider-boundary, worker, queue/DLQ, reversal, export, deletion, rotation, request-hardening and backup coverage passes locally. Website, Telegram and `fake.third` free/paid real-D1 parity covers attribution, exact-payment fencing, replay/conflict and cross-tenant isolation. The current full repository gate is 188 files / 1,423 tests; the fresh local restore applies all 52 migrations through `0052` with integrity `ok`, zero FK violations, 612 restored items and no schema/count mismatches. Final-tree local and staging deploy dry-runs both pass without deployment.
-- Standard export is schema version 5 with safe generated metadata only. Backup validation includes all eight generated-license tables. Seller configuration remains service-level/source-local, while the existing Website order-key route and Telegram principal fulfillment boundary now reveal generated artifacts under payment, tenant/channel/customer and TTL fences. The PromptOS frontend checklist passes 19/19; the authenticated local browser gate passes 7/7 across desktop/mobile and 1440/768/390/320px plus 200% geometry, with 42 authenticated and 26 public current-source snapshots manually reviewed. The active matrix is 19 routes / 82 route-state pairs; unlisted degraded/loading/blocked variants remain documented follow-up. Staging visual acceptance remains 18/20 because the deployed Worker lacks `[data-cart-variant-id]`.
-- Staging has 24 pending migrations (`0029`-`0052`); no staging migration/deploy is admitted until live route inventory, exact account/D1 identity, fresh report-v2 backup and immediate rechecks pass. Production resources exist only at the empty-bootstrap identity/recovery layer; no production schema or traffic promotion exists, and release remains `NO-GO`.
+- Migration, crypto, service, provider-boundary, worker, queue/DLQ, reversal, export, deletion, rotation, request-hardening and backup coverage passes locally. Website, Telegram and `fake.third` free/paid real-D1 parity covers attribution, exact-payment fencing, replay/conflict and cross-tenant isolation. The historical full-repository checkpoint was 188 files / 1,423 tests; the current source gate is recorded in the handoff manifest. The fresh local restore through `0052` remains historical evidence; a current-chain protected backup/restore admission is still required.
+- Standard export is schema version 5 with safe generated metadata only. Backup validation includes all eight generated-license tables. Seller configuration remains service-level/source-local, while the existing Website order-key route and Telegram principal fulfillment boundary now reveal generated artifacts under payment, tenant/channel/customer and TTL fences. The historical PromptOS frontend checklist passes 19/19; the authenticated local browser gate passes 7/7 across desktop/mobile and 1440/768/390/320px plus 200% geometry, with 42 authenticated and 26 public current-source snapshots manually reviewed. The active rebuild handoff is 25 routes / 87 acceptance scenarios; staging visual acceptance remains 18/20 because the deployed Worker lacks `[data-cart-variant-id]`.
+- Staging has 49 pending source migrations (`0029`-`0077`); no staging migration/deploy is admitted until live route inventory, exact account/D1 identity, fresh report-v2 backup and immediate rechecks pass. Production remains on the admitted `0001`-`0052` baseline; continuation/provider activation evidence is still missing and release remains `NO-GO` for those changes.
 
 ### Deliverables
 
@@ -288,7 +292,7 @@ Không đánh dấu phase complete chỉ vì route/UI đã tồn tại.
 - Reference-only domain events and per-connection delivery jobs using the existing integration/notification Queues; cron remains a reconciliation fallback.
 - Provider-neutral payment port that preserves PayOS-specific signature and credential rules inside the PayOS adapter.
 - Additive provider-payment persistence: tenant-scoped connection/capability/currency/method projections, deterministic PayOS backfill, versioned descriptor/policy evidence, cleanup of unverified legacy identity claims, exact legacy PayOS tenant/provider relationship guards and deletion-fenced provider identity release (`0035`-`0037`, `0039`); legacy PayOS tables/runtime remain authoritative.
-- Bounded public API foundation: owner-managed one-time-reveal credentials, tenant-derived Bearer authentication, D1-backed rate limiting, `GET /api/v1/shop` (`0038`) and the source/local `catalog:read` projection at `GET /api/v1/catalog` (`0040`). Broader inventory/order/fulfillment scopes and outbound webhook subscriptions remain separate follow-up work.
+- Bounded public API foundation: owner-managed one-time-reveal credentials, tenant-derived Bearer authentication, D1-backed rate limiting, `GET /api/v1/shop` (`0038`), `GET /api/v1/catalog` (`0040`), and source/local `inventory:read`/`orders:read` projections (`0068`). Fulfillment, entitlement and outbound webhook subscriptions remain separate follow-up work.
 - Semantic design system and constrained tenant theming with contrast, keyboard, responsive and visual-regression gates.
 
 ### Acceptance

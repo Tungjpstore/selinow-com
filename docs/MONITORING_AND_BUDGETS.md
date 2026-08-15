@@ -2,6 +2,8 @@
 
 Complete this checklist before the Phase 10 change window. Every alert needs an owner, notification destination, threshold, evaluation window and tested acknowledgement path. Do not put API tokens, webhook secrets, customer identifiers or payload bodies into dashboards or notifications.
 
+Current status (2026-08-02): **NO-GO** for full commerce/provider activation. The retained production alert/dashboard acknowledgements cover only the platform canary and route watchdog; service, D1, inventory, payment, provider, queue/DLQ, domain, security and budget evidence remains unchecked and must be completed for the current candidate.
+
 ## Service health
 
 - [ ] Worker request volume, error rate, status family, CPU time and tail latency dashboard.

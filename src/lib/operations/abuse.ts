@@ -238,7 +238,10 @@ async function verifyReportTurnstile(input: {
   token: unknown;
 }): Promise<void> {
   const configuration = resolveTurnstileConfiguration(input.env);
-  if (configuration === null) return;
+  if (configuration === null) {
+    if (input.env.APP_ENV !== "local") throw new AppError("turnstile_unavailable", 503);
+    return;
+  }
   if (typeof input.token !== "string" || input.token.length < 10 || input.token.length > 2_048) {
     throw new AppError("turnstile_required", 403);
   }

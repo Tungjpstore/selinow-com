@@ -1,0 +1,139 @@
+/* ==========================================================================
+   SELINOW COMMERCE FLOW OS — MARKETING SHELL & LAYOUT PRIMITIVES
+   ========================================================================== */
+
+/* Base Reset & Smooth Render */
+.landing-page,
+.solution-page,
+.pricing-page,
+.public-doc-page {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.55;
+  overflow-x: clip;
+}
+
+/* Platform Shell Container */
+.platform-shell {
+  width: 100%;
+  max-width: var(--mk-shell);
+  margin-inline: auto;
+  padding-inline: var(--space-6);
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .platform-shell {
+    padding-inline: var(--space-4);
+  }
+}
+
+@media (max-width: 390px) {
+  .platform-shell {
+    padding-inline: var(--space-3);
+  }
+}
+
+.readable {
+  max-width: var(--mk-readable);
+  margin-inline: auto;
+}
+
+/* Focus Visible Standard */
+:focus-visible {
+  outline: 2px solid var(--mk-focus);
+  outline-offset: var(--mk-focus-offset);
+}
+
+/* Typography Hierarchy */
+.hero-headline {
+  font-size: clamp(36px, 5.2vw, 56px);
+  font-weight: 750;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.hero-lead {
+  font-size: clamp(16px, 2.2vw, 19px);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: var(--mk-prose-max);
+  margin: var(--space-4) 0 0;
+}
+
+.section-eyebrow,
+.kit-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brand-700);
+  margin-bottom: var(--space-2);
+}
+
+.section-title {
+  font-size: clamp(26px, 3.6vw, 38px);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.section-description {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 62ch;
+  margin: var(--space-3) 0 0;
+}
+
+.kit-section-heading {
+  margin-bottom: var(--space-10);
+}
+
+.kit-section-heading-centered {
+  text-align: center;
+}
+
+.kit-section-heading-centered .section-description,
+.kit-section-heading-centered p {
+  margin-inline: auto;
+}
+
+/* Section Rhythm */
+.kit-section {
+  padding-block: clamp(56px, 8vw, 108px);
+}
+
+.kit-section-dense {
+  padding-block: clamp(40px, 5vw, 72px);
+}
+
+/* Subtle Divider */
+.hairline-divider {
+  height: 1px;
+  background-color: var(--border-soft);
+  border: none;
+  margin: 0;
+}
+
+/* Reduced Motion Guard */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

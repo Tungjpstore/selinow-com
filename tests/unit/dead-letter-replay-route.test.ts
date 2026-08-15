@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const dependencies = vi.hoisted(() => ({
   acknowledge: vi.fn(),
   env: {},
+  generatedRetry: vi.fn(),
   isAdmin: vi.fn(),
+  role: vi.fn(),
   replay: vi.fn(),
   requestRetry: vi.fn(),
   requireCsrf: vi.fn(),
@@ -21,12 +23,14 @@ vi.mock("../../src/lib/platform/bindings", () => ({
 }));
 
 vi.mock("../../src/lib/tenants/store", () => ({
+  getPlatformAdminRole: dependencies.role,
   isPlatformAdmin: dependencies.isAdmin,
 }));
 
 vi.mock("../../src/lib/operations/dead-letters", () => ({
   acknowledgeDeadLetter: dependencies.acknowledge,
   requestDeadLetterRetry: dependencies.requestRetry,
+  requestGeneratedLicenseDeadLetterRetry: dependencies.generatedRetry,
   requestGenericDeadLetterReplay: dependencies.replay,
   resolveDeadLetter: dependencies.resolve,
 }));
@@ -42,10 +46,10 @@ const auth = {
   userId: "admin-risk",
 };
 
-function context(request: Request) {
+function context(request: Request, deadLetterId = "dlq_route_test") {
   return {
     locals: { requestId: "request-dead-letter-route" },
-    params: { deadLetterId: "dlq_route_test" },
+    params: { deadLetterId },
     request,
   } as never;
 }
@@ -53,7 +57,9 @@ function context(request: Request) {
 beforeEach(() => {
   for (const dependency of [
     dependencies.acknowledge,
+    dependencies.generatedRetry,
     dependencies.isAdmin,
+    dependencies.role,
     dependencies.replay,
     dependencies.requestRetry,
     dependencies.requireCsrf,
@@ -61,15 +67,84 @@ beforeEach(() => {
     dependencies.resolve,
   ]) dependency.mockReset();
   dependencies.isAdmin.mockResolvedValue(true);
+  dependencies.role.mockResolvedValue("risk");
   dependencies.requireCsrf.mockResolvedValue(auth);
   dependencies.replay.mockResolvedValue({
     deadLetter: { id: "dlq_route_test", status: "retry_requested" },
     operationId: "dlr_route_operation",
     replayed: false,
   });
+  dependencies.generatedRetry.mockResolvedValue({
+    deadLetter: { id: "gld_route_test", status: "retry_requested" },
+    operationId: "gld_route_operation",
+    replayed: false,
+  });
 });
 
 describe("dead-letter replay route", () => {
+  it("forwards generated-license retry requests through the owner/risk guarded service", async () => {
+    const response = await POST(context(new Request(
+      "https://app.test/api/admin/operations/dead-letters/gld_route_test",
+      {
+        body: JSON.stringify({
+          action: "retry_generated_license",
+          shopId: "shop-route-test",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "generated-license-route-retry-0001",
+        },
+        method: "POST",
+      },
+    ), "gld_route_test"));
+
+    expect(dependencies.generatedRetry).toHaveBeenCalledWith({
+      actorUserId: "admin-risk",
+      env: dependencies.env,
+      id: "gld_route_test",
+      idempotencyKey: "generated-license-route-retry-0001",
+      requestId: "request-dead-letter-route",
+      shopId: "shop-route-test",
+    });
+    expect(response).toBeInstanceOf(Response);
+    if (!(response instanceof Response)) throw new Error("response_missing");
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      operationId: "gld_route_operation",
+      replayed: false,
+    });
+  });
+
+  it("rejects generated-license retry without a shop scope or for support admins", async () => {
+    const missingScope = await POST(context(new Request(
+      "https://app.test/api/admin/operations/dead-letters/gld_route_test",
+      {
+        body: JSON.stringify({ action: "retry_generated_license", shopId: null }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "generated-license-route-retry-0002" },
+        method: "POST",
+      },
+    ), "gld_route_test"));
+    expect(missingScope).toBeInstanceOf(Response);
+    if (!(missingScope instanceof Response)) throw new Error("response_missing");
+    expect(missingScope.status).toBe(400);
+    expect(dependencies.generatedRetry).not.toHaveBeenCalled();
+
+    dependencies.role.mockResolvedValue("support");
+    const denied = await POST(context(new Request(
+      "https://app.test/api/admin/operations/dead-letters/gld_route_test",
+      {
+        body: JSON.stringify({ action: "retry_generated_license", shopId: "shop-route-test" }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "generated-license-route-retry-0003" },
+        method: "POST",
+      },
+    ), "gld_route_test"));
+    expect(denied).toBeInstanceOf(Response);
+    if (!(denied instanceof Response)) throw new Error("response_missing");
+    expect(denied.status).toBe(403);
+    expect(dependencies.generatedRetry).not.toHaveBeenCalled();
+  });
+
   it("requires CSRF/recent auth and forwards the Idempotency-Key to guarded replay", async () => {
     const response = await POST(context(new Request(
       "https://app.test/api/admin/operations/dead-letters/dlq_route_test",
@@ -139,5 +214,40 @@ describe("dead-letter replay route", () => {
     if (!(missingScope instanceof Response)) throw new Error("response_missing");
     expect(missingScope.status).toBe(400);
     expect(dependencies.replay).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies replay to support admins while preserving acknowledgement access", async () => {
+    dependencies.role.mockResolvedValue("support");
+    dependencies.acknowledge.mockResolvedValueOnce({ id: "dlq_route_test", status: "acknowledged" });
+
+    const replay = await POST(context(new Request(
+      "https://app.test/api/admin/operations/dead-letters/dlq_route_test",
+      {
+        body: JSON.stringify({ action: "replay", expectedVersion: 3, shopId: "shop-route-test" }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "dead-letter-route-support-replay" },
+        method: "POST",
+      },
+    )));
+    expect(replay).toBeInstanceOf(Response);
+    if (!(replay instanceof Response)) throw new Error("response_missing");
+    expect(replay.status).toBe(403);
+    await expect(replay.json()).resolves.toMatchObject({
+      code: "authorization_denied",
+      requestId: "request-dead-letter-route",
+    });
+    expect(dependencies.replay).not.toHaveBeenCalled();
+
+    const acknowledge = await POST(context(new Request(
+      "https://app.test/api/admin/operations/dead-letters/dlq_route_test",
+      {
+        body: JSON.stringify({ action: "acknowledge", expectedVersion: 3, shopId: "shop-route-test" }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    )));
+    expect(acknowledge).toBeInstanceOf(Response);
+    if (!(acknowledge instanceof Response)) throw new Error("response_missing");
+    expect(acknowledge.status).toBe(200);
+    expect(dependencies.acknowledge).toHaveBeenCalledOnce();
   });
 });

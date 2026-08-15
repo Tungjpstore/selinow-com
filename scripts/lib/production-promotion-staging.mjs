@@ -8,9 +8,13 @@ export function deriveProductionPromotionStagingSpec(stagingSpec) {
   if (typeof stagingSpec !== "object" || stagingSpec === null || Array.isArray(stagingSpec)) {
     throw new Error("production_promotion_staging_contract_invalid");
   }
+  const workerRoutes = Array.isArray(stagingSpec.workerRoutes)
+    ? [...stagingSpec.workerRoutes, { pattern: "*/*", zone_name: stagingSpec.zoneName }]
+    : stagingSpec.workerRoutes;
   return {
     ...stagingSpec,
     sharedZoneDisabledRoutes: [],
+    workerRoutes,
   };
 }
 
@@ -23,7 +27,7 @@ export function assertProductionPromotionStagingContract(stagingSpec, promotionS
     || typeof stagingSpec.zoneName !== "string"
     || !isDeepStrictEqual(
       stagingSpec.sharedZoneDisabledRoutes,
-      [`${stagingSpec.zoneName}/*`, `*.${stagingSpec.zoneName}/*`],
+      [`${stagingSpec.zoneName}/*`, `*.${stagingSpec.zoneName}/*`, "*/*"],
     )
     || !isDeepStrictEqual(
       promotionStagingSpec,

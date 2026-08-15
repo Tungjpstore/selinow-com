@@ -25,6 +25,8 @@ export interface PlatformEnvironmentSpec {
     fallbackOrigin: string;
   };
   sharedZoneDisabledRoutes: string[];
+  stagingRouteExceptions: string[];
+  productionWorkerName: string;
   wildcardRoute: string;
   workerName: string;
   workerRoutes: Array<
@@ -90,16 +92,38 @@ export function validateProductionWorkerRouteInventory(
   wranglerConfig: Record<string, any>,
   liveRoutes: unknown,
   liveDomains: unknown,
+  options?: { admissionMode?: "exact" | "pre_candidate" },
 ): { checks: StagingRouteCheck[]; ok: boolean };
 export function assertProductionWorkerDatabaseIdentity(
   d1ListOutput: unknown,
   databaseId: string,
   databaseName: string,
 ): void;
+export function parseProductionWorkerDeploymentVersion(value: unknown): string;
+export function parseProductionWorkerDeployableVersions(value: unknown): string[];
+export function parseProductionWorkerDeployableVersionInventory(value: unknown): Array<{
+  binding: {
+    commitSha: string | null;
+    manifestRef: string | null;
+    manifestSha256: string | null;
+    releaseId: string | null;
+    treeSha: string | null;
+  } | null;
+  id: string;
+}>;
+export function assertProductionWorkerVersionAdmission(input: Record<string, unknown>): {
+  candidateWorkerVersion: string;
+  currentWorkerVersion: string;
+  rollbackCandidateWorkerVersion: string;
+};
 export function assertProductionWorkerIdentityAdmission(input: {
+  infrastructureAdmissionMode?: "exact" | "pre_candidate";
+  expectedCurrentWorkerVersion?: string;
   environment?: NodeJS.ProcessEnv;
   fetchImplementation?: typeof fetch;
+  productionManifest?: Record<string, unknown>;
   productionSpec: Record<string, any>;
+  promotionAuditToken?: string;
   repositoryRoot?: string;
   runWranglerImplementation?: (
     args: string[],
@@ -107,6 +131,7 @@ export function assertProductionWorkerIdentityAdmission(input: {
   ) => { stderr: string; stdout: string };
   stagingSpec: Record<string, any>;
   token?: string;
+  requireCurrentWorkerVersion?: boolean;
   wranglerConfig: Record<string, any>;
 }): Promise<{
   accountId: string;
@@ -114,6 +139,18 @@ export function assertProductionWorkerIdentityAdmission(input: {
   databaseId: string;
   databaseName: string;
   ok: boolean;
+  currentWorkerVersion?: string;
+  deployableWorkerVersionIds?: string[];
+  deployableWorkerVersionInventory?: Array<{
+    binding: {
+      commitSha: string | null;
+      manifestRef: string | null;
+      manifestSha256: string | null;
+      releaseId: string | null;
+      treeSha: string | null;
+    } | null;
+    id: string;
+  }>;
   workerName: string;
   zoneId: string;
   zoneName: string;
@@ -166,6 +203,14 @@ export function validateStagingRuntimeIdentity(
   manifest: Record<string, any>,
   wranglerConfig: Record<string, any>,
 ): { databaseId: string; databaseName: string };
+export function validateRemoteDatabaseTarget(
+  spec: Record<string, any>,
+  manifest: Record<string, any>,
+  wranglerConfig: Record<string, any>,
+): { accountId: string; databaseId: string; databaseName: string };
+export function loadRemoteDatabaseTarget(
+  environment: "staging" | "production",
+): Promise<{ accountId: string; databaseId: string; databaseName: string }>;
 export function assertStagingAccountIdentity(
   whoamiOutput: unknown,
   accountId: string,
@@ -207,9 +252,14 @@ export function cloudflareApiRequest(
   options?: {
     body?: unknown;
     fetchImplementation?: typeof fetch;
+    includeEnvelope?: boolean;
     method?: string;
   },
 ): Promise<unknown>;
+export function validateProductionLiveInfrastructure(input: Record<string, any>): {
+  checks: StagingRouteCheck[];
+  ok: boolean;
+};
 export function doctor(
   environment: "local" | "production" | "staging",
   input?: {
@@ -223,6 +273,10 @@ export function doctor(
     spec?: PlatformEnvironmentSpec & { resources: Record<string, string> };
   },
 ): Promise<{ checks: Array<{ code: string; detail: string; ok: boolean }>; environment: string; ok: boolean }>;
+export function buildCloudflareResourceAuditEnvironment(
+  environment: NodeJS.ProcessEnv,
+  accountId: string,
+): NodeJS.ProcessEnv;
 export function discoverSaasState(
   spec: PlatformEnvironmentSpec,
   token: string,
@@ -258,4 +312,17 @@ export function provision(
   manifest?: Record<string, unknown>;
 }>;
 export function requireCloudflarePlatformToken(environment?: NodeJS.ProcessEnv): string;
+export function requireCloudflareStagingResourceAuditToken(environment?: NodeJS.ProcessEnv): string;
 export function requireCloudflareRouteAuditToken(environment?: NodeJS.ProcessEnv): string;
+export const CLOUDFLARE_WORKER_DEPLOY_TOKEN_NAME: "CLOUDFLARE_WORKER_DEPLOY_API_TOKEN";
+export function requireCloudflareWorkerDeployToken(environment?: NodeJS.ProcessEnv): string;
+export const CLOUDFLARE_D1_TOKEN_NAME: "CLOUDFLARE_D1_API_TOKEN";
+export function requireCloudflareD1Token(environment?: NodeJS.ProcessEnv): string;
+export function buildWorkerBuildEnvironment(
+  environment: NodeJS.ProcessEnv | undefined,
+  environmentName: "local" | "staging" | "production",
+): NodeJS.ProcessEnv;
+export function buildWorkerDeployEnvironment(
+  environment: NodeJS.ProcessEnv | undefined,
+  accountId: string,
+): NodeJS.ProcessEnv;

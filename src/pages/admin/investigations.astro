@@ -1,0 +1,80 @@
+---
+import AdminState from "../../components/admin/AdminState.astro";
+import AdminLayout from "../../layouts/AdminLayout.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { listAdminAuditEntries, listAdminOrderInvestigations } from "../../lib/operations/admin-investigations";
+import { getBindings } from "../../lib/platform/bindings";
+import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
+import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
+
+const env = getBindings();
+const locale = resolvePresentationLocale(Astro.locals.locale);
+const t = createAdminTranslator(locale);
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("Pragma", "no-cache");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+Astro.response.headers.set("Referrer-Policy", "no-referrer");
+
+let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let roleLookupFailed = false;
+try { adminRole = await getPlatformAdminRole({ env, userId: auth.userId }); } catch { roleLookupFailed = true; }
+if (roleLookupFailed) Astro.response.status = 503;
+else if (adminRole === null) Astro.response.status = 403;
+
+const tab = Astro.url.searchParams.get("tab") === "audit" ? "audit" : "orders";
+const q = Astro.url.searchParams.get("q") ?? "";
+const shopPublicId = Astro.url.searchParams.get("shopPublicId") ?? "";
+const paymentStatus = Astro.url.searchParams.get("paymentStatus") ?? "";
+let orderResult: Awaited<ReturnType<typeof listAdminOrderInvestigations>> = { nextCursor: null, orders: [] };
+let auditResult: Awaited<ReturnType<typeof listAdminAuditEntries>> = { nextCursor: null, entries: [] };
+let dataUnavailable = false;
+if (adminRole !== null) {
+  try {
+    if (tab === "audit") auditResult = await listAdminAuditEntries({ env, userId: auth.userId, filters: { action: Astro.url.searchParams.get("action"), cursor: Astro.url.searchParams.get("cursor"), limit: 25, resourceType: Astro.url.searchParams.get("resourceType"), shopPublicId: shopPublicId || null } });
+    else orderResult = await listAdminOrderInvestigations({ env, userId: auth.userId, filters: { cursor: Astro.url.searchParams.get("cursor"), limit: 25, paymentStatus: paymentStatus || null, query: q || null, shopPublicId: shopPublicId || null } });
+  } catch { dataUnavailable = true; Astro.response.status = 503; }
+}
+const formatTime = (value: string): string => { const date = new Date(value); return Number.isNaN(date.getTime()) ? t("admin.common.unknown") : date.toLocaleString(locale, { dateStyle: "short", timeStyle: "short" }); };
+const href = (params: Record<string, string | null>): string => {
+  const next = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value !== null && value.length > 0) next.set(key, value);
+  return `/admin/investigations?${next.toString()}`;
+};
+---
+
+<AdminLayout activePath="/admin/investigations" email={auth.email} role={adminRole} title={t("admin.investigations.title")}>
+  {roleLookupFailed ? <AdminState tone="danger" eyebrow={t("admin.investigations.permission.eyebrow")} title={t("admin.investigations.permission.title")} description={t("admin.investigations.permission.description")} code={t("admin.common.request", { requestId: Astro.locals.requestId })} actionHref="/admin/investigations" actionLabel={t("admin.common.reload")} />
+    : adminRole === null ? <AdminState tone="warning" eyebrow={t("admin.investigations.forbidden.eyebrow")} title={t("admin.investigations.forbidden.title")} description={t("admin.investigations.forbidden.description")} code="authorization_denied" actionHref="/admin" actionLabel={t("admin.common.back_workspace")} />
+    : dataUnavailable ? <AdminState tone="danger" eyebrow={t("admin.investigations.data.eyebrow")} title={t("admin.investigations.data.title")} description={t("admin.investigations.data.description")} code={t("admin.common.request", { requestId: Astro.locals.requestId })} actionHref="/admin/investigations" actionLabel={t("admin.common.reload")} />
+    : <div class="investigations-page">
+      <header class="admin-page-header"><div><p class="admin-eyebrow">{t("admin.investigations.eyebrow")}</p><h1>{t("admin.investigations.title")}</h1><p>{t("admin.investigations.description")}</p></div><div class="admin-summary"><div><span>{t("admin.investigations.orders")}</span><strong>{orderResult.orders.length}</strong></div><div><span>{t("admin.investigations.audit")}</span><strong>{auditResult.entries.length}</strong></div></div></header>
+      <nav class="investigations-tabs" aria-label={t("admin.investigations.tabs_aria")}><a href={href({ tab: "orders", q, shopPublicId, paymentStatus })} aria-current={tab === "orders" ? "page" : undefined}>{t("admin.investigations.orders")}</a><a href={href({ tab: "audit", shopPublicId })} aria-current={tab === "audit" ? "page" : undefined}>{t("admin.investigations.audit")}</a></nav>
+      {tab === "orders" ? <>
+        <form class="investigation-filter" method="get"><input type="hidden" name="tab" value="orders" aria-label="tab" /><label>{t("admin.investigations.filter.query")}<input name="q" value={q} aria-label={t("admin.investigations.filter.query")} maxlength="64" placeholder="ord_…" /></label><label>{t("admin.investigations.filter.shop")}<input name="shopPublicId" value={shopPublicId} aria-label={t("admin.investigations.filter.shop")} maxlength="128" placeholder="shop_…" /></label><label>{t("admin.investigations.filter.payment")}<select name="paymentStatus" aria-label={t("admin.investigations.filter.payment")}><option value="">{t("admin.investigations.filter.all")}</option><option value="pending" selected={paymentStatus === "pending"}>pending</option><option value="paid" selected={paymentStatus === "paid"}>paid</option><option value="failed" selected={paymentStatus === "failed"}>failed</option></select></label><button type="submit">{t("admin.investigations.filter.apply")}</button></form>
+        <section class="admin-section" aria-labelledby="orders-title"><div class="admin-section-heading"><div><h2 id="orders-title">{t("admin.investigations.orders")}</h2><p>{t("admin.investigations.orders_description")}</p></div><span>{orderResult.orders.length}</span></div>{orderResult.orders.length === 0 ? <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div> : <div class="admin-records" role="list">{orderResult.orders.map((order) => <article class="admin-record" role="listitem"><div class="admin-record-summary"><div><small>{t("admin.investigations.column.order")}</small><strong>{order.orderNumber}</strong><span>{order.orderPublicId}</span></div><div><small>{t("admin.investigations.column.shop")}</small><strong>{order.shopName}</strong><span>{order.shopPublicId}</span></div><div><small>{t("admin.investigations.column.payment")}</small><span>{order.paymentStatus}</span></div><div><small>{t("admin.investigations.column.fulfillment")}</small><span>{order.fulfillmentStatus}</span></div><div><small>{t("admin.investigations.column.amount")}</small><span>{order.totalMinor} {order.currency}</span></div><div><small>{t("admin.investigations.column.updated")}</small><span>{formatTime(order.updatedAt)}</span></div></div><details><summary>{t("admin.investigations.details")}</summary><dl><div><dt>{t("admin.investigations.column.customer")}</dt><dd>{order.customerEmailMasked ?? t("admin.common.none")}</dd></div><div><dt>{t("admin.investigations.column.payment_evidence")}</dt><dd>{order.paymentEvidence === null ? t("admin.common.none") : `${order.paymentEvidence.provider} · ${order.paymentEvidence.state} · ${order.paymentEvidence.lastSafeErrorCode ?? t("admin.common.connected")}`}</dd></div></dl></details></article>)}</div>}{orderResult.nextCursor !== null && <a class="next-link" href={href({ tab: "orders", q, shopPublicId, paymentStatus, cursor: orderResult.nextCursor })}>{t("admin.investigations.next")}</a>}</section>
+      </> : <section class="admin-section" aria-labelledby="audit-title"><div class="admin-section-heading"><div><h2 id="audit-title">{t("admin.investigations.audit")}</h2><p>{t("admin.investigations.audit_description")}</p></div><span>{auditResult.entries.length}</span></div>{auditResult.entries.length === 0 ? <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div> : <div class="admin-records" role="list">{auditResult.entries.map((entry) => <article class="admin-record" role="listitem"><div class="admin-record-summary"><div><small>{t("admin.investigations.column.action")}</small><strong>{entry.action}</strong></div><div><small>{t("admin.investigations.column.resource")}</small><span>{entry.resourceType} · {entry.resourceId ?? t("admin.common.none")}</span></div><div><small>{t("admin.investigations.column.shop")}</small><span>{entry.shopName ?? t("admin.common.platform")}</span></div><div><small>{t("admin.investigations.column.updated")}</small><span>{formatTime(entry.createdAt)}</span></div><div><small>{t("admin.investigations.column.request")}</small><code>{entry.requestId}</code></div></div><details><summary>{t("admin.investigations.details")}</summary><dl>{Object.entries(entry.metadata).map(([key, value]) => <div><dt>{key}</dt><dd>{String(value ?? t("admin.common.none"))}</dd></div>)}</dl></details></article>)}</div>}{auditResult.nextCursor !== null && <a class="next-link" href={href({ tab: "audit", shopPublicId, cursor: auditResult.nextCursor })}>{t("admin.investigations.next")}</a>}</section>}
+    </div>}
+</AdminLayout>
+
+<style>
+  .investigations-page { display:grid; gap:24px; }
+  .investigations-tabs { display:flex; gap:8px; border-bottom:1px solid var(--sln-border-default); }
+  .investigations-tabs a { padding:10px 14px; color:var(--sln-text-muted); text-decoration:none; }
+  .investigations-tabs a[aria-current="page"] { border-bottom:2px solid var(--sln-action-primary); color:var(--sln-text-primary); }
+  .investigation-filter { display:grid; grid-template-columns:1fr 1fr 180px auto; gap:12px; align-items:end; }
+  .investigation-filter label { display:grid; gap:6px; color:var(--sln-text-muted); font-size:12px; }
+  .investigation-filter input, .investigation-filter select { min-height:40px; border:1px solid var(--sln-border-default); border-radius:8px; padding:8px 10px; background:var(--sln-bg-surface); color:var(--sln-text-primary); }
+  .investigation-filter button { min-height:40px; border:0; border-radius:8px; padding:8px 14px; background:var(--sln-action-primary); color:white; cursor:pointer; }
+  .admin-record-summary small { display:block; color:var(--sln-text-muted); font-size:11px; }
+  .admin-record-summary span, .admin-record-summary strong { overflow-wrap:anywhere; }
+  .admin-record details { border-top:1px solid var(--sln-border-default); margin-top:12px; padding-top:12px; }
+  .admin-record dl { display:grid; gap:8px; margin:12px 0 0; }
+  .admin-record dl div { display:grid; grid-template-columns:180px 1fr; gap:10px; }
+  .admin-record dt { color:var(--sln-text-muted); }
+  .admin-record dd { margin:0; color:var(--sln-text-primary); overflow-wrap:anywhere; }
+  .next-link { color:var(--sln-action-primary); }
+  @media (max-width:760px) { .investigation-filter { grid-template-columns:1fr; } .investigation-filter button { width:100%; } .admin-record dl div { grid-template-columns:1fr; gap:3px; } }
+</style>

@@ -30,6 +30,50 @@ export function normalizeDisplayName(value: unknown, email: string): string {
   return normalized;
 }
 
+const COMMON_WEAK_PASSWORDS = new Set([
+  "12345678", "password", "password123", "123456789", "1234567890",
+  "qwerty123", "admin123", "selinow123", "iloveyou"
+]);
+
+export function validatePasswordStrength(password: unknown): string {
+  if (typeof password !== "string" || password.length === 0) {
+    throw new AppError("validation_failed", 400, ["password_required"]);
+  }
+  if (password.length < 8) {
+    throw new AppError("validation_failed", 400, ["password_too_short"]);
+  }
+  if (password.length > 128) {
+    throw new AppError("validation_failed", 400, ["password_too_long"]);
+  }
+  if (COMMON_WEAK_PASSWORDS.has(password.toLowerCase())) {
+    throw new AppError("validation_failed", 400, ["password_too_weak"]);
+  }
+
+  const hasLower = /[a-z]/u.test(password);
+  const hasUpper = /[A-Z]/u.test(password);
+  const hasNumber = /[0-9]/u.test(password);
+  const hasSpecial = /[^A-Za-z0-9]/u.test(password);
+
+  const passedRules = [hasLower, hasUpper, hasNumber, hasSpecial].filter(Boolean).length;
+  if (passedRules < 3) {
+    throw new AppError("validation_failed", 400, ["password_complexity_failed"]);
+  }
+
+  return password;
+}
+
+export function normalizeOtp(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new AppError("validation_failed", 400, ["otp_required"]);
+  }
+  const clean = value.trim().replace(/\s+/gu, "");
+  if (!/^\d{6}$/u.test(clean)) {
+    throw new AppError("validation_failed", 400, ["otp_invalid_format"]);
+  }
+  return clean;
+}
+
+
 export function assertDashboardOrigin(request: Request, dashboardOrigin: string): void {
   if (request.headers.get("Origin") !== dashboardOrigin) {
     throw new AppError("csrf_invalid", 403, ["origin_mismatch"]);

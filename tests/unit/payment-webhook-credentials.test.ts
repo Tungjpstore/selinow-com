@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { sha256Json } from "../../src/lib/core/crypto";
+import { expireUnpaidOrders } from "../../src/lib/commerce/store";
 import { encryptPayOSCredentials } from "../../src/lib/payments/crypto";
 import { createPayOSObjectSignature } from "../../src/lib/payments/payos";
 import { processPayOSWebhook } from "../../src/lib/payments/webhooks";
@@ -70,14 +71,14 @@ function applyMigrations(database: DatabaseSync): void {
 
 function bindings(
   database: DatabaseSync,
-  beforeBatch?: () => void,
+  beforeBatch?: () => Promise<void> | void,
   beforeAll?: (sql: string) => Promise<void> | void,
 ): AppBindings {
   let batchTail = Promise.resolve();
   const platformDb = {
     batch(statements: D1PreparedStatement[]) {
       const execute = async () => {
-        beforeBatch?.();
+        await beforeBatch?.();
         database.exec("BEGIN IMMEDIATE");
         try {
           const results = [];
@@ -301,7 +302,12 @@ async function seedSecondTenantAttempt(database: DatabaseSync): Promise<void> {
   );
 }
 
-function bodyData(reference: string, orderCode = ORDER_CODE, amount = 100_000): Record<string, unknown> {
+function bodyData(
+  reference: string,
+  orderCode = ORDER_CODE,
+  amount = 100_000,
+  transactionDateTime = new Date(NOW.getTime() + 5 * 60_000).toISOString(),
+): Record<string, unknown> {
   return {
     amount,
     code: "00",
@@ -311,12 +317,18 @@ function bodyData(reference: string, orderCode = ORDER_CODE, amount = 100_000): 
     orderCode,
     paymentLinkId: "link-a",
     reference,
-    transactionDateTime: new Date(NOW.getTime() + 5 * 60_000).toISOString(),
+    transactionDateTime,
   };
 }
 
-async function webhookBody(reference: string, checksumKey: string, orderCode = ORDER_CODE, amount = 100_000): Promise<Record<string, unknown>> {
-  const data = bodyData(reference, orderCode, amount);
+async function webhookBody(
+  reference: string,
+  checksumKey: string,
+  orderCode = ORDER_CODE,
+  amount = 100_000,
+  transactionDateTime = new Date(NOW.getTime() + 5 * 60_000).toISOString(),
+): Promise<Record<string, unknown>> {
+  const data = bodyData(reference, orderCode, amount, transactionDateTime);
   return {
     code: "00",
     data,
@@ -558,6 +570,132 @@ describe("PayOS webhook credential ownership", () => {
     expect(database.prepare("SELECT status FROM inventory_keys WHERE id = 'inventory-key-a'").get())
       .toEqual({ status: "reserved" });
     expect(database.prepare("SELECT COUNT(*) AS count FROM fulfillments").get()).toEqual({ count: 0 });
+  });
+
+  it.each([
+    {
+      amount: 100_001,
+      occurredAt: new Date(NOW.getTime() + 5 * 60_000).toISOString(),
+      paymentStatus: "overpaid",
+      state: "overpaid",
+    },
+    {
+      amount: 100_000,
+      occurredAt: new Date(NOW.getTime() + 31 * 60_000).toISOString(),
+      paymentStatus: "failed",
+      state: "late",
+    },
+  ] as const)("records signed $state evidence without selling or fulfilling inventory", async ({ amount, occurredAt, paymentStatus, state }) => {
+    const reference = `signed-${state}-exception`;
+
+    await expect(processPayOSWebhook({
+      body: await webhookBody(reference, ACTIVE_CHECKSUM_KEY, ORDER_CODE, amount, occurredAt),
+      env,
+      webhookPublicId: "paywh-a",
+    })).resolves.toEqual({ duplicate: false, processed: true, state });
+
+    expect(database.prepare(`
+      SELECT state, paid_event_id AS paidEventId, last_safe_error_code AS lastSafeErrorCode
+      FROM payment_attempts WHERE id = 'attempt-a'
+    `).get()).toEqual({ lastSafeErrorCode: `payment_${state}`, paidEventId: null, state });
+    expect(database.prepare(`
+      SELECT status, payment_status AS paymentStatus,
+        fulfillment_status AS fulfillmentStatus, paid_at AS paidAt,
+        fulfilled_at AS fulfilledAt
+      FROM orders WHERE id = 'order-a'
+    `).get()).toEqual({
+      fulfilledAt: null,
+      fulfillmentStatus: "reserved",
+      paidAt: null,
+      paymentStatus,
+      status: "exception",
+    });
+    expect(database.prepare(`
+      SELECT status, sold_order_item_id AS soldOrderItemId
+      FROM inventory_keys WHERE id = 'inventory-key-a'
+    `).get()).toEqual({ soldOrderItemId: null, status: "reserved" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM fulfillments").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM domain_events WHERE event_type = 'order.paid'").get()).toEqual({ count: 0 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM outbox_jobs
+      WHERE shop_id = ? AND kind = 'payment_exception' AND status = 'pending'
+    `).get(SHOP_ID)).toEqual({ count: 1 });
+    const exception = database.prepare(`
+      SELECT type, status, safe_evidence_json AS safeEvidenceJson
+      FROM payment_exceptions WHERE shop_id = ? AND payment_attempt_id = 'attempt-a'
+    `).get(SHOP_ID) as { safeEvidenceJson: string; status: string; type: string };
+    expect(exception).toMatchObject({ status: "open", type: state });
+    expect(JSON.parse(exception.safeEvidenceJson)).toMatchObject({ amount, occurredAt, reference });
+    const exceptionEvent = database.prepare(`
+      SELECT normalized_state AS normalizedState, process_result AS processResult,
+        processed_at AS processedAt, processing_token AS processingToken
+      FROM payment_events WHERE provider_event_reference = ?
+    `).get(reference) as { normalizedState: string; processResult: string; processedAt: string | null; processingToken: string | null };
+    expect(exceptionEvent.normalizedState).toBe(state);
+    expect(exceptionEvent.processResult).toBe("exception_created");
+    expect(exceptionEvent.processedAt).toEqual(expect.any(String));
+    expect(exceptionEvent.processingToken).toBeNull();
+  });
+
+  it("fails closed when reservation expiry wins immediately before the exact-payment batch", async () => {
+    const expiresAfter = new Date(NOW.getTime() + 31 * 60_000).toISOString();
+    let expirationRuns = 0;
+    env = bindings(database, async () => {
+      if (expirationRuns > 0) return;
+      expirationRuns += 1;
+      const expired = await expireUnpaidOrders(env, expiresAfter);
+      if (expired !== 1) throw new Error("expected_order_expiration");
+    });
+
+    await expect(processPayOSWebhook({
+      body: await webhookBody("expiry-wins-before-exact-batch", ACTIVE_CHECKSUM_KEY),
+      env,
+      webhookPublicId: "paywh-a",
+    })).resolves.toEqual({ duplicate: false, processed: false, state: "pending" });
+
+    expect(expirationRuns).toBe(1);
+    expect(database.prepare("SELECT state, paid_event_id AS paidEventId FROM payment_attempts WHERE id = 'attempt-a'").get())
+      .toEqual({ paidEventId: null, state: "pending" });
+    expect(database.prepare(`
+      SELECT status, payment_status AS paymentStatus, fulfillment_status AS fulfillmentStatus
+      FROM orders WHERE id = 'order-a'
+    `).get()).toEqual({ fulfillmentStatus: "unfulfilled", paymentStatus: "expired", status: "expired" });
+    expect(database.prepare(`
+      SELECT status, reservation_token AS reservationToken,
+        reserved_order_item_id AS reservedOrderItemId, reserved_until AS reservedUntil
+      FROM inventory_keys WHERE id = 'inventory-key-a'
+    `).get()).toEqual({ reservationToken: null, reservedOrderItemId: null, reservedUntil: null, status: "available" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM fulfillments").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM domain_events WHERE event_type = 'order.paid'").get()).toEqual({ count: 0 });
+    const expiredEvent = database.prepare(`
+      SELECT normalized_state AS normalizedState, process_result AS processResult,
+        processed_at AS processedAt, processing_token AS processingToken
+      FROM payment_events WHERE provider_event_reference = 'expiry-wins-before-exact-batch'
+    `).get() as { normalizedState: string; processResult: string; processedAt: string | null; processingToken: string | null };
+    expect(expiredEvent.normalizedState).toBe("pending");
+    expect(expiredEvent.processResult).toBe("state_conflict");
+    expect(expiredEvent.processedAt).toEqual(expect.any(String));
+    expect(expiredEvent.processingToken).toBeNull();
+  });
+
+  it("does not expire or release an order after exact payment wins", async () => {
+    await expect(processPayOSWebhook({
+      body: await webhookBody("exact-wins-before-expiry", ACTIVE_CHECKSUM_KEY),
+      env,
+      webhookPublicId: "paywh-a",
+    })).resolves.toEqual({ duplicate: false, processed: true, state: "paid_exact" });
+
+    await expect(expireUnpaidOrders(env, new Date(NOW.getTime() + 31 * 60_000).toISOString())).resolves.toBe(0);
+    expect(database.prepare(`
+      SELECT status, payment_status AS paymentStatus, fulfillment_status AS fulfillmentStatus
+      FROM orders WHERE id = 'order-a'
+    `).get()).toEqual({ fulfillmentStatus: "fulfilled", paymentStatus: "paid", status: "completed" });
+    expect(database.prepare(`
+      SELECT status, sold_order_item_id AS soldOrderItemId
+      FROM inventory_keys WHERE id = 'inventory-key-a'
+    `).get()).toEqual({ soldOrderItemId: "order-item-a", status: "sold" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM fulfillments").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM domain_events WHERE event_type = 'order.paid'").get()).toEqual({ count: 1 });
   });
 
   it("classifies concurrent first deliveries with one reference and different hashes as inconsistent", async () => {

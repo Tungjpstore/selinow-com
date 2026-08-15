@@ -97,7 +97,7 @@ function seedTenant(database: DatabaseSync): void {
   const nowIso = NOW.toISOString();
   database.exec(`
     INSERT INTO plans (id, code, name, feature_flags_json, limits_json, created_at, updated_at)
-    VALUES ('plan-a', 'starter', 'Starter', '{}', '{}', '${nowIso}', '${nowIso}');
+    VALUES ('plan-a', 'legacy_test', 'Legacy Test', '{}', '{}', '${nowIso}', '${nowIso}');
     INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
     VALUES ('${USER_ID}', 'owner@example.test', 'Owner', 'active', '${nowIso}', '${nowIso}');
     INSERT INTO shops (
@@ -724,13 +724,26 @@ function seedProviderBackedCustomDomain(database: DatabaseSync): void {
     INSERT INTO shop_domains (
       id, shop_id, hostname_normalized, type, status, is_primary,
       validation_metadata_json, dns_status, cloudflare_hostname_id,
+      hostname_status, ssl_status, ownership_verified_at,
       version, activated_at, created_at, updated_at
-    ) VALUES (?, ?, ?, 'custom', 'active', 0, '{}', 'active', ?, 1, ?, ?, ?)
+    ) VALUES (?, ?, ?, 'custom', 'active', 0,
+      json_object(
+        'turnstile', json_object(
+          'hostname', ?,
+          'mode', 'operator_managed',
+          'source', 'cloudflare_widget_domains',
+          'status', 'active',
+          'checkedAt', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        )
+      ),
+      'active', ?, 'active', 'active', ?, 1, ?, ?, ?)
   `).run(
     "domain-custom-a",
     SHOP_ID,
     "custom.alpha.example.test",
+    "custom.alpha.example.test",
     "cloudflare-hostname-a",
+    nowIso,
     nowIso,
     nowIso,
     nowIso,

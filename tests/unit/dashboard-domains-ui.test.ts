@@ -28,7 +28,12 @@ describe("dashboard domain UI localization", () => {
     expect(page).toContain('title={t("dashboard.domains.title")}');
     expect(manager).toContain("createDashboardTranslator");
     expect(manager).toContain('data-locale={locale ?? "en"}');
+    expect(manager).toContain("domain.turnstileStatus");
+    expect(manager).toContain("data-turnstile-note");
     expect(lifecycle).toContain('t("dashboard.domains.lifecycle.aria")');
+    expect(lifecycle).toContain('t("dashboard.domains.lifecycle.turnstile")');
+    expect(english("dashboard.domains.connect.privacy")).toContain("TXT and CNAME remain manual");
+    expect(vietnamese("dashboard.domains.card.turnstile_pending")).toContain("Operator Selinow");
     for (const source of [page, manager, lifecycle]) expect(source).not.toMatch(/[À-ỹ]/u);
   });
 });

@@ -5,9 +5,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertProductionAccountIdentity,
+  assertProductionDatabasePreflight,
   assertProductionDatabaseIdentity,
+  assertProductionMigrationLedger,
   assertProductionMigrationAdmission,
+  assertProductionMigrationLedgerPrefix,
+  parseProductionMigrationLedgerOutput,
   parseDatabaseFlags,
+  requiresMaintenanceDrainConfirmation,
   requiresProductionMigrationAdmission,
   requiresStagingDatabaseAdmission,
   resolveApprovedProductionDatabaseTarget,
@@ -38,15 +43,37 @@ function wranglerConfig(): Record<string, unknown> {
   };
 }
 
+function continuationEvidence() {
+  return {
+    backup: { checksumSha256: "a".repeat(64), snapshotId: "bkp_continuation" },
+    restore: { reportRef: "restore-report", snapshotId: "rdr_continuation" },
+  };
+}
+
+function d1OperatorEnvironment(): NodeJS.ProcessEnv {
+  return {
+    CLOUDFLARE_API_TOKEN: "ambient-token-must-not-win",
+    CLOUDFLARE_D1_API_TOKEN: "d1-token",
+  };
+}
+
 describe("production database migration admission", () => {
   it("preserves local, staging, dry-run, and read-only command behavior", () => {
     expect(parseDatabaseFlags(["--env", "local"])).toMatchObject({
       environment: "local",
+      maintenanceDrainConfirmed: false,
       releaseManifestPath: null,
     });
     expect(parseDatabaseFlags(["--env", "staging", "--dry-run"])).toMatchObject({
       dryRun: true,
       environment: "staging",
+    });
+    expect(parseDatabaseFlags([
+      "--env", "staging",
+      "--release-manifest", ".wrangler/releases/staging/stg_test/release-manifest.json",
+    ])).toMatchObject({
+      environment: "staging",
+      releaseManifestPath: ".wrangler/releases/staging/stg_test/release-manifest.json",
     });
     const productionDryRun = parseDatabaseFlags([
       "--env", "production", "--confirm-production", "--dry-run",
@@ -73,13 +100,14 @@ describe("production database migration admission", () => {
       ...stagingFlags,
       dryRun: true,
     })).toBe(false);
+    const drainedStagingFlags = parseDatabaseFlags(["--env", "staging", "--confirm-maintenance-drain"]);
+    expect(drainedStagingFlags.maintenanceDrainConfirmed).toBe(true);
+    expect(requiresMaintenanceDrainConfirmation("migrate", stagingFlags)).toBe(true);
+    expect(requiresMaintenanceDrainConfirmation("migrate", drainedStagingFlags)).toBe(false);
+    expect(requiresMaintenanceDrainConfirmation("seed", stagingFlags)).toBe(false);
   });
 
-  it("fails staging migrate and seed before Wrangler when route admission is unavailable", () => {
-    const environment = { ...process.env };
-    delete environment.CLOUDFLARE_PLATFORM_API_TOKEN;
-    delete environment.CLOUDFLARE_ROUTE_AUDIT_API_TOKEN;
-
+  it("requires reviewed release evidence before staging database mutation", () => {
     for (const operation of ["migrate", "seed"]) {
       const result = spawnSync(process.execPath, [
         "scripts/db.mjs",
@@ -89,35 +117,10 @@ describe("production database migration admission", () => {
       ], {
         cwd: process.cwd(),
         encoding: "utf8",
-        env: environment,
       });
       expect(result.status).toBe(1);
       expect(result.stdout).toBe("");
-      expect(result.stderr.trim()).toBe("cloudflare_route_audit_api_token_missing");
-    }
-  });
-
-  it("requires the full platform doctor token before staging database mutation", () => {
-    const environment: NodeJS.ProcessEnv = {
-      ...process.env,
-      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
-    };
-    delete environment.CLOUDFLARE_PLATFORM_API_TOKEN;
-
-    for (const operation of ["migrate", "seed"]) {
-      const result = spawnSync(process.execPath, [
-        "scripts/db.mjs",
-        operation,
-        "--env",
-        "staging",
-      ], {
-        cwd: process.cwd(),
-        encoding: "utf8",
-        env: environment,
-      });
-      expect(result.status).toBe(1);
-      expect(result.stdout).toBe("");
-      expect(result.stderr.trim()).toBe("cloudflare_platform_api_token_missing");
+      expect(result.stderr.trim()).toBe("staging_release_manifest_required");
     }
   });
 
@@ -136,6 +139,30 @@ describe("production database migration admission", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr.trim()).toBe("production_release_manifest_required");
+  });
+
+  it("requires an explicit maintenance drain after manifest presence is established", () => {
+    const cases = [
+      ["staging"],
+      ["production", "--confirm-production"],
+    ];
+    for (const [environment, ...extra] of cases) {
+      const result = spawnSync(process.execPath, [
+        "scripts/db.mjs",
+        "migrate",
+        "--env",
+        environment ?? "missing",
+        ...extra,
+        "--release-manifest",
+        ".wrangler/releases/test/release-manifest.json",
+      ], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr.trim()).toBe("maintenance_drain_confirmation_required");
+    }
   });
 
   it("keeps production migration and status dry-runs network-free without a manifest", () => {
@@ -218,13 +245,95 @@ describe("production database migration admission", () => {
     }).toThrow("production_database_identity_mismatch");
   });
 
+  it("accepts only an exact ordered production ledger prefix and requires completeness after migration", async () => {
+    const migrationNames = [
+      "0001_platform_foundation.sql",
+      "0002_tenant_auth_subscription.sql",
+      "0003_catalog_inventory_orders.sql",
+    ];
+    const runner = (observed: string[]) => () => ({
+      stderr: "",
+      stdout: JSON.stringify([{ success: true, results: observed.map((name) => ({ name })) }]),
+    });
+
+    await expect(assertProductionMigrationLedgerPrefix({
+      expectedPrefix: migrationNames.slice(0, 2),
+      migrationNames,
+      runWranglerImplementation: runner(migrationNames.slice(0, 2)),
+    })).resolves.toEqual({ migrationNames: migrationNames.slice(0, 2) });
+    await expect(assertProductionMigrationLedgerPrefix({
+      expectedPrefix: migrationNames.slice(0, 1),
+      migrationNames,
+      runWranglerImplementation: runner(migrationNames.slice(0, 2)),
+    })).rejects.toThrow("production_migration_ledger_prefix_invalid");
+    await expect(assertProductionMigrationLedgerPrefix({
+      migrationNames,
+      runWranglerImplementation: runner([
+        "0002_tenant_auth_subscription.sql",
+        "0001_platform_foundation.sql",
+      ]),
+    })).rejects.toThrow("production_migration_ledger_prefix_invalid");
+    await expect(assertProductionMigrationLedger({
+      migrationNames,
+      runWranglerImplementation: runner(migrationNames.slice(0, 2)),
+    })).rejects.toThrow("production_migration_ledger_incomplete");
+    await expect(assertProductionMigrationLedger({
+      migrationNames,
+      runWranglerImplementation: runner(migrationNames),
+    })).resolves.toEqual({ migrationNames });
+    expect(() => parseProductionMigrationLedgerOutput(JSON.stringify([{
+      results: migrationNames.map((name) => ({ name })),
+      success: false,
+    }]))).toThrow("production_migration_ledger_invalid_result");
+  });
+
+  it("runs every production database invariant query and fails closed on violations", () => {
+    const runner = vi.fn((args: string[]) => {
+      const sql = args[args.indexOf("--command") + 1] ?? "";
+      if (sql.includes("sqlite_master")) return { stderr: "", stdout: JSON.stringify([{ results: [] }]) };
+      if (sql.includes("missing_payos_connections")) throw new Error("provider query should be skipped");
+      if (sql.includes("invalid_payos_active_credential_links")) {
+        return { stderr: "", stdout: JSON.stringify([{ results: [{
+          invalid_payos_active_credential_links: 0,
+          invalid_payos_attempt_links: 0,
+          invalid_payos_credential_integration_links: 0,
+          invalid_payos_event_links: 0,
+          invalid_payos_exception_links: 0,
+          invalid_payos_paid_event_links: 0,
+        }] }]) };
+      }
+      return { stderr: "", stdout: JSON.stringify([{ results: [{
+        canonical_null_shops: 0,
+        duplicate_primary_shops: 0,
+        duplicate_provider_ids: 0,
+        invalid_canonical_links: 0,
+        legacy_custom_domains: 0,
+        unresolved_active_attempt_origins: 0,
+      }] }]) };
+    });
+
+    expect(assertProductionDatabasePreflight({ runWranglerImplementation: runner })).toMatchObject({ ok: true });
+    expect(runner).toHaveBeenCalledTimes(3);
+    expect(() => assertProductionDatabasePreflight({
+      requirePaymentProviderSchema: true,
+      runWranglerImplementation: runner,
+    })).toThrow("production_database_preflight_failed");
+    expect(() => assertProductionDatabasePreflight({
+      runWranglerImplementation: () => {
+        throw new Error("provider output");
+      },
+    })).toThrow("production_database_preflight_failed");
+  });
+
   it("does not expose provider output when account lookup fails", async () => {
     await expect(assertProductionMigrationAdmission({
       assertReleaseAdmissionImplementation: () => Promise.resolve({
         commitSha: "0123456789abcdef0123456789abcdef01234567",
         releaseId: "release_20260729_abcdef12",
       }),
+      environment: d1OperatorEnvironment(),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
+      assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
       repositoryRoot: process.cwd(),
       runWranglerImplementation: () => {
@@ -241,7 +350,9 @@ describe("production database migration admission", () => {
         commitSha: "0123456789abcdef0123456789abcdef01234567",
         releaseId: "release_20260729_abcdef12",
       }),
+      environment: d1OperatorEnvironment(),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
+      assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
       repositoryRoot: process.cwd(),
       runWranglerImplementation: (args) => {
@@ -259,12 +370,15 @@ describe("production database migration admission", () => {
       events.push("release");
       return Promise.resolve({
         commitSha: "0123456789abcdef0123456789abcdef01234567",
+        migrationLedgerPrefix: ["0001_platform_foundation.sql"],
         releaseId: "release_20260729_abcdef12",
       });
     });
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       events.push(args.join(" "));
       expect(options?.env?.CLOUDFLARE_ACCOUNT_ID).toBe(accountId);
+      expect(options?.env?.CLOUDFLARE_API_TOKEN).toBe("d1-token");
+      expect(options?.env).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
       return {
         stderr: "",
         stdout: args[0] === "d1"
@@ -275,7 +389,23 @@ describe("production database migration admission", () => {
 
     await expect(assertProductionMigrationAdmission({
       assertReleaseAdmissionImplementation: releaseAdmission,
+      assertDatabasePreflightImplementation: () => {
+        events.push("preflight");
+        return { checks: [], ok: true };
+      },
+      assertMigrationLedgerPrefixImplementation: (input) => {
+        expect(input.environment).toMatchObject({
+          CLOUDFLARE_ACCOUNT_ID: accountId,
+          CLOUDFLARE_API_TOKEN: "d1-token",
+        });
+        expect(input.environment).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
+        expect(input.expectedPrefix).toEqual(["0001_platform_foundation.sql"]);
+        events.push("ledger");
+        return Promise.resolve({ migrationNames: ["0001_platform_foundation.sql"] });
+      },
+      environment: d1OperatorEnvironment(),
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
+      assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
       productionSpec: productionSpec(),
       repositoryRoot: process.cwd(),
       runWranglerImplementation: runner,
@@ -288,7 +418,45 @@ describe("production database migration admission", () => {
       databaseName: "selinow-production",
       releaseId: "release_20260729_abcdef12",
     });
-    expect(events).toEqual(["release", "whoami --json", "d1 list --env production --json", "release"]);
+    expect(events).toEqual([
+      "release",
+      "whoami --json",
+      "d1 list --env production --json",
+      "ledger",
+      "preflight",
+      "release",
+      "ledger",
+      "preflight",
+    ]);
+  });
+
+  it("fails closed when the production migration ledger changes during admission", async () => {
+    let ledgerRead = 0;
+    await expect(assertProductionMigrationAdmission({
+      assertReleaseAdmissionImplementation: () => Promise.resolve({
+        commitSha: "0123456789abcdef0123456789abcdef01234567",
+        releaseId: "release_20260729_abcdef12",
+      }),
+      assertDatabasePreflightImplementation: () => ({ checks: [], ok: true }),
+      assertMigrationLedgerPrefixImplementation: () => Promise.resolve({
+        migrationNames: ledgerRead++ === 0
+          ? ["0001_platform_foundation.sql"]
+          : ["0001_platform_foundation.sql", "0002_tenant_auth_subscription.sql"],
+      }),
+      environment: d1OperatorEnvironment(),
+      manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
+      assertContinuationEvidenceImplementation: () => Promise.resolve(continuationEvidence()),
+      productionSpec: productionSpec(),
+      repositoryRoot: process.cwd(),
+      runWranglerImplementation: (args) => ({
+        stderr: "",
+        stdout: args[0] === "d1"
+          ? JSON.stringify([{ name: "selinow-production", uuid: databaseId }])
+          : `Account ID: ${accountId}`,
+      }),
+      workerSecretNames: [],
+      wranglerConfig: wranglerConfig(),
+    })).rejects.toThrow("production_migration_ledger_changed");
   });
 
   it("places admission immediately before the production migration sink", () => {
@@ -296,10 +464,16 @@ describe("production database migration admission", () => {
     const gate = source.indexOf("await assertProductionMigrationAdmission");
     const pin = source.indexOf("buildPinnedCloudflareEnvironment", gate);
     const sink = source.indexOf("runWrangler(wranglerArgs", gate);
+    const postLedger = source.indexOf("await assertProductionMigrationLedger", sink);
+    const postPreflight = source.indexOf("assertProductionDatabasePreflight", postLedger);
+    const strictProviderSchema = source.indexOf("requirePaymentProviderSchema: true", postPreflight);
 
     expect(gate).toBeGreaterThan(-1);
     expect(pin).toBeGreaterThan(gate);
     expect(sink).toBeGreaterThan(gate);
+    expect(postLedger).toBeGreaterThan(sink);
+    expect(postPreflight).toBeGreaterThan(postLedger);
+    expect(strictProviderSchema).toBeGreaterThan(postPreflight);
   });
 
   it("places the same production admission immediately before the seed sink", () => {
@@ -317,20 +491,100 @@ describe("production database migration admission", () => {
     expect(sink).toBeGreaterThan(pin);
   });
 
-  it("rechecks staging admission after backup evidence and immediately before mutation sinks", () => {
+  it("runs the complete remote and invariant contract after database mutation sinks", () => {
     const source = readFileSync("scripts/db.mjs", "utf8");
-    const firstGate = source.indexOf("await assertStagingMutationAdmission");
-    const backup = source.indexOf("await assertFreshStagingBackupEvidence", firstGate);
-    const finalGate = source.indexOf("await assertStagingMutationAdmission", firstGate + 1);
-    const stableTargetGuard = source.indexOf("staging_backup_admission_changed", finalGate);
-    const pin = source.indexOf("buildPinnedCloudflareEnvironment", finalGate);
-    const sink = source.indexOf("runWrangler(wranglerArgs", finalGate);
+    const productionSink = source.indexOf("runWrangler(wranglerArgs");
+    const productionRemote = source.indexOf("assertRemotePostMigrationContract({", productionSink);
+    const productionInvariant = source.indexOf("assertProductionDatabaseInvariantContract({", productionRemote);
+    const stagingMigration = source.indexOf("await runStagingMigrationWithVerification");
+    const stagingRemote = source.indexOf("assertRemotePostMigrationContract({", stagingMigration);
+    const stagingInvariant = source.indexOf("assertProductionDatabaseInvariantContract({", stagingRemote);
 
+    expect(productionSink).toBeGreaterThan(-1);
+    expect(productionRemote).toBeGreaterThan(productionSink);
+    expect(productionInvariant).toBeGreaterThan(productionRemote);
+    expect(stagingMigration).toBeGreaterThan(-1);
+    expect(stagingRemote).toBeGreaterThan(stagingMigration);
+    expect(stagingInvariant).toBeGreaterThan(stagingRemote);
+  });
+
+  it("rechecks manifest-pinned staging evidence before mutation and records migration completion", () => {
+    const source = readFileSync("scripts/db.mjs", "utf8");
+    const stagingGate = source.indexOf("if (requiresStagingDatabaseAdmission(operation, flags))");
+    const firstRelease = source.indexOf("await assertStagingReleaseAdmission", stagingGate);
+    const firstGate = source.indexOf("await assertStagingMutationAdmission", firstRelease);
+    const continuation = source.indexOf("await assertStagingContinuationEvidenceByReference", firstGate);
+    const finalGate = source.indexOf("await assertStagingMutationAdmission", firstGate + 1);
+    const finalRelease = source.indexOf("await assertStagingReleaseAdmission", firstRelease + 1);
+    const finalContinuation = source.indexOf("await assertStagingContinuationEvidenceByReference", continuation + 1);
+    const stableTargetGuard = source.indexOf("staging_release_admission_changed", finalContinuation);
+    const pin = source.indexOf("buildPinnedCloudflareEnvironment", finalGate);
+    const migrationVerification = source.indexOf("await runStagingMigrationWithVerification", pin);
+    const migrationNamesBinding = source.indexOf(
+      "migrationNames: finalReleaseAdmission.migrationNames",
+      migrationVerification,
+    );
+    const completeLedger = source.indexOf("await assertStagingMigrationLedger({", pin);
+    const preflight = source.indexOf("assertStagingDatabasePreflight", completeLedger);
+    const migrationSink = source.indexOf("runWrangler(wranglerArgs", migrationVerification);
+    const migrationCompletion = source.indexOf("buildStagingMigrationCompletion", migrationSink);
+    const projectedCompletionTarget = source.indexOf(
+      "databaseTarget: databaseTargetFromAdmission(finalAdmission)",
+      migrationSink,
+    );
+    const migrationCompletionWrite = source.indexOf("writeStagingMigrationCompletion", migrationCompletion);
+    const seedSink = source.indexOf("runWrangler(wranglerArgs", migrationSink + 1);
+
+    expect(firstRelease).toBeGreaterThan(-1);
+    expect(firstRelease).toBeLessThan(firstGate);
     expect(firstGate).toBeGreaterThan(-1);
-    expect(backup).toBeGreaterThan(firstGate);
-    expect(finalGate).toBeGreaterThan(backup);
-    expect(stableTargetGuard).toBeGreaterThan(finalGate);
+    expect(continuation).toBeGreaterThan(firstGate);
+    expect(finalGate).toBeGreaterThan(continuation);
+    expect(finalRelease).toBeGreaterThan(finalGate);
+    expect(finalContinuation).toBeGreaterThan(finalRelease);
+    expect(stableTargetGuard).toBeGreaterThan(finalContinuation);
     expect(pin).toBeGreaterThan(stableTargetGuard);
-    expect(sink).toBeGreaterThan(pin);
+    expect(migrationVerification).toBeGreaterThan(pin);
+    expect(migrationVerification).toBeLessThan(migrationSink);
+    expect(migrationNamesBinding).toBeGreaterThan(migrationVerification);
+    expect(migrationNamesBinding).toBeLessThan(migrationSink);
+    expect(completeLedger).toBeGreaterThan(pin);
+    expect(completeLedger).toBeLessThan(preflight);
+    expect(preflight).toBeLessThan(seedSink);
+    expect(migrationSink).toBeGreaterThan(pin);
+    expect(migrationCompletion).toBeGreaterThan(migrationSink);
+    expect(projectedCompletionTarget).toBeGreaterThan(migrationSink);
+    expect(projectedCompletionTarget).toBeLessThan(migrationCompletionWrite);
+    expect(migrationCompletionWrite).toBeGreaterThan(migrationCompletion);
+    expect(seedSink).toBeGreaterThan(preflight);
+  });
+
+  it("finalizes staging only from a completed ledger and post-migration backup/restore", () => {
+    const source = readFileSync("scripts/db.mjs", "utf8");
+    const completionBranch = source.indexOf('if (operation === "complete-release")');
+    const releaseAdmission = source.indexOf("await assertStagingReleaseAdmission", completionBranch);
+    const projectedTarget = source.indexOf(
+      "databaseTargetFromAdmission(await assertStagingMutationAdmission())",
+      releaseAdmission,
+    );
+    const preEvidence = source.indexOf("await assertStagingContinuationEvidenceByReference", releaseAdmission);
+    const completeLedger = source.indexOf("await assertStagingMigrationLedger", preEvidence);
+    const migrationCompletion = source.indexOf("await assertStagingMigrationCompletion", completeLedger);
+    const postEvidence = source.indexOf("await assertFreshStagingContinuationEvidence", migrationCompletion);
+    const buildEvidence = source.indexOf("buildStagingPostMigrationEvidence", postEvidence);
+    const writeEvidence = source.indexOf("writeStagingPostMigrationEvidence", buildEvidence);
+    const validateEvidence = source.indexOf("await assertStagingPostMigrationEvidence", writeEvidence);
+
+    expect(completionBranch).toBeGreaterThan(-1);
+    expect(releaseAdmission).toBeGreaterThan(completionBranch);
+    expect(projectedTarget).toBeGreaterThan(releaseAdmission);
+    expect(projectedTarget).toBeLessThan(preEvidence);
+    expect(preEvidence).toBeGreaterThan(releaseAdmission);
+    expect(completeLedger).toBeGreaterThan(preEvidence);
+    expect(migrationCompletion).toBeGreaterThan(completeLedger);
+    expect(postEvidence).toBeGreaterThan(migrationCompletion);
+    expect(buildEvidence).toBeGreaterThan(postEvidence);
+    expect(writeEvidence).toBeGreaterThan(buildEvidence);
+    expect(validateEvidence).toBeGreaterThan(writeEvidence);
   });
 });

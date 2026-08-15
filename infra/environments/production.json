@@ -27,11 +27,11 @@
   "routing": {
     "canaryOverrideRoute": "canary.selinow.com/*",
     "externalCustomDomainFallbackRoute": "*/*",
-    "externalCustomDomainStrategy": "platform_only_staging_fallback",
+    "externalCustomDomainStrategy": "production_fallback_with_platform_staging_exceptions",
     "platformApexRoute": "selinow.com/*",
     "platformStorefrontWildcard": "*.selinow.com/*",
-    "routeHandoff": "atomic_platform_route_replacement",
-    "stagingExternalCustomDomainInventory": "pending_inventory",
+    "routeHandoff": "atomic_shared_zone_route_replacement",
+    "stagingExternalCustomDomainInventory": "verified_none_active",
     "stagingRouteExceptions": [
       "staging.selinow.com/*",
       "app-staging.selinow.com/*",
@@ -40,12 +40,30 @@
     ]
   },
   "turnstile": {
-    "externalCustomDomainAdmission": "pending_runtime_lifecycle",
+    "externalCustomDomainAdmission": "verified_before_domain_activation",
     "externalCustomDomainStrategy": "exact_hostname_admission_before_activation",
     "platformHostname": "selinow.com"
   },
   "saas": {
     "fallbackOrigin": "proxy-fallback.selinow.com",
-    "cnameTarget": "customers.selinow.com"
+    "cnameTarget": "customers.selinow.com",
+    "dnsRecords": [
+      {
+        "key": "fallbackOrigin",
+        "type": "AAAA",
+        "name": "proxy-fallback.selinow.com",
+        "content": "100::",
+        "proxied": true,
+        "ttl": 1
+      },
+      {
+        "key": "cnameTarget",
+        "type": "CNAME",
+        "name": "customers.selinow.com",
+        "content": "proxy-fallback.selinow.com",
+        "proxied": true,
+        "ttl": 1
+      }
+    ]
   }
 }

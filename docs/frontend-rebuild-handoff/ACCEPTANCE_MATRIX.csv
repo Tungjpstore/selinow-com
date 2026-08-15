@@ -1,0 +1,88 @@
+surface,route,scenario,audience,viewport_set,required_assertions,maturity
+marketing,/,ready,anonymous,1440|768|390|320,"marketing host renders; real value proposition; no fake metrics; semantic navigation; no overflow",live
+marketing,/,data_unavailable,anonymous,1440|390|320,"safe fallback; no invented plans or counts; request diagnostics if available",live
+marketing,/pricing,ready,anonymous,1440|768|390|320,"runtime plan price/features/limits; accessible comparison; no hard-coded hidden limits",live
+marketing,/pricing,unavailable,anonymous,1440|390|320,"truthful unavailable state; no stale fake price; wrong host is 404",live
+auth,/login,idle,anonymous,1440|768|390|320,"email form keyboard accessible; private/noindex; intended dashboard context",live
+auth,/login,accepted,anonymous,1440|390|320,"expiry guidance; no token/debug link outside local; duplicate submit locked",live
+auth,/login,error_or_rate_limited,anonymous,1440|390|320,"safe code copy; field association; retry guidance; no raw provider error",live
+workspace,/app,no_shop,authenticated,1440|768|390|320,"shop creation/onboarding path; no stale tenant data; role-safe shell",live
+workspace,/app,ready,all_shop_roles,1440|768|390|320,"selected shop clear; real readiness; orders show payment and fulfillment separately; no fake KPI",live
+workspace,/app,subprojection_forbidden_or_unavailable,all_shop_roles,1440|390|320,"other safe sections remain; explicit forbidden/unavailable; no previous-role fallback",live
+workspace,/onboarding,step_in_progress,owner_manager,1440|768|390|320,"server step state; durable re-entry; current shop/currency/locale; action authority visible",live
+workspace,/onboarding,blocked,owner_manager,1440|390|320,"all required readiness blockers; exact action links; publish disabled by server projection",live
+workspace,/onboarding,waiting_provider,owner_manager,1440|390|320,"provider wait distinct from user action and error; bounded refresh; no fake activation",provider_pending
+workspace,/app/products,empty,owner_manager,1440|768|390|320,"create path; no fake sample products; category/product/variant hierarchy understandable",live
+workspace,/app/products,ready,owner_manager,1440|768|390|320,"status/version/price/currency; archive not delete; moderation suspension protected",live
+workspace,/app/products,conflict_or_forbidden,all_shop_roles,1440|390|320,"409 reload path or safe 200 forbidden; no mutation for support/viewer",live
+workspace,/app/inventory,empty,owner_manager,1440|768|390|320,"no plaintext placeholders; import instructions; authoritative zero counts",live
+workspace,/app/inventory,preview,owner_manager,1440|390|320,"accepted/duplicate/rejected counts; no key rows/fingerprints; token expiry stated",live
+workspace,/app/inventory,import_complete_or_expired,owner_manager,1440|390|320,"replay-safe result or re-preview requirement; input plaintext cleared",live
+workspace,/app/orders,empty,all_shop_roles,1440|768|390|320,"truthful empty ledger; no fake sales; safe filters only on loaded data",live
+workspace,/app/orders,ready,all_shop_roles,1440|768|390|320,"masked customer; channel; order/payment/fulfillment separate; no token/provider raw",live
+workspace,/app/orders,payment_exception_unavailable,all_shop_roles,1440|390|320,"base orders remain safe; exception section owner/manager only; no resolution button",read_only
+workspace,/app/orders/:id,ready,all_shop_roles,1440|768|390|320,"immutable item snapshot; attempts; fulfillment; safe audit; tenant-bound detail",live
+workspace,/app/orders/:id,cross_tenant_or_missing,all_shop_roles,1440|390|320,"403 cross-tenant or 404 missing; no fallback to another shop/order",live
+workspace,/app/orders/:id,manual_fulfillment,owner_manager,1440|390|320,"only server-eligible item; recent auth; idempotency; canonical reload; evidence immutable",live
+workspace,/app/customers,empty_or_ready,all_shop_roles,1440|768|390|320,"masked identity; owner/manager detail, profile/status update, note and redaction controls use tenant-bound versioned APIs; support/viewer remains read-only",contract_ready
+workspace,/app/customers,unavailable,all_shop_roles,1440|390|320,"safe unavailable state; no unmasked fallback or cached tenant data",read_only
+workspace,/app/integrations,disconnected,owner_manager,1440|768|390|320,"registered/configured/health/readiness separated; one-way secret forms",provider_pending
+workspace,/app/integrations,active_or_degraded,owner_manager,1440|390|320,"webhook/credential/provider health separate; checked time; safe reason; no secret",provider_pending
+workspace,/app/integrations,forbidden,support_viewer,1440|390|320,"safe unavailable projections; no connect/check/disconnect controls",provider_pending
+workspace,/app/integrations,api_credentials_empty_or_ready,owner_manager,1440|768|390|320,"tenant-scoped list; catalog:read/shop:read scopes; no token recovery; safe metadata only",live
+workspace,/app/integrations,api_credential_issue_and_revoke,owner_manager,1440|390|320,"recent-auth/CSRF/idempotency/version guards; one-time token reveal/copy; revoke reloads authoritative state",live
+workspace,/app/integrations,channel_catalog_ready,owner_manager,1440|768|390|320,"safe declared manifests for Telegram Mini App, Zalo Mini App, WhatsApp Cloud and Discord; capabilities and provider stage are explicit; no credentials",contract_ready
+workspace,/app/integrations,channel_request_states,owner_manager,1440|768|390|320,"request/cancel controls use CSRF/recent-auth/idempotency/expected-version; requested/provider_pending/canceled/rejected are distinct and never imply activation",contract_ready
+workspace,/app/integrations,channel_forbidden_or_read_only,support_viewer,1440|390|320,"catalog may be read only; no request/cancel controls; provider secrets and payloads absent",contract_ready
+workspace,/app/integrations,dashboard_shell_grouping,all_shop_roles,1440|768|390|320,"Command/Commerce/Channels/Operations/Workspace groups are discoverable; selected shop and role remain visible; no horizontal overflow",live
+workspace,/app/integrations,telegram_bot_lane,owner_manager,1440|768|390|320,"bot identity, webhook proof, health and connect/replace/disconnect are isolated; provider_pending never reads active",provider_pending
+workspace,/app/integrations,telegram_mini_app_lane,owner_manager,1440|768|390|320,"Mini App manifest and session/launch requirements are separate from Bot lane; no initData, token or provider payload in UI",contract_ready
+workspace,/app/integrations,zalo_mini_app_lane,owner_manager,1440|390|320,"app identity, signature stage, connector request and required seller action are explicit; no OA state or activation inference",provider_pending
+workspace,/app/integrations,zalo_oa_lane,owner_manager,1440|390|320,"OA OAuth/PKCE pending state is distinct from Mini App; callback/webhook proof and token rotation remain provider_pending",provider_pending
+workspace,/app/integrations,whatsapp_cloud_lane,owner_manager,1440|768|390|320,"WABA/phone identity, challenge/HMAC, service window/template policy and billing gate are shown without secrets",contract_ready
+workspace,/app/integrations,discord_bot_lane,owner_manager,1440|390|320,"application/public-key installation and Ed25519 interaction acknowledgement are separate from outbound delivery/payment",contract_ready
+workspace,/app/domains,no_custom_domain,owner,1440|768|390|320,"platform fallback visible; external activation caveat; hostname form",external_pending
+workspace,/app/domains,lifecycle,owner,1440|768|390|320,"ownership/hostname/DNS/SSL/primary/routing separate; version refresh; safe instructions",external_pending
+workspace,/app/domains,blocked_or_failed,owner,1440|390|320,"plan/payment-origin/provider blocker explicit; no browser-side override; safe error",external_pending
+workspace,/app/automation,pending_or_running,all_shop_roles,1440|768|390|320,"level/status/attempt/next attempt separate; canCancel from server; version shown",live
+workspace,/app/automation,waiting_user_or_provider,all_shop_roles,1440|390|320,"user/provider wait distinct; action URL safe; no evidence token in client",live
+workspace,/app/automation,retry_failed_canceled_succeeded,all_shop_roles,1440|768|390|320,"terminal/retry semantics exact; conflict reload; requested action not claimed complete",live
+workspace,/app/automation,provider_wait_group,all_shop_roles,1440|390|320,"needs_seller and waiting_provider groups are distinct; safe action URL/status only; no evidence or lease token",live
+workspace,/app/store,never_published,all_shop_roles,1440|768|390|320,"draft/live distinction; preview read-only; editor only owner/manager; publish owner",live
+workspace,/app/store,unpublished_changes,owner_manager,1440|768|390|320,"version/published version; pending changes; expectedVersion; no instant public claim",live
+workspace,/app/store,publish_blocked_or_conflict,owner,1440|390|320,"readiness blocker or 409 reload; no optimistic success; public snapshot unchanged",live
+workspace,/app/members,ready_or_empty,owner,1440|768|390|320,"masked identity/role/status; invite, role change, suspend, resend and revoke controls use CSRF/recent-auth/idempotency/version guards",contract_ready
+workspace,/app/members,forbidden,non_owner,1440|390|320,"403/read-only state; no member data leak or controls",read_only
+workspace,/app/billing,trial_active_past_due,owner,1440|768|390|320,"server plan/features/limits/usage/dates; audited plan/cancel request is rendered as provider-pending intent; no provider settlement or browser-side mutation",provider_pending
+workspace,/app/billing,grace_suspended_canceled,owner,1440|390|320,"authorization consequence truthful; no assumed grace checkout; no upgrade button",read_only
+workspace,/app/data,audit_exports,owner,1440|768|390|320,"safe audit fields; export status; one-time token handling; plaintext risk explicit",live
+workspace,/app/data,deletion_processing_or_blocked,owner,1440|768|390|320,"ordered immutable steps; hold/deadline/irreversible boundary; resume not completion",live
+workspace,/app/data,forbidden,non_owner,1440|390|320,"owner-only state; no audit/export/deletion data or action",live
+admin,/admin,ready,platform_owner_risk_support,1440|768|390|320,"real report counts; safe evidence; support triage only; owner/risk controls",live
+admin,/admin,forbidden_or_unavailable,authenticated_non_admin,1440|390|320,"403 or 503 explicit; no admin data; safe exit",live
+admin,/admin,moderation_conflict,platform_owner_risk,1440|390|320,"recent auth/idempotency pending; 409 reload; immutable result reference",live
+admin,/admin/operations,ready,platform_owner_risk_support,1440|768|390|320,"incidents/DLQ/deletion/rotation separated; safe context; canOperate respected",live
+admin,/admin/operations,support_scoped_controls,platform_support,1440|390|320,"incident and unlinked-DLQ controls follow source; no linked replay/legal-hold/rotation; safe context remains",live
+admin,/admin/operations,retry_or_version_conflict,platform_owner_risk,1440|390|320,"retry_requested distinct from complete; expectedVersion reload; no queue payload",live
+admin,/admin/shops,ready,platform_owner_risk_support,1440|768|390|320,"public identity/safe aggregates only; opaque cursor; no impersonation/mutation",read_only
+admin,/admin/shops,empty_or_unavailable,platform_owner_risk_support,1440|390|320,"filtered empty distinct from 503; no identity fallback",read_only
+storefront,/,live_catalog,anonymous,1440|768|390|320,"tenant from host; published content; semantic products; no-JS useful; no overflow",live
+storefront,/,empty_or_coming_soon,anonymous,1440|390|320,"merchant identity and truthful state; no unpublished products; noindex/no-store when non-live",live
+storefront,/,suspended_or_unknown,anonymous,1440|390|320,"fail closed; no other tenant data; no cart controls; safe support/404",live
+storefront,/products/:slug,available,anonymous,1440|768|390|320,"variant/price/min-max/stock state; revalidation before add; fulfillment expectation",live
+storefront,/products/:slug,sold_out_or_drift,anonymous,1440|390|320,"add blocked; authoritative changed state; no stale price/stock; requote/reload",live
+storefront,/products/:slug,missing_or_suspended,anonymous,1440|390|320,"no unpublished data; safe report targeting only when product resolved",live
+storefront,/cart,empty,anonymous,1440|768|390|320,"clear next navigation; no fake persisted cart; token not in URL",live
+storefront,/cart,valid_quote,anonymous,1440|768|390|320,"server totals/evidence/expiry; accessible quantity/remove; no local authority",live
+storefront,/cart,expired_or_drift,anonymous,1440|390|320,"changed lines; continuation blocked; requote/review; converted cart not resurrected",live
+storefront,/checkout,ready,anonymous,1440|768|390|320,"authoritative items/total/expiry; policy/Turnstile; idempotency contract exact",live
+storefront,/checkout,quote_or_inventory_error,anonymous,1440|390|320,"specific safe state; no order success; return to cart/requote",live
+storefront,/checkout,provider_unavailable_or_rate_limited,anonymous,1440|390|320,"safe request ID; bounded retry; no payment/paid claim",provider_pending
+storefront,/orders/:orderPublicId,pending_payment,authorized_buyer,1440|768|390|320,"order/payment/fulfillment separate; payment link pending; provider return checks API",provider_pending
+storefront,/orders/:orderPublicId,exception,authorized_buyer,1440|390|320,"partial/overpaid/late/mismatch manual review; no fulfillment success",provider_pending
+storefront,/orders/:orderPublicId,paid_processing,authorized_buyer,1440|390|320,"paid visible but access/fulfillment pending; entitlement/provider state distinct",provider_pending
+storefront,/orders/:orderPublicId,fulfilled,authorized_buyer,1440|390|320,"keys/downloads only through protected endpoints; plaintext ephemeral; quota/expiry shown",live
+storefront,/orders/:orderPublicId,refunded_revoked_or_exhausted,authorized_buyer,1440|390|320,"future access closed; prior evidence not rewritten; no download/reveal bypass",live
+storefront,/orders/:orderPublicId,missing_or_bad_token,anonymous,1440|390|320,"404 indistinguishable; no existence leak; token not echoed",live
+workspace_alias,/app/telegram,redirect,authenticated,all,"307 to integrations focus; selected shop preserved; no duplicate screen",live
+workspace_alias,/app/store/settings,redirect,authenticated,all,"307 to store settings focus; selected shop preserved; no duplicate screen",live

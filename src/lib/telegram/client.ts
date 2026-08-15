@@ -5,6 +5,7 @@ import { telegramCommands } from "./localization";
 
 const TELEGRAM_BASE_URL = "https://api.telegram.org";
 const MAX_RESPONSE_BYTES = 256 * 1024;
+const TELEGRAM_ID_MAX = 4_503_599_627_370_495n;
 
 type TelegramEnvelope = {
   description?: unknown;
@@ -87,8 +88,9 @@ export class TelegramClient {
   async getMe(): Promise<TelegramBotIdentity> {
     const result = requireRecord(await this.request("getMe"));
     if (result.is_bot !== true || (typeof result.id !== "number" && typeof result.id !== "string")) throw new TelegramProviderError("telegram_provider_identity_invalid", 409);
+    if (typeof result.id === "number" && !Number.isSafeInteger(result.id)) throw new TelegramProviderError("telegram_provider_identity_invalid", 409);
     const id = String(result.id);
-    if (!/^\d{1,20}$/u.test(id)) throw new TelegramProviderError("telegram_provider_identity_invalid", 409);
+    if (!/^\d{1,20}$/u.test(id) || BigInt(id) > TELEGRAM_ID_MAX) throw new TelegramProviderError("telegram_provider_identity_invalid", 409);
     return { displayName: sanitizeBotDisplayName(result.first_name), id, username: sanitizeBotUsername(result.username) };
   }
 
@@ -100,10 +102,10 @@ export class TelegramClient {
     await this.request("setChatMenuButton", { menu_button: { type: "commands" } });
   }
 
-  async setWebhook(input: { allowedUpdates: string[]; maxConnections: number; secretToken: string; url: string }): Promise<void> {
+  async setWebhook(input: { allowedUpdates: string[]; dropPendingUpdates?: boolean; maxConnections: number; secretToken: string; url: string }): Promise<void> {
     await this.request("setWebhook", {
       allowed_updates: input.allowedUpdates,
-      drop_pending_updates: false,
+      drop_pending_updates: input.dropPendingUpdates === true,
       max_connections: input.maxConnections,
       secret_token: input.secretToken,
       url: input.url,

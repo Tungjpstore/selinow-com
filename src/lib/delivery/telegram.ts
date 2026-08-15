@@ -19,7 +19,7 @@ export type TelegramDeliveryJobReference = {
 export type TelegramDeliveryResult =
   | { kind: "delivered" }
   | { errorCode: string; kind: "failed" }
-  | { errorCode: string; kind: "retryable"; retryAfterSeconds?: number };
+  | { errorCode: string; kind: "retryable"; providerOutcome?: "not_sent" | "unknown"; retryAfterSeconds?: number };
 
 type JobContextRow = {
   aggregateId: string | null;
@@ -53,7 +53,9 @@ type ConnectionContextRow = {
   channelStatus: string | null;
   connectionStatus: string;
   hasOutboundGrant: number;
+  generationState: string | null;
   integrationId: string | null;
+  integrationGeneration: number | null;
   integrationStatus: string | null;
   providerCode: string;
 };
@@ -73,16 +75,20 @@ function failed(errorCode: string): TelegramDeliveryResult {
   return { errorCode, kind: "failed" };
 }
 
-function retryable(errorCode: string, retryAfterSeconds?: number): TelegramDeliveryResult {
+function retryable(
+  errorCode: string,
+  retryAfterSeconds?: number,
+  providerOutcome: "not_sent" | "unknown" = "unknown",
+): TelegramDeliveryResult {
   return retryAfterSeconds === undefined
-    ? { errorCode, kind: "retryable" }
-    : { errorCode, kind: "retryable", retryAfterSeconds };
+    ? { errorCode, kind: "retryable", providerOutcome }
+    : { errorCode, kind: "retryable", providerOutcome, retryAfterSeconds };
 }
 
 function classifyProviderError(error: unknown): TelegramDeliveryResult {
   if (error instanceof TelegramProviderError) {
     if (error.code === "telegram_rate_limited") {
-      return retryable(error.code, error.retryAfter ?? undefined);
+      return retryable(error.code, error.retryAfter ?? undefined, "not_sent");
     }
     if (
       error.code === "provider_timeout"
@@ -208,6 +214,8 @@ async function loadConnectionContext(
       telegram_integrations.id AS integrationId,
       telegram_integrations.status AS integrationStatus,
       telegram_integrations.active_credential_id AS activeCredentialId,
+      telegram_integrations.integration_generation AS integrationGeneration,
+      telegram_integrations.generation_state AS generationState,
       EXISTS (
         SELECT 1 FROM channel_connection_grants
         WHERE channel_connection_grants.shop_id = channel_connections.shop_id
@@ -244,6 +252,9 @@ function validateConnectionContext(row: ConnectionContextRow | null): TelegramDe
   if (
     row.integrationId === null
     || row.activeCredentialId === null
+    || row.integrationGeneration === null
+    || row.integrationGeneration <= 0
+    || row.generationState !== "active"
     || !new Set(["active", "degraded"]).has(row.integrationStatus ?? "")
   ) {
     return failed("telegram_delivery_integration_unavailable");
@@ -305,6 +316,7 @@ async function loadRecipient(
 }
 
 export async function deliverTelegramJob(input: {
+  beforeProviderAttempt?: (authority: { credentialId: string; integrationGeneration: number; integrationId: string }) => Promise<void>;
   env: AppBindings;
   fetcher?: typeof fetch;
   job: TelegramDeliveryJobReference;
@@ -332,6 +344,7 @@ export async function deliverTelegramJob(input: {
     || connectionContext === null
     || connectionContext.integrationId === null
     || connectionContext.activeCredentialId === null
+    || connectionContext.integrationGeneration === null
   ) {
     return failed("telegram_delivery_state_invalid");
   }
@@ -388,6 +401,13 @@ export async function deliverTelegramJob(input: {
       shopDefaultLocale: jobContext.shopDefaultLocale,
     });
     const notification = telegramPaidOrderNotification(locale, jobContext.orderNumber, jobContext.orderPublicId);
+    if (input.beforeProviderAttempt !== undefined) {
+      await input.beforeProviderAttempt({
+        credentialId: connectionContext.activeCredentialId,
+        integrationGeneration: connectionContext.integrationGeneration,
+        integrationId: connectionContext.integrationId,
+      });
+    }
     await new TelegramClient(botToken, input.fetcher).sendMessage({
       chatId,
       keyboard: notification.keyboard,

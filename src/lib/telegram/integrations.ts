@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import { hmacToken } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
+import { tryRecordActivationMilestone } from "../analytics/activation";
 import { resolveActiveEncryptionKey, resolveEncryptionKey } from "../crypto/keyring";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
@@ -18,6 +19,8 @@ type IntegrationRow = {
   botUsername: string | null;
   connectedAt: string | null;
   id: string;
+  generationState: "active" | "draining";
+  integrationGeneration: number;
   lastCheckedAt: string | null;
   lastHealthUpdateAt: string | null;
   lastOutboundAt: string | null;
@@ -29,6 +32,14 @@ type IntegrationRow = {
   status: string;
   webhookPublicId: string;
   webhookStatus: string;
+};
+
+type ActivationAuthority = {
+  activeCredentialId: string | null;
+  activeCredentialVersion: number | null;
+  botId: string | null;
+  generationState: "active" | "draining";
+  integrationGeneration: number;
 };
 
 export type TelegramIntegrationView = {
@@ -52,6 +63,8 @@ const INTEGRATION_SELECT = `
   webhook_public_id AS webhookPublicId,
   shop_id AS shopId,
   status,
+  generation_state AS generationState,
+  integration_generation AS integrationGeneration,
   webhook_status AS webhookStatus,
   active_credential_id AS activeCredentialId,
   channel_connection_id AS channelConnectionId,
@@ -156,13 +169,99 @@ function mapIntegration(row: IntegrationRow): TelegramIntegrationView {
   };
 }
 
-async function requireIntegrationActor(env: AppBindings, shopPublicId: string, userId: string): Promise<{ defaultLocale: string; shopId: string }> {
+async function requireIntegrationReader(env: AppBindings, shopPublicId: string, userId: string): Promise<{ defaultLocale: string; shopId: string }> {
+  const member = await getShopForMember({ capability: "integrations:read", env, shopPublicId, userId });
+  return { defaultLocale: member.shop.defaultLocale, shopId: member.row.shop_id };
+}
+
+async function requireIntegrationOperator(env: AppBindings, shopPublicId: string, userId: string): Promise<{ defaultLocale: string; shopId: string }> {
   const member = await getShopForMember({ capability: "integrations:manage", env, shopPublicId, userId });
+  return { defaultLocale: member.shop.defaultLocale, shopId: member.row.shop_id };
+}
+
+async function requireIntegrationCredential(env: AppBindings, shopPublicId: string, userId: string): Promise<{ defaultLocale: string; shopId: string }> {
+  const member = await getShopForMember({ capability: "integrations:credentials", env, shopPublicId, subscriptionAction: "provider_setup", userId });
+  if (member.row.shop_status !== "active" && member.row.shop_status !== "draft") throw new AppError("tenant_suspended", 403);
+  if (member.shop.featureFlags.telegram !== true) throw new AppError("plan_feature_unavailable", 402, ["telegram"]);
   return { defaultLocale: member.shop.defaultLocale, shopId: member.row.shop_id };
 }
 
 async function findIntegration(env: AppBindings, shopId: string): Promise<IntegrationRow | null> {
   return env.PLATFORM_DB.prepare(`SELECT ${INTEGRATION_SELECT} FROM telegram_integrations WHERE shop_id = ? LIMIT 1`).bind(shopId).first<IntegrationRow>();
+}
+
+async function readActivationAuthority(env: AppBindings, integrationId: string, shopId: string): Promise<ActivationAuthority | null> {
+  return env.PLATFORM_DB.prepare(`
+    SELECT telegram_integrations.active_credential_id AS activeCredentialId,
+      telegram_integrations.bot_id AS botId,
+      telegram_integrations.generation_state AS generationState,
+      telegram_integrations.integration_generation AS integrationGeneration,
+      telegram_credentials.version AS activeCredentialVersion
+    FROM telegram_integrations
+    LEFT JOIN telegram_credentials
+      ON telegram_credentials.id = telegram_integrations.active_credential_id
+      AND telegram_credentials.integration_id = telegram_integrations.id
+      AND telegram_credentials.shop_id = telegram_integrations.shop_id
+    WHERE telegram_integrations.id = ? AND telegram_integrations.shop_id = ?
+    LIMIT 1
+  `).bind(integrationId, shopId).first<ActivationAuthority>();
+}
+
+function authorityMatches(
+  authority: ActivationAuthority | null,
+  expected: { botId: string; credentialId: string; credentialVersion?: number; integrationGeneration?: number },
+): boolean {
+  return authority !== null
+    && authority.generationState === "active"
+    && authority.activeCredentialId === expected.credentialId
+    && authority.botId === expected.botId
+    && authority.activeCredentialVersion !== null
+    && (expected.integrationGeneration === undefined || authority.integrationGeneration === expected.integrationGeneration)
+    && (expected.credentialVersion === undefined || authority.activeCredentialVersion === expected.credentialVersion);
+}
+
+async function beginGenerationDrain(env: AppBindings, integration: IntegrationRow): Promise<IntegrationRow> {
+  const now = new Date().toISOString();
+  const result = await env.PLATFORM_DB.prepare(`
+    UPDATE telegram_integrations
+    SET generation_state = 'draining', updated_at = ?
+    WHERE id = ? AND shop_id = ?
+      AND generation_state = 'active'
+      AND integration_generation = ?
+      AND active_credential_id IS ?
+      AND NOT EXISTS (
+        SELECT 1 FROM telegram_updates
+        WHERE telegram_updates.integration_id = telegram_integrations.id
+          AND telegram_updates.shop_id = telegram_integrations.shop_id
+          AND telegram_updates.integration_generation = telegram_integrations.integration_generation
+          AND telegram_updates.status = 'processing'
+      )
+  `).bind(now, integration.id, integration.shopId, integration.integrationGeneration, integration.activeCredentialId).run();
+  if (result.meta.changes !== 1) throw new AppError("telegram_integration_busy", 409, ["retry"]);
+  return { ...integration, generationState: "draining" };
+}
+
+async function releaseGenerationDrain(env: AppBindings, integration: IntegrationRow): Promise<void> {
+  await env.PLATFORM_DB.prepare(`
+    UPDATE telegram_integrations
+    SET generation_state = 'active', updated_at = ?
+    WHERE id = ? AND shop_id = ? AND generation_state = 'draining'
+      AND integration_generation = ? AND active_credential_id IS ?
+  `).bind(new Date().toISOString(), integration.id, integration.shopId, integration.integrationGeneration, integration.activeCredentialId).run();
+}
+
+async function degradeOwnedIntegration(env: AppBindings, input: { credentialId: string; integrationId: string; shopId: string }): Promise<void> {
+  try {
+    await env.PLATFORM_DB.prepare(`
+      UPDATE telegram_integrations
+      SET status = 'degraded', webhook_status = 'error',
+        last_safe_error_code = 'telegram_webhook_failed', updated_at = ?
+      WHERE id = ? AND shop_id = ? AND active_credential_id = ?
+        AND status IN ('active', 'degraded')
+    `).bind(new Date().toISOString(), input.integrationId, input.shopId, input.credentialId).run();
+  } catch {
+    // The provider failure can coincide with D1 unavailability.
+  }
 }
 
 function webhookMaxConnections(env: AppBindings): number {
@@ -174,15 +273,22 @@ function webhookUrl(env: AppBindings, publicId: string): string {
   return `${env.API_ORIGIN}/webhooks/telegram/${publicId}`;
 }
 
+function webhookAllowedUpdatesMatch(allowedUpdates: readonly string[]): boolean {
+  return allowedUpdates.length === 2
+    && allowedUpdates.includes("message")
+    && allowedUpdates.includes("callback_query");
+}
+
 async function configureProvider(client: TelegramClient, env: AppBindings, integration: IntegrationRow, secret: string, shopDefaultLocale: string): Promise<TelegramWebhookInfo> {
   await client.setMyCommands(telegramCommands(shopDefaultLocale));
   await client.setMyCommands(telegramCommands("en"), "en");
   await client.setMyCommands(telegramCommands("vi-VN"), "vi");
   await client.setChatMenuButton();
   const url = webhookUrl(env, integration.webhookPublicId);
-  await client.setWebhook({ allowedUpdates: ["message", "callback_query"], maxConnections: webhookMaxConnections(env), secretToken: secret, url });
+  const maxConnections = webhookMaxConnections(env);
+  await client.setWebhook({ allowedUpdates: ["message", "callback_query"], dropPendingUpdates: true, maxConnections, secretToken: secret, url });
   const info = await client.getWebhookInfo();
-  if (info.url !== url || !info.allowedUpdates.includes("message") || !info.allowedUpdates.includes("callback_query")) throw new AppError("telegram_webhook_failed", 409);
+  if (info.url !== url || info.maxConnections !== maxConnections || !webhookAllowedUpdatesMatch(info.allowedUpdates)) throw new AppError("telegram_webhook_failed", 409);
   return info;
 }
 
@@ -308,13 +414,13 @@ async function prepareTelegramCredential(input: {
 }
 
 export async function getTelegramIntegration(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<TelegramIntegrationView | null> {
-  const { shopId } = await requireIntegrationActor(input.env, input.shopPublicId, input.userId);
+  const { shopId } = await requireIntegrationReader(input.env, input.shopPublicId, input.userId);
   const integration = await findIntegration(input.env, shopId);
   return integration === null ? null : mapIntegration(integration);
 }
 
 export async function connectTelegram(input: { botToken: string; env: AppBindings; fetcher?: typeof fetch; replaceBot: boolean; requestId: string; shopPublicId: string; userId: string }): Promise<TelegramIntegrationView> {
-  const actor = await requireIntegrationActor(input.env, input.shopPublicId, input.userId);
+  const actor = await requireIntegrationCredential(input.env, input.shopPublicId, input.userId);
   const { shopId } = actor;
   const client = new TelegramClient(input.botToken, input.fetcher);
   const bot = await client.getMe();
@@ -331,11 +437,25 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
   integration = await ensureReconnectableGenericConnection(input.env, integration, shopId);
   const previous = integration.activeCredentialId === null ? null : await loadActiveTelegramCredential(input.env, integration.id, shopId);
   const credential = await prepareTelegramCredential({ botToken: input.botToken, env: input.env, integration, shopId, userId: input.userId });
-  if (credential.alreadyActive) return mapIntegration(integration);
+  if (credential.alreadyActive) {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "telegram_connected",
+      milestone: "telegram_connected",
+      reason: "connected",
+      shopId,
+      source: "telegram",
+    });
+    return mapIntegration(integration);
+  }
+  const rotated = integration.activeCredentialId !== null && integration.activeCredentialId !== credential.credentialId;
+  const botChanged = integration.botId !== null && integration.botId !== bot.id;
+  integration = await beginGenerationDrain(input.env, integration);
   let info: TelegramWebhookInfo;
   try {
     info = await configureProvider(client, input.env, integration, credential.secret, actor.defaultLocale);
   } catch (error) {
+    await releaseGenerationDrain(input.env, integration).catch(() => undefined);
     await input.env.PLATFORM_DB.batch([
       input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'error' WHERE id = ? AND shop_id = ? AND status = 'pending'").bind(credential.credentialId, shopId),
       input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = CASE WHEN active_credential_id IS NULL THEN 'error' ELSE status END, webhook_status = CASE WHEN active_credential_id IS NULL THEN 'error' ELSE webhook_status END, last_safe_error_code = ?, last_checked_at = ?, updated_at = ? WHERE id = ? AND shop_id = ?").bind(error instanceof AppError ? error.code : "telegram_webhook_failed", nowIso, nowIso, integration.id, shopId),
@@ -343,24 +463,115 @@ export async function connectTelegram(input: { botToken: string; env: AppBinding
     throw error instanceof AppError ? error : new AppError("telegram_webhook_failed", 409);
   }
   const activatedAt = new Date().toISOString();
-  const rotated = integration.activeCredentialId !== null && integration.activeCredentialId !== credential.credentialId;
-  const botChanged = integration.botId !== null && integration.botId !== bot.id;
+  const replacement = previous !== null && integration.botId !== null && integration.botId !== bot.id
+    ? { botId: integration.botId, previous }
+    : null;
+  if (replacement !== null) {
+    try {
+      await new TelegramClient(replacement.previous.credentials.botToken, input.fetcher).deleteWebhook(true);
+    } catch {
+      await releaseGenerationDrain(input.env, integration).catch(() => undefined);
+      let authority: ActivationAuthority | null;
+      try {
+        authority = await readActivationAuthority(input.env, integration.id, shopId);
+      } catch {
+        // Provider rollback is unsafe until D1 ownership can be confirmed.
+        await degradeOwnedIntegration(input.env, { credentialId: replacement.previous.row.credentialId, integrationId: integration.id, shopId });
+        throw new AppError("telegram_webhook_failed", 409);
+      }
+      if (authorityMatches(authority, { botId: replacement.botId, credentialId: replacement.previous.row.credentialId })) {
+        let restored = false;
+        try {
+          await configureProvider(
+            new TelegramClient(replacement.previous.credentials.botToken, input.fetcher),
+            input.env,
+            integration,
+            replacement.previous.credentials.webhookSecret,
+            actor.defaultLocale,
+          );
+          restored = true;
+        } catch {
+          await degradeOwnedIntegration(input.env, { credentialId: replacement.previous.row.credentialId, integrationId: integration.id, shopId });
+        }
+        if (restored) {
+          try {
+            const confirmed = await readActivationAuthority(input.env, integration.id, shopId);
+            if (authorityMatches(confirmed, { botId: replacement.botId, credentialId: replacement.previous.row.credentialId })) {
+              try { await client.deleteWebhook(true); } catch { /* The pending replacement remains safely unclaimed in D1. */ }
+            }
+          } catch { /* Do not mutate the replacement provider without fresh ownership evidence. */ }
+        }
+      }
+      throw new AppError("telegram_webhook_failed", 409);
+    }
+  }
   try {
     await input.env.PLATFORM_DB.batch([
-      input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'revoked', revoked_at = ? WHERE integration_id = ? AND shop_id = ? AND status = 'active' AND id != ?").bind(activatedAt, integration.id, shopId, credential.credentialId),
-      input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'active', activated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND status IN ('pending', 'error')").bind(activatedAt, credential.credentialId, integration.id, shopId),
-      input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = ?, webhook_status = 'verified', active_credential_id = ?, last_health_update_at = CASE WHEN ? = 1 THEN NULL ELSE last_health_update_at END, bot_id = ?, bot_username_sanitized = ?, bot_display_name_sanitized = ?, pending_update_count = ?, last_safe_error_code = ?, last_checked_at = ?, connected_at = COALESCE(connected_at, ?), updated_at = ? WHERE id = ? AND shop_id = ?").bind(info.hasDeliveryError ? "degraded" : "active", credential.credentialId, rotated ? 1 : 0, bot.id, bot.username, bot.displayName, info.pendingUpdateCount, info.hasDeliveryError ? "telegram_provider_delivery_error" : null, activatedAt, activatedAt, activatedAt, integration.id, shopId),
+      input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = ?, webhook_status = 'verified', active_credential_id = ?, integration_generation = integration_generation + 1, generation_state = 'active', last_health_update_at = CASE WHEN ? = 1 THEN NULL ELSE last_health_update_at END, bot_id = ?, bot_username_sanitized = ?, bot_display_name_sanitized = ?, pending_update_count = ?, last_safe_error_code = ?, last_checked_at = ?, connected_at = COALESCE(connected_at, ?), updated_at = ? WHERE id = ? AND shop_id = ? AND generation_state = 'draining' AND integration_generation = ? AND active_credential_id IS ?").bind(info.hasDeliveryError ? "degraded" : "active", credential.credentialId, rotated ? 1 : 0, bot.id, bot.username, bot.displayName, info.pendingUpdateCount, info.hasDeliveryError ? "telegram_provider_delivery_error" : null, activatedAt, activatedAt, activatedAt, integration.id, shopId, integration.integrationGeneration, integration.activeCredentialId),
+      input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'revoked', revoked_at = ? WHERE integration_id = ? AND shop_id = ? AND status = 'active' AND id != ? AND EXISTS (SELECT 1 FROM telegram_integrations WHERE id = ? AND shop_id = ? AND active_credential_id = ? AND integration_generation = ?)").bind(activatedAt, integration.id, shopId, credential.credentialId, integration.id, shopId, credential.credentialId, integration.integrationGeneration + 1),
+      input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'active', activated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND status IN ('pending', 'error') AND EXISTS (SELECT 1 FROM telegram_integrations WHERE id = ? AND shop_id = ? AND active_credential_id = ? AND integration_generation = ?)").bind(activatedAt, credential.credentialId, integration.id, shopId, integration.id, shopId, credential.credentialId, integration.integrationGeneration + 1),
+      input.env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'rejected', safe_result_code = 'telegram_update_stale_generation', processed_at = ?, updated_at = ? WHERE integration_id = ? AND shop_id = ? AND integration_generation = ? AND status IN ('accepted', 'failed')").bind(activatedAt, activatedAt, integration.id, shopId, integration.integrationGeneration),
+      input.env.PLATFORM_DB.prepare("UPDATE telegram_recipients SET status = 'unavailable', last_safe_error_code = 'telegram_bot_generation_replaced', updated_at = ? WHERE integration_id = ? AND shop_id = ? AND status = 'active' AND ? = 1").bind(activatedAt, integration.id, shopId, botChanged ? 1 : 0),
+      input.env.PLATFORM_DB.prepare("INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) SELECT ?, ?, 'system', NULL, 'telegram.update_generation_fenced', 'telegram_integration', ?, ?, ?, ? WHERE ? = 1").bind(createId("aud"), shopId, integration.id, JSON.stringify({ credentialVersion: credential.version }), input.requestId, activatedAt, rotated ? 1 : 0),
       input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) SELECT ?, ?, 'user', ?, 'telegram.credentials_connected', 'telegram_integration', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM telegram_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)`).bind(createId("aud"), shopId, input.userId, integration.id, JSON.stringify({ botChanged, credentialVersion: credential.version, rotated }), input.requestId, activatedAt, credential.credentialId, integration.id, shopId, activatedAt),
     ]);
   } catch {
-    try { await client.deleteWebhook(false); } catch { /* Best-effort cleanup after an activation race. */ }
-    throw new AppError("telegram_activation_failed", 409);
-  }
-  if (previous !== null && integration.botId !== null && integration.botId !== bot.id) {
-    try { await new TelegramClient(previous.credentials.botToken, input.fetcher).deleteWebhook(false); } catch { /* The previous bot may already be revoked. */ }
+    await releaseGenerationDrain(input.env, integration).catch(() => undefined);
+    let authority: ActivationAuthority | null;
+    try {
+      authority = await readActivationAuthority(input.env, integration.id, shopId);
+    } catch {
+      // The activation result is unknown. Preserve provider state until D1 can
+      // authoritatively identify the active credential generation.
+      if (previous !== null) {
+        await degradeOwnedIntegration(input.env, { credentialId: previous.row.credentialId, integrationId: integration.id, shopId });
+      }
+      throw new AppError("telegram_activation_failed", 409);
+    }
+    if (authorityMatches(authority, { botId: bot.id, credentialId: credential.credentialId, credentialVersion: credential.version, integrationGeneration: integration.integrationGeneration + 1 })) {
+      // D1 committed and only the response was lost. The configured replacement
+      // remains authoritative, so continue through the normal success readback.
+    } else if (replacement !== null && authorityMatches(authority, { botId: replacement.botId, credentialId: replacement.previous.row.credentialId })) {
+      let restored = false;
+      try {
+        await configureProvider(
+          new TelegramClient(replacement.previous.credentials.botToken, input.fetcher),
+          input.env,
+          integration,
+          replacement.previous.credentials.webhookSecret,
+          actor.defaultLocale,
+        );
+        restored = true;
+      } catch {
+        await degradeOwnedIntegration(input.env, { credentialId: replacement.previous.row.credentialId, integrationId: integration.id, shopId });
+      }
+      if (restored) {
+        try {
+          const confirmed = await readActivationAuthority(input.env, integration.id, shopId);
+          if (authorityMatches(confirmed, { botId: replacement.botId, credentialId: replacement.previous.row.credentialId })) {
+            try { await client.deleteWebhook(true); } catch { /* Best-effort cleanup while the replacement credential remains pending. */ }
+          }
+        } catch { /* Do not mutate provider state after an unavailable ownership readback. */ }
+      }
+      throw new AppError("telegram_activation_failed", 409);
+    } else {
+      // Another credential generation won the race; its provider state is not
+      // owned by this activation attempt and must remain untouched.
+      throw new AppError("telegram_activation_failed", 409);
+    }
   }
   const active = await findIntegration(input.env, shopId);
   if (active === null) throw new AppError("internal_error", 500);
+  if (active.status === "active" && active.webhookStatus === "verified") {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "telegram_connected",
+      milestone: "telegram_connected",
+      reason: "connected",
+      shopId,
+      source: "telegram",
+    });
+  }
   return mapIntegration(active);
 }
 
@@ -385,13 +596,15 @@ async function retryTelegramSetup(input: {
   });
   const checkedAt = new Date().toISOString();
   const client = new TelegramClient(credentials.botToken, input.fetcher);
+  const drainingIntegration = await beginGenerationDrain(input.env, input.integration);
   let bot: TelegramBotIdentity;
   let info: TelegramWebhookInfo;
   try {
     bot = await client.getMe();
     await assertBotAvailable(input.env, bot, input.integration.id);
-    info = await configureProvider(client, input.env, input.integration, credentials.webhookSecret, input.defaultLocale);
+    info = await configureProvider(client, input.env, drainingIntegration, credentials.webhookSecret, input.defaultLocale);
   } catch (error) {
+    await releaseGenerationDrain(input.env, drainingIntegration).catch(() => undefined);
     const code = error instanceof AppError ? error.code : "telegram_webhook_failed";
     await input.env.PLATFORM_DB.batch([
       input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'error' WHERE id = ? AND integration_id = ? AND shop_id = ? AND status IN ('pending', 'error')").bind(row.credentialId, input.integration.id, input.shopId),
@@ -402,18 +615,37 @@ async function retryTelegramSetup(input: {
   const activatedAt = new Date().toISOString();
   try {
     await input.env.PLATFORM_DB.batch([
-      input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'active', activated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND status IN ('pending', 'error') AND EXISTS (SELECT 1 FROM telegram_integrations WHERE id = ? AND shop_id = ? AND active_credential_id IS NULL)").bind(activatedAt, row.credentialId, input.integration.id, input.shopId, input.integration.id, input.shopId),
-      input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = ?, webhook_status = 'verified', active_credential_id = ?, last_health_update_at = CASE WHEN ? = 1 THEN NULL ELSE last_health_update_at END, bot_id = ?, bot_username_sanitized = ?, bot_display_name_sanitized = ?, pending_update_count = ?, last_safe_error_code = ?, last_checked_at = ?, connected_at = COALESCE(connected_at, ?), updated_at = ? WHERE id = ? AND shop_id = ? AND active_credential_id IS NULL AND EXISTS (SELECT 1 FROM telegram_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)").bind(info.hasDeliveryError ? "degraded" : "active", row.credentialId, 1, bot.id, bot.username, bot.displayName, info.pendingUpdateCount, info.hasDeliveryError ? "telegram_provider_delivery_error" : null, activatedAt, activatedAt, activatedAt, input.integration.id, input.shopId, row.credentialId, input.integration.id, input.shopId, activatedAt),
+      input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = ?, webhook_status = 'verified', active_credential_id = ?, integration_generation = integration_generation + 1, generation_state = 'active', last_health_update_at = NULL, bot_id = ?, bot_username_sanitized = ?, bot_display_name_sanitized = ?, pending_update_count = ?, last_safe_error_code = ?, last_checked_at = ?, connected_at = COALESCE(connected_at, ?), updated_at = ? WHERE id = ? AND shop_id = ? AND active_credential_id IS NULL AND generation_state = 'draining' AND integration_generation = ?").bind(info.hasDeliveryError ? "degraded" : "active", row.credentialId, bot.id, bot.username, bot.displayName, info.pendingUpdateCount, info.hasDeliveryError ? "telegram_provider_delivery_error" : null, activatedAt, activatedAt, activatedAt, input.integration.id, input.shopId, input.integration.integrationGeneration),
+      input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'active', activated_at = ? WHERE id = ? AND integration_id = ? AND shop_id = ? AND status IN ('pending', 'error') AND EXISTS (SELECT 1 FROM telegram_integrations WHERE id = ? AND shop_id = ? AND active_credential_id = ? AND integration_generation = ?)").bind(activatedAt, row.credentialId, input.integration.id, input.shopId, input.integration.id, input.shopId, row.credentialId, input.integration.integrationGeneration + 1),
       input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) SELECT ?, ?, 'user', ?, 'telegram.credentials_connected', 'telegram_integration', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM telegram_credentials WHERE id = ? AND integration_id = ? AND shop_id = ? AND activated_at = ?)`).bind(createId("aud"), input.shopId, input.userId, input.integration.id, JSON.stringify({ credentialVersion: row.version, retry: true, rotated: false }), input.requestId, activatedAt, row.credentialId, input.integration.id, input.shopId, activatedAt),
     ]);
   } catch {
-    try { await client.deleteWebhook(false); } catch { /* Best-effort cleanup after an activation failure. */ }
-    throw new AppError("telegram_activation_failed", 409);
+    let authority: ActivationAuthority | null;
+    try {
+      authority = await readActivationAuthority(input.env, input.integration.id, input.shopId);
+    } catch {
+      throw new AppError("telegram_activation_failed", 409);
+    }
+    if (!authorityMatches(authority, { botId: bot.id, credentialId: row.credentialId, credentialVersion: row.version, integrationGeneration: input.integration.integrationGeneration + 1 })) {
+      // Preserve provider state when D1 did not commit or another generation won.
+      // A later retry can safely reconfigure the still-owned pending credential.
+      throw new AppError("telegram_activation_failed", 409);
+    }
+  }
+  if (!info.hasDeliveryError) {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "telegram_connected",
+      milestone: "telegram_connected",
+      reason: "connected",
+      shopId: input.shopId,
+      source: "telegram",
+    });
   }
 }
 
 export async function refreshTelegramHealth(input: { env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<TelegramIntegrationView> {
-  const actor = await requireIntegrationActor(input.env, input.shopPublicId, input.userId);
+  const actor = await requireIntegrationOperator(input.env, input.shopPublicId, input.userId);
   const { shopId } = actor;
   const integration = await findIntegration(input.env, shopId);
   if (integration === null || integration.status === "disabled") throw new AppError("telegram_not_configured", 409);
@@ -430,7 +662,9 @@ export async function refreshTelegramHealth(input: { env: AppBindings; fetcher?:
     const [bot, info] = await Promise.all([client.getMe(), client.getWebhookInfo()]);
     const expectedUrl = webhookUrl(input.env, integration.webhookPublicId);
     const identityMatches = integration.botId === bot.id;
-    const webhookMatches = info.url === expectedUrl && info.allowedUpdates.includes("message") && info.allowedUpdates.includes("callback_query");
+    const webhookMatches = info.url === expectedUrl
+      && info.maxConnections === webhookMaxConnections(input.env)
+      && webhookAllowedUpdatesMatch(info.allowedUpdates);
     const healthy = identityMatches && webhookMatches && !info.hasDeliveryError;
     const errorCode = !identityMatches ? "telegram_bot_mismatch" : !webhookMatches ? "telegram_webhook_mismatch" : info.hasDeliveryError ? "telegram_provider_delivery_error" : null;
     await input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = ?, webhook_status = ?, pending_update_count = ?, last_safe_error_code = ?, last_checked_at = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND status != 'disabled'").bind(healthy ? "active" : "degraded", webhookMatches ? "verified" : "mismatch", info.pendingUpdateCount, errorCode, now, now, integration.id, shopId).run();
@@ -440,23 +674,41 @@ export async function refreshTelegramHealth(input: { env: AppBindings; fetcher?:
   }
   const refreshed = await findIntegration(input.env, shopId);
   if (refreshed === null) throw new AppError("internal_error", 500);
+  if (refreshed.status === "active" && refreshed.webhookStatus === "verified") {
+    await tryRecordActivationMilestone({
+      env: input.env,
+      idempotencyKey: "telegram_connected",
+      milestone: "telegram_connected",
+      reason: "connected",
+      shopId,
+      source: "telegram",
+    });
+  }
   return mapIntegration(refreshed);
 }
 
 export async function disconnectTelegram(input: { env: AppBindings; fetcher?: typeof fetch; requestId: string; shopPublicId: string; userId: string }): Promise<void> {
-  const { shopId } = await requireIntegrationActor(input.env, input.shopPublicId, input.userId);
+  const { shopId } = await requireIntegrationCredential(input.env, input.shopPublicId, input.userId);
   const integration = await findIntegration(input.env, shopId);
-  if (integration === null || integration.activeCredentialId === null) throw new AppError("telegram_not_configured", 409);
+  if (integration === null) throw new AppError("telegram_not_configured", 409);
+  if (integration.activeCredentialId === null) {
+    if (integration.status === "disabled" && integration.webhookStatus === "disabled") return;
+    throw new AppError("telegram_not_configured", 409);
+  }
+  const drainingIntegration = await beginGenerationDrain(input.env, integration);
   try {
-    const credential = await loadActiveTelegramCredential(input.env, integration.id, shopId);
-    await new TelegramClient(credential.credentials.botToken, input.fetcher).deleteWebhook(false);
+    const credential = await loadActiveTelegramCredential(input.env, drainingIntegration.id, shopId);
+    await new TelegramClient(credential.credentials.botToken, input.fetcher).deleteWebhook(true);
   } catch {
     // Disconnect remains authoritative even when the provider token was revoked.
   }
   const now = new Date().toISOString();
   await input.env.PLATFORM_DB.batch([
-    input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = 'disabled', webhook_status = 'disabled', active_credential_id = NULL, last_health_update_at = NULL, last_safe_error_code = NULL, updated_at = ? WHERE id = ? AND shop_id = ?").bind(now, integration.id, shopId),
-    input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'revoked', revoked_at = ? WHERE integration_id = ? AND shop_id = ? AND status IN ('active', 'pending')").bind(now, integration.id, shopId),
+    input.env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET status = 'disabled', webhook_status = 'disabled', active_credential_id = NULL, integration_generation = integration_generation + 1, generation_state = 'active', last_health_update_at = NULL, last_safe_error_code = NULL, updated_at = ? WHERE id = ? AND shop_id = ? AND generation_state = 'draining' AND integration_generation = ? AND active_credential_id = ?").bind(now, integration.id, shopId, integration.integrationGeneration, integration.activeCredentialId),
+    input.env.PLATFORM_DB.prepare("UPDATE telegram_credentials SET status = 'revoked', revoked_at = ? WHERE integration_id = ? AND shop_id = ? AND status IN ('active', 'pending') AND EXISTS (SELECT 1 FROM telegram_integrations WHERE id = ? AND shop_id = ? AND active_credential_id IS NULL AND integration_generation = ?)").bind(now, integration.id, shopId, integration.id, shopId, integration.integrationGeneration + 1),
+    input.env.PLATFORM_DB.prepare("UPDATE telegram_updates SET status = 'rejected', safe_result_code = 'telegram_update_stale_generation', processed_at = ?, updated_at = ? WHERE integration_id = ? AND shop_id = ? AND integration_generation = ? AND status IN ('accepted', 'failed')").bind(now, now, integration.id, shopId, integration.integrationGeneration),
+    input.env.PLATFORM_DB.prepare("UPDATE telegram_recipients SET status = 'unavailable', last_safe_error_code = 'telegram_integration_disconnected', updated_at = ? WHERE integration_id = ? AND shop_id = ? AND status = 'active'").bind(now, integration.id, shopId),
+    input.env.PLATFORM_DB.prepare("INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'system', NULL, 'telegram.update_generation_fenced', 'telegram_integration', ?, '{\"reason\":\"disconnect\"}', ?, ?)").bind(createId("aud"), shopId, integration.id, input.requestId, now),
     input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'user', ?, 'telegram.disconnected', 'telegram_integration', ?, '{}', ?, ?)`).bind(createId("aud"), shopId, input.userId, integration.id, input.requestId, now),
   ]);
 }

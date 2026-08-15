@@ -2,6 +2,8 @@
 
 Codex phải tạo `AGENTS.md` ở root repository mới với nội dung tương đương dưới đây và cập nhật nếu project scripts thay đổi.
 
+Current repository continuation note: the same rules apply to Telegram Bot, Telegram Mini App, Zalo Mini App/OA, WhatsApp Cloud and Discord Bot plus Dodo platform billing. Keep each provider's proof, credential lineage, identity, receipt and outbound boundary separate; never treat a connector request or provider-pending state as activation. The current source migration chain ends at `0076`, while remote environment ledgers must be verified independently before mutation.
+
 ````markdown
 # AGENTS.md
 

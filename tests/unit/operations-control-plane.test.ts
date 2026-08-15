@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   acknowledgeDeadLetter,
+  listActiveDeadLetters,
   recordDeadLetter,
   requestGenericDeadLetterReplay,
   requestDeadLetterRetry,
@@ -13,6 +14,7 @@ import {
 } from "../../src/lib/operations/dead-letters";
 import {
   acknowledgeIncident,
+  listActiveIncidents,
   resolveIncident,
   upsertOpenIncident,
 } from "../../src/lib/operations/incidents";
@@ -160,6 +162,54 @@ describe("operations control plane", () => {
       .toThrow(/audit_logs_immutable/u);
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(database.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+  });
+
+  it("reports when active incident and dead-letter lists are truncated", async () => {
+    const now = NOW.toISOString();
+    database.exec(`
+      WITH RECURSIVE sequence(value) AS (
+        SELECT 1
+        UNION ALL
+        SELECT value + 1 FROM sequence WHERE value < 101
+      )
+      INSERT INTO operations_incidents (
+        id, shop_id, scope_key, incident_key, category, severity, status,
+        source_kind, source_ref, safe_context_json, occurrence_count,
+        first_seen_at, last_seen_at, version, created_at, updated_at
+      )
+      SELECT printf('incident-visible-%03d', value), NULL, 'platform',
+        printf('visibility-%03d', value), 'system_health', 'low', 'open',
+        'system', printf('source-%03d', value), '{}', 1,
+        '${now}', '${now}', 1, '${now}', '${now}'
+      FROM sequence;
+
+      WITH RECURSIVE sequence(value) AS (
+        SELECT 1
+        UNION ALL
+        SELECT value + 1 FROM sequence WHERE value < 101
+      )
+      INSERT INTO queue_dead_letters (
+        id, shop_id, scope_key, queue_name, message_id, message_kind,
+        reference_type, reference_id, failure_code, safe_envelope_json,
+        status, provider_attempts, occurrence_count, first_seen_at,
+        last_seen_at, retry_count, version, created_at, updated_at
+      )
+      SELECT printf('dead-letter-visible-%03d', value), NULL, 'platform',
+        'integration-staging', printf('message-visible-%03d', value), 'integration',
+        'none', NULL, 'queue_retries_exhausted', '{}', 'open', 6, 1,
+        '${now}', '${now}', 0, 1, '${now}', '${now}'
+      FROM sequence;
+    `);
+
+    const [deadLetters, incidents] = await Promise.all([
+      listActiveDeadLetters({ env }),
+      listActiveIncidents({ env }),
+    ]);
+
+    expect(deadLetters).toMatchObject({ hasMore: true, limit: 100 });
+    expect(deadLetters.items).toHaveLength(100);
+    expect(incidents).toMatchObject({ hasMore: true, limit: 100 });
+    expect(incidents.items).toHaveLength(100);
   });
 
   it("deduplicates queue messages and stores only allowlisted references", async () => {

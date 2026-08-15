@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import { constantTimeEqual, hmacToken, sha256Json } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import { resolveOrderChannelAttribution } from "../channels/attribution";
 import { TELEGRAM_CHANNEL_CODE, WEBSITE_CHANNEL_CODE } from "../channels/builtins";
 import type { AppBindings } from "../platform/bindings";
@@ -376,9 +377,16 @@ async function createOrRecoverAuthorizedPaymentLink(input: { env: AppBindings; f
           AND request_domain.hostname_normalized = ?
           AND request_domain.status = 'active'
           AND request_domain.deleted_at IS NULL
+          AND request_domain.delete_requested_at IS NULL
           AND (
             request_domain.type = 'platform_subdomain'
-            OR request_domain.ownership_verified_at IS NOT NULL
+            OR (
+              request_domain.ownership_verified_at IS NOT NULL
+              AND request_domain.hostname_status = 'active'
+              AND request_domain.ssl_status = 'active'
+              AND request_domain.dns_status = 'active'
+              AND (${customDomainTurnstileAdmissionSql("request_domain")})
+            )
           )
         INNER JOIN shop_domains AS canonical_domain
           ON canonical_domain.id = shops.canonical_domain_id
@@ -386,9 +394,16 @@ async function createOrRecoverAuthorizedPaymentLink(input: { env: AppBindings; f
           AND canonical_domain.is_primary = 1
           AND canonical_domain.status = 'active'
           AND canonical_domain.deleted_at IS NULL
+          AND canonical_domain.delete_requested_at IS NULL
           AND (
             canonical_domain.type = 'platform_subdomain'
-            OR canonical_domain.ownership_verified_at IS NOT NULL
+            OR (
+              canonical_domain.ownership_verified_at IS NOT NULL
+              AND canonical_domain.hostname_status = 'active'
+              AND canonical_domain.ssl_status = 'active'
+              AND canonical_domain.dns_status = 'active'
+              AND (${customDomainTurnstileAdmissionSql("canonical_domain")})
+            )
           )
         WHERE shops.id = ?
       `).bind(

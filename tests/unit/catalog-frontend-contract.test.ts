@@ -103,4 +103,29 @@ describe("seller catalog frontend contract", () => {
     expect(page).toContain('<time datetime={updatedAt}>{updatedLabel}</time>');
     expect(page).toContain('t("dashboard.products.updated.record")');
   });
+
+  it("keeps inline channel visibility tenant-scoped, versioned, and fail-closed", async () => {
+    const [page, client, route] = await Promise.all([
+      readFile("src/pages/app/products.astro", "utf8"),
+      readFile("src/scripts/dashboard/products.ts", "utf8"),
+      readFile("src/pages/api/app/shops/[shopPublicId]/catalog/visibility.ts", "utf8"),
+    ]);
+
+    expect(page).toContain("data-channel-visibility-panel");
+    expect(page).toContain("data-visibility-toggle");
+    expect(page).toContain("data-provider-pending");
+    expect(page).toContain("data-channel-visibility-retry");
+    expect(page).toContain('data-version="0"');
+    expect(client).toContain("/catalog/visibility");
+    expect(client).toContain('method: "PUT"');
+    expect(client).toContain('"Idempotency-Key": idempotencyKey');
+    expect(client).toContain('"X-CSRF-Token": decodeURIComponent(csrf)');
+    expect(client).toContain("const refreshed = await loadVisibility();");
+    expect(client).toContain('button.disabled = !visibilityReady || button.dataset.providerPending === "true";');
+    expect(client).toContain("visibilityRetry?.addEventListener");
+    expect(route).toContain("requireCsrfSession");
+    expect(route).toContain("requireRecentAuth");
+    expect(route).toContain("expectedVersion");
+    expect(route).toContain('request.headers.get("Idempotency-Key")');
+  });
 });

@@ -4,6 +4,7 @@ import type { TelegramCallbackUpdate, TelegramChat, TelegramMessageUpdate, Teleg
 
 const BOT_TOKEN_PATTERN = /^\d{6,20}:[A-Za-z0-9_-]{20,128}$/u;
 const CALLBACK_PATTERN = /^(?:add:var_[0-9a-f-]{36}|cart|buy|menu|pay:order_[0-9a-f-]{36}|ord:order_[0-9a-f-]{36}|key:order_[0-9a-f-]{36})$/u;
+const TELEGRAM_ID_MAX = 4_503_599_627_370_495n;
 
 function requireRecord(value: unknown, issue: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new AppError("telegram_update_invalid", 400, [issue]);
@@ -18,6 +19,19 @@ function requireInteger(value: unknown, issue: string): number {
 function requireSignedInteger(value: unknown, issue: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value)) throw new AppError("telegram_update_invalid", 400, [issue]);
   return value;
+}
+
+function requireTelegramUserId(value: unknown): number {
+  const id = requireInteger(value, "user_id_invalid");
+  if (BigInt(id) > TELEGRAM_ID_MAX) throw new AppError("telegram_update_invalid", 400, ["user_id_invalid"]);
+  return id;
+}
+
+function requireTelegramChatId(value: unknown): number {
+  const id = requireSignedInteger(value, "chat_id_invalid");
+  const magnitude = BigInt(id < 0 ? -id : id);
+  if (magnitude > TELEGRAM_ID_MAX) throw new AppError("telegram_update_invalid", 400, ["chat_id_invalid"]);
+  return id;
 }
 
 function sanitizeText(value: unknown, maximum: number): string | null {
@@ -37,7 +51,7 @@ function parseUser(value: unknown): TelegramUser {
   const languageCode = canonicalizeLocale(sanitizeText(row.language_code, 128));
   return {
     firstName,
-    id: requireInteger(row.id, "user_id_invalid"),
+    id: requireTelegramUserId(row.id),
     isBot: row.is_bot,
     languageCode,
     lastName: sanitizeText(row.last_name, 80),
@@ -48,7 +62,7 @@ function parseUser(value: unknown): TelegramUser {
 function parseChat(value: unknown): TelegramChat {
   const row = requireRecord(value, "chat_invalid");
   if (!new Set(["channel", "group", "private", "supergroup"]).has(String(row.type))) throw new AppError("telegram_update_invalid", 400, ["chat_type_invalid"]);
-  return { id: requireSignedInteger(row.id, "chat_id_invalid"), type: row.type as TelegramChat["type"] };
+  return { id: requireTelegramChatId(row.id), type: row.type as TelegramChat["type"] };
 }
 
 export function parseBotToken(value: unknown): string {
@@ -86,9 +100,14 @@ export function parseTelegramUpdate(body: Record<string, unknown>): TelegramUpda
   }
   if (body.callback_query !== undefined) {
     const callback = requireRecord(body.callback_query, "callback_query_invalid");
-    const message = requireRecord(callback.message, "callback_message_invalid");
     const callbackId = sanitizeText(callback.id, 128);
     if (callbackId === null) throw new AppError("telegram_update_invalid", 400, ["callback_id_invalid"]);
+    const user = parseUser(callback.from);
+    const inlineMessageId = sanitizeText(callback.inline_message_id, 256);
+    if ((callback.message === undefined || callback.message === null) && inlineMessageId !== null) {
+      return { callbackId, kind: "unsupported_callback_query", updateId, user };
+    }
+    const message = requireRecord(callback.message, "callback_message_invalid");
     const update: TelegramCallbackUpdate = {
       callbackId,
       chat: parseChat(message.chat),
@@ -96,7 +115,7 @@ export function parseTelegramUpdate(body: Record<string, unknown>): TelegramUpda
       kind: "callback_query",
       messageId: requireInteger(message.message_id, "message_id_invalid"),
       updateId,
-      user: parseUser(callback.from),
+      user,
     };
     return update;
   }

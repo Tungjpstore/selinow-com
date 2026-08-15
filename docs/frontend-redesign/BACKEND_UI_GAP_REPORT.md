@@ -1,6 +1,6 @@
 # Frontend/backend coverage report
 
-Updated: 2026-07-30
+Updated: 2026-08-03
 
 This report tracks the PromptOS seller surfaces against the contracts that are
 actually implemented. A surface is called operational only when it reads or
@@ -19,19 +19,33 @@ truthfully disabled instead of being simulated in the browser.
 - **Inventory:** `/app/inventory` projects tenant-scoped available, reserved and
   delivered counts, server low-stock thresholds and last-import timestamps. The
   import drawer clears plaintext from the form/request lifecycle, invalidates
-  stale previews, locks pending actions and maps safe errors without exposing
-  inventory-key plaintext in HTML, logs or screenshots.
+  stale previews after success, cancel, close, shop switch and terminal errors,
+  locks pending actions and maps safe errors without exposing inventory-key
+  plaintext in HTML, logs or screenshots. Onboarding uses the same cleanup
+  contract for preview/import failures.
+- **Overview:** `/app` now separates shop lifecycle from sellability. The
+  headline and storefront action use the owner-authoritative readiness result;
+  active-but-blocked, unavailable and role-limited states remain distinct, and
+  the action queue cannot claim an all-clear while required projections are
+  forbidden or unavailable. Payment and fulfillment projections remain separate.
 - **Orders:** `/app/orders` and `/app/orders/:id` use tenant-scoped seller order
   projections. Payment and fulfillment stay on separate axes; customer identity,
   access tokens, provider payloads and key plaintext are never returned. Payment
   exception evidence is allowlisted into localized amount/time/key-count facts;
   the ledger remains read-only and links to the tenant-scoped order detail.
 - **Customers:** `/app/customers` reads a masked customer ledger and safe order
-  metadata, with explicit empty and unavailable states.
+  metadata, with explicit empty and unavailable states. Owner/manager detail,
+  profile/status update, immutable notes and optimistic redaction controls now
+  use the tenant-bound `/api/app/shops/:shopPublicId/customers/...` contracts.
 - **Members:** `/app/members` reads membership, role and status projections with
-  masked identity fields and server-derived capabilities.
+  masked identity fields and server-derived capabilities. Owner invitation,
+  role change, suspension and revoke controls are backed by migration `0053`,
+  recent-auth/CSRF routes, optimistic versions, idempotency records and audit
+  receipts.
 - **Billing:** `/app/billing` reads subscription, entitlement and usage
-  projections from D1 without inventing plan limits or payment state.
+  projections from D1 without inventing plan limits or payment state. Owner
+  plan/cancel requests are rendered as audited provider-pending intents; no
+  payment method, proration or settlement is fabricated.
 - **Store builder:** `/app/store` reads and writes validated draft settings,
   exposes draft/live publication state, supports owner-only publish through the
   readiness gate, includes bounded SEO title/description fields, and renders a
@@ -53,8 +67,15 @@ truthfully disabled instead of being simulated in the browser.
 - **Integrations:** `/app/integrations` SSRs Telegram, PayOS and domain health for
   roles already authorized by backend capability checks, while support/viewer and
   unsupported aggregates remain explicitly unavailable.
+- **Channel expansion:** `/app/integrations` also reads the safe channel-expansion
+  catalog and tenant-bound connector requests for Telegram Mini App, Zalo Mini App,
+  WhatsApp Cloud and Discord. Owner/manager request and cancel actions retain CSRF,
+  recent-auth, idempotency and optimistic-version guards; provider activation is
+  never inferred from a request state.
 - **Admin operations:** `/admin/operations` reads a safe active deletion queue and
-  exposes owner/risk legal-hold controls with support read-only access.
+  exposes owner/risk legal-hold controls with support read-only access. It now
+  also shows a bounded masked investigation/audit evidence bridge and links to
+  the full read-only `/admin/investigations` explorer.
 - **Admin Sellers & Shops:** `/admin/shops` and `GET /api/admin/shops` use active
   platform-admin authorization, enum filters and an opaque cursor to read public
   shop identity plus subscription, owner coverage, active-product and generic
@@ -72,8 +93,21 @@ truthfully disabled instead of being simulated in the browser.
 - **Automation:** `/app/automation` reads the existing tenant-scoped task
   projection and offers only server-backed refresh/cancel/resume controls.
   Provider evidence tokens and internal references remain absent from the UI.
+- **API credentials:** `/app/integrations` now consumes the existing
+  recent-authenticated issue/list/revoke endpoints. It renders only scoped
+  metadata, reveals the newly issued token once, never stores it in browser
+  storage, and preserves idempotency plus optimistic-version revocation.
 - **Buyer integrity:** public product/cart controls enforce server-projected
   quantity bounds and fail closed on malformed or expired quote snapshots.
+- **Seller operations backend:** order internal notes support tenant-bound
+  list/append/redact with immutable bodies, version guards and replay-safe
+  idempotency. Admin-only order investigations and audit exploration expose
+  masked order/payment evidence, bounded cursors and allowlisted metadata only.
+- **Backend gap workflows:** migration `0054_backend_gap_workflows.sql` adds
+  provider-pending seller order messages, audited payment remediation requests,
+  optimistic billing change requests and an admin appeals/refunds projection.
+  These workflows never mark a message sent, refund completed or subscription
+  changed without verified provider/operator evidence.
 
 ## Implemented buyer interactions
 
@@ -90,38 +124,48 @@ truthfully disabled instead of being simulated in the browser.
 
 ## Remaining backend/UI gaps
 
-- **Members:** invite, role-change and revoke mutations still need a complete
-  recent-auth, CSRF, optimistic-version, idempotency and audit contract.
-- **Billing:** plan change, payment-method, upgrade/downgrade and cancellation
-  flows need an explicit subscription/billing provider and operator contract;
-  the read-only projection must remain read-only until then.
-- **Customers:** detail, edit, merge, notes and deletion actions need a defined
-  privacy/retention contract. The current masked ledger is intentionally safe.
-- **Orders:** seller message/note, retry-delivery and payment/fulfillment
-  override actions are not available in the backend and are not shown as fake
-  controls.
-- **Catalog presentation:** product channel visibility and a hidden product state
-  lack a backend contract and remain unavailable. Product creation plus the first
-  variant now commits atomically with its idempotency and audit receipts; focused
-  rollback, replay/conflict and cross-tenant coverage closes the former two-write
-  orphan-draft risk.
+- **Billing provider settlement:** plan-change/cancellation request recording is
+  implemented and rendered as an audited pending intent, but payment-method capture, pricing/proration, provider
+  execution and completion webhooks remain required before the subscription can
+  mutate.
+- **Customers:** merge and deletion remain intentionally unimplemented; detail,
+  edit, notes and redaction now have privacy-safe tenant contracts and owner/
+  manager browser controls. Support/viewer remains read-only.
+- **Orders:** seller message request/list/redaction is implemented with a
+  provider-pending state; verified channel delivery, retry scheduling and
+  payment/fulfillment overrides remain unavailable. Internal notes remain
+  tenant-bound and hidden from unsupported UI controls.
+- **Catalog presentation:** migration `0069` now provides a tenant-bound product
+  channel-visibility GET/PUT contract with fail-closed missing rows, and Website
+  plus Telegram Mini App projections apply the visible fence. The product client
+  now exposes inline controls that remain disabled until server hydration succeeds,
+  then use CSRF/recent-auth, idempotency and expected-version conflict reloads;
+  provider activation and remote migration admission remain separate gates.
+  Product creation plus the first variant now commits atomically with its
+  idempotency and audit receipts; focused rollback, replay/conflict and
+  cross-tenant coverage closes the former two-write orphan-draft risk.
 - **Global shop configuration:** onboarding now exposes tenant-scoped merchant and
   business country, supported currency and default-locale controls for initial
   setup and later settings updates. Server validation, currency-drift guards and
   the authenticated local visual gate cover the truthful seller flow.
 - **Provider-backed UAT:** Telegram/PayOS integration APIs and the integrations
   workspace are present, but a dedicated seller test bot, controlled PayOS
-  channel and provider-backed automation parity are still external acceptance
-  work. The SSR/UI work does not replace those provider-backed gates.
+  channel, Telegram Mini App/Zalo/WhatsApp/Discord provider credentials and
+  provider-backed automation parity are still external acceptance work. The
+  connector catalog/request UI records intent only; the SSR/UI work does not
+  replace provider-backed activation, webhook or delivery gates.
 - **Authenticated visual evidence:** the automation workspace, buyer-bound
   controls and shell/static tenant-link changes are covered by source/unit
   contracts. The isolated local Playwright gate passes 7/7 across desktop/mobile
   and 1440/768/390/320px coverage; all 42 current-source authenticated snapshots
-  for 21 surface IDs were regenerated and manually reviewed at 1440x1024 and
-  390x844. The public local gate passes 27/27 with 26 additional route/state
-  screenshots.
+  for 21 surface IDs were reviewed at 1440x1024 and 390x844; the Phase 2
+  dashboard copy change intentionally refreshed the mobile dashboard baseline.
+  The public local gate passes 27/27 with 26 additional route/state screenshots.
 - **Additional adapters:** managed shared channels, DNS-provider authorization,
   social/marketplace adapters and a second payment provider remain roadmap work.
+  The four channel-expansion manifests and connector workflow are contract-ready or
+  provider-pending only; provider credentials, webhooks, delivery evidence and
+  external activation remain separate acceptance gates.
 
 ## Product boundary
 
@@ -130,12 +174,9 @@ state. D1 remains authoritative; cache/KV is never used to decide a commerce or
 subscription mutation. Production remains `NO-GO` until Phase 10 release gates,
 controlled provider pilots, operations evidence and ownership approvals pass.
 
-- Latest completed frontend source verification checkpoint (before the current
-  production promotion/DNS test additions): `npm run check` passed with 0 errors
-  and 3 existing non-blocking hints; `npm run lint` passed; `npm test` passed with
-  189 files / 1,447 tests; `npm run build` and `npm run deploy:dry-run` passed
-  without deployment. Rerun the full repository gate before treating the test
-  total as current.
+- Latest continuation verification counts and artifact paths are recorded in
+  `docs/PHASE_2_REVIEW_PACKAGE_R1.md`; no deployment or remote migration is
+  performed here.
 
 All latest frontend slices remain local-only. No staging deployment or production
 mutation was performed. The authenticated Playwright contract defines 21 surface

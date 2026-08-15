@@ -31,7 +31,16 @@ export type TelegramCallbackUpdate = {
   user: TelegramUser;
 };
 
-export type TelegramUpdate = TelegramCallbackUpdate | TelegramMessageUpdate;
+// Inline callback queries have no message/chat and cannot enter private-chat
+// commerce, but they must still be acknowledged and recorded to stop retries.
+export type TelegramUnsupportedCallbackUpdate = {
+  callbackId: string;
+  kind: "unsupported_callback_query";
+  updateId: number;
+  user: TelegramUser;
+};
+
+export type TelegramUpdate = TelegramCallbackUpdate | TelegramMessageUpdate | TelegramUnsupportedCallbackUpdate;
 
 export type TelegramInlineKeyboard = Array<Array<{ callback_data: string; text: string }>>;
 

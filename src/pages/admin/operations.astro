@@ -6,6 +6,7 @@ import { listActiveDeadLetters } from "../../lib/operations/dead-letters";
 import { listActiveDeletionRequests } from "../../lib/operations/deletion";
 import { listActiveIncidents } from "../../lib/operations/incidents";
 import { listEncryptionRotationRuns } from "../../lib/operations/rotation-operator";
+import { listAdminAuditEntries, listAdminOrderInvestigations } from "../../lib/operations/admin-investigations";
 import { getBindings } from "../../lib/platform/bindings";
 import { getPlatformAdminRole } from "../../lib/tenants/store";
 import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
@@ -33,14 +34,17 @@ try {
 if (roleLookupFailed) Astro.response.status = 503;
 else if (adminRole === null) Astro.response.status = 403;
 
-let deadLetters: Awaited<ReturnType<typeof listActiveDeadLetters>> = [];
+let deadLetterOverview: Awaited<ReturnType<typeof listActiveDeadLetters>> = { hasMore: false, items: [], limit: 100 };
 let deletionOverview: Awaited<ReturnType<typeof listActiveDeletionRequests>> = { canOperate: false, requests: [] };
-let incidents: Awaited<ReturnType<typeof listActiveIncidents>> = [];
+let incidentOverview: Awaited<ReturnType<typeof listActiveIncidents>> = { hasMore: false, items: [], limit: 100 };
 let rotationOverview: Awaited<ReturnType<typeof listEncryptionRotationRuns>> = { canOperate: false, runs: [] };
 let dataUnavailable = false;
+let investigationOrders: Awaited<ReturnType<typeof listAdminOrderInvestigations>> = { nextCursor: null, orders: [] };
+let investigationAudit: Awaited<ReturnType<typeof listAdminAuditEntries>> = { nextCursor: null, entries: [] };
+let investigationUnavailable = false;
 if (adminRole !== null) {
   try {
-    [deadLetters, deletionOverview, incidents, rotationOverview] = await Promise.all([
+    [deadLetterOverview, deletionOverview, incidentOverview, rotationOverview] = await Promise.all([
       listActiveDeadLetters({ env }),
       listActiveDeletionRequests({ env, userId: auth.userId }),
       listActiveIncidents({ env }),
@@ -50,8 +54,27 @@ if (adminRole !== null) {
     dataUnavailable = true;
     Astro.response.status = 503;
   }
+  try {
+    [investigationOrders, investigationAudit] = await Promise.all([
+      listAdminOrderInvestigations({
+        env,
+        filters: { cursor: null, limit: 5, paymentStatus: null, query: null, shopPublicId: null },
+        userId: auth.userId,
+      }),
+      listAdminAuditEntries({
+        env,
+        filters: { action: null, cursor: null, limit: 5, resourceType: null, shopPublicId: null },
+        userId: auth.userId,
+      }),
+    ]);
+  } catch {
+    // Investigation data is an optional read-only bridge; preserve the systems queue if its tables are unavailable.
+    investigationUnavailable = true;
+  }
 }
 
+const deadLetters = deadLetterOverview.items;
+const incidents = incidentOverview.items;
 const canReplayDeadLetters = adminRole === "owner" || adminRole === "risk";
 const providerIncidents = incidents.filter((item) => ["provider_degraded", "outbox_failure"].includes(item.category));
 const safeDate = (value: string): Date | null => {
@@ -72,6 +95,9 @@ const age = (value: string): string => {
   if (hours < 48) return t("admin.common.hours", { count: hours });
   return t("admin.common.days", { count: Math.floor(hours / 24) });
 };
+const visibilityCount = (hasMore: boolean, count: number): string => hasMore
+  ? t("admin.operations.visibility.truncated_count", { count })
+  : t("admin.operations.visibility.complete_count", { count });
 
 const incidentCategoryLabels: Record<string, string> = {
   backup_failure: t("admin.operations.incident.category.backup_failure"),
@@ -170,6 +196,11 @@ const operationsClientCopy = {
   "rotation.processed": t("admin.operations.client.rotation.processed"),
   "rotation.processing": t("admin.operations.client.rotation.processing"),
   "rotation.shop_required": t("admin.operations.client.rotation.shop_required"),
+  "payos.client_id_required": t("admin.operations.client.payos.client_id_required"),
+  "payos.fingerprint_created": t("admin.operations.client.payos.fingerprint_created"),
+  "payos.fingerprint_copied": t("admin.operations.client.payos.fingerprint_copied"),
+  "payos.fingerprint_copy_failed": t("admin.operations.client.payos.fingerprint_copy_failed"),
+  "payos.fingerprint_creating": t("admin.operations.client.payos.fingerprint_creating"),
 };
 ---
 
@@ -213,8 +244,8 @@ const operationsClientCopy = {
           <p>{t("admin.operations.header.description")}</p>
         </div>
         <div class="admin-summary" aria-label={t("admin.operations.header.summary_aria")}>
-          <div><span>{t("admin.operations.summary.dead_letter")}</span><strong>{deadLetters.length}</strong></div>
-          <div><span>{t("admin.operations.summary.incident")}</span><strong>{incidents.length}</strong></div>
+          <div><span>{t("admin.operations.summary.dead_letter")}</span><strong>{visibilityCount(deadLetterOverview.hasMore, deadLetters.length)}</strong></div>
+          <div><span>{t("admin.operations.summary.incident")}</span><strong>{visibilityCount(incidentOverview.hasMore, incidents.length)}</strong></div>
           <div><span>{t("admin.operations.summary.deletion_active")}</span><strong>{deletionOverview.requests.length}</strong></div>
         </div>
       </header>
@@ -239,6 +270,79 @@ const operationsClientCopy = {
             <li><span>{t("admin.operations.contract.health")}</span><span class="admin-badge">{t("admin.common.read_api_unavailable")}</span></li>
           </ul>
         </div>
+      </section>
+
+      {env.APP_ENV === "staging" && adminRole === "owner" && (
+        <section class="admin-section" aria-labelledby="payos-fingerprint-title" data-payos-fingerprint>
+          <div class="admin-section-heading">
+            <div>
+              <h2 id="payos-fingerprint-title">{t("admin.operations.payos.title")}</h2>
+              <p>{t("admin.operations.payos.description")}</p>
+            </div>
+          </div>
+          <form class="admin-form" data-payos-fingerprint-form>
+            <label>{t("admin.operations.payos.client_id")}<input name="clientId" type="password" autocomplete="off" required pattern="[A-Za-z0-9._:-]{3,128}" maxlength="128" /></label>
+            <div class="admin-form-actions"><button type="submit">{t("admin.operations.payos.create")}</button></div>
+          </form>
+          <div class="admin-empty" data-payos-fingerprint-result hidden>
+            <strong>{t("admin.operations.payos.result_title")}</strong>
+            <span>{t("admin.operations.payos.result_warning")}</span>
+            <code data-payos-fingerprint-value></code>
+            <small data-payos-fingerprint-request></small>
+            <div class="admin-form-actions"><button type="button" data-payos-fingerprint-copy>{t("admin.operations.payos.copy")}</button></div>
+          </div>
+        </section>
+      )}
+
+      <section class="admin-section" aria-labelledby="investigation-title" data-admin-investigation-bridge>
+        <div class="admin-section-heading">
+          <div><h2 id="investigation-title">{t("admin.investigations.title")}</h2><p>{t("admin.investigations.description")}</p></div>
+          <div class="admin-section-links">
+            <a class="admin-inline-link" href="/admin/investigations?tab=orders">{t("admin.investigations.orders")}</a>
+            <a class="admin-inline-link" href="/admin/investigations?tab=audit">{t("admin.investigations.audit")}</a>
+          </div>
+        </div>
+        {investigationUnavailable ? (
+          <div class="admin-empty">
+            <strong>{t("admin.common.read_api_unavailable")}</strong>
+            <span>{t("admin.investigations.description")}</span>
+          </div>
+        ) : (
+          <div class="investigation-bridge-grid">
+            <article class="investigation-bridge-card">
+              <div class="admin-section-heading"><div><h3>{t("admin.investigations.orders")}</h3><p>{t("admin.investigations.orders_description")}</p></div><span>{investigationOrders.orders.length}</span></div>
+              {investigationOrders.orders.length === 0 ? (
+                <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div>
+              ) : (
+                <ul class="investigation-bridge-list">
+                  {investigationOrders.orders.map((order) => (
+                    <li>
+                      <div><strong>{order.orderNumber}</strong><span>{order.shopName}</span></div>
+                      <div><span>{order.paymentStatus} · {order.fulfillmentStatus}</span><small>{order.totalMinor} {order.currency}</small></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <a class="next-link" href="/admin/investigations?tab=orders">{t("admin.investigations.details")}</a>
+            </article>
+            <article class="investigation-bridge-card">
+              <div class="admin-section-heading"><div><h3>{t("admin.investigations.audit")}</h3><p>{t("admin.investigations.audit_description")}</p></div><span>{investigationAudit.entries.length}</span></div>
+              {investigationAudit.entries.length === 0 ? (
+                <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div>
+              ) : (
+                <ul class="investigation-bridge-list">
+                  {investigationAudit.entries.map((entry) => (
+                    <li>
+                      <div><strong>{entry.action}</strong><span>{entry.resourceType}{entry.shopName === null ? ` · ${t("admin.common.platform")}` : ` · ${entry.shopName}`}</span></div>
+                      <div><span>{entry.actorType}</span><small>{formatTime(entry.createdAt)}</small></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <a class="next-link" href="/admin/investigations?tab=audit">{t("admin.investigations.details")}</a>
+            </article>
+          </div>
+        )}
       </section>
 
       <section class="admin-section" aria-labelledby="deletion-title">
@@ -377,8 +481,9 @@ const operationsClientCopy = {
       <section class="admin-section" aria-labelledby="dead-letter-title">
         <div class="admin-section-heading">
           <div><h2 id="dead-letter-title">{t("admin.operations.dead_letter.title")}</h2><p>{t("admin.operations.dead_letter.description")}</p></div>
-          <span>{t("admin.operations.dead_letter.count", { count: deadLetters.length })}</span>
+          <span>{visibilityCount(deadLetterOverview.hasMore, deadLetters.length)}</span>
         </div>
+        {deadLetterOverview.hasMore && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: deadLetterOverview.limit })}</div>}
         {deadLetters.length === 0 ? (
           <div class="admin-empty"><strong>{t("admin.operations.dead_letter.empty_title")}</strong><span>{t("admin.operations.dead_letter.empty_description")}</span></div>
         ) : (
@@ -407,6 +512,7 @@ const operationsClientCopy = {
                           <div><dt>{t("admin.operations.dead_letter.detail.message_id")}</dt><dd><code>{item.messageId}</code></dd></div>
                           <div><dt>{t("admin.operations.dead_letter.detail.replay_target")}</dt><dd>{item.replayTargetKind === null ? t("admin.operations.dead_letter.unlinked") : t("admin.operations.dead_letter.replay_target_value", { kind: item.replayTargetKind, status: item.replayStatus ?? t("admin.common.unknown") })}</dd></div>
                           <div><dt>{t("admin.operations.field.occurrences")}</dt><dd>{t("admin.operations.dead_letter.occurrence_summary", { count: item.occurrenceCount, attempts: item.providerAttempts })}</dd></div>
+                          <div><dt>{t("admin.operations.status.retry_requested")}</dt><dd>{item.retryRequestedAt === null ? t("admin.common.unknown") : `${item.retryCount} · ${formatTime(item.retryRequestedAt)}`}</dd></div>
                         </dl>
                       </div>
                       <div>
@@ -430,8 +536,9 @@ const operationsClientCopy = {
       <section class="admin-section" aria-labelledby="incident-title">
         <div class="admin-section-heading">
           <div><h2 id="incident-title">{t("admin.operations.incident.title")}</h2><p>{t("admin.operations.incident.description")}</p></div>
-          <span>{t("admin.operations.incident.count", { count: incidents.length })}</span>
+          <span>{visibilityCount(incidentOverview.hasMore, incidents.length)}</span>
         </div>
+        {incidentOverview.hasMore && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: incidentOverview.limit })}</div>}
         {incidents.length === 0 ? (
           <div class="admin-empty"><strong>{t("admin.operations.incident.empty_title")}</strong><span>{t("admin.operations.incident.empty_description")}</span></div>
         ) : (
@@ -480,6 +587,27 @@ const operationsClientCopy = {
     </div>
   )}
 </AdminLayout>
+
+<style>
+  .admin-section-links { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+  .admin-inline-link { color:var(--sln-action-primary); font-size:13px; font-weight:600; text-decoration:none; }
+  .admin-inline-link:hover { text-decoration:underline; }
+  .investigation-bridge-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
+  .investigation-bridge-card { display:grid; gap:12px; min-width:0; padding:16px; border:1px solid var(--sln-border-default); border-radius:12px; background:var(--sln-bg-surface); }
+  .investigation-bridge-card h3 { margin:0; font-size:16px; }
+  .investigation-bridge-card .admin-section-heading { margin:0; }
+  .investigation-bridge-list { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+  .investigation-bridge-list li { display:flex; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--sln-border-default); }
+  .investigation-bridge-list li:last-child { border-bottom:0; }
+  .investigation-bridge-list li > div { display:grid; gap:3px; min-width:0; }
+  .investigation-bridge-list li > div:last-child { justify-items:end; text-align:right; }
+  .investigation-bridge-list strong, .investigation-bridge-list span, .investigation-bridge-list small { overflow-wrap:anywhere; }
+  .investigation-bridge-list span, .investigation-bridge-list small { color:var(--sln-text-muted); }
+  @media (max-width:760px) {
+    .investigation-bridge-grid { grid-template-columns:1fr; }
+    .admin-section-links { width:100%; }
+  }
+</style>
 
 <script>
   import "../../scripts/dashboard/system-operations";

@@ -13,6 +13,13 @@ const routes = [
   },
 ] as const;
 
+function isAllowedTurnstileMutation(requestUrl: URL, method: string): boolean {
+  return method === "POST"
+    && requestUrl.protocol === "https:"
+    && requestUrl.hostname === "challenges.cloudflare.com"
+    && requestUrl.pathname.startsWith("/cdn-cgi/challenge-platform/");
+}
+
 async function expectStablePage(page: Page, expectedWidth: number): Promise<void> {
   await page.evaluate(async () => document.fonts.ready);
   const geometry = await page.evaluate(() => ({
@@ -31,15 +38,18 @@ async function expectStablePage(page: Page, expectedWidth: number): Promise<void
 test("public storefront remains stable across the PromptOS viewport matrix", async ({ page }, testInfo) => {
   const expectedWidth = testInfo.project.use.viewport?.width;
   if (typeof expectedWidth !== "number") throw new Error("viewport_matrix_width_missing");
+  const storefrontOrigin = new URL(process.env.SELINOW_VISUAL_BASE_URL ?? "https://signal.staging.selinow.com").origin;
 
   const nonReadOnlyRequests: string[] = [];
   await page.route("**/*", async (route) => {
     const request = route.request();
-    if (request.method() === "GET" || request.method() === "HEAD") {
+    const requestUrl = new URL(request.url());
+    if (request.method() === "GET" || request.method() === "HEAD"
+      || isAllowedTurnstileMutation(requestUrl, request.method())) {
       await route.continue();
       return;
     }
-    nonReadOnlyRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    nonReadOnlyRequests.push(`${request.method()} ${requestUrl.origin === storefrontOrigin ? requestUrl.pathname : requestUrl.origin}`);
     await route.abort("blockedbyclient");
   });
 

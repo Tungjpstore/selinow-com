@@ -1,8 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { hmacToken } from "../../src/lib/core/crypto";
 import type { AppBindings } from "../../src/lib/platform/bindings";
-import { connectPayOS, refreshPayOSHealth } from "../../src/lib/payments/integrations";
+import { connectPayOS, disconnectPayOS, getPaymentIntegration, refreshPayOSHealth } from "../../src/lib/payments/integrations";
 import { encryptPayOSCredentials, type PayOSCredentials } from "../../src/lib/payments/crypto";
+import { payOSProviderIdentityFingerprint } from "../../src/lib/payments/payos-admission";
 import { connectTelegram, disconnectTelegram, refreshTelegramHealth } from "../../src/lib/telegram/integrations";
 import { encryptTelegramCredential, type EncryptedTelegramCredential } from "../../src/lib/telegram/crypto";
 
@@ -10,8 +16,8 @@ const membership = vi.hoisted(() => ({ role: "owner" }));
 
 vi.mock("../../src/lib/tenants/store", () => ({
   getShopForMember: vi.fn(() => Promise.resolve({
-    row: { role: membership.role, shop_id: "shop-a" },
-    shop: {},
+    row: { role: membership.role, shop_id: "shop-a", shop_status: "active" },
+    shop: { featureFlags: { telegram: true } },
   })),
 }));
 
@@ -23,11 +29,54 @@ const PAYOS_CREDENTIALS: PayOSCredentials = {
   checksumKey: "payos-checksum-key",
   clientId: "payos-client-id",
 };
+const PAYOS_ROTATED_CREDENTIALS: PayOSCredentials = {
+  apiKey: "payos-rotated-api-key",
+  checksumKey: "payos-rotated-checksum-key",
+  clientId: PAYOS_CREDENTIALS.clientId,
+};
 const TELEGRAM_BOT_TOKEN = "123456789:abcdefghijklmnopqrstuvwxyzABCDE";
 const TELEGRAM_REPLACEMENT_TOKEN = "987654321:ZYXWVUTSRQPONMLKJIHGFEDCBAabcde";
 const TELEGRAM_WEBHOOK_SECRET = "existing-webhook-secret_123456789";
 
 type SqlStatement = { run: () => Promise<unknown> };
+const payOSDatabases: DatabaseSync[] = [];
+
+class ResumabilitySqliteStatement {
+  constructor(
+    private readonly database: DatabaseSync,
+    readonly sql: string,
+    private readonly values: SQLInputValue[] = [],
+  ) {}
+
+  bind(...values: unknown[]): ResumabilitySqliteStatement {
+    return new ResumabilitySqliteStatement(this.database, this.sql, values.map((value): SQLInputValue => {
+      if (value === null || typeof value === "string" || typeof value === "number"
+        || typeof value === "bigint" || value instanceof Uint8Array) return value;
+      throw new TypeError("unsupported_sqlite_binding");
+    }));
+  }
+
+  first<T>(): Promise<T | null> {
+    return Promise.resolve((this.database.prepare(this.sql).get(...this.values) as T | undefined) ?? null);
+  }
+
+  all<T>(): Promise<D1Result<T>> {
+    return Promise.resolve({ results: this.database.prepare(this.sql).all(...this.values) as T[] } as D1Result<T>);
+  }
+
+  run(): Promise<{ meta: { changes: number } }> {
+    const result = this.database.prepare(this.sql).run(...this.values);
+    return Promise.resolve({ meta: { changes: Number(result.changes) } });
+  }
+}
+
+function applyAllMigrations(database: DatabaseSync): void {
+  for (const filename of readdirSync(join(process.cwd(), "migrations"))
+    .filter((name) => /^\d{4}_.+\.sql$/u.test(name))
+    .sort()) {
+    database.exec(readFileSync(join(process.cwd(), "migrations", filename), "utf8"));
+  }
+}
 
 function binding(database: object): AppBindings {
   return {
@@ -64,6 +113,8 @@ async function telegramRuntime() {
     lastOutboundAt: null as string | null,
     lastSafeErrorCode: "telegram_webhook_failed" as string | null,
     lastUpdateAt: null as string | null,
+    generationState: "active" as "active" | "draining",
+    integrationGeneration: 1,
     pendingUpdateCount: 0,
     publicId: "telegram-public-a",
     shopId: "shop-a",
@@ -114,6 +165,7 @@ async function telegramRuntime() {
               if (sql.includes("UPDATE telegram_credentials SET status = 'revoked'") && sql.includes("status IN ('active', 'pending')")) {
                 credential.status = "revoked";
               }
+              if (sql.includes("generation_state = 'draining'")) integration.generationState = "draining";
               if (sql.includes("UPDATE telegram_integrations SET status = CASE")) {
                 integration.status = integration.activeCredentialId === null ? "pending" : integration.status;
                 integration.webhookStatus = integration.activeCredentialId === null ? "pending" : integration.webhookStatus;
@@ -123,6 +175,8 @@ async function telegramRuntime() {
                 integration.status = String(values[0]);
                 integration.webhookStatus = "verified";
                 integration.activeCredentialId = String(values[1]);
+                integration.generationState = "active";
+                integration.integrationGeneration += 1;
                 if (values[2] === 1) integration.lastHealthUpdateAt = null;
                 integration.botId = String(values[3]);
                 integration.botUsername = String(values[4]);
@@ -136,6 +190,8 @@ async function telegramRuntime() {
                 integration.status = "disabled";
                 integration.webhookStatus = "disabled";
                 integration.activeCredentialId = null;
+                integration.generationState = "active";
+                integration.integrationGeneration += 1;
                 if (sql.includes("last_health_update_at = NULL")) integration.lastHealthUpdateAt = null;
                 integration.lastSafeErrorCode = null;
               }
@@ -161,7 +217,7 @@ async function telegramRuntime() {
     const result = method === "getMe"
       ? { first_name: "Resume Bot", id: 123_456_789, is_bot: true, username: "resume_bot" }
       : method === "getWebhookInfo"
-        ? { allowed_updates: ["message", "callback_query"], pending_update_count: 0, url: `${API_ORIGIN}/webhooks/telegram/${integration.webhookPublicId}` }
+        ? { allowed_updates: ["message", "callback_query"], max_connections: 20, pending_update_count: 0, url: `${API_ORIGIN}/webhooks/telegram/${integration.webhookPublicId}` }
         : true;
     return Promise.resolve(new Response(JSON.stringify({ ok: true, result }), { status: 200 }));
   };
@@ -178,7 +234,20 @@ async function telegramRuntime() {
   };
 }
 
-async function payOSRuntime(input: { active?: boolean; pending?: boolean; providerFails?: boolean } = {}) {
+async function payOSRuntime(input: {
+  active?: boolean;
+  currentPeriodEnd?: string | null | undefined;
+  graceEndsAt?: string | null;
+  pending?: boolean;
+  providerFails?: boolean;
+  subscriptionQueryFails?: boolean;
+  subscriptionState?: "pending_payment" | "trialing" | "active" | "past_due" | "grace_period" | "suspended" | "cancel_scheduled" | "upgrade_pending" | "downgrade_scheduled";
+  trialEndsAt?: string | null | undefined;
+  withoutSubscription?: boolean;
+} = {}) {
+  const database = new DatabaseSync(":memory:");
+  payOSDatabases.push(database);
+  applyAllMigrations(database);
   const encrypted = await encryptPayOSCredentials(PAYOS_CREDENTIALS, {
     credentialId: "payos-credential-a",
     hmacSecret: IDENTIFIER_SECRET,
@@ -189,111 +258,161 @@ async function payOSRuntime(input: { active?: boolean; pending?: boolean; provid
   });
   const active = input.active === true;
   const pending = !active && input.pending === true;
+  const now = "2026-07-25T00:00:00.000Z";
+  const providerIdentityFingerprint = active
+    ? await payOSProviderIdentityFingerprint({ IDENTIFIER_HMAC_SECRET: IDENTIFIER_SECRET }, PAYOS_CREDENTIALS)
+    : null;
+  const providerOwnershipFingerprint = active
+    ? await hmacToken(
+      IDENTIFIER_SECRET,
+      "payos-provider-credential:v1",
+      `${PAYOS_CREDENTIALS.clientId}\0${PAYOS_CREDENTIALS.apiKey}\0${PAYOS_CREDENTIALS.checksumKey}`,
+    )
+    : null;
   const integration = {
     activeCredentialId: active ? "payos-credential-a" : null as string | null,
-    connectedAt: active ? "2026-07-25T00:00:00.000Z" : null as string | null,
+    connectedAt: active ? now : null as string | null,
     id: "payos-integration-a",
-    lastCheckedAt: active ? "2026-07-25T00:00:00.000Z" : null as string | null,
+    lastCheckedAt: active ? now : null as string | null,
     lastSafeErrorCode: active || pending ? null : "provider_verification_failed" as string | null,
-    lastWebhookVerifiedAt: active ? "2026-07-25T00:00:00.000Z" : null as string | null,
-    providerIdentityFingerprint: null as string | null,
+    lastWebhookVerifiedAt: active ? now : null as string | null,
+    providerClaimGeneration: 0,
+    providerClaimNonce: null as string | null,
+    providerClaimState: "idle" as const,
+    providerClaimTargetFingerprint: null as string | null,
+    providerIdentityFingerprint,
     publicId: "payos-public-a",
     status: active ? "active" : pending ? "pending" : "error",
     webhookPublicId: "payos-webhook-a",
     webhookStatus: active ? "verified" : pending ? "pending" : "error",
   };
+  database.prepare(`
+    INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+    VALUES ('owner-a', 'owner-a@example.test', 'Owner A', 'active', ?, ?)
+  `).run(now, now);
+  database.prepare(`
+    INSERT INTO shops (
+      id, public_id, slug, name, status, default_locale, currency, timezone,
+      readiness_version, created_at, updated_at
+    ) VALUES (
+      'shop-a', 'shop-public-a', 'shop-a', 'Shop A', 'active', 'en', 'VND',
+      'Asia/Ho_Chi_Minh', 1, ?, ?
+    )
+  `).run(now, now);
+  if (input.subscriptionState === "trialing" && input.trialEndsAt != null
+    && Date.parse(input.trialEndsAt) <= Date.now()) {
+    // Simulate a valid trial row whose deadline elapsed after it was created.
+    database.exec("DROP TRIGGER shop_subscriptions_trialing_insert_guard");
+  }
+  if (input.withoutSubscription !== true) {
+    database.prepare(`
+      INSERT INTO shop_subscriptions (
+        id, shop_id, plan_id, state, trial_ends_at, current_period_end,
+        grace_ends_at, created_at, updated_at
+      ) VALUES ('subscription-a', 'shop-a', 'plan_starter_v1', ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.subscriptionState ?? "active",
+      input.trialEndsAt ?? null,
+      input.currentPeriodEnd === undefined ? "2099-01-01T00:00:00.000Z" : input.currentPeriodEnd,
+      input.graceEndsAt ?? null,
+      now,
+      now,
+    );
+  }
+  database.prepare(`
+    INSERT INTO payment_integrations (
+      id, public_id, webhook_public_id, shop_id, provider, status,
+      webhook_status, provider_identity_fingerprint, connected_at,
+      last_safe_error_code, last_checked_at, last_webhook_verified_at,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, 'shop-a', 'payos', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    integration.id,
+    integration.publicId,
+    integration.webhookPublicId,
+    integration.status,
+    integration.webhookStatus,
+    integration.providerIdentityFingerprint,
+    integration.connectedAt,
+    integration.lastSafeErrorCode,
+    integration.lastCheckedAt,
+    integration.lastWebhookVerifiedAt,
+    now,
+    now,
+  );
+  database.prepare(`
+    INSERT INTO payment_credentials (
+      id, shop_id, integration_id, provider, status, version, key_version,
+      client_id_ciphertext_b64, client_id_iv_b64, api_key_ciphertext_b64,
+      api_key_iv_b64, checksum_key_ciphertext_b64, checksum_key_iv_b64,
+      credential_fingerprint, provider_ownership_fingerprint,
+      created_by_user_id, created_at, activated_at
+    ) VALUES (?, 'shop-a', ?, 'payos', ?, 7, 'v1', ?, ?, ?, ?, ?, ?, ?, ?, 'owner-a', ?, ?)
+  `).run(
+    "payos-credential-a",
+    integration.id,
+    active ? "active" : pending ? "pending" : "error",
+    encrypted.clientIdCiphertextB64,
+    encrypted.clientIdIvB64,
+    encrypted.apiKeyCiphertextB64,
+    encrypted.apiKeyIvB64,
+    encrypted.checksumKeyCiphertextB64,
+    encrypted.checksumKeyIvB64,
+    encrypted.fingerprint,
+    providerOwnershipFingerprint,
+    now,
+    active ? now : null,
+  );
+  if (active) {
+    database.prepare(`
+      UPDATE payment_integrations
+      SET active_credential_id = ?
+      WHERE id = ? AND shop_id = 'shop-a'
+    `).run("payos-credential-a", integration.id);
+  }
+
   const credential = {
-    ...encrypted,
     credentialId: "payos-credential-a",
-    integrationId: integration.id,
-    keyVersion: "v1",
-    providerOwnershipFingerprint: active ? "payos-provider-ownership-a" : null as string | null,
-    shopId: "shop-a",
-    status: active ? "active" : pending ? "pending" : "error",
+    get status() {
+      const row = database.prepare(`
+        SELECT status FROM payment_credentials WHERE id = ? AND shop_id = 'shop-a'
+      `).get("payos-credential-a") as { status: string };
+      return row.status;
+    },
     version: 7,
   };
   const sqlHistory: string[] = [];
   let credentialInsertCount = 0;
   let providerCalls = 0;
 
-  const database = {
+  const d1Database = {
     prepare(sql: string) {
       sqlHistory.push(sql);
       if (sql.includes("INSERT INTO payment_credentials")) credentialInsertCount += 1;
-      return {
-        bind(...values: unknown[]) {
-          return {
-            first() {
-              if (sql.includes("FROM payment_integrations WHERE shop_id")) return Promise.resolve({ ...integration });
-              if (sql.includes("UPDATE payment_integrations") && sql.includes("provider_identity_fingerprint = ?")) {
-                integration.providerIdentityFingerprint = String(values[0]);
-                return Promise.resolve({ providerIdentityFingerprint: integration.providerIdentityFingerprint });
-              }
-              if (sql.includes("SELECT shop_id AS shopId") && sql.includes("provider_identity_fingerprint = ?")) {
-                return Promise.resolve(null);
-              }
-              if (sql.includes("FROM payment_credentials") && sql.includes("credential_fingerprint = ?")) {
-                return Promise.resolve({ credentialId: credential.credentialId, providerOwnershipFingerprint: credential.providerOwnershipFingerprint, status: credential.status, version: credential.version });
-              }
-              if (sql.includes("FROM payment_credentials") && sql.includes("provider_ownership_fingerprint = ?")) {
-                const verified = new Set(["active", "grace"]).has(credential.status)
-                  && credential.providerOwnershipFingerprint === values[0];
-                return Promise.resolve(verified
-                  ? { credentialId: credential.credentialId, providerOwnershipFingerprint: credential.providerOwnershipFingerprint, status: credential.status, version: credential.version }
-                  : null);
-              }
-              if (sql.includes("FROM payment_credentials") && sql.includes("status IN ('pending', 'error')")) {
-                return Promise.resolve(new Set(["pending", "error"]).has(credential.status) ? { ...credential } : null);
-              }
-              if (sql.includes("SELECT provider_ownership_fingerprint AS providerOwnershipFingerprint")) {
-                return Promise.resolve({ providerOwnershipFingerprint: credential.providerOwnershipFingerprint });
-              }
-              if (sql.includes("FROM payment_credentials WHERE id = ?")) {
-                return Promise.resolve(credential.status === "active" ? { ...credential } : null);
-              }
-              return Promise.resolve(null);
-            },
-            run() {
-              if (sql.includes("UPDATE payment_credentials SET status = 'pending'")) credential.status = "pending";
-              if (sql.includes("UPDATE payment_credentials SET status = 'active'")) credential.status = "active";
-              if (sql.includes("UPDATE payment_credentials SET status = 'error'")) credential.status = "error";
-              if (sql.includes("SET provider_ownership_fingerprint = ?")) {
-                credential.providerOwnershipFingerprint = String(values[0]);
-              }
-              if (sql.includes("UPDATE payment_integrations SET status = CASE")) {
-                integration.status = integration.activeCredentialId === null ? "pending" : integration.status;
-                integration.webhookStatus = integration.activeCredentialId === null ? "pending" : integration.webhookStatus;
-                integration.lastSafeErrorCode = null;
-              }
-              if (sql.includes("SET provider_identity_fingerprint = NULL")) integration.providerIdentityFingerprint = null;
-              if (sql.includes("UPDATE payment_integrations SET status = 'active', webhook_status = 'verified', active_credential_id")) {
-                integration.status = "active";
-                integration.webhookStatus = "verified";
-                integration.activeCredentialId = String(values[0]);
-                integration.connectedAt ??= String(values[1]);
-                integration.lastSafeErrorCode = null;
-                integration.lastCheckedAt = String(values[2]);
-                integration.lastWebhookVerifiedAt = String(values[3]);
-              } else if (sql.includes("UPDATE payment_integrations SET status = 'active', webhook_status = 'verified'")) {
-                integration.status = "active";
-                integration.webhookStatus = "verified";
-                integration.lastSafeErrorCode = null;
-                integration.lastCheckedAt = String(values[0]);
-                integration.lastWebhookVerifiedAt = String(values[1]);
-              } else if (sql.includes("UPDATE payment_integrations SET status = 'error', webhook_status = 'error'")) {
-                integration.status = "error";
-                integration.webhookStatus = "error";
-                integration.lastSafeErrorCode = String(values[0]);
-                integration.lastCheckedAt = String(values[1]);
-              }
-              return Promise.resolve({ meta: { changes: 1 } });
-            },
-          };
-        },
-      };
+      if (input.subscriptionQueryFails === true && sql.includes("FROM shop_subscriptions")) {
+        const failedStatement = {
+          bind() {
+            return failedStatement;
+          },
+          first() {
+            return Promise.reject(new Error("subscription_query_failed"));
+          },
+        };
+        return failedStatement as unknown as D1PreparedStatement;
+      }
+      return new ResumabilitySqliteStatement(database, sql) as unknown as D1PreparedStatement;
     },
-    batch(statements: SqlStatement[]) {
-      return Promise.all(statements.map((statement) => statement.run()));
+    async batch(statements: D1PreparedStatement[]) {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        database.exec("COMMIT");
+        return results;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
     },
   };
   const fetcher: typeof fetch = (_request, init) => {
@@ -303,12 +422,18 @@ async function payOSRuntime(input: { active?: boolean; pending?: boolean; provid
     if (input.providerFails === true) {
       return Promise.resolve(new Response(JSON.stringify({ code: "01", desc: "sensitive provider description" }), { status: 400 }));
     }
-    return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+    return Promise.resolve(Response.json({ code: "00", data: {
+      accountName: "Selinow Test",
+      accountNumber: "0000006797",
+      name: "Selinow Staging UAT",
+      shortName: "SELINOW",
+      webhookUrl: body.webhookUrl,
+    } }));
   };
 
   return {
     credential,
-    env: binding(database),
+    env: binding(d1Database),
     fetcher,
     getCredentialInsertCount: () => credentialInsertCount,
     getProviderCalls: () => providerCalls,
@@ -443,7 +568,7 @@ async function telegramReplacementRuntime(input: { sameBot?: boolean } = {}) {
     const result = method === "getMe"
       ? { first_name: "Replacement Bot", id: 987_654_321, is_bot: true, username: "replacement_bot" }
       : method === "getWebhookInfo"
-        ? { allowed_updates: ["message", "callback_query"], pending_update_count: 0, url: `${API_ORIGIN}/webhooks/telegram/${integration.webhookPublicId}` }
+        ? { allowed_updates: ["message", "callback_query"], max_connections: 20, pending_update_count: 0, url: `${API_ORIGIN}/webhooks/telegram/${integration.webhookPublicId}` }
         : true;
     return Promise.resolve(new Response(JSON.stringify({ ok: true, result }), { status: 200 }));
   };
@@ -453,6 +578,10 @@ async function telegramReplacementRuntime(input: { sameBot?: boolean } = {}) {
 
 beforeEach(() => {
   membership.role = "owner";
+});
+
+afterEach(() => {
+  for (const database of payOSDatabases.splice(0)) database.close();
 });
 
 describe("provider connection resumability", () => {
@@ -507,6 +636,13 @@ describe("provider connection resumability", () => {
       shopPublicId: "shop-public-a",
       userId: "owner-a",
     });
+    await expect(disconnectTelegram({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-telegram-disconnect-retry",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).resolves.toBeUndefined();
 
     expect(runtime.integration).toMatchObject({
       activeCredentialId: null,
@@ -539,6 +675,17 @@ describe("provider connection resumability", () => {
     expect(runtime.credentials).toHaveLength(2);
     expect(runtime.credentials.find((row) => row.credentialId === "telegram-credential-old")?.status).toBe("revoked");
     expect(runtime.credentials.find((row) => row.credentialId === runtime.integration.activeCredentialId)?.status).toBe("active");
+
+    await expect(connectTelegram({
+      botToken: TELEGRAM_REPLACEMENT_TOKEN,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      replaceBot: true,
+      requestId: "request-telegram-replace-retry",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(runtime.credentials).toHaveLength(2);
   });
 
   it("clears Telegram health evidence when credentials rotate for the same bot", async () => {
@@ -601,6 +748,67 @@ describe("provider connection resumability", () => {
     expect(runtime.getCredentialInsertCount()).toBe(0);
     expect(runtime.sqlHistory.join("\n")).not.toContain("SELECT COALESCE(MAX(version)");
   });
+
+  it.each([
+    { currentPeriodEnd: "2000-01-01T00:00:00.000Z", graceEndsAt: null, name: "expired active period", subscriptionState: "active" as const, expectedCode: "subscription_payment_required" },
+    { currentPeriodEnd: "2000-01-01T00:00:00.000Z", graceEndsAt: null, name: "expired scheduled period", subscriptionState: "cancel_scheduled" as const, expectedCode: "subscription_payment_required" },
+    { currentPeriodEnd: null, graceEndsAt: null, name: "missing active period", subscriptionState: "active" as const, expectedCode: "subscription_payment_required" },
+    { graceEndsAt: null, name: "pending payment", subscriptionState: "pending_payment" as const, expectedCode: "subscription_payment_required" },
+    { graceEndsAt: null, name: "expired trial", subscriptionState: "trialing" as const, trialEndsAt: "2000-01-01T00:00:00.000Z", expectedCode: "subscription_payment_required" },
+    { graceEndsAt: "2099-01-01T00:00:00.000Z", name: "past due grace", subscriptionState: "past_due" as const, expectedCode: "provider_not_ready" },
+    { graceEndsAt: "2099-01-01T00:00:00.000Z", name: "renewal grace", subscriptionState: "grace_period" as const, expectedCode: "provider_not_ready" },
+    { graceEndsAt: "2000-01-01T00:00:00.000Z", name: "expired renewal grace", subscriptionState: "grace_period" as const, expectedCode: "subscription_grace_expired" },
+    { graceEndsAt: null, name: "suspended", subscriptionState: "suspended" as const, expectedCode: "subscription_payment_required" },
+  ])("blocks PayOS connection for a $name subscription", async ({ currentPeriodEnd, expectedCode, graceEndsAt, subscriptionState, trialEndsAt }) => {
+    const runtime = await payOSRuntime({ active: true, currentPeriodEnd, graceEndsAt, subscriptionState, trialEndsAt });
+
+    await expect(connectPayOS({
+      credentials: PAYOS_ROTATED_CREDENTIALS,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: `request-payos-block-${subscriptionState}`,
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: expectedCode });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getCredentialInsertCount()).toBe(0);
+    expect(runtime.credential.status).toBe("active");
+  });
+
+  it("fails closed when the authoritative subscription row is missing", async () => {
+    const runtime = await payOSRuntime({ active: true, withoutSubscription: true });
+
+    await expect(connectPayOS({
+      credentials: PAYOS_ROTATED_CREDENTIALS,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-missing-subscription",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "subscription_payment_required" });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getCredentialInsertCount()).toBe(0);
+    expect(runtime.sqlHistory.join("\n")).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/u);
+  });
+
+  it("propagates subscription database failure before provider calls or writes", async () => {
+    const runtime = await payOSRuntime({ active: true, subscriptionQueryFails: true });
+
+    await expect(connectPayOS({
+      credentials: PAYOS_ROTATED_CREDENTIALS,
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-subscription-db-failure",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toThrow("subscription_query_failed");
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.getCredentialInsertCount()).toBe(0);
+    expect(runtime.sqlHistory.join("\n")).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/u);
+  });
 });
 
 describe("PayOS health refresh", () => {
@@ -624,6 +832,25 @@ describe("PayOS health refresh", () => {
     expect(JSON.stringify(result)).not.toContain(PAYOS_CREDENTIALS.clientId);
   });
 
+  it("blocks pending setup retry during renewal grace before calling PayOS", async () => {
+    const runtime = await payOSRuntime({
+      graceEndsAt: "2099-01-01T00:00:00.000Z",
+      pending: true,
+      subscriptionState: "past_due",
+    });
+
+    await expect(refreshPayOSHealth({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-blocked-retry",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "provider_not_ready" });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+    expect(runtime.credential.status).toBe("pending");
+  });
+
   it("keeps a failed pending retry sanitized and retryable", async () => {
     const runtime = await payOSRuntime({ pending: true, providerFails: true });
 
@@ -636,7 +863,7 @@ describe("PayOS health refresh", () => {
     });
 
     expect(runtime.credential.status).toBe("error");
-    expect(result).toMatchObject({ lastSafeErrorCode: "provider_rejected", status: "error", webhookStatus: "error" });
+    expect(result).toMatchObject({ lastSafeErrorCode: "provider_verification_failed", status: "error", webhookStatus: "error" });
     expect(JSON.stringify(result)).not.toContain("sensitive provider description");
     expect(JSON.stringify(result)).not.toContain(PAYOS_CREDENTIALS.apiKey);
   });
@@ -658,6 +885,38 @@ describe("PayOS health refresh", () => {
     expect(Date.parse(result.lastCheckedAt ?? "")).not.toBeNaN();
     expect(result.lastCheckedAt).not.toBe(previousCheckedAt);
     expect(result.lastWebhookVerifiedAt).toBe(result.lastCheckedAt);
+  });
+
+  it("blocks provider-mutating health refresh for a suspended subscription", async () => {
+    const runtime = await payOSRuntime({ active: true, subscriptionState: "suspended" });
+
+    await expect(refreshPayOSHealth({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-blocked-health",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "subscription_payment_required" });
+
+    expect(runtime.getProviderCalls()).toBe(0);
+  });
+
+  it("keeps integration reads and disconnect available while suspended", async () => {
+    const runtime = await payOSRuntime({ active: true, subscriptionState: "suspended" });
+
+    await expect(getPaymentIntegration({
+      env: runtime.env,
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    await expect(disconnectPayOS({
+      env: runtime.env,
+      requestId: "request-payos-disconnect-suspended",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    })).resolves.toBeUndefined();
+
+    expect(runtime.getProviderCalls()).toBe(0);
   });
 
   it("rejects a manager before loading credentials or calling PayOS", async () => {
@@ -689,7 +948,7 @@ describe("PayOS health refresh", () => {
     });
 
     expect(result).toMatchObject({
-      lastSafeErrorCode: "provider_rejected",
+      lastSafeErrorCode: "provider_verification_failed",
       lastWebhookVerifiedAt: previousVerifiedAt,
       status: "error",
       webhookStatus: "error",

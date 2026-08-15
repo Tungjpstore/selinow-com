@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { parseFlags } from "../../scripts/lib/cli.mjs";
+import { parseFlags, run } from "../../scripts/lib/cli.mjs";
 import {
   assertProductionWorkerDatabaseIdentity,
   assertProductionWorkerIdentityAdmission,
@@ -14,7 +14,10 @@ import {
   assertOwnedName,
   auditStagingRouteInventory,
   buildQueueBindings,
+  buildCloudflareResourceAuditEnvironment,
   buildPinnedCloudflareEnvironment,
+  buildWorkerBuildEnvironment,
+  buildWorkerDeployEnvironment,
   buildStagingRoutes,
   buildStagingVars,
   cloudflareApiRequest,
@@ -26,15 +29,23 @@ import {
   planSaasConfiguration,
   provision,
   requireCloudflarePlatformToken,
+  requireCloudflareD1Token,
   requireCloudflareRouteAuditToken,
+  requireCloudflareWorkerDeployToken,
   type PlatformEnvironmentSpec,
+  validateProductionLiveInfrastructure,
   validateProductionWorkerRouteInventory,
+  validateRemoteDatabaseTarget,
   validateStagingRouteInventory,
   validateStagingRuntimeIdentity,
 } from "../../scripts/lib/platform.mjs";
 
 const STAGING_DATABASE_ID = "c86d76a0-7407-42b6-ba92-f9f9623d0730";
 const PRODUCTION_DATABASE_ID = "17ea8f2f-4c97-4337-8989-28b25a58ddeb";
+const PRODUCTION_CACHE_KV_ID = "11111111111111111111111111111111";
+const PRODUCTION_SESSION_KV_ID = "22222222222222222222222222222222";
+const PRODUCTION_MANIFEST_VERSION = "fixture-production-v1";
+const PRODUCTION_TURNSTILE_SITE_KEY = "0xSiteKeyThatLooksConfigured123456";
 
 const stagingSpec = {
   accountId: "abcdef0123456789abcdef0123456789",
@@ -74,9 +85,17 @@ const stagingSpec = {
   sharedZoneDisabledRoutes: [
     "selinow.com/*",
     "*.selinow.com/*",
+    "*/*",
+  ],
+  stagingRouteExceptions: [
+    "staging.selinow.com/*",
+    "app-staging.selinow.com/*",
+    "api-staging.selinow.com/*",
+    "*.staging.selinow.com/*",
   ],
   wildcardRoute: "*.staging.selinow.com/*",
   workerName: "selinow-com-staging",
+  productionWorkerName: "selinow-com-production",
   workerRoutes: [
     { custom_domain: true, pattern: "staging.selinow.com" },
     { custom_domain: true, pattern: "app-staging.selinow.com" },
@@ -85,8 +104,10 @@ const stagingSpec = {
     { custom_domain: true, pattern: "canvas.staging.selinow.com" },
     { custom_domain: true, pattern: "coming-soon.staging.selinow.com" },
     { custom_domain: true, pattern: "paused.staging.selinow.com" },
+    { pattern: "staging.selinow.com/*", zone_name: "selinow.com" },
+    { pattern: "app-staging.selinow.com/*", zone_name: "selinow.com" },
+    { pattern: "api-staging.selinow.com/*", zone_name: "selinow.com" },
     { pattern: "*.staging.selinow.com/*", zone_name: "selinow.com" },
-    { pattern: "*/*", zone_name: "selinow.com" },
   ],
   zoneId: "ce1536fca500680c544662e361ed869b",
   zoneName: "selinow.com",
@@ -94,6 +115,7 @@ const stagingSpec = {
 
 const stagingAdmissionFixtures = {
   doctorImplementation: () => Promise.resolve({ checks: [], ok: true }),
+  environment: { CLOUDFLARE_D1_API_TOKEN: "d1-token" },
   platformToken: "platform-token",
   runtimeIdentityImplementation: () => Promise.resolve({
     databaseId: STAGING_DATABASE_ID,
@@ -103,10 +125,13 @@ const stagingAdmissionFixtures = {
 
 function exactStagingRouteInventory() {
   return [
-    { pattern: "selinow.com/*", script: null },
-    { pattern: "*.selinow.com/*", script: null },
+    { pattern: "selinow.com/*", script: stagingSpec.productionWorkerName },
+    { pattern: "*.selinow.com/*", script: stagingSpec.productionWorkerName },
+    { pattern: "staging.selinow.com/*", script: stagingSpec.workerName },
+    { pattern: "app-staging.selinow.com/*", script: stagingSpec.workerName },
+    { pattern: "api-staging.selinow.com/*", script: stagingSpec.workerName },
     { pattern: stagingSpec.wildcardRoute, script: stagingSpec.workerName },
-    { pattern: "*/*", script: stagingSpec.workerName },
+    { pattern: "*/*", script: stagingSpec.productionWorkerName },
   ];
 }
 
@@ -133,7 +158,28 @@ function productionSpec() {
       dashboard: "app.selinow.com",
       marketing: "selinow.com",
     },
-    resources: { d1: "selinow-production" },
+    resources: {
+      d1: "selinow-production",
+      deadLetterQueue: "selinow-dlq-production",
+      integrationQueue: "selinow-integration-production",
+      notificationQueue: "selinow-notification-production",
+      platformCacheKv: "selinow-cache-production",
+      privateExports: "selinow-private-exports-production",
+      r2: "selinow-media-production",
+      sessionKv: "selinow-session-production",
+    },
+    routing: {
+      externalCustomDomainFallbackRoute: "*/*",
+    },
+    saas: {
+      cnameTarget: "customers.selinow.com",
+      fallbackOrigin: "proxy-fallback.selinow.com",
+    },
+    turnstile: {
+      externalCustomDomainAdmission: "verified_before_domain_activation",
+      externalCustomDomainStrategy: "exact_hostname_admission_before_activation",
+      platformHostname: "selinow.com",
+    },
     workerName: "selinow-com-production",
     zoneId: stagingSpec.zoneId,
     zoneName: stagingSpec.zoneName,
@@ -142,7 +188,9 @@ function productionSpec() {
 
 function productionWranglerConfig() {
   const routes: Array<{ custom_domain?: true; pattern: string; zone_name?: string }> = [
-    { custom_domain: true, pattern: "selinow.com" },
+    { pattern: "selinow.com/*", zone_name: "selinow.com" },
+    { pattern: "*.selinow.com/*", zone_name: "selinow.com" },
+    { pattern: "*/*", zone_name: "selinow.com" },
     { custom_domain: true, pattern: "app.selinow.com" },
     { custom_domain: true, pattern: "api.selinow.com" },
   ];
@@ -154,19 +202,197 @@ function productionWranglerConfig() {
           database_id: PRODUCTION_DATABASE_ID,
           database_name: "selinow-production",
         }],
+        kv_namespaces: [
+          { binding: "PLATFORM_CACHE", id: PRODUCTION_CACHE_KV_ID },
+          { binding: "SESSION", id: PRODUCTION_SESSION_KV_ID },
+        ],
         name: "selinow-com-production",
+        queues: {
+          consumers: [
+            {
+              dead_letter_queue: "selinow-dlq-production",
+              max_batch_size: 10,
+              max_batch_timeout: 5,
+              max_retries: 5,
+              queue: "selinow-integration-production",
+              retry_delay: 60,
+            },
+            {
+              dead_letter_queue: "selinow-dlq-production",
+              max_batch_size: 10,
+              max_batch_timeout: 5,
+              max_retries: 5,
+              queue: "selinow-notification-production",
+              retry_delay: 60,
+            },
+            {
+              max_batch_size: 10,
+              max_batch_timeout: 5,
+              max_retries: 100,
+              queue: "selinow-dlq-production",
+            },
+          ],
+          producers: [
+            { binding: "INTEGRATION_QUEUE", queue: "selinow-integration-production" },
+            { binding: "NOTIFICATION_QUEUE", queue: "selinow-notification-production" },
+          ],
+        },
+        r2_buckets: [
+          { binding: "MEDIA", bucket_name: "selinow-media-production" },
+          { binding: "PRIVATE_EXPORTS", bucket_name: "selinow-private-exports-production" },
+        ],
         routes,
+        triggers: { crons: ["*/15 * * * *"] },
+        vars: {
+          RESOURCE_MANIFEST_VERSION: PRODUCTION_MANIFEST_VERSION,
+          TURNSTILE_SITE_KEY: PRODUCTION_TURNSTILE_SITE_KEY,
+        },
       },
     },
   };
 }
 
+function productionManifest() {
+  return {
+    accountId: stagingSpec.accountId,
+    environment: "production",
+    resources: {
+      d1: { id: PRODUCTION_DATABASE_ID, name: "selinow-production" },
+      deadLetterQueue: { name: "selinow-dlq-production" },
+      integrationQueue: { name: "selinow-integration-production" },
+      notificationQueue: { name: "selinow-notification-production" },
+      platformCacheKv: { id: PRODUCTION_CACHE_KV_ID, name: "selinow-cache-production" },
+      privateExports: { name: "selinow-private-exports-production" },
+      r2: { name: "selinow-media-production" },
+      sessionKv: { id: PRODUCTION_SESSION_KV_ID, name: "selinow-session-production" },
+    },
+    saas: {
+      cnameTarget: "customers.selinow.com",
+      fallbackOrigin: "proxy-fallback.selinow.com",
+    },
+    version: PRODUCTION_MANIFEST_VERSION,
+    workerName: "selinow-com-production",
+    zoneId: stagingSpec.zoneId,
+    zoneName: stagingSpec.zoneName,
+  };
+}
+
+function exactProductionWorkerBindings() {
+  return [
+    { id: PRODUCTION_DATABASE_ID, name: "PLATFORM_DB", type: "d1" },
+    { name: "PLATFORM_CACHE", namespace_id: PRODUCTION_CACHE_KV_ID, type: "kv_namespace" },
+    { name: "SESSION", namespace_id: PRODUCTION_SESSION_KV_ID, type: "kv_namespace" },
+    { bucket_name: "selinow-media-production", name: "MEDIA", type: "r2_bucket" },
+    { bucket_name: "selinow-private-exports-production", name: "PRIVATE_EXPORTS", type: "r2_bucket" },
+    { name: "INTEGRATION_QUEUE", queue_name: "selinow-integration-production", type: "queue" },
+    { name: "NOTIFICATION_QUEUE", queue_name: "selinow-notification-production", type: "queue" },
+  ];
+}
+
+function exactProductionQueueConsumers(queue: string) {
+  const config = productionWranglerConfig().env.production.queues.consumers.find((entry) => (
+    entry.queue === queue
+  ));
+  if (config === undefined) throw new Error("test_queue_consumer_missing");
+  return [{
+    batch_size: config.max_batch_size,
+    batch_timeout: config.max_batch_timeout,
+    dead_letter_queue: config.dead_letter_queue,
+    max_retries: config.max_retries,
+    retry_delay: config.retry_delay,
+    script: "selinow-com-production",
+  }];
+}
+
+function productionLiveContract() {
+  const config = productionWranglerConfig().env.production;
+  return {
+    consumers: config.queues.consumers.map((consumer) => ({
+      queue: consumer.queue,
+      script: "selinow-com-production",
+      settings: Object.fromEntries(Object.entries({
+        batchSize: consumer.max_batch_size,
+        batchTimeout: consumer.max_batch_timeout,
+        deadLetterQueue: consumer.dead_letter_queue,
+        maxRetries: consumer.max_retries,
+        retryDelaySecs: consumer.retry_delay,
+      }).filter(([, value]) => value !== undefined)),
+    })),
+    criticalBindings: [
+      { id: PRODUCTION_DATABASE_ID, name: "PLATFORM_DB", type: "d1" },
+      { id: PRODUCTION_CACHE_KV_ID, name: "PLATFORM_CACHE", type: "kv_namespace" },
+      { id: PRODUCTION_SESSION_KV_ID, name: "SESSION", type: "kv_namespace" },
+      { id: "selinow-integration-production", name: "INTEGRATION_QUEUE", type: "queue" },
+      { id: "selinow-notification-production", name: "NOTIFICATION_QUEUE", type: "queue" },
+      { id: "selinow-media-production", name: "MEDIA", type: "r2_bucket" },
+      { id: "selinow-private-exports-production", name: "PRIVATE_EXPORTS", type: "r2_bucket" },
+    ].sort((left, right) => `${left.type}:${left.name}`.localeCompare(`${right.type}:${right.name}`)),
+    cron: "*/15 * * * *",
+    fallbackOrigin: "proxy-fallback.selinow.com",
+    manifestVersion: PRODUCTION_MANIFEST_VERSION,
+    platformTurnstileHostname: "selinow.com",
+    turnstileSiteKey: PRODUCTION_TURNSTILE_SITE_KEY,
+  };
+}
+
+function exactProductionLiveInfrastructure() {
+  const contract = productionLiveContract();
+  const customerHostname = "shop.customer.example";
+  const customerHostnameId = "custom-hostname-1";
+  return {
+    contract,
+    customDomainRows: [{
+      cloudflare_hostname_id: customerHostnameId,
+      delete_requested_at: null,
+      deleted_at: null,
+      dns_status: "active",
+      hostname_normalized: customerHostname,
+      hostname_status: "active",
+      is_primary: 1,
+      ownership_verified_at: "2026-08-11T00:00:00.000Z",
+      shop_id: "shop-1",
+      ssl_status: "active",
+      status: "active",
+      validation_metadata_json: JSON.stringify({
+        turnstile: {
+          checkedAt: "2026-08-11T00:00:00.000Z",
+          hostname: customerHostname,
+          mode: "operator_managed",
+          source: "cloudflare_widget_domains",
+          status: "active",
+        },
+      }),
+    }],
+    customHostnames: [{
+      hostname: customerHostname,
+      id: customerHostnameId,
+      ssl: { status: "active" },
+      status: "active",
+    }],
+    fallbackOrigin: { origin: contract.fallbackOrigin, status: "active" },
+    now: "2026-08-11T06:00:00.000Z",
+    queueConsumers: contract.consumers.map((consumer) => ({
+      consumers: [{ script: consumer.script, settings: consumer.settings }],
+      queue: consumer.queue,
+    })),
+    schedules: [{ cron: contract.cron }],
+    turnstileWidget: {
+      domains: [contract.platformTurnstileHostname, customerHostname],
+      sitekey: contract.turnstileSiteKey,
+    },
+    workerSettings: { bindings: exactProductionWorkerBindings() },
+  };
+}
+
 function exactSharedZoneRouteInventory() {
   return [
-    { pattern: "selinow.com/*", script: null },
-    { pattern: "*.selinow.com/*", script: null },
+    { pattern: "selinow.com/*", script: "selinow-com-production" },
+    { pattern: "*.selinow.com/*", script: "selinow-com-production" },
+    { pattern: "staging.selinow.com/*", script: stagingSpec.workerName },
+    { pattern: "app-staging.selinow.com/*", script: stagingSpec.workerName },
+    { pattern: "api-staging.selinow.com/*", script: stagingSpec.workerName },
     { pattern: stagingSpec.wildcardRoute, script: stagingSpec.workerName },
-    { pattern: "*/*", script: stagingSpec.workerName },
+    { pattern: "*/*", script: stagingSpec.productionWorkerName },
   ];
 }
 
@@ -179,7 +405,7 @@ function exactSharedZoneDomainInventory(includeCanaryCarrier = false) {
       zone_id: stagingSpec.zoneId,
       zone_name: stagingSpec.zoneName,
     })),
-    ...Object.values(production.hostnames).map((hostname) => ({
+    ...Object.values(production.hostnames).filter((hostname) => hostname !== production.hostnames.marketing).map((hostname) => ({
       hostname,
       service: production.workerName,
       zone_id: production.zoneId,
@@ -231,6 +457,44 @@ describe("platform CLI flags", () => {
       }],
       environment: "production",
       ok: false,
+    });
+  });
+
+  it("collapses child-process output before an operator CLI can print it", () => {
+    expect(() => run(process.execPath, [
+      "-e",
+      "process.stderr.write('DUMMY_SECRET_MARKER'); process.exit(1)",
+    ])).toThrow("command_failed");
+    try {
+      run(process.execPath, [
+        "-e",
+        "process.stderr.write('DUMMY_SECRET_MARKER'); process.exit(1)",
+      ]);
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("command_failed");
+      expect((error as Error).message).not.toContain("DUMMY_SECRET_MARKER");
+    }
+  });
+
+  it("preserves only an explicitly allowlisted single-line child failure code", () => {
+    expect(() => run(process.execPath, [
+      "-e",
+      "process.stderr.write('platform_child_admission_denied\\n'); process.exit(1)",
+    ], { capture: false, safeFailureCodes: ["platform_child_admission_denied"] }))
+      .toThrow("platform_child_admission_denied");
+
+    expect(() => run(process.execPath, [
+      "-e",
+      "process.stderr.write('platform_child_admission_denied\\nDUMMY_SECRET_MARKER'); process.exit(1)",
+    ], { safeFailureCodes: ["platform_child_admission_denied"] }))
+      .toThrow("command_failed");
+  });
+
+  it("runs the local doctor without requiring remote operator tokens", async () => {
+    await expect(doctor("local", { environment: {} })).resolves.toMatchObject({
+      environment: "local",
+      ok: true,
     });
   });
 });
@@ -287,13 +551,16 @@ describe("Cloudflare for SaaS platform configuration", () => {
     })).toThrow("cloudflare_staging_route_contract_invalid");
   });
 
-  it("accepts only the exact live guards, staging wildcard, and catch-all", () => {
+  it("accepts only the exact live production handoff", () => {
     const exactRoutes = exactStagingRouteInventory();
     const result = validateStagingRouteInventory(stagingSpec, exactRoutes);
     expect(result.ok).toBe(true);
     expect(result.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "cloudflare_staging_route_guard_apex", ok: true }),
       expect.objectContaining({ code: "cloudflare_staging_route_guard_wildcard", ok: true }),
+      expect.objectContaining({ code: "cloudflare_staging_route_exception_staging_selinow_com", ok: true }),
+      expect.objectContaining({ code: "cloudflare_staging_route_exception_app_staging_selinow_com", ok: true }),
+      expect.objectContaining({ code: "cloudflare_staging_route_exception_api_staging_selinow_com", ok: true }),
       expect.objectContaining({ code: "cloudflare_staging_route_wildcard", ok: true }),
       expect.objectContaining({ code: "cloudflare_staging_route_catch_all", ok: true }),
       expect.objectContaining({ code: "cloudflare_staging_route_script_binding", ok: true }),
@@ -321,6 +588,26 @@ describe("Cloudflare for SaaS platform configuration", () => {
     ))).ok).toBe(false);
     expect(validateStagingRouteInventory(stagingSpec, [...exactRoutes, exactRoutes[0]]).ok)
       .toBe(false);
+  });
+
+  it("rejects pre-handoff guards, missing exact exceptions, and bare custom-domain hosts", () => {
+    const handoffRoutes = exactStagingRouteInventory();
+    const preHandoffRoutes = handoffRoutes.map((route) => (
+      stagingSpec.sharedZoneDisabledRoutes.includes(route.pattern)
+        ? { ...route, script: null }
+        : route
+    ));
+    expect(validateStagingRouteInventory(stagingSpec, preHandoffRoutes).ok).toBe(false);
+
+    for (const pattern of stagingSpec.stagingRouteExceptions) {
+      expect(validateStagingRouteInventory(stagingSpec, handoffRoutes.filter((route) => (
+        route.pattern !== pattern
+      ))).ok).toBe(false);
+    }
+    expect(validateStagingRouteInventory(stagingSpec, [
+      ...handoffRoutes,
+      { pattern: "staging.selinow.com", script: stagingSpec.workerName },
+    ]).ok).toBe(false);
   });
 
   it("fails closed on extra or conflicting script-bound routes", () => {
@@ -475,22 +762,138 @@ describe("Cloudflare for SaaS platform configuration", () => {
         exactSharedZoneDomainInventory(),
       );
     }).toThrow("production_worker_route_contract_invalid");
+
+    const unexpectedConfig = productionWranglerConfig();
+    unexpectedConfig.env.production.routes.push({
+      pattern: "legacy.selinow.com/*",
+      zone_name: "selinow.com",
+    });
+    expect(() => {
+      validateProductionWorkerRouteInventory(
+        productionSpec(),
+        stagingSpec,
+        unexpectedConfig,
+        exactSharedZoneRouteInventory(),
+        exactSharedZoneDomainInventory(),
+      );
+    }).toThrow("production_worker_route_contract_invalid");
+
+    const ambiguousMarketingConfig = productionWranglerConfig();
+    ambiguousMarketingConfig.env.production.routes.push({
+      custom_domain: true,
+      pattern: "selinow.com",
+    });
+    expect(() => {
+      validateProductionWorkerRouteInventory(
+        productionSpec(),
+        stagingSpec,
+        ambiguousMarketingConfig,
+        exactSharedZoneRouteInventory(),
+        exactSharedZoneDomainInventory(),
+      );
+    }).toThrow("production_worker_route_contract_invalid");
   });
 
-  it("pins and rechecks production account, D1, routes, and Worker domains", async () => {
+  it("fails closed on binding, trigger, SaaS mapping, fallback, or Turnstile drift", () => {
+    const exact = exactProductionLiveInfrastructure();
+    expect(validateProductionLiveInfrastructure(exact)).toMatchObject({ ok: true });
+
+    const drifts = [
+      {
+        code: "cloudflare_production_worker_binding_inventory_allowlist",
+        input: {
+          ...exact,
+          workerSettings: {
+            bindings: exactProductionWorkerBindings().map((binding) => (
+              binding.name === "PLATFORM_CACHE"
+                ? { ...binding, namespace_id: PRODUCTION_SESSION_KV_ID }
+                : binding
+            )),
+          },
+        },
+      },
+      {
+        code: "cloudflare_production_queue_consumer_inventory_allowlist",
+        input: {
+          ...exact,
+          queueConsumers: exact.queueConsumers.map((entry, index) => index === 0
+            ? { ...entry, consumers: [...entry.consumers, entry.consumers[0]] }
+            : entry),
+        },
+      },
+      {
+        code: "cloudflare_production_schedule_inventory_allowlist",
+        input: { ...exact, schedules: [...exact.schedules, { cron: "0 * * * *" }] },
+      },
+      {
+        code: "cloudflare_production_saas_hostname_mapping",
+        input: {
+          ...exact,
+          customHostnames: [
+            ...exact.customHostnames,
+            {
+              hostname: "unknown.customer.example",
+              id: "unknown-hostname-id",
+              ssl: { status: "active" },
+              status: "active",
+            },
+          ],
+        },
+      },
+      {
+        code: "cloudflare_production_saas_fallback_origin",
+        input: { ...exact, fallbackOrigin: { origin: "wrong.selinow.com", status: "active" } },
+      },
+      {
+        code: "cloudflare_production_turnstile_hostname_allowlist",
+        input: {
+          ...exact,
+          turnstileWidget: {
+            ...exact.turnstileWidget,
+            domains: [exact.contract.platformTurnstileHostname],
+          },
+        },
+      },
+    ];
+
+    for (const drift of drifts) {
+      const result = validateProductionLiveInfrastructure(drift.input);
+      expect(result.ok, drift.code).toBe(false);
+      expect(result.checks).toContainEqual(expect.objectContaining({ code: drift.code, ok: false }));
+    }
+  });
+
+  it("pins and rechecks the exact production identity, bindings, triggers, SaaS inventory, and domains", async () => {
     const requestedUrls: string[] = [];
     const fetchImplementation: typeof fetch = (input, init) => {
       expect(init?.method ?? "GET").toBe("GET");
-      expect(init?.headers).toMatchObject({ Authorization: "Bearer route-audit-token" });
       const url = typeof input === "string"
         ? input
         : input instanceof URL
           ? input.href
           : input.url;
       requestedUrls.push(url);
+      const authorization = new Headers(init?.headers).get("Authorization");
+      if (url.endsWith("/workers/routes") || url.endsWith("/workers/domains")) {
+        expect(authorization).toBe("Bearer route-audit-token");
+      } else {
+        expect(authorization).toBe("Bearer promotion-audit-token");
+      }
       const result = url.endsWith("/workers/routes")
         ? exactSharedZoneRouteInventory()
-        : exactSharedZoneDomainInventory();
+        : url.endsWith("/workers/domains")
+          ? exactSharedZoneDomainInventory()
+          : url.endsWith("/settings")
+            ? { bindings: exactProductionWorkerBindings() }
+            : url.endsWith("/schedules")
+              ? [{ cron: "*/15 * * * *" }]
+              : url.includes("/custom_hostnames?")
+                ? []
+                : url.endsWith("/custom_hostnames/fallback_origin")
+                  ? { origin: "proxy-fallback.selinow.com", status: "active" }
+                  : url.includes("/challenges/widgets/")
+                    ? { domains: ["selinow.com"], sitekey: PRODUCTION_TURNSTILE_SITE_KEY }
+                    : null;
       return Promise.resolve(new Response(JSON.stringify({ result, success: true }), {
         status: 200,
       }));
@@ -507,6 +910,12 @@ describe("Cloudflare for SaaS platform configuration", () => {
       if (args[0] === "whoami") {
         return { stderr: "", stdout: JSON.stringify({ accounts: [{ id: stagingSpec.accountId }] }) };
       }
+      if (args[0] === "queues") {
+        return { stderr: "", stdout: JSON.stringify(exactProductionQueueConsumers(args[3] ?? "")) };
+      }
+      if (args[0] === "d1" && args[1] === "execute") {
+        return { stderr: "", stdout: JSON.stringify([{ results: [], success: true }]) };
+      }
       return {
         stderr: "",
         stdout: JSON.stringify([{
@@ -518,10 +927,13 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     await expect(assertProductionWorkerIdentityAdmission({
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+        CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: "promotion-audit-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
       },
       fetchImplementation,
+      productionManifest: productionManifest(),
       productionSpec: productionSpec(),
       runWranglerImplementation,
       stagingSpec,
@@ -537,11 +949,145 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(commands).toEqual([
       ["whoami", "--json"],
       ["d1", "list", "--env", "production", "--json"],
+      ["queues", "consumer", "list", "selinow-integration-production", "--env", "production", "--json"],
+      ["queues", "consumer", "list", "selinow-notification-production", "--env", "production", "--json"],
+      ["queues", "consumer", "list", "selinow-dlq-production", "--env", "production", "--json"],
+      expect.arrayContaining(["d1", "execute", "PLATFORM_DB", "--env", "production", "--remote", "--command"]),
     ]);
     expect(requestedUrls.sort()).toEqual([
+      `https://api.cloudflare.com/client/v4/accounts/${stagingSpec.accountId}/challenges/widgets/${PRODUCTION_TURNSTILE_SITE_KEY}`,
+      `https://api.cloudflare.com/client/v4/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/schedules`,
+      `https://api.cloudflare.com/client/v4/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/settings`,
       `https://api.cloudflare.com/client/v4/accounts/${stagingSpec.accountId}/workers/domains`,
+      `https://api.cloudflare.com/client/v4/zones/${stagingSpec.zoneId}/custom_hostnames/fallback_origin`,
+      `https://api.cloudflare.com/client/v4/zones/${stagingSpec.zoneId}/custom_hostnames?page=1&per_page=100`,
       `https://api.cloudflare.com/client/v4/zones/${stagingSpec.zoneId}/workers/routes`,
     ].sort());
+  });
+
+  it("uses the promotion audit token for the complete account-level production inventory", async () => {
+    const currentWorkerVersion = "11111111-1111-4111-8111-111111111111";
+    const candidateWorkerVersion = "22222222-2222-4222-8222-222222222222";
+    const rollbackWorkerVersion = "33333333-3333-4333-8333-333333333333";
+    const requests: Array<{ authorization: string; path: string }> = [];
+    const fetchImplementation: typeof fetch = (input, init) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+      requests.push({
+        authorization: init?.headers instanceof Headers
+          ? init.headers.get("Authorization") ?? ""
+          : new Headers(init?.headers).get("Authorization") ?? "",
+        path: url.replace("https://api.cloudflare.com/client/v4", ""),
+      });
+      let result: unknown;
+      if (url.endsWith("/workers/routes")) result = exactSharedZoneRouteInventory();
+      else if (url.endsWith("/workers/domains")) result = exactSharedZoneDomainInventory();
+      else if (url.endsWith("/settings")) result = { bindings: exactProductionWorkerBindings() };
+      else if (url.endsWith("/schedules")) result = [{ cron: "*/15 * * * *" }];
+      else if (url.includes("/custom_hostnames?")) result = [];
+      else if (url.endsWith("/custom_hostnames/fallback_origin")) {
+        result = { origin: "proxy-fallback.selinow.com", status: "active" };
+      } else if (url.includes("/challenges/widgets/")) {
+        result = { domains: ["selinow.com"], sitekey: PRODUCTION_TURNSTILE_SITE_KEY };
+      } else if (url.endsWith("/deployments")) {
+        result = {
+          deployments: [{
+            created_on: "2026-08-08T12:00:00.000Z",
+            id: "44444444-4444-4444-8444-444444444444",
+            versions: [{ percentage: 100, version_id: currentWorkerVersion }],
+          }],
+        };
+      } else {
+        result = { items: [{ id: candidateWorkerVersion }, { id: rollbackWorkerVersion }] };
+      }
+      return Promise.resolve(new Response(JSON.stringify({ result, success: true }), { status: 200 }));
+    };
+    const runWranglerImplementation = (args: string[]) => {
+      if (args[0] === "whoami") {
+        return { stderr: "", stdout: JSON.stringify({ accounts: [{ id: stagingSpec.accountId }] }) };
+      }
+      if (args[0] === "queues") {
+        return { stderr: "", stdout: JSON.stringify(exactProductionQueueConsumers(args[3] ?? "")) };
+      }
+      if (args[0] === "d1" && args[1] === "execute") {
+        return { stderr: "", stdout: JSON.stringify([{ results: [], success: true }]) };
+      }
+      return {
+        stderr: "",
+        stdout: JSON.stringify([{ name: "selinow-production", uuid: PRODUCTION_DATABASE_ID }]),
+      };
+    };
+
+    await expect(assertProductionWorkerIdentityAdmission({
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+        CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: "promotion-audit-token",
+      },
+      fetchImplementation,
+      productionManifest: productionManifest(),
+      productionSpec: productionSpec(),
+      requireCurrentWorkerVersion: true,
+      runWranglerImplementation,
+      stagingSpec,
+      wranglerConfig: productionWranglerConfig(),
+    })).resolves.toMatchObject({
+      currentWorkerVersion,
+      deployableWorkerVersionIds: [candidateWorkerVersion, rollbackWorkerVersion],
+    });
+
+    expect(requests).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        authorization: "Bearer route-audit-token",
+        path: `/zones/${stagingSpec.zoneId}/workers/routes`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer route-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/domains`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer promotion-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/deployments`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer promotion-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/versions?deployable=true`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer promotion-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/settings`,
+      }),
+      expect.objectContaining({
+        authorization: "Bearer promotion-audit-token",
+        path: `/accounts/${stagingSpec.accountId}/workers/scripts/selinow-com-production/schedules`,
+      }),
+    ]));
+  });
+
+  it("fails every production live admission when the promotion-read token is absent", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const input = {
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+      },
+      fetchImplementation,
+      productionManifest: productionManifest(),
+      productionSpec: productionSpec(),
+      runWranglerImplementation: vi.fn(),
+      stagingSpec,
+      wranglerConfig: productionWranglerConfig(),
+    };
+    await expect(assertProductionWorkerIdentityAdmission(input))
+      .rejects.toThrow("cloudflare_production_promotion_audit_api_token_missing");
+    await expect(assertProductionWorkerIdentityAdmission({
+      ...input,
+      requireCurrentWorkerVersion: true,
+    })).rejects.toThrow("cloudflare_production_promotion_audit_api_token_missing");
+    expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
   it("fails production Worker admission before route reads on missing token or D1 drift", async () => {
@@ -559,8 +1105,13 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(fetchImplementation).not.toHaveBeenCalled();
 
     await expect(assertProductionWorkerIdentityAdmission({
-      environment: { CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token" },
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: "promotion-audit-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+      },
       fetchImplementation,
+      productionManifest: productionManifest(),
       productionSpec: productionSpec(),
       runWranglerImplementation: (args) => args[0] === "whoami"
         ? { stderr: "", stdout: `Account ID: ${stagingSpec.accountId}` }
@@ -616,6 +1167,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     await expect(inspectStagingRoutePreflight({
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
       },
@@ -634,7 +1186,44 @@ describe("Cloudflare for SaaS platform configuration", () => {
       zoneName: stagingSpec.zoneName,
     });
     expect(commands).toEqual([
-      ["whoami"],
+      ["whoami", "--json"],
+      ["d1", "list", "--env", "staging", "--json"],
+    ]);
+  });
+
+  it("accepts scoped user tokens whose Wrangler account inventory is omitted", async () => {
+    const fetchImplementation: typeof fetch = () => Promise.resolve(new Response(JSON.stringify({
+      result: exactStagingRouteInventory(),
+      success: true,
+    }), { status: 200 }));
+    const runner = vi.fn((args: string[]) => {
+      if (args[0] === "whoami") {
+        return {
+          stderr: "",
+          stdout: JSON.stringify({ accounts: [], authType: "User API Token", loggedIn: true }),
+        };
+      }
+      return {
+        stderr: "",
+        stdout: JSON.stringify([{
+          name: stagingSpec.resources.d1,
+          uuid: STAGING_DATABASE_ID,
+        }]),
+      };
+    });
+
+    await expect(inspectStagingRoutePreflight({
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-audit-token",
+      },
+      fetchImplementation,
+      runWranglerImplementation: runner,
+      runtimeIdentityImplementation: stagingAdmissionFixtures.runtimeIdentityImplementation,
+      spec: stagingSpec,
+    })).resolves.toMatchObject({ ok: true });
+    expect(runner.mock.calls.map(([args]) => args)).toEqual([
+      ["whoami", "--json"],
       ["d1", "list", "--env", "staging", "--json"],
     ]);
   });
@@ -774,6 +1363,57 @@ describe("Cloudflare for SaaS platform configuration", () => {
     })).toThrow("staging_database_target_mismatch");
   });
 
+  it("binds production read-only database access to the generated manifest and Wrangler target", () => {
+    const productionSpec = {
+      accountId: stagingSpec.accountId,
+      environment: "production",
+      resources: { d1: "selinow-production" },
+      workerName: "selinow-com-production",
+      zoneId: stagingSpec.zoneId,
+      zoneName: stagingSpec.zoneName,
+    };
+    const manifest = {
+      accountId: productionSpec.accountId,
+      environment: productionSpec.environment,
+      resources: {
+        d1: { id: PRODUCTION_DATABASE_ID, name: productionSpec.resources.d1 },
+      },
+      version: PRODUCTION_MANIFEST_VERSION,
+      workerName: productionSpec.workerName,
+      zoneId: productionSpec.zoneId,
+      zoneName: productionSpec.zoneName,
+    };
+    const database = {
+      binding: "PLATFORM_DB",
+      database_id: PRODUCTION_DATABASE_ID,
+      database_name: productionSpec.resources.d1,
+      migrations_dir: "./migrations",
+    };
+    const wranglerConfig = {
+      env: {
+        production: {
+          d1_databases: [database],
+          name: productionSpec.workerName,
+          vars: { RESOURCE_MANIFEST_VERSION: manifest.version },
+        },
+      },
+    };
+
+    expect(validateRemoteDatabaseTarget(productionSpec, manifest, wranglerConfig)).toEqual({
+      accountId: productionSpec.accountId,
+      databaseId: PRODUCTION_DATABASE_ID,
+      databaseName: productionSpec.resources.d1,
+    });
+    expect(() => validateRemoteDatabaseTarget(productionSpec, manifest, {
+      env: {
+        production: {
+          ...wranglerConfig.env.production,
+          d1_databases: [{ ...database, database_name: stagingSpec.resources.d1 }],
+        },
+      },
+    })).toThrow("remote_database_target_mismatch");
+  });
+
   it("requires exactly one live D1 name and UUID match", () => {
     const exactDatabase = { name: stagingSpec.resources.d1, uuid: STAGING_DATABASE_ID };
     expect(() => {
@@ -823,7 +1463,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     })).rejects.toThrow("staging_database_identity_mismatch");
     expect(fetchImplementation).not.toHaveBeenCalled();
     expect(runner.mock.calls.map(([args]) => args.slice(0, 2))).toEqual([
-      ["whoami"],
+      ["whoami", "--json"],
       ["d1", "list"],
     ]);
   });
@@ -832,7 +1472,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: stagingSpec.accountId,
-        KEEP_ME: "safe",
+        CLOUDFLARE_API_TOKEN: "d1-token",
       });
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_PLATFORM_API_TOKEN");
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
@@ -856,9 +1496,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
     await expect(assertStagingMutationAdmission({
       ...stagingAdmissionFixtures,
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       fetchImplementation,
       runWranglerImplementation: runner,
@@ -867,7 +1508,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(runner).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps operator tokens out of every full-doctor Wrangler subprocess", async () => {
+  it("keeps the D1 token in Wrangler while using the platform token for SaaS API checks", async () => {
     const spec = JSON.parse(
       await readFile(new URL("../../infra/environments/staging.json", import.meta.url), "utf8"),
     ) as PlatformEnvironmentSpec & {
@@ -918,7 +1559,8 @@ describe("Cloudflare for SaaS platform configuration", () => {
         stdout: JSON.stringify([{ name: "CLOUDFLARE_API_TOKEN" }]),
       };
     };
-    const fetchImplementation: typeof fetch = (input) => {
+    const saasAuthorizationHeaders: string[] = [];
+    const fetchImplementation: typeof fetch = (input, init) => {
       const url = typeof input === "string"
         ? input
         : input instanceof URL
@@ -927,20 +1569,26 @@ describe("Cloudflare for SaaS platform configuration", () => {
       if (url.endsWith("/workers/routes")) {
         return Promise.resolve(new Response(JSON.stringify({
           result: [
-            { pattern: "selinow.com/*", script: null },
-            { pattern: "*.selinow.com/*", script: null },
+            { pattern: "selinow.com/*", script: spec.productionWorkerName },
+            { pattern: "*.selinow.com/*", script: spec.productionWorkerName },
+            ...spec.stagingRouteExceptions.filter((pattern) => pattern !== spec.wildcardRoute)
+              .map((pattern) => ({ pattern, script: spec.workerName })),
             { pattern: spec.wildcardRoute, script: spec.workerName },
-            { pattern: "*/*", script: spec.workerName },
+            { pattern: "*/*", script: spec.productionWorkerName },
           ],
           success: true,
         }), { status: 200 }));
       }
       if (url.includes("/dns_records?")) {
+        saasAuthorizationHeaders.push(String(new Headers(init?.headers).get("authorization")));
         const requestedName = new URL(url).searchParams.get("name");
         const record = spec.saas.dnsRecords.find((candidate) => candidate.name === requestedName);
         return Promise.resolve(new Response(JSON.stringify({ result: [record], success: true }), {
           status: 200,
         }));
+      }
+      if (url.includes("/custom_hostnames/fallback_origin")) {
+        saasAuthorizationHeaders.push(String(new Headers(init?.headers).get("authorization")));
       }
       return Promise.resolve(new Response(JSON.stringify({
         result: { origin: spec.saas.fallbackOrigin, status: "active" },
@@ -950,9 +1598,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     await expect(doctor("staging", {
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       fetchImplementation,
       runWranglerImplementation: runner,
@@ -961,10 +1610,96 @@ describe("Cloudflare for SaaS platform configuration", () => {
     expect(observedEnvironments.length).toBeGreaterThan(0);
     expect(observedEnvironments.every((environment) => (
       environment.CLOUDFLARE_ACCOUNT_ID === spec.accountId
-      && environment.KEEP_ME === "safe"
+      && environment.CLOUDFLARE_API_TOKEN === "d1-token"
+      && environment.KEEP_ME === undefined
       && !Object.prototype.hasOwnProperty.call(environment, "CLOUDFLARE_PLATFORM_API_TOKEN")
       && !Object.prototype.hasOwnProperty.call(environment, "CLOUDFLARE_ROUTE_AUDIT_API_TOKEN")
     ))).toBe(true);
+    expect(saasAuthorizationHeaders.length).toBeGreaterThan(0);
+    expect(saasAuthorizationHeaders.every((header) => header === "Bearer platform-token")).toBe(true);
+  });
+
+  it("reports the failing Wrangler inventory role without collapsing to command_failed", async () => {
+    const spec = JSON.parse(
+      await readFile(new URL("../../infra/environments/staging.json", import.meta.url), "utf8"),
+    ) as PlatformEnvironmentSpec;
+    const observedTokens = new Map<string, string | undefined>();
+    const runner = (args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      observedTokens.set(args.slice(0, 3).join(" "), options?.env?.CLOUDFLARE_API_TOKEN);
+      if (args[0] === "whoami") {
+        return { stderr: "", stdout: `Account ID: ${spec.accountId}` };
+      }
+      if (args[0] === "d1") {
+        return { stderr: "", stdout: JSON.stringify([{ name: spec.resources.d1 }]) };
+      }
+      if (args[0] === "kv") {
+        throw new Error("command_failed:provider-output-must-stay-private");
+      }
+      if (args[0] === "r2") return { stderr: "", stdout: "" };
+      if (args[0] === "queues") return { stderr: "", stdout: "" };
+      return { stderr: "", stdout: "[]" };
+    };
+    const fetchImplementation: typeof fetch = (input) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+      if (url.includes("/dns_records?")) {
+        const requestedName = new URL(url).searchParams.get("name");
+        const record = spec.saas.dnsRecords.find((candidate) => candidate.name === requestedName);
+        return Promise.resolve(new Response(JSON.stringify({ result: [record], success: true }), { status: 200 }));
+      }
+      if (url.includes("/custom_hostnames/fallback_origin")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          result: { origin: spec.saas.fallbackOrigin, status: "active" },
+          success: true,
+        }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ result: [], success: true }), { status: 200 }));
+    };
+
+    const result = await doctor("staging", {
+      environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
+        CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+        CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
+        CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN: "resource-audit-token",
+      },
+      fetchImplementation,
+      runWranglerImplementation: runner,
+      spec,
+    });
+
+    expect(result.checks).toContainEqual({
+      code: "cloudflare_kv_inventory_api",
+      detail: "Wrangler KV inventory failed using CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN",
+      ok: false,
+    });
+    expect(JSON.stringify(result)).not.toContain("provider-output-must-stay-private");
+    expect(observedTokens.get("whoami --json")).toBe("d1-token");
+    expect(observedTokens.get("d1 list --json")).toBe("d1-token");
+    expect(observedTokens.get("kv namespace list")).toBe("resource-audit-token");
+  });
+
+  it("maps an optional resource-audit token without forwarding operator credentials", () => {
+    expect(buildCloudflareResourceAuditEnvironment({
+      CLOUDFLARE_D1_API_TOKEN: "d1-token",
+      CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
+      CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN: " resource-audit-token ",
+      KEEP_ME: "must-not-forward",
+      PATH: "/bin",
+    }, stagingSpec.accountId)).toEqual({
+      CLOUDFLARE_ACCOUNT_ID: stagingSpec.accountId,
+      CLOUDFLARE_API_TOKEN: "resource-audit-token",
+      PATH: "/bin",
+    });
+    expect(buildCloudflareResourceAuditEnvironment({
+      CLOUDFLARE_D1_API_TOKEN: "d1-token",
+    }, stagingSpec.accountId)).toMatchObject({
+      CLOUDFLARE_API_TOKEN: "d1-token",
+    });
   });
 
   it("fails closed without exposing Wrangler account output", async () => {
@@ -978,7 +1713,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     })).rejects.toThrow("staging_account_identity_unavailable");
   });
 
-  it("pins staging child commands without forwarding temporary operator tokens", () => {
+  it("requires and maps the dedicated D1 token for pinned Wrangler commands", () => {
     expect(() => {
       assertStagingAccountIdentity(
         `Account ID: ${stagingSpec.accountId}`,
@@ -986,13 +1721,23 @@ describe("Cloudflare for SaaS platform configuration", () => {
       );
     }).not.toThrow();
 
+    expect(() => requireCloudflareD1Token({})).toThrow("cloudflare_d1_api_token_missing");
+    expect(requireCloudflareD1Token({
+      CLOUDFLARE_D1_API_TOKEN: " d1-token ",
+    })).toBe("d1-token");
+    expect(() => buildPinnedCloudflareEnvironment({
+      CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
+      CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
+    }, stagingSpec.accountId)).toThrow("cloudflare_d1_api_token_missing");
     expect(buildPinnedCloudflareEnvironment({
       CLOUDFLARE_PLATFORM_API_TOKEN: "platform-token",
       CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "route-token",
-      KEEP_ME: "safe",
+      CLOUDFLARE_D1_API_TOKEN: "d1-token",
+      PATH: "/bin",
     }, stagingSpec.accountId)).toEqual({
       CLOUDFLARE_ACCOUNT_ID: stagingSpec.accountId,
-      KEEP_ME: "safe",
+      CLOUDFLARE_API_TOKEN: "d1-token",
+      PATH: "/bin",
     });
   });
 
@@ -1077,6 +1822,13 @@ describe("Cloudflare for SaaS platform configuration", () => {
       SAAS_CNAME_TARGET: stagingSpec.saas.cnameTarget,
     });
     expect(wranglerConfig.env.staging.routes).toEqual(buildStagingRoutes(stagingSpec));
+    expect(wranglerConfig.env.staging.routes.filter((route) => route.custom_domain !== true))
+      .toEqual([
+        { pattern: "staging.selinow.com/*", zone_name: "selinow.com" },
+        { pattern: "app-staging.selinow.com/*", zone_name: "selinow.com" },
+        { pattern: "api-staging.selinow.com/*", zone_name: "selinow.com" },
+        { pattern: "*.staging.selinow.com/*", zone_name: "selinow.com" },
+      ]);
     expect(wranglerConfig.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(wranglerConfig.queues).toEqual(buildQueueBindings({
       deadLetterQueue: "selinow-dlq-local",
@@ -1210,10 +1962,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
       await readFile(new URL("../../infra/environments/staging.json", import.meta.url), "utf8"),
     ) as PlatformEnvironmentSpec;
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
-      expect(args).toEqual(["whoami"]);
+      expect(args).toEqual(["whoami", "--json"]);
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: specification.accountId,
-        KEEP_ME: "safe",
+        CLOUDFLARE_API_TOKEN: "d1-token",
       });
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_PLATFORM_API_TOKEN");
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
@@ -1222,9 +1974,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     await expect(provision("staging", true, {
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "temporary-platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "temporary-route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       platformToken: "platform-token",
       runWranglerImplementation: runner,
@@ -1245,7 +1998,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: specification.accountId,
-        KEEP_ME: "safe",
+        CLOUDFLARE_API_TOKEN: "d1-token",
       });
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_PLATFORM_API_TOKEN");
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
@@ -1311,9 +2064,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     const result = await provision("staging", true, {
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "temporary-platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "temporary-route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       fetchImplementation,
       platformToken: "platform-token",
@@ -1343,7 +2097,7 @@ describe("Cloudflare for SaaS platform configuration", () => {
     const runner = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       expect(options?.env).toMatchObject({
         CLOUDFLARE_ACCOUNT_ID: specification.accountId,
-        KEEP_ME: "safe",
+        CLOUDFLARE_API_TOKEN: "d1-token",
       });
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_PLATFORM_API_TOKEN");
       expect(options?.env).not.toHaveProperty("CLOUDFLARE_ROUTE_AUDIT_API_TOKEN");
@@ -1443,9 +2197,10 @@ describe("Cloudflare for SaaS platform configuration", () => {
 
     const result = await provision("staging", false, {
       environment: {
+        CLOUDFLARE_D1_API_TOKEN: "d1-token",
         CLOUDFLARE_PLATFORM_API_TOKEN: "temporary-platform-token",
         CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: "temporary-route-token",
-        KEEP_ME: "safe",
+        KEEP_ME: "must-not-forward",
       },
       fetchImplementation,
       platformToken: "platform-token",
@@ -1483,5 +2238,39 @@ describe("Cloudflare for SaaS platform configuration", () => {
       CLOUDFLARE_ROUTE_AUDIT_API_TOKEN: " route-audit-token ",
     }))
       .toBe("route-audit-token");
+    expect(() => requireCloudflareWorkerDeployToken({}))
+      .toThrow("cloudflare_worker_deploy_api_token_missing");
+    expect(requireCloudflareWorkerDeployToken({
+      CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: " worker-deploy-token ",
+    }))
+      .toBe("worker-deploy-token");
+  });
+
+  it("keeps builds and Worker sinks on explicit environment allowlists", () => {
+    const accountId = "abcdef0123456789abcdef0123456789";
+    const source = {
+      CLOUDFLARE_API_TOKEN: "ambient-token",
+      CLOUDFLARE_D1_API_TOKEN: "d1-token",
+      CLOUDFLARE_OAUTH_TOKEN: "ambient-oauth",
+      CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: "dedicated-deploy-token",
+      DODO_PAYMENTS_API_KEY: "provider-secret",
+      NODE_OPTIONS: "--require=operator-hook",
+      PATH: "/bin",
+      RELEASE_OPERATOR_NOTE: "must-not-forward",
+    };
+    const build = buildWorkerBuildEnvironment(source, "production");
+    expect(build).toMatchObject({ CI: "1", CLOUDFLARE_ENV: "production", PATH: "/bin" });
+    expect(build).not.toHaveProperty("CLOUDFLARE_API_TOKEN");
+    expect(build).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
+    expect(build).not.toHaveProperty("DODO_PAYMENTS_API_KEY");
+    expect(build).not.toHaveProperty("NODE_OPTIONS");
+    expect(build).not.toHaveProperty("RELEASE_OPERATOR_NOTE");
+
+    const sink = buildWorkerDeployEnvironment(source, accountId);
+    expect(sink).toMatchObject({ CLOUDFLARE_ACCOUNT_ID: accountId, CLOUDFLARE_API_TOKEN: "dedicated-deploy-token" });
+    expect(sink).not.toHaveProperty("CLOUDFLARE_WORKER_DEPLOY_API_TOKEN");
+    expect(sink).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
+    expect(sink).not.toHaveProperty("CLOUDFLARE_OAUTH_TOKEN");
+    expect(sink).not.toHaveProperty("DODO_PAYMENTS_API_KEY");
   });
 });

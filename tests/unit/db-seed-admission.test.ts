@@ -12,6 +12,7 @@ const DATABASE_ID = "17ea8f2f-4c97-4337-8989-28b25a58ddeb";
 
 const originalArgv = [...process.argv];
 const originalExitCode = process.exitCode;
+const originalD1OperatorToken = process.env.CLOUDFLARE_D1_API_TOKEN;
 
 type AdmissionResult = {
   accountId: string;
@@ -47,8 +48,11 @@ async function runDatabaseCli(input: {
   const runner = vi.fn(input.runner);
   vi.doMock("../../scripts/lib/db-admission.mjs", () => {
     return {
+      assertProductionDatabasePreflight: vi.fn(() => ({ checks: [], ok: true })),
+      assertProductionMigrationLedger: vi.fn(() => Promise.resolve({ migrationNames: [] })),
       assertProductionMigrationAdmission: admission,
       parseDatabaseFlags,
+      requiresMaintenanceDrainConfirmation: vi.fn(() => false),
       requiresProductionMigrationAdmission,
       requiresStagingDatabaseAdmission,
     };
@@ -59,6 +63,13 @@ async function runDatabaseCli(input: {
       writeOutput: vi.fn(),
     };
   });
+  vi.doMock("../../scripts/lib/db-post-migration-contract.mjs", () => ({
+    assertRemotePostMigrationContract: vi.fn(() => ({ ok: true })),
+  }));
+  const invariant = vi.fn(() => ({ ok: true }));
+  vi.doMock("../../scripts/lib/release.mjs", () => ({
+    assertProductionDatabaseInvariantContract: invariant,
+  }));
 
   process.argv = [
     process.execPath,
@@ -71,17 +82,22 @@ async function runDatabaseCli(input: {
     ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
   ];
   const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  process.env.CLOUDFLARE_D1_API_TOKEN = "d1-token";
   await import("../../scripts/db.mjs");
-  return { admission, runner, stderr, status: process.exitCode };
+  return { admission, invariant, runner, stderr, status: process.exitCode };
 }
 
 afterEach(() => {
   process.argv = [...originalArgv];
   process.exitCode = originalExitCode;
+  if (originalD1OperatorToken === undefined) delete process.env.CLOUDFLARE_D1_API_TOKEN;
+  else process.env.CLOUDFLARE_D1_API_TOKEN = originalD1OperatorToken;
   vi.restoreAllMocks();
   vi.resetModules();
   vi.doUnmock("../../scripts/lib/db-admission.mjs");
   vi.doUnmock("../../scripts/lib/cli.mjs");
+  vi.doUnmock("../../scripts/lib/db-post-migration-contract.mjs");
+  vi.doUnmock("../../scripts/lib/release.mjs");
 });
 
 describe("production seed admission CLI", () => {
@@ -115,6 +131,7 @@ describe("production seed admission CLI", () => {
       manifestPath: ".wrangler/releases/release_20260729_abcdef12/release-manifest.json",
     }));
     expect(result.runner).toHaveBeenCalledOnce();
+    expect(result.invariant).toHaveBeenCalledOnce();
     const [runnerArgs, runnerOptions] = result.runner.mock.calls[0] ?? [];
     expect(runnerArgs).toEqual([
       "d1",
@@ -127,5 +144,7 @@ describe("production seed admission CLI", () => {
       "./seeds/0001_platform_defaults.sql",
     ]);
     expect(runnerOptions?.env?.CLOUDFLARE_ACCOUNT_ID).toBe(ACCOUNT_ID);
+    expect(runnerOptions?.env?.CLOUDFLARE_API_TOKEN).toBe("d1-token");
+    expect(runnerOptions?.env).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
   });
 });

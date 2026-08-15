@@ -1,0 +1,29 @@
+---
+import PlatformLayout from "../layouts/PlatformLayout.astro";
+import MarketingHeader from "../components/marketing/MarketingHeader.astro";
+import MarketingFooter from "../components/marketing/MarketingFooter.astro";
+import PublicationGate from "../components/marketing/PublicationGate.astro";
+import { getBindings } from "../lib/platform/bindings";
+import { normalizeSupportedLocale } from "../lib/i18n/locale";
+
+const env = getBindings();
+const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
+Astro.response.headers.set("Cache-Control", "public, max-age=300");
+---
+
+<PlatformLayout
+  title="Privacy status | Selinow"
+  description="Publication status of Selinow privacy policy and data governance terms."
+  locale={locale}
+  canonical="https://selinow.com/privacy"
+>
+  <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  <PublicationGate
+    eyebrow="PRIVACY STATUS"
+    title="Policy publication is blocked."
+    detail="Selinow has not published owner-approved privacy terms, retention periods, contact details, or data-subject instructions on this surface."
+    aside="Owner approval and legal review are required before this page can state policy or accept privacy requests."
+    locale={locale}
+  />
+  <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+</PlatformLayout>

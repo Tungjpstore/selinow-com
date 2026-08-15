@@ -52,10 +52,22 @@ export async function verifyPayOSWebhook(data: Record<string, unknown>, signatur
 
 export class PayOSProviderError extends AppError {
   readonly providerStatus: number;
-  constructor(code: string, status = 503, providerStatus = 0) {
+  readonly writeOutcome: "ambiguous" | "definitive_rejection" | "not_applicable";
+
+  constructor(
+    code: string,
+    status = 503,
+    providerStatus = 0,
+    writeOutcome: "ambiguous" | "definitive_rejection" | "not_applicable" = "not_applicable",
+  ) {
     super(code, status);
     this.providerStatus = providerStatus;
+    this.writeOutcome = writeOutcome;
   }
+}
+
+export function isDefinitivePayOSWebhookRejection(error: unknown): boolean {
+  return error instanceof PayOSProviderError && error.writeOutcome === "definitive_rejection";
 }
 
 type PayOSEnvelope = { code: string; data?: unknown; desc?: string; signature?: string };
@@ -72,8 +84,24 @@ async function readBoundedJson(response: Response): Promise<PayOSEnvelope> {
   }
 }
 
+function invalidProviderWriteResponse(): PayOSProviderError {
+  return new PayOSProviderError("provider_response_invalid", 503, 200, "ambiguous");
+}
+
 export type PaymentLinkResponse = { accountName: string; accountNumber: string; amount: number; bin: string; checkoutUrl: string; currency: string; description: string; orderCode: number; paymentLinkId: string; qrCode: string; status: string };
 export type PaymentLinkStatusResponse = { amount: number; amountPaid: number; amountRemaining: number; canceledAt?: string | null; currency: string; description: string; id: string; orderCode: number; status: string; transactions: Array<Record<string, unknown>> };
+
+function parseConfirmedWebhook(value: unknown, expectedUrl: string): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw invalidProviderWriteResponse();
+  }
+  const row = value as Record<string, unknown>;
+  const requiredFields = ["accountName", "accountNumber", "name", "shortName", "webhookUrl"] as const;
+  if (requiredFields.some((field) => typeof row[field] !== "string" || row[field].length === 0)
+    || row.webhookUrl !== expectedUrl) {
+    throw invalidProviderWriteResponse();
+  }
+}
 
 export class PayOSClient {
   readonly credentials: PayOSCredentials;
@@ -84,7 +112,7 @@ export class PayOSClient {
     this.fetcher = fetcher;
   }
 
-  private async request(method: string, path: string, body?: Record<string, unknown>, verifyResponse = false): Promise<unknown> {
+  private async request(method: string, path: string, body?: Record<string, unknown>, verifyResponse = false, providerWrite = false): Promise<unknown> {
     const fetcher = this.fetcher;
     let response: Response;
     try {
@@ -95,10 +123,29 @@ export class PayOSClient {
         signal: AbortSignal.timeout(8_000),
       });
     } catch {
-      throw new PayOSProviderError("provider_timeout");
+      throw new PayOSProviderError("provider_timeout", 503, 0, providerWrite ? "ambiguous" : "not_applicable");
     }
-    const envelope = await readBoundedJson(response);
-    if (!response.ok || envelope.code !== "00" || envelope.data === undefined) throw new PayOSProviderError("provider_rejected", response.status >= 500 ? 503 : 409, response.status);
+    let envelope: PayOSEnvelope;
+    try {
+      envelope = await readBoundedJson(response);
+    } catch (error) {
+      if (!providerWrite || !(error instanceof PayOSProviderError)) throw error;
+      throw new PayOSProviderError(error.code, error.status, response.status, "ambiguous");
+    }
+    if (!response.ok || envelope.code !== "00" || envelope.data === undefined) {
+      const definitiveRejection = providerWrite
+        && response.status >= 400
+        && response.status < 500
+        && response.status !== 408
+        && response.status !== 425
+        && response.status !== 429;
+      throw new PayOSProviderError(
+        "provider_rejected",
+        response.status >= 500 ? 503 : 409,
+        response.status,
+        definitiveRejection ? "definitive_rejection" : providerWrite ? "ambiguous" : "not_applicable",
+      );
+    }
     if (verifyResponse) {
       if (typeof envelope.signature !== "string" || typeof envelope.data !== "object" || envelope.data === null || Array.isArray(envelope.data) || !await verifyPayOSWebhook(envelope.data as Record<string, unknown>, envelope.signature, this.credentials.checksumKey)) throw new PayOSProviderError("provider_signature_invalid");
     }
@@ -106,7 +153,8 @@ export class PayOSClient {
   }
 
   async confirmWebhook(webhookUrl: string): Promise<void> {
-    await this.request("POST", "/confirm-webhook", { webhookUrl });
+    const data = await this.request("POST", "/confirm-webhook", { webhookUrl }, false, true);
+    parseConfirmedWebhook(data, webhookUrl);
   }
 
   async createPaymentLink(input: { amount: number; cancelUrl: string; description: string; expiredAt: number; orderCode: number; returnUrl: string }): Promise<PaymentLinkResponse> {

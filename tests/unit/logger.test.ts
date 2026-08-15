@@ -32,6 +32,8 @@ describe("safe structured logger", () => {
       event: "http.request_completed",
       metrics: {
         accountNumber: 123456,
+        licenseCount: 4,
+        payloadBytes: 512,
         processed: 2,
         webhookSignatureCount: 1,
       },

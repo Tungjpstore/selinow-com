@@ -1,0 +1,177 @@
+---
+import MarketingHeader from "../../components/marketing/MarketingHeader.astro";
+import MarketingFooter from "../../components/marketing/MarketingFooter.astro";
+import SolutionDiagram from "../../components/marketing/SolutionDiagram.astro";
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import { getBindings } from "../../lib/platform/bindings";
+import { getSolutionNotFound, getSolutionPage, getSolutionsHub, solutionSlugs } from "../../lib/content/solutions";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { classifyPlatformHost } from "../../lib/storefront/routing";
+
+const env = getBindings();
+const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
+const slug = Astro.params.slug ?? "";
+const content = getSolutionPage(slug, locale);
+const hub = getSolutionsHub(locale);
+const notFound = getSolutionNotFound(locale);
+const validHost = classifyPlatformHost(new URL(Astro.request.url).hostname, env) === "marketing";
+const canonical = `https://selinow.com/solutions/${slug}`;
+const localizedPath = (pathname: string): string => locale === "en" ? pathname : `${pathname}?lang=${locale}`;
+
+if (!validHost || content === null) {
+  Astro.response.status = 404;
+  Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+}
+
+const structuredData = content === null || !validHost ? undefined : {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": `${canonical}#webpage`,
+      name: content.seoTitle,
+      description: content.seoDescription,
+      url: canonical,
+      dateModified: "2026-08-02",
+      inLanguage: locale,
+      isPartOf: { "@type": "WebSite", name: "Selinow", url: "https://selinow.com/" },
+    },
+    {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Selinow", item: "https://selinow.com/" },
+        { "@type": "ListItem", position: 2, name: hub.solutionsLabel, item: "https://selinow.com/solutions" },
+        { "@type": "ListItem", position: 3, name: content.title, item: canonical },
+      ],
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: content.faq.map((item) => ({
+        "@type": "Question",
+        name: item.question,
+        acceptedAnswer: { "@type": "Answer", text: item.answer },
+      })),
+    },
+  ],
+};
+---
+
+<PlatformLayout
+  title={content?.seoTitle ?? notFound.title}
+  description={content?.seoDescription ?? notFound.description}
+  locale={locale}
+  canonical={canonical}
+  noindex={!validHost || content === null}
+  structuredData={structuredData}
+>
+  {validHost && content ? <>
+    <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+    <main id="main-content" class="solution-page">
+      <section class="solution-hero platform-shell kit-section-dense">
+        <div class="solution-hero-copy">
+          <a class="solution-breadcrumb" href={localizedPath("/solutions")}>
+            <span aria-hidden="true">←</span> {hub.solutionsLabel} <span aria-hidden="true">/</span> {content.eyebrow}
+          </a>
+          <p class="section-eyebrow">{content.eyebrow}</p>
+          <h1 class="hero-headline">{content.title}</h1>
+          <p class="hero-lead">{content.lead}</p>
+          <div class="landing-actions">
+            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+              <span>{content.cta}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+            <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
+          </div>
+        </div>
+        <aside class="solution-signal" aria-label={content.answerLabel}>
+          <span class="solution-signal-index" aria-hidden="true">01</span>
+          <p>{content.answerLabel}</p>
+          <strong>{content.answer}</strong>
+          <small>Selinow OS / {content.slug}</small>
+        </aside>
+      </section>
+
+      <section class="kit-section platform-shell" aria-labelledby="solution-proof-title">
+        <div class="kit-section-heading">
+          <p class="kit-kicker">{content.proofLabel}</p>
+          <h2 class="section-title" id="solution-proof-title">{hub.proofTitle}</h2>
+        </div>
+        <ul class="solution-proof-grid">
+          {content.proof.map((item, index) => (
+            <li>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              {item}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section class="kit-section workflow-section" aria-labelledby="solution-workflow-title">
+        <div class="platform-shell">
+          <div class="kit-section-heading kit-section-heading-centered">
+            <p class="kit-kicker">{content.workflowLabel}</p>
+            <h2 class="section-title" id="solution-workflow-title">{content.workflowTitle}</h2>
+          </div>
+
+          <SolutionDiagram slug={content.slug} locale={locale} />
+
+          <ol class="solution-steps">
+            {content.workflow.map((step, index) => (
+              <li>
+                <span class="solution-step-number">{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <h3>{step.title}</h3>
+                  <p>{step.description}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section class="kit-section platform-shell" aria-labelledby="solution-faq-title">
+        <div class="kit-section-heading kit-section-heading-centered">
+          <p class="kit-kicker">{content.faqLabel}</p>
+          <h2 class="section-title" id="solution-faq-title">{content.faqTitle}</h2>
+        </div>
+        <div class="solution-faq-list">
+          {content.faq.map((item) => (
+            <details>
+              <summary>
+                <span>{item.question}</span>
+                <span aria-hidden="true">+</span>
+              </summary>
+              <p>{item.answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+
+      <section class="kit-section platform-shell" aria-labelledby="solution-related-title">
+        <div class="kit-section-heading">
+          <p class="kit-kicker">{content.relatedLabel}</p>
+          <h2 class="section-title" id="solution-related-title">{hub.relatedTitle}</h2>
+        </div>
+        <div class="solution-related-grid">
+          {solutionSlugs.filter((item) => item !== content.slug).map((item) => {
+            const related = getSolutionPage(item, locale);
+            return related === null ? null : (
+              <a href={localizedPath(`/solutions/${item}`)}>
+                <span>{related.eyebrow}</span>
+                <strong>{related.title}</strong>
+                <b aria-hidden="true">↗</b>
+              </a>
+            );
+          })}
+          <a href={localizedPath("/")} class="solution-related-home">
+            <span>{hub.relatedHomeLabel}</span>
+            <strong>{hub.relatedHomeTitle}</strong>
+            <b aria-hidden="true">↗</b>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
+</PlatformLayout>

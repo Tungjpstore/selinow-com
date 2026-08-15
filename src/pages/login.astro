@@ -1,15 +1,24 @@
 ---
 import "../styles/selinow-tokens.css";
 import "../styles/selinow-a11y.css";
+import "../styles/marketing/tokens.css";
+import ProductFlowIllustration from "../components/marketing/ProductFlowIllustration.astro";
 import { authenticateRequest } from "../lib/auth/session";
 import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
 
+const env = getBindings();
+if (Astro.url.origin !== env.DASHBOARD_ORIGIN) {
+  const canonicalLogin = new URL("/login", env.DASHBOARD_ORIGIN);
+  canonicalLogin.search = Astro.url.search;
+  return Astro.redirect(canonicalLogin.toString(), 308);
+}
+
 try {
-  await authenticateRequest(Astro.request, getBindings());
-  return Astro.redirect("/app");
+  await authenticateRequest(Astro.request, env);
+  return Astro.redirect("/app", 302);
 } catch {
-  // Anonymous visitors continue to the login form.
+  // Anonymous visitors continue to login form
 }
 
 Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
@@ -31,58 +40,358 @@ const t = createSystemTranslator(locale);
   </head>
   <body>
     <a class="selinow-skip-link" href="#main-content">{t("auth.login.skip")}</a>
-    <main id="main-content" class="selinow-focus-target" tabindex="-1">
-      <a class="brand" href="/" aria-label={t("auth.login.brand_aria")}><img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="152" height="40" /></a>
-      <section class="login-panel" aria-labelledby="login-title">
-        <div class="login-heading"><p class="eyebrow">{t("auth.login.eyebrow")}</p><h1 id="login-title">{t("auth.login.heading")}</h1><p>{t("auth.login.intro")}</p></div>
-        <form id="login-form" data-login-form>
-          <label for="email">{t("auth.login.email_label")}</label>
-          <input id="email" name="email" type="email" inputmode="email" autocomplete="email" required maxlength="254" aria-describedby="email-help status" data-login-email />
-          <p class="field-help" id="email-help">{t("auth.login.email_help")}</p>
-          <label for="display-name">{t("auth.login.display_name_label")} <span>{t("auth.login.optional")}</span></label>
-          <input id="display-name" name="displayName" autocomplete="name" maxlength="80" data-login-display-name />
-          <button type="submit" data-login-submit><span data-login-submit-label>{t("auth.login.submit")}</span><span aria-hidden="true">→</span></button>
-          <p id="status" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
-        </form>
-        <div class="login-help"><a href="/#faq">{t("auth.login.help")}</a><span>{t("auth.login.privacy")}</span></div>
-      </section>
-    </main>
+
+    <div class="login-split-shell">
+      <main id="main-content" class="login-main-panel selinow-focus-target" tabindex="-1">
+        <div class="brand-wrapper">
+          <a class="brand" href="/" aria-label={t("auth.login.brand_aria")}>
+            <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="144" height="38" />
+          </a>
+        </div>
+
+        <div class="auth-card">
+          <div class="auth-heading">
+            <h1>{locale === "vi-VN" ? "Đăng nhập để tiếp tục" : "Log in to continue"}</h1>
+            <p>{t("auth.login.intro")}</p>
+          </div>
+
+          <form id="login-form" class="auth-form" data-login-form>
+            <div class="field-group">
+              <label for="email">{t("auth.login.email_label")}</label>
+              <div class="input-control">
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  inputmode="email"
+                  autocomplete="email"
+                  required
+                  maxlength="254"
+                  placeholder="name@company.com"
+                  data-login-email
+                />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div class="password-label-row">
+                <label for="password">{t("auth.login.password_label")}</label>
+                <a href="/forgot-password" class="forgot-link">{t("auth.login.forgot_password")}</a>
+              </div>
+              <div class="input-control has-toggle">
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autocomplete="current-password"
+                  required
+                  maxlength="128"
+                  placeholder="••••••••"
+                  data-login-password
+                  data-password-input
+                />
+                <button type="button" class="btn-reveal-pwd" data-toggle-password aria-label="Ẩn/hiện mật khẩu">
+                  <svg class="icon-eye" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="remember-row">
+              <label class="checkbox-label">
+                <input type="checkbox" name="rememberMe" data-login-remember />
+                <span>{t("auth.login.remember_me")}</span>
+              </label>
+            </div>
+
+            <button type="submit" class="btn-primary" data-login-submit>
+              <span data-submit-label>{t("auth.login.submit")}</span>
+              <span class="btn-arrow" aria-hidden="true">→</span>
+            </button>
+            <p id="status" class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
+          </form>
+
+          <div class="card-footer">
+            <div class="switch-auth">
+              <span>{t("auth.login.no_account")}</span>
+              <a href="/register" class="link-bold">{t("auth.login.register_now")}</a>
+            </div>
+            <div class="privacy-note">
+              <span>{t("auth.login.privacy")}</span>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <div class="login-aside-panel">
+        <ProductFlowIllustration locale={locale} />
+      </div>
+    </div>
+
     <script>
-      import "../scripts/marketing/login";
+      import "../scripts/marketing/auth";
     </script>
   </body>
 </html>
 
 <style>
   :global(*) { box-sizing: border-box; }
-  :global(body) { margin: 0; min-width: 320px; min-height: 100vh; background: var(--sln-bg-canvas); color: var(--sln-text-primary); font-family: var(--sln-font-sans); }
-  main { width: min(calc(100% - 40px), 1120px); margin-inline: auto; padding: 24px 0 64px; }
-  .brand { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
-  .brand img { display: block; width: 132px; height: auto; }
-  .login-panel { width: min(100%, 420px); margin: clamp(64px, 10vw, 112px) auto 0; padding: 32px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-xl); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-sm); }
-  .login-heading { margin-bottom: 28px; text-align: center; }
-  .eyebrow { margin: 0 0 12px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .09em; }
-  h1 { margin: 0; font: var(--sln-font-h2); letter-spacing: -.035em; }
-  .login-heading > p:last-child { margin: 12px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
-  form { display: grid; }
-  label { margin: 0 0 8px; color: var(--sln-text-primary); font: var(--sln-font-label); }
-  label:not(:first-child) { margin-top: 20px; }
-  label span { color: var(--sln-text-muted); font-weight: 500; }
-  input { width: 100%; min-height: 48px; border: 1px solid var(--selinow-border-control); border-radius: var(--sln-radius-md); padding: 12px 14px; background: var(--sln-bg-surface); color: var(--sln-text-primary); outline: none; }
-  input:focus { border-color: var(--sln-focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 22%, transparent); }
-  .field-help { margin: 8px 0 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
-  button { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 50px; margin-top: 24px; border: 1px solid var(--sln-action-primary); border-radius: var(--sln-radius-md); padding: 12px 20px; background: var(--sln-action-primary); color: var(--sln-white); font: var(--sln-font-label); cursor: pointer; }
-  button:hover { background: var(--sln-action-primary-hover); }
-  button:disabled { cursor: wait; opacity: .68; }
-  #status { min-height: 44px; margin: 14px 0 0; padding: 10px 12px; border-radius: var(--sln-radius-sm); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
-  #status:empty { padding: 0; }
-  #status[data-tone="pending"] { background: var(--sln-tint-info); color: var(--sln-state-info); }
-  #status[data-tone="success"] { background: var(--sln-tint-success); color: var(--selinow-success-text); }
-  #status[data-tone="error"] { background: var(--sln-tint-danger); color: var(--selinow-danger-text); }
-  #status :global(a) { color: inherit; font-weight: 750; }
-  .login-help { display: grid; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--sln-border-default); color: var(--sln-text-muted); font: var(--sln-font-caption); text-align: center; }
-  .login-help a { color: var(--sln-action-primary); font-weight: 700; }
-  :global(:focus-visible) { outline: 3px solid var(--sln-focus-ring); outline-offset: 3px; }
-  @media (max-width: 480px) { main { padding-top: 16px; } .login-panel { margin-top: 48px; padding: 24px 20px; } }
-  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+  :global(body) {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: var(--sln-bg-canvas);
+    color: var(--sln-text-primary);
+    font-family: var(--sln-font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .login-split-shell {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    min-height: 100vh;
+    width: 100%;
+  }
+
+  .login-main-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(32px, 6vw, 64px) var(--space-6);
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 540px;
+    margin-inline: auto;
+  }
+
+  .login-aside-panel {
+    background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 100%);
+    border-left: 1px solid var(--border-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .brand-wrapper {
+    margin-bottom: 24px;
+    align-self: flex-start;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+    transition: opacity 0.2s ease;
+  }
+  .brand:hover { opacity: 0.88; }
+  .brand img { display: block; width: 140px; height: auto; }
+
+  /* Auth Card */
+  .auth-card {
+    width: 100%;
+    background: #FFFFFF;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 24px;
+    padding: 36px 32px;
+    box-shadow:
+      0 1px 3px 0 rgba(0, 0, 0, 0.04),
+      0 10px 25px -5px rgba(91, 92, 235, 0.06),
+      0 8px 10px -6px rgba(0, 0, 0, 0.03);
+    position: relative;
+  }
+
+  /* Headings */
+  .auth-heading {
+    text-align: left;
+    margin-bottom: 24px;
+  }
+  .auth-heading h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 750;
+    letter-spacing: -0.025em;
+    color: #0F172A;
+  }
+  .auth-heading p {
+    margin: 8px 0 0;
+    color: #64748B;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* Form controls */
+  .auth-form {
+    display: grid;
+    gap: 16px;
+  }
+  .field-group {
+    display: grid;
+    gap: 6px;
+  }
+  .field-group label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #334155;
+  }
+  .password-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .forgot-link {
+    color: var(--sln-action-primary);
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .forgot-link:hover { text-decoration: underline; }
+
+  .input-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .input-control input {
+    width: 100%;
+    min-height: 46px;
+    border: 1px solid var(--selinow-border-control);
+    border-radius: 12px;
+    padding: 10px 14px;
+    background: #F8FAFC;
+    color: #0F172A;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+  .input-control.has-toggle input {
+    padding-right: 42px;
+  }
+  .input-control input:focus {
+    background: #FFFFFF;
+    border-color: var(--sln-action-primary);
+    box-shadow: 0 0 0 4px rgba(91, 92, 235, 0.12);
+  }
+  .btn-reveal-pwd {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    padding: 6px;
+    color: #94A3B8;
+    cursor: pointer;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-reveal-pwd:hover { color: #475569; }
+
+  .remember-row {
+    display: flex;
+    align-items: center;
+    margin-top: 2px;
+  }
+  .checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    cursor: pointer;
+    font-size: 13px;
+    color: #475569;
+  }
+  .checkbox-label input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--sln-action-primary);
+  }
+
+  /* Primary Button */
+  .btn-primary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 48px;
+    margin-top: 8px;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 20px;
+    background: var(--sln-action-primary);
+    color: #FFFFFF;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(91, 92, 235, 0.25);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .btn-primary:hover {
+    background: var(--sln-action-primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(91, 92, 235, 0.35);
+  }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary:disabled { cursor: wait; opacity: 0.72; transform: none; }
+  .btn-arrow { font-size: 16px; transition: transform 0.2s ease; }
+  .btn-primary:hover .btn-arrow { transform: translateX(3px); }
+
+  /* Status messages */
+  .status-msg {
+    min-height: 0;
+    margin: 12px 0 0;
+    padding: 0;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: center;
+    transition: all 0.2s ease;
+  }
+  .status-msg:not(:empty) { padding: 10px 14px; }
+  .status-msg[data-tone="pending"] { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+  .status-msg[data-tone="success"] { background: #ECFDF5; color: var(--selinow-success-text); border: 1px solid #A7F3D0; }
+  .status-msg[data-tone="error"] { background: #FEF2F2; color: var(--selinow-danger-text); border: 1px solid #FECACA; }
+
+  /* Card Footer */
+  .card-footer {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid #F1F5F9;
+    text-align: center;
+  }
+  .switch-auth {
+    font-size: 14px;
+    color: #475467;
+  }
+  .link-bold {
+    color: var(--sln-action-primary);
+    font-weight: 600;
+    text-decoration: none;
+    margin-left: 4px;
+  }
+  .link-bold:hover { text-decoration: underline; }
+  .privacy-note {
+    margin-top: 12px;
+    color: #475467;
+    font-size: 12px;
+  }
+
+  @media (max-width: 960px) {
+    .login-split-shell { grid-template-columns: 1fr; }
+    .login-aside-panel { display: none; }
+    .login-main-panel { max-width: 440px; padding: 32px 16px; }
+  }
+
+  @media (max-width: 480px) {
+    .login-main-panel { width: 100%; padding: 24px 12px 48px; }
+    .auth-card { padding: 28px 18px; border-radius: 20px; }
+  }
 </style>

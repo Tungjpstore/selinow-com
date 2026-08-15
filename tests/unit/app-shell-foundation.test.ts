@@ -47,7 +47,7 @@ describe("seller app shell foundation", () => {
     ]);
 
     expect(page).not.toContain('data-theme="dark"');
-    expect(page).toContain("<AppLayout");
+    expect(page).toContain("<OnboardingShell");
     expect(wizard).toContain('role="progressbar"');
     expect(wizard).toContain('aria-valuenow="0"');
     expect(wizard).toContain('t("onboarding.rail.note_copy")');
@@ -111,6 +111,10 @@ describe("seller app shell foundation", () => {
     expect(layout).toContain("shopSwitchHref(Astro.url, shopPublicId)");
     expect(css).toContain("grid-template-columns: repeat(5, 1fr);");
     expect(css).toContain("min-height: 52px;");
+    expect(css).toContain("scroll-padding-block-end: calc(132px + env(safe-area-inset-bottom));");
+    expect(css).toContain("padding-bottom: calc(140px + env(safe-area-inset-bottom));");
+    expect(layout).toContain("data-channel={item.channel}");
+    expect(layout).toContain("app-nav-channel-group");
   });
 
   it("keeps the mobile workspace menu truthful and exposes its dialog state", async () => {
@@ -129,6 +133,25 @@ describe("seller app shell foundation", () => {
     expect(css).toContain('.app-icon-action[aria-expanded="true"]');
     expect(css).toContain(".app-context-mark {");
     expect(css).not.toContain(".app-live-dot");
+  });
+
+  it("gives every supported sales channel a distinct tenant-bound workspace entry", async () => {
+    const [layout, css] = await Promise.all([
+      readFile("src/layouts/AppLayout.astro", "utf8"),
+      readFile("src/styles/app-shell.css", "utf8"),
+    ]);
+
+    for (const channel of ["telegram-mini-app", "zalo-mini-app", "zalo-oa", "whatsapp-cloud", "discord-bot"]) {
+      expect(layout).toContain(`href: "/app/integrations#channel-${channel}"`);
+      expect(layout).toContain(`channel: "${channel}"`);
+      expect(css).toContain(`data-channel="${channel}"`);
+    }
+    expect(layout).toContain("syncChannelFocus");
+    expect(layout).toContain('window.addEventListener("hashchange", syncChannelFocus)');
+    expect(layout).toContain('window.addEventListener("popstate", syncChannelFocus)');
+    expect(layout).toContain('window.addEventListener("pageshow", syncChannelFocus)');
+    expect(css).toContain(".app-nav-channel-group");
+    expect(css).toContain(".app-menu-link-channel");
   });
 
   it("keeps shared page headings within the 320px workspace canvas", async () => {
@@ -155,6 +178,17 @@ describe("seller app shell foundation", () => {
     expect(controller).toContain("clearLegacyIntentPayloads");
     expect(controller).toContain("clearTenantBoundDrafts");
     expect(controller).toContain("shopSelectionEpoch");
+    expect(controller).toContain("tenantHydrating");
+    expect(controller).toContain("setShopMutationFence(root, true)");
+    expect(controller).toContain("selectedMutationShop(state, shops)");
+    expect(controller).toContain("state.onboarding.profile?.currentStep");
+    expect(controller).toContain("serverStep ?? storedStep");
+    const hydrationStart = controller.indexOf("async function loadShopState");
+    const hydrationEnd = controller.indexOf("function readSettingsForm", hydrationStart);
+    const hydrationController = controller.slice(hydrationStart, hydrationEnd);
+    expect(hydrationController).toContain("try {");
+    expect(hydrationController).toContain("finally {");
+    expect(hydrationController).toContain("state.selectedShopId === selectionShopId");
     expect(controller).toContain("encodeURIComponent(shop.publicId)");
     expect(controller).not.toContain("JSON.stringify({ key, payload })");
   });

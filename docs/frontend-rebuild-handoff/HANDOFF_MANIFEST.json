@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "package": "Selinow Frontend Rebuild Handoff",
+  "generatedAt": "2026-08-03",
+  "sourceBaseline": {
+    "repository": "Selinow.com",
+    "commit": "1144ae7b7021e6d6828cfebfb68f403fc6a2c2b0",
+    "note": "Handoff files and seller operation/channel/UI continuation changes are uncommitted working-tree changes at generation time."
+  },
+  "scope": {
+    "canonicalLogicalRoutes": 25,
+    "redirectAliases": 2,
+    "acceptanceScenarios": 87,
+    "traceabilityRecords": 28,
+    "sourceMigrations": "0001-0069",
+    "apiEndpoints": 157
+  },
+  "verification": {
+    "npm run check": "pass: 0 errors, 3 hints",
+    "npm run lint": "pass",
+    "npx tsc --noEmit": "pass",
+    "npm run test": "pass: 235 files / 1,670 tests",
+    "npm run build": "pass: 272 modules, 3156.58 KiB",
+    "npm run deploy:dry-run": "pass: 272 modules, 3713.82 KiB upload, no deployment",
+    "npm audit --audit-level=high": "pass: 0 vulnerabilities",
+    "csv": "pass: 87 acceptance rows, 28 traceability rows",
+    "yaml": "pass: 25 routes, 2 aliases",
+    "git diff --check": "pass",
+    "apiEndpointIndex": "pass: 157 method/path rows, source paths and contract metadata",
+    "npm run deploy:staging:dry-run": "pass: 272 modules, 3713.82 KiB upload, no deployment"
+  },
+  "productionBoundary": {
+    "productionChanged": false,
+    "stagingChanged": false,
+    "providerActivationChanged": false,
+    "note": "This package documents the frontend contract; it does not activate PayOS, Telegram, fulfillment, queues, or external customer domains."
+  },
+  "files": [
+    {
+      "path": "docs/frontend-rebuild-handoff/ACCEPTANCE_MATRIX.csv",
+      "sha256": "161b2de2fc2027a327e4ac0a9438bca9fbd2ef7439245544c9689b6656c65232"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/API_ENDPOINT_INDEX.csv",
+      "sha256": "9f4024ac5d7e055fe558c78713cb942b11d2850f3e43cafed058e7ef22db74bf"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/DASHBOARD_INFORMATION_ARCHITECTURE.md",
+      "sha256": "1fbd4e46c768b6a302a3469de7550f297b40576c3989110ee92614c84fb5010d"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/DATA_API_AND_SECURITY_CONTRACTS.md",
+      "sha256": "f2075a48411aab183639151b98695c3e2114b1e169f815a40dbbf0403714a594"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/DESIGN_AND_INTERACTION_REQUIREMENTS.md",
+      "sha256": "538fb6f03a7ae586e0c0e730966d4d9baaa76a684fabd9bff173285383582b45"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/DOMAIN_STATE_MACHINES.md",
+      "sha256": "6eb46c12c0f6b3a91129af53f5e5b4698337ed82d68edaa3d8422c0f5b6828f4"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/IMPLEMENTATION_MIGRATION_PLAN.md",
+      "sha256": "a3cba1ddb482e12eeb09ec5a947d9756d10050d1aabb64ee983dbd25ce7b43e5"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/MASTER_REBUILD_PROMPT.md",
+      "sha256": "e3b7243543020e3a7889126756e6104773aeed4acffabba5418bb22550904704"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/PRODUCT_CAPABILITY_CATALOG.md",
+      "sha256": "f2bfff58819c3d48bb258bbf477e1616f7ee7ab58c0fa415d8cffd6c235aa19f"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/QUICK_START.md",
+      "sha256": "5ba341cfd42c1af967d181fe98d86b87d2cb851c8d22a86871d55a264d6c4db1"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/README.md",
+      "sha256": "63aaa68266756d60839ef1f286505cc4c2869ff043b2c5b4f9fc8f2daa873e78"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/ROLES_PERMISSIONS_AND_VISIBILITY.md",
+      "sha256": "90c3b9d656863be07d292c614db62bcc6998d39425ab8f251408d87543012012"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/route-contracts.yaml",
+      "sha256": "db5ecfa0bd7469b83a35ec668e03d70c7d15ac8f37f99fda5e9cbc8a8fcd4042"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/SCREEN_BLUEPRINTS.md",
+      "sha256": "e5b9a506443d0996463e9848fcebfb687c94baa21cc39391690cab775d3f13e6"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/SOURCE_OF_TRUTH.md",
+      "sha256": "562bf39f748f55087f6019a855c5c27f4965c81851f6a69c5653b379cfa64d13"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/SURFACES_ROUTES_AND_NAVIGATION.md",
+      "sha256": "c56c6e01bb4898a301d0eda436b71083dffe22912b7e6a428f282c32423c14f7"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/SYSTEM_ARCHITECTURE.md",
+      "sha256": "394f0ef04ec548c50222f79c4e6b363986ff3ff93e3b8ebcdf590034e388550d"
+    },
+    {
+      "path": "docs/frontend-rebuild-handoff/TRACEABILITY_MATRIX.csv",
+      "sha256": "4e36f18eaef465fb21f468da0c57b0c1ef992f47a1618b524b5cda316eefabb3"
+    }
+  ]
+}

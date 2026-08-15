@@ -207,9 +207,9 @@ if (dialog !== null && form !== null && shopPublicId !== undefined && csrfCookie
         setFeedback(`${t("dashboard.inventory.client.preview.summary", { accepted: counts.acceptedCount, total: counts.totalCount, duplicate: counts.duplicateCount, rejected: counts.rejectedCount })}${reference === null ? "" : t("dashboard.inventory.client.request_id", { requestId: reference })}`);
       }
     } catch (error) {
-      invalidatePreview();
       const safeError = error instanceof InventoryApiError ? error : new InventoryApiError("request_failed", null);
-      if (safeError.message === "authentication_required" || safeError.message === "recent_auth_required") eraseImportForm();
+      eraseImportForm();
+      invalidatePreview();
       setFeedback(safeErrorMessage(safeError));
     } finally {
       requestBody.data = "";
@@ -241,10 +241,8 @@ if (dialog !== null && form !== null && shopPublicId !== undefined && csrfCookie
       window.setTimeout(() => { window.location.reload(); }, 1_500);
     } catch (error) {
       const safeError = error instanceof InventoryApiError ? error : new InventoryApiError("request_failed", null);
-      if (safeError.message === "authentication_required" || safeError.message === "recent_auth_required") {
-        eraseImportForm();
-        invalidatePreview();
-      }
+      eraseImportForm();
+      invalidatePreview();
       setFeedback(safeErrorMessage(safeError));
     } finally {
       requestBody.data = "";

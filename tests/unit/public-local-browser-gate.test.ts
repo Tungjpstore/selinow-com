@@ -44,6 +44,8 @@ describe("deterministic local public PromptOS browser gate", () => {
     expect(runner).toContain("local_public_browser_gate_port_busy");
     expect(runner).toContain("4_399");
     expect(runner).toContain('"--file", "./seeds/0003_phase6_demo.sql"');
+    expect(runner).toContain('{ quiet: true }');
+    expect(runner).not.toContain('"--persist-to", stateDirectory], { capture: true }');
     expect(runner).toContain("rmSync(stateDirectory, { recursive: true, force: true })");
     expect(helper).toContain("buildLocalCommandEnvironment");
     expect(buildLocalPublicCommandEnvironment({

@@ -89,12 +89,30 @@ export async function getPublicApiCatalog(input: {
       LIMIT 1
     `).bind(input.shopId).first<{ lowStockThreshold: number }>(),
     input.env.PLATFORM_DB.prepare(`
-      SELECT id, slug, name, description
-      FROM product_categories
-      WHERE shop_id = ? AND status = 'active'
-      ORDER BY sort_order, id
+      SELECT categories.id, categories.slug, categories.name, categories.description
+      FROM product_categories AS categories
+      WHERE categories.shop_id = ?
+        AND categories.status = 'active'
+        AND EXISTS (
+          SELECT 1
+          FROM products AS category_products
+          INNER JOIN catalog_channel_visibility AS category_visibility
+            ON category_visibility.shop_id = category_products.shop_id
+            AND category_visibility.product_id = category_products.id
+            AND category_visibility.channel_code = 'website'
+            AND category_visibility.status = 'visible'
+          INNER JOIN product_variants AS category_variants
+            ON category_variants.shop_id = category_products.shop_id
+            AND category_variants.product_id = category_products.id
+            AND category_variants.status = 'active'
+          WHERE category_products.shop_id = categories.shop_id
+            AND category_products.category_id = categories.id
+            AND category_products.status = 'active'
+            AND category_variants.currency = ?
+        )
+      ORDER BY categories.sort_order, categories.id
       LIMIT 200
-    `).bind(input.shopId).all<CategoryRow>(),
+    `).bind(input.shopId, input.currency).all<CategoryRow>(),
     input.env.PLATFORM_DB.prepare(`
       SELECT products.id AS productId,
         products.category_id AS categoryId,
@@ -115,6 +133,11 @@ export async function getPublicApiCatalog(input: {
         product_variants.version AS variantVersion,
         COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock
       FROM products
+      INNER JOIN catalog_channel_visibility
+        ON catalog_channel_visibility.shop_id = products.shop_id
+        AND catalog_channel_visibility.product_id = products.id
+        AND catalog_channel_visibility.channel_code = 'website'
+        AND catalog_channel_visibility.status = 'visible'
       INNER JOIN product_variants
         ON product_variants.shop_id = products.shop_id
         AND product_variants.product_id = products.id

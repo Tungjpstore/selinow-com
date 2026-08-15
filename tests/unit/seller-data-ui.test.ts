@@ -87,7 +87,7 @@ describe("seller payment exception UI", () => {
 
     expect(page).toContain("listPaymentExceptions");
     expect(page).toContain("parsePaymentExceptionEvidence");
-    expect(page).toContain('capability: "payments:manage"');
+    expect(page).toContain('capability: "payments:read"');
     expect(page).toContain('t("dashboard.orders.exceptions.intro")');
     expect(page).toContain('t("dashboard.orders.exceptions.expected_amount")');
     expect(page).toContain('t("dashboard.orders.exceptions.received_amount")');

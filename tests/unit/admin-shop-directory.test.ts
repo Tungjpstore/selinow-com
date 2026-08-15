@@ -56,7 +56,8 @@ function bindings(database: DatabaseSync): AppBindings {
 }
 
 function seed(database: DatabaseSync): void {
-  const base = new Date("2026-07-29T00:00:00.000Z");
+  // Keep the trial fixture valid regardless of the wall clock used by CI.
+  const base = new Date("2099-07-29T00:00:00.000Z");
   const now = base.toISOString();
   database.prepare(`
     INSERT INTO plans (id, code, name, feature_flags_json, limits_json, created_at, updated_at)
@@ -105,16 +106,16 @@ function seed(database: DatabaseSync): void {
         readiness_version, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 'vi', 'VND', 'Asia/Ho_Chi_Minh', 1, ?, ?)
     `).run(shop.id, shop.publicId, shop.slug, shop.name, shop.status, now, updatedAt);
-    database.prepare(`
-      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
-      VALUES (?, ?, 'plan-safe', ?, ?, ?)
-    `).run(`subscription-${shop.id}`, shop.id, shop.state, now, updatedAt);
     if (shop.owner !== null) {
       database.prepare(`
         INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
         VALUES (?, ?, 'owner', 'active', ?, ?)
       `).run(shop.id, shop.owner, now, updatedAt);
     }
+    database.prepare(`
+      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, trial_ends_at, created_at, updated_at)
+      VALUES (?, ?, 'plan-safe', ?, ?, ?, ?)
+    `).run(`subscription-${shop.id}`, shop.id, shop.state, shop.state === "trialing" ? new Date(base.getTime() + 8 * 24 * 60 * 60_000).toISOString() : null, now, updatedAt);
   }
 
   database.prepare(`

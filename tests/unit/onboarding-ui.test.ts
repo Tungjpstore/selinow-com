@@ -20,7 +20,7 @@ import {
 describe("onboarding UI response guards", () => {
   it("parses only safe onboarding profile, settings and step fields", () => {
     const snapshot = parseOnboardingSnapshot({
-      profile: { customDomainPreference: "connect", telegramEnabled: true, websiteEnabled: false },
+      profile: { currentStep: "inventory_ready", customDomainPreference: "connect", telegramEnabled: true, websiteEnabled: false },
       settings: {
         attestationAccepted: true,
         privacyUrl: "https://shop.example/privacy",
@@ -36,7 +36,7 @@ describe("onboarding UI response guards", () => {
       ],
     });
 
-    expect(snapshot.profile).toEqual({ customDomainPreference: "connect", telegramEnabled: true, websiteEnabled: false });
+    expect(snapshot.profile).toEqual({ currentStep: "inventory_ready", customDomainPreference: "connect", telegramEnabled: true, websiteEnabled: false });
     expect(snapshot.settings?.supportContact).toBe("support@example.test");
     expect(Object.fromEntries(snapshot.steps)).toEqual({ catalog: "ready", inventory: "warning", telegram_ready: "not_started" });
     expect(parseOnboardingSnapshot({ profile: "invalid" }).profile).toBeNull();
@@ -101,7 +101,7 @@ describe("onboarding progress", () => {
     availableInventoryCount: 3,
     hasManualProduct: false,
     payosReady: true,
-    profile: { customDomainPreference: "later" as const, telegramEnabled: false, websiteEnabled: true },
+    profile: { currentStep: "readiness_passed", customDomainPreference: "later" as const, telegramEnabled: false, websiteEnabled: true },
     readinessReady: false,
     settingsReady: true,
     shopExists: true,
@@ -125,7 +125,7 @@ describe("onboarding progress", () => {
     expect(hasAuthoritativeTelegramHealth("2026-07-26T00:00:00.000Z")).toBe(true);
     expect(deriveFallbackProgress({
       ...completeInput,
-      profile: { customDomainPreference: "later", telegramEnabled: true, websiteEnabled: true },
+      profile: { currentStep: "telegram_ready", customDomainPreference: "later", telegramEnabled: true, websiteEnabled: true },
       telegramHealthReady: hasAuthoritativeTelegramHealth(null),
       telegramReady: true,
     }).telegram).toBe("in_progress");

@@ -36,6 +36,16 @@ describe("Telegram webhook policy", () => {
       message: { chat: { id: -100123456789, type: "supergroup" }, from: { first_name: "Buyer", id: 42, is_bot: false }, message_id: 8, text: "/keys" },
       update_id: 101,
     })).toMatchObject({ chat: { id: -100123456789, type: "supergroup" } });
+
+    expect(() => parseTelegramUpdate({
+      message: { chat: { id: 4_503_599_627_370_496, type: "private" }, from: { first_name: "Buyer", id: 42, is_bot: false }, message_id: 9, text: "/start" },
+      update_id: 103,
+    })).toThrow(expect.objectContaining({ code: "telegram_update_invalid" }));
+
+    expect(() => parseTelegramUpdate({
+      message: { chat: { id: -4_503_599_627_370_496, type: "supergroup" }, from: { first_name: "Buyer", id: 42, is_bot: false }, message_id: 10, text: "/start" },
+      update_id: 104,
+    })).toThrow(expect.objectContaining({ code: "telegram_update_invalid" }));
   });
 
   it.each([
@@ -54,5 +64,16 @@ describe("Telegram webhook policy", () => {
   it("rejects unsupported updates and oversized callback data", () => {
     expect(() => parseTelegramUpdate({ edited_message: {}, update_id: 102 })).toThrow(expect.objectContaining({ code: "telegram_update_unsupported" }));
     expect(() => parseCallbackData(`menu${"x".repeat(70)}`)).toThrow();
+  });
+
+  it("parses inline callback queries as acknowledged-but-unsupported updates", () => {
+    expect(parseTelegramUpdate({
+      callback_query: {
+        from: { first_name: "Buyer", id: 42, is_bot: false },
+        id: "callback-inline",
+        inline_message_id: "inline-message-1",
+      },
+      update_id: 105,
+    })).toMatchObject({ callbackId: "callback-inline", kind: "unsupported_callback_query", updateId: 105 });
   });
 });

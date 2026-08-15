@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import type { PayOSCredentials } from "../../src/lib/payments/crypto";
+import { payOSProviderIdentityFingerprint } from "../../src/lib/payments/payos-admission";
 
 vi.mock("../../src/lib/tenants/store", () => ({
   getShopForMember: vi.fn((input: { shopPublicId: string; userId: string }) => {
@@ -59,7 +60,9 @@ function applyMigrations(database: DatabaseSync, maximumMigration = Number.POSIT
   }
 }
 
-function bindings(database: DatabaseSync): AppBindings {
+type PayOSTestBindings = AppBindings & { PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT?: string };
+
+function bindings(database: DatabaseSync): PayOSTestBindings {
   return {
     ACTIVE_CREDENTIAL_KEY_VERSION: "v1",
     API_ORIGIN: "https://api.example.test",
@@ -102,18 +105,34 @@ function seed(database: DatabaseSync): void {
       ('shop-a', ?, 'shop-a', 'Shop A', 'active', 'vi', 'VND', 'Asia/Ho_Chi_Minh', 1, ?, ?),
       ('shop-b', ?, 'shop-b', 'Shop B', 'active', 'vi', 'VND', 'Asia/Ho_Chi_Minh', 1, ?, ?)
   `).run(SHOP_A, now, now, SHOP_B, now, now);
+  if (database.prepare("SELECT id FROM plans WHERE id = 'plan_starter_v1'").get() !== undefined) {
+    database.prepare(`
+      INSERT INTO shop_subscriptions (
+        id, shop_id, plan_id, state, current_period_end, created_at, updated_at
+      ) VALUES
+        ('subscription-a', 'shop-a', 'plan_starter_v1', 'active', '2099-01-01T00:00:00.000Z', ?, ?),
+        ('subscription-b', 'shop-b', 'plan_starter_v1', 'active', '2099-01-01T00:00:00.000Z', ?, ?)
+    `).run(now, now, now, now);
+  }
 }
 
 function provider(fetchCount: { value: number }): typeof fetch {
-  return () => {
+  return (_request, init) => {
     fetchCount.value += 1;
-    return Promise.resolve(new Response(JSON.stringify({ code: "00", data: true }), { status: 200 }));
+    const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as { webhookUrl: string };
+    return Promise.resolve(Response.json({ code: "00", data: {
+      accountName: "Selinow Test",
+      accountNumber: "0000006797",
+      name: "Selinow Staging UAT",
+      shortName: "SELINOW",
+      webhookUrl: body.webhookUrl,
+    } }));
   };
 }
 
 describe("PayOS provider identity ownership", () => {
   let database: DatabaseSync;
-  let env: AppBindings;
+  let env: PayOSTestBindings;
 
   beforeEach(() => {
     database = new DatabaseSync(":memory:");
@@ -146,18 +165,104 @@ describe("PayOS provider identity ownership", () => {
       .toEqual({ count: 1 });
   });
 
+  it("rejects rotated cross-shop credentials before redirecting the verified channel webhook", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-owner-a", shopPublicId: SHOP_A, userId: "owner-a" });
+
+    await expect(connectPayOS({
+      credentials: {
+        ...CHANNEL_A,
+        apiKey: "rotated-api-key-for-shop-b",
+        checksumKey: "rotated-checksum-key-for-shop-b",
+      },
+      env,
+      fetcher,
+      requestId: "request-owner-b-rotated",
+      shopPublicId: SHOP_B,
+      userId: "owner-b",
+    })).rejects.toMatchObject({ code: "credential_already_connected", status: 409 });
+
+    expect(fetchCount.value).toBe(1);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials WHERE shop_id = 'shop-b'").get())
+      .toEqual({ count: 0 });
+  });
+
+  it("rejects a different channel identity before redirecting an existing shop webhook", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-owner-a", shopPublicId: SHOP_A, userId: "owner-a" });
+
+    await expect(connectPayOS({
+      credentials: {
+        apiKey: "different-api-key",
+        checksumKey: "different-checksum-key",
+        clientId: "different-client-id",
+      },
+      env,
+      fetcher,
+      requestId: "request-different-channel",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "credential_channel_mismatch", status: 409 });
+
+    expect(fetchCount.value).toBe(1);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials WHERE shop_id = 'shop-a'").get())
+      .toEqual({ count: 1 });
+  });
+
+  it("fails staging connection closed until the controlled channel is explicitly attested", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    env.APP_ENV = "staging";
+
+    await expect(connectPayOS({
+      credentials: CHANNEL_A,
+      env,
+      fetcher,
+      requestId: "request-staging-unattested",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).rejects.toMatchObject({ code: "payment_provider_environment_not_admitted", status: 409 });
+
+    expect(fetchCount.value).toBe(0);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials").get()).toEqual({ count: 0 });
+
+    env.PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT = await payOSProviderIdentityFingerprint(env, CHANNEL_A);
+    await expect(connectPayOS({
+      credentials: CHANNEL_A,
+      env,
+      fetcher,
+      requestId: "request-staging-attested",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(fetchCount.value).toBe(1);
+  });
+
   it("retains channel ownership across same-shop secret rotation and disconnect", async () => {
     const fetchCount = { value: 0 };
     const fetcher = provider(fetchCount);
+    const rotatedChannel = { ...CHANNEL_A, apiKey: "rotated-api-key", checksumKey: "rotated-checksum-key" };
     await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-connect", shopPublicId: SHOP_A, userId: "owner-a" });
     await connectPayOS({
-      credentials: { ...CHANNEL_A, apiKey: "rotated-api-key", checksumKey: "rotated-checksum-key" },
+      credentials: rotatedChannel,
       env,
       fetcher,
       requestId: "request-rotate",
       shopPublicId: SHOP_A,
       userId: "owner-a",
     });
+    const rotatedGeneration = database.prepare("SELECT provider_claim_generation AS generation FROM payment_integrations WHERE shop_id = 'shop-a'").get();
+    await expect(connectPayOS({
+      credentials: rotatedChannel,
+      env,
+      fetcher,
+      requestId: "request-rotate-retry",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(database.prepare("SELECT provider_claim_generation AS generation FROM payment_integrations WHERE shop_id = 'shop-a'").get()).toEqual(rotatedGeneration);
     await disconnectPayOS({ env, requestId: "request-disconnect", shopPublicId: SHOP_A, userId: "owner-a" });
     await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-reconnect", shopPublicId: SHOP_A, userId: "owner-a" });
 
@@ -172,11 +277,45 @@ describe("PayOS provider identity ownership", () => {
       .toEqual({ count: 0 });
   });
 
+  it("makes a settled disconnect retry a no-op without advancing the provider generation", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-connect", shopPublicId: SHOP_A, userId: "owner-a" });
+    await disconnectPayOS({ env, requestId: "request-disconnect", shopPublicId: SHOP_A, userId: "owner-a" });
+    const settled = database.prepare(`
+      SELECT active_credential_id AS activeCredentialId,
+        provider_claim_generation AS generation,
+        provider_claim_nonce AS nonce,
+        provider_claim_state AS claimState,
+        provider_claim_target_fingerprint AS targetFingerprint,
+        status, webhook_status AS webhookStatus
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get();
+
+    await expect(disconnectPayOS({
+      env,
+      requestId: "request-disconnect-retry",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toBeUndefined();
+
+    expect(database.prepare(`
+      SELECT active_credential_id AS activeCredentialId,
+        provider_claim_generation AS generation,
+        provider_claim_nonce AS nonce,
+        provider_claim_state AS claimState,
+        provider_claim_target_fingerprint AS targetFingerprint,
+        status, webhook_status AS webhookStatus
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get()).toEqual(settled);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE shop_id = 'shop-a' AND action = 'payos.disconnected'").get()).toEqual({ count: 1 });
+  });
+
   it("does not let an unverified client-id claim block legitimate credentials", async () => {
     const fetchCount = { value: 0 };
     const failingFetcher: typeof fetch = () => {
       fetchCount.value += 1;
-      return Promise.resolve(new Response(JSON.stringify({ code: "01", desc: "timeout after provider processing" }), { status: 503 }));
+      return Promise.resolve(new Response(JSON.stringify({ code: "01", desc: "credentials rejected" }), { status: 409 }));
     };
     await expect(connectPayOS({ credentials: CHANNEL_A, env, fetcher: failingFetcher, requestId: "request-failed", shopPublicId: SHOP_A, userId: "owner-a" }))
       .rejects.toMatchObject({ code: "provider_verification_failed", status: 409 });
@@ -210,7 +349,7 @@ describe("PayOS provider identity ownership", () => {
       .toEqual({ count: 1 });
   });
 
-  it("retries an unverified same-shop credential without a global ownership claim", async () => {
+  it("reconciles an ambiguously quarantined same-shop credential without releasing ownership", async () => {
     const fetchCount = { value: 0 };
     const failingFetcher: typeof fetch = () => {
       fetchCount.value += 1;
@@ -223,7 +362,18 @@ describe("PayOS provider identity ownership", () => {
       requestId: "request-failed",
       shopPublicId: SHOP_A,
       userId: "owner-a",
-    })).rejects.toMatchObject({ code: "provider_verification_failed", status: 409 });
+    })).rejects.toMatchObject({ code: "provider_verification_failed", status: 503 });
+    expect(database.prepare(`
+      SELECT provider_claim_nonce IS NOT NULL AS claimed,
+        provider_claim_state AS claimState,
+        provider_identity_fingerprint IS NOT NULL AS owned
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ claimed: 1, claimState: "ambiguous", owned: 1 });
+    expect(database.prepare(`
+      SELECT provider_claim_nonce IS NOT NULL AS claimed,
+        provider_ownership_fingerprint IS NOT NULL AS owned, status
+      FROM payment_credentials WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ claimed: 1, owned: 1, status: "error" });
 
     await expect(connectPayOS({
       credentials: CHANNEL_A,

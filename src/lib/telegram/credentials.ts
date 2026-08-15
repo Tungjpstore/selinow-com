@@ -14,16 +14,22 @@ export type TelegramCredentialRow = EncryptedTelegramCredential & {
 };
 
 export type TelegramWebhookIntegration = {
+  activeCredentialId?: string | null;
   botDisplayName: string | null;
   botUsername: string | null;
   credential: TelegramCredentialRow;
   integrationId: string;
+  generationState: "active" | "draining";
+  integrationGeneration: number;
   integrationStatus: string;
   shopId: string;
   shopName: string;
   defaultLocale: string;
   shopStatus: string;
   subscriptionState: string;
+  currentPeriodEnd: string | null;
+  trialEndsAt: string | null;
+  graceEndsAt: string | null;
 };
 
 export type TelegramRecipientEncryptionRow = {
@@ -69,14 +75,20 @@ export async function loadTelegramWebhookIntegration(env: AppBindings, webhookPu
   const row = await env.PLATFORM_DB.prepare(`
     SELECT ${CREDENTIAL_SELECT},
       telegram_integrations.id AS integrationId,
+      telegram_integrations.active_credential_id AS activeCredentialId,
       telegram_integrations.shop_id AS shopId,
       telegram_integrations.status AS integrationStatus,
+      telegram_integrations.generation_state AS generationState,
+      telegram_integrations.integration_generation AS integrationGeneration,
       telegram_integrations.bot_username_sanitized AS botUsername,
       telegram_integrations.bot_display_name_sanitized AS botDisplayName,
       shops.name AS shopName,
       shops.default_locale AS defaultLocale,
       shops.status AS shopStatus,
-      shop_subscriptions.state AS subscriptionState
+      shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
+      shop_subscriptions.trial_ends_at AS trialEndsAt,
+      shop_subscriptions.grace_ends_at AS graceEndsAt
     FROM telegram_integrations
     INNER JOIN telegram_credentials
       ON telegram_credentials.id = telegram_integrations.active_credential_id
@@ -89,6 +101,7 @@ export async function loadTelegramWebhookIntegration(env: AppBindings, webhookPu
       AND shop_subscriptions.state != 'canceled'
     WHERE telegram_integrations.webhook_public_id = ?
       AND telegram_integrations.status IN ('active', 'degraded')
+      AND telegram_integrations.generation_state = 'active'
     LIMIT 1
   `).bind(webhookPublicId).first<TelegramCredentialRow & Omit<TelegramWebhookIntegration, "credential">>();
   if (row === null) throw new AppError("webhook_not_found", 404);

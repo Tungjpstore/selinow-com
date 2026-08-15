@@ -37,7 +37,17 @@ describe("admin operations PromptOS surface", () => {
     expect(admin).toContain("data-manual-action-form");
     expect(admin).toContain("data-copy={JSON.stringify(clientCopy)}");
     expect(systems).toContain("data-rotation-create-form");
+    expect(systems).toContain("data-payos-fingerprint-form");
+    expect(systems).toContain("data-payos-fingerprint-result");
+    expect(systems).toContain("data-payos-fingerprint-copy");
+    expect(systems).toContain("admin.operations.payos.result_warning");
+    expect(systems).toContain('env.APP_ENV === "staging" && adminRole === "owner"');
     expect(systems).toContain("data-rotation-process");
+    expect(systems).toContain("item.retryCount");
+    expect(systems).toContain("item.retryRequestedAt");
+    expect(systems).toContain("deadLetterOverview.hasMore");
+    expect(systems).toContain("incidentOverview.hasMore");
+    expect(systems).toContain('t("admin.operations.visibility.truncated_warning"');
     expect(systems).toContain("max=\"100\"");
     expect(systems).toContain("listActiveDeletionRequests");
     expect(systems).toContain("data-deletion-legal-hold-form");
@@ -49,6 +59,10 @@ describe("admin operations PromptOS surface", () => {
     expect(systems).not.toContain("Xem run details");
     expect(systems).not.toMatch(/name="(?:shopId|requestedByUserId|requestId|leaseToken|providerPayload|secretMaterialDestroyedJson)"/);
     expect(operationsApi).toContain("deletionOverview");
+    expect(operationsApi).toContain("deadLettersHasMore");
+    expect(operationsApi).toContain("generatedLicenseDeadLettersHasMore");
+    expect(operationsApi).toContain("incidentsHasMore");
+    expect(operationsApi).toContain("operationsListLimit");
     expect(operationsApi).toContain("listActiveDeletionRequests({ env, userId: auth.userId })");
     expect(moderation).toContain("Idempotency-Key");
     expect(moderation).toContain("recent_auth_required");
@@ -89,6 +103,26 @@ describe("admin operations PromptOS surface", () => {
     expect(operations).toContain("legalHoldForm.getAttribute(\"aria-busy\") !== \"true\"");
     expect(operations).toContain("expectedConfirmation");
     expect(operations).toContain("window.confirm");
+    expect(operations).toContain("/api/admin/payments/payos/staging-fingerprint");
+    expect(operations).toContain("navigator.clipboard.writeText");
+    expect(operations).toContain("payosFingerprintValue.textContent = fingerprint");
+    expect(operations).toContain('clientIdInput.value = ""');
+    expect(operations).not.toContain("fingerprint: payload");
+    expect(operations).not.toMatch(/(?:apiKey|checksumKey|IDENTIFIER_HMAC_SECRET)/);
     expect(operations).not.toMatch(/name="[^"]*(?:ciphertext|plaintext|license)[^"]*"/i);
+    expect(systems).toContain("listAdminOrderInvestigations");
+    expect(systems).toContain("listAdminAuditEntries");
+    expect(systems).toContain("data-admin-investigation-bridge");
+    expect(systems).toContain("/admin/investigations?tab=orders");
+    expect(systems).toContain("/admin/investigations?tab=audit");
+    expect(systems).toContain("investigationUnavailable");
+    for (const key of [
+      "admin.operations.visibility.complete_count",
+      "admin.operations.visibility.truncated_count",
+      "admin.operations.visibility.truncated_warning",
+    ] as const) {
+      expect(adminCatalogs.en[key]).toBeTypeOf("string");
+      expect(adminCatalogs["vi-VN"][key]).toBeTypeOf("string");
+    }
   });
 });

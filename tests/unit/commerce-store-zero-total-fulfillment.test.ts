@@ -143,6 +143,7 @@ function shop(): StorefrontShop {
     settingsVersion: 1,
     slug: "zero-total",
     status: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
     theme: {
       accent: "#0F766E",
@@ -173,7 +174,7 @@ async function checkout(input: {
   const orderInput = {
     cartId: cart.cartId,
     cartToken: cart.cartToken,
-    customerEmail: null,
+    customerEmail: "buyer-zero-total@example.test",
     env,
     expected: quote.items,
     idempotencyKey: input.idempotencyKey,
@@ -226,40 +227,14 @@ describe("website zero-total fulfillment policy", () => {
     `).get("shop_zero_total", "shop_zero_total", order.orderId)).toEqual({ count: 1 });
   });
 
-  it("fulfills only the digital portion of a mixed free order and leaves manual work pending", async () => {
+  it("rejects mixed free fulfillment before creating an order", async () => {
     const database = createDatabase();
-    const { order } = await checkout({
+    await expect(checkout({
       database,
       idempotencyKey: "checkout-zero-mixed-0001",
-      items: [
-        { quantity: 1, variantId: "variant_zero_license" },
-        { quantity: 1, variantId: "variant_zero_manual" },
-      ],
-    });
-
-    expect(order).toMatchObject({ fulfillmentStatus: "unfulfilled", paymentStatus: "paid", status: "processing", totalMinor: 0 });
-    expect(database.database.prepare(`
-      SELECT fulfillment_type AS fulfillmentType, state
-      FROM fulfillments WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?)
-      ORDER BY fulfillment_type
-    `).all("shop_zero_total", "shop_zero_total", order.orderId)).toEqual([
-      { fulfillmentType: "digital_keys", state: "fulfilled" },
-      { fulfillmentType: "manual", state: "pending" },
-    ]);
-    expect(database.database.prepare(`
-      SELECT COUNT(*) AS count FROM fulfillment_items
-      WHERE shop_id = ? AND fulfillment_id IN (
-        SELECT id FROM fulfillments WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?) AND fulfillment_type = 'digital_keys'
-      )
-    `).get("shop_zero_total", "shop_zero_total", "shop_zero_total", order.orderId)).toEqual({ count: 1 });
-    const soldKey = database.database.prepare(`
-      SELECT status, sold_order_item_id AS soldOrderItemId
-      FROM inventory_keys WHERE shop_id = ? AND id = 'key_zero_license'
-    `).get("shop_zero_total") as { soldOrderItemId: string | null; status: string } | undefined;
-    expect(soldKey?.status).toBe("sold");
-    expect(typeof soldKey?.soldOrderItemId).toBe("string");
-    expect(database.database.prepare(`
-      SELECT fulfilled_at AS fulfilledAt FROM orders WHERE shop_id = ? AND public_id = ?
-    `).get("shop_zero_total", order.orderId)).toEqual({ fulfilledAt: null });
+      items: [{ quantity: 1, variantId: "variant_zero_license" }, { quantity: 1, variantId: "variant_zero_manual" }],
+    })).rejects.toMatchObject({ code: "mixed_fulfillment_unsupported", status: 409 });
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get("shop_zero_total")).toEqual({ count: 0 });
+    expect(database.database.prepare("SELECT status FROM inventory_keys WHERE shop_id = ? AND id = 'key_zero_license'").get("shop_zero_total")).toEqual({ status: "available" });
   });
 });

@@ -286,11 +286,12 @@ function createRuntime(): { database: SqliteD1; env: AppBindings; fakeShop: Prin
     settingsVersion: 1,
     slug: "parity-shop",
     status: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
     theme: { accent: "#111111", accentInk: "#FFFFFF", brand: "#111111", brandInk: "#FFFFFF", logoUrl: null },
   } as StorefrontShop;
-  const telegramShop: TelegramCheckoutShop = { currency: "VND", defaultLocale: "vi", id: SHOP_ID, orderExpiryMinutes: 30, status: "active", subscriptionState: "active" };
-  const fakeShop: PrincipalChannelShop = { currency: "VND", defaultLocale: "vi", id: SHOP_ID, orderExpiryMinutes: 30, status: "active", subscriptionState: "active" };
+  const telegramShop: TelegramCheckoutShop = { currency: "VND", currentPeriodEnd: "2099-01-01T00:00:00.000Z", defaultLocale: "vi", id: SHOP_ID, orderExpiryMinutes: 30, status: "active", subscriptionState: "active" };
+  const fakeShop: PrincipalChannelShop = { currency: "VND", currentPeriodEnd: "2099-01-01T00:00:00.000Z", defaultLocale: "vi", id: SHOP_ID, orderExpiryMinutes: 30, status: "active", subscriptionState: "active" };
   return { database, env, fakeShop, shop, telegramShop };
 }
 
@@ -498,6 +499,23 @@ describe("canonical commerce channel parity on local D1", () => {
       status: created.status,
       totalMinor: expectedTotal,
     });
+    await expect(prepared.app.recoverCheckout(prepared.context, {
+      cart: prepared.command.cart,
+      customerEmail: prepared.command.customerEmail,
+      expected: prepared.command.expected,
+      idempotencyKey: prepared.command.idempotencyKey,
+      recoveryEvidence: recovery.evidence,
+    })).resolves.toMatchObject({
+      access: created.access,
+      orderId: created.orderId,
+      paymentStatus: created.paymentStatus,
+      status: created.status,
+      totalMinor: expectedTotal,
+    });
+    expect(runtime.database.database.prepare(`
+      SELECT COUNT(*) AS count FROM checkout_recovery_capabilities
+      WHERE shop_id = ? AND consumed_at IS NOT NULL
+    `).get(SHOP_ID)).toEqual({ count: 1 });
     const persisted = runtime.database.database.prepare(`
       SELECT checkout_request_hash AS requestHash, discount_minor AS discountMinor,
         total_minor AS totalMinor
@@ -510,7 +528,7 @@ describe("canonical commerce channel parity on local D1", () => {
     expect(persisted?.requestHash).toMatch(/^[A-Za-z0-9_-]{43}$/u);
   });
 
-  it("keeps Website replay and recovery stable when expected lines are reordered", async () => {
+  it("fails closed before checkout when expected lines mix fulfillment modes", async () => {
     const runtime = createRuntime();
     const context: CommerceContext = {
       actor: { kind: "anonymous" },
@@ -529,39 +547,19 @@ describe("canonical commerce channel parity on local D1", () => {
     if (cart.access.kind !== "opaque_token") throw new Error("website_reordered_cart_access_invalid");
     const cartReference = { access: cart.access, cartId: cart.cartId };
     const quote = await app.quoteCart(context, { cart: cartReference });
-    if (quote.quoteEvidence === undefined) throw new Error("website_reordered_quote_evidence_missing");
-    const canonicalExpected = expectedItems(quote);
-    const reorderedExpected = [...canonicalExpected].reverse();
-    const idempotencyKey = "parity-recovery-reordered-0001";
-    const recovery = await app.prepareCheckoutRecovery(context, {
-      cart: cartReference,
-      customerEmail: null,
-      expected: reorderedExpected,
-      idempotencyKey,
-      quoteEvidence: quote.quoteEvidence,
-    });
-    const first = await app.checkoutCart(context, {
-      cart: cartReference,
-      customerEmail: null,
-      expected: canonicalExpected,
-      idempotencyKey,
-      quoteEvidence: quote.quoteEvidence,
-    });
+    if (quote.quoteEvidence === undefined) throw new Error("website_mixed_quote_evidence_missing");
     await expect(app.checkoutCart(context, {
       cart: cartReference,
-      customerEmail: null,
-      expected: reorderedExpected,
-      idempotencyKey,
+      customerEmail: "mixed-parity@example.test",
+      expected: expectedItems(quote),
+      idempotencyKey: "parity-recovery-reordered-0001",
       quoteEvidence: quote.quoteEvidence,
-    })).resolves.toEqual(first);
-    const recovered = await app.recoverCheckout(context, {
-      cart: cartReference,
-      customerEmail: null,
-      expected: reorderedExpected,
-      idempotencyKey,
-      recoveryEvidence: recovery.evidence,
+    })).rejects.toMatchObject({
+      code: "mixed_fulfillment_unsupported",
+      status: 409,
+      issues: ["split_cart_by_fulfillment"],
     });
-    expect(recovered).toMatchObject({ access: first.access, orderId: first.orderId, totalMinor: first.totalMinor });
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get(SHOP_ID)).toEqual({ count: 0 });
   });
 
   it.each(["website", "telegram", "fake"] as const)("keeps %s commerce state equivalent for English and Vietnamese locales", async (channel) => {
@@ -752,19 +750,25 @@ describe("canonical commerce channel parity on local D1", () => {
     expect(runtime.database.database.prepare("SELECT status, reservation_token AS reservationToken FROM inventory_keys WHERE shop_id = ? AND variant_id = 'variant-paid'").all(SHOP_ID)).toEqual(before.inventory);
   });
 
-  it("applies exact payment through the canonical event seam for Website, Telegram and fake orders", async () => {
+  it("applies exact payment through the canonical event seam, including on-demand private files", async () => {
     const runtime = createRuntime();
     const website = await prepareWebsiteCheckout(runtime, "variant-paid", "parity-payment-event-web-0001");
+    const privateWebsite = await prepareWebsiteCheckout(runtime, "variant-private-paid", "parity-payment-event-private-web-0001");
     const telegram = await prepareTelegramCheckout(runtime, "variant-paid", 2201);
     const fake = await prepareFakeCheckout(runtime, "variant-paid", "parity-payment-event-fake-0001");
     const checkouts = [
-      { channelCode: "website", prepared: website },
-      { channelCode: "telegram", prepared: telegram },
-      { channelCode: FAKE_CHANNEL_CODE, prepared: fake },
+      { channelCode: "website", expectedFulfillmentItems: 1, prepared: website },
+      { channelCode: "website", expectedFulfillmentItems: 0, prepared: privateWebsite },
+      { channelCode: "telegram", expectedFulfillmentItems: 1, prepared: telegram },
+      { channelCode: FAKE_CHANNEL_CODE, expectedFulfillmentItems: 1, prepared: fake },
     ] as const;
 
+    const checkedOut: Array<(typeof checkouts)[number] & { view: CommerceCheckoutView }> = [];
     for (const checkout of checkouts) {
-      await checkout.prepared.app.checkoutCart(checkout.prepared.context, checkout.prepared.command);
+      checkedOut.push({
+        ...checkout,
+        view: await checkout.prepared.app.checkoutCart(checkout.prepared.context, checkout.prepared.command),
+      });
     }
 
     runtime.database.database.exec(`
@@ -788,12 +792,11 @@ describe("canonical commerce channel parity on local D1", () => {
       );
     `);
 
-    const paymentRows: Array<{ attempt: CommercePaymentAttempt; eventId: string; orderId: string; channelCode: string }> = [];
-    for (const [index, checkout] of checkouts.entries()) {
-      const order = runtime.database.database.prepare("SELECT id, public_id AS publicId FROM orders WHERE shop_id = ? AND source_channel = ? ORDER BY created_at DESC, id DESC LIMIT 1 OFFSET ?").get(
+    const paymentRows: Array<{ attempt: CommercePaymentAttempt; eventId: string; expectedAmount: number; expectedFulfillmentItems: number; orderId: string; channelCode: string }> = [];
+    for (const [index, checkout] of checkedOut.entries()) {
+      const order = runtime.database.database.prepare("SELECT id, public_id AS publicId FROM orders WHERE shop_id = ? AND public_id = ? LIMIT 1").get(
         SHOP_ID,
-        checkout.channelCode === "telegram" ? "telegram" : "web",
-        checkout.channelCode === "telegram" ? 0 : checkout.channelCode === "website" ? 0 : 1,
+        checkout.view.orderId,
       ) as { id: string; publicId: string } | undefined;
       if (order === undefined) throw new Error(`payment_event_order_missing:${checkout.channelCode}`);
       const attemptId = `attempt-parity-payment-${String(index)}`;
@@ -804,8 +807,8 @@ describe("canonical commerce channel parity on local D1", () => {
           provider_order_code, state, expected_amount_minor, currency,
           expected_description, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, 'integration-parity-payment', 'credential-parity-payment',
-          'payos', ?, 'pending', 9000, 'VND', 'Parity payment', ?, ?, ?)
-      `).run(attemptId, `${attemptId}-public`, SHOP_ID, order.id, 88001 + index, "2026-07-30T06:00:00.000Z", NOW, NOW);
+          'payos', ?, 'pending', ?, 'VND', 'Parity payment', ?, ?, ?)
+      `).run(attemptId, `${attemptId}-public`, SHOP_ID, order.id, 88001 + index, checkout.view.totalMinor, "2026-07-30T06:00:00.000Z", NOW, NOW);
       runtime.database.database.prepare(`
         INSERT INTO payment_events (
           id, shop_id, payment_attempt_id, integration_id, provider,
@@ -819,6 +822,8 @@ describe("canonical commerce channel parity on local D1", () => {
         attempt: { id: attemptId, integrationId: "integration-parity-payment", orderId: order.id, shopId: SHOP_ID, state: "pending" },
         channelCode: checkout.channelCode,
         eventId,
+        expectedAmount: checkout.view.totalMinor,
+        expectedFulfillmentItems: checkout.expectedFulfillmentItems,
         orderId: order.publicId,
       });
     }
@@ -830,7 +835,7 @@ describe("canonical commerce channel parity on local D1", () => {
         decision: "paid_exact",
         env: runtime.env,
         eventId: row.eventId,
-        evidence: { amount: 9000, expectedAmount: 9000, occurredAt: NOW, reference: `reference-${row.eventId}` },
+        evidence: { amount: row.expectedAmount, expectedAmount: row.expectedAmount, occurredAt: NOW, reference: `reference-${row.eventId}` },
         integrationId: "integration-parity-payment",
       })).resolves.toEqual({ processed: true, state: "paid_exact" });
 
@@ -840,7 +845,8 @@ describe("canonical commerce channel parity on local D1", () => {
       `).get(SHOP_ID, row.orderId)).toEqual({ fulfillmentStatus: "fulfilled", paymentStatus: "paid", status: "completed" });
       expect(runtime.database.database.prepare("SELECT state FROM payment_attempts WHERE id = ? AND shop_id = ?").get(row.attempt.id, SHOP_ID)).toEqual({ state: "paid_exact" });
       expect(runtime.database.database.prepare("SELECT normalized_state AS normalizedState, process_result AS processResult, processed_at AS processedAt FROM payment_events WHERE id = ? AND shop_id = ?").get(row.eventId, SHOP_ID)).toMatchObject({ normalizedState: "paid_exact", processResult: "fulfilled" });
-      expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM fulfillment_items WHERE shop_id = ? AND fulfillment_id IN (SELECT id FROM fulfillments WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?))").get(SHOP_ID, SHOP_ID, SHOP_ID, row.orderId)).toEqual({ count: 1 });
+      expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM fulfillments WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?)").get(SHOP_ID, SHOP_ID, row.orderId)).toEqual({ count: row.expectedFulfillmentItems });
+      expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM fulfillment_items WHERE shop_id = ? AND fulfillment_id IN (SELECT id FROM fulfillments WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?))").get(SHOP_ID, SHOP_ID, SHOP_ID, row.orderId)).toEqual({ count: row.expectedFulfillmentItems });
     }
 
     expect(runtime.database.database.prepare("SELECT status, COUNT(*) AS count FROM inventory_keys WHERE shop_id = ? AND variant_id = 'variant-paid' GROUP BY status ORDER BY status").all(SHOP_ID)).toEqual([
@@ -850,7 +856,7 @@ describe("canonical commerce channel parity on local D1", () => {
     expect(runtime.database.database.prepare("SELECT channel_code AS channelCode, COUNT(*) AS count FROM order_channel_attributions WHERE shop_id = ? GROUP BY channel_code ORDER BY channel_code").all(SHOP_ID)).toEqual([
       { channelCode: FAKE_CHANNEL_CODE, count: 1 },
       { channelCode: "telegram", count: 1 },
-      { channelCode: "website", count: 1 },
+      { channelCode: "website", count: 2 },
     ]);
   });
 
@@ -1395,13 +1401,11 @@ describe("canonical commerce channel parity on local D1", () => {
     expect(runtime.database.database.prepare("SELECT state FROM carts WHERE id = ? AND shop_id = ?").get(cartId, SHOP_ID)).toEqual({ state: "active" });
   });
 
-  it.each(["website", "telegram", "fake"] as const)("captures the private-file requirement in the canonical %s checkout", async (channel) => {
+  it.each(["website", "fake"] as const)("captures the private-file requirement in the canonical %s checkout", async (channel) => {
     const runtime = createRuntime();
     const prepared = channel === "website"
       ? await prepareWebsiteCheckout(runtime, "variant-private-free", `parity-private-${channel}-0001`)
-      : channel === "telegram"
-        ? await prepareTelegramCheckout(runtime, "variant-private-free", 3011)
-        : await prepareFakeCheckout(runtime, "variant-private-free", `parity-private-${channel}-0001`);
+      : await prepareFakeCheckout(runtime, "variant-private-free", `parity-private-${channel}-0001`);
     const first = await checkoutAndReadOrder({ app: prepared.app, command: prepared.command, context: prepared.context });
     const order = runtime.database.database.prepare("SELECT id FROM orders WHERE public_id = ? AND shop_id = ?").get(first.view.orderId, SHOP_ID) as { id: string } | undefined;
     expect(order).toBeDefined();
@@ -1421,10 +1425,27 @@ describe("canonical commerce channel parity on local D1", () => {
       policyId: "policy-private-parity-v1",
       policyVersion: 1,
     }]);
+    expect(first.view).toMatchObject({ fulfillmentStatus: "fulfilled", paymentStatus: "paid", status: "completed" });
+    expect(runtime.database.database.prepare(`
+      SELECT COUNT(*) AS count FROM fulfillments
+      WHERE shop_id = ? AND order_id = ? AND fulfillment_type = 'manual'
+    `).get(SHOP_ID, order.id)).toEqual({ count: 0 });
     expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM digital_entitlements WHERE shop_id = ? AND order_id = ?").get(SHOP_ID, order.id)).toEqual({ count: 0 });
 
     await expect(prepared.app.checkoutCart(prepared.context, prepared.command)).resolves.toEqual(first.view);
     expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM order_item_fulfillment_requirements WHERE shop_id = ? AND order_id = ?").get(SHOP_ID, order.id)).toEqual({ count: 1 });
+  });
+
+  it("rejects Telegram private-file checkout before creating an order", async () => {
+    const runtime = createRuntime();
+    const prepared = await prepareTelegramCheckout(runtime, "variant-private-free", 3011);
+
+    await expect(prepared.app.checkoutCart(prepared.context, prepared.command)).rejects.toMatchObject({
+      code: "telegram_private_file_unsupported",
+      status: 409,
+    });
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get(SHOP_ID)).toEqual({ count: 0 });
+    expect(runtime.database.database.prepare("SELECT state FROM carts WHERE id = ? AND shop_id = ?").get(prepared.command.cart.cartId, SHOP_ID)).toEqual({ state: "active" });
   });
 
   it("preserves the checkout-time private-file policy when the seller publishes a replacement", async () => {
@@ -1843,6 +1864,29 @@ describe("canonical commerce channel parity on local D1", () => {
     const order = await prepared.app.checkoutCart(prepared.context, prepared.command);
     expect(runtime.database.database.prepare("SELECT customer_id AS customerId FROM orders WHERE public_id = ? AND shop_id = ?").get(order.orderId, SHOP_ID)).toEqual({ customerId: "customer-existing-web" });
     expect(runtime.database.database.prepare("SELECT locale FROM shop_customers WHERE id = ? AND shop_id = ?").get("customer-existing-web", SHOP_ID)).toEqual({ locale: "vi" });
+  });
+
+  it("rejects checkout when the customer becomes blocked before the authoritative order batch", async () => {
+    const runtime = createRuntime();
+    const customerEmail = "blocked-race@example.test";
+    const prepared = await prepareWebsiteCheckout(runtime, "variant-paid", "parity-blocked-customer-race-web-0001", customerEmail);
+    const gate = runtime.database.pauseNextBatch();
+    const checkout = prepared.app.checkoutCart(prepared.context, prepared.command);
+    await gate.reached;
+
+    runtime.database.database.prepare(`
+      INSERT INTO shop_customers (
+        id, shop_id, email_normalized, display_name, locale, status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, NULL, 'en', 'blocked', ?, ?)
+    `).run("customer-blocked-race-web", SHOP_ID, customerEmail, NOW, NOW);
+    gate.resume();
+
+    await expect(checkout).rejects.toMatchObject({ code: "checkout_failed", status: 409 });
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get(SHOP_ID)).toEqual({ count: 0 });
+    expect(runtime.database.database.prepare("SELECT state FROM carts WHERE id = ? AND shop_id = ?").get(prepared.command.cart.cartId, SHOP_ID)).toEqual({ state: "active" });
+    expect(runtime.database.database.prepare("SELECT COUNT(*) AS count FROM inventory_keys WHERE shop_id = ? AND variant_id = 'variant-paid' AND status = 'reserved'").get(SHOP_ID)).toEqual({ count: 0 });
+    expect(runtime.database.database.prepare("SELECT status, locale FROM shop_customers WHERE id = ? AND shop_id = ?").get("customer-blocked-race-web", SHOP_ID)).toEqual({ locale: "en", status: "blocked" });
   });
 
   it.each(["website", "telegram"] as const)("recovers the durable winner when same-key retries overlap at the order batch boundary through the %s port", async (channel) => {

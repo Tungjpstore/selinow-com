@@ -1,0 +1,138 @@
+# Production Release Closeout
+
+This is an executable, non-secret closeout checklist for the production
+candidate. It is intentionally separate from provider UAT and production
+mutation procedures. A passing local check does not authorize a production
+database migration, Worker deploy, route change, secret write, or payment
+activation.
+
+## Read-only audit
+
+Run from the reviewed clean tree:
+
+```bash
+node scripts/release-closeout-audit.mjs --json
+npm run release:doctor -- --json
+```
+
+`release-closeout-audit.mjs` reads only the Wrangler/spec/evidence files and
+name-only Worker secret inventory. It reports the current Git identity, latest
+staging manifest metadata, candidate drift, and every failed release-doctor
+check grouped by the action that can close it. It never reads or prints secret
+values, browser storage, provider payloads, customer identifiers, or database
+exports.
+
+The audit is expected to fail when `.wrangler/release/production-evidence.json`
+has not been created. Do not make it pass with placeholders, old bootstrap
+reports, synthetic webhooks, or local-only test output.
+
+## Required closeout order
+
+1. **Candidate identity**
+
+   - Confirm a clean reviewed commit and tree (`git status --porcelain` is empty).
+   - Deploy that exact commit to staging and create a fresh staging manifest.
+   - Verify the staging manifest commit/tree, worker version, migration prefix,
+     route inventory, health phase, and expiry all match the candidate.
+
+2. **Quality and staging evidence**
+
+   - Run `npm run release:quality:evidence -- --write --json`. It executes
+     `check`, `lint`, `tsc --noEmit`, the complete test suite, both builds,
+     high-severity audit, both deploy dry-runs and `git diff --check`
+     sequentially. It fails closed if the clean commit/tree changes, writes the
+     mode-`0600` quality artifact, and updates only the quality projection in
+     the private production evidence file. Run `release:doctor` separately;
+     the doctor must keep reporting every still-open external gate.
+   - Run staging migration/backup/restore admission and the relevant browser,
+     route, health, domain, Website and Telegram smoke checks.
+   - After migration (and any separately approved seed), create a newer,
+     different staging backup, rerun the restore drill with the full reviewed
+     commit, and run `npm run db:complete-release -- --env staging
+     --release-manifest <manifest-ref> --json` before `deploy:staging`.
+
+3. **Provider acceptance**
+
+   - Run genuine Dodo TEST-mode and PayOS controlled-staging UAT using the
+     provider dashboards and approved tenant-owner session.
+   - Bind each redacted artifact to the same staging release ID, manifest hash,
+     commit/tree and Worker version.
+   - Synthetic signature probes and a `provider_pending` response are route
+     evidence only; they cannot satisfy commerce acceptance.
+   - Keep Telegram Mini App, WhatsApp, Discord, Zalo Mini App and Zalo OA
+     deferred until real provider execution and acceptance exist.
+
+4. **Production protection and operations**
+
+   - Obtain data, payment, release, security and support owner approvals with
+     private references.
+   - Create a fresh protected production backup and provider bookmark, then run
+     an isolated restore drill against the exact candidate tree.
+   - Verify production secret names and install secret values only through the
+     approved Cloudflare secret channel; never place values in evidence files.
+   - Configure dashboards, error/latency/dead-letter alerts and budget alerts;
+     record a fresh monitoring reference.
+   - Complete the controlled pilot (at least two shops) and the manual Website,
+     Telegram, signed-payment and custom-domain acceptance flows.
+
+5. **Admission and mutation**
+
+   - Create the production release evidence draft with every accepted artifact
+     except the not-yet-executed rollback fields. A final doctor failure on those
+     rollback fields is expected at this point; do not fill them with placeholders.
+   - Before `release:manifest`, upload route-neutral candidate and rollback
+     versions with `npm run release:worker:upload -- --role candidate --tag
+     <candidate-tag> --execute --confirm-production --json` and
+     `npm run release:worker:upload -- --role rollback --tag <rollback-tag>
+     --source-root <clean-rollback-worktree> --execute --confirm-production
+     --json`; record both full returned UUIDs. Create the canonical mode-`0600`
+     `.wrangler/releases/<release-id>/maintenance-drain-evidence.json` only after
+     write admission is closed, queue producers and scheduled work are paused,
+     and in-flight jobs are drained. Then run
+     `npm run release:rollback:rehearsal -- --execute --confirm-production
+     --confirm-maintenance-drain --maintenance-drain-evidence
+     .wrangler/releases/<release-id>/maintenance-drain-evidence.json
+     --smoke-storefront-url https://<reviewed-pilot-host>/ --json` and record its
+     `evidenceRef`/`artifactSha256`. The non-mutating `--write` mode validates
+     schema compatibility only and does not authorize production admission.
+     The live rehearsal requires phase-10 health, dashboard, marketing,
+     D1-backed storefront and unsigned-Dodo fail-closed checks, then restores and
+     verifies the exact previous version. Deploy admission validates both
+     Cloudflare version bindings.
+   - Populate the returned rollback fields, run the closeout audit again, and
+     require `release:doctor` to return `ok: true` with continuation-file
+     admission passing for the same commit/tree and migration ledger.
+   - Only then write the candidate-bound release manifest.
+   - Only after all approvals and provider/operations artifacts are accepted,
+     execute the separately approved production migration and deploy ceremony.
+   - Use a short-lived D1-capable `CLOUDFLARE_D1_API_TOKEN` for normal continuation
+     (mapped to `CLOUDFLARE_API_TOKEN` only inside child Wrangler), read-only
+     `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` for route/domain admission, read-only
+     `CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN` for deployment/version
+     inventory admission, and dedicated `CLOUDFLARE_WORKER_DEPLOY_API_TOKEN` for
+     the Worker deploy sink; the
+     historical bootstrap migration token is never a continuation token and the
+     runtime Worker secret is never operator input.
+     The exact deploy command is
+     `npm run deploy -- --env production --confirm-production --release-manifest <manifest-ref>`.
+   - Recheck live routes, Worker version, health, queues, cron and tenant
+     isolation after deployment; retain rollback references.
+
+## Current audit interpretation
+
+The current repository contains strong non-secret platform/staging artifacts,
+but those artifacts are not production admission. In particular:
+
+- A staging manifest exists under `.wrangler/releases/staging/`, but the latest
+  recorded manifest is bound to the prior runtime commit until a fresh exact
+  candidate deployment is performed.
+- Existing production bootstrap smoke and empty-baseline restore reports are
+  historical bootstrap evidence. They do not prove continuation migration,
+  provider UAT, pilot, monitoring, or current-candidate rollback readiness.
+- Missing owner approvals, genuine Dodo/PayOS acceptance, fresh production
+  backup/restore, monitoring, pilot, manual acceptance, and production secret
+  inventory must remain visible as blocked gates.
+
+The only safe way to shorten this list is to produce the corresponding
+auditable artifact through the real operator/provider workflow. Never edit the
+doctor, evidence JSON, or release manifest to bypass an external gate.

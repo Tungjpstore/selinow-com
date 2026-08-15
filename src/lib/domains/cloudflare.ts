@@ -1,4 +1,5 @@
 import { AppError } from "../core/errors";
+import { canonicalizeHostname } from "./policy";
 
 const CLOUDFLARE_API_ORIGIN = "https://api.cloudflare.com/client/v4";
 export const CLOUDFLARE_API_TIMEOUT_MS = 8_000;
@@ -47,6 +48,13 @@ export type CloudflareCustomHostname = {
   };
   ssl: CloudflareCustomHostnameSsl;
   status: string;
+};
+
+export type CloudflareTurnstileHostnameAdmission = {
+  hostname: string;
+  mode: "operator_managed";
+  source: "cloudflare_widget_domains";
+  status: "active" | "pending";
 };
 
 export class CloudflareProviderError extends AppError {
@@ -209,6 +217,7 @@ function parseCustomHostname(value: unknown): CloudflareCustomHostname {
 }
 
 export class CloudflareSaaSClient {
+  private accountIdPromise: Promise<string> | null = null;
   private readonly apiToken: string;
   private readonly timeoutMs: number;
   readonly fetcher: typeof fetch;
@@ -233,12 +242,12 @@ export class CloudflareSaaSClient {
     this.zoneId = normalizedZoneId;
   }
 
-  private async request(method: string, path: string, body?: Record<string, unknown>): Promise<unknown> {
+  private async requestApi(method: string, path: string, body?: Record<string, unknown>): Promise<unknown> {
     const signal = AbortSignal.timeout(this.timeoutMs);
     const fetcher = this.fetcher;
     let response: Response;
     try {
-      response = await fetcher(`${CLOUDFLARE_API_ORIGIN}/zones/${encodeURIComponent(this.zoneId)}/custom_hostnames${path}`, {
+      response = await fetcher(`${CLOUDFLARE_API_ORIGIN}${path}`, {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         headers: {
           Accept: "application/json",
@@ -256,6 +265,25 @@ export class CloudflareSaaSClient {
     const envelope = await readBoundedEnvelope(response);
     if (!response.ok || envelope.success !== true || envelope.result === undefined) throw mapProviderError(response, envelope);
     return envelope.result;
+  }
+
+  private request(method: string, path: string, body?: Record<string, unknown>): Promise<unknown> {
+    return this.requestApi(method, `/zones/${encodeURIComponent(this.zoneId)}/custom_hostnames${path}`, body);
+  }
+
+  private resolveAccountId(): Promise<string> {
+    this.accountIdPromise ??= this.requestApi("GET", `/zones/${encodeURIComponent(this.zoneId)}`).then((result) => {
+      const zone = requireRecord(result);
+      const account = requireRecord(zone.account);
+      if (typeof account.id !== "string" || !/^[a-f0-9]{32}$/u.test(account.id)) {
+        throw new CloudflareProviderError("provider_response_invalid");
+      }
+      return account.id;
+    }).catch((error: unknown) => {
+      this.accountIdPromise = null;
+      throw error;
+    });
+    return this.accountIdPromise;
   }
 
   async createCustomHostname(hostname: string): Promise<CloudflareCustomHostname> {
@@ -284,6 +312,32 @@ export class CloudflareSaaSClient {
 
   async deleteCustomHostname(id: string): Promise<void> {
     await this.request("DELETE", `/${encodeURIComponent(id)}`);
+  }
+
+  async verifyTurnstileHostnameAdmission(siteKeyInput: string, hostnameInput: string): Promise<CloudflareTurnstileHostnameAdmission> {
+    const siteKey = siteKeyInput.trim();
+    if (!/^0x[A-Za-z0-9_-]{20,}$/u.test(siteKey)) throw new AppError("cloudflare_config_invalid", 500);
+    const hostname = canonicalizeHostname(hostnameInput);
+    const accountId = await this.resolveAccountId();
+    const widget = requireRecord(await this.requestApi(
+      "GET",
+      `/accounts/${encodeURIComponent(accountId)}/challenges/widgets/${encodeURIComponent(siteKey)}`,
+    ));
+    if (widget.sitekey !== siteKey || !Array.isArray(widget.domains) || widget.domains.length > 1_000) {
+      throw new CloudflareProviderError("provider_response_invalid");
+    }
+    const domains = widget.domains.map((value) => {
+      if (typeof value !== "string" || value.length === 0 || value.length > 253) {
+        throw new CloudflareProviderError("provider_response_invalid");
+      }
+      return value.trim().toLowerCase().replace(/\.$/u, "");
+    });
+    return {
+      hostname,
+      mode: "operator_managed",
+      source: "cloudflare_widget_domains",
+      status: domains.includes(hostname) ? "active" : "pending",
+    };
   }
 }
 

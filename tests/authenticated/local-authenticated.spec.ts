@@ -198,11 +198,21 @@ function expectPrivateHeaders(headers: Record<string, string>): void {
   expect(headers["x-robots-tag"]).toContain("noindex");
 }
 
-async function authenticateThroughVisibleMagicLink(page: Page, projectName: string): Promise<void> {
+async function authenticateThroughVisibleMagicLink(
+  page: Page,
+  projectName: string,
+  options: {
+    beforeOpen?: () => Promise<void>;
+    confirmationRequired?: boolean;
+    emailPrefix?: string;
+  } = {},
+): Promise<void> {
   await page.goto("/login");
   await expect(page).toHaveTitle("Đăng nhập — Selinow");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Đăng nhập để tiếp tục");
-  await page.getByLabel("Email").fill(`browser-gate-${projectName}@selinow.invalid`);
+  await page
+    .getByRole("textbox", { name: "Email", exact: true })
+    .fill(`${options.emailPrefix ?? "browser-gate"}-${projectName}@selinow.invalid`);
   await page.getByLabel("Tên hiển thị").fill("Browser Gate");
   const magicLinkResponsePromise = page.waitForResponse((response) => {
     try {
@@ -264,12 +274,47 @@ async function authenticateThroughVisibleMagicLink(page: Page, projectName: stri
       tone: lastLoginState.tone,
     })}`);
   }
+  await options.beforeOpen?.();
+  const consumeResponsePromise = page.waitForResponse((response) => {
+    try {
+      return new URL(response.url()).pathname === "/api/auth/magic-link/consume";
+    } catch {
+      return false;
+    }
+  });
   await page.evaluate(() => {
     const links = [...document.querySelectorAll("a")];
     const link = links.find((candidate) => candidate.textContent.trim() === "mở liên kết đăng nhập");
     if (!(link instanceof HTMLAnchorElement)) throw new Error("local_magic_link_action_missing");
     link.click();
   });
+  const consumeResponse = await consumeResponsePromise;
+  const consumeState = await consumeResponse.json().then((body: unknown) => {
+    const record = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
+    return {
+      authenticated: record.authenticated === true,
+      code: typeof record.code === "string" ? record.code : "none",
+      confirmationRequired: record.confirmationRequired === true,
+      requestId: typeof record.requestId === "string" ? record.requestId : "none",
+      status: consumeResponse.status(),
+    };
+  }).catch(() => ({
+    authenticated: false,
+    code: "response_unreadable",
+    confirmationRequired: false,
+    requestId: "none",
+    status: consumeResponse.status(),
+  }));
+
+  if (options.confirmationRequired === true) {
+    expect(consumeState).toMatchObject({ confirmationRequired: true, status: 202 });
+    await expect(page.locator("[data-login-confirmation]")).toBeVisible();
+    await expect(page.locator("[data-login-confirm-destination]")).not.toBeEmpty();
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
+    await page.locator("[data-login-confirm]").click();
+  } else {
+    expect(consumeState).toMatchObject({ authenticated: true, status: 200 });
+  }
 
   // Read only the final path so a failed assertion cannot print a magic-link token.
   await expect.poll(async () => {
@@ -279,10 +324,18 @@ async function authenticateThroughVisibleMagicLink(page: Page, projectName: stri
       return "navigation_in_progress";
     }
   }, { message: "local magic-link navigation did not reach the dashboard" }).toBe("/app");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Browser Gate");
+  await expect(page.locator("[data-app-shell] .app-topbar-context > strong")).toHaveText("Browser Gate");
 }
 
 test.describe.configure({ mode: "serial" });
+
+test("local magic link confirms safely when the requester cookie is unavailable", async ({ page }, testInfo) => {
+  await authenticateThroughVisibleMagicLink(page, testInfo.project.name, {
+    beforeOpen: () => page.context().clearCookies(),
+    confirmationRequired: true,
+    emailPrefix: "cross-browser-gate",
+  });
+});
 
 test("local magic link opens deterministic authenticated seller surfaces", async ({ page }, testInfo) => {
   const runtimeIssues: string[] = [];

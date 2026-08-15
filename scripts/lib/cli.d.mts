@@ -17,6 +17,7 @@ export function run(
     capture?: boolean;
     cwd?: string;
     env?: NodeJS.ProcessEnv;
+    safeFailureCodes?: string[];
   },
 ): { stderr: string; stdout: string };
 
@@ -26,6 +27,7 @@ export function runWrangler(
     capture?: boolean;
     cwd?: string;
     env?: NodeJS.ProcessEnv;
+    safeFailureCodes?: string[];
   },
 ): { stderr: string; stdout: string };
 

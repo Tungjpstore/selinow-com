@@ -1,0 +1,73 @@
+version: 1
+baseline_date: "2026-08-03"
+runtime:
+  framework: Astro 7 SSR
+  adapter: Cloudflare Workers
+  canonical_logical_routes: 25
+  redirect_aliases: 2
+surfaces:
+  marketing:
+    host: selinow.com
+    routes:
+      - path: /
+        source: src/pages/index.astro
+        auth: anonymous
+        cache: public
+        maturity: live
+      - path: /pricing
+        source: src/pages/pricing.astro
+        auth: anonymous
+        cache: public
+        maturity: live
+  auth:
+    intended_host: app.selinow.com
+    routes:
+      - path: /login
+        source: src/pages/login.astro
+        auth: anonymous_or_redirect_authenticated
+        cache: private_no_store
+        maturity: live
+  workspace:
+    host: app.selinow.com
+    auth: session_and_active_membership
+    routes:
+      - { path: /app, source: src/pages/app/index.astro, audience: all_shop_roles, maturity: live }
+      - { path: /onboarding, source: src/pages/onboarding.astro, audience: authenticated_member_server_gated, maturity: live }
+      - { path: /app/products, source: src/pages/app/products.astro, audience: owner_manager, maturity: live }
+      - { path: /app/inventory, source: src/pages/app/inventory.astro, audience: owner_manager, maturity: live }
+      - { path: /app/orders, source: src/pages/app/orders.astro, audience: all_shop_roles, maturity: live }
+      - { path: "/app/orders/:id", source: "src/pages/app/orders/[id].astro", audience: all_shop_roles, maturity: live }
+      - { path: /app/customers, source: src/pages/app/customers.astro, audience: all_shop_roles, maturity: contract_ready }
+      - { path: /app/integrations, source: src/pages/app/integrations.astro, audience: capability_gated, maturity: provider_pending }
+      - { path: /app/domains, source: src/pages/app/domains.astro, audience: owner, maturity: external_pending }
+      - { path: /app/automation, source: src/pages/app/automation.astro, audience: all_read_capability_control, maturity: live }
+      - { path: /app/store, source: src/pages/app/store.astro, audience: all_read_owner_manager_edit_owner_publish, maturity: live }
+      - { path: /app/members, source: src/pages/app/members.astro, audience: owner, maturity: contract_ready }
+      - { path: /app/billing, source: src/pages/app/billing.astro, audience: owner, maturity: provider_pending }
+      - { path: /app/data, source: src/pages/app/data.astro, audience: owner, maturity: live }
+    aliases:
+      - { path: /app/telegram, redirect: "/app/integrations?focus=telegram#telegram", status: 307 }
+      - { path: /app/store/settings, redirect: "/app/store?focus=settings#store-settings", status: 307 }
+  admin:
+    intended_host: app.selinow.com
+    auth: session_and_active_platform_admin
+    routes:
+      - { path: /admin, source: src/pages/admin/index.astro, audience: owner_risk_support, maturity: live }
+      - { path: /admin/operations, source: src/pages/admin/operations.astro, audience: owner_risk_support, maturity: live }
+      - { path: /admin/shops, source: src/pages/admin/shops.astro, audience: owner_risk_support, maturity: read_only }
+  storefront:
+    host: active_tenant_hostname
+    auth: anonymous_with_opaque_capability_tokens_for_private_flows
+    routes:
+      - { path: /, source: src/pages/index.astro, cache: edge_public_when_live, maturity: live }
+      - { path: "/products/:slug", source: "src/pages/products/[slug].astro", cache: edge_public_when_live, maturity: live }
+      - { path: /cart, source: src/pages/cart.astro, cache: private_no_store, maturity: live }
+      - { path: /checkout, source: src/pages/checkout.astro, cache: private_no_store, maturity: live }
+      - { path: "/orders/:orderPublicId", source: "src/pages/orders/[orderPublicId].astro", cache: private_no_store, maturity: live }
+forbidden_inferences:
+  - client_shop_id_is_tenant_authority
+  - return_url_or_qr_means_paid
+  - payment_status_implies_fulfillment_status
+  - queue_or_cache_is_authoritative
+  - hidden_button_is_authorization
+  - provider_code_or_secret_is_safe_to_render

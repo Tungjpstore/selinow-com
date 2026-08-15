@@ -44,6 +44,17 @@ describe("system localization", () => {
     expect(subscriptionStatePresentation("provider_internal_state", "en")).toMatchObject({ label: "Unknown", tone: "neutral" });
   });
 
+  it("localizes staging provider admission failures with a safe request reference", () => {
+    const requestId = "request-payos-admission";
+
+    expect(safeErrorMessage("payment_provider_environment_not_admitted", requestId, "en")).toBe(
+      `This provider account is not admitted for this environment. Support code: ${requestId}.`,
+    );
+    expect(safeErrorMessage("payment_provider_environment_not_admitted", requestId, "vi-VN")).toBe(
+      `Tài khoản nhà cung cấp này chưa được cho phép trong môi trường hiện tại. Mã hỗ trợ: ${requestId}.`,
+    );
+  });
+
   it("localizes magic-link email copy and maps provider failures without leaking secrets", async () => {
     const messages: EmailMessage[] = [];
     await sendMagicLinkEmail({

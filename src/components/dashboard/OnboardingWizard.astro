@@ -1,23 +1,42 @@
 ---
 import { WIZARD_STEPS } from "../../lib/dashboard/onboarding-ui";
+import { PUBLIC_PLAN_CODES } from "../../lib/billing/plan-catalog";
 import { currencyInputStep, formatMinorAmountForInput, SUPPORTED_CURRENCY_CODES } from "../../lib/i18n/currency";
 import { createOnboardingTranslator, getOnboardingClientCopy } from "../../lib/i18n/catalogs/onboarding";
-import type { ShopView } from "../../lib/tenants/store";
+import type { ShopCreationAdmission, ShopView } from "../../lib/tenants/store";
 
 type Props = {
+  creationAdmission: ShopCreationAdmission;
   csrfCookieName: string;
   defaultCurrency: string;
   defaultLocale: string;
   locale?: string | undefined;
   platformBaseDomain: string;
+  policyAttestationPublished: boolean;
+  policyAttestationVersion: number | null;
   shops: ShopView[];
 };
 
-const { csrfCookieName, defaultCurrency, defaultLocale, locale, platformBaseDomain, shops } = Astro.props;
+const {
+  creationAdmission,
+  csrfCookieName,
+  defaultCurrency,
+  defaultLocale,
+  locale,
+  platformBaseDomain,
+  policyAttestationPublished,
+  policyAttestationVersion,
+  shops,
+} = Astro.props;
 const t = createOnboardingTranslator(locale);
 const clientCopy = getOnboardingClientCopy(locale);
 const wizardSteps = WIZARD_STEPS.map((step) => ({ ...step, label: t(step.labelKey) }));
 const initialShop = shops[0];
+const initialPlanLabel = initialShop?.planCode === "starter"
+  ? t("onboarding.form.plan_starter")
+  : initialShop?.planCode === "pro"
+    ? t("onboarding.form.plan_pro")
+    : t("onboarding.shop.existing_plan");
 ---
 
 <div
@@ -25,10 +44,14 @@ const initialShop = shops[0];
   data-onboarding-root
   data-csrf-cookie-name={csrfCookieName}
   data-copy={JSON.stringify(clientCopy)}
+  data-creation-admission={JSON.stringify(creationAdmission)}
   data-default-currency={defaultCurrency}
   data-default-locale={defaultLocale}
   data-locale={locale ?? "en"}
   data-platform-base-domain={platformBaseDomain}
+  data-policy-attestation-published={policyAttestationPublished ? "true" : "false"}
+  data-policy-attestation-version={policyAttestationVersion === null ? "" : String(policyAttestationVersion)}
+  data-public-plan-codes={JSON.stringify(PUBLIC_PLAN_CODES)}
   data-shops={JSON.stringify(shops)}
 >
   <section class="onboarding-intro" aria-labelledby="onboarding-title">
@@ -46,6 +69,10 @@ const initialShop = shops[0];
   </section>
 
   <div id="onboarding-global-feedback" class="global-feedback" data-global-feedback role="status" aria-live="polite" aria-atomic="true" hidden></div>
+  <div class="resume-recovery" data-onboarding-resume-recovery hidden={creationAdmission.recoveryShopPublicId === null}>
+    <p>{t("onboarding.feedback.create_recovery")}</p>
+    <button type="button" class="secondary-action" data-onboarding-resume-reload>{t("onboarding.button.reload_saved_setup")}</button>
+  </div>
 
   <section class="wizard-frame" aria-label={t("onboarding.aria.steps")}>
     <div class="mobile-step-summary">
@@ -119,7 +146,7 @@ const initialShop = shops[0];
             </select>
             <button type="button" class="secondary-action" data-refresh-shop>{t("onboarding.button.refresh")}</button>
           </div>
-          <p class="selection-summary" data-shop-summary>{initialShop === undefined ? "" : `${initialShop.slug}.${platformBaseDomain} · ${initialShop.planCode}`}</p>
+          <p class="selection-summary" data-shop-summary>{initialShop === undefined ? "" : `${initialShop.slug}.${platformBaseDomain} · ${initialPlanLabel}`}</p>
           <form class="shop-rename-form" data-shop-rename-form hidden novalidate>
             <label for="onboarding-shop-name">{t("onboarding.form.rename_label")}</label>
             <div class="select-row">
@@ -130,7 +157,7 @@ const initialShop = shops[0];
           </form>
         </div>
 
-        <details class="create-shop-box" open={shops.length === 0} data-create-shop-box>
+        <details class="create-shop-box" open={creationAdmission.allowed && shops.length === 0} hidden={!creationAdmission.allowed} data-create-shop-box>
           <summary>{shops.length === 0 ? t("onboarding.shop.create_first") : t("onboarding.shop.create_more")}</summary>
           <form class="form-grid" data-shop-form novalidate>
             <label class="field field-wide">
@@ -144,11 +171,10 @@ const initialShop = shops[0];
             </label>
             <label class="field">
               <span>{t("onboarding.form.plan_label")}</span>
-              <select name="planCode" data-shop-plan>
-                <option value="store">{t("onboarding.form.plan_store")}</option>
-                <option value="bot">{t("onboarding.form.plan_bot")}</option>
-                <option value="business">{t("onboarding.form.plan_business")}</option>
+              <select name="planCode" data-shop-plan disabled aria-describedby="onboarding-plan-summary">
+                <option value="">{t("onboarding.form.plan_loading")}</option>
               </select>
+              <small id="onboarding-plan-summary" data-plan-summary>{t("onboarding.form.plan_loading")}</small>
             </label>
             <label class="field">
               <span>{t("onboarding.form.merchant_country")}</span>
@@ -351,7 +377,7 @@ const initialShop = shops[0];
           <h2>{t("onboarding.settings.title")}</h2>
           <p>{t("onboarding.settings.description")}</p>
         </header>
-        <form class="form-grid" data-settings-form novalidate>
+        <form class="form-grid" data-globalization-form novalidate>
           <fieldset class="field-wide settings-globalization">
             <legend>{t("onboarding.form.globalization_legend")}</legend>
             <div class="form-grid">
@@ -361,11 +387,14 @@ const initialShop = shops[0];
               <label class="field"><span>{t("onboarding.form.default_locale")}</span><select name="defaultLocale" data-settings-default-locale><option value="en">English</option><option value="vi-VN">Tiếng Việt</option></select></label>
             </div>
           </fieldset>
+          <div class="form-actions field-wide"><p>{t("onboarding.form.globalization_note")}</p><button type="submit" class="primary-action" data-globalization-submit>{t("onboarding.button.save_globalization")}</button></div>
+        </form>
+        <form class="form-grid settings-legal-form" data-settings-form novalidate>
           <label class="field field-wide"><span>{t("onboarding.form.support")}</span><input name="supportContact" type="text" minlength="3" maxlength="180" placeholder={t("onboarding.form.support_placeholder")} required data-support-contact /></label>
           <label class="field"><span>{t("onboarding.form.terms")}</span><input name="termsUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/terms" required data-terms-url /></label>
           <label class="field"><span>{t("onboarding.form.privacy")}</span><input name="privacyUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/privacy" required data-privacy-url /></label>
           <label class="field field-wide"><span>{t("onboarding.form.refund")}</span><input name="refundPolicyUrl" type="url" inputmode="url" maxlength="512" placeholder="https://example.com/refund" required data-refund-url /></label>
-          <label class="attestation field-wide"><input name="attestationAccepted" type="checkbox" required data-attestation /><span>{t("onboarding.form.attestation")}</span></label>
+          <label class="attestation field-wide"><input name="attestationAccepted" type="checkbox" required={policyAttestationPublished} disabled={!policyAttestationPublished} data-attestation /><span>{t("onboarding.form.attestation")}</span></label>
           <div class="domain-callout field-wide">
             <div><strong>{t("onboarding.form.domain_optional_title")}</strong><p>{t("onboarding.form.domain_optional_copy")}</p></div>
             <a href={initialShop === undefined ? "/app/domains" : `/app/domains?shop=${encodeURIComponent(initialShop.publicId)}`} data-domain-management-link>{t("onboarding.form.domain_link")}</a>
@@ -540,6 +569,10 @@ const initialShop = shops[0];
   .global-feedback { position: sticky; top: 12px; z-index: 20; margin-bottom: 16px; padding: 16px 20px; border: 1px solid var(--selinow-info); border-radius: var(--selinow-radius-md); background: rgb(11 16 32 / 96%); box-shadow: var(--selinow-shadow-md); line-height: 1.5; }
   .global-feedback[data-tone="error"] { border-color: var(--selinow-danger); }
   .global-feedback[data-tone="success"] { border-color: var(--selinow-success); }
+  .resume-recovery { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -4px 0 20px; padding: 14px 16px; border: 1px solid var(--selinow-info); border-radius: var(--selinow-radius-md); background: rgb(37 99 235 / 8%); }
+  .resume-recovery[hidden] { display: none; }
+  .resume-recovery p { margin: 0; line-height: 1.5; }
+  .resume-recovery button { flex: 0 0 auto; }
   .wizard-frame { display: grid; grid-template-columns: minmax(224px, .35fr) minmax(0, 1.65fr); overflow: hidden; border: 1px solid var(--selinow-ink-700); border-radius: var(--selinow-radius-xl); background: var(--selinow-ink-900); box-shadow: var(--selinow-shadow-lg); }
   .mobile-step-summary { display: none; }
   .step-rail { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--selinow-ink-700); background: var(--selinow-ink-950); }
@@ -749,6 +782,7 @@ const initialShop = shops[0];
   .global-feedback { top: calc(var(--sln-topbar-height) + 12px); border-color: var(--sln-state-info); background: var(--sln-bg-surface); color: var(--sln-text-primary); box-shadow: var(--sln-shadow-sm); }
   .global-feedback[data-tone="error"] { border-color: var(--sln-state-danger); background: var(--sln-tint-danger); }
   .global-feedback[data-tone="success"] { border-color: var(--sln-state-success); background: var(--sln-tint-success); }
+  .resume-recovery { border-color: var(--sln-state-info); background: var(--sln-tint-info); color: var(--sln-text-primary); }
   .wizard-frame { grid-template-columns: minmax(248px, 280px) minmax(0, 1fr); border-color: var(--sln-border-default); border-radius: var(--sln-radius-xl); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-sm); }
   .step-rail { border-color: var(--sln-border-default); background: var(--sln-bg-subtle); }
   .step-rail li { border-color: var(--sln-border-default); }

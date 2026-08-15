@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -38,8 +39,30 @@ const EXPECTED_DATABASE_NAMES = {
 const STAGING_BACKUP_FRESHNESS_MS = 60 * 60_000;
 const CLOUDFLARE_ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/u;
 const D1_DATABASE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+// The source database may legitimately predate the billing/activation chain;
+// those tables are created by pending migrations and validated on the replayed
+// target below. Only require the durable platform baseline in the source copy.
+const SOURCE_BASELINE_TABLES = ["plans", "shops", "shop_subscriptions", "usage_counters"];
 const CORE_COUNT_TABLES = [
   "api_credentials",
+  "plans",
+  "plan_prices",
+  "shop_subscriptions",
+  "billing_accounts",
+  "billing_checkout_sessions",
+  "billing_invoices",
+  "billing_provider_events",
+  "subscription_events",
+  "usage_counters",
+  "usage_events",
+  "activation_milestones",
+  "catalog_channel_visibility",
+  "channel_customer_identities",
+  "channel_connector_requests",
+  "channel_oauth_states",
+  "channel_provider_verification_evidence",
+  "channel_provider_event_receipts",
+  "customer_notes",
   "delivery_grant_claims",
   "delivery_grant_consumptions",
   "delivery_grants",
@@ -70,12 +93,14 @@ const CORE_COUNT_TABLES = [
   "order_item_fulfillment_requirements",
   "order_item_entitlement_requirements",
   "order_items",
+  "order_access_recovery_tokens",
   "orders",
   "payment_attempts",
   "payment_credentials",
   "payment_events",
   "payment_exceptions",
   "payment_reversal_events",
+  "payment_remediation_requests",
   "payment_integrations",
   "payment_method_codes",
   "payment_provider_connection_capabilities",
@@ -88,7 +113,12 @@ const CORE_COUNT_TABLES = [
   "shop_domains",
   "shop_deletion_requests",
   "shop_deletion_steps",
+  "shop_member_invitations",
   "shops",
+  "subscription_change_requests",
+  "order_messages",
+  "order_notes",
+  "telegram_mini_app_sessions",
   "telegram_integrations",
 ];
 const REQUIRED_TABLES = [
@@ -103,8 +133,26 @@ const REQUIRED_TABLES = [
   "shop_channels",
 ];
 
+// A migration file was briefly renamed after it had already been applied to
+// the default Wrangler database. Restore drills may normalize that historical
+// ledger row only inside their disposable target; the authoritative database
+// is always opened read-only by the source-copy step.
+const HISTORICAL_MIGRATION_ALIASES = Object.freeze([
+  Object.freeze({
+    canonical: "0062_zalo_oa_oauth_state_retry.sql",
+    historical: "0062_zalo_oa_oauth_state_reissue.sql",
+  }),
+]);
+
 export const restoreCountValidationTables = Object.freeze([...CORE_COUNT_TABLES]);
 export const restoreValidationTables = Object.freeze([...REQUIRED_TABLES]);
+
+export function assertRequiredRestoreTables(tableNames) {
+  const names = new Set(tableNames);
+  if (REQUIRED_TABLES.some((table) => !names.has(table))) {
+    throw new Error("restore_schema_incomplete");
+  }
+}
 
 function compactTimestamp(now) {
   return now.toISOString().replaceAll(/[-:.TZ]/gu, "").slice(0, 14);
@@ -227,6 +275,54 @@ async function copyLocalDatabase(destinationPath) {
     throw new Error("local_database_copy_failed");
   } finally {
     source.close();
+  }
+}
+
+export function normalizeHistoricalMigrationAliases(databasePath, repositoryMigrationNames) {
+  const parentDirectory = basename(dirname(databasePath));
+  if (
+    basename(databasePath) !== "restored.sqlite"
+    || !parentDirectory.startsWith(RESTORE_TEMP_PREFIX)
+  ) {
+    throw new Error("restore_target_invalid");
+  }
+  const repositoryNames = new Set(repositoryMigrationNames);
+  const database = new DatabaseSync(databasePath);
+  const normalized = [];
+  try {
+    const migrationTable = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'd1_migrations'",
+    ).get();
+    if (migrationTable === undefined) throw new Error("restore_migration_ledger_missing");
+    database.exec("PRAGMA foreign_keys = ON");
+    const names = database.prepare("SELECT name FROM d1_migrations ORDER BY name").all()
+      .map((row) => String(row.name));
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const alias of HISTORICAL_MIGRATION_ALIASES) {
+        if (repositoryNames.has(alias.historical)) {
+          throw new Error("restore_migration_alias_is_current");
+        }
+        if (!repositoryNames.has(alias.canonical)) {
+          throw new Error("restore_migration_alias_canonical_missing");
+        }
+        const historicalCount = names.filter((name) => name === alias.historical).length;
+        if (historicalCount === 0) continue;
+        const canonicalCount = names.filter((name) => name === alias.canonical).length;
+        if (historicalCount !== 1 || canonicalCount !== 1) {
+          throw new Error("restore_migration_alias_unresolved");
+        }
+        database.prepare("DELETE FROM d1_migrations WHERE name = ?").run(alias.historical);
+        normalized.push({ ...alias });
+      }
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return normalized;
+  } finally {
+    database.close();
   }
 }
 
@@ -450,22 +546,8 @@ export async function createBackup(options) {
   };
 }
 
-export async function assertFreshStagingBackupEvidence(options) {
-  const backupRoot = options.backupRoot ?? resolve(BACKUP_ROOT, "staging");
-  let entries;
-  try {
-    entries = await readdir(backupRoot, { withFileTypes: true });
-  } catch {
-    throw new Error("staging_backup_evidence_missing");
-  }
-  const latestDirectory = entries
-    .filter((entry) => entry.isDirectory() && /^bkp_\d{14}_[a-f0-9]{12}$/u.test(entry.name))
-    .map((entry) => entry.name)
-    .sort()
-    .at(-1);
-  if (latestDirectory === undefined) throw new Error("staging_backup_evidence_missing");
-
-  const snapshotDirectory = resolve(backupRoot, latestDirectory);
+async function assertStagingBackupEvidence(options) {
+  const snapshotDirectory = resolve(options.backupRoot, options.snapshotId);
   const reportPath = resolve(snapshotDirectory, "snapshot.json");
   let report;
   try {
@@ -480,7 +562,7 @@ export async function assertFreshStagingBackupEvidence(options) {
     report?.report_version !== 2
     || report?.artifact?.format !== "sql"
     || report?.artifact?.path !== "database.sql"
-    || record?.id !== latestDirectory
+    || record?.id !== options.snapshotId
     || record?.environment !== "staging"
     || record?.resource_ref !== `d1:${options.databaseName}`
     || record?.snapshot_kind !== "time_travel"
@@ -503,7 +585,7 @@ export async function assertFreshStagingBackupEvidence(options) {
   }
 
   const completedAt = new Date(record.completed_at);
-  const age = (options.now ?? new Date()).getTime() - completedAt.getTime();
+  const age = options.now.getTime() - completedAt.getTime();
   if (!Number.isFinite(completedAt.getTime()) || age < 0 || age > STAGING_BACKUP_FRESHNESS_MS) {
     throw new Error("staging_backup_evidence_stale");
   }
@@ -524,10 +606,209 @@ export async function assertFreshStagingBackupEvidence(options) {
   }
 
   return {
+    artifactPath,
+    checksumSha256: record.checksum_sha256,
     completedAt: completedAt.toISOString(),
-    reportRef: options.backupRoot === undefined ? relativeReportPath(reportPath) : reportPath,
+    createdAt: record.created_at,
+    expiresAt: record.expires_at,
+    providerReference: record.provider_reference,
+    reportRef: options.reportRef,
+    sizeBytes: record.size_bytes,
     snapshotId: record.id,
+    snapshotKind: record.snapshot_kind,
   };
+}
+
+export async function assertFreshStagingBackupEvidence(options) {
+  const backupRoot = options.backupRoot ?? resolve(BACKUP_ROOT, "staging");
+  let entries;
+  try {
+    entries = await readdir(backupRoot, { withFileTypes: true });
+  } catch {
+    throw new Error("staging_backup_evidence_missing");
+  }
+  const latestDirectory = entries
+    .filter((entry) => entry.isDirectory() && /^bkp_\d{14}_[a-f0-9]{12}$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .at(-1);
+  if (latestDirectory === undefined) throw new Error("staging_backup_evidence_missing");
+  const reportPath = resolve(backupRoot, latestDirectory, "snapshot.json");
+  return assertStagingBackupEvidence({
+    ...options,
+    backupRoot,
+    now: options.now ?? new Date(),
+    reportRef: options.backupRoot === undefined ? relativeReportPath(reportPath) : reportPath,
+    snapshotId: latestDirectory,
+  });
+}
+
+async function assertStagingRestoreEvidence(options) {
+  const reportPath = options.reportPath;
+  let report;
+  let reportStat;
+  try {
+    [report, reportStat] = await Promise.all([
+      readFile(reportPath, "utf8").then((value) => JSON.parse(value)),
+      lstat(reportPath),
+    ]);
+  } catch {
+    throw new Error("staging_continuation_restore_evidence_invalid");
+  }
+  if (!reportStat.isFile() || (reportStat.mode & 0o077) !== 0) {
+    throw new Error("staging_continuation_restore_permissions_invalid");
+  }
+
+  const snapshots = report?.records?.backup_snapshots;
+  const drills = report?.records?.restore_drills;
+  const snapshot = Array.isArray(snapshots) && snapshots.length === 1 ? snapshots[0] : null;
+  const drill = Array.isArray(drills) && drills.length === 1 ? drills[0] : null;
+  const source = report?.source;
+  const repositoryMigrationNames = await expectedMigrationNames();
+  const updatedAt = new Date(drill?.updated_at ?? "");
+  const restoreAge = options.now.getTime() - updatedAt.getTime();
+  const backupCompletedAt = new Date(options.backup.completedAt).getTime();
+  const targetResourceRef = drill?.target_resource_ref;
+
+  if (
+    report?.report_version !== 1
+    || report?.reviewed_commit_sha !== options.reviewedCommitSha
+    || source?.account_id !== options.accountId
+    || source?.database_id !== options.databaseId
+    || source?.database_name !== options.databaseName
+    || source?.resource_ref !== `d1:${options.databaseName}`
+    || snapshot?.environment !== "staging"
+    || snapshot?.id !== options.backup.snapshotId
+    || snapshot?.resource_ref !== `d1:${options.databaseName}`
+    || snapshot?.status !== "available"
+    || snapshot?.checksum_sha256 !== options.backup.checksumSha256
+    || snapshot?.size_bytes !== options.backup.sizeBytes
+    || drill?.environment !== "staging"
+    || drill?.status !== "passed"
+    || drill?.backup_snapshot_id !== snapshot?.id
+    || !/^d1:selinow-restore-drill-staging-[a-f0-9]{12}$/u.test(targetResourceRef ?? "")
+    || targetResourceRef === `d1:${options.databaseName}`
+    || drill?.foreign_key_violation_count !== 0
+    || !Number.isSafeInteger(drill?.restored_item_count)
+    || drill.restored_item_count < 1
+    || report?.verification?.integrityOk !== true
+    || report?.verification?.foreignKeyViolationCount !== 0
+    || !Array.isArray(report?.verification?.migrationNames)
+    || report.verification.migrationNames.length !== repositoryMigrationNames.length
+    || report.verification.migrationNames.some((name, index) => name !== repositoryMigrationNames[index])
+    || !Number.isFinite(updatedAt.getTime())
+    || updatedAt.getTime() < backupCompletedAt
+    || restoreAge < 0
+    || restoreAge > STAGING_BACKUP_FRESHNESS_MS
+  ) {
+    throw new Error("staging_continuation_restore_evidence_invalid");
+  }
+
+  return {
+    completedAt: updatedAt.toISOString(),
+    reportRef: reportPath,
+    snapshotId: snapshot.id,
+    targetResourceRef,
+  };
+}
+
+export async function assertFreshStagingContinuationEvidence(options) {
+  const reviewedCommitSha = options.reviewedCommitSha;
+  if (typeof reviewedCommitSha !== "string" || !/^[a-f0-9]{40}$/u.test(reviewedCommitSha)) {
+    throw new Error("staging_continuation_reviewed_commit_invalid");
+  }
+
+  const root = resolve(options.repositoryRoot ?? repositoryRoot);
+  const backupRoot = options.backupRoot ?? resolve(root, ".wrangler/backups/staging");
+  const restoreRoot = options.restoreRoot ?? resolve(root, ".wrangler/restore-drills/staging");
+  const backup = await assertFreshStagingBackupEvidence({
+    accountId: options.accountId,
+    backupRoot,
+    databaseId: options.databaseId,
+    databaseName: options.databaseName,
+    now: options.now,
+  });
+  let entries;
+  try {
+    entries = await readdir(restoreRoot, { withFileTypes: true });
+  } catch {
+    throw new Error("staging_continuation_restore_evidence_missing");
+  }
+  const latestReport = entries
+    .filter((entry) => entry.isFile() && /^rdr_\d{14}_[a-f0-9]{12}\.json$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .at(-1);
+  if (latestReport === undefined) throw new Error("staging_continuation_restore_evidence_missing");
+
+  const restore = await assertStagingRestoreEvidence({
+    ...options,
+    backup,
+    now: options.now ?? new Date(),
+    reportPath: resolve(restoreRoot, latestReport),
+    reviewedCommitSha,
+  });
+
+  return {
+    backup,
+    reviewedCommitSha,
+    restore,
+  };
+}
+
+export async function assertStagingContinuationEvidenceByReference(options) {
+  const expected = options.continuationEvidence;
+  const root = resolve(options.repositoryRoot ?? repositoryRoot);
+  const backupRoot = resolve(options.backupRoot ?? resolve(root, ".wrangler/backups/staging"));
+  const restoreRoot = resolve(options.restoreRoot ?? resolve(root, ".wrangler/restore-drills/staging"));
+  const snapshotId = expected?.backupSnapshotId;
+  const backupReportPath = resolve(root, expected?.backupReportRef ?? "");
+  const restoreReportPath = resolve(root, expected?.restoreReportRef ?? "");
+  if (!/^bkp_\d{14}_[a-f0-9]{12}$/u.test(snapshotId ?? "")
+    || backupReportPath !== resolve(backupRoot, snapshotId, "snapshot.json")
+    || dirname(restoreReportPath) !== restoreRoot
+    || !/^rdr_\d{14}_[a-f0-9]{12}\.json$/u.test(basename(restoreReportPath))) {
+    throw new Error("staging_release_continuation_evidence_mismatch");
+  }
+  const now = options.evidenceRecordedAt instanceof Date
+    ? options.evidenceRecordedAt
+    : new Date(options.evidenceRecordedAt ?? "");
+  if (!Number.isFinite(now.getTime())) {
+    throw new Error("staging_release_continuation_evidence_mismatch");
+  }
+  const backup = await assertStagingBackupEvidence({
+    accountId: options.accountId,
+    backupRoot,
+    databaseId: options.databaseId,
+    databaseName: options.databaseName,
+    now,
+    reportRef: expected.backupReportRef,
+    snapshotId,
+  });
+  const restore = await assertStagingRestoreEvidence({
+    accountId: options.accountId,
+    backup,
+    databaseId: options.databaseId,
+    databaseName: options.databaseName,
+    now,
+    reportPath: restoreReportPath,
+    reviewedCommitSha: options.reviewedCommitSha,
+  });
+  const actual = {
+    backupChecksumSha256: backup.checksumSha256,
+    backupCompletedAt: backup.completedAt,
+    backupReportRef: backup.reportRef,
+    backupSizeBytes: backup.sizeBytes,
+    backupSnapshotId: backup.snapshotId,
+    restoreCompletedAt: restore.completedAt,
+    restoreReportRef: restore.reportRef,
+    restoreSnapshotId: restore.snapshotId,
+    restoreTargetResourceRef: restore.targetResourceRef,
+  };
+  if (Object.keys(actual).some((key) => actual[key] !== expected[key])) {
+    throw new Error("staging_release_continuation_evidence_mismatch");
+  }
+  return { backup, restore, reviewedCommitSha: options.reviewedCommitSha };
 }
 
 export async function assertFreshProductionBootstrapBackupEvidence(options) {
@@ -614,6 +895,130 @@ export async function assertFreshProductionBootstrapBackupEvidence(options) {
   };
 }
 
+/**
+ * Continuation migrations use the non-empty production backup/restore path.
+ * The historical empty-baseline ceremony cannot prove that the current
+ * production schema and data survive a forward-only continuation.
+ */
+export async function assertFreshProductionContinuationEvidence(options) {
+  const reviewedCommitSha = options.reviewedCommitSha;
+  if (typeof reviewedCommitSha !== "string" || !/^[a-f0-9]{40}$/u.test(reviewedCommitSha)) {
+    throw new Error("production_continuation_reviewed_commit_invalid");
+  }
+
+  const root = resolve(options.repositoryRoot ?? repositoryRoot);
+  const backupRoot = options.backupRoot ?? resolve(root, ".wrangler/backups/production");
+  const restoreRoot = options.restoreRoot ?? resolve(root, ".wrangler/restore-drills/production");
+  const backup = await assertFreshProductionBootstrapBackupEvidence({
+    accountId: options.accountId,
+    backupRoot,
+    databaseId: options.databaseId,
+    databaseName: options.databaseName,
+    now: options.now,
+  });
+  let backupReportStat;
+  let backupArtifactStat;
+  try {
+    [backupReportStat, backupArtifactStat] = await Promise.all([
+      lstat(backup.reportRef),
+      lstat(backup.artifactPath),
+    ]);
+  } catch {
+    throw new Error("production_continuation_backup_evidence_invalid");
+  }
+  if (
+    !backupReportStat.isFile()
+    || (backupReportStat.mode & 0o077) !== 0
+    || !backupArtifactStat.isFile()
+    || (backupArtifactStat.mode & 0o077) !== 0
+  ) {
+    throw new Error("production_continuation_backup_permissions_invalid");
+  }
+
+  let entries;
+  try {
+    entries = await readdir(restoreRoot, { withFileTypes: true });
+  } catch {
+    throw new Error("production_continuation_restore_evidence_missing");
+  }
+  const latestReport = entries
+    .filter((entry) => entry.isFile() && /^rdr_\d{14}_[a-f0-9]{12}\.json$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .at(-1);
+  if (latestReport === undefined) throw new Error("production_continuation_restore_evidence_missing");
+
+  const reportPath = resolve(restoreRoot, latestReport);
+  let report;
+  let reportStat;
+  try {
+    [report, reportStat] = await Promise.all([
+      readFile(reportPath, "utf8").then((value) => JSON.parse(value)),
+      lstat(reportPath),
+    ]);
+  } catch {
+    throw new Error("production_continuation_restore_evidence_invalid");
+  }
+  if (!reportStat.isFile() || (reportStat.mode & 0o077) !== 0) {
+    throw new Error("production_continuation_restore_permissions_invalid");
+  }
+
+  const snapshots = report?.records?.backup_snapshots;
+  const drills = report?.records?.restore_drills;
+  const snapshot = Array.isArray(snapshots) && snapshots.length === 1 ? snapshots[0] : null;
+  const drill = Array.isArray(drills) && drills.length === 1 ? drills[0] : null;
+  const source = report?.source;
+  const repositoryMigrationNames = await expectedMigrationNames();
+  const updatedAt = new Date(drill?.updated_at ?? "");
+  const nowTimestamp = (options.now ?? new Date()).getTime();
+  const restoreAge = nowTimestamp - updatedAt.getTime();
+  const targetResourceRef = drill?.target_resource_ref;
+  const reportCommit = report?.reviewed_commit_sha;
+
+  if (
+    report?.report_version !== 1
+    || reportCommit !== reviewedCommitSha
+    || source?.account_id !== options.accountId
+    || source?.database_id !== options.databaseId
+    || source?.database_name !== options.databaseName
+    || source?.resource_ref !== `d1:${options.databaseName}`
+    || snapshot?.environment !== "production"
+    || snapshot?.resource_ref !== `d1:${options.databaseName}`
+    || snapshot?.status !== "available"
+    || snapshot?.checksum_sha256 !== backup.checksumSha256
+    || snapshot?.size_bytes !== backup.sizeBytes
+    || drill?.environment !== "isolated"
+    || drill?.status !== "passed"
+    || drill?.backup_snapshot_id !== snapshot?.id
+    || !/^d1:selinow-restore-drill-production-[a-f0-9]{12}$/u.test(targetResourceRef ?? "")
+    || targetResourceRef === `d1:${options.databaseName}`
+    || drill?.foreign_key_violation_count !== 0
+    || !Number.isSafeInteger(drill?.restored_item_count)
+    || drill.restored_item_count < 1
+    || report?.verification?.integrityOk !== true
+    || report?.verification?.foreignKeyViolationCount !== 0
+    || !Array.isArray(report?.verification?.migrationNames)
+    || report.verification.migrationNames.length !== repositoryMigrationNames.length
+    || report.verification.migrationNames.some((name, index) => name !== repositoryMigrationNames[index])
+    || !Number.isFinite(updatedAt.getTime())
+    || restoreAge < 0
+    || restoreAge > 30 * 24 * 60 * 60_000
+  ) {
+    throw new Error("production_continuation_restore_evidence_invalid");
+  }
+
+  return {
+    backup,
+    reviewedCommitSha,
+    restore: {
+      completedAt: updatedAt.toISOString(),
+      reportRef: reportPath,
+      snapshotId: snapshot.id,
+      targetResourceRef,
+    },
+  };
+}
+
 function assertPathInside(parent, child) {
   const normalizedParent = resolve(parent);
   const normalizedChild = resolve(child);
@@ -659,18 +1064,152 @@ function verifyLocalDatabase(databasePath, baselineCounts) {
     const foreignKeyViolationCount = database.prepare("PRAGMA foreign_key_check").all().length;
     const tables = new Set(listApplicationTables(database));
     const missingTables = REQUIRED_TABLES.filter((table) => !tables.has(table));
-    const restoredCounts = readTableCounts(database, Object.keys(baselineCounts));
+    const countTables = Object.keys(baselineCounts);
+    const missingCountTables = countTables.filter((table) => !tables.has(table));
+    const restoredCounts = missingCountTables.length === 0
+      ? readTableCounts(database, countTables)
+      : {};
+    // Forward migrations may seed new catalog rows (for example paid plans),
+    // but a restore must never contain fewer authoritative rows than the
+    // snapshot baseline.
     const countMismatches = Object.entries(baselineCounts)
-      .filter(([table, count]) => restoredCounts[table] !== count)
+      .filter(([table, count]) => (restoredCounts[table] ?? -1) < count)
       .map(([table]) => table);
     const expectedMigrations = database.prepare("SELECT name FROM d1_migrations ORDER BY name").all().map((row) => String(row.name));
+    const crossLedgerMismatches = readCrossLedgerMismatches(database);
     return {
       countMismatches,
       expectedMigrations,
       foreignKeyViolationCount,
       integrityOk,
       missingTables,
+      missingCountTables,
+      crossLedgerMismatches,
       restoredItemCount: sumCounts(restoredCounts),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+// These relationships are not all expressible as SQLite foreign keys because
+// provider payloads may legitimately omit tenant metadata. Keep the checks
+// reference-only and fail closed when an explicit identity disagrees.
+export function readCrossLedgerMismatches(database) {
+  const rows = database.prepare(`
+    SELECT 'subscription_event_provider_shop' AS code, events.id AS id
+    FROM subscription_events AS events
+    INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
+    WHERE events.source_kind = 'provider'
+      AND provider.shop_id IS NOT NULL
+      AND provider.shop_id != events.shop_id
+    UNION ALL
+    SELECT 'subscription_event_provider_ref_missing' AS code, events.id AS id
+    FROM subscription_events AS events
+    WHERE events.source_kind = 'provider' AND events.provider_event_id IS NULL
+    UNION ALL
+    SELECT 'invoice_billing_account_shop' AS code, invoices.id AS id
+    FROM billing_invoices AS invoices
+    INNER JOIN billing_accounts AS accounts ON accounts.id = invoices.billing_account_id
+    WHERE invoices.billing_account_id IS NOT NULL
+      AND (accounts.shop_id != invoices.shop_id
+        OR accounts.provider_code != invoices.provider_code
+        OR accounts.currency != invoices.currency)
+    UNION ALL
+    SELECT 'checkout_subscription_plan_price_provider' AS code, sessions.id AS id
+    FROM billing_checkout_sessions AS sessions
+    INNER JOIN shop_subscriptions AS subscriptions
+      ON subscriptions.shop_id = sessions.shop_id AND subscriptions.id = sessions.subscription_id
+    INNER JOIN plan_prices AS prices ON prices.id = sessions.price_id
+    WHERE prices.plan_id != sessions.plan_id
+      OR prices.provider_code != sessions.provider_code
+      OR subscriptions.shop_id != sessions.shop_id
+    UNION ALL
+    SELECT 'activation_projection_invalid' AS code, milestones.id AS id
+    FROM activation_milestones AS milestones
+    WHERE json_type(milestones.projection_json) != 'object'
+      OR EXISTS (
+        SELECT 1
+        FROM json_each(milestones.projection_json)
+        WHERE key NOT IN ('channel', 'currency', 'fulfillment_type', 'trigger')
+          OR type != 'text'
+          OR (key = 'channel' AND value NOT IN ('website', 'telegram'))
+          OR (key = 'currency' AND value NOT IN ('VND', 'USD', 'EUR', 'JPY'))
+          OR (key = 'fulfillment_type' AND value NOT IN ('license_key', 'manual'))
+          OR (key = 'trigger' AND value NOT IN ('manual', 'publish', 'test'))
+      )
+    UNION ALL
+    SELECT 'trial_conversion_without_paid_event' AS code, milestones.id AS id
+    FROM activation_milestones AS milestones
+    WHERE milestones.milestone_code = 'trial_converted'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM subscription_events AS events
+        INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
+        WHERE events.shop_id = milestones.shop_id
+          AND events.to_state = 'active'
+          AND events.source_kind = 'provider'
+          AND provider.shop_id = milestones.shop_id
+          AND provider.status = 'processed'
+      )
+    UNION ALL
+    SELECT 'custom_domain_turnstile_admission_invalid' AS code, domain.id AS id
+    FROM shop_domains AS domain
+    WHERE domain.type = 'custom'
+      AND (domain.status = 'active' OR domain.is_primary = 1)
+      AND NOT COALESCE((
+        domain.ownership_verified_at IS NOT NULL
+        AND domain.hostname_status = 'active'
+        AND domain.ssl_status = 'active'
+        AND domain.dns_status = 'active'
+        AND domain.delete_requested_at IS NULL
+        AND domain.deleted_at IS NULL
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.status') = 'active'
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.hostname') = domain.hostname_normalized
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+        AND json_type(domain.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')
+      ), 0)
+    UNION ALL
+    SELECT 'shop_canonical_custom_domain_invalid' AS code, shop.id AS id
+    FROM shops AS shop
+    WHERE shop.canonical_domain_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM shop_domains AS candidate
+        WHERE candidate.id = shop.canonical_domain_id AND candidate.type = 'custom')
+      AND NOT EXISTS (SELECT 1 FROM shop_domains AS canonical
+        WHERE canonical.id = shop.canonical_domain_id
+          AND canonical.shop_id = shop.id
+          AND canonical.type = 'custom'
+          AND canonical.status = 'active'
+          AND canonical.is_primary = 1
+          AND canonical.ownership_verified_at IS NOT NULL
+          AND canonical.hostname_status = 'active'
+          AND canonical.ssl_status = 'active'
+          AND canonical.dns_status = 'active'
+          AND canonical.delete_requested_at IS NULL
+          AND canonical.deleted_at IS NULL
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.status') = 'active'
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.hostname') = canonical.hostname_normalized
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+          AND json_type(canonical.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
+  `).all();
+  return rows.map((row) => ({ code: String(row.code), id: String(row.id) }));
+}
+
+export function verifyLocalIntegrity(databasePath) {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const integrityRows = database.prepare("PRAGMA integrity_check").all();
+    return {
+      foreignKeyViolationCount: database.prepare("PRAGMA foreign_key_check").all().length,
+      integrityOk: integrityRows.length === 1 && String(Object.values(integrityRows[0] ?? {})[0]) === "ok",
     };
   } finally {
     database.close();
@@ -716,8 +1255,10 @@ async function applyPendingLocalMigrations(databasePath, migrationNames) {
 function assertLocalVerification(verification, migrationNames) {
   if (!verification.integrityOk) throw new Error("restore_integrity_failed");
   if (verification.foreignKeyViolationCount !== 0) throw new Error("restore_foreign_keys_failed");
-  if (verification.missingTables.length !== 0) throw new Error("restore_schema_incomplete");
+  assertRequiredRestoreTables(REQUIRED_TABLES.filter((table) => !verification.missingTables.includes(table)));
+  if (verification.missingCountTables.length !== 0) throw new Error("restore_count_tables_missing");
   if (verification.countMismatches.length !== 0) throw new Error("restore_count_mismatch");
+  if (verification.crossLedgerMismatches.length !== 0) throw new Error("restore_cross_ledger_mismatch");
   assertExactMigrationLedger(verification.expectedMigrations, migrationNames);
 }
 
@@ -728,6 +1269,16 @@ export function assertExactMigrationLedger(appliedMigrationNames, repositoryMigr
   ) {
     throw new Error("restore_migrations_incomplete");
   }
+}
+
+export function resolvePendingMigrationNames(appliedMigrationNames, repositoryMigrationNames) {
+  if (
+    appliedMigrationNames.length > repositoryMigrationNames.length
+    || appliedMigrationNames.some((name, index) => repositoryMigrationNames[index] !== name)
+  ) {
+    throw new Error("restore_migrations_incomplete");
+  }
+  return repositoryMigrationNames.slice(appliedMigrationNames.length);
 }
 
 function insertIsolatedReportRecords(databasePath, snapshot, drill) {
@@ -839,6 +1390,7 @@ async function runLocalRestoreDrill(target, identifiers) {
       baselineDatabase.close();
     }
     const migrationNames = await expectedMigrationNames();
+    const normalizedMigrationAliases = normalizeHistoricalMigrationAliases(databasePath, migrationNames);
     await applyPendingLocalMigrations(databasePath, migrationNames);
     const verification = verifyLocalDatabase(databasePath, baselineCounts);
     assertLocalVerification(verification, migrationNames);
@@ -873,7 +1425,11 @@ async function runLocalRestoreDrill(target, identifiers) {
       updatedAt: completedAt,
     });
     insertIsolatedReportRecords(databasePath, snapshotRecord, drillRecord);
-    outcome = { drillRecord, snapshotRecord, verification };
+    outcome = {
+      drillRecord,
+      snapshotRecord,
+      verification: { ...verification, normalizedMigrationAliases },
+    };
   } catch (error) {
     operationError = error;
   } finally {
@@ -922,6 +1478,88 @@ function parseRemoteCounts(output, tables = CORE_COUNT_TABLES) {
   }));
 }
 
+function remoteCrossLedgerSql() {
+  // D1 limits compound SELECTs to five terms, so aggregate each invariant independently.
+  return `SELECT
+    (SELECT COUNT(*)
+    FROM subscription_events AS events
+    INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
+    WHERE events.source_kind = 'provider'
+      AND provider.shop_id IS NOT NULL
+      AND provider.shop_id != events.shop_id)
+    + (SELECT COUNT(*) FROM subscription_events AS events
+      WHERE events.source_kind = 'provider' AND events.provider_event_id IS NULL)
+    + (SELECT COUNT(*)
+    FROM billing_invoices AS invoices
+    INNER JOIN billing_accounts AS accounts ON accounts.id = invoices.billing_account_id
+    WHERE invoices.billing_account_id IS NOT NULL AND accounts.shop_id != invoices.shop_id)
+    + (SELECT COUNT(*) FROM activation_milestones AS milestones
+    WHERE milestones.milestone_code = 'trial_converted'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM subscription_events AS events
+        INNER JOIN billing_provider_events AS provider ON provider.id = events.provider_event_id
+        WHERE events.shop_id = milestones.shop_id
+          AND events.to_state = 'active'
+          AND events.source_kind = 'provider'
+          AND provider.shop_id = milestones.shop_id
+          AND provider.status = 'processed'
+      ))
+    + (SELECT COUNT(*)
+    FROM shop_domains AS domain
+    WHERE domain.type = 'custom'
+      AND (domain.status = 'active' OR domain.is_primary = 1)
+      AND NOT COALESCE((
+        domain.ownership_verified_at IS NOT NULL
+        AND domain.hostname_status = 'active'
+        AND domain.ssl_status = 'active'
+        AND domain.dns_status = 'active'
+        AND domain.delete_requested_at IS NULL
+        AND domain.deleted_at IS NULL
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.status') = 'active'
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.hostname') = domain.hostname_normalized
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+        AND json_extract(domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+        AND json_type(domain.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+        AND julianday(json_extract(domain.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')
+      ), 0))
+    + (SELECT COUNT(*)
+    FROM shops AS shop
+    WHERE shop.canonical_domain_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM shop_domains AS candidate
+        WHERE candidate.id = shop.canonical_domain_id AND candidate.type = 'custom')
+      AND NOT EXISTS (SELECT 1 FROM shop_domains AS canonical
+        WHERE canonical.id = shop.canonical_domain_id
+          AND canonical.shop_id = shop.id
+          AND canonical.type = 'custom'
+          AND canonical.status = 'active'
+          AND canonical.is_primary = 1
+          AND canonical.ownership_verified_at IS NOT NULL
+          AND canonical.hostname_status = 'active'
+          AND canonical.ssl_status = 'active'
+          AND canonical.dns_status = 'active'
+          AND canonical.delete_requested_at IS NULL
+          AND canonical.deleted_at IS NULL
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.status') = 'active'
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.hostname') = canonical.hostname_normalized
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'
+          AND json_extract(canonical.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'
+          AND json_type(canonical.validation_metadata_json, '$.turnstile.checkedAt') = 'text'
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) IS NOT NULL
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) >= julianday('now', '-12 hours')
+          AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now')))
+    AS mismatch_count;`;
+}
+
+function parseRemoteCrossLedgerMismatchCount(output) {
+  const row = parseWranglerRows(output, "restore_cross_ledger_invalid")[0];
+  const count = Number(row?.mismatch_count);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("restore_cross_ledger_invalid");
+  return count;
+}
+
 function parseWranglerWhoami(output) {
   let payload;
   try {
@@ -939,6 +1577,18 @@ function parseWranglerWhoami(output) {
     throw new Error("cloudflare_identity_invalid");
   }
   return accountIds;
+}
+
+function hasScopedUserTokenWithoutAccountInventory(output) {
+  try {
+    const payload = JSON.parse(String(output ?? ""));
+    return payload?.loggedIn === true
+      && payload?.authType === "User API Token"
+      && Array.isArray(payload?.accounts)
+      && payload.accounts.length === 0;
+  } catch {
+    return false;
+  }
 }
 
 function parseD1List(output) {
@@ -1013,14 +1663,49 @@ function approvedRemoteRunnerOptions(accountId, additionalEnvironment = {}) {
   };
 }
 
+function normalizeRemoteMigrationAliases(
+  runner,
+  targetName,
+  environment,
+  runnerOptions,
+  appliedMigrationNames,
+  repositoryMigrationNames,
+) {
+  const repositoryNames = new Set(repositoryMigrationNames);
+  const normalizedNames = [...appliedMigrationNames];
+  const normalizedMigrationAliases = [];
+  for (const alias of HISTORICAL_MIGRATION_ALIASES) {
+    if (repositoryNames.has(alias.historical)) throw new Error("restore_migration_alias_is_current");
+    if (!repositoryNames.has(alias.canonical)) throw new Error("restore_migration_alias_canonical_missing");
+    const historicalCount = normalizedNames.filter((name) => name === alias.historical).length;
+    if (historicalCount === 0) continue;
+    const canonicalCount = normalizedNames.filter((name) => name === alias.canonical).length;
+    if (historicalCount !== 1 || canonicalCount !== 1) throw new Error("restore_migration_alias_unresolved");
+    remoteExecute(
+      runner,
+      targetName,
+      environment,
+      `DELETE FROM d1_migrations WHERE name = '${alias.historical}';`,
+      "restore_migration_alias_normalization_failed",
+      runnerOptions,
+    );
+    const historicalIndex = normalizedNames.indexOf(alias.historical);
+    normalizedNames.splice(historicalIndex, 1);
+    normalizedMigrationAliases.push({ ...alias });
+  }
+  return { migrationNames: normalizedNames, normalizedMigrationAliases };
+}
+
 function admitRemoteRestoreTarget(runner, target, approvedIdentity, runnerOptions) {
-  const accountIds = parseWranglerWhoami(safeRunner(
+  const whoamiOutput = safeRunner(
     runner,
     ["whoami", "--json"],
     "cloudflare_credentials_missing",
     runnerOptions,
-  ).stdout);
-  if (!accountIds.includes(approvedIdentity.accountId)) {
+  ).stdout;
+  const accountIds = parseWranglerWhoami(whoamiOutput);
+  if (!accountIds.includes(approvedIdentity.accountId)
+    && !hasScopedUserTokenWithoutAccountInventory(whoamiOutput)) {
     throw new Error(`restore_account_mismatch:${target.environment}`);
   }
 
@@ -1063,12 +1748,23 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
   const approvedIdentity = await loadApprovedRemoteRestoreIdentity(target);
   const runnerOptions = approvedRemoteRunnerOptions(approvedIdentity.accountId);
   const databases = admitRemoteRestoreTarget(runner, target, approvedIdentity, runnerOptions);
+  const protectedBackup = environment === "staging"
+    ? await (options.stagingBackupEvidenceImplementation ?? assertFreshStagingBackupEvidence)({
+      accountId: approvedIdentity.accountId,
+      backupRoot: options.backupRoot,
+      databaseId: approvedIdentity.databaseId,
+      databaseName: approvedIdentity.databaseName,
+      now: options.now ?? new Date(),
+    })
+    : null;
   if (databases.some((database) => database.name === targetName)) {
     throw new Error("restore_target_already_exists");
   }
   const tempDirectory = await mkdtemp(join(tmpdir(), RESTORE_TEMP_PREFIX));
   await writeFile(resolve(tempDirectory, RESTORE_MARKER), `${identifiers.drillId}\n`, { encoding: "utf8", mode: 0o600 });
   const sourceExport = resolve(tempDirectory, "source.sql");
+  const targetExport = resolve(tempDirectory, "target.sql");
+  const targetVerificationDatabase = resolve(tempDirectory, "target-verification.sqlite");
   let createdTarget = false;
   let cleanupFailure = false;
   let operationError = null;
@@ -1078,9 +1774,38 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       "d1", "create", targetName, "--env", environment, "--location", "apac",
     ], "restore_target_create_failed", runnerOptions);
     createdTarget = true;
+    const sourceArtifact = protectedBackup?.artifactPath ?? sourceExport;
+    if (protectedBackup === null) {
+      safeRunner(
+        runner,
+        exportArgs(target, environment, sourceExport),
+        "database_export_failed",
+        runnerOptions,
+      );
+      await chmod(sourceExport, 0o600);
+      const exportedStat = await stat(sourceExport);
+      if (!exportedStat.isFile() || exportedStat.size === 0) throw new Error("database_export_empty");
+    }
+    const sourceStat = await stat(sourceArtifact);
+    if (!sourceStat.isFile() || sourceStat.size === 0) throw new Error("database_export_empty");
+    const artifactChecksumSha256 = await sha256File(sourceArtifact);
+    const checksumSha256 = protectedBackup?.checksumSha256 ?? artifactChecksumSha256;
+    if (protectedBackup !== null && sourceStat.size !== protectedBackup.sizeBytes) {
+      throw new Error("staging_backup_artifact_invalid");
+    }
+    if (protectedBackup !== null && artifactChecksumSha256 !== protectedBackup.checksumSha256) {
+      throw new Error("staging_backup_artifact_invalid");
+    }
+    if (protectedBackup !== null) {
+      safeRunner(runner, [
+        "d1", "execute", targetName, "--remote", "--env", environment,
+        "--file", sourceArtifact, "--yes",
+      ], "restore_import_failed", runnerOptions);
+    }
+    const sourceQueryTarget = protectedBackup === null ? target.databaseName : targetName;
     const sourceTableRows = parseWranglerRows(remoteExecute(
       runner,
-      target.databaseName,
+      sourceQueryTarget,
       environment,
       `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${CORE_COUNT_TABLES.map((table) => `'${table}'`).join(", ")});`,
       "restore_source_tables_failed",
@@ -1089,34 +1814,65 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     const sourceTableNames = new Set(sourceTableRows
       .map((row) => row?.name)
       .filter((name) => typeof name === "string"));
+    if (SOURCE_BASELINE_TABLES.some((table) => !sourceTableNames.has(table))) {
+      throw new Error("restore_source_schema_incomplete");
+    }
     const sourceCountTables = CORE_COUNT_TABLES.filter((table) => sourceTableNames.has(table));
     if (sourceCountTables.length === 0) throw new Error("restore_source_tables_empty");
     const sourceCounts = parseRemoteCounts(remoteExecute(
       runner,
-      target.databaseName,
+      sourceQueryTarget,
       environment,
       remoteCountSql(sourceCountTables),
       "restore_source_counts_failed",
       runnerOptions,
     ), sourceCountTables);
-    safeRunner(
-      runner,
-      exportArgs(target, environment, sourceExport),
-      "database_export_failed",
-      runnerOptions,
-    );
-    await chmod(sourceExport, 0o600);
-    const sourceStat = await stat(sourceExport);
-    if (!sourceStat.isFile() || sourceStat.size === 0) throw new Error("database_export_empty");
-    const checksumSha256 = await sha256File(sourceExport);
-    safeRunner(runner, [
-      "d1", "execute", targetName, "--remote", "--env", environment,
-      "--file", sourceExport, "--yes",
-    ], "restore_import_failed", runnerOptions);
-    safeRunner(runner, [
-      "d1", "migrations", "apply", targetName, "--remote", "--env", environment,
-    ], "restore_migration_failed", approvedRemoteRunnerOptions(approvedIdentity.accountId, { CI: "1" }));
+    if (protectedBackup === null) {
+      safeRunner(runner, [
+        "d1", "execute", targetName, "--remote", "--env", environment,
+        "--file", sourceArtifact, "--yes",
+      ], "restore_import_failed", runnerOptions);
+    }
     const repositoryMigrationNames = await expectedMigrationNames();
+    const initialMigrationRows = parseWranglerRows(remoteExecute(
+      runner,
+      targetName,
+      environment,
+      "SELECT name FROM d1_migrations ORDER BY name;",
+      "restore_migration_ledger_query_failed",
+      runnerOptions,
+    ), "restore_migration_ledger_invalid");
+    const initialMigrationNames = initialMigrationRows.map((row) => {
+      if (typeof row?.name !== "string") throw new Error("restore_migration_ledger_invalid");
+      return row.name;
+    });
+    const normalizedMigrationLedger = normalizeRemoteMigrationAliases(
+      runner,
+      targetName,
+      environment,
+      runnerOptions,
+      initialMigrationNames,
+      repositoryMigrationNames,
+    );
+    const pendingMigrationNames = resolvePendingMigrationNames(
+      normalizedMigrationLedger.migrationNames,
+      repositoryMigrationNames,
+    );
+    const migrationRunnerOptions = approvedRemoteRunnerOptions(approvedIdentity.accountId, { CI: "1" });
+    for (const migrationName of pendingMigrationNames) {
+      safeRunner(runner, [
+        "d1", "execute", targetName, "--remote", "--env", environment,
+        "--file", resolve(repositoryRoot, "migrations", migrationName), "--yes",
+      ], `restore_migration_failed:${migrationName}`, migrationRunnerOptions);
+      remoteExecute(
+        runner,
+        targetName,
+        environment,
+        `INSERT INTO d1_migrations (name) VALUES ('${migrationName}');`,
+        `restore_migration_ledger_write_failed:${migrationName}`,
+        migrationRunnerOptions,
+      );
+    }
     const appliedMigrationRows = parseWranglerRows(remoteExecute(
       runner,
       targetName,
@@ -1138,26 +1894,37 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       "restore_target_counts_failed",
       runnerOptions,
     ), sourceCountTables);
-    if (sourceCountTables.some((table) => sourceCounts[table] !== targetCounts[table])) {
+    if (sourceCountTables.some((table) => (targetCounts[table] ?? -1) < sourceCounts[table])) {
       throw new Error("restore_count_mismatch");
     }
-    const integrityRows = parseWranglerRows(remoteExecute(
+    const crossLedgerMismatchCount = parseRemoteCrossLedgerMismatchCount(remoteExecute(
       runner,
       targetName,
       environment,
-      "PRAGMA integrity_check;",
-      "restore_integrity_query_failed",
+      remoteCrossLedgerSql(),
+      "restore_cross_ledger_query_failed",
       runnerOptions,
-    ), "restore_integrity_invalid");
-    const integrityOk = integrityRows.length === 1 && String(Object.values(integrityRows[0] ?? {})[0]) === "ok";
-    const foreignKeyViolationCount = parseWranglerRows(remoteExecute(
-      runner,
-      targetName,
-      environment,
-      "PRAGMA foreign_key_check;",
-      "restore_foreign_key_query_failed",
-      runnerOptions,
-    ), "restore_foreign_key_invalid").length;
+    ));
+    if (crossLedgerMismatchCount !== 0) throw new Error("restore_cross_ledger_mismatch");
+    safeRunner(runner, [
+      "d1", "export", targetName, "--remote", "--env", environment,
+      "--output", targetExport, "--skip-confirmation",
+    ], "restore_target_export_failed", runnerOptions);
+    await chmod(targetExport, 0o600);
+    const targetExportStat = await stat(targetExport);
+    if (!targetExportStat.isFile() || targetExportStat.size === 0) {
+      throw new Error("restore_target_export_empty");
+    }
+    const targetDatabase = new DatabaseSync(targetVerificationDatabase);
+    try {
+      targetDatabase.exec(await readFile(targetExport, "utf8"));
+    } catch (error) {
+      throw new Error("restore_target_export_invalid", { cause: error });
+    } finally {
+      targetDatabase.close();
+    }
+    await chmod(targetVerificationDatabase, 0o600);
+    const { foreignKeyViolationCount, integrityOk } = verifyLocalIntegrity(targetVerificationDatabase);
     const schemaRows = parseWranglerRows(remoteExecute(
       runner,
       targetName,
@@ -1169,24 +1936,26 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     const schemaNames = new Set(schemaRows.map((row) => row?.name).filter((name) => typeof name === "string"));
     if (!integrityOk) throw new Error("restore_integrity_failed");
     if (foreignKeyViolationCount !== 0) throw new Error("restore_foreign_keys_failed");
-    if (REQUIRED_TABLES.some((table) => !schemaNames.has(table))) throw new Error("restore_schema_incomplete");
+    assertRequiredRestoreTables(schemaNames);
     const completedAt = new Date().toISOString();
     const snapshotRecord = buildBackupSnapshotRecord({
       checksumSha256,
-      completedAt,
-      createdAt: identifiers.startedAt,
+      completedAt: protectedBackup?.completedAt ?? completedAt,
+      createdAt: protectedBackup?.createdAt ?? identifiers.startedAt,
       environment,
-      id: identifiers.snapshotId,
+      expiresAt: protectedBackup?.expiresAt,
+      id: protectedBackup?.snapshotId ?? identifiers.snapshotId,
       itemCount: sumCounts(sourceCounts),
+      providerReference: protectedBackup?.providerReference,
       requestId: identifiers.requestId,
       resourceRef: target.resourceRef,
       sizeBytes: sourceStat.size,
-      snapshotKind: "export",
+      snapshotKind: protectedBackup?.snapshotKind ?? "export",
       status: "available",
-      updatedAt: completedAt,
+      updatedAt: protectedBackup?.completedAt ?? completedAt,
     });
     const drillRecord = buildRestoreDrillRecord({
-      backupSnapshotId: identifiers.snapshotId,
+      backupSnapshotId: protectedBackup?.snapshotId ?? identifiers.snapshotId,
       completedAt,
       createdAt: identifiers.startedAt,
       environment: environment === "production" ? "isolated" : environment,
@@ -1200,7 +1969,23 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       targetResourceRef: `d1:${targetName}`,
       updatedAt: completedAt,
     });
-    outcome = { drillRecord, snapshotRecord, verification: { foreignKeyViolationCount, integrityOk } };
+    outcome = {
+      drillRecord,
+      snapshotRecord,
+      source: {
+        account_id: approvedIdentity.accountId,
+        database_id: approvedIdentity.databaseId,
+        database_name: approvedIdentity.databaseName,
+        resource_ref: target.resourceRef,
+      },
+      verification: {
+        foreignKeyViolationCount,
+        integrityOk,
+        migrationNames: appliedMigrationNames,
+        normalizedMigrationAliases: normalizedMigrationLedger.normalizedMigrationAliases,
+        crossLedgerMismatchCount,
+      },
+    };
   } catch (error) {
     operationError = error;
   } finally {
@@ -1228,6 +2013,13 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
 export async function runRestoreDrill(options) {
   const environment = options.environment;
   const now = options.now ?? new Date();
+  if (
+    environment !== "local"
+    && !options.dryRun
+    && !/^[a-f0-9]{40}$/u.test(options.reviewedCommitSha ?? "")
+  ) {
+    throw new Error("restore_reviewed_commit_required");
+  }
   const config = options.config ?? await loadWranglerConfig();
   const target = resolveDatabaseTarget(config, environment);
   if (options.dryRun) return restoreDryRun(environment, target);
@@ -1249,6 +2041,8 @@ export async function runRestoreDrill(options) {
         restore_drills: [result.drillRecord],
       },
       report_version: 1,
+      reviewed_commit_sha: options.reviewedCommitSha ?? null,
+      source: result.source ?? null,
       verification: result.verification,
     });
     return {

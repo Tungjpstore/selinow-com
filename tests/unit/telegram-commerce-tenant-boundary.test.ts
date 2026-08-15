@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppBindings } from "../../src/lib/platform/bindings";
-import { handleTelegramCommerce } from "../../src/lib/telegram/commerce";
+import { handleTelegramCommerce, loadTelegramShop } from "../../src/lib/telegram/commerce";
 
 class SqliteStatement {
   private values: SQLInputValue[] = [];
@@ -98,10 +98,10 @@ function createRuntime(): { database: SqliteD1; env: AppBindings } {
     ) VALUES
       ('shop-a', '{}', '{}', 30, 5, 1, '${NOW}'),
       ('shop-b', '{}', '{}', 30, 5, 1, '${NOW}');
-    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at)
+    INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at)
     VALUES
-      ('subscription-a', 'shop-a', 'plan-telegram-boundary', 'active', '${NOW}', '${NOW}'),
-      ('subscription-b', 'shop-b', 'plan-telegram-boundary', 'active', '${NOW}', '${NOW}');
+      ('subscription-a', 'shop-a', 'plan-telegram-boundary', 'active', '2099-01-01T00:00:00.000Z', '${NOW}', '${NOW}'),
+      ('subscription-b', 'shop-b', 'plan-telegram-boundary', 'active', '2099-01-01T00:00:00.000Z', '${NOW}', '${NOW}');
     INSERT INTO shop_domains (
       id, shop_id, hostname_normalized, type, status, is_primary,
       validation_metadata_json, dns_status, version, activated_at, created_at, updated_at
@@ -137,6 +137,7 @@ function createRuntime(): { database: SqliteD1; env: AppBindings } {
   `);
   sqlite.exec(readFileSync("migrations/0032_shop_globalization_invariants.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0045_telegram_customer_locale_preference.sql", "utf8"));
+  sqlite.exec(readFileSync("migrations/0069_catalog_channel_visibility.sql", "utf8"));
   const database = new SqliteD1(sqlite);
   const env = {
     ACTIVE_CREDENTIAL_KEY_VERSION: "v1",
@@ -186,6 +187,31 @@ function persistedQuoteAction(runtime: ReturnType<typeof createRuntime>, updateI
 }
 
 describe("Telegram commerce tenant boundary", () => {
+  it("uses only fresh exact Turnstile admission for a custom canonical origin", async () => {
+    const runtime = createRuntime();
+    const checkedAt = new Date().toISOString();
+    runtime.database.database.prepare(`
+      UPDATE shop_domains
+      SET type = 'custom', hostname_normalized = 'shop.customer.example',
+        ownership_verified_at = ?, hostname_status = 'active', ssl_status = 'active',
+        dns_status = 'active', validation_metadata_json = ?
+      WHERE id = 'domain-a' AND shop_id = 'shop-a'
+    `).run(checkedAt, JSON.stringify({ turnstile: { checkedAt, hostname: "shop.customer.example", mode: "operator_managed", source: "cloudflare_widget_domains", status: "active" } }));
+
+    await expect(loadTelegramShop(runtime.env, "shop-a")).resolves.toMatchObject({
+      origin: "https://shop.customer.example",
+    });
+
+    runtime.database.database.prepare(`
+      UPDATE shop_domains
+      SET validation_metadata_json = ?
+      WHERE id = 'domain-a' AND shop_id = 'shop-a'
+    `).run(JSON.stringify({ turnstile: { checkedAt: "2020-01-01T00:00:00.000Z", hostname: "shop.customer.example", mode: "operator_managed", source: "cloudflare_widget_domains", status: "active" } }));
+
+    await expect(loadTelegramShop(runtime.env, "shop-a"))
+      .rejects.toMatchObject({ code: "tenant_not_found", status: 404 });
+  });
+
   it("allows a command only when its normalized capability projection is effective", async () => {
     const runtime = createRuntime();
 

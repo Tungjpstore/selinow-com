@@ -7,7 +7,7 @@ import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { isAppError } from "../../lib/core/errors";
 import { createDashboardTranslator } from "../../lib/i18n";
 import { getBindings } from "../../lib/platform/bindings";
-import { listSellerCustomers, type SellerCustomerView } from "../../lib/tenants/seller-management";
+import { listSellerCustomersPage, type SellerCustomerView } from "../../lib/tenants/seller-management";
 import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
 
 const env = getBindings();
@@ -15,13 +15,15 @@ const auth = await authenticateRequest(Astro.request, env).catch(() => null);
 if (auth === null) return Astro.redirect("/login");
 let shops: ShopView[] = [];
 let state: "ready" | "unavailable" | "forbidden" = "ready";
-try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { state = "unavailable"; }
+let loadRequestId: string | null = null;
+try { shops = await listShopsForMember({ env, userId: auth.userId }); } catch { state = "unavailable"; loadRequestId = Astro.locals.requestId; }
 const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
 let customers: SellerCustomerView[] = [];
+let nextCursor: string | null = null;
 if (shop !== undefined && state === "ready") {
-  try { customers = await listSellerCustomers({ env, shopPublicId: shop.publicId, userId: auth.userId }); }
-  catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; }
+  try { const page = await listSellerCustomersPage({ cursor: Astro.url.searchParams.get("cursor"), env, shopPublicId: shop.publicId, userId: auth.userId }); customers = page.customers; nextCursor = page.nextCursor; }
+  catch (error) { state = isAppError(error) && error.status === 403 ? "forbidden" : "unavailable"; if (state === "unavailable") loadRequestId = Astro.locals.requestId; }
 }
 if (state === "forbidden") Astro.response.status = 403;
 if (state === "unavailable") Astro.response.status = 503;
@@ -35,26 +37,56 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
   <PageHeader eyebrow={t("dashboard.customers.eyebrow")} title={t("dashboard.customers.title")} description={t("dashboard.customers.description")}>
     {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app/orders")}>{t("dashboard.customers.open_orders")} <span aria-hidden="true">↗</span></a>}
   </PageHeader>
-  {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.unavailable.title")} description={t("dashboard.customers.unavailable.description")} actionHref={workspaceHref("/app/customers")} actionLabel={t("dashboard.customers.retry")} tone="danger" /></div>
+  {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.unavailable.title")} description={`${t("dashboard.customers.unavailable.description")} ${loadRequestId === null ? "" : t("dashboard.state.error.meta_request", { requestId: loadRequestId })}`.trim()} actionHref={workspaceHref("/app/customers")} actionLabel={t("dashboard.customers.retry")} tone="danger" /></div>
     : shop === undefined ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.no_store.title")} description={t("dashboard.customers.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.customers.no_store.action")} tone="info" /></div>
     : state === "forbidden" ? <div class="state-space"><WorkspaceState title={t("dashboard.customers.forbidden.title")} description={t("dashboard.customers.forbidden.description")} tone="warning" /></div>
-    : <section class="customer-panel" aria-labelledby="customer-ledger-title" data-customer-panel data-locale={locale ?? "en"}>
+    : <div class="customers-workspace" data-customers-root data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-can-manage={shop.role === "owner" || shop.role === "manager" ? "true" : "false"} data-locale={locale ?? "en"} data-copy={JSON.stringify({
+      loading: t("dashboard.customers.detail.loading"), loaded: t("dashboard.customers.detail.loaded"), unavailable: t("dashboard.customers.detail.unavailable"), save: t("dashboard.customers.detail.save"), saving: t("dashboard.customers.detail.saving"), saved: t("dashboard.customers.detail.saved"), addNote: t("dashboard.customers.detail.add_note"), addingNote: t("dashboard.customers.detail.adding_note"), noteAdded: t("dashboard.customers.detail.note_added"), redact: t("dashboard.customers.detail.redact"), redactConfirm: t("dashboard.customers.detail.redact_confirm"), redacting: t("dashboard.customers.detail.redacting"), redacted: t("dashboard.customers.detail.redacted"), emptyNotes: t("dashboard.customers.detail.empty_notes"), error: t("dashboard.customers.detail.error"), errorRecentAuth: t("dashboard.customers.detail.error_recent_auth"), errorConflict: t("dashboard.customers.detail.error_conflict"), errorForbidden: t("dashboard.customers.detail.error_forbidden"), errorNotFound: t("dashboard.customers.detail.error_not_found"), errorAnonymized: t("dashboard.customers.detail.error_anonymized"), errorPrivacyBlocked: t("dashboard.customers.privacy.blocked"), requestId: t("dashboard.customers.detail.request_id"), privacyExporting: t("dashboard.customers.privacy.exporting"), privacyExported: t("dashboard.customers.privacy.exported"), privacyAnonymizing: t("dashboard.customers.privacy.anonymizing"), privacyAnonymized: t("dashboard.customers.privacy.anonymized"), statusActive: t("dashboard.customers.status.active"), statusBlocked: t("dashboard.customers.status.blocked"), unnamed: t("dashboard.customers.unnamed"), noEmail: t("dashboard.customers.no_email"),
+    })}>
+    <section class="customer-panel" aria-labelledby="customer-ledger-title" data-customer-panel>
       <header><div><p class="eyebrow">{t("dashboard.customers.ledger.eyebrow")}</p><h2 id="customer-ledger-title">{t("dashboard.customers.ledger.title", { shop: shop.name })}</h2></div><span>{t("dashboard.customers.record_count", { count: customers.length })}</span></header>
       {customers.length === 0 ? <WorkspaceState title={t("dashboard.customers.empty.title")} description={t("dashboard.customers.empty.description")} actionHref={workspaceHref("/app/products")} actionLabel={t("dashboard.customers.empty.action")} tone="info" /> : <>
         <label class="search-field"><span class="sr-only">{t("dashboard.customers.search.label")}</span><input type="search" placeholder={t("dashboard.customers.search.placeholder")} data-customer-search /></label>
         <div class="customer-ledger" role="list" aria-label={t("dashboard.customers.list_aria")}>
-          {customers.map((customer) => <article role="listitem" data-customer-row data-search={`${customer.emailMasked ?? ""} ${customer.displayName ?? ""}`.toLocaleLowerCase(locale ?? "en")}>
+          {customers.map((customer) => <article role="listitem" data-customer-row data-customer-public-id={customer.publicId} data-customer-version={customer.version} data-search={`${customer.emailMasked ?? ""} ${customer.displayName ?? ""}`.toLocaleLowerCase(locale ?? "en")}>
             <div class="customer-mark" aria-hidden="true">{(customer.displayName ?? customer.emailMasked ?? "?").slice(0, 1).toUpperCase()}</div>
-            <div><strong>{customer.displayName ?? t("dashboard.customers.unnamed")}</strong><span>{customer.emailMasked ?? t("dashboard.customers.no_email")}</span></div>
+            <div><strong data-customer-name>{customer.displayName ?? t("dashboard.customers.unnamed")}</strong><span>{customer.emailMasked ?? t("dashboard.customers.no_email")}</span></div>
             <div><span>{t("dashboard.customers.orders")}</span><strong>{customer.orderCount}</strong></div>
             <div><span>{t("dashboard.customers.last_activity")}</span>{customer.lastOrderAt === null ? <strong>{t("dashboard.customers.no_orders")}</strong> : <time datetime={customer.lastOrderAt}>{date(customer.lastOrderAt)}</time>}</div>
-            <span class={`status-chip status-${customer.status}`}>{customer.status === "active" ? t("dashboard.customers.status.active") : t("dashboard.customers.status.blocked")}</span>
+            <span class={`status-chip status-${customer.status}`} data-customer-status>{customer.status === "active" ? t("dashboard.customers.status.active") : t("dashboard.customers.status.blocked")}</span>
+            {shop.role === "owner" || shop.role === "manager" ? <button class="text-action" type="button" data-customer-open>{t("dashboard.customers.detail.open")}</button> : null}
           </article>)}
         </div>
         <p class="customer-no-results" data-customer-no-results hidden role="status" aria-live="polite">{t("dashboard.customers.no_results")}</p>
         <p class="scope-note">{t("dashboard.customers.scope")}</p>
       </>}
-    </section>}
+    </section>
+    {shop.role === "owner" || shop.role === "manager" ? <section class="customer-panel customer-detail-panel" data-customer-detail hidden aria-labelledby="customer-detail-title">
+      <header><div><p class="eyebrow">{t("dashboard.customers.detail.eyebrow")}</p><h2 id="customer-detail-title">{t("dashboard.customers.detail.title")}</h2><p class="customer-detail-email" data-customer-email></p></div><button class="text-action" type="button" data-customer-close>{t("dashboard.customers.detail.close")}</button></header>
+      <div class="workspace-feedback" data-customer-feedback role="status" aria-live="polite" hidden></div>
+      <form class="customer-detail-form" data-customer-form novalidate>
+        <label>{t("dashboard.customers.detail.name")}<input name="displayName" maxlength="120" /></label>
+        <label>{t("dashboard.customers.detail.locale")}<select name="locale"><option value="en">en</option><option value="vi-VN">vi-VN</option></select></label>
+        <label>{t("dashboard.customers.detail.status")}<select name="status"><option value="active">{t("dashboard.customers.status.active")}</option><option value="blocked">{t("dashboard.customers.status.blocked")}</option></select></label>
+        <button class="sln-button sln-button-primary" type="submit">{t("dashboard.customers.detail.save")}</button>
+      </form>
+      <div class="customer-notes" data-customer-notes></div>
+      <form class="customer-note-form" data-customer-note-form novalidate><label>{t("dashboard.customers.detail.note")}<textarea name="body" maxlength="4000" required></textarea></label><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.customers.detail.add_note")}</button></form>
+      <section class="customer-privacy" aria-labelledby="customer-privacy-title">
+        <div><p class="eyebrow">{t("dashboard.customers.privacy.eyebrow")}</p><h3 id="customer-privacy-title">{t("dashboard.customers.privacy.title")}</h3><p>{t("dashboard.customers.privacy.description")}</p><p class="scope-note">{t("dashboard.customers.privacy.self_service_blocked")}</p></div>
+        <div class="customer-privacy-actions">
+          <button class="sln-button sln-button-secondary" type="button" data-customer-export>{t("dashboard.customers.privacy.export")}</button>
+          <form class="customer-anonymize-form" data-customer-anonymize-form novalidate>
+            <p>{t("dashboard.customers.privacy.anonymize_warning")}</p>
+            <label>{t("dashboard.customers.privacy.confirm_label")} <code>ANONYMIZE</code><input name="confirmation" type="text" required pattern="ANONYMIZE" autocomplete="off" autocapitalize="characters" spellcheck="false" /></label>
+            <button class="sln-button sln-button-danger" type="submit" data-customer-anonymize>{t("dashboard.customers.privacy.anonymize")}</button>
+          </form>
+        </div>
+        <p class="workspace-feedback" data-customer-privacy-status role="status" aria-live="polite" hidden></p>
+      </section>
+    </section> : null}
+    {nextCursor !== null && <a class="sln-button sln-button-secondary" href={workspaceHref(`/app/customers?cursor=${encodeURIComponent(nextCursor)}`)}>{t("dashboard.customers.pagination.next")} →</a>}
+    </div>}
 </AppLayout>
 
 {customers.length > 0 && <script>
@@ -73,9 +105,13 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
   });
 </script>}
 
+<script src="../../scripts/dashboard/customers.ts"></script>
+
 <style>
   .sln-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:10px 16px; font:var(--sln-font-label); text-decoration:none; }
   .sln-button-secondary { border-color:var(--sln-border-strong); background:var(--sln-bg-surface); color:var(--sln-text-primary); }
+  .sln-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:9px 14px; font:var(--sln-font-label); cursor:pointer; }
+  .sln-button-primary { background:var(--sln-action-primary); color:var(--sln-white); }
   .state-space { margin-top:var(--sln-space-8); }
   .customer-panel { display:grid; gap:20px; margin-top:var(--sln-space-8); border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); padding:var(--sln-space-6); background:var(--sln-bg-surface); }
   .customer-panel > header { display:flex; align-items:end; justify-content:space-between; gap:16px; padding-bottom:16px; border-bottom:1px solid var(--sln-border-default); }
@@ -85,7 +121,7 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
   .search-field { display:block; max-width:360px; }
   .search-field input { width:100%; min-height:44px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 12px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
   .customer-ledger { display:grid; overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); }
-  .customer-ledger article { display:grid; grid-template-columns:40px minmax(0,1.4fr) minmax(90px,.5fr) minmax(170px,.8fr) auto; gap:14px; align-items:center; min-height:78px; padding:14px 16px; border-top:1px solid var(--sln-border-default); }
+  .customer-ledger article { display:grid; grid-template-columns:40px minmax(0,1.4fr) minmax(90px,.5fr) minmax(170px,.8fr) auto auto; gap:14px; align-items:center; min-height:78px; padding:14px 16px; border-top:1px solid var(--sln-border-default); }
   .customer-ledger article:first-child { border-top:0; }
   .customer-ledger article[hidden] { display:none; }
   .customer-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:var(--sln-tint-indigo); color:var(--sln-action-primary-strong); font-weight:800; }
@@ -96,6 +132,34 @@ const date = (value: string | null): string => value === null ? t("dashboard.cus
   .status-suspended, .status-blocked { background:var(--sln-tint-danger); color:var(--sln-state-danger) !important; }
   .scope-note { margin:0; color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .customer-no-results { margin:0; border:1px dashed var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:18px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); text-align:center; }
+  .customer-detail-panel { scroll-margin-top:88px; }
+  .customer-detail-email { margin:6px 0 0; color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .customer-detail-form, .customer-note-form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) auto; gap:12px; align-items:end; }
+  .customer-detail-form label, .customer-note-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
+  .customer-detail-form input, .customer-detail-form select, .customer-note-form textarea { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
+  .customer-note-form { grid-template-columns:minmax(0,1fr) auto; }
+  .customer-note-form textarea { min-height:80px; resize:vertical; }
+  .customer-notes { display:grid; gap:10px; }
+  .customer-note { display:grid; gap:5px; border-top:1px solid var(--sln-border-default); padding-top:12px; }
+  .customer-note header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .customer-note p { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); white-space:pre-wrap; }
+  .customer-privacy { display:grid; gap:16px; border-top:1px solid var(--sln-border-default); padding-top:20px; }
+  .customer-privacy h3, .customer-privacy p { margin:0; }
+  .customer-privacy > div:first-child { display:grid; gap:8px; }
+  .customer-privacy > div:first-child > p:not(.eyebrow) { color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .customer-privacy-actions { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:18px; align-items:start; }
+  .customer-anonymize-form { display:grid; gap:10px; border-left:1px solid var(--sln-border-default); padding-left:18px; }
+  .customer-anonymize-form p { color:var(--sln-state-danger); font:var(--sln-font-body-sm); }
+  .customer-anonymize-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
+  .customer-anonymize-form input { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
+  .sln-button-danger { border-color:var(--sln-state-danger); background:var(--sln-tint-danger); color:var(--sln-state-danger); }
+  .workspace-feedback { padding:12px 14px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .workspace-feedback[data-tone="danger"] { border-color:var(--sln-state-danger); color:var(--sln-state-danger); }
+  .workspace-feedback[data-tone="success"] { border-color:var(--sln-state-success); color:var(--sln-state-success); }
+  .text-action { border:0; padding:4px 0; background:transparent; color:var(--sln-action-primary); font:var(--sln-font-label); cursor:pointer; }
+  .text-action:hover { text-decoration:underline; text-underline-offset:3px; }
+  .danger-text { color:var(--sln-state-danger); }
   .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
-  @media (max-width:760px) { .customer-panel { padding:16px; } .customer-panel > header { align-items:start; flex-direction:column; } .search-field { max-width:none; } .customer-ledger article { grid-template-columns:40px minmax(0,1fr) auto; gap:10px; } .customer-ledger article > div:nth-of-type(n+3) { grid-column:2 / -1; display:flex; flex-wrap:wrap; gap:8px; } .customer-ledger article > .status-chip { grid-column:2 / -1; justify-self:start; } }
+  @media (max-width:900px) { .customer-detail-form { grid-template-columns:repeat(2,minmax(0,1fr)); } .customer-detail-form .sln-button { width:100%; } }
+  @media (max-width:760px) { .customer-panel { padding:16px; } .customer-panel > header { align-items:start; flex-direction:column; } .search-field { max-width:none; } .customer-ledger article { grid-template-columns:40px minmax(0,1fr) auto; gap:10px; } .customer-ledger article > div:nth-of-type(n+3) { grid-column:2 / -1; display:flex; flex-wrap:wrap; gap:8px; } .customer-ledger article > .status-chip, .customer-ledger article > [data-customer-open] { grid-column:2 / -1; justify-self:start; } .customer-detail-form, .customer-note-form, .customer-privacy-actions { grid-template-columns:1fr; } .customer-anonymize-form { border-top:1px solid var(--sln-border-default); border-left:0; padding-top:18px; padding-left:0; } }
 </style>

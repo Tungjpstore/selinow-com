@@ -31,6 +31,7 @@ const systemT = createSystemTranslator(locale);
 const orderParam = Astro.params.id;
 let order: SellerOrderDetail | null = null;
 let state: "ready" | "not_found" | "forbidden" | "error" = "ready";
+let loadRequestId: string | null = null;
 
 if (unauthorizedShopRequest) {
   state = "forbidden";
@@ -43,6 +44,7 @@ if (unauthorizedShopRequest) {
   } catch (error) {
     if (!isAppError(error)) throw error;
     state = error.status === 403 || error.code === "authorization_denied" ? "forbidden" : error.status === 404 ? "not_found" : "error";
+    if (state === "error") loadRequestId = Astro.locals.requestId;
   }
 }
 
@@ -101,12 +103,46 @@ const formatDate = (value: string | null | undefined): string => {
   return Number.isNaN(date.getTime()) ? t("dashboard.commerce.not_recorded") : dateFormatter.format(date);
 };
 const formatShortId = (value: string): string => value.replace(/^order_/u, "").slice(0, 8).toUpperCase();
+const canManageFulfillment = shop?.role === "owner" || shop?.role === "manager";
+const canManagePayments = shop?.role === "owner" || shop?.role === "manager";
+const manualItems = order?.items.filter((item) => item.manualFulfillment?.status === "pending") ?? [];
+const manualFulfillmentTone = (status: "completed" | "pending" | "unsupported"): "neutral" | "success" | "warning" => {
+  if (status === "completed") return "success";
+  if (status === "unsupported") return "warning";
+  return "neutral";
+};
+const openPaymentExceptions = order?.paymentExceptions.filter((exception) => exception.status === "open") ?? [];
+const activeRemediationByException = new Map(
+  order?.remediationRequests
+    .filter((request) => request.status === "requested" || request.status === "provider_pending")
+    .map((request) => [request.exceptionId, request]) ?? [],
+);
+const paymentExceptionLabel = (value: string): string => {
+  switch (value) {
+    case "failed": return t("dashboard.orders.exception.type.failed");
+    case "identity_mismatch": return t("dashboard.orders.exception.type.identity_mismatch");
+    case "inconsistent": return t("dashboard.orders.exception.type.inconsistent");
+    case "late": return t("dashboard.orders.exception.type.late");
+    case "manual_review": return t("dashboard.orders.exception.type.manual_review");
+    case "overpaid": return t("dashboard.orders.exception.type.overpaid");
+    case "partial": return t("dashboard.orders.exception.type.partial");
+    default: return t("dashboard.orders.exception.type.default");
+  }
+};
+const remediationStatusLabels: Record<string, string> = {
+  canceled: t("dashboard.billing.requests.status_canceled"),
+  completed: t("dashboard.billing.requests.status_completed"),
+  failed: t("dashboard.order_detail.exceptions.request_failed"),
+  provider_pending: t("dashboard.billing.requests.status_provider_pending"),
+  rejected: t("dashboard.billing.requests.status_rejected"),
+  requested: t("dashboard.billing.requests.status_requested"),
+};
 ---
 
 <AppLayout activePath="/app/orders" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={order ? t("dashboard.order_detail.order_title", { number: order.orderNumber }) : t("dashboard.order_detail.title")}>
   {state === "not_found" && <WorkspaceState eyebrow={t("dashboard.order_detail.not_found.eyebrow")} title={t("dashboard.order_detail.not_found.title")} description={t("dashboard.order_detail.not_found.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.back")} tone="warning" />}
   {state === "forbidden" && <WorkspaceState eyebrow={t("dashboard.order_detail.forbidden.eyebrow")} title={t("dashboard.order_detail.forbidden.title")} description={t("dashboard.order_detail.forbidden.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.back")} tone="danger" />}
-  {state === "error" && <WorkspaceState eyebrow={t("dashboard.order_detail.error.eyebrow")} title={t("dashboard.order_detail.error.title")} description={t("dashboard.order_detail.error.description")} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.error.action")} tone="danger" />}
+  {state === "error" && <WorkspaceState eyebrow={t("dashboard.order_detail.error.eyebrow")} title={t("dashboard.order_detail.error.title")} description={`${t("dashboard.order_detail.error.description")} ${loadRequestId === null ? "" : t("dashboard.state.error.meta_request", { requestId: loadRequestId })}`.trim()} actionHref={workspaceHref("/app/orders")} actionLabel={t("dashboard.order_detail.error.action")} tone="danger" />}
 
   {state === "ready" && order !== null && shop !== undefined && <>
     <PageHeader eyebrow={t("dashboard.order_detail.header.eyebrow", { id: formatShortId(order.orderId) })} title={t("dashboard.order_detail.order_title", { number: order.orderNumber })} description={t("dashboard.order_detail.header.description")}>
@@ -142,7 +178,7 @@ const formatShortId = (value: string): string => value.replace(/^order_/u, "").s
           {order.items.length === 0 ? <WorkspaceState title={t("dashboard.order_detail.items.empty_title")} description={t("dashboard.order_detail.items.empty_description")} tone="warning" /> : <div class="item-ledger">
             {order.items.map((item, index) => <article class="item-row">
               <span class="item-index">{String(index + 1).padStart(2, "0")}</span>
-              <div class="item-copy"><strong>{item.productTitle}</strong><span>{item.variantTitle} · <code>{item.sku}</code></span><small>{fulfillmentTypeLabels[item.fulfillmentType] ?? item.fulfillmentType} · {t("dashboard.order_detail.quantity", { count: item.quantity })}</small>{item.privateDownload !== null && <span class="private-download-state"><strong>{t("dashboard.order_detail.private_download.title")}</strong><span>{item.privateDownload.filename}</span><small>{item.privateDownload.entitlementStatus === "active" ? t("dashboard.order_detail.private_download.remaining", { count: item.privateDownload.remainingDownloads }) : item.privateDownload.entitlementStatus === "exhausted" ? t("dashboard.order_detail.private_download.exhausted") : t("dashboard.order_detail.private_download.waiting")}</small></span>}</div>
+              <div class="item-copy"><strong>{item.productTitle}</strong><span>{item.variantTitle} · <code>{item.sku}</code></span><small>{fulfillmentTypeLabels[item.fulfillmentType] ?? item.fulfillmentType} · {t("dashboard.order_detail.quantity", { count: item.quantity })}</small>{item.privateDownload !== null && <span class="private-download-state"><strong>{t("dashboard.order_detail.private_download.title")}</strong><span>{item.privateDownload.filename}</span><small>{item.privateDownload.entitlementStatus === "active" ? t("dashboard.order_detail.private_download.remaining", { count: item.privateDownload.remainingDownloads }) : item.privateDownload.entitlementStatus === "exhausted" ? t("dashboard.order_detail.private_download.exhausted") : t("dashboard.order_detail.private_download.waiting")}</small></span>}{item.manualFulfillment !== null && <span class="manual-fulfillment-state"><strong>{fulfillmentTypeLabels.manual}</strong><StatusBadge label={item.manualFulfillment.status} tone={manualFulfillmentTone(item.manualFulfillment.status)} /><small>{item.manualFulfillment.status === "completed" ? t("dashboard.order_detail.fulfillment_done", { time: formatDate(item.manualFulfillment.completedAt) }) : item.manualFulfillment.status === "pending" ? t("dashboard.order_detail.fulfillment_waiting") : <code>{item.manualFulfillment.unsupportedReason ?? "unsupported"}</code>}</small></span>}</div>
               <div class="item-price"><strong><Money value={item.lineTotalMinor} currency={order.currency} locale={locale ?? "en"} /></strong><small><Money value={item.unitPriceMinor} currency={order.currency} locale={locale ?? "en"} /> / {t("dashboard.order_detail.unit")}</small></div>
             </article>)}
             <div class="item-total"><span>{t("dashboard.order_detail.total")}</span><strong><Money value={order.totalMinor} currency={order.currency} locale={locale ?? "en"} /></strong></div>
@@ -192,7 +228,43 @@ const formatShortId = (value: string): string => value.replace(/^order_/u, "").s
             <div><dt>{t("dashboard.order_detail.summary.fulfilled_at")}</dt><dd>{formatDate(order.fulfilledAt)}</dd></div>
           </dl>
           <div class="safe-callout"><strong>{t("dashboard.order_detail.summary.no_override")}</strong><span>{t("dashboard.order_detail.summary.no_override_description")}</span></div>
+          <div class="safe-callout"><strong>{t("dashboard.order_detail.refund.title")}</strong><span>{t("dashboard.order_detail.refund.description")}</span></div>
         </section>
+
+        {order.paymentExceptions.length > 0 && <section class="side-panel" aria-labelledby="payment-exceptions-title" data-payment-remediation data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-submitting={t("dashboard.order_detail.exceptions.submitting")} data-requested={t("dashboard.order_detail.exceptions.requested")} data-failed={t("dashboard.order_detail.exceptions.failed")} data-error-code-label={t("dashboard.order_detail.action.error_code_label")} data-request-id-label={t("dashboard.order_detail.action.request_id_label")}>
+          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.exceptions.eyebrow")}</p><h2 id="payment-exceptions-title">{t("dashboard.order_detail.exceptions.title")}</h2></div><span class="record-count">{order.paymentExceptions.length}</span></div>
+          <p class="privacy-copy">{t("dashboard.order_detail.exceptions.description")}</p>
+          <div class="exception-list">
+            {order.paymentExceptions.map((exception) => {
+              const activeRequest = activeRemediationByException.get(exception.id);
+              return <article class="exception-card">
+                <div class="exception-heading"><strong>{paymentExceptionLabel(exception.type)}</strong><StatusBadge label={exception.status === "open" ? t("dashboard.order_detail.exceptions.status_open") : exception.status === "resolved" ? t("dashboard.order_detail.exceptions.status_resolved") : t("dashboard.order_detail.exceptions.status_ignored")} tone={exception.status === "open" ? "danger" : "neutral"} /></div>
+                <dl class="exception-meta">
+                  <div><dt>{t("dashboard.order_detail.exceptions.attempt")}</dt><dd><code>{exception.paymentAttemptId}</code></dd></div>
+                  <div><dt>{t("dashboard.order_detail.exceptions.recorded")}</dt><dd>{formatDate(exception.createdAt)}</dd></div>
+                </dl>
+                {activeRequest !== undefined && <p class="remediation-state">{t("dashboard.order_detail.exceptions.review_status", { status: remediationStatusLabels[activeRequest.status] ?? activeRequest.status })} <code>{activeRequest.requestPublicId}</code></p>}
+                {canManagePayments && exception.status === "open" && activeRequest === undefined && <form class="remediation-form" data-remediation-form data-exception-id={exception.id} data-currency={exception.currency} data-idempotency-key="">
+                  <p>{t("dashboard.order_detail.exceptions.manual_review_description")}</p>
+                  <button class="sln-button sln-button-secondary" type="submit">{t("dashboard.order_detail.exceptions.manual_review")}</button>
+                  <p class="workspace-feedback" data-remediation-feedback hidden aria-live="polite"></p>
+                </form>}
+              </article>;
+            })}
+          </div>
+          {openPaymentExceptions.length === 0 && <p class="privacy-copy">{t("dashboard.order_detail.exceptions.no_open")}</p>}
+        </section>}
+
+        {canManageFulfillment && manualItems.length > 0 && <section class="side-panel" aria-labelledby="manual-action-title" data-manual-fulfillment data-shop-public-id={shop.publicId} data-order-public-id={order.orderId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-submitting={t("dashboard.order_detail.manual.submitting")} data-failed={t("dashboard.order_detail.manual.failed")} data-error-code-label={t("dashboard.order_detail.action.error_code_label")} data-request-id-label={t("dashboard.order_detail.action.request_id_label")} data-idempotency-key="">
+          <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.manual.eyebrow")}</p><h2 id="manual-action-title">{t("dashboard.order_detail.manual.title")}</h2></div></div>
+          <p class="privacy-copy">{order.paymentStatus === "paid" ? t("dashboard.order_detail.manual.ready") : t("dashboard.order_detail.manual.payment_required")}</p>
+          <form class="manual-form" data-manual-form>
+            <label>{t("dashboard.order_detail.manual.item")}<select name="orderItemId" required>{manualItems.map((item) => <option value={item.id}>{item.productTitle} · {item.variantTitle}</option>)}</select></label>
+            <label>{t("dashboard.order_detail.manual.reference")}<input name="reference" maxlength="512" required /></label>
+            <button class="sln-button sln-button-primary" type="submit" disabled={order.paymentStatus !== "paid"}>{t("dashboard.order_detail.manual.complete")}</button>
+          </form>
+          <p class="workspace-feedback" data-manual-feedback hidden aria-live="polite"></p>
+        </section>}
 
         <section class="side-panel" aria-labelledby="audit-title">
           <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.audit.eyebrow")}</p><h2 id="audit-title">{t("dashboard.order_detail.audit.title")}</h2></div><span class="record-count">{t("dashboard.order_detail.audit.count", { count: order.audit.length })}</span></div>
@@ -204,6 +276,95 @@ const formatShortId = (value: string): string => value.replace(/^order_/u, "").s
     </div>
   </>}
 </AppLayout>
+
+<script>
+  type ActionResponse = { code?: string; requestId?: string };
+
+  const csrfToken = (root: HTMLElement): string | null => {
+    const cookieName = root.dataset.csrfCookieName ?? "";
+    const rawCookie = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
+    return rawCookie === undefined ? null : decodeURIComponent(rawCookie);
+  };
+  const actionError = (root: HTMLElement, body: ActionResponse): string => {
+    const parts = [root.dataset.failed ?? ""];
+    if (body.code !== undefined) parts.push(`${root.dataset.errorCodeLabel ?? "Error"}: ${body.code}`);
+    if (body.requestId !== undefined) parts.push(`${root.dataset.requestIdLabel ?? "Request ID"}: ${body.requestId}`);
+    return parts.filter(Boolean).join(" ");
+  };
+  const readActionResponse = async (response: Response): Promise<ActionResponse> => {
+    try {
+      return await response.json() as ActionResponse;
+    } catch {
+      const requestId = response.headers.get("X-Request-Id");
+      return requestId === null ? { code: "invalid_response" } : { code: "invalid_response", requestId };
+    }
+  };
+
+  const manualRoot = document.querySelector<HTMLElement>("[data-manual-fulfillment]");
+  const manualForm = manualRoot?.querySelector<HTMLFormElement>("[data-manual-form]");
+  const manualFeedback = manualRoot?.querySelector<HTMLElement>("[data-manual-feedback]");
+  manualForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (manualRoot === null || manualFeedback === null || manualFeedback === undefined || !manualForm.reportValidity()) return;
+    const values = new FormData(manualForm);
+    const csrf = csrfToken(manualRoot);
+    const idempotencyKey = manualRoot.dataset.idempotencyKey || `manual-ui-${crypto.randomUUID()}`;
+    manualRoot.dataset.idempotencyKey = idempotencyKey;
+    manualFeedback.hidden = false;
+    manualFeedback.textContent = manualRoot.dataset.submitting ?? "";
+    try {
+      if (csrf === null) throw new Error(actionError(manualRoot, { code: "csrf_missing" }));
+      const response = await fetch(`/api/app/shops/${encodeURIComponent(manualRoot.dataset.shopPublicId ?? "")}/orders/${encodeURIComponent(manualRoot.dataset.orderPublicId ?? "")}/manual-fulfillments`, {
+        body: JSON.stringify({ executionType: "seller_attested_delivery", externalReference: { reference: values.get("reference"), type: "merchant_reference" }, orderItemId: values.get("orderItemId") }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, "X-CSRF-Token": csrf },
+        method: "POST",
+      });
+      const body = await readActionResponse(response);
+      if (!response.ok) throw new Error(actionError(manualRoot, body));
+      window.location.reload();
+    } catch (error) {
+      manualFeedback.textContent = error instanceof Error && error.message.startsWith(manualRoot.dataset.failed ?? "")
+        ? error.message
+        : manualRoot.dataset.failed ?? "";
+    }
+  });
+
+  const remediationRoot = document.querySelector<HTMLElement>("[data-payment-remediation]");
+  remediationRoot?.querySelectorAll<HTMLFormElement>("[data-remediation-form]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (remediationRoot === null) return;
+      const feedback = form.querySelector<HTMLElement>("[data-remediation-feedback]");
+      const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (feedback === null || submit === null) return;
+      const csrf = csrfToken(remediationRoot);
+      const idempotencyKey = form.dataset.idempotencyKey || `remediation-ui-${crypto.randomUUID()}`;
+      form.dataset.idempotencyKey = idempotencyKey;
+      feedback.hidden = false;
+      feedback.textContent = remediationRoot.dataset.submitting ?? "";
+      submit.disabled = true;
+      try {
+        if (csrf === null) throw new Error(actionError(remediationRoot, { code: "csrf_missing" }));
+        const response = await fetch(`/api/app/shops/${encodeURIComponent(remediationRoot.dataset.shopPublicId ?? "")}/payments/remediation`, {
+          body: JSON.stringify({ amountMinor: 0, currency: form.dataset.currency, exceptionPublicId: form.dataset.exceptionId, kind: "manual_review", reasonCode: "seller_requested" }),
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, "X-CSRF-Token": csrf },
+          method: "POST",
+        });
+        const body = await readActionResponse(response);
+        if (!response.ok) throw new Error(actionError(remediationRoot, body));
+        const requestId = body.requestId === undefined ? "" : ` ${remediationRoot.dataset.requestIdLabel ?? "Request ID"}: ${body.requestId}`;
+        feedback.textContent = `${remediationRoot.dataset.requested ?? ""}${requestId}`;
+      } catch (error) {
+        feedback.textContent = error instanceof Error && error.message.startsWith(remediationRoot.dataset.failed ?? "")
+          ? error.message
+          : remediationRoot.dataset.failed ?? "";
+        submit.disabled = false;
+      }
+    });
+  });
+</script>
 
 <style>
   .header-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 10px; }
@@ -221,6 +382,20 @@ const formatShortId = (value: string): string => value.replace(/^order_/u, "").s
   .order-side { position: sticky; top: calc(var(--sln-topbar-height) + 24px); display: grid; gap: var(--sln-space-8); min-width: 0; }
   .ledger-panel, .side-panel { min-width: 0; padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
   .side-panel { padding: 20px; }
+  .manual-form { display:grid; gap:12px; }
+  .exception-list { display: grid; gap: 12px; margin-top: 18px; }
+  .exception-card { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-subtle); }
+  .exception-heading { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+  .exception-heading strong { font: var(--sln-font-label); }
+  .exception-meta { display: grid; gap: 8px; margin: 0; }
+  .exception-meta > div { display: grid; gap: 3px; }
+  .exception-meta dt { color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .exception-meta dd { overflow-wrap: anywhere; margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .remediation-form { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--sln-border-default); }
+  .remediation-form p, .remediation-state { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .remediation-state { overflow-wrap: anywhere; padding: 10px; border-left: 3px solid var(--sln-state-info); background: var(--sln-tint-info); }
+  .manual-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
+  .manual-form input, .manual-form select { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); }
   .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: var(--sln-space-6); }
   .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
   h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
@@ -241,6 +416,8 @@ const formatShortId = (value: string): string => value.replace(/^order_/u, "").s
   .item-copy span, .item-copy small, .item-price small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .item-copy code { color: var(--sln-text-secondary); }
   .item-copy .private-download-state { display: grid; gap: 3px; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 3px solid var(--sln-state-info); background: var(--sln-tint-info); color: var(--sln-text-secondary); white-space: normal; }
+  .item-copy .manual-fulfillment-state { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 3px solid var(--sln-state-warning); background: var(--sln-tint-warning); color: var(--sln-text-secondary); white-space: normal; }
+  .manual-fulfillment-state small { grid-column: 1 / -1; }
   .private-download-state strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
   .private-download-state span, .private-download-state small { overflow-wrap: anywhere; white-space: normal; }
   .item-price { display: grid; gap: 3px; justify-items: end; text-align: right; }

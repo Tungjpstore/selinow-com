@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 
 import { getPublicApiCatalog } from "../../../lib/api/catalog";
-import { authenticatePublicApiRequest } from "../../../lib/api/credentials";
+import { authenticatePublicApiRequest, recordPublicApiUsage } from "../../../lib/api/credentials";
 import { isAppError } from "../../../lib/core/errors";
 import { createCaughtErrorResponse } from "../../../lib/http/security";
 import { getBindings } from "../../../lib/platform/bindings";
@@ -24,6 +24,7 @@ export const GET: APIRoute = async ({ locals, request }) => {
       env,
       shopId: context.shopId,
     });
+    await recordPublicApiUsage({ context, env, requestId: locals.requestId });
     return Response.json({
       data: { catalog, shop: context.shop },
       ok: true,

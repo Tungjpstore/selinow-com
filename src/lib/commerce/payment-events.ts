@@ -1,6 +1,7 @@
 import { sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { tryRecordFirstPaidFulfilled } from "../analytics/activation";
 import { sha256Hex } from "../events/append";
 import type { AppBindings } from "../platform/bindings";
 import { prepareGenericPaidActivationStatements } from "./entitlements";
@@ -234,7 +235,8 @@ async function fulfillExactPayment(
   }
   const now = new Date().toISOString();
   const hasManual = orderItems.results.some((item) => item.fulfillmentType === "manual"
-    && (item.hasPrivateRequirement === 1 || item.hasGenericRequirement !== 1));
+    && item.hasPrivateRequirement !== 1
+    && item.hasGenericRequirement !== 1);
   const hasGeneratedLicense = orderItems.results.some((item) => item.hasGeneratedLicenseRequirement === 1);
   const hasAsyncFulfillment = hasManual || hasGeneratedLicense;
   const digitalFulfillmentId = expectedKeys > 0 ? createId("ful") : null;
@@ -254,7 +256,6 @@ async function fulfillExactPayment(
     env.PLATFORM_DB.prepare(`UPDATE payment_attempts SET state = 'paid_exact', paid_event_id = ?, provider_status = 'PAID', last_safe_error_code = NULL, updated_at = ? WHERE id = ? AND shop_id = ? AND state IN ('creating', 'pending', 'error') AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND shop_id = ? AND payment_status IN ('unpaid', 'pending')) AND (SELECT COUNT(*) FROM inventory_keys INNER JOIN order_items ON order_items.id = inventory_keys.reserved_order_item_id AND order_items.shop_id = inventory_keys.shop_id WHERE order_items.order_id = ? AND order_items.shop_id = ? AND inventory_keys.status = 'reserved') = ? AND ${claimedEventGuard()}`).bind(eventId, now, attempt.id, attempt.shopId, attempt.orderId, attempt.shopId, attempt.orderId, attempt.shopId, expectedKeys, ...claimedEventBindings(attempt, eventId, claimToken)),
     env.PLATFORM_DB.prepare("UPDATE orders SET status = ?, payment_status = 'paid', fulfillment_status = ?, paid_at = ?, fulfilled_at = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND payment_status IN ('unpaid', 'pending') AND EXISTS (SELECT 1 FROM payment_attempts WHERE id = ? AND shop_id = ? AND state = 'paid_exact' AND paid_event_id = ?) AND EXISTS (SELECT 1 FROM payment_events WHERE id = ? AND integration_id = ? AND processing_token = ? AND processed_at IS NULL)").bind(hasAsyncFulfillment ? "processing" : "completed", hasAsyncFulfillment ? "unfulfilled" : "fulfilled", evidence.occurredAt, hasAsyncFulfillment ? null : now, now, attempt.orderId, attempt.shopId, attempt.id, attempt.shopId, eventId, eventId, attempt.integrationId, claimToken),
     env.PLATFORM_DB.prepare("UPDATE inventory_keys SET status = 'sold', sold_order_item_id = reserved_order_item_id, sold_at = ?, reservation_token = NULL, reserved_until = NULL WHERE shop_id = ? AND status = 'reserved' AND reserved_order_item_id IN (SELECT id FROM order_items WHERE order_id = ? AND shop_id = ?) AND EXISTS (SELECT 1 FROM payment_attempts INNER JOIN orders ON orders.id = payment_attempts.order_id AND orders.shop_id = payment_attempts.shop_id WHERE payment_attempts.id = ? AND payment_attempts.shop_id = ? AND payment_attempts.state = 'paid_exact' AND payment_attempts.paid_event_id = ? AND orders.payment_status = 'paid') AND EXISTS (SELECT 1 FROM payment_events WHERE id = ? AND integration_id = ? AND processing_token = ? AND processed_at IS NULL)").bind(now, attempt.shopId, attempt.orderId, attempt.shopId, attempt.id, attempt.shopId, eventId, eventId, attempt.integrationId, claimToken),
-    env.PLATFORM_DB.prepare("INSERT OR IGNORE INTO outbox_jobs (id, shop_id, kind, aggregate_type, aggregate_id, status, attempts, next_attempt_at, created_at, updated_at) SELECT ?, ?, 'order_paid', 'order', ?, 'pending', 0, ?, ?, ? WHERE EXISTS (SELECT 1 FROM payment_attempts INNER JOIN orders ON orders.id = payment_attempts.order_id AND orders.shop_id = payment_attempts.shop_id WHERE payment_attempts.id = ? AND payment_attempts.shop_id = ? AND payment_attempts.state = 'paid_exact' AND payment_attempts.paid_event_id = ? AND orders.payment_status = 'paid') AND EXISTS (SELECT 1 FROM payment_events WHERE id = ? AND integration_id = ? AND processing_token = ? AND processed_at IS NULL)").bind(createId("job"), attempt.shopId, attempt.orderId, now, now, now, attempt.id, attempt.shopId, eventId, eventId, attempt.integrationId, claimToken),
   ];
   if (digitalFulfillmentId !== null) {
     statements.push(env.PLATFORM_DB.prepare("INSERT INTO fulfillments (id, shop_id, order_id, fulfillment_type, state, idempotency_key, created_at, fulfilled_at) SELECT ?, ?, ?, 'digital_keys', 'fulfilled', ?, ?, ? WHERE EXISTS (SELECT 1 FROM payment_attempts INNER JOIN orders ON orders.id = payment_attempts.order_id AND orders.shop_id = payment_attempts.shop_id WHERE payment_attempts.id = ? AND payment_attempts.shop_id = ? AND payment_attempts.state = 'paid_exact' AND payment_attempts.paid_event_id = ? AND orders.payment_status = 'paid') AND EXISTS (SELECT 1 FROM payment_events WHERE id = ? AND integration_id = ? AND processing_token = ? AND processed_at IS NULL)").bind(digitalFulfillmentId, attempt.shopId, attempt.orderId, `payment:${attempt.id}:digital`, now, now, attempt.id, attempt.shopId, eventId, eventId, attempt.integrationId, claimToken));
@@ -289,7 +290,11 @@ export async function applyCommercePaymentEvent(input: ApplyCommercePaymentEvent
   const { attempt, claimToken, decision, env, eventId, evidence } = input;
   if (input.integrationId !== attempt.integrationId) throw new AppError("payment_event_claim_invalid", 500);
   await assertClaimedEventBinding(env, attempt, eventId, claimToken);
-  if (decision === "paid_exact") return fulfillExactPayment(env, attempt, eventId, claimToken, evidence);
+  if (decision === "paid_exact") {
+    const result = await fulfillExactPayment(env, attempt, eventId, claimToken, evidence);
+    if (result.state === "paid_exact") await tryRecordFirstPaidFulfilled({ env, orderId: attempt.orderId, shopId: attempt.shopId });
+    return result;
+  }
   if (decision === "pending" || decision === "terminal_unpaid") {
     const now = new Date().toISOString();
     // Unpaid provider observations may advance only a transient attempt. Once

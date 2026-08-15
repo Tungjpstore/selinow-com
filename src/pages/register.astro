@@ -1,0 +1,670 @@
+---
+import "../styles/selinow-tokens.css";
+import "../styles/selinow-a11y.css";
+import { authenticateRequest } from "../lib/auth/session";
+import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
+import { getBindings } from "../lib/platform/bindings";
+
+const env = getBindings();
+if (Astro.url.origin !== env.DASHBOARD_ORIGIN) {
+  const canonicalRegister = new URL("/register", env.DASHBOARD_ORIGIN);
+  canonicalRegister.search = Astro.url.search;
+  return Astro.redirect(canonicalRegister.toString(), 308);
+}
+
+try {
+  await authenticateRequest(Astro.request, env);
+  return Astro.redirect("/app", 302);
+} catch {
+  // Continue to register form
+}
+
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+const locale = resolvePresentationLocale(Astro.locals.locale ?? DEFAULT_LOCALE);
+const t = createSystemTranslator(locale);
+---
+
+<!doctype html>
+<html lang={locale} dir={directionForLocale(locale)}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#F8FAFC" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/selinow-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/selinow-180.png" />
+    <title>{t("auth.register.title")}</title>
+  </head>
+  <body>
+    <a class="selinow-skip-link" href="#main-content">{t("auth.login.skip")}</a>
+    <main id="main-content" class="selinow-focus-target" tabindex="-1">
+      <div class="brand-wrapper">
+        <a class="brand" href="/" aria-label={t("auth.login.brand_aria")}>
+          <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="144" height="38" />
+        </a>
+      </div>
+
+      <div class="auth-card">
+        <!-- Step Indicators -->
+        <div class="wizard-steps" aria-hidden="true">
+          <div class="step-item is-active" data-step-indicator="1">
+            <span class="step-num">1</span>
+            <span class="step-text">Tài khoản</span>
+          </div>
+          <div class="step-divider" data-step-divider></div>
+          <div class="step-item" data-step-indicator="2">
+            <span class="step-num">2</span>
+            <span class="step-text">Xác thực OTP</span>
+          </div>
+        </div>
+
+        <!-- Step 1: Registration Form -->
+        <div class="view-step" data-register-view-step="1">
+          <div class="auth-heading">
+            <h1>{t("auth.register.heading")}</h1>
+            <p>{t("auth.register.intro")}</p>
+          </div>
+
+          <form id="register-form" class="auth-form" data-register-form>
+            <div class="field-group">
+              <label for="display-name">{t("auth.register.name_label")}</label>
+              <div class="input-control">
+                <input
+                  id="display-name"
+                  name="displayName"
+                  type="text"
+                  autocomplete="name"
+                  maxlength="80"
+                  placeholder="Tên hoặc thương hiệu của bạn"
+                  data-register-name
+                />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label for="email">{t("auth.login.email_label")}</label>
+              <div class="input-control">
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  inputmode="email"
+                  autocomplete="email"
+                  required
+                  maxlength="254"
+                  placeholder="name@company.com"
+                  data-register-email
+                />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label for="password">{t("auth.register.password_label")}</label>
+              <div class="input-control has-toggle">
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autocomplete="new-password"
+                  required
+                  minlength="8"
+                  maxlength="128"
+                  placeholder="Tối thiểu 8 ký tự"
+                  data-register-password
+                  data-password-input
+                />
+                <button type="button" class="btn-reveal-pwd" data-toggle-password aria-label="Ẩn/hiện mật khẩu">
+                  <svg class="icon-eye" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+              <div class="strength-meter" data-strength-meter hidden>
+                <div class="meter-bar"><div class="meter-fill" data-strength-fill></div></div>
+                <span class="meter-label" data-strength-label>Độ mạnh mật khẩu</span>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label for="confirm-password">{t("auth.register.confirm_password_label")}</label>
+              <div class="input-control has-toggle">
+                <input
+                  id="confirm-password"
+                  name="confirmPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  required
+                  minlength="8"
+                  maxlength="128"
+                  placeholder="Nhập lại mật khẩu"
+                  data-register-confirm-password
+                  data-password-input
+                />
+                <button type="button" class="btn-reveal-pwd" data-toggle-password aria-label="Ẩn/hiện mật khẩu">
+                  <svg class="icon-eye" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn-primary" data-register-submit>
+              <span data-submit-label>{t("auth.register.submit")}</span>
+              <span class="btn-arrow" aria-hidden="true">→</span>
+            </button>
+            <p id="status" class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-register-status></p>
+          </form>
+        </div>
+
+        <!-- Step 2: OTP Verification Section (Dedicated card view) -->
+        <section class="view-step otp-view" data-otp-section hidden>
+          <div class="otp-header">
+            <div class="otp-badge-icon">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect width="20" height="16" x="2" y="4" rx="2" />
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+              </svg>
+            </div>
+            <h2>{t("auth.otp.heading")}</h2>
+            <p class="otp-instruction-text">{t("auth.otp.intro")}</p>
+            
+            <div class="recipient-pill">
+              <span class="email-value" data-otp-email-display></span>
+              <button type="button" class="btn-change-email" data-otp-back-step>
+                <span>Sửa</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="otp-input-wrapper">
+            <label class="sr-only">{t("auth.otp.label")}</label>
+            <div class="otp-boxes-grid" data-otp-container>
+              <div class="otp-group">
+                <input type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="OTP Digit 1" data-otp-digit required autofocus />
+                <input type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="OTP Digit 2" data-otp-digit required />
+                <input type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="OTP Digit 3" data-otp-digit required />
+              </div>
+              <span class="otp-dash" aria-hidden="true">−</span>
+              <div class="otp-group">
+                <input type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="OTP Digit 4" data-otp-digit required />
+                <input type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="OTP Digit 5" data-otp-digit required />
+                <input type="text" inputmode="numeric" maxlength="1" pattern="[0-9]" aria-label="OTP Digit 6" data-otp-digit required />
+              </div>
+            </div>
+          </div>
+
+          <button type="button" class="btn-primary" data-otp-verify-submit>
+            <span data-submit-label>{t("auth.otp.submit")}</span>
+            <span class="btn-arrow" aria-hidden="true">→</span>
+          </button>
+
+          <div class="otp-footer-actions">
+            <button type="button" class="btn-resend-link" data-otp-resend>
+              {t("auth.otp.resend")}
+            </button>
+            <span class="dot-separator">•</span>
+            <button type="button" class="btn-text-secondary" data-otp-back-step>
+              Nhập lại email khác
+            </button>
+          </div>
+
+          <p id="otp-status" class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-otp-status></p>
+        </section>
+
+        <!-- Footer Links -->
+        <div class="card-footer">
+          <div class="switch-auth">
+            <span>{t("auth.register.has_account")}</span>
+            <a href="/login" class="link-bold">{t("auth.register.login_now")}</a>
+          </div>
+          <div class="privacy-note">
+            <span>{t("auth.login.privacy")}</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      import "../scripts/marketing/auth";
+    </script>
+  </body>
+</html>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  :global(body) {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: radial-gradient(circle at 50% 0%, #EEF2FF 0%, #F8FAFC 60%, #F1F5F9 100%);
+    color: var(--sln-text-primary);
+    font-family: var(--sln-font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    width: min(calc(100% - 32px), 480px);
+    margin-inline: auto;
+    padding: 36px 0 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .brand-wrapper {
+    margin-bottom: 24px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+    transition: opacity 0.2s ease;
+  }
+  .brand:hover { opacity: 0.88; }
+  .brand img { display: block; width: 140px; height: auto; }
+
+  /* Auth Card */
+  .auth-card {
+    width: 100%;
+    background: #FFFFFF;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 24px;
+    padding: 36px 32px;
+    box-shadow:
+      0 1px 3px 0 rgba(0, 0, 0, 0.04),
+      0 10px 25px -5px rgba(91, 92, 235, 0.06),
+      0 8px 10px -6px rgba(0, 0, 0, 0.03);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Wizard Step Progress */
+  .wizard-steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #F1F5F9;
+  }
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #94A3B8;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .step-item.is-active {
+    color: var(--sln-action-primary);
+  }
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #F1F5F9;
+    color: #64748B;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .step-item.is-active .step-num {
+    background: var(--sln-action-primary);
+    color: #FFFFFF;
+  }
+  .step-divider {
+    width: 32px;
+    height: 2px;
+    background: #E2E8F0;
+    border-radius: 2px;
+  }
+  .step-divider.is-active {
+    background: var(--sln-action-primary);
+  }
+
+  /* Headings */
+  .auth-heading {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .auth-heading h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 750;
+    letter-spacing: -0.025em;
+    color: #0F172A;
+  }
+  .auth-heading p {
+    margin: 8px 0 0;
+    color: #64748B;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* Form controls */
+  .auth-form {
+    display: grid;
+    gap: 16px;
+  }
+  .field-group {
+    display: grid;
+    gap: 6px;
+  }
+  .field-group label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #334155;
+  }
+  .input-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .input-control input {
+    width: 100%;
+    min-height: 46px;
+    border: 1.5px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 10px 14px;
+    background: #F8FAFC;
+    color: #0F172A;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+  .input-control.has-toggle input {
+    padding-right: 42px;
+  }
+  .input-control input:focus {
+    background: #FFFFFF;
+    border-color: var(--sln-action-primary);
+    box-shadow: 0 0 0 4px rgba(91, 92, 235, 0.12);
+  }
+  .btn-reveal-pwd {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    padding: 6px;
+    color: #94A3B8;
+    cursor: pointer;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-reveal-pwd:hover { color: #475569; }
+
+  /* Strength Meter */
+  .strength-meter {
+    margin-top: 4px;
+  }
+  .meter-bar {
+    height: 4px;
+    background: #E2E8F0;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .meter-fill {
+    height: 100%;
+    width: 0;
+    transition: width 0.3s ease, background-color 0.3s ease;
+  }
+  .meter-label {
+    display: block;
+    font-size: 11px;
+    color: #94A3B8;
+    margin-top: 4px;
+    text-align: right;
+  }
+
+  /* Primary Button */
+  .btn-primary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 48px;
+    margin-top: 8px;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 20px;
+    background: var(--sln-action-primary);
+    color: #FFFFFF;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(91, 92, 235, 0.25);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .btn-primary:hover {
+    background: var(--sln-action-primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(91, 92, 235, 0.35);
+  }
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+  .btn-primary:disabled {
+    cursor: wait;
+    opacity: 0.72;
+    transform: none;
+  }
+  .btn-arrow {
+    font-size: 16px;
+    transition: transform 0.2s ease;
+  }
+  .btn-primary:hover .btn-arrow {
+    transform: translateX(3px);
+  }
+
+  /* OTP View Specific */
+  .otp-view {
+    text-align: center;
+    animation: fadeInSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes fadeInSlide {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .otp-badge-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: #EEF2FF;
+    color: var(--sln-action-primary);
+    margin-bottom: 16px;
+  }
+  .otp-header h2 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 750;
+    color: #0F172A;
+  }
+  .otp-instruction-text {
+    margin: 6px 0 14px;
+    color: #64748B;
+    font-size: 14px;
+  }
+  .recipient-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #F1F5F9;
+    border: 1px solid #E2E8F0;
+    padding: 4px 12px 4px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    color: #1E293B;
+    margin-bottom: 24px;
+  }
+  .email-value {
+    font-weight: 600;
+  }
+  .btn-change-email {
+    background: transparent;
+    border: none;
+    color: var(--sln-action-primary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 2px 4px;
+    text-decoration: underline;
+  }
+  .btn-change-email:hover { color: var(--sln-action-primary-hover); }
+
+  /* OTP Boxes Grid */
+  .otp-boxes-grid {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .otp-group {
+    display: flex;
+    gap: 8px;
+  }
+  .otp-dash {
+    color: #CBD5E1;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .otp-boxes-grid input {
+    width: 46px;
+    height: 54px;
+    min-height: 54px;
+    font-size: 24px;
+    font-family: var(--sln-font-mono);
+    font-weight: 700;
+    text-align: center;
+    border: 2px solid #CBD5E1;
+    border-radius: 12px;
+    background: #F8FAFC;
+    color: #0F172A;
+    outline: none;
+    transition: all 0.15s ease;
+  }
+  .otp-boxes-grid input:focus {
+    background: #FFFFFF;
+    border-color: var(--sln-action-primary);
+    box-shadow: 0 0 0 4px rgba(91, 92, 235, 0.14);
+    transform: scale(1.04);
+  }
+
+  .otp-footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 18px;
+    font-size: 13px;
+  }
+  .btn-resend-link {
+    background: transparent;
+    border: none;
+    color: var(--sln-action-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+  }
+  .btn-resend-link:hover { text-decoration: underline; }
+  .btn-resend-link:disabled { color: #94A3B8; cursor: not-allowed; text-decoration: none; }
+  .dot-separator { color: #CBD5E1; }
+  .btn-text-secondary {
+    background: transparent;
+    border: none;
+    color: #64748B;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .btn-text-secondary:hover { color: #334155; text-decoration: underline; }
+
+  /* Status messages */
+  .status-msg {
+    min-height: 0;
+    margin: 12px 0 0;
+    padding: 0;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: center;
+    transition: all 0.2s ease;
+  }
+  .status-msg:not(:empty) {
+    padding: 10px 14px;
+  }
+  .status-msg[data-tone="pending"] {
+    background: #EFF6FF;
+    color: #1D4ED8;
+    border: 1px solid #BFDBFE;
+  }
+  .status-msg[data-tone="success"] {
+    background: #ECFDF5;
+    color: #047857;
+    border: 1px solid #A7F3D0;
+  }
+  .status-msg[data-tone="error"] {
+    background: #FEF2F2;
+    color: #B91C1C;
+    border: 1px solid #FECACA;
+  }
+
+  /* Card Footer */
+  .card-footer {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid #F1F5F9;
+    text-align: center;
+  }
+  .switch-auth {
+    font-size: 14px;
+    color: #64748B;
+  }
+  .link-bold {
+    color: var(--sln-action-primary);
+    font-weight: 600;
+    text-decoration: none;
+    margin-left: 4px;
+  }
+  .link-bold:hover { text-decoration: underline; }
+  .privacy-note {
+    margin-top: 12px;
+    color: #94A3B8;
+    font-size: 12px;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  @media (max-width: 480px) {
+    main { width: 100%; padding: 16px 12px 48px; }
+    .auth-card { padding: 28px 18px; border-radius: 20px; }
+    .otp-boxes-grid { gap: 6px; }
+    .otp-group { gap: 4px; }
+    .otp-boxes-grid input { width: 38px; height: 48px; min-height: 48px; font-size: 20px; }
+  }
+</style>

@@ -1,10 +1,13 @@
 import { AppError } from "../core/errors";
+import { assertQuotaAvailable, recordUsage } from "../billing/metering";
+import { subscriptionAllows } from "../billing/entitlements";
+import { parsePlanFeatures, parsePlanLimits, PUBLIC_PLAN_CODES } from "../billing/plan-catalog";
 import { constantTimeEqual, hmacToken, sha256Json } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
 
-const API_SCOPES = ["catalog:read", "shop:read"] as const;
+const API_SCOPES = ["catalog:read", "inventory:read", "orders:read", "shop:read"] as const;
 const API_SCOPE_SET = new Set<string>(API_SCOPES);
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,128}$/u;
 const SAFE_REASON_CODE = /^[a-z][a-z0-9._:-]{2,95}$/u;
@@ -610,12 +613,19 @@ export async function authenticatePublicApiRequest(input: {
       shops.public_id AS shopPublicId, shops.name AS shopName,
       shops.status AS shopStatus, shops.default_locale AS defaultLocale,
       shops.currency, shops.timezone,
-      shop_subscriptions.state AS subscriptionState
+      shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
+      shop_subscriptions.trial_ends_at AS trialEndsAt,
+      shop_subscriptions.grace_ends_at AS graceEndsAt,
+      plans.code AS planCode,
+      plans.feature_flags_json AS featureFlagsJson,
+      plans.limits_json AS limitsJson
     FROM api_credentials
     INNER JOIN shops ON shops.id = api_credentials.shop_id
     INNER JOIN shop_subscriptions
       ON shop_subscriptions.shop_id = shops.id
       AND shop_subscriptions.state != 'canceled'
+    INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
     WHERE api_credentials.public_id = ?
     LIMIT 1
   `).bind(publicId).first<{
@@ -631,6 +641,12 @@ export async function authenticatePublicApiRequest(input: {
     shopStatus: string;
     status: ApiCredentialStatus;
     subscriptionState: string;
+    currentPeriodEnd: string | null;
+    trialEndsAt: string | null;
+    graceEndsAt: string | null;
+    planCode: string;
+    featureFlagsJson: string;
+    limitsJson: string;
     timezone: string;
     tokenHash: string;
     version: number;
@@ -645,11 +661,25 @@ export async function authenticatePublicApiRequest(input: {
   if (row.shopStatus === "suspended" || row.shopStatus === "archived") {
     throw new AppError("tenant_suspended", 403);
   }
-  if (!new Set(["trialing", "active", "past_due"]).has(row.subscriptionState)) {
+  if (!subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
     throw new AppError("subscription_required", 402);
   }
   const scopes = parseScopeJson(row.scopeJson);
   if (!scopes.includes(input.requiredScope)) throw new AppError("authorization_denied", 403);
+  // Starter deliberately has no public API allowance. Legacy plans retain
+  // their historical behavior until their subscriptions are migrated.
+  if ((PUBLIC_PLAN_CODES as readonly string[]).includes(row.planCode)) {
+    const features = parsePlanFeatures(row.featureFlagsJson);
+    if (!features.ok || !features.value.api) throw new AppError("plan_feature_unavailable", 402, ["api"]);
+    const limits = parsePlanLimits(row.limitsJson);
+    if (!limits.ok) throw new AppError("quota_unavailable", 503, ["api_requests"]);
+    await assertQuotaAvailable({
+      database: input.env.PLATFORM_DB,
+      limit: limits.value.api_requests,
+      metric: "api_requests",
+      shopId: row.shopId,
+    });
+  }
   const rateLimit = await claimRateLimit({
     credentialId: row.id,
     env: input.env,
@@ -683,4 +713,34 @@ export async function authenticatePublicApiRequest(input: {
     },
     shopId: row.shopId,
   };
+}
+
+/** Record one successfully served public API request after its read succeeds. */
+export async function recordPublicApiUsage(input: {
+  context: PublicApiContext;
+  env: AppBindings;
+  requestId: string;
+  now?: Date;
+}): Promise<void> {
+  const plan = await input.env.PLATFORM_DB.prepare(`
+    SELECT plans.code, plans.limits_json AS limitsJson
+    FROM shop_subscriptions AS subscriptions
+    INNER JOIN plans ON plans.id = subscriptions.plan_id
+    WHERE subscriptions.shop_id = ? AND subscriptions.state != 'canceled'
+    ORDER BY subscriptions.created_at DESC, subscriptions.id DESC
+    LIMIT 1
+  `).bind(input.context.shopId).first<{ code: string; limitsJson: string }>();
+  if (plan === null || !(PUBLIC_PLAN_CODES as readonly string[]).includes(plan.code)) return;
+  const limits = parsePlanLimits(plan.limitsJson);
+  if (!limits.ok) throw new AppError("quota_unavailable", 503, ["api_requests"]);
+  await recordUsage({
+    database: input.env.PLATFORM_DB,
+    delta: 1,
+    limit: limits.value.api_requests,
+    metric: "api_requests",
+    occurredAt: (input.now ?? new Date()).toISOString(),
+    shopId: input.context.shopId,
+    sourceId: input.requestId,
+    sourceKind: "api_request",
+  });
 }

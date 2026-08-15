@@ -53,14 +53,22 @@ function localSecret() {
 }
 
 function run(command, args, options = {}) {
+  const stdio = options.capture
+    ? ["ignore", "pipe", "pipe"]
+    : options.quiet
+      ? ["ignore", "ignore", "pipe"]
+      : "inherit";
   const result = spawnSync(command, args, {
     cwd: repositoryRoot,
     env: environment,
     encoding: "utf8",
-    stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    stdio,
   });
   if (result.error !== undefined) throw result.error;
-  if (result.status !== 0) throw new Error(`${command}_failed_${String(result.status ?? "unknown")}`);
+  if (result.status !== 0) {
+    const detail = typeof result.stderr === "string" ? result.stderr.trim().slice(0, 400) : "";
+    throw new Error(`${command}_failed_${String(result.status ?? "unknown")}${detail.length > 0 ? `:${detail}` : ""}`);
+  }
   return options.capture ? `${result.stdout ?? ""}${result.stderr ?? ""}` : "";
 }
 
@@ -107,9 +115,9 @@ try {
     wranglerConfigPath,
   });
   assertNoDevServer();
-  run("npx", ["--no-install", "wrangler", "d1", "migrations", "apply", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory], { capture: true });
-  run("npx", ["--no-install", "wrangler", "d1", "execute", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory, "--file", "./seeds/0001_platform_defaults.sql"], { capture: true });
-  run("npx", ["--no-install", "wrangler", "d1", "execute", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory, "--file", "./seeds/0003_phase6_demo.sql"], { capture: true });
+  run("npx", ["--no-install", "wrangler", "d1", "migrations", "apply", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory], { quiet: true });
+  run("npx", ["--no-install", "wrangler", "d1", "execute", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory, "--file", "./seeds/0001_platform_defaults.sql"], { quiet: true });
+  run("npx", ["--no-install", "wrangler", "d1", "execute", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory, "--file", "./seeds/0003_phase6_demo.sql"], { quiet: true });
   const startOutput = run("npx", [
     "--no-install",
     "astro",

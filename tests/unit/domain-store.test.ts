@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CloudflareCustomHostname } from "../../src/lib/domains/cloudflare";
+import { hasFreshExactTurnstileAdmission } from "../../src/lib/domains/readiness";
 import { reconcileCustomDomains } from "../../src/lib/domains/reconciliation";
 import { checkCustomDomain, createCustomDomain as createCustomDomainClaim, customDomainBackoffSeconds, deleteCustomDomain, listShopDomains, setPrimaryDomain, type DomainProvider } from "../../src/lib/domains/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
@@ -31,6 +32,13 @@ type FakeDomain = {
   validationMetadataJson: string;
   version: number;
 };
+
+function hasExactTurnstileAdmission(row: FakeDomain): boolean {
+  return hasFreshExactTurnstileAdmission({
+    hostname: row.hostname,
+    validationMetadataJson: row.validationMetadataJson,
+  });
+}
 
 type FakeClaim = {
   challengeHash: string;
@@ -73,6 +81,7 @@ class DomainDatabase {
   readonly claims = new Map<string, FakeClaim>();
   readonly customDomainFeature = new Map([["shop-a", true], ["shop-b", true]]);
   readonly customDomainLimits = new Map<string, unknown>([["shop-a", 5], ["shop-b", 5]]);
+  readonly membershipRoles = new Map<string, "manager" | "owner" | "support" | "viewer">([["shop-a", "owner"], ["shop-b", "owner"]]);
   failVerifiedClaimAudit = false;
 
   constructor() {
@@ -104,6 +113,7 @@ class DomainDatabase {
     const claims = this.claims;
     const customDomainFeature = this.customDomainFeature;
     const customDomainLimits = this.customDomainLimits;
+    const membershipRoles = this.membershipRoles;
     const domains = this.domains;
     return {
       bind(...values: unknown[]) {
@@ -122,6 +132,16 @@ class DomainDatabase {
             return Promise.resolve({ results: [] });
           },
           first() {
+            if (sql.includes("FROM shop_subscriptions AS domain_subscription")) {
+              const shopId = String(values[0]);
+              return Promise.resolve({
+                currentPeriodEnd: "2099-01-01T00:00:00.000Z",
+                featureFlagsJson: JSON.stringify({ customDomain: customDomainFeature.get(shopId) }),
+                graceEndsAt: null,
+                subscriptionState: "active",
+                trialEndsAt: null,
+              });
+            }
             if (sql.includes("FROM shops") && sql.includes("INNER JOIN shop_members")) {
               const userId = String(values[0]);
               const shopPublicId = String(values[1]);
@@ -133,8 +153,9 @@ class DomainDatabase {
               return Promise.resolve(shopId === null ? null : {
                 currency: "VND", default_locale: "vi", feature_flags_json: JSON.stringify({ customDomain: customDomainFeature.get(shopId) }),
                 limits_json: customDomainLimits.has(shopId) ? JSON.stringify({ customDomains: customDomainLimits.get(shopId) }) : "{}",
-                name: shopId, plan_code: "business", public_id: shopPublicId, role: "owner", shop_id: shopId,
-                shop_status: "active", slug: shopId, subscription_state: "active", timezone: "Asia/Ho_Chi_Minh",
+                name: shopId, plan_code: "business", public_id: shopPublicId, role: membershipRoles.get(shopId) ?? "owner", shop_id: shopId,
+                current_period_end: "2099-01-01T00:00:00.000Z", shop_status: "active", slug: shopId,
+                subscription_state: "active", timezone: "Asia/Ho_Chi_Minh",
               });
             }
             if (sql.includes("AS liveCount") && sql.includes("custom_domain_claims")) {
@@ -175,6 +196,31 @@ class DomainDatabase {
             return Promise.resolve(null);
           },
           run() {
+            if (sql.includes("domain:suspend-missing-entitlement")) {
+              const row = domains.get(String(values[2]));
+              const expectedCanonical = typeof values[8] === "string" ? values[8] : null;
+              if (row === undefined
+                || row.shopId !== values[3]
+                || row.deleteRequestedAt !== null
+                || row.leaseToken !== values[4]
+                || row.version !== values[5]
+                || row.isPrimary !== values[6]
+                || (canonical.get(String(values[7])) ?? null) !== expectedCanonical) {
+                return Promise.resolve({ meta: { changes: 0 } });
+              }
+              Object.assign(row, {
+                isPrimary: 0,
+                lastCheckedAt: values[0],
+                lastSafeErrorCode: "subscription_required",
+                leaseExpiresAt: null,
+                leaseToken: null,
+                nextCheckAt: null,
+                status: "suspended",
+                updatedAt: values[1],
+                version: row.version + 1,
+              });
+              return Promise.resolve({ meta: { changes: 1 } });
+            }
             if (sql.includes("domain:create-ownership-claim")) {
               const [idValue, shopIdValue, hostnameValue, challengeHashValue, expiresAtValue, createdAtValue, updatedAtValue] = values;
               const id = String(idValue);
@@ -452,7 +498,7 @@ class DomainDatabase {
               runBeforePrimaryGuard();
               const row = domains.get(String(values[0]));
               const ready = row !== undefined && row.shopId === values[1] && row.status === "active" && row.deletedAt === null && row.deleteRequestedAt === null && row.version === values[2]
-                && (row.type !== "custom" || (row.ownershipVerifiedAt != null && row.hostnameStatus === "active" && row.sslStatus === "active" && row.dnsStatus === "active"));
+                && (row.type !== "custom" || (row.ownershipVerifiedAt != null && row.hostnameStatus === "active" && row.sslStatus === "active" && row.dnsStatus === "active" && hasExactTurnstileAdmission(row)));
               return Promise.resolve({ meta: { changes: ready ? 1 : 0 } });
             }
             if (sql.includes("domain:demote-primary")) {
@@ -471,7 +517,7 @@ class DomainDatabase {
             if (sql.includes("domain:promote-primary")) {
               const row = domains.get(String(values[1]));
               const ready = row !== undefined && row.shopId === values[2] && row.status === "active" && row.deletedAt === null && row.deleteRequestedAt === null && row.version === values[3]
-                && (row.type !== "custom" || (row.ownershipVerifiedAt != null && row.hostnameStatus === "active" && row.sslStatus === "active" && row.dnsStatus === "active"));
+                && (row.type !== "custom" || (row.ownershipVerifiedAt != null && row.hostnameStatus === "active" && row.sslStatus === "active" && row.dnsStatus === "active" && hasExactTurnstileAdmission(row)));
               if (!ready) return Promise.resolve({ meta: { changes: 0 } });
               row.isPrimary = 1;
               row.updatedAt = String(values[0]);
@@ -632,6 +678,7 @@ class Provider implements DomainProvider {
 
   nextStatus: string;
   nextSslStatus: string;
+  nextTurnstileStatus: "active" | "pending" = "active";
 
   createCustomHostname(hostname: string): Promise<CloudflareCustomHostname> {
     this.creates += 1;
@@ -645,6 +692,15 @@ class Provider implements DomainProvider {
     if (this.current === null) throw new Error("missing");
     this.current = { ...this.current, ssl: { status: this.nextSslStatus }, status: this.nextStatus };
     return Promise.resolve(this.current);
+  }
+
+  verifyTurnstileHostnameAdmission(_siteKey: string, hostname: string) {
+    return Promise.resolve({
+      hostname,
+      mode: "operator_managed" as const,
+      source: "cloudflare_widget_domains" as const,
+      status: this.nextTurnstileStatus,
+    });
   }
 }
 
@@ -660,6 +716,7 @@ function environment(database: DomainDatabase): AppBindings {
     PLATFORM_ORIGIN: "https://staging.selinow.com",
     SAAS_CNAME_TARGET: "customers.selinow.com",
     SESSION_SECRET: "domain-store-test-session-secret",
+    TURNSTILE_SITE_KEY: "0xSiteKeyThatLooksConfigured123456",
   } as unknown as AppBindings;
 }
 
@@ -683,6 +740,14 @@ async function createCustomDomain(input: Parameters<typeof createCustomDomainCla
 }
 
 describe("custom domain store", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it("lists platform domains without requiring the custom-hostname provider token", async () => {
     const database = new DomainDatabase();
     const env = environment(database) as AppBindings & { CLOUDFLARE_API_TOKEN?: string };
@@ -883,6 +948,37 @@ describe("custom domain store", () => {
     expect(provider.creates).toBe(0);
   });
 
+  it("does not verify or promote a pending claim after downgrade", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const claimed = await createCustomDomainClaim({
+      env,
+      hostname: "shop.customer.com",
+      requestId: "request-claim",
+      runtime: { now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    database.customDomainFeature.set("shop-a", false);
+
+    await expect(checkCustomDomain({
+      domainId: claimed.domain.id,
+      env,
+      requestId: "request-check",
+      runtime: {
+        now: NOW,
+        ownershipVerifier: ({ expectedValue }) => Promise.resolve({ observedValues: [expectedValue], status: "active" }),
+        provider,
+      },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "subscription_required", status: 402 });
+    expect(Array.from(database.domains.values()).filter((row) => row.type === "custom")).toHaveLength(0);
+    expect(database.claims.get(claimed.domain.id)?.verifiedAt).toBeNull();
+    expect(provider.creates).toBe(0);
+  });
+
   it("allows different shops to hold tenant-bound pending claims for one hostname", async () => {
     const database = new DomainDatabase();
     const provider = new Provider();
@@ -922,6 +1018,33 @@ describe("custom domain store", () => {
 
     expect(checked.status).toBe("ownership_pending");
     expect(checked.lastSafeErrorCode).toBe("domain_ownership_not_verified");
+    expect(provider.creates).toBe(0);
+  });
+
+  it("allows domain reads but denies provider checks to a read-only domain member", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const claimed = await createCustomDomainClaim({
+      env,
+      hostname: "shop.customer.com",
+      requestId: "request-claim",
+      runtime: { now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    database.membershipRoles.set("shop-a", "manager");
+
+    await expect(listShopDomains({ env, shopPublicId: "shop_public_a", userId: "user-a" }))
+      .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: claimed.domain.id })]));
+    await expect(checkCustomDomain({
+      domainId: claimed.domain.id,
+      env,
+      requestId: "request-check",
+      runtime: { now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "authorization_denied", status: 403 });
     expect(provider.creates).toBe(0);
   });
 
@@ -1017,7 +1140,15 @@ describe("custom domain store", () => {
         status: "active",
         type: "custom",
         updatedAt: verifiedAt,
-        validationMetadataJson: "{}",
+        validationMetadataJson: JSON.stringify({
+          turnstile: {
+            checkedAt: verifiedAt,
+            hostname: "shop.customer.com",
+            mode: "operator_managed",
+            source: "cloudflare_widget_domains",
+            status: "active",
+          },
+        }),
         version: 1,
       });
     };
@@ -1147,6 +1278,124 @@ describe("custom domain store", () => {
     expect(checked.status).toBe("active");
   });
 
+  it("keeps a custom domain non-routable until exact Turnstile admission is verified", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    provider.nextTurnstileStatus = "pending";
+    const env = environment(database);
+    const created = await createCustomDomain({
+      env,
+      hostname: "shop.customer.com",
+      requestId: "request-turnstile-pending",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+
+    expect(created.domain).toMatchObject({
+      isPrimary: false,
+      lastSafeErrorCode: "domain_turnstile_admission_pending",
+      status: "validating",
+      turnstileStatus: "pending",
+    });
+    expect(created.domain.validation.turnstile).toMatchObject({
+      hostname: "shop.customer.com",
+      mode: "operator_managed",
+      source: "cloudflare_widget_domains",
+      status: "pending",
+    });
+    await expect(setPrimaryDomain({
+      domainId: created.domain.id,
+      env,
+      requestId: "request-primary-too-early",
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "domain_not_ready", status: 409 });
+
+    provider.nextTurnstileStatus = "active";
+    const checked = await checkCustomDomain({
+      domainId: created.domain.id,
+      env,
+      requestId: "request-turnstile-admitted",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    expect(checked).toMatchObject({ status: "active", turnstileStatus: "active" });
+  });
+
+  it("refuses primary promotion after Turnstile evidence expires without a reconciliation poll", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({
+      env,
+      hostname: "shop.customer.com",
+      requestId: "request-stale-admission",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    const row = database.domains.get(created.domain.id);
+    expect(row).toBeDefined();
+    if (row === undefined) return;
+    const metadata = JSON.parse(row.validationMetadataJson) as Record<string, unknown>;
+    row.validationMetadataJson = JSON.stringify({
+      ...metadata,
+      turnstile: {
+        checkedAt: new Date(NOW.getTime() - 13 * 60 * 60_000).toISOString(),
+        hostname: row.hostname,
+        mode: "operator_managed",
+        source: "cloudflare_widget_domains",
+        status: "active",
+      },
+    });
+
+    await expect(setPrimaryDomain({
+      domainId: created.domain.id,
+      env,
+      requestId: "request-stale-primary",
+      runtime: { now: NOW },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "domain_not_ready", status: 409 });
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+  });
+
+  it("falls back atomically when Turnstile admission is removed", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    await setPrimaryDomain({ domainId: created.domain.id, env, requestId: "request-primary", shopPublicId: "shop_public_a", userId: "user-a" });
+    provider.nextTurnstileStatus = "pending";
+
+    const checked = await checkCustomDomain({ domainId: created.domain.id, env, requestId: "request-check", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    expect(checked).toMatchObject({ isPrimary: false, status: "validating", turnstileStatus: "pending" });
+    expect(database.domains.get("dom_platform_shop-a")?.isPrimary).toBe(1);
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+  });
+
+  it("persists a safe retry state when Turnstile admission read-back is unavailable", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    provider.verifyTurnstileHostnameAdmission = () => Promise.reject(new Error("provider detail must stay private"));
+    const created = await createCustomDomain({
+      env: environment(database),
+      hostname: "shop.customer.com",
+      requestId: "request-turnstile-error",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+
+    expect(created.domain).toMatchObject({
+      isPrimary: false,
+      lastSafeErrorCode: "domain_turnstile_admission_lookup_failed",
+      status: "validating",
+    });
+  });
+
   it("atomically falls back from a primary custom domain when provider readiness becomes pending", async () => {
     const database = new DomainDatabase();
     const provider = new Provider();
@@ -1239,6 +1488,32 @@ describe("custom domain store", () => {
     expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
   });
 
+  it("does not promote a domain whose Turnstile evidence changes inside the primary CAS", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    database.beforePrimaryGuard = () => {
+      const row = database.domains.get(created.domain.id);
+      if (row === undefined) return;
+      const metadata = JSON.parse(row.validationMetadataJson) as Record<string, unknown>;
+      row.validationMetadataJson = JSON.stringify({
+        ...metadata,
+        turnstile: {
+          hostname: row.hostname,
+          mode: "operator_managed",
+          source: "cloudflare_widget_domains",
+          status: "pending",
+        },
+      });
+    };
+
+    await expect(setPrimaryDomain({ domainId: created.domain.id, env, requestId: "request-primary", shopPublicId: "shop_public_a", userId: "user-a" }))
+      .rejects.toMatchObject({ code: "domain_not_ready", status: 409 });
+    expect(database.domains.get(created.domain.id)?.isPrimary).toBe(0);
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+  });
+
   it("removes routing before provider deletion and keeps repeated delete idempotent", async () => {
     const database = new DomainDatabase();
     const provider = new Provider();
@@ -1268,6 +1543,45 @@ describe("custom domain store", () => {
     expect(reconciled?.checkAttempts).toBe(before + 1);
     expect(reconciled?.leaseToken).toBeNull();
     expect(reconciled?.leaseExpiresAt).toBeNull();
+  });
+
+  it("suspends an active secondary custom domain without polling after downgrade", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    database.customDomainFeature.set("shop-a", false);
+    const providerPoll = vi.spyOn(provider, "getCustomHostname");
+
+    const future = new Date(NOW.getTime() + 7 * 60 * 60_000);
+    await expect(reconcileCustomDomains(env, future, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 1, deleted: 0, failed: 0 });
+    expect(database.domains.get(created.domain.id)).toMatchObject({
+      isPrimary: 0,
+      lastSafeErrorCode: "subscription_required",
+      leaseExpiresAt: null,
+      leaseToken: null,
+      nextCheckAt: null,
+      status: "suspended",
+    });
+    expect(providerPoll).not.toHaveBeenCalled();
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+  });
+
+  it("atomically restores the platform canonical domain when a primary custom domain is downgraded", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    await setPrimaryDomain({ domainId: created.domain.id, env, requestId: "request-primary", shopPublicId: "shop_public_a", userId: "user-a" });
+    database.customDomainFeature.set("shop-a", false);
+    const providerPoll = vi.spyOn(provider, "getCustomHostname");
+
+    const future = new Date(NOW.getTime() + 7 * 60 * 60_000);
+    await expect(reconcileCustomDomains(env, future, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 1, deleted: 0, failed: 0 });
+    expect(database.domains.get(created.domain.id)).toMatchObject({ isPrimary: 0, status: "suspended" });
+    expect(database.domains.get("dom_platform_shop-a")?.isPrimary).toBe(1);
+    expect(database.canonical.get("shop-a")).toBe("dom_platform_shop-a");
+    expect(providerPoll).not.toHaveBeenCalled();
   });
 
   it("suspends routing immediately and defers provider deletion while a poll owns the lease", async () => {

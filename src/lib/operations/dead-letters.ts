@@ -1,6 +1,7 @@
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { createGeneratedLicenseQueueEnvelope } from "../commerce/generated-license";
 import type { AppBindings } from "../platform/bindings";
 import {
   operationsScopeKey,
@@ -71,6 +72,69 @@ type DeadLetterRow = {
 export type DeadLetterView = Omit<DeadLetterRow, "safeEnvelopeJson"> & {
   safeEnvelope: Record<string, string>;
 };
+
+export type ActiveDeadLetterList = {
+  hasMore: boolean;
+  items: DeadLetterView[];
+  limit: number;
+};
+
+type GeneratedLicenseDeadLetterRow = {
+  createdAt: string;
+  failureCode: string;
+  id: string;
+  occurrenceCount: number;
+  providerAttempts: number;
+  requestId: string;
+  requestStatus: "canceled" | "failed" | "manual_review" | "pending" | "processing" | "reconcile_pending" | "retryable" | "succeeded";
+  resolutionCode: string | null;
+  resolvedAt: string | null;
+  safeContextJson: string;
+  shopId: string;
+  status: "acknowledged" | "open" | "resolved" | "retry_requested";
+  updatedAt: string;
+};
+
+export type GeneratedLicenseDeadLetterView = Omit<GeneratedLicenseDeadLetterRow, "safeContextJson"> & {
+  safeContext: Record<string, string>;
+};
+
+export type ActiveGeneratedLicenseDeadLetterList = {
+  hasMore: boolean;
+  items: GeneratedLicenseDeadLetterView[];
+  limit: number;
+};
+
+const GENERATED_LICENSE_DEAD_LETTER_SELECT = `
+  SELECT dead_letter.id, dead_letter.shop_id AS shopId,
+    dead_letter.request_id AS requestId, dead_letter.failure_code AS failureCode,
+    dead_letter.safe_context_json AS safeContextJson, dead_letter.status,
+    dead_letter.provider_attempts AS providerAttempts,
+    dead_letter.occurrence_count AS occurrenceCount,
+    dead_letter.resolution_code AS resolutionCode,
+    dead_letter.resolved_at AS resolvedAt,
+    dead_letter.created_at AS createdAt, dead_letter.updated_at AS updatedAt,
+    request.status AS requestStatus
+  FROM generated_license_dead_letters AS dead_letter
+  INNER JOIN generated_license_requests AS request
+    ON request.id = dead_letter.request_id AND request.shop_id = dead_letter.shop_id
+`;
+
+function mapGeneratedLicenseDeadLetter(row: GeneratedLicenseDeadLetterRow): GeneratedLicenseDeadLetterView {
+  const { safeContextJson, ...view } = row;
+  const safeContext: Record<string, string> = {};
+  try {
+    const parsed = JSON.parse(safeContextJson) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("safe_context_invalid");
+    for (const key of ["providerCode", "requestId"] as const) {
+      const value = (parsed as Record<string, unknown>)[key];
+      if (value !== undefined) safeContext[key] = safeOperationsReference(value, `safe_context_${key}_invalid`);
+    }
+  } catch {
+    // A corrupt safe projection must not make the operator surface fail open.
+  }
+  return { ...view, safeContext };
+}
 
 const DEAD_LETTER_SELECT = `
   SELECT id, shop_id AS shopId, queue_name AS queueName, message_id AS messageId,
@@ -256,7 +320,7 @@ async function ensureOutboxReplayLink(input: {
 export async function listActiveDeadLetters(input: {
   env: AppBindings;
   limit?: number;
-}): Promise<DeadLetterView[]> {
+}): Promise<ActiveDeadLetterList> {
   const limit = input.limit ?? 100;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new AppError("operations_validation_failed", 400, ["limit_invalid"]);
@@ -269,8 +333,36 @@ export async function listActiveDeadLetters(input: {
       ELSE 1
     END DESC, last_seen_at DESC, id
     LIMIT ?
-  `).bind(limit).all<DeadLetterRow>();
-  return result.results.map(mapDeadLetter);
+  `).bind(limit + 1).all<DeadLetterRow>();
+  return {
+    hasMore: result.results.length > limit,
+    items: result.results.slice(0, limit).map(mapDeadLetter),
+    limit,
+  };
+}
+
+export async function listActiveGeneratedLicenseDeadLetters(input: {
+  env: AppBindings;
+  limit?: number;
+}): Promise<ActiveGeneratedLicenseDeadLetterList> {
+  const limit = input.limit ?? 100;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new AppError("operations_validation_failed", 400, ["limit_invalid"]);
+  }
+  const result = await input.env.PLATFORM_DB.prepare(`${GENERATED_LICENSE_DEAD_LETTER_SELECT}
+    WHERE dead_letter.status IN ('open', 'acknowledged', 'retry_requested')
+    ORDER BY CASE dead_letter.status
+      WHEN 'open' THEN 3
+      WHEN 'retry_requested' THEN 2
+      ELSE 1
+    END DESC, dead_letter.updated_at DESC, dead_letter.id
+    LIMIT ?
+  `).bind(limit + 1).all<GeneratedLicenseDeadLetterRow>();
+  return {
+    hasMore: result.results.length > limit,
+    items: result.results.slice(0, limit).map(mapGeneratedLicenseDeadLetter),
+    limit,
+  };
 }
 
 async function attachIncident(
@@ -583,6 +675,17 @@ type ReplayLink = {
 
 const REPLAY_NAMESPACE = "admin.dead-letter-replay.v1";
 const REPLAY_KEY = /^[A-Za-z0-9._:-]{8,128}$/u;
+const GENERATED_LICENSE_RETRY_NAMESPACE = "admin.generated-license-dead-letter-retry.v1";
+
+async function findGeneratedLicenseDeadLetterById(
+  env: AppBindings,
+  id: string,
+  shopId: string,
+): Promise<GeneratedLicenseDeadLetterRow | null> {
+  return env.PLATFORM_DB.prepare(`${GENERATED_LICENSE_DEAD_LETTER_SELECT}
+    WHERE dead_letter.id = ? AND dead_letter.shop_id = ? LIMIT 1
+  `).bind(id, shopId).first<GeneratedLicenseDeadLetterRow>();
+}
 
 async function requireReplayOperator(env: AppBindings, userId: string): Promise<void> {
   const row = await env.PLATFORM_DB.prepare(`
@@ -594,10 +697,239 @@ async function requireReplayOperator(env: AppBindings, userId: string): Promise<
   }
 }
 
-function parseReplayState(value: string): "enqueued" | "pending" {
+export async function requestGeneratedLicenseDeadLetterRetry(input: {
+  actorUserId: string;
+  env: AppBindings;
+  id: string;
+  idempotencyKey: string;
+  now?: Date;
+  requestId: string;
+  shopId: string;
+}): Promise<{ deadLetter: GeneratedLicenseDeadLetterView; operationId: string; replayed: boolean }> {
+  const actorUserId = safeOperationsReference(input.actorUserId, "actor_user_id_invalid");
+  const id = safeOperationsReference(input.id, "dead_letter_id_invalid");
+  const shopId = safeOperationsReference(input.shopId, "shop_id_invalid");
+  const requestId = safeOperationsReference(input.requestId, "request_id_invalid");
+  if (!REPLAY_KEY.test(input.idempotencyKey)) {
+    throw new AppError("operations_validation_failed", 400, ["idempotency_key_invalid"]);
+  }
+  await requireReplayOperator(input.env, actorUserId);
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  const keyHash = await hmacToken(input.env.SESSION_SECRET, "idempotency", input.idempotencyKey);
+  const requestHash = await sha256Json({ deadLetterId: id, shopId });
+  const operationId = `gld_${(await hmacToken(
+    input.env.SESSION_SECRET,
+    GENERATED_LICENSE_RETRY_NAMESPACE,
+    `${actorUserId}:${input.idempotencyKey}`,
+  )).slice(0, 48)}`;
+  const deadLetter = await findGeneratedLicenseDeadLetterById(input.env, id, shopId);
+  if (deadLetter === null) throw new AppError("generated_license_dead_letter_not_found", 404);
+  const stored = await input.env.PLATFORM_DB.prepare(`
+    SELECT request_hash AS requestHash, response_json AS responseJson
+    FROM idempotency_records
+    WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND expires_at > ?
+    LIMIT 1
+  `).bind(actorUserId, GENERATED_LICENSE_RETRY_NAMESPACE, keyHash, nowIso)
+    .first<{ requestHash: string; responseJson: string }>();
+  if (stored !== null && stored.requestHash !== requestHash) {
+    throw new AppError("idempotency_conflict", 409);
+  }
+
+  let replayed = stored !== null;
+  const state = stored === null ? null : parseGeneratedLicenseRetryState(stored.responseJson);
+  if (stored === null) {
+    if (!new Set(["open", "acknowledged"]).has(deadLetter.status)
+      || !new Set(["failed", "manual_review"]).has(deadLetter.requestStatus)) {
+      throw new AppError("generated_license_dead_letter_conflict", 409);
+    }
+    let batchChangedAll = false;
+    try {
+      const results = await input.env.PLATFORM_DB.batch([
+        input.env.PLATFORM_DB.prepare(`
+        UPDATE generated_license_dead_letters
+        SET status = 'retry_requested', updated_at = ?
+        WHERE id = ? AND shop_id = ? AND status IN ('open', 'acknowledged')
+          AND EXISTS (
+            SELECT 1 FROM generated_license_requests
+            WHERE id = ? AND shop_id = ? AND status IN ('failed', 'manual_review')
+          )
+      `).bind(nowIso, id, shopId, deadLetter.requestId, shopId),
+        input.env.PLATFORM_DB.prepare(`
+        UPDATE generated_license_requests
+        SET status = 'retryable', next_attempt_at = ?, last_safe_error_code = NULL,
+          lease_token = NULL, lease_expires_at = NULL, version = version + 1, updated_at = ?
+        WHERE id = ? AND shop_id = ? AND status IN ('failed', 'manual_review')
+          AND changes() = 1
+          AND EXISTS (
+            SELECT 1 FROM generated_license_dead_letters
+            WHERE id = ? AND shop_id = ? AND status = 'retry_requested'
+          )
+      `).bind(nowIso, nowIso, deadLetter.requestId, shopId, id, shopId),
+        input.env.PLATFORM_DB.prepare(`
+        INSERT INTO audit_logs (
+          id, shop_id, actor_type, actor_id, action, resource_type, resource_id,
+          safe_metadata_json, request_id, created_at, source_kind,
+          correlation_id, operation_id, retention_class
+        ) SELECT ?, ?, 'platform_admin', ?, 'operations.generated_license_dead_letter_retry_requested',
+          'generated_license_dead_letter', ?, ?, ?, ?, 'http', ?, ?, 'security'
+        WHERE changes() = 1
+          AND EXISTS (
+            SELECT 1 FROM generated_license_dead_letters
+            WHERE id = ? AND shop_id = ? AND status = 'retry_requested'
+          ) AND EXISTS (
+            SELECT 1 FROM generated_license_requests
+            WHERE id = ? AND shop_id = ? AND status = 'retryable'
+          )
+      `).bind(
+        createId("aud"), shopId, actorUserId, id,
+        JSON.stringify({ operationId, requestId: deadLetter.requestId }), requestId, nowIso,
+        requestId, operationId, id, shopId, deadLetter.requestId, shopId,
+      ),
+        input.env.PLATFORM_DB.prepare(`
+        INSERT INTO idempotency_records (
+          actor_user_id, namespace, key_hash, request_hash, response_json, created_at, expires_at
+        ) SELECT ?, ?, ?, ?, ?, ?, ?
+        WHERE changes() = 1
+      `).bind(
+        actorUserId, GENERATED_LICENSE_RETRY_NAMESPACE, keyHash, requestHash,
+        JSON.stringify({ state: "pending", operationId }), nowIso,
+        new Date(now.getTime() + 24 * 60 * 60_000).toISOString(),
+      ),
+      ]);
+      batchChangedAll = results.every((result) => result.meta.changes === 1);
+    } catch (error) {
+      const raced = await input.env.PLATFORM_DB.prepare(`
+        SELECT request_hash AS requestHash, response_json AS responseJson
+        FROM idempotency_records
+        WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND expires_at > ?
+        LIMIT 1
+      `).bind(actorUserId, GENERATED_LICENSE_RETRY_NAMESPACE, keyHash, nowIso)
+        .first<{ requestHash: string; responseJson: string }>();
+      if (raced === null) throw error;
+      if (raced.requestHash !== requestHash) throw new AppError("idempotency_conflict", 409);
+      replayed = true;
+      if (parseGeneratedLicenseRetryState(raced.responseJson) === "enqueued") {
+        const refreshed = await findGeneratedLicenseDeadLetterById(input.env, id, shopId);
+        if (refreshed === null) throw new AppError("generated_license_dead_letter_not_found", 404);
+        return { deadLetter: mapGeneratedLicenseDeadLetter(refreshed), operationId, replayed: true };
+      }
+    }
+    if (!batchChangedAll && !replayed) {
+      throw new AppError("generated_license_dead_letter_conflict", 409);
+    }
+  } else if (state === "enqueued") {
+    return {
+      deadLetter: mapGeneratedLicenseDeadLetter(deadLetter),
+      operationId,
+      replayed: true,
+    };
+  } else if (state === "pending" || state === "enqueuing") {
+    const ownership = await input.env.PLATFORM_DB.prepare(`
+      SELECT 1 AS owned
+      FROM audit_logs
+      WHERE shop_id = ? AND action = 'operations.generated_license_dead_letter_retry_requested'
+        AND resource_id = ? AND operation_id = ?
+      LIMIT 1
+    `).bind(shopId, id, operationId).first<{ owned: number }>();
+    if (ownership === null
+      || deadLetter.status !== "retry_requested"
+      || deadLetter.requestStatus !== "retryable") {
+      throw new AppError("generated_license_dead_letter_conflict", 409);
+    }
+    if (state === "enqueuing") {
+      throw new AppError("generated_license_dead_letter_enqueue_in_progress", 409);
+    }
+  }
+
+  const claiming = await input.env.PLATFORM_DB.prepare(`
+    UPDATE idempotency_records SET response_json = ?
+    WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+      AND json_extract(response_json, '$.state') = 'pending'
+      AND json_extract(response_json, '$.operationId') = ?
+  `).bind(
+    JSON.stringify({ state: "enqueuing", operationId }), actorUserId,
+    GENERATED_LICENSE_RETRY_NAMESPACE, keyHash, requestHash, operationId,
+  ).run();
+  if (claiming.meta.changes !== 1) {
+    const current = await input.env.PLATFORM_DB.prepare(`
+      SELECT response_json AS responseJson
+      FROM idempotency_records
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+      LIMIT 1
+    `).bind(actorUserId, GENERATED_LICENSE_RETRY_NAMESPACE, keyHash, requestHash)
+      .first<{ responseJson: string }>();
+    if (current !== null && parseGeneratedLicenseRetryState(current.responseJson) === "enqueued") {
+      const refreshed = await findGeneratedLicenseDeadLetterById(input.env, id, shopId);
+      if (refreshed === null) throw new AppError("generated_license_dead_letter_not_found", 404);
+      return { deadLetter: mapGeneratedLicenseDeadLetter(refreshed), operationId, replayed: true };
+    }
+    if (current !== null && parseGeneratedLicenseRetryState(current.responseJson) === "enqueuing") {
+      throw new AppError("generated_license_dead_letter_enqueue_in_progress", 409);
+    }
+    throw new AppError("generated_license_dead_letter_conflict", 409);
+  }
+
+  try {
+    await input.env.INTEGRATION_QUEUE.send(createGeneratedLicenseQueueEnvelope({
+      requestId: deadLetter.requestId,
+      shopId,
+    }));
+  } catch {
+    await input.env.PLATFORM_DB.prepare(`
+      UPDATE idempotency_records SET response_json = ?
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+        AND json_extract(response_json, '$.state') = 'enqueuing'
+        AND json_extract(response_json, '$.operationId') = ?
+    `).bind(
+      JSON.stringify({ state: "pending", operationId }), actorUserId,
+      GENERATED_LICENSE_RETRY_NAMESPACE, keyHash, requestHash, operationId,
+    ).run();
+    throw new AppError("generated_license_dead_letter_enqueue_failed", 503);
+  }
+  const enqueued = await input.env.PLATFORM_DB.prepare(`
+    UPDATE idempotency_records SET response_json = ?
+    WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+      AND json_extract(response_json, '$.state') = 'enqueuing'
+      AND json_extract(response_json, '$.operationId') = ?
+  `).bind(
+    JSON.stringify({ state: "enqueued", operationId }), actorUserId,
+    GENERATED_LICENSE_RETRY_NAMESPACE, keyHash, requestHash, operationId,
+  ).run();
+  if (enqueued.meta.changes !== 1) {
+    const current = await input.env.PLATFORM_DB.prepare(`
+      SELECT response_json AS responseJson
+      FROM idempotency_records
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+      LIMIT 1
+    `).bind(actorUserId, GENERATED_LICENSE_RETRY_NAMESPACE, keyHash, requestHash)
+      .first<{ responseJson: string }>();
+    if (current !== null && parseGeneratedLicenseRetryState(current.responseJson) === "enqueued") {
+      const refreshed = await findGeneratedLicenseDeadLetterById(input.env, id, shopId);
+      if (refreshed === null) throw new AppError("generated_license_dead_letter_not_found", 404);
+      return { deadLetter: mapGeneratedLicenseDeadLetter(refreshed), operationId, replayed: true };
+    }
+    throw new AppError("generated_license_dead_letter_conflict", 409);
+  }
+  const refreshed = await findGeneratedLicenseDeadLetterById(input.env, id, shopId);
+  if (refreshed === null) throw new AppError("generated_license_dead_letter_not_found", 404);
+  return { deadLetter: mapGeneratedLicenseDeadLetter(refreshed), operationId, replayed };
+}
+
+function parseGeneratedLicenseRetryState(value: string): "enqueued" | "enqueuing" | "pending" {
   try {
     const parsed = JSON.parse(value) as { state?: unknown };
-    if (parsed.state === "pending" || parsed.state === "enqueued") return parsed.state;
+    if (parsed.state === "pending" || parsed.state === "enqueuing" || parsed.state === "enqueued") return parsed.state;
+  } catch {
+    // Fail closed when an idempotency record has an unexpected shape.
+  }
+  throw new AppError("internal_error", 500);
+}
+
+function parseReplayState(value: string): "enqueued" | "enqueuing" | "pending" {
+  try {
+    const parsed = JSON.parse(value) as { state?: unknown };
+    if (parsed.state === "pending" || parsed.state === "enqueuing" || parsed.state === "enqueued") return parsed.state;
   } catch {
     // Fail closed when an idempotency record has an unexpected shape.
   }
@@ -681,7 +1013,7 @@ export async function requestGenericDeadLetterReplay(input: {
   }
 
   let replayed = stored !== null;
-  const state = stored === null ? null : parseReplayState(stored.responseJson);
+  let state = stored === null ? null : parseReplayState(stored.responseJson);
   if (stored === null) {
     const eligibleTarget = link.targetKind === "domain_event"
       ? new Set(["failed"])
@@ -746,15 +1078,53 @@ export async function requestGenericDeadLetterReplay(input: {
       }
     } catch (error) {
       const raced = await input.env.PLATFORM_DB.prepare(`
-        SELECT request_hash AS requestHash FROM idempotency_records
+        SELECT request_hash AS requestHash, response_json AS responseJson
+        FROM idempotency_records
         WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? LIMIT 1
-      `).bind(actorUserId, REPLAY_NAMESPACE, keyHash).first<{ requestHash: string }>();
+      `).bind(actorUserId, REPLAY_NAMESPACE, keyHash).first<{ requestHash: string; responseJson: string }>();
       if (raced === null) throw error;
       if (raced.requestHash !== requestHash) throw new AppError("idempotency_conflict", 409);
       replayed = true;
+      state = parseReplayState(raced.responseJson);
     }
-  } else if (state === "enqueued") {
+  }
+  if (state === "enqueued") {
     return { deadLetter: mapDeadLetter(deadLetter), operationId, replayed: true };
+  }
+
+  const ownership = await input.env.PLATFORM_DB.prepare(`
+    SELECT replay_status AS replayStatus, replay_request_id AS replayRequestId
+    FROM queue_dead_letter_outbox_links
+    WHERE dead_letter_id = ? AND shop_id = ? LIMIT 1
+  `).bind(id, shopId).first<{ replayRequestId: string | null; replayStatus: string }>();
+  if (ownership?.replayStatus !== "requested" || ownership.replayRequestId !== operationId) {
+    throw new AppError("dead_letter_conflict", 409);
+  }
+  if (state === "enqueuing") throw new AppError("dead_letter_replay_enqueue_in_progress", 409);
+
+  const claimed = await input.env.PLATFORM_DB.prepare(`
+    UPDATE idempotency_records SET response_json = ?
+    WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+      AND json_extract(response_json, '$.state') = 'pending'
+      AND json_extract(response_json, '$.operationId') = ?
+  `).bind(
+    JSON.stringify({ state: "enqueuing", operationId }), actorUserId,
+    REPLAY_NAMESPACE, keyHash, requestHash, operationId,
+  ).run();
+  if (claimed.meta.changes !== 1) {
+    const current = await input.env.PLATFORM_DB.prepare(`
+      SELECT response_json AS responseJson
+      FROM idempotency_records
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+      LIMIT 1
+    `).bind(actorUserId, REPLAY_NAMESPACE, keyHash, requestHash).first<{ responseJson: string }>();
+    if (current !== null && parseReplayState(current.responseJson) === "enqueued") {
+      return { deadLetter: mapDeadLetter(deadLetter), operationId, replayed: true };
+    }
+    if (current !== null && parseReplayState(current.responseJson) === "enqueuing") {
+      throw new AppError("dead_letter_replay_enqueue_in_progress", 409);
+    }
+    throw new AppError("dead_letter_conflict", 409);
   }
 
   const queue = queueKind === "integration" ? input.env.INTEGRATION_QUEUE : input.env.NOTIFICATION_QUEUE;
@@ -770,6 +1140,15 @@ export async function requestGenericDeadLetterReplay(input: {
       version: 1,
     });
   } catch {
+    await input.env.PLATFORM_DB.prepare(`
+      UPDATE idempotency_records SET response_json = ?
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+        AND json_extract(response_json, '$.state') = 'enqueuing'
+        AND json_extract(response_json, '$.operationId') = ?
+    `).bind(
+      JSON.stringify({ state: "pending", operationId }), actorUserId,
+      REPLAY_NAMESPACE, keyHash, requestHash, operationId,
+    ).run();
     throw new AppError("dead_letter_replay_enqueue_failed", 503);
   }
   const enqueued = await input.env.PLATFORM_DB.prepare(`
@@ -788,11 +1167,24 @@ export async function requestGenericDeadLetterReplay(input: {
       throw new AppError("dead_letter_conflict", 409);
     }
   }
-  await input.env.PLATFORM_DB.prepare(`
+  const completed = await input.env.PLATFORM_DB.prepare(`
     UPDATE idempotency_records SET response_json = ?
     WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+      AND json_extract(response_json, '$.state') = 'enqueuing'
+      AND json_extract(response_json, '$.operationId') = ?
   `).bind(JSON.stringify({ state: "enqueued", operationId }), actorUserId,
-    REPLAY_NAMESPACE, keyHash, requestHash).run();
+    REPLAY_NAMESPACE, keyHash, requestHash, operationId).run();
+  if (completed.meta.changes !== 1) {
+    const current = await input.env.PLATFORM_DB.prepare(`
+      SELECT response_json AS responseJson
+      FROM idempotency_records
+      WHERE actor_user_id = ? AND namespace = ? AND key_hash = ? AND request_hash = ?
+      LIMIT 1
+    `).bind(actorUserId, REPLAY_NAMESPACE, keyHash, requestHash).first<{ responseJson: string }>();
+    if (current === null || parseReplayState(current.responseJson) !== "enqueued") {
+      throw new AppError("dead_letter_conflict", 409);
+    }
+  }
   return {
     deadLetter: mapDeadLetter(requireDeadLetter(await findDeadLetterById(input.env, id, shopId))),
     operationId,

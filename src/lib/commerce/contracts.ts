@@ -243,6 +243,7 @@ export type CommercePrivateDownloadGrantCommand = {
 export type CommercePrivateDownloadConsumeCommand = {
   grantId: string;
   grantToken: string;
+  idempotencyKey: string;
   order: CommerceOrderReference;
 };
 

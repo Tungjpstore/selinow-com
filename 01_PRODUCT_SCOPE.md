@@ -4,6 +4,10 @@
 
 `selinow.com` là nền tảng cho thuê hạ tầng bán sản phẩm số. Người bán nhận một Telegram bot, một website, kho key, checkout PayOS và giao hàng tự động mà không cần tự deploy source hoặc vận hành server.
 
+## Current capability overlay (2026-08-03)
+
+The Telegram/website/PayOS scope remains the only production-admitted commerce path. The current source adds separate, truthful expansion surfaces for Telegram Mini App, Zalo Mini App, Zalo OA, WhatsApp Cloud and Discord Bot plus Starter/Pro platform billing through Dodo and privacy-safe activation milestones. These lanes expose seller intent, provider stage, capabilities and safe projections; they do not claim live provider credentials, outbound delivery or fulfillment activation. Per-product channel visibility is fail-closed and tenant-scoped. The source schema ends at migration `0077`, while staging remains on `0028` and production remains on `0052` pending external admission.
+
 Giá trị cốt lõi:
 
 - Setup nhanh, gần như không cần kỹ thuật.

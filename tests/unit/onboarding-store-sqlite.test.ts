@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,21 +62,11 @@ afterEach(() => {
 function createDatabase(): SqliteD1 {
   const database = new DatabaseSync(":memory:");
   databases.push(database);
-  for (let version = 1; version <= 10; version += 1) {
-    const prefix = String(version).padStart(4, "0");
-    const filename = version === 1 ? "platform_foundation"
-      : version === 2 ? "tenant_auth_subscription"
-        : version === 3 ? "catalog_inventory_orders"
-          : version === 4 ? "checkout_idempotency"
-            : version === 5 ? "checkout_request_hash"
-              : version === 6 ? "payos_payments"
-                : version === 7 ? "telegram_multibot"
-                  : version === 8 ? "storefront_abuse_controls"
-                    : version === 9 ? "custom_domains"
-                      : "automated_onboarding";
-    database.exec(readFileSync(`migrations/${prefix}_${filename}.sql`, "utf8"));
+  for (const filename of readdirSync(join(process.cwd(), "migrations"))
+    .filter((name) => /^\d{4}_.+\.sql$/u.test(name))
+    .sort()) {
+    database.exec(readFileSync(join(process.cwd(), "migrations", filename), "utf8"));
   }
-  database.exec(readFileSync("migrations/0029_storefront_draft_publication.sql", "utf8"));
   database.exec(readFileSync("seeds/0001_platform_defaults.sql", "utf8"));
   return new SqliteD1(database);
 }
@@ -88,7 +79,7 @@ function seedReadyShop(database: DatabaseSync): void {
     ["INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, canonical_domain_id, readiness_version, created_at, updated_at) VALUES (?, ?, ?, ?, 'draft', 'vi', 'VND', 'Asia/Ho_Chi_Minh', ?, 1, ?, ?)", ["shp_a", "shop_public_a", "seller", "Seller", "dom_a", now, now]],
     ["INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at) VALUES (?, ?, 'owner', 'active', ?, ?)", ["shp_a", "usr_a", now, now]],
     ["INSERT INTO shop_settings (shop_id, branding_json, storefront_json, order_expiry_minutes, low_stock_threshold, version, updated_at, support_contact, terms_url, privacy_url, refund_policy_url, policy_attestation_version, policy_attested_at, policy_attested_by_user_id) VALUES (?, ?, ?, 30, 5, 1, ?, ?, ?, ?, ?, 1, ?, ?)", ["shp_a", '{"primaryColor":"#176B5B"}', '{"headline":"Draft storefront"}', now, "support@example.com", "https://seller.example/terms", "https://seller.example/privacy", "https://seller.example/refunds", now, "usr_a"]],
-    ["INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, created_at, updated_at) VALUES (?, ?, 'plan_business_v1', 'active', ?, ?)", ["sub_a", "shp_a", now, now]],
+    ["INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, current_period_end, created_at, updated_at) VALUES (?, ?, 'plan_business_v1', 'active', '2099-01-01T00:00:00.000Z', ?, ?)", ["sub_a", "shp_a", now, now]],
     ["INSERT INTO shop_domains (id, shop_id, hostname_normalized, type, status, is_primary, validation_metadata_json, activated_at, created_at, updated_at, dns_status, check_attempts, version) VALUES (?, ?, ?, 'platform_subdomain', 'active', 1, '{}', ?, ?, ?, 'active', 0, 1)", ["dom_a", "shp_a", "seller.selinow.com", now, now, now]],
     ["INSERT INTO shop_onboarding_profiles (shop_id, website_enabled, telegram_enabled, custom_domain_preference, current_step, version, created_at, updated_at) VALUES (?, 1, 0, 'later', 'readiness_passed', 1, ?, ?)", ["shp_a", now, now]],
     ["INSERT INTO products (id, shop_id, category_id, slug, title, description, status, fulfillment_type, version, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, '', 'active', 'manual', 1, ?, ?)", ["prd_a", "shp_a", "license", "License", now, now]],
@@ -118,6 +109,7 @@ describe("onboarding SQL transitions", () => {
     const result = await publishReadyStorefront({
       env: envFor(database),
       expectedStorefrontVersion: 1,
+      platformPolicyVersion: 1,
       requestId: "request-sqlite-publish",
       shopPublicId: "shop_public_a",
       userId: "usr_a",

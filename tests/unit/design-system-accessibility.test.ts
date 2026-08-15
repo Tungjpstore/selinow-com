@@ -52,7 +52,7 @@ describe("accessible design-system gate", () => {
 
     expect(layout).toContain('class="app-main selinow-focus-target" tabindex="-1"');
     expect(layout).toContain('class="app-skip-link selinow-skip-link"');
-    expect(onboardingPage).toContain("<AppLayout");
+    expect(onboardingPage).toContain("<OnboardingShell");
     expect(wizard).toContain('class="onboarding-shell"');
     expect(wizard).toContain('id="onboarding-global-feedback"');
     expect(wizard).toContain("--selinow-onboarding-accent: var(--sln-action-primary);");

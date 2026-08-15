@@ -1,0 +1,117 @@
+---
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { createDashboardTranslator } from "../../lib/i18n/catalogs/dashboard";
+import { getBindings } from "../../lib/platform/bindings";
+import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
+import AppLayout from "../../layouts/AppLayout.astro";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+let shops: ShopView[] = [];
+try {
+  shops = await listShopsForMember({ env, userId: auth.userId });
+} catch {
+  // Account security remains available even if shop navigation is degraded.
+}
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+---
+
+<AppLayout activePath="/app/security" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.security.title")}>
+  <PageHeader eyebrow={t("dashboard.security.eyebrow")} title={t("dashboard.security.title")} description={t("dashboard.security.description")}>
+    <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app")}>{t("dashboard.data.back")}</a>
+  </PageHeader>
+
+  <div
+    class="security-workspace"
+    data-account-security-root
+    data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`}
+    data-locale={locale ?? "en"}
+  >
+    <p class="security-feedback" role="status" aria-live="polite" tabindex="-1" data-security-feedback>
+      {t("dashboard.security.client.loading")}
+    </p>
+
+    <section class="security-overview" aria-labelledby="security-overview-title">
+      <span class="overview-mark" aria-hidden="true">✓</span>
+      <div>
+        <p class="eyebrow">{t("dashboard.security.overview.eyebrow")}</p>
+        <h2 id="security-overview-title">{t("dashboard.security.overview.title")}</h2>
+        <p>{t("dashboard.security.overview.description")}</p>
+      </div>
+    </section>
+
+    <section class="security-panel" aria-labelledby="active-sessions-title">
+      <header class="panel-heading">
+        <div>
+          <h2 id="active-sessions-title">{t("dashboard.security.sessions.title")}</h2>
+          <p>{t("dashboard.security.sessions.description")}</p>
+        </div>
+        <button class="sln-button sln-button-secondary" type="button" data-security-refresh>{t("dashboard.security.refresh")}</button>
+      </header>
+      <div class="session-ledger" role="list" aria-label={t("dashboard.security.sessions.aria")} data-security-session-list>
+        <article class="session-loading" role="listitem" aria-busy="true">
+          <span class="session-mark" aria-hidden="true"></span>
+          <p>{t("dashboard.security.sessions.loading")}</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="security-panel danger-panel" aria-labelledby="revoke-sessions-title">
+      <div>
+        <p class="eyebrow danger-eyebrow">{t("dashboard.security.revoke.eyebrow")}</p>
+        <h2 id="revoke-sessions-title">{t("dashboard.security.revoke.title")}</h2>
+        <p>{t("dashboard.security.revoke.description")}</p>
+      </div>
+      <div class="danger-actions">
+        <button class="sln-button sln-button-danger" type="button" data-security-revoke-all>{t("dashboard.security.revoke.action")}</button>
+        <button class="sln-button sln-button-secondary" type="button" data-security-reauth hidden>{t("dashboard.security.client.reauth_action")}</button>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    import "../../scripts/dashboard/security";
+  </script>
+</AppLayout>
+
+<style>
+  .security-workspace { display:grid; gap:22px; }
+  .security-feedback { min-height:46px; margin:0; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:12px 14px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .security-feedback[data-tone="danger"] { border-color:color-mix(in srgb, var(--sln-state-danger) 42%, var(--sln-border-default)); background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
+  .security-feedback[data-tone="success"] { border-color:color-mix(in srgb, var(--sln-state-success) 42%, var(--sln-border-default)); background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .security-overview { display:grid; grid-template-columns:auto minmax(0,1fr); gap:18px; align-items:start; border:1px solid color-mix(in srgb, var(--sln-action-primary) 28%, var(--sln-border-default)); border-radius:var(--sln-radius-xl); padding:24px; background:linear-gradient(135deg, var(--sln-bg-surface), color-mix(in srgb, var(--sln-tint-info) 55%, var(--sln-bg-surface))); box-shadow:var(--sln-shadow-sm); }
+  .overview-mark { display:grid; place-items:center; width:46px; height:46px; border-radius:14px; background:var(--sln-action-primary); color:var(--sln-white); font-size:22px; font-weight:800; }
+  .eyebrow { margin:0 0 6px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:800; letter-spacing:.09em; }
+  .security-overview h2, .security-panel h2 { margin:0; color:var(--sln-text-primary); font:var(--sln-font-h3); }
+  .security-overview div > p:last-child, .panel-heading p, .danger-panel > div > p:last-child { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .security-panel { display:grid; gap:18px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-xl); padding:24px; background:var(--sln-bg-surface); box-shadow:var(--sln-shadow-sm); }
+  .panel-heading { display:flex; justify-content:space-between; gap:20px; align-items:start; }
+  .panel-heading .sln-button { flex:0 0 auto; }
+  .session-ledger { display:grid; overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); }
+  .session-ledger article { display:grid; grid-template-columns:44px minmax(150px,1.3fr) repeat(4,minmax(120px,.8fr)); gap:14px; align-items:center; min-height:88px; padding:16px; border-top:1px solid var(--sln-border-default); }
+  .session-ledger article:first-child { border-top:0; }
+  .session-mark { display:grid; place-items:center; width:40px; height:40px; border-radius:12px; background:var(--sln-bg-subtle); color:var(--sln-action-primary); font-weight:850; }
+  .session-copy { display:grid; gap:5px; min-width:0; }
+  .session-copy strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .session-copy span { width:max-content; border-radius:var(--sln-radius-pill); padding:4px 8px; background:var(--sln-tint-success); color:var(--selinow-success-text); font:var(--sln-font-caption); font-weight:750; }
+  .session-meta { display:grid; gap:5px; min-width:0; }
+  .session-meta span { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .session-meta time { overflow:hidden; color:var(--sln-text-primary); font:var(--sln-font-body-sm); text-overflow:ellipsis; white-space:nowrap; }
+  .session-loading { grid-template-columns:44px minmax(0,1fr) !important; }
+  .session-loading .session-mark { background:linear-gradient(90deg,var(--sln-bg-subtle),var(--sln-border-default),var(--sln-bg-subtle)); background-size:200% 100%; animation:security-pulse 1.2s linear infinite; }
+  .session-loading p { margin:0; color:var(--sln-text-secondary); }
+  .danger-panel { grid-template-columns:minmax(0,1fr) auto; align-items:center; border-color:color-mix(in srgb, var(--sln-state-danger) 32%, var(--sln-border-default)); }
+  .danger-eyebrow { color:var(--sln-state-danger); }
+  .danger-actions { display:grid; gap:10px; min-width:210px; }
+  @keyframes security-pulse { to { background-position:-200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .session-loading .session-mark { animation:none; } }
+  @media (max-width: 980px) { .session-ledger article { grid-template-columns:44px minmax(0,1fr) minmax(130px,.8fr); } .session-meta { grid-column:2 / -1; } }
+  @media (max-width: 680px) { .security-overview, .security-panel { padding:18px; } .security-overview { grid-template-columns:1fr; } .panel-heading, .danger-panel { grid-template-columns:1fr; flex-direction:column; } .panel-heading .sln-button, .danger-actions { width:100%; } .session-ledger article { grid-template-columns:40px minmax(0,1fr); gap:10px; } .session-meta { grid-column:2; } }
+</style>

@@ -1,11 +1,16 @@
 # PayOS Multi-Tenant Integration Contract
 
+## Current continuation overlay (2026-08-03)
+
+PayOS remains the seller-order payment provider and its signed event/reconciliation rules remain authoritative for seller checkout. Platform subscription billing uses the separate Dodo adapter and trust boundary. The channel expansion work does not infer payment from QR/return URLs, and does not permit WhatsApp, Zalo or Discord messages to mark an order paid. Provider/channel activation and payment settlement remain separate gates.
+
 ## 1. Payment ownership
 
 - Mỗi shop kết nối payment channel PayOS của chính seller.
 - Tiền đi trực tiếp về tài khoản/kênh PayOS của seller.
 - `selinow.com` không gom tiền rồi payout trong MVP.
-- Platform subscription billing, nếu dùng PayOS, phải dùng một platform channel riêng và code path/credential riêng với seller checkout.
+- Platform subscription billing must use Dodo's platform namespace and code path;
+  it must never reuse seller PayOS credentials or webhook evidence.
 
 ## 2. Seller-provided credentials
 

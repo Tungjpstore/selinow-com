@@ -1,9 +1,11 @@
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
+import { assertSubscriptionAllows } from "../billing/entitlements";
 import { createId, createOpaqueToken } from "../core/ids";
 import { resolveExternalOrderChannelAttribution, type OrderChannelAttribution } from "../channels/attribution";
 import type { ChannelAdapterRegistry } from "../channels/registry";
 import { D1ChannelConnectionRepository } from "../channels/store";
+import { getProviderRuntimeContract } from "../channels/provider-contracts";
 import { assertCheckoutAllowed } from "../tenants/policy";
 import type { AppBindings } from "../platform/bindings";
 import { CommerceApplicationService } from "./application";
@@ -38,11 +40,14 @@ import type { ChannelCapability } from "../channels/types";
  */
 export type PrincipalChannelShop = {
   currency: string;
+  currentPeriodEnd?: string | null;
   defaultLocale: string;
+  graceEndsAt?: string | null;
   id: string;
   orderExpiryMinutes: number;
   status: string;
   subscriptionState: string;
+  trialEndsAt?: string | null;
 };
 
 export type PrincipalChannelIdentity = {
@@ -133,6 +138,13 @@ async function assertAdmission(input: PrincipalChannelPortInput, context: Commer
   ) throw new AppError("commerce_context_mismatch", 403, ["principal_channel_required"]);
   const manifest = input.registry.require(input.channelCode);
   if (manifest.version !== input.adapterVersion) throw new AppError("channel_adapter_version_conflict", 409);
+  // Expansion manifests are catalog contracts until a provider-specific
+  // adapter, identity binding and webhook evidence are admitted. Do not let a
+  // manually-created active connection bypass that gate into commerce state.
+  if (["telegram.mini_app", "zalo.mini_app", "zalo.oa", "whatsapp.cloud", "discord.bot"].includes(input.channelCode)) {
+    const runtime = getProviderRuntimeContract(input.channelCode);
+    if (runtime.stage !== "implemented") throw new AppError("channel_provider_pending", 409, [input.channelCode]);
+  }
   const projection = await new D1ChannelConnectionRepository(input.env.PLATFORM_DB, input.registry).projectCapabilities({
     connectionId: input.connectionId,
     planEntitlements: input.planEntitlements,
@@ -312,6 +324,7 @@ export class PrincipalChannelCommercePort implements CommerceApplicationPort {
 
   async checkoutCart(input: { command: CommerceCheckoutCommand; context: CommerceContext }): Promise<CommerceCheckoutView> {
     const subjectHash = await this.assertContext(input.context, "checkout.external_link");
+    assertSubscriptionAllows({ currentPeriodEnd: this.input.shop.currentPeriodEnd, graceEndsAt: this.input.shop.graceEndsAt, subscriptionState: this.input.shop.subscriptionState, trialEndsAt: this.input.shop.trialEndsAt });
     assertCheckoutAllowed({ shopStatus: this.input.shop.status, subscriptionState: this.input.shop.subscriptionState });
     const command = input.command;
     if (command.customerEmail !== null || command.cart.access.kind !== "principal" || (this.input.expectedIdempotencyKey !== undefined && command.idempotencyKey !== this.input.expectedIdempotencyKey)) throw new AppError("commerce_context_mismatch", 403, ["principal_checkout_required"]);

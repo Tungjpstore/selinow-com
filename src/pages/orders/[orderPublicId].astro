@@ -17,6 +17,7 @@ const locale = Astro.locals.locale ?? normalizeSupportedLocale(shop?.defaultLoca
 const t = createStorefrontTranslator(locale);
 Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
 Astro.response.headers.set("Pragma", "no-cache");
+Astro.response.headers.set("Referrer-Policy", "no-referrer");
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
 ---
 

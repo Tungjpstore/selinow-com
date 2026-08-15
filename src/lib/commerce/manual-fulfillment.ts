@@ -1,3 +1,4 @@
+import { tryRecordFirstPaidFulfilled } from "../analytics/activation";
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import type { AppBindings } from "../platform/bindings";
@@ -192,6 +193,37 @@ async function findByOrderItem(input: {
   `).bind(input.shopId, input.orderItemId).first<ExecutionRow>();
 }
 
+async function findOrderIdByIdempotency(input: {
+  env: AppBindings;
+  idempotencyKeyHash: string;
+  shopId: string;
+}): Promise<string | null> {
+  const row = await input.env.PLATFORM_DB.prepare(`
+    SELECT order_id AS orderId
+    FROM manual_fulfillment_executions
+    WHERE shop_id = ? AND idempotency_key_hash = ?
+    LIMIT 1
+  `).bind(input.shopId, input.idempotencyKeyHash).first<{ orderId: string }>();
+  return row?.orderId ?? null;
+}
+
+async function recordReplayMilestone(input: {
+  env: AppBindings;
+  idempotencyKeyHash: string;
+  replay: { execution: ManualFulfillmentExecutionView; replayed: true };
+  shopId: string;
+}): Promise<{ execution: ManualFulfillmentExecutionView; replayed: true }> {
+  try {
+    const orderId = await findOrderIdByIdempotency(input);
+    if (orderId !== null) {
+      await tryRecordFirstPaidFulfilled({ env: input.env, orderId, shopId: input.shopId });
+    }
+  } catch {
+    // Analytics recovery must not change an idempotent fulfillment response.
+  }
+  return input.replay;
+}
+
 async function loadTarget(input: {
   env: AppBindings;
   orderItemId: string;
@@ -305,7 +337,9 @@ export async function completeManualFulfillment(input: {
   });
 
   const replay = await findByIdempotency({ env: input.env, idempotencyKeyHash, requestHash, shopId });
-  if (replay !== null) return replay;
+  if (replay !== null) {
+    return recordReplayMilestone({ env: input.env, idempotencyKeyHash, replay, shopId });
+  }
 
   let target = await loadTarget({
     env: input.env,
@@ -317,7 +351,9 @@ export async function completeManualFulfillment(input: {
     assertTargetReady(target);
   } catch (error) {
     const racedReplay = await findByIdempotency({ env: input.env, idempotencyKeyHash, requestHash, shopId });
-    if (racedReplay !== null) return racedReplay;
+    if (racedReplay !== null) {
+      return recordReplayMilestone({ env: input.env, idempotencyKeyHash, replay: racedReplay, shopId });
+    }
     throw error;
   }
 
@@ -537,18 +573,23 @@ export async function completeManualFulfillment(input: {
     if ((results[0]?.meta.changes ?? 0) === 1) {
       const created = await findByIdempotency({ env: input.env, idempotencyKeyHash, requestHash, shopId });
       if (created === null) throw new AppError("manual_fulfillment_execution_failed", 500);
+      await tryRecordFirstPaidFulfilled({ env: input.env, orderId: target.orderId, shopId });
       return { ...created, replayed: false };
     }
   } catch (error) {
     const racedReplay = await findByIdempotency({ env: input.env, idempotencyKeyHash, requestHash, shopId });
-    if (racedReplay !== null) return racedReplay;
+    if (racedReplay !== null) {
+      return recordReplayMilestone({ env: input.env, idempotencyKeyHash, replay: racedReplay, shopId });
+    }
     const completedItem = await findByOrderItem({ env: input.env, orderItemId: execution.orderItemId, shopId });
     if (completedItem !== null) throw new AppError("manual_fulfillment_already_completed", 409);
     throw error;
   }
 
   const racedReplay = await findByIdempotency({ env: input.env, idempotencyKeyHash, requestHash, shopId });
-  if (racedReplay !== null) return racedReplay;
+  if (racedReplay !== null) {
+    return recordReplayMilestone({ env: input.env, idempotencyKeyHash, replay: racedReplay, shopId });
+  }
   const completedItem = await findByOrderItem({ env: input.env, orderItemId: execution.orderItemId, shopId });
   if (completedItem !== null) throw new AppError("manual_fulfillment_already_completed", 409);
 

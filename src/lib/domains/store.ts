@@ -1,6 +1,7 @@
 import { AppError } from "../core/errors";
 import { constantTimeEqual, hmacToken } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
+import { subscriptionAllows } from "../billing/entitlements";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
 import { getPlanLimit, hasFeature } from "../tenants/policy";
@@ -8,9 +9,11 @@ import {
   CloudflareProviderError,
   CloudflareSaaSClient,
   type CloudflareCustomHostname,
+  type CloudflareTurnstileHostnameAdmission,
 } from "./cloudflare";
 import { verifyCustomDomainOwnership, verifyCustomHostnameDns, type DnsVerificationResult } from "./dns";
 import { isCloudflareHostnameReady, normalizeCustomHostname } from "./policy";
+import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } from "./readiness";
 
 const DOMAIN_SELECT = `
   SELECT
@@ -74,6 +77,7 @@ type DomainBindings = AppBindings & {
   CLOUDFLARE_API_TOKEN: string;
   CLOUDFLARE_ZONE_ID: string;
   SAAS_CNAME_TARGET: string;
+  TURNSTILE_SITE_KEY: string;
 };
 
 type DomainRow = {
@@ -145,6 +149,7 @@ export type DomainView = {
   ownershipStatus: "pending" | "verified" | null;
   sslStatus: string | null;
   status: string;
+  turnstileStatus: "active" | "error" | "pending" | null;
   type: "custom" | "platform_subdomain";
   updatedAt: string;
   validation: Record<string, unknown>;
@@ -153,7 +158,7 @@ export type DomainView = {
 
 export type DomainProvider = Pick<
   CloudflareSaaSClient,
-  "createCustomHostname" | "deleteCustomHostname" | "findCustomHostname" | "getCustomHostname"
+  "createCustomHostname" | "deleteCustomHostname" | "findCustomHostname" | "getCustomHostname" | "verifyTurnstileHostnameAdmission"
 >;
 
 export type DomainRuntime = {
@@ -184,7 +189,12 @@ function getSaasTarget(env: AppBindings): string {
     return `customers.${env.PLATFORM_BASE_DOMAIN}`.toLowerCase().replace(/\.$/u, "");
   }
   if (typeof value !== "string" || value.length === 0) throw new AppError("cloudflare_config_invalid", 500);
-  return value.trim().toLowerCase().replace(/\.$/u, "");
+  const target = value.trim().toLowerCase().replace(/\.$/u, "");
+  // Production and staging must use the reviewed Cloudflare for SaaS target.
+  if (env.APP_ENV !== "local" && target !== "customers.selinow.com") {
+    throw new AppError("cloudflare_config_invalid", 500);
+  }
+  return target;
 }
 
 function safeJsonObject(value: string): Record<string, unknown> {
@@ -198,7 +208,24 @@ function safeJsonObject(value: string): Record<string, unknown> {
   }
 }
 
+function turnstileAdmissionStatus(metadata: Record<string, unknown>, hostname: string, now = new Date()): DomainView["turnstileStatus"] {
+  const value = metadata.turnstile;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const admission = value as Record<string, unknown>;
+  if (
+    admission.hostname !== hostname
+    || admission.mode !== "operator_managed"
+    || admission.source !== "cloudflare_widget_domains"
+    || !["active", "error", "pending"].includes(String(admission.status))
+  ) return null;
+  if (admission.status === "active" && !hasFreshExactTurnstileAdmission({ hostname, now, validationMetadataJson: metadata })) {
+    return "pending";
+  }
+  return admission.status as DomainView["turnstileStatus"];
+}
+
 function mapDomain(row: DomainRow, saasTarget: string): DomainView {
+  const validation = safeJsonObject(row.validationMetadataJson);
   return {
     activatedAt: row.activatedAt,
     createdAt: row.createdAt,
@@ -217,9 +244,10 @@ function mapDomain(row: DomainRow, saasTarget: string): DomainView {
     ownershipStatus: row.type === "custom" ? (row.ownershipVerifiedAt === null ? "pending" : "verified") : null,
     sslStatus: row.sslStatus,
     status: row.status,
+    turnstileStatus: row.type === "custom" ? turnstileAdmissionStatus(validation, row.hostname) : null,
     type: row.type,
     updatedAt: row.updatedAt,
-    validation: safeJsonObject(row.validationMetadataJson),
+    validation,
     version: row.version,
   };
 }
@@ -254,6 +282,7 @@ async function mapClaim(env: AppBindings, row: DomainClaimRow, now = new Date())
     ownershipStatus: row.verifiedAt === null ? "pending" : "verified",
     sslStatus: null,
     status: row.verifiedAt !== null ? "active" : expired ? "ownership_expired" : "ownership_pending",
+    turnstileStatus: null,
     type: "custom",
     updatedAt: row.updatedAt,
     validation: { expiresAt: row.expiresAt, ownershipChallenge: true },
@@ -276,9 +305,10 @@ async function requireDomainActor(
   env: AppBindings,
   shopPublicId: string,
   userId: string,
+  access: "read" | "manage",
   requireEntitlement: boolean,
 ): Promise<DomainActor> {
-  const member = await getShopForMember({ capability: "domains:manage", env, shopPublicId, userId });
+  const member = await getShopForMember({ capability: access === "manage" ? "domains:manage" : "domains:read", env, shopPublicId, userId });
   if (requireEntitlement && !hasFeature(member.row.feature_flags_json, "customDomain")) {
     throw new AppError("subscription_required", 402, ["custom_domain_not_in_plan"]);
   }
@@ -324,18 +354,24 @@ function requireDomain(row: DomainRow | null): DomainRow {
   return row;
 }
 
-function validationMetadata(provider: CloudflareCustomHostname, dns: DnsVerificationResult): string {
+function validationMetadata(
+  provider: CloudflareCustomHostname,
+  dns: DnsVerificationResult,
+  turnstile: CloudflareTurnstileHostnameAdmission,
+  checkedAt: string,
+): string {
   return JSON.stringify({
     dns: { observedTargets: dns.observedTargets },
     ownershipVerification: provider.ownership_verification ?? null,
     ownershipVerificationHttp: provider.ownership_verification_http ?? null,
     sslDcvDelegationRecords: provider.ssl.dcv_delegation_records ?? [],
     sslValidationRecords: provider.ssl.validation_records ?? [],
+    turnstile: { ...turnstile, checkedAt },
   });
 }
 
-export function customDomainState(input: { dnsStatus: string; hostnameStatus: string; sslStatus: string }): "active" | "failed" | "validating" {
-  if (isCloudflareHostnameReady(input)) return "active";
+export function customDomainState(input: { dnsStatus: string; hostnameStatus: string; sslStatus: string; turnstileStatus: string }): "active" | "failed" | "validating" {
+  if (isCloudflareHostnameReady(input) && input.turnstileStatus === "active") return "active";
   if (TERMINAL_HOSTNAME_STATUSES.has(input.hostnameStatus) || TERMINAL_SSL_STATUSES.has(input.sslStatus)) return "failed";
   return "validating";
 }
@@ -391,6 +427,45 @@ type CheckPersistenceGuard = {
   row: DomainRow;
 };
 
+type CustomDomainEntitlementRow = {
+  currentPeriodEnd: string | null;
+  featureFlagsJson: string;
+  graceEndsAt: string | null;
+  subscriptionState: string;
+  trialEndsAt: string | null;
+};
+
+async function shopHasCustomDomainEntitlement(env: AppBindings, shopId: string, now: Date): Promise<boolean> {
+  const row = await env.PLATFORM_DB.prepare(`
+    SELECT
+      domain_subscription.state AS subscriptionState,
+      domain_subscription.current_period_end AS currentPeriodEnd,
+      domain_subscription.trial_ends_at AS trialEndsAt,
+      domain_subscription.grace_ends_at AS graceEndsAt,
+      plans.feature_flags_json AS featureFlagsJson
+    FROM shop_subscriptions AS domain_subscription
+    INNER JOIN plans ON plans.id = domain_subscription.plan_id
+    WHERE domain_subscription.id = (
+      SELECT latest_subscription.id
+      FROM shop_subscriptions AS latest_subscription
+      WHERE latest_subscription.shop_id = ?
+      ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+      LIMIT 1
+    )
+      AND domain_subscription.shop_id = ?
+    LIMIT 1
+  `).bind(shopId, shopId).first<CustomDomainEntitlementRow>();
+  return row !== null
+    && hasFeature(row.featureFlagsJson, "customDomain")
+    && subscriptionAllows({
+      currentPeriodEnd: row.currentPeriodEnd,
+      graceEndsAt: row.graceEndsAt,
+      now,
+      subscriptionState: row.subscriptionState,
+      trialEndsAt: row.trialEndsAt,
+    });
+}
+
 async function persistCheckTransition(input: {
   env: AppBindings;
   leaseToken: string;
@@ -398,7 +473,7 @@ async function persistCheckTransition(input: {
   prepareTarget: (guard: CheckPersistenceGuard) => D1PreparedStatement;
   reasonCode: string | null;
   row: DomainRow;
-  status: "active" | "failed" | "validating";
+  status: "active" | "failed" | "suspended" | "validating";
 }): Promise<DomainRow> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const row = requireDomain(await findDomainById(input.env, input.row.shopId, input.row.id));
@@ -513,6 +588,49 @@ async function persistCheckTransition(input: {
   throw new AppError("domain_lease_lost", 409);
 }
 
+async function persistEntitlementSuspension(input: {
+  env: AppBindings;
+  leaseToken: string;
+  now: Date;
+  row: DomainRow;
+}): Promise<DomainRow> {
+  return persistCheckTransition({
+    env: input.env,
+    leaseToken: input.leaseToken,
+    now: input.now,
+    prepareTarget: ({ canonicalDomainId, fallbackDomainId, needsFailover, row }) => input.env.PLATFORM_DB.prepare(`
+      /* domain:suspend-missing-entitlement */
+      UPDATE shop_domains
+      SET status = 'suspended', is_primary = 0, next_check_at = NULL,
+          last_checked_at = ?, last_safe_error_code = 'subscription_required',
+          lease_token = NULL, lease_expires_at = NULL,
+          version = version + 1, updated_at = ?
+      WHERE id = ? AND shop_id = ? AND type = 'custom' AND deleted_at IS NULL
+        AND delete_requested_at IS NULL AND lease_token = ? AND version = ? AND is_primary = ?
+        AND EXISTS (SELECT 1 FROM shops WHERE id = ? AND canonical_domain_id IS ?)
+        ${needsFailover && fallbackDomainId !== null ? `AND EXISTS (
+          SELECT 1 FROM shop_domains fallback
+          WHERE fallback.id = ? AND fallback.shop_id = ? AND fallback.type = 'platform_subdomain'
+            AND fallback.status = 'active' AND fallback.delete_requested_at IS NULL AND fallback.deleted_at IS NULL
+        )` : ""}
+    `).bind(
+      input.now.toISOString(),
+      input.now.toISOString(),
+      row.id,
+      row.shopId,
+      input.leaseToken,
+      row.version,
+      row.isPrimary,
+      row.shopId,
+      canonicalDomainId,
+      ...(needsFailover && fallbackDomainId !== null ? [fallbackDomainId, row.shopId] : []),
+    ),
+    reasonCode: "subscription_required",
+    row: input.row,
+    status: "suspended",
+  });
+}
+
 async function persistCheckFailure(input: {
   env: AppBindings;
   error: unknown;
@@ -572,19 +690,23 @@ async function persistProviderCheck(input: {
   now: Date;
   provider: CloudflareCustomHostname;
   row: DomainRow;
+  turnstile: CloudflareTurnstileHostnameAdmission;
 }): Promise<DomainRow> {
   if (input.provider.hostname.toLowerCase() !== input.row.hostname) throw new AppError("domain_provider_conflict", 409);
   const status = customDomainState({
     dnsStatus: input.dns.status,
     hostnameStatus: input.provider.status,
     sslStatus: input.provider.ssl.status,
+    turnstileStatus: input.turnstile.status,
   });
   const attempts = input.row.checkAttempts + 1;
   const errorCode = input.dns.status === "error"
     ? "domain_dns_lookup_failed"
     : input.dns.status === "pending"
       ? "domain_dns_pending"
-      : null;
+      : input.turnstile.status === "pending"
+        ? "domain_turnstile_admission_pending"
+        : null;
   return persistCheckTransition({
     env: input.env,
     leaseToken: input.leaseToken,
@@ -614,7 +736,7 @@ async function persistProviderCheck(input: {
       input.dns.status,
       status,
       status === "active" ? row.isPrimary : 0,
-      validationMetadata(input.provider, input.dns),
+      validationMetadata(input.provider, input.dns, input.turnstile, input.now.toISOString()),
       input.now.toISOString(),
       status,
       input.now.toISOString(),
@@ -645,14 +767,18 @@ async function runProviderCheck(input: {
 }): Promise<ProviderCheckResult> {
   const now = input.runtime.now ?? new Date();
   try {
-    const provider = await recoverOrCreateProviderHostname(createProvider(input.env, input.runtime), input.row);
+    const client = createProvider(input.env, input.runtime);
+    const provider = await recoverOrCreateProviderHostname(client, input.row);
     const dns = await (input.runtime.dnsVerifier ?? verifyCustomHostnameDns)({
       expectedTarget: getSaasTarget(input.env),
       hostname: input.row.hostname,
     });
+    const turnstile = await client
+      .verifyTurnstileHostnameAdmission(bindingString(input.env, "TURNSTILE_SITE_KEY"), input.row.hostname)
+      .catch(() => { throw new AppError("domain_turnstile_admission_lookup_failed", 503); });
     return {
       outcome: "checked",
-      row: await persistProviderCheck({ dns, env: input.env, leaseToken: input.leaseToken, now, provider, row: input.row }),
+      row: await persistProviderCheck({ dns, env: input.env, leaseToken: input.leaseToken, now, provider, row: input.row, turnstile }),
     };
   } catch (error) {
     return {
@@ -688,7 +814,7 @@ async function claimCheckLease(input: { env: AppBindings; now: Date; row: Domain
 }
 
 export async function listShopDomains(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<DomainView[]> {
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, false);
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "read", false);
   const [result, claims] = await Promise.all([
     input.env.PLATFORM_DB.prepare(`${DOMAIN_SELECT}
     WHERE shop_id = ? AND deleted_at IS NULL
@@ -715,7 +841,7 @@ export async function createCustomDomain(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<{ created: boolean; domain: DomainView }> {
-  const actor = await requireDomainActor(input.env, input.shopPublicId, input.userId, true);
+  const actor = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", true);
   const { shopId } = actor;
   const limit = actor.customDomainLimit;
   if (limit === null) throw new AppError("subscription_configuration_invalid", 500, ["custom_domain_limit_invalid"]);
@@ -963,7 +1089,9 @@ export async function checkCustomDomain(input: {
   userId: string;
 }): Promise<DomainView> {
   const runtime = input.runtime ?? {};
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, false);
+  // Checking a claim/domain mutates provider state and consumes a reconciliation
+  // lease, so read-only members must not be able to trigger it.
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", true);
   const claim = await findClaimById(input.env, shopId, input.domainId);
   if (claim !== null) {
     return verifyAndPromoteClaim({
@@ -997,7 +1125,7 @@ export async function checkCustomDomain(input: {
     shopId,
     input.userId,
     checked.id,
-    JSON.stringify({ dnsStatus: checked.dnsStatus, hostnameStatus: checked.hostnameStatus, sslStatus: checked.sslStatus, status: checked.status }),
+    JSON.stringify({ dnsStatus: checked.dnsStatus, hostnameStatus: checked.hostnameStatus, sslStatus: checked.sslStatus, status: checked.status, turnstileStatus: mapDomain(checked, getSaasTarget(input.env)).turnstileStatus }),
     input.requestId,
     checkedAt,
   ).run();
@@ -1008,13 +1136,14 @@ export async function setPrimaryDomain(input: {
   domainId: string;
   env: AppBindings;
   requestId: string;
+  runtime?: Pick<DomainRuntime, "now">;
   shopPublicId: string;
   userId: string;
 }): Promise<DomainView> {
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, false);
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", false);
   const row = requireDomain(await findDomainById(input.env, shopId, input.domainId));
   if (row.type === "custom") {
-    await requireDomainActor(input.env, input.shopPublicId, input.userId, true);
+    await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", true);
     if (row.ownershipVerifiedAt === null) throw new AppError("domain_not_ready", 409);
   }
   if (row.status !== "active" || row.deleteRequestedAt !== null) throw new AppError("domain_not_ready", 409);
@@ -1023,8 +1152,14 @@ export async function setPrimaryDomain(input: {
     hostnameStatus: row.hostnameStatus ?? "",
     sslStatus: row.sslStatus ?? "",
   })) throw new AppError("domain_not_ready", 409);
+  const nowDate = input.runtime?.now ?? new Date();
+  if (row.type === "custom" && !hasFreshExactTurnstileAdmission({
+    hostname: row.hostname,
+    now: nowDate,
+    validationMetadataJson: row.validationMetadataJson,
+  })) throw new AppError("domain_not_ready", 409);
 
-  const now = new Date().toISOString();
+  const now = nowDate.toISOString();
   const shop = await input.env.PLATFORM_DB.prepare(`
     SELECT canonical_domain_id AS canonicalDomainId FROM shops WHERE id = ? LIMIT 1
   `).bind(shopId).first<{ canonicalDomainId: string | null }>();
@@ -1035,7 +1170,8 @@ export async function setPrimaryDomain(input: {
     LIMIT 1
   `).bind(shopId).first<{ id: string }>();
   const providerReadiness = row.type === "custom"
-    ? " AND ownership_verified_at IS NOT NULL AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'"
+    ? ` AND ownership_verified_at IS NOT NULL AND hostname_status = 'active' AND ssl_status = 'active' AND dns_status = 'active'
+        AND ${customDomainTurnstileAdmissionSql()}`
     : "";
   const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
@@ -1072,6 +1208,9 @@ export async function setPrimaryDomain(input: {
         WHERE target.id = ? AND target.shop_id = shops.id AND target.is_primary = 1
           AND target.status = 'active' AND target.deleted_at IS NULL
           AND target.delete_requested_at IS NULL AND target.version = ?
+          ${row.type === "custom" ? `AND target.ownership_verified_at IS NOT NULL
+          AND target.hostname_status = 'active' AND target.ssl_status = 'active' AND target.dns_status = 'active'
+          AND ${customDomainTurnstileAdmissionSql("target")}` : ""}
       )
     `).bind(row.id, now, shopId, row.id, row.version + 1),
     input.env.PLATFORM_DB.prepare(`
@@ -1207,7 +1346,7 @@ export async function deleteCustomDomain(input: {
   userId: string;
 }): Promise<void> {
   const runtime = input.runtime ?? {};
-  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, false);
+  const { shopId } = await requireDomainActor(input.env, input.shopPublicId, input.userId, "manage", false);
   const claim = await findClaimById(input.env, shopId, input.domainId);
   if (claim !== null && claim.verifiedAt === null) {
     const nowIso = (runtime.now ?? new Date()).toISOString();
@@ -1439,6 +1578,10 @@ export async function reconcileCustomDomainRecord(input: {
       await persistDeleteFailure({ env: input.env, error, leaseToken: input.leaseToken, now: input.now, row });
       throw error;
     }
+  }
+  if (!await shopHasCustomDomainEntitlement(input.env, row.shopId, input.now)) {
+    await persistEntitlementSuspension({ env: input.env, leaseToken: input.leaseToken, now: input.now, row });
+    return "checked";
   }
   return (await runProviderCheck({ env: input.env, leaseToken: input.leaseToken, row, runtime })).outcome;
 }

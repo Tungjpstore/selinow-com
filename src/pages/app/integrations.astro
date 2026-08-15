@@ -12,6 +12,7 @@ import { getPaymentIntegration, type PaymentIntegrationView } from "../../lib/pa
 import { getTelegramIntegration, type TelegramIntegrationView } from "../../lib/telegram/integrations";
 import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
 import { createDashboardTranslator } from "../../lib/i18n";
+import { listChannelExpansionCatalog } from "../../lib/channels/expansion";
 
 const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
@@ -19,8 +20,13 @@ if (auth === null) return Astro.redirect("/login");
 const shops = await listShopsForMember({ env, userId: auth.userId });
 const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
-const canManageProviders = shop?.role === "owner" || shop?.role === "manager";
+const canReadProviders = shop?.role === "owner" || shop?.role === "manager" || shop?.role === "support";
+const canManageProviders = shop?.role === "owner";
+const canManageApiCredentials = canManageProviders;
+const canManageChannelConnectors = shop?.role === "owner" || shop?.role === "manager";
+const canRefreshTelegram = shop?.role === "owner" || shop?.role === "manager";
 const canManageDomains = shop?.role === "owner";
+const canReadDomains = shop?.role === "owner" || shop?.role === "manager";
 const canRefreshPayos = shop?.role === "owner";
 
 let telegram: TelegramIntegrationView | null = null;
@@ -30,11 +36,11 @@ let payosError: unknown = null;
 let domains: DomainView[] = [];
 let domainsError: unknown = null;
 
-if (shop !== undefined && canManageProviders) {
+if (shop !== undefined && canReadProviders) {
   try { telegram = await getTelegramIntegration({ env, shopPublicId: shop.publicId, userId: auth.userId }); } catch (error) { telegramError = error; }
   try { payos = await getPaymentIntegration({ env, shopPublicId: shop.publicId, userId: auth.userId }); } catch (error) { payosError = error; }
 }
-if (shop !== undefined && canManageDomains) {
+if (shop !== undefined && canReadDomains) {
   try { domains = await listShopDomains({ env, shopPublicId: shop.publicId, userId: auth.userId }); } catch (error) { domainsError = error; }
 }
 
@@ -57,6 +63,30 @@ const telegramConnected = telegram !== null && telegram.status !== "disabled" &&
 const payosConnected = payos !== null && payos.status !== "disabled" && payos.status !== "disconnected";
 const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
 const csrfCookieName = `${env.SESSION_COOKIE_NAME}_csrf`;
+const channelSurfaceCatalog = listChannelExpansionCatalog().map((entry) => ({
+  capabilities: [...entry.capabilities],
+  code: entry.code,
+  description: t(entry.safeDescriptionKey),
+  providerPending: entry.providerExecution === "provider_pending",
+  providerStage: entry.providerExecution === "provider_pending"
+    ? t("dashboard.integrations.channel_expansion.status_provider_pending")
+    : t("dashboard.integrations.channel_expansion.stage_contract_ready"),
+  requiredSellerAction: entry.requiredSellerAction === "create_app"
+    ? t("dashboard.integrations.channel_expansion.action_create_app")
+    : entry.requiredSellerAction === "create_bot"
+      ? t("dashboard.integrations.channel_expansion.action_create_bot")
+      : t("dashboard.integrations.channel_expansion.action_connect_provider"),
+  name: entry.code === "telegram.mini_app"
+    ? t("dashboard.integrations.channel_expansion.name.telegram_mini_app")
+    : entry.code === "zalo.mini_app"
+      ? t("dashboard.integrations.channel_expansion.name.zalo_mini_app")
+      : entry.code === "zalo.oa"
+        ? t("dashboard.integrations.channel_expansion.name.zalo_oa")
+        : entry.code === "whatsapp.cloud"
+          ? t("dashboard.integrations.channel_expansion.name.whatsapp_cloud")
+          : t("dashboard.integrations.channel_expansion.name.discord_bot"),
+  slug: entry.code.replaceAll(".", "-"),
+}));
 const integrationClientCopy = {
   refresh: t("dashboard.integrations.refresh"),
   refreshing: t("dashboard.integrations.runtime.refreshing"),
@@ -76,10 +106,81 @@ const integrationClientCopy = {
   disconnectConfirm: t("dashboard.integrations.disconnect.confirm"),
   disconnectTelegram: t("dashboard.integrations.disconnect.telegram"),
   disconnectPayos: t("dashboard.integrations.disconnect.payos"),
+  apiCredentialsLoad: t("dashboard.integrations.api_credentials.load"),
+  apiCredentialsLoading: t("dashboard.integrations.api_credentials.loading"),
+  apiCredentialsLoaded: t("dashboard.integrations.api_credentials.loaded"),
+  apiCredentialsUnavailable: t("dashboard.integrations.api_credentials.unavailable"),
+  apiCredentialsTitle: t("dashboard.integrations.api_credentials.title"),
+  apiCredentialsDescription: t("dashboard.integrations.api_credentials.description"),
+  apiCredentialsName: t("dashboard.integrations.api_credentials.name"),
+  apiCredentialsNamePlaceholder: t("dashboard.integrations.api_credentials.name_placeholder"),
+  apiCredentialsScopes: t("dashboard.integrations.api_credentials.scopes"),
+  apiCredentialsCatalogScope: t("dashboard.integrations.api_credentials.catalog_scope"),
+  apiCredentialsInventoryScope: t("dashboard.integrations.api_credentials.inventory_scope"),
+  apiCredentialsOrdersScope: t("dashboard.integrations.api_credentials.orders_scope"),
+  apiCredentialsShopScope: t("dashboard.integrations.api_credentials.shop_scope"),
+  apiCredentialsExpiry: t("dashboard.integrations.api_credentials.expiry"),
+  apiCredentialsExpiryHelp: t("dashboard.integrations.api_credentials.expiry_help"),
+  apiCredentialsNever: t("dashboard.integrations.api_credentials.never"),
+  apiCredentialsIssue: t("dashboard.integrations.api_credentials.issue"),
+  apiCredentialsIssuing: t("dashboard.integrations.api_credentials.issuing"),
+  apiCredentialsIssued: t("dashboard.integrations.api_credentials.issued"),
+  apiCredentialsTokenTitle: t("dashboard.integrations.api_credentials.token_title"),
+  apiCredentialsTokenWarning: t("dashboard.integrations.api_credentials.token_warning"),
+  apiCredentialsCopy: t("dashboard.integrations.api_credentials.copy"),
+  apiCredentialsCopied: t("dashboard.integrations.api_credentials.copied"),
+  apiCredentialsCopyFailed: t("dashboard.integrations.api_credentials.copy_failed"),
+  apiCredentialsRevoke: t("dashboard.integrations.api_credentials.revoke"),
+  apiCredentialsRevoking: t("dashboard.integrations.api_credentials.revoking"),
+  apiCredentialsRevoked: t("dashboard.integrations.api_credentials.revoked"),
+  apiCredentialsRevokeConfirm: t("dashboard.integrations.api_credentials.revoke_confirm"),
+  apiCredentialsStatusActive: t("dashboard.integrations.api_credentials.status_active"),
+  apiCredentialsStatusRevoked: t("dashboard.integrations.api_credentials.status_revoked"),
+  apiCredentialsCreated: t("dashboard.integrations.api_credentials.created"),
+  apiCredentialsLastUsed: t("dashboard.integrations.api_credentials.last_used"),
+  apiCredentialsNoCredentials: t("dashboard.integrations.api_credentials.empty"),
+  apiCredentialsRequestId: t("dashboard.integrations.api_credentials.request_id"),
   health: t("dashboard.integrations.provider.health"),
   connect: t("dashboard.integrations.provider.connect"),
   update: t("dashboard.integrations.provider.update"),
   disconnect: t("dashboard.integrations.provider.disconnect"),
+  channelExpansionEyebrow: t("dashboard.integrations.channel_expansion.eyebrow"),
+  channelExpansionTitle: t("dashboard.integrations.channel_expansion.title"),
+  channelExpansionDescription: t("dashboard.integrations.channel_expansion.description"),
+  channelExpansionLoading: t("dashboard.integrations.channel_expansion.loading"),
+  channelExpansionLoaded: t("dashboard.integrations.channel_expansion.loaded"),
+  channelExpansionUnavailable: t("dashboard.integrations.channel_expansion.unavailable"),
+  channelExpansionRequest: t("dashboard.integrations.channel_expansion.request"),
+  channelExpansionRequesting: t("dashboard.integrations.channel_expansion.requesting"),
+  channelExpansionRequested: t("dashboard.integrations.channel_expansion.requested"),
+  channelExpansionCancel: t("dashboard.integrations.channel_expansion.cancel"),
+  channelExpansionCanceling: t("dashboard.integrations.channel_expansion.canceling"),
+  channelExpansionCanceled: t("dashboard.integrations.channel_expansion.canceled"),
+  channelExpansionCancelConfirm: t("dashboard.integrations.channel_expansion.cancel_confirm"),
+  channelExpansionReadOnly: t("dashboard.integrations.channel_expansion.read_only"),
+  channelExpansionNoProviders: t("dashboard.integrations.channel_expansion.no_providers"),
+  channelExpansionCapabilities: t("dashboard.integrations.channel_expansion.capabilities"),
+  channelExpansionRequiredAction: t("dashboard.integrations.channel_expansion.required_action"),
+  channelExpansionActionCreateApp: t("dashboard.integrations.channel_expansion.action_create_app"),
+  channelExpansionActionCreateBot: t("dashboard.integrations.channel_expansion.action_create_bot"),
+  channelExpansionActionConnectProvider: t("dashboard.integrations.channel_expansion.action_connect_provider"),
+  channelExpansionStageContractReady: t("dashboard.integrations.channel_expansion.stage_contract_ready"),
+  channelExpansionStageProviderPending: t("dashboard.integrations.channel_expansion.stage_provider_pending"),
+  channelExpansionStatusRequested: t("dashboard.integrations.channel_expansion.status_requested"),
+  channelExpansionStatusProviderPending: t("dashboard.integrations.channel_expansion.status_provider_pending"),
+  channelExpansionStatusActive: t("dashboard.integrations.channel_expansion.status_active"),
+  channelExpansionStatusCanceled: t("dashboard.integrations.channel_expansion.status_canceled"),
+  channelExpansionStatusRejected: t("dashboard.integrations.channel_expansion.status_rejected"),
+  channelExpansionNameTelegram: t("dashboard.integrations.channel_expansion.name.telegram_mini_app"),
+  channelExpansionNameZalo: t("dashboard.integrations.channel_expansion.name.zalo_mini_app"),
+  channelExpansionNameZaloOa: t("dashboard.integrations.channel_expansion.name.zalo_oa"),
+  channelExpansionNameWhatsapp: t("dashboard.integrations.channel_expansion.name.whatsapp_cloud"),
+  channelExpansionNameDiscord: t("dashboard.integrations.channel_expansion.name.discord_bot"),
+  channelExpansionDescriptionTelegram: t("dashboard.channels.expansion.telegram_mini_app"),
+  channelExpansionDescriptionZalo: t("dashboard.channels.expansion.zalo_mini_app"),
+  channelExpansionDescriptionZaloOa: t("dashboard.channels.expansion.zalo_oa"),
+  channelExpansionDescriptionWhatsapp: t("dashboard.channels.expansion.whatsapp_cloud"),
+  channelExpansionDescriptionDiscord: t("dashboard.channels.expansion.discord_bot"),
 };
 ---
 
@@ -94,7 +195,12 @@ const integrationClientCopy = {
     data-locale={locale ?? "en"}
     data-copy={JSON.stringify(integrationClientCopy)}
     data-can-manage-providers={canManageProviders ? "true" : "false"}
+    data-can-read-providers={canReadProviders ? "true" : "false"}
+    data-can-manage-channel-connectors={canManageChannelConnectors ? "true" : "false"}
+    data-can-manage-api-credentials={canManageApiCredentials ? "true" : "false"}
     data-can-manage-domains={canManageDomains ? "true" : "false"}
+    data-can-read-domains={canReadDomains ? "true" : "false"}
+    data-can-refresh-telegram={canRefreshTelegram ? "true" : "false"}
     data-can-refresh-payos={canRefreshPayos ? "true" : "false"}
   >
     <PageHeader
@@ -103,7 +209,7 @@ const integrationClientCopy = {
       description={t("dashboard.integrations.description")}
     >
       <div slot="actions" class="header-actions">
-        <button class="app-button app-button-secondary" type="button" data-refresh-all disabled={shop === undefined || (!canManageProviders && !canManageDomains)}>{t("dashboard.integrations.refresh")}</button>
+        <button class="app-button app-button-secondary" type="button" data-refresh-all disabled={shop === undefined || (!canReadProviders && !canReadDomains)}>{t("dashboard.integrations.refresh")}</button>
       </div>
     </PageHeader>
 
@@ -124,17 +230,52 @@ const integrationClientCopy = {
               <div><p>{t("dashboard.integrations.group.channels.eyebrow")}</p><h2 id="channels-title">{t("dashboard.integrations.group.channels.title")}</h2></div>
               <span>{t("dashboard.integrations.group.channels.description")}</span>
             </header>
-            <article id="telegram" class="integration-row" data-provider-row="telegram" data-readable={canManageProviders && telegramError === null ? "true" : "false"}>
+            <article id="telegram" class="integration-row" data-provider-row="telegram" data-readable={canReadProviders && telegramError === null ? "true" : "false"}>
               <div class="provider-mark provider-mark-telegram" aria-hidden="true">TG</div>
-              <div class="provider-copy"><h3>Telegram</h3><p class="provider-summary" data-summary>{canManageProviders ? telegramView.summary : unavailableTelegram.summary}</p><p class="provider-check" data-last-check>{canManageProviders ? telegramView.checked : unavailableTelegram.checked}</p></div>
-              <StatusBadge label={canManageProviders ? telegramView.label : unavailableTelegram.label} tone={canManageProviders ? telegramView.tone : unavailableTelegram.tone} />
+              <div class="provider-copy"><h3>Telegram</h3><p class="provider-summary" data-summary>{canReadProviders ? telegramView.summary : unavailableTelegram.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? telegramView.checked : unavailableTelegram.checked}</p></div>
+              <StatusBadge label={canReadProviders ? telegramView.label : unavailableTelegram.label} tone={canReadProviders ? telegramView.tone : unavailableTelegram.tone} />
               <div class="provider-actions">
-                {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{telegram === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}
-                {canManageProviders && telegram !== null && telegramError === null && <button class="text-action" type="button" data-action="health">{t("dashboard.integrations.provider.health")}</button>}
+                {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{telegram === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note" data-reason-code={canReadProviders ? "owner_required" : "permission_unavailable"}>{canReadProviders ? t("dashboard.integrations.channel_expansion.read_only") : t("dashboard.integrations.provider.unavailable")}</span>}
+                {canRefreshTelegram && telegram !== null && telegramError === null && <button class="text-action" type="button" data-action="health">{t("dashboard.integrations.provider.health")}</button>}
                 {canManageProviders && telegramConnected && telegramError === null && <button class="text-action danger-text" type="button" data-action="disconnect">{t("dashboard.integrations.provider.disconnect")}</button>}
               </div>
-              <p class="provider-error" data-error hidden={!canManageProviders || telegramView.error === null}>{canManageProviders ? telegramView.error : ""}</p>
+              <p class="provider-error" data-error hidden={!canReadProviders || telegramView.error === null}>{canReadProviders ? telegramView.error : ""}</p>
             </article>
+          </section>
+
+          <section class="integration-group channel-expansion-group" aria-labelledby="channel-expansion-title" data-channel-expansion-section>
+            <header class="group-heading">
+              <div><p>{t("dashboard.integrations.channel_expansion.eyebrow")}</p><h2 id="channel-expansion-title">{t("dashboard.integrations.channel_expansion.title")}</h2></div>
+              <span>{t("dashboard.integrations.channel_expansion.description")}</span>
+            </header>
+            <nav class="channel-surface-nav" aria-label={t("dashboard.integrations.channel_expansion.title")}>
+              {channelSurfaceCatalog.map((channel) => <a href={`#channel-${channel.slug}`}>{channel.name}</a>)}
+            </nav>
+            <div class="workspace-feedback" data-channel-expansion-feedback role="status" aria-live="polite">{t("dashboard.integrations.channel_expansion.loading")}</div>
+            <div class="channel-expansion-grid" data-channel-expansion-grid aria-live="polite">
+              {channelSurfaceCatalog.map((channel) => (
+                <article id={`channel-${channel.slug}`} class={`channel-expansion-card channel-expansion-card--${channel.slug}`} data-channel-code={channel.code} data-channel-placeholder>
+                  <div class="channel-expansion-card-head">
+                    <div class="channel-expansion-identity">
+                      <span class="channel-provider-mark" aria-hidden="true">{channel.code === "telegram.mini_app" ? "TG" : channel.code === "zalo.mini_app" || channel.code === "zalo.oa" ? "ZA" : channel.code === "whatsapp.cloud" ? "WA" : "DC"}</span>
+                      <div><h3>{channel.name}</h3><div class="channel-expansion-code">{channel.code}</div></div>
+                    </div>
+                    <StatusBadge label={channel.providerStage} tone={channel.providerPending ? "warning" : "info"} />
+                  </div>
+                  <p>{channel.description}</p>
+                  <div class="channel-expansion-stage">{channel.providerStage}</div>
+                  <div class="channel-expansion-next-action"><strong>{t("dashboard.integrations.channel_expansion.required_action")}:</strong> {channel.requiredSellerAction}</div>
+                  <details class="channel-expansion-details">
+                    <summary>{t("dashboard.integrations.channel_expansion.capabilities")} ({channel.capabilities.length})</summary>
+                    <div class="channel-expansion-capabilities">
+                      {channel.capabilities.map((capability) => <code>{capability}</code>)}
+                    </div>
+                  </details>
+                  <div class="channel-expansion-card-actions"><span class="provider-note">{t("dashboard.integrations.channel_expansion.loading")}</span></div>
+                </article>
+              ))}
+            </div>
+            <p class="provider-note channel-expansion-empty" data-channel-expansion-empty hidden>{t("dashboard.integrations.channel_expansion.no_providers")}</p>
           </section>
 
           <section class="integration-group" aria-labelledby="payments-title">
@@ -142,16 +283,16 @@ const integrationClientCopy = {
               <div><p>{t("dashboard.integrations.group.payments.eyebrow")}</p><h2 id="payments-title">{t("dashboard.integrations.group.payments.title")}</h2></div>
               <span>{t("dashboard.integrations.group.payments.description")}</span>
             </header>
-            <article class="integration-row" data-provider-row="payos" data-readable={canManageProviders && payosError === null ? "true" : "false"}>
+            <article class="integration-row" data-provider-row="payos" data-readable={canReadProviders && payosError === null ? "true" : "false"}>
               <div class="provider-mark provider-mark-payos" aria-hidden="true">PO</div>
-              <div class="provider-copy"><h3>PayOS</h3><p class="provider-summary" data-summary>{canManageProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canManageProviders ? payosView.checked : unavailablePayos.checked}</p></div>
-              <StatusBadge label={canManageProviders ? payosView.label : unavailablePayos.label} tone={canManageProviders ? payosView.tone : unavailablePayos.tone} />
+              <div class="provider-copy"><h3>PayOS</h3><p class="provider-summary" data-summary>{canReadProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? payosView.checked : unavailablePayos.checked}</p></div>
+              <StatusBadge label={canReadProviders ? payosView.label : unavailablePayos.label} tone={canReadProviders ? payosView.tone : unavailablePayos.tone} />
               <div class="provider-actions">
-                {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{payos === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}
+                {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{payos === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note" data-reason-code={canReadProviders ? "owner_required" : "permission_unavailable"}>{canReadProviders ? t("dashboard.integrations.channel_expansion.read_only") : t("dashboard.integrations.provider.unavailable")}</span>}
                 {canRefreshPayos && payos !== null && payosError === null && <button class="text-action" type="button" data-action="health">{t("dashboard.integrations.provider.health")}</button>}
                 {canManageProviders && payosConnected && payosError === null && <button class="text-action danger-text" type="button" data-action="disconnect">{t("dashboard.integrations.provider.disconnect")}</button>}
               </div>
-              <p class="provider-error" data-error hidden={!canManageProviders || payosView.error === null}>{canManageProviders ? payosView.error : ""}</p>
+              <p class="provider-error" data-error hidden={!canReadProviders || payosView.error === null}>{canReadProviders ? payosView.error : ""}</p>
             </article>
           </section>
 
@@ -160,13 +301,45 @@ const integrationClientCopy = {
               <div><p>{t("dashboard.integrations.group.infrastructure.eyebrow")}</p><h2 id="infrastructure-title">{t("dashboard.integrations.group.infrastructure.title")}</h2></div>
               <span>{t("dashboard.integrations.group.infrastructure.description")}</span>
             </header>
-            <article class="integration-row" data-provider-row="domains" data-readable={canManageDomains && domainsError === null ? "true" : "false"}>
+            <article class="integration-row" data-provider-row="domains" data-readable={canReadDomains && domainsError === null ? "true" : "false"}>
               <div class="provider-mark provider-mark-domain" aria-hidden="true">DNS</div>
-              <div class="provider-copy"><h3>{t("dashboard.integrations.provider.domain")}</h3><p class="provider-summary" data-summary>{canManageDomains ? domainsView.summary : unavailableDomains.summary}</p><p class="provider-check" data-last-check>{canManageDomains ? domainsView.checked : unavailableDomains.checked}</p></div>
-              <StatusBadge label={canManageDomains ? domainsView.label : unavailableDomains.label} tone={canManageDomains ? domainsView.tone : unavailableDomains.tone} />
-              <div class="provider-actions">{canManageDomains ? <a class="app-button app-button-secondary" href={workspaceHref("/app/domains")}>{t("dashboard.integrations.provider.manage_domains")}</a> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}</div>
-              <p class="provider-error" data-error hidden={!canManageDomains || domainsView.error === null}>{canManageDomains ? domainsView.error : ""}</p>
+              <div class="provider-copy"><h3>{t("dashboard.integrations.provider.domain")}</h3><p class="provider-summary" data-summary>{canReadDomains ? domainsView.summary : unavailableDomains.summary}</p><p class="provider-check" data-last-check>{canReadDomains ? domainsView.checked : unavailableDomains.checked}</p></div>
+              <StatusBadge label={canReadDomains ? domainsView.label : unavailableDomains.label} tone={canReadDomains ? domainsView.tone : unavailableDomains.tone} />
+              <div class="provider-actions">{canManageDomains ? <a class="app-button app-button-secondary" href={workspaceHref("/app/domains")}>{t("dashboard.integrations.provider.manage_domains")}</a> : canReadDomains ? <span class="provider-note">{t("dashboard.integrations.channel_expansion.read_only")}</span> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}</div>
+              <p class="provider-error" data-error hidden={!canReadDomains || domainsView.error === null}>{canReadDomains ? domainsView.error : ""}</p>
             </article>
+          </section>
+
+          <section class="integration-group api-credentials-group" aria-labelledby="api-credentials-title" data-api-credentials-section>
+            <header class="group-heading">
+              <div><p>{t("dashboard.integrations.api_credentials.eyebrow")}</p><h2 id="api-credentials-title">{t("dashboard.integrations.api_credentials.title")}</h2></div>
+              <span>{t("dashboard.integrations.api_credentials.description")}</span>
+            </header>
+            {canManageApiCredentials ? (
+              <div class="api-credentials-panel" data-api-credentials-panel>
+                <div class="api-credentials-toolbar">
+                  <p class="provider-note" data-api-credentials-feedback>{t("dashboard.integrations.api_credentials.loading")}</p>
+                  <button class="app-button app-button-secondary" type="button" data-api-credentials-load>{t("dashboard.integrations.api_credentials.load")}</button>
+                </div>
+                <div class="workspace-feedback" data-api-credentials-token-feedback role="status" aria-live="polite" hidden></div>
+                <div class="api-token-panel" data-api-credentials-token hidden>
+                  <div><strong>{t("dashboard.integrations.api_credentials.token_title")}</strong><p>{t("dashboard.integrations.api_credentials.token_warning")}</p></div>
+                  <div class="api-token-row"><input type="text" readonly data-api-credentials-token-value aria-label={t("dashboard.integrations.api_credentials.token_title")} /><button class="app-button app-button-secondary" type="button" data-api-credentials-copy>{t("dashboard.integrations.api_credentials.copy")}</button></div>
+                </div>
+                <form class="api-credential-form" data-api-credential-form hidden novalidate>
+                  <div class="form-heading"><div><h3>{t("dashboard.integrations.api_credentials.issue")}</h3><p>{t("dashboard.integrations.api_credentials.expiry_help")}</p></div></div>
+                  <label for="api-credential-name">{t("dashboard.integrations.api_credentials.name")}</label>
+                  <input id="api-credential-name" name="name" type="text" maxlength="80" required placeholder={t("dashboard.integrations.api_credentials.name_placeholder")} />
+                  <fieldset class="api-scope-fieldset"><legend>{t("dashboard.integrations.api_credentials.scopes")}</legend><label class="checkbox-line"><input type="checkbox" name="scope" value="catalog:read" checked /> <span>{t("dashboard.integrations.api_credentials.catalog_scope")}</span></label><label class="checkbox-line"><input type="checkbox" name="scope" value="inventory:read" /> <span>{t("dashboard.integrations.api_credentials.inventory_scope")}</span></label><label class="checkbox-line"><input type="checkbox" name="scope" value="orders:read" /> <span>{t("dashboard.integrations.api_credentials.orders_scope")}</span></label><label class="checkbox-line"><input type="checkbox" name="scope" value="shop:read" /> <span>{t("dashboard.integrations.api_credentials.shop_scope")}</span></label></fieldset>
+                  <label for="api-credential-expiry">{t("dashboard.integrations.api_credentials.expiry")}</label>
+                  <input id="api-credential-expiry" name="expiresAt" type="datetime-local" />
+                  <button class="app-button app-button-primary" type="submit">{t("dashboard.integrations.api_credentials.issue")}</button>
+                </form>
+                <div class="api-credential-ledger" data-api-credentials-list role="list" aria-live="polite"></div>
+              </div>
+            ) : (
+              <p class="provider-note api-credentials-unavailable">{t("dashboard.integrations.api_credentials.unavailable")}</p>
+            )}
           </section>
 
           {canManageProviders && (
@@ -213,6 +386,41 @@ const integrationClientCopy = {
   .workspace-feedback[data-tone="danger"] { border-color: color-mix(in srgb, var(--sln-state-danger) 28%, var(--sln-border-default)); background: var(--sln-tint-danger); color: #b91c1c; }
   .integration-panels { display: grid; gap: var(--sln-space-12); }
   .integration-group { display: grid; gap: 0; }
+  .channel-expansion-group { gap: 16px; }
+  .channel-expansion-group .workspace-feedback { margin-top: 0; }
+  .channel-surface-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+  .channel-surface-nav a { display: inline-flex; align-items: center; min-height: 36px; padding: 7px 11px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-pill); background: var(--sln-bg-surface); color: var(--sln-text-secondary); font: var(--sln-font-caption); text-decoration: none; transition: border-color 160ms ease, color 160ms ease, background 160ms ease; }
+  .channel-surface-nav a:hover, .channel-surface-nav a:focus-visible { border-color: var(--sln-action-primary); background: var(--sln-tint-info); color: var(--sln-action-primary); outline: none; }
+  .channel-expansion-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .channel-expansion-card { display: grid; gap: 14px; min-width: 0; padding: 18px; border: 1px solid var(--sln-border-default); border-top: 3px solid var(--channel-accent, var(--sln-border-strong)); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs, none); scroll-margin-top: 96px; }
+  .channel-expansion-card--telegram-mini-app { --channel-accent: #2587c8; }
+  .channel-expansion-card--zalo-mini-app { --channel-accent: #2563eb; }
+  .channel-expansion-card--zalo-oa { --channel-accent: #0f766e; }
+  /* Darkened marks keep provider identity colors readable on the tinted cards. */
+  .channel-expansion-card--whatsapp-cloud { --channel-accent: #0f6b35; }
+  .channel-expansion-card--discord-bot { --channel-accent: #3f4bb8; }
+  .channel-expansion-card[data-stage="provider_pending"] { background: color-mix(in srgb, var(--sln-tint-warning) 26%, var(--sln-bg-surface)); }
+  .channel-expansion-card-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+  .channel-expansion-card-head > .sln-status { max-width: 220px; white-space: normal; text-align: right; }
+  .channel-expansion-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .channel-provider-mark { display: grid; flex: 0 0 auto; place-items: center; width: 38px; height: 38px; border: 1px solid color-mix(in srgb, var(--channel-accent, var(--sln-border-strong)) 30%, transparent); border-radius: 11px; background: color-mix(in srgb, var(--channel-accent, var(--sln-border-strong)) 12%, var(--sln-bg-surface)); color: var(--channel-accent, var(--sln-text-secondary)); font: 800 11px/1 var(--sln-font-mono); letter-spacing: -.03em; }
+  .channel-expansion-card h3 { margin: 0; font: var(--sln-font-h4); letter-spacing: -.025em; }
+  .channel-expansion-card p { margin: 5px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .channel-expansion-code { color: var(--sln-text-muted); font: 11px/16px var(--sln-font-mono); overflow-wrap: anywhere; }
+  .channel-expansion-meta { display: grid; gap: 8px; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .channel-expansion-meta strong { color: var(--sln-text-primary); }
+  .channel-expansion-stage { padding: 8px 10px; border-radius: 8px; background: var(--sln-bg-subtle); color: var(--sln-text-secondary); }
+  .channel-expansion-next-action { padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--channel-accent, var(--sln-border-strong)) 24%, var(--sln-border-default)); border-radius: 8px; background: color-mix(in srgb, var(--channel-accent, var(--sln-border-strong)) 7%, var(--sln-bg-surface)); color: var(--sln-text-primary); }
+  .channel-expansion-details { border-top: 1px solid var(--sln-border-default); padding-top: 10px; }
+  .channel-expansion-details summary { width: fit-content; color: var(--sln-text-secondary); font: var(--sln-font-label); cursor: pointer; }
+  .channel-expansion-details summary:hover, .channel-expansion-details summary:focus-visible { color: var(--sln-action-primary); }
+  .channel-expansion-details[open] summary { margin-bottom: 10px; }
+  .channel-expansion-capabilities { display: flex; flex-wrap: wrap; gap: 6px; }
+  .channel-expansion-capabilities code { padding: 3px 6px; border-radius: 6px; background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: 11px/15px var(--sln-font-mono); }
+  .channel-expansion-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 4px; border-top: 1px solid var(--sln-border-default); }
+  .channel-expansion-card-actions .provider-note { margin: 0; text-align: left; }
+  .channel-expansion-card-actions .text-action { white-space: nowrap; }
+  .channel-expansion-empty { margin: 0; padding: 16px 0; text-align: left; }
   .group-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--sln-border-strong); }
   .group-heading p, .secure-kicker { margin: 0 0 6px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
   .group-heading h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
@@ -231,6 +439,28 @@ const integrationClientCopy = {
   .provider-actions .text-action { white-space: nowrap; }
   .provider-note { color: #334155; font: var(--sln-font-caption); text-align: right; }
   .provider-error { grid-column: 2 / -1; margin: 0; color: var(--sln-state-danger); font: var(--sln-font-body-sm); }
+  .api-credentials-panel { display: grid; gap: 18px; padding: 20px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .api-credentials-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .api-credentials-toolbar .provider-note { margin: 0; text-align: left; }
+  .api-credentials-unavailable { margin: 0; padding: 20px 0; border-bottom: 1px solid var(--sln-border-default); text-align: left; }
+  .api-credential-form { display: grid; gap: 12px; max-width: 720px; padding: 18px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-subtle); }
+  .api-credential-form > input { width: 100%; min-height: 44px; padding: 10px 13px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); color: var(--sln-text-primary); font: 14px/22px var(--sln-font-mono); }
+  .api-credential-form > input:focus { border-color: var(--sln-focus-ring); box-shadow: 0 0 0 3px rgb(59 130 246 / 20%); outline: none; }
+  .api-scope-fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+  .api-scope-fieldset legend { margin-bottom: 2px; color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .api-token-panel { display: grid; gap: 12px; padding: 16px; border: 1px solid color-mix(in srgb, var(--sln-state-warning) 42%, var(--sln-border-default)); border-radius: var(--sln-radius-md); background: var(--sln-tint-warning); }
+  .api-token-panel strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .api-token-panel p { margin: 4px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .api-token-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .api-token-row input { min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); background: var(--sln-bg-surface); color: var(--sln-text-primary); font: 12px/18px var(--sln-font-mono); }
+  .api-credential-ledger { display: grid; gap: 10px; }
+  .api-credential-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; padding: 14px 0; border-top: 1px solid var(--sln-border-default); }
+  .api-credential-row h3 { margin: 0; font: var(--sln-font-label); }
+  .api-credential-row p { margin: 4px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .api-credential-row code { color: var(--sln-text-muted); font: 12px/18px var(--sln-font-mono); }
+  .api-credential-meta { color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .api-credential-status { color: var(--sln-state-success); font: var(--sln-font-label); white-space: nowrap; }
+  .api-credential-status[data-status="revoked"] { color: var(--sln-state-danger); }
   .text-action { min-height: 36px; padding: 6px 0; border: 0; background: transparent; color: var(--sln-action-primary); font: var(--sln-font-label); cursor: pointer; text-decoration: none; }
   .text-action:hover { color: var(--sln-action-primary-hover); text-decoration: underline; text-underline-offset: 3px; }
   .danger-text { color: var(--sln-state-danger); }
@@ -255,6 +485,6 @@ const integrationClientCopy = {
   .field-help code { padding: 2px 5px; border-radius: 5px; background: var(--sln-bg-subtle); font: 12px/1.4 var(--sln-font-mono); }
   .disconnect-panel { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--sln-state-danger) 22%, var(--sln-border-default)); }
   .disconnect-panel .app-button { margin-top: 14px; }
-  @media (max-width: 900px) { .group-heading { align-items: start; flex-direction: column; gap: 8px; } .group-heading > span { max-width: 560px; text-align: left; } .integration-row { grid-template-columns: 44px minmax(0, 1fr) auto; } .integration-row > .sln-status { grid-column: 3; grid-row: 1; } .provider-actions { grid-column: 2 / -1; justify-content: start; } .provider-error { grid-column: 1 / -1; } }
-  @media (max-width: 560px) { .header-actions, .header-actions .app-button { width: 100%; } .integration-row { gap: 12px; padding: 18px 0; } .provider-copy h3 { font-size: 18px; } .provider-summary { white-space: normal; } .provider-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; } .provider-actions .app-button { width: 100%; } .provider-actions .text-action { justify-self: start; } .provider-note { text-align: left; } .secure-panel-head, .form-heading { flex-direction: column; } .form-heading a { min-height: 40px; } }
+  @media (max-width: 900px) { .group-heading { align-items: start; flex-direction: column; gap: 8px; } .group-heading > span { max-width: 560px; text-align: left; } .integration-row { grid-template-columns: 44px minmax(0, 1fr) auto; } .integration-row > .sln-status { grid-column: 3; grid-row: 1; } .provider-actions { grid-column: 2 / -1; justify-content: start; } .provider-error { grid-column: 1 / -1; } .channel-expansion-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { .header-actions, .header-actions .app-button { width: 100%; } .integration-row { gap: 12px; padding: 18px 0; } .provider-copy h3 { font-size: 18px; } .provider-summary { white-space: normal; } .provider-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; } .provider-actions .app-button { width: 100%; } .provider-actions .text-action { justify-self: start; } .provider-note { text-align: left; } .secure-panel-head, .form-heading { flex-direction: column; } .form-heading a { min-height: 40px; } .api-credentials-toolbar { align-items: start; flex-direction: column; } .api-credentials-toolbar .app-button { width: 100%; } .api-token-row { grid-template-columns: 1fr; } .api-token-row .app-button { width: 100%; } .api-credential-row { grid-template-columns: 1fr; gap: 8px; } .api-credential-row .text-action { justify-self: start; } .channel-expansion-card-actions { align-items: start; flex-direction: column; } .channel-expansion-card-actions .app-button { width: 100%; } }
 </style>

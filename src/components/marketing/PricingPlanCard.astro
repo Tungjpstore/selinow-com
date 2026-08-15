@@ -1,0 +1,136 @@
+---
+interface Props {
+  plan: MarketingPlan;
+  dashboardOrigin: string;
+  pricingState: "ready" | "unavailable";
+  locale?: unknown;
+  featuredLabel?: string;
+  ctaLabel?: string;
+}
+
+import { formatMarketingPrice, planFeatureList, type MarketingPlan, type MarketingPrice } from "../../lib/storefront/marketing";
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+const { plan, dashboardOrigin, pricingState, locale: propLocale, featuredLabel, ctaLabel } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const isRecommended = plan.recommended === true;
+const features = planFeatureList(plan, locale);
+const resolvedCtaLabel = ctaLabel ?? t("marketing.pricing.cta");
+const resolvedFeaturedLabel = featuredLabel ?? t("marketing.home.pricing.recommended");
+---
+
+<article class:list={["runtime-plan-card", isRecommended && "runtime-plan-card-featured", pricingState === "unavailable" && "plan-preview"]}>
+  {isRecommended && <span class="plan-recommended-label">{resolvedFeaturedLabel}</span>}
+
+  <div class="runtime-plan-head">
+    <span class="plan-code-tag">{plan.code}</span>
+    <h3>{plan.name}</h3>
+  </div>
+
+  <p class="runtime-plan-source">Runtime plan · {plan.code}</p>
+
+  <div class="runtime-plan-prices" role="status" aria-label={`${plan.name} pricing`} aria-live="polite">
+    {pricingState === "ready" && (plan.prices ?? []).map((price: MarketingPrice) => {
+      const amount = formatMarketingPrice(price, locale);
+      const marketLabel = price.marketCode === "vn"
+        ? t("marketing.pricing.price_market.vn")
+        : price.marketCode === "global"
+          ? t("marketing.pricing.price_market.global")
+          : t("marketing.pricing.capability.unpublished");
+      const periodLabel = price.interval === "month" ? t("marketing.pricing.price_period.month") : price.interval;
+      return amount === null ? null : (
+        <p
+          data-pricing-offer
+          data-market={price.marketCode}
+          data-currency={price.currency}
+          data-interval={price.interval}
+        >
+          <strong>{amount}</strong>
+          <span>/ {periodLabel}</span>
+          <small>{marketLabel}</small>
+        </p>
+      );
+    })}
+
+    {pricingState === "unavailable" && (
+      <p class="price-unavailable-text">
+        <em>{t("marketing.pricing.price_unavailable")}</em>
+      </p>
+    )}
+  </div>
+
+  <ul class="plan-feature-list">
+    {features.map((feature: string) => (
+      <li>{feature}</li>
+    ))}
+  </ul>
+
+  <div class="plan-card-action">
+    <a
+      class:list={["kit-button", isRecommended ? "kit-button-primary" : "kit-button-secondary"]}
+      href={`${dashboardOrigin}/login`}
+      data-pricing-cta
+    >
+      <span>{resolvedCtaLabel}</span>
+      <span aria-hidden="true">→</span>
+    </a>
+  </div>
+</article>
+
+<style>
+  .plan-code-tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--brand-600);
+    background-color: var(--brand-50);
+    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+    margin-bottom: var(--space-1);
+  }
+
+  .price-unavailable-text {
+    font-size: 14px;
+    color: var(--text-tertiary);
+    margin: var(--space-2) 0;
+  }
+
+  .plan-feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--space-8);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex-grow: 1;
+  }
+
+  .plan-feature-list li {
+    font-size: 14px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    line-height: 1.45;
+  }
+
+  .plan-feature-list li::before {
+    content: "✓";
+    color: var(--brand-600);
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .plan-card-action {
+    margin-top: auto;
+  }
+
+  .plan-card-action .kit-button {
+    width: 100%;
+  }
+</style>

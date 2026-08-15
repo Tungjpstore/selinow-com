@@ -367,12 +367,26 @@ describe("authenticated browser gate isolation", () => {
 
   it("persists only redacted Playwright failure diagnostics", () => {
     const diagnostic = redactPlaywrightFailure(
-      'href="/api/auth/magic-link/consume?token=opaque-token-value-that-is-longer-than-thirty-two-bytes" Cookie: selinow_session=private-value SESSION_SECRET=private-secret',
+      'href="/api/auth/magic-link/consume?token=opaque-token-value-that-is-longer-than-thirty-two-bytes" Cookie: selinow_session=private-value SESSION_SECRET=private-secret DODO_PAYMENTS_API_KEY=short-dodo-key DODO_PAYMENTS_WEBHOOK_KEY=short-webhook-key PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT=short-fingerprint PAYOS_CONTROLLED_STAGING_CLIENT_ID=short-client CLOUDFLARE_PLATFORM_API_TOKEN=short-platform-token CLOUDFLARE_ROUTE_AUDIT_API_TOKEN=short-route-token',
     );
     expect(diagnostic).toContain("/api/auth/magic-link/consume?[redacted]");
     expect(diagnostic).toContain("Cookie: [redacted]");
     expect(diagnostic).not.toContain("opaque-token-value");
     expect(diagnostic).not.toContain("private-value");
     expect(diagnostic).not.toContain("private-secret");
+    expect(diagnostic).not.toContain("short-dodo-key");
+    expect(diagnostic).not.toContain("short-webhook-key");
+    expect(diagnostic).not.toContain("short-fingerprint");
+    expect(diagnostic).not.toContain("short-client");
+    const operatorTokens = redactPlaywrightFailure(
+      "CLOUDFLARE_D1_API_TOKEN=d1-secret CLOUDFLARE_WORKER_DEPLOY_API_TOKEN=worker-secret CLOUDFLARE_STAGING_RESOURCE_AUDIT_API_TOKEN=resource-read CLOUDFLARE_STAGING_DEPLOYMENT_AUDIT_API_TOKEN=short-deploy CLOUDFLARE_STAGING_TRIGGER_AUDIT_API_TOKEN=short-trigger",
+    );
+    expect(operatorTokens).toContain("CLOUDFLARE_D1_API_TOKEN=[redacted]");
+    expect(operatorTokens).not.toContain("resource-read");
+    expect(operatorTokens).not.toContain("worker-secret");
+    expect(operatorTokens).not.toContain("short-deploy");
+    expect(operatorTokens).not.toContain("short-trigger");
+    expect(diagnostic).not.toContain("short-platform-token");
+    expect(diagnostic).not.toContain("short-route-token");
   });
 });

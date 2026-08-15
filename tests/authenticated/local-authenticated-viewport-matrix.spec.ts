@@ -26,7 +26,9 @@ async function authenticateThroughVisibleMagicLink(page: Page, projectName: stri
   await page.goto("/login");
   await expect(page).toHaveTitle("Đăng nhập — Selinow");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Đăng nhập để tiếp tục");
-  await page.getByLabel("Email").fill(`browser-gate-${projectName}@selinow.invalid`);
+  await page
+    .getByRole("textbox", { name: "Email", exact: true })
+    .fill(`browser-gate-${projectName}@selinow.invalid`);
   await page.getByLabel("Tên hiển thị").fill("Browser Gate");
   const magicLinkResponsePromise = page.waitForResponse((response) => {
     try {

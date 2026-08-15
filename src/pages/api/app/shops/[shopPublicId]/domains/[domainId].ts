@@ -7,6 +7,10 @@ import { readJsonObject, rejectUnknownFields } from "../../../../../../lib/http/
 import { createCaughtErrorResponse } from "../../../../../../lib/http/security";
 import { getBindings } from "../../../../../../lib/platform/bindings";
 
+function requireDeleteTargetId(value: string | undefined): string {
+  return requireResourceId(value, value?.startsWith("dcl_") === true ? "dcl" : "dom");
+}
+
 export const DELETE: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
@@ -14,7 +18,7 @@ export const DELETE: APIRoute = async ({ locals, params, request }) => {
     requireRecentAuth(auth);
     rejectUnknownFields(await readJsonObject(request), []);
     await deleteCustomDomain({
-      domainId: requireResourceId(params.domainId, "dom"),
+      domainId: requireDeleteTargetId(params.domainId),
       env,
       requestId: locals.requestId,
       shopPublicId: requireResourceId(params.shopPublicId, "shop"),

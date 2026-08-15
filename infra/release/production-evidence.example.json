@@ -1,20 +1,87 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "environment": "production",
   "releaseId": "replace-with-release-id",
   "commitSha": "replace-with-reviewed-git-sha",
+  "treeSha": "replace-with-reviewed-git-tree-sha",
+  "migrationLedgerPrefix": [],
   "previousWorkerVersion": "replace-with-current-worker-version",
   "candidateWorkerVersion": "replace-with-candidate-worker-version",
+  "releaseScope": {
+    "activeChannels": [
+      "website",
+      "telegramBot"
+    ],
+    "deferredChannels": [
+      "telegramMiniApp",
+      "zaloMiniApp",
+      "zaloOa",
+      "whatsappCloud",
+      "discord"
+    ]
+  },
   "approvals": {
+    "dataOwner": "replace-with-data-owner",
+    "paymentOwner": "replace-with-payment-owner",
     "releaseOwner": "replace-with-release-owner",
+    "securityOwner": "replace-with-security-owner",
     "supportOwner": "replace-with-support-owner"
   },
+  "legalSupport": {
+    "accepted": false,
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-legal-support-decision-artifact-sha256",
+    "evidenceRef": ".wrangler/releases/<release-id>/legal-support-decisions.json",
+    "observedAt": null,
+    "requiredDecisionKeys": [
+      "contractingLegalEntity",
+      "registeredAddressTaxIdentity",
+      "governingLawDisputeForum",
+      "digitalGoodsRefundRules",
+      "abuseCopyrightTakedown",
+      "sellerResponsibility",
+      "payosSettlementBoundary",
+      "dodoMerchantOfRecord",
+      "privacyRolesDsar",
+      "retentionDeletionExceptions",
+      "platformSupportContact",
+      "sellerBuyerSupportBoundary"
+    ]
+  },
+  "secretInventory": {
+    "schemaVersion": 1,
+    "mode": "name_only",
+    "evidenceRef": ".wrangler/releases/<release-id>/production-secret-inventory.json",
+    "artifactSha256": "replace-with-name-only-secret-inventory-artifact-sha256",
+    "requiredNames": [
+      "CLOUDFLARE_API_TOKEN",
+      "CREDENTIAL_KEK_V1",
+      "DODO_PAYMENTS_API_KEY",
+      "DODO_PAYMENTS_WEBHOOK_KEY",
+      "EXPORT_KEK_V1",
+      "IDENTIFIER_HMAC_SECRET",
+      "INVENTORY_KEK_V1",
+      "MAGIC_LINK_SECRET",
+      "SESSION_SECRET",
+      "TURNSTILE_SECRET_KEY"
+    ]
+  },
   "quality": {
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-quality-evidence-artifact-sha256",
+    "evidenceRef": ".wrangler/releases/<release-id>/quality-evidence.json",
+    "observedAt": null,
+    "schemaVersion": 2,
     "check": false,
     "lint": false,
+    "tscNoEmit": false,
     "test": false,
     "build": false,
-    "deployDryRun": false
+    "buildStaging": false,
+    "auditHigh": false,
+    "deployDryRun": false,
+    "deployStagingDryRun": false,
+    "gitDiffCheck": false
   },
   "backup": {
     "snapshotReportRef": "replace-with-private-backup-report-reference",
@@ -26,24 +93,79 @@
   },
   "staging": {
     "accepted": false,
-    "acceptedAt": null
+    "acceptedAt": null,
+    "releaseId": "replace-with-staging-release-id",
+    "manifestRef": "replace-with-private-staging-manifest-reference",
+    "manifestSha256": "replace-with-staging-manifest-sha256",
+    "workerVersion": "replace-with-staging-worker-version"
   },
   "security": {
     "criticalOpen": 0,
     "highOpen": 0
   },
   "pilot": {
-    "shopCount": 0
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-pilot-evidence-artifact-sha256",
+    "shopCount": 0,
+    "evidenceRef": ".wrangler/releases/<release-id>/pilot-evidence.json",
+    "completedAt": null
   },
   "manualAcceptance": {
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-manual-acceptance-artifact-sha256",
     "website": false,
     "telegram": false,
     "paymentSignedEvent": false,
-    "customDomain": false
+    "customDomain": false,
+    "evidenceRef": ".wrangler/releases/<release-id>/manual-acceptance.json",
+    "observedAt": null
+  },
+  "providerAcceptance": {
+    "telegramBot": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-provider-acceptance-report-reference",
+      "observedAt": null
+    }
+  },
+  "commerceAcceptance": {
+    "payos": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-payos-acceptance-report-reference",
+      "artifactSha256": "replace-with-payos-acceptance-artifact-sha256",
+      "observedAt": null
+    },
+    "dodo": {
+      "accepted": false,
+      "evidenceRef": "replace-with-private-dodo-acceptance-report-reference",
+      "artifactSha256": "replace-with-dodo-acceptance-artifact-sha256",
+      "observedAt": null
+    }
   },
   "monitoring": {
+    "artifactSchemaVersion": 1,
+    "artifactSha256": "replace-with-monitoring-evidence-artifact-sha256",
     "dashboardReady": false,
     "alertsReady": false,
-    "budgetAlertsReady": false
+    "budgetAlertsReady": false,
+    "evidenceRef": ".wrangler/releases/<release-id>/monitoring-evidence.json",
+    "observedAt": null
+  },
+  "rollback": {
+    "rehearsalEvidenceRef": "replace-with-private-rollback-rehearsal-report-reference",
+    "rehearsedAt": null,
+    "candidate": {
+      "schemaVersion": 2,
+      "accepted": false,
+      "rehearsalPassed": false,
+      "rehearsedAt": null,
+      "workerVersion": "replace-with-schema-compatible-rollback-worker-version",
+      "commitSha": "replace-with-rollback-source-git-sha",
+      "treeSha": "replace-with-rollback-source-git-tree-sha",
+      "migrationName": "replace-with-latest-source-migration-name",
+      "migrationLedgerSha256": "replace-with-source-migration-ledger-sha256",
+      "invariants": [],
+      "evidenceRef": "replace-with-private-rollback-rehearsal-report-reference",
+      "artifactSha256": "replace-with-rollback-rehearsal-artifact-sha256"
+    }
   }
 }

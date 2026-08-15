@@ -8,6 +8,7 @@ import {
   completeManualFulfillment,
   type ManualFulfillmentExecutionInput,
 } from "../../src/lib/commerce/manual-fulfillment";
+import { getSellerOrder } from "../../src/lib/commerce/seller-orders";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
 const NOW = new Date("2026-07-30T03:00:00.000Z");
@@ -230,6 +231,26 @@ describe("manual fulfillment execution", () => {
     expect(database.prepare("SELECT status, fulfillment_status AS fulfillmentStatus FROM orders WHERE id = ?").get(ORDER_ID)).toEqual({ fulfillmentStatus: "fulfilled", status: "completed" });
   });
 
+  it("projects only eligible pending manual items and records completed state", async () => {
+    const pending = await getSellerOrder({ env, orderPublicId: ORDER_PUBLIC_ID, shopPublicId: SHOP_PUBLIC_ID, userId: OWNER_ID });
+    expect(pending.items).toEqual([
+      expect.objectContaining({
+        id: ITEM_ID,
+        manualFulfillment: { completedAt: null, status: "pending", unsupportedReason: null },
+      }),
+    ]);
+
+    await complete();
+
+    const completed = await getSellerOrder({ env, orderPublicId: ORDER_PUBLIC_ID, shopPublicId: SHOP_PUBLIC_ID, userId: OWNER_ID });
+    expect(completed.items).toEqual([
+      expect.objectContaining({
+        id: ITEM_ID,
+        manualFulfillment: { completedAt: NOW.toISOString(), status: "completed", unsupportedReason: null },
+      }),
+    ]);
+  });
+
   it("replays the same command and conflicts when the request changes", async () => {
     const first = await complete();
     const replay = await complete();
@@ -328,6 +349,44 @@ describe("manual fulfillment execution", () => {
     )).toThrow(/manual_fulfillment_execution_scope_mismatch/u);
     expect(database.prepare("SELECT state FROM fulfillments WHERE id = 'fulfillment-manual-a'").get()).toEqual({ state: "pending" });
     expect(database.prepare("SELECT COUNT(*) AS count FROM manual_fulfillment_executions").get()).toEqual({ count: 0 });
+    const detail = await getSellerOrder({ env, orderPublicId: ORDER_PUBLIC_ID, shopPublicId: SHOP_PUBLIC_ID, userId: OWNER_ID });
+    expect(detail.items[0]?.manualFulfillment).toEqual({
+      completedAt: null,
+      status: "unsupported",
+      unsupportedReason: "private_file",
+    });
+  });
+
+  it("projects generic entitlement items as unsupported manual work", async () => {
+    database.exec(`
+      INSERT INTO entitlement_resources (
+        id, shop_id, resource_key, resource_type, status, created_by_user_id,
+        created_at, updated_at
+      ) VALUES ('resource-manual-generic', '${SHOP_ID}', 'membership.manual', 'membership',
+        'active', '${OWNER_ID}', '${NOW.toISOString()}', '${NOW.toISOString()}');
+      INSERT INTO product_entitlement_policies (
+        id, shop_id, product_id, resource_id, policy_version, activation_condition,
+        grant_quantity_per_unit, entitlement_ttl_seconds, status, created_by_user_id,
+        created_at, updated_at
+      ) VALUES ('policy-manual-generic', '${SHOP_ID}', 'product-manual-a',
+        'resource-manual-generic', 1, 'order_paid', 1, NULL, 'active', '${OWNER_ID}',
+        '${NOW.toISOString()}', '${NOW.toISOString()}');
+      INSERT INTO order_item_entitlement_requirements (
+        id, shop_id, order_id, order_item_id, policy_id, resource_id, policy_version,
+        activation_condition, item_quantity, grant_quantity, entitlement_ttl_seconds, created_at
+      ) VALUES ('requirement-manual-generic', '${SHOP_ID}', '${ORDER_ID}', '${ITEM_ID}',
+        'policy-manual-generic', 'resource-manual-generic', 1, 'order_paid', 1, 1, NULL,
+        '${NOW.toISOString()}');
+    `);
+
+    const detail = await getSellerOrder({ env, orderPublicId: ORDER_PUBLIC_ID, shopPublicId: SHOP_PUBLIC_ID, userId: OWNER_ID });
+    expect(detail.items[0]?.manualFulfillment).toEqual({
+      completedAt: null,
+      status: "unsupported",
+      unsupportedReason: "entitlement_policy",
+    });
+    await expect(complete({ idempotencyKey: "manual-generic-item-key-0001" }))
+      .rejects.toMatchObject({ code: "manual_fulfillment_item_ineligible", status: 409 });
   });
 
   it("serializes concurrent different-key attempts so only one execution wins", async () => {

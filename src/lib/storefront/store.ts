@@ -1,8 +1,10 @@
 import { AppError } from "../core/errors";
+import { assertSubscriptionAllows, subscriptionAllows } from "../billing/entitlements";
 import { parseCookies } from "../http/cookies";
 import { LOCALE_COOKIE_NAME, resolveLocale } from "../i18n/locale";
 import type { AppBindings } from "../platform/bindings";
-import { assertCheckoutAllowed } from "../tenants/policy";
+import { assertCheckoutAllowed, hasFeature } from "../tenants/policy";
+import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } from "../domains/readiness";
 import { classifyPlatformHost, getCanonicalStorefrontUrl, normalizeHostname } from "./routing";
 import { parseStorefrontPublicDetails, type StorefrontPublicDetails } from "./public-details";
 import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, type StorefrontTheme } from "./theme";
@@ -10,9 +12,14 @@ import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, t
 type StorefrontShopRow = {
   brandingJson: string;
   canonicalHostname: string | null;
+  canonicalDomainType: string | null;
   currency: string;
+  currentPeriodEnd: string | null;
+  currentDomainType: string;
+  currentDomainValidationMetadataJson: string;
   currentHostname: string;
   defaultLocale: string;
+  featureFlagsJson: string;
   id: string;
   lowStockThreshold: number;
   name: string;
@@ -25,6 +32,8 @@ type StorefrontShopRow = {
   status: string;
   storefrontJson: string;
   supportContact: string | null;
+  trialEndsAt: string | null;
+  graceEndsAt: string | null;
   subscriptionState: string | null;
   termsUrl: string | null;
 };
@@ -98,12 +107,15 @@ export type StorefrontShop = {
   slug: string;
   status: string;
   subscriptionState: string;
+  currentPeriodEnd?: string | null;
+  trialEndsAt?: string | null;
+  graceEndsAt?: string | null;
   theme: StorefrontTheme;
 };
 
-function storefrontAccess(status: string, subscriptionState: string): StorefrontAccess {
+function storefrontAccess(status: string, subscriptionState: string, trialEndsAt: string | null, graceEndsAt: string | null, currentPeriodEnd: string | null): StorefrontAccess {
   if (status === "draft") return "coming_soon";
-  if (status === "active" && new Set(["trialing", "active", "past_due"]).has(subscriptionState)) return "live";
+  if (status === "active" && subscriptionAllows({ currentPeriodEnd, graceEndsAt, subscriptionState, trialEndsAt })) return "live";
   return "suspended";
 }
 
@@ -123,6 +135,8 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     SELECT shops.id, shops.public_id AS publicId, shops.slug, shops.name, shops.status,
       shops.default_locale AS defaultLocale, shops.currency,
       shop_domains.hostname_normalized AS currentHostname,
+      shop_domains.type AS currentDomainType,
+      shop_domains.validation_metadata_json AS currentDomainValidationMetadataJson,
       COALESCE(shop_settings.published_branding_json, '{}') AS brandingJson,
       COALESCE(shop_settings.published_storefront_json, '{}') AS storefrontJson,
       shop_settings.support_contact AS supportContact,
@@ -132,8 +146,18 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
       shop_settings.order_expiry_minutes AS orderExpiryMinutes,
       shop_settings.low_stock_threshold AS lowStockThreshold,
       shop_settings.published_version AS settingsVersion,
-      (SELECT state FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC LIMIT 1) AS subscriptionState,
-      canonical_domain.hostname_normalized AS canonicalHostname
+      (SELECT state FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS subscriptionState,
+      (SELECT current_period_end FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS currentPeriodEnd,
+      (SELECT trial_ends_at FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS trialEndsAt,
+      (SELECT grace_ends_at FROM shop_subscriptions WHERE shop_id = shops.id ORDER BY created_at DESC, id DESC LIMIT 1) AS graceEndsAt,
+      (SELECT plans.feature_flags_json
+        FROM shop_subscriptions AS entitlement_subscription
+        INNER JOIN plans ON plans.id = entitlement_subscription.plan_id
+        WHERE entitlement_subscription.shop_id = shops.id
+        ORDER BY entitlement_subscription.created_at DESC, entitlement_subscription.id DESC
+        LIMIT 1) AS featureFlagsJson,
+      canonical_domain.hostname_normalized AS canonicalHostname,
+      canonical_domain.type AS canonicalDomainType
     FROM shop_domains
     INNER JOIN shops ON shops.id = shop_domains.shop_id
     INNER JOIN shop_settings ON shop_settings.shop_id = shops.id
@@ -144,18 +168,69 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
       AND canonical_domain.deleted_at IS NULL
       AND (
         canonical_domain.type = 'platform_subdomain'
-        OR canonical_domain.ownership_verified_at IS NOT NULL
+        OR (
+          canonical_domain.ownership_verified_at IS NOT NULL
+          AND canonical_domain.hostname_status = 'active'
+          AND canonical_domain.ssl_status = 'active'
+          AND canonical_domain.dns_status = 'active'
+          AND ${customDomainTurnstileAdmissionSql("canonical_domain")}
+          AND EXISTS (
+            SELECT 1
+            FROM shop_subscriptions AS canonical_subscription
+            INNER JOIN plans ON plans.id = canonical_subscription.plan_id
+            WHERE canonical_subscription.id = (
+              SELECT latest_subscription.id
+              FROM shop_subscriptions AS latest_subscription
+              WHERE latest_subscription.shop_id = shops.id
+              ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+              LIMIT 1
+            )
+              AND json_extract(plans.feature_flags_json, '$.customDomain') = 1
+          )
+        )
       )
     WHERE shop_domains.hostname_normalized = ?
       AND shop_domains.status = 'active'
       AND shop_domains.deleted_at IS NULL
       AND (
         shop_domains.type = 'platform_subdomain'
-        OR shop_domains.ownership_verified_at IS NOT NULL
+        OR (
+          shop_domains.ownership_verified_at IS NOT NULL
+          AND shop_domains.hostname_status = 'active'
+          AND shop_domains.ssl_status = 'active'
+          AND shop_domains.dns_status = 'active'
+          AND ${customDomainTurnstileAdmissionSql("shop_domains")}
+          AND EXISTS (
+            SELECT 1
+            FROM shop_subscriptions AS current_domain_subscription
+            INNER JOIN plans ON plans.id = current_domain_subscription.plan_id
+            WHERE current_domain_subscription.id = (
+              SELECT latest_subscription.id
+              FROM shop_subscriptions AS latest_subscription
+              WHERE latest_subscription.shop_id = shops.id
+              ORDER BY latest_subscription.created_at DESC, latest_subscription.id DESC
+              LIMIT 1
+            )
+              AND json_extract(plans.feature_flags_json, '$.customDomain') = 1
+          )
+        )
       )
     LIMIT 1
   `).bind(hostname).first<StorefrontShopRow>();
-  if (row === null || normalizeHostname(row.currentHostname) !== hostname) throw new AppError("storefront_not_found", 404);
+  if (row === null) throw new AppError("storefront_not_found", 404);
+  const customDomainEntitled = hasFeature(row.featureFlagsJson, "customDomain");
+  const currentDomainReady = (
+    row.currentDomainType === "platform_subdomain"
+    || (
+      row.currentDomainType === "custom"
+      && customDomainEntitled
+      && hasFreshExactTurnstileAdmission({
+        hostname,
+        validationMetadataJson: row.currentDomainValidationMetadataJson,
+      })
+    )
+  );
+  if (!currentDomainReady || normalizeHostname(row.currentHostname) !== hostname) throw new AppError("storefront_not_found", 404);
   const subscriptionState = row.subscriptionState ?? "canceled";
   // Resolve the same buyer hint order as middleware so locale-dependent
   // storefront defaults match the rendered document and cache dimension.
@@ -168,8 +243,10 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
   });
   const content = parseStorefrontContent(row.storefrontJson, row.name, locale);
   return {
-    access: storefrontAccess(row.status, subscriptionState),
-    canonicalHostname: row.canonicalHostname === null ? null : normalizeHostname(row.canonicalHostname),
+    access: storefrontAccess(row.status, subscriptionState, row.trialEndsAt, row.graceEndsAt, row.currentPeriodEnd),
+    canonicalHostname: row.canonicalHostname === null || (row.canonicalDomainType === "custom" && !customDomainEntitled)
+      ? null
+      : normalizeHostname(row.canonicalHostname),
     content,
     currency: row.currency,
     currentHostname: hostname,
@@ -192,6 +269,9 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     slug: row.slug,
     status: row.status,
     subscriptionState,
+    currentPeriodEnd: row.currentPeriodEnd,
+    trialEndsAt: row.trialEndsAt,
+    graceEndsAt: row.graceEndsAt,
     theme: parseStorefrontTheme(row.brandingJson),
   };
 }
@@ -199,12 +279,16 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
 export function assertStorefrontLive(shop: StorefrontShop): void {
   if (shop.access === "coming_soon") throw new AppError("tenant_not_ready", 409);
   if (shop.access === "suspended") {
+    if (shop.status === "active") {
+      assertSubscriptionAllows({ currentPeriodEnd: shop.currentPeriodEnd, graceEndsAt: shop.graceEndsAt, subscriptionState: shop.subscriptionState, trialEndsAt: shop.trialEndsAt });
+    }
     assertCheckoutAllowed({ shopStatus: shop.status, subscriptionState: shop.subscriptionState });
     throw new AppError("tenant_suspended", 403);
   }
 }
 
 export function assertStorefrontCheckout(shop: StorefrontShop): void {
+  assertSubscriptionAllows({ currentPeriodEnd: shop.currentPeriodEnd, graceEndsAt: shop.graceEndsAt, subscriptionState: shop.subscriptionState, trialEndsAt: shop.trialEndsAt });
   assertCheckoutAllowed({ shopStatus: shop.status, subscriptionState: shop.subscriptionState });
 }
 
@@ -221,7 +305,30 @@ function stockState(row: CatalogRow, threshold: number): StockState {
 export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontShop): Promise<{ categories: StorefrontCategory[]; products: StorefrontProduct[] }> {
   assertStorefrontLive(shop);
   const [categoryResult, productResult] = await Promise.all([
-    env.PLATFORM_DB.prepare(`SELECT id, slug, name, description FROM product_categories WHERE shop_id = ? AND status = 'active' ORDER BY sort_order, id LIMIT 200`).bind(shop.id).all<StorefrontCategory>(),
+    env.PLATFORM_DB.prepare(`
+      SELECT categories.id, categories.slug, categories.name, categories.description
+      FROM product_categories AS categories
+      WHERE categories.shop_id = ?
+        AND categories.status = 'active'
+        AND EXISTS (
+          SELECT 1
+          FROM products AS category_products
+          INNER JOIN catalog_channel_visibility AS category_visibility
+            ON category_visibility.shop_id = category_products.shop_id
+            AND category_visibility.product_id = category_products.id
+            AND category_visibility.channel_code = 'website'
+            AND category_visibility.status = 'visible'
+          INNER JOIN product_variants AS category_variants
+            ON category_variants.shop_id = category_products.shop_id
+            AND category_variants.product_id = category_products.id
+            AND category_variants.status = 'active'
+          WHERE category_products.shop_id = categories.shop_id
+            AND category_products.category_id = categories.id
+            AND category_products.status = 'active'
+        )
+      ORDER BY categories.sort_order, categories.id
+      LIMIT 200
+    `).bind(shop.id).all<StorefrontCategory>(),
     env.PLATFORM_DB.prepare(`
       SELECT products.id AS productId, products.category_id AS categoryId, products.slug AS productSlug,
         products.title AS productTitle, products.description, products.version AS productVersion,
@@ -233,6 +340,11 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
         product_variants.version AS variantVersion,
         COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock
       FROM products
+      INNER JOIN catalog_channel_visibility
+        ON catalog_channel_visibility.shop_id = products.shop_id
+        AND catalog_channel_visibility.product_id = products.id
+        AND catalog_channel_visibility.channel_code = 'website'
+        AND catalog_channel_visibility.status = 'visible'
       INNER JOIN product_variants
         ON product_variants.shop_id = products.shop_id
         AND product_variants.product_id = products.id

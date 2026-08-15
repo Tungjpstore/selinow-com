@@ -1,6 +1,6 @@
 # Domains
 
-Platform storefronts use `{slug}.selinow.com` through wildcard routing. Paid custom domains use Cloudflare for SaaS and are not active until hostname, DNS and SSL checks pass.
+Platform storefronts use `{slug}.selinow.com` through wildcard routing. Paid custom domains use Cloudflare for SaaS and are not active until ownership, hostname, DNS, SSL and exact Turnstile hostname-admission checks pass.
 
 ## Current implementation status
 
@@ -14,7 +14,7 @@ Phase 6 platform routing is implemented and live on Selinow staging. Worker `sel
 
 Phase 7 implementation and the shared-zone route matrix are accepted on staging. The `selinow.com` zone, Selinow-owned storage/queues, proxied wildcard DNS, fallback/CNAME records, Worker bindings/secrets and Cloudflare for SaaS fallback origin are provisioned. The external `selinow-lab.vnecs.store` lifecycle completed ownership verification, pending -> active hostname/SSL readiness, primary selection, HTTPS tenant rendering, platform-host redirect, deletion, fallback-primary restoration and authoritative DNS cleanup. Temporary acceptance resources were removed.
 
-Production routing remains intentionally unchanged.
+Production platform routing is live for the Selinow apex and wildcard surfaces after the platform-only handoff. External customer-domain traffic, Turnstile hostname admission and commerce/provider activation remain disabled pending their separate release gates; do not infer full production readiness from the route handoff.
 
 ## Production canary hostname
 
@@ -35,6 +35,7 @@ Do not use `wrangler deploy --env production`, `wrangler triggers deploy` or a b
 | Fallback origin | `proxy-fallback.selinow.com`, Cloudflare status `active` |
 | Customer instruction | `shop.customer.example CNAME customers.selinow.com` |
 | Runtime API secret | `CLOUDFLARE_API_TOKEN` as a least-privilege staging Worker secret |
+| Turnstile admission | Operator adds the exact hostname to the widget allowlist; Selinow reads it back but does not mutate the widget |
 
 `CLOUDFLARE_ZONE_ID` and `SAAS_CNAME_TARGET` are identifiers, not credentials, and are stored in staging `vars`. The API token must never be written to `wrangler.jsonc`, environment manifests, generated manifests, source, test fixtures with real values or command output.
 
@@ -56,15 +57,17 @@ Recommended operator sequence:
 ```bash
 # Supply the token through the shell prompt or an approved secret manager.
 export CLOUDFLARE_PLATFORM_API_TOKEN
+export CLOUDFLARE_D1_API_TOKEN
 export CLOUDFLARE_ROUTE_AUDIT_API_TOKEN
 npm run platform:provision -- --env staging --dry-run --json
 npm run platform:provision -- --env staging --json
 npm run platform:doctor -- --env staging --json
 unset CLOUDFLARE_PLATFORM_API_TOKEN
+unset CLOUDFLARE_D1_API_TOKEN
 unset CLOUDFLARE_ROUTE_AUDIT_API_TOKEN
 ```
 
-The operator token scope should be restricted to the DNS and fallback-origin setup required for the `selinow.com` zone and should remain in an approved operator secret manager. Use a separate least-privilege custom-hostname token for the staging Worker:
+The operator token scope should be restricted to the DNS and fallback-origin setup required for the `selinow.com` zone and should remain in an approved operator secret manager. Use a separate least-privilege runtime token for the staging Worker. It needs only the custom-hostname operations already used by the domain lifecycle plus Zone Read and Turnstile Widget Read for exact-host admission evidence; it does not receive Turnstile Widget Edit:
 
 ```bash
 wrangler secret put CLOUDFLARE_API_TOKEN --env staging
@@ -78,18 +81,21 @@ The deployed shared-zone configuration uses four explicit Worker routes:
 
 | Route | Worker |
 | --- | --- |
-| `selinow.com/*` | Disabled |
-| `*.selinow.com/*` | Disabled |
+| `selinow.com/*` | `selinow-com-production` |
+| `*.selinow.com/*` | `selinow-com-production` |
+| `staging.selinow.com/*` | `selinow-com-staging` |
+| `app-staging.selinow.com/*` | `selinow-com-staging` |
+| `api-staging.selinow.com/*` | `selinow-com-staging` |
 | `*.staging.selinow.com/*` | `selinow-com-staging` |
-| `*/*` | `selinow-com-staging` |
+| `*/*` | `selinow-com-production` |
 
-Cloudflare applies the more specific disabled routes before the broad fallback route. This keeps the apex and normal platform subdomains out of the staging Worker while allowing arbitrary external custom hostnames to reach the Cloudflare for SaaS fallback. The disabled null-script guards were applied manually and verified against staging; production Worker resources and routes were not changed.
+The catch-all belongs to production so external Cloudflare for SaaS customer hostnames cannot fall through to the staging Worker. The exact staging host routes are required because a wildcard route does not match the bare `staging.selinow.com`, `app-staging.selinow.com` or `api-staging.selinow.com` hostnames. The seven named staging hostnames remain attached as Worker Custom Domains and their DNS records remain manual/operator-managed.
 
-The staging environment specification validates the full reviewed contract. Wrangler owns and regenerates only the seven custom domains plus the active wildcard and `*/*` Worker routes; the two disabled null-script guards remain operator-managed because the Worker routes API does not accept them as script-owned routes. `platform:doctor` and every non-dry staging deploy now use a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` to require the exact two `script=null` guards and bind both `*.staging.selinow.com/*` and `*/*` to `selinow-com-staging`; a missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
+The staging environment specification validates the exact four staging-bound exceptions plus the three production-bound shared routes. Wrangler owns and regenerates the seven staging Worker Custom Domains, the three exact staging routes and `*.staging.selinow.com/*`; it does not own the production catch-all. `platform:doctor` and every non-dry staging deploy use `CLOUDFLARE_D1_API_TOKEN` for account-pinned Wrangler identity/D1 admission and a separate read-only `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN` for the seven-route inventory. A missing token, unreadable inventory or any drift fails closed before build and again immediately before Wrangler. Staging build-only and dry-run packaging remain offline. Any route change requires operator review because an incorrect broad route could intercept unrelated traffic.
 
-### Production platform handoff matrix (not live)
+### Production platform handoff matrix (historical baseline; revalidate before mutation)
 
-The reviewed production platform-only handoff intentionally differs from the current staging inventory and has not been applied. Cloudflare evaluates the most-specific route first, so the safe target is:
+The reviewed production platform-only handoff intentionally differs from the current staging inventory and was applied after this matrix was drafted. Cloudflare evaluates the most-specific route first; the historical handoff target was:
 
 | Route | Worker |
 | --- | --- |
@@ -101,29 +107,37 @@ The reviewed production platform-only handoff intentionally differs from the cur
 | `*.staging.selinow.com/*` | `selinow-com-staging` |
 | `*/*` | `selinow-com-staging` |
 
-The exact in-zone staging routes are required because a production wildcard route outranks a staging Custom Domain. In this platform-only release, `*/*` intentionally remains on `selinow-com-staging`, so external custom-domain traffic remains on staging and no external-domain production cutover is claimed. Worker route patterns must belong to the zone; a future external cutover therefore requires a fresh inventory proving that no external staging custom hostname is active, or a separate staging zone/dispatcher. During first-production canary, add `canary.selinow.com/* -> selinow-com-production` as a temporary specificity override while the existing null wildcard is still present. This matrix is plan-only evidence until a fresh live inventory confirms that every entry and service binding matches.
+This was the initial handoff matrix. The three exact staging routes were later removed as redundant while their Worker Custom Domains remained active. The subsequent production handoff moved `*/*` to `selinow-com-production`; therefore this historical table must never be used as a rollback target or current route contract. The reviewed repair reapplied the three exact staging exceptions without changing DNS or Worker Custom Domains. Capture a fresh live inventory before every subsequent mutation.
 
 The active fallback origin and deployed route matrix prove the shared-zone configuration exists. The accepted external customer-hostname lifecycle additionally proves staging resolution through `customers.selinow.com`, successful HTTPS, correct tenant rendering and removal that stops routing; it does not prove production external-host admission or Turnstile lifecycle. Every future route or SaaS-contract change must repeat the relevant checks rather than relying only on this baseline.
 
 ## Customer readiness
 
-A custom domain is ready only when all three conditions are true:
+A custom domain is ready only when all five conditions are true:
 
-1. Cloudflare custom hostname status is `active`.
-2. Cloudflare SSL status is `active`.
-3. Customer DNS resolves to `SAAS_CNAME_TARGET`.
+1. The seller-created TXT record proves ownership for the current tenant claim.
+2. Cloudflare custom hostname status is `active`.
+3. Cloudflare SSL status is `active`.
+4. The seller-created CNAME resolves exactly to `SAAS_CNAME_TARGET`.
+5. The exact hostname appears in the configured Turnstile widget domain allowlist and Selinow has read it back as `active`.
 
-TLS success, fallback-origin status or a single successful provider poll is insufficient by itself. The platform subdomain remains available until the custom domain is fully ready and selected as primary.
+TXT and CNAME creation remain manual because Selinow has no registrar API integration. After DNS is correct, Selinow automates Cloudflare custom-hostname/SSL polling and Turnstile allowlist read-back. Adding or removing a hostname from the Turnstile widget remains an operator action; the product must not claim that this mutation is automatic.
+
+TLS success, fallback-origin status, a wildcard Turnstile entry or a single successful custom-hostname poll is insufficient by itself. Wildcard widget domains never satisfy exact-host admission. The platform subdomain remains available until the custom domain is fully ready and selected as primary.
+
+Migration `0092_custom_domain_turnstile_admission.sql` marks every pre-admission custom domain `pending`, demotes legacy custom primaries, restores a safe platform canonical domain when one exists and schedules reconciliation. Rows without exact admission evidence remain non-routable under the new runtime.
+
+Migration `0093_custom_domain_turnstile_runtime_guard.sql` adds D1 guards that keep custom-domain activation, primary selection, domain identity and canonical routing fail-closed while an older Worker may still be active during migrate-before-deploy or rollback. It also repairs any invalid reactivation written between the `0092` data transition and guard installation.
 
 ## Seller lifecycle
 
 - `POST /api/app/shops/{shopPublicId}/domains` normalizes and claims a hostname idempotently, then starts a leased provider check.
-- `GET /api/app/shops/{shopPublicId}/domains` returns tenant-scoped DNS, hostname and SSL readiness plus the exact CNAME target.
-- `POST /api/app/shops/{shopPublicId}/domains/{domainId}/checks` performs an owner-authorized leased retry.
+- `GET /api/app/shops/{shopPublicId}/domains` returns tenant-scoped ownership, DNS, hostname, SSL and Turnstile admission readiness plus the exact manual TXT/CNAME instructions.
+- `POST /api/app/shops/{shopPublicId}/domains/{domainId}/checks` performs an owner-authorized leased retry and reads back the exact Turnstile widget hostname after the operator has admitted it.
 - `PUT /api/app/shops/{shopPublicId}/domains/{domainId}/primary` atomically updates primary and canonical routing only after all readiness signals pass.
 - `DELETE /api/app/shops/{shopPublicId}/domains/{domainId}` removes routing atomically, blocks while an active payment attempt depends on the domain and retries provider deletion through reconciliation.
 
-All mutations require owner capability, recent authentication, JSON content type and CSRF. Provider checks persist only while holding the matching lease, so polling cannot reactivate a hostname after deletion begins.
+All mutations require owner capability, recent authentication, JSON content type and CSRF. Provider checks persist only while holding the matching lease, so polling cannot reactivate a hostname after deletion begins. Deletion removes Selinow routing and the Cloudflare custom hostname; DNS records and the operator-managed Turnstile allowlist entry are not represented as automatically deleted.
 
 Create and restore transitions use optimistic version compare-and-swap in addition to lease fencing. When a concurrent request commits first, the losing request re-reads and returns the current live domain instead of reporting a false conflict; transition audit is written only for the request that actually commits. Primary/canonical updates and domain deletion also re-check the current row version and active payment-origin dependency inside the guarded transition.
 

@@ -32,6 +32,7 @@ describe("Telegram shop routing", () => {
       orderExpiryMinutes: 30,
       status: "active",
       subscriptionState: "active",
+      currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     });
 
     await expect(loadTelegramShop(env, "shop_internal")).resolves.toMatchObject({
@@ -43,6 +44,17 @@ describe("Telegram shop routing", () => {
     expect(query().sql).toContain("canonical_domain.status = 'active'");
     expect(query().sql).toContain("canonical_domain.type = 'platform_subdomain'");
     expect(query().sql).toContain("canonical_domain.ownership_verified_at IS NOT NULL");
+    expect(query().sql).toContain("canonical_domain.hostname_status = 'active'");
+    expect(query().sql).toContain("canonical_domain.ssl_status = 'active'");
+    expect(query().sql).toContain("canonical_domain.dns_status = 'active'");
+    expect(query().sql).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.status') = 'active'");
+    expect(query().sql).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.hostname') = canonical_domain.hostname_normalized");
+    expect(query().sql).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.mode') = 'operator_managed'");
+    expect(query().sql).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.source') = 'cloudflare_widget_domains'");
+    expect(query().sql).toContain("json_extract(canonical_domain.validation_metadata_json, '$.turnstile.checkedAt')");
+    expect(query().sql).toContain("canonical_domain.deleted_at IS NULL");
+    expect(query().sql).toContain("canonical_domain.delete_requested_at IS NULL");
+    expect(query().sql).toContain("-12 hours");
     expect(query().sql).not.toContain("is_primary");
     expect(query().values).toEqual(["shop_internal"]);
   });

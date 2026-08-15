@@ -210,6 +210,7 @@ function storefrontShop(): StorefrontShop {
     settingsVersion: 1,
     slug: "attribution-a",
     status: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
     theme: {
       accent: "#7C3AED",
@@ -230,6 +231,7 @@ function telegramShop(): TelegramShop {
     orderExpiryMinutes: 30,
     origin: "https://attribution-b.selinow.com",
     status: "active",
+    currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
   };
 }
@@ -404,7 +406,7 @@ describe("built-in channel attribution contract", () => {
     const order = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-attribution-web-0001",
@@ -463,7 +465,7 @@ describe("built-in channel attribution contract", () => {
     const staleCheckout = checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-cart-race-loser-0001",
@@ -474,7 +476,7 @@ describe("built-in channel attribution contract", () => {
     const winner = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-cart-race-winner-0002",
@@ -664,6 +666,7 @@ describe("built-in channel attribution contract", () => {
     };
     const telegramShop: TelegramShop = {
       currency: shop.currency,
+      currentPeriodEnd: shop.currentPeriodEnd ?? null,
       defaultLocale: shop.defaultLocale,
       id: shop.id,
       name: shop.name,
@@ -685,7 +688,7 @@ describe("built-in channel attribution contract", () => {
     const websiteCheckout = checkoutCart({
       cartId: websiteCart.cartId,
       cartToken: websiteCart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-cross-channel-web-0001",
@@ -765,7 +768,7 @@ describe("built-in channel attribution contract", () => {
     const order = await checkoutCart({
       cartId: cart.cartId,
       cartToken: cart.cartToken,
-      customerEmail: null,
+      customerEmail: "buyer@example.test",
       env,
       expected,
       idempotencyKey: "checkout-attribution-web-free-0001",
@@ -862,6 +865,7 @@ describe("built-in channel attribution contract", () => {
       orderExpiryMinutes: 30,
       origin: "https://attribution-b.selinow.com",
       status: "active",
+      currentPeriodEnd: "2099-01-01T00:00:00.000Z",
       subscriptionState: "active",
     };
     await seedTelegramQuote({ cartId: "cart_attribution_telegram", env, identity, integrationId: "integration_attribution_telegram", shop, updateId: 1001 });
@@ -1014,6 +1018,7 @@ describe("built-in channel attribution contract", () => {
       orderExpiryMinutes: 30,
       origin: "https://attribution-b.selinow.com",
       status: "active",
+      currentPeriodEnd: "2099-01-01T00:00:00.000Z",
       subscriptionState: "active",
     };
     await seedTelegramQuote({ cartId: "cart_attribution_telegram_free", env, identity, integrationId: "integration_attribution_telegram_free", shop, updateId: 1002 });
@@ -1067,7 +1072,7 @@ describe("built-in channel attribution contract", () => {
     expect(events[0]?.idempotencyHash).not.toBe(events[1]?.idempotencyHash);
   });
 
-  it("fulfills only the digital portion of a mixed free Telegram order", async () => {
+  it("rejects a mixed free Telegram order without partial fulfillment", async () => {
     const database = createDatabase();
     const now = "2026-07-26T00:00:00.000Z";
     seedTelegramCheckout(database, {
@@ -1133,49 +1138,22 @@ describe("built-in channel attribution contract", () => {
       subjectHash: "subject-attribution-telegram-mixed",
     };
     const shop = telegramShop();
+    const ordersBefore = database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get(shop.id);
 
     await seedTelegramQuote({ cartId: "cart_attribution_telegram_mixed", env, identity, integrationId: "integration_attribution_telegram_mixed", shop, updateId: 1007 });
-    const order = await checkoutTelegramCart({
+    await expect(checkoutTelegramCart({
       env,
       identity,
       integrationId: "integration_attribution_telegram_mixed",
       quoteUpdateId: 1007,
       shop,
       updateId: 1007,
+    })).rejects.toMatchObject({
+      code: "mixed_fulfillment_unsupported",
+      status: 409,
     });
-
-    expect(order).toMatchObject({
-      fulfillmentStatus: "unfulfilled",
-      paymentStatus: "paid",
-      status: "processing",
-      totalMinor: 0,
-    });
-    expect(database.database.prepare(`
-      SELECT fulfillment_type AS fulfillmentType, state
-      FROM fulfillments
-      WHERE shop_id = ? AND order_id = (SELECT id FROM orders WHERE shop_id = ? AND public_id = ?)
-      ORDER BY fulfillment_type
-    `).all(shop.id, shop.id, order.orderId)).toEqual([
-      { fulfillmentType: "digital_keys", state: "fulfilled" },
-      { fulfillmentType: "manual", state: "pending" },
-    ]);
-    expect(database.database.prepare(`
-      SELECT COUNT(*) AS count
-      FROM fulfillment_items
-      WHERE shop_id = ? AND fulfillment_id = (
-        SELECT id FROM fulfillments
-        WHERE shop_id = ? AND order_id = (
-          SELECT id FROM orders WHERE shop_id = ? AND public_id = ?
-        ) AND fulfillment_type = 'digital_keys'
-      )
-    `).get(shop.id, shop.id, shop.id, order.orderId)).toEqual({ count: 1 });
-    expect(database.database.prepare(`
-      SELECT status, sold_order_item_id AS soldOrderItemId
-      FROM inventory_keys WHERE shop_id = ? AND id = ?
-    `).get(shop.id, "inventory_attribution_telegram_mixed")).toMatchObject({ status: "sold" });
-    expect(database.database.prepare(`
-      SELECT fulfilled_at AS fulfilledAt FROM orders WHERE shop_id = ? AND public_id = ?
-    `).get(shop.id, order.orderId)).toEqual({ fulfilledAt: null });
+    expect(database.database.prepare("SELECT COUNT(*) AS count FROM orders WHERE shop_id = ?").get(shop.id)).toEqual(ordersBefore);
+    expect(database.database.prepare("SELECT status FROM inventory_keys WHERE shop_id = ? AND id = ?").get(shop.id, "inventory_attribution_telegram_mixed")).toEqual({ status: "available" });
   });
 
   it("replays a Telegram checkout after the original cart is converted", async () => {

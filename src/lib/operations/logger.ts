@@ -39,7 +39,7 @@ const SAFE_REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/u;
 const SAFE_QUEUE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
 const SAFE_SCHEDULE = /^[0-9*/?, -]{1,80}$/u;
 const SAFE_METRIC_KEY = /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/u;
-const SENSITIVE_KEY = /(account|authorization|chat|checkout|cookie|credential|customer|email|key|password|qr|recipient|secret|signature|token|webhook)/iu;
+const SENSITIVE_KEY = /(account|authorization|body|chat|checkout|cookie|credential|customer|email|key|license|password|payload|qr|recipient|secret|signature|token|webhook)/iu;
 
 function parseLevel(value: unknown): LogLevel | "silent" {
   if (typeof value !== "string") return "info";

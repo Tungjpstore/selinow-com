@@ -1,15 +1,21 @@
 import { AppError } from "../core/errors";
-import { constantTimeEqual, hmacToken } from "../core/crypto";
+import { constantTimeEqual, dummyVerifyPassword, hashPassword, hmacToken, verifyPassword } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
+
 import { clearCookie, parseCookies, serializeCookie } from "../http/cookies";
 import type { AppBindings } from "../platform/bindings";
 import { claimMagicLinkAdmission } from "./admission";
-import { sendMagicLinkEmail } from "./email";
-import { assertCsrfRequest } from "./policy";
+import { sendMagicLinkEmail, sendPasswordChangedAlertEmail } from "./email";
+import { createAndSendOtp, verifyOtp } from "./otp";
+import { assertCsrfRequest, validatePasswordStrength } from "./policy";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
+const SESSION_LAST_SEEN_WRITE_INTERVAL_MS = 5 * 60_000;
 const MAGIC_LINK_TTL_MINUTES = 15;
 const MAGIC_LINK_INITIATION_TTL_SECONDS = MAGIC_LINK_TTL_MINUTES * 60;
+const MAGIC_LINK_CONFIRMATION_TTL_SECONDS = 5 * 60;
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60_000; // 15 minutes
 
 type SessionRow = {
   authenticated_at: string;
@@ -20,6 +26,7 @@ type SessionRow = {
   session_id: string;
   user_id: string;
   user_status: string;
+  password_hash: string | null;
 };
 
 type MagicLinkRow = {
@@ -29,6 +36,16 @@ type MagicLinkRow = {
   token_id: string;
   user_id: string;
   user_status: string;
+};
+
+type UserAccountRow = {
+  displayName: string;
+  emailNormalized: string;
+  failedLoginCount: number;
+  lockedUntil: string | null;
+  passwordHash: string | null;
+  status: string;
+  userId: string;
 };
 
 export type AuthContext = {
@@ -45,11 +62,45 @@ export type SessionCredentials = {
   sessionToken: string;
 };
 
+export type SessionSummary = {
+  authenticatedAt: string;
+  createdAt: string;
+  expiresAt: string;
+  isCurrent: boolean;
+  lastSeenAt: string;
+  sessionId: string;
+};
+
 export type MagicLinkRequestResult = {
+  challengeRequired: boolean;
   debugMagicLink?: string;
   expiresAt: string;
   initiationBinding: string;
 };
+
+export type PasswordLoginResult = {
+  auth: Omit<AuthContext, "csrfTokenHash">;
+  credentials: SessionCredentials;
+  needsPasswordChange: boolean;
+};
+
+export type PasswordLoginRequest = {
+  email: string;
+  password: string;
+  rememberMe?: boolean;
+};
+
+export type BrowserMagicLinkConsumptionResult =
+  | {
+    confirmationBinding: string;
+    confirmationRequired: true;
+    maskedDestination: string;
+  }
+  | {
+    auth: Omit<AuthContext, "csrfTokenHash">;
+    confirmationRequired: false;
+    credentials: SessionCredentials;
+  };
 
 export function createSessionCredentials(): SessionCredentials {
   return {
@@ -58,7 +109,34 @@ export function createSessionCredentials(): SessionCredentials {
   };
 }
 
+async function activateMagicLinkReplacement(input: {
+  env: AppBindings;
+  expiresAt: string;
+  now: Date;
+  tokenId: string;
+  userId: string;
+}): Promise<void> {
+  const nowIso = input.now.toISOString();
+  const expiredIso = new Date(input.now.getTime() - 1).toISOString();
+  const results = await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE magic_link_tokens
+      SET expires_at = ?
+      WHERE user_id = ? AND purpose = 'seller_login' AND id != ?
+        AND consumed_at IS NULL AND expires_at > ?
+    `).bind(expiredIso, input.userId, input.tokenId, nowIso),
+
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE magic_link_tokens
+      SET expires_at = ?
+      WHERE id = ? AND user_id = ? AND purpose = 'seller_login' AND consumed_at IS NULL
+    `).bind(input.expiresAt, input.tokenId, input.userId),
+  ]);
+  if ((results[1]?.meta.changes ?? 0) !== 1) throw new AppError("provider_unavailable", 503);
+}
+
 export async function requestMagicLink(input: {
+  challengePassed?: boolean;
   displayName: string;
   email: string;
   env: AppBindings;
@@ -68,17 +146,20 @@ export async function requestMagicLink(input: {
 }): Promise<MagicLinkRequestResult> {
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + MAGIC_LINK_TTL_MINUTES * 60_000).toISOString();
-  const rateLimitWindowStart = new Date(now.getTime() - MAGIC_LINK_TTL_MINUTES * 60_000).toISOString();
-  await claimMagicLinkAdmission({
+  const admission = await claimMagicLinkAdmission({
+    ...(input.challengePassed === undefined ? {} : { challengePassed: input.challengePassed }),
+    email: input.email,
     env: input.env,
     now,
     requesterAddress: input.requesterAddress,
   });
+  const token = createOpaqueToken();
+  const initiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", token);
+  if (!admission.deliveryPermitted) return { challengeRequired: true, expiresAt, initiationBinding };
+
   const userId = createId("usr");
   const tokenId = createId("mlt");
-  const token = createOpaqueToken();
   const tokenHash = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link", token);
-  const initiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", token);
 
   const user = await input.env.PLATFORM_DB.prepare(`
     INSERT INTO platform_users (
@@ -93,23 +174,19 @@ export async function requestMagicLink(input: {
   `).bind(input.email).first<{ id: string }>();
   if (resolvedUser === null) throw new AppError("provider_unavailable", 503);
 
-  const results = await input.env.PLATFORM_DB.batch([
-    input.env.PLATFORM_DB.prepare(`
-      INSERT INTO magic_link_tokens (
-        id, user_id, token_hash, purpose, expires_at, created_at
-      )
-      SELECT ?, ?, ?, 'seller_login', ?, ?
-      WHERE (
-        SELECT COUNT(*) FROM magic_link_tokens
-        WHERE user_id = ? AND created_at >= ?
-      ) < 5
-    `).bind(tokenId, resolvedUser.id, tokenHash, expiresAt, now.toISOString(), resolvedUser.id, rateLimitWindowStart),
-  ]);
-  if ((results[0]?.meta.changes ?? 0) !== 1) throw new AppError("rate_limited", 429);
+  const inserted = await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO magic_link_tokens (
+      id, user_id, token_hash, purpose, expires_at, created_at
+    )
+    VALUES (?, ?, ?, 'seller_login', ?, ?)
+  `).bind(tokenId, resolvedUser.id, tokenHash, now.toISOString(), now.toISOString()).run();
+  if (inserted.meta.changes !== 1) throw new AppError("provider_unavailable", 503);
 
   if (input.env.APP_ENV === "local") {
+    await activateMagicLinkReplacement({ env: input.env, expiresAt, now, tokenId, userId: resolvedUser.id });
     return {
-      debugMagicLink: `/api/auth/magic-link/consume?token=${encodeURIComponent(token)}`,
+      challengeRequired: false,
+      debugMagicLink: `/login#${new URLSearchParams({ magic: token }).toString()}`,
       expiresAt,
       initiationBinding,
     };
@@ -121,38 +198,27 @@ export async function requestMagicLink(input: {
     locale: input.locale,
     token,
   });
+  await activateMagicLinkReplacement({ env: input.env, expiresAt, now, tokenId, userId: resolvedUser.id });
 
-  return { expiresAt, initiationBinding };
+  return { challengeRequired: false, expiresAt, initiationBinding };
 }
 
-export async function consumeMagicLink(input: {
-  env: AppBindings;
-  initiationBinding: string;
-  token: string;
-}): Promise<{ auth: Omit<AuthContext, "csrfTokenHash">; credentials: SessionCredentials }> {
-  if (input.token.length < 20 || input.token.length > 256) {
-    throw new AppError("authentication_required", 401);
-  }
+function assertMagicLinkToken(token: string): void {
+  if (token.length < 20 || token.length > 256) throw new AppError("authentication_required", 401);
+}
 
-  const expectedInitiationBinding = await hmacToken(
-    input.env.MAGIC_LINK_SECRET,
-    "magic-link-initiation",
-    input.token,
-  );
-  if (!constantTimeEqual(input.initiationBinding, expectedInitiationBinding)) {
-    throw new AppError("authentication_required", 401);
-  }
-
-  const now = new Date();
-  const tokenHash = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link", input.token);
-  const magicLink = await input.env.PLATFORM_DB.prepare(`
+async function loadMagicLink(env: AppBindings, token: string, now: Date): Promise<MagicLinkRow> {
+  assertMagicLinkToken(token);
+  const tokenHash = await hmacToken(env.MAGIC_LINK_SECRET, "magic-link", token);
+  const magicLink = await env.PLATFORM_DB.prepare(`
     SELECT
       magic_link_tokens.id AS token_id,
       magic_link_tokens.user_id,
       magic_link_tokens.expires_at,
       platform_users.email_normalized,
       platform_users.display_name,
-      platform_users.status AS user_status
+      platform_users.status AS user_status,
+      platform_users.password_hash
     FROM magic_link_tokens
     INNER JOIN platform_users ON platform_users.id = magic_link_tokens.user_id
     WHERE magic_link_tokens.token_hash = ?
@@ -164,12 +230,38 @@ export async function consumeMagicLink(input: {
   if (magicLink === null || magicLink.user_status === "suspended") {
     throw new AppError("authentication_required", 401);
   }
+  return magicLink;
+}
 
+async function loadUserAccountByEmail(env: AppBindings, email: string): Promise<UserAccountRow | null> {
+  const row = await env.PLATFORM_DB.prepare(`
+    SELECT 
+      id AS userId, 
+      email_normalized AS emailNormalized, 
+      display_name AS displayName, 
+      status, 
+      password_hash AS passwordHash,
+      COALESCE(failed_login_count, 0) AS failedLoginCount,
+      locked_until AS lockedUntil
+    FROM platform_users
+    WHERE email_normalized = ?
+    LIMIT 1
+  `).bind(email).first<UserAccountRow>();
+
+  return row ?? null;
+}
+
+async function consumeLoadedMagicLink(input: {
+  env: AppBindings;
+  magicLink: MagicLinkRow;
+  now: Date;
+}): Promise<{ auth: Omit<AuthContext, "csrfTokenHash">; credentials: SessionCredentials }> {
   const credentials = createSessionCredentials();
   const sessionId = createId("ses");
   const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
   const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
-  const expiresAt = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
+  const expiresAt = new Date(input.now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
+  const nowIso = input.now.toISOString();
 
   const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
@@ -179,30 +271,33 @@ export async function consumeMagicLink(input: {
       )
       SELECT ?, ?, ?, ?, 'active', ?, ?, ?, ?
       FROM magic_link_tokens
-      WHERE id = ? AND consumed_at IS NULL AND expires_at > ?
+      INNER JOIN platform_users ON platform_users.id = magic_link_tokens.user_id
+      WHERE magic_link_tokens.id = ? AND magic_link_tokens.consumed_at IS NULL AND magic_link_tokens.expires_at > ?
+
     `).bind(
       sessionId,
-      magicLink.user_id,
+      input.magicLink.user_id,
       sessionTokenHash,
       csrfTokenHash,
-      now.toISOString(),
+      nowIso,
       expiresAt,
-      now.toISOString(),
-      now.toISOString(),
-      magicLink.token_id,
-      now.toISOString(),
+      nowIso,
+      nowIso,
+      input.magicLink.token_id,
+      nowIso,
     ),
     input.env.PLATFORM_DB.prepare(`
       UPDATE magic_link_tokens
       SET consumed_at = ?
       WHERE id = ? AND consumed_at IS NULL AND expires_at > ?
-    `).bind(now.toISOString(), magicLink.token_id, now.toISOString()),
+    `).bind(nowIso, input.magicLink.token_id, nowIso),
     input.env.PLATFORM_DB.prepare(`
       UPDATE platform_users
       SET status = 'active', last_login_at = ?, updated_at = ?
       WHERE id = ? AND status != 'suspended'
-    `).bind(now.toISOString(), now.toISOString(), magicLink.user_id),
+    `).bind(nowIso, nowIso, input.magicLink.user_id),
   ]);
+
 
   if ((results[0]?.meta.changes ?? 0) !== 1 || (results[1]?.meta.changes ?? 0) !== 1) {
     throw new AppError("authentication_required", 401);
@@ -210,13 +305,392 @@ export async function consumeMagicLink(input: {
 
   return {
     auth: {
-      authenticatedAt: now.toISOString(),
-      displayName: magicLink.display_name,
-      email: magicLink.email_normalized,
+      authenticatedAt: nowIso,
+      displayName: input.magicLink.display_name,
+      email: input.magicLink.email_normalized,
       sessionId,
-      userId: magicLink.user_id,
+      userId: input.magicLink.user_id,
     },
     credentials,
+  };
+}
+
+function maskEmailDestination(email: string): string {
+  const separator = email.lastIndexOf("@");
+  if (separator <= 0 || separator === email.length - 1) return "***";
+  const local = email.slice(0, separator);
+  const domain = email.slice(separator + 1);
+  const labels = domain.split(".");
+  const domainName = labels.shift() ?? "";
+  const suffix = labels.length > 0 ? `.${labels.join(".")}` : "";
+  return `${local.slice(0, 1)}***@${domainName.slice(0, 1)}***${suffix}`;
+}
+
+async function createMagicLinkConfirmationBinding(env: AppBindings, token: string, now: Date): Promise<string> {
+  const expiresAt = Math.floor(now.getTime() / 1_000) + MAGIC_LINK_CONFIRMATION_TTL_SECONDS;
+  const expiresAtText = String(expiresAt);
+  const signature = await hmacToken(env.MAGIC_LINK_SECRET, "magic-link-confirmation", `${expiresAtText}:${token}`);
+  return `${expiresAtText}.${signature}`;
+}
+
+async function confirmationBindingMatches(input: {
+  binding: string;
+  env: AppBindings;
+  now: Date;
+  token: string;
+}): Promise<boolean> {
+  const separator = input.binding.indexOf(".");
+  if (separator <= 0) return false;
+  const expiresAtText = input.binding.slice(0, separator);
+  const providedSignature = input.binding.slice(separator + 1);
+  if (!/^\d{10,13}$/u.test(expiresAtText) || providedSignature.length < 32 || providedSignature.length > 128) return false;
+  const expiresAt = Number.parseInt(expiresAtText, 10);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt < Math.floor(input.now.getTime() / 1_000)) return false;
+  const expectedSignature = await hmacToken(
+    input.env.MAGIC_LINK_SECRET,
+    "magic-link-confirmation",
+    `${String(expiresAt)}:${input.token}`,
+  );
+  return constantTimeEqual(providedSignature, expectedSignature);
+}
+
+export async function consumeMagicLink(input: {
+  env: AppBindings;
+  initiationBinding: string;
+  now?: Date;
+  token: string;
+}): Promise<{ auth: Omit<AuthContext, "csrfTokenHash">; credentials: SessionCredentials }> {
+  assertMagicLinkToken(input.token);
+  const expectedInitiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", input.token);
+  if (!constantTimeEqual(input.initiationBinding, expectedInitiationBinding)) {
+    throw new AppError("authentication_required", 401);
+  }
+  const now = input.now ?? new Date();
+  return consumeLoadedMagicLink({ env: input.env, magicLink: await loadMagicLink(input.env, input.token, now), now });
+}
+
+
+export async function loginWithPassword(input: {
+  env: AppBindings;
+  email: string;
+  password: string;
+  now?: Date;
+  rememberMe?: boolean;
+}): Promise<PasswordLoginResult> {
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  const user = await loadUserAccountByEmail(input.env, input.email);
+
+  if (!user) {
+    // Mitigate timing attack
+    await dummyVerifyPassword(input.password);
+    throw new AppError("authentication_required", 401, ["invalid_credentials"]);
+  }
+
+  if (user.status === "suspended") {
+    throw new AppError("authentication_required", 401, ["account_suspended"]);
+  }
+
+  // Check account lockout
+  if (user.lockedUntil && Date.parse(user.lockedUntil) > now.getTime()) {
+    const remainingSeconds = Math.ceil((Date.parse(user.lockedUntil) - now.getTime()) / 1000);
+    throw new AppError("account_locked", 423, [`retry_after_${String(remainingSeconds)}s`]);
+  }
+
+
+  if (!user.passwordHash) {
+    throw new AppError("authentication_required", 401, ["password_not_set"]);
+  }
+
+  const isValid = await verifyPassword(input.password, user.passwordHash);
+
+  if (!isValid) {
+    const nextFailed = user.failedLoginCount + 1;
+    let lockedUntil: string | null = null;
+    if (nextFailed >= MAX_FAILED_LOGIN_ATTEMPTS) {
+      lockedUntil = new Date(now.getTime() + LOCKOUT_DURATION_MS).toISOString();
+    }
+
+    await input.env.PLATFORM_DB.prepare(`
+      UPDATE platform_users
+      SET failed_login_count = ?, locked_until = ?, updated_at = ?
+      WHERE id = ?
+    `).bind(nextFailed, lockedUntil, nowIso, user.userId).run();
+
+    if (lockedUntil) {
+      throw new AppError("account_locked", 423, ["too_many_attempts_account_locked"]);
+    }
+    throw new AppError("authentication_required", 401, ["invalid_credentials"]);
+  }
+
+  // Password is valid - check user verification status
+  if (user.status === "pending" || user.status === "unverified") {
+    throw new AppError("email_unverified", 403, ["email_verification_required"]);
+  }
+
+  // Reset failed login counter and clear lock
+  await input.env.PLATFORM_DB.prepare(`
+    UPDATE platform_users
+    SET failed_login_count = 0, locked_until = NULL, last_login_at = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(nowIso, nowIso, user.userId).run();
+
+  const credentials = createSessionCredentials();
+  const sessionId = createId("ses");
+  const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
+  const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
+  const ttlSeconds = input.rememberMe ? 30 * 24 * 60 * 60 : SESSION_TTL_SECONDS;
+  const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
+
+  const result = await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO auth_sessions (
+      id, user_id, token_hash, csrf_token_hash, status, authenticated_at,
+      expires_at, last_seen_at, created_at
+    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
+    RETURNING id
+  `).bind(
+    sessionId,
+    user.userId,
+    sessionTokenHash,
+    csrfTokenHash,
+    nowIso,
+    expiresAt,
+    nowIso,
+    nowIso,
+  ).first();
+
+  if (!result) throw new AppError("provider_unavailable", 503);
+
+  return {
+    auth: {
+      authenticatedAt: nowIso,
+      displayName: user.displayName,
+      email: user.emailNormalized,
+      sessionId,
+      userId: user.userId,
+    },
+    credentials,
+    needsPasswordChange: false,
+  };
+}
+
+export async function completeRegistrationWithOtp(input: {
+  email: string;
+  env: AppBindings;
+  now?: Date;
+  otp: string;
+}): Promise<{ auth: Omit<AuthContext, "csrfTokenHash">; credentials: SessionCredentials }> {
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+
+  // Verify OTP
+  await verifyOtp({
+    email: input.email,
+    env: input.env,
+    now,
+    otp: input.otp,
+    purpose: "register_verify",
+  });
+
+  const user = await loadUserAccountByEmail(input.env, input.email);
+  if (!user) throw new AppError("authentication_required", 401);
+
+  // Activate user account
+  await input.env.PLATFORM_DB.prepare(`
+    UPDATE platform_users
+    SET status = 'active', email_verified_at = ?, updated_at = ?, last_login_at = ?
+    WHERE id = ? AND status != 'suspended'
+  `).bind(nowIso, nowIso, nowIso, user.userId).run();
+
+  const credentials = createSessionCredentials();
+  const sessionId = createId("ses");
+  const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
+  const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
+  const expiresAt = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
+
+  await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO auth_sessions (
+      id, user_id, token_hash, csrf_token_hash, status, authenticated_at,
+      expires_at, last_seen_at, created_at
+    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
+  `).bind(
+    sessionId,
+    user.userId,
+    sessionTokenHash,
+    csrfTokenHash,
+    nowIso,
+    expiresAt,
+    nowIso,
+    nowIso,
+  ).run();
+
+
+  return {
+    auth: {
+      authenticatedAt: nowIso,
+      displayName: user.displayName,
+      email: user.emailNormalized,
+      sessionId,
+      userId: user.userId,
+    },
+    credentials,
+  };
+}
+
+export async function requestPasswordResetOtp(input: {
+  email: string;
+  env: AppBindings;
+  locale?: unknown;
+  now?: Date;
+}): Promise<{ cooldownSeconds: number; debugOtp?: string; expiresAt: string }> {
+  const user = await loadUserAccountByEmail(input.env, input.email);
+  if (!user || user.status === "suspended") {
+    // Generic simulated return to avoid account enumeration
+    return {
+      cooldownSeconds: 60,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    };
+  }
+
+  return createAndSendOtp({
+    ...(input.locale === undefined ? {} : { locale: input.locale }),
+    ...(input.now === undefined ? {} : { now: input.now }),
+    email: input.email,
+    env: input.env,
+    purpose: "password_reset",
+    userId: user.userId,
+  });
+}
+
+export async function createPasswordResetToken(secret: string, email: string, userId?: string | null): Promise<string> {
+  const expiresAt = Date.now() + 15 * 60 * 1000;
+  const payload = `${email}:${String(expiresAt)}:${userId ?? ""}`;
+  const signature = await hmacToken(secret, "password-reset-token", payload);
+  const encodedPayload = btoa(payload);
+  return `${encodedPayload}.${signature}`;
+}
+
+export async function verifyPasswordResetToken(secret: string, email: string, token: string): Promise<void> {
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new AppError("authentication_required", 401);
+  }
+  const [encodedPayload, signature] = parts;
+  let payload: string;
+  try {
+    payload = atob(encodedPayload);
+  } catch {
+    throw new AppError("authentication_required", 401);
+  }
+  const [tokenEmail, expiresAtStr] = payload.split(":");
+  if (tokenEmail !== email || !expiresAtStr) {
+    throw new AppError("authentication_required", 401);
+  }
+  const expiresAt = Number(expiresAtStr);
+  if (isNaN(expiresAt) || Date.now() > expiresAt) {
+    throw new AppError("validation_failed", 400, ["reset_token_expired"]);
+  }
+  const expectedSig = await hmacToken(secret, "password-reset-token", payload);
+  if (!constantTimeEqual(signature, expectedSig)) {
+    throw new AppError("authentication_required", 401);
+  }
+}
+
+export async function resetPasswordWithOtp(input: {
+  email: string;
+  env: AppBindings;
+  locale?: unknown;
+  newPassword: string;
+  now?: Date;
+  otp?: string;
+  resetToken?: string;
+}): Promise<void> {
+  const validatedPassword = validatePasswordStrength(input.newPassword);
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+
+  if (input.resetToken) {
+    await verifyPasswordResetToken(input.env.SESSION_SECRET, input.email, input.resetToken);
+  } else if (input.otp) {
+    await verifyOtp({
+      ...(input.now === undefined ? {} : { now }),
+      email: input.email,
+      env: input.env,
+      otp: input.otp,
+      purpose: "password_reset",
+    });
+  } else {
+    throw new AppError("validation_failed", 400, ["otp_or_token_required"]);
+  }
+
+
+  const user = await loadUserAccountByEmail(input.env, input.email);
+  if (!user || user.status === "suspended") {
+    throw new AppError("authentication_required", 401);
+  }
+
+  const newHash = await hashPassword(validatedPassword);
+
+  // Update password, clear lockouts, and revoke ALL active sessions
+  await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE platform_users
+      SET password_hash = ?, failed_login_count = 0, locked_until = NULL,
+          status = 'active', updated_at = ?
+      WHERE id = ?
+    `).bind(newHash, nowIso, user.userId),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE auth_sessions
+      SET status = 'revoked', revoked_at = ?
+      WHERE user_id = ? AND status = 'active'
+    `).bind(nowIso, user.userId),
+  ]);
+
+  // Send security alert email
+  await sendPasswordChangedAlertEmail({
+    email: input.email,
+    env: input.env,
+    locale: input.locale,
+  });
+}
+
+export async function consumeMagicLinkFromBrowser(input: {
+  confirmationBinding: string;
+  confirm: boolean;
+  env: AppBindings;
+  existingSession: boolean;
+  initiationBinding: string;
+  token: string;
+}): Promise<BrowserMagicLinkConsumptionResult> {
+  const now = new Date();
+  const magicLink = await loadMagicLink(input.env, input.token, now);
+  const expectedInitiationBinding = await hmacToken(input.env.MAGIC_LINK_SECRET, "magic-link-initiation", input.token);
+  const initiationMatches = constantTimeEqual(input.initiationBinding, expectedInitiationBinding);
+
+  if (input.confirm) {
+    if (!await confirmationBindingMatches({
+      binding: input.confirmationBinding,
+      env: input.env,
+      now,
+      token: input.token,
+    })) throw new AppError("authentication_required", 401);
+    return {
+      confirmationRequired: false,
+      ...await consumeLoadedMagicLink({ env: input.env, magicLink, now }),
+    };
+  }
+
+  if (input.existingSession || !initiationMatches) {
+    return {
+      confirmationBinding: await createMagicLinkConfirmationBinding(input.env, input.token, now),
+      confirmationRequired: true,
+      maskedDestination: maskEmailDestination(magicLink.email_normalized),
+    };
+  }
+
+  return {
+    confirmationRequired: false,
+    ...await consumeLoadedMagicLink({ env: input.env, magicLink, now }),
   };
 }
 
@@ -237,7 +711,8 @@ export async function authenticateRequest(request: Request, env: AppBindings): P
       auth_sessions.expires_at,
       platform_users.email_normalized,
       platform_users.display_name,
-      platform_users.status AS user_status
+      platform_users.status AS user_status,
+      platform_users.password_hash
     FROM auth_sessions
     INNER JOIN platform_users ON platform_users.id = auth_sessions.user_id
     WHERE auth_sessions.token_hash = ?
@@ -249,6 +724,17 @@ export async function authenticateRequest(request: Request, env: AppBindings): P
 
   if (session === null || session.user_status !== "active") {
     throw new AppError("authentication_required", 401);
+  }
+
+  const lastSeenCutoff = new Date(Date.parse(now) - SESSION_LAST_SEEN_WRITE_INTERVAL_MS).toISOString();
+  try {
+    await env.PLATFORM_DB.prepare(`
+      UPDATE auth_sessions SET last_seen_at = ?
+      WHERE id = ? AND user_id = ? AND status = 'active' AND revoked_at IS NULL
+        AND last_seen_at < ?
+    `).bind(now, session.session_id, session.user_id, lastSeenCutoff).run();
+  } catch {
+    // Activity metadata must not turn a valid session into an availability failure.
   }
 
   return {
@@ -289,8 +775,31 @@ export async function revokeSession(auth: AuthContext, env: AppBindings): Promis
   `).bind(now, auth.sessionId, auth.userId).run();
 }
 
+export async function listSessions(auth: AuthContext, env: AppBindings): Promise<SessionSummary[]> {
+  const rows = await env.PLATFORM_DB.prepare(`
+    SELECT id AS sessionId, authenticated_at AS authenticatedAt,
+      created_at AS createdAt, expires_at AS expiresAt, last_seen_at AS lastSeenAt
+    FROM auth_sessions
+    WHERE user_id = ? AND status = 'active' AND revoked_at IS NULL AND expires_at > ?
+    ORDER BY last_seen_at DESC, id
+  `).bind(auth.userId, new Date().toISOString()).all<SessionSummary>();
+  return rows.results.map((row) => ({ ...row, isCurrent: row.sessionId === auth.sessionId }));
+}
+
+export async function revokeAllSessions(auth: AuthContext, env: AppBindings): Promise<number> {
+  const result = await env.PLATFORM_DB.prepare(`
+    UPDATE auth_sessions SET status = 'revoked', revoked_at = ?
+    WHERE user_id = ? AND status = 'active' AND revoked_at IS NULL
+  `).bind(new Date().toISOString(), auth.userId).run();
+  return result.meta.changes;
+}
+
 export function magicLinkInitiationCookieName(env: AppBindings): string {
   return `${env.SESSION_COOKIE_NAME}_magic_link`;
+}
+
+export function magicLinkConfirmationCookieName(env: AppBindings): string {
+  return `${env.SESSION_COOKIE_NAME}_magic_link_confirm`;
 }
 
 export function appendMagicLinkInitiationCookie(headers: Headers, binding: string, env: AppBindings): void {
@@ -304,6 +813,19 @@ export function appendMagicLinkInitiationCookie(headers: Headers, binding: strin
 
 export function appendClearedMagicLinkInitiationCookie(headers: Headers, env: AppBindings): void {
   headers.append("Set-Cookie", clearCookie(magicLinkInitiationCookieName(env), env.APP_ENV !== "local", true));
+}
+
+export function appendMagicLinkConfirmationCookie(headers: Headers, binding: string, env: AppBindings): void {
+  headers.append("Set-Cookie", serializeCookie(magicLinkConfirmationCookieName(env), binding, {
+    httpOnly: true,
+    maxAge: MAGIC_LINK_CONFIRMATION_TTL_SECONDS,
+    sameSite: "Lax",
+    secure: env.APP_ENV !== "local",
+  }));
+}
+
+export function appendClearedMagicLinkConfirmationCookie(headers: Headers, env: AppBindings): void {
+  headers.append("Set-Cookie", clearCookie(magicLinkConfirmationCookieName(env), env.APP_ENV !== "local", true));
 }
 
 export function appendSessionCookies(headers: Headers, credentials: SessionCredentials, env: AppBindings): void {

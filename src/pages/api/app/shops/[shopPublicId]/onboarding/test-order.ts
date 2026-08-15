@@ -4,6 +4,7 @@ import { requireCsrfSession, requireRecentAuth } from "../../../../../../lib/aut
 import { requireResourceId } from "../../../../../../lib/catalog/policy";
 import { readJsonObject, rejectUnknownFields } from "../../../../../../lib/http/request";
 import { createCaughtErrorResponse } from "../../../../../../lib/http/security";
+import { tryRecordActivationMilestone } from "../../../../../../lib/analytics/activation";
 import { runControlledTestOrder } from "../../../../../../lib/onboarding/test-order";
 import { getBindings } from "../../../../../../lib/platform/bindings";
 import { runShopReadiness } from "../../../../../../lib/tenants/readiness";
@@ -20,6 +21,16 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     const result = await runControlledTestOrder({
       body,
       env,
+      emitSafeTestPassed: async (shopId) => {
+        await tryRecordActivationMilestone({
+          env,
+          idempotencyKey: "safe_test_passed",
+          milestone: "safe_test_passed",
+          reason: "passed",
+          shopId,
+          source: "safe_test",
+        });
+      },
       requestId: locals.requestId,
       runReadiness: runShopReadiness,
       shopPublicId: requireResourceId(params.shopPublicId, "shop"),

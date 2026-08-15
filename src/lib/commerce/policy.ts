@@ -3,6 +3,12 @@ import { matchSupportedLocale, type SupportedLocale } from "../i18n/locale";
 
 export type CartItemInput = { quantity: number; variantId: string };
 
+/** Mixed automatic/manual carts have no provider-neutral fulfillment state. */
+export function assertSupportedFulfillmentComposition(lines: readonly { fulfillmentType: "license_key" | "manual" }[]): void {
+  const modes = new Set(lines.map((line) => line.fulfillmentType));
+  if (modes.size > 1) throw new AppError("mixed_fulfillment_unsupported", 409, ["split_cart_by_fulfillment"]);
+}
+
 export function parseCartItems(value: unknown): CartItemInput[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 20) {
     throw new AppError("validation_failed", 400, ["cart_items_invalid"]);

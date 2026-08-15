@@ -1,0 +1,925 @@
+/* ==========================================================================
+   SELINOW COMMERCE FLOW OS — LANDING v3 (homepage)
+   Namespace: .l3-*. Shared primitives (kit-button, kit-section, status-chip,
+   runtime-plan-*, faq-kit-list, landing-footer) stay in their own sheets.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   0. PAGE CANVAS
+   -------------------------------------------------------------------------- */
+.landing-page {
+  background: var(--surface-page);
+  color: var(--text-primary);
+}
+
+/* --------------------------------------------------------------------------
+   1. ANNOUNCEMENT BAR
+   -------------------------------------------------------------------------- */
+.l3-announcement {
+  background: linear-gradient(90deg, #3A3183 0%, #5140C9 55%, #6552E8 100%);
+  color: #FFFFFF;
+  font-size: 12.5px;
+  border-bottom: 1px solid rgba(58, 49, 131, 0.4);
+}
+
+.l3-announcement-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 38px;
+}
+
+.l3-announcement-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34D399;
+  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.25);
+  flex-shrink: 0;
+}
+
+.l3-announcement-inner a {
+  margin-inline-start: 8px;
+  color: #DCD7FF;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.l3-announcement-inner a:hover {
+  color: #FFFFFF;
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   2. HERO
+   -------------------------------------------------------------------------- */
+.l3-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+}
+
+.l3-hero-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.l3-hero-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(900px 420px at 12% -8%, rgba(121, 101, 245, 0.14), transparent 65%),
+    radial-gradient(760px 380px at 92% 108%, rgba(156, 139, 255, 0.12), transparent 65%),
+    url("/brand/selinow-kit/global/v3/hero-backdrop.svg") center top / 1440px auto no-repeat;
+}
+
+.l3-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: var(--space-10);
+  align-items: center;
+  padding-block: clamp(44px, 6vw, 84px) clamp(48px, 6vw, 88px);
+}
+
+.l3-hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.l3-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-5);
+  padding: 6px 14px;
+  border: 1px solid var(--brand-200);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--brand-700);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.l3-hero-eyebrow-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand-500);
+  box-shadow: 0 0 0 3px rgba(121, 101, 245, 0.18);
+}
+
+.l3-hero-title {
+  margin: 0 0 var(--space-5);
+  max-width: 17ch;
+  font-size: clamp(38px, 5vw, 60px);
+  font-weight: 760;
+  line-height: 1.06;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+  color: var(--text-primary);
+}
+
+.l3-hero-title strong {
+  font-weight: inherit;
+  background: linear-gradient(96deg, #6552E8 10%, #4436A5 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.l3-hero-lead {
+  max-width: 56ch;
+  margin: 0 0 var(--space-7, 28px);
+  font-size: clamp(15px, 1.7vw, 17.5px);
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.l3-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.play-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: 8.5px;
+}
+
+.l3-hero-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-secondary);
+}
+
+.l3-hero-proof li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.l3-hero-proof svg {
+  flex-shrink: 0;
+  color: var(--success);
+}
+
+.l3-hero-visual {
+  position: relative;
+  min-width: 0;
+}
+
+.l3-hero-visual::after {
+  position: absolute;
+  inset: -14px -14px auto auto;
+  width: 120px;
+  height: 120px;
+  z-index: -1;
+  border: 1.5px dashed var(--brand-300);
+  border-radius: 50%;
+  opacity: 0.55;
+  content: "";
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   3. COMMERCE FLOW RAIL (component override)
+   -------------------------------------------------------------------------- */
+.commerce-flow-strip {
+  background: linear-gradient(180deg, #F7F6FF 0%, var(--surface-page) 100%);
+  border-block: 1px solid var(--border-soft);
+  padding-block: var(--space-12);
+}
+
+.flow-strip-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.flow-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-5);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-xs);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.flow-node::after {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: -13px;
+  z-index: 2;
+  width: 22px;
+  height: 1.5px;
+  background: repeating-linear-gradient(90deg, var(--brand-400) 0 3px, transparent 3px 6px);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.flow-node:last-child::after {
+  display: none;
+}
+
+.flow-node:hover {
+  border-color: var(--brand-300);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.flow-node h3 {
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.flow-node p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   4. TRUST PRINCIPLES
+   -------------------------------------------------------------------------- */
+.l3-trust {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-5);
+  padding-block: var(--space-12);
+}
+
+.l3-trust-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+
+.l3-trust-card:hover {
+  border-color: var(--brand-300);
+  transform: translateY(-2px);
+}
+
+.l3-trust-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(145deg, var(--brand-50), #FFFFFF);
+  border: 1px solid var(--brand-200);
+  color: var(--brand-600);
+}
+
+.l3-trust-card h2 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 720;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+
+.l3-trust-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   5. CHANNEL COVERAGE BOARD
+   -------------------------------------------------------------------------- */
+.l3-channel-board {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 0.85fr;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+}
+
+.l3-channel-column {
+  padding: var(--space-6);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-xs);
+}
+
+.l3-channel-heading {
+  margin: 0 0 var(--space-5);
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.l3-channel-heading[data-tone="live"] { color: var(--success-text); }
+.l3-channel-heading[data-tone="next"] { color: var(--brand-700); }
+.l3-channel-heading[data-tone="planned"] { color: var(--text-tertiary); }
+
+.l3-channel-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.l3-channel-tile {
+  flex: 1 1 150px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-page);
+  transition: border-color 0.18s ease;
+}
+
+.l3-channel-tile:hover { border-color: var(--brand-300); }
+
+.l3-channel-tile-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  color: var(--brand-600);
+  background: var(--brand-50);
+}
+
+.l3-channel-tile[data-channel-state="live"] .l3-channel-tile-icon {
+  color: var(--success-text);
+  background: var(--success-surface);
+}
+
+.l3-channel-tile[data-channel-state="next"] .l3-channel-tile-icon {
+  color: var(--brand-700);
+  background: var(--brand-100);
+}
+
+.l3-channel-tile[data-channel-state="planned"] .l3-channel-tile-icon {
+  color: var(--text-tertiary);
+  background: var(--surface-soft);
+}
+
+.l3-channel-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.l3-channel-copy strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.l3-channel-copy small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.l3-channel-extensible {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-height: 128px;
+  border: 1.5px dashed var(--brand-300);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(160deg, var(--brand-50), var(--surface-page) 70%);
+  text-align: center;
+  padding: var(--space-5);
+}
+
+.l3-channel-extensible .l3-channel-tile-icon {
+  background: var(--surface-raised);
+}
+
+.l3-channel-extensible strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.l3-channel-extensible small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--brand-700);
+}
+
+.l3-channel-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-6);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.l3-channel-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.l3-channel-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.l3-legend-live { background: var(--success); }
+.l3-legend-next { background: var(--brand-500); }
+.l3-legend-planned { background: var(--warning); }
+.l3-legend-extensible {
+  border: 1.5px dashed var(--brand-400);
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   6. USE CASE GRID
+   -------------------------------------------------------------------------- */
+.l3-usecase-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-6);
+}
+
+/* --------------------------------------------------------------------------
+   7. OPERATIONAL WORKFLOW TRACK
+   -------------------------------------------------------------------------- */
+.l3-workflow {
+  background:
+    radial-gradient(720px 320px at 50% -120px, rgba(121, 101, 245, 0.09), transparent 70%),
+    linear-gradient(180deg, #F8F7FF 0%, var(--surface-page) 100%);
+  border-block: 1px solid var(--border-soft);
+  padding-block: var(--space-16);
+}
+
+.l3-workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-6);
+}
+
+.l3-workflow-step {
+  position: relative;
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-xs);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.l3-workflow-step:hover {
+  border-color: var(--brand-300);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.l3-workflow-number {
+  position: absolute;
+  top: calc(-1 * var(--space-3));
+  inset-inline-start: var(--space-5);
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding-inline: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--brand-600);
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  box-shadow: 0 6px 14px rgba(101, 82, 232, 0.3);
+}
+
+.l3-workflow-art {
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-page);
+  overflow: hidden;
+  aspect-ratio: 640 / 420;
+}
+
+.l3-workflow-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.l3-workflow-step h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 15.5px;
+  font-weight: 720;
+  color: var(--text-primary);
+}
+
+.l3-workflow-step p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   8. ARCHITECTURE BOARD
+   -------------------------------------------------------------------------- */
+.l3-architecture-board {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 1fr;
+  gap: var(--space-8);
+  align-items: center;
+  padding: var(--space-10);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(420px 260px at 50% 42%, rgba(121, 101, 245, 0.08), transparent 70%),
+    var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.l3-architecture-board::before,
+.l3-architecture-board::after {
+  position: absolute;
+  top: 50%;
+  width: 18%;
+  height: 1.5px;
+  background: repeating-linear-gradient(90deg, var(--brand-300) 0 4px, transparent 4px 9px);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.l3-architecture-board::before { inset-inline-start: 16%; }
+.l3-architecture-board::after { inset-inline-end: 16%; }
+
+.l3-architecture-list {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.l3-architecture-list > p {
+  margin: 0 0 var(--space-2);
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.l3-architecture-list > span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-page);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.l3-architecture-list i {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
+  background: var(--brand-50);
+  color: var(--brand-600);
+  font-style: normal;
+}
+
+.l3-architecture-core {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-8);
+  border: 1.5px solid var(--brand-300);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(165deg, #FFFFFF 0%, var(--brand-50) 100%);
+  box-shadow: var(--shadow-md);
+}
+
+.l3-architecture-core img {
+  width: 88px;
+  height: 88px;
+  margin-bottom: var(--space-4);
+}
+
+.l3-architecture-core strong {
+  display: block;
+  font-size: 16.5px;
+  font-weight: 740;
+  letter-spacing: -0.015em;
+  color: var(--brand-900);
+}
+
+.l3-architecture-core small {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.l3-architecture-destination-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.l3-architecture-destination-copy strong {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.l3-architecture-destination-copy small {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* --------------------------------------------------------------------------
+   9. RUNTIME PRICING PREVIEW (shared with pricing page components)
+   -------------------------------------------------------------------------- */
+.runtime-plan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.runtime-plan-head > span {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--brand-600);
+  background: var(--brand-50);
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.runtime-plan-head h3 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 750;
+  color: var(--text-primary);
+}
+
+.pricing-empty {
+  padding: var(--space-10);
+  border: 1.5px dashed var(--brand-300);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  text-align: center;
+}
+
+.pricing-empty h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 18px;
+  color: var(--text-primary);
+}
+
+.pricing-empty p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.pricing-preview-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-8);
+}
+
+/* --------------------------------------------------------------------------
+   10. FAQ
+   -------------------------------------------------------------------------- */
+.l3-faq {
+  border-top: 1px solid var(--border-soft);
+}
+
+/* --------------------------------------------------------------------------
+   11. FINAL CTA
+   -------------------------------------------------------------------------- */
+.l3-final {
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  background: linear-gradient(112deg, #2B2470 0%, #4436A5 52%, #6552E8 100%);
+  color: #FFFFFF;
+}
+
+.l3-final::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(560px 280px at 88% 20%, rgba(156, 139, 255, 0.35), transparent 70%),
+    url("/brand/selinow-kit/global/v3/hero-backdrop.svg") center / 1440px auto no-repeat;
+  opacity: 0.5;
+  content: "";
+  pointer-events: none;
+}
+
+.l3-final-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) auto;
+  gap: var(--space-8);
+  align-items: center;
+  padding-block: clamp(48px, 6vw, 84px);
+}
+
+.l3-final-inner .kit-kicker {
+  color: #C0B7FF;
+}
+
+.l3-final-inner h2 {
+  margin: 0 0 var(--space-3);
+  max-width: 20ch;
+  font-size: clamp(26px, 3.2vw, 40px);
+  font-weight: 750;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+  color: #FFFFFF;
+}
+
+.l3-final-inner > div > p:not(.kit-kicker) {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 14px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.l3-final-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* --------------------------------------------------------------------------
+   RESPONSIVE
+   -------------------------------------------------------------------------- */
+@media (max-width: 1024px) {
+  .l3-hero-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-8);
+  }
+
+  .l3-hero-title {
+    max-width: 20ch;
+  }
+
+  .l3-trust {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .l3-channel-board {
+    grid-template-columns: 1fr;
+  }
+
+  .l3-usecase-grid {
+    grid-template-columns: 1fr;
+    max-width: 620px;
+    margin-inline: auto;
+  }
+
+  .l3-workflow-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .l3-architecture-board {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+  }
+
+  .l3-architecture-board::before,
+  .l3-architecture-board::after {
+    display: none;
+  }
+
+  .flow-strip-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: var(--space-5);
+  }
+
+  .flow-node::after {
+    display: none;
+  }
+
+  .l3-final-inner {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .l3-announcement-inner {
+    justify-content: flex-start;
+    line-height: 1.5;
+    padding-block: 9px;
+  }
+
+  .l3-announcement-inner a {
+    display: none;
+  }
+
+  .l3-trust {
+    grid-template-columns: 1fr;
+  }
+
+  .l3-hero-actions .kit-button {
+    flex: 1 1 100%;
+  }
+
+  .l3-final-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .l3-final-actions .kit-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .l3-workflow-grid,
+  .flow-strip-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .l3-hero-canvas {
+    opacity: 0.35;
+  }
+
+  .flow-node,
+  .l3-trust-card,
+  .l3-workflow-step,
+  .l3-channel-tile {
+    transition: none;
+  }
+
+  .flow-node:hover,
+  .l3-trust-card:hover,
+  .l3-workflow-step:hover {
+    transform: none;
+  }
+}

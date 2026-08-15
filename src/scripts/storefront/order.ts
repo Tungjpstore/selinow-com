@@ -1,6 +1,7 @@
 import { fulfillmentStateView, orderStateLabel, paymentStateView, type OrderStateView } from "../../lib/storefront/order-view";
 import { formatClientMoney } from "./catalog-dom";
 import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+import { createBrowserOrderAccessStorage } from "./order-access-storage";
 
 type ApiError = { code?: string; requestId?: string };
 type OrderItem = { fulfillmentType: string; lineTotalMinor: number; productTitle: string; quantity: number; variantTitle: string };
@@ -11,6 +12,7 @@ type KeyResponse = { fulfillment?: { keys: Array<{ productTitle: string; value: 
 type PrivateDownload = { assetVersionId: string; downloadCount: number; entitlementExpiresAt: string | null; entitlementStatus: string | null; filename: string; maxDownloads: number; orderItemId: string; remainingDownloads: number };
 type DownloadListResponse = { downloads?: PrivateDownload[] } & ApiError;
 type DownloadGrantResponse = { grant?: { expiresAt: string; grantId: string; grantToken: string; remainingDownloads: number } } & ApiError;
+type RecoveryConsumeResponse = { order?: { orderId: string; orderToken: string } } & ApiError;
 
 const locale = document.documentElement.lang || "en";
 const t = createStorefrontTranslator(locale);
@@ -18,11 +20,14 @@ const t = createStorefrontTranslator(locale);
 const root = document.querySelector("[data-order-id]");
 const orderId = root instanceof HTMLElement ? root.dataset.orderId : undefined;
 const tokenKey = orderId === undefined ? "" : `selinow-order-token:v1:${window.location.host}:${orderId}`;
-const fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get("access");
-if (fragmentToken !== null && tokenKey !== "") {
-  sessionStorage.setItem(tokenKey, fragmentToken);
+const accessStorage = createBrowserOrderAccessStorage();
+const fragment = new URLSearchParams(window.location.hash.slice(1));
+const fragmentAccessToken = fragment.get("access");
+let fragmentRecoveryToken = fragment.get("recovery");
+if (fragmentAccessToken !== null || fragmentRecoveryToken !== null) {
   history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
 }
+if (fragmentAccessToken !== null && tokenKey !== "") accessStorage.set(tokenKey, fragmentAccessToken);
 
 const status = document.querySelector("#order-status");
 const actions = document.querySelector("#order-actions");
@@ -36,7 +41,7 @@ const downloadStatus = document.querySelector("#download-status");
 const downloadRetry = document.querySelector("#download-retry");
 
 function orderToken(): string | null {
-  return tokenKey === "" ? null : sessionStorage.getItem(tokenKey);
+  return tokenKey === "" ? null : accessStorage.get(tokenKey);
 }
 
 async function copyToClipboard(value: string): Promise<void> {
@@ -87,6 +92,79 @@ function showState(titleText: string, detailText: string, tone: "danger" | "info
   if (paymentButton instanceof HTMLButtonElement) paymentButton.hidden = true;
   if (revealButton instanceof HTMLButtonElement) revealButton.hidden = true;
   resetDownloads();
+}
+
+function supportSuffix(requestId?: string): string {
+  return requestId === undefined ? "" : t("storefront.support_code", { requestId });
+}
+
+function showRecoveryForm(): void {
+  if (!(status instanceof HTMLElement) || orderId === undefined) return;
+  const form = document.createElement("form");
+  form.className = "order-recovery-form";
+  form.noValidate = false;
+  const heading = document.createElement("h2");
+  heading.textContent = t("storefront.order.recovery.form_title");
+  const detail = document.createElement("p");
+  detail.textContent = t("storefront.order.recovery.form_detail");
+  const label = document.createElement("label");
+  label.textContent = t("storefront.order.recovery.email_label");
+  const email = document.createElement("input");
+  email.autocomplete = "email";
+  email.maxLength = 254;
+  email.name = "email";
+  email.placeholder = t("storefront.order.recovery.email_placeholder");
+  email.required = true;
+  email.type = "email";
+  const submit = document.createElement("button");
+  submit.className = "store-button";
+  submit.type = "submit";
+  submit.textContent = t("storefront.order.recovery.submit");
+  const result = document.createElement("p");
+  result.className = "form-status";
+  result.setAttribute("aria-live", "polite");
+  label.appendChild(email);
+  form.appendChild(heading);
+  form.appendChild(detail);
+  form.appendChild(label);
+  form.appendChild(submit);
+  form.appendChild(result);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    submit.disabled = true;
+    submit.textContent = t("storefront.order.recovery.submitting");
+    result.classList.remove("error");
+    result.textContent = t("storefront.order.recovery.requesting");
+    void fetch(`/api/store/orders/${encodeURIComponent(orderId)}/recovery`, {
+      body: JSON.stringify({ email: email.value }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    }).then(async (response) => {
+      const body: ApiError = await response.json();
+      if (response.ok) {
+        result.textContent = t("storefront.order.recovery.accepted");
+        email.value = "";
+        return;
+      }
+      result.classList.add("error");
+      result.textContent = response.status === 429
+        ? `${t("storefront.order.recovery.rate_limited")}${supportSuffix(body.requestId)}`
+        : `${t("storefront.order.recovery.request_failed")}${supportSuffix(body.requestId)}`;
+    }).catch(() => {
+      result.classList.add("error");
+      result.textContent = t("storefront.order.recovery.network_failed");
+    }).finally(() => {
+      submit.disabled = false;
+      submit.textContent = t("storefront.order.recovery.submit");
+    });
+  });
+  status.appendChild(form);
+}
+
+function showAccessRecovery(title: string, detail: string): void {
+  showState(title, detail, "warning");
+  showRecoveryForm();
 }
 
 function appendTimeline(parent: HTMLElement, title: string, view: OrderStateView): void {
@@ -163,19 +241,15 @@ function downloadIntentStorageKey(download: PrivateDownload): string {
 
 function downloadIntentKey(download: PrivateDownload): string {
   const storageKey = downloadIntentStorageKey(download);
-  try {
-    const stored = sessionStorage.getItem(storageKey);
-    if (stored !== null && /^[A-Za-z0-9._:-]{16,128}$/u.test(stored)) return stored;
-    const next = `private-download:${crypto.randomUUID()}`;
-    sessionStorage.setItem(storageKey, next);
-    return next;
-  } catch {
-    return `private-download:${crypto.randomUUID()}`;
-  }
+  const stored = accessStorage.get(storageKey);
+  if (stored !== null && /^[A-Za-z0-9._:-]{16,128}$/u.test(stored)) return stored;
+  const next = `private-download:${crypto.randomUUID()}`;
+  accessStorage.set(storageKey, next);
+  return next;
 }
 
 function clearDownloadIntent(download: PrivateDownload): void {
-  try { sessionStorage.removeItem(downloadIntentStorageKey(download)); } catch { /* Storage is optional. */ }
+  accessStorage.remove(downloadIntentStorageKey(download));
 }
 
 async function readErrorCode(response: Response): Promise<string> {
@@ -208,9 +282,10 @@ async function consumePrivateDownload(download: PrivateDownload, button: HTMLBut
   button.textContent = t("storefront.order.downloads.preparing");
   setDownloadStatus(t("storefront.order.downloads.requesting"));
   try {
+    const idempotencyKey = downloadIntentKey(download);
     const grantResponse = await fetch(`/api/store/orders/${encodeURIComponent(orderId)}/downloads/${encodeURIComponent(download.assetVersionId)}/grant`, {
       headers: {
-        "Idempotency-Key": downloadIntentKey(download),
+        "Idempotency-Key": idempotencyKey,
         "X-Order-Access-Token": token,
         "X-Order-Item-Id": download.orderItemId,
       },
@@ -222,6 +297,7 @@ async function consumePrivateDownload(download: PrivateDownload, button: HTMLBut
     if (grant === undefined || typeof grant.grantId !== "string" || typeof grant.grantToken !== "string") throw new Error("private_download_grant_invalid");
     const consumeResponse = await fetch(`/api/store/orders/${encodeURIComponent(orderId)}/downloads/grants/${encodeURIComponent(grant.grantId)}/consume`, {
       headers: {
+        "Idempotency-Key": idempotencyKey,
         "X-Delivery-Grant-Token": grant.grantToken,
         "X-Order-Access-Token": token,
       },
@@ -317,10 +393,9 @@ async function loadDownloads(): Promise<void> {
 async function loadOrder(): Promise<void> {
   const token = orderToken();
   if (orderId === undefined || token === null) {
-    showState(
+    showAccessRecovery(
       t("storefront.order.access_title"),
       t("storefront.order.access_detail"),
-      "warning",
     );
     if (refreshButton instanceof HTMLButtonElement) refreshButton.hidden = true;
     return;
@@ -338,12 +413,11 @@ async function loadOrder(): Promise<void> {
     const body: OrderResponse = await response.json();
     if (!response.ok) {
       if (response.status === 404) {
-        if (tokenKey !== "") sessionStorage.removeItem(tokenKey);
+        if (tokenKey !== "") accessStorage.remove(tokenKey);
         if (refreshButton instanceof HTMLButtonElement) refreshButton.hidden = true;
-        showState(
+        showAccessRecovery(
           t("storefront.order.open_failed_title"),
           t("storefront.order.open_failed_detail"),
-          "warning",
         );
       } else {
         const suffix = body.requestId === undefined ? "" : t("storefront.support_code", { requestId: body.requestId });
@@ -364,6 +438,39 @@ async function loadOrder(): Promise<void> {
       refreshButton.disabled = false;
       refreshButton.textContent = t("storefront.order.refresh");
     }
+  }
+}
+
+async function consumeRecoveryFragment(): Promise<void> {
+  if (fragmentRecoveryToken === null || orderId === undefined || tokenKey === "") return;
+  const token = fragmentRecoveryToken;
+  fragmentRecoveryToken = null;
+  showState(
+    t("storefront.order.recovery.opening_title"),
+    t("storefront.order.recovery.opening_detail"),
+    "info",
+  );
+  try {
+    const response = await fetch(`/api/store/orders/${encodeURIComponent(orderId)}/recovery/consume`, {
+      body: JSON.stringify({ token }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    const body: RecoveryConsumeResponse = await response.json();
+    if (!response.ok || body.order === undefined) {
+      showAccessRecovery(
+        t("storefront.order.recovery.invalid_title"),
+        `${t("storefront.order.recovery.invalid_detail")}${supportSuffix(body.requestId)}`,
+      );
+      return;
+    }
+    accessStorage.set(tokenKey, body.order.orderToken);
+    await loadOrder();
+  } catch {
+    showAccessRecovery(
+      t("storefront.order.recovery.network_title"),
+      t("storefront.order.recovery.network_detail"),
+    );
   }
 }
 
@@ -474,4 +581,5 @@ paymentButton?.addEventListener("click", () => { void openPaymentLink(); });
 revealButton?.addEventListener("click", () => { void revealKeys(); });
 downloadRetry?.addEventListener("click", () => { void loadDownloads(); });
 
-void loadOrder();
+if (fragmentRecoveryToken === null) void loadOrder();
+else void consumeRecoveryFragment();

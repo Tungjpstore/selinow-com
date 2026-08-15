@@ -1,4 +1,5 @@
 import { hmacToken } from "../core/crypto";
+import { subscriptionAllows } from "../billing/entitlements";
 import { CommerceApplicationService } from "../commerce/application";
 import { createTelegramCartProjectionPort, type CommerceCartProjection } from "../commerce/cart-projection";
 import type { CommerceContext, CommercePaymentFulfillmentApplication } from "../commerce/contracts";
@@ -18,6 +19,7 @@ import { D1ChannelConnectionRepository } from "../channels/store";
 import type { ChannelCapability } from "../channels/types";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import { isSupportedCurrency } from "../i18n/currency";
 import { matchSupportedLocale, type SupportedLocale } from "../i18n/locale";
 import { createOrRecoverPrincipalPaymentHandoff } from "../payments/store";
@@ -30,6 +32,7 @@ import { formatTelegramMoney, formatTelegramTimestamp, resolveTelegramLocale, te
 
 export type TelegramShop = {
   currency: string;
+  currentPeriodEnd?: string | null;
   defaultLocale: string;
   id: string;
   name: string;
@@ -37,6 +40,8 @@ export type TelegramShop = {
   origin: string;
   status: string;
   subscriptionState: string;
+  trialEndsAt?: string | null;
+  graceEndsAt?: string | null;
 };
 
 export type TelegramIdentity = {
@@ -90,6 +95,7 @@ const TELEGRAM_BASE_CAPABILITIES = [
 
 function requiredTelegramCapabilities(update: TelegramUpdate): readonly ChannelCapability[] {
   const required = new Set<ChannelCapability>(TELEGRAM_BASE_CAPABILITIES);
+  if (update.kind === "unsupported_callback_query") return [...required];
   if (update.kind === "callback_query") {
     if (update.data.startsWith("add:") || update.data === "cart" || update.data === "buy" || update.data.startsWith("buy:")) {
       required.add("cart.interactive");
@@ -122,7 +128,10 @@ async function loadTelegramEffectiveCapabilities(input: {
   const plan = await input.env.PLATFORM_DB.prepare(`
     SELECT plans.feature_flags_json AS featureFlagsJson,
       plans.is_active AS planActive,
-      shop_subscriptions.state AS subscriptionState
+      shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
+      shop_subscriptions.trial_ends_at AS trialEndsAt,
+      shop_subscriptions.grace_ends_at AS graceEndsAt
     FROM shop_subscriptions
     INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
     WHERE shop_subscriptions.shop_id = ?
@@ -134,14 +143,14 @@ async function loadTelegramEffectiveCapabilities(input: {
         LIMIT 1
       )
     LIMIT 1
-  `).bind(input.shopId).first<{ featureFlagsJson: string; planActive: number; subscriptionState: string }>();
+  `).bind(input.shopId).first<{ currentPeriodEnd: string | null; featureFlagsJson: string; graceEndsAt: string | null; planActive: number; subscriptionState: string; trialEndsAt: string | null }>();
   const adapterCapabilities = new Set<ChannelCapability>(builtInChannelRegistry.require(TELEGRAM_CHANNEL_CODE).capabilities);
   const planEntitlements = plan !== null && hasFeature(plan.featureFlagsJson, "telegram")
     ? adapterCapabilities
     : new Set<ChannelCapability>();
   const policyAllowsCommerce = plan !== null
     && plan.planActive === 1
-    && new Set(["trialing", "active", "past_due"]).has(plan.subscriptionState);
+    && subscriptionAllows({ currentPeriodEnd: plan.currentPeriodEnd, graceEndsAt: plan.graceEndsAt, subscriptionState: plan.subscriptionState, trialEndsAt: plan.trialEndsAt });
   const projection = await new D1ChannelConnectionRepository(input.env.PLATFORM_DB, builtInChannelRegistry).projectCapabilities({
     connectionId: input.connectionId,
     planEntitlements,
@@ -178,22 +187,37 @@ export async function loadTelegramShop(env: AppBindings, shopId: string): Promis
     SELECT shops.id, shops.name, shops.status, shops.default_locale AS defaultLocale, shops.currency,
       shop_settings.order_expiry_minutes AS orderExpiryMinutes,
       shop_subscriptions.state AS subscriptionState,
+      shop_subscriptions.current_period_end AS currentPeriodEnd,
+      shop_subscriptions.trial_ends_at AS trialEndsAt,
+      shop_subscriptions.grace_ends_at AS graceEndsAt,
       canonical_domain.hostname_normalized AS hostname
     FROM shops
     INNER JOIN shop_settings ON shop_settings.shop_id = shops.id
     INNER JOIN shop_subscriptions ON shop_subscriptions.shop_id = shops.id AND shop_subscriptions.state != 'canceled'
+    INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
     INNER JOIN shop_domains AS canonical_domain
       ON canonical_domain.id = shops.canonical_domain_id
       AND canonical_domain.shop_id = shops.id
       AND canonical_domain.status = 'active'
+      AND canonical_domain.deleted_at IS NULL
+      AND canonical_domain.delete_requested_at IS NULL
       AND (
         canonical_domain.type = 'platform_subdomain'
-        OR canonical_domain.ownership_verified_at IS NOT NULL
+        OR (
+          canonical_domain.ownership_verified_at IS NOT NULL
+          AND canonical_domain.hostname_status = 'active'
+          AND canonical_domain.ssl_status = 'active'
+          AND canonical_domain.dns_status = 'active'
+          AND (${customDomainTurnstileAdmissionSql("canonical_domain")})
+        )
       )
     WHERE shops.id = ?
     LIMIT 1
   `).bind(shopId).first<Omit<TelegramShop, "origin"> & { hostname: string }>();
   if (row === null) throw new AppError("tenant_not_found", 404);
+  if (!subscriptionAllows({ currentPeriodEnd: row.currentPeriodEnd, graceEndsAt: row.graceEndsAt, subscriptionState: row.subscriptionState, trialEndsAt: row.trialEndsAt })) {
+    throw new AppError("subscription_required", 402);
+  }
   assertCheckoutAllowed({ shopStatus: row.status, subscriptionState: row.subscriptionState });
   return { ...row, origin: `https://${row.hostname}` };
 }
@@ -303,7 +327,9 @@ async function cartReply(application: CommerceApplicationService, context: Comme
 }
 
 async function catalogReply(env: AppBindings, shop: TelegramShop, locale: SupportedLocale): Promise<TelegramReply> {
-  const result = await env.PLATFORM_DB.prepare(`SELECT products.title AS productTitle, product_variants.id AS variantId, product_variants.title AS variantTitle, product_variants.price_minor AS priceMinor, product_variants.currency, products.fulfillment_type AS fulfillmentType, COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock FROM products INNER JOIN product_variants ON product_variants.product_id = products.id AND product_variants.shop_id = products.shop_id AND product_variants.status = 'active' LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE products.shop_id = ? AND products.status = 'active' AND product_variants.currency = ? GROUP BY product_variants.id ORDER BY products.created_at, product_variants.created_at LIMIT 12`).bind(shop.id, shop.currency).all<{ availableStock: number; currency: string; fulfillmentType: string; priceMinor: number; productTitle: string; variantId: string; variantTitle: string }>();
+  const privateFileSchema = await env.PLATFORM_DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'product_fulfillment_policies' LIMIT 1").first<{ name: string }>();
+  const privateFileGuard = privateFileSchema === null ? "" : "AND NOT EXISTS (SELECT 1 FROM product_fulfillment_policies AS private_policy WHERE private_policy.shop_id = products.shop_id AND private_policy.product_id = products.id AND private_policy.capability = 'private_file' AND private_policy.status = 'active')";
+  const result = await env.PLATFORM_DB.prepare(`SELECT products.title AS productTitle, product_variants.id AS variantId, product_variants.title AS variantTitle, product_variants.price_minor AS priceMinor, product_variants.currency, products.fulfillment_type AS fulfillmentType, COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock FROM products INNER JOIN catalog_channel_visibility ON catalog_channel_visibility.shop_id = products.shop_id AND catalog_channel_visibility.product_id = products.id AND catalog_channel_visibility.channel_code = 'telegram' AND catalog_channel_visibility.status = 'visible' INNER JOIN product_variants ON product_variants.product_id = products.id AND product_variants.shop_id = products.shop_id AND product_variants.status = 'active' LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE products.shop_id = ? AND products.status = 'active' AND product_variants.currency = ? ${privateFileGuard} GROUP BY product_variants.id ORDER BY products.created_at, product_variants.created_at LIMIT 12`).bind(shop.id, shop.currency).all<{ availableStock: number; currency: string; fulfillmentType: string; priceMinor: number; productTitle: string; variantId: string; variantTitle: string }>();
   // Do not render legacy/invalid currencies even if a shop row predates the
   // supported-currency guard; formatting an unknown currency would throw from
   // the webhook boundary.
@@ -486,6 +512,7 @@ function safeErrorReply(error: AppError, locale: SupportedLocale): TelegramReply
 }
 
 export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?: typeof fetch; integrationId: string; shopId: string; update: TelegramUpdate }): Promise<{ identity: TelegramIdentity; reply: TelegramReply; resultCode: string }> {
+  if (input.update.kind === "unsupported_callback_query") throw new AppError("telegram_update_unsupported", 400);
   const shop = await loadTelegramShop(input.env, input.shopId);
   // Resolve the normalized projection before creating buyer, recipient or
   // commerce state. Missing, expired, unentitled or policy-disabled grants

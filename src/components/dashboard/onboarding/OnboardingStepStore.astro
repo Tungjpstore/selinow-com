@@ -1,0 +1,461 @@
+---
+type Props = {
+  defaultCurrency?: string;
+  defaultLocale?: string;
+  initialShopName?: string | undefined;
+  initialShopSlug?: string | undefined;
+  platformBaseDomain: string;
+  shopsCount?: number;
+};
+
+const {
+  initialShopName = "",
+  initialShopSlug = "",
+  platformBaseDomain,
+  shopsCount = 0,
+} = Astro.props;
+---
+
+<div class="onboarding-step-pane" data-step-pane="store">
+  <div class="step-intro-header">
+    <span class="step-num-badge">BƯỚC 01/04</span>
+    <h2>Hồ sơ Cửa hàng & Kênh Bán</h2>
+    <p>Đặt tên cho cửa hàng và lựa chọn các kênh phân phối sản phẩm số tự động của bạn.</p>
+  </div>
+
+  <form class="step-form-grid" data-store-form novalidate>
+    <!-- Store Name -->
+    <div class="form-group">
+      <label for="store-name-input">Tên cửa hàng <span class="required-star">*</span></label>
+      <div class="input-with-icon">
+        <span class="input-icon">🏪</span>
+        <input
+          id="store-name-input"
+          name="name"
+          type="text"
+          minlength="2"
+          maxlength="80"
+          placeholder="Ví dụ: Tạp Hóa MMO, Key Bản Quyền 247..."
+          value={initialShopName}
+          required
+          autofocus
+          data-input-shop-name
+        />
+      </div>
+      <small class="field-hint">Tên hiển thị thương hiệu trên trang thanh toán và thông báo bot.</small>
+    </div>
+
+    <!-- Store Slug / Domain -->
+    <div class="form-group">
+      <label for="store-slug-input">Đường dẫn Website (Subdomain) <span class="required-star">*</span></label>
+      <div class="input-slug-wrap">
+        <input
+          id="store-slug-input"
+          name="slug"
+          type="text"
+          minlength="3"
+          maxlength="48"
+          pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+          placeholder="tap-hoa-mmo"
+          value={initialShopSlug}
+          required
+          data-input-shop-slug
+        />
+        <span class="slug-suffix">.{platformBaseDomain}</span>
+      </div>
+      <div class="slug-status" data-slug-availability-msg>
+        <span class="slug-badge-dot"></span>
+        <span class="slug-badge-text">Địa chỉ web khả dụng</span>
+      </div>
+    </div>
+
+    <!-- Sales Channels Selector (Visual Cards) -->
+    <div class="form-group full-width">
+      <label class="channels-label">Lựa chọn Kênh Bán Hàng <span class="required-star">*</span></label>
+      <div class="channel-cards-grid">
+        <label class="channel-card active" data-channel-opt="both">
+          <input type="radio" name="channelSelection" value="both" checked data-channel-radio />
+          <div class="channel-card-icon">🚀</div>
+          <div class="channel-card-body">
+            <div class="channel-card-title-wrap">
+              <strong>Đa Kênh (Website + Telegram)</strong>
+              <span class="recommend-pill">Khuyên Dùng</span>
+            </div>
+            <p>Bán song song cả Web Storefront và Bot Telegram tự động 24/7. Khách mua ở đâu cũng nhận được key ngay.</p>
+          </div>
+          <div class="channel-card-check">✓</div>
+        </label>
+
+        <label class="channel-card" data-channel-opt="telegram">
+          <input type="radio" name="channelSelection" value="telegram" data-channel-radio />
+          <div class="channel-card-icon">📱</div>
+          <div class="channel-card-body">
+            <strong>Chỉ Bot Telegram</strong>
+            <p>Khách hàng chỉ mua qua Bot Telegram. Tự động trả key và menu sản phẩm trong khung chat.</p>
+          </div>
+          <div class="channel-card-check">✓</div>
+        </label>
+
+        <label class="channel-card" data-channel-opt="website">
+          <input type="radio" name="channelSelection" value="website" data-channel-radio />
+          <div class="channel-card-icon">🌐</div>
+          <div class="channel-card-body">
+            <strong>Chỉ Website Storefront</strong>
+            <p>Website bán hàng độc lập với địa chỉ riêng, tối ưu SEO và tùy biến thương hiệu.</p>
+          </div>
+          <div class="channel-card-check">✓</div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Auto-Provisioning Smart Badge -->
+    <div class="smart-defaults-box full-width">
+      <div class="smart-box-icon">✨</div>
+      <div class="smart-box-text">
+        <strong>Tự động tối ưu sẵn:</strong>
+        <p>Hệ thống tự động áp dụng Tiền tệ <code>VND</code>, Ngôn ngữ <code>Tiếng Việt</code> và bộ chính sách pháp lý mẫu đạt chuẩn. Bạn có thể tùy chỉnh lại bất kỳ lúc nào.</p>
+      </div>
+    </div>
+
+    <div class="step-actions full-width">
+      <button type="submit" class="btn-primary-next" data-step-submit="store">
+        <span data-btn-label>{shopsCount > 0 ? "Lưu & Tiếp Tục: Sản Phẩm" : "Tạo Cửa Hàng & Tiếp Tục"}</span>
+        <span class="btn-arrow" aria-hidden="true">→</span>
+      </button>
+    </div>
+  </form>
+</div>
+
+<style>
+  .onboarding-step-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    animation: fadeInSlide 0.3s ease;
+  }
+
+  @keyframes fadeInSlide {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .step-intro-header {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .step-num-badge {
+    align-self: flex-start;
+    padding: 3px 10px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+  }
+
+  .step-intro-header h2 {
+    margin: 0;
+    font-size: clamp(22px, 3.5vw, 28px);
+    font-weight: 750;
+    color: var(--sln-text-primary);
+    letter-spacing: -0.03em;
+  }
+
+  .step-intro-header p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--sln-text-secondary);
+    line-height: 1.5;
+  }
+
+  .step-form-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .form-group.full-width {
+    grid-column: 1 / -1;
+  }
+
+  label {
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--sln-text-primary);
+  }
+
+  .required-star {
+    color: var(--sln-state-danger);
+  }
+
+  .field-hint {
+    font-size: 12px;
+    color: var(--sln-text-muted);
+  }
+
+  .input-with-icon {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .input-icon {
+    position: absolute;
+    left: 14px;
+    font-size: 16px;
+    pointer-events: none;
+  }
+
+  .input-with-icon input {
+    padding-left: 44px;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    min-height: 48px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-md);
+    padding: 10px 14px;
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-primary);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--sln-focus-ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+  }
+
+  .input-slug-wrap {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-md);
+    background: var(--sln-bg-surface);
+    overflow: hidden;
+  }
+
+  .input-slug-wrap input {
+    border: none;
+    border-radius: 0;
+    min-height: 48px;
+    padding: 10px 14px;
+    flex: 1;
+  }
+
+  .input-slug-wrap:focus-within {
+    border-color: var(--sln-focus-ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+  }
+
+  .slug-suffix {
+    padding: 0 14px;
+    color: var(--sln-text-muted);
+    font-size: 13px;
+    font-family: var(--sln-font-mono);
+    background: var(--sln-bg-subtle);
+    border-left: 1px solid var(--sln-border-default);
+    height: 48px;
+    display: flex;
+    align-items: center;
+    user-select: none;
+  }
+
+  .slug-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--sln-state-success);
+    font-weight: 500;
+  }
+
+  .slug-badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--sln-state-success);
+  }
+
+  /* Channel Cards */
+  .channels-label {
+    margin-bottom: 2px;
+  }
+
+  .channel-cards-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .channel-card {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    border: 1.5px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .channel-card:hover {
+    border-color: var(--sln-border-strong);
+    background: var(--sln-bg-subtle);
+  }
+
+  .channel-card.active {
+    border-color: var(--sln-action-primary);
+    background: color-mix(in srgb, var(--sln-action-primary) 4%, var(--sln-bg-surface));
+    box-shadow: 0 0 0 1px var(--sln-action-primary);
+  }
+
+  .channel-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .channel-card-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+
+  .channel-card-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .channel-card-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .channel-card-body strong {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--sln-text-primary);
+  }
+
+  .recommend-pill {
+    padding: 2px 8px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-success);
+    color: var(--sln-state-success);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.05em;
+  }
+
+  .channel-card-body p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--sln-text-secondary);
+    line-height: 1.4;
+  }
+
+  .channel-card-check {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1.5px solid var(--sln-border-strong);
+    color: transparent;
+    font-size: 12px;
+    font-weight: 800;
+    transition: all 0.15s ease;
+  }
+
+  .channel-card.active .channel-card-check {
+    background: var(--sln-action-primary);
+    border-color: var(--sln-action-primary);
+    color: var(--sln-white);
+  }
+
+  /* Smart Defaults Box */
+  .smart-defaults-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: var(--sln-radius-md);
+    background: var(--sln-bg-subtle);
+    border: 1px solid var(--sln-border-default);
+  }
+
+  .smart-box-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .smart-box-text strong {
+    font-size: 12px;
+    color: var(--sln-text-primary);
+  }
+
+  .smart-box-text p {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: var(--sln-text-secondary);
+    line-height: 1.45;
+  }
+
+  .smart-box-text code {
+    background: var(--sln-bg-canvas);
+    padding: 2px 6px;
+    border-radius: var(--sln-radius-sm);
+    font-size: 11px;
+    font-family: var(--sln-font-mono);
+  }
+
+  /* Step Actions */
+  .step-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+  }
+
+  .btn-primary-next {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 12px 24px;
+    border: none;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+
+  .btn-primary-next:hover {
+    background: var(--sln-action-primary-hover);
+    transform: translateX(2px);
+  }
+
+  .btn-primary-next:disabled {
+    opacity: 0.6;
+    cursor: wait;
+    transform: none;
+  }
+</style>

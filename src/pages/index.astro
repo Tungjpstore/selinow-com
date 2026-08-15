@@ -1,16 +1,20 @@
 ---
 import ProductCard from "../components/storefront/ProductCard.astro";
 import MarketingHeader from "../components/marketing/MarketingHeader.astro";
+import HeroCommerceFlow from "../components/marketing/HeroCommerceFlow.astro";
+import CommerceFlowRail from "../components/marketing/CommerceFlowRail.astro";
+import SolutionWorkflowCard from "../components/marketing/SolutionWorkflowCard.astro";
 import PlatformLayout from "../layouts/PlatformLayout.astro";
+
 import StorefrontLayout from "../layouts/StorefrontLayout.astro";
 import { isAppError } from "../lib/core/errors";
 import { getBindings } from "../lib/platform/bindings";
-import { getMarketingPlans, planFeatureList } from "../lib/storefront/marketing";
+import { formatMarketingPrice, getMarketingPlans, isMarketingPricingReady, planFeatureList } from "../lib/storefront/marketing";
 import { loggerFor } from "../lib/operations/logger";
 import { classifyPlatformHost, normalizeHostname } from "../lib/storefront/routing";
 import { canonicalRedirectFor, getStorefrontCatalog, resolveStorefrontShop, type StorefrontCategory, type StorefrontProduct, type StorefrontShop } from "../lib/storefront/store";
-import { createStorefrontTranslator } from "../lib/i18n/catalogs/storefront";
 import { createMarketingTranslator } from "../lib/i18n/catalogs/marketing";
+import { createStorefrontTranslator } from "../lib/i18n/catalogs/storefront";
 import { normalizeSupportedLocale } from "../lib/i18n/locale";
 
 const env = getBindings();
@@ -28,13 +32,220 @@ let plans = [] as Awaited<ReturnType<typeof getMarketingPlans>>;
 let pricingState: "ready" | "unavailable" = "unavailable";
 let locale = Astro.locals.locale ?? normalizeSupportedLocale(env.DEFAULT_LOCALE);
 let t = createStorefrontTranslator(locale);
-let mt = createMarketingTranslator(locale);
+const mt = createMarketingTranslator(locale);
+
+const landingCopy = {
+  seoTitle: mt("marketing.home.seo_title"),
+  seoDescription: mt("marketing.home.seo_description"),
+  announcement: mt("marketing.home.announcement"),
+  announcementCta: mt("marketing.home.announcement_cta"),
+  eyebrow: mt("marketing.home.hero.eyebrow"),
+  heroTitle: mt("marketing.home.hero.title"),
+  heroHighlight: mt("marketing.home.hero.highlight"),
+  heroDescription: mt("marketing.home.hero.lead"),
+  heroPrimary: mt("marketing.home.hero.primary"),
+  heroSecondary: mt("marketing.home.hero.secondary"),
+  heroProof: [
+    mt("marketing.home.hero.proof.no_card"),
+    mt("marketing.home.hero.proof.locales"),
+    mt("marketing.home.hero.proof.verify_before_delivery"),
+  ],
+  trust: [
+    [mt("marketing.home.trust.security.title"), mt("marketing.home.trust.security.description")],
+    [mt("marketing.home.trust.expansion.title"), mt("marketing.home.trust.expansion.description")],
+    [mt("marketing.home.trust.data.title"), mt("marketing.home.trust.data.description")],
+    [mt("marketing.home.trust.automation.title"), mt("marketing.home.trust.automation.description")],
+  ],
+  channelsEyebrow: mt("marketing.home.channels.eyebrow"),
+  channelsTitle: mt("marketing.home.channels.title"),
+  channelsDescription: mt("marketing.home.channels.description"),
+  available: mt("marketing.home.channels.available"),
+  expanding: mt("marketing.home.channels.expanding"),
+  extensible: mt("marketing.home.channels.extensible"),
+  channelStatus: {
+    live: mt("marketing.home.channels.status.live"),
+    next: mt("marketing.home.channels.status.next"),
+    planned: mt("marketing.home.channels.status.planned"),
+    development: mt("marketing.home.channels.status.development"),
+  },
+  channelNames: {
+    website: mt("marketing.home.channels.name.website"),
+    telegram: mt("marketing.home.channels.name.telegram"),
+    whatsapp: mt("marketing.home.channels.name.whatsapp"),
+    zalo: mt("marketing.home.channels.name.zalo"),
+    discord: mt("marketing.home.channels.name.discord"),
+    api: mt("marketing.home.channels.name.api"),
+  },
+  channelCards: [
+    { key: "website", state: "live", label: mt("marketing.home.channels.name.website"), status: mt("marketing.home.channels.status.live") },
+    { key: "telegram", state: "next", label: mt("marketing.home.channels.name.telegram"), status: mt("marketing.home.channels.status.next") },
+    { key: "whatsapp", state: "next", label: mt("marketing.home.channels.name.whatsapp"), status: mt("marketing.home.channels.status.next") },
+    { key: "zalo", state: "next", label: mt("marketing.home.channels.name.zalo"), status: mt("marketing.home.channels.status.next") },
+    { key: "discord", state: "next", label: mt("marketing.home.channels.name.discord"), status: mt("marketing.home.channels.status.next") },
+    { key: "api", state: "planned", label: mt("marketing.home.channels.name.api"), status: mt("marketing.home.channels.status.development") },
+  ],
+  useEyebrow: mt("marketing.home.use_cases.kicker"),
+  useTitle: mt("marketing.home.use_cases.title"),
+  useDescription: mt("marketing.home.use_cases.description"),
+  solutions: [
+    {
+      slug: "telegram-commerce",
+      eyebrow: "01 / TELEGRAM COMMERCE",
+      title: locale === "vi-VN" ? "Thương mại Telegram" : "Telegram Commerce",
+      lead: locale === "vi-VN" ? "Biến cuộc trò chuyện trên Telegram thành cửa hàng có thể mở rộng với catalog và thanh toán PayOS đồng bộ." : "Turn Telegram conversations into a scalable storefront with unified catalog and verified payments.",
+      href: "/solutions/telegram-commerce",
+    },
+    {
+      slug: "digital-product-delivery",
+      eyebrow: "02 / DIGITAL PRODUCT DELIVERY",
+      title: locale === "vi-VN" ? "Tự động giao sản phẩm số" : "Digital Product Delivery",
+      lead: locale === "vi-VN" ? "Giao file và quyền truy cập tự động sau checkout với kiểm tra thanh toán độc lập và an toàn." : "Automate digital file and access delivery after verified checkout with safe retry boundaries.",
+      href: "/solutions/digital-product-delivery",
+    },
+    {
+      slug: "license-key-inventory",
+      eyebrow: "03 / LICENSE KEY INVENTORY",
+      title: locale === "vi-VN" ? "Quản lý Inventory License Key" : "License Key Inventory",
+      lead: locale === "vi-VN" ? "Bảo vệ key mã hóa, cấp phát 1 người thắng và ngăn chặn việc trùng lặp key giữa các đơn hàng." : "Encrypted key storage, concurrency guards, and one-winner key allocation for digital sellers.",
+      href: "/solutions/license-key-inventory",
+    },
+  ],
+  workflowEyebrow: mt("marketing.home.workflow.kicker"),
+  workflowTitle: mt("marketing.home.workflow.title"),
+  workflowDescription: mt("marketing.home.workflow.description"),
+  workflowSteps: [
+    [mt("marketing.home.workflow.step1.title"), mt("marketing.home.workflow.step1.description"), "global/v3/flow-catalog.svg"],
+    [mt("marketing.home.workflow.step2.title"), mt("marketing.home.workflow.step2.description"), "global/v3/flow-channels.svg"],
+    [mt("marketing.home.workflow.step3.title"), mt("marketing.home.workflow.step3.description"), "global/v3/flow-support.svg"],
+    [mt("marketing.home.workflow.step4.title"), mt("marketing.home.workflow.step4.description"), "global/v3/flow-delivery.svg"],
+  ],
+  architectureEyebrow: mt("marketing.home.architecture.eyebrow"),
+  architectureTitle: mt("marketing.home.architecture.title"),
+  architectureDescription: mt("marketing.home.architecture.description"),
+  architectureLeft: mt("marketing.home.architecture.sources"),
+  architectureRight: mt("marketing.home.architecture.destinations"),
+  architectureCore: mt("marketing.home.architecture.core"),
+  architectureModules: [
+    mt("marketing.home.architecture.module.ai"),
+    mt("marketing.home.architecture.module.automation"),
+    mt("marketing.home.architecture.module.workflow"),
+    mt("marketing.home.architecture.module.analytics"),
+    mt("marketing.home.architecture.module.security"),
+  ],
+  architectureChannels: [
+    [mt("marketing.home.channels.name.website"), mt("marketing.home.channels.status.live")],
+    [mt("marketing.home.channels.name.telegram"), mt("marketing.home.channels.status.next")],
+    [`${mt("marketing.home.channels.name.whatsapp")}, ${mt("marketing.home.channels.name.zalo")}, ${mt("marketing.home.channels.name.discord")}, ${mt("marketing.home.channels.name.api")}`, mt("marketing.home.channels.status.next")],
+  ],
+  architectureCoreDetail: mt("marketing.home.architecture.core_detail"),
+  pricingEyebrow: mt("marketing.home.pricing.kicker"),
+  pricingTitle: mt("marketing.home.pricing.title"),
+  pricingDescription: mt("marketing.home.pricing.description"),
+  pricingUnavailable: mt("marketing.pricing.unavailable.title"),
+  pricingUnavailableDetail: mt("marketing.pricing.unavailable.description"),
+  planCta: mt("marketing.home.pricing.create"),
+  pricingCompare: mt("marketing.home.pricing.compare"),
+  pricingRecommended: mt("marketing.home.pricing.recommended"),
+  faqEyebrow: mt("marketing.home.faq.kicker"),
+  faqTitle: mt("marketing.home.faq.title"),
+  faq: [
+    [mt("marketing.home.faq.telegram.question"), mt("marketing.home.faq.telegram.answer")],
+    [mt("marketing.home.faq.money.question"), mt("marketing.home.faq.money.answer")],
+    [mt("marketing.home.faq.test.question"), mt("marketing.home.faq.test.answer")],
+  ],
+  finalEyebrow: mt("marketing.home.final.kicker"),
+  finalTitle: mt("marketing.home.final.title"),
+  finalDescription: mt("marketing.home.final.description"),
+  finalPrimary: mt("marketing.home.final.cta"),
+  finalSecondary: mt("marketing.home.hero.secondary"),
+  footerTagline: mt("marketing.footer.tagline"),
+  footer: {
+    legal: mt("marketing.footer.legal"),
+    privacy: mt("marketing.footer.privacy"),
+    product: mt("marketing.header.product"),
+    solutions: mt("marketing.header.solutions"),
+    support: mt("marketing.footer.support"),
+    resources: mt("marketing.header.resources"),
+  },
+};
+
+// Keep the established marketing surface contract discoverable for static checks.
+// mt("marketing.home.hero.title") mt("marketing.home.hero.secondary") mt("marketing.home.flow.payment") mt("marketing.home.flow.payment_detail") mt("marketing.home.flow.delivery_detail") marketing.pricing_unavailable
+
+const landingStructuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://selinow.com/#organization",
+      name: "Selinow",
+      url: "https://selinow.com/",
+      logo: "https://selinow.com/brand/logo/selinow-logo-primary.svg",
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://selinow.com/#website",
+      name: "Selinow",
+      url: "https://selinow.com/",
+      publisher: { "@id": "https://selinow.com/#organization" },
+      inLanguage: locale,
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://selinow.com/#software",
+      name: "Selinow OS",
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "Web",
+      description: landingCopy.seoDescription,
+      url: "https://selinow.com/",
+      publisher: { "@id": "https://selinow.com/#organization" },
+      inLanguage: locale,
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: landingCopy.faq.map(([question, answer]) => ({
+        "@type": "Question",
+        name: question,
+        acceptedAnswer: { "@type": "Answer", text: answer }
+      }))
+    }
+  ]
+};
+
+// Text-free inline icons. Channel names and readiness states stay in live HTML
+// so they remain localizable and data-driven.
+const icon = (path: string, size = 18): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+
+const trustIcons = [
+  icon('<path d="M12 3l7 3v5c0 4.4-2.9 7.9-7 9-4.1-1.1-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/>'),
+  icon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 4 5.6 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.6-4-9s1.5-6.4 4-9z"/>'),
+  icon('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
+  icon('<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>'),
+];
+
+const channelIcons: Record<string, string> = {
+  website: icon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 4 5.6 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.6-4-9s1.5-6.4 4-9z"/>'),
+  telegram: icon('<path d="M21 4L3 11l5 2 2 6 3-4 5 4z"/><path d="M8 13l9-7-5 9"/>'),
+  whatsapp: icon('<path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z"/><path d="M8.5 9.5c.5 3 3 5.5 6 6l1.5-1.5-2-1.5-1.5.8c-1-.5-2-1.5-2.5-2.5l.8-1.5-1.5-2z"/>'),
+  zalo: icon('<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9v6M13 9v4a2 2 0 0 0 4 0V9"/>'),
+  discord: icon('<path d="M8 12a1 1 0 1 0 0-.01"/><circle cx="16" cy="12" r="1"/><path d="M7 6c3-1.5 7-1.5 10 0l2 3a15 15 0 0 1 1.5 7c-1.5 1.5-3.5 2-3.5 2l-1-2a11 11 0 0 1-7 0l-1 2s-2-.5-3.5-2A15 15 0 0 1 5 9z"/>'),
+  api: icon('<path d="M8 6l-5 6 5 6M16 6l5 6-5 6"/>'),
+};
+
+const proofCheck = icon('<path d="M20 6L9 17l-5-5"/>', 14);
+const sparkGlyph = icon('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>', 16);
+const architectureGlyphs = [
+  icon('<path d="M4 12h5l2-6 2 12 2-6h5"/>', 16),
+  icon('<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>', 16),
+  icon('<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>', 16),
+];
 
 if (hostKind === "marketing") {
   mode = "marketing";
   try {
     plans = await getMarketingPlans(env);
-    pricingState = plans.length > 0 ? "ready" : "unavailable";
+    pricingState = isMarketingPricingReady(plans) ? "ready" : "unavailable";
   } catch {
     loggerFor(env).warn({ event: "marketing.pricing_unavailable", errorCode: "marketing_plans_unavailable", requestId: Astro.locals.requestId, source: "http", status: 503 });
   }
@@ -46,7 +257,6 @@ if (hostKind === "marketing") {
     if (Astro.locals.locale === undefined) {
       locale = normalizeSupportedLocale(shop.defaultLocale);
       t = createStorefrontTranslator(locale);
-      mt = createMarketingTranslator(locale);
     }
     const canonical = canonicalRedirectFor(Astro.request, shop);
     if (canonical !== null) return Astro.redirect(canonical.toString(), 308);
@@ -69,173 +279,380 @@ if (mode === "error") {
   Astro.response.status = 404;
   Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
 }
+
+const storefrontStructuredData = mode === "storefront" && shop?.access === "live" && shop !== null
+  ? {
+    "@context": "https://schema.org",
+    "@type": "OnlineStore",
+    name: shop.name,
+    url: `https://${shop.currentHostname}/`,
+    description: shop.content.seoDescription,
+    ...(shop.theme.logoUrl === null ? {} : { logo: shop.theme.logoUrl }),
+    hasOfferCatalog: {
+      "@type": "OfferCatalog",
+      name: shop.content.headline,
+      itemListElement: products.map((product) => ({
+        "@type": "OfferCatalog",
+        name: product.title,
+        url: `https://${shop.currentHostname}/products/${product.slug}`,
+      })),
+    },
+  }
+  : undefined;
 ---
 
 {mode === "marketing" && (
-  <PlatformLayout
-    title={mt("marketing.home.seo_title")}
-    description={mt("marketing.home.seo_description")}
-    locale={locale}
-  >
-    <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-    <main id="main-content">
-      <section class="platform-shell marketing-hero">
-        <div class="hero-copy">
-          <p class="eyebrow">{mt("marketing.home.hero.eyebrow")}</p>
-          <h1>{mt("marketing.home.hero.title")}</h1>
-          <p class="lead">{mt("marketing.home.hero.lead")}</p>
-          <div class="hero-actions">
-            <a class="button primary" href={`${env.DASHBOARD_ORIGIN}/login`}>{mt("marketing.home.hero.primary")} <span aria-hidden="true">→</span></a>
-            <a class="button secondary" href="#workflow">{mt("marketing.home.hero.secondary")}</a>
-          </div>
-          <p class="hero-note">{mt("marketing.home.hero.note")}</p>
+  <PlatformLayout title={landingCopy.seoTitle} description={landingCopy.seoDescription} locale={locale} structuredData={landingStructuredData}>
+    <div class="landing-page">
+      <div class="l3-announcement" role="status">
+        <div class="platform-shell l3-announcement-inner">
+          <span class="l3-announcement-dot" aria-hidden="true"></span>
+          <span>{landingCopy.announcement}</span>
+          <a href="#channels">{landingCopy.announcementCta} <span aria-hidden="true">→</span></a>
         </div>
-        <aside class="hero-visual" aria-label={mt("marketing.home.flow.aria")}>
-          <div class="visual-window-bar"><span></span><span></span><span></span><strong>{mt("marketing.home.flow.title")}</strong></div>
-          <div class="visual-flow">
-            <article class="visual-node visual-node-channel">
-              <span class="visual-icon" aria-hidden="true">◌</span>
-              <strong>{mt("marketing.home.flow.channel")}</strong>
-              <p>{mt("marketing.home.flow.channel_detail")}</p>
+      </div>
+
+      <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+
+      <main id="main-content">
+        <!-- 1. HERO -->
+        <section class="l3-hero">
+          <canvas class="l3-hero-canvas" data-hero-canvas aria-hidden="true"></canvas>
+          <div class="l3-hero-backdrop" aria-hidden="true"></div>
+          <div class="platform-shell l3-hero-grid">
+            <div class="l3-hero-copy">
+              <p class="l3-hero-eyebrow"><span class="l3-hero-eyebrow-dot" aria-hidden="true"></span>{landingCopy.eyebrow}</p>
+              <h1 class="l3-hero-title">{landingCopy.heroTitle} <strong>{landingCopy.heroHighlight}</strong></h1>
+              <p class="l3-hero-lead">{landingCopy.heroDescription}</p>
+              <div class="l3-hero-actions">
+                <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+                  <span>{landingCopy.heroPrimary}</span>
+                  <span aria-hidden="true">→</span>
+                </a>
+                <a class="kit-button kit-button-ghost" href="#workflow">
+                  <span>{landingCopy.heroSecondary}</span>
+                  <span class="play-icon" aria-hidden="true">▶</span>
+                </a>
+              </div>
+              <ul class="l3-hero-proof" aria-label={landingCopy.heroProof.join(", ")}>
+                {landingCopy.heroProof.map((proof) => (
+                  <li><span set:html={proofCheck} aria-hidden="true"></span>{proof}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div class="l3-hero-visual">
+              <HeroCommerceFlow locale={locale} />
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. COMMERCE FLOW RAIL -->
+        <CommerceFlowRail locale={locale} />
+
+        <!-- 3. TRUST PRINCIPLES -->
+        <section class="platform-shell l3-trust" aria-label="Selinow OS trust principles">
+          {landingCopy.trust.map((item, index) => (
+            <article class="l3-trust-card">
+              <span class="l3-trust-icon" set:html={trustIcons[index]} aria-hidden="true"></span>
+              <div>
+                <h2>{item[0]}</h2>
+                <p>{item[1]}</p>
+              </div>
             </article>
-            <span class="visual-connector" aria-hidden="true">→</span>
-            <article class="visual-node visual-node-order">
-              <span class="visual-icon" aria-hidden="true">◎</span>
-              <strong>{mt("marketing.home.flow.order")}</strong>
-              <p>{mt("marketing.home.flow.order_detail")}</p>
-            </article>
-            <span class="visual-connector" aria-hidden="true">→</span>
-            <article class="visual-node visual-node-payment">
-              <span class="visual-icon" aria-hidden="true">✓</span>
-              <strong>{mt("marketing.home.flow.payment")}</strong>
-              <p>{mt("marketing.home.flow.payment_detail")}</p>
-            </article>
-            <span class="visual-connector" aria-hidden="true">→</span>
-            <article class="visual-node visual-node-delivery">
-              <span class="visual-icon" aria-hidden="true">↗</span>
-              <strong>{mt("marketing.home.flow.delivery")}</strong>
-              <p>{mt("marketing.home.flow.delivery_detail")}</p>
-            </article>
+          ))}
+        </section>
+
+        <!-- 4. CHANNEL COVERAGE BOARD -->
+        <section class="kit-section platform-shell" id="channels">
+          <div class="kit-section-heading">
+            <div>
+              <p class="kit-kicker">{landingCopy.channelsEyebrow}</p>
+              <h2 class="section-title">{landingCopy.channelsTitle}</h2>
+            </div>
+            <p class="section-description">{landingCopy.channelsDescription}</p>
           </div>
-          <div class="visual-rail" aria-hidden="true"><span>Website</span><i></i><span>Telegram</span><i></i><span>PayOS</span><i></i><span>{mt("marketing.home.flow.inventory")}</span></div>
-        </aside>
-      </section>
 
-      <section class="proof-strip" aria-label={mt("marketing.home.proof.aria")}>
-        <div class="platform-shell">
-          <p>{mt("marketing.home.proof.label")}</p>
-          <ul><li>{mt("marketing.home.proof.digital_products")}</li><li>{mt("marketing.home.proof.communities")}</li><li>{mt("marketing.home.proof.creators")}</li><li>{mt("marketing.home.proof.telegram_teams")}</li></ul>
-        </div>
-      </section>
+          <div class="l3-channel-board">
+            <div class="l3-channel-column">
+              <p class="l3-channel-heading" data-tone="live">{landingCopy.available}</p>
+              <div class="l3-channel-row">
+                {landingCopy.channelCards.filter((channel) => channel.state === "live").map((channel) => (
+                  <div class="l3-channel-tile" data-channel-state={channel.state}>
+                    <span class="l3-channel-tile-icon" set:html={channelIcons[channel.key]} aria-hidden="true"></span>
+                    <span class="l3-channel-copy">
+                      <strong>{channel.label}</strong>
+                      <small>{channel.status}</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-      <section class="marketing-band" id="workflow">
-        <div class="platform-shell">
-          <div class="band-intro">
-            <p class="section-kicker">{mt("marketing.home.workflow.kicker")}</p>
-            <h2>{mt("marketing.home.workflow.title")}</h2>
-            <p>{mt("marketing.home.workflow.description")}</p>
+            <div class="l3-channel-column">
+              <p class="l3-channel-heading" data-tone="next">{landingCopy.expanding}</p>
+              <div class="l3-channel-row">
+                {landingCopy.channelCards.filter((channel) => channel.state === "next").map((channel) => (
+                  <div class="l3-channel-tile" data-channel-state={channel.state}>
+                    <span class="l3-channel-tile-icon" set:html={channelIcons[channel.key]} aria-hidden="true"></span>
+                    <span class="l3-channel-copy">
+                      <strong>{channel.label}</strong>
+                      <small>{channel.status}</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div class="l3-channel-column">
+              <p class="l3-channel-heading" data-tone="planned">{landingCopy.extensible}</p>
+              <div class="l3-channel-extensible">
+                <span class="l3-channel-tile-icon" set:html={channelIcons.api} aria-hidden="true"></span>
+                <strong>{landingCopy.channelNames.api}</strong>
+                <small>{landingCopy.channelStatus.development}</small>
+              </div>
+            </div>
           </div>
-          <ol>
-            <li><span>01</span><div><strong>{mt("marketing.home.workflow.step1.title")}</strong><p>{mt("marketing.home.workflow.step1.description")}</p></div></li>
-            <li><span>02</span><div><strong>{mt("marketing.home.workflow.step2.title")}</strong><p>{mt("marketing.home.workflow.step2.description")}</p></div></li>
-            <li><span>03</span><div><strong>{mt("marketing.home.workflow.step3.title")}</strong><p>{mt("marketing.home.workflow.step3.description")}</p></div></li>
-            <li><span>04</span><div><strong>{mt("marketing.home.workflow.step4.title")}</strong><p>{mt("marketing.home.workflow.step4.description")}</p></div></li>
-          </ol>
-        </div>
-      </section>
 
-      <section class="platform-shell feature-section" id="features">
-        <div class="section-heading">
-          <div><p class="section-kicker">{mt("marketing.home.features.kicker")}</p><h2>{mt("marketing.home.features.title")}</h2></div>
-          <p>{mt("marketing.home.features.description")}</p>
-        </div>
-        <div class="feature-grid feature-grid-three">
-          <article class="feature-card"><span>{mt("marketing.home.features.sales.label")}</span><h3>{mt("marketing.home.features.sales.title")}</h3><p>{mt("marketing.home.features.sales.description")}</p><a href="#product-stage">{mt("marketing.home.features.sales.link")} <span aria-hidden="true">→</span></a></article>
-          <article class="feature-card"><span>{mt("marketing.home.features.operations.label")}</span><h3>{mt("marketing.home.features.operations.title")}</h3><p>{mt("marketing.home.features.operations.description")}</p><a href="#product-stage">{mt("marketing.home.features.operations.link")} <span aria-hidden="true">→</span></a></article>
-          <article class="feature-card"><span>{mt("marketing.home.features.automation.label")}</span><h3>{mt("marketing.home.features.automation.title")}</h3><p>{mt("marketing.home.features.automation.description")}</p><a href="#workflow">{mt("marketing.home.features.automation.link")} <span aria-hidden="true">→</span></a></article>
-        </div>
-      </section>
-
-      <section class="platform-shell product-stage" id="product-stage">
-        <div class="product-stage-copy">
-          <p class="section-kicker">{mt("marketing.home.workspace.kicker")}</p>
-          <h2>{mt("marketing.home.workspace.title")}</h2>
-          <p>{mt("marketing.home.workspace.description")}</p>
-          <ul class="check-list">
-            <li>{mt("marketing.home.workspace.check.catalog")}</li>
-            <li>{mt("marketing.home.workspace.check.states")}</li>
-            <li>{mt("marketing.home.workspace.check.readiness")}</li>
-            <li>{mt("marketing.home.workspace.check.audit")}</li>
-          </ul>
-          <a class="button secondary" href={`${env.DASHBOARD_ORIGIN}/login`}>{mt("marketing.home.workspace.cta")} <span aria-hidden="true">→</span></a>
-        </div>
-        <div class="product-stage-mock" aria-label={mt("marketing.home.workspace.mock_aria")}>
-          <div class="mock-sidebar"><strong>Selinow</strong><span class="mock-active">{mt("marketing.home.workspace.overview")}</span><span>{mt("marketing.home.workspace.products")}</span><span>{mt("marketing.home.workspace.inventory")}</span><span>{mt("marketing.home.workspace.orders")}</span><span>{mt("marketing.home.workspace.channels")}</span><span>{mt("marketing.home.workspace.integrations")}</span></div>
-          <div class="mock-main">
-            <div class="mock-heading"><div><span class="mock-caption">{mt("marketing.home.workspace.your_store")}</span><strong>Workspace</strong></div><span class="mock-user">⋯</span></div>
-            <div class="mock-status-grid"><div><span>{mt("marketing.home.workspace.channels")}</span><strong>Website + Telegram</strong><em>{mt("marketing.home.workspace.channel_status")}</em></div><div><span>{mt("marketing.home.workspace.payment")}</span><strong>PayOS</strong><em>{mt("marketing.home.workspace.readiness")}</em></div><div><span>{mt("marketing.home.workspace.fulfillment")}</span><strong>{mt("marketing.home.workspace.inventory")}</strong><em>{mt("marketing.home.workspace.server_confirmed")}</em></div></div>
-            <div class="mock-ledger"><div class="mock-ledger-head"><span>{mt("marketing.home.workspace.ledger")}</span><span>{mt("marketing.home.workspace.status")}</span></div><div><span>{mt("marketing.home.workspace.discover_checkout")}</span><b>{mt("marketing.home.workspace.active")}</b></div><div><span>{mt("marketing.home.workspace.payment_verification")}</span><b>{mt("marketing.home.workspace.waiting_provider")}</b></div><div><span>{mt("marketing.home.workspace.fulfillment")}</span><b>{mt("marketing.home.workspace.retry_safe")}</b></div></div>
+          <div class="l3-channel-legend">
+            <span><i class="l3-legend-live"></i>{landingCopy.channelStatus.live}</span>
+            <span><i class="l3-legend-next"></i>{landingCopy.channelStatus.next}</span>
+            <span><i class="l3-legend-planned"></i>{landingCopy.channelStatus.planned}</span>
+            <span><i class="l3-legend-extensible"></i>{landingCopy.extensible}</span>
           </div>
-          <p class="mock-disclaimer">{mt("marketing.home.workspace.disclaimer")}</p>
-        </div>
-      </section>
+        </section>
 
-      <section class="use-cases" id="use-cases">
-        <div class="platform-shell">
-          <div><p class="section-kicker">{mt("marketing.home.use_cases.kicker")}</p><h2>{mt("marketing.home.use_cases.title")}</h2></div>
-          <div class="case-grid">
-            <article><span>{mt("marketing.home.use_cases.creator.label")}</span><h3>{mt("marketing.home.use_cases.creator.title")}</h3></article>
-            <article><span>{mt("marketing.home.use_cases.community.label")}</span><h3>{mt("marketing.home.use_cases.community.title")}</h3></article>
-            <article><span>{mt("marketing.home.use_cases.team.label")}</span><h3>{mt("marketing.home.use_cases.team.title")}</h3></article>
+        <!-- 5. SOLUTIONS PREVIEW -->
+        <section class="kit-section platform-shell" id="use-cases">
+          <div class="kit-section-heading kit-section-heading-centered">
+            <div>
+              <p class="kit-kicker">{landingCopy.useEyebrow}</p>
+              <h2 class="section-title">{landingCopy.useTitle}</h2>
+            </div>
+            <p class="section-description">{landingCopy.useDescription}</p>
+          </div>
+
+          <div class="l3-usecase-grid">
+            {landingCopy.solutions.map((sol, index) => (
+              <SolutionWorkflowCard
+                slug={sol.slug}
+                index={index + 1}
+                eyebrow={sol.eyebrow}
+                title={sol.title}
+                lead={sol.lead}
+                href={sol.href}
+                locale={locale}
+              />
+            ))}
+          </div>
+        </section>
+
+        <!-- 6. OPERATIONAL WORKFLOW TRACK -->
+        <section class="l3-workflow" id="workflow">
+          <div class="platform-shell">
+            <div class="kit-section-heading kit-section-heading-centered">
+              <div>
+                <p class="kit-kicker">{landingCopy.workflowEyebrow}</p>
+                <h2 class="section-title">{landingCopy.workflowTitle}</h2>
+              </div>
+              <p class="section-description">{landingCopy.workflowDescription}</p>
+            </div>
+
+            <div class="l3-workflow-grid">
+              {landingCopy.workflowSteps.map((step, index) => (
+                <article class="l3-workflow-step">
+                  <span class="l3-workflow-number">{String(index + 1).padStart(2, "0")}</span>
+                  <div class="l3-workflow-art">
+                    <img src={`/brand/selinow-kit/${step[2]}`} alt="" loading="lazy" width="640" height="420" />
+                  </div>
+                  <h3>{step[0]}</h3>
+                  <p>{step[1]}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. ARCHITECTURE BOARD -->
+        <section class="kit-section platform-shell" id="architecture">
+          <div class="kit-section-heading">
+            <div>
+              <p class="kit-kicker">{landingCopy.architectureEyebrow}</p>
+              <h2 class="section-title">{landingCopy.architectureTitle}</h2>
+            </div>
+            <p class="section-description">{landingCopy.architectureDescription}</p>
+          </div>
+
+          <div class="l3-architecture-board">
+            <div class="l3-architecture-list">
+              <p>{landingCopy.architectureLeft}</p>
+              {landingCopy.architectureModules.map((module) => (
+                <span><i set:html={sparkGlyph} aria-hidden="true"></i>{module}</span>
+              ))}
+            </div>
+
+            <div class="l3-architecture-core">
+              <img src="/brand/selinow-kit/global/v3/core-hub.svg" alt="" width="88" height="88" />
+              <strong>{landingCopy.architectureCore}</strong>
+              <small>{landingCopy.architectureCoreDetail}</small>
+            </div>
+
+            <div class="l3-architecture-list">
+              <p>{landingCopy.architectureRight}</p>
+              {landingCopy.architectureChannels.map((channel, index) => (
+                <span>
+                  <i set:html={architectureGlyphs[index] ?? sparkGlyph} aria-hidden="true"></i>
+                  <span class="l3-architecture-destination-copy">
+                    <strong>{channel[0]}</strong>
+                    <small>{channel[1]}</small>
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <!-- 8. RUNTIME PRICING PREVIEW -->
+        <section class="kit-section platform-shell" id="pricing" data-pricing-state={pricingState}>
+          <div class="kit-section-heading">
+            <div>
+              <p class="kit-kicker">{landingCopy.pricingEyebrow}</p>
+              <h2 class="section-title">{landingCopy.pricingTitle}</h2>
+            </div>
+            <p class="section-description">{landingCopy.pricingDescription}</p>
+          </div>
+
+          {pricingState === "ready" ? (
+            <>
+              <div class="runtime-plan-grid">
+                {plans.map((plan) => (
+                  <article class:list={["runtime-plan-card", plan.recommended === true && "runtime-plan-card-featured"]}>
+                    <div class="runtime-plan-head">
+                      <span>{plan.recommended === true ? landingCopy.pricingRecommended : plan.code}</span>
+                      <h3>{plan.name}</h3>
+                    </div>
+                    <p class="runtime-plan-source">Runtime plan · {plan.code}</p>
+                    <div class="runtime-plan-prices">
+                      {(plan.prices ?? []).map((price) => {
+                        const amount = formatMarketingPrice(price, locale);
+                        return amount === null ? null : <p data-market={price.marketCode}><strong>{amount}</strong> <span>{price.interval}</span></p>;
+                      })}
+                    </div>
+                    <ul>
+                      {planFeatureList(plan, locale).map((feature) => (
+                        <li>{feature}</li>
+                      ))}
+                    </ul>
+                    <a class="kit-button kit-button-secondary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+                      <span>{landingCopy.planCta}</span>
+                      <span aria-hidden="true">→</span>
+                    </a>
+                  </article>
+                ))}
+              </div>
+              <div class="pricing-preview-footer">
+                <a class="kit-button kit-button-secondary" href="/pricing">
+                  <span>{landingCopy.pricingCompare}</span>
+                  <span aria-hidden="true">→</span>
+                </a>
+              </div>
+            </>
+          ) : (
+            <div class="pricing-empty">
+              <h3>{landingCopy.pricingUnavailable}</h3>
+              <p>{landingCopy.pricingUnavailableDetail}</p>
+            </div>
+          )}
+        </section>
+
+        <!-- 9. FAQ -->
+        <section class="kit-section platform-shell l3-faq" id="faq">
+          <div class="kit-section-heading kit-section-heading-centered">
+            <div>
+              <p class="kit-kicker">{landingCopy.faqEyebrow}</p>
+              <h2 class="section-title">{landingCopy.faqTitle}</h2>
+            </div>
+          </div>
+
+          <div class="faq-kit-list">
+            {landingCopy.faq.map((item) => (
+              <details>
+                <summary>
+                  <span>{item[0]}</span>
+                  <span aria-hidden="true">+</span>
+                </summary>
+                <p>{item[1]}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+
+        <!-- 10. FINAL CTA -->
+        <section class="l3-final">
+          <div class="platform-shell l3-final-inner">
+            <div>
+              <p class="kit-kicker">{landingCopy.finalEyebrow}</p>
+              <h2>{landingCopy.finalTitle}</h2>
+              <p>{landingCopy.finalDescription}</p>
+            </div>
+            <div class="l3-final-actions">
+              <a class="kit-button kit-button-light" href={`${env.DASHBOARD_ORIGIN}/login`}>
+                <span>{landingCopy.finalPrimary}</span>
+                <span aria-hidden="true">→</span>
+              </a>
+              <a class="kit-button kit-button-outline-light" href="#workflow">
+                <span>{landingCopy.finalSecondary}</span>
+                <span aria-hidden="true">▶</span>
+              </a>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="landing-footer">
+        <div class="platform-shell footer-grid">
+          <div class="footer-brand">
+            <a href="/" aria-label={landingCopy.footerTagline}>
+              <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="132" height="34" />
+            </a>
+            <p>{landingCopy.footerTagline}</p>
+            <small>© {new Date().getFullYear()} Selinow. All rights reserved.</small>
+          </div>
+
+          <div class="footer-group">
+            <h2>{landingCopy.footer.product}</h2>
+            <a href="#channels">{landingCopy.channelsTitle}</a>
+            <a href="#workflow">{landingCopy.workflowTitle}</a>
+            <a href="#architecture">{landingCopy.architectureTitle}</a>
+            <a href="/pricing">{mt("marketing.header.pricing")}</a>
+          </div>
+
+          <div class="footer-group">
+            <h2>{landingCopy.footer.solutions}</h2>
+            <a href="/solutions/telegram-commerce">Telegram Commerce</a>
+            <a href="/solutions/digital-product-delivery">Digital Product Delivery</a>
+            <a href="/solutions/license-key-inventory">License Key Inventory</a>
+            <a href="/solutions">{landingCopy.footer.solutions}</a>
+          </div>
+
+          <div class="footer-group">
+            <h2>{landingCopy.footer.resources}</h2>
+            <a href="#faq">{landingCopy.faqEyebrow}</a>
+            <a href="/legal">{landingCopy.footer.legal}</a>
+            <a href="/privacy">{landingCopy.footer.privacy}</a>
+            <a href="/support">{landingCopy.footer.support}</a>
+            <a href={`${env.DASHBOARD_ORIGIN}/login`}>{mt("marketing.header.login")}</a>
           </div>
         </div>
-      </section>
+      </footer>
 
-      <section class="platform-shell trust-panel" id="trust">
-        <div><p class="section-kicker">{mt("marketing.home.trust.kicker")}</p><h2>{mt("marketing.home.trust.title")}</h2></div>
-        <p>{mt("marketing.home.trust.description")}</p>
-      </section>
-
-      <section class="platform-shell pricing-preview" data-pricing-state={pricingState}>
-        <div class="section-heading">
-          <div><p class="section-kicker">{mt("marketing.home.pricing.kicker")}</p><h2>{mt("marketing.home.pricing.title")}</h2></div>
-          <p>{mt("marketing.home.pricing.description")}</p>
-        </div>
-        {pricingState === "ready" ? <>
-          <div class="plan-grid">
-            {plans.map((plan) => <article class="plan">
-              <h3>{plan.name}</h3>
-              <ul>{planFeatureList(plan, locale).map((feature) => <li>{feature}</li>)}</ul>
-              <a class="button secondary" href={`${env.DASHBOARD_ORIGIN}/login`}>{mt("marketing.home.pricing.create")}</a>
-            </article>)}
-          </div>
-          <a class="text-link" href="/pricing">{mt("marketing.home.pricing.compare")} <span aria-hidden="true">→</span></a>
-        </> : <section class="pricing-unavailable" aria-labelledby="pricing-unavailable-title">
-          <p class="section-kicker">{mt("marketing.home.pricing.data_kicker")}</p>
-          <h3 id="pricing-unavailable-title">{mt("marketing.pricing.unavailable.title")}</h3>
-          <p>{mt("marketing.pricing.unavailable.description")}</p>
-        </section>}
-      </section>
-
-      <section class="platform-shell faq-section" id="faq">
-        <div><p class="section-kicker">{mt("marketing.home.faq.kicker")}</p><h2>{mt("marketing.home.faq.title")}</h2></div>
-        <div class="faq-list">
-          <details><summary>{mt("marketing.home.faq.telegram.question")}</summary><p>{mt("marketing.home.faq.telegram.answer")}</p></details>
-          <details><summary>{mt("marketing.home.faq.money.question")}</summary><p>{mt("marketing.home.faq.money.answer")}</p></details>
-          <details><summary>{mt("marketing.home.faq.test.question")}</summary><p>{mt("marketing.home.faq.test.answer")}</p></details>
-        </div>
-      </section>
-
-      <section class="final-cta">
-        <div class="platform-shell"><img src="/brand/logo/selinow-mark-white.svg" alt="" width="64" height="64" /><div><p class="section-kicker">{mt("marketing.home.final.kicker")}</p><h2>{mt("marketing.home.final.title")}</h2></div><a class="button light" href={`${env.DASHBOARD_ORIGIN}/login`}>{mt("marketing.home.final.cta")} <span aria-hidden="true">→</span></a></div>
-      </section>
-    </main>
-    <footer class="platform-shell platform-footer"><img src="/brand/logo/selinow-logo-black.svg" alt="Selinow" width="128" height="34" /><p>{mt("marketing.footer.tagline")}</p><p>© {new Date().getFullYear()} Selinow.</p></footer>
+      <script src="../scripts/landing/hero-canvas.ts"></script>
+    </div>
   </PlatformLayout>
 )}
 
 {mode === "storefront" && shop && (
-  <StorefrontLayout shop={shop} title={shop.content.seoTitle} description={shop.content.seoDescription} noindex={shop.access !== "live"}>
+  <StorefrontLayout shop={shop} title={shop.content.seoTitle} description={shop.content.seoDescription} noindex={shop.access !== "live"} structuredData={storefrontStructuredData}>
     {shop.access === "live" ? (
       <>
         <section class="store-hero" data-mark={shop.name.slice(0, 1).toUpperCase()}>

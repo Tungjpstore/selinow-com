@@ -1,0 +1,32 @@
+{
+  "schema": "phase_4_pilot_scorecard_example",
+  "schemaVersion": 1,
+  "exampleOnly": true,
+  "candidateCommit": null,
+  "releaseId": null,
+  "environment": "staging",
+  "overallStatus": "not_started",
+  "pilotId": null,
+  "opaqueShopId": null,
+  "scenarios": {
+    "exact_payment": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "duplicate_webhook": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "partial_payment": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "overpaid_payment": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "late_payment": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "mismatched_payment": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "inventory_race": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "fulfillment_replay": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "provider_outage": { "status": "waiting_provider", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "stale_readiness": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "shop_switch_inventory_request": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "billing_response_loss": { "status": "waiting_provider", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "support_escalation": { "status": "pending_user", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "rollback_cleanup": { "status": "pending_user", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "tenant_isolation": { "status": "not_started", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "migration_retry": { "status": "pending_user", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "deploy_response_ambiguity": { "status": "pending_user", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null },
+    "monitoring_acknowledgement_loss": { "status": "pending_user", "observedAt": null, "safeRequestRefs": [], "privateEvidenceRefs": [], "ownerAckRef": null }
+  },
+  "notes": "Example/non-evidence only. Store completed records privately and retain safe references only."
+}

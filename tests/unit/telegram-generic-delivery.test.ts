@@ -64,7 +64,9 @@ const VALID_CONNECTION_ROW = {
   channelStatus: "enabled",
   connectionStatus: "active",
   hasOutboundGrant: 1,
+  generationState: "active",
   integrationId: "integration-a",
+  integrationGeneration: 2,
   integrationStatus: "active",
   providerCode: "telegram",
 };
@@ -274,8 +276,8 @@ describe("generic Telegram delivery adapter", () => {
   });
 
   it.each([
-    [429, { error_code: 429, ok: false, parameters: { retry_after: 17 } }, { errorCode: "telegram_rate_limited", kind: "retryable", retryAfterSeconds: 17 }],
-    [500, { error_code: 500, ok: false }, { errorCode: "provider_unavailable", kind: "retryable" }],
+    [429, { error_code: 429, ok: false, parameters: { retry_after: 17 } }, { errorCode: "telegram_rate_limited", kind: "retryable", providerOutcome: "not_sent", retryAfterSeconds: 17 }],
+    [500, { error_code: 500, ok: false }, { errorCode: "provider_unavailable", kind: "retryable", providerOutcome: "unknown" }],
     [401, { error_code: 401, ok: false }, { errorCode: "telegram_unauthorized", kind: "failed" }],
     [403, { error_code: 403, ok: false }, { errorCode: "telegram_recipient_unavailable", kind: "failed" }],
   ])("classifies Telegram HTTP %i without leaking provider detail", async (status, envelope, expected) => {
@@ -291,6 +293,7 @@ describe("generic Telegram delivery adapter", () => {
     await expect(deliverTelegramJob({ env: transport.env, fetcher, job: JOB })).resolves.toEqual({
       errorCode: "provider_timeout",
       kind: "retryable",
+      providerOutcome: "unknown",
     });
 
     const state = runtime();
@@ -298,6 +301,7 @@ describe("generic Telegram delivery adapter", () => {
     await expect(deliverTelegramJob({ env: state.env, job: JOB })).resolves.toEqual({
       errorCode: "telegram_delivery_state_unavailable",
       kind: "retryable",
+      providerOutcome: "unknown",
     });
   });
 });

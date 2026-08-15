@@ -246,6 +246,13 @@ const DYNAMIC_TRANSLATION_ALLOWLIST: readonly DynamicAllowlistEntry[] = [
     identifier: "t",
     path: "src/scripts/marketing/login.ts",
   },
+  {
+    catalog: "dashboard",
+    expression: "entry.safeDescriptionKey",
+    guard: /listChannelExpansionCatalog\(\)\.map\(\(entry\) => \(\{[\s\S]*description: t\(entry\.safeDescriptionKey\)/u,
+    identifier: "t",
+    path: "src/pages/app/integrations.astro",
+  },
 ] as const;
 
 function sourceFiles(root: string): SourceFile[] {

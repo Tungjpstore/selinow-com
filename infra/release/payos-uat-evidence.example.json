@@ -1,0 +1,206 @@
+{
+  "schemaVersion": 2,
+  "evidenceKind": "contract_gap",
+  "acceptanceReasonCode": "payos_controlled_real_transaction_not_executed",
+  "environment": "staging",
+  "provider": "payos",
+  "providerEnvironment": "unavailable",
+  "channel": "seller_payment",
+  "release": {
+    "releaseId": "stg_20260808T090000Z_000000000000",
+    "commitSha": "0000000000000000000000000000000000000000",
+    "treeSha": "0000000000000000000000000000000000000000",
+    "manifestRef": ".wrangler/releases/staging/stg_20260808T090000Z_000000000000/release-manifest.json",
+    "manifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "workerVersion": "replace-with-staging-worker-version"
+  },
+  "ownerAttestation": null,
+  "providerExecution": {
+    "controlledAccountFingerprintSha256": null,
+    "paymentInstrument": "none",
+    "realLowValueTransactionObserved": false,
+    "signatureSource": "none",
+    "syntheticSignatureUsed": false,
+    "transactionEvidenceFingerprintSha256": null
+  },
+  "scenarioPolicy": {
+    "providerRequired": ["signed_exact_payment", "direct_reconciliation"],
+    "localRequired": [
+      "invalid_signature",
+      "duplicate_replay",
+      "conflicting_replay",
+      "partial_payment",
+      "overpayment",
+      "late_payment",
+      "amount_mismatch",
+      "currency_mismatch",
+      "tenant_isolation",
+      "fulfillment_exactly_once"
+    ],
+    "providerUnsupported": ["signed_refund", "signed_chargeback"]
+  },
+  "unsupportedCapabilities": {
+    "signedRefund": {
+      "documentationReference": "payos_docs:payment_webhook",
+      "reasonCode": "payos_signed_refund_not_supported",
+      "status": "unsupported"
+    },
+    "signedChargeback": {
+      "documentationReference": "payos_docs:payment_webhook",
+      "reasonCode": "payos_signed_chargeback_not_supported",
+      "status": "unsupported"
+    }
+  },
+  "scenarios": {
+    "signed_exact_payment": {
+      "classification": "provider_supported",
+      "status": "blocked",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_controlled_real_transaction_not_executed",
+      "verificationMethod": "signed_webhook"
+    },
+    "direct_reconciliation": {
+      "classification": "provider_supported",
+      "status": "blocked",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_controlled_real_transaction_not_executed",
+      "verificationMethod": "verified_provider_response"
+    },
+    "invalid_signature": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "duplicate_replay": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "conflicting_replay": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "partial_payment": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "overpayment": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "late_payment": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "amount_mismatch": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "currency_mismatch": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "tenant_isolation": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "fulfillment_exactly_once": {
+      "classification": "selinow_local_assurance",
+      "status": "not_started",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_local_assurance_not_recorded",
+      "verificationMethod": "local_contract"
+    },
+    "signed_refund": {
+      "classification": "provider_unsupported",
+      "status": "unsupported",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_signed_refund_not_supported",
+      "verificationMethod": "provider_capability_audit"
+    },
+    "signed_chargeback": {
+      "classification": "provider_unsupported",
+      "status": "unsupported",
+      "observedAt": null,
+      "evidenceFingerprintSha256": null,
+      "requestReference": null,
+      "eventReference": null,
+      "reasonCode": "payos_signed_chargeback_not_supported",
+      "verificationMethod": "provider_capability_audit"
+    }
+  },
+  "redaction": {
+    "d1NoRawPayload": false,
+    "d1NoSecretValues": false,
+    "logsNoSensitiveValues": false,
+    "queuesNoSensitiveValues": false,
+    "auditNoSensitiveValues": false,
+    "evidenceFingerprintSha256": null
+  },
+  "createdAt": null,
+  "completedAt": null
+}

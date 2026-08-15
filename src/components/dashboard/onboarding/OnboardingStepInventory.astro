@@ -1,0 +1,307 @@
+---
+---
+
+<div class="onboarding-step-pane" data-step-pane="inventory" hidden>
+  <div class="step-intro-header">
+    <span class="step-num-badge">BƯỚC 03/04</span>
+    <h2>Nhập kho Mã Kích Hoạt (License Keys)</h2>
+    <p>Nạp sẵn danh sách key vào kho để hệ thống tự động trả cho khách hàng ngay sau khi thanh toán.</p>
+  </div>
+
+  <!-- Quick Action Bar -->
+  <div class="inventory-quick-actions">
+    <button type="button" class="btn-sample-keys" data-action-generate-sample-keys>
+      <span>✨ Tạo nhanh 5 Key Thử Nghiệm</span>
+    </button>
+    <span class="or-separator">hoặc dán danh sách key của bạn bên dưới</span>
+  </div>
+
+  <form class="step-form-grid" data-inventory-form novalidate>
+    <div class="form-group full-width">
+      <div class="label-with-count">
+        <label for="inventory-keys-input">Danh sách License Keys (Mỗi dòng 1 key) <span class="required-star">*</span></label>
+        <span class="keys-count-badge" data-inventory-count-badge>0 key</span>
+      </div>
+      <div class="textarea-keys-wrap">
+        <textarea
+          id="inventory-keys-input"
+          name="keysData"
+          rows="6"
+          spellcheck="false"
+          placeholder="W269N-WFGWX-YVC9B-4J6C9-T83GX
+VK7JG-NPHTM-C97JM-9MPGT-3V66T
+MH37W-N47XK-V7XM9-C7227-GCQG9"
+          data-input-inventory-keys
+        ></textarea>
+      </div>
+      <small class="field-hint">Mã key được mã hóa phong bì nhiều lớp trước khi lưu vào cơ sở dữ liệu. An toàn tuyệt đối 100%.</small>
+    </div>
+
+    <!-- Live Parser Strip -->
+    <div class="keys-metrics-strip" data-inventory-metrics>
+      <div class="metric-item">
+        <span class="metric-label">Tổng dòng nhận</span>
+        <strong class="metric-value" data-metric-total>0</strong>
+      </div>
+      <div class="metric-item highlight-success">
+        <span class="metric-label">Hợp lệ</span>
+        <strong class="metric-value" data-metric-valid>0</strong>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Trùng lặp</span>
+        <strong class="metric-value" data-metric-duplicate>0</strong>
+      </div>
+    </div>
+  </form>
+
+  <div class="step-actions split-actions">
+    <button type="button" class="btn-secondary-back" data-step-back="product">
+      ← Quay lại
+    </button>
+    <div class="right-actions">
+      <button type="button" class="btn-skip-link" data-step-skip="inventory">
+        Nhập key sau
+      </button>
+      <button type="button" class="btn-primary-next" data-step-submit="inventory">
+        <span data-btn-label>Tiếp Tục: Kết Nối PayOS & Kênh</span>
+        <span class="btn-arrow" aria-hidden="true">→</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .onboarding-step-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    animation: fadeInSlide 0.3s ease;
+  }
+
+  .step-intro-header {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .step-num-badge {
+    align-self: flex-start;
+    padding: 3px 10px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+  }
+
+  .step-intro-header h2 {
+    margin: 0;
+    font-size: clamp(22px, 3.5vw, 28px);
+    font-weight: 750;
+    color: var(--sln-text-primary);
+    letter-spacing: -0.03em;
+  }
+
+  .step-intro-header p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--sln-text-secondary);
+    line-height: 1.5;
+  }
+
+  /* Quick action */
+  .inventory-quick-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .btn-sample-keys {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px dashed var(--sln-action-primary);
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-sample-keys:hover {
+    background: color-mix(in srgb, var(--sln-action-primary) 15%, transparent);
+    transform: translateY(-1px);
+  }
+
+  .or-separator {
+    font-size: 12px;
+    color: var(--sln-text-muted);
+  }
+
+  /* Form */
+  .step-form-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .label-with-count {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  label {
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--sln-text-primary);
+  }
+
+  .required-star {
+    color: var(--sln-state-danger);
+  }
+
+  .keys-count-badge {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-secondary);
+    font-family: var(--sln-font-mono);
+  }
+
+  .textarea-keys-wrap textarea {
+    width: 100%;
+    min-height: 140px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-md);
+    padding: 12px 14px;
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-primary);
+    font-family: var(--sln-font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    outline: none;
+    resize: vertical;
+  }
+
+  .textarea-keys-wrap textarea:focus {
+    border-color: var(--sln-focus-ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+  }
+
+  .field-hint {
+    font-size: 12px;
+    color: var(--sln-text-muted);
+  }
+
+  /* Parser Strip */
+  .keys-metrics-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: var(--sln-radius-md);
+    background: var(--sln-bg-subtle);
+    border: 1px solid var(--sln-border-default);
+  }
+
+  .metric-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .metric-label {
+    font-size: 11px;
+    color: var(--sln-text-muted);
+  }
+
+  .metric-value {
+    font-size: 18px;
+    font-weight: 750;
+    color: var(--sln-text-primary);
+    font-family: var(--sln-font-mono);
+  }
+
+  .metric-item.highlight-success .metric-value {
+    color: var(--sln-state-success);
+  }
+
+  /* Actions */
+  .step-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--sln-border-default);
+  }
+
+  .right-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .btn-skip-link {
+    padding: 8px 14px;
+    border: none;
+    background: transparent;
+    color: var(--sln-text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-skip-link:hover {
+    color: var(--sln-text-primary);
+    text-decoration: underline;
+  }
+
+  .btn-secondary-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-secondary-back:hover {
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-primary);
+  }
+
+  .btn-primary-next {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 12px 24px;
+    border: none;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+
+  .btn-primary-next:hover {
+    background: var(--sln-action-primary-hover);
+    transform: translateX(2px);
+  }
+</style>

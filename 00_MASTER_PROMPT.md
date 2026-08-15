@@ -11,6 +11,15 @@
 
 **Infrastructure:** D1, R2, KV, Queues, Cron Triggers, Turnstile, Cloudflare for SaaS
 
+## Current continuation overlay (2026-08-03)
+
+The original Telegram/PayOS brief below remains the product foundation. The current source tree extends it with isolated dashboard lanes and backend contracts for Telegram Mini App, Zalo Mini App, Zalo Official Account, WhatsApp Cloud and Discord Bot plus paid Starter/Pro platform billing and privacy-safe activation milestones. The source migration ledger is `0001`-`0077`; production remains admitted through `0052`, staging remains accepted through `0028`, and `0029`-`0077` are source/local-only until a separately reviewed mutation window.
+
+- Telegram Mini App, WhatsApp Cloud and Discord Bot are contract-ready; Zalo Mini App and Zalo OA remain provider-pending.
+- The integrations dashboard separates Website, Telegram Bot, Telegram Mini App, Zalo Mini App, Zalo OA, WhatsApp Cloud and Discord Bot surfaces without exposing credentials or provider payloads.
+- Connector requests, provider receipts, identity references, verification evidence and catalog channel visibility are tenant-bound and fail closed; they do not imply provider activation.
+- Production remains `NO-GO` until remote migrations, fresh backup/restore, provider credentials/UAT, pilot, monitoring, rollback and ownership evidence are admitted. Local tests and dry-runs never authorize external mutation.
+
 **Primary locale:** Vietnamese; architecture must be English-ready
 **Quality bar:** Production SaaS with payment-grade idempotency, tenant isolation and automated onboarding
 

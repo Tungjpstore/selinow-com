@@ -69,6 +69,7 @@ export type OnboardingState = {
 };
 
 async function requireOwner(input: {
+  action?: "draft_setup" | "read";
   env: AppBindings;
   shopPublicId: string;
   userId: string;
@@ -77,6 +78,7 @@ async function requireOwner(input: {
     capability: "shop:update",
     env: input.env,
     shopPublicId: input.shopPublicId,
+    subscriptionAction: input.action ?? "read",
     userId: input.userId,
   });
   if (actor.row.role !== "owner") {
@@ -193,6 +195,7 @@ export async function updateOnboardingChannels(input: {
     capability: "shop:update",
     env: input.env,
     shopPublicId: input.shopPublicId,
+    subscriptionAction: "draft_setup",
     userId: input.userId,
   });
   if (member.row.role !== "owner") throw new AppError("authorization_denied", 403);
@@ -296,7 +299,7 @@ export async function updateOnboardingSettings(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<OnboardingState> {
-  const actor = await requireOwner(input);
+  const actor = await requireOwner({ ...input, action: "draft_setup" });
   const now = new Date().toISOString();
   const auditId = createId("aud");
   const result = await input.env.PLATFORM_DB.batch([

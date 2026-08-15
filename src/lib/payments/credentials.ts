@@ -2,6 +2,7 @@ import { AppError } from "../core/errors";
 import { resolveEncryptionKey } from "../crypto/keyring";
 import type { AppBindings } from "../platform/bindings";
 import { decryptPayOSCredentials, type EncryptedPayOSCredentials, type PayOSCredentials } from "./crypto";
+import { assertPayOSChannelAdmitted } from "./payos-admission";
 
 export type CredentialRow = EncryptedPayOSCredentials & {
   credentialId: string;
@@ -33,12 +34,18 @@ const CREDENTIAL_SELECT = `
 export async function loadCredentialById(env: AppBindings, credentialId: string, shopId: string): Promise<{ credentials: PayOSCredentials; row: CredentialRow }> {
   const row = await env.PLATFORM_DB.prepare(`SELECT ${CREDENTIAL_SELECT} FROM payment_credentials WHERE id = ? AND shop_id = ? AND provider_ownership_fingerprint IS NOT NULL AND (status = 'active' OR (status = 'grace' AND grace_ends_at > ?)) LIMIT 1`).bind(credentialId, shopId, new Date().toISOString()).first<CredentialRow>();
   if (row === null) throw new AppError("payment_not_configured", 409);
-  return { credentials: await decryptCredentialRow(env, row), row };
+  const credentials = await decryptCredentialRow(env, row);
+  await assertPayOSChannelAdmitted(env, credentials);
+  return { credentials, row };
 }
 
 export async function loadWebhookCredentials(env: AppBindings, webhookPublicId: string): Promise<{ credentials: PayOSCredentials; row: CredentialRow; integrationPublicId: string; webhookStatus: string }[]> {
   const rows = await env.PLATFORM_DB.prepare(`SELECT ${CREDENTIAL_SELECT}, payment_integrations.public_id AS integrationPublicId, payment_integrations.webhook_status AS webhookStatus FROM payment_integrations INNER JOIN payment_credentials ON payment_credentials.integration_id = payment_integrations.id AND payment_credentials.shop_id = payment_integrations.shop_id WHERE payment_integrations.webhook_public_id = ? AND payment_integrations.provider = 'payos' AND payment_credentials.provider_ownership_fingerprint IS NOT NULL AND payment_credentials.status IN ('active', 'grace', 'pending') AND (payment_credentials.status IN ('active', 'pending') OR payment_credentials.grace_ends_at > ?) ORDER BY CASE payment_credentials.status WHEN 'active' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, payment_credentials.version DESC LIMIT 3`).bind(webhookPublicId, new Date().toISOString()).all<CredentialRow & { integrationPublicId: string; webhookStatus: string }>();
-  return Promise.all(rows.results.map(async (row) => ({ credentials: await decryptCredentialRow(env, row), integrationPublicId: row.integrationPublicId, row, webhookStatus: row.webhookStatus })));
+  return Promise.all(rows.results.map(async (row) => {
+    const credentials = await decryptCredentialRow(env, row);
+    await assertPayOSChannelAdmitted(env, credentials);
+    return { credentials, integrationPublicId: row.integrationPublicId, row, webhookStatus: row.webhookStatus };
+  }));
 }
 
 async function decryptCredentialRow(env: AppBindings, row: CredentialRow): Promise<PayOSCredentials> {

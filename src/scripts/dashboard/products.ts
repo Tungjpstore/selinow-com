@@ -493,3 +493,135 @@ if (categoryManager !== null && managerShopId !== undefined && managerCsrfCookie
     confirmArchive?.addEventListener("click", () => { void updateCategory(row, "archived"); });
   }
 }
+
+const visibilityPanel = document.querySelector<HTMLElement>("[data-channel-visibility-panel]");
+const visibilityShopId = visibilityPanel?.dataset.shopPublicId;
+const visibilityCsrfCookieName = visibilityPanel?.dataset.csrfCookieName;
+if (visibilityPanel !== null && visibilityShopId !== undefined && visibilityCsrfCookieName !== undefined) {
+  type VisibilityProjection = {
+    channelCode: string;
+    productId: string;
+    status: "hidden" | "visible";
+    version: number;
+  };
+  const visibilityFeedback = visibilityPanel.querySelector<HTMLElement>("[data-channel-visibility-feedback]");
+  const visibilityRetry = visibilityPanel.querySelector<HTMLButtonElement>("[data-channel-visibility-retry]");
+  const visibilityToggles = [...visibilityPanel.querySelectorAll<HTMLButtonElement>("[data-visibility-toggle]")];
+  const pendingIntents = new Map<string, { key: string; payload: string }>();
+  let visibilityReady = false;
+  const readVisibilityCookie = (name: string): string | null => document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
+  const visibilityErrorCode = (payload: unknown): string => typeof payload === "object" && payload !== null && typeof (payload as JsonObject).code === "string" ? String((payload as JsonObject).code) : "request_failed";
+  const parseVisibility = (value: unknown): VisibilityProjection[] => {
+    if (!Array.isArray(value)) throw new Error("visibility_response_invalid");
+    return value.filter((row): row is VisibilityProjection => typeof row === "object" && row !== null
+      && typeof (row as JsonObject).channelCode === "string"
+      && typeof (row as JsonObject).productId === "string"
+      && ((row as JsonObject).status === "visible" || (row as JsonObject).status === "hidden")
+      && typeof (row as JsonObject).version === "number"
+      && Number.isSafeInteger((row as JsonObject).version));
+  };
+  const setVisibilityToggle = (button: HTMLButtonElement, status: "hidden" | "visible", version: number): void => {
+    const providerPending = button.dataset.providerPending === "true";
+    const visible = !providerPending && status === "visible";
+    button.dataset.visible = String(visible);
+    button.dataset.version = String(version);
+    button.classList.toggle("is-visible", visible);
+    button.setAttribute("aria-pressed", String(visible));
+    const state = button.querySelector<HTMLElement>("[data-visibility-state]");
+    if (state !== null) state.textContent = providerPending
+      ? t("dashboard.integrations.channel_expansion.status_provider_pending")
+      : visible ? t("dashboard.products.visibility.visible") : t("dashboard.products.visibility.hidden");
+  };
+  const setVisibilityReady = (ready: boolean): void => {
+    visibilityReady = ready;
+    for (const button of visibilityToggles) button.disabled = !visibilityReady || button.dataset.providerPending === "true";
+  };
+  const loadVisibility = async (): Promise<boolean> => {
+    setVisibilityReady(false);
+    if (visibilityRetry !== null) visibilityRetry.hidden = true;
+    if (visibilityFeedback !== null) visibilityFeedback.textContent = t("dashboard.products.visibility.loading");
+    try {
+      const response = await fetch(`/api/app/shops/${encodeURIComponent(visibilityShopId)}/catalog/visibility`, { credentials: "same-origin" });
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error(visibilityErrorCode(payload));
+      const rows = parseVisibility(typeof payload === "object" && payload !== null ? (payload as JsonObject).visibility : null);
+      const byKey = new Map(rows.map((row) => [`${row.productId}:${row.channelCode}`, row]));
+      for (const button of visibilityToggles) {
+        const productId = button.dataset.productId;
+        const channelCode = button.dataset.channelCode;
+        if (productId === undefined || channelCode === undefined) continue;
+        const projection = byKey.get(`${productId}:${channelCode}`);
+        setVisibilityToggle(button, projection?.status ?? "hidden", projection?.version ?? 0);
+      }
+      setVisibilityReady(true);
+      if (visibilityFeedback !== null) visibilityFeedback.textContent = t("dashboard.products.visibility.loaded");
+      return true;
+    } catch (error) {
+      if (visibilityRetry !== null) visibilityRetry.hidden = false;
+      if (visibilityFeedback !== null) visibilityFeedback.textContent = error instanceof Error
+        ? t("dashboard.products.visibility.load_error", { code: error.message })
+        : t("dashboard.products.visibility.load_error_generic");
+      return false;
+    }
+  };
+  const setVisibility = async (button: HTMLButtonElement): Promise<void> => {
+    if (button.dataset.providerPending === "true") return;
+    const productId = button.dataset.productId;
+    const channelCode = button.dataset.channelCode;
+    if (productId === undefined || channelCode === undefined) return;
+    const csrf = readVisibilityCookie(visibilityCsrfCookieName);
+    if (csrf === null) {
+      if (visibilityFeedback !== null) visibilityFeedback.textContent = t("dashboard.products.client.session_invalid");
+      return;
+    }
+    const expectedVersion = Number(button.dataset.version ?? 0);
+    const visible = button.dataset.visible !== "true";
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
+      if (visibilityFeedback !== null) visibilityFeedback.textContent = t("dashboard.products.visibility.save_error", { code: "visibility_version_invalid" });
+      return;
+    }
+    const requestBody = { channelCode, expectedVersion, productId, visible };
+    const payload = JSON.stringify(requestBody);
+    const intentKey = `${productId}:${channelCode}`;
+    const prior = pendingIntents.get(intentKey);
+    const idempotencyKey = prior?.payload === payload ? prior.key : crypto.randomUUID();
+    pendingIntents.set(intentKey, { key: idempotencyKey, payload });
+    button.disabled = true;
+    if (visibilityFeedback !== null) visibilityFeedback.textContent = t("dashboard.products.visibility.saving");
+    try {
+      const response = await fetch(`/api/app/shops/${encodeURIComponent(visibilityShopId)}/catalog/visibility`, {
+        body: payload,
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+          "X-CSRF-Token": decodeURIComponent(csrf),
+        },
+        method: "PUT",
+      });
+      const responsePayload: unknown = await response.json();
+      if (!response.ok) throw new Error(visibilityErrorCode(responsePayload));
+      const projection = typeof responsePayload === "object" && responsePayload !== null ? (responsePayload as JsonObject).projection : null;
+      const rows = parseVisibility(projection === null ? [] : [projection]);
+      const updated = rows[0];
+      if (updated === undefined || updated.productId !== productId || updated.channelCode !== channelCode) throw new Error("visibility_response_invalid");
+      setVisibilityToggle(button, updated.status, updated.version);
+      pendingIntents.delete(intentKey);
+      if (visibilityFeedback !== null) visibilityFeedback.textContent = t("dashboard.products.visibility.saved");
+    } catch (error) {
+      if (error instanceof Error && error.message === "version_conflict") {
+        const refreshed = await loadVisibility();
+        if (refreshed && visibilityFeedback !== null) visibilityFeedback.textContent = t("dashboard.products.visibility.conflict");
+      } else if (visibilityFeedback !== null) {
+        visibilityFeedback.textContent = error instanceof Error
+          ? t("dashboard.products.visibility.save_error", { code: error.message })
+          : t("dashboard.products.visibility.save_error_generic");
+      }
+    } finally {
+      button.disabled = !visibilityReady || button.dataset.providerPending === "true";
+    }
+  };
+  for (const button of visibilityToggles) button.addEventListener("click", () => { void setVisibility(button); });
+  visibilityRetry?.addEventListener("click", () => { void loadVisibility(); });
+  void loadVisibility();
+}

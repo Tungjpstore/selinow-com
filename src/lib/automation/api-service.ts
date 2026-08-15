@@ -1,6 +1,8 @@
 import { constantTimeEqual, hmacToken } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
+import { assertQuotaAvailable, recordUsage } from "../billing/metering";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
 import { assertRoleCapability, type ShopCapability, type ShopRole } from "../tenants/policy";
@@ -185,6 +187,7 @@ function publicTask(task: AutomationTask, now: Date): PublicAutomationTask {
 }
 
 type MemberContext = {
+  limits: Record<string, unknown>;
   role: ShopRole;
   shopId: string;
 };
@@ -200,7 +203,7 @@ async function requireMember(input: {
     shopPublicId: input.shopPublicId,
     userId: input.userId,
   });
-  return { role: member.row.role, shopId: member.row.shop_id };
+  return { limits: member.shop.limits, role: member.row.role, shopId: member.row.shop_id };
 }
 
 function capabilityPermission(capabilityCode: string): ShopCapability {
@@ -215,9 +218,31 @@ async function requireAutomationMutationMember(input: {
   env: AppBindings;
   shopPublicId: string;
   userId: string;
-}): Promise<{ shopId: string }> {
+}): Promise<{ limits: Record<string, unknown>; shopId: string }> {
   const member = await requireMember(input, capabilityPermission(input.capabilityCode));
-  return { shopId: member.shopId };
+  return { limits: member.limits, shopId: member.shopId };
+}
+
+function planLimit(limits: Record<string, unknown>, metric: string): number | null {
+  const value = limits[metric];
+  if (value === undefined) return null;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new AppError("quota_unavailable", 503);
+  return value as number;
+}
+
+async function meterAutomationTask(input: { database: D1Database; limit: number | null; now: Date; shopId: string; taskId: string }): Promise<void> {
+  if (input.limit === null) return;
+  await recordUsage({
+    database: input.database,
+    delta: 1,
+    limit: input.limit,
+    metric: "automation_runs",
+    occurredAt: input.now.toISOString(),
+    now: input.now,
+    shopId: input.shopId,
+    sourceId: input.taskId,
+    sourceKind: "automation",
+  });
 }
 
 async function loadTask(env: AppBindings, shopId: string, taskId: string): Promise<AutomationTask> {
@@ -316,6 +341,7 @@ async function resolveProviderEvidence(input: {
         AND cloudflare_hostname_id IS NOT NULL
         AND hostname_status = 'active' AND ssl_status = 'active'
         AND dns_status = 'active' AND activated_at IS NOT NULL
+        AND (${customDomainTurnstileAdmissionSql("shop_domains")})
         AND deleted_at IS NULL AND delete_requested_at IS NULL
         AND lease_token IS NULL
       LIMIT 1
@@ -831,7 +857,8 @@ export async function createAutomationTask(input: {
   if (!API_START_CAPABILITIES.has(input.capabilityCode)) {
     throw new AppError("automation_capability_context_required", 409);
   }
-  const { shopId } = await requireAutomationMutationMember(input);
+  const { limits, shopId } = await requireAutomationMutationMember(input);
+  const automationRunLimit = planLimit(limits, "automation_runs");
   const now = nowFrom(input.runtime);
   const idempotencyKeyHash = await sha256TextHex(await hmacToken(
     input.env.SESSION_SECRET,
@@ -858,7 +885,17 @@ export async function createAutomationTask(input: {
       taskId: existing.id,
       userId: input.userId,
     });
+    await meterAutomationTask({ database: input.env.PLATFORM_DB, limit: automationRunLimit, now, shopId, taskId: existing.id });
     return { replayed: true, task: publicTask(existing, now) };
+  }
+  if (automationRunLimit !== null) {
+    await assertQuotaAvailable({
+      database: input.env.PLATFORM_DB,
+      limit: automationRunLimit,
+      metric: "automation_runs",
+      shopId,
+      requested: 1,
+    });
   }
   let task: AutomationTask;
   try {
@@ -889,6 +926,7 @@ export async function createAutomationTask(input: {
         taskId: replay.id,
         userId: input.userId,
       });
+      await meterAutomationTask({ database: input.env.PLATFORM_DB, limit: automationRunLimit, now, shopId, taskId: replay.id });
       return { replayed: true, task: publicTask(replay, now) };
     }
     throw new AppError("automation_task_limit_reached", 429);
@@ -904,6 +942,7 @@ export async function createAutomationTask(input: {
     taskId: task.id,
     userId: input.userId,
   });
+  await meterAutomationTask({ database: input.env.PLATFORM_DB, limit: automationRunLimit, now, shopId, taskId: task.id });
   return { replayed: false, task: publicTask(task, now) };
 }
 

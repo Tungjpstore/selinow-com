@@ -1,0 +1,186 @@
+---
+interface Props {
+  eyebrow: string;
+  title: string;
+  detail: string;
+  aside?: string;
+  items?: Array<{ title: string; detail: string }>;
+  locale?: unknown;
+}
+
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+const { eyebrow, title, detail, aside, items, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const isVi = locale.toLowerCase().startsWith("vi");
+---
+
+<main id="main-content" class="platform-shell publication-gate-shell">
+  <div class="publication-gate-card">
+    <div class="gate-status-tag">
+      <span class="gate-status-dot" aria-hidden="true"></span>
+      <span class="gate-eyebrow">{eyebrow}</span>
+    </div>
+
+    <h1>{title}</h1>
+    <p class="gate-detail">{detail}</p>
+
+    {items && items.length > 0 && (
+      <div class="gate-items-grid">
+        {items.map((item) => (
+          <article class="gate-item-card">
+            <h2>{item.title}</h2>
+            <p>{item.detail}</p>
+          </article>
+        ))}
+      </div>
+    )}
+
+    {aside && (
+      <aside class="gate-aside">
+        <span class="aside-icon" aria-hidden="true">ℹ</span>
+        <div>
+          <strong>{isVi ? "Yêu cầu phê duyệt" : "Governance Notice"}</strong>
+          <p>{aside}</p>
+        </div>
+      </aside>
+    )}
+
+    <div class="gate-actions">
+      <a class="kit-button kit-button-secondary" href="/">
+        <span aria-hidden="true">←</span>
+        <span>{isVi ? "Quay về trang chủ" : "Return to home"}</span>
+      </a>
+      <a class="kit-button kit-button-ghost" href="/pricing">
+        <span>{isVi ? "Xem bảng giá" : "View pricing"}</span>
+      </a>
+    </div>
+  </div>
+</main>
+
+<style>
+  .publication-gate-shell {
+    padding-block: clamp(64px, 10vw, 120px);
+    display: flex;
+    justify-content: center;
+  }
+
+  .publication-gate-card {
+    width: 100%;
+    max-width: 820px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-xl);
+    padding: clamp(32px, 6vw, 64px);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .gate-status-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 4px 10px;
+    background: var(--warning-surface);
+    border: 1px solid var(--warning-border);
+    border-radius: var(--radius-pill);
+    margin-bottom: var(--space-4);
+  }
+
+  .gate-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--warning);
+  }
+
+  .gate-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--warning-text);
+  }
+
+  .publication-gate-card h1 {
+    font-size: clamp(28px, 4vw, 42px);
+    font-weight: 750;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    margin: 0 0 var(--space-4);
+  }
+
+  .gate-detail {
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-6);
+  }
+
+  .gate-items-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+
+  .gate-item-card {
+    background-color: var(--surface-page);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+  }
+
+  .gate-item-card h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 var(--space-2);
+  }
+
+  .gate-item-card p {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .gate-aside {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background-color: var(--brand-50);
+    border: 1px solid var(--brand-200);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-6);
+  }
+
+  .aside-icon {
+    font-size: 16px;
+    color: var(--brand-600);
+    flex-shrink: 0;
+  }
+
+  .gate-aside strong {
+    display: block;
+    font-size: 13px;
+    color: var(--brand-900);
+    margin-bottom: 2px;
+  }
+
+  .gate-aside p {
+    font-size: 13px;
+    color: var(--brand-800);
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .gate-actions {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    padding-top: var(--space-4);
+    border-top: 1px dashed var(--border-soft);
+  }
+</style>

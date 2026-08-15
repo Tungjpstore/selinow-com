@@ -29,8 +29,16 @@ import {
   normalizeCurrencyCode,
 } from "../../lib/i18n/currency";
 import { matchSupportedLocale } from "../../lib/i18n/locale";
+import { createSensitiveRequestBody, type SensitiveRequestBody } from "../../lib/security/sensitive-request-body";
 
 type CopyParams = Readonly<Record<string, string | number>>;
+
+type ShopCreationAdmission = {
+  allowed: boolean;
+  creationMode: "paid" | "trial" | null;
+  reason: "billing_recovery" | "eligible";
+  recoveryShopPublicId: string | null;
+};
 
 let activeCopy: Readonly<Record<string, string>> = {};
 let activeLocale = "en";
@@ -82,6 +90,31 @@ type Shop = {
   subscriptionState: string;
   timezone: string;
 };
+
+type PublicPlan = {
+  code: PublicPlanCode;
+  features: Record<string, unknown>;
+  name: string;
+  offers: Array<{ amountMinor: number; currency: string; interval: string; marketCode: string }>;
+};
+
+type PublicPlanCode = "pro" | "starter";
+
+const PLAN_FEATURE_ORDER = [
+  "storefront",
+  "telegram",
+  "catalog",
+  "inventory",
+  "sellerPayments",
+  "manualFulfillment",
+  "privateDownloads",
+  "automation",
+  "dataExport",
+  "audit",
+  "api",
+  "customDomain",
+  "analytics",
+] as const;
 
 type CatalogProduct = {
   description: string;
@@ -181,6 +214,10 @@ type PageState = {
   catalogVariants: CatalogVariant[];
   domains: DomainRecord[];
   inventoryPreview: InventoryPreview | null;
+  pendingInventoryRequest: {
+    controller: AbortController;
+    requestBody: SensitiveRequestBody<Record<string, unknown> & { data: string }>;
+  } | null;
   onboarding: OnboardingSnapshot;
   payos: PaymentIntegration | null;
   published: boolean;
@@ -188,6 +225,7 @@ type PageState = {
   selectedShopId: string | null;
   shopSelectionEpoch: number;
   telegram: TelegramIntegration | null;
+  tenantHydrating: boolean;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -225,6 +263,167 @@ function parseShops(value: string | undefined): Shop[] {
     return Array.isArray(parsed) ? parsed.filter(isShop) : [];
   } catch {
     return [];
+  }
+}
+
+function parseShopCreationAdmission(value: unknown): ShopCreationAdmission {
+  let parsed = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value) as unknown; } catch { parsed = null; }
+  }
+  const row = asRecord(parsed);
+  if (row === null
+    || typeof row.allowed !== "boolean"
+    || (row.creationMode !== null && row.creationMode !== "paid" && row.creationMode !== "trial")
+    || (row.reason !== "eligible" && row.reason !== "billing_recovery")
+    || (row.recoveryShopPublicId !== null && typeof row.recoveryShopPublicId !== "string")) {
+    return { allowed: false, creationMode: null, reason: "billing_recovery", recoveryShopPublicId: null };
+  }
+  if (row.allowed !== (row.reason === "eligible")
+    || row.allowed !== (row.creationMode !== null)
+    || (row.allowed && row.recoveryShopPublicId !== null)) {
+    return { allowed: false, creationMode: null, reason: "billing_recovery", recoveryShopPublicId: null };
+  }
+  return {
+    allowed: row.allowed,
+    creationMode: row.creationMode,
+    reason: row.reason,
+    recoveryShopPublicId: row.recoveryShopPublicId,
+  };
+}
+
+function parsePublicPlanCodes(value: string | undefined): PublicPlanCode[] {
+  if (value === undefined) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== 2) return [];
+    const codes = parsed.filter((code): code is PublicPlanCode => code === "starter" || code === "pro");
+    return codes.length === parsed.length && new Set(codes).size === codes.length ? codes : [];
+  } catch {
+    return [];
+  }
+}
+
+function parsePublicPlans(value: unknown, planCodes: readonly PublicPlanCode[]): PublicPlan[] {
+  const root = asRecord(value);
+  if (root === null || !Array.isArray(root.plans) || planCodes.length === 0) return [];
+  const plans: PublicPlan[] = [];
+  for (const item of root.plans) {
+    const row = asRecord(item);
+    if (row === null || (row.code !== "starter" && row.code !== "pro") || !planCodes.includes(row.code) || typeof row.name !== "string") continue;
+    const offers = Array.isArray(row.offers) ? row.offers.flatMap((item) => {
+      const offer = asRecord(item);
+      return offer !== null
+        && typeof offer.amountMinor === "number"
+        && typeof offer.currency === "string"
+        && typeof offer.interval === "string"
+        && typeof offer.marketCode === "string"
+        ? [{ amountMinor: offer.amountMinor, currency: offer.currency, interval: offer.interval, marketCode: offer.marketCode }]
+        : [];
+    }) : [];
+    plans.push({ code: row.code, features: asRecord(row.features) ?? {}, name: row.name, offers });
+  }
+  if (plans.length !== planCodes.length) return [];
+  const byCode = new Map(plans.map((plan) => [plan.code, plan]));
+  if (byCode.size !== planCodes.length) return [];
+  return planCodes.flatMap((code) => {
+    const plan = byCode.get(code);
+    return plan === undefined ? [] : [plan];
+  });
+}
+
+function planLabel(code: PublicPlanCode): string {
+  return code === "pro"
+    ? copy("onboarding.form.plan_pro", "Pro")
+    : copy("onboarding.form.plan_starter", "Starter");
+}
+
+function shopPlanLabel(code: string): string {
+  if (code === "starter" || code === "pro") return planLabel(code);
+  return copy("onboarding.shop.existing_plan", "Existing plan");
+}
+
+function planFeatureLabel(feature: (typeof PLAN_FEATURE_ORDER)[number], value: unknown): string | null {
+  if (feature === "analytics") {
+    if (value === "advanced") return copy("onboarding.form.plan_feature.analytics_advanced", "Advanced analytics");
+    if (value === "basic") return copy("onboarding.form.plan_feature.analytics_basic", "Basic analytics");
+    return null;
+  }
+  if (value !== true) return null;
+  const labels: Readonly<Record<Exclude<(typeof PLAN_FEATURE_ORDER)[number], "analytics">, readonly [string, string]>> = {
+    api: ["onboarding.form.plan_feature.api", "API"],
+    audit: ["onboarding.form.plan_feature.audit", "Audit history"],
+    automation: ["onboarding.form.plan_feature.automation", "Automation"],
+    catalog: ["onboarding.form.plan_feature.catalog", "Catalog"],
+    customDomain: ["onboarding.form.plan_feature.custom_domain", "Custom domain"],
+    dataExport: ["onboarding.form.plan_feature.data_export", "Data export"],
+    inventory: ["onboarding.form.plan_feature.inventory", "Inventory"],
+    manualFulfillment: ["onboarding.form.plan_feature.manual_fulfillment", "Manual fulfillment"],
+    privateDownloads: ["onboarding.form.plan_feature.private_downloads", "Private downloads"],
+    sellerPayments: ["onboarding.form.plan_feature.seller_payments", "Seller payments"],
+    storefront: ["onboarding.form.plan_feature.storefront", "Storefront"],
+    telegram: ["onboarding.form.plan_feature.telegram", "Telegram"],
+  };
+  const [key, fallback] = labels[feature];
+  return copy(key, fallback);
+}
+
+function renderPlanOptions(root: HTMLElement, plans: readonly PublicPlan[], planCodes: readonly PublicPlanCode[]): boolean {
+  const select = query<HTMLSelectElement>(root, "[data-shop-plan]");
+  const submit = query<HTMLButtonElement>(root, "[data-shop-submit]");
+  if (select === null) return false;
+  const previous = select.value;
+  select.replaceChildren();
+  const ready = plans.length === planCodes.length
+    && plans.every((plan, index) => plan.code === planCodes[index]);
+  if (!ready) {
+    select.add(new Option(copy("onboarding.form.plan_unavailable", "Plan details are temporarily unavailable."), ""));
+    select.disabled = true;
+    if (submit !== null) submit.disabled = true;
+    return false;
+  }
+  for (const plan of plans) select.add(new Option(planLabel(plan.code), plan.code));
+  select.value = plans.some((plan) => plan.code === previous) ? previous : planCodes[0] ?? "";
+  select.disabled = false;
+  if (submit !== null) submit.disabled = false;
+  return true;
+}
+
+function renderPlanSummary(root: HTMLElement, plans: readonly PublicPlan[]): void {
+  const selected = query<HTMLSelectElement>(root, "[data-shop-plan]")?.value;
+  const plan = plans.find((item) => item.code === selected);
+  if (plan === undefined) {
+    setText(root, "[data-plan-summary]", copy("onboarding.form.plan_unavailable", "Plan details are temporarily unavailable."));
+    return;
+  }
+  const merchantCountry = query<HTMLInputElement>(root, "[data-shop-merchant-country]")?.value.trim().toUpperCase() ?? "";
+  const market = merchantCountry === "VN" ? "vn" : "global";
+  const offer = plan.offers.find((item) => item.marketCode === market);
+  const features = PLAN_FEATURE_ORDER.flatMap((feature) => {
+    const label = planFeatureLabel(feature, plan.features[feature]);
+    return label === null ? [] : [label];
+  });
+  const price = offer === undefined
+    ? copy("onboarding.form.plan_price_unavailable", "Price unavailable")
+    : copy("onboarding.form.plan_price", "{price}/month", { price: formatMoney(offer.amountMinor, offer.currency, activeLocale) });
+  const featureSummary = features.length === 0
+    ? copy("onboarding.form.plan_features_unavailable", "Feature details are temporarily unavailable.")
+    : copy("onboarding.form.plan_features", "Includes: {features}", { features: features.join(", ") });
+  setText(root, "[data-plan-summary]", `${price} · ${featureSummary}`);
+}
+
+async function loadPublicPlans(root: HTMLElement, planCodes: readonly PublicPlanCode[]): Promise<{ creationAdmission: ShopCreationAdmission; plans: PublicPlan[] }> {
+  try {
+    const response = await requestApi(root, "/api/app/shops", { method: "GET" });
+    const plans = parsePublicPlans(response, planCodes);
+    const creationAdmission = parseShopCreationAdmission(asRecord(response)?.creationAdmission);
+    renderPlanOptions(root, plans, planCodes);
+    renderPlanSummary(root, plans);
+    return { creationAdmission, plans };
+  } catch {
+    renderPlanOptions(root, [], planCodes);
+    renderPlanSummary(root, []);
+    return { creationAdmission: parseShopCreationAdmission(root.dataset.creationAdmission), plans: [] };
   }
 }
 
@@ -523,6 +722,23 @@ function setFeedback(root: HTMLElement, message: string, tone: "error" | "info" 
   if (message.length > 0) feedback.scrollIntoView({ behavior: preferredScrollBehavior(), block: "nearest" });
 }
 
+function showCreateRecovery(root: HTMLElement, recoveryShopPublicId: string | null): void {
+  const recovery = query<HTMLElement>(root, "[data-onboarding-resume-recovery]");
+  if (recovery !== null) recovery.hidden = recoveryShopPublicId === null;
+  const action = query<HTMLButtonElement>(root, "[data-onboarding-resume-reload]");
+  if (action !== null) {
+    if (recoveryShopPublicId === null) delete action.dataset.recoveryShopPublicId;
+    else action.dataset.recoveryShopPublicId = recoveryShopPublicId;
+  }
+}
+
+function applyShopCreationAdmission(root: HTMLElement, admission: ShopCreationAdmission): void {
+  root.dataset.creationMode = admission.creationMode ?? "blocked";
+  const createBox = query<HTMLDetailsElement>(root, "[data-create-shop-box]");
+  if (createBox !== null) createBox.hidden = !admission.allowed;
+  showCreateRecovery(root, admission.recoveryShopPublicId);
+}
+
 function errorMessage(error: unknown): string {
   if (!(error instanceof ApiError)) return copy("onboarding.feedback.server", "The server could not be reached. Check your connection and try again.");
   const message = copy(readableErrorKey(error.code, error.issues), undefined, "The request could not be completed.");
@@ -549,11 +765,31 @@ function selectedShop(state: PageState, shops: readonly Shop[]): Shop | null {
   return shops.find((shop) => shop.publicId === state.selectedShopId) ?? null;
 }
 
+function selectedMutationShop(state: PageState, shops: readonly Shop[]): Shop | null {
+  return state.tenantHydrating ? null : selectedShop(state, shops);
+}
+
+function setShopMutationFence(root: HTMLElement, fenced: boolean): void {
+  root.toggleAttribute("inert", fenced);
+  root.setAttribute("aria-busy", fenced ? "true" : "false");
+}
+
 function selectionIsCurrent(state: PageState, shopId: string, epoch: number): boolean {
   return state.selectedShopId === shopId && state.shopSelectionEpoch === epoch;
 }
 
+function clearPendingInventoryRequest(state: PageState): void {
+  state.pendingInventoryRequest?.controller.abort();
+  state.pendingInventoryRequest?.requestBody.clear();
+  state.pendingInventoryRequest = null;
+}
+
+function isCurrentInventoryRequest(state: PageState, controller: AbortController): boolean {
+  return state.pendingInventoryRequest?.controller === controller;
+}
+
 function clearTenantBoundDrafts(root: HTMLElement, state: PageState): void {
+  clearPendingInventoryRequest(state);
   for (const selector of [
     "[data-channels-form]",
     "[data-product-form]",
@@ -580,8 +816,9 @@ function apiBase(shopId: string): string {
 
 function initialProfile(shop: Shop): OnboardingProfileView {
   return {
+    currentStep: "channel_selected",
     customDomainPreference: "later",
-    telegramEnabled: shop.planCode === "bot",
+    telegramEnabled: shop.featureFlags.telegram === true,
     websiteEnabled: shop.featureFlags.storefront === true,
   };
 }
@@ -639,7 +876,7 @@ function renderShopSelection(root: HTMLElement, state: PageState, shops: readonl
   const baseDomain = root.dataset.platformBaseDomain ?? "selinow.com";
   setText(root, "[data-shop-summary]", shop === null
     ? copy("onboarding.shop.none", "No store selected.")
-    : copy("onboarding.shop.summary", "{slug}.{domain} · {plan} · {state}", { domain: baseDomain, plan: shop.planCode, slug: shop.slug, state: shop.subscriptionState }));
+    : copy("onboarding.shop.summary", "{slug}.{domain} · {plan} · {state}", { domain: baseDomain, plan: shopPlanLabel(shop.planCode), slug: shop.slug, state: shop.subscriptionState }));
   setText(root, "[data-product-price-label]", copy("onboarding.catalog.price_label", { currency: shop?.currency ?? "—" }, "Price ({currency})"));
   const currency = normalizeCurrencyCode(shop?.currency ?? root.dataset.defaultCurrency);
   const priceInput = query<HTMLInputElement>(root, "[data-product-price]");
@@ -801,7 +1038,7 @@ async function mutateAutomationTask(
   action: "cancel" | "resume",
   button: HTMLButtonElement,
 ): Promise<void> {
-  const shop = selectedShop(state, shops);
+  const shop = selectedMutationShop(state, shops);
   if (shop === null) { showStep(root, state, "shop"); return; }
   if (action === "cancel" && !window.confirm(copy("onboarding.automation.cancel_confirm", "Cancel this task? The scheduler will stop processing it; completed data will not be deleted."))) return;
   const selectionEpoch = state.shopSelectionEpoch;
@@ -1093,10 +1330,28 @@ function stepFromHash(hash: string): WizardStepCode | null {
   return aliases[hash.replace(/^#/u, "")] ?? null;
 }
 
+function wizardStepFromCurrentStep(currentStep: string | undefined): WizardStepCode | null {
+  const steps: Readonly<Record<string, WizardStepCode>> = {
+    account_ready: "shop",
+    catalog_ready: "catalog",
+    channel_selected: "channels",
+    inventory_ready: "inventory",
+    payos_ready: "payos",
+    policies_ready: "settings",
+    published: "readiness",
+    readiness_passed: "readiness",
+    shop_created: "shop",
+    telegram_ready: "telegram",
+  };
+  return currentStep === undefined ? null : steps[currentStep] ?? null;
+}
+
 function renderProgress(root: HTMLElement, state: PageState, shops: readonly Shop[]): void {
   const shop = selectedShop(state, shops);
   const profile = state.onboarding.profile;
-  const settingsReady = state.onboarding.settings !== null && settingsDraftReady(state.onboarding.settings);
+  const settingsReady = root.dataset.policyAttestationPublished === "true"
+    && state.onboarding.settings !== null
+    && settingsDraftReady(state.onboarding.settings);
   const fallback = deriveFallbackProgress({
     activeProductCount: state.catalogProducts.filter((product) => product.status === "active").length,
     availableInventoryCount: state.catalogVariants.reduce((total, variant) => total + Math.max(0, variant.availableStock), 0),
@@ -1173,80 +1428,90 @@ async function optionalRequest(root: HTMLElement, url: string): Promise<unknown>
 
 async function loadShopState(root: HTMLElement, state: PageState, shops: Shop[]): Promise<void> {
   const shop = selectedShop(state, shops);
-  if (shop === null) {
-    state.automationTasks = [];
-    state.onboarding = { profile: null, settings: null, steps: new Map() };
+  const selectionShopId = state.selectedShopId;
+  const selectionEpoch = state.shopSelectionEpoch;
+  state.tenantHydrating = true;
+  setShopMutationFence(root, true);
+  try {
+    if (shop === null) {
+      state.automationTasks = [];
+      state.onboarding = { profile: null, settings: null, steps: new Map() };
+      state.catalogProducts = [];
+      state.catalogVariants = [];
+      state.telegram = null;
+      state.payos = null;
+      state.published = false;
+      state.domains = [];
+      state.readiness = { checkedAt: null, checks: [], ready: false, runId: null };
+      renderShopSelection(root, state, shops);
+      renderCatalog(root, state);
+      renderTelegram(root, null);
+      renderPayos(root, null);
+      renderAutomationTasks(root, state, shops);
+      renderReadiness(root, state);
+      renderProgress(root, state, shops);
+      return;
+    }
+    const currentShopId = shop.publicId;
     state.catalogProducts = [];
+    state.automationTasks = [];
     state.catalogVariants = [];
-    state.telegram = null;
-    state.payos = null;
-    state.published = false;
     state.domains = [];
+    state.inventoryPreview = null;
+    state.onboarding = { profile: initialProfile(shop), settings: null, steps: new Map() };
+    state.payos = null;
+    state.published = shop.status === "active";
     state.readiness = { checkedAt: null, checks: [], ready: false, runId: null };
+    state.telegram = null;
+    setFeedback(root, copy("onboarding.feedback.loading", "Syncing progress from the server…"));
+    const base = apiBase(shop.publicId);
+    const results = await Promise.allSettled([
+      optionalRequest(root, `${base}/onboarding`),
+      requestApi(root, `${base}/catalog`),
+      requestApi(root, `${base}/integrations/telegram`),
+      requestApi(root, `${base}/payments/payos`),
+      requestApi(root, `${base}/domains`),
+      optionalRequest(root, `${base}/readiness`),
+    ]);
+    if (!selectionIsCurrent(state, currentShopId, selectionEpoch)) return;
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) setFeedback(root, errorMessage(failures[0]?.reason), "error");
+    else setFeedback(root, "");
+
+    const onboardingValue = results[0].status === "fulfilled" ? results[0].value : null;
+    state.onboarding = onboardingValue === null
+      ? { profile: initialProfile(shop), settings: null, steps: new Map() }
+      : parseOnboardingSnapshot(onboardingValue);
+    if (state.onboarding.profile === null) state.onboarding.profile = initialProfile(shop);
+    if (state.onboarding.steps.get("published") === "ready") state.published = true;
+    if (results[1].status === "fulfilled") {
+      const catalog = parseCatalog(results[1].value, shop.currency);
+      state.catalogProducts = catalog.products;
+      state.catalogVariants = catalog.variants;
+    }
+    if (results[2].status === "fulfilled") state.telegram = parseTelegram(results[2].value);
+    if (results[3].status === "fulfilled") state.payos = parsePayos(results[3].value);
+    if (results[4].status === "fulfilled") state.domains = parseDomains(results[4].value);
+    const readinessValue = results[5].status === "fulfilled" ? results[5].value : null;
+    state.readiness = readinessValue === null
+      ? { checkedAt: null, checks: [], ready: false, runId: null }
+      : parseReadinessChecks(readinessValue);
+
     renderShopSelection(root, state, shops);
+    prefillProfile(root, state.onboarding.profile);
+    if (state.onboarding.settings !== null) prefillSettings(root, state.onboarding.settings);
     renderCatalog(root, state);
-    renderTelegram(root, null);
-    renderPayos(root, null);
-    renderAutomationTasks(root, state, shops);
+    renderTelegram(root, state.telegram);
+    renderPayos(root, state.payos);
     renderReadiness(root, state);
     renderProgress(root, state, shops);
-    return;
+    await loadAutomationTasks(root, state, shops);
+  } finally {
+    if (state.selectedShopId === selectionShopId && state.shopSelectionEpoch === selectionEpoch) {
+      state.tenantHydrating = false;
+      setShopMutationFence(root, false);
+    }
   }
-  const currentShopId = shop.publicId;
-  const selectionEpoch = state.shopSelectionEpoch;
-  state.catalogProducts = [];
-  state.automationTasks = [];
-  state.catalogVariants = [];
-  state.domains = [];
-  state.inventoryPreview = null;
-  state.onboarding = { profile: initialProfile(shop), settings: null, steps: new Map() };
-  state.payos = null;
-  state.published = shop.status === "active";
-  state.readiness = { checkedAt: null, checks: [], ready: false, runId: null };
-  state.telegram = null;
-  setFeedback(root, copy("onboarding.feedback.loading", "Syncing progress from the server…"));
-  const base = apiBase(shop.publicId);
-  const results = await Promise.allSettled([
-    optionalRequest(root, `${base}/onboarding`),
-    requestApi(root, `${base}/catalog`),
-    requestApi(root, `${base}/integrations/telegram`),
-    requestApi(root, `${base}/payments/payos`),
-    requestApi(root, `${base}/domains`),
-    optionalRequest(root, `${base}/readiness`),
-  ]);
-  if (!selectionIsCurrent(state, currentShopId, selectionEpoch)) return;
-  const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-  if (failures.length > 0) setFeedback(root, errorMessage(failures[0]?.reason), "error");
-  else setFeedback(root, "");
-
-  const onboardingValue = results[0].status === "fulfilled" ? results[0].value : null;
-  state.onboarding = onboardingValue === null
-    ? { profile: initialProfile(shop), settings: null, steps: new Map() }
-    : parseOnboardingSnapshot(onboardingValue);
-  if (state.onboarding.profile === null) state.onboarding.profile = initialProfile(shop);
-  if (state.onboarding.steps.get("published") === "ready") state.published = true;
-  if (results[1].status === "fulfilled") {
-    const catalog = parseCatalog(results[1].value, shop.currency);
-    state.catalogProducts = catalog.products;
-    state.catalogVariants = catalog.variants;
-  }
-  if (results[2].status === "fulfilled") state.telegram = parseTelegram(results[2].value);
-  if (results[3].status === "fulfilled") state.payos = parsePayos(results[3].value);
-  if (results[4].status === "fulfilled") state.domains = parseDomains(results[4].value);
-  const readinessValue = results[5].status === "fulfilled" ? results[5].value : null;
-  state.readiness = readinessValue === null
-    ? { checkedAt: null, checks: [], ready: false, runId: null }
-    : parseReadinessChecks(readinessValue);
-
-  renderShopSelection(root, state, shops);
-  prefillProfile(root, state.onboarding.profile);
-  if (state.onboarding.settings !== null) prefillSettings(root, state.onboarding.settings);
-  renderCatalog(root, state);
-  renderTelegram(root, state.telegram);
-  renderPayos(root, state.payos);
-  renderReadiness(root, state);
-  renderProgress(root, state, shops);
-  await loadAutomationTasks(root, state, shops);
 }
 
 function readSettingsForm(root: HTMLElement): OnboardingSettingsView {
@@ -1266,6 +1531,8 @@ type ShopGlobalizationDraft = {
   merchantCountry: string | null;
 };
 
+type ShopGlobalizationPatch = Partial<ShopGlobalizationDraft>;
+
 function readShopGlobalizationForm(root: HTMLElement): ShopGlobalizationDraft | null {
   const currency = normalizeCurrencyCode(query<HTMLSelectElement>(root, "[data-settings-currency]")?.value);
   const defaultLocale = matchSupportedLocale(query<HTMLSelectElement>(root, "[data-settings-default-locale]")?.value);
@@ -1279,6 +1546,15 @@ function readShopGlobalizationForm(root: HTMLElement): ShopGlobalizationDraft | 
     currency,
     defaultLocale,
     merchantCountry: countryValue("[data-settings-merchant-country]"),
+  };
+}
+
+function changedShopGlobalization(shop: Shop, draft: ShopGlobalizationDraft): ShopGlobalizationPatch {
+  return {
+    ...(draft.businessCountry === shop.businessCountry ? {} : { businessCountry: draft.businessCountry }),
+    ...(draft.currency === shop.currency ? {} : { currency: draft.currency }),
+    ...(draft.defaultLocale === shop.defaultLocale ? {} : { defaultLocale: draft.defaultLocale }),
+    ...(draft.merchantCountry === shop.merchantCountry ? {} : { merchantCountry: draft.merchantCountry }),
   };
 }
 
@@ -1309,12 +1585,25 @@ function addShopOption(root: HTMLElement, shop: Shop): void {
 async function initialize(root: HTMLElement): Promise<void> {
   configureLocalization(root);
   const shops = parseShops(root.dataset.shops);
+  let creationAdmission = parseShopCreationAdmission(root.dataset.creationAdmission);
+  const publicPlanCodes = parsePublicPlanCodes(root.dataset.publicPlanCodes);
+  const publicData = await loadPublicPlans(root, publicPlanCodes);
+  const publicPlans = publicData.plans;
+  creationAdmission = publicData.creationAdmission;
+  applyShopCreationAdmission(root, creationAdmission);
+  const policyAttestationVersionValue = Number(root.dataset.policyAttestationVersion);
+  const policyAttestationVersion = root.dataset.policyAttestationPublished === "true"
+    && Number.isSafeInteger(policyAttestationVersionValue)
+    && policyAttestationVersionValue > 0
+    ? policyAttestationVersionValue
+    : null;
   const state: PageState = {
     automationTasks: [],
     catalogProducts: [],
     catalogVariants: [],
     domains: [],
     inventoryPreview: null,
+    pendingInventoryRequest: null,
     onboarding: { profile: null, settings: null, steps: new Map() },
     payos: null,
     published: false,
@@ -1322,6 +1611,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     selectedShopId: shops[0]?.publicId ?? null,
     shopSelectionEpoch: 0,
     telegram: null,
+    tenantHydrating: false,
   };
 
   clearLegacyIntentPayloads();
@@ -1333,6 +1623,8 @@ async function initialize(root: HTMLElement): Promise<void> {
   };
   root.addEventListener("input", clearEditedFieldError);
   root.addEventListener("change", clearEditedFieldError);
+  query<HTMLSelectElement>(root, "[data-shop-plan]")?.addEventListener("change", () => { renderPlanSummary(root, publicPlans); });
+  query<HTMLInputElement>(root, "[data-shop-merchant-country]")?.addEventListener("input", () => { renderPlanSummary(root, publicPlans); });
 
   for (const button of queryAll<HTMLButtonElement>(root, "[data-step-button]")) {
     button.addEventListener("click", () => {
@@ -1358,12 +1650,16 @@ async function initialize(root: HTMLElement): Promise<void> {
   });
   query<HTMLButtonElement>(root, "[data-refresh-shop]")?.addEventListener("click", () => { void loadShopState(root, state, shops); });
   query<HTMLButtonElement>(root, "[data-automation-refresh]")?.addEventListener("click", () => { void loadAutomationTasks(root, state, shops); });
+  query<HTMLButtonElement>(root, "[data-onboarding-resume-reload]")?.addEventListener("click", () => {
+    const recoveryShopPublicId = query<HTMLButtonElement>(root, "[data-onboarding-resume-reload]")?.dataset.recoveryShopPublicId;
+    if (recoveryShopPublicId !== undefined) window.location.assign(`/app/billing?shop=${encodeURIComponent(recoveryShopPublicId)}`);
+  });
 
   query<HTMLFormElement>(root, "[data-shop-rename-form]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       const input = query<HTMLInputElement>(root, "[data-shop-rename-name]");
       const submit = query<HTMLButtonElement>(root, "[data-shop-rename-submit]");
       if (shop === null || (shop.role !== "owner" && shop.role !== "manager") || input === null || submit === null) return;
@@ -1422,7 +1718,11 @@ async function initialize(root: HTMLElement): Promise<void> {
       clearInvalidFields(root);
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_shop", "Check the highlighted fields before creating the store."))) return;
       const draft = validateShopDraft(shopName?.value ?? "", shopSlug?.value ?? "");
-      const planCode = query<HTMLSelectElement>(root, "[data-shop-plan]")?.value ?? "store";
+      const planCode = query<HTMLSelectElement>(root, "[data-shop-plan]")?.value ?? "starter";
+      if (planCode !== "starter" && planCode !== "pro") {
+        markFieldInvalid(root, query<HTMLSelectElement>(root, "[data-shop-plan]"), copy("onboarding.feedback.invalid_plan", "Choose Starter or Pro."));
+        return;
+      }
       const merchantCountry = query<HTMLInputElement>(root, "[data-shop-merchant-country]")?.value.trim().toUpperCase() ?? "";
       const businessCountry = query<HTMLInputElement>(root, "[data-shop-business-country]")?.value.trim().toUpperCase() ?? "";
       const currency = normalizeCurrencyCode(query<HTMLSelectElement>(root, "[data-shop-currency]")?.value);
@@ -1450,11 +1750,17 @@ async function initialize(root: HTMLElement): Promise<void> {
         if (!isShop(response.shop)) throw new ApiError("request_failed", 500, [], stringOrNull(response.requestId));
         const shop = response.shop;
         if (!shops.some((item) => item.publicId === shop.publicId)) shops.push(shop);
+        clearIntent("shop");
+        if (shop.subscriptionState === "pending_payment") {
+          window.location.assign(`/app/billing?shop=${encodeURIComponent(shop.publicId)}`);
+          return;
+        }
+        creationAdmission = { allowed: true, creationMode: "paid", reason: "eligible", recoveryShopPublicId: null };
+        applyShopCreationAdmission(root, creationAdmission);
         addShopOption(root, shop);
         state.shopSelectionEpoch += 1;
         state.selectedShopId = shop.publicId;
         clearTenantBoundDrafts(root, state);
-        clearIntent("shop");
         query<HTMLFormElement>(root, "[data-shop-form]")?.reset();
         const details = query<HTMLDetailsElement>(root, "[data-create-shop-box]");
         if (details !== null) details.open = false;
@@ -1462,6 +1768,15 @@ async function initialize(root: HTMLElement): Promise<void> {
         await loadShopState(root, state, shops);
         showStep(root, state, "channels");
       } catch (error) {
+        if (error instanceof ApiError && error.issues.includes("billing_recovery_required")) {
+          try {
+            const admissionResponse = await requestApi(root, "/api/app/shops", { method: "GET" });
+            creationAdmission = parseShopCreationAdmission(asRecord(admissionResponse)?.creationAdmission);
+          } catch {
+            creationAdmission = { allowed: false, creationMode: null, reason: "billing_recovery", recoveryShopPublicId: null };
+          }
+          applyShopCreationAdmission(root, creationAdmission);
+        }
         setFeedback(root, errorMessage(error), "error");
       } finally {
         setBusy(button, false);
@@ -1473,7 +1788,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     event.preventDefault();
     void (async () => {
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const websiteEnabled = query<HTMLInputElement>(root, "[data-channel-website]")?.checked === true;
@@ -1492,8 +1807,9 @@ async function initialize(root: HTMLElement): Promise<void> {
         const response = await requestApi(root, `${apiBase(shop.publicId)}/onboarding/channels`, { body, method: "PUT" });
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
         state.onboarding = parseOnboardingSnapshot(response);
-        if (state.onboarding.profile === null) state.onboarding.profile = { customDomainPreference, telegramEnabled, websiteEnabled };
-        prefillProfile(root, state.onboarding.profile);
+        const profile = state.onboarding.profile ?? { currentStep: "catalog_ready", customDomainPreference, telegramEnabled, websiteEnabled };
+        state.onboarding.profile = profile;
+        prefillProfile(root, profile);
         setFeedback(root, copy("onboarding.feedback.channels_saved", "Sales channels and progress updated."), "success");
         renderProgress(root, state, shops);
         showStep(root, state, "catalog");
@@ -1521,7 +1837,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_product", "Check the highlighted fields before creating the product."))) return;
@@ -1643,7 +1959,7 @@ async function initialize(root: HTMLElement): Promise<void> {
   query<HTMLButtonElement>(root, "[data-inventory-preview-button]")?.addEventListener("click", () => {
     void (async () => {
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       const variantId = query<HTMLSelectElement>(root, "[data-inventory-variant]")?.value ?? "";
       const source = query<HTMLSelectElement>(root, "[data-inventory-source]")?.value === "csv" ? "csv" : "paste";
       const data = inventoryData?.value ?? "";
@@ -1656,10 +1972,15 @@ async function initialize(root: HTMLElement): Promise<void> {
       const button = query<HTMLButtonElement>(root, "[data-inventory-preview-button]");
       invalidateInventoryPreview(root, state, copy("onboarding.inventory.preview_safe", "Creating a safe preview…"));
       setBusy(button, true, copy("onboarding.busy.previewing", "Creating preview…"));
+      clearPendingInventoryRequest(state);
+      const requestBody = createSensitiveRequestBody({ data, source });
+      const controller = new AbortController();
+      state.pendingInventoryRequest = { controller, requestBody };
       try {
         const response = await requestApi(root, `${apiBase(shop.publicId)}/variants/${encodeURIComponent(variantId)}/inventory/preview`, {
-          body: JSON.stringify({ data, source }),
+          body: requestBody.serialized,
           method: "POST",
+          signal: controller.signal,
         });
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
         const preview = parseInventoryPreview(response);
@@ -1676,10 +1997,15 @@ async function initialize(root: HTMLElement): Promise<void> {
         if (confirm !== null) confirm.disabled = preview.acceptedCount === 0 || preview.rejectedCount > 0 || preview.duplicateCount > 0;
         setFeedback(root, copy("onboarding.feedback.inventory_preview", "Preview complete. Key contents are never returned to the browser."), "success");
       } catch (error) {
+        if (!isCurrentInventoryRequest(state, controller)) return;
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
+        if (inventoryData !== null) inventoryData.value = "";
+        updateLocalInventoryPreview(root);
         invalidateInventoryPreview(root, state, copy("onboarding.feedback.inventory_preview_failed", "Could not create the preview. Check your session and try again; no keys were imported."));
         setFeedback(root, errorMessage(error), "error");
       } finally {
+        requestBody.clear();
+        if (isCurrentInventoryRequest(state, controller)) state.pendingInventoryRequest = null;
         setBusy(button, false);
       }
     })();
@@ -1689,7 +2015,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     event.preventDefault();
     void (async () => {
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       const variantId = query<HTMLSelectElement>(root, "[data-inventory-variant]")?.value ?? "";
       const source = query<HTMLSelectElement>(root, "[data-inventory-source]")?.value === "csv" ? "csv" : "paste";
       const data = inventoryData?.value ?? "";
@@ -1697,16 +2023,19 @@ async function initialize(root: HTMLElement): Promise<void> {
       const selectionEpoch = state.shopSelectionEpoch;
       if (variantId.length === 0) { markFieldInvalid(root, query<HTMLSelectElement>(root, "[data-inventory-variant]"), copy("onboarding.feedback.inventory_variant_required", "Choose an offer to receive keys.")); return; }
       if (state.inventoryPreview === null) { markFieldInvalid(root, inventoryData, copy("onboarding.feedback.inventory_preview_required", "Create a preview before confirming the import.")); return; }
-      const bodyValue: Record<string, unknown> = { data, filename: null, previewToken: state.inventoryPreview.previewToken, source };
-      const payload = JSON.stringify(bodyValue);
+      const requestBody = createSensitiveRequestBody({ data, filename: null, previewToken: state.inventoryPreview.previewToken, source });
       const namespace = `inventory:${shop.publicId}:${variantId}`;
       const button = query<HTMLButtonElement>(root, "[data-inventory-confirm]");
       setBusy(button, true, copy("onboarding.busy.encrypting", "Encrypting…"));
+      clearPendingInventoryRequest(state);
+      const controller = new AbortController();
+      state.pendingInventoryRequest = { controller, requestBody };
       try {
         await requestApi(root, `${apiBase(shop.publicId)}/variants/${encodeURIComponent(variantId)}/inventory/import`, {
-          body: payload,
-          idempotencyKey: await intentKey(namespace, payload),
+          body: requestBody.serialized,
+          idempotencyKey: await intentKey(namespace, requestBody.serialized),
           method: "POST",
+          signal: controller.signal,
         });
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
         clearIntent(namespace);
@@ -1718,12 +2047,15 @@ async function initialize(root: HTMLElement): Promise<void> {
         await loadShopState(root, state, shops);
         showStep(root, state, "telegram");
       } catch (error) {
+        if (!isCurrentInventoryRequest(state, controller)) return;
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
-        if (error instanceof ApiError && error.code.startsWith("inventory_preview_")) {
-          invalidateInventoryPreview(root, state, copy("onboarding.feedback.import_expired", "Preview is no longer valid. Create a new preview before importing."));
-        }
+        if (inventoryData !== null) inventoryData.value = "";
+        updateLocalInventoryPreview(root);
+        invalidateInventoryPreview(root, state, copy("onboarding.feedback.import_expired", "Preview is no longer valid. Create a new preview before importing."));
         setFeedback(root, errorMessage(error), "error");
       } finally {
+        requestBody.clear();
+        if (isCurrentInventoryRequest(state, controller)) state.pendingInventoryRequest = null;
         setBusy(button, false);
         if (button !== null && state.inventoryPreview === null) button.disabled = true;
       }
@@ -1735,7 +2067,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       const token = query<HTMLInputElement>(root, "[data-telegram-token]");
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
@@ -1765,7 +2097,7 @@ async function initialize(root: HTMLElement): Promise<void> {
 
   query<HTMLButtonElement>(root, "[data-telegram-health]")?.addEventListener("click", () => {
     void (async () => {
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const button = query<HTMLButtonElement>(root, "[data-telegram-health]");
@@ -1792,7 +2124,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const clientId = query<HTMLInputElement>(root, "[data-payos-client-id]");
       const apiKey = query<HTMLInputElement>(root, "[data-payos-api-key]");
@@ -1831,7 +2163,7 @@ async function initialize(root: HTMLElement): Promise<void> {
 
   query<HTMLButtonElement>(root, "[data-payos-health]")?.addEventListener("click", () => {
     void (async () => {
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const button = query<HTMLButtonElement>(root, "[data-payos-health]");
@@ -1860,22 +2192,58 @@ async function initialize(root: HTMLElement): Promise<void> {
     })();
   });
 
+  query<HTMLFormElement>(root, "[data-globalization-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void (async () => {
+      const form = event.currentTarget as HTMLFormElement;
+      clearInvalidFields(root);
+      const shop = selectedMutationShop(state, shops);
+      if (shop === null) { showStep(root, state, "shop"); return; }
+      const selectionEpoch = state.shopSelectionEpoch;
+      if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_globalization", "Check the regional fields before saving."))) return;
+      const globalization = readShopGlobalizationForm(root);
+      if (globalization === null) {
+        markFieldInvalid(root, query<HTMLSelectElement>(root, "[data-settings-currency]"), copy("onboarding.feedback.invalid_shop_globalization", "Choose a supported currency and locale."));
+        return;
+      }
+      const patch = changedShopGlobalization(shop, globalization);
+      if (Object.keys(patch).length === 0) {
+        setFeedback(root, copy("onboarding.feedback.globalization_unchanged", "Regional settings have not changed."), "info");
+        return;
+      }
+      const button = query<HTMLButtonElement>(root, "[data-globalization-submit]");
+      setBusy(button, true, copy("onboarding.busy.saving", "Saving…"));
+      try {
+        const profileResponse = asRecord(await requestApi(root, apiBase(shop.publicId), { body: JSON.stringify(patch), method: "PATCH" }));
+        if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
+        if (!isShop(profileResponse?.shop)) throw new ApiError("request_failed", 500, [], stringOrNull(profileResponse?.requestId));
+        Object.assign(shop, profileResponse.shop);
+        renderShopSelection(root, state, shops);
+        setFeedback(root, copy("onboarding.feedback.globalization_saved", "Regional and billing-market settings saved. Legal readiness is still checked separately."), "success");
+      } catch (error) {
+        if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
+        setFeedback(root, errorMessage(error), "error");
+      } finally {
+        setBusy(button, false);
+      }
+    })();
+  });
+
   query<HTMLFormElement>(root, "[data-settings-form]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const settings = readSettingsForm(root);
-      const globalization = readShopGlobalizationForm(root);
+      settings.attestationAccepted = policyAttestationVersion !== null && settings.attestationAccepted;
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_settings", "Complete the required fields before saving."))) return;
-      if (globalization === null) {
-        markFieldInvalid(root, query<HTMLSelectElement>(root, "[data-settings-currency]"), copy("onboarding.feedback.invalid_shop_globalization", "Choose a supported currency and locale."));
-        return;
-      }
-      if (!settingsDraftReady(settings)) {
+      const sellerPolicyLinksReady = settings.supportContact.trim().length >= 3
+        && settings.supportContact.trim().length <= 180
+        && [settings.termsUrl, settings.privacyUrl, settings.refundPolicyUrl].every(isSafeHttpsUrl);
+      if (!sellerPolicyLinksReady || (policyAttestationVersion !== null && !settingsDraftReady(settings))) {
         const invalidUrlField = [
           [settings.termsUrl, query<HTMLInputElement>(root, "[data-terms-url]")],
           [settings.privacyUrl, query<HTMLInputElement>(root, "[data-privacy-url]")],
@@ -1885,7 +2253,7 @@ async function initialize(root: HTMLElement): Promise<void> {
           markFieldInvalid(root, invalidUrlField, copy("onboarding.feedback.policy_url", "Use an HTTPS policy URL without credentials or a fragment."));
         } else if (settings.supportContact.trim().length < 3 || settings.supportContact.trim().length > 180) {
           markFieldInvalid(root, query<HTMLInputElement>(root, "[data-support-contact]"), copy("onboarding.feedback.support_length", "Enter a support contact between 3 and 180 characters."));
-        } else {
+        } else if (policyAttestationVersion !== null) {
           markFieldInvalid(root, query<HTMLInputElement>(root, "[data-attestation]"), copy("onboarding.feedback.attestation_required", "Confirm your right to sell and comply with Selinow policy."));
         }
         return;
@@ -1893,22 +2261,11 @@ async function initialize(root: HTMLElement): Promise<void> {
       const button = query<HTMLButtonElement>(root, "[data-settings-submit]");
       setBusy(button, true, copy("onboarding.busy.saving", "Saving…"));
       try {
-        const globalizationChanged = globalization.businessCountry !== shop.businessCountry
-          || globalization.currency !== shop.currency
-          || globalization.defaultLocale !== shop.defaultLocale
-          || globalization.merchantCountry !== shop.merchantCountry;
-        if (globalizationChanged) {
-          const profileResponse = asRecord(await requestApi(root, apiBase(shop.publicId), {
-            body: JSON.stringify(globalization),
-            method: "PATCH",
-          }));
-          if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
-          if (!isShop(profileResponse?.shop)) throw new ApiError("request_failed", 500, [], stringOrNull(profileResponse?.requestId));
-          Object.assign(shop, profileResponse.shop);
-          renderShopSelection(root, state, shops);
-        }
         const response = await requestApi(root, `${apiBase(shop.publicId)}/onboarding/settings`, {
-          body: JSON.stringify({ ...settings, attestationVersion: 1 }),
+          body: JSON.stringify({
+            ...settings,
+            attestationVersion: settings.attestationAccepted ? policyAttestationVersion : null,
+          }),
           method: "PUT",
         });
         if (!selectionIsCurrent(state, shop.publicId, selectionEpoch)) return;
@@ -1928,7 +2285,7 @@ async function initialize(root: HTMLElement): Promise<void> {
 
   query<HTMLButtonElement>(root, "[data-readiness-run]")?.addEventListener("click", () => {
     void (async () => {
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       const button = query<HTMLButtonElement>(root, "[data-readiness-run]");
@@ -1956,7 +2313,7 @@ async function initialize(root: HTMLElement): Promise<void> {
     void (async () => {
       const form = event.currentTarget as HTMLFormElement;
       clearInvalidFields(root);
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       if (focusNativeFormError(root, form, copy("onboarding.feedback.form_invalid_test", "Check the test-order quantity before running it."))) return;
@@ -2001,7 +2358,7 @@ async function initialize(root: HTMLElement): Promise<void> {
 
   query<HTMLButtonElement>(root, "[data-publish-button]")?.addEventListener("click", () => {
     void (async () => {
-      const shop = selectedShop(state, shops);
+      const shop = selectedMutationShop(state, shops);
       if (shop === null) { showStep(root, state, "shop"); return; }
       const selectionEpoch = state.shopSelectionEpoch;
       if (!state.readiness.ready) { setFeedback(root, copy("onboarding.feedback.publish_blocked", "Run all checks and complete required items before opening for sales."), "error"); return; }
@@ -2034,15 +2391,17 @@ async function initialize(root: HTMLElement): Promise<void> {
   renderShopSelection(root, state, shops);
   updateLocalInventoryPreview(root);
   await loadShopState(root, state, shops);
-  let initialStep: WizardStepCode = shops.length === 0 ? "shop" : "channels";
+  const serverStep = wizardStepFromCurrentStep(state.onboarding.profile?.currentStep);
+  let storedStep: WizardStepCode | null = null;
   const hashStep = stepFromHash(location.hash);
   try {
     const stored = sessionStorage.getItem(`selinow:onboarding:step:${state.selectedShopId ?? "new"}`);
-    if (WIZARD_STEPS.some((step) => step.code === stored)) initialStep = stored as WizardStepCode;
+    if (WIZARD_STEPS.some((step) => step.code === stored)) storedStep = stored as WizardStepCode;
   } catch {
     // Use the first actionable step.
   }
-  showStep(root, state, hashStep ?? initialStep, false);
+  const defaultStep: WizardStepCode = shops.length === 0 ? "shop" : "channels";
+  showStep(root, state, hashStep ?? serverStep ?? storedStep ?? defaultStep, false);
   window.addEventListener("hashchange", () => {
     const nextStep = stepFromHash(location.hash);
     if (nextStep !== null) showStep(root, state, nextStep);

@@ -1,5 +1,9 @@
 # Security and Operations Contract
 
+## Current continuation overlay (2026-08-03)
+
+Provider expansion adds encrypted, versioned tenant credentials plus hash-only verification evidence, receipt ledgers and HMAC-bound customer identity references. Telegram Mini App launch data, WhatsApp HMAC, Discord Ed25519 and Zalo proof boundaries remain distinct; proof in one lane never authenticates another. Queue/audit payloads carry references only. Runtime admission requires active connection/channel/subscription, matching credential lineage, provider identity, required capability grants and fresh evidence; missing evidence fails closed.
+
 ## 1. Threat model
 
 Tài sản quan trọng:

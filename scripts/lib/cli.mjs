@@ -66,30 +66,39 @@ export function parseDeployFlags(argv) {
   if (flags.environment === "production" && !flags.confirmProduction) {
     throw new Error("production_confirmation_required");
   }
-  const requiresReleaseManifest = flags.environment === "production"
+  const requiresReleaseManifest = (flags.environment === "production" || flags.environment === "staging")
     && !flags.dryRun
     && !flags.buildOnly;
   if (requiresReleaseManifest && !releaseManifestPath) {
-    throw new Error("production_release_manifest_required");
+    throw new Error(flags.environment === "production"
+      ? "production_release_manifest_required"
+      : "staging_release_manifest_required");
   }
   return { ...flags, releaseManifestPath };
 }
 
 export function run(command, args, options = {}) {
+  const safeFailureCodes = new Set(Array.isArray(options.safeFailureCodes) ? options.safeFailureCodes : []);
   const result = spawnSync(command, args, {
     cwd: options.cwd,
     encoding: "utf8",
     env: options.env ?? process.env,
-    stdio: options.capture === false ? "inherit" : "pipe",
+    stdio: options.capture === false && safeFailureCodes.size === 0 ? "inherit" : "pipe",
   });
 
   if (result.error) {
-    throw result.error;
+    throw new Error("command_failed");
   }
 
   if (result.status !== 0) {
-    const safeOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
-    throw new Error(`command_failed:${command}:${args[0] ?? "unknown"}:${safeOutput}`);
+    const failureLines = [result.stdout ?? "", result.stderr ?? ""]
+      .flatMap((value) => value.split(/\r?\n/u))
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (failureLines.length === 1 && safeFailureCodes.has(failureLines[0])) {
+      throw new Error(failureLines[0]);
+    }
+    throw new Error("command_failed");
   }
 
   return {
