@@ -40,11 +40,13 @@ describe("accessible design-system gate", () => {
   });
 
   it("provides shared skip links, focus targets, labeled step regions and atomic status updates", async () => {
-    const [layout, onboardingPage, wizard, domainManager, controller, shellCss, tokens] = await Promise.all([
+    const [layout, onboardingPage, wizard, domainManager, domainList, domainsScript, controller, shellCss, tokens] = await Promise.all([
       readFile("src/layouts/AppLayout.astro", "utf8"),
       readFile("src/pages/onboarding.astro", "utf8"),
       readFile("src/components/dashboard/OnboardingWizard.astro", "utf8"),
       readFile("src/components/dashboard/DomainManager.astro", "utf8"),
+      readFile("src/components/dashboard/domains/DomainList.astro", "utf8"),
+      readFile("src/scripts/dashboard/domains.ts", "utf8"),
       readFile("src/scripts/dashboard/onboarding.ts", "utf8"),
       readFile("src/styles/app-shell.css", "utf8"),
       readFile("src/styles/selinow-tokens.css", "utf8"),
@@ -59,11 +61,12 @@ describe("accessible design-system gate", () => {
     expect(contrast(token(tokens, "selinow-action-primary"), token(tokens, "selinow-white"))).toBeGreaterThanOrEqual(4.5);
     expect(wizard).toContain('role="region" aria-labelledby="onboarding-step-trigger-');
     expect(wizard).toContain('aria-atomic="true"');
-    expect(domainManager).toContain('role="alert" aria-atomic="true"');
-    expect(domainManager).toContain("2_500");
-    expect(domainManager).toContain('setFeedback(message, "success")');
-    expect(domainManager).toContain('addEventListener("cancel"');
-    expect(domainManager).toContain("event.preventDefault()");
+    expect(domainList).toContain('role="alert" aria-atomic="true"');
+    expect(domainManager).toContain('role="status" aria-live="polite" aria-atomic="true"');
+    expect(domainsScript).toContain("2_500");
+    expect(domainsScript).toContain('setFeedback(message, "success")');
+    expect(domainsScript).toContain('addEventListener("cancel"');
+    expect(domainsScript).toContain("event.preventDefault()");
     expect(domainManager).toContain("overflow-wrap: anywhere");
     expect(controller).toContain('window.matchMedia("(prefers-reduced-motion: reduce)")');
     expect(controller).toContain('tone === "error" ? "alert" : "status"');

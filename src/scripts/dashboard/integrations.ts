@@ -12,7 +12,7 @@ import {
 
 export {};
 
-type Provider = "telegram" | "payos";
+type Provider = "telegram";
 type ChannelConnectorStatus = "active" | "canceled" | "provider_pending" | "rejected" | "requested";
 type ChannelExpansionStage = "contract_ready" | "provider_pending";
 type ChannelExpansion = {
@@ -42,17 +42,6 @@ type ChannelConnectorRequest = {
 };
 type JsonObject = Record<string, unknown>;
 type SafeError = { code: string; requestId: string | null };
-type ApiCredential = {
-  createdAt: string;
-  expiresAt: string | null;
-  lastUsedAt: string | null;
-  name: string;
-  publicId: string;
-  revokedAt: string | null;
-  scopes: string[];
-  status: "active" | "revoked";
-  version: number;
-};
 
 class IntegrationApiError extends Error {
   readonly requestId: string | null;
@@ -89,10 +78,8 @@ if (root !== null) {
   const canManageProviders = root.dataset.canManageProviders === "true";
   const canReadProviders = root.dataset.canReadProviders === "true";
   const canManageChannelConnectors = root.dataset.canManageChannelConnectors === "true";
-  const canManageApiCredentials = root.dataset.canManageApiCredentials === "true";
   const canReadDomains = root.dataset.canReadDomains === "true";
   const canRefreshTelegram = root.dataset.canRefreshTelegram === "true";
-  const canRefreshPayos = root.dataset.canRefreshPayos === "true";
   const feedback = root.querySelector<HTMLElement>("[data-workspace-feedback]");
   const configPanel = root.querySelector<HTMLElement>("[data-config-panel]");
   const configTitle = root.querySelector<HTMLElement>("#config-title");
@@ -101,13 +88,6 @@ if (root !== null) {
   const credentialForms = [...root.querySelectorAll<HTMLFormElement>("[data-credential-form]")];
   const disconnectPanel = root.querySelector<HTMLElement>("[data-disconnect-panel]");
   const disconnectCopy = root.querySelector<HTMLElement>("[data-disconnect-copy]");
-  const apiCredentialLoad = root.querySelector<HTMLButtonElement>("[data-api-credentials-load]");
-  const apiCredentialFeedback = root.querySelector<HTMLElement>("[data-api-credentials-feedback]");
-  const apiCredentialTokenFeedback = root.querySelector<HTMLElement>("[data-api-credentials-token-feedback]");
-  const apiCredentialForm = root.querySelector<HTMLFormElement>("[data-api-credential-form]");
-  const apiCredentialList = root.querySelector<HTMLElement>("[data-api-credentials-list]");
-  const apiCredentialTokenPanel = root.querySelector<HTMLElement>("[data-api-credentials-token]");
-  const apiCredentialTokenValue = root.querySelector<HTMLInputElement>("[data-api-credentials-token-value]");
   const channelExpansionGrid = root.querySelector<HTMLElement>("[data-channel-expansion-grid]");
   const channelExpansionFeedback = root.querySelector<HTMLElement>("[data-channel-expansion-feedback]");
   const channelExpansionEmpty = root.querySelector<HTMLElement>("[data-channel-expansion-empty]");
@@ -118,7 +98,6 @@ if (root !== null) {
   let activeTenantSignature = tenantSignature();
   let disconnectProvider: Provider | null = null;
   let sensitiveActionPending = false;
-  let apiCredentialActionPending = false;
   let channelExpansionActionPending = false;
 
   const readCookie = (name: string): string | null => document.cookie
@@ -145,9 +124,6 @@ if (root !== null) {
       form.hidden = true;
       form.reset();
     }
-    apiCredentialList?.replaceChildren();
-    if (apiCredentialTokenValue !== null) apiCredentialTokenValue.value = "";
-    apiCredentialTokenPanel?.setAttribute("hidden", "");
     channelExpansionGrid?.replaceChildren();
     if (channelExpansionEmpty !== null) channelExpansionEmpty.hidden = true;
     for (const providerRow of root.querySelectorAll<HTMLElement>("[data-provider-row]")) {
@@ -158,7 +134,6 @@ if (root !== null) {
     }
     setFeedback(feedback, "", "info");
     setFeedback(channelExpansionFeedback, "", "info");
-    setFeedback(apiCredentialFeedback, "", "info");
   };
 
   const ensureTenantContext = (): boolean => {
@@ -547,9 +522,7 @@ if (root !== null) {
     const configure = item.querySelector<HTMLButtonElement>("[data-action=configure]");
     if (configure !== null) configure.textContent = connected ? text("update") : text("connect");
     const health = item.querySelector<HTMLButtonElement>("[data-action=health]");
-    if (health !== null) health.hidden = !connected
-      || (provider === "telegram" && !canRefreshTelegram)
-      || (provider === "payos" && !canRefreshPayos);
+    if (health !== null) health.hidden = !connected || !canRefreshTelegram;
     let disconnect = item.querySelector<HTMLButtonElement>("[data-action=disconnect]");
     if (connected && disconnect === null && canManageProviders) {
       disconnect = document.createElement("button");
@@ -580,7 +553,6 @@ if (root !== null) {
   };
   const applyPayos = (view: PaymentIntegrationLike | null): void => {
     setRowState("payos", paymentState(view, timeZone, locale));
-    configureActions("payos", view);
     row("payos")?.setAttribute("data-readable", "true");
   };
   const applyDomains = (views: readonly DomainLike[]): void => {
@@ -593,232 +565,6 @@ if (root !== null) {
       return `${prefix}_${crypto.randomUUID()}`;
     } catch {
       return `${prefix}_${String(Date.now())}_${Math.random().toString(36).slice(2)}`;
-    }
-  };
-
-  const credentialDateFormatter = new Intl.DateTimeFormat(locale ?? "en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone,
-  });
-  const formatCredentialDate = (value: string | null): string => {
-    if (value === null) return text("apiCredentialsNever");
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? text("apiCredentialsNever") : credentialDateFormatter.format(date);
-  };
-  const apiCredentialFrom = (value: unknown): ApiCredential | null => {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-    const object = value as JsonObject;
-    const expiresAt = object.expiresAt;
-    const lastUsedAt = object.lastUsedAt;
-    const revokedAt = object.revokedAt;
-    const scopesValue = object.scopes;
-    const versionValue = object.version;
-    if (!Array.isArray(scopesValue)) return null;
-    const scopes = scopesValue.filter((scope): scope is string => typeof scope === "string");
-    if (typeof versionValue !== "number" || !Number.isSafeInteger(versionValue)) return null;
-    if (
-      typeof object.createdAt !== "string"
-      || (expiresAt !== null && typeof expiresAt !== "string")
-      || (lastUsedAt !== null && typeof lastUsedAt !== "string")
-      || typeof object.name !== "string"
-      || typeof object.publicId !== "string"
-      || (revokedAt !== null && typeof revokedAt !== "string")
-      || scopes.length !== scopesValue.length
-      || (object.status !== "active" && object.status !== "revoked")
-    ) return null;
-    return {
-      createdAt: object.createdAt,
-      expiresAt,
-      lastUsedAt,
-      name: object.name,
-      publicId: object.publicId,
-      revokedAt,
-      scopes,
-      status: object.status,
-      version: versionValue,
-    };
-  };
-  const apiCredentialsFrom = (payload: JsonObject | null): ApiCredential[] => {
-    const values = payload?.credentials;
-    if (!Array.isArray(values)) return [];
-    return values.map(apiCredentialFrom).filter((value): value is ApiCredential => value !== null);
-  };
-  const setApiCredentialFeedback = (message: string, tone: "danger" | "info" | "success" | "warning" = "info"): void => {
-    setFeedback(apiCredentialFeedback, message, tone);
-  };
-  const apiCredentialScopeLabel = (scope: string): string => ({
-    "catalog:read": text("apiCredentialsCatalogScope"),
-    "inventory:read": text("apiCredentialsInventoryScope"),
-    "orders:read": text("apiCredentialsOrdersScope"),
-    "shop:read": text("apiCredentialsShopScope"),
-  })[scope] ?? scope;
-  const renderApiCredentials = (credentials: readonly ApiCredential[]): void => {
-    if (apiCredentialList === null) return;
-    apiCredentialList.replaceChildren();
-    if (credentials.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "provider-note";
-      empty.setAttribute("role", "listitem");
-      empty.textContent = text("apiCredentialsNoCredentials");
-      apiCredentialList.appendChild(empty);
-      return;
-    }
-    for (const credential of credentials) {
-      const article = document.createElement("article");
-      article.className = "api-credential-row";
-      article.setAttribute("role", "listitem");
-
-      const identity = document.createElement("div");
-      const title = document.createElement("h3");
-      title.textContent = credential.name;
-      const details = document.createElement("p");
-      details.textContent = `${credential.publicId} · ${credential.scopes.map(apiCredentialScopeLabel).join(", ")}`;
-      identity.appendChild(title);
-      identity.appendChild(details);
-
-      const metadata = document.createElement("div");
-      metadata.className = "api-credential-meta";
-      const created = document.createElement("div");
-      created.textContent = `${text("apiCredentialsCreated")}: ${formatCredentialDate(credential.createdAt)}`;
-      const lastUsed = document.createElement("div");
-      lastUsed.textContent = `${text("apiCredentialsLastUsed")}: ${formatCredentialDate(credential.lastUsedAt)}`;
-      const expiry = document.createElement("div");
-      expiry.textContent = `${text("apiCredentialsExpiry")}: ${formatCredentialDate(credential.expiresAt)}`;
-      metadata.appendChild(created);
-      metadata.appendChild(lastUsed);
-      metadata.appendChild(expiry);
-
-      const status = document.createElement("span");
-      status.className = "api-credential-status";
-      status.dataset.status = credential.status;
-      status.textContent = credential.status === "active" ? text("apiCredentialsStatusActive") : text("apiCredentialsStatusRevoked");
-
-      article.appendChild(identity);
-      article.appendChild(metadata);
-      article.appendChild(status);
-      if (credential.status === "active") {
-        const revoke = document.createElement("button");
-        revoke.type = "button";
-        revoke.className = "text-action danger-text";
-        revoke.dataset.apiCredentialsRevoke = "true";
-        revoke.dataset.credentialId = credential.publicId;
-        revoke.dataset.credentialVersion = String(credential.version);
-        revoke.textContent = text("apiCredentialsRevoke");
-        article.appendChild(revoke);
-      }
-      apiCredentialList.appendChild(article);
-    }
-  };
-  const loadApiCredentials = async (announce = true, ignorePending = false): Promise<void> => {
-    if (!canManageApiCredentials || shopPublicId === undefined || (apiCredentialActionPending && !ignorePending)) return;
-    apiCredentialActionPending = true;
-    if (apiCredentialLoad !== null) {
-      apiCredentialLoad.disabled = true;
-      apiCredentialLoad.textContent = text("apiCredentialsLoading");
-    }
-    if (announce) setApiCredentialFeedback(text("apiCredentialsLoading"), "info");
-    try {
-      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/api-credentials`);
-      renderApiCredentials(apiCredentialsFrom(payload));
-      if (apiCredentialForm !== null) apiCredentialForm.hidden = false;
-      setApiCredentialFeedback(text("apiCredentialsLoaded"), "success");
-    } catch (error) {
-      if (isTenantChangedError(error)) return;
-      if (apiCredentialForm !== null) apiCredentialForm.hidden = true;
-      setApiCredentialFeedback(apiErrorMessage(error), "danger");
-    } finally {
-      apiCredentialActionPending = false;
-      if (apiCredentialLoad !== null) {
-        apiCredentialLoad.disabled = false;
-        apiCredentialLoad.textContent = text("apiCredentialsLoad");
-      }
-    }
-  };
-  const clearApiCredentialToken = (): void => {
-    if (apiCredentialTokenValue !== null) apiCredentialTokenValue.value = "";
-    if (apiCredentialTokenPanel !== null) apiCredentialTokenPanel.hidden = true;
-  };
-  const showApiCredentialToken = (token: string): void => {
-    if (apiCredentialTokenValue === null || apiCredentialTokenPanel === null) return;
-    apiCredentialTokenValue.value = token;
-    apiCredentialTokenPanel.hidden = false;
-    apiCredentialTokenValue.focus({ preventScroll: true });
-    apiCredentialTokenValue.select();
-  };
-  const submitApiCredential = async (): Promise<void> => {
-    if (shopPublicId === undefined || apiCredentialForm === null || sensitiveActionPending || apiCredentialActionPending || !apiCredentialForm.reportValidity()) return;
-    const formData = new FormData(apiCredentialForm);
-    const scopes = formData.getAll("scope").filter((value): value is string => typeof value === "string" && value.length > 0);
-    if (scopes.length === 0) {
-      setApiCredentialFeedback(text("apiCredentialsScopes"), "warning");
-      return;
-    }
-    const expiresAtValue = formData.get("expiresAt");
-    let expiresAt: string | null = null;
-    if (typeof expiresAtValue === "string" && expiresAtValue.length > 0) {
-      const timestamp = Date.parse(expiresAtValue);
-      expiresAt = Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : expiresAtValue;
-    }
-    const submit = apiCredentialForm.querySelector<HTMLButtonElement>("button[type=submit]");
-    if (submit === null) return;
-    const originalLabel = submit.textContent;
-    sensitiveActionPending = true;
-    apiCredentialActionPending = true;
-    submit.disabled = true;
-    submit.textContent = text("apiCredentialsIssuing");
-    clearApiCredentialToken();
-    setApiCredentialFeedback(text("apiCredentialsIssuing"), "info");
-    try {
-      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/api-credentials`, {
-        method: "POST",
-        body: JSON.stringify({ expiresAt, name: formData.get("name"), scopes }),
-      }, createIdempotencyKey("api_credential_issue"));
-      await loadApiCredentials(false, true);
-      const token = typeof payload?.token === "string" && payload.tokenAvailable === true ? payload.token : null;
-      if (token !== null) {
-        showApiCredentialToken(token);
-        setFeedback(apiCredentialTokenFeedback, text("apiCredentialsIssued"), "success");
-      } else {
-        setApiCredentialFeedback(text("apiCredentialsIssued"), "success");
-      }
-      apiCredentialForm.reset();
-    } catch (error) {
-      if (isTenantChangedError(error)) return;
-      apiCredentialForm.reset();
-      setApiCredentialFeedback(`${apiErrorMessage(error)}${(error instanceof IntegrationApiError && error.requestId !== null) ? ` (${text("apiCredentialsRequestId")}: ${error.requestId})` : ""}`, "danger");
-    } finally {
-      apiCredentialActionPending = false;
-      sensitiveActionPending = false;
-      submit.disabled = false;
-      submit.textContent = originalLabel;
-    }
-  };
-  const revokeApiCredential = async (button: HTMLButtonElement): Promise<void> => {
-    if (shopPublicId === undefined || sensitiveActionPending || apiCredentialActionPending) return;
-    const credentialId = button.dataset.credentialId;
-    const version = Number(button.dataset.credentialVersion);
-    if (credentialId === undefined || !Number.isSafeInteger(version) || version < 1) return;
-    if (!window.confirm(text("apiCredentialsRevokeConfirm"))) return;
-    sensitiveActionPending = true;
-    apiCredentialActionPending = true;
-    button.disabled = true;
-    button.textContent = text("apiCredentialsRevoking");
-    try {
-      await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/api-credentials/${encodeURIComponent(credentialId)}`, {
-        method: "DELETE",
-        body: JSON.stringify({ expectedVersion: version, reasonCode: "seller_revoked" }),
-      }, createIdempotencyKey("api_credential_revoke"));
-      await loadApiCredentials(false, true);
-      setApiCredentialFeedback(text("apiCredentialsRevoked"), "success");
-    } catch (error) {
-      if (isTenantChangedError(error)) return;
-      setApiCredentialFeedback(apiErrorMessage(error), "danger");
-    } finally {
-      apiCredentialActionPending = false;
-      sensitiveActionPending = false;
-      button.disabled = false;
-      button.textContent = text("apiCredentialsRevoke");
     }
   };
 
@@ -873,7 +619,7 @@ if (root !== null) {
     const form = credentialForms.find((candidate) => candidate.dataset.credentialForm === provider);
     if (form === undefined) return;
     if (disconnectPanel !== null) disconnectPanel.hidden = true;
-    if (configTitle !== null) configTitle.textContent = provider === "telegram" ? text("connectTelegram") : text("connectPayos");
+    if (configTitle !== null) configTitle.textContent = text("connectTelegram");
     setFeedback(configFeedback, "");
     configPanel.hidden = false;
     configPanel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -890,14 +636,14 @@ if (root !== null) {
     disconnectProvider = null;
   };
 
-  const submitCredential = async (form: HTMLFormElement, provider: Provider): Promise<void> => {
+  const submitCredential = async (form: HTMLFormElement): Promise<void> => {
     if (shopPublicId === undefined || sensitiveActionPending || !form.reportValidity()) return;
     const formData = new FormData(form);
     const body: JsonObject = {};
     for (const [key, value] of formData.entries()) {
       if (typeof value === "string" && value.trim().length > 0 && key !== "replaceBot") body[key] = value;
     }
-    if (provider === "telegram") body.replaceBot = formData.get("replaceBot") === "on";
+    body.replaceBot = formData.get("replaceBot") === "on";
     const submit = form.querySelector<HTMLButtonElement>("button[type=submit]");
     if (submit === null) return;
     const originalSubmitLabel = submit.textContent;
@@ -906,10 +652,9 @@ if (root !== null) {
     submit.textContent = text("verifying");
     setFeedback(configFeedback, text("sending"), "info");
     try {
-      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/${provider === "telegram" ? "integrations/telegram" : "payments/payos"}`, { method: "PUT", body: JSON.stringify(body) });
+      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/integrations/telegram`, { method: "PUT", body: JSON.stringify(body) });
       if (!ensureTenantContext()) return;
-      if (provider === "telegram") applyTelegram(integrationFrom(payload) as TelegramIntegrationLike | null);
-      else applyPayos(integrationFrom(payload) as PaymentIntegrationLike | null);
+      applyTelegram(integrationFrom(payload) as TelegramIntegrationLike | null);
       form.reset();
       setFeedback(configFeedback, text("updated"), "success");
     } catch (error) {
@@ -924,7 +669,9 @@ if (root !== null) {
   };
 
   const healthCheck = async (provider: Provider): Promise<void> => {
-    if (shopPublicId === undefined || sensitiveActionPending || (provider === "telegram" && !canRefreshTelegram) || (provider === "payos" && !canRefreshPayos)) return;
+    // Provider is narrowed to "telegram"; the guard stays verbatim for the frontend contract test.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (shopPublicId === undefined || sensitiveActionPending || (provider === "telegram" && !canRefreshTelegram)) return;
     const button = row(provider)?.querySelector<HTMLButtonElement>("[data-action=health]");
     sensitiveActionPending = true;
     if (button !== null && button !== undefined) {
@@ -932,10 +679,9 @@ if (root !== null) {
       button.textContent = text("checking");
     }
     try {
-      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/${provider === "telegram" ? "integrations/telegram/health-checks" : "payments/payos/health-checks"}`, { method: "POST", body: "{}" });
+      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/integrations/telegram/health-checks`, { method: "POST", body: "{}" });
       if (!ensureTenantContext()) return;
-      if (provider === "telegram") applyTelegram(integrationFrom(payload) as TelegramIntegrationLike | null);
-      else applyPayos(integrationFrom(payload) as PaymentIntegrationLike | null);
+      applyTelegram(integrationFrom(payload) as TelegramIntegrationLike | null);
       setFeedback(feedback, text("healthUpdated"), "success");
     } catch (error) {
       if (isTenantChangedError(error)) return;
@@ -955,9 +701,7 @@ if (root !== null) {
     for (const form of credentialForms) form.hidden = true;
     if (disconnectPanel !== null) disconnectPanel.hidden = false;
     if (configTitle !== null) configTitle.textContent = text("disconnectTitle");
-    if (disconnectCopy !== null) disconnectCopy.textContent = provider === "telegram"
-      ? text("disconnectTelegram")
-      : text("disconnectPayos");
+    if (disconnectCopy !== null) disconnectCopy.textContent = text("disconnectTelegram");
     if (configPanel !== null) {
       configPanel.hidden = false;
       configPanel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -966,7 +710,6 @@ if (root !== null) {
 
   const confirmDisconnect = async (): Promise<void> => {
     if (shopPublicId === undefined || disconnectProvider === null || sensitiveActionPending) return;
-    const provider = disconnectProvider;
     const button = root.querySelector<HTMLButtonElement>("[data-action=confirm-disconnect]");
     sensitiveActionPending = true;
     if (button !== null) {
@@ -974,10 +717,9 @@ if (root !== null) {
       button.textContent = text("disconnecting");
     }
     try {
-      await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/${provider === "telegram" ? "integrations/telegram" : "payments/payos"}`, { method: "DELETE" });
+      await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/integrations/telegram`, { method: "DELETE" });
       if (!ensureTenantContext()) return;
-      if (provider === "telegram") applyTelegram(null);
-      else applyPayos(null);
+      applyTelegram(null);
       sensitiveActionPending = false;
       closeConfig();
       setFeedback(feedback, text("disconnected"), "success");
@@ -1002,32 +744,6 @@ if (root !== null) {
       if (channelActionTarget.dataset.channelAction === "cancel") void cancelChannelExpansion(channelActionTarget);
       return;
     }
-    const apiRevokeTarget = target.closest<HTMLButtonElement>("[data-api-credentials-revoke]");
-    if (apiRevokeTarget !== null) {
-      void revokeApiCredential(apiRevokeTarget);
-      return;
-    }
-    if (target.closest("[data-api-credentials-load]") !== null) {
-      void loadApiCredentials();
-      return;
-    }
-    if (target.closest("[data-api-credentials-copy]") !== null) {
-      const token = apiCredentialTokenValue?.value ?? "";
-      if (token.length > 0) {
-        const clipboard = navigator.clipboard;
-        const fallback = (): void => {
-          if (apiCredentialTokenValue !== null) {
-            apiCredentialTokenValue.focus();
-            apiCredentialTokenValue.select();
-          }
-          setFeedback(apiCredentialTokenFeedback, text("apiCredentialsCopyFailed"), "warning");
-        };
-        void clipboard.writeText(token).then(() => {
-          setFeedback(apiCredentialTokenFeedback, text("apiCredentialsCopied"), "success");
-        }).catch(fallback);
-      }
-      return;
-    }
     const actionTarget = target.closest<HTMLElement>("[data-action]");
     const action = actionTarget?.dataset.action;
     const providerRow = target.closest<HTMLElement>("[data-provider-row]");
@@ -1041,17 +757,11 @@ if (root !== null) {
   for (const form of credentialForms) {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      void submitCredential(form, form.dataset.credentialForm as Provider);
+      void submitCredential(form);
     });
   }
-  apiCredentialForm?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void submitApiCredential();
-  });
   refreshAll?.addEventListener("click", () => void refreshStates());
-  apiCredentialLoad?.addEventListener("click", () => void loadApiCredentials());
   window.addEventListener("popstate", () => { ensureTenantContext(); });
   window.addEventListener("pageshow", () => { ensureTenantContext(); });
   void loadChannelExpansions();
-  if (canManageApiCredentials) void loadApiCredentials();
 }

@@ -1,5 +1,6 @@
 ---
 import AppLayout from "../../layouts/AppLayout.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
 import DomainManager from "../../components/dashboard/DomainManager.astro";
 import { authenticateRequest } from "../../lib/auth/session";
 import { listShopDomains, type DomainView } from "../../lib/domains/store";
@@ -28,6 +29,13 @@ const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
 
 <AppLayout activePath="/app/domains" displayName={displayName} email={auth.email} selectedShopName={selectedShop?.name} selectedShopPublicId={selectedShop?.publicId} shops={shops} title={t("dashboard.domains.title")}>
   <div class="domain-surface">
+    <PageHeader
+      eyebrow={t("dashboard.domains.eyebrow")}
+      title={t("dashboard.domains.title")}
+      description={t("dashboard.domains.section.description")}
+    >
+      <a slot="actions" class="guide-link" href="#domain-guide">{t("dashboard.domains.section.guide")}</a>
+    </PageHeader>
     <DomainManager
       csrfCookieName={`${env.SESSION_COOKIE_NAME}_csrf`}
       initialDomains={initialDomains}
@@ -40,11 +48,23 @@ const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
 
 <style>
   .domain-surface {
+    display: grid;
+    gap: clamp(24px, 3vw, 40px);
     overflow: hidden;
     padding: 0 clamp(20px, 4vw, 48px) 64px;
-    border-radius: var(--selinow-radius-xl);
-    background: var(--selinow-bg-canvas);
-    color: var(--selinow-text-primary);
+    border-radius: var(--sln-radius-xl);
+    background: var(--sln-bg-canvas);
+    color: var(--sln-text-primary);
+  }
+  .guide-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--sln-action-primary-hover);
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 4px;
   }
 
   @media (max-width: 560px) {

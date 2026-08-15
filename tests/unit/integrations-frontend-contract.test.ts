@@ -6,7 +6,10 @@ import { domainState, paymentState, telegramState, unavailableState } from "../.
 
 describe("integrations frontend contract", () => {
   it("uses AppLayout tenant context and server-backed SSR projections", async () => {
-    const page = await readFile("src/pages/app/integrations.astro", "utf8");
+    const [page, developer] = await Promise.all([
+      readFile("src/pages/app/integrations.astro", "utf8"),
+      readFile("src/pages/app/developer.astro", "utf8"),
+    ]);
 
     expect(page).toContain("selectShopForMember");
     expect(page).toContain("getTelegramIntegration");
@@ -18,18 +21,18 @@ describe("integrations frontend contract", () => {
     expect(page).not.toContain('data-provider-row="webhooks"');
     expect(page).not.toContain('data-provider-row="email"');
     expect(page).toContain("unavailableState");
-    expect(page).toContain("data-can-manage-api-credentials");
     expect(page).toContain("data-can-read-providers");
     expect(page).toContain("data-can-refresh-telegram");
     expect(page).toContain("data-can-read-domains");
     expect(page).toContain("const canManageProviders = shop?.role === \"owner\";");
     expect(page).toContain("const canManageChannelConnectors = shop?.role === \"owner\" || shop?.role === \"manager\";");
-    expect(page).toContain("data-api-credentials-section");
-    expect(page).toContain("dashboard.integrations.api_credentials");
-    expect(page).toContain('value="inventory:read"');
-    expect(page).toContain('value="orders:read"');
     expect(page).toContain("data-channel-expansion-section");
     expect(page).toContain("data-can-manage-channel-connectors");
+    expect(developer).toContain("data-can-manage-api-credentials");
+    expect(developer).toContain("data-api-credentials-section");
+    expect(developer).toContain("dashboard.integrations.api_credentials");
+    expect(developer).toContain('value="inventory:read"');
+    expect(developer).toContain('value="orders:read"');
   });
 
   it("keeps provider views safe and truthful for unavailable access", () => {
@@ -41,13 +44,16 @@ describe("integrations frontend contract", () => {
   });
 
   it("keeps credentials out of the progressive enhancement payload", async () => {
-    const script = await readFile("src/scripts/dashboard/integrations.ts", "utf8");
+    const [script, developerScript] = await Promise.all([
+      readFile("src/scripts/dashboard/integrations.ts", "utf8"),
+      readFile("src/scripts/dashboard/developer.ts", "utf8"),
+    ]);
 
     expect(script).toContain("form.reset()");
     expect(script).toContain("credentials: \"same-origin\"");
-    expect(script).toContain("/api-credentials");
-    expect(script).toContain("Idempotency-Key");
-    expect(script).toContain("tokenAvailable");
+    expect(developerScript).toContain("/api-credentials");
+    expect(developerScript).toContain("Idempotency-Key");
+    expect(developerScript).toContain("tokenAvailable");
     expect(script).toContain("/channels");
     expect(script).toContain("/catalog");
     expect(script).toContain("/requests");
@@ -75,7 +81,10 @@ describe("integrations frontend contract", () => {
   });
 
   it("drops stale tenant responses when a shop switch races an integration request", async () => {
-    const script = await readFile("src/scripts/dashboard/integrations.ts", "utf8");
+    const [script, developerScript] = await Promise.all([
+      readFile("src/scripts/dashboard/integrations.ts", "utf8"),
+      readFile("src/scripts/dashboard/developer.ts", "utf8"),
+    ]);
 
     expect(script).toContain("class TenantChangedError extends Error");
     expect(script).toContain("const tenantSignature = (): string");
@@ -84,7 +93,7 @@ describe("integrations frontend contract", () => {
     expect(script).toContain("assertTenantContext(requestSignature);");
     expect(script).toContain("window.addEventListener(\"popstate\", () => { ensureTenantContext(); });");
     expect(script).toContain("channelExpansionGrid?.replaceChildren();");
-    expect(script).toContain("apiCredentialList?.replaceChildren();");
+    expect(developerScript).toContain("apiCredentialList?.replaceChildren();");
     expect(script).toContain("if (isTenantChangedError(error)) return;");
   });
 });

@@ -1,0 +1,62 @@
+---
+import { createDashboardTranslator } from "../../../lib/i18n/catalogs/dashboard";
+
+type Props = {
+  domainEntitled: boolean;
+  mutationBlocked: boolean;
+};
+
+const { domainEntitled, mutationBlocked } = Astro.props;
+const locale = Astro.locals.locale;
+const t = createDashboardTranslator(locale);
+---
+
+<aside class="connect-panel" aria-labelledby="connect-domain-title">
+  <p class="step">{t("dashboard.domains.connect.step")}</p>
+  <h4 id="connect-domain-title">{t("dashboard.domains.connect.title")}</h4>
+  <p>{t("dashboard.domains.connect.description", { example: t("dashboard.domains.connect.placeholder") })}</p>
+  <form data-domain-form novalidate>
+    <label for="custom-hostname">{t("dashboard.domains.connect.label")}</label>
+    <input
+      id="custom-hostname"
+      name="hostname"
+      type="text"
+      inputmode="url"
+      autocomplete="off"
+      autocapitalize="none"
+      spellcheck="false"
+      maxlength="253"
+      placeholder={t("dashboard.domains.connect.placeholder")}
+      aria-describedby="hostname-help hostname-error"
+      required
+      data-hostname-input
+      disabled={!domainEntitled || mutationBlocked}
+    />
+    <p id="hostname-help" class="field-help">{t("dashboard.domains.connect.help", { shop: "shop.", store: "store.", buy: locale === "vi-VN" ? "mua." : "buy." })}</p>
+    <p id="hostname-error" class="field-error" data-hostname-error aria-live="polite"></p>
+    <button type="submit" class="primary-button" data-connect-button disabled={!domainEntitled || mutationBlocked}>{t("dashboard.domains.connect.action")}</button>
+  </form>
+  <p class="privacy-note">{t("dashboard.domains.connect.privacy")}</p>
+</aside>
+
+<style>
+  .connect-panel { padding: 28px; background: var(--sln-bg-subtle); }
+  .connect-panel h4 { margin: 0; font-size: 24px; line-height: 1.2; letter-spacing: -.02em; }
+  .step { margin: 0 0 7px; color: var(--sln-action-primary-hover); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  .connect-panel > p:not(.step, .privacy-note) { color: var(--sln-text-secondary); line-height: 1.6; }
+  .connect-panel form { margin-top: 1.6rem; }
+  .connect-panel label { display: block; margin-bottom: .55rem; font-size: .74rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+  .connect-panel input { width: 100%; min-height: 48px; border: 1px solid var(--sln-slate-500); border-radius: var(--sln-radius-md); padding: 12px 14px; background: var(--sln-bg-surface); color: var(--sln-text-primary); font-family: var(--sln-font-mono); outline: none; }
+  .connect-panel input::placeholder { color: var(--sln-text-muted); opacity: 1; }
+  .connect-panel input:focus { border-color: var(--sln-focus-ring); box-shadow: 0 0 0 3px rgb(59 130 246 / 22%); }
+  .connect-panel input[aria-invalid="true"] { border-color: var(--sln-state-danger); }
+  .connect-panel input:disabled { border-color: var(--sln-slate-500); background: var(--sln-slate-200); color: var(--sln-slate-600); cursor: not-allowed; }
+  .field-help, .field-error, .privacy-note { font-size: .76rem; line-height: 1.5; }
+  .field-help { margin: 10px 0 0; color: var(--sln-text-secondary); }
+  .field-error { min-height: 36px; margin: 7px 0; color: var(--sln-state-danger); }
+  .privacy-note { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--sln-border-default); color: var(--sln-text-secondary); }
+  .primary-button { min-height: 44px; width: 100%; border: 1px solid transparent; border-radius: var(--sln-radius-pill); padding: 10px 16px; background: var(--sln-action-primary); color: var(--sln-white); font-family: var(--sln-font-sans); font-size: 12px; font-weight: 700; cursor: pointer; }
+  .primary-button:hover { background: var(--sln-action-primary-hover); }
+  .primary-button:disabled { border-color: var(--sln-slate-500); background: var(--sln-slate-200); color: var(--sln-slate-600); cursor: not-allowed; opacity: 1; }
+  @media (max-width: 650px) { .connect-panel { padding: 1.1rem; } }
+</style>

@@ -1,0 +1,171 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { getBindings } from "../../lib/platform/bindings";
+import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const canManageApiCredentials = shop?.role === "owner";
+const timeZone = shop?.timezone ?? "Asia/Ho_Chi_Minh";
+const locale = Astro.locals.locale ?? shop?.defaultLocale;
+const t = createDashboardTranslator(locale);
+const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+const csrfCookieName = `${env.SESSION_COOKIE_NAME}_csrf`;
+const developerClientCopy = {
+  apiCredentialsLoad: t("dashboard.integrations.api_credentials.load"),
+  apiCredentialsLoading: t("dashboard.integrations.api_credentials.loading"),
+  apiCredentialsLoaded: t("dashboard.integrations.api_credentials.loaded"),
+  apiCredentialsUnavailable: t("dashboard.integrations.api_credentials.unavailable"),
+  apiCredentialsTitle: t("dashboard.integrations.api_credentials.title"),
+  apiCredentialsDescription: t("dashboard.integrations.api_credentials.description"),
+  apiCredentialsName: t("dashboard.integrations.api_credentials.name"),
+  apiCredentialsNamePlaceholder: t("dashboard.integrations.api_credentials.name_placeholder"),
+  apiCredentialsScopes: t("dashboard.integrations.api_credentials.scopes"),
+  apiCredentialsCatalogScope: t("dashboard.integrations.api_credentials.catalog_scope"),
+  apiCredentialsInventoryScope: t("dashboard.integrations.api_credentials.inventory_scope"),
+  apiCredentialsOrdersScope: t("dashboard.integrations.api_credentials.orders_scope"),
+  apiCredentialsShopScope: t("dashboard.integrations.api_credentials.shop_scope"),
+  apiCredentialsExpiry: t("dashboard.integrations.api_credentials.expiry"),
+  apiCredentialsExpiryHelp: t("dashboard.integrations.api_credentials.expiry_help"),
+  apiCredentialsNever: t("dashboard.integrations.api_credentials.never"),
+  apiCredentialsIssue: t("dashboard.integrations.api_credentials.issue"),
+  apiCredentialsIssuing: t("dashboard.integrations.api_credentials.issuing"),
+  apiCredentialsIssued: t("dashboard.integrations.api_credentials.issued"),
+  apiCredentialsTokenTitle: t("dashboard.integrations.api_credentials.token_title"),
+  apiCredentialsTokenWarning: t("dashboard.integrations.api_credentials.token_warning"),
+  apiCredentialsCopy: t("dashboard.integrations.api_credentials.copy"),
+  apiCredentialsCopied: t("dashboard.integrations.api_credentials.copied"),
+  apiCredentialsCopyFailed: t("dashboard.integrations.api_credentials.copy_failed"),
+  apiCredentialsRevoke: t("dashboard.integrations.api_credentials.revoke"),
+  apiCredentialsRevoking: t("dashboard.integrations.api_credentials.revoking"),
+  apiCredentialsRevoked: t("dashboard.integrations.api_credentials.revoked"),
+  apiCredentialsRevokeConfirm: t("dashboard.integrations.api_credentials.revoke_confirm"),
+  apiCredentialsStatusActive: t("dashboard.integrations.api_credentials.status_active"),
+  apiCredentialsStatusRevoked: t("dashboard.integrations.api_credentials.status_revoked"),
+  apiCredentialsCreated: t("dashboard.integrations.api_credentials.created"),
+  apiCredentialsLastUsed: t("dashboard.integrations.api_credentials.last_used"),
+  apiCredentialsNoCredentials: t("dashboard.integrations.api_credentials.empty"),
+  apiCredentialsRequestId: t("dashboard.integrations.api_credentials.request_id"),
+};
+---
+
+<AppLayout activePath="/app/developer" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.developer.title")}>
+  <div
+    class="developer-page"
+    data-developer-workspace
+    data-csrf-cookie-name={csrfCookieName}
+    data-shop-public-id={shop?.publicId}
+    data-time-zone={timeZone}
+    data-locale={locale ?? "en"}
+    data-copy={JSON.stringify(developerClientCopy)}
+    data-can-manage-api-credentials={canManageApiCredentials ? "true" : "false"}
+  >
+    <PageHeader
+      eyebrow={t("dashboard.developer.eyebrow")}
+      title={t("dashboard.developer.title")}
+      description={t("dashboard.developer.description")}
+    />
+
+    {shop === undefined ? (
+      <WorkspaceState
+        title={t("dashboard.integrations.no_store.title")}
+        description={t("dashboard.integrations.no_store.description")}
+        actionHref={workspaceHref("/onboarding")}
+        actionLabel={t("dashboard.integrations.no_store.action")}
+        tone="info"
+      />
+    ) : (
+      <section class="integration-group api-credentials-group" aria-labelledby="api-credentials-title" data-api-credentials-section>
+        <header class="group-heading">
+          <div><p>{t("dashboard.integrations.api_credentials.eyebrow")}</p><h2 id="api-credentials-title">{t("dashboard.integrations.api_credentials.title")}</h2></div>
+          <span>{t("dashboard.integrations.api_credentials.description")}</span>
+        </header>
+        {canManageApiCredentials ? (
+          <div class="api-credentials-panel" data-api-credentials-panel>
+            <div class="api-credentials-toolbar">
+              <p class="provider-note" data-api-credentials-feedback>{t("dashboard.integrations.api_credentials.loading")}</p>
+              <button class="app-button app-button-secondary" type="button" data-api-credentials-load>{t("dashboard.integrations.api_credentials.load")}</button>
+            </div>
+            <div class="workspace-feedback" data-api-credentials-token-feedback role="status" aria-live="polite" hidden></div>
+            <div class="api-token-panel" data-api-credentials-token hidden>
+              <div><strong>{t("dashboard.integrations.api_credentials.token_title")}</strong><p>{t("dashboard.integrations.api_credentials.token_warning")}</p></div>
+              <div class="api-token-row"><input type="text" readonly data-api-credentials-token-value aria-label={t("dashboard.integrations.api_credentials.token_title")} /><button class="app-button app-button-secondary" type="button" data-api-credentials-copy>{t("dashboard.integrations.api_credentials.copy")}</button></div>
+            </div>
+            <form class="api-credential-form" data-api-credential-form hidden novalidate>
+              <div class="form-heading"><div><h3>{t("dashboard.integrations.api_credentials.issue")}</h3><p>{t("dashboard.integrations.api_credentials.expiry_help")}</p></div></div>
+              <label for="api-credential-name">{t("dashboard.integrations.api_credentials.name")}</label>
+              <input id="api-credential-name" name="name" type="text" maxlength="80" required placeholder={t("dashboard.integrations.api_credentials.name_placeholder")} />
+              <fieldset class="api-scope-fieldset"><legend>{t("dashboard.integrations.api_credentials.scopes")}</legend><label class="checkbox-line"><input type="checkbox" name="scope" value="catalog:read" checked /> <span>{t("dashboard.integrations.api_credentials.catalog_scope")}</span></label><label class="checkbox-line"><input type="checkbox" name="scope" value="inventory:read" /> <span>{t("dashboard.integrations.api_credentials.inventory_scope")}</span></label><label class="checkbox-line"><input type="checkbox" name="scope" value="orders:read" /> <span>{t("dashboard.integrations.api_credentials.orders_scope")}</span></label><label class="checkbox-line"><input type="checkbox" name="scope" value="shop:read" /> <span>{t("dashboard.integrations.api_credentials.shop_scope")}</span></label></fieldset>
+              <label for="api-credential-expiry">{t("dashboard.integrations.api_credentials.expiry")}</label>
+              <input id="api-credential-expiry" name="expiresAt" type="datetime-local" />
+              <button class="app-button app-button-primary" type="submit">{t("dashboard.integrations.api_credentials.issue")}</button>
+            </form>
+            <div class="api-credential-ledger" data-api-credentials-list role="list" aria-live="polite"></div>
+          </div>
+        ) : (
+          <p class="provider-note api-credentials-unavailable">{t("dashboard.integrations.api_credentials.unavailable")}</p>
+        )}
+      </section>
+    )}
+  </div>
+</AppLayout>
+
+<script src="../../scripts/dashboard/developer.ts"></script>
+
+<style>
+  [hidden] { display: none !important; }
+  .developer-page { display: grid; gap: var(--sln-space-8); }
+  .workspace-feedback { padding: 12px 16px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .workspace-feedback[data-tone="success"] { border-color: color-mix(in srgb, var(--sln-state-success) 28%, var(--sln-border-default)); background: var(--sln-tint-success); color: #047857; }
+  .workspace-feedback[data-tone="warning"] { border-color: color-mix(in srgb, var(--sln-state-warning) 28%, var(--sln-border-default)); background: var(--sln-tint-warning); color: #9a5004; }
+  .workspace-feedback[data-tone="danger"] { border-color: color-mix(in srgb, var(--sln-state-danger) 28%, var(--sln-border-default)); background: var(--sln-tint-danger); color: #b91c1c; }
+  .integration-group { display: grid; gap: 0; }
+  .group-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--sln-border-strong); }
+  .group-heading p { margin: 0 0 6px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+  .group-heading h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .group-heading > span { max-width: 360px; color: var(--sln-text-muted); font: var(--sln-font-body-sm); text-align: right; }
+  .provider-note { color: #334155; font: var(--sln-font-caption); text-align: right; }
+  .api-credentials-panel { display: grid; gap: 18px; padding: 20px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .api-credentials-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .api-credentials-toolbar .provider-note { margin: 0; text-align: left; }
+  .api-credentials-unavailable { margin: 0; padding: 20px 0; border-bottom: 1px solid var(--sln-border-default); text-align: left; }
+  .api-credential-form { display: grid; gap: 12px; max-width: 720px; padding: 18px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-subtle); }
+  .api-credential-form > input { width: 100%; min-height: 44px; padding: 10px 13px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); color: var(--sln-text-primary); font: 14px/22px var(--sln-font-mono); }
+  .api-credential-form > input:focus { border-color: var(--sln-focus-ring); box-shadow: 0 0 0 3px rgb(59 130 246 / 20%); outline: none; }
+  .api-scope-fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+  .api-scope-fieldset legend { margin-bottom: 2px; color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .api-token-panel { display: grid; gap: 12px; padding: 16px; border: 1px solid color-mix(in srgb, var(--sln-state-warning) 42%, var(--sln-border-default)); border-radius: var(--sln-radius-md); background: var(--sln-tint-warning); }
+  .api-token-panel strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .api-token-panel p { margin: 4px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .api-token-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .api-token-row input { min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); background: var(--sln-bg-surface); color: var(--sln-text-primary); font: 12px/18px var(--sln-font-mono); }
+  .api-credential-ledger { display: grid; gap: 10px; }
+  .api-credential-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; padding: 14px 0; border-top: 1px solid var(--sln-border-default); }
+  .api-credential-row h3 { margin: 0; font: var(--sln-font-label); }
+  .api-credential-row p { margin: 4px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .api-credential-row code { color: var(--sln-text-muted); font: 12px/18px var(--sln-font-mono); }
+  .api-credential-meta { color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .api-credential-status { color: var(--sln-state-success); font: var(--sln-font-label); white-space: nowrap; }
+  .api-credential-status[data-status="revoked"] { color: var(--sln-state-danger); }
+  .text-action { min-height: 36px; padding: 6px 0; border: 0; background: transparent; color: var(--sln-action-primary); font: var(--sln-font-label); cursor: pointer; text-decoration: none; }
+  .text-action:hover { color: var(--sln-action-primary-hover); text-decoration: underline; text-underline-offset: 3px; }
+  .danger-text { color: var(--sln-state-danger); }
+  .danger-text:hover { color: #b91c1c; }
+  .form-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 4px; }
+  .form-heading h3 { margin: 0; font: var(--sln-font-h4); }
+  .form-heading p { margin: 5px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .api-credential-form label:not(.checkbox-line) { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .checkbox-line { display: flex; align-items: start; gap: 10px; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .checkbox-line input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--sln-action-primary); }
+  @media (max-width: 900px) { .group-heading { align-items: start; flex-direction: column; gap: 8px; } .group-heading > span { max-width: 560px; text-align: left; } }
+  @media (max-width: 560px) { .api-credentials-toolbar { align-items: start; flex-direction: column; } .api-credentials-toolbar .app-button { width: 100%; } .api-token-row { grid-template-columns: 1fr; } .api-token-row .app-button { width: 100%; } .api-credential-row { grid-template-columns: 1fr; gap: 8px; } .api-credential-row .text-action { justify-self: start; } .form-heading { flex-direction: column; } }
+</style>

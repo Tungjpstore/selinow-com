@@ -4,11 +4,12 @@ import { describe, expect, it } from "vitest";
 
 describe("seller app shell foundation", () => {
   it("keeps the dashboard light-first and routes domain management through the shared shell", async () => {
-    const [layout, overview, domains, domainManager] = await Promise.all([
+    const [layout, overview, domains, domainManager, deleteDialog] = await Promise.all([
       readFile("src/layouts/AppLayout.astro", "utf8"),
       readFile("src/pages/app/index.astro", "utf8"),
       readFile("src/pages/app/domains.astro", "utf8"),
       readFile("src/components/dashboard/DomainManager.astro", "utf8"),
+      readFile("src/components/dashboard/domains/DomainDeleteDialog.astro", "utf8"),
     ]);
 
     expect(layout).toContain('content="#F8FAFC"');
@@ -17,8 +18,9 @@ describe("seller app shell foundation", () => {
     expect(overview).not.toContain('data-theme="dark"');
     expect(domains).toContain("<DomainManager");
     expect(domains).not.toContain('data-theme="dark"');
-    expect(domainManager).toContain('t("dashboard.domains.section.description")');
-    expect(domainManager).toContain('aria-describedby="delete-dialog-impact"');
+    expect(domains).toContain('t("dashboard.domains.section.description")');
+    expect(domainManager).toContain("data-domain-workspace");
+    expect(deleteDialog).toContain('aria-describedby="delete-dialog-impact"');
   });
 
   it("uses a solid accessible primary action instead of the brand gradient for routine app controls", async () => {
