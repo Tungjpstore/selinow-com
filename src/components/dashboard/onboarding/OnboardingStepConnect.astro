@@ -1,9 +1,9 @@
 ---
 ---
 
-<div class="onboarding-step-pane" data-step-pane="connect" hidden>
+<div class="onboarding-step-pane" data-step-pane="connect">
   <div class="step-intro-header">
-    <span class="step-num-badge">BƯỚC 04/04</span>
+    <span class="step-num-badge">BƯỚC 04/05</span>
     <h2>Kết nối Thanh toán & Kênh Phân phối</h2>
     <p>Liên kết cổng thanh toán QR VietQR (PayOS) và Bot Telegram để vận hành bán hàng tự động 100%.</p>
   </div>
@@ -50,6 +50,7 @@
           <p class="crypto-note">Khóa bí mật được mã hóa AES-256-GCM tại D1, không bao giờ lộ ra ngoài.</p>
         </div>
       </form>
+      <button type="button" class="btn-card-skip" data-card-skip="payos">Chưa có tài khoản PayOS — để sau</button>
     </section>
 
     <!-- Section 2: Telegram Bot (Conditional) -->
@@ -84,6 +85,7 @@
           </button>
         </div>
       </form>
+      <button type="button" class="btn-card-skip" data-card-skip="telegram">Chưa tạo bot — để sau</button>
     </section>
   </div>
 
@@ -103,11 +105,10 @@
 </div>
 
 <style>
+  /* Display & animation are managed globally by OnboardingShell. */
   .onboarding-step-pane {
-    display: flex;
     flex-direction: column;
     gap: 20px;
-    animation: fadeInSlide 0.3s ease;
   }
 
   .step-intro-header {
@@ -143,9 +144,10 @@
   }
 
   .connect-sections-stack {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
     gap: 18px;
+    align-items: start;
   }
 
   .connect-card {
@@ -336,6 +338,27 @@
     color: var(--sln-text-muted);
   }
 
+  .btn-card-skip {
+    align-self: flex-start;
+    padding: 4px 0;
+    border: none;
+    background: transparent;
+    color: var(--sln-text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+  }
+
+  .btn-card-skip:hover {
+    color: var(--sln-text-primary);
+  }
+
+  .connect-card.is-skipped {
+    opacity: 0.6;
+  }
+
   /* Actions */
   .step-actions {
     display: flex;
@@ -406,5 +429,29 @@
   .btn-primary-launch:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+  }
+
+  .btn-primary-launch:disabled {
+    opacity: 0.6;
+    cursor: wait;
+    transform: none;
+  }
+
+  @media (max-width: 640px) {
+    .step-actions {
+      flex-direction: column-reverse;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .btn-primary-launch, .btn-secondary-back {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .connect-form-actions {
+      flex-direction: column;
+      align-items: flex-start;
+    }
   }
 </style>

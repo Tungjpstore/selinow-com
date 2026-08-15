@@ -1,0 +1,619 @@
+---
+type Props = {
+  defaultCurrency?: string;
+  initialShopName?: string | undefined;
+  initialShopSlug?: string | undefined;
+  platformBaseDomain: string;
+};
+
+const {
+  defaultCurrency = "VND",
+  initialShopName = "Cửa Hàng Của Bạn",
+  initialShopSlug = "cua-hang",
+  platformBaseDomain,
+} = Astro.props;
+---
+
+<!-- Floating trigger button -->
+<button
+  type="button"
+  class="preview-drawer-trigger"
+  data-preview-drawer-trigger
+  aria-label="Xem trước cửa hàng"
+  aria-expanded="false"
+  aria-controls="onboarding-preview-drawer"
+>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+    <circle cx="12" cy="12" r="3"></circle>
+  </svg>
+  <span>Xem trước</span>
+</button>
+
+<!-- Drawer overlay backdrop -->
+<div class="preview-drawer-backdrop" data-preview-drawer-backdrop hidden></div>
+
+<!-- Drawer panel -->
+<aside
+  id="onboarding-preview-drawer"
+  class="preview-drawer-panel"
+  data-preview-drawer-panel
+  role="dialog"
+  aria-label="Xem trước cửa hàng trực tiếp"
+  hidden
+>
+  <!-- Drawer header -->
+  <div class="drawer-header">
+    <div class="drawer-title-group">
+      <span class="drawer-dot"></span>
+      <strong>Xem trước trực tiếp</strong>
+    </div>
+    <div class="drawer-actions">
+      <div class="drawer-switcher" role="tablist" data-preview-drawer-switcher>
+        <button type="button" class="drawer-tab active" data-preview-mode="web" aria-selected="true" role="tab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+          <span>Website</span>
+        </button>
+        <button type="button" class="drawer-tab" data-preview-mode="telegram" aria-selected="false" role="tab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>
+          <span>Telegram</span>
+        </button>
+      </div>
+      <button type="button" class="drawer-close-btn" data-preview-drawer-close aria-label="Đóng xem trước">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Drawer body -->
+  <div class="drawer-body">
+    <!-- Web Storefront Mockup -->
+    <div class="drawer-canvas web-canvas" data-canvas="web">
+      <div class="browser-bar">
+        <div class="browser-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="browser-url">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span>https://<strong data-preview-slug>{initialShopSlug}</strong>.{platformBaseDomain}</span>
+        </div>
+      </div>
+      <div class="storefront-mockup-body">
+        <header class="mock-nav">
+          <div class="mock-logo">
+            <span class="mock-logo-icon">⚡</span>
+            <strong data-preview-shop-name>{initialShopName}</strong>
+          </div>
+          <div class="mock-nav-badge"><span>Giỏ hàng (0)</span></div>
+        </header>
+
+        <div class="mock-hero">
+          <span class="mock-badge">Bản quyền chính hãng 24/7</span>
+          <h4 data-preview-shop-name>{initialShopName}</h4>
+          <p>Nhận key tự động ngay sau khi thanh toán QR chuyển khoản</p>
+        </div>
+
+        <div class="mock-product-grid">
+          <article class="mock-product-card">
+            <div class="mock-product-thumb">
+              <span class="mock-product-emoji" data-preview-product-icon>🪟</span>
+              <span class="mock-tag" data-preview-fulfillment>Tự động giao key</span>
+            </div>
+            <div class="mock-product-info">
+              <h5 data-preview-product-title>Windows 11 Pro Retail Bản Quyền</h5>
+              <p data-preview-product-desc>Khóa kích hoạt bản quyền Windows 11 Pro Retail vĩnh viễn.</p>
+              <div class="mock-product-footer">
+                <strong class="mock-price" data-preview-product-price>199.000 {defaultCurrency}</strong>
+                <button type="button" class="mock-buy-btn" tabindex="-1">Mua ngay</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telegram Bot Mockup -->
+    <div class="drawer-canvas tg-canvas" data-canvas="telegram" hidden>
+      <div class="tg-header">
+        <div class="tg-bot-avatar">🤖</div>
+        <div class="tg-bot-info">
+          <strong data-preview-bot-name>Selinow Store Bot</strong>
+          <small>bot • trực tuyến</small>
+        </div>
+      </div>
+      <div class="tg-messages-body">
+        <div class="tg-bot-msg">
+          <div class="tg-msg-bubble">
+            <p>👋 Chào mừng bạn đến với <strong data-preview-shop-name>{initialShopName}</strong>!</p>
+            <p>Hệ thống hỗ trợ đặt mua sản phẩm số và nhận mã kích hoạt tự động 100% qua VietQR.</p>
+            <hr class="tg-msg-divider" />
+            <p>🔥 <strong>Sản phẩm nổi bật:</strong></p>
+            <p>• <span data-preview-product-title>Windows 11 Pro Retail Bản Quyền</span> — <span data-preview-product-price>199.000 {defaultCurrency}</span></p>
+          </div>
+          <div class="tg-inline-keyboard">
+            <button type="button" class="tg-btn" tabindex="-1">
+              <span>🛒 Mua <span data-preview-product-title-short>Windows 11 Pro</span></span>
+            </button>
+            <button type="button" class="tg-btn tg-btn-subtle" tabindex="-1">
+              <span>📋 Xem danh mục sản phẩm</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<style>
+  /* ---- Floating trigger ---- */
+  .preview-drawer-trigger {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 60;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-secondary);
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+    box-shadow: var(--sln-shadow-lg);
+    transition: all 0.2s ease;
+  }
+
+  .preview-drawer-trigger:hover {
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+    border-color: var(--sln-action-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--sln-action-primary) 30%, transparent);
+  }
+
+  .preview-drawer-trigger svg {
+    flex-shrink: 0;
+  }
+
+  /* ---- Backdrop ---- */
+  .preview-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(2px);
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* ---- Drawer panel ---- */
+  .preview-drawer-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 80;
+    width: 440px;
+    max-width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--sln-bg-canvas);
+    border-left: 1px solid var(--sln-border-default);
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
+    animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slideInRight {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+
+  /* ---- Drawer header ---- */
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--sln-border-default);
+    background: var(--sln-bg-subtle);
+    flex-shrink: 0;
+  }
+
+  .drawer-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--sln-text-primary);
+  }
+
+  .drawer-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--sln-state-success);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-state-success) 20%, transparent);
+    animation: pulse 2s infinite ease-in-out;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .drawer-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .drawer-switcher {
+    display: flex;
+    background: var(--sln-bg-canvas);
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-pill);
+    padding: 2px;
+  }
+
+  .drawer-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border: none;
+    border-radius: var(--sln-radius-pill);
+    background: transparent;
+    color: var(--sln-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .drawer-tab.active {
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+    box-shadow: var(--sln-shadow-xs);
+  }
+
+  .drawer-close-btn {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: var(--sln-radius-md);
+    background: transparent;
+    color: var(--sln-text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .drawer-close-btn:hover {
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-primary);
+  }
+
+  /* ---- Drawer body ---- */
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .drawer-canvas {
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--sln-shadow-sm);
+  }
+
+  /* ---- Web canvas ---- */
+  .browser-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--sln-border-default);
+    background: var(--sln-bg-subtle);
+  }
+
+  .browser-dots {
+    display: flex;
+    gap: 5px;
+  }
+
+  .browser-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--sln-slate-300, #cbd5e1);
+  }
+
+  .browser-dots span:nth-child(1) { background: #ef4444; }
+  .browser-dots span:nth-child(2) { background: #f59e0b; }
+  .browser-dots span:nth-child(3) { background: #10b981; }
+
+  .browser-url {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--sln-bg-surface);
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-sm);
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--sln-text-muted);
+    font-family: var(--sln-font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .browser-url strong {
+    color: var(--sln-action-primary);
+  }
+
+  .storefront-mockup-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .mock-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--sln-border-default);
+  }
+
+  .mock-logo {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--sln-text-primary);
+  }
+
+  .mock-logo-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--sln-radius-sm);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 13px;
+  }
+
+  .mock-nav-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-secondary);
+    font-weight: 600;
+  }
+
+  .mock-hero {
+    padding: 12px 14px;
+    border-radius: var(--sln-radius-md);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--sln-action-primary) 10%, transparent), transparent);
+    border: 1px solid color-mix(in srgb, var(--sln-action-primary) 20%, transparent);
+  }
+
+  .mock-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-success);
+    color: var(--sln-state-success);
+    font-size: 10px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .mock-hero h4 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--sln-text-primary);
+  }
+
+  .mock-hero p {
+    margin: 0;
+    font-size: 11px;
+    color: var(--sln-text-secondary);
+  }
+
+  .mock-product-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .mock-product-card {
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-md);
+    padding: 12px;
+    background: var(--sln-bg-surface);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .mock-product-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--sln-bg-subtle);
+    border-radius: var(--sln-radius-sm);
+    padding: 10px 12px;
+  }
+
+  .mock-product-emoji { font-size: 24px; }
+
+  .mock-tag {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-info);
+    color: var(--sln-state-info);
+    font-weight: 600;
+  }
+
+  .mock-product-info h5 {
+    margin: 0 0 4px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--sln-text-primary);
+  }
+
+  .mock-product-info p {
+    margin: 0 0 10px;
+    font-size: 11px;
+    color: var(--sln-text-muted);
+    line-height: 1.4;
+  }
+
+  .mock-product-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 8px;
+    border-top: 1px dashed var(--sln-border-default);
+  }
+
+  .mock-price {
+    font-size: 14px;
+    font-weight: 750;
+    color: var(--sln-state-success);
+  }
+
+  .mock-buy-btn {
+    padding: 6px 14px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+    border: none;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: default;
+  }
+
+  /* ---- Telegram canvas ---- */
+  .tg-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #24A1DE;
+    color: white;
+  }
+
+  .tg-bot-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    display: grid;
+    place-items: center;
+    font-size: 18px;
+  }
+
+  .tg-bot-info {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tg-bot-info strong { font-size: 13px; font-weight: 600; }
+  .tg-bot-info small { font-size: 10px; opacity: 0.85; }
+
+  .tg-messages-body {
+    padding: 16px 12px;
+    background: #0e1621;
+    color: #f5f5f5;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+
+  .tg-bot-msg {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 92%;
+  }
+
+  .tg-msg-bubble {
+    background: #182533;
+    padding: 12px 14px;
+    border-radius: 12px 12px 12px 2px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .tg-msg-bubble p { margin: 0 0 6px; }
+  .tg-msg-bubble p:last-child { margin-bottom: 0; }
+
+  .tg-msg-divider {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin: 8px 0;
+  }
+
+  .tg-inline-keyboard {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .tg-btn {
+    padding: 9px 12px;
+    border-radius: 8px;
+    background: #2b5278;
+    color: #64b5f6;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    cursor: default;
+  }
+
+  .tg-btn-subtle {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e0e0e0;
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 520px) {
+    .preview-drawer-panel {
+      width: 100vw;
+    }
+
+    .preview-drawer-trigger {
+      bottom: 16px;
+      right: 16px;
+      padding: 8px 14px;
+      font-size: 12px;
+    }
+  }
+</style>

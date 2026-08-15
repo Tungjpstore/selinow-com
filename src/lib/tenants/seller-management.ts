@@ -17,7 +17,31 @@ export type SellerCustomerView = {
   version: number;
 };
 
-export type SellerCustomerPage = { customers: SellerCustomerView[]; nextCursor: string | null };
+export type SellerCustomerPage = { customers: SellerCustomerView[]; nextCursor: string | null; page?: number; pageSize?: number; totalCount?: number; totalPages?: number };
+
+export type SellerCustomerSort = "created_asc" | "created_desc" | "orders_asc" | "orders_desc";
+const SELLER_CUSTOMER_SORTS: readonly SellerCustomerSort[] = ["created_asc", "created_desc", "orders_asc", "orders_desc"];
+
+export function parseSellerCustomerSort(value: string | null): SellerCustomerSort {
+  return value !== null && (SELLER_CUSTOMER_SORTS as readonly string[]).includes(value) ? value as SellerCustomerSort : "created_desc";
+}
+
+function sellerCustomerSortSql(sort: SellerCustomerSort): string {
+  switch (sort) {
+    case "created_asc": return "cursorCreatedAt ASC, id ASC";
+    case "orders_desc": return "orderCount DESC, cursorCreatedAt DESC, id DESC";
+    case "orders_asc": return "orderCount ASC, cursorCreatedAt DESC, id DESC";
+    default: return "cursorCreatedAt DESC, id DESC";
+  }
+}
+
+const SELLER_CUSTOMER_SEARCH_MAX = 64;
+
+function normalizeSellerCustomerSearch(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed.slice(0, SELLER_CUSTOMER_SEARCH_MAX);
+}
 
 function sellerPage(input: { cursor?: string | null; limit?: number }): PublicApiPage {
   const url = new URL("https://seller.selinow.invalid/");

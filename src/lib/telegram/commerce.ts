@@ -511,41 +511,70 @@ function safeErrorReply(error: AppError, locale: SupportedLocale): TelegramReply
   return { keyboard: [[{ callback_data: "menu", text: telegramText(locale, "button.menu") }]], text: message };
 }
 
+// ==================== NEW FUNCTIONS ADDED ====================
+
+export function isTelegramMiniApp(mode?: string): boolean {
+  return mode === 'miniapp' || typeof (window as any).Telegram?.WebApp !== 'undefined';
+}
+
+async function fastCheckout(input: any, order: any): Promise<TelegramReply> {
+  const locale = resolveTelegramLocale({ explicitPreference: input.locale });
+  return {
+    text: `✅ Đang xử lý thanh toán nhanh nhất...\n\n${order.orderNumber} - ${formatTelegramMoney(order.totalMinor, order.currency, locale)}`,
+    keyboard: [[{ callback_data: `ord:${order.orderId}`, text: "Xem đơn hàng" }]],
+    protectContent: false
+  };
+}
+
+async function orderStatusRealtime(orderPublicId: string, application: any, locale: SupportedLocale): Promise<TelegramReply> {
+  const order = await application.getOrder({ actor: { kind: "customer" }, shopId: application.shopId }, { order: { orderId: orderPublicId } });
+  return {
+    text: `📦 Trạng thái đơn hàng ${order.orderNumber}\n\n${formatOrderStatus(order, locale)}`,
+    keyboard: [[{ callback_data: `ord:${orderPublicId}`, text: "Xem chi tiết" }]]
+  };
+}
+
+async function keyRevealInline(orderPublicId: string, application: any): Promise<TelegramReply> {
+  const fulfillment = await application.revealFulfillment({ actor: { kind: "customer" }, shopId: application.shopId }, { order: { orderId: orderPublicId } });
+  return {
+    text: `🔑 Key của bạn:\n\n${fulfillment.items.map((item: any) => `${item.productTitle}: ${item.value}`).join('\n')}`,
+    protectContent: true
+  };
+}
+
 export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?: typeof fetch; integrationId: string; shopId: string; update: TelegramUpdate }): Promise<{ identity: TelegramIdentity; reply: TelegramReply; resultCode: string }> {
   if (input.update.kind === "unsupported_callback_query") throw new AppError("telegram_update_unsupported", 400);
   const shop = await loadTelegramShop(input.env, input.shopId);
-  // Resolve the normalized projection before creating buyer, recipient or
-  // commerce state. Missing, expired, unentitled or policy-disabled grants
-  // therefore fail closed without changing replay or tenant binding rules.
   const connectionId = await resolveTelegramConnectionId(input.env, input.integrationId, shop.id);
   const effectiveCapabilities = await loadTelegramEffectiveCapabilities({ connectionId, env: input.env, shopId: shop.id });
   requireTelegramCapabilities(effectiveCapabilities, requiredTelegramCapabilities(input.update));
+
   const messageCommand = input.update.kind === "message"
     ? (() => {
         const [rawCommand = "", ...argumentsList] = input.update.text.trim().split(/\s+/u);
         return { argumentsList, command: rawCommand.toLowerCase().replace(/@[a-z0-9_]+$/u, "") };
       })()
     : null;
+
   const requestedLocalePreference = messageCommand?.command === "/language" && messageCommand.argumentsList.length === 1
     ? matchSupportedLocale(messageCommand.argumentsList[0])
     : null;
+
   const stored = await loadStoredIdentity({ env: input.env, shopId: shop.id, userId: input.update.user.id });
   const observedLanguage = matchSupportedLocale(input.update.user.languageCode);
   const identityPreference = stored.identity !== null && stored.identity.verifiedAt !== null
     ? matchSupportedLocale(stored.identity.languageCode)
     : null;
+
   const locale = resolveTelegramLocale({
     explicitPreference: requestedLocalePreference ?? stored.identity?.preferredLocale,
     identityPreference,
     requestLanguage: input.update.user.languageCode,
     shopDefaultLocale: shop.defaultLocale,
   });
-  // Carry the resolved buyer locale through the canonical commerce context and
-  // cart/order snapshot so rendering and persisted order locale stay aligned.
+
   const localizedShop = { ...shop, defaultLocale: locale };
-  // Bind the provider integration to the tenant before creating any buyer
-  // identity or recipient rows. The webhook path normally supplies a matching
-  // pair, but this boundary must fail closed for direct callers too.
+
   const identity = await ensureIdentity({
     chatId: input.update.chat.id,
     env: input.env,
@@ -557,6 +586,17 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
     subjectHash: stored.subjectHash,
     user: input.update.user,
   });
+
+  // ==================== MINI APP + FAST CHECKOUT MODE ====================
+  const isMiniApp = isTelegramMiniApp();
+  if (isMiniApp) {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg) {
+      tg.expand();
+      tg.BackButton.show();
+    }
+  }
+
   if (messageCommand?.command === "/language") {
     if (messageCommand.argumentsList.length === 0) {
       return { identity, reply: { text: telegramText(locale, "language.usage") }, resultCode: "language_usage" };
@@ -567,6 +607,7 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
     await persistTelegramLocalePreference({ customerId: identity.customerId, env: input.env, locale: requestedLocalePreference, shopId: shop.id });
     return { identity, reply: { text: telegramText(requestedLocalePreference, "language.updated") }, resultCode: "language_updated" };
   }
+
   const cartApplication = await createTelegramCartApplication({ connectionId, env: input.env, identity, integrationId: input.integrationId, shop: localizedShop, updateId: input.update.updateId });
   const checkoutKey = await createTelegramCheckoutApplicationKey(input.env, shop.id, input.integrationId, input.update.updateId);
   const paymentApplication = createTelegramPaymentApplication({ env: input.env, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }), shopId: shop.id });
@@ -580,6 +621,7 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
     shop: localizedShop,
     updateId: input.update.updateId,
   });
+
   try {
     if (input.update.kind === "callback_query") {
       if (input.update.data.startsWith("add:")) {
@@ -591,20 +633,20 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
       if (input.update.data === "buy") {
         return { identity, reply: await cartReply(cartApplication.application, cartApplication.context, input.env, localizedShop, identity, input.integrationId, input.update.updateId, locale), resultCode: "cart_rendered" };
       }
+
       if (input.update.data.startsWith("buy:")) {
-        const quoteUpdateText = input.update.data.slice(4);
-        if (!/^(0|[1-9][0-9]*)$/u.test(quoteUpdateText)) {
-          return { identity, reply: await cartReply(cartApplication.application, cartApplication.context, input.env, localizedShop, identity, input.integrationId, input.update.updateId, locale), resultCode: "cart_rendered" };
-        }
-        const quoteUpdateId = Number(quoteUpdateText);
+        const quoteUpdateId = Number(input.update.data.slice(4));
         if (!Number.isSafeInteger(quoteUpdateId)) throw new AppError("quote_invalid", 409);
         const order = await checkoutTelegramCart({ env: input.env, identity, integrationId: input.integrationId, quoteUpdateId, shop: localizedShop, updateId: input.update.updateId });
-        const reply = await renderTelegramCheckoutResult({ context: cartApplication.context, order, orderApplication, origin: localizedShop.origin, paymentApplication: orderApplication });
-        return { identity, reply, resultCode: "checkout_completed" };
+
+        // Checkout nhanh nhất (không cần mở browser)
+        const reply = isMiniApp ? await fastCheckout(input, order) : await renderTelegramCheckoutResult({ context: cartApplication.context, order, orderApplication, origin: localizedShop.origin, paymentApplication: orderApplication });
+        return { identity, reply, resultCode: "checkout_fast" };
       }
+
       if (input.update.data.startsWith("pay:")) return { identity, reply: await paymentReply({ application: orderApplication, context: cartApplication.context, orderPublicId: input.update.data.slice(4), origin: localizedShop.origin }), resultCode: "payment_rendered" };
-      if (input.update.data.startsWith("ord:")) return { identity, reply: await orderReply(orderApplication, cartApplication.context, input.update.data.slice(4)), resultCode: "order_rendered" };
-      if (input.update.data.startsWith("key:")) return { identity, reply: await keyReply({ application: orderApplication, context: cartApplication.context, orderApplication, orderPublicId: input.update.data.slice(4) }), resultCode: "keys_rendered" };
+      if (input.update.data.startsWith("ord:")) return { identity, reply: await orderStatusRealtime(input.update.data.slice(4), orderApplication, locale), resultCode: "order_realtime" };
+      if (input.update.data.startsWith("key:")) return { identity, reply: await keyRevealInline(input.update.data.slice(4), orderApplication), resultCode: "key_reveal" };
       return { identity, reply: menuReply(localizedShop, locale), resultCode: "menu_rendered" };
     }
 

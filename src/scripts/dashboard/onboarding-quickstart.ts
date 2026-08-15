@@ -1,4 +1,6 @@
-type WizardStep = "celebration" | "connect" | "inventory" | "product" | "store";
+type WizardStep = "connect" | "inventory" | "launch" | "product" | "store";
+
+const STEP_ORDER: WizardStep[] = ["store", "product", "inventory", "connect", "launch"];
 
 type ShopResponse = {
   shop?: {
@@ -131,8 +133,9 @@ function readCookie(name: string): string | null {
 }
 
 function initQuickstart(): void {
-  const root = document.querySelector<HTMLElement>("[data-quickstart-root]");
-  if (!root) return;
+  const _root = document.querySelector<HTMLElement>("[data-quickstart-root]");
+  if (!_root) return;
+  const root = _root;
 
   const csrfCookieName = root.dataset.csrfCookieName || "selinow_session_csrf";
   const platformBaseDomain = root.dataset.platformBaseDomain || "selinow.com";
@@ -141,9 +144,17 @@ function initQuickstart(): void {
 
   let activeShopPublicId = root.dataset.activeShopPublicId || "";
   let activeShopSlug = "";
+  let activeShopName = "";
   let createdVariantId = "";
   let selectedPresetId = "win11pro";
   let currentProductMode: "custom" | "preset" = "preset";
+  let importedKeysCount = 0;
+  let productIsManual = false;
+  let productTitle = "";
+  let payosVerified = false;
+  let telegramConnected = false;
+  let telegramBotUser = "";
+  let currentStep: WizardStep = "store";
 
   function showToast(message: string, tone: "error" | "success" = "success"): void {
     if (!toastEl) return;
@@ -155,32 +166,50 @@ function initQuickstart(): void {
     }, 4000);
   }
 
+  // --- Step navigation with directional transitions ---
+  function updateProgress(): void {
+    const fill = root.querySelector<HTMLElement>("[data-progress-fill]");
+    const track = root.querySelector<HTMLElement>(".progress-track");
+    const currentIndex = STEP_ORDER.indexOf(currentStep);
+    const percent = Math.round((currentIndex / (STEP_ORDER.length - 1)) * 100);
+    if (fill) fill.style.width = `${String(percent)}%`;
+    if (track) {
+      track.setAttribute("aria-valuenow", String(percent));
+    }
+    root.querySelectorAll<HTMLElement>("[data-progress-label]").forEach((label) => {
+      const labelStep = label.dataset.progressLabel as WizardStep;
+      const labelIndex = STEP_ORDER.indexOf(labelStep);
+      label.classList.remove("active", "done");
+      if (labelIndex === currentIndex) label.classList.add("active");
+      else if (labelIndex < currentIndex) label.classList.add("done");
+    });
+  }
+
   function setStep(step: WizardStep): void {
-    if (!root) return;
-    const panes = root.querySelectorAll<HTMLElement>("[data-step-pane]");
-    panes.forEach((pane) => {
-      pane.hidden = pane.dataset.stepPane !== step;
-    });
+    const currentIndex = STEP_ORDER.indexOf(currentStep);
+    const nextIndex = STEP_ORDER.indexOf(step);
+    const forward = nextIndex >= currentIndex;
+    const currentPane = root.querySelector<HTMLElement>(`[data-step-pane="${currentStep}"]`);
+    const nextPane = root.querySelector<HTMLElement>(`[data-step-pane="${step}"]`);
+    if (!nextPane) return;
 
-    const indicators = root.querySelectorAll<HTMLElement>("[data-step-indicator]");
-    const stepOrder: WizardStep[] = ["store", "product", "inventory", "connect", "celebration"];
-    const currentIndex = stepOrder.indexOf(step);
+    if (currentPane && currentPane !== nextPane) {
+      const exitClass = forward ? "is-exiting-left" : "is-exiting-right";
+      currentPane.classList.remove("is-active", "is-exiting-left", "is-exiting-right");
+      currentPane.classList.add(exitClass);
+      setTimeout(() => {
+        currentPane.classList.remove(exitClass);
+      }, 260);
+    }
 
-    indicators.forEach((ind) => {
-      const indStep = ind.dataset.stepIndicator as WizardStep;
-      const indIndex = stepOrder.indexOf(indStep);
-      ind.classList.remove("active", "done");
-      if (indIndex === currentIndex) {
-        ind.classList.add("active");
-      } else if (indIndex < currentIndex) {
-        ind.classList.add("done");
-      }
-    });
-
+    nextPane.classList.remove("is-exiting-left", "is-exiting-right");
+    nextPane.classList.add("is-active");
+    currentStep = step;
+    updateProgress();
     window.scrollTo({ behavior: "smooth", top: 0 });
 
-    if (step === "celebration") {
-      triggerConfetti();
+    if (step === "launch") {
+      refreshLaunchState();
     }
   }
 
@@ -205,15 +234,34 @@ function initQuickstart(): void {
     return { data, ok: res.ok, status: res.status };
   }
 
-  // --- Live Preview Elements ---
-  const previewSlugEls = root.querySelectorAll<HTMLElement>("[data-preview-slug]");
-  const previewShopNameEls = root.querySelectorAll<HTMLElement>("[data-preview-shop-name]");
-  const previewProductTitleEls = root.querySelectorAll<HTMLElement>("[data-preview-product-title]");
-  const previewProductTitleShortEls = root.querySelectorAll<HTMLElement>("[data-preview-product-title-short]");
-  const previewProductPriceEls = root.querySelectorAll<HTMLElement>("[data-preview-product-price]");
-  const previewProductDescEls = root.querySelectorAll<HTMLElement>("[data-preview-product-desc]");
-  const previewProductIconEls = root.querySelectorAll<HTMLElement>("[data-preview-product-icon]");
-  const previewFulfillmentEls = root.querySelectorAll<HTMLElement>("[data-preview-fulfillment]");
+  // --- Preview drawer ---
+  const drawerPanel = root.querySelector<HTMLElement>("[data-preview-drawer-panel]");
+  const drawerBackdrop = root.querySelector<HTMLElement>("[data-preview-drawer-backdrop]");
+  const drawerTrigger = root.querySelector<HTMLButtonElement>("[data-preview-drawer-trigger]");
+
+  function openDrawer(): void {
+    if (!drawerPanel || !drawerBackdrop || !drawerTrigger) return;
+    drawerPanel.hidden = false;
+    drawerBackdrop.hidden = false;
+    drawerTrigger.setAttribute("aria-expanded", "true");
+  }
+
+  function closeDrawer(): void {
+    if (!drawerPanel || !drawerBackdrop || !drawerTrigger) return;
+    drawerPanel.hidden = true;
+    drawerBackdrop.hidden = true;
+    drawerTrigger.setAttribute("aria-expanded", "false");
+  }
+
+  drawerTrigger?.addEventListener("click", () => {
+    if (drawerPanel?.hidden) openDrawer();
+    else closeDrawer();
+  });
+  drawerBackdrop?.addEventListener("click", closeDrawer);
+  root.querySelector<HTMLButtonElement>("[data-preview-drawer-close]")?.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && drawerPanel && !drawerPanel.hidden) closeDrawer();
+  });
 
   const previewTabs = root.querySelectorAll<HTMLButtonElement>("[data-preview-mode]");
   const webCanvas = root.querySelector<HTMLElement>("[data-canvas='web']");
@@ -235,6 +283,16 @@ function initQuickstart(): void {
       }
     });
   });
+
+  // --- Live preview elements ---
+  const previewSlugEls = root.querySelectorAll<HTMLElement>("[data-preview-slug]");
+  const previewShopNameEls = root.querySelectorAll<HTMLElement>("[data-preview-shop-name]");
+  const previewProductTitleEls = root.querySelectorAll<HTMLElement>("[data-preview-product-title]");
+  const previewProductTitleShortEls = root.querySelectorAll<HTMLElement>("[data-preview-product-title-short]");
+  const previewProductPriceEls = root.querySelectorAll<HTMLElement>("[data-preview-product-price]");
+  const previewProductDescEls = root.querySelectorAll<HTMLElement>("[data-preview-product-desc]");
+  const previewProductIconEls = root.querySelectorAll<HTMLElement>("[data-preview-product-icon]");
+  const previewFulfillmentEls = root.querySelectorAll<HTMLElement>("[data-preview-fulfillment]");
 
   // --- Step 1: Store & Channels ---
   const storeForm = root.querySelector<HTMLFormElement>("[data-store-form]");
@@ -321,6 +379,7 @@ function initQuickstart(): void {
         }
 
         activeShopSlug = slug;
+        activeShopName = name;
 
         // Configure Channels
         const selectedChannel = Array.from(channelRadios).find((r) => r.checked)?.value || "both";
@@ -385,6 +444,7 @@ function initQuickstart(): void {
       const desc = card.dataset.presetDesc || "";
       const fulfillment = card.dataset.presetFulfillment === "manual" ? "Giao thủ công" : "Tự động giao key";
 
+      productTitle = title;
       previewProductTitleEls.forEach((el) => { el.textContent = title; });
       previewProductTitleShortEls.forEach((el) => { el.textContent = title.split(" ")[0] || title; });
       previewProductPriceEls.forEach((el) => { el.textContent = `${price.toLocaleString("vi-VN")} ${defaultCurrency}`; });
@@ -439,13 +499,15 @@ function initQuickstart(): void {
 
           const seedData = res.data as SeedResponse;
           createdVariantId = seedData.variant?.id ?? "";
-          const importedCount = seedData.importedKeysCount ?? 0;
-          showToast(`Đã tạo sản phẩm và nạp ${String(importedCount)} key mẫu vào kho!`);
+          importedKeysCount = seedData.importedKeysCount ?? 0;
+          productIsManual = false;
+          showToast(`Đã tạo sản phẩm và nạp ${String(importedKeysCount)} key mẫu vào kho!`);
         } else {
           const title = customTitleInput?.value.trim() || "Sản phẩm mới";
           const price = Number(customPriceInput?.value || 0);
           const fulfillmentType = customFulfillmentSelect?.value || "license_key";
           const description = customDescTextarea?.value.trim() || "";
+          productTitle = title;
 
           const res = await apiRequest(
             `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/catalog/products`,
@@ -484,6 +546,7 @@ function initQuickstart(): void {
 
           const prodData = res.data as ProductCreateResponse;
           createdVariantId = prodData.variant?.id ?? "";
+          productIsManual = fulfillmentType === "manual";
           showToast("Đã tạo sản phẩm thành công!");
         }
 
@@ -595,6 +658,7 @@ function initQuickstart(): void {
         if (importRes.ok) {
           const importData = importRes.data as InventoryImportResponse;
           const accepted = importData.acceptedCount ?? 0;
+          importedKeysCount += accepted;
           showToast(`Đã mã hóa và nạp ${String(accepted)} key vào kho an toàn!`);
           setStep("connect");
         } else {
@@ -615,6 +679,24 @@ function initQuickstart(): void {
   const tgStatusPill = root.querySelector<HTMLElement>("[data-telegram-status-pill]");
   const launchBtn = root.querySelector<HTMLButtonElement>("[data-step-submit='connect']");
   const skipConnectBtn = root.querySelector<HTMLButtonElement>("[data-step-skip='connect']");
+
+  // Per-card "skip for now"
+  root.querySelectorAll<HTMLButtonElement>("[data-card-skip]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const card = btn.closest<HTMLElement>(".connect-card");
+      if (!card) return;
+      card.classList.add("is-skipped");
+      card.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
+        input.disabled = true;
+      });
+      const pill = card.querySelector<HTMLElement>("[data-payos-status-pill], [data-telegram-status-pill]");
+      if (pill) {
+        pill.dataset.status = "skipped";
+        pill.textContent = "Sẽ kết nối sau";
+      }
+      btn.hidden = true;
+    });
+  });
 
   payosForm?.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -638,6 +720,7 @@ function initQuickstart(): void {
         });
 
         if (res.ok) {
+          payosVerified = true;
           if (payosStatusPill) {
             payosStatusPill.dataset.status = "verified";
             payosStatusPill.textContent = "✓ Đã xác thực";
@@ -683,16 +766,11 @@ function initQuickstart(): void {
         const botUser = tgData.bot?.username ?? "";
 
         if (res.ok && botUser) {
+          telegramConnected = true;
+          telegramBotUser = botUser;
           if (tgStatusPill) {
             tgStatusPill.dataset.status = "verified";
             tgStatusPill.textContent = `✓ Đã kết nối @${botUser}`;
-          }
-          const tgLinkEl = root.querySelector<HTMLAnchorElement>("[data-celebration-telegram-link]");
-          const tgDisplay = root.querySelector<HTMLElement>("[data-celebration-bot-display]");
-          if (tgLinkEl && tgDisplay) {
-            tgLinkEl.href = `https://t.me/${botUser}`;
-            tgLinkEl.hidden = false;
-            tgDisplay.textContent = `@${botUser}`;
           }
           showToast(`Kết nối Bot @${botUser} thành công!`);
         } else {
@@ -710,11 +788,109 @@ function initQuickstart(): void {
     })();
   });
 
+  skipConnectBtn?.addEventListener("click", () => {
+    setStep("launch");
+  });
+
+  launchBtn?.addEventListener("click", () => {
+    setStep("launch");
+  });
+
+  // --- Step 5: Launch review, settings & publish ---
+  const launchSettingsForm = root.querySelector<HTMLFormElement>("[data-launch-settings-form]");
+  const saveSettingsBtn = root.querySelector<HTMLButtonElement>("[data-btn-save-settings]");
+  const publishBtn = root.querySelector<HTMLButtonElement>("[data-step-submit='launch']");
+  const launchReview = root.querySelector<HTMLElement>("[data-launch-review]");
+  const launchCelebration = root.querySelector<HTMLElement>("[data-launch-celebration]");
+
+  function refreshLaunchState(): void {
+    // Summary cards
+    const shopEl = root.querySelector<HTMLElement>("[data-launch-summary-shop]");
+    const slugEl = root.querySelector<HTMLElement>("[data-launch-summary-slug]");
+    const productEl = root.querySelector<HTMLElement>("[data-launch-summary-product]");
+    const keysEl = root.querySelector<HTMLElement>("[data-launch-summary-keys]");
+    const payosEl = root.querySelector<HTMLElement>("[data-launch-summary-payos]");
+    const telegramEl = root.querySelector<HTMLElement>("[data-launch-summary-telegram]");
+
+    if (shopEl) shopEl.textContent = activeShopName || "Cửa hàng của bạn";
+    if (slugEl) slugEl.textContent = activeShopSlug ? `${activeShopSlug}.${platformBaseDomain}` : "—";
+    if (productEl) productEl.textContent = productTitle || (createdVariantId ? "Đã tạo" : "Chưa tạo");
+    if (keysEl) keysEl.textContent = productIsManual
+      ? "Giao thủ công — không cần key"
+      : `${String(importedKeysCount)} key trong kho`;
+
+    const payosCard = root.querySelector<HTMLElement>("[data-launch-card-payos]");
+    if (payosEl) payosEl.textContent = payosVerified ? "✓ Đã xác thực" : "Chưa kết nối";
+    payosCard?.classList.toggle("is-ready", payosVerified);
+
+    const telegramCard = root.querySelector<HTMLElement>("[data-launch-card-telegram]");
+    if (telegramEl) telegramEl.textContent = telegramConnected ? `✓ @${telegramBotUser}` : "Chưa kết nối";
+    telegramCard?.classList.toggle("is-ready", telegramConnected);
+
+    // Checklist
+    const checks: Record<string, boolean> = {
+      inventory: productIsManual || importedKeysCount > 0,
+      payos: payosVerified,
+      product: createdVariantId !== "",
+      shop: activeShopPublicId !== "",
+      telegram: telegramConnected,
+    };
+    root.querySelectorAll<HTMLElement>("[data-launch-check]").forEach((row) => {
+      const key = row.dataset.launchCheck ?? "";
+      row.classList.toggle("is-done", checks[key] === true);
+    });
+  }
+
+  launchSettingsForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    void (async () => {
+      if (!activeShopPublicId) {
+        showToast("Vui lòng hoàn thành bước tạo cửa hàng trước.", "error");
+        return;
+      }
+
+      const support = (root.querySelector<HTMLInputElement>("[data-input-launch-support]")?.value || "").trim();
+      const terms = (root.querySelector<HTMLInputElement>("[data-input-launch-terms]")?.value || "").trim();
+      const privacy = (root.querySelector<HTMLInputElement>("[data-input-launch-privacy]")?.value || "").trim();
+      const refund = (root.querySelector<HTMLInputElement>("[data-input-launch-refund]")?.value || "").trim();
+
+      if (saveSettingsBtn) saveSettingsBtn.disabled = true;
+
+      try {
+        const res = await apiRequest(
+          `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/onboarding/settings`,
+          {
+            body: JSON.stringify({
+              attestationAccepted: false,
+              attestationVersion: null,
+              privacyUrl: privacy || null,
+              refundPolicyUrl: refund || null,
+              supportContact: support || null,
+              termsUrl: terms || null,
+            }),
+            method: "POST",
+          },
+        );
+
+        if (res.ok) {
+          showToast("Đã lưu thông tin liên hệ & chính sách.");
+        } else {
+          showToast("Không lưu được thông tin. Kiểm tra lại các đường dẫn HTTPS.", "error");
+        }
+      } catch {
+        showToast("Có lỗi xảy ra khi lưu thông tin.", "error");
+      } finally {
+        if (saveSettingsBtn) saveSettingsBtn.disabled = false;
+      }
+    })();
+  });
+
   function completeAndCelebrate(): void {
-    if (!root) return;
     const storefrontLink = root.querySelector<HTMLAnchorElement>("[data-celebration-storefront-link]");
     const slugDisplay = root.querySelector<HTMLElement>("[data-celebration-slug-display]");
     const dashboardLink = root.querySelector<HTMLAnchorElement>("[data-celebration-dashboard-link]");
+    const telegramLink = root.querySelector<HTMLAnchorElement>("[data-celebration-telegram-link]");
+    const telegramDisplay = root.querySelector<HTMLElement>("[data-celebration-bot-display]");
 
     const finalSlug = activeShopSlug || "cua-hang";
     if (storefrontLink && slugDisplay) {
@@ -724,37 +900,51 @@ function initQuickstart(): void {
     if (dashboardLink && activeShopPublicId) {
       dashboardLink.href = `/app?shop=${encodeURIComponent(activeShopPublicId)}`;
     }
+    if (telegramLink && telegramConnected && telegramBotUser) {
+      telegramLink.href = `https://t.me/${telegramBotUser}`;
+      telegramLink.hidden = false;
+      if (telegramDisplay) telegramDisplay.textContent = `@${telegramBotUser}`;
+    }
 
-    setStep("celebration");
+    if (launchReview) launchReview.hidden = true;
+    if (launchCelebration) launchCelebration.hidden = false;
+    triggerConfetti();
   }
 
-  skipConnectBtn?.addEventListener("click", completeAndCelebrate);
-
-  launchBtn?.addEventListener("click", () => {
+  publishBtn?.addEventListener("click", () => {
     void (async () => {
-      launchBtn.disabled = true;
+      publishBtn.disabled = true;
       try {
         if (activeShopPublicId) {
-          await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/publish`, {
-            method: "POST",
-          });
+          const res = await apiRequest(
+            `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/storefront/publish`,
+            { body: JSON.stringify({}), method: "POST" },
+          );
+          if (!res.ok) {
+            showToast("Cửa hàng đã lưu nhưng chưa publish được — bạn có thể publish lại từ Dashboard.", "error");
+          }
         }
       } catch {
-        // Continue even if publish warning
+        showToast("Không kết nối được máy chủ — tiến trình vẫn được lưu.", "error");
       } finally {
-        launchBtn.disabled = false;
+        publishBtn.disabled = false;
         completeAndCelebrate();
       }
     })();
   });
 
-  // --- Back Navigation Buttons ---
+  // --- Back navigation buttons ---
   root.querySelectorAll<HTMLButtonElement>("[data-step-back]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const target = btn.dataset.stepBack as WizardStep;
       setStep(target);
     });
   });
+
+  // --- Initial state ---
+  const initialPane = root.querySelector<HTMLElement>(`[data-step-pane="${currentStep}"]`);
+  initialPane?.classList.add("is-active");
+  updateProgress();
 }
 
 if (document.readyState === "loading") {

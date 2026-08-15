@@ -18,7 +18,7 @@ const {
 
 <div class="onboarding-step-pane" data-step-pane="store">
   <div class="step-intro-header">
-    <span class="step-num-badge">BƯỚC 01/04</span>
+    <span class="step-num-badge">BƯỚC 01/05</span>
     <h2>Hồ sơ Cửa hàng & Kênh Bán</h2>
     <p>Đặt tên cho cửa hàng và lựa chọn các kênh phân phối sản phẩm số tự động của bạn.</p>
   </div>
@@ -108,14 +108,10 @@ const {
       </div>
     </div>
 
-    <!-- Auto-Provisioning Smart Badge -->
-    <div class="smart-defaults-box full-width">
-      <div class="smart-box-icon">✨</div>
-      <div class="smart-box-text">
-        <strong>Tự động tối ưu sẵn:</strong>
-        <p>Hệ thống tự động áp dụng Tiền tệ <code>VND</code>, Ngôn ngữ <code>Tiếng Việt</code> và bộ chính sách pháp lý mẫu đạt chuẩn. Bạn có thể tùy chỉnh lại bất kỳ lúc nào.</p>
-      </div>
-    </div>
+    <!-- Inline smart-defaults hint -->
+    <p class="smart-defaults-hint full-width">
+      ✨ Tiền tệ <code>VND</code>, ngôn ngữ <code>Tiếng Việt</code> và chính sách mẫu được áp dụng tự động — bạn có thể đổi lại bất cứ lúc nào.
+    </p>
 
     <div class="step-actions full-width">
       <button type="submit" class="btn-primary-next" data-step-submit="store">
@@ -127,16 +123,10 @@ const {
 </div>
 
 <style>
+  /* Display & animation are managed globally by OnboardingShell. */
   .onboarding-step-pane {
-    display: flex;
     flex-direction: column;
     gap: 24px;
-    animation: fadeInSlide 0.3s ease;
-  }
-
-  @keyframes fadeInSlide {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
   }
 
   .step-intro-header {
@@ -389,37 +379,17 @@ const {
     color: var(--sln-white);
   }
 
-  /* Smart Defaults Box */
-  .smart-defaults-box {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 12px 16px;
-    border-radius: var(--sln-radius-md);
+  /* Smart defaults inline hint */
+  .smart-defaults-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--sln-text-muted);
+    line-height: 1.5;
+  }
+
+  .smart-defaults-hint code {
     background: var(--sln-bg-subtle);
-    border: 1px solid var(--sln-border-default);
-  }
-
-  .smart-box-icon {
-    font-size: 18px;
-    flex-shrink: 0;
-  }
-
-  .smart-box-text strong {
-    font-size: 12px;
-    color: var(--sln-text-primary);
-  }
-
-  .smart-box-text p {
-    margin: 3px 0 0;
-    font-size: 12px;
-    color: var(--sln-text-secondary);
-    line-height: 1.45;
-  }
-
-  .smart-box-text code {
-    background: var(--sln-bg-canvas);
-    padding: 2px 6px;
+    padding: 1px 6px;
     border-radius: var(--sln-radius-sm);
     font-size: 11px;
     font-family: var(--sln-font-mono);

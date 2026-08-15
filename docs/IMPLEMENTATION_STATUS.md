@@ -1566,3 +1566,58 @@ connections to suggest live data flow. Uses only the Selinow indigo palette
 Verification: `npm run check` 0 errors; `npm run lint` clean; 2,450 tests pass;
 `npm run build` succeeds; `npm run deploy:dry-run` succeeds. Canvas confirmed
 present and sized (1184×692px, active 2D context) via in-browser inspection.
+
+## Onboarding v2 — 5-step wizard with preview drawer (2026-08-15)
+
+Redesigned the `/onboarding` quickstart into a 5-step full-page wizard
+(directional slide/fade transitions) with a linear progress bar in the top bar
+and the former fixed live-preview column collapsed into a floating
+button-triggered right drawer (Website/Telegram tabs, Esc/backdrop close,
+mobile full-width).
+
+New step flow: Store (name/slug/channels) → Product (preset or custom) →
+Inventory (paste keys) → Connect (PayOS + Telegram side-by-side, per-card
+"để sau") → Launch (summary cards, checklist, optional contact/policy
+settings, publish, celebration + confetti).
+
+- Created `src/components/dashboard/onboarding/OnboardingPreviewDrawer.astro`
+  (drawer + floating trigger; reuses the storefront/Telegram mockups).
+- Created `src/components/dashboard/onboarding/OnboardingStepLaunch.astro`
+  (review summary, collapsible optional settings form, derived checklist,
+  publish → celebration state; storefront link, bot link, dashboard link).
+- Rewrote `src/components/dashboard/onboarding/OnboardingShell.astro`:
+  single-column layout (max-width 720px), linear gradient progress bar with
+  step labels, avatar + exit CTA, global step-pane animation classes
+  (`is-active` / `is-exiting-left|right` managed via `:global()` because panes
+  render inside child components).
+- Redesigned the four step components (Store/Product/Inventory/Connect):
+  step badges now /05, Connect uses a 2-column card grid with per-card skip,
+  Store's smart-defaults box replaced by an inline hint; all data attributes
+  and form contracts preserved.
+- Rewrote `src/scripts/dashboard/onboarding-quickstart.ts`: class-based
+  directional step transitions, progress-bar updates, drawer open/close/Esc
+  logic, launch-state tracking (shop/product/keys/PayOS/Telegram), settings
+  save via `POST /onboarding/settings` (attestation not required),
+  publish via `POST /storefront/publish` (replaces the previously
+  non-existent `/publish` call), celebration handling. All API, CSRF, and
+  idempotency behavior unchanged.
+- `OnboardingLivePreview.astro` and `OnboardingCelebration.astro` are now
+  unreferenced by the live route (kept for history; superseded by the drawer
+  and Launch step).
+- No changes to `src/lib/onboarding/*`, `onboarding-ui.ts`, AppLayout,
+  migrations, API endpoints, or auth.
+
+Verification (2026-08-15): `npm run check` — 0 errors in onboarding files
+(18 pre-existing errors in other workstreams' WIP: `payments.astro`,
+`seller-management.ts`, `telegram/commerce.ts`, `auth/session.ts`);
+`npm run lint` — onboarding files clean (52 pre-existing errors elsewhere);
+`npm run test` — all onboarding-related tests pass (23 pre-existing failures
+in 4 files owned by parallel workstreams); `npm run build` — succeeds when the
+truncated WIP file `src/pages/app/payments.astro` (cut off mid-line 64,
+another session's unfinished draft) is excluded; the file was restored
+byte-for-byte afterward.
+
+Known limitations: wizard copy is hardcoded Vietnamese (consistent with the
+previous quickstart); i18n catalog keys for the 8-step legacy wizard remain
+unused by this route; manual browser walkthrough of the 5-step flow still
+recommended before deploy.

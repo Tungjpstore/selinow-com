@@ -25,12 +25,9 @@ type NavItem = {
   label: string;
   path: string;
   href?: string;
-  channel?: ChannelCode;
   roles?: readonly ShopRole[];
   visibleWithoutShop?: boolean;
 };
-
-type ChannelCode = "website" | "telegram" | "telegram-mini-app" | "zalo-mini-app" | "zalo-oa" | "whatsapp-cloud" | "discord-bot";
 
 type NavGroup = {
   key: "administration" | "configuration" | "operations" | "sales_channels";
@@ -62,15 +59,7 @@ const canOpenShopSetup = selectedShopRole === "owner" || selectedShopRole === "m
   || (selectedShopPublicId === undefined && shops.length === 0);
 
 const isCurrent = (path: string): boolean => activePath === path || (path !== "/app" && activePath.startsWith(`${path}/`));
-const isCurrentItem = (item: NavItem): boolean => {
-  if (item.channel !== undefined && activePath === "/app/integrations") {
-    return Astro.url.hash === `#channel-${item.channel}`;
-  }
-  if (item.channel === undefined && item.path === "/app/integrations" && Astro.url.hash.startsWith("#channel-")) {
-    return false;
-  }
-  return isCurrent(item.path);
-};
+const isCurrentItem = (item: NavItem): boolean => isCurrent(item.path);
 const itemPath = (item: NavItem): string => item.href ?? item.path;
 const withSelectedShop = (path: string): string => appendSelectedShop(path, selectedShopPublicId, Astro.url.origin);
 const shopSelectionHref = (shopPublicId: string): string => shopSwitchHref(Astro.url, shopPublicId);
@@ -95,49 +84,9 @@ const groups: readonly NavGroup[] = [
     key: "sales_channels",
     label: t("dashboard.nav.sales_channels"),
     items: [
-      { icon: "store", label: t("dashboard.nav.website"), path: "/app/store", channel: "website" },
-      { icon: "telegram", label: t("dashboard.nav.telegram"), path: "/app/telegram", channel: "telegram", roles: ["owner", "manager"] },
-      { icon: "plug", label: t("dashboard.nav.integrations"), path: "/app/integrations", roles: ["owner", "manager"] },
-      {
-        icon: "miniapp",
-        label: t("dashboard.integrations.channel_expansion.name.telegram_mini_app"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-telegram-mini-app",
-        channel: "telegram-mini-app",
-        roles: ["owner", "manager"],
-      },
-      {
-        icon: "zalo",
-        label: t("dashboard.integrations.channel_expansion.name.zalo_mini_app"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-zalo-mini-app",
-        channel: "zalo-mini-app",
-        roles: ["owner", "manager"],
-      },
-      {
-        icon: "zalo",
-        label: t("dashboard.integrations.channel_expansion.name.zalo_oa"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-zalo-oa",
-        channel: "zalo-oa",
-        roles: ["owner", "manager"],
-      },
-      {
-        icon: "whatsapp",
-        label: t("dashboard.integrations.channel_expansion.name.whatsapp_cloud"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-whatsapp-cloud",
-        channel: "whatsapp-cloud",
-        roles: ["owner", "manager"],
-      },
-      {
-        icon: "discord",
-        label: t("dashboard.integrations.channel_expansion.name.discord_bot"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-discord-bot",
-        channel: "discord-bot",
-        roles: ["owner", "manager"],
-      },
+      { icon: "store", label: t("dashboard.nav.website"), path: "/app/store" },
+      { icon: "plug", label: t("dashboard.nav.channels"), path: "/app/integrations", roles: ["owner", "manager"] },
+      { icon: "payments", label: t("dashboard.nav.payments"), path: "/app/payments", roles: ["owner", "manager"] },
     ],
   },
   {
@@ -147,6 +96,7 @@ const groups: readonly NavGroup[] = [
       { icon: "check", label: t("dashboard.nav.readiness"), path: "/onboarding", roles: ["owner", "manager"], visibleWithoutShop: true },
       { icon: "domain", label: t("dashboard.nav.domains"), path: "/app/domains", roles: ["owner"] },
       { icon: "palette", label: t("dashboard.nav.store_brand"), path: "/app/store/settings" },
+      { icon: "developer", label: t("dashboard.nav.developer"), path: "/app/developer", roles: ["owner"] },
     ],
   },
   {
@@ -193,7 +143,6 @@ const icons: Record<string, string> = {
   orders: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>',
   customers: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   store: '<path d="M4 10v10h16V10"/><path d="M3 10 5 4h14l2 6"/><path d="M3 10c0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0"/>',
-  telegram: '<path d="m21 3-7.5 18-4.2-7.2L3 10.5 21 3Z"/><path d="m9.3 13.8 4.7-4.1"/>',
   plug: '<path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-6 6v4"/>',
   check: '<path d="M4 12 9 17 20 6"/>',
   domain: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4a12 12 0 0 1 0 16M12 4a12 12 0 0 0 0 16"/>',
@@ -203,10 +152,8 @@ const icons: Record<string, string> = {
   shield: '<path d="M12 3 20 6v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/>',
   lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
-  miniapp: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/>',
-  zalo: '<path d="M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z"/><path d="m8 16 8-8M8 8h4M12 16h4"/>',
-  whatsapp: '<path d="M20 11.5a8 8 0 0 1-11.7 7.1L4 20l1.5-4.1A8 8 0 1 1 20 11.5Z"/><path d="M9 9.5c.2 1.3 1.2 2.6 2.4 3.4 1.1.8 2.5 1.2 3.7.9"/>',
-  discord: '<path d="M7 7.5A13 13 0 0 1 12 6a13 13 0 0 1 5 1.5c1.5 2.1 2.2 4.6 2 7.5-1.3 1-2.7 1.6-4.2 2l-.8-1.4M5 15c-.2-2.9.5-5.4 2-7.5M8.5 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM15.5 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/>',
+  payments: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="7.5" cy="14.5" r="1"/>',
+  developer: '<path d="m9 8-4 4 4 4M15 8l4 4-4 4"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
@@ -266,8 +213,7 @@ const icons: Record<string, string> = {
               <section class:list={{ "app-nav-channel-group": group.key === "sales_channels" }} data-nav-group={group.key}>
                 <div class="app-nav-group-label"><p>{group.label}</p>{group.key === "sales_channels" && <span aria-hidden="true">{group.items.length}</span>}</div>
                 {group.items.map((item) => (
-                  <a class:list={{ "app-nav-item": true, "app-nav-item-channel": item.channel !== undefined }} data-channel={item.channel} href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined} title={item.label}>
-                    {item.channel !== undefined && <span class="app-nav-channel-mark" aria-hidden="true"></span>}
+                  <a class="app-nav-item" href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined} title={item.label}>
                     <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
                     <span>{item.label}</span>
                   </a>
@@ -382,8 +328,7 @@ const icons: Record<string, string> = {
           <nav aria-label={t("dashboard.shell.mobile.sales_channels_aria")}>
             <p>{channelGroup.label}</p>
             {channelGroup.items.map((item) => (
-              <a class:list={{ "app-menu-link": true, "app-menu-link-channel": item.channel !== undefined }} data-channel={item.channel} href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined}>
-                {item.channel !== undefined && <span class="app-menu-channel-mark" aria-hidden="true"></span>}
+              <a class="app-menu-link" href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined}>
                 <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
                 <span><strong>{item.label}</strong><small>{t("dashboard.shell.mobile.channel_open")}</small></span>
               </a>
@@ -476,29 +421,6 @@ const icons: Record<string, string> = {
           }
         }).observe(shell, { childList: true, subtree: true });
       }
-
-      // Fragments never reach the server, so keep channel focus in sync after
-      // navigation without making the hash part of any backend contract.
-      const syncChannelFocus = (): void => {
-        if (window.location.pathname !== "/app/integrations") return;
-        const focusedChannel = window.location.hash.startsWith("#channel-")
-          ? window.location.hash.slice("#channel-".length)
-          : null;
-        for (const link of document.querySelectorAll<HTMLElement>("[data-channel]")) {
-          const channel = link.dataset.channel;
-          if (channel === undefined) continue;
-          const isFocused = focusedChannel !== null && channel === focusedChannel;
-          if (isFocused) link.setAttribute("aria-current", "page");
-          else if (link.classList.contains("app-nav-item-channel") || link.classList.contains("app-menu-link-channel")) link.removeAttribute("aria-current");
-        }
-        if (focusedChannel !== null) {
-          for (const link of document.querySelectorAll<HTMLElement>(".app-nav-item:not([data-channel]), .app-menu-link:not([data-channel])")) link.removeAttribute("aria-current");
-        }
-      };
-      syncChannelFocus();
-      window.addEventListener("hashchange", syncChannelFocus);
-      window.addEventListener("popstate", syncChannelFocus);
-      window.addEventListener("pageshow", syncChannelFocus);
 
       const readCookie = (name: string): string | null => document.cookie
         .split(";")

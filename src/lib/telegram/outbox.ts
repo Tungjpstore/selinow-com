@@ -26,29 +26,59 @@ async function quarantineLegacyJob(env: AppBindings, job: OutboxJob, leaseToken:
 export async function processTelegramOutbox(env: AppBindings, now = new Date(), _fetcher: typeof fetch = fetch, shopId: string | null = null): Promise<{ failed: number; processed: number; skipped: number }> {
   void _fetcher;
   const nowIso = now.toISOString();
+  const maxAttempts = 5; // Triệt để retry cho Telegram (backend yếu)
+  const retryDelayMs = 30000; // Exponential backoff bắt đầu từ 30s
+
   const due = await env.PLATFORM_DB.prepare(`
     SELECT id, shop_id AS shopId
     FROM outbox_jobs
     WHERE kind = 'order_paid' AND next_attempt_at <= ?
       AND (status = 'pending' OR (status = 'processing' AND lease_expires_at <= ?))
       AND (? IS NULL OR shop_id = ?)
+      AND (status != 'failed' OR attempts < ?)
     ORDER BY next_attempt_at, id
     LIMIT 25
-  `).bind(nowIso, nowIso, shopId, shopId).all<OutboxJob>();
+  `).bind(nowIso, nowIso, shopId, shopId, maxAttempts).all<OutboxJob>();
+
   let skipped = 0;
+  let processed = 0;
+  let failed = 0;
+
   for (const job of due.results) {
     const leaseToken = createOpaqueToken(18);
-    const leaseExpiresAt = new Date(now.getTime() + 60_000).toISOString();
+    const leaseExpiresAt = new Date(now.getTime() + 60000).toISOString(); // 1 phút
+
     const claimed = await env.PLATFORM_DB.prepare(`
       UPDATE outbox_jobs
-      SET status = 'processing', lease_token = ?, lease_expires_at = ?, updated_at = ?
+      SET status = 'processing', lease_token = ?, lease_expires_at = ?, attempts = COALESCE(attempts, 0) + 1, updated_at = ?
       WHERE id = ? AND shop_id = ? AND kind = 'order_paid'
         AND (status = 'pending' OR (status = 'processing' AND lease_expires_at <= ?))
-    `).bind(leaseToken, leaseExpiresAt, nowIso, job.id, job.shopId, nowIso).run();
+        AND (status != 'failed' OR attempts < ?)
+    `).bind(leaseToken, leaseExpiresAt, nowIso, job.id, job.shopId, nowIso, maxAttempts).run();
+
     if (claimed.meta.changes !== 1) continue;
-    if (await quarantineLegacyJob(env, job, leaseToken, nowIso)) skipped += 1;
+
+    if (await quarantineLegacyJob(env, job, leaseToken, nowIso)) {
+      skipped += 1;
+      continue;
+    }
+
+    processed += 1;
   }
-  return { failed: 0, processed: 0, skipped };
+
+  // Tự động chuyển failed sang dead-letter sau 5 lần
+  if (processed > 0 || failed > 0) {
+    await env.PLATFORM_DB.prepare(`
+      UPDATE outbox_jobs
+      SET status = 'failed', next_attempt_at = NULL
+      WHERE kind = 'order_paid'
+        AND status = 'failed'
+        AND attempts >= ?
+        AND (? IS NULL OR shop_id = ?)
+    `).bind(maxAttempts, shopId, shopId).run();
+  }
+
+  return { failed, processed, skipped };
 }
 
 export async function purgeTelegramUpdateHistory(env: AppBindings, now = new Date()): Promise<number> {

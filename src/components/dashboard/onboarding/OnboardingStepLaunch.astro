@@ -1,0 +1,662 @@
+---
+type Props = {
+  platformBaseDomain: string;
+};
+
+const { platformBaseDomain } = Astro.props;
+---
+
+<div class="onboarding-step-pane" data-step-pane="launch" hidden>
+  <!-- Pre-launch review -->
+  <div data-launch-review>
+    <div class="step-intro-header">
+      <span class="step-num-badge">BƯỚC 05/05</span>
+      <h2>Kiểm tra & Mở Bán</h2>
+      <p>Xem lại toàn bộ cấu hình, bổ sung thông tin liên hệ nếu cần và kích hoạt cửa hàng của bạn.</p>
+    </div>
+
+    <!-- Configuration summary -->
+    <div class="summary-grid">
+      <div class="summary-card">
+        <span class="summary-icon">🏪</span>
+        <div class="summary-body">
+          <small>Cửa hàng</small>
+          <strong data-launch-summary-shop>Cửa hàng của bạn</strong>
+          <span class="summary-sub" data-launch-summary-slug>—</span>
+        </div>
+      </div>
+      <div class="summary-card">
+        <span class="summary-icon">📦</span>
+        <div class="summary-body">
+          <small>Sản phẩm</small>
+          <strong data-launch-summary-product>Chưa tạo</strong>
+          <span class="summary-sub" data-launch-summary-keys>0 key trong kho</span>
+        </div>
+      </div>
+      <div class="summary-card" data-launch-card-payos>
+        <span class="summary-icon">💳</span>
+        <div class="summary-body">
+          <small>Thanh toán PayOS</small>
+          <strong data-launch-summary-payos>Chưa kết nối</strong>
+        </div>
+      </div>
+      <div class="summary-card" data-launch-card-telegram>
+        <span class="summary-icon">🤖</span>
+        <div class="summary-body">
+          <small>Bot Telegram</small>
+          <strong data-launch-summary-telegram>Chưa kết nối</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- Optional settings -->
+    <details class="optional-settings">
+      <summary>
+        <span>📋 Thông tin liên hệ & chính sách <em>(không bắt buộc)</em></span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </summary>
+      <form class="settings-form" data-launch-settings-form novalidate>
+        <div class="form-group">
+          <label for="launch-support-input">Liên hệ hỗ trợ</label>
+          <input
+            id="launch-support-input"
+            type="text"
+            maxlength="180"
+            placeholder="support@example.com hoặc @shop_support"
+            data-input-launch-support
+          />
+          <small class="field-hint">Để người mua biết cách liên hệ khi cần hỗ trợ.</small>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="launch-terms-input">Điều khoản bán hàng (HTTPS)</label>
+            <input id="launch-terms-input" type="url" placeholder="https://..." data-input-launch-terms />
+          </div>
+          <div class="form-group">
+            <label for="launch-privacy-input">Chính sách riêng tư (HTTPS)</label>
+            <input id="launch-privacy-input" type="url" placeholder="https://..." data-input-launch-privacy />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="launch-refund-input">Chính sách hoàn tiền (HTTPS)</label>
+          <input id="launch-refund-input" type="url" placeholder="https://..." data-input-launch-refund />
+        </div>
+        <button type="submit" class="btn-save-settings" data-btn-save-settings>
+          Lưu thông tin
+        </button>
+      </form>
+    </details>
+
+    <!-- Launch checklist -->
+    <div class="launch-checklist">
+      <div class="checklist-row" data-launch-check="shop">
+        <span class="check-dot"></span>
+        <span class="check-text">Cửa hàng đã được tạo</span>
+      </div>
+      <div class="checklist-row" data-launch-check="product">
+        <span class="check-dot"></span>
+        <span class="check-text">Có ít nhất một sản phẩm</span>
+      </div>
+      <div class="checklist-row" data-launch-check="inventory">
+        <span class="check-dot"></span>
+        <span class="check-text">Kho key đã được nạp (hoặc giao thủ công)</span>
+      </div>
+      <div class="checklist-row" data-launch-check="payos">
+        <span class="check-dot"></span>
+        <span class="check-text">PayOS đã kết nối để nhận thanh toán</span>
+      </div>
+      <div class="checklist-row" data-launch-check="telegram">
+        <span class="check-dot"></span>
+        <span class="check-text">Bot Telegram đã kết nối</span>
+      </div>
+    </div>
+
+    <div class="step-actions split-actions">
+      <button type="button" class="btn-secondary-back" data-step-back="connect">
+        ← Quay lại
+      </button>
+      <button type="button" class="btn-primary-launch" data-step-submit="launch">
+        <span data-btn-label>🚀 Hoàn Tất & Mở Bán Ngay</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Celebration (hidden until publish) -->
+  <div class="celebration-pane" data-launch-celebration hidden>
+    <div class="celebration-badge-wrap">
+      <div class="celebration-fireworks">🎉</div>
+      <span class="celebration-glow-pill">KÍCH HOẠT THÀNH CÔNG</span>
+      <h2>Cửa Hàng Của Bạn Đã Sẵn Sàng!</h2>
+      <p>Chúc mừng bạn! Cấu hình cốt lõi đã hoàn tất. Cửa hàng số và bot tự động sẵn sàng nhận đơn và giao key 24/7.</p>
+    </div>
+
+    <div class="celebration-links-cards">
+      <a href="#" target="_blank" rel="noreferrer" class="launch-link-card" data-celebration-storefront-link>
+        <div class="launch-card-icon">🌐</div>
+        <div class="launch-card-info">
+          <strong>Mở Website Bán Hàng</strong>
+          <span data-celebration-slug-display>https://shop.{platformBaseDomain}</span>
+        </div>
+        <span class="launch-arrow">↗</span>
+      </a>
+
+      <a href="#" target="_blank" rel="noreferrer" class="launch-link-card" data-celebration-telegram-link hidden>
+        <div class="launch-card-icon">🤖</div>
+        <div class="launch-card-info">
+          <strong>Mở Bot Telegram</strong>
+          <span data-celebration-bot-display>@your_bot</span>
+        </div>
+        <span class="launch-arrow">↗</span>
+      </a>
+    </div>
+
+    <div class="celebration-footer-action">
+      <a href="/app" class="btn-go-dashboard" data-celebration-dashboard-link>
+        <span>Đi Tới Bảng Điều Khiển (Dashboard)</span>
+        <span aria-hidden="true">→</span>
+      </a>
+    </div>
+  </div>
+</div>
+
+<style>
+  .onboarding-step-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .step-intro-header {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .step-num-badge {
+    align-self: flex-start;
+    padding: 3px 10px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+  }
+
+  .step-intro-header h2 {
+    margin: 0;
+    font-size: clamp(22px, 3.5vw, 28px);
+    font-weight: 750;
+    color: var(--sln-text-primary);
+    letter-spacing: -0.03em;
+  }
+
+  .step-intro-header p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--sln-text-secondary);
+    line-height: 1.5;
+  }
+
+  /* ---- Summary grid ---- */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .summary-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    transition: border-color 0.2s ease;
+  }
+
+  .summary-card.is-ready {
+    border-color: color-mix(in srgb, var(--sln-state-success) 35%, var(--sln-border-default));
+  }
+
+  .summary-icon {
+    font-size: 22px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .summary-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .summary-body small {
+    font-size: 11px;
+    color: var(--sln-text-muted);
+    font-weight: 600;
+  }
+
+  .summary-body strong {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--sln-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .summary-sub {
+    font-size: 11px;
+    color: var(--sln-text-muted);
+    font-family: var(--sln-font-mono);
+  }
+
+  /* ---- Optional settings ---- */
+  .optional-settings {
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    overflow: hidden;
+  }
+
+  .optional-settings summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 18px;
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--sln-text-primary);
+    cursor: pointer;
+    list-style: none;
+    transition: background 0.15s ease;
+  }
+
+  .optional-settings summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .optional-settings summary:hover {
+    background: var(--sln-bg-subtle);
+  }
+
+  .optional-settings summary em {
+    font-style: normal;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--sln-text-muted);
+  }
+
+  .optional-settings summary svg {
+    color: var(--sln-text-muted);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .optional-settings[open] summary svg {
+    transform: rotate(180deg);
+  }
+
+  .settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 18px 18px;
+    border-top: 1px solid var(--sln-border-default);
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  label {
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--sln-text-primary);
+  }
+
+  input[type="text"], input[type="url"] {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-md);
+    padding: 9px 13px;
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-primary);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  input:focus {
+    border-color: var(--sln-focus-ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+  }
+
+  .field-hint {
+    font-size: 11px;
+    color: var(--sln-text-muted);
+  }
+
+  .btn-save-settings {
+    align-self: flex-start;
+    padding: 9px 18px;
+    border: 1px solid var(--sln-action-primary);
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-primary);
+    color: var(--sln-action-primary);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-save-settings:hover {
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+  }
+
+  .btn-save-settings:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+
+  /* ---- Checklist ---- */
+  .launch-checklist {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-lg);
+    overflow: hidden;
+    background: var(--sln-bg-surface);
+  }
+
+  .checklist-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--sln-border-default);
+    transition: background 0.2s ease;
+  }
+
+  .checklist-row:last-child {
+    border-bottom: none;
+  }
+
+  .check-dot {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--sln-border-strong);
+    color: transparent;
+    font-size: 12px;
+    font-weight: 800;
+    flex-shrink: 0;
+    transition: all 0.25s ease;
+  }
+
+  .checklist-row.is-done .check-dot {
+    background: var(--sln-state-success);
+    border-color: var(--sln-state-success);
+    color: var(--sln-white);
+  }
+
+  .checklist-row.is-done .check-dot::before {
+    content: "✓";
+  }
+
+  .checklist-row.is-done .check-text {
+    color: var(--sln-text-muted);
+  }
+
+  .check-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--sln-text-secondary);
+  }
+
+  /* ---- Actions ---- */
+  .step-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--sln-border-default);
+  }
+
+  .btn-secondary-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-bg-surface);
+    color: var(--sln-text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-secondary-back:hover {
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-primary);
+  }
+
+  .btn-primary-launch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 12px 26px;
+    border: none;
+    border-radius: var(--sln-radius-pill);
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: var(--sln-white);
+    font-size: 14px;
+    font-weight: 750;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  .btn-primary-launch:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+  }
+
+  .btn-primary-launch:disabled {
+    opacity: 0.6;
+    cursor: wait;
+    transform: none;
+  }
+
+  /* ---- Celebration ---- */
+  .celebration-pane {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 28px;
+    padding: 24px 12px 12px;
+    animation: celebrationPop 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes celebrationPop {
+    0% { opacity: 0; transform: scale(0.92); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  .celebration-badge-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    max-width: 520px;
+  }
+
+  .celebration-fireworks {
+    font-size: 54px;
+    line-height: 1;
+    animation: bounce 1.5s infinite alternate ease-in-out;
+  }
+
+  @keyframes bounce {
+    0% { transform: translateY(0) scale(1); }
+    100% { transform: translateY(-8px) scale(1.1); }
+  }
+
+  .celebration-glow-pill {
+    padding: 4px 14px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-tint-success);
+    color: var(--sln-state-success);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    border: 1px solid color-mix(in srgb, var(--sln-state-success) 30%, transparent);
+  }
+
+  .celebration-badge-wrap h2 {
+    margin: 0;
+    font-size: clamp(24px, 4vw, 32px);
+    font-weight: 800;
+    color: var(--sln-text-primary);
+    letter-spacing: -0.03em;
+  }
+
+  .celebration-badge-wrap p {
+    margin: 0;
+    font-size: 15px;
+    color: var(--sln-text-secondary);
+    line-height: 1.6;
+  }
+
+  .celebration-links-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 480px;
+  }
+
+  .launch-link-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 20px;
+    border: 1.5px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    box-shadow: var(--sln-shadow-xs);
+  }
+
+  .launch-link-card:hover {
+    border-color: var(--sln-action-primary);
+    transform: translateY(-2px);
+    box-shadow: var(--sln-shadow-md);
+  }
+
+  .launch-card-icon {
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+
+  .launch-card-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    min-width: 0;
+  }
+
+  .launch-card-info strong {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--sln-text-primary);
+  }
+
+  .launch-card-info span {
+    font-size: 12px;
+    color: var(--sln-action-primary);
+    font-family: var(--sln-font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .launch-arrow {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--sln-text-muted);
+  }
+
+  .celebration-footer-action {
+    margin-top: 8px;
+    width: 100%;
+    max-width: 480px;
+  }
+
+  .btn-go-dashboard {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 52px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-action-primary);
+    color: var(--sln-white);
+    font-size: 15px;
+    font-weight: 750;
+    text-decoration: none;
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--sln-action-primary) 35%, transparent);
+    transition: transform 0.15s, background 0.15s;
+  }
+
+  .btn-go-dashboard:hover {
+    background: var(--sln-action-primary-hover);
+    transform: translateY(-2px);
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 640px) {
+    .summary-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .form-row {
+      grid-template-columns: 1fr;
+    }
+
+    .step-actions {
+      flex-direction: column-reverse;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .btn-primary-launch, .btn-secondary-back {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+</style>

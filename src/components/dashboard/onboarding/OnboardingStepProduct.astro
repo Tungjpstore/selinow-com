@@ -8,9 +8,9 @@ type Props = {
 const { defaultCurrency = "VND" } = Astro.props;
 ---
 
-<div class="onboarding-step-pane" data-step-pane="product" hidden>
+<div class="onboarding-step-pane" data-step-pane="product">
   <div class="step-intro-header">
-    <span class="step-num-badge">BƯỚC 02/04</span>
+    <span class="step-num-badge">BƯỚC 02/05</span>
     <h2>Thêm Sản phẩm Đầu tiên</h2>
     <p>Chọn nhanh một mẫu sản phẩm phổ biến hoặc tự tạo sản phẩm theo ý bạn trong 30 giây.</p>
   </div>
@@ -121,11 +121,10 @@ const { defaultCurrency = "VND" } = Astro.props;
 </div>
 
 <style>
+  /* Display & animation are managed globally by OnboardingShell. */
   .onboarding-step-pane {
-    display: flex;
     flex-direction: column;
     gap: 20px;
-    animation: fadeInSlide 0.3s ease;
   }
 
   .step-intro-header {

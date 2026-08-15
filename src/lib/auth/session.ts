@@ -6,7 +6,8 @@ import { clearCookie, parseCookies, serializeCookie } from "../http/cookies";
 import type { AppBindings } from "../platform/bindings";
 import { claimMagicLinkAdmission } from "./admission";
 import { sendMagicLinkEmail, sendPasswordChangedAlertEmail } from "./email";
-import { createAndSendOtp, verifyOtp } from "./otp";
+import { recordLoginHistory } from "./login-history";
+import { createAndSendOtp, OTP_TTL_MINUTES, verifyOtp } from "./otp";
 import { assertCsrfRequest, validatePasswordStrength } from "./policy";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
@@ -45,6 +46,7 @@ type UserAccountRow = {
   lockedUntil: string | null;
   passwordHash: string | null;
   status: string;
+  twoFactorEnabled: number;
   userId: string;
 };
 
@@ -82,6 +84,13 @@ export type PasswordLoginResult = {
   auth: Omit<AuthContext, "csrfTokenHash">;
   credentials: SessionCredentials;
   needsPasswordChange: boolean;
+};
+
+export type TwoFactorChallengeResult = {
+  challengeToken: string;
+  cooldownSeconds: number;
+  expiresAt: string;
+  twoFactorRequired: true;
 };
 
 export type PasswordLoginRequest = {
@@ -242,11 +251,31 @@ async function loadUserAccountByEmail(env: AppBindings, email: string): Promise<
       status, 
       password_hash AS passwordHash,
       COALESCE(failed_login_count, 0) AS failedLoginCount,
-      locked_until AS lockedUntil
+      locked_until AS lockedUntil,
+      COALESCE(two_factor_enabled, 0) AS twoFactorEnabled
     FROM platform_users
     WHERE email_normalized = ?
     LIMIT 1
   `).bind(email).first<UserAccountRow>();
+
+  return row ?? null;
+}
+
+async function loadUserAccountById(env: AppBindings, userId: string): Promise<UserAccountRow | null> {
+  const row = await env.PLATFORM_DB.prepare(`
+    SELECT 
+      id AS userId, 
+      email_normalized AS emailNormalized, 
+      display_name AS displayName, 
+      status, 
+      password_hash AS passwordHash,
+      COALESCE(failed_login_count, 0) AS failedLoginCount,
+      locked_until AS lockedUntil,
+      COALESCE(two_factor_enabled, 0) AS twoFactorEnabled
+    FROM platform_users
+    WHERE id = ?
+    LIMIT 1
+  `).bind(userId).first<UserAccountRow>();
 
   return row ?? null;
 }
@@ -370,35 +399,122 @@ export async function consumeMagicLink(input: {
 }
 
 
+async function issueSessionForUser(input: {
+  env: AppBindings;
+  now: Date;
+  rememberMe?: boolean;
+  user: UserAccountRow;
+}): Promise<PasswordLoginResult> {
+  const nowIso = input.now.toISOString();
+  const credentials = createSessionCredentials();
+  const sessionId = createId("ses");
+  const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
+  const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
+  const ttlSeconds = input.rememberMe ? 30 * 24 * 60 * 60 : SESSION_TTL_SECONDS;
+  const expiresAt = new Date(input.now.getTime() + ttlSeconds * 1000).toISOString();
+
+  const result = await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO auth_sessions (
+      id, user_id, token_hash, csrf_token_hash, status, authenticated_at,
+      expires_at, last_seen_at, created_at
+    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
+    RETURNING id
+  `).bind(
+    sessionId,
+    input.user.userId,
+    sessionTokenHash,
+    csrfTokenHash,
+    nowIso,
+    expiresAt,
+    nowIso,
+    nowIso,
+  ).first();
+
+  if (!result) throw new AppError("provider_unavailable", 503);
+
+  return {
+    auth: {
+      authenticatedAt: nowIso,
+      displayName: input.user.displayName,
+      email: input.user.emailNormalized,
+      sessionId,
+      userId: input.user.userId,
+    },
+    credentials,
+    needsPasswordChange: false,
+  };
+}
+
+async function createTwoFactorChallengeToken(secret: string, email: string, userId: string, rememberMe: boolean): Promise<string> {
+  const expiresAt = Date.now() + OTP_TTL_MINUTES * 60_000;
+  const payload = `${email}:${String(expiresAt)}:${userId}:${rememberMe ? "1" : "0"}`;
+  const signature = await hmacToken(secret, "login-2fa-challenge", payload);
+  return `${btoa(payload)}.${signature}`;
+}
+
+async function verifyTwoFactorChallengeToken(secret: string, token: string): Promise<{ email: string; rememberMe: boolean; userId: string }> {
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new AppError("authentication_required", 401);
+  }
+  const [encodedPayload, signature] = parts;
+  let payload: string;
+  try {
+    payload = atob(encodedPayload);
+  } catch {
+    throw new AppError("authentication_required", 401);
+  }
+  const [email, expiresAtStr, userId, rememberMeFlag] = payload.split(":");
+  if (!email || !expiresAtStr || !userId) {
+    throw new AppError("authentication_required", 401);
+  }
+  const expiresAt = Number(expiresAtStr);
+  if (isNaN(expiresAt) || Date.now() > expiresAt) {
+    throw new AppError("validation_failed", 400, ["two_factor_challenge_expired"]);
+  }
+  const expectedSignature = await hmacToken(secret, "login-2fa-challenge", payload);
+  if (!constantTimeEqual(signature, expectedSignature)) {
+    throw new AppError("authentication_required", 401);
+  }
+  return { email, rememberMe: rememberMeFlag === "1", userId };
+}
+
 export async function loginWithPassword(input: {
   env: AppBindings;
   email: string;
   password: string;
   now?: Date;
   rememberMe?: boolean;
-}): Promise<PasswordLoginResult> {
+  requesterAddress?: string;
+}): Promise<PasswordLoginResult | TwoFactorChallengeResult> {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
+  const requesterAddress = input.requesterAddress ?? "unknown";
   const user = await loadUserAccountByEmail(input.env, input.email);
 
   if (!user) {
-    // Mitigate timing attack
+    // Mitigate timing attack. No login history is recorded: an unresolved
+    // email never has an account_id to attach the record to, and recording
+    // arbitrary attacker-supplied emails would only add new PII exposure.
     await dummyVerifyPassword(input.password);
     throw new AppError("authentication_required", 401, ["invalid_credentials"]);
   }
 
   if (user.status === "suspended") {
+    await recordLoginHistory({ env: input.env, now, outcome: "account_suspended", requesterAddress, userId: user.userId });
     throw new AppError("authentication_required", 401, ["account_suspended"]);
   }
 
   // Check account lockout
   if (user.lockedUntil && Date.parse(user.lockedUntil) > now.getTime()) {
+    await recordLoginHistory({ env: input.env, now, outcome: "account_locked", requesterAddress, userId: user.userId });
     const remainingSeconds = Math.ceil((Date.parse(user.lockedUntil) - now.getTime()) / 1000);
     throw new AppError("account_locked", 423, [`retry_after_${String(remainingSeconds)}s`]);
   }
 
 
   if (!user.passwordHash) {
+    await recordLoginHistory({ env: input.env, now, outcome: "invalid_credentials", requesterAddress, userId: user.userId });
     throw new AppError("authentication_required", 401, ["password_not_set"]);
   }
 
@@ -418,13 +534,16 @@ export async function loginWithPassword(input: {
     `).bind(nextFailed, lockedUntil, nowIso, user.userId).run();
 
     if (lockedUntil) {
+      await recordLoginHistory({ env: input.env, now, outcome: "account_locked", requesterAddress, userId: user.userId });
       throw new AppError("account_locked", 423, ["too_many_attempts_account_locked"]);
     }
+    await recordLoginHistory({ env: input.env, now, outcome: "invalid_credentials", requesterAddress, userId: user.userId });
     throw new AppError("authentication_required", 401, ["invalid_credentials"]);
   }
 
   // Password is valid - check user verification status
   if (user.status === "pending" || user.status === "unverified") {
+    await recordLoginHistory({ env: input.env, now, outcome: "email_unverified", requesterAddress, userId: user.userId });
     throw new AppError("email_unverified", 403, ["email_verification_required"]);
   }
 
@@ -435,43 +554,69 @@ export async function loginWithPassword(input: {
     WHERE id = ?
   `).bind(nowIso, nowIso, user.userId).run();
 
-  const credentials = createSessionCredentials();
-  const sessionId = createId("ses");
-  const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
-  const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
-  const ttlSeconds = input.rememberMe ? 30 * 24 * 60 * 60 : SESSION_TTL_SECONDS;
-  const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
-
-  const result = await input.env.PLATFORM_DB.prepare(`
-    INSERT INTO auth_sessions (
-      id, user_id, token_hash, csrf_token_hash, status, authenticated_at,
-      expires_at, last_seen_at, created_at
-    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
-    RETURNING id
-  `).bind(
-    sessionId,
-    user.userId,
-    sessionTokenHash,
-    csrfTokenHash,
-    nowIso,
-    expiresAt,
-    nowIso,
-    nowIso,
-  ).first();
-
-  if (!result) throw new AppError("provider_unavailable", 503);
-
-  return {
-    auth: {
-      authenticatedAt: nowIso,
-      displayName: user.displayName,
+  if (user.twoFactorEnabled === 1) {
+    const challenge = await createAndSendOtp({
       email: user.emailNormalized,
-      sessionId,
+      env: input.env,
+      now,
+      purpose: "login_2fa",
       userId: user.userId,
-    },
-    credentials,
-    needsPasswordChange: false,
-  };
+    });
+    const challengeToken = await createTwoFactorChallengeToken(
+      input.env.SESSION_SECRET,
+      user.emailNormalized,
+      user.userId,
+      input.rememberMe === true,
+    );
+    await recordLoginHistory({ env: input.env, now, outcome: "two_factor_required", requesterAddress, userId: user.userId });
+    return {
+      challengeToken,
+      cooldownSeconds: challenge.cooldownSeconds,
+      expiresAt: challenge.expiresAt,
+      twoFactorRequired: true,
+    };
+  }
+
+  const result = await issueSessionForUser({ env: input.env, now, rememberMe: input.rememberMe, user });
+  await recordLoginHistory({ env: input.env, now, outcome: "success", requesterAddress, userId: user.userId });
+  return result;
+}
+
+/**
+ * Completes an email-OTP two-factor login challenge issued by
+ * loginWithPassword. Verifying the OTP reuses otp.ts's existing
+ * attempts/cooldown enforcement, so this endpoint cannot become a new
+ * brute-force vector beyond what already protects purpose "login_2fa".
+ */
+export async function completeTwoFactorLogin(input: {
+  challengeToken: string;
+  env: AppBindings;
+  now?: Date;
+  otp: string;
+  requesterAddress?: string;
+}): Promise<PasswordLoginResult> {
+  const now = input.now ?? new Date();
+  const requesterAddress = input.requesterAddress ?? "unknown";
+  const { email, rememberMe, userId } = await verifyTwoFactorChallengeToken(input.env.SESSION_SECRET, input.challengeToken);
+
+  try {
+    await verifyOtp({ email, env: input.env, now, otp: input.otp, purpose: "login_2fa" });
+  } catch (error) {
+    await recordLoginHistory({ env: input.env, now, outcome: "two_factor_failed", requesterAddress, userId });
+    throw error;
+  }
+
+  const user = await loadUserAccountById(input.env, userId);
+  if (!user || user.status === "suspended") {
+    throw new AppError("authentication_required", 401);
+  }
+  if (user.lockedUntil && Date.parse(user.lockedUntil) > now.getTime()) {
+    throw new AppError("account_locked", 423, ["account_locked_during_two_factor"]);
+  }
+
+  const result = await issueSessionForUser({ env: input.env, now, rememberMe, user });
+  await recordLoginHistory({ env: input.env, now, outcome: "success", requesterAddress, userId });
+  return result;
 }
 
 export async function completeRegistrationWithOtp(input: {

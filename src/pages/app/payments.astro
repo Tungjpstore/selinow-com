@@ -1,0 +1,64 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import StatusBadge from "../../components/primitives/StatusBadge.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { loadErrorState, unavailableState, paymentState } from "../../lib/dashboard/integrations-view";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { getBindings } from "../../lib/platform/bindings";
+import { getPaymentIntegration, type PaymentIntegrationView } from "../../lib/payments/integrations";
+import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+const canReadProviders = shop?.role === "owner" || shop?.role === "manager" || shop?.role === "support";
+const canManageProviders = shop?.role === "owner";
+const canRefreshPayos = shop?.role === "owner";
+
+let payos: PaymentIntegrationView | null = null;
+let payosError: unknown = null;
+if (shop !== undefined && canReadProviders) {
+  try { payos = await getPaymentIntegration({ env, shopPublicId: shop.publicId, userId: auth.userId }); } catch (error) { payosError = error; }
+}
+
+const timeZone = shop?.timezone ?? "Asia/Ho_Chi_Minh";
+const locale = Astro.locals.locale ?? shop?.defaultLocale;
+const t = createDashboardTranslator(locale);
+const payosView = payosError === null
+  ? paymentState(payos, timeZone, locale)
+  : loadErrorState("PayOS", payosError, locale);
+const unavailablePayos = unavailableState("PayOS", locale);
+const payosConnected = payos !== null && payos.status !== "disabled" && payos.status !== "disconnected";
+const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+const csrfCookieName = `${env.SESSION_COOKIE_NAME}_csrf`;
+const integrationClientCopy = {
+  refresh: t("dashboard.integrations.refresh"),
+  refreshing: t("dashboard.integrations.runtime.refreshing"),
+  reading: t("dashboard.integrations.runtime.reading"),
+  partial: t("dashboard.integrations.runtime.partial"),
+  refreshed: t("dashboard.integrations.runtime.refreshed"),
+  connectPayos: t("dashboard.integrations.runtime.connect.payos"),
+  verifying: t("dashboard.integrations.runtime.verifying"),
+  sending: t("dashboard.integrations.runtime.sending"),
+  updated: t("dashboard.integrations.runtime.updated"),
+  checking: t("dashboard.integrations.runtime.checking"),
+  healthUpdated: t("dashboard.integrations.runtime.health_updated"),
+  disconnecting: t("dashboard.integrations.runtime.disconnecting"),
+  disconnected: t("dashboard.integrations.runtime.disconnected"),
+  disconnectTitle: t("dashboard.integrations.disconnect.title"),
+  disconnectConfirm: t("dashboard.integrations.disconnect.confirm"),
+  disconnectPayos: t("dashboard.integrations.disconnect.payos"),
+  health: t("dashboard.integrations.provider.health"),
+  connect: t("dashboard.integrations.provider.connect"),
+  update: t("dashboard.integrations.provider.update"),
+  disconnect: t("dashboard.integrations.provider.disconnect"),
+};
+---
+
+<AppLayout activePath="/app/payments" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.public

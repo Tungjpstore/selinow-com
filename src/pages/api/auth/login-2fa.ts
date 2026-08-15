@@ -1,9 +1,8 @@
 import type { APIRoute } from "astro";
 
-import { isAppError } from "../../../lib/core/errors";
 import { cloudflareRequesterAddress } from "../../../lib/auth/admission";
-import { normalizeEmail } from "../../../lib/auth/policy";
-import { appendSessionCookies, loginWithPassword } from "../../../lib/auth/session";
+import { AppError, isAppError } from "../../../lib/core/errors";
+import { appendSessionCookies, completeTwoFactorLogin } from "../../../lib/auth/session";
 import { createCaughtErrorResponse } from "../../../lib/http/security";
 import { getBindings } from "../../../lib/platform/bindings";
 import { readJsonObject, rejectUnknownFields } from "../../../lib/http/request";
@@ -13,35 +12,20 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const env = getBindings();
   try {
     const body = await readJsonObject(request);
-    rejectUnknownFields(body, ["email", "password", "rememberMe"]);
+    rejectUnknownFields(body, ["challengeToken", "otp"]);
 
-    const email = normalizeEmail(body.email);
-    const password = typeof body.password === "string" ? body.password : "";
-    const rememberMe = body.rememberMe === true;
+    const challengeToken = typeof body.challengeToken === "string" ? body.challengeToken : "";
+    const otp = typeof body.otp === "string" ? body.otp : "";
+    if (challengeToken.length < 10 || challengeToken.length > 1_024) {
+      throw new AppError("validation_failed", 400, ["challenge_token_invalid"]);
+    }
 
-    const result = await loginWithPassword({
-      email,
+    const result = await completeTwoFactorLogin({
+      challengeToken,
       env,
-      password,
-      rememberMe,
+      otp,
       requesterAddress: cloudflareRequesterAddress(request),
     });
-
-    if ("twoFactorRequired" in result) {
-      return Response.json({
-        challengeToken: result.challengeToken,
-        cooldownSeconds: result.cooldownSeconds,
-        expiresAt: result.expiresAt,
-        ok: true,
-        requestId: locals.requestId,
-        twoFactorRequired: true,
-      }, {
-        headers: {
-          "Cache-Control": "private, no-store, max-age=0",
-          "X-Robots-Tag": "noindex, nofollow",
-        },
-      });
-    }
 
     const headers = new Headers({
       "Cache-Control": "private, no-store, max-age=0",
@@ -66,7 +50,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
     loggerFor(env).warn({
       ...failure,
-      event: "auth.password_login_failed",
+      event: "auth.two_factor_login_failed",
       requestId: locals.requestId,
       source: "http",
     });
