@@ -158,39 +158,41 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
                 autocomplete="current-password"
                 maxLength={128}
               />
-              <Button variant="danger" className="two-factor-action" data-action="two-factor-disable">{t("dashboard.security.two_factor.disable_action")}</Button>
+              <Button type="button" variant="danger" className="two-factor-action" data-action="two-factor-disable">{t("dashboard.security.two_factor.disable_action")}</Button>
               <p class="two-factor-divider">{t("dashboard.security.two_factor.disable_or")}</p>
               <div class="two-factor-otp-row">
-                <Button variant="secondary" className="two-factor-action" data-action="two-factor-disable-otp-request" data-two-factor-disable-otp-request>{t("dashboard.security.two_factor.send_otp")}</Button>
+                <Button type="button" variant="secondary" className="two-factor-action" data-action="two-factor-disable-otp-request" data-two-factor-disable-otp-request>{t("dashboard.security.two_factor.send_otp")}</Button>
                 <Input
                   id="two-factor-disable-otp"
                   name="twoFactorDisableOtp"
                   label={t("dashboard.security.two_factor.verify_label")}
+                  aria-label={t("dashboard.security.two_factor.verify_label")}
                   inputmode="numeric"
                   maxLength={6}
                   placeholder="000000"
                 />
-                <Button variant="secondary" className="two-factor-action" data-action="two-factor-disable-otp-submit">{t("dashboard.security.two_factor.disable_action")}</Button>
+                <Button type="button" variant="secondary" className="two-factor-action" data-action="two-factor-disable-otp-submit">{t("dashboard.security.two_factor.disable_action")}</Button>
               </div>
             </div>
           </div>
         ) : (
           <div class="two-factor-block">
             <div class="two-factor-actions" data-two-factor-enroll>
-              <Button className="two-factor-action" data-action="two-factor-enable" data-two-factor-enable>{t("dashboard.security.two_factor.enable_action")}</Button>
+              <Button type="button" className="two-factor-action" data-action="two-factor-enable" data-two-factor-enable>{t("dashboard.security.two_factor.enable_action")}</Button>
             </div>
             <div class="two-factor-enroll" data-two-factor-enroll-form hidden>
               <Input
                 id="two-factor-enroll-otp"
                 name="twoFactorEnrollOtp"
                 label={t("dashboard.security.two_factor.verify_label")}
+                aria-label={t("dashboard.security.two_factor.verify_label")}
                 inputmode="numeric"
                 maxLength={6}
                 placeholder="000000"
               />
               <div class="two-factor-otp-row">
-                <Button className="two-factor-action" data-action="two-factor-verify" data-two-factor-verify>{t("dashboard.security.two_factor.verify_submit")}</Button>
-                <Button variant="secondary" className="two-factor-action" data-action="two-factor-resend" data-two-factor-resend>{t("dashboard.security.two_factor.resend")}</Button>
+                <Button type="button" className="two-factor-action" data-action="two-factor-verify" data-two-factor-verify>{t("dashboard.security.two_factor.verify_submit")}</Button>
+                <Button type="button" variant="secondary" className="two-factor-action" data-action="two-factor-resend" data-two-factor-resend>{t("dashboard.security.two_factor.resend")}</Button>
               </div>
             </div>
           </div>
@@ -230,7 +232,7 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
             maxLength={128}
             required
           />
-          <Button className="two-factor-action" data-action="password-submit" data-password-submit>{t("dashboard.security.password.submit")}</Button>
+          <Button type="button" className="two-factor-action" data-action="password-submit" data-password-submit>{t("dashboard.security.password.submit")}</Button>
         </div>
       </section>
     </div>
