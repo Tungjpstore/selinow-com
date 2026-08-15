@@ -147,6 +147,118 @@ export async function listSellerCatalog(input: { env: AppBindings; shopPublicId:
   return { categories: categories.results, products: products.results, variants: variants.results };
 }
 
+export type SellerProductLedgerRow = ProductView & { lowestPriceMinor: number | null; stock: number; variantCount: number };
+
+export type SellerProductPage = {
+  nextCursor: null;
+  page: number;
+  pageSize: number;
+  products: SellerProductLedgerRow[];
+  totalCount: number;
+  totalPages: number;
+};
+
+export type SellerProductSort = "created_asc" | "created_desc" | "stock_asc" | "stock_desc" | "title_asc" | "title_desc" | "updated_asc" | "updated_desc";
+export type SellerProductStatusFilter = "active" | "all" | "archived" | "draft" | "out_of_stock" | "suspended";
+
+const SELLER_PRODUCT_SORTS: readonly SellerProductSort[] = ["created_asc", "created_desc", "stock_asc", "stock_desc", "title_asc", "title_desc", "updated_asc", "updated_desc"];
+const SELLER_PRODUCT_STATUS_FILTERS: readonly SellerProductStatusFilter[] = ["active", "all", "archived", "draft", "out_of_stock", "suspended"];
+
+export function parseSellerProductSort(value: string | null): SellerProductSort {
+  if (value === null) return "created_asc";
+  for (const sort of SELLER_PRODUCT_SORTS) {
+    if (sort === value || sort === `${value}_asc`) return sort;
+  }
+  return "created_asc";
+}
+
+export function parseSellerProductStatusFilter(value: string | null): SellerProductStatusFilter {
+  return value !== null && (SELLER_PRODUCT_STATUS_FILTERS as readonly string[]).includes(value) ? value as SellerProductStatusFilter : "all";
+}
+
+function sellerProductSortSql(sort: SellerProductSort): string {
+  switch (sort) {
+    case "created_desc": return "product_ledger.createdAt DESC, product_ledger.id DESC";
+    case "title_asc": return "product_ledger.title ASC, product_ledger.id ASC";
+    case "title_desc": return "product_ledger.title DESC, product_ledger.id DESC";
+    case "stock_asc": return "product_ledger.stock ASC, product_ledger.id ASC";
+    case "stock_desc": return "product_ledger.stock DESC, product_ledger.id DESC";
+    case "updated_asc": return "product_ledger.updatedAt ASC, product_ledger.id ASC";
+    case "updated_desc": return "product_ledger.updatedAt DESC, product_ledger.id DESC";
+    default: return "product_ledger.createdAt ASC, product_ledger.id ASC";
+  }
+}
+
+const SELLER_PRODUCT_SEARCH_MAX = 64;
+
+function normalizeSellerProductSearch(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed.slice(0, SELLER_PRODUCT_SEARCH_MAX);
+}
+
+export async function listSellerProductsPage(input: {
+  env: AppBindings;
+  page?: number;
+  pageSize?: number;
+  search?: string | null;
+  shopPublicId: string;
+  sort?: SellerProductSort;
+  status?: SellerProductStatusFilter;
+  userId: string;
+}): Promise<SellerProductPage> {
+  const actor = await requireCatalogActor(input.env, input.shopPublicId, input.userId, "read");
+  const pageNumber = Number.isSafeInteger(input.page) && (input.page ?? 0) >= 1 ? input.page ?? 1 : 1;
+  const pageSize = Number.isSafeInteger(input.pageSize) && (input.pageSize ?? 0) >= 1 && (input.pageSize ?? 0) <= 100 ? input.pageSize ?? 25 : 25;
+  const search = normalizeSellerProductSearch(input.search);
+  const statusFilter = input.status ?? "all";
+  const sort = input.sort ?? "created_asc";
+  const likeTerm = search === null ? null : `%${search}%`;
+  const offset = (pageNumber - 1) * pageSize;
+
+  const filterSql: string[] = [statusFilter === "out_of_stock" ? "COALESCE(product_stock.stock, 0) = 0" : "1 = 1"];
+  const filterValues: Array<number | string> = [];
+  if (statusFilter !== "all" && statusFilter !== "out_of_stock") {
+    filterSql.push("products.status = ?");
+    filterValues.push(statusFilter);
+  }
+
+  const cteSql = `
+    WITH product_stock AS (
+      SELECT product_variants.product_id AS productId,
+        COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS stock,
+        COUNT(product_variants.id) AS variantCount,
+        MIN(product_variants.price_minor) AS lowestPriceMinor
+      FROM product_variants
+      LEFT JOIN inventory_keys
+        ON inventory_keys.shop_id = product_variants.shop_id
+        AND inventory_keys.variant_id = product_variants.id
+      WHERE product_variants.shop_id = ?
+      GROUP BY product_variants.product_id
+    ),
+    product_ledger AS (
+      SELECT products.id, products.category_id AS categoryId, products.slug, products.title,
+        products.description, products.status, products.fulfillment_type AS fulfillmentType,
+        products.version, products.created_at AS createdAt, products.updated_at AS updatedAt,
+        COALESCE(product_stock.stock, 0) AS stock,
+        COALESCE(product_stock.variantCount, 0) AS variantCount,
+        product_stock.lowestPriceMinor AS lowestPriceMinor
+      FROM products
+      LEFT JOIN product_stock ON product_stock.productId = products.id
+      WHERE products.shop_id = ?
+        AND (? IS NULL OR products.title LIKE ?)
+        AND ${filterSql.join(" AND ")}
+    )
+  `;
+  const baseValues: Array<number | string | null> = [actor.shopId, actor.shopId, likeTerm, likeTerm, ...filterValues];
+
+  const countRow = await input.env.PLATFORM_DB.prepare(`${cteSql} SELECT COUNT(*) AS total FROM product_ledger`).bind(...baseValues).first<{ total: number }>();
+  const totalCount = countRow !== null && Number.isSafeInteger(countRow.total) ? countRow.total : 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const rows = await input.env.PLATFORM_DB.prepare(`${cteSql} SELECT * FROM product_ledger ORDER BY ${sellerProductSortSql(sort)} LIMIT ? OFFSET ?`).bind(...baseValues, pageSize, offset).all<SellerProductLedgerRow>();
+  return { nextCursor: null, page: pageNumber, pageSize, products: rows.results, totalCount, totalPages };
+}
+
 export async function createCategory(input: { data: CategoryInput; env: AppBindings; shopPublicId: string; userId: string }): Promise<unknown> {
   const actor = await requireCatalogActor(input.env, input.shopPublicId, input.userId);
   const id = createId("cat");
