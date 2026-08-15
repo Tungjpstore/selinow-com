@@ -15,7 +15,7 @@ describe("document direction contract", () => {
     expect(platform).toContain('<html lang={locale} dir={directionForLocale(locale)}>');
     expect(admin).toContain('<html lang={locale} dir={directionForLocale(locale)} data-theme="dark">');
     expect(storefront).toContain(
-      '<html lang={documentLocale} dir={directionForLocale(documentLocale)} style={style}>',
+      '<html lang={documentLocale} dir={directionForLocale(documentLocale)} style={style} data-storefront-template={shop.template.id} data-storefront-vertical={shop.template.vertical} data-template-scheme={shop.template.scheme}>',
     );
     expect(app).toContain('<html lang={locale ?? "en"} dir={directionForLocale(locale)}>');
     expect(login).toContain('<html lang={locale} dir={directionForLocale(locale)}>');

@@ -1,0 +1,167 @@
+/* Pulse — dark, energetic storefront for game keys / digital gaming goods.
+   Scoped to [data-storefront-template="pulse"]; consumes --sln-* ink tokens
+   and --merchant-* brand vars. Payment/stock semantics stay light-chipped
+   to preserve absolute contrast (ADR 0011 protected states). */
+
+[data-storefront-template="pulse"] body,
+html[data-storefront-template="pulse"] body {
+  background: var(--sln-ink-900);
+  color: var(--sln-slate-100);
+}
+
+html[data-storefront-template="pulse"] .store-announcement {
+  color: var(--sln-ink-900);
+  font-weight: 700;
+}
+
+html[data-storefront-template="pulse"] .store-header {
+  border-bottom: 1px solid var(--sln-ink-700);
+  background: var(--sln-ink-900);
+}
+
+html[data-storefront-template="pulse"] .store-brand strong { color: var(--sln-white); }
+html[data-storefront-template="pulse"] .store-header nav > a { color: var(--sln-slate-300); }
+html[data-storefront-template="pulse"] .store-header nav > a:hover { color: var(--sln-white); }
+html[data-storefront-template="pulse"] .cart-link { color: var(--sln-slate-300); }
+
+html[data-storefront-template="pulse"] .pulse-hero {
+  display: grid;
+  min-height: 420px;
+  align-items: center;
+  background:
+    radial-gradient(circle at 85% 15%, color-mix(in srgb, var(--merchant-accent) 38%, transparent), transparent 45%),
+    radial-gradient(circle at 8% 90%, color-mix(in srgb, var(--merchant-brand) 46%, transparent), transparent 42%),
+    var(--sln-ink-900);
+}
+
+html[data-storefront-template="pulse"] .pulse-hero-inner {
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin-inline: auto;
+  padding: clamp(48px, 8vw, 96px) 0;
+}
+
+html[data-storefront-template="pulse"] .pulse-hero h1 {
+  max-width: 18ch;
+  color: var(--sln-white);
+}
+
+html[data-storefront-template="pulse"] .store-kicker { color: var(--sln-slate-400); }
+
+html[data-storefront-template="pulse"] .pulse-hero-lead {
+  max-width: 52ch;
+  margin: 16px 0 0;
+  color: var(--sln-slate-300);
+  font-size: 1.0625rem;
+  line-height: 1.7;
+}
+
+html[data-storefront-template="pulse"] .pulse-instant-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 22px 0 0;
+  padding: 8px 14px;
+  border: 1px solid var(--merchant-brand);
+  border-radius: var(--sln-radius-pill);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+  font-size: .8125rem;
+  font-weight: 750;
+}
+
+html[data-storefront-template="pulse"] .pulse-hero .store-search { margin-top: 26px; }
+html[data-storefront-template="pulse"] .pulse-hero .store-search label { color: var(--sln-slate-400); }
+html[data-storefront-template="pulse"] .pulse-hero .store-search input {
+  border-color: var(--sln-ink-700);
+  background: var(--sln-ink-800);
+  color: var(--sln-white);
+}
+html[data-storefront-template="pulse"] .pulse-hero .store-search button {
+  border-color: var(--merchant-brand);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+}
+
+html[data-storefront-template="pulse"] .pulse-trust-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: 18px auto 0;
+  padding: 0;
+  border-block: 1px solid var(--sln-ink-700);
+  list-style: none;
+}
+
+html[data-storefront-template="pulse"] .pulse-trust-strip li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 0;
+  color: var(--sln-slate-300);
+  font-size: .8125rem;
+  font-weight: 650;
+}
+
+html[data-storefront-template="pulse"] .pulse-trust-strip span { color: var(--merchant-brand); }
+
+/* Denser gaming grid; card text switches to light ink on dark canvas. */
+html[data-storefront-template="pulse"] .pulse-product-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+html[data-storefront-template="pulse"] .product-card { border-bottom-color: var(--sln-ink-700); }
+html[data-storefront-template="pulse"] .product-card h2 a { color: var(--sln-white); }
+html[data-storefront-template="pulse"] .product-copy > p { color: var(--sln-slate-400); }
+html[data-storefront-template="pulse"] .product-variant-count { color: var(--sln-slate-500); }
+html[data-storefront-template="pulse"] .product-buy-row strong { color: var(--sln-white); }
+html[data-storefront-template="pulse"] .product-buy-row del { color: var(--sln-slate-500); }
+
+/* Keep stock/payment semantics on light chips: guaranteed 4.5:1 on dark. */
+html[data-storefront-template="pulse"] .product-copy .stock,
+html[data-storefront-template="pulse"] .product-copy .stock.low_stock,
+html[data-storefront-template="pulse"] .product-copy .stock.out_of_stock {
+  align-self: start;
+  margin: 0 0 12px;
+  padding: 4px 10px;
+  border-radius: var(--sln-radius-pill);
+  background: var(--sln-bg-surface);
+  color: var(--sln-success-text);
+}
+
+html[data-storefront-template="pulse"] .product-copy .stock.low_stock { color: var(--sln-warning-text); }
+html[data-storefront-template="pulse"] .product-copy .stock.out_of_stock { color: var(--sln-danger-text); }
+
+html[data-storefront-template="pulse"] .catalog-heading h2 { color: var(--sln-white); }
+html[data-storefront-template="pulse"] .catalog-heading p,
+html[data-storefront-template="pulse"] .store-filter-control { color: var(--sln-slate-400); }
+html[data-storefront-template="pulse"] .store-filter-control select {
+  border-color: var(--sln-ink-700);
+  background: var(--sln-ink-800);
+  color: var(--sln-white);
+}
+
+html[data-storefront-template="pulse"] .empty-cart { color: var(--sln-slate-400); }
+
+html[data-storefront-template="pulse"] .store-support-rail {
+  border: 1px solid var(--sln-ink-700);
+  background: var(--sln-ink-800);
+  color: var(--sln-slate-300);
+}
+html[data-storefront-template="pulse"] .store-support-rail strong { color: var(--sln-white); }
+
+html[data-storefront-template="pulse"] .store-footer {
+  border-top: 1px solid var(--sln-ink-700);
+  color: var(--sln-slate-400);
+}
+
+html[data-storefront-template="pulse"] .store-footer .store-support a { color: var(--sln-slate-300); }
+
+@media (max-width: 860px) {
+  html[data-storefront-template="pulse"] .pulse-product-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  html[data-storefront-template="pulse"] .pulse-product-list { grid-template-columns: 1fr; }
+}

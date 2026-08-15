@@ -8,6 +8,7 @@ import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } fr
 import { classifyPlatformHost, getCanonicalStorefrontUrl, normalizeHostname } from "./routing";
 import { parseStorefrontPublicDetails, type StorefrontPublicDetails } from "./public-details";
 import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, type StorefrontTheme } from "./theme";
+import { PREMIUM_STOREFRONT_TEMPLATES_FEATURE, resolveStorefrontTemplate, type StorefrontTemplateDefinition } from "./templates";
 
 type StorefrontShopRow = {
   brandingJson: string;
@@ -82,6 +83,7 @@ export type StorefrontProduct = {
   description: string;
   fulfillmentType: "license_key" | "manual";
   id: string;
+  imageUrl: string | null;
   slug: string;
   title: string;
   variants: StorefrontVariant[];
@@ -110,6 +112,7 @@ export type StorefrontShop = {
   currentPeriodEnd?: string | null;
   trialEndsAt?: string | null;
   graceEndsAt?: string | null;
+  template: StorefrontTemplateDefinition;
   theme: StorefrontTheme;
 };
 
@@ -242,6 +245,13 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     fallback: row.defaultLocale,
   });
   const content = parseStorefrontContent(row.storefrontJson, row.name, locale);
+  // Render-time safe fallback: an unknown, unavailable, or premium template on
+  // a plan that lost the entitlement must degrade to the default, never break
+  // the storefront.
+  const template = resolveStorefrontTemplate({
+    premiumEntitled: hasFeature(row.featureFlagsJson, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+    templateId: content.templateId,
+  });
   return {
     access: storefrontAccess(row.status, subscriptionState, row.trialEndsAt, row.graceEndsAt, row.currentPeriodEnd),
     canonicalHostname: row.canonicalHostname === null || (row.canonicalDomainType === "custom" && !customDomainEntitled)
@@ -272,6 +282,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     currentPeriodEnd: row.currentPeriodEnd,
     trialEndsAt: row.trialEndsAt,
     graceEndsAt: row.graceEndsAt,
+    template,
     theme: parseStorefrontTheme(row.brandingJson),
   };
 }
@@ -304,7 +315,7 @@ function stockState(row: CatalogRow, threshold: number): StockState {
 
 export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontShop): Promise<{ categories: StorefrontCategory[]; products: StorefrontProduct[] }> {
   assertStorefrontLive(shop);
-  const [categoryResult, productResult] = await Promise.all([
+  const [categoryResult, productResult, imageResult] = await Promise.all([
     env.PLATFORM_DB.prepare(`
       SELECT categories.id, categories.slug, categories.name, categories.description
       FROM product_categories AS categories
@@ -359,7 +370,21 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
       ORDER BY products.created_at, products.id, product_variants.created_at, product_variants.id
       LIMIT 500
     `).bind(shop.id, shop.currency).all<CatalogRow>(),
+    env.PLATFORM_DB.prepare(`
+      SELECT product_images.product_id AS productId, media_assets.public_id AS mediaPublicId
+      FROM product_images
+      INNER JOIN media_assets
+        ON media_assets.shop_id = product_images.shop_id
+        AND media_assets.id = product_images.media_asset_id
+        AND media_assets.status = 'active'
+      WHERE product_images.shop_id = ? AND product_images.status = 'active'
+      ORDER BY product_images.sort_order, product_images.id
+    `).bind(shop.id).all<{ mediaPublicId: string; productId: string }>(),
   ]);
+  const firstImageByProduct = new Map<string, string>();
+  for (const row of imageResult.results) {
+    if (!firstImageByProduct.has(row.productId)) firstImageByProduct.set(row.productId, `/media/${row.mediaPublicId}`);
+  }
   const products = new Map<string, StorefrontProduct>();
   for (const row of productResult.results) {
     let product = products.get(row.productId);
@@ -369,6 +394,7 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
         description: row.description,
         fulfillmentType: row.fulfillmentType,
         id: row.productId,
+        imageUrl: firstImageByProduct.get(row.productId) ?? null,
         slug: row.productSlug,
         title: row.productTitle,
         variants: [],

@@ -323,6 +323,27 @@ const DYNAMIC_TRANSLATION_ALLOWLIST: readonly DynamicAllowlistEntry[] = [
     identifier: "t",
     path: "src/lib/dashboard/automation-rules-ui.ts",
   },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.store_builder.template.${template.id}.description`",
+    guard: /settings\.templates\.map\(\(template\) => \(\{[\s\S]*`dashboard\.store_builder\.template\.\$\{template\.id\}\.description`/u,
+    identifier: "t",
+    path: "src/pages/app/store.astro",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.store_builder.template.${template.id}.name`",
+    guard: /settings\.templates\.map\(\(template\) => \(\{[\s\S]*`dashboard\.store_builder\.template\.\$\{template\.id\}\.name`/u,
+    identifier: "t",
+    path: "src/pages/app/store.astro",
+  },
+  {
+    catalog: "dashboard",
+    expression: "`dashboard.store_builder.template.vertical.${template.vertical}`",
+    guard: /settings\.templates\.map\(\(template\) => \(\{[\s\S]*`dashboard\.store_builder\.template\.vertical\.\$\{template\.vertical\}`/u,
+    identifier: "t",
+    path: "src/pages/app/store.astro",
+  },
 ] as const;
 
 function sourceFiles(root: string): SourceFile[] {

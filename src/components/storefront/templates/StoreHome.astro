@@ -1,0 +1,27 @@
+---
+/**
+ * Store-home dispatcher. `StorefrontShop.template` is resolved through the
+ * registry (unknown ids never reach here), so each shipped template registers
+ * its home component in the map below; swift stays the structural fallback.
+ */
+import DeskStoreHome from "./desk/StoreHome.astro";
+import PulseStoreHome from "./pulse/StoreHome.astro";
+import SwiftStoreHome from "./swift/StoreHome.astro";
+import type { StorefrontCategory, StorefrontProduct, StorefrontShop } from "../../../lib/storefront/store";
+
+interface Props {
+  categories: StorefrontCategory[];
+  locale: string;
+  products: StorefrontProduct[];
+  shop: StorefrontShop;
+}
+
+const { categories, locale, products, shop } = Astro.props;
+const storeHomeByTemplate: Record<string, typeof SwiftStoreHome> = {
+  desk: DeskStoreHome,
+  pulse: PulseStoreHome,
+  swift: SwiftStoreHome,
+};
+const StoreHomeComponent = storeHomeByTemplate[shop.template.id] ?? SwiftStoreHome;
+---
+<StoreHomeComponent categories={categories} locale={locale} products={products} shop={shop} />

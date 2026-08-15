@@ -17,9 +17,15 @@ const soldOut = purchasableVariant === undefined || purchasableVariant.stockStat
 ---
 
 <article class="product-card" data-product-card data-category-id={product.categoryId ?? ""} data-search-text={`${product.title} ${product.description} ${product.variants.map((variant) => variant.title).join(" ")}`}>
-  <a class="product-visual" href={`/products/${product.slug}`} aria-hidden="true" tabindex="-1">
-    <span>{String(index + 1).padStart(2, "0")}</span>
-    <strong>{product.title.slice(0, 1).toUpperCase()}</strong>
+  <a class="product-visual" href={`/products/${product.slug}`} aria-hidden="true" tabindex="-1" data-visual={product.imageUrl !== null ? "image" : "mark"}>
+    {product.imageUrl !== null ? (
+      <img src={product.imageUrl} alt="" loading={index < 4 ? "eager" : "lazy"} decoding="async" />
+    ) : (
+      <>
+        <span>{String(index + 1).padStart(2, "0")}</span>
+        <strong>{product.title.slice(0, 1).toUpperCase()}</strong>
+      </>
+    )}
   </a>
   <div class="product-copy">
     <p class:list={["stock", purchasableVariant?.stockState]}>{purchasableVariant ? stockLabel(purchasableVariant.stockState, purchasableVariant.availableStock, locale) : t("storefront.product.no_variant")}</p>

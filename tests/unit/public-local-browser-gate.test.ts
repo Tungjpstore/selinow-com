@@ -38,6 +38,7 @@ describe("deterministic local public PromptOS browser gate", () => {
     const spec = readFileSync("tests/visual/local-public.spec.ts", "utf8");
     const storefrontLayout = readFileSync("src/layouts/StorefrontLayout.astro", "utf8");
     const storefrontHome = readFileSync("src/pages/index.astro", "utf8");
+    const swiftStoreHome = readFileSync("src/components/storefront/templates/swift/StoreHome.astro", "utf8");
     const platformCss = readFileSync("src/styles/platform.css", "utf8");
     expect(runner).toContain('"--local"');
     expect(runner).not.toContain('"--remote"');
@@ -80,8 +81,9 @@ describe("deterministic local public PromptOS browser gate", () => {
     expect(spec).toContain("public-storefront-home.png");
     expect(storefrontLayout).toContain('<script src="../scripts/storefront/cart-count.ts"></script>');
     expect(storefrontLayout).not.toContain("const cartKey = `selinow-cart:v1:");
-    expect(storefrontHome).toContain('<script src="../scripts/storefront/store-search.ts"></script>');
-    expect(storefrontHome).not.toContain("<script is:inline>");
+    expect(storefrontHome).toContain('StoreHome from "../components/storefront/templates/StoreHome.astro"');
+    expect(swiftStoreHome).toContain('<script src="../../../../scripts/storefront/store-search.ts"></script>');
+    expect(swiftStoreHome).not.toContain("<script is:inline>");
     expect(platformCss).toMatch(/\.trust-panel h2,[\s\S]*?\.final-cta h2 \{[\s\S]*?color: var\(--sln-white\);/u);
   });
 

@@ -51,7 +51,20 @@ const initialDraft = settings === null ? null : {
   seoTitle: settings.content.seoTitle,
   showExactStock: settings.content.showExactStock,
   supportText: settings.content.supportText,
+  templateId: settings.template.id,
 };
+// Gallery copy is built server-side so the client script only handles the
+// templateId draft value; entitlement comes from the settings payload.
+const templateGallery = settings === null ? [] : settings.templates.map((template) => ({
+  available: template.available,
+  description: t(`dashboard.store_builder.template.${template.id}.description`),
+  id: template.id,
+  name: t(`dashboard.store_builder.template.${template.id}.name`),
+  premium: template.premium,
+  scheme: template.scheme,
+  selectable: template.available && (!template.premium || settings.premiumTemplatesEnabled),
+  verticalLabel: t(`dashboard.store_builder.template.vertical.${template.vertical}`),
+}));
 const storeBuilderClientCopy = {
   failed: t("dashboard.store_builder.runtime.failed"),
   forbidden: t("dashboard.store_builder.runtime.forbidden"),
@@ -115,6 +128,7 @@ const storeBuilderClientCopy = {
         <div class="builder-tabs" role="tablist" aria-label={t("dashboard.store_builder.tabs.aria")}>
           <button class="builder-tab is-active" id="tab-content" type="button" role="tab" aria-selected="true" aria-controls="panel-content" data-tab="content">{t("dashboard.store_builder.tab.content")}</button>
           <button class="builder-tab" id="tab-brand" type="button" role="tab" aria-selected="false" aria-controls="panel-brand" data-tab="brand">{t("dashboard.store_builder.tab.brand")}</button>
+          <button class="builder-tab" id="tab-template" type="button" role="tab" aria-selected="false" aria-controls="panel-template" data-tab="template">{t("dashboard.store_builder.tab.template")}</button>
           <button class="builder-tab" id="tab-layout" type="button" role="tab" aria-selected="false" aria-controls="panel-layout" data-tab="layout">{t("dashboard.store_builder.tab.layout")}</button>
           <button class="builder-tab" id="tab-seo" type="button" role="tab" aria-selected="false" aria-controls="panel-seo" data-tab="seo">{t("dashboard.store_builder.tab.seo")}</button>
           <button class="builder-tab" id="tab-support" type="button" role="tab" aria-selected="false" aria-controls="panel-support" data-tab="support">{t("dashboard.store_builder.tab.support")}</button>
@@ -155,6 +169,33 @@ const storeBuilderClientCopy = {
                 <label>{t("dashboard.store_builder.field.accent")}<input name="accentColor" data-field="accentColor" type="color" value={settings.theme.accent} aria-describedby="storefront-contrast-status" /></label>
               </div>
               <div id="storefront-contrast-status" class="contrast-check" data-contrast data-tone="info" role="status" aria-live="polite" aria-atomic="true"><span aria-hidden="true"></span><p>{t("dashboard.store_builder.contrast.checking")}</p></div>
+            </fieldset>
+          </div>
+
+          <div class="tab-panel" id="panel-template" role="tabpanel" aria-labelledby="tab-template" data-panel="template" hidden>
+            <div class="panel-heading"><p class="eyebrow">{t("dashboard.store_builder.panel.template.eyebrow")}</p><h2>{t("dashboard.store_builder.panel.template.title")}</h2><p>{t("dashboard.store_builder.panel.template.description")}</p></div>
+            <fieldset disabled={!canManage}>
+              <div class="template-gallery" role="radiogroup" aria-label={t("dashboard.store_builder.panel.template.title")} data-template-gallery>
+                {templateGallery.map((option) => (
+                  <label class:list={["template-option", option.selectable ? "is-selectable" : "is-locked"]} data-template-option={option.id}>
+                    <input type="radio" name="templateId" data-field="templateId" value={option.id} checked={settings.template.id === option.id} disabled={!option.selectable} />
+                    <span class="template-thumb" data-template={option.id} data-scheme={option.scheme} aria-hidden="true">
+                      <span class="thumb-bar"></span>
+                      <span class="thumb-body"><span class="thumb-hero"><i></i><i></i><i></i></span><span class="thumb-grid"><i></i><i></i><i></i><i></i></span></span>
+                    </span>
+                    <span class="template-copy">
+                      <span class="template-name-row">
+                        <strong>{option.name}</strong>
+                        {option.premium && <span class="template-badge" data-badge="pro">{t("dashboard.store_builder.template.premium_badge")}</span>}
+                        {!option.available && <span class="template-badge" data-badge="soon">{t("dashboard.store_builder.template.coming_soon")}</span>}
+                      </span>
+                      <small>{option.verticalLabel} · {option.description}</small>
+                      {option.premium && !settings.premiumTemplatesEnabled && <small class="template-locked-note">{t("dashboard.store_builder.template.premium_note")}</small>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p class="template-preview-note">{t("dashboard.store_builder.template.preview_note")}</p>
             </fieldset>
           </div>
 
@@ -261,6 +302,50 @@ const storeBuilderClientCopy = {
   .contrast-check[data-tone="success"] { background: var(--sln-tint-success); color: var(--sln-success-text); }
   .contrast-check[data-tone="warning"] { background: var(--sln-tint-warning); color: var(--sln-warning-text-strong); }
   .contrast-check[data-tone="danger"] { background: var(--sln-tint-danger); color: var(--sln-danger-text); }
+  .template-gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .template-option { position: relative; display: grid; gap: 8px; padding: 12px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); cursor: pointer; }
+  .template-option input { position: absolute; top: 10px; right: 10px; width: 16px; height: 16px; margin: 0; accent-color: var(--sln-action-primary); }
+  .template-option:has(input:checked) { border-color: var(--sln-action-primary); box-shadow: 0 0 0 1px var(--sln-action-primary); }
+  .template-option:has(input:focus-visible) { outline: 2px solid var(--sln-action-primary); outline-offset: 2px; }
+  .template-option.is-locked { cursor: not-allowed; }
+  .template-option.is-locked .template-thumb { opacity: .55; }
+  .template-thumb { display: grid; gap: 4px; padding: 9px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-sm); background: var(--sln-white); }
+  .thumb-bar { height: 8px; border-radius: 4px; background: var(--sln-brand-indigo); }
+  .thumb-body { display: grid; gap: 4px; }
+  .thumb-hero { display: grid; gap: 3px; }
+  .thumb-hero i { height: 5px; border-radius: 3px; background: var(--sln-slate-200); }
+  .thumb-hero i:first-child { width: 55%; height: 9px; background: var(--sln-slate-300); }
+  .thumb-hero i:last-child { width: 75%; }
+  .thumb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+  .thumb-grid i { height: 15px; border: 1px solid var(--sln-border-default); border-radius: 4px; background: var(--sln-slate-100); }
+  .template-thumb[data-scheme="dark"] { border-color: var(--sln-ink-700); background: var(--sln-ink-900); }
+  .template-thumb[data-scheme="dark"] .thumb-bar { background: var(--sln-slate-500); }
+  .template-thumb[data-scheme="dark"] .thumb-hero i { background: var(--sln-ink-700); }
+  .template-thumb[data-scheme="dark"] .thumb-hero i:first-child { background: var(--sln-slate-600); }
+  .template-thumb[data-scheme="dark"] .thumb-grid i { border-color: var(--sln-ink-700); background: var(--sln-ink-800); }
+  .template-thumb[data-template="aurora"] .thumb-hero i:first-child { width: 100%; height: 24px; background: var(--sln-slate-200); }
+  .template-thumb[data-template="aurora"] .thumb-grid i { height: 22px; }
+  .template-thumb[data-template="metro"] .thumb-grid { grid-template-columns: 1fr; }
+  .template-thumb[data-template="metro"] .thumb-grid i { height: 6px; background: var(--sln-slate-200); }
+  .template-thumb[data-template="bustle"] .thumb-grid { grid-template-columns: 1fr 1fr 1fr; }
+  .template-thumb[data-template="bustle"] .thumb-grid i:first-child { background: var(--sln-tint-indigo); }
+  .template-thumb[data-template="desk"] .thumb-grid { grid-template-columns: 1fr; }
+  .template-thumb[data-template="desk"] .thumb-grid i { height: 7px; background: var(--sln-slate-100); }
+  .template-thumb[data-template="pulse"] .thumb-hero i:first-child { background: var(--sln-tint-indigo); }
+  .template-thumb[data-template="serenity"] .thumb-bar, .template-thumb[data-template="serenity"] .thumb-hero i, .template-thumb[data-template="serenity"] .thumb-grid i { border-radius: var(--sln-radius-pill); }
+  .template-thumb[data-template="craft"] .thumb-hero i:first-child { height: 12px; }
+  .template-thumb[data-template="clinic"] .thumb-grid { grid-template-columns: 1fr; }
+  .template-thumb[data-template="clinic"] .thumb-grid i { height: 7px; background: var(--sln-slate-200); }
+  .template-copy { display: grid; gap: 4px; }
+  .template-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .template-name-row strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .template-badge { padding: 2px 8px; border-radius: var(--sln-radius-pill); font: var(--sln-font-caption); font-weight: 700; }
+  .template-badge[data-badge="pro"] { background: var(--sln-tint-indigo); color: var(--sln-action-primary-strong); }
+  .template-badge[data-badge="soon"] { background: var(--sln-slate-100); color: var(--sln-text-muted); }
+  .template-copy small { color: var(--sln-text-secondary); font: var(--sln-font-caption); line-height: 1.5; }
+  .template-locked-note { color: var(--sln-warning-text-strong); }
+  .template-preview-note { margin: 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  @media (max-width: 560px) { .template-gallery { grid-template-columns: 1fr; } }
   .read-only-list { display: grid; border-top: 1px solid var(--sln-border-default); }
   .read-only-list > div { display: grid; gap: 4px; padding: 14px 0; border-bottom: 1px solid var(--sln-border-default); }
   .read-only-list strong { font: var(--sln-font-label); }

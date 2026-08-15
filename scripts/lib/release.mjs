@@ -355,6 +355,43 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_automation_tasks_shop_rule_created: "e6d905262b2095c5c0f7ece120c14b3f2c3ecb8cdb63ee1f85ac56add08f1d77",
     }),
   }),
+  "0101_storefront_media_assets.sql": Object.freeze({
+    columns: Object.freeze({
+      "media_assets.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "media_assets.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.public_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.kind": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.object_key": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.content_type": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.byte_size": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "media_assets.content_sha256": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.object_etag": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.created_by_user_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.deleted_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "product_images.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "product_images.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.product_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.media_asset_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.sort_order": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "product_images.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.deleted_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_media_assets_shop_status: "56e7fa2194fd99113580a344d9cba7e3fbad860a55d7b8be34151b13d4bbfe30",
+      idx_product_images_product: "d628c689bba7b14766b3106fe7d7d992259da5979f6a157ca2b8241e8f13be65",
+      media_assets: "61afe23ed9be198bc12abf527191e701bdc37780689f47926092cc1ba7a2b0ff",
+      media_assets_identity_immutable: "66f369cca92cb4921907e9845c46334e1bc97a7bf0811bc003bfdd00bae59b53",
+      media_assets_transition_guard: "05dbad7c05ef62525e14726ffbb82ff3a31dd447024347ccbbf6cc9f26e4de82",
+      product_images: "b769bf28c672bccc9291a48784559a52c6d13bab6a57a9c3aa3edb09455eafe5",
+      product_images_identity_immutable: "214d387bb1e4dc0d7b01cd564c14f5c2b1867ab46dbbba9d27b55f663a33f0fa",
+      product_images_transition_guard: "e739b429922139787c62c870159e29cffd199b0b0dc6dd4071f417697616a4b2",
+    }),
+  }),
 });
 
 
@@ -2215,7 +2252,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_request_admissions", "order_access_recovery_tokens", "payment_credentials", "payment_integrations", "telegram_actions", "telegram_action_history", "telegram_updates"].includes(row?.name)) expectedType = "table";
+    if (["auth_request_admissions", "media_assets", "order_access_recovery_tokens", "payment_credentials", "payment_integrations", "product_images", "telegram_actions", "telegram_action_history", "telegram_updates"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");

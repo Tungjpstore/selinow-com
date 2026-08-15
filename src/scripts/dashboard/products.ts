@@ -246,6 +246,121 @@ if (editor !== null && editorForm !== null && saveButton !== null && archiveButt
   });
   privateFileUpload?.addEventListener("click", () => { void uploadPrivateFile(); });
   privateFileActivate?.addEventListener("click", () => { void savePrivateFilePolicy(); });
+  const imageControls = editor.querySelector<HTMLElement>("[data-product-image-controls]");
+  const imageInput = imageControls?.querySelector<HTMLInputElement>("[data-product-image-input]") ?? null;
+  const imageUploadButton = imageControls?.querySelector<HTMLButtonElement>("[data-upload-product-image]") ?? null;
+  const imageList = imageControls?.querySelector<HTMLUListElement>("[data-product-image-list]") ?? null;
+  const imageFeedback = imageControls?.querySelector<HTMLElement>("[data-product-image-feedback]") ?? null;
+  type ProductImageRow = { imageId: string; mediaUrl: string };
+  const parseImageRows = (value: unknown): ProductImageRow[] => {
+    if (typeof value !== "object" || value === null || !Array.isArray((value as JsonObject).images)) return [];
+    return ((value as JsonObject).images as unknown[]).filter((row): row is ProductImageRow => {
+      if (typeof row !== "object" || row === null) return false;
+      const candidate = row as JsonObject;
+      return typeof candidate.imageId === "string" && typeof candidate.mediaUrl === "string";
+    });
+  };
+  const imageSetBusy = (busy: boolean): void => {
+    if (imageUploadButton !== null) imageUploadButton.disabled = busy;
+    imageList?.querySelectorAll<HTMLButtonElement>("[data-remove-product-image]").forEach((button) => {
+      button.disabled = busy;
+    });
+  };
+  const renderProductImages = (rows: ProductImageRow[]): void => {
+    if (imageList === null) return;
+    imageList.replaceChildren();
+    for (const row of rows) {
+      const item = document.createElement("li");
+      const thumbnail = document.createElement("img");
+      thumbnail.src = row.mediaUrl;
+      thumbnail.alt = "";
+      thumbnail.loading = "lazy";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "sln-button";
+      remove.dataset.variant = "danger";
+      remove.dataset.removeProductImage = "";
+      remove.dataset.imageId = row.imageId;
+      remove.textContent = t("dashboard.products.dialog.images.remove");
+      item.appendChild(thumbnail);
+      item.appendChild(remove);
+      imageList.appendChild(item);
+    }
+  };
+  const loadProductImages = async (): Promise<void> => {
+    if (imageList === null) return;
+    try {
+      const response = await fetch(`/api/app/shops/${editorShopId}/products/${editorProductId}/images`, { credentials: "same-origin" });
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error("image_list_failed");
+      renderProductImages(parseImageRows(payload));
+    } catch {
+      if (imageFeedback !== null) imageFeedback.textContent = t("dashboard.products.client.images.list_error");
+    }
+  };
+  const uploadProductImage = async (): Promise<void> => {
+    if (imageControls === null || imageUploadButton === null) return;
+    const file = imageInput?.files?.[0];
+    if (file === undefined) {
+      if (imageFeedback !== null) imageFeedback.textContent = t("dashboard.products.client.images.missing");
+      return;
+    }
+    imageSetBusy(true);
+    if (imageFeedback !== null) imageFeedback.textContent = t("dashboard.products.client.images.uploading");
+    try {
+      const csrf = readEditorCookie(editorCsrfCookieName);
+      if (csrf === null) throw new Error("csrf_missing");
+      const upload = await fetch(`/api/app/shops/${editorShopId}/media`, {
+        body: file,
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+          "X-CSRF-Token": decodeURIComponent(csrf),
+          "X-Media-Kind": "product_image",
+        },
+        method: "POST",
+      });
+      const uploadPayload: unknown = await upload.json();
+      if (!upload.ok) {
+        const code = typeof uploadPayload === "object" && uploadPayload !== null && typeof (uploadPayload as JsonObject).code === "string" ? (uploadPayload as JsonObject).code : "request_failed";
+        throw new Error(String(code));
+      }
+      const asset = typeof uploadPayload === "object" && uploadPayload !== null ? (uploadPayload as JsonObject).asset : null;
+      if (typeof asset !== "object" || asset === null || typeof (asset as JsonObject).publicId !== "string") throw new Error("media_asset_response_invalid");
+      await editorRequest(`/api/app/shops/${editorShopId}/products/${editorProductId}/images`, "POST", { mediaAssetPublicId: (asset as JsonObject).publicId });
+      if (imageInput !== null) imageInput.value = "";
+      await loadProductImages();
+      if (imageFeedback !== null) imageFeedback.textContent = t("dashboard.products.client.images.uploaded");
+    } catch (error) {
+      if (imageFeedback !== null) imageFeedback.textContent = error instanceof Error
+        ? t("dashboard.products.client.images.error", { code: error.message })
+        : t("dashboard.products.client.images.error_generic");
+    } finally {
+      imageSetBusy(false);
+    }
+  };
+  imageUploadButton?.addEventListener("click", () => { void uploadProductImage(); });
+  imageList?.addEventListener("click", (event) => {
+    const button = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("[data-remove-product-image]") : null;
+    const imageId = button?.dataset.imageId;
+    if (button === null || imageId === undefined) return;
+    void (async () => {
+      imageSetBusy(true);
+      if (imageFeedback !== null) imageFeedback.textContent = t("dashboard.products.client.images.removing");
+      try {
+        await editorRequest(`/api/app/shops/${editorShopId}/products/${editorProductId}/images`, "DELETE", { imageId });
+        await loadProductImages();
+        if (imageFeedback !== null) imageFeedback.textContent = t("dashboard.products.client.images.removed");
+      } catch (error) {
+        if (imageFeedback !== null) imageFeedback.textContent = error instanceof Error
+          ? t("dashboard.products.client.images.error", { code: error.message })
+          : t("dashboard.products.client.images.error_generic");
+      } finally {
+        imageSetBusy(false);
+      }
+    })();
+  });
+  void loadProductImages();
   const editorPayload = (): JsonObject => {
     const data = new FormData(editorForm);
     return {

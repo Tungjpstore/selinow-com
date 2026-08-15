@@ -1,0 +1,99 @@
+/* Desk — tidy SaaS/office-software storefront. Light, tabular, invoice-friendly.
+   Scoped to [data-storefront-template="desk"]. */
+
+html[data-storefront-template="desk"] .desk-hero h1 {
+  font-size: clamp(2.1rem, 4vw, 3.4rem);
+  font-weight: 740;
+  letter-spacing: -.03em;
+}
+
+html[data-storefront-template="desk"] .desk-hero .store-hero-copy { border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+
+html[data-storefront-template="desk"] .desk-plan-section {
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin-inline: auto;
+  padding: clamp(32px, 5vw, 56px) 0 0;
+}
+
+html[data-storefront-template="desk"] .desk-plan-heading { display: grid; gap: 6px; margin-bottom: 14px; }
+html[data-storefront-template="desk"] .desk-plan-heading h2 { margin: 0; font-size: clamp(1.6rem, 3vw, 2.2rem); font-weight: 740; letter-spacing: -.03em; }
+html[data-storefront-template="desk"] .desk-plan-heading p { margin: 0; color: var(--sln-text-secondary); font-size: .9375rem; }
+
+html[data-storefront-template="desk"] .desk-plan-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--sln-border-default);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-bg-surface);
+  box-shadow: var(--sln-shadow-xs);
+}
+
+html[data-storefront-template="desk"] .desk-plan-table { width: 100%; border-collapse: collapse; }
+html[data-storefront-template="desk"] .desk-plan-table th, html[data-storefront-template="desk"] .desk-plan-table td { padding: 14px 18px; text-align: start; border-bottom: 1px solid var(--sln-border-default); font-size: .9375rem; }
+html[data-storefront-template="desk"] .desk-plan-table thead th { color: var(--sln-text-secondary); font-size: .75rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+html[data-storefront-template="desk"] .desk-plan-table tbody tr:last-child th, html[data-storefront-template="desk"] .desk-plan-table tbody tr:last-child td { border-bottom: 0; }
+html[data-storefront-template="desk"] .desk-plan-table tbody tr:hover th, html[data-storefront-template="desk"] .desk-plan-table tbody tr:hover td { background: var(--sln-bg-subtle); }
+html[data-storefront-template="desk"] .desk-plan-table tbody th { font-weight: 700; color: var(--sln-text-primary); }
+html[data-storefront-template="desk"] .desk-plan-table td { color: var(--sln-text-primary); font-variant-numeric: tabular-nums; font-weight: 700; }
+
+html[data-storefront-template="desk"] .desk-plan-table button {
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 1px solid var(--merchant-brand);
+  border-radius: var(--sln-radius-md);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+  font-size: .8125rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+html[data-storefront-template="desk"] .desk-plan-table button:hover { filter: brightness(.96); }
+
+html[data-storefront-template="desk"] .desk-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: clamp(32px, 5vw, 48px) auto 0;
+  padding: 0;
+  counter-reset: desk-step;
+  list-style: none;
+}
+
+html[data-storefront-template="desk"] .desk-steps li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid var(--sln-border-default);
+  border-radius: var(--sln-radius-md);
+  background: var(--sln-bg-surface);
+  color: var(--sln-text-secondary);
+  font-size: .875rem;
+  line-height: 1.55;
+}
+
+html[data-storefront-template="desk"] .desk-steps li > span {
+  color: var(--merchant-brand);
+  font-family: var(--sln-font-mono);
+  font-size: .8125rem;
+  font-weight: 750;
+}
+
+/* Catalog as tidy rows instead of the default airy grid. */
+html[data-storefront-template="desk"] .desk-product-list { grid-template-columns: 1fr; gap: 0; }
+html[data-storefront-template="desk"] .desk-product-list .product-card { flex-direction: row; align-items: center; gap: 18px; padding: 18px 0; }
+html[data-storefront-template="desk"] .desk-product-list .product-visual { flex: 0 0 96px; min-height: 96px; }
+html[data-storefront-template="desk"] .desk-product-list .product-visual strong { font-size: 2.4rem; }
+html[data-storefront-template="desk"] .desk-product-list .product-copy { align-items: start; }
+html[data-storefront-template="desk"] .desk-product-list .product-copy > p { display: none; }
+html[data-storefront-template="desk"] .desk-product-list .product-copy h2 { font-size: 1.0625rem; }
+html[data-storefront-template="desk"] .desk-product-list .product-buy-row { justify-content: flex-end; text-align: end; }
+
+@media (max-width: 720px) {
+  html[data-storefront-template="desk"] .desk-steps { grid-template-columns: 1fr; }
+  html[data-storefront-template="desk"] .desk-product-list .product-card { flex-direction: column; align-items: stretch; }
+  html[data-storefront-template="desk"] .desk-product-list .product-visual { flex-basis: auto; min-height: 160px; }
+  html[data-storefront-template="desk"] .desk-product-list .product-copy > p { display: block; }
+}

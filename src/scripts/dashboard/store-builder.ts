@@ -13,6 +13,7 @@ type StorefrontDraft = {
   seoTitle: string;
   showExactStock: boolean;
   supportText: string;
+  templateId: string;
 };
 
 type StorefrontSettingsResponse = {
@@ -53,7 +54,8 @@ if (builder !== null) {
         || typeof draft.seoDescription !== "string"
         || typeof draft.seoTitle !== "string"
         || typeof draft.showExactStock !== "boolean"
-        || typeof draft.supportText !== "string") return null;
+        || typeof draft.supportText !== "string"
+        || typeof draft.templateId !== "string") return null;
       return {
         accentColor: draft.accentColor,
         announcement: typeof draft.announcement === "string" ? draft.announcement : "",
@@ -67,6 +69,7 @@ if (builder !== null) {
         seoTitle: draft.seoTitle,
         showExactStock: draft.showExactStock,
         supportText: draft.supportText,
+        templateId: draft.templateId,
       };
     } catch {
       return null;
@@ -116,6 +119,7 @@ if (builder !== null) {
 
     const readDraft = (): StorefrontDraft => {
       const stockField = field("showExactStock");
+      const templateField = builder.querySelector<HTMLInputElement>('[data-field="templateId"]:checked');
       return {
         accentColor: field("accentColor")?.value.toUpperCase() ?? saved.accentColor,
         announcement: field("announcement")?.value.trim() ?? "",
@@ -129,7 +133,14 @@ if (builder !== null) {
         seoTitle: field("seoTitle")?.value.trim() ?? "",
         showExactStock: stockField instanceof HTMLInputElement ? stockField.checked : saved.showExactStock,
         supportText: field("supportText")?.value.trim() ?? "",
+        templateId: templateField?.value ?? saved.templateId,
       };
+    };
+
+    const setTemplateSelection = (templateId: string): void => {
+      builder.querySelectorAll<HTMLInputElement>('[data-field="templateId"]').forEach((radio) => {
+        radio.checked = radio.value === templateId;
+      });
     };
 
     const setState = (state: string): void => {
@@ -293,11 +304,13 @@ if (builder !== null) {
 
     undoButton?.addEventListener("click", () => {
       (Object.entries(saved) as Array<[keyof StorefrontDraft, string | boolean]>).forEach(([key, value]) => {
+        if (key === "templateId") return;
         const input = field(key);
         if (input === null) return;
         if (typeof value === "boolean" && input instanceof HTMLInputElement) input.checked = value;
         else if (typeof value === "string") input.value = value;
       });
+      setTemplateSelection(saved.templateId);
       const validation = updateControls(saved);
       contrastWasValid = validation.valid;
       setFeedback(validation.valid ? text("undone") : contrastMessage(validation));

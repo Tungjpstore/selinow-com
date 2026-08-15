@@ -10,6 +10,11 @@ import "../styles/base.css";
 import "../styles/primitives.css";
 import "../styles/selinow-a11y.css";
 import "../styles/storefront.css";
+// Template sheets are scoped by [data-storefront-template] on <html>; loading
+// them together keeps the shell (header/footer/cart/checkout) styled on every
+// storefront page regardless of the active template.
+import "../styles/storefront/templates/pulse.css";
+import "../styles/storefront/templates/desk.css";
 
 interface Props {
   abuseReportProductSlug?: string | undefined;
@@ -50,7 +55,7 @@ const policyLinks = [
 ---
 
 <!doctype html>
-<html lang={documentLocale} dir={directionForLocale(documentLocale)} style={style}>
+<html lang={documentLocale} dir={directionForLocale(documentLocale)} style={style} data-storefront-template={shop.template.id} data-storefront-vertical={shop.template.vertical} data-template-scheme={shop.template.scheme}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -67,7 +72,7 @@ const policyLinks = [
     {shop.theme.logoUrl && <meta name="twitter:image" content={shop.theme.logoUrl} />}
     <meta name="twitter:image:alt" content={shop.name} />
     {noindex && <meta name="robots" content="noindex, nofollow" />}
-    <meta name="theme-color" content="#F8FAFC" />
+    <meta name="theme-color" content={shop.template.scheme === "dark" ? "#0B1020" : "#F8FAFC"} />
     {!noindex && <link rel="canonical" href={canonicalUrl} />}
     {!noindex && localeAlternates.map((alternate) => <link rel="alternate" hreflang={alternate.hreflang} href={alternate.href} />)}
     <link rel="icon" href="/favicon.ico" sizes="any" />
