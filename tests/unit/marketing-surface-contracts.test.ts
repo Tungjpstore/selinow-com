@@ -96,23 +96,24 @@ describe("PromptOS marketing surfaces", () => {
     expect(pricing).not.toContain('href={`${env.DASHBOARD_ORIGIN}/login`} data-pricing-cta');
   });
 
-  it("covers passwordless login feedback and local-only debug navigation", async () => {
+  it("covers password-based login feedback and security controls", async () => {
     const [page, controller] = await Promise.all([
       readFile("src/pages/login.astro", "utf8"),
-      readFile("src/scripts/marketing/login.ts", "utf8"),
+      readFile("src/scripts/marketing/auth.ts", "utf8"),
     ]);
 
     expect(page).toContain('type="email"');
-    expect(page).not.toContain('type="password"');
+    expect(page).toContain('type="password"');
+    expect(page).toContain('name="rememberMe"');
+    expect(page).toContain('href="/forgot-password"');
+    expect(page).toContain('href="/register"');
     expect(page).toContain('aria-live="polite" aria-atomic="true"');
     expect(page).toContain('Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow")');
-    expect(controller).toContain('hostname.endsWith(".localhost")');
-    expect(controller).toContain('linkUrl.pathname !== "/login"');
-    expect(controller).toContain('link.textContent = t("auth.login.debug_link")');
-    expect(controller).toContain("rate_limited");
-    expect(controller).toContain("provider_unavailable");
+    expect(controller).not.toContain("localStorage");
+    expect(controller).not.toContain("sessionStorage");
     expect(controller).not.toContain("console.");
   });
+
 
   it("formats all available runtime limits with their units and reset period", () => {
     const plan: MarketingPlan = {

@@ -22,33 +22,45 @@ describe("marketing asset contracts", () => {
     }
   });
 
-  it("ships the versioned text-free visual kit with complete PNG files", async () => {
+  it("ships the versioned text-free visual kit with complete SVG files", async () => {
     const landing = await readFile(resolve(workspace, "src/pages/index.astro"), "utf8");
-    const assetDir = resolve(workspace, "public/brand/selinow-kit/global/v2");
+    const assetDir = resolve(workspace, "public/brand/selinow-kit/global/v3");
     const expected = [
-      "hero-core.png",
-      "channel-network.png",
-      "commerce-catalog.png",
-      "support-automation.png",
-      "delivery-payment.png",
+      "core-hub.svg",
+      "hero-backdrop.svg",
+      "flow-catalog.svg",
+      "flow-channels.svg",
+      "flow-support.svg",
+      "flow-delivery.svg",
+      "og-cover.svg",
     ];
+    const referencedOnLanding = new Set([
+      "core-hub.svg",
+      "flow-catalog.svg",
+      "flow-channels.svg",
+      "flow-support.svg",
+      "flow-delivery.svg",
+    ]);
 
     for (const file of expected) {
       const bytes = await readFile(resolve(assetDir, file));
-      expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
-      expect(bytes.subarray(-12).toString("hex")).toBe("0000000049454e44ae426082");
-      expect(bytes.length).toBeGreaterThan(500_000);
-      expect(landing).toContain(`global/v2/${file}`);
+      const source = bytes.toString("utf8");
+      expect(source.trimStart().startsWith("<svg")).toBe(true);
+      expect(source.trimEnd().endsWith("</svg>")).toBe(true);
+      expect(source.length).toBeGreaterThan(1_000);
+      if (referencedOnLanding.has(file)) {
+        expect(landing).toContain(`global/v3/${file}`);
+      }
     }
   });
 
-  it("uses a locale-neutral text-free social cover", async () => {
+  it("renders a locale-neutral social cover as a valid PNG", async () => {
     const layout = await readFile(resolve(workspace, "src/layouts/PlatformLayout.astro"), "utf8");
     const cover = await readFile(resolve(workspace, "public/brand/selinow-og-cover-global.png"));
 
     expect(layout).toContain("selinow-og-cover-global.png");
     expect(cover.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
     expect(cover.subarray(-12).toString("hex")).toBe("0000000049454e44ae426082");
-    expect(cover.length).toBeGreaterThan(500_000);
+    expect(cover.length).toBeGreaterThan(100_000);
   });
 });

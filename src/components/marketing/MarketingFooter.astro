@@ -1,0 +1,57 @@
+---
+interface Props {
+  dashboardOrigin?: string;
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+const { dashboardOrigin = "https://app.selinow.com", locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const localizedPath = (pathname: string): string => {
+  if (locale === "en") return pathname;
+  const url = new URL(pathname, "https://selinow.com");
+  url.searchParams.set("lang", locale);
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+---
+
+<footer class="landing-footer">
+  <div class="platform-shell footer-grid">
+    <div class="footer-brand">
+      <a href={localizedPath("/")} aria-label={t("marketing.header.home_aria")}>
+        <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="132" height="34" />
+      </a>
+      <p>{t("marketing.footer.tagline")}</p>
+      <small>© {new Date().getFullYear()} Selinow. All rights reserved.</small>
+    </div>
+
+    <div class="footer-group">
+      <h2>{t("marketing.header.product")}</h2>
+      <a href={localizedPath("/#channels")}>{t("marketing.home.channels.title")}</a>
+      <a href={localizedPath("/#workflow")}>{t("marketing.home.workflow.title")}</a>
+      <a href={localizedPath("/#architecture")}>{t("marketing.home.architecture.title")}</a>
+      <a href={localizedPath("/pricing")}>{t("marketing.header.pricing")}</a>
+    </div>
+
+    <div class="footer-group">
+      <h2>{t("marketing.header.solutions")}</h2>
+      <a href={localizedPath("/solutions/telegram-commerce")}>Telegram Commerce</a>
+      <a href={localizedPath("/solutions/digital-product-delivery")}>Digital Product Delivery</a>
+      <a href={localizedPath("/solutions/license-key-inventory")}>License Key Inventory</a>
+      <a href={localizedPath("/solutions")}>{t("marketing.header.solutions")}</a>
+    </div>
+
+    <div class="footer-group">
+      <h2>{t("marketing.header.resources")}</h2>
+      <a href={localizedPath("/#faq")}>{t("marketing.home.faq.kicker")}</a>
+      <a href={localizedPath("/legal")}>{t("marketing.footer.legal")}</a>
+      <a href={localizedPath("/privacy")}>{t("marketing.footer.privacy")}</a>
+      <a href={localizedPath("/support")}>{t("marketing.footer.support")}</a>
+      <a href={`${dashboardOrigin}/login`}>{t("marketing.header.login")}</a>
+    </div>
+  </div>
+</footer>

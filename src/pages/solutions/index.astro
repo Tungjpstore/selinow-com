@@ -1,5 +1,6 @@
 ---
 import MarketingHeader from "../../components/marketing/MarketingHeader.astro";
+import MarketingFooter from "../../components/marketing/MarketingFooter.astro";
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
 import { getBindings } from "../../lib/platform/bindings";
 import { getSolutionNotFound, getSolutionPage, getSolutionsHub, solutionSlugs } from "../../lib/content/solutions";
@@ -64,14 +65,17 @@ if (!validHost) {
   {validHost ? <>
     <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
     <main id="main-content" class="solution-page solution-hub-page" data-marketing-surface="solutions-hub">
-      <section class="solution-hero platform-shell">
+      <section class="solution-hero platform-shell kit-section-dense">
         <div class="solution-hero-copy">
           <a class="solution-breadcrumb" href={localizedPath("/")}>Selinow <span aria-hidden="true">/</span> {content.eyebrow}</a>
-          <p class="solution-eyebrow">{content.eyebrow}</p>
-          <h1>{content.title}</h1>
-          <p class="solution-lead">{content.lead}</p>
-          <div class="solution-actions">
-            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>{content.cta}<span aria-hidden="true">→</span></a>
+          <p class="section-eyebrow">{content.eyebrow}</p>
+          <h1 class="hero-headline">{content.title}</h1>
+          <p class="hero-lead">{content.lead}</p>
+          <div class="landing-actions">
+            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+              <span>{content.cta}</span>
+              <span aria-hidden="true">→</span>
+            </a>
             <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
           </div>
         </div>
@@ -79,37 +83,48 @@ if (!validHost) {
           <span class="solution-signal-index" aria-hidden="true">00</span>
           <p>{content.answerLabel}</p>
           <strong>{content.answer}</strong>
-          <span class="solution-signal-line" aria-hidden="true"></span>
           <small>Selinow OS / {content.solutionsLabel.toLowerCase()}</small>
         </aside>
       </section>
 
-      <section class="solution-catalog platform-shell" aria-labelledby="solution-catalog-title">
-        <div class="solution-section-heading solution-section-heading-wide">
-          <p class="solution-kicker">{content.cardLabel}</p>
-          <h2 id="solution-catalog-title">{content.cardTitle}</h2>
-          <p class="solution-section-description">{content.cardDescription}</p>
+      <section class="kit-section platform-shell" aria-labelledby="solution-catalog-title">
+        <div class="kit-section-heading">
+          <p class="kit-kicker">{content.cardLabel}</p>
+          <h2 class="section-title" id="solution-catalog-title">{content.cardTitle}</h2>
+          <p class="section-description">{content.cardDescription}</p>
         </div>
         <div class="solution-catalog-grid">
           {solutionSlugs.map((slug, index) => {
             const solution = getSolutionPage(slug, locale);
-            return solution === null ? null : <a class="solution-catalog-card" href={localizedPath(`/solutions/${slug}`)}>
-              <span class="solution-card-index">{String(index + 1).padStart(2, "0")}</span>
-              <span class="solution-card-eyebrow">{solution.eyebrow}</span>
-              <strong>{solution.title}</strong>
-              <p>{solution.lead}</p>
-              <b aria-hidden="true">↗</b>
-            </a>;
+            return solution === null ? null : (
+              <a class="solution-catalog-card" href={localizedPath(`/solutions/${slug}`)}>
+                <span class="solution-card-index">{String(index + 1).padStart(2, "0")}</span>
+                <span class="solution-card-eyebrow">{solution.eyebrow}</span>
+                <strong>{solution.title}</strong>
+                <p>{solution.lead}</p>
+                <b aria-hidden="true">↗</b>
+              </a>
+            );
           })}
         </div>
       </section>
 
-      <section class="solution-hub-note platform-shell" aria-label={content.answerLabel}>
-        <span>SELINOW / 02</span>
-        <p>{content.answer}</p>
-        <a href={localizedPath("/")}>{content.homeCoreCta}<span aria-hidden="true">↗</span></a>
+      <section class="final-cta-kit">
+        <div class="platform-shell final-cta-inner">
+          <div>
+            <p class="kit-kicker">SELINOW COMMERCE FLOW OS</p>
+            <h2>{content.answer}</h2>
+          </div>
+          <div class="final-cta-actions">
+            <a class="kit-button kit-button-light" href={localizedPath("/")}>
+              <span>{content.homeCoreCta}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+          </div>
+        </div>
       </section>
     </main>
-    <footer class="platform-shell solution-footer"><img src="/brand/logo/selinow-logo-black.svg" alt="Selinow" width="128" height="34" /><p>{content.footerTagline} © {new Date().getFullYear()} Selinow.</p></footer>
+
+    <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
   </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
 </PlatformLayout>

@@ -1,10 +1,29 @@
 ---
-import "../styles/selinow-tokens.css";
+import PlatformLayout from "../layouts/PlatformLayout.astro";
+import MarketingHeader from "../components/marketing/MarketingHeader.astro";
+import MarketingFooter from "../components/marketing/MarketingFooter.astro";
+import PublicationGate from "../components/marketing/PublicationGate.astro";
+import { getBindings } from "../lib/platform/bindings";
+import { normalizeSupportedLocale } from "../lib/i18n/locale";
+
+const env = getBindings();
+const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
 Astro.response.headers.set("Cache-Control", "public, max-age=300");
 ---
-<!doctype html>
-<html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width" /><title>Privacy status | Selinow</title></head>
-  <body><main><a href="/">Selinow</a><p class="eyebrow">PRIVACY STATUS</p><h1>Policy publication is blocked.</h1><p>Selinow has not published owner-approved privacy terms, retention periods, contact details, or data-subject instructions on this surface.</p><aside>Owner approval and legal review are required before this page can state policy or accept privacy requests.</aside></main></body>
-</html>
-<style>:global(body){margin:0;background:linear-gradient(145deg,#f4f7f1,#e7efe6);color:#17221a;font-family:Georgia,serif}main{width:min(680px,calc(100% - 40px));margin:12vh auto;padding:clamp(28px,6vw,64px);border:1px solid #9eaa9f;background:#fffdf7;box-shadow:12px 12px 0 #cbd7c8}a{color:#245b38;font:700 1rem ui-monospace,monospace}.eyebrow{margin-top:64px;color:#586b5b;font:700 .78rem ui-monospace,monospace;letter-spacing:.14em}h1{font-size:clamp(2.4rem,8vw,5.2rem);line-height:.94;letter-spacing:-.05em}p,aside{font-size:1.08rem;line-height:1.65}aside{margin-top:32px;padding:20px;border-left:5px solid #a64b2a;background:#f7e9df;font-weight:700}</style>
+
+<PlatformLayout
+  title="Privacy status | Selinow"
+  description="Publication status of Selinow privacy policy and data governance terms."
+  locale={locale}
+  canonical="https://selinow.com/privacy"
+>
+  <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  <PublicationGate
+    eyebrow="PRIVACY STATUS"
+    title="Policy publication is blocked."
+    detail="Selinow has not published owner-approved privacy terms, retention periods, contact details, or data-subject instructions on this surface."
+    aside="Owner approval and legal review are required before this page can state policy or accept privacy requests."
+    locale={locale}
+  />
+  <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+</PlatformLayout>

@@ -1,0 +1,191 @@
+---
+interface Props {
+  locale?: unknown;
+}
+
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const isVi = locale.toLowerCase().startsWith("vi");
+---
+
+<aside class="auth-product-flow" aria-label={isVi ? "Minh họa luồng thương mại" : "Commerce flow illustration"}>
+  <div class="auth-flow-card">
+    <div class="auth-flow-head">
+      <span class="auth-flow-brand">SELINOW / FLOW OS</span>
+      <span class="status-chip" data-status="verified">
+        <span class="status-chip-dot" aria-hidden="true"></span>
+        {isVi ? "Đang vận hành" : "Operational"}
+      </span>
+    </div>
+
+    <div class="auth-flow-sequence">
+      <div class="auth-seq-item">
+        <span class="seq-num">01</span>
+        <div class="seq-content">
+          <strong>{isVi ? "Kênh bán hàng" : "Sales Channel"}</strong>
+          <small>{isVi ? "Khách gửi yêu cầu mua hàng" : "Customer requests digital offer"}</small>
+        </div>
+        <span class="seq-badge">Telegram / Web</span>
+      </div>
+
+      <div class="auth-seq-connector">↓</div>
+
+      <div class="auth-seq-item auth-seq-highlight">
+        <span class="seq-num">02</span>
+        <div class="seq-content">
+          <strong>{isVi ? "Đơn hàng #SLN-2084" : "Order #SLN-2084"}</strong>
+          <small>{isVi ? "Snapshot giá & cấu hình" : "Server-confirmed price"}</small>
+        </div>
+        <span class="status-chip" data-status="verified">Verified</span>
+      </div>
+
+      <div class="auth-seq-connector">↓</div>
+
+      <div class="auth-seq-item">
+        <span class="seq-num">03</span>
+        <div class="seq-content">
+          <strong>{isVi ? "Thanh toán PayOS" : "PayOS Payment"}</strong>
+          <small>{isVi ? "Khớp mã chuyển khoản" : "Provider event matched"}</small>
+        </div>
+        <span class="seq-badge">{isVi ? "Đã xác nhận" : "Confirmed"}</span>
+      </div>
+
+      <div class="auth-seq-connector">↓</div>
+
+      <div class="auth-seq-item auth-seq-success">
+        <span class="seq-num">04</span>
+        <div class="seq-content">
+          <strong>{isVi ? "Giao sản phẩm số" : "Digital Fulfillment"}</strong>
+          <small>{isVi ? "Mở mã license & thông báo" : "Key allocated & delivered"}</small>
+        </div>
+        <span class="status-chip" data-status="delivered">Delivered</span>
+      </div>
+    </div>
+
+    <div class="auth-flow-footer">
+      <p>{isVi ? "Vận hành cửa hàng sản phẩm số với một nguồn dữ liệu duy nhất." : "Operate your digital store with a single authoritative source of truth."}</p>
+    </div>
+  </div>
+</aside>
+
+<style>
+  .auth-product-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    padding: var(--space-8);
+    box-sizing: border-box;
+  }
+
+  .auth-flow-card {
+    width: 100%;
+    max-width: 460px;
+    background: #FFFFFF;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
+    box-shadow: var(--shadow-md);
+  }
+
+  .auth-flow-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: var(--space-5);
+  }
+
+  .auth-flow-brand {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.1em;
+    color: var(--brand-700);
+  }
+
+  .auth-flow-sequence {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .auth-seq-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: 10px 14px;
+    background-color: var(--surface-page);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md);
+  }
+
+  .seq-num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--brand-600);
+  }
+
+  .seq-content {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .seq-content strong {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .seq-content small {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .seq-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-soft);
+    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+  }
+
+  .auth-seq-connector {
+    text-align: center;
+    font-size: 12px;
+    color: var(--brand-400);
+    height: 18px;
+    line-height: 18px;
+  }
+
+  .auth-seq-highlight {
+    background-color: var(--brand-50);
+    border-color: var(--brand-300);
+  }
+
+  .auth-seq-success {
+    background-color: #F4FDF8;
+    border-color: #A7F3D0;
+  }
+
+  .auth-flow-footer {
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+    border-top: 1px dashed var(--border-soft);
+  }
+
+  .auth-flow-footer p {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin: 0;
+    text-align: center;
+  }
+</style>

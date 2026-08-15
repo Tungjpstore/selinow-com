@@ -1,10 +1,45 @@
 ---
-import "../styles/selinow-tokens.css";
+import PlatformLayout from "../layouts/PlatformLayout.astro";
+import MarketingHeader from "../components/marketing/MarketingHeader.astro";
+import MarketingFooter from "../components/marketing/MarketingFooter.astro";
+import PublicationGate from "../components/marketing/PublicationGate.astro";
+import { getBindings } from "../lib/platform/bindings";
+import { normalizeSupportedLocale } from "../lib/i18n/locale";
+
+const env = getBindings();
+const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
 Astro.response.headers.set("Cache-Control", "public, max-age=300");
+
+const items = [
+  {
+    title: "Terms",
+    detail: "Blocked pending owner approval and legal review.",
+  },
+  {
+    title: "Refunds",
+    detail: "Blocked. No refund eligibility, window, or process is stated here.",
+  },
+  {
+    title: "Tax",
+    detail: "Blocked. No tax treatment or seller obligation is stated here.",
+  },
+];
 ---
-<!doctype html>
-<html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width" /><title>Legal status | Selinow</title></head>
-  <body><main><a href="/">Selinow</a><p class="eyebrow">LEGAL PUBLICATION GATE</p><h1>No policy values are published yet.</h1><div class="grid"><article><h2>Terms</h2><p>Blocked pending owner approval and legal review.</p></article><article><h2>Refunds</h2><p>Blocked. No refund eligibility, window, or process is stated here.</p></article><article><h2>Tax</h2><p>Blocked. No tax treatment or seller obligation is stated here.</p></article></div></main></body>
-</html>
-<style>:global(body){margin:0;background:#f0eadc;color:#202019;font-family:Georgia,serif}main{width:min(980px,calc(100% - 40px));margin:9vh auto}a{color:#7b321e;font:700 1rem ui-monospace,monospace}.eyebrow{margin-top:56px;font:700 .78rem ui-monospace,monospace;letter-spacing:.14em}h1{max-width:800px;font-size:clamp(2.7rem,7vw,5.8rem);line-height:.92;letter-spacing:-.055em}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:48px}article{min-height:170px;padding:24px;border:1px solid #8e806a;background:#fffaf0}h2{font-size:1.6rem}p{line-height:1.6}@media(max-width:700px){.grid{grid-template-columns:1fr}}</style>
+
+<PlatformLayout
+  title="Legal status | Selinow"
+  description="Publication status of Selinow legal terms and seller policies."
+  locale={locale}
+  canonical="https://selinow.com/legal"
+>
+  <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  <PublicationGate
+    eyebrow="LEGAL PUBLICATION GATE"
+    title="No policy values are published yet."
+    detail="Selinow legal and commercial policy documents are currently under governance review. No unapproved commitments are published on this surface."
+    items={items}
+    aside="Owner approval and formal legal review are required before policy terms can take effect."
+    locale={locale}
+  />
+  <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+</PlatformLayout>

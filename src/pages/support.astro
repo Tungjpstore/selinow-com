@@ -1,10 +1,29 @@
 ---
-import "../styles/selinow-tokens.css";
+import PlatformLayout from "../layouts/PlatformLayout.astro";
+import MarketingHeader from "../components/marketing/MarketingHeader.astro";
+import MarketingFooter from "../components/marketing/MarketingFooter.astro";
+import PublicationGate from "../components/marketing/PublicationGate.astro";
+import { getBindings } from "../lib/platform/bindings";
+import { normalizeSupportedLocale } from "../lib/i18n/locale";
+
+const env = getBindings();
+const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
 Astro.response.headers.set("Cache-Control", "public, max-age=300");
 ---
-<!doctype html>
-<html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width" /><title>Support status | Selinow</title></head>
-  <body><main><a href="/">Selinow</a><section><p>SUPPORT INTAKE</p><h1>Public support contact is not approved.</h1><div>Blocked pending an owner-approved support identity, response scope, and abuse-handling process. This page does not collect messages.</div></section></main></body>
-</html>
-<style>:global(body){margin:0;background:repeating-linear-gradient(90deg,#17251d 0,#17251d 32px,#1b2b22 32px,#1b2b22 64px);color:#f6f0dc;font-family:Georgia,serif}main{width:min(760px,calc(100% - 40px));margin:12vh auto}a{color:#ffd47b;font:700 1rem ui-monospace,monospace}section{margin-top:48px;padding:clamp(28px,7vw,72px);border:1px solid #7e967f;background:#213329}section>p{font:700 .78rem ui-monospace,monospace;letter-spacing:.15em;color:#bdd0bb}h1{font-size:clamp(2.6rem,8vw,5.5rem);line-height:.94;letter-spacing:-.05em}div{margin-top:36px;padding:20px;border:1px solid #b68a4b;background:#302c20;font-size:1.06rem;line-height:1.65}</style>
+
+<PlatformLayout
+  title="Support status | Selinow"
+  description="Publication status of Selinow support channels and operational assistance."
+  locale={locale}
+  canonical="https://selinow.com/support"
+>
+  <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  <PublicationGate
+    eyebrow="SUPPORT INTAKE"
+    title="Public support contact is not approved."
+    detail="Blocked pending an owner-approved support identity, response scope, and abuse-handling process. This page does not collect messages."
+    aside="Support channels will be enabled once operating procedures and response commitments are formally ratified."
+    locale={locale}
+  />
+  <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+</PlatformLayout>

@@ -84,12 +84,17 @@ describe("provider surface audit", () => {
       .split(/\r?\n/)
       .slice(1)
       .map(parseCsvRow);
-    expect(rows).toHaveLength(157);
+    expect(rows).toHaveLength(165);
+
+
+
     for (const row of rows) {
       const source = row[2];
       expect(typeof source).toBe("string");
       if (source !== undefined && source.length > 0) expect(existsSync(resolve(workspace, source))).toBe(true);
     }
+
+
     const inventory = rows.map((row) => row[1] ?? "").join("\n");
     expect(inventory).toContain("/webhooks/discord/:connectionPublicId");
     expect(inventory).toContain("/webhooks/whatsapp/:connectionPublicId");
