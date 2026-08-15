@@ -27,7 +27,6 @@ export async function processTelegramOutbox(env: AppBindings, now = new Date(), 
   void _fetcher;
   const nowIso = now.toISOString();
   const maxAttempts = 5; // Triệt để retry cho Telegram (backend yếu)
-  const retryDelayMs = 30000; // Exponential backoff bắt đầu từ 30s
 
   const due = await env.PLATFORM_DB.prepare(`
     SELECT id, shop_id AS shopId
@@ -42,7 +41,7 @@ export async function processTelegramOutbox(env: AppBindings, now = new Date(), 
 
   let skipped = 0;
   let processed = 0;
-  let failed = 0;
+  const failed = 0;
 
   for (const job of due.results) {
     const leaseToken = createOpaqueToken(18);
@@ -67,7 +66,7 @@ export async function processTelegramOutbox(env: AppBindings, now = new Date(), 
   }
 
   // Tự động chuyển failed sang dead-letter sau 5 lần
-  if (processed > 0 || failed > 0) {
+  if (processed > 0) {
     await env.PLATFORM_DB.prepare(`
       UPDATE outbox_jobs
       SET status = 'failed', next_attempt_at = NULL

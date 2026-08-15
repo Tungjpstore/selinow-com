@@ -331,6 +331,30 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
   }),
+  "0099_account_security_hardening.sql": Object.freeze({
+    columns: Object.freeze({
+      "platform_users.two_factor_enabled": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "platform_users.two_factor_enabled_at": Object.freeze({ defaultValue: "NULL", notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      auth_login_history_no_delete: "0bfdc944c5c7c37612ebb86a5b2b9c94169f797a0d9372cd9c4c3c3a508e87e5",
+      auth_login_history_no_update: "a99b8fc3d10d6bea01f69318420ad7dd7cfd69f70b2d1d145cfbf6847a8823c2",
+      idx_auth_login_history_user_created: "cbc4fa642df155b0ee7078829fb5623fe03f1f474a8b0e337cd8e860a2e6282a",
+    }),
+  }),
+  "0100_automation_rule_builder.sql": Object.freeze({
+    columns: Object.freeze({
+      "automation_tasks.rule_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_automation_customer_tags_shop_customer: "447912f73769a78745215a2bba15a3d8b4f50120dd598a72c7b1dd48fcbb3d1a",
+      idx_automation_rule_action_runs_shop_rule: "3a3657816b5519b7be2a10c7b766901e14e15a28cdbe683d82faab5242aeb9a9",
+      idx_automation_rules_shop_create_idempotency: "fb845066c26d67ff34c526746056050afb26fbbe925e57be2972cd7aa1c163a9",
+      idx_automation_rules_shop_trigger_enabled: "8a387bb0ff733013fb1ea7a432805bec2f02b51015473392b0db25bab42779bd",
+      idx_automation_rules_shop_updated: "0e6087712314b43cc74b1a5013b1fac6d45eeaaa7fe4e407e3d6b765ef4c8005",
+      idx_automation_tasks_shop_rule_created: "e6d905262b2095c5c0f7ece120c14b3f2c3ecb8cdb63ee1f85ac56add08f1d77",
+    }),
+  }),
 });
 
 

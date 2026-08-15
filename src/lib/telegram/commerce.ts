@@ -437,9 +437,7 @@ async function orderReply(application: CommerceApplicationService, context: Comm
     text: [
       telegramText(locale, "order.heading", { order: order.orderNumber }),
       telegramText(locale, "order.total", { total: formatTelegramMoney(order.totalMinor, order.currency, locale) }),
-      telegramText(locale, "order.payment", { status: telegramStatus(locale, "payment", order.paymentStatus) }),
-      telegramText(locale, "order.status", { status: telegramStatus(locale, "order", order.status) }),
-      telegramText(locale, "order.fulfillment", { status: telegramStatus(locale, "fulfillment", order.fulfillmentStatus) }),
+      formatOrderStatus(order, locale),
     ].join("\n"),
   };
 }
@@ -511,35 +509,23 @@ function safeErrorReply(error: AppError, locale: SupportedLocale): TelegramReply
   return { keyboard: [[{ callback_data: "menu", text: telegramText(locale, "button.menu") }]], text: message };
 }
 
-// ==================== NEW FUNCTIONS ADDED ====================
+// The Telegram Mini App surface is served by the dedicated session-bound HTTP
+// API (migrations/0057_telegram_mini_app_sessions.sql and
+// docs/TELEGRAM_MINI_APP_SESSION.md). Bot webhook updates are processed in the
+// Worker, where no browser global exists, so detection must stay server-side
+// and only accepts an explicit marker carried in the update payload itself.
+const TELEGRAM_MINI_APP_CALLBACK_PREFIX = "wma:";
 
-export function isTelegramMiniApp(mode?: string): boolean {
-  return mode === 'miniapp' || typeof (window as any).Telegram?.WebApp !== 'undefined';
+export function isTelegramMiniApp(update: TelegramUpdate): boolean {
+  return update.kind === "callback_query" && update.data.startsWith(TELEGRAM_MINI_APP_CALLBACK_PREFIX);
 }
 
-async function fastCheckout(input: any, order: any): Promise<TelegramReply> {
-  const locale = resolveTelegramLocale({ explicitPreference: input.locale });
-  return {
-    text: `✅ Đang xử lý thanh toán nhanh nhất...\n\n${order.orderNumber} - ${formatTelegramMoney(order.totalMinor, order.currency, locale)}`,
-    keyboard: [[{ callback_data: `ord:${order.orderId}`, text: "Xem đơn hàng" }]],
-    protectContent: false
-  };
-}
-
-async function orderStatusRealtime(orderPublicId: string, application: any, locale: SupportedLocale): Promise<TelegramReply> {
-  const order = await application.getOrder({ actor: { kind: "customer" }, shopId: application.shopId }, { order: { orderId: orderPublicId } });
-  return {
-    text: `📦 Trạng thái đơn hàng ${order.orderNumber}\n\n${formatOrderStatus(order, locale)}`,
-    keyboard: [[{ callback_data: `ord:${orderPublicId}`, text: "Xem chi tiết" }]]
-  };
-}
-
-async function keyRevealInline(orderPublicId: string, application: any): Promise<TelegramReply> {
-  const fulfillment = await application.revealFulfillment({ actor: { kind: "customer" }, shopId: application.shopId }, { order: { orderId: orderPublicId } });
-  return {
-    text: `🔑 Key của bạn:\n\n${fulfillment.items.map((item: any) => `${item.productTitle}: ${item.value}`).join('\n')}`,
-    protectContent: true
-  };
+function formatOrderStatus(order: { fulfillmentStatus: string; paymentStatus: string; status: string }, locale: SupportedLocale): string {
+  return [
+    telegramText(locale, "order.payment", { status: telegramStatus(locale, "payment", order.paymentStatus) }),
+    telegramText(locale, "order.status", { status: telegramStatus(locale, "order", order.status) }),
+    telegramText(locale, "order.fulfillment", { status: telegramStatus(locale, "fulfillment", order.fulfillmentStatus) }),
+  ].join("\n");
 }
 
 export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?: typeof fetch; integrationId: string; shopId: string; update: TelegramUpdate }): Promise<{ identity: TelegramIdentity; reply: TelegramReply; resultCode: string }> {
@@ -587,16 +573,6 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
     user: input.update.user,
   });
 
-  // ==================== MINI APP + FAST CHECKOUT MODE ====================
-  const isMiniApp = isTelegramMiniApp();
-  if (isMiniApp) {
-    const tg = (window as any).Telegram?.WebApp;
-    if (tg) {
-      tg.expand();
-      tg.BackButton.show();
-    }
-  }
-
   if (messageCommand?.command === "/language") {
     if (messageCommand.argumentsList.length === 0) {
       return { identity, reply: { text: telegramText(locale, "language.usage") }, resultCode: "language_usage" };
@@ -635,18 +611,23 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
       }
 
       if (input.update.data.startsWith("buy:")) {
-        const quoteUpdateId = Number(input.update.data.slice(4));
+        // The quote reference must be the exact persisted update id. Anything
+        // else fails closed back to the quoted cart instead of checking out
+        // at the current price.
+        const quoteUpdateText = input.update.data.slice(4);
+        if (!/^(0|[1-9][0-9]*)$/u.test(quoteUpdateText)) {
+          return { identity, reply: await cartReply(cartApplication.application, cartApplication.context, input.env, localizedShop, identity, input.integrationId, input.update.updateId, locale), resultCode: "cart_rendered" };
+        }
+        const quoteUpdateId = Number(quoteUpdateText);
         if (!Number.isSafeInteger(quoteUpdateId)) throw new AppError("quote_invalid", 409);
         const order = await checkoutTelegramCart({ env: input.env, identity, integrationId: input.integrationId, quoteUpdateId, shop: localizedShop, updateId: input.update.updateId });
-
-        // Checkout nhanh nhất (không cần mở browser)
-        const reply = isMiniApp ? await fastCheckout(input, order) : await renderTelegramCheckoutResult({ context: cartApplication.context, order, orderApplication, origin: localizedShop.origin, paymentApplication: orderApplication });
-        return { identity, reply, resultCode: "checkout_fast" };
+        const reply = await renderTelegramCheckoutResult({ context: cartApplication.context, order, orderApplication, origin: localizedShop.origin, paymentApplication: orderApplication });
+        return { identity, reply, resultCode: "checkout_completed" };
       }
 
       if (input.update.data.startsWith("pay:")) return { identity, reply: await paymentReply({ application: orderApplication, context: cartApplication.context, orderPublicId: input.update.data.slice(4), origin: localizedShop.origin }), resultCode: "payment_rendered" };
-      if (input.update.data.startsWith("ord:")) return { identity, reply: await orderStatusRealtime(input.update.data.slice(4), orderApplication, locale), resultCode: "order_realtime" };
-      if (input.update.data.startsWith("key:")) return { identity, reply: await keyRevealInline(input.update.data.slice(4), orderApplication), resultCode: "key_reveal" };
+      if (input.update.data.startsWith("ord:")) return { identity, reply: await orderReply(orderApplication, cartApplication.context, input.update.data.slice(4)), resultCode: "order_rendered" };
+      if (input.update.data.startsWith("key:")) return { identity, reply: await keyReply({ application: orderApplication, context: cartApplication.context, orderApplication, orderPublicId: input.update.data.slice(4) }), resultCode: "keys_rendered" };
       return { identity, reply: menuReply(localizedShop, locale), resultCode: "menu_rendered" };
     }
 

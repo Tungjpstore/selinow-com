@@ -61,4 +61,123 @@ const integrationClientCopy = {
 };
 ---
 
-<AppLayout activePath="/app/payments" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.public
+<AppLayout activePath="/app/payments" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.nav.payments")}>
+  <div
+    class="payments-page"
+    data-payments-workspace
+    data-csrf-cookie-name={csrfCookieName}
+    data-shop-public-id={shop?.publicId}
+    data-shop-role={shop?.role}
+    data-time-zone={timeZone}
+    data-locale={locale ?? "en"}
+    data-copy={JSON.stringify(integrationClientCopy)}
+    data-can-manage-providers={canManageProviders ? "true" : "false"}
+    data-can-read-providers={canReadProviders ? "true" : "false"}
+    data-can-refresh-payos={canRefreshPayos ? "true" : "false"}
+  >
+    <PageHeader
+      eyebrow={t("dashboard.integrations.group.payments.eyebrow")}
+      title={t("dashboard.integrations.group.payments.title")}
+      description={t("dashboard.integrations.group.payments.description")}
+    >
+      <div slot="actions" class="header-actions">
+        <button class="app-button app-button-secondary" type="button" data-refresh-payos disabled={shop === undefined || !canReadProviders}>{t("dashboard.integrations.refresh")}</button>
+      </div>
+    </PageHeader>
+
+    {shop === undefined ? (
+      <WorkspaceState
+        title={t("dashboard.integrations.no_store.title")}
+        description={t("dashboard.integrations.no_store.description")}
+        actionHref={workspaceHref("/onboarding")}
+        actionLabel={t("dashboard.integrations.no_store.action")}
+        tone="info"
+      />
+    ) : (
+      <>
+        <div class="workspace-feedback" data-workspace-feedback role="status" aria-live="polite" hidden></div>
+        <section class="integration-group" aria-label={t("dashboard.integrations.group.payments.title")}>
+          <article class="integration-row" data-provider-row="payos" data-readable={canReadProviders && payosError === null ? "true" : "false"}>
+            <div class="provider-mark provider-mark-payos" aria-hidden="true">PO</div>
+            <div class="provider-copy"><h3>PayOS</h3><p class="provider-summary" data-summary>{canReadProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? payosView.checked : unavailablePayos.checked}</p></div>
+            <StatusBadge label={canReadProviders ? payosView.label : unavailablePayos.label} tone={canReadProviders ? payosView.tone : unavailablePayos.tone} />
+            <div class="provider-actions">
+              {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{payos === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note" data-reason-code={canReadProviders ? "owner_required" : "permission_unavailable"}>{canReadProviders ? t("dashboard.integrations.channel_expansion.read_only") : t("dashboard.integrations.provider.unavailable")}</span>}
+              {canRefreshPayos && payos !== null && payosError === null && <button class="text-action" type="button" data-action="health">{t("dashboard.integrations.provider.health")}</button>}
+              {canManageProviders && payosConnected && payosError === null && <button class="text-action danger-text" type="button" data-action="disconnect">{t("dashboard.integrations.provider.disconnect")}</button>}
+            </div>
+            <p class="provider-error" data-error hidden={!canReadProviders || payosView.error === null}>{canReadProviders ? payosView.error : ""}</p>
+          </article>
+        </section>
+
+        {canManageProviders && (
+          <section class="secure-panel" data-config-panel hidden aria-labelledby="payments-config-title">
+            <div class="secure-panel-head"><div><p class="secure-kicker">{t("dashboard.integrations.config.eyebrow")}</p><h2 id="payments-config-title">{t("dashboard.integrations.config.title")}</h2><p>{t("dashboard.integrations.config.description")}</p></div><button class="text-action" type="button" data-action="close-config">{t("dashboard.integrations.config.close")}</button></div>
+            <div class="workspace-feedback" data-config-feedback role="status" aria-live="polite" hidden></div>
+            <form class="credential-form" data-credential-form="payos" hidden novalidate>
+              <div class="form-heading"><div><h3>{t("dashboard.integrations.payos.title")}</h3><p>{t("dashboard.integrations.payos.description")}</p></div><a href="https://payos.vn" target="_blank" rel="noreferrer">{t("dashboard.integrations.payos.open")}</a></div>
+              <label for="payments-payos-client-id">{t("dashboard.integrations.field.client_id")}</label>
+              <input id="payments-payos-client-id" name="clientId" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" required />
+              <label for="payments-payos-api-key">{t("dashboard.integrations.field.api_key")}</label>
+              <input id="payments-payos-api-key" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" required />
+              <label for="payments-payos-checksum-key">{t("dashboard.integrations.field.checksum_key")}</label>
+              <input id="payments-payos-checksum-key" name="checksumKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" required />
+              <p class="field-help">{t("dashboard.integrations.payos.help")}</p>
+              <button class="app-button app-button-primary" type="submit">{t("dashboard.integrations.payos.submit")}</button>
+            </form>
+            <div class="disconnect-panel" data-disconnect-panel hidden><h3>{t("dashboard.integrations.disconnect.title")}</h3><p data-disconnect-copy>{t("dashboard.integrations.disconnect.payos")}</p><button class="app-button app-button-danger" type="button" data-action="confirm-disconnect">{t("dashboard.integrations.disconnect.confirm")}</button></div>
+          </section>
+        )}
+      </>
+    )}
+  </div>
+</AppLayout>
+
+<script src="../../scripts/dashboard/payments.ts"></script>
+
+<style>
+  [hidden] { display: none !important; }
+  .payments-page { display: grid; gap: var(--sln-space-8); }
+  .header-actions { display: flex; align-items: center; }
+  .workspace-feedback { padding: 12px 16px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .workspace-feedback[data-tone="success"] { border-color: color-mix(in srgb, var(--sln-state-success) 28%, var(--sln-border-default)); background: var(--sln-tint-success); color: #047857; }
+  .workspace-feedback[data-tone="warning"] { border-color: color-mix(in srgb, var(--sln-state-warning) 28%, var(--sln-border-default)); background: var(--sln-tint-warning); color: #9a5004; }
+  .workspace-feedback[data-tone="danger"] { border-color: color-mix(in srgb, var(--sln-state-danger) 28%, var(--sln-border-default)); background: var(--sln-tint-danger); color: #b91c1c; }
+  .integration-group { display: grid; gap: 0; }
+  .integration-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) minmax(130px, auto) auto; gap: 16px; align-items: center; min-width: 0; padding: 20px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .provider-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; font: 800 11px/1 var(--sln-font-mono); letter-spacing: -.03em; }
+  .provider-mark-payos { background: var(--sln-tint-indigo); color: #4338ca; }
+  .provider-copy { min-width: 0; }
+  .provider-copy h3 { margin: 0; font: var(--sln-font-h4); letter-spacing: -.025em; }
+  .provider-summary, .provider-check { overflow: hidden; margin: 3px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); text-overflow: ellipsis; white-space: nowrap; }
+  .provider-check { color: var(--sln-text-secondary); font-size: 12px; }
+  .provider-actions { display: flex; align-items: center; justify-content: end; gap: 12px; min-width: 0; }
+  .provider-actions .app-button { min-height: 40px; padding: 9px 13px; }
+  .provider-actions .text-action { white-space: nowrap; }
+  .provider-note { color: #334155; font: var(--sln-font-caption); text-align: right; }
+  .provider-error { grid-column: 2 / -1; margin: 0; color: var(--sln-state-danger); font: var(--sln-font-body-sm); }
+  .text-action { min-height: 36px; padding: 6px 0; border: 0; background: transparent; color: var(--sln-action-primary); font: var(--sln-font-label); cursor: pointer; text-decoration: none; }
+  .text-action:hover { color: var(--sln-action-primary-hover); text-decoration: underline; text-underline-offset: 3px; }
+  .danger-text { color: var(--sln-state-danger); }
+  .danger-text:hover { color: #b91c1c; }
+  .app-button-danger { background: var(--sln-state-danger); color: var(--sln-white); }
+  .app-button-danger:hover { background: #b91c1c; }
+  .secure-panel { display: grid; gap: 22px; padding: clamp(20px, 4vw, 32px); border: 1px solid color-mix(in srgb, var(--sln-action-primary) 26%, var(--sln-border-default)); border-radius: var(--sln-radius-lg); background: linear-gradient(135deg, var(--sln-tint-indigo), var(--sln-bg-surface) 54%); box-shadow: var(--sln-shadow-sm); scroll-margin-top: 88px; }
+  .secure-panel-head { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+  .secure-panel-head h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .secure-panel-head p:not(.secure-kicker) { max-width: 680px; margin: 8px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .secure-kicker { margin: 0 0 6px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+  .credential-form { display: grid; gap: 12px; max-width: 720px; padding-top: 10px; border-top: 1px solid color-mix(in srgb, var(--sln-action-primary) 18%, var(--sln-border-default)); }
+  .form-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 4px; }
+  .form-heading h3, .disconnect-panel h3 { margin: 0; font: var(--sln-font-h4); }
+  .form-heading p, .disconnect-panel p { margin: 5px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .form-heading a { color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; white-space: nowrap; }
+  .credential-form label { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .credential-form input[type=password] { width: 100%; min-height: 46px; padding: 10px 13px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); color: var(--sln-text-primary); font: 14px/22px var(--sln-font-mono); }
+  .credential-form input[type=password]:focus { border-color: var(--sln-focus-ring); box-shadow: 0 0 0 3px rgb(59 130 246 / 20%); outline: none; }
+  .field-help { margin: 0 0 6px; color: var(--sln-text-muted); font: var(--sln-font-body-sm); }
+  .disconnect-panel { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--sln-state-danger) 22%, var(--sln-border-default)); }
+  .disconnect-panel .app-button { margin-top: 14px; }
+  @media (max-width: 900px) { .integration-row { grid-template-columns: 44px minmax(0, 1fr) auto; } .integration-row > .sln-status { grid-column: 3; grid-row: 1; } .provider-actions { grid-column: 2 / -1; justify-content: start; } .provider-error { grid-column: 1 / -1; } }
+  @media (max-width: 560px) { .header-actions, .header-actions .app-button { width: 100%; } .integration-row { gap: 12px; padding: 18px 0; } .provider-copy h3 { font-size: 18px; } .provider-summary { white-space: normal; } .provider-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; } .provider-actions .app-button { width: 100%; } .provider-actions .text-action { justify-self: start; } .provider-note { text-align: left; } .secure-panel-head, .form-heading { flex-direction: column; } .form-heading a { min-height: 40px; } }
+</style>

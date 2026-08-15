@@ -92,7 +92,7 @@ describe("seller app shell foundation", () => {
     expect(layout).toContain("item.roles.includes(selectedShopRole)");
     expect(layout).toContain("const mobileMoreGroups");
     expect(layout).toContain("href={withSelectedShop(mobilePrimaryThird.path)}");
-    for (const availablePath of ["/app/telegram", "/app/store/settings", "/app/customers", "/app/automation", "/app/members", "/app/billing"]) {
+    for (const availablePath of ["/app/integrations", "/app/payments", "/app/store/settings", "/app/customers", "/app/automation", "/app/members", "/app/billing", "/app/developer", "/app/security", "/app/inventory", "/app/domains"]) {
       expect(layout).toContain(`path: "${availablePath}"`);
     }
     expect(telegramAlias).toContain('new URL("/app/integrations?focus=telegram", Astro.url)');
@@ -113,7 +113,7 @@ describe("seller app shell foundation", () => {
     expect(css).toContain("min-height: 52px;");
     expect(css).toContain("scroll-padding-block-end: calc(132px + env(safe-area-inset-bottom));");
     expect(css).toContain("padding-bottom: calc(140px + env(safe-area-inset-bottom));");
-    expect(layout).toContain("data-channel={item.channel}");
+    expect(layout).toContain("data-nav-group={group.key}");
     expect(layout).toContain("app-nav-channel-group");
   });
 
@@ -135,21 +135,23 @@ describe("seller app shell foundation", () => {
     expect(css).not.toContain(".app-live-dot");
   });
 
-  it("gives every supported sales channel a distinct tenant-bound workspace entry", async () => {
+  it("gives the redesigned sales-channel IA distinct tenant-bound workspace entries", async () => {
     const [layout, css] = await Promise.all([
       readFile("src/layouts/AppLayout.astro", "utf8"),
       readFile("src/styles/app-shell.css", "utf8"),
     ]);
 
-    for (const channel of ["telegram-mini-app", "zalo-mini-app", "zalo-oa", "whatsapp-cloud", "discord-bot"]) {
-      expect(layout).toContain(`href: "/app/integrations#channel-${channel}"`);
-      expect(layout).toContain(`channel: "${channel}"`);
-      expect(css).toContain(`data-channel="${channel}"`);
+    for (const navKey of ["dashboard.nav.sales_channels", "dashboard.nav.website", "dashboard.nav.channels", "dashboard.nav.payments", "dashboard.nav.developer"]) {
+      expect(layout).toContain(`t("${navKey}")`);
     }
-    expect(layout).toContain("syncChannelFocus");
-    expect(layout).toContain('window.addEventListener("hashchange", syncChannelFocus)');
-    expect(layout).toContain('window.addEventListener("popstate", syncChannelFocus)');
-    expect(layout).toContain('window.addEventListener("pageshow", syncChannelFocus)');
+    for (const entryPath of ["/app/store", "/app/integrations", "/app/payments", "/app/developer"]) {
+      expect(layout).toContain(`path: "${entryPath}"`);
+    }
+    expect(layout).toContain('key: "sales_channels"');
+    expect(layout).toContain('key: "configuration"');
+    expect(layout).toContain("data-nav-group={group.key}");
+    expect(layout).toContain("app-nav-channel-group");
+    expect(layout).toContain("withSelectedShop(itemPath(item))");
     expect(css).toContain(".app-nav-channel-group");
     expect(css).toContain(".app-menu-link-channel");
   });

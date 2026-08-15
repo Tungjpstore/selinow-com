@@ -577,7 +577,7 @@ export async function loginWithPassword(input: {
     };
   }
 
-  const result = await issueSessionForUser({ env: input.env, now, rememberMe: input.rememberMe, user });
+  const result = await issueSessionForUser({ env: input.env, now, ...(input.rememberMe === undefined ? {} : { rememberMe: input.rememberMe }), user });
   await recordLoginHistory({ env: input.env, now, outcome: "success", requesterAddress, userId: user.userId });
   return result;
 }
