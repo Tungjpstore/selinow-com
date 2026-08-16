@@ -135,13 +135,16 @@ const pricingStructuredData = {
   {validHost ? <>
     <MarketingHeader dashboardOrigin={dashboardOrigin} locale={locale} />
     <main id="main-content" class="pricing-page">
-      <section class="platform-shell kit-section-dense">
-        <div class="pricing-intro kit-section-heading kit-section-heading-centered">
+      <section class="marketing-band platform-shell kit-section-dense pricing-intro">
+        <div class="kit-section-heading kit-section-heading-centered" data-reveal>
           <p class="kit-kicker">{t("marketing.pricing.intro.kicker")}</p>
           <h1 class="hero-headline">{t("marketing.pricing.intro.title")}</h1>
           <p class="section-description">{t("marketing.pricing.intro.description")}</p>
         </div>
+        <span class="nav-sentinel" data-nav-sentinel aria-hidden="true"></span>
+      </section>
 
+      <section class="platform-shell kit-section-dense">
         {pricingState === "unavailable" && (
           <section class="pricing-unavailable" data-pricing-state="unavailable" aria-labelledby="pricing-unavailable-title">
             <h2 id="pricing-unavailable-title">{t("marketing.pricing.unavailable.title")}</h2>
@@ -150,7 +153,7 @@ const pricingStructuredData = {
         )}
 
         {displayPlans.length > 0 && (
-          <section class="plan-grid-wrap" aria-label={t("marketing.pricing.plans_aria")} data-pricing-state={pricingState}>
+          <section class="plan-grid-wrap" aria-label={t("marketing.pricing.plans_aria")} data-pricing-state={pricingState} data-reveal>
             <div class="pricing-market-bar" data-pricing-market-root data-default-market={defaultMarket}>
               <div>
                 <p class="pricing-market-label">{t("marketing.pricing.market.label")}</p>
@@ -196,7 +199,7 @@ const pricingStructuredData = {
       </section>
 
       {displayPlans.length === 2 && (
-        <section class="platform-shell comparison-section" aria-labelledby="comparison-title">
+        <section class="platform-shell comparison-section" aria-labelledby="comparison-title" data-reveal>
           <div class="comparison-intro">
             <div>
               <p class="section-kicker">{t("marketing.pricing.comparison.kicker")}</p>
@@ -232,7 +235,7 @@ const pricingStructuredData = {
         </section>
       )}
 
-      <section class="platform-shell kit-section" id="faq">
+      <section class="platform-shell kit-section" id="faq" data-reveal>
         <div class="kit-section-heading kit-section-heading-centered">
           <p class="kit-kicker">{t("marketing.pricing.faq.kicker")}</p>
           <h2 class="section-title">{t("marketing.pricing.faq.title")}</h2>
@@ -257,6 +260,8 @@ const pricingStructuredData = {
     <MarketingFooter dashboardOrigin={dashboardOrigin} locale={locale} />
   </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{t("marketing.pricing.host_only")}</p></div></main>}
 </PlatformLayout>
+
+<script src="../scripts/landing/reveal.ts"></script>
 
 <script>
   const marketRoot = document.querySelector<HTMLElement>("[data-pricing-market-root]");

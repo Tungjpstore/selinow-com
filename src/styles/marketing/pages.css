@@ -1,8 +1,99 @@
 /* ==========================================================================
    SELINOW COMMERCE FLOW OS — PAGES STYLESHEET
-   Homepage sections live in landing.css (v3). This sheet covers pricing and
+   Homepage sections live in landing.css (v4). This sheet covers pricing and
    solutions pages plus shared section chrome.
    ========================================================================== */
+
+/* Shared dark intro band for pricing + solutions (landing v4 language). */
+.marketing-band {
+  position: relative;
+  overflow: clip;
+  background-color: var(--dark-canvas);
+  color: var(--dark-text);
+}
+
+.marketing-band::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(56% 76% at 16% 0%, rgba(124, 58, 237, 0.26), transparent 62%),
+    radial-gradient(46% 66% at 88% 12%, rgba(59, 130, 246, 0.18), transparent 60%),
+    radial-gradient(64% 88% at 50% 115%, rgba(101, 82, 232, 0.22), transparent 62%);
+  pointer-events: none;
+}
+
+.marketing-band::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse 92% 90% at 50% 0%, #000 18%, transparent 78%);
+  mask-image: radial-gradient(ellipse 92% 90% at 50% 0%, #000 18%, transparent 78%);
+  pointer-events: none;
+}
+
+.marketing-band > * {
+  position: relative;
+  z-index: 1;
+}
+
+.marketing-band .hero-headline {
+  color: var(--dark-text);
+}
+
+.marketing-band .hero-lead,
+.marketing-band .section-description {
+  color: var(--dark-text-secondary);
+}
+
+.marketing-band .section-eyebrow,
+.marketing-band .kit-kicker {
+  color: var(--brand-300);
+}
+
+.marketing-band .solution-breadcrumb {
+  color: var(--dark-text-muted);
+}
+
+.marketing-band .solution-breadcrumb:hover {
+  color: var(--brand-300);
+}
+
+.marketing-band .solution-signal {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: var(--dark-line);
+  box-shadow: 0 24px 64px rgba(2, 3, 10, 0.35);
+}
+
+.marketing-band .solution-signal p {
+  color: var(--dark-text-muted);
+}
+
+.marketing-band .solution-signal strong {
+  color: var(--dark-text);
+}
+
+.marketing-band .solution-signal-index,
+.marketing-band .solution-signal small {
+  color: var(--brand-300);
+}
+
+.marketing-band + .kit-section,
+.solution-page .marketing-band {
+  scroll-margin-top: 96px;
+}
+
+.landing-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-7);
+}
 
 /* Shared with solutions detail pages. */
 .workflow-section {
@@ -87,7 +178,36 @@
   display: flex;
   flex-direction: column;
   position: relative;
+  overflow: hidden;
   box-shadow: var(--shadow-xs);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.runtime-plan-card::before,
+.plan::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-image: var(--aurora-gradient);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.runtime-plan-card:hover,
+.plan:hover {
+  transform: translateY(-4px);
+  border-color: var(--brand-300);
+  box-shadow: var(--shadow-md);
+}
+
+.runtime-plan-card:hover::before,
+.plan:hover::before,
+.runtime-plan-card-featured::before,
+.plan-recommended::before {
+  opacity: 1;
 }
 
 .runtime-plan-card-featured,

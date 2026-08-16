@@ -13,6 +13,13 @@ import { LOCALE_COOKIE_NAME, resolveLocaleWithSource } from "./lib/i18n/locale";
 import { isStorefrontCacheCandidate, resolveActiveStorefrontCacheKey } from "./lib/storefront/cache";
 import { classifyPlatformHost } from "./lib/storefront/routing";
 
+/** Cloudflare edge geo metadata — request.cf when present, header otherwise. */
+function geoCountryFor(request: Request): string | null {
+  const cf = (request as Request & { cf?: { country?: unknown } }).cf;
+  if (typeof cf?.country === "string") return cf.country;
+  return request.headers.get("cf-ipcountry");
+}
+
 export const onRequest = defineMiddleware(async (context, next) => {
   const startedAt = Date.now();
   const requestId = resolveRequestId(context.request.headers.get("X-Request-Id"));
@@ -28,6 +35,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
       acceptLanguage: context.request.headers.get("Accept-Language"),
       cookie: parseCookies(context.request.headers.get("Cookie")).get(LOCALE_COOKIE_NAME),
       explicit: requestUrl.searchParams.get("lang"),
+      // Geo auto-detection is a platform-marketing concern only: tenant
+      // storefronts resolve their own authoritative shop default.
+      ...(hostKind === "marketing" ? { geoCountry: geoCountryFor(context.request) } : {}),
     });
     const locale = localeResolution.source === "default" ? undefined : localeResolution.locale;
     const localePreferenceCookie = localeResolution.source === "explicit"

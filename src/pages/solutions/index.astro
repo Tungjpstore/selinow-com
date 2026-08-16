@@ -65,18 +65,18 @@ if (!validHost) {
   {validHost ? <>
     <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
     <main id="main-content" class="solution-page solution-hub-page" data-marketing-surface="solutions-hub">
-      <section class="solution-hero platform-shell kit-section-dense">
-        <div class="solution-hero-copy">
+      <section class="solution-hero marketing-band platform-shell kit-section-dense">
+        <div class="solution-hero-copy" data-reveal>
           <a class="solution-breadcrumb" href={localizedPath("/")}>Selinow <span aria-hidden="true">/</span> {content.eyebrow}</a>
           <p class="section-eyebrow">{content.eyebrow}</p>
           <h1 class="hero-headline">{content.title}</h1>
           <p class="hero-lead">{content.lead}</p>
           <div class="landing-actions">
-            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+            <a class="kit-button kit-button-aurora" href={`${env.DASHBOARD_ORIGIN}/login`}>
               <span>{content.cta}</span>
               <span aria-hidden="true">→</span>
             </a>
-            <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
+            <a class="kit-button kit-button-outline-light" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
           </div>
         </div>
         <aside class="solution-signal" aria-label={content.answerLabel}>
@@ -85,19 +85,20 @@ if (!validHost) {
           <strong>{content.answer}</strong>
           <small>Selinow OS / {content.solutionsLabel.toLowerCase()}</small>
         </aside>
+        <span class="nav-sentinel" data-nav-sentinel aria-hidden="true"></span>
       </section>
 
       <section class="kit-section platform-shell" aria-labelledby="solution-catalog-title">
-        <div class="kit-section-heading">
+        <div class="kit-section-heading" data-reveal>
           <p class="kit-kicker">{content.cardLabel}</p>
           <h2 class="section-title" id="solution-catalog-title">{content.cardTitle}</h2>
           <p class="section-description">{content.cardDescription}</p>
         </div>
-        <div class="solution-catalog-grid">
+        <div class="solution-catalog-grid" data-reveal-group>
           {solutionSlugs.map((slug, index) => {
             const solution = getSolutionPage(slug, locale);
             return solution === null ? null : (
-              <a class="solution-catalog-card" href={localizedPath(`/solutions/${slug}`)}>
+              <a class="solution-catalog-card" href={localizedPath(`/solutions/${slug}`)} data-reveal>
                 <span class="solution-card-index">{String(index + 1).padStart(2, "0")}</span>
                 <span class="solution-card-eyebrow">{solution.eyebrow}</span>
                 <strong>{solution.title}</strong>
@@ -128,3 +129,5 @@ if (!validHost) {
     <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
   </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
 </PlatformLayout>
+
+<script src="../../scripts/landing/reveal.ts"></script>

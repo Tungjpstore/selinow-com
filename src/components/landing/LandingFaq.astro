@@ -1,0 +1,42 @@
+---
+/**
+ * Landing v4 FAQ — native details/summary accordions, honest answers only.
+ */
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+interface Props {
+  locale?: unknown;
+}
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const faq = [
+  [t("marketing.home.faq.telegram.question"), t("marketing.home.faq.telegram.answer")],
+  [t("marketing.home.faq.money.question"), t("marketing.home.faq.money.answer")],
+  [t("marketing.home.faq.test.question"), t("marketing.home.faq.test.answer")],
+];
+---
+
+<section class="kit-section platform-shell landing-faq" id="faq">
+  <div class="kit-section-heading kit-section-heading-centered">
+    <div data-reveal>
+      <p class="kit-kicker">{t("marketing.home.faq.kicker")}</p>
+      <h2 class="section-title">{t("marketing.home.faq.title")}</h2>
+    </div>
+  </div>
+
+  <div class="faq-kit-list" data-reveal>
+    {faq.map((item) => (
+      <details>
+        <summary>
+          <span>{item[0]}</span>
+          <span aria-hidden="true">+</span>
+        </summary>
+        <p>{item[1]}</p>
+      </details>
+    ))}
+  </div>
+</section>

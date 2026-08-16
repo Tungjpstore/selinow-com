@@ -1,0 +1,38 @@
+---
+/**
+ * Landing v4 final CTA — second dark cinematic surface with a CSS aurora
+ * backdrop (no canvas here; the hero already owns the animated scene).
+ */
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+interface Props {
+  dashboardOrigin: string;
+  locale?: unknown;
+}
+
+const { dashboardOrigin, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+---
+
+<section class="landing-final">
+  <div class="landing-final-backdrop" aria-hidden="true"></div>
+  <div class="platform-shell landing-final-inner">
+    <div data-reveal>
+      <p class="kit-kicker kit-kicker-dark">{t("marketing.home.final.kicker")}</p>
+      <h2>{t("marketing.home.final.title")}</h2>
+      <p>{t("marketing.home.final.description")}</p>
+    </div>
+    <div class="landing-final-actions" data-reveal>
+      <a class="kit-button kit-button-aurora" href={`${dashboardOrigin}/login`}>
+        <span>{t("marketing.home.final.cta")}</span>
+        <span aria-hidden="true">→</span>
+      </a>
+      <a class="kit-button kit-button-outline-light" href="#workflow">
+        <span>{t("marketing.home.hero.secondary")}</span>
+        <span class="play-icon" aria-hidden="true">▶</span>
+      </a>
+    </div>
+  </div>
+</section>

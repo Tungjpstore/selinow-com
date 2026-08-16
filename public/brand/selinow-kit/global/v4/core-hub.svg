@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" fill="none" role="img" aria-hidden="true">
+  <defs>
+    <linearGradient id="aurora" x1="0" y1="0" x2="160" y2="160" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7C3AED"/>
+      <stop offset="0.5" stop-color="#6552E8"/>
+      <stop offset="1" stop-color="#3B82F6"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="160" y2="160" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C0B7FF"/>
+      <stop offset="1" stop-color="#6552E8"/>
+    </linearGradient>
+  </defs>
+  <g stroke="url(#aurora)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M80 22l44 19v38c0 27-18 45-44 55-26-10-44-28-44-55V41z"/>
+    <path d="M62 80l13 13 25-27" stroke-width="3"/>
+  </g>
+  <g stroke="url(#ink)" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.5">
+    <circle cx="80" cy="80" r="66" stroke-dasharray="3 8"/>
+  </g>
+  <g fill="#9C8BFF" fill-opacity="0.85">
+    <circle cx="146" cy="34" r="4"/>
+    <circle cx="16" cy="118" r="3.5"/>
+  </g>
+  <g fill="#3B82F6" fill-opacity="0.7">
+    <circle cx="140" cy="128" r="3"/>
+  </g>
+</svg>

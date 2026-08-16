@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
+  <defs>
+    <radialGradient id="glowViolet" cx="0.22" cy="0.18" r="0.6">
+      <stop offset="0" stop-color="#7C3AED" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowBlue" cx="0.85" cy="0.16" r="0.55">
+      <stop offset="0" stop-color="#3B82F6" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowIndigo" cx="0.55" cy="1.05" r="0.75">
+      <stop offset="0" stop-color="#6552E8" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#6552E8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9C8BFF"/>
+      <stop offset="1" stop-color="#6552E8"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F5F6FA"/>
+      <stop offset="1" stop-color="#C0B7FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#0A0B12"/>
+  <rect width="1200" height="630" fill="url(#glowViolet)"/>
+  <rect width="1200" height="630" fill="url(#glowBlue)"/>
+  <rect width="1200" height="630" fill="url(#glowIndigo)"/>
+  <g stroke="#9C8BFF" stroke-opacity="0.14" stroke-width="1.2">
+    <path d="M120 480 L360 380 L610 470 L860 360 L1080 430"/>
+    <path d="M120 520 L400 470 L640 540 L920 460"/>
+    <path d="M200 120 L480 200 L760 130 L1000 210"/>
+  </g>
+  <g fill="#E9ECF6" fill-opacity="0.5">
+    <circle cx="120" cy="480" r="4"/>
+    <circle cx="360" cy="380" r="5"/>
+    <circle cx="610" cy="470" r="4"/>
+    <circle cx="860" cy="360" r="5"/>
+    <circle cx="1080" cy="430" r="4"/>
+    <circle cx="400" cy="470" r="3.5"/>
+    <circle cx="920" cy="460" r="3.5"/>
+    <circle cx="480" cy="200" r="3.5"/>
+    <circle cx="760" cy="130" r="4"/>
+  </g>
+  <g transform="translate(96 118)">
+    <path d="M34 8l30 13v26c0 18.5-12.3 30.8-30 37-17.7-6.2-30-18.5-30-37V21z" stroke="url(#mark)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M22 40l9 9 17-18" stroke="#C0B7FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="184" y="172" font-family="Inter, 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="-1" fill="url(#title)">Selinow</text>
+  <text x="97" y="252" font-family="Inter, 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif" font-size="40" font-weight="700" letter-spacing="-0.5" fill="#F5F6FA">Digital product commerce,</text>
+  <text x="97" y="304" font-family="Inter, 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif" font-size="40" font-weight="700" letter-spacing="-0.5" fill="#F5F6FA">verified delivery.</text>
+  <text x="97" y="352" font-family="Inter, 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="500" fill="#9AA0B5">Website + Telegram · One catalog, one order state, one fulfillment flow</text>
+  <rect x="97" y="510" width="220" height="2" fill="#6552E8" fill-opacity="0.6"/>
+  <text x="97" y="560" font-family="Inter, 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif" font-size="24" font-weight="600" fill="#C0B7FF">selinow.com</text>
+</svg>

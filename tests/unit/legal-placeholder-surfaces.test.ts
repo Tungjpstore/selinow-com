@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 
 describe("owner-approval placeholder surfaces", () => {
   it("links every blocked policy surface from the public landing footer", () => {
-    const source = readFileSync(join(process.cwd(), "src/pages/index.astro"), "utf8");
-    expect(source).toContain('href="/legal"');
-    expect(source).toContain('href="/privacy"');
-    expect(source).toContain('href="/support"');
+    // The landing delegates its footer to MarketingFooter (landing v4).
+    const source = readFileSync(join(process.cwd(), "src/components/marketing/MarketingFooter.astro"), "utf8");
+    expect(source).toContain('localizedPath("/legal")');
+    expect(source).toContain('localizedPath("/privacy")');
+    expect(source).toContain('localizedPath("/support")');
   });
 
   it("keeps privacy, legal and support claims explicitly blocked", () => {

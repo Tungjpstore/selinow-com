@@ -2,6 +2,63 @@
    SELINOW COMMERCE FLOW OS — MARKETING DESIGN TOKENS
    ========================================================================== */
 
+/* Self-hosted webfonts (see docs/marketing-redesign/LANDING_V4_DESIGN_DIRECTION.md).
+   English pages render Inter; :lang(vi) flips the stack so Vietnamese text uses
+   one consistent typeface instead of mixed per-glyph fallbacks. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url("/fonts/inter-var-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url("/fonts/inter-var-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Be Vietnam Pro";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("/fonts/bvp-latin-400.woff2") format("woff2"), url("/fonts/bvp-vietnamese-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: "Be Vietnam Pro";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("/fonts/bvp-latin-500.woff2") format("woff2"), url("/fonts/bvp-vietnamese-500.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: "Be Vietnam Pro";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("/fonts/bvp-latin-600.woff2") format("woff2"), url("/fonts/bvp-vietnamese-600.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: "Be Vietnam Pro";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("/fonts/bvp-latin-700.woff2") format("woff2"), url("/fonts/bvp-vietnamese-700.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+1EA0-1EF9, U+20AB;
+}
+
 :root {
   /* Brand / Primary Palette — Selinow Indigo */
   --brand-50:  #F4F3FF;
@@ -148,12 +205,33 @@
 
   /* Typography Stack */
   --font-sans: Inter, "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans-vi: "Be Vietnam Pro", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
 
   --mk-font-sans: var(--font-sans);
   --mk-font-mono: var(--font-mono);
 
+  /* Landing V4 — dark cinematic surfaces (hero, final CTA, page intro bands) */
+  --dark-canvas: #06070D;
+  --dark-canvas-deep: #04050A;
+  --dark-canvas-raised: rgba(255, 255, 255, 0.04);
+  --dark-line: rgba(255, 255, 255, 0.09);
+  --dark-text: #F5F6FA;
+  --dark-text-secondary: rgba(233, 236, 246, 0.72);
+  --dark-text-muted: rgba(233, 236, 246, 0.55);
+  --aurora-violet: #7C3AED;
+  --aurora-indigo: #6552E8;
+  --aurora-blue: #3B82F6;
+  --aurora-bright: #9C8BFF;
+  --aurora-gradient: linear-gradient(96deg, var(--aurora-violet) 0%, var(--aurora-indigo) 48%, var(--aurora-blue) 100%);
+
   /* Focus Indicator */
   --mk-focus: #6552E8;
   --mk-focus-offset: 3px;
+}
+
+/* Vietnamese-locale pages swap the sans stack so every glyph (including
+   diacritics) comes from one typeface instead of a mixed Inter/BVP fallback. */
+:lang(vi) {
+  --font-sans: "Be Vietnam Pro", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }

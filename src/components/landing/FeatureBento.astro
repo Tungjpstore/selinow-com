@@ -1,0 +1,45 @@
+---
+/**
+ * Landing v4 feature bento — six real capabilities on a light surface.
+ */
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { bentoIcons } from "./icons";
+
+interface Props {
+  locale?: unknown;
+}
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const cards = [
+  { icon: bentoIcons[0], title: t("marketing.home.bento.payments.title"), description: t("marketing.home.bento.payments.description"), wide: true },
+  { icon: bentoIcons[1], title: t("marketing.home.bento.delivery.title"), description: t("marketing.home.bento.delivery.description") },
+  { icon: bentoIcons[2], title: t("marketing.home.bento.core.title"), description: t("marketing.home.bento.core.description") },
+  { icon: bentoIcons[3], title: t("marketing.home.bento.bilingual.title"), description: t("marketing.home.bento.bilingual.description") },
+  { icon: bentoIcons[4], title: t("marketing.home.bento.operations.title"), description: t("marketing.home.bento.operations.description"), wide: true },
+  { icon: bentoIcons[5], title: t("marketing.home.bento.tenancy.title"), description: t("marketing.home.bento.tenancy.description") },
+];
+---
+
+<section class="kit-section platform-shell landing-bento" id="features">
+  <div class="kit-section-heading kit-section-heading-centered">
+    <div data-reveal>
+      <p class="kit-kicker">{t("marketing.home.bento.kicker")}</p>
+      <h2 class="section-title">{t("marketing.home.bento.title")}</h2>
+    </div>
+    <p class="section-description" data-reveal>{t("marketing.home.bento.description")}</p>
+  </div>
+
+  <div class="bento-grid" data-reveal-group>
+    {cards.map((card) => (
+      <article class:list={["bento-card", card.wide === true && "bento-card-wide"]} data-reveal>
+        <span class="bento-icon" set:html={card.icon} aria-hidden="true"></span>
+        <h3>{card.title}</h3>
+        <p>{card.description}</p>
+      </article>
+    ))}
+  </div>
+</section>

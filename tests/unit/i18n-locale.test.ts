@@ -52,7 +52,7 @@ describe("locale core", () => {
     expect(parseAcceptLanguage("vi;q=bogus, en;q=0.7")).toEqual(["en"]);
   });
 
-  it("resolves explicit, cookie, browser, configured fallback, then English", () => {
+  it("resolves explicit, cookie, geo, browser, configured fallback, then English", () => {
     expect(resolveLocaleWithSource({
       acceptLanguage: "en-US",
       cookie: "vi",
@@ -66,6 +66,21 @@ describe("locale core", () => {
     expect(resolveLocaleWithSource({ acceptLanguage: "fr-FR", fallback: "vi" }))
       .toEqual({ locale: "vi-VN", source: "fallback" });
     expect(resolveLocaleWithSource({ explicit: "zz", fallback: "also-invalid" }))
+      .toEqual({ locale: DEFAULT_LOCALE, source: "default" });
+  });
+
+  it("applies geo detection after explicit choice and cookie, before Accept-Language", () => {
+    expect(resolveLocaleWithSource({ acceptLanguage: "en-US", explicit: "en", geoCountry: "VN" }))
+      .toEqual({ locale: "en", source: "explicit" });
+    expect(resolveLocaleWithSource({ acceptLanguage: "en-US", cookie: "en", geoCountry: "VN" }))
+      .toEqual({ locale: "en", source: "cookie" });
+    expect(resolveLocaleWithSource({ acceptLanguage: "en-US", geoCountry: "vn" }))
+      .toEqual({ locale: "vi-VN", source: "geo" });
+    expect(resolveLocaleWithSource({ acceptLanguage: "en-US", fallback: "en", geoCountry: "JP" }))
+      .toEqual({ locale: "en", source: "accept-language" });
+    expect(resolveLocaleWithSource({ geoCountry: "NOT-A-COUNTRY" }))
+      .toEqual({ locale: DEFAULT_LOCALE, source: "default" });
+    expect(resolveLocaleWithSource({ geoCountry: 84 }))
       .toEqual({ locale: DEFAULT_LOCALE, source: "default" });
   });
 

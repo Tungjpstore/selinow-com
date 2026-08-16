@@ -4,6 +4,55 @@ Last updated: 2026-08-16
 
 ## Current source of truth
 
+Landing V4 "Aurora" — Dark Cinematic Marketing Rebuild + Geo i18n (2026-08-16, branch `storefront-templates`):
+Full rebuild of the marketing surface per `docs/marketing-redesign/LANDING_V4_DESIGN_DIRECTION.md`
+(dark cinematic hero + final CTA bookending a light body; scoped, WCAG-AA-controlled override of the
+old "no purple-on-dark" guidance, which otherwise still stands).
+- **Landing `/`**: componentized into `src/components/landing/` (LandingHero with canvas aurora +
+  transaction-lifecycle player, FeatureBento, HowItWorks scroll-story with product-UI mocks
+  [Telegram bot, catalog, readiness checklist, order timeline — all localized HTML, replacing the
+  abstract SVG kit], SolutionsPreview, LandingFaq, FinalCta); channel marquee + coverage board +
+  architecture board + runtime pricing preview stay in `index.astro` (surface contracts intact);
+  inline footer duplicate replaced by `MarketingFooter`. Storefront/404 modes untouched.
+- **Motion system** `src/scripts/landing/`: `hero-scene.ts` (aurora mesh + particle network canvas,
+  offscreen 1/8-res aurora, DPR≤2, IO/visibility pause, reduced-motion static frame), `reveal.ts`
+  (IO play-once stagger, no-JS safe via `[data-reveal-ready]`), `scroll-stage.ts` (first client
+  dependency `motion` v13 — hero parallax + how-it-works progress rail), `lifecycle-player.ts`
+  (auto-playing checkout demo, 4s hold between cycles, paused offscreen/hidden). Old `hero-canvas.ts`,
+  `HeroCommerceFlow`, `CommerceFlowRail` removed.
+- **Typography**: self-hosted webfonts in `public/fonts/` (Inter variable latin/latin-ext +
+  Be Vietnam Pro 400–700 latin/vietnamese, OFL notices included); `@font-face` + preloads in
+  tokens.css/PlatformLayout; `:lang(vi)` flips the sans stack to Be Vietnam Pro for consistent
+  diacritics. `theme-color` → `#06070D`.
+- **Pricing + Solutions sync**: pricing intro and solutions hero/detail heroes became dark
+  `.marketing-band` intros with nav sentinels; plan cards got hover lift + aurora top line;
+  `final-cta-kit` restyled on the aurora backdrop; reveal script wired on all marketing pages.
+- **Nav**: `MarketingHeader` renders transparent-dark overlay over the dark bands (logo swap +
+  light link treatments via `[data-nav-surface]`, flipped by an IntersectionObserver on
+  `[data-nav-sentinel]`); EN/VI switcher and mobile menu contracts preserved.
+- **Assets**: `public/brand/selinow-kit/global/v4/` now ships `core-hub.svg` + `og-cover.svg` only
+  (text-free); new OG PNG rasterized from the SVG master via `scripts/generate-og-image.mjs`
+  (Playwright, safe-fallback keeps the previous PNG). v3 kit untouched for history.
+- **Geo i18n**: `resolveLocaleWithSource` gained `geoCountry` + `"geo"` source (VN → vi-VN);
+  middleware feeds `request.cf.country ?? cf-ipcountry` **for marketing hosts only** — tenant
+  storefronts keep their authoritative shop default, and geo never persists the locale cookie
+  (only explicit `?lang=` does). Precedence: explicit > cookie > geo > Accept-Language > fallback.
+- **i18n copy**: `marketing.home.*` rewritten for v4 (hero, bento×6, lifecycle, solutions,
+  workflow mocks) with full en/vi-VN parity; the hardcoded `locale === "vi-VN" ? …` ternaries in
+  the landing/solutions surfaces are gone (now catalog keys, incl. SolutionWorkflowCard CTA).
+- **Verification**: `npm run check` (my surfaces 0 errors — the 8 remaining AppLayout errors are
+  the parallel dashboard stream's in-flight WIP) · `npm run lint` clean · `npm run test`
+  (335 files, **2632 tests**; updated `marketing-assets-contract`, `legal-placeholder-surfaces`,
+  `middleware-locale-contract`, `i18n-locale`) · `npm run build` · `npm run deploy:dry-run` ·
+  `scripts/landing-visual-check.mjs` (24 captures at 1440/768/390/320 × en/vi: no horizontal
+  overflow, no console errors; AI-vision review 7–8/10, hero dark + cinematic after the
+  wash-out/deeper-bg/hero-height-50% revision round).
+- **Known limitations**: motion demo loops (lifecycle, marquee, arch connectors) are documented
+  deviations from the "no infinite loops" rule — each pauses offscreen/hidden and is fully static
+  under reduced-motion; geo detection is Cloudflare-edge only (dev server shows English unless
+  `?lang=vi-VN`); OG rasterization requires local Playwright chromium (regenerate via
+  `node scripts/generate-og-image.mjs`).
+
 Seller Operations for All Verticals — TV5 (2026-08-16, branch `storefront-templates`):
 Closes the seller-side loop: physical and booking shops are now fully operable from the dashboard.
 - **Product editor (TV5a)**: selling-type select (digital vs physical) persisted through the

@@ -1,0 +1,67 @@
+---
+/**
+ * Landing v4 solutions preview — catalog-driven copy (no hardcoded locale
+ * ternaries), linking into the three solution deep dives.
+ */
+import SolutionWorkflowCard from "../marketing/SolutionWorkflowCard.astro";
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+interface Props {
+  locale?: unknown;
+}
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const solutions = [
+  {
+    slug: "telegram-commerce",
+    eyebrow: "01 / TELEGRAM COMMERCE",
+    title: t("marketing.home.solutions.telegram_commerce.title"),
+    lead: t("marketing.home.solutions.telegram_commerce.lead"),
+    href: "/solutions/telegram-commerce",
+  },
+  {
+    slug: "digital-product-delivery",
+    eyebrow: "02 / DIGITAL PRODUCT DELIVERY",
+    title: t("marketing.home.solutions.digital_delivery.title"),
+    lead: t("marketing.home.solutions.digital_delivery.lead"),
+    href: "/solutions/digital-product-delivery",
+  },
+  {
+    slug: "license-key-inventory",
+    eyebrow: "03 / LICENSE KEY INVENTORY",
+    title: t("marketing.home.solutions.license_keys.title"),
+    lead: t("marketing.home.solutions.license_keys.lead"),
+    href: "/solutions/license-key-inventory",
+  },
+];
+---
+
+<section class="kit-section platform-shell" id="use-cases">
+  <div class="kit-section-heading kit-section-heading-centered">
+    <div data-reveal>
+      <p class="kit-kicker">{t("marketing.home.use_cases.kicker")}</p>
+      <h2 class="section-title">{t("marketing.home.use_cases.title")}</h2>
+    </div>
+    <p class="section-description" data-reveal>{t("marketing.home.use_cases.description")}</p>
+  </div>
+
+  <div class="usecase-grid" data-reveal-group>
+    {solutions.map((solution, index) => (
+      <div data-reveal>
+        <SolutionWorkflowCard
+          slug={solution.slug}
+          index={index + 1}
+          eyebrow={solution.eyebrow}
+          title={solution.title}
+          lead={solution.lead}
+          href={solution.href}
+          locale={locale}
+        />
+      </div>
+    ))}
+  </div>
+</section>

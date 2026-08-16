@@ -10,10 +10,12 @@ interface Props {
 }
 
 import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
 import SolutionDiagram from "./SolutionDiagram.astro";
 
 const { slug, index, eyebrow, title, lead, href, locale: propLocale } = Astro.props;
 const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
 ---
 
 <article class="solution-workflow-card">
@@ -38,7 +40,7 @@ const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
 
   <div class="card-footer">
     <a class="kit-button kit-button-secondary" href={href}>
-      <span>{locale.toLowerCase().startsWith("vi") ? "Xem chi tiết luồng" : "Explore workflow"}</span>
+      <span>{t("marketing.home.solutions.explore")}</span>
       <span aria-hidden="true">→</span>
     </a>
   </div>

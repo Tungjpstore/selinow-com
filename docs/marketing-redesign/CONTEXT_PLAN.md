@@ -33,6 +33,7 @@
 - Visual Language: Selinow Indigo primary palette (`--mk-brand: #5b5ceb`, `--brand-50` to `--brand-900`), clean light neutral surfaces, subtle border hierarchy, crisp shadows.
 - Primitives: Flow nodes, status chips, timeline connectors, transaction sequence simulations.
 - No Cliché Tropes: No card-wall syndrome, no fake metric graphs, no purple-on-dark, no glowing borders, no fake testimonials.
+- Note (2026-08-16): the purple-on-dark / glowing-border ban is superseded for the landing hero, dark intro bands, and final CTA by `LANDING_V4_DESIGN_DIRECTION.md` (scoped, WCAG-AA-controlled deviation). Fake metrics/testimonials and card-wall remain banned everywhere.
 - Responsive breakpoints: 320px, 390px, 768px, 1024px, 1440px with programmatic horizontal overflow prevention.
 
 ## 5. Security & Public/Private Boundaries

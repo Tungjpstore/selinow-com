@@ -290,6 +290,60 @@
   }
 }
 
+/* Overlay nav — transparent-dark while the page's dark intro band sits
+   underneath (flipped by the sentinel watcher in MarketingHeader). */
+.platform-nav[data-nav-surface="overlay"] {
+  background-color: rgba(10, 11, 18, 0.55);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.platform-logo-dark {
+  display: none;
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-logo-light {
+  display: none;
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-logo-dark {
+  display: block;
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-nav-desktop a:not(.nav-cta) {
+  color: rgba(233, 236, 246, 0.76);
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-nav-desktop a:not(.nav-cta):hover {
+  color: #FFFFFF;
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-language-switcher {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-language-switcher a {
+  color: rgba(240, 242, 250, 0.9);
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-language-switcher a[aria-current="page"] {
+  color: #E4DCFF;
+  background-color: rgba(156, 139, 255, 0.24);
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-nav-mobile-login {
+  color: rgba(233, 236, 246, 0.85);
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-nav-mobile summary {
+  background-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.platform-nav[data-nav-surface="overlay"] .platform-nav-mobile summary span {
+  background-color: #E9ECF6;
+}
+
 /* --------------------------------------------------------------------------
    3. GLOBAL MARKETING FOOTER
    -------------------------------------------------------------------------- */
@@ -549,11 +603,22 @@
    7. FINAL MINIMAL CTA
    -------------------------------------------------------------------------- */
 .final-cta-kit {
-  background: linear-gradient(145deg, #181926 0%, #0F101A 100%);
+  background-color: var(--dark-canvas);
   color: #FFFFFF;
   padding: clamp(64px, 8vw, 96px) 0;
   position: relative;
   overflow: hidden;
+}
+
+.final-cta-kit::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(56% 76% at 18% 0%, rgba(124, 58, 237, 0.28), transparent 62%),
+    radial-gradient(46% 66% at 86% 14%, rgba(59, 130, 246, 0.2), transparent 60%),
+    radial-gradient(66% 90% at 50% 112%, rgba(101, 82, 232, 0.26), transparent 62%);
+  pointer-events: none;
 }
 
 .final-cta-inner {

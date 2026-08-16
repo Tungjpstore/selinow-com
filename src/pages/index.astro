@@ -1,9 +1,14 @@
 ---
 import MarketingHeader from "../components/marketing/MarketingHeader.astro";
-import HeroCommerceFlow from "../components/marketing/HeroCommerceFlow.astro";
-import CommerceFlowRail from "../components/marketing/CommerceFlowRail.astro";
-import SolutionWorkflowCard from "../components/marketing/SolutionWorkflowCard.astro";
+import MarketingFooter from "../components/marketing/MarketingFooter.astro";
 import PlatformLayout from "../layouts/PlatformLayout.astro";
+import LandingHero from "../components/landing/LandingHero.astro";
+import FeatureBento from "../components/landing/FeatureBento.astro";
+import HowItWorks from "../components/landing/HowItWorks.astro";
+import SolutionsPreview from "../components/landing/SolutionsPreview.astro";
+import LandingFaq from "../components/landing/LandingFaq.astro";
+import FinalCta from "../components/landing/FinalCta.astro";
+import { architectureGlyphs, channelIcons, sparkGlyph } from "../components/landing/icons";
 import StoreHome from "../components/storefront/templates/StoreHome.astro";
 import StorefrontLayout from "../layouts/StorefrontLayout.astro";
 import { isAppError } from "../lib/core/errors";
@@ -38,23 +43,6 @@ const landingCopy = {
   seoDescription: mt("marketing.home.seo_description"),
   announcement: mt("marketing.home.announcement"),
   announcementCta: mt("marketing.home.announcement_cta"),
-  eyebrow: mt("marketing.home.hero.eyebrow"),
-  heroTitle: mt("marketing.home.hero.title"),
-  heroHighlight: mt("marketing.home.hero.highlight"),
-  heroDescription: mt("marketing.home.hero.lead"),
-  heroPrimary: mt("marketing.home.hero.primary"),
-  heroSecondary: mt("marketing.home.hero.secondary"),
-  heroProof: [
-    mt("marketing.home.hero.proof.no_card"),
-    mt("marketing.home.hero.proof.locales"),
-    mt("marketing.home.hero.proof.verify_before_delivery"),
-  ],
-  trust: [
-    [mt("marketing.home.trust.security.title"), mt("marketing.home.trust.security.description")],
-    [mt("marketing.home.trust.expansion.title"), mt("marketing.home.trust.expansion.description")],
-    [mt("marketing.home.trust.data.title"), mt("marketing.home.trust.data.description")],
-    [mt("marketing.home.trust.automation.title"), mt("marketing.home.trust.automation.description")],
-  ],
   channelsEyebrow: mt("marketing.home.channels.eyebrow"),
   channelsTitle: mt("marketing.home.channels.title"),
   channelsDescription: mt("marketing.home.channels.description"),
@@ -83,41 +71,6 @@ const landingCopy = {
     { key: "discord", state: "next", label: mt("marketing.home.channels.name.discord"), status: mt("marketing.home.channels.status.next") },
     { key: "api", state: "planned", label: mt("marketing.home.channels.name.api"), status: mt("marketing.home.channels.status.development") },
   ],
-  useEyebrow: mt("marketing.home.use_cases.kicker"),
-  useTitle: mt("marketing.home.use_cases.title"),
-  useDescription: mt("marketing.home.use_cases.description"),
-  solutions: [
-    {
-      slug: "telegram-commerce",
-      eyebrow: "01 / TELEGRAM COMMERCE",
-      title: locale === "vi-VN" ? "Thương mại Telegram" : "Telegram Commerce",
-      lead: locale === "vi-VN" ? "Biến cuộc trò chuyện trên Telegram thành cửa hàng có thể mở rộng với catalog và thanh toán PayOS đồng bộ." : "Turn Telegram conversations into a scalable storefront with unified catalog and verified payments.",
-      href: "/solutions/telegram-commerce",
-    },
-    {
-      slug: "digital-product-delivery",
-      eyebrow: "02 / DIGITAL PRODUCT DELIVERY",
-      title: locale === "vi-VN" ? "Tự động giao sản phẩm số" : "Digital Product Delivery",
-      lead: locale === "vi-VN" ? "Giao file và quyền truy cập tự động sau checkout với kiểm tra thanh toán độc lập và an toàn." : "Automate digital file and access delivery after verified checkout with safe retry boundaries.",
-      href: "/solutions/digital-product-delivery",
-    },
-    {
-      slug: "license-key-inventory",
-      eyebrow: "03 / LICENSE KEY INVENTORY",
-      title: locale === "vi-VN" ? "Quản lý Inventory License Key" : "License Key Inventory",
-      lead: locale === "vi-VN" ? "Bảo vệ key mã hóa, cấp phát 1 người thắng và ngăn chặn việc trùng lặp key giữa các đơn hàng." : "Encrypted key storage, concurrency guards, and one-winner key allocation for digital sellers.",
-      href: "/solutions/license-key-inventory",
-    },
-  ],
-  workflowEyebrow: mt("marketing.home.workflow.kicker"),
-  workflowTitle: mt("marketing.home.workflow.title"),
-  workflowDescription: mt("marketing.home.workflow.description"),
-  workflowSteps: [
-    [mt("marketing.home.workflow.step1.title"), mt("marketing.home.workflow.step1.description"), "global/v3/flow-catalog.svg"],
-    [mt("marketing.home.workflow.step2.title"), mt("marketing.home.workflow.step2.description"), "global/v3/flow-channels.svg"],
-    [mt("marketing.home.workflow.step3.title"), mt("marketing.home.workflow.step3.description"), "global/v3/flow-support.svg"],
-    [mt("marketing.home.workflow.step4.title"), mt("marketing.home.workflow.step4.description"), "global/v3/flow-delivery.svg"],
-  ],
   architectureEyebrow: mt("marketing.home.architecture.eyebrow"),
   architectureTitle: mt("marketing.home.architecture.title"),
   architectureDescription: mt("marketing.home.architecture.description"),
@@ -145,27 +98,11 @@ const landingCopy = {
   planCta: mt("marketing.home.pricing.create"),
   pricingCompare: mt("marketing.home.pricing.compare"),
   pricingRecommended: mt("marketing.home.pricing.recommended"),
-  faqEyebrow: mt("marketing.home.faq.kicker"),
-  faqTitle: mt("marketing.home.faq.title"),
   faq: [
     [mt("marketing.home.faq.telegram.question"), mt("marketing.home.faq.telegram.answer")],
     [mt("marketing.home.faq.money.question"), mt("marketing.home.faq.money.answer")],
     [mt("marketing.home.faq.test.question"), mt("marketing.home.faq.test.answer")],
   ],
-  finalEyebrow: mt("marketing.home.final.kicker"),
-  finalTitle: mt("marketing.home.final.title"),
-  finalDescription: mt("marketing.home.final.description"),
-  finalPrimary: mt("marketing.home.final.cta"),
-  finalSecondary: mt("marketing.home.hero.secondary"),
-  footerTagline: mt("marketing.footer.tagline"),
-  footer: {
-    legal: mt("marketing.footer.legal"),
-    privacy: mt("marketing.footer.privacy"),
-    product: mt("marketing.header.product"),
-    solutions: mt("marketing.header.solutions"),
-    support: mt("marketing.footer.support"),
-    resources: mt("marketing.header.resources"),
-  },
 };
 
 // Keep the established marketing surface contract discoverable for static checks.
@@ -211,34 +148,12 @@ const landingStructuredData = {
   ]
 };
 
-// Text-free inline icons. Channel names and readiness states stay in live HTML
-// so they remain localizable and data-driven.
-const icon = (path: string, size = 18): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
-
-const trustIcons = [
-  icon('<path d="M12 3l7 3v5c0 4.4-2.9 7.9-7 9-4.1-1.1-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/>'),
-  icon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 4 5.6 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.6-4-9s1.5-6.4 4-9z"/>'),
-  icon('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
-  icon('<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>'),
-];
-
-const channelIcons: Record<string, string> = {
-  website: icon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 4 5.6 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.6-4-9s1.5-6.4 4-9z"/>'),
-  telegram: icon('<path d="M21 4L3 11l5 2 2 6 3-4 5 4z"/><path d="M8 13l9-7-5 9"/>'),
-  whatsapp: icon('<path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z"/><path d="M8.5 9.5c.5 3 3 5.5 6 6l1.5-1.5-2-1.5-1.5.8c-1-.5-2-1.5-2.5-2.5l.8-1.5-1.5-2z"/>'),
-  zalo: icon('<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9v6M13 9v4a2 2 0 0 0 4 0V9"/>'),
-  discord: icon('<path d="M8 12a1 1 0 1 0 0-.01"/><circle cx="16" cy="12" r="1"/><path d="M7 6c3-1.5 7-1.5 10 0l2 3a15 15 0 0 1 1.5 7c-1.5 1.5-3.5 2-3.5 2l-1-2a11 11 0 0 1-7 0l-1 2s-2-.5-3.5-2A15 15 0 0 1 5 9z"/>'),
-  api: icon('<path d="M8 6l-5 6 5 6M16 6l5 6-5 6"/>'),
-};
-
-const proofCheck = icon('<path d="M20 6L9 17l-5-5"/>', 14);
-const sparkGlyph = icon('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>', 16);
-const architectureGlyphs = [
-  icon('<path d="M4 12h5l2-6 2 12 2-6h5"/>', 16),
-  icon('<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>', 16),
-  icon('<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>', 16),
-];
+const marqueeItems = landingCopy.channelCards.map((channel) => ({
+  key: channel.key,
+  state: channel.state,
+  label: channel.label,
+  status: channel.state === "live" ? landingCopy.channelStatus.live : channel.state === "next" ? landingCopy.channelStatus.next : landingCopy.channelStatus.planned,
+}));
 
 if (hostKind === "marketing") {
   mode = "marketing";
@@ -303,9 +218,9 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
 {mode === "marketing" && (
   <PlatformLayout title={landingCopy.seoTitle} description={landingCopy.seoDescription} locale={locale} structuredData={landingStructuredData}>
     <div class="landing-page">
-      <div class="l3-announcement" role="status">
-        <div class="platform-shell l3-announcement-inner">
-          <span class="l3-announcement-dot" aria-hidden="true"></span>
+      <div class="landing-announcement" role="status">
+        <div class="platform-shell landing-announcement-inner">
+          <span class="landing-announcement-dot" aria-hidden="true"></span>
           <span>{landingCopy.announcement}</span>
           <a href="#channels">{landingCopy.announcementCta} <span aria-hidden="true">→</span></a>
         </div>
@@ -314,57 +229,28 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
       <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
 
       <main id="main-content">
-        <!-- 1. HERO -->
-        <section class="l3-hero">
-          <canvas class="l3-hero-canvas" data-hero-canvas aria-hidden="true"></canvas>
-          <div class="l3-hero-backdrop" aria-hidden="true"></div>
-          <div class="platform-shell l3-hero-grid">
-            <div class="l3-hero-copy">
-              <p class="l3-hero-eyebrow"><span class="l3-hero-eyebrow-dot" aria-hidden="true"></span>{landingCopy.eyebrow}</p>
-              <h1 class="l3-hero-title">{landingCopy.heroTitle} <strong>{landingCopy.heroHighlight}</strong></h1>
-              <p class="l3-hero-lead">{landingCopy.heroDescription}</p>
-              <div class="l3-hero-actions">
-                <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
-                  <span>{landingCopy.heroPrimary}</span>
-                  <span aria-hidden="true">→</span>
-                </a>
-                <a class="kit-button kit-button-ghost" href="#workflow">
-                  <span>{landingCopy.heroSecondary}</span>
-                  <span class="play-icon" aria-hidden="true">▶</span>
-                </a>
-              </div>
-              <ul class="l3-hero-proof" aria-label={landingCopy.heroProof.join(", ")}>
-                {landingCopy.heroProof.map((proof) => (
-                  <li><span set:html={proofCheck} aria-hidden="true"></span>{proof}</li>
-                ))}
-              </ul>
-            </div>
+        <LandingHero dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
 
-            <div class="l3-hero-visual">
-              <HeroCommerceFlow locale={locale} />
-            </div>
+        <!-- CHANNEL MARQUEE -->
+        <section class="channel-marquee" aria-label={landingCopy.channelsTitle}>
+          <div class="marquee-track">
+            {[false, true].map((isClone) => (
+              <div class="marquee-group" aria-hidden={isClone ? "true" : undefined}>
+                {marqueeItems.map((item) => (
+                  <span class="marquee-item" data-channel-state={item.state}>
+                    <span set:html={channelIcons[item.key] ?? channelIcons.api} aria-hidden="true"></span>
+                    {item.label}
+                    <span class="marquee-item-status">{item.status}</span>
+                  </span>
+                ))}
+              </div>
+            ))}
           </div>
         </section>
 
-        <!-- 2. COMMERCE FLOW RAIL -->
-        <CommerceFlowRail locale={locale} />
-
-        <!-- 3. TRUST PRINCIPLES -->
-        <section class="platform-shell l3-trust" aria-label="Selinow OS trust principles">
-          {landingCopy.trust.map((item, index) => (
-            <article class="l3-trust-card">
-              <span class="l3-trust-icon" set:html={trustIcons[index]} aria-hidden="true"></span>
-              <div>
-                <h2>{item[0]}</h2>
-                <p>{item[1]}</p>
-              </div>
-            </article>
-          ))}
-        </section>
-
-        <!-- 4. CHANNEL COVERAGE BOARD -->
+        <!-- CHANNEL COVERAGE BOARD -->
         <section class="kit-section platform-shell" id="channels">
-          <div class="kit-section-heading">
+          <div class="kit-section-heading" data-reveal>
             <div>
               <p class="kit-kicker">{landingCopy.channelsEyebrow}</p>
               <h2 class="section-title">{landingCopy.channelsTitle}</h2>
@@ -372,14 +258,14 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
             <p class="section-description">{landingCopy.channelsDescription}</p>
           </div>
 
-          <div class="l3-channel-board">
-            <div class="l3-channel-column">
-              <p class="l3-channel-heading" data-tone="live">{landingCopy.available}</p>
-              <div class="l3-channel-row">
+          <div class="channel-board" data-reveal-group>
+            <div class="channel-column" data-column="live" data-reveal>
+              <p class="channel-heading" data-tone="live">{landingCopy.available}</p>
+              <div class="channel-row">
                 {landingCopy.channelCards.filter((channel) => channel.state === "live").map((channel) => (
-                  <div class="l3-channel-tile" data-channel-state={channel.state}>
-                    <span class="l3-channel-tile-icon" set:html={channelIcons[channel.key]} aria-hidden="true"></span>
-                    <span class="l3-channel-copy">
+                  <div class="channel-tile" data-channel-state={channel.state}>
+                    <span class="channel-tile-icon" set:html={channelIcons[channel.key]} aria-hidden="true"></span>
+                    <span class="channel-tile-copy">
                       <strong>{channel.label}</strong>
                       <small>{channel.status}</small>
                     </span>
@@ -388,13 +274,13 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
               </div>
             </div>
 
-            <div class="l3-channel-column">
-              <p class="l3-channel-heading" data-tone="next">{landingCopy.expanding}</p>
-              <div class="l3-channel-row">
+            <div class="channel-column" data-column="next" data-reveal>
+              <p class="channel-heading" data-tone="next">{landingCopy.expanding}</p>
+              <div class="channel-row">
                 {landingCopy.channelCards.filter((channel) => channel.state === "next").map((channel) => (
-                  <div class="l3-channel-tile" data-channel-state={channel.state}>
-                    <span class="l3-channel-tile-icon" set:html={channelIcons[channel.key]} aria-hidden="true"></span>
-                    <span class="l3-channel-copy">
+                  <div class="channel-tile" data-channel-state={channel.state}>
+                    <span class="channel-tile-icon" set:html={channelIcons[channel.key]} aria-hidden="true"></span>
+                    <span class="channel-tile-copy">
                       <strong>{channel.label}</strong>
                       <small>{channel.status}</small>
                     </span>
@@ -403,78 +289,35 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
               </div>
             </div>
 
-            <div class="l3-channel-column">
-              <p class="l3-channel-heading" data-tone="planned">{landingCopy.extensible}</p>
-              <div class="l3-channel-extensible">
-                <span class="l3-channel-tile-icon" set:html={channelIcons.api} aria-hidden="true"></span>
-                <strong>{landingCopy.channelNames.api}</strong>
-                <small>{landingCopy.channelStatus.development}</small>
+            <div class="channel-column" data-column="planned" data-reveal>
+              <p class="channel-heading">{landingCopy.extensible}</p>
+              <div class="channel-extensible">
+                <span class="channel-tile-icon" set:html={channelIcons.api} aria-hidden="true"></span>
+                <span>
+                  <strong>{landingCopy.channelNames.api}</strong>
+                  <small>{landingCopy.channelStatus.development}</small>
+                </span>
               </div>
             </div>
           </div>
 
-          <div class="l3-channel-legend">
-            <span><i class="l3-legend-live"></i>{landingCopy.channelStatus.live}</span>
-            <span><i class="l3-legend-next"></i>{landingCopy.channelStatus.next}</span>
-            <span><i class="l3-legend-planned"></i>{landingCopy.channelStatus.planned}</span>
-            <span><i class="l3-legend-extensible"></i>{landingCopy.extensible}</span>
+          <div class="channel-legend" data-reveal>
+            <span><i class="legend-live"></i>{landingCopy.channelStatus.live}</span>
+            <span><i class="legend-next"></i>{landingCopy.channelStatus.next}</span>
+            <span><i class="legend-planned"></i>{landingCopy.channelStatus.planned}</span>
+            <span><i class="legend-extensible"></i>{landingCopy.extensible}</span>
           </div>
         </section>
 
-        <!-- 5. SOLUTIONS PREVIEW -->
-        <section class="kit-section platform-shell" id="use-cases">
-          <div class="kit-section-heading kit-section-heading-centered">
-            <div>
-              <p class="kit-kicker">{landingCopy.useEyebrow}</p>
-              <h2 class="section-title">{landingCopy.useTitle}</h2>
-            </div>
-            <p class="section-description">{landingCopy.useDescription}</p>
-          </div>
+        <!-- FEATURE BENTO -->
+        <FeatureBento locale={locale} />
 
-          <div class="l3-usecase-grid">
-            {landingCopy.solutions.map((sol, index) => (
-              <SolutionWorkflowCard
-                slug={sol.slug}
-                index={index + 1}
-                eyebrow={sol.eyebrow}
-                title={sol.title}
-                lead={sol.lead}
-                href={sol.href}
-                locale={locale}
-              />
-            ))}
-          </div>
-        </section>
+        <!-- HOW IT WORKS -->
+        <HowItWorks locale={locale} />
 
-        <!-- 6. OPERATIONAL WORKFLOW TRACK -->
-        <section class="l3-workflow" id="workflow">
-          <div class="platform-shell">
-            <div class="kit-section-heading kit-section-heading-centered">
-              <div>
-                <p class="kit-kicker">{landingCopy.workflowEyebrow}</p>
-                <h2 class="section-title">{landingCopy.workflowTitle}</h2>
-              </div>
-              <p class="section-description">{landingCopy.workflowDescription}</p>
-            </div>
-
-            <div class="l3-workflow-grid">
-              {landingCopy.workflowSteps.map((step, index) => (
-                <article class="l3-workflow-step">
-                  <span class="l3-workflow-number">{String(index + 1).padStart(2, "0")}</span>
-                  <div class="l3-workflow-art">
-                    <img src={`/brand/selinow-kit/${step[2]}`} alt="" loading="lazy" width="640" height="420" />
-                  </div>
-                  <h3>{step[0]}</h3>
-                  <p>{step[1]}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <!-- 7. ARCHITECTURE BOARD -->
+        <!-- ARCHITECTURE BOARD -->
         <section class="kit-section platform-shell" id="architecture">
-          <div class="kit-section-heading">
+          <div class="kit-section-heading" data-reveal>
             <div>
               <p class="kit-kicker">{landingCopy.architectureEyebrow}</p>
               <h2 class="section-title">{landingCopy.architectureTitle}</h2>
@@ -482,26 +325,30 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
             <p class="section-description">{landingCopy.architectureDescription}</p>
           </div>
 
-          <div class="l3-architecture-board">
-            <div class="l3-architecture-list">
+          <div class="arch-board" data-reveal>
+            <svg class="arch-connector" aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 100 100">
+              <line x1="0" y1="50" x2="100" y2="50"></line>
+            </svg>
+
+            <div class="arch-list">
               <p>{landingCopy.architectureLeft}</p>
               {landingCopy.architectureModules.map((module) => (
                 <span><i set:html={sparkGlyph} aria-hidden="true"></i>{module}</span>
               ))}
             </div>
 
-            <div class="l3-architecture-core">
-              <img src="/brand/selinow-kit/global/v3/core-hub.svg" alt="" width="88" height="88" />
+            <div class="arch-core">
+              <img src="/brand/selinow-kit/global/v4/core-hub.svg" alt="" width="88" height="88" />
               <strong>{landingCopy.architectureCore}</strong>
               <small>{landingCopy.architectureCoreDetail}</small>
             </div>
 
-            <div class="l3-architecture-list">
+            <div class="arch-list">
               <p>{landingCopy.architectureRight}</p>
               {landingCopy.architectureChannels.map((channel, index) => (
                 <span>
                   <i set:html={architectureGlyphs[index] ?? sparkGlyph} aria-hidden="true"></i>
-                  <span class="l3-architecture-destination-copy">
+                  <span class="arch-destination-copy">
                     <strong>{channel[0]}</strong>
                     <small>{channel[1]}</small>
                   </span>
@@ -511,9 +358,12 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
           </div>
         </section>
 
-        <!-- 8. RUNTIME PRICING PREVIEW -->
-        <section class="kit-section platform-shell" id="pricing" data-pricing-state={pricingState}>
-          <div class="kit-section-heading">
+        <!-- SOLUTIONS PREVIEW -->
+        <SolutionsPreview locale={locale} />
+
+        <!-- RUNTIME PRICING PREVIEW -->
+        <section class="kit-section platform-shell landing-pricing" id="pricing" data-pricing-state={pricingState}>
+          <div class="kit-section-heading" data-reveal>
             <div>
               <p class="kit-kicker">{landingCopy.pricingEyebrow}</p>
               <h2 class="section-title">{landingCopy.pricingTitle}</h2>
@@ -525,9 +375,9 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
             <>
               <div class="runtime-plan-grid">
                 {plans.map((plan) => (
-                  <article class:list={["runtime-plan-card", plan.recommended === true && "runtime-plan-card-featured"]}>
-                    <div class="runtime-plan-head">
-                      <span>{plan.recommended === true ? landingCopy.pricingRecommended : plan.code}</span>
+                  <article class:list={["runtime-plan-card", plan.recommended === true && "runtime-plan-card-featured"]} data-reveal>
+                    <div>
+                      <span class="plan-recommended-label">{plan.recommended === true ? landingCopy.pricingRecommended : plan.code}</span>
                       <h3>{plan.name}</h3>
                     </div>
                     <p class="runtime-plan-source">Runtime plan · {plan.code}</p>
@@ -564,88 +414,17 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
           )}
         </section>
 
-        <!-- 9. FAQ -->
-        <section class="kit-section platform-shell l3-faq" id="faq">
-          <div class="kit-section-heading kit-section-heading-centered">
-            <div>
-              <p class="kit-kicker">{landingCopy.faqEyebrow}</p>
-              <h2 class="section-title">{landingCopy.faqTitle}</h2>
-            </div>
-          </div>
+        <!-- FAQ -->
+        <LandingFaq locale={locale} />
 
-          <div class="faq-kit-list">
-            {landingCopy.faq.map((item) => (
-              <details>
-                <summary>
-                  <span>{item[0]}</span>
-                  <span aria-hidden="true">+</span>
-                </summary>
-                <p>{item[1]}</p>
-              </details>
-            ))}
-          </div>
-        </section>
-
-        <!-- 10. FINAL CTA -->
-        <section class="l3-final">
-          <div class="platform-shell l3-final-inner">
-            <div>
-              <p class="kit-kicker">{landingCopy.finalEyebrow}</p>
-              <h2>{landingCopy.finalTitle}</h2>
-              <p>{landingCopy.finalDescription}</p>
-            </div>
-            <div class="l3-final-actions">
-              <a class="kit-button kit-button-light" href={`${env.DASHBOARD_ORIGIN}/login`}>
-                <span>{landingCopy.finalPrimary}</span>
-                <span aria-hidden="true">→</span>
-              </a>
-              <a class="kit-button kit-button-outline-light" href="#workflow">
-                <span>{landingCopy.finalSecondary}</span>
-                <span aria-hidden="true">▶</span>
-              </a>
-            </div>
-          </div>
-        </section>
+        <!-- FINAL CTA -->
+        <FinalCta dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
       </main>
 
-      <footer class="landing-footer">
-        <div class="platform-shell footer-grid">
-          <div class="footer-brand">
-            <a href="/" aria-label={landingCopy.footerTagline}>
-              <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="132" height="34" />
-            </a>
-            <p>{landingCopy.footerTagline}</p>
-            <small>© {new Date().getFullYear()} Selinow. All rights reserved.</small>
-          </div>
+      <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
 
-          <div class="footer-group">
-            <h2>{landingCopy.footer.product}</h2>
-            <a href="#channels">{landingCopy.channelsTitle}</a>
-            <a href="#workflow">{landingCopy.workflowTitle}</a>
-            <a href="#architecture">{landingCopy.architectureTitle}</a>
-            <a href="/pricing">{mt("marketing.header.pricing")}</a>
-          </div>
-
-          <div class="footer-group">
-            <h2>{landingCopy.footer.solutions}</h2>
-            <a href="/solutions/telegram-commerce">Telegram Commerce</a>
-            <a href="/solutions/digital-product-delivery">Digital Product Delivery</a>
-            <a href="/solutions/license-key-inventory">License Key Inventory</a>
-            <a href="/solutions">{landingCopy.footer.solutions}</a>
-          </div>
-
-          <div class="footer-group">
-            <h2>{landingCopy.footer.resources}</h2>
-            <a href="#faq">{landingCopy.faqEyebrow}</a>
-            <a href="/legal">{landingCopy.footer.legal}</a>
-            <a href="/privacy">{landingCopy.footer.privacy}</a>
-            <a href="/support">{landingCopy.footer.support}</a>
-            <a href={`${env.DASHBOARD_ORIGIN}/login`}>{mt("marketing.header.login")}</a>
-          </div>
-        </div>
-      </footer>
-
-      <script src="../scripts/landing/hero-canvas.ts"></script>
+      <script src="../scripts/landing/reveal.ts"></script>
+      <script src="../scripts/landing/scroll-stage.ts"></script>
     </div>
   </PlatformLayout>
 )}

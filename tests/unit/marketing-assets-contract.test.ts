@@ -24,23 +24,13 @@ describe("marketing asset contracts", () => {
 
   it("ships the versioned text-free visual kit with complete SVG files", async () => {
     const landing = await readFile(resolve(workspace, "src/pages/index.astro"), "utf8");
-    const assetDir = resolve(workspace, "public/brand/selinow-kit/global/v3");
+    const assetDir = resolve(workspace, "public/brand/selinow-kit/global/v4");
+    // How-it-works visuals are localized HTML product-UI mocks (HowItWorks.astro),
+    // so the raster-free kit only carries the text-free core-hub + OG master.
     const expected = [
       "core-hub.svg",
-      "hero-backdrop.svg",
-      "flow-catalog.svg",
-      "flow-channels.svg",
-      "flow-support.svg",
-      "flow-delivery.svg",
       "og-cover.svg",
     ];
-    const referencedOnLanding = new Set([
-      "core-hub.svg",
-      "flow-catalog.svg",
-      "flow-channels.svg",
-      "flow-support.svg",
-      "flow-delivery.svg",
-    ]);
 
     for (const file of expected) {
       const bytes = await readFile(resolve(assetDir, file));
@@ -48,10 +38,8 @@ describe("marketing asset contracts", () => {
       expect(source.trimStart().startsWith("<svg")).toBe(true);
       expect(source.trimEnd().endsWith("</svg>")).toBe(true);
       expect(source.length).toBeGreaterThan(1_000);
-      if (referencedOnLanding.has(file)) {
-        expect(landing).toContain(`global/v3/${file}`);
-      }
     }
+    expect(landing).toContain("global/v4/core-hub.svg");
   });
 
   it("renders a locale-neutral social cover as a valid PNG", async () => {

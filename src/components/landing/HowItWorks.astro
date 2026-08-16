@@ -1,0 +1,164 @@
+---
+/**
+ * Landing v4 how-it-works — scroll storytelling with a progress rail
+ * (driven by scroll-stage.ts via [data-flow-section] / [data-flow-progress]).
+ * Each step pairs its copy with a compact Selinow product-UI mock (chat bot,
+ * catalog, readiness checklist, order lifecycle) so the visuals show the
+ * actual product instead of abstract art.
+ */
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { icon } from "./icons";
+
+interface Props {
+  locale?: unknown;
+}
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const checkGlyph = icon('<path d="M20 6L9 17l-5-5"/>', 11, 2.6);
+const keyGlyph = icon('<path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"/>', 16);
+const fileGlyph = icon('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>', 16);
+
+const steps = [
+  {
+    key: "bot",
+    title: t("marketing.home.workflow.step1.title"),
+    description: t("marketing.home.workflow.step1.description"),
+  },
+  {
+    key: "catalog",
+    title: t("marketing.home.workflow.step2.title"),
+    description: t("marketing.home.workflow.step2.description"),
+  },
+  {
+    key: "publish",
+    title: t("marketing.home.workflow.step3.title"),
+    description: t("marketing.home.workflow.step3.description"),
+  },
+  {
+    key: "order",
+    title: t("marketing.home.workflow.step4.title"),
+    description: t("marketing.home.workflow.step4.description"),
+  },
+];
+
+const checklist = [
+  t("marketing.home.workspace.check.catalog"),
+  t("marketing.home.workspace.check.states"),
+  t("marketing.home.workspace.check.readiness"),
+  t("marketing.home.workspace.check.audit"),
+];
+
+const timeline = [
+  t("marketing.home.flow.order"),
+  t("marketing.home.flow.payment"),
+  t("marketing.home.flow.inventory"),
+  t("marketing.home.flow.delivery"),
+];
+---
+
+<section class="landing-flow" id="workflow" data-flow-section>
+  <div class="platform-shell">
+    <div class="kit-section-heading kit-section-heading-centered">
+      <div data-reveal>
+        <p class="kit-kicker">{t("marketing.home.workflow.kicker")}</p>
+        <h2 class="section-title">{t("marketing.home.workflow.title")}</h2>
+      </div>
+      <p class="section-description" data-reveal>{t("marketing.home.workflow.description")}</p>
+    </div>
+
+    <div class="flow-track">
+      <div class="flow-rail" aria-hidden="true">
+        <span class="flow-rail-progress" data-flow-progress></span>
+      </div>
+
+      <ol class="flow-steps">
+        {steps.map((step, index) => (
+          <li class="flow-step" data-reveal>
+            <div class="flow-step-copy">
+              <span class="flow-step-number">{String(index + 1).padStart(2, "0")}</span>
+              <h3>{step.title}</h3>
+              <p>{step.description}</p>
+            </div>
+
+            <div class="flow-step-art">
+              {step.key === "bot" && (
+                <div class="mock-window" role="img" aria-label={t("marketing.home.mock.bot.greeting")}>
+                  <div class="mock-titlebar">
+                    <span class="mock-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="mock-title-text">@yourstore_bot</span>
+                    <span class="mock-badge">Telegram</span>
+                  </div>
+                  <div class="mock-chat">
+                    <p class="mock-bubble">{t("marketing.home.mock.bot.greeting")}</p>
+                    <div class="mock-product-card">
+                      <strong>{t("marketing.home.mock.bot.product")}</strong>
+                      <small>{t("marketing.home.mock.bot.meta")}</small>
+                      <span class="mock-buy">{t("marketing.home.mock.bot.buy")}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {step.key === "catalog" && (
+                <div class="mock-window" role="img" aria-label={t("marketing.home.mock.catalog.title")}>
+                  <div class="mock-titlebar">
+                    <span class="mock-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="mock-title-text">{t("marketing.home.mock.catalog.title")}</span>
+                    <span class="mock-badge mock-badge-success">{t("marketing.home.mock.catalog.badge")}</span>
+                  </div>
+                  <div class="mock-catalog-grid">
+                    <div class="mock-catalog-item">
+                      <span class="mock-catalog-icon" set:html={keyGlyph} aria-hidden="true"></span>
+                      <strong>{t("marketing.home.mock.catalog.item1")}</strong>
+                    </div>
+                    <div class="mock-catalog-item">
+                      <span class="mock-catalog-icon" set:html={fileGlyph} aria-hidden="true"></span>
+                      <strong>{t("marketing.home.mock.catalog.item2")}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {step.key === "publish" && (
+                <div class="mock-window" role="img" aria-label={t("marketing.home.workspace.readiness")}>
+                  <div class="mock-titlebar">
+                    <span class="mock-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="mock-title-text">{t("marketing.home.workspace.readiness")}</span>
+                  </div>
+                  <div class="mock-checklist">
+                    {checklist.map((row) => (
+                      <p class="mock-check-row"><span class="mock-check-dot" set:html={checkGlyph} aria-hidden="true"></span>{row}</p>
+                    ))}
+                    <span class="mock-publish">{t("marketing.home.mock.publish.cta")}</span>
+                  </div>
+                </div>
+              )}
+
+              {step.key === "order" && (
+                <div class="mock-window" role="img" aria-label="#SLN-2084">
+                  <div class="mock-titlebar">
+                    <span class="mock-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="mock-title-text">#SLN-2084</span>
+                    <span class="mock-badge mock-badge-success">OK</span>
+                  </div>
+                  <ol class="mock-timeline">
+                    {timeline.map((label, stateIndex) => (
+                      <li class:list={["mock-timeline-row", stateIndex === timeline.length - 1 && "mock-timeline-active"]}>
+                        <span class="mock-timeline-dot" aria-hidden="true"></span>
+                        <span>{label}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </div>
+</section>

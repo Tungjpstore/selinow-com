@@ -1,0 +1,110 @@
+---
+/**
+ * Landing v4 hero — dark cinematic surface.
+ * Canvas aurora + particle network (hero-scene.ts), scroll parallax
+ * (scroll-stage.ts) and the transaction lifecycle mock (lifecycle-player.ts).
+ */
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { proofCheck } from "./icons";
+
+interface Props {
+  dashboardOrigin: string;
+  locale?: unknown;
+}
+
+const { dashboardOrigin, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const proof = [
+  t("marketing.home.hero.proof.no_card"),
+  t("marketing.home.hero.proof.locales"),
+  t("marketing.home.hero.proof.verify_before_delivery"),
+];
+
+// Transaction lifecycle panel — copy comes from the established flow.* keys so
+// the surface contract keeps describing the real checkout story.
+const lifecycleSteps = [
+  { label: t("marketing.home.flow.channel"), detail: t("marketing.home.flow.channel_detail") },
+  { label: t("marketing.home.flow.order"), detail: t("marketing.home.flow.order_detail") },
+  { label: t("marketing.home.flow.payment"), detail: t("marketing.home.flow.payment_detail") },
+  { label: t("marketing.home.flow.inventory"), detail: "XXXXX-XXXXX-•••••" },
+  { label: t("marketing.home.flow.delivery"), detail: t("marketing.home.flow.delivery_detail") },
+];
+---
+
+<section class="landing-hero" data-hero-root id="top">
+  <div class="hero-media" data-parallax-far aria-hidden="true">
+    <canvas class="hero-canvas" data-hero-canvas></canvas>
+    <div class="dark-grid-overlay"></div>
+  </div>
+
+  <div class="platform-shell hero-inner" data-parallax-near>
+    <div class="hero-copy" data-reveal-group>
+      <p class="hero-eyebrow" data-reveal>
+        <span class="hero-eyebrow-dot" aria-hidden="true"></span>
+        {t("marketing.home.hero.eyebrow")}
+      </p>
+      <h1 class="hero-title" data-reveal>
+        {t("marketing.home.hero.title")}
+        <span class="hero-gradient-text">{t("marketing.home.hero.highlight")}</span>
+      </h1>
+      <p class="hero-lead" data-reveal>{t("marketing.home.hero.lead")}</p>
+      <div class="hero-actions" data-reveal>
+        <a class="kit-button kit-button-aurora" href={`${dashboardOrigin}/login`}>
+          <span>{t("marketing.home.hero.primary")}</span>
+          <span aria-hidden="true">→</span>
+        </a>
+        <a class="kit-button kit-button-outline-light" href="#workflow">
+          <span>{t("marketing.home.hero.secondary")}</span>
+          <span class="play-icon" aria-hidden="true">▶</span>
+        </a>
+      </div>
+      <ul class="hero-proof" data-reveal aria-label={proof.join(", ")}>
+        {proof.map((item) => (
+          <li><span set:html={proofCheck} aria-hidden="true"></span>{item}</li>
+        ))}
+      </ul>
+    </div>
+
+    <div class="hero-visual" data-reveal>
+      <div class="lifecycle-panel" data-lifecycle data-lifecycle-steps="5" data-lifecycle-step="0" aria-label={t("marketing.home.flow.aria")}>
+        <div class="lifecycle-titlebar">
+          <span class="lifecycle-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lifecycle-title">{t("marketing.home.flow.title")}</span>
+          <span class="lifecycle-badge">{t("marketing.home.lifecycle.badge")}</span>
+        </div>
+        <ol class="lifecycle-steps">
+          {lifecycleSteps.map((step, index) => (
+            <li class="lifecycle-step" data-step={index + 1}>
+              <span class="lifecycle-step-marker" aria-hidden="true">
+                <span class="lifecycle-step-marker-ring"></span>
+                <span class="lifecycle-step-marker-dot"></span>
+              </span>
+              <span class="lifecycle-step-copy">
+                <strong>{step.label}</strong>
+                <small>{step.detail}</small>
+              </span>
+              <span class="lifecycle-step-state">
+                <span class="lifecycle-step-pending" aria-hidden="true">·</span>
+                <span class="lifecycle-step-done" aria-hidden="true">✓</span>
+                <span class="sr-only">{t("marketing.home.lifecycle.step_done")}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div class="lifecycle-order" aria-hidden="true">
+          <span class="lifecycle-order-id">#SLN-2084</span>
+          <span class="status-chip" data-state="live"><span class="status-chip-dot"></span>{t("marketing.home.channels.status.live")}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-fade" aria-hidden="true"></div>
+  <span class="nav-sentinel" data-nav-sentinel aria-hidden="true"></span>
+</section>
+
+<script src="../../scripts/landing/hero-scene.ts"></script>
+<script src="../../scripts/landing/lifecycle-player.ts"></script>

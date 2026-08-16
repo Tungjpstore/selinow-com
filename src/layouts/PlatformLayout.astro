@@ -50,11 +50,14 @@ Astro.response.headers.set("Vary", "Accept-Language, Cookie");
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preload" href="/fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/bvp-latin-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/bvp-latin-700.woff2" as="font" type="font/woff2" crossorigin />
     <meta name="description" content={resolvedDescription} />
     {noindex && <meta name="robots" content="noindex, nofollow" />}
     {!noindex && <link rel="canonical" href={canonicalUrl} />}
     {!noindex && localeAlternates.map((alternate) => <link rel="alternate" hreflang={alternate.hreflang} href={alternate.href} />)}
-    <meta name="theme-color" content="#F8FAFC" />
+    <meta name="theme-color" content="#0A0B12" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Selinow" />
     <meta property="og:locale" content={ogLocaleFor(locale)} />

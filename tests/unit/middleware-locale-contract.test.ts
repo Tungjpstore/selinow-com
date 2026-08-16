@@ -44,6 +44,18 @@ describe("middleware locale fallback contract", () => {
     expect(resolveLocaleWithSource({ fallback: "vi-VN" })).toEqual({ locale: "vi-VN", source: "fallback" });
   });
 
+  it("auto-detects geo locale for marketing hosts only and never persists it", async () => {
+    const source = await readFile("src/middleware.ts", "utf8");
+
+    expect(source).toContain("geoCountry: geoCountryFor(context.request)");
+    expect(source).toContain('hostKind === "marketing" ? { geoCountry: geoCountryFor(context.request) } : {}');
+    expect(resolveLocaleWithSource({ acceptLanguage: "en-US", geoCountry: "VN" }))
+      .toEqual({ locale: "vi-VN", source: "geo" });
+    // Geo is a soft hint: only the explicit ?lang= choice persists a cookie.
+    expect(source).toContain('localeResolution.source === "explicit"');
+    expect(source).not.toContain('localeResolution.source === "geo"');
+  });
+
   it("keeps local, staging, production and login on the centralized English platform default", async () => {
     const [login, source] = await Promise.all([
       readFile("src/pages/login.astro", "utf8"),

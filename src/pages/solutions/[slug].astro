@@ -67,8 +67,8 @@ const structuredData = content === null || !validHost ? undefined : {
   {validHost && content ? <>
     <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
     <main id="main-content" class="solution-page">
-      <section class="solution-hero platform-shell kit-section-dense">
-        <div class="solution-hero-copy">
+      <section class="solution-hero marketing-band platform-shell kit-section-dense">
+        <div class="solution-hero-copy" data-reveal>
           <a class="solution-breadcrumb" href={localizedPath("/solutions")}>
             <span aria-hidden="true">←</span> {hub.solutionsLabel} <span aria-hidden="true">/</span> {content.eyebrow}
           </a>
@@ -76,11 +76,11 @@ const structuredData = content === null || !validHost ? undefined : {
           <h1 class="hero-headline">{content.title}</h1>
           <p class="hero-lead">{content.lead}</p>
           <div class="landing-actions">
-            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+            <a class="kit-button kit-button-aurora" href={`${env.DASHBOARD_ORIGIN}/login`}>
               <span>{content.cta}</span>
               <span aria-hidden="true">→</span>
             </a>
-            <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
+            <a class="kit-button kit-button-outline-light" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
           </div>
         </div>
         <aside class="solution-signal" aria-label={content.answerLabel}>
@@ -89,16 +89,17 @@ const structuredData = content === null || !validHost ? undefined : {
           <strong>{content.answer}</strong>
           <small>Selinow OS / {content.slug}</small>
         </aside>
+        <span class="nav-sentinel" data-nav-sentinel aria-hidden="true"></span>
       </section>
 
       <section class="kit-section platform-shell" aria-labelledby="solution-proof-title">
-        <div class="kit-section-heading">
+        <div class="kit-section-heading" data-reveal>
           <p class="kit-kicker">{content.proofLabel}</p>
           <h2 class="section-title" id="solution-proof-title">{hub.proofTitle}</h2>
         </div>
-        <ul class="solution-proof-grid">
+        <ul class="solution-proof-grid" data-reveal-group>
           {content.proof.map((item, index) => (
-            <li>
+            <li data-reveal>
               <span>{String(index + 1).padStart(2, "0")}</span>
               {item}
             </li>
@@ -175,3 +176,5 @@ const structuredData = content === null || !validHost ? undefined : {
     <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
   </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
 </PlatformLayout>
+
+<script src="../../scripts/landing/reveal.ts"></script>

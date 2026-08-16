@@ -13,6 +13,28 @@ const SUPPORTED_BY_LANGUAGE: Readonly<Record<string, SupportedLocale>> = {
   vi: "vi-VN",
 };
 
+/**
+ * Marketing surfaces auto-detect the visitor's country via Cloudflare's edge
+ * metadata (`request.cf.country` / `cf-ipcountry`) and serve Vietnamese to
+ * Vietnam-based first visits. Only countries with an explicit mapping are
+ * affected; every other country falls through to Accept-Language. The
+ * middleware passes this hint for platform pages only — tenant storefronts
+ * keep their authoritative shop default.
+ */
+const GEO_LOCALE_BY_COUNTRY: Readonly<Record<string, SupportedLocale>> = {
+  VN: "vi-VN",
+};
+
+const GEO_COUNTRY_MAX_LENGTH = 8;
+
+/** Map a sanitized ISO country code to its geo-preferred locale, if any. */
+export function localeForGeoCountry(value: unknown): SupportedLocale | null {
+  if (typeof value !== "string") return null;
+  const country = value.trim().toUpperCase();
+  if (country.length === 0 || country.length > GEO_COUNTRY_MAX_LENGTH) return null;
+  return GEO_LOCALE_BY_COUNTRY[country] ?? null;
+}
+
 const LANGUAGE_TAG_PATTERN = /^[A-Za-z0-9-]+$/u;
 const ACCEPT_LANGUAGE_MAX_BYTES = 4_096;
 const ACCEPT_LANGUAGE_MAX_RANGES = 32;
@@ -132,13 +154,19 @@ export type LocaleResolutionInput = {
   explicit?: unknown;
   cookie?: unknown;
   acceptLanguage?: string | null;
+  /**
+   * Edge geo country (marketing pages only). Considered after explicit choice
+   * and cookie, before Accept-Language, so a Vietnam IP wins the first visit
+   * without ever persisting a preference cookie.
+   */
+  geoCountry?: unknown;
   /** Tenant/platform default is considered only after explicit browser choices. */
   fallback?: unknown;
 };
 
 export type LocaleResolution = {
   locale: SupportedLocale;
-  source: "explicit" | "cookie" | "accept-language" | "fallback" | "default";
+  source: "explicit" | "cookie" | "geo" | "accept-language" | "fallback" | "default";
 };
 
 function resolveCandidate(value: unknown): SupportedLocale | null {
@@ -152,6 +180,9 @@ export function resolveLocaleWithSource(input: LocaleResolutionInput = {}): Loca
 
   const cookie = resolveCandidate(input.cookie);
   if (cookie !== null) return { locale: cookie, source: "cookie" };
+
+  const geo = localeForGeoCountry(input.geoCountry);
+  if (geo !== null) return { locale: geo, source: "geo" };
 
   for (const range of parseAcceptLanguage(input.acceptLanguage)) {
     const accepted = resolveCandidate(range);
