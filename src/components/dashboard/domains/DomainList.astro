@@ -74,6 +74,10 @@ const formatCheckedAt = (value: string | null): string => {
               <div><dt>{domain.dnsInstructions.type === "TXT" ? t("dashboard.domains.card.dns.value") : t("dashboard.domains.card.dns.target")}</dt><dd><code>{domain.dnsInstructions.target}</code><button type="button" data-copy-target>{t("dashboard.domains.card.dns.copy")}</button></dd></div>
             </dl>
             <p>{domain.dnsInstructions.type === "TXT" ? t("dashboard.domains.card.dns.txt_note") : t("dashboard.domains.card.dns.cname_note")}</p>
+            <div class="dns-provider-actions">
+              <a class="dns-provider-link" href="https://dash.cloudflare.com/?to=/:account/dns/records" target="_blank" rel="noopener noreferrer">{t("dashboard.domains.card.dns.open_cloudflare")}</a>
+              <span class="dns-auto-note">{t("dashboard.domains.card.dns.auto_check_note")}</span>
+            </div>
           </div>
         )}
         {domain.type === "custom" && domain.turnstileStatus !== "active" && domain.ownershipStatus === "verified" && domain.hostnameStatus === "active" && domain.sslStatus === "active" && domain.dnsStatus === "active" && (
@@ -124,6 +128,10 @@ const formatCheckedAt = (value: string | null): string => {
         </div>
       </dl>
       <p data-dns-note>{t("dashboard.domains.card.dns.cname_note")}</p>
+      <div class="dns-provider-actions">
+        <a class="dns-provider-link" href="https://dash.cloudflare.com/?to=/:account/dns/records" target="_blank" rel="noopener noreferrer">{t("dashboard.domains.card.dns.open_cloudflare")}</a>
+        <span class="dns-auto-note">{t("dashboard.domains.card.dns.auto_check_note")}</span>
+      </div>
     </div>
 
     <p class="turnstile-note" data-turnstile-note hidden>{t("dashboard.domains.card.turnstile_pending")}</p>
@@ -173,6 +181,9 @@ const formatCheckedAt = (value: string | null): string => {
   .dns-record code { min-width: 0; color: var(--sln-text-primary); font-size: 12px; overflow-wrap: anywhere; white-space: normal; }
   .dns-record button { flex: 0 0 auto; min-height: 44px; border: 0; padding: 6px; background: transparent; color: var(--sln-action-primary-hover); font-size: 11px; font-weight: 700; cursor: pointer; }
   .dns-record > p { margin: 10px 0 0; color: var(--sln-text-muted); font-size: 12px; line-height: 1.5; }
+  .dns-provider-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 12px; }
+  .dns-provider-link { color: var(--sln-action-primary); font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+  .dns-auto-note { color: var(--sln-text-muted); font-size: 11px; line-height: 1.5; }
   .turnstile-note { margin: 14px 0 0; padding: 11px 13px; border: 1px solid var(--sln-warning-text); border-radius: var(--sln-radius-sm); background: var(--sln-tint-warning); color: var(--sln-warning-text); font-size: 12px; line-height: 1.5; }
   .domain-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 14px; color: var(--sln-text-muted); font-size: 11px; }
   .domain-meta span:last-child { color: var(--sln-state-danger); }

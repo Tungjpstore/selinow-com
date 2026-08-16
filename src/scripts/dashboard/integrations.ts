@@ -644,6 +644,13 @@ if (root !== null) {
       if (typeof value === "string" && value.trim().length > 0 && key !== "replaceBot") body[key] = value;
     }
     body.replaceBot = formData.get("replaceBot") === "on";
+    // Fail fast on obvious paste mistakes (wrong clipboard slot, partial copy)
+    // without spending a server round-trip to Telegram.
+    if (typeof body.botToken === "string" && !/^\d{6,}:[A-Za-z0-9_-]{30,}$/u.test(body.botToken)) {
+      setFeedback(configFeedback, text("tokenInvalid"), "danger");
+      form.querySelector<HTMLInputElement>("input[name=botToken]")?.focus();
+      return;
+    }
     const submit = form.querySelector<HTMLButtonElement>("button[type=submit]");
     if (submit === null) return;
     const originalSubmitLabel = submit.textContent;
@@ -651,12 +658,14 @@ if (root !== null) {
     submit.disabled = true;
     submit.textContent = text("verifying");
     setFeedback(configFeedback, text("sending"), "info");
+    let justConnected = false;
     try {
       const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/integrations/telegram`, { method: "PUT", body: JSON.stringify(body) });
       if (!ensureTenantContext()) return;
       applyTelegram(integrationFrom(payload) as TelegramIntegrationLike | null);
       form.reset();
-      setFeedback(configFeedback, text("updated"), "success");
+      justConnected = true;
+      setFeedback(configFeedback, text("autoVerify"), "success");
     } catch (error) {
       if (isTenantChangedError(error)) return;
       form.reset();
@@ -666,6 +675,9 @@ if (root !== null) {
       submit.disabled = false;
       submit.textContent = originalSubmitLabel;
     }
+    // Finish the "connect" journey without another manual click: verify bot
+    // identity + webhook right away so the seller sees the final state.
+    if (justConnected) void healthCheck("telegram");
   };
 
   const healthCheck = async (provider: Provider): Promise<void> => {
@@ -753,6 +765,12 @@ if (root !== null) {
     if (action === "disconnect" && provider !== undefined) openDisconnect(provider);
     if (action === "close-config") closeConfig();
     if (action === "confirm-disconnect") void confirmDisconnect();
+    if (action === "copy-newbot-command") {
+      void navigator.clipboard
+        .writeText("/newbot")
+        .then(() => { setFeedback(configFeedback, text("copyCommandDone"), "success"); })
+        .catch(() => { setFeedback(configFeedback, text("copyCommand"), "danger"); });
+    }
   });
   for (const form of credentialForms) {
     form.addEventListener("submit", (event) => {
