@@ -34,12 +34,10 @@ describe("marketing asset contracts", () => {
       "flow-delivery.svg",
       "og-cover.svg",
     ];
+    // v5 rebuild: workflow art is HTML/CSS; the core glyph stays the only kit
+    // reference on the landing page. The rest of the kit still ships intact.
     const referencedOnLanding = new Set([
       "core-hub.svg",
-      "flow-catalog.svg",
-      "flow-channels.svg",
-      "flow-support.svg",
-      "flow-delivery.svg",
     ]);
 
     for (const file of expected) {

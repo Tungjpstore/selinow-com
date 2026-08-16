@@ -31,10 +31,9 @@ const localizedPath = (pathname: string): string => {
 
     <div class="footer-group">
       <h2>{t("marketing.header.product")}</h2>
-      <a href={localizedPath("/#channels")}>{t("marketing.home.channels.title")}</a>
-      <a href={localizedPath("/#workflow")}>{t("marketing.home.workflow.title")}</a>
-      <a href={localizedPath("/#architecture")}>{t("marketing.home.architecture.title")}</a>
-      <a href={localizedPath("/pricing")}>{t("marketing.header.pricing")}</a>
+      <a href={localizedPath("/#core")}>{t("marketing.home.architecture.title")}</a>
+      <a href={localizedPath("/#flow")}>{t("marketing.home.flow_section.title")}</a>
+      <a href={localizedPath("/#pricing")}>{t("marketing.header.pricing")}</a>
     </div>
 
     <div class="footer-group">
@@ -42,15 +41,14 @@ const localizedPath = (pathname: string): string => {
       <a href={localizedPath("/solutions/telegram-commerce")}>Telegram Commerce</a>
       <a href={localizedPath("/solutions/digital-product-delivery")}>Digital Product Delivery</a>
       <a href={localizedPath("/solutions/license-key-inventory")}>License Key Inventory</a>
-      <a href={localizedPath("/solutions")}>{t("marketing.header.solutions")}</a>
+      <a href={localizedPath("/solutions")}>{t("marketing.footer.all_solutions")}</a>
     </div>
 
     <div class="footer-group">
-      <h2>{t("marketing.header.resources")}</h2>
-      <a href={localizedPath("/#faq")}>{t("marketing.home.faq.kicker")}</a>
+      <h2>{t("marketing.footer.company")}</h2>
+      <a href={localizedPath("/support")}>{t("marketing.footer.support")}</a>
       <a href={localizedPath("/legal")}>{t("marketing.footer.legal")}</a>
       <a href={localizedPath("/privacy")}>{t("marketing.footer.privacy")}</a>
-      <a href={localizedPath("/support")}>{t("marketing.footer.support")}</a>
       <a href={`${dashboardOrigin}/login`}>{t("marketing.header.login")}</a>
     </div>
   </div>

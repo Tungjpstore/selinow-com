@@ -181,7 +181,7 @@ const t = createSystemTranslator(locale);
 
   .login-split-shell {
     display: grid;
-    grid-template-columns: 1.1fr 1fr;
+    grid-template-columns: minmax(0, 42fr) minmax(0, 58fr);
     min-height: 100vh;
     width: 100%;
   }
@@ -199,7 +199,9 @@ const t = createSystemTranslator(locale);
   }
 
   .login-aside-panel {
-    background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 100%);
+    background:
+      radial-gradient(700px 420px at 70% 10%, rgba(101, 82, 232, 0.06), transparent 62%),
+      var(--surface-muted, #F6F7FA);
     border-left: 1px solid var(--border-soft);
     display: flex;
     align-items: center;
@@ -225,13 +227,10 @@ const t = createSystemTranslator(locale);
   .auth-card {
     width: 100%;
     background: #FFFFFF;
-    border: 1px solid rgba(226, 232, 240, 0.9);
-    border-radius: 24px;
+    border: 1px solid var(--border-strong, #D9DCE5);
+    border-radius: 16px;
     padding: 36px 32px;
-    box-shadow:
-      0 1px 3px 0 rgba(0, 0, 0, 0.04),
-      0 10px 25px -5px rgba(91, 92, 235, 0.06),
-      0 8px 10px -6px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px rgba(16, 24, 40, 0.06);
     position: relative;
   }
 
@@ -304,7 +303,8 @@ const t = createSystemTranslator(locale);
   .input-control input:focus {
     background: #FFFFFF;
     border-color: var(--sln-action-primary);
-    box-shadow: 0 0 0 4px rgba(91, 92, 235, 0.12);
+    box-shadow: 0 0 0 3px rgba(101, 82, 232, 0.14);
+    outline: none;
   }
   .btn-reveal-pwd {
     position: absolute;
@@ -354,21 +354,21 @@ const t = createSystemTranslator(locale);
     width: 100%;
     min-height: 48px;
     margin-top: 8px;
-    border: none;
-    border-radius: 12px;
+    border: 1px solid #5140C9;
+    border-radius: 10px;
     padding: 12px 20px;
     background: var(--sln-action-primary);
     color: #FFFFFF;
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(91, 92, 235, 0.25);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .btn-primary:hover {
     background: var(--sln-action-primary-hover);
     transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(91, 92, 235, 0.35);
+    box-shadow: 0 2px 8px rgba(101, 82, 232, 0.24);
   }
   .btn-primary:active { transform: translateY(0); }
   .btn-primary:disabled { cursor: wait; opacity: 0.72; transform: none; }

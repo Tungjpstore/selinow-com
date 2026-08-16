@@ -135,18 +135,27 @@ const pricingStructuredData = {
   {validHost ? <>
     <MarketingHeader dashboardOrigin={dashboardOrigin} locale={locale} />
     <main id="main-content" class="pricing-page">
-      <section class="platform-shell kit-section-dense">
-        <div class="pricing-intro kit-section-heading kit-section-heading-centered">
-          <p class="kit-kicker">{t("marketing.pricing.intro.kicker")}</p>
-          <h1 class="hero-headline">{t("marketing.pricing.intro.title")}</h1>
-          <p class="section-description">{t("marketing.pricing.intro.description")}</p>
+      <section class="pricing-hero">
+        <div class="platform-shell">
+          <nav class="mk-breadcrumb" aria-label={t("marketing.breadcrumb.aria")}>
+            <a href={locale === "en" ? "/" : "/?lang=vi-VN"}>Selinow</a>
+            <span aria-hidden="true">/</span>
+            <span aria-current="page">{t("marketing.header.pricing")}</span>
+          </nav>
+          <div class="kit-section-heading kit-section-heading-centered pricing-intro">
+            <p class="kit-kicker">{t("marketing.pricing.intro.kicker")}</p>
+            <h1 class="hero-headline">{t("marketing.pricing.intro.title")}</h1>
+            <p class="section-description">{t("marketing.pricing.intro.description")}</p>
+          </div>
         </div>
+      </section>
 
+      <section class="platform-shell kit-section-dense pricing-body">
         {pricingState === "unavailable" && (
-          <section class="pricing-unavailable" data-pricing-state="unavailable" aria-labelledby="pricing-unavailable-title">
+          <div class="pricing-unavailable" data-pricing-state="unavailable" aria-labelledby="pricing-unavailable-title">
             <h2 id="pricing-unavailable-title">{t("marketing.pricing.unavailable.title")}</h2>
             <p>{t("marketing.pricing.unavailable.description")}</p>
-          </section>
+          </div>
         )}
 
         {displayPlans.length > 0 && (
@@ -162,7 +171,7 @@ const pricingStructuredData = {
               </div>
             </div>
 
-            <div class="plan-grid">
+            <div class:list={["plan-grid", displayPlans.length === 1 && "plan-grid-single", displayPlans.length === 2 && "plan-grid-pair", displayPlans.length >= 4 && "plan-grid-many"]}>
               {displayPlans.map((plan) => (
                 <article class:list={["plan", "runtime-plan-card", plan.recommended === true && "plan-recommended", pricingState === "unavailable" && "plan-preview"]}>
                   {plan.recommended === true && <p class="plan-recommended-label">{t("marketing.home.pricing.recommended")}</p>}
@@ -183,6 +192,11 @@ const pricingStructuredData = {
                         </p>
                       );
                     })}
+                    {pricingState !== "ready" && (
+                      <p class="plan-price-unpublished" data-pricing-offer-hidden>
+                        <strong>{t("marketing.pricing.price_unavailable")}</strong>
+                      </p>
+                    )}
                   </div>
                   <ul>{planFeatureList(plan, locale).map((feature) => <li>{feature}</li>)}</ul>
                   <a class="kit-button kit-button-secondary button secondary" href={`${dashboardOrigin}/login`} data-pricing-cta>{t("marketing.pricing.cta")}</a>
@@ -195,16 +209,17 @@ const pricingStructuredData = {
         <p class="pricing-note">{t("marketing.pricing.paid_only")} {t("marketing.pricing.note")}</p>
       </section>
 
-      {displayPlans.length === 2 && (
+      {displayPlans.length > 1 && (
         <section class="platform-shell comparison-section" aria-labelledby="comparison-title">
           <div class="comparison-intro">
             <div>
-              <p class="section-kicker">{t("marketing.pricing.comparison.kicker")}</p>
-              <h2 id="comparison-title">{t("marketing.pricing.comparison.title")}</h2>
+              <p class="kit-kicker">{t("marketing.pricing.comparison.kicker")}</p>
+              <h2 class="section-title" id="comparison-title">{t("marketing.pricing.comparison.title")}</h2>
             </div>
-            <p>{t("marketing.pricing.comparison.description")}</p>
+            <p class="section-description">{t("marketing.pricing.comparison.description")}</p>
           </div>
-          <div class="comparison-table-wrap">
+
+          <div class="comparison-table-wrap" data-comparison-desktop>
             <table class="comparison-table">
               <thead>
                 <tr>
@@ -228,6 +243,27 @@ const pricingStructuredData = {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div class="comparison-mobile" data-comparison-mobile>
+            {comparisonGroups.map((group) => (
+              <section class="comparison-mobile-group" aria-label={group.label}>
+                <h3>{group.label}</h3>
+                {group.rows.map((row) => (
+                  <div class="comparison-mobile-row">
+                    <p class="comparison-mobile-label">{row.label}</p>
+                    <dl>
+                      {displayPlans.map((plan) => (
+                        <>
+                          <dt>{plan.name}</dt>
+                          <dd data-plan={plan.name}>{row.value(plan)}</dd>
+                        </>
+                      ))}
+                    </dl>
+                  </div>
+                ))}
+              </section>
+            ))}
           </div>
         </section>
       )}

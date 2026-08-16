@@ -20,18 +20,20 @@ const localeHref = (targetLocale: "en" | "vi-VN"): string => {
   if (targetLocale !== "en") url.searchParams.set("lang", targetLocale);
   return `${url.pathname}${url.search}`;
 };
+const navLinks = [
+  { href: marketingHref("/#core"), label: t("marketing.header.product") },
+  { href: marketingHref("/solutions"), label: t("marketing.header.solutions") },
+  { href: marketingHref("/pricing"), label: t("marketing.header.pricing") },
+  { href: marketingHref("/support"), label: t("marketing.header.support") },
+];
 ---
 
 <header class="platform-shell platform-nav" data-marketing-nav>
-  <a class="platform-logo" href="/" aria-label={t("marketing.header.home_aria")}>
+  <a class="platform-logo" href={marketingHref("/")} aria-label={t("marketing.header.home_aria")}>
     <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="152" height="40" />
   </a>
   <nav class="platform-nav-desktop" aria-label={t("marketing.header.nav_aria")}>
-    <a href={marketingHref("/#channels")}>{t("marketing.header.product")}</a>
-    <a href={marketingHref("/solutions")}>{t("marketing.header.solutions")}</a>
-    <a href={marketingHref("/pricing")}>{t("marketing.header.pricing")}</a>
-    <a href={marketingHref("/#faq")}>{t("marketing.header.resources")}</a>
-    <a href={marketingHref("/#architecture")}>{t("marketing.header.partners")}</a>
+    {navLinks.map((link) => <a href={link.href}>{link.label}</a>)}
     <a href={`${dashboardOrigin}/login`}>{t("marketing.header.login")}</a>
     <span class="platform-language-switcher" aria-label={languageLabel}>
       <a href={localeHref("en")} aria-current={activeLocale === "en" ? "page" : undefined}>EN</a>
@@ -51,11 +53,7 @@ const localeHref = (targetLocale: "en" | "vi-VN"): string => {
         data-marketing-menu-trigger
       ><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span></summary>
       <nav aria-label={t("marketing.header.mobile_nav_aria")}>
-        <a href={marketingHref("/#channels")}>{t("marketing.header.product")}</a>
-        <a href={marketingHref("/solutions")}>{t("marketing.header.solutions")}</a>
-        <a href={marketingHref("/pricing")}>{t("marketing.header.pricing")}</a>
-        <a href={marketingHref("/#faq")}>{t("marketing.header.resources")}</a>
-        <a href={marketingHref("/#architecture")}>{t("marketing.header.partners")}</a>
+        {navLinks.map((link) => <a href={link.href}>{link.label}</a>)}
         <div class="platform-language-switcher" aria-label={languageLabel}>
           <a href={localeHref("en")} aria-current={activeLocale === "en" ? "page" : undefined}>EN</a>
           <span aria-hidden="true">/</span>

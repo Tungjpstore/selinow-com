@@ -51,5 +51,14 @@ export default tseslint.config(
   {
     files: ["scripts/**/*.mjs", "eslint.config.js"],
     ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      globals: {
+        // Dev-time node scripts may also evaluate code inside a browser page.
+        console: "readonly",
+        document: "readonly",
+        process: "readonly",
+        window: "readonly",
+      },
+    },
   },
 );

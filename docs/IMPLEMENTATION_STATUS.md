@@ -1,8 +1,40 @@
 # Implementation Status
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 ## Current source of truth
+
+Marketing v5 "Commerce Flow OS" rebuild (2026-08-16/17, branch `dashboard-redesign-takeover`):
+The rejected "Landing V4 Aurora" attempt was fully torn down (tracked files restored to the v3
+commit, untracked v4 artifacts deleted; backup tarball + working-tree diff in `/tmp/landing-v4-*`)
+and every public marketing surface was rebuilt from the original master prompt — light, calm,
+operational, Selinow-indigo — then upgraded once more from owner feedback (v5.1: denser rhythm,
+hairline section separation, card-vs-canvas surface layering, dot grids + gradient hairlines,
+stronger layered hero, professional card interiors). Full detail in
+`docs/marketing-redesign/IMPLEMENTATION_REPORT.md`.
+- **Surfaces**: `/` (hero + layered transaction simulation with floating status chips + factual
+  status strip, flow rail, why-cards, one-core dot-grid diagram, solution tiles with per-slug
+  mini rails, payment-ownership facts, runtime pricing preview, FAQ, final CTA), `/pricing`
+  (breadcrumb, runtime states, market switcher, desktop table + mobile grouped ledger),
+  `/solutions` + 3 detail pages (semantic breadcrumbs, per-slug hero visuals, timeline
+  workflows), gates `/legal` `/privacy` `/support` (truthful blocked copy kept), `/login`
+  (restyle only; auth semantics + every data-hook untouched).
+- **Architecture**: new `src/components/marketing/{icons.ts,HeroFlowSim,SolutionHeroVisual,
+  solutionRails.ts}`; removed `HeroCommerceFlow`, `SolutionDiagram`, `PricingPlanCard`,
+  `scripts/landing/hero-canvas.ts`; marketing i18n catalog rewritten (en/vi parity, ternary
+  CTA moved to catalog); tokens/shell/components/pages/landing CSS onto the layered surface
+  system (`--mk-canvas` vs white cards, hairlines, dot grids).
+- **Verification**: `npm run check` (0 marketing errors; the 8 AppLayout errors are the parallel
+  dashboard stream's, present at HEAD) · `npm run lint` clean · `npm run test` 335 files /
+  **2630 tests** (intentional updates: `marketing-assets-contract` kit refs → core-hub.svg only,
+  `legal-placeholder-surfaces` footer source → `MarketingFooter.astro`) · `npm run build` ·
+  `npm run deploy:dry-run` · `scripts/landing-visual-check.mjs` extended to 12 targets ×
+  1440/768/390/320 × en/vi: **48 captures, no overflow, no console errors**. In-browser: mobile
+  menu keyboard/Escape, pricing market switcher + mobile ledger swap, FAQ toggles, authenticated
+  /login → /app redirect, SEO headers (canonical/hreflang/x-default/noindex) verified via curl.
+- **Known limitations**: local pricing renders the truthful unavailable state until Dodo refs
+  publish; gate copy stays English-only (owner-gated content, nothing invented); OG cover stays
+  the v3 global PNG.
 
 Seller Operations for All Verticals — TV5 (2026-08-16, branch `storefront-templates`):
 Closes the seller-side loop: physical and booking shops are now fully operable from the dashboard.

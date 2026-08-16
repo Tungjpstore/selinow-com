@@ -1,14 +1,17 @@
 ---
 import MarketingHeader from "../../components/marketing/MarketingHeader.astro";
 import MarketingFooter from "../../components/marketing/MarketingFooter.astro";
+import SolutionWorkflowCard from "../../components/marketing/SolutionWorkflowCard.astro";
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
 import { getBindings } from "../../lib/platform/bindings";
 import { getSolutionNotFound, getSolutionPage, getSolutionsHub, solutionSlugs } from "../../lib/content/solutions";
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
 import { normalizeSupportedLocale } from "../../lib/i18n/locale";
 import { classifyPlatformHost } from "../../lib/storefront/routing";
 
 const env = getBindings();
 const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
+const t = createMarketingTranslator(locale);
 const content = getSolutionsHub(locale);
 const notFound = getSolutionNotFound(locale);
 const validHost = classifyPlatformHost(new URL(Astro.request.url).hostname, env) === "marketing";
@@ -65,58 +68,70 @@ if (!validHost) {
   {validHost ? <>
     <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
     <main id="main-content" class="solution-page solution-hub-page" data-marketing-surface="solutions-hub">
-      <section class="solution-hero platform-shell kit-section-dense">
-        <div class="solution-hero-copy">
-          <a class="solution-breadcrumb" href={localizedPath("/")}>Selinow <span aria-hidden="true">/</span> {content.eyebrow}</a>
-          <p class="section-eyebrow">{content.eyebrow}</p>
-          <h1 class="hero-headline">{content.title}</h1>
-          <p class="hero-lead">{content.lead}</p>
-          <div class="landing-actions">
-            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
-              <span>{content.cta}</span>
-              <span aria-hidden="true">→</span>
-            </a>
-            <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
+      <section class="solution-hero">
+        <div class="platform-shell">
+          <nav class="mk-breadcrumb" aria-label={t("marketing.breadcrumb.aria")}>
+            <a href={localizedPath("/")}>Selinow</a>
+            <span aria-hidden="true">/</span>
+            <span aria-current="page">{content.solutionsLabel}</span>
+          </nav>
+          <div class="solution-hero-grid">
+            <div class="solution-hero-copy">
+              <p class="section-eyebrow">{content.eyebrow}</p>
+              <h1 class="hero-headline">{content.title}</h1>
+              <p class="hero-lead">{content.lead}</p>
+              <div class="landing-actions">
+                <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+                  <span>{content.cta}</span>
+                  <span aria-hidden="true">→</span>
+                </a>
+                <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
+              </div>
+            </div>
+            <aside class="solution-signal" aria-label={content.answerLabel}>
+              <span class="solution-signal-index" aria-hidden="true">00</span>
+              <p>{content.answerLabel}</p>
+              <strong>{content.answer}</strong>
+              <small>Selinow OS / {content.solutionsLabel.toLowerCase()}</small>
+            </aside>
           </div>
         </div>
-        <aside class="solution-signal" aria-label={content.answerLabel}>
-          <span class="solution-signal-index" aria-hidden="true">00</span>
-          <p>{content.answerLabel}</p>
-          <strong>{content.answer}</strong>
-          <small>Selinow OS / {content.solutionsLabel.toLowerCase()}</small>
-        </aside>
       </section>
 
       <section class="kit-section platform-shell" aria-labelledby="solution-catalog-title">
         <div class="kit-section-heading">
-          <p class="kit-kicker">{content.cardLabel}</p>
-          <h2 class="section-title" id="solution-catalog-title">{content.cardTitle}</h2>
+          <div>
+            <p class="kit-kicker">{content.cardLabel}</p>
+            <h2 class="section-title" id="solution-catalog-title">{content.cardTitle}</h2>
+          </div>
           <p class="section-description">{content.cardDescription}</p>
         </div>
-        <div class="solution-catalog-grid">
+        <div class="mk-solutions-grid">
           {solutionSlugs.map((slug, index) => {
             const solution = getSolutionPage(slug, locale);
             return solution === null ? null : (
-              <a class="solution-catalog-card" href={localizedPath(`/solutions/${slug}`)}>
-                <span class="solution-card-index">{String(index + 1).padStart(2, "0")}</span>
-                <span class="solution-card-eyebrow">{solution.eyebrow}</span>
-                <strong>{solution.title}</strong>
-                <p>{solution.lead}</p>
-                <b aria-hidden="true">↗</b>
-              </a>
+              <SolutionWorkflowCard
+                slug={slug}
+                index={index + 1}
+                eyebrow={solution.eyebrow}
+                title={solution.title}
+                lead={solution.lead}
+                href={localizedPath(`/solutions/${slug}`)}
+                locale={locale}
+              />
             );
           })}
         </div>
       </section>
 
-      <section class="final-cta-kit">
-        <div class="platform-shell final-cta-inner">
+      <section class="mk-final solution-hub-final">
+        <div class="platform-shell mk-final-inner">
           <div>
-            <p class="kit-kicker">SELINOW COMMERCE FLOW OS</p>
-            <h2>{content.answer}</h2>
+            <p class="kit-kicker">{content.relatedHomeLabel}</p>
+            <h2>{content.relatedHomeTitle}</h2>
           </div>
-          <div class="final-cta-actions">
-            <a class="kit-button kit-button-light" href={localizedPath("/")}>
+          <div class="mk-final-actions">
+            <a class="kit-button kit-button-primary" href={localizedPath("/")}>
               <span>{content.homeCoreCta}</span>
               <span aria-hidden="true">→</span>
             </a>
