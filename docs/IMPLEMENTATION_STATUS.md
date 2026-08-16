@@ -9,9 +9,12 @@ The rejected "Landing V4 Aurora" attempt was fully torn down (tracked files rest
 commit, untracked v4 artifacts deleted; backup tarball + working-tree diff in `/tmp/landing-v4-*`)
 and every public marketing surface was rebuilt from the original master prompt — light, calm,
 operational, Selinow-indigo — then upgraded once more from owner feedback (v5.1: denser rhythm,
-hairline section separation, card-vs-canvas surface layering, dot grids + gradient hairlines,
-stronger layered hero, professional card interiors). Full detail in
-`docs/marketing-redesign/IMPLEMENTATION_REPORT.md`.
+hairline section separation, card-vs-canvas surface layering, dot grids, gradient hairlines,
+stronger layered hero, professional card interiors) and again in v5.2 (pricing split hero +
+"every plan" core panel + CTA band; solutions eyebrow pills + shared-core strip + detail CTA
+bands; gates hero bands; keyword-grounded SEO titles/descriptions/H1s for the VN-first market,
+Organization `areaServed`/`knowsLanguage`, sitemap gates + lastmod, richer llms.txt). Full
+detail in `docs/marketing-redesign/IMPLEMENTATION_REPORT.md`.
 - **Surfaces**: `/` (hero + layered transaction simulation with floating status chips + factual
   status strip, flow rail, why-cards, one-core dot-grid diagram, solution tiles with per-slug
   mini rails, payment-ownership facts, runtime pricing preview, FAQ, final CTA), `/pricing`

@@ -974,3 +974,194 @@
     padding: var(--space-4);
   }
 }
+
+/* --------------------------------------------------------------------------
+   PRICING HERO SPLIT (v5.2) — copy left, core panel right
+   -------------------------------------------------------------------------- */
+.pricing-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  gap: clamp(32px, 5vw, 64px);
+  align-items: center;
+}
+
+.pricing-hero-copy .hero-headline {
+  font-size: clamp(32px, 4.2vw, 50px);
+}
+
+.pricing-core-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--mk-hairline);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-5);
+  box-shadow: var(--mk-panel-shadow);
+  overflow: hidden;
+  max-width: 460px;
+  width: 100%;
+  margin-inline: auto;
+}
+
+.pricing-core-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  inset-inline: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--brand-500), var(--brand-300) 55%, transparent);
+}
+
+.pricing-core-panel img {
+  filter: drop-shadow(0 8px 18px rgba(101, 82, 232, 0.22));
+  margin-bottom: var(--space-1);
+}
+
+.pricing-core-panel .kit-kicker {
+  margin-bottom: 0;
+}
+
+.pricing-core-panel strong {
+  font-size: 16.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+  letter-spacing: -0.012em;
+}
+
+.pricing-core-panel ul {
+  list-style: none;
+  margin: var(--space-3) 0;
+  padding: var(--space-3) 0 0;
+  border-top: 1px dashed var(--mk-hairline);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2) var(--space-4);
+  width: 100%;
+}
+
+.pricing-core-panel li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.pricing-core-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(135deg, var(--brand-50), #FFFFFF);
+  border: 1px solid var(--brand-100);
+  color: var(--brand-600);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pricing-core-panel > small {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.pricing-final {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .pricing-hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-core-panel {
+    max-width: 520px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   PUBLICATION GATE — hero band + status panel (v5.2)
+   -------------------------------------------------------------------------- */
+.gate-hero {
+  position: relative;
+  padding-block: clamp(40px, 6vw, 72px) 0;
+  background:
+    radial-gradient(900px 420px at 82% -10%, rgba(101, 82, 232, 0.06), transparent 62%),
+    linear-gradient(180deg, var(--mk-canvas-deep) 0%, var(--mk-canvas) 100%);
+  border-bottom: 1px solid var(--mk-hairline);
+  overflow: hidden;
+}
+
+.gate-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--mk-dot) 1px, transparent 1.4px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(560px 280px at 84% 0%, rgba(0, 0, 0, 0.4), transparent 72%);
+  -webkit-mask-image: radial-gradient(560px 280px at 84% 0%, rgba(0, 0, 0, 0.4), transparent 72%);
+  pointer-events: none;
+}
+
+.gate-hero .platform-shell {
+  position: relative;
+}
+
+.gate-hero-copy {
+  max-width: 760px;
+  margin-bottom: clamp(32px, 5vw, 56px);
+}
+
+.gate-hero-copy .hero-headline {
+  font-size: clamp(30px, 4vw, 46px);
+  margin: var(--space-3) 0 var(--space-4);
+}
+
+.gate-hero-copy > p {
+  font-size: 16.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 62ch;
+}
+
+/* --------------------------------------------------------------------------
+   SOLUTIONS SHARED-CORE STRIP (v5.2)
+   -------------------------------------------------------------------------- */
+.solution-shared-core {
+  background-color: var(--surface-raised);
+  border-block: 1px solid var(--mk-hairline);
+}
+
+.solution-core-strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.solution-core-strip li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-primary);
+  background-color: var(--surface-page);
+  border: 1px solid var(--mk-hairline-soft);
+  border-radius: var(--radius-pill);
+  padding: 9px 16px;
+}
+
+.solution-core-strip svg {
+  color: var(--brand-600);
+}

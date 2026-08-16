@@ -81,7 +81,7 @@ const structuredData = content === null || !validHost ? undefined : {
           </nav>
           <div class="solution-hero-grid">
             <div class="solution-hero-copy">
-              <p class="section-eyebrow">{content.eyebrow}</p>
+              <p class="mk-hero-eyebrow">{content.eyebrow}</p>
               <h1 class="hero-headline">{content.title}</h1>
               <p class="hero-lead">{content.lead}</p>
               <div class="landing-actions">
@@ -176,6 +176,25 @@ const structuredData = content === null || !validHost ? undefined : {
             <strong>{hub.relatedHomeTitle}</strong>
             <b aria-hidden="true">→</b>
           </a>
+        </div>
+      </section>
+
+      <section class="mk-final">
+        <div class="platform-shell mk-final-inner">
+          <div>
+            <p class="kit-kicker">{content.eyebrow}</p>
+            <h2>{content.cta}</h2>
+          </div>
+          <div class="mk-final-actions">
+            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+              <span>{content.cta}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+            <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>
+              <span>{content.ctaSecondary}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+          </div>
         </div>
       </section>
     </main>

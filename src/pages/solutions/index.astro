@@ -2,6 +2,7 @@
 import MarketingHeader from "../../components/marketing/MarketingHeader.astro";
 import MarketingFooter from "../../components/marketing/MarketingFooter.astro";
 import SolutionWorkflowCard from "../../components/marketing/SolutionWorkflowCard.astro";
+import { icons } from "../../components/marketing/icons";
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
 import { getBindings } from "../../lib/platform/bindings";
 import { getSolutionNotFound, getSolutionPage, getSolutionsHub, solutionSlugs } from "../../lib/content/solutions";
@@ -77,7 +78,7 @@ if (!validHost) {
           </nav>
           <div class="solution-hero-grid">
             <div class="solution-hero-copy">
-              <p class="section-eyebrow">{content.eyebrow}</p>
+              <p class="mk-hero-eyebrow">{content.eyebrow}</p>
               <h1 class="hero-headline">{content.title}</h1>
               <p class="hero-lead">{content.lead}</p>
               <div class="landing-actions">
@@ -122,6 +123,20 @@ if (!validHost) {
             );
           })}
         </div>
+      </section>
+
+      <section class="kit-section platform-shell solution-shared-core" aria-labelledby="shared-core-title">
+        <div class="kit-section-heading kit-section-heading-centered">
+          <p class="kit-kicker">{content.proofTitle}</p>
+          <h2 class="section-title" id="shared-core-title">{content.answer}</h2>
+        </div>
+        <ul class="solution-core-strip">
+          <li><span set:html={icons.receipt(15)} aria-hidden="true"></span>{t("marketing.home.architecture.module.ai")}</li>
+          <li><span set:html={icons.shieldCheck(15)} aria-hidden="true"></span>{t("marketing.home.architecture.module.automation")}</li>
+          <li><span set:html={icons.package(15)} aria-hidden="true"></span>{t("marketing.home.architecture.module.workflow")}</li>
+          <li><span set:html={icons.pulse(15)} aria-hidden="true"></span>{t("marketing.home.architecture.module.analytics")}</li>
+          <li><span set:html={icons.lock(15)} aria-hidden="true"></span>{t("marketing.home.architecture.module.security")}</li>
+        </ul>
       </section>
 
       <section class="mk-final solution-hub-final">

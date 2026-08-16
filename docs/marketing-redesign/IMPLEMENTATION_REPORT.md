@@ -12,7 +12,31 @@ clean rebuild of every public marketing surface per the original master prompt:
 visual pass (v5.1) applied owner feedback: denser rhythm, hairline section
 separation, layered card-vs-canvas surfaces, dot-grid + gradient-hairline
 detailing, a stronger layered hero scene, and more professional card interiors —
-all still light-themed, JS-free, and reduced-motion safe.
+all still light-themed, JS-free, and reduced-motion safe. A third pass (v5.2)
+brought pricing and the satellite pages up to the landing's standard and shipped
+a keyword-grounded SEO/geo upgrade across every public route.
+
+## v5.2 addendum — satellite pages + SEO/geo
+
+- **Pricing**: split hero (copy left; "every plan includes the full commerce
+  core" panel right, reusing the core hub + module keys), proof chips, compare
+  anchor, upgraded plan cards, `#compare` section, and a closing CTA band —
+  visually on par with the landing.
+- **Solutions hub/detail**: eyebrow pills, shared-core module strip on the hub,
+  closing CTA bands on every detail page.
+- **Gates** (`/legal` `/privacy` `/support`): hero band (dot grid + pill + H1 +
+  lead) above the status panel; blocked-pending-approval copy unchanged.
+- **SEO keywords** (VN-first market: seller của sản phẩm số, Website + Telegram,
+  PayOS, auto delivery): titles/descriptions/H1s rewritten for `/`, `/pricing`,
+  and all three solution pages — e.g. "Nền tảng bán sản phẩm số trên Website &
+  Telegram", "Bán hàng qua Telegram", "Giao sản phẩm số tự động sau thanh toán",
+  "Quản lý license key & kho mã số an toàn"; EN mirrors for the global market.
+  All banned-phrase contracts still hold.
+- **Geo**: Organization JSON-LD now declares `knowsLanguage: [en, vi]` and
+  `areaServed: [Vietnam, Worldwide]` (grounded in the vn + global billing
+  markets); hreflang/x-default/og-locale alternates unchanged and verified.
+- **Infrastructure**: sitemap now includes `/legal` `/privacy` `/support` with
+  `lastmod`; llms.txt intro enriched with the delivery keywords.
 
 ## Routes redesigned
 

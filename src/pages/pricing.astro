@@ -2,6 +2,7 @@
 import PlatformLayout from "../layouts/PlatformLayout.astro";
 import MarketingHeader from "../components/marketing/MarketingHeader.astro";
 import MarketingFooter from "../components/marketing/MarketingFooter.astro";
+import { icons } from "../components/marketing/icons";
 import { loggerFor } from "../lib/operations/logger";
 import { getBindings } from "../lib/platform/bindings";
 import { formatMarketingPrice, getDefaultMarketingMarket, getMarketingAvailableMarkets, getMarketingPlans, getMarketingPreviewPlans, getMarketingStructuredOffers, isMarketingPricingReady, planFeatureList, type MarketingPlan, type MarketingPrice } from "../lib/storefront/marketing";
@@ -45,6 +46,13 @@ const previewPlans = validHost && env.APP_ENV === "local" ? getMarketingPreviewP
 const displayPlans = plans.length === 2 ? plans : previewPlans;
 const availableMarkets = getMarketingAvailableMarkets(plans);
 
+const everyPlanModules = [
+  { icon: icons.receipt(14), label: t("marketing.home.architecture.module.ai") },
+  { icon: icons.shieldCheck(14), label: t("marketing.home.architecture.module.automation") },
+  { icon: icons.package(14), label: t("marketing.home.architecture.module.workflow") },
+  { icon: icons.pulse(14), label: t("marketing.home.architecture.module.analytics") },
+  { icon: icons.lock(14), label: t("marketing.home.architecture.module.security") },
+];
 
 const capability = (value: unknown): string => value === true
   ? t("marketing.pricing.capability.yes")
@@ -142,10 +150,43 @@ const pricingStructuredData = {
             <span aria-hidden="true">/</span>
             <span aria-current="page">{t("marketing.header.pricing")}</span>
           </nav>
-          <div class="kit-section-heading kit-section-heading-centered pricing-intro">
-            <p class="kit-kicker">{t("marketing.pricing.intro.kicker")}</p>
-            <h1 class="hero-headline">{t("marketing.pricing.intro.title")}</h1>
-            <p class="section-description">{t("marketing.pricing.intro.description")}</p>
+
+          <div class="pricing-hero-grid">
+            <div class="pricing-hero-copy">
+              <p class="kit-kicker">{t("marketing.pricing.intro.kicker")}</p>
+              <h1 class="hero-headline">{t("marketing.pricing.intro.title")}</h1>
+              <p class="hero-lead">{t("marketing.pricing.intro.description")}</p>
+              <div class="landing-actions">
+                <a class="kit-button kit-button-primary" href={`${dashboardOrigin}/login`}>
+                  <span>{t("marketing.pricing.cta")}</span>
+                  <span aria-hidden="true">→</span>
+                </a>
+                <a class="kit-button kit-button-ghost" href="#compare">
+                  <span>{t("marketing.home.pricing.compare")}</span>
+                  <span aria-hidden="true">→</span>
+                </a>
+              </div>
+              <ul class="mk-hero-proof">
+                <li><span set:html={icons.check(13)} aria-hidden="true"></span>{t("marketing.home.hero.proof.no_card")}</li>
+                <li><span set:html={icons.check(13)} aria-hidden="true"></span>{t("marketing.home.hero.proof.locales")}</li>
+                <li><span set:html={icons.check(13)} aria-hidden="true"></span>{t("marketing.pricing.paid_only").split(".")[0]}.</li>
+              </ul>
+            </div>
+
+            <aside class="pricing-core-panel" aria-label={t("marketing.pricing.every.title")}>
+              <img src="/brand/selinow-kit/global/v3/core-hub.svg" alt="" width="64" height="64" loading="lazy" />
+              <p class="kit-kicker">{t("marketing.pricing.every.kicker")}</p>
+              <strong>{t("marketing.pricing.every.title")}</strong>
+              <ul>
+                {everyPlanModules.map((module) => (
+                  <li>
+                    <span class="pricing-core-icon" set:html={module.icon} aria-hidden="true"></span>
+                    {module.label}
+                  </li>
+                ))}
+              </ul>
+              <small>{t("marketing.pricing.every.note")}</small>
+            </aside>
           </div>
         </div>
       </section>
@@ -210,7 +251,7 @@ const pricingStructuredData = {
       </section>
 
       {displayPlans.length > 1 && (
-        <section class="platform-shell comparison-section" aria-labelledby="comparison-title">
+        <section class="platform-shell comparison-section" id="compare" aria-labelledby="comparison-title">
           <div class="comparison-intro">
             <div>
               <p class="kit-kicker">{t("marketing.pricing.comparison.kicker")}</p>
@@ -286,6 +327,22 @@ const pricingStructuredData = {
             <summary><span>{t("marketing.pricing.faq.domain.question")}</span><span aria-hidden="true">+</span></summary>
             <p>{t("marketing.pricing.faq.domain.answer")}</p>
           </details>
+        </div>
+      </section>
+
+      <section class="mk-final pricing-final">
+        <div class="platform-shell mk-final-inner">
+          <div>
+            <p class="kit-kicker">{t("marketing.pricing.intro.kicker")}</p>
+            <h2>{t("marketing.pricing.final.title")}</h2>
+            <p>{t("marketing.pricing.final.description")}</p>
+          </div>
+          <div class="mk-final-actions">
+            <a class="kit-button kit-button-primary" href={`${dashboardOrigin}/login`} data-pricing-cta>
+              <span>{t("marketing.pricing.cta")}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+          </div>
         </div>
       </section>
     </main>
