@@ -366,7 +366,7 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
   .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding-bottom: var(--sln-space-4); border-bottom: 1px solid var(--sln-border-default); }
   .panel-heading h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
   .panel-heading > span { color: var(--sln-text-muted); font: var(--sln-font-caption); }
-  .eyebrow { margin: 0 0 7px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+  .eyebrow { margin: 0 0 7px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
   .eyebrow-danger { color: var(--sln-state-danger); }
   .export-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sln-space-4); }
   .export-options > article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 18px; background: var(--sln-bg-canvas); }
@@ -380,13 +380,13 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
   .export-ledger { display: grid; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); overflow: hidden; }
   .export-ledger article { display: grid; grid-template-columns: 42px minmax(180px, 1.3fr) repeat(4, minmax(115px, .8fr)); gap: 14px; align-items: center; min-height: 82px; padding: 14px 16px; border-top: 1px solid var(--sln-border-default); }
   .export-ledger article:first-child { border-top: 0; }
-  .record-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--sln-tint-indigo); color: var(--sln-action-primary-strong); font-weight: 800; }
+  .record-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--sln-tint-indigo); color: var(--sln-action-primary-strong); font-weight: 600; }
   .export-ledger article:has(.record-mark:first-child:nth-last-child(n)) .record-mark { flex: none; }
   .export-ledger article > div:not(.record-mark) { display: grid; gap: 3px; min-width: 0; }
   .export-ledger span, .export-ledger time, .export-ledger code { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
   .export-ledger strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
   .export-ledger code { font-family: var(--sln-font-mono); font-size: 10px; }
-  .record-error, .hold-note { grid-column: 1 / -1; margin: 0; border-radius: var(--sln-radius-sm); padding: 10px 12px; background: var(--sln-tint-warning); color: #7c3e02; font: var(--sln-font-body-sm); }
+  .record-error, .hold-note { grid-column: 1 / -1; margin: 0; border-radius: var(--sln-radius-sm); padding: 10px 12px; background: var(--sln-tint-warning); color: var(--sln-warning-text); font: var(--sln-font-body-sm); }
   .record-error code { font-family: var(--sln-font-mono); }
   .deletion-start { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr); gap: var(--sln-space-6); align-items: start; }
   .impact-copy { border-left: 1px solid var(--sln-state-danger); padding: 4px 0 4px 18px; }
@@ -418,7 +418,7 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
   .abuse-ledger { display: grid; overflow: hidden; border: 1px solid color-mix(in srgb, var(--sln-state-danger) 25%, var(--sln-border-default)); border-radius: var(--sln-radius-md); }
   .abuse-ledger article { display: grid; grid-template-columns: 34px minmax(0, 1.4fr) minmax(110px, .6fr) minmax(135px, .7fr); gap: 14px; align-items: start; padding: 16px; border-top: 1px solid var(--sln-border-default); }
   .abuse-ledger article:first-child { border-top: 0; }
-  .report-severity { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--sln-tint-danger); color: var(--sln-state-danger); font-weight: 800; }
+  .report-severity { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--sln-tint-danger); color: var(--sln-state-danger); font-weight: 600; }
   .report-copy { display: grid; gap: 4px; min-width: 0; }
   .report-copy strong, .abuse-ledger article > div:not(.report-copy) strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
   .report-copy p { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }

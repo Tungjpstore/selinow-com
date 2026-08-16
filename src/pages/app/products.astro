@@ -440,13 +440,13 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .visibility-toggle.is-visible { border-color: color-mix(in srgb, var(--sln-state-success) 45%, var(--sln-border-strong)); background: var(--sln-tint-success); }
   .visibility-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--sln-font-label); }
   .visibility-state { color: var(--sln-text-muted); font: var(--sln-font-caption); }
-  .visibility-toggle.is-visible .visibility-state { color: var(--sln-success-text-strong); font-weight: 700; }
+  .visibility-toggle.is-visible .visibility-state { color: var(--sln-success-text-strong); font-weight: 600; }
   .visibility-empty { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
   .category-panel { margin-top: var(--sln-space-8); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
   .category-list { display: grid; gap: 12px; }
   .category-row { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-canvas); }
   .category-fields { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(140px, 1fr) 100px 130px; gap: 12px; }
-  .category-fields label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
+  .category-fields label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 600; }
   .category-fields input, .category-fields select, .category-fields textarea { width: 100%; min-height: 40px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 10px; background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .category-description { grid-column: 1 / -1; }
   .category-actions { display: flex; justify-content: end; gap: 8px; }
@@ -457,16 +457,16 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .archive-confirmation > div { display: flex; flex: 0 0 auto; gap: 8px; }
   .ledger-panel { margin-top: var(--sln-space-10); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
   .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: var(--sln-space-6); }
-  .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .eyebrow { margin: 0 0 8px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
   h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
   .record-count { color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .panel-heading-tools { display: flex; align-items: center; gap: 14px; }
   .catalog-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; align-items: end; gap: 12px; margin-bottom: 16px; }
-  .catalog-toolbar label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
+  .catalog-toolbar label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 600; }
   .catalog-toolbar input, .catalog-toolbar select { width: 100%; min-height: 42px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
   .catalog-no-results { margin: 16px 0 0; padding: 20px; border: 1px dashed var(--sln-border-strong); border-radius: var(--sln-radius-md); color: var(--sln-text-secondary); }
   .catalog-no-results[hidden] { display: none; }
-  .ledger-panel .product-index { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: 10px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 750; vertical-align: middle; }
+  .ledger-panel .product-index { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: 10px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 600; vertical-align: middle; }
   .product-cell-title { display: inline-grid; gap: 3px; max-width: calc(100% - 48px); vertical-align: middle; }
   .product-cell-title strong { overflow: hidden; color: var(--sln-text-primary); text-overflow: ellipsis; white-space: nowrap; }
   .product-cell-title small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
@@ -479,7 +479,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .page-size-form { margin-left: auto; }
   .page-size-form label { display: inline-flex; align-items: center; gap: 8px; color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .page-size-form select { min-height: 40px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 6px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
-  .product-index { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 750; }
+  .product-index { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--sln-tint-indigo); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 600; }
   .product-dialog { width: min(100% - 32px, 480px); border: 0; border-radius: var(--sln-radius-xl); padding: 0; background: transparent; }
   .product-dialog[open] { position: fixed; inset: 16px; z-index: var(--sln-z-dialog); max-height: calc(100dvh - 32px); margin: auto; overflow-y: auto; box-shadow: 0 0 0 100vmax rgb(8 11 20 / 52%); }
   .product-dialog::backdrop { background: rgb(8 11 20 / 52%); backdrop-filter: blur(4px); }
@@ -491,13 +491,13 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .dialog-card select { width: 100%; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 10px 12px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
   .private-file-controls { display: grid; gap: 12px; margin: 4px 0 0; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 14px; background: var(--sln-tint-info); }
   .private-file-controls[hidden] { display: none; }
-  .private-file-controls legend { padding-inline: 6px; color: var(--sln-text-primary); font: var(--sln-font-label); font-weight: 750; }
+  .private-file-controls legend { padding-inline: 6px; color: var(--sln-text-primary); font: var(--sln-font-label); font-weight: 600; }
   .private-file-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .private-file-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
   .private-file-metadata { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
   .private-file-metadata[hidden] { display: none; }
   .image-controls { display: grid; gap: 10px; }
-  .image-controls legend { padding-inline: 6px; color: var(--sln-text-primary); font: var(--sln-font-label); font-weight: 750; }
+  .image-controls legend { padding-inline: 6px; color: var(--sln-text-primary); font: var(--sln-font-label); font-weight: 600; }
   .image-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
   .product-image-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
   .product-image-list li { display: grid; gap: 6px; }
@@ -506,7 +506,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .variant-editor-list { display: grid; gap: 12px; margin-top: 4px; }
   .variant-editor-list > .eyebrow { margin-bottom: 0; }
   .variant-editor-list fieldset { display: grid; gap: 12px; margin: 0; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 14px; }
-  .variant-editor-list legend { padding-inline: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; }
+  .variant-editor-list legend { padding-inline: 6px; color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 600; }
   .variant-editor-list .new-variant-fieldset { border-style: dashed; background: var(--sln-bg-subtle); }
   .variant-number-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .dialog-actions { display: flex; justify-content: end; gap: 10px; margin-top: 6px; }

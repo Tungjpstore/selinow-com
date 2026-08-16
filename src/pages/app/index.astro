@@ -5,6 +5,8 @@ import Icon from "../../components/console/Icon.astro";
 import MetricStrip from "../../components/console/MetricStrip.astro";
 import StatusDot from "../../components/console/StatusDot.astro";
 import Money from "../../components/commerce/Money.astro";
+import PaymentState from "../../components/commerce/PaymentState.astro";
+import FulfillmentState from "../../components/commerce/FulfillmentState.astro";
 import { authenticateRequest } from "../../lib/auth/session";
 import { listSellerCatalog } from "../../lib/catalog/store";
 import { listSellerOrders, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
@@ -212,22 +214,13 @@ const recentOrders = orders.slice(0, 6);
 const channelLabel = (value: string): string => value === "telegram" ? "Telegram" : value === "web" ? "Website" : value;
 
 
+const dayFormatter = new Intl.DateTimeFormat(typeof locale === "string" ? locale : "en", { dateStyle: "full", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
+const todayLabel = dayFormatter.format(new Date());
+
 const needsActionCount = paymentExceptionOrders.length + fulfillmentExceptionOrders.length;
 const shopCurrency = shop?.currency ?? "VND";
 const revenueLabel = formatMoney(verifiedValue, shopCurrency, typeof locale === "string" ? locale : "en");
 const fulfillmentLabel = fulfillmentRate === null ? "—" : percentFormatter.format(fulfillmentRate);
-const paymentTone = (status: string): "neutral" | "info" | "success" | "warning" | "danger" =>
-  status === "paid" ? "success"
-    : status === "failed" ? "danger"
-      : status === "partial" || status === "overpaid" ? "warning"
-        : status === "refunded" ? "info"
-          : "neutral";
-const fulfillmentTone = (status: string): "neutral" | "info" | "success" | "warning" | "danger" =>
-  status === "fulfilled" ? "success"
-    : status === "reserved" ? "info"
-      : status === "failed" ? "danger"
-        : status === "manual_review" ? "warning"
-          : "neutral";
 ---
 
 <ConsoleLayout activePath="/app" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.overview.title")}>
@@ -251,6 +244,7 @@ const fulfillmentTone = (status: string): "neutral" | "info" | "success" | "warn
         <div class="console-page-head__title">
           <h1>{shop.name}</h1>
           <StatusDot label={shopStatus} tone={shopTone === "neutral" ? "neutral" : shopTone} />
+          <span class="console-page-head__date" id={shop === undefined ? undefined : "dashboard-overview-date"}>{todayLabel}</span>
         </div>
         <div class="console-page-head__actions">
           {sellability !== "unavailable" && (
@@ -290,7 +284,7 @@ const fulfillmentTone = (status: string): "neutral" | "info" | "success" | "warn
                   <span class:list={["console-queue__dot", item.severity === "blocked" ? "is-danger" : "is-warning"]} aria-hidden="true"></span>
                   <span class="console-queue__body">
                     <span class="console-queue__title">{item.title}</span>
-                    <span class="console-queue__impact">{item.impact}</span>
+                    <span class="console-queue__impact" data-visual-dynamic>{item.impact}</span>
                   </span>
                   {item.count !== undefined && <span class="console-queue__count">{item.count}</span>}
                   <Icon name="chevronRight" size={14} />
@@ -316,10 +310,11 @@ const fulfillmentTone = (status: string): "neutral" | "info" | "success" | "warn
                   <span class="console-order__number">{order.orderNumber}</span>
                   <span class="console-order__item">{order.primaryItem ?? channelLabel(order.sourceChannel)}</span>
                   <span class="console-order__states">
-                    <StatusDot label={order.paymentStatus} tone={paymentTone(order.paymentStatus)} />
-                    <StatusDot label={order.fulfillmentStatus} tone={fulfillmentTone(order.fulfillmentStatus)} />
+                    <PaymentState locale={locale ?? shop.defaultLocale} value={order.paymentStatus} />
+                    <FulfillmentState locale={locale ?? shop.defaultLocale} value={order.fulfillmentStatus} />
                   </span>
                   <span class="console-order__total"><Money currency={order.currency} locale={locale ?? "en"} value={order.totalMinor} /></span>
+                  <time class="console-order__time" datetime={order.createdAt} data-visual-dynamic>{formatDate(order.createdAt)}</time>
                 </a>
               </li>
             ))}
@@ -393,6 +388,8 @@ const fulfillmentTone = (status: string): "neutral" | "info" | "success" | "warn
   .console-order__item { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sln-console-ink-2); font: var(--sln-console-text-sm); }
   .console-order__states { display: flex; gap: 12px; flex: 0 0 auto; }
   .console-order__total { flex: 0 0 auto; color: var(--sln-console-ink); font: var(--sln-console-text-sm); font-variant-numeric: tabular-nums; }
+  .console-order__time { flex: 0 0 auto; color: var(--sln-console-ink-3); font: var(--sln-console-label); }
+  .console-page-head__date { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
 
   @media (max-width: 767px) {
     .console-order__states { display: none; }

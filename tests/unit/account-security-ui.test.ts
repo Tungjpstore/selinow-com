@@ -10,7 +10,7 @@ describe("seller account security UI", () => {
   const client = readFileSync("src/scripts/dashboard/security.ts", "utf8");
 
   it("exposes account security navigation independently of shop ownership", () => {
-    expect(layout).toContain('label: t("dashboard.nav.security")');
+    expect(layout).toContain('label: t("dashboard.console.nav.security")');
     expect(layout).toContain('path: "/app/security"');
     expect(layout).not.toContain('path: "/app/security", roles:');
     expect(page).toContain('activePath="/app/security"');

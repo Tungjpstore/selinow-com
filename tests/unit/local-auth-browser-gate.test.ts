@@ -186,7 +186,7 @@ describe("deterministic local authenticated browser gate", () => {
     expect(config).toContain("playwright-safe-failure-reporter.mjs");
     expect(config).toMatch(/name: "desktop",[\s\S]*?local-authenticated\\\.spec\\\.ts\$[\s\S]*?height: 1024, width: 1440/iu);
     expect(config).toMatch(/name: "mobile",[\s\S]*?local-authenticated\\\.spec\\\.ts\$[\s\S]*?height: 844, width: 390/iu);
-    expect(dashboard).toContain('descriptionId={shop === undefined ? undefined : "dashboard-overview-date"}');
+    expect(dashboard).toContain('id={shop === undefined ? undefined : "dashboard-overview-date"}');
     expect(dashboard).toContain("data-visual-dynamic");
     expect(spec).toContain('page.locator("#dashboard-overview-date")');
     expect(spec).toContain('page.locator("[data-visual-dynamic]")');

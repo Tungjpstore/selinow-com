@@ -21,7 +21,7 @@ const t = createDashboardTranslator(Astro.locals.locale);
 </dialog>
 
 <style>
-  .step { margin: 0 0 7px; color: var(--sln-action-primary-hover); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  .step { margin: 0 0 7px; color: var(--sln-action-primary-hover); font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
   .delete-dialog { width: min(100% - 2rem, 544px); border: 1px solid var(--sln-state-danger); border-radius: var(--sln-radius-xl); padding: 0; background: var(--sln-bg-surface); color: var(--sln-text-primary); box-shadow: var(--sln-shadow-lg); }
   .delete-dialog::backdrop { background: rgb(8 11 20 / 82%); }
   .delete-dialog form { padding: 1.75rem; }
@@ -30,7 +30,7 @@ const t = createDashboardTranslator(Astro.locals.locale);
   .dialog-warning { margin-top: 16px; padding: 16px; border-left: 1px solid var(--sln-state-danger); background: rgb(220 38 38 / 8%); }
   .dialog-warning p { margin: 6px 0 0; color: var(--sln-text-secondary); line-height: 1.55; }
   .dialog-actions { display: flex; justify-content: end; gap: .65rem; margin-top: 1.5rem; }
-  .secondary-button, .danger-button { min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-pill); padding: 10px 16px; font-family: var(--sln-font-sans); font-size: 12px; font-weight: 700; cursor: pointer; }
+  .secondary-button, .danger-button { min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-pill); padding: 10px 16px; font-family: var(--sln-font-sans); font-size: 12px; font-weight: 600; cursor: pointer; }
   .secondary-button { background: var(--sln-bg-surface); border-color: var(--sln-slate-500); color: var(--sln-text-primary); }
   .secondary-button:hover { border-color: var(--sln-slate-500); background: var(--sln-bg-subtle); }
   .danger-button { background: transparent; border-color: var(--sln-state-danger); color: var(--sln-state-danger); }

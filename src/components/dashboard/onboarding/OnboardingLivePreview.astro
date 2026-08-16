@@ -231,9 +231,9 @@ const {
     background: var(--sln-slate-300);
   }
 
-  .browser-dots span:nth-child(1) { background: #ef4444; }
-  .browser-dots span:nth-child(2) { background: #f59e0b; }
-  .browser-dots span:nth-child(3) { background: #10b981; }
+  .browser-dots span:nth-child(1) { background: var(--sln-state-danger); }
+  .browser-dots span:nth-child(2) { background: var(--sln-state-warning); }
+  .browser-dots span:nth-child(3) { background: var(--sln-state-success); }
 
   .browser-url {
     flex: 1;
@@ -313,14 +313,14 @@ const {
     background: var(--sln-tint-success);
     color: var(--sln-state-success);
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     margin-bottom: 6px;
   }
 
   .mock-hero h4 {
     margin: 0 0 4px;
     font-size: 16px;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--sln-text-primary);
   }
 
@@ -370,7 +370,7 @@ const {
   .mock-product-info h5 {
     margin: 0 0 4px;
     font-size: 13px;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--sln-text-primary);
   }
 
@@ -391,7 +391,7 @@ const {
 
   .mock-price {
     font-size: 14px;
-    font-weight: 750;
+    font-weight: 600;
     color: var(--sln-state-success);
   }
 
@@ -402,7 +402,7 @@ const {
     color: var(--sln-white);
     border: none;
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 600;
     cursor: default;
   }
 
@@ -444,7 +444,7 @@ const {
   .tg-messages-body {
     padding: 16px 12px;
     background: #0e1621;
-    color: #f5f5f5;
+    color: var(--sln-bg-subtle);
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -500,6 +500,6 @@ const {
 
   .tg-btn-subtle {
     background: rgba(255, 255, 255, 0.08);
-    color: #e0e0e0;
+    color: var(--sln-border-default);
   }
 </style>

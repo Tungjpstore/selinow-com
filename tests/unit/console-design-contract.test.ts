@@ -50,8 +50,8 @@ describe("console design contract", () => {
     }
   });
 
-  it("caps console font weights at 600 (no display-black in the workspace)", async () => {
-    for (const file of CONSOLE_FILES) {
+  it("caps font weights at 600 across the console and the workspace", async () => {
+    for (const file of [...CONSOLE_FILES, ...WORKSPACE_ASTRO]) {
       const source = await readFile(file, "utf8");
       const heavy = source.match(/font-weight:\s*(6[5-9]\d|[7-9]\d\d)\b/gu)
         ?? source.match(/\b(6[5-9]\d|[7-9]\d\d)\s\d+px\/\d+px/gu)
@@ -68,6 +68,19 @@ describe("console design contract", () => {
         .filter((line) => !ONBOARDING_PREVIEW_MOCKS.test(line))
         .some((line) => EMOJI_RANGE.test(line));
       expect(visibleEmoji, `${file} contains emoji`).toBe(false);
+    }
+  });
+
+  it("keeps semantic colors on tokens — raw hex only for brand/channel accents and preview mocks", async () => {
+    const brandOrMock = /--channel-accent|--merchant-|brand|telegram|zalo|whatsapp|discord|mock|preview/i;
+    const hex = /#[0-9a-fA-F]{6}\b/;
+    for (const file of WORKSPACE_ASTRO) {
+      const source = await readFile(file, "utf8");
+      const offenders = source.split("\n")
+        .filter((line) => hex.test(line))
+        .filter((line) => !brandOrMock.test(line))
+        .filter((line) => !/content=/.test(line)); // <meta theme-color> values
+      expect(offenders, `${file} uses raw semantic hex`).toEqual([]);
     }
   });
 
