@@ -67,6 +67,8 @@ let cart: CartResponse | null = null;
 let quote: QuoteResponse | null = null;
 let quoteExpiryTimer: number | undefined;
 let selectedShippingMethodId: string | null = null;
+let selectedBooking: { resourceId: string; startAt: string } | null = null;
+let bookingVariantId: string | null = null;
 const status = document.querySelector("#checkout-status");
 const retry = document.querySelector("#checkout-retry");
 const submit = document.querySelector("#checkout-submit");
@@ -75,6 +77,10 @@ const shippingFields = document.querySelector("#shipping-fields");
 const shippingMethodsElement = document.querySelector("#shipping-methods");
 const shippingFeeRow = document.querySelector("#shipping-fee-row");
 const shippingFee = document.querySelector("#shipping-fee");
+const bookingFields = document.querySelector("#booking-fields");
+const bookingDateInput = document.querySelector("#booking-date");
+const bookingSlotsElement = document.querySelector("#booking-slots");
+const bookingSlotStatus = document.querySelector("#booking-slot-status");
 let recoveryAction: RecoveryAction | null = null;
 let pendingIntent: CheckoutIntent | null = null;
 const accessStorage = createBrowserOrderAccessStorage();
@@ -207,6 +213,8 @@ function errorMessage(code: unknown, requestId?: string): string {
     shipping_method_not_found: t("storefront.checkout.error.shipping_method_not_found"),
     shipping_address_invalid: t("storefront.checkout.error.shipping_address_invalid"),
     shipping_phone_invalid: t("storefront.checkout.error.shipping_phone_invalid"),
+    booking_slot_taken: t("storefront.checkout.error.booking_slot_taken"),
+    booking_slot_required: t("storefront.checkout.error.booking_slot_required"),
     checkout_recovery_expired: t("storefront.checkout.error.checkout_recovery_expired"),
     idempotency_conflict: t("storefront.checkout.error.idempotency_conflict"),
     rate_limited: t("storefront.checkout.error.rate_limited"),
@@ -346,6 +354,78 @@ function renderShipping(currentQuote: QuoteResponse): void {
   }
 }
 
+function isBookingCart(): boolean {
+  const entry = catalog.get(items[0]?.variantId ?? "");
+  return items.length === 1 && entry !== undefined && entry.durationMinutes !== null;
+}
+
+function localDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+async function loadBookingSlots(): Promise<void> {
+  if (!(bookingSlotsElement instanceof HTMLElement) || !(bookingSlotStatus instanceof HTMLElement)) return;
+  if (!(bookingDateInput instanceof HTMLInputElement) || bookingVariantId === null) return;
+  bookingSlotsElement.replaceChildren();
+  bookingSlotStatus.textContent = t("storefront.checkout.booking.loading");
+  const fallbackDate = localDateKey(new Date(Date.now() + 86_400_000));
+  const date = bookingDateInput.value !== "" ? bookingDateInput.value : fallbackDate;
+  bookingDateInput.value = date;
+  const dateStart = date;
+  const dateEnd = localDateKey(new Date(Date.parse(date) + 6 * 86_400_000));
+  try {
+    const params = new URLSearchParams({ dateEnd, dateStart, variantId: bookingVariantId });
+    const response = await fetch(`/api/store/booking/slots?${params.toString()}`);
+    const body = await readJson<{ slots?: Array<{ endAt: string; resourceId: string; resourceName: string; startAt: string }> }>(response);
+    if (!response.ok || !Array.isArray(body.slots)) throw new Error("booking_slots_failed");
+    const slots = body.slots;
+    bookingSlotStatus.textContent = slots.length === 0 ? t("storefront.checkout.booking.empty") : "";
+    let currentDay = "";
+    for (const slot of slots) {
+      const day = slot.startAt.slice(0, 10);
+      if (day !== currentDay) {
+        currentDay = day;
+        const heading = document.createElement("span");
+        heading.className = "booking-slot-day";
+        heading.textContent = new Date(slot.startAt).toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "short" });
+        bookingSlotsElement.appendChild(heading);
+      }
+      const label = document.createElement("label");
+      label.className = "booking-slot";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "bookingSlot";
+      input.value = `${slot.resourceId}|${slot.startAt}`;
+      input.required = true;
+      const text = document.createElement("span");
+      text.textContent = `${new Date(slot.startAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })} · ${slot.resourceName}`;
+      label.appendChild(input);
+      label.appendChild(text);
+      bookingSlotsElement.appendChild(label);
+    }
+  } catch {
+    bookingSlotStatus.textContent = t("storefront.checkout.booking.empty");
+  }
+}
+
+bookingSlotsElement?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.name !== "bookingSlot") return;
+  const separator = target.value.indexOf("|");
+  if (separator <= 0) return;
+  const resourceId = target.value.slice(0, separator);
+  const startAt = target.value.slice(separator + 1);
+  selectedBooking = { resourceId, startAt };
+  if (bookingSlotStatus instanceof HTMLElement) {
+    bookingSlotStatus.textContent = t("storefront.checkout.booking.selected", { time: new Date(startAt).toLocaleString(locale) });
+  }
+});
+
+bookingDateInput?.addEventListener("change", () => {
+  selectedBooking = null;
+  void loadBookingSlots();
+});
+
 shippingMethodsElement?.addEventListener("change", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement) || target.name !== "shippingMethodId") return;
@@ -400,6 +480,15 @@ async function prepare(existingCart?: CartResponse, expectedItems?: QuoteItem[])
   }
   const quoteChanged = renderAuthoritativeQuote(quote);
   renderShipping(quote);
+  if (isBookingCart()) {
+    if (bookingFields instanceof HTMLFieldSetElement) bookingFields.hidden = false;
+    if (bookingVariantId === null) {
+      bookingVariantId = items[0]?.variantId ?? null;
+      void loadBookingSlots();
+    }
+  } else if (bookingFields instanceof HTMLFieldSetElement) {
+    bookingFields.hidden = true;
+  }
   if (total !== null) total.textContent = formatClientMoney(quote.totalMinor, quote.currency);
   if (status instanceof HTMLElement) {
     const heldUntil = new Date(expiresAtMs).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
@@ -555,6 +644,7 @@ async function submitCheckout(event: Event): Promise<void> {
         expected: intent.expected.map(({ quantity, unitPriceMinor, variantId, variantVersion }) => ({ quantity, unitPriceMinor, variantId, variantVersion })),
         quoteEvidence: intent.quote.quoteEvidence,
         ...(physical ? { shipping: { address: readShippingAddress(), methodId: selectedShippingMethodId } } : {}),
+        ...(isBookingCart() && selectedBooking !== null ? { booking: selectedBooking } : {}),
         turnstileToken: tokenInput instanceof HTMLInputElement ? tokenInput.value : undefined,
       }),
       headers: { "Content-Type": "application/json", "Idempotency-Key": intent.idempotencyKey },

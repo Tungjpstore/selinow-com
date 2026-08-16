@@ -1,0 +1,135 @@
+/* Craft — vintage-industrial barbershop. Dark, bold type, hairline rules. */
+
+html[data-storefront-template="craft"] body,
+html[data-storefront-template="craft"] body[data-storefront-surface] {
+  background: var(--sln-ink-900);
+  color: var(--sln-slate-100);
+}
+
+html[data-storefront-template="craft"] .store-header { border-bottom: 1px solid var(--sln-ink-700); background: var(--sln-ink-900); }
+html[data-storefront-template="craft"] .store-brand strong { color: var(--sln-white); letter-spacing: .04em; text-transform: uppercase; }
+html[data-storefront-template="craft"] .store-header nav > a { color: var(--sln-slate-300); }
+html[data-storefront-template="craft"] .store-header nav > a:hover { color: var(--sln-white); }
+html[data-storefront-template="craft"] .cart-link { color: var(--sln-slate-300); }
+
+html[data-storefront-template="craft"] .craft-hero {
+  display: grid;
+  gap: 14px;
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin-inline: auto;
+  padding: clamp(40px, 7vw, 88px) 0 clamp(24px, 4vw, 40px);
+}
+
+html[data-storefront-template="craft"] .craft-hero h1 {
+  max-width: 15ch;
+  margin: 0;
+  font-size: clamp(2.4rem, 6vw, 4.4rem);
+  font-weight: 800;
+  letter-spacing: -.04em;
+  line-height: 1.02;
+  text-transform: uppercase;
+}
+
+html[data-storefront-template="craft"] .craft-hero p { margin: 0; max-width: 52ch; color: var(--sln-slate-300); font-size: 1rem; line-height: 1.65; }
+html[data-storefront-template="craft"] .craft-hero .store-kicker { color: var(--merchant-accent); }
+
+html[data-storefront-template="craft"] .craft-cta {
+  justify-self: start;
+  margin-top: 10px;
+  padding: 13px 32px;
+  border: 1px solid var(--merchant-brand);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+  font-size: .9375rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+html[data-storefront-template="craft"] .craft-services {
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: 0 auto;
+}
+
+html[data-storefront-template="craft"] .craft-services h2 {
+  margin: 0 0 18px;
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+html[data-storefront-template="craft"] .craft-service-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+
+html[data-storefront-template="craft"] .craft-service-list li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--sln-ink-700);
+}
+
+html[data-storefront-template="craft"] .craft-service-rule { width: 24px; height: 1px; background: var(--sln-slate-500); }
+html[data-storefront-template="craft"] .craft-service-copy { display: grid; gap: 2px; min-width: 0; }
+html[data-storefront-template="craft"] .craft-service-copy strong { color: var(--sln-white); font-size: .9375rem; letter-spacing: .05em; }
+html[data-storefront-template="craft"] .craft-service-copy small { color: var(--sln-slate-400); font-size: .8125rem; }
+html[data-storefront-template="craft"] .craft-service-price { color: var(--sln-white); font-weight: 750; font-variant-numeric: tabular-nums; }
+
+html[data-storefront-template="craft"] .craft-book-button {
+  padding: 9px 18px;
+  border: 1px solid var(--merchant-brand);
+  color: var(--merchant-accent);
+  font-size: .8125rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  text-decoration: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+html[data-storefront-template="craft"] .craft-book-button.is-disabled { border-color: var(--sln-ink-700); color: var(--sln-slate-500); }
+
+html[data-storefront-template="craft"] .craft-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: clamp(28px, 4vw, 44px) auto 0;
+  padding: 0;
+  list-style: none;
+}
+
+html[data-storefront-template="craft"] .craft-steps li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--sln-ink-700);
+  color: var(--sln-slate-300);
+  font-size: .8125rem;
+  line-height: 1.5;
+}
+
+html[data-storefront-template="craft"] .craft-steps li > span { color: var(--merchant-accent); font-family: var(--sln-font-mono); font-weight: 750; }
+html[data-storefront-template="craft"] .craft-categories { display: flex; flex-wrap: wrap; gap: 10px; width: min(calc(100% - 32px), var(--store-page-width)); margin: 20px auto 0; }
+html[data-storefront-template="craft"] .craft-categories a {
+  padding: 8px 16px;
+  border: 1px solid var(--sln-ink-700);
+  color: var(--sln-slate-300);
+  font-size: .8125rem;
+  font-weight: 700;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+html[data-storefront-template="craft"] .store-footer { border-top: 1px solid var(--sln-ink-700); color: var(--sln-slate-400); }
+html[data-storefront-template="craft"] .empty-cart { color: var(--sln-slate-400); }
+
+@media (max-width: 720px) {
+  html[data-storefront-template="craft"] .craft-steps { grid-template-columns: 1fr; }
+  html[data-storefront-template="craft"] .craft-service-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  html[data-storefront-template="craft"] .craft-service-rule { display: none; }
+  html[data-storefront-template="craft"] .craft-service-price { display: none; }
+}

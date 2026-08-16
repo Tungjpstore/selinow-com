@@ -5,6 +5,9 @@
  * its home component in the map below; swift stays the structural fallback.
  */
 import AuroraStoreHome from "./aurora/StoreHome.astro";
+import ClinicStoreHome from "./clinic/StoreHome.astro";
+import CraftStoreHome from "./craft/StoreHome.astro";
+import SerenityStoreHome from "./serenity/StoreHome.astro";
 import BustleStoreHome from "./bustle/StoreHome.astro";
 import DeskStoreHome from "./desk/StoreHome.astro";
 import MetroStoreHome from "./metro/StoreHome.astro";
@@ -23,6 +26,9 @@ const { categories, locale, products, shop } = Astro.props;
 const storeHomeByTemplate: Record<string, typeof SwiftStoreHome> = {
   aurora: AuroraStoreHome,
   bustle: BustleStoreHome,
+  clinic: ClinicStoreHome,
+  craft: CraftStoreHome,
+  serenity: SerenityStoreHome,
   desk: DeskStoreHome,
   metro: MetroStoreHome,
   pulse: PulseStoreHome,

@@ -443,6 +443,66 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       variant_stock_levels_identity_immutable: "5e0c41010514558fc2c18e4afa8a8548dadd88c9338c65ee4b6b8b1563076bc3",
     }),
   }),
+  "0103_appointment_booking_vertical.sql": Object.freeze({
+    columns: Object.freeze({
+      "product_variants.duration_minutes": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "INTEGER" }),
+      "booking_resources.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "booking_resources.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.name": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.role_label": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "booking_resource_schedules.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.resource_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.weekday": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "booking_resource_schedules.start_minute": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "booking_resource_schedules.end_minute": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "booking_resource_schedules.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "booking_holds.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.resource_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.variant_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.hold_token": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.start_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.end_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.released_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "bookings.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.order_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.order_item_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.variant_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.resource_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.start_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.end_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.cancelled_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      booking_holds: "80cf2fb0d53e6165e0379a8ba3a741f7b33e2c2af2707aac22522e0c525947ea",
+      booking_holds_identity_immutable: "331dc7f902e94627374921251a28e63bfca45dda275469ec88a8f5d987999c1c",
+      booking_holds_transition_guard: "6fb0f4b5387bd75c95abf4600a325e31ffe76a10b39bf0d81fe93d0f552dfb8f",
+      booking_resource_schedules: "59e51688ff958decfb6b7037de33bad8028f97cfa46bd46371fe0d73666eec7d",
+      booking_resource_schedules_identity_immutable: "94b063fa831ff702b85e3e44364a0d95cfc0ce9a643c3b390fcb4abc96caf579",
+      booking_resources: "66b012941acd7fefa1472d37a6f572f6a97fb6eea701a78d7df1660b09fb2888",
+      booking_resources_identity_immutable: "7d0ebf89ced39158a96cf52a1973f7d4d8d4601e5ed689d2720d891c62c21c66",
+      bookings: "9b5dc58e9993330ef0718597b87202fdebd3643a7e272308454b007d0397dc23",
+      bookings_identity_immutable: "396b2dd027cde1e27761d918ffb2f378da48540dd947dfa801ea1dfa368de8cf",
+      bookings_transition_guard: "d2594ba6f9c8a0e3bf042829333edfa2e33839700c398d3469949086c5309328",
+      idx_booking_holds_overlap: "7ad3020ad0cd30b1cae78ced26a1b28d86e245d7b918cedaa1f2a66944be95d6",
+      idx_booking_resource_schedules_resource: "68a6c15481e510b7ec6a97e75faaaf318a4461c248c33973171129906c0999b8",
+      idx_booking_resources_shop: "80fb03e1163c67f40840236d62e735d1830170468397ebb61b0c1f1ad8022ec9",
+      idx_bookings_resource_start: "649746d2f95b1b0a50909fb7c6f7eaecd40735f888d1624f8047ae603b265622",
+      idx_bookings_shop_start: "e34b81ca5f9ff5c55f9fe45b435b4a062dff29fb76f2fa1b638a3cddef4f22f0",
+    }),
+  }),
 });
 
 
@@ -2303,7 +2363,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_request_admissions", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "telegram_actions", "telegram_action_history", "telegram_updates", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
+    if (["auth_request_admissions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "telegram_actions", "telegram_action_history", "telegram_updates", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");

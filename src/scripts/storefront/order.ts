@@ -7,6 +7,7 @@ type ApiError = { code?: string; requestId?: string };
 type OrderItem = { fulfillmentType: string; lineTotalMinor: number; productTitle: string; quantity: number; variantTitle: string };
 type ShippingAddress = { addressLine: string; district: string; fullName: string; notes: string | null; phone: string; province: string; ward: string };
 type Shipment = { carrier: string | null; shippingState: string; trackingCode: string | null };
+type BookingDetail = { bookingStatus: string; endAt: string; resourceName: string; startAt: string };
 type OrderView = {
   currency: string;
   expiresAt: string;
@@ -14,6 +15,7 @@ type OrderView = {
   items: OrderItem[];
   orderNumber: string;
   paymentStatus: string;
+  booking?: BookingDetail;
   shipments?: Shipment[];
   shippingAddress?: ShippingAddress;
   shippingFeeMinor?: number;
@@ -240,6 +242,7 @@ function renderOrder(order: OrderView): void {
   status.appendChild(lines);
   appendTimeline(status, t("storefront.order.timeline.payment"), paymentStateView(order.paymentStatus, order.status, locale));
   appendTimeline(status, t("storefront.order.timeline.fulfillment"), fulfillmentStateView(order.fulfillmentStatus, order.status, locale));
+  renderBooking(order);
   renderShipping(order);
   const hasKeyDelivery = order.items.some((item) => item.fulfillmentType === "license_key");
   if (actions instanceof HTMLElement) actions.hidden = false;
@@ -249,6 +252,36 @@ function renderOrder(order: OrderView): void {
   if (revealButton instanceof HTMLButtonElement) {
     revealButton.hidden = !hasKeyDelivery || !(order.status === "completed" && order.paymentStatus === "paid" && order.fulfillmentStatus === "fulfilled");
   }
+}
+
+function bookingStatusLabel(status: string): string {
+  if (status === "booked") return t("storefront.order.shipping.state.packing");
+  if (status === "cancelled") return t("storefront.order.shipping.state.packing");
+  if (status === "completed") return t("storefront.order.shipping.state.delivered");
+  return status;
+}
+
+function renderBooking(order: OrderView): void {
+  const section = document.querySelector("#booking-section");
+  const detail = document.querySelector("#booking-detail");
+  if (!(section instanceof HTMLElement) || !(detail instanceof HTMLElement)) return;
+  if (order.booking === undefined) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  detail.replaceChildren();
+  const start = new Date(order.booking.startAt);
+  const end = new Date(order.booking.endAt);
+  const when = document.createElement("p");
+  when.textContent = `${start.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" })} · ${start.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}–${end.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`;
+  const who = document.createElement("p");
+  who.textContent = order.booking.resourceName;
+  const state = document.createElement("p");
+  state.textContent = bookingStatusLabel(order.booking.bookingStatus);
+  detail.appendChild(when);
+  detail.appendChild(who);
+  detail.appendChild(state);
 }
 
 function shippingStateLabel(state: string): string {

@@ -87,7 +87,7 @@ export const STOREFRONT_TEMPLATES: readonly StorefrontTemplateDefinition[] = [
     vertical: "physical",
   },
   {
-    available: false,
+    available: true,
     id: "serenity",
     name: "Serenity",
     premium: false,
@@ -95,7 +95,7 @@ export const STOREFRONT_TEMPLATES: readonly StorefrontTemplateDefinition[] = [
     vertical: "booking",
   },
   {
-    available: false,
+    available: true,
     id: "craft",
     name: "Craft",
     premium: true,
@@ -103,7 +103,7 @@ export const STOREFRONT_TEMPLATES: readonly StorefrontTemplateDefinition[] = [
     vertical: "booking",
   },
   {
-    available: false,
+    available: true,
     id: "clinic",
     name: "Clinic",
     premium: true,

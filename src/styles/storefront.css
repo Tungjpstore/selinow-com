@@ -374,6 +374,14 @@ button:disabled {
 .shipping-method .shipping-method-fee { font-weight: 750; }
 .shipping-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 560px) { .shipping-grid { grid-template-columns: 1fr; } }
+.booking-fields { display: grid; gap: 14px; margin: 0 0 24px; padding: 0; border: 0; }
+.booking-fields[hidden] { display: none; }
+.booking-fields h2 { margin: 0; font-size: 1.5rem; font-weight: 740; letter-spacing: -.03em; line-height: 1.15; }
+.booking-slots { display: flex; flex-wrap: wrap; gap: 8px; }
+.booking-slot-day { display: grid; gap: 6px; width: 100%; color: var(--sln-text-muted); font-size: .75rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.booking-slot { display: inline-flex; align-items: center; min-height: 40px; padding: 8px 14px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-pill); background: var(--sln-bg-surface); color: var(--sln-text-primary); font-size: .8125rem; font-weight: 700; cursor: pointer; }
+.booking-slot:has(input:checked) { border-color: var(--merchant-brand); background: var(--merchant-brand); color: var(--merchant-brand-ink); }
+.booking-slot input { position: absolute; opacity: 0; pointer-events: none; }
 .shipping-order-section { display: grid; gap: 14px; margin-top: 24px; padding: 20px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
 .shipping-order-section[hidden] { display: none; }
 .shipping-order-section h2 { margin: 0; font-size: 1.25rem; font-weight: 740; letter-spacing: -.03em; }

@@ -15,19 +15,20 @@ import { verifyQuoteEvidence, type QuoteEvidenceCatalogItem } from "./quote-evid
 import { executeCanonicalCheckoutTransaction } from "./checkout-transaction";
 import { calculateCartDiscountMinor } from "./pricing";
 import { computeShippingFeeMinor, parseShippingAddress, resolveShippingMethod, type ShippingAddress, type ShippingMethodSnapshot } from "./shipping";
+import { resolveBookingSelection } from "./booking";
 import { createCanonicalCart } from "./cart-creation";
 import { projectCanonicalCartQuote } from "./cart-quote";
 import { isBuyerOrderRecoveryBinding, resolveCurrentBuyerOrderRecoveryToken } from "./buyer-order-recovery";
 
 type PublicShop = StorefrontShop;
-type CheckoutVariant = { availableStock: number; currency: string; deliveryMode: "digital" | "shipping"; fulfillmentType: "license_key" | "manual"; maxPerOrder: number; minPerOrder: number; priceMinor: number; productId: string; productStatus: string; productTitle: string; productVersion: number; sku: string; status: string; title: string; variantId: string; version: number };
+type CheckoutVariant = { availableStock: number; currency: string; deliveryMode: "digital" | "shipping"; durationMinutes: number | null; fulfillmentType: "license_key" | "manual"; maxPerOrder: number; minPerOrder: number; priceMinor: number; productId: string; productStatus: string; productTitle: string; productVersion: number; sku: string; status: string; title: string; variantId: string; version: number };
 type CartRow = { cartId: string; discountCode: string | null; expiresAt: string; locale: string; state: string; subjectHash: string };
 
 const WEBSITE_ORDER_ATTRIBUTION = resolveOrderChannelAttribution(WEBSITE_CHANNEL_CODE);
 
 async function loadVariants(env: AppBindings, shopId: string, ids: string[]): Promise<Map<string, CheckoutVariant>> {
   if (ids.length === 0) return new Map();
-  const result = await env.PLATFORM_DB.prepare(`SELECT product_variants.id AS variantId, product_variants.product_id AS productId, product_variants.sku, product_variants.title, product_variants.price_minor AS priceMinor, product_variants.currency, product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder, product_variants.status, product_variants.version, products.title AS productTitle, products.status AS productStatus, products.version AS productVersion, products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode, CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved FROM variant_stock_levels WHERE variant_stock_levels.shop_id = product_variants.shop_id AND variant_stock_levels.variant_id = product_variants.id), 0) ELSE COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) END AS availableStock FROM product_variants INNER JOIN products ON products.id = product_variants.product_id AND products.shop_id = product_variants.shop_id LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE product_variants.shop_id = ? AND product_variants.id IN (${ids.map(() => "?").join(",")}) GROUP BY product_variants.id`).bind(shopId, ...ids).all<CheckoutVariant>();
+  const result = await env.PLATFORM_DB.prepare(`SELECT product_variants.id AS variantId, product_variants.product_id AS productId, product_variants.sku, product_variants.title, product_variants.price_minor AS priceMinor, product_variants.currency, product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder, product_variants.status, product_variants.version, products.title AS productTitle, products.status AS productStatus, products.version AS productVersion, products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode, product_variants.duration_minutes AS durationMinutes, CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved FROM variant_stock_levels WHERE variant_stock_levels.shop_id = product_variants.shop_id AND variant_stock_levels.variant_id = product_variants.id), 0) ELSE COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) END AS availableStock FROM product_variants INNER JOIN products ON products.id = product_variants.product_id AND products.shop_id = product_variants.shop_id LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE product_variants.shop_id = ? AND product_variants.id IN (${ids.map(() => "?").join(",")}) GROUP BY product_variants.id`).bind(shopId, ...ids).all<CheckoutVariant>();
   return new Map(result.results.map((row) => [row.variantId, row]));
 }
 
@@ -141,6 +142,7 @@ function quoteCatalog(expected: readonly ExpectedItem[], variants: readonly Chec
 }
 
 export async function websiteCheckoutFingerprint(input: {
+  booking?: { resourceId: string; startAt: string };
   cartId: string;
   customerEmail: string | null;
   discountCode: string | null;
@@ -158,11 +160,12 @@ export async function websiteCheckoutFingerprint(input: {
     // aligned so semantically identical line order cannot conflict on retry.
     expected: [...input.expected].sort((left, right) => left.variantId.localeCompare(right.variantId)),
     ...(input.shipping === undefined ? {} : { shippingFeeMinor: input.shipping.feeMinor, shippingMethodId: input.shipping.methodId }),
+    ...(input.booking === undefined ? {} : { bookingResourceId: input.booking.resourceId, bookingStartAt: input.booking.startAt }),
     totalMinor: input.totalMinor,
   });
 }
 
-export async function checkoutCart(input: { cartId: string; cartToken: string; customerEmail: string | null; env: AppBindings; expected: ExpectedItem[]; idempotencyKey: string; quoteEvidence?: string; shop: PublicShop; shipping?: { address: unknown; methodId: unknown } }): Promise<{ currency: string; expiresAt: string; fulfillmentStatus: string; orderId: string; orderNumber: string; orderToken: string; paymentStatus: string; status: string; totalMinor: number }> {
+export async function checkoutCart(input: { booking?: { resourceId: unknown; startAt: unknown }; cartId: string; cartToken: string; customerEmail: string | null; env: AppBindings; expected: ExpectedItem[]; idempotencyKey: string; quoteEvidence?: string; shop: PublicShop; shipping?: { address: unknown; methodId: unknown } }): Promise<{ currency: string; expiresAt: string; fulfillmentStatus: string; orderId: string; orderNumber: string; orderToken: string; paymentStatus: string; status: string; totalMinor: number }> {
   assertSubscriptionAllows({ currentPeriodEnd: input.shop.currentPeriodEnd, graceEndsAt: input.shop.graceEndsAt, subscriptionState: input.shop.subscriptionState, trialEndsAt: input.shop.trialEndsAt });
   assertCheckoutAllowed({ shopStatus: input.shop.status, subscriptionState: input.shop.subscriptionState });
   const customerEmail = normalizeCustomerEmail(input.customerEmail);
@@ -182,6 +185,15 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
     ? await resolveShippingMethod(input.env, input.shop.id, input.shipping.methodId)
     : null;
   const hashShippingFee = hashShipping === null ? 0 : computeShippingFeeMinor(hashShipping, hashSubtotalMinor - hashDiscountMinor);
+  // Booking carts bind the selected slot into the request hash so a same-key
+  // retry can never silently rebook a different slot.
+  // The hash binds the RAW slot choice, not a resolved selection: a replay
+  // of the same key must hash identically even though the first order now
+  // holds the slot (resolution happens after the durable replay check).
+  const bookingInput = input.booking;
+  const hashBooking = bookingInput !== undefined && typeof bookingInput.startAt === "string" && typeof bookingInput.resourceId === "string"
+    ? { resourceId: bookingInput.resourceId, startAt: bookingInput.startAt }
+    : null;
   const requestHash = await websiteCheckoutFingerprint({
     cartId: input.cartId,
     customerEmail,
@@ -189,6 +201,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
     discountMinor: hashDiscountMinor,
     expected: input.expected,
     ...(hashShipping === null ? {} : { shipping: { feeMinor: hashShippingFee, methodId: hashShipping.id } }),
+    ...(hashBooking === null ? {} : { booking: { resourceId: hashBooking.resourceId, startAt: hashBooking.startAt } }),
     totalMinor: hashSubtotalMinor - hashDiscountMinor + hashShippingFee,
   });
   const orderToken = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `order-access-token:${input.shop.id}`, input.idempotencyKey);
@@ -321,6 +334,29 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
   }
   const totalMinor = subtotalMinor - discountMinor + shippingFeeMinor;
   if (hasPhysicalLines && totalMinor <= 0) throw new AppError("validation_failed", 400, ["physical_free_unsupported"]);
+  // Booking carts: exactly one service line, quantity one, paid and website-only.
+  const hasBookingLine = ordered.length === 1 && ordered[0]?.durationMinutes !== null && ordered[0] !== undefined && cart.items[0]?.quantity === 1;
+  if (ordered.some((variant) => variant.durationMinutes !== null) && !hasBookingLine) {
+    throw new AppError("validation_failed", 400, ["booking_cart_invalid"]);
+  }
+  let bookingSelection: Awaited<ReturnType<typeof resolveBookingSelection>> | null = null;
+  if (hasBookingLine) {
+    if (input.booking === undefined || typeof input.booking.startAt !== "string" || typeof input.booking.resourceId !== "string") {
+      throw new AppError("validation_failed", 400, ["booking_slot_required"]);
+    }
+    if (totalMinor <= 0) throw new AppError("validation_failed", 400, ["booking_free_unsupported"]);
+    const serviceVariant = ordered.find((variant) => variant.durationMinutes !== null);
+    if (serviceVariant === undefined) throw new AppError("validation_failed", 400, ["booking_cart_invalid"]);
+    bookingSelection = await resolveBookingSelection({
+      env: input.env,
+      resourceId: input.booking.resourceId,
+      shop: { id: input.shop.id, timezone: input.shop.timezone },
+      startAt: input.booking.startAt,
+      variantId: serviceVariant.variantId,
+    });
+  } else if (input.booking !== undefined) {
+    throw new AppError("validation_failed", 400, ["booking_slot_not_applicable"]);
+  }
   const authoritativeRequestHash = await websiteCheckoutFingerprint({
     cartId: input.cartId,
     customerEmail,
@@ -328,6 +364,7 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
     discountMinor,
     expected: input.expected,
     ...(shippingMethod === null ? {} : { shipping: { feeMinor: shippingFeeMinor, methodId: shippingMethod.id } }),
+    ...(bookingSelection === null ? {} : { booking: { resourceId: bookingSelection.resourceId, startAt: bookingSelection.startAt } }),
     totalMinor,
   });
   if (authoritativeRequestHash !== requestHash) throw new AppError("checkout_changed", 409);
@@ -402,6 +439,14 @@ export async function checkoutCart(input: { cartId: string; cartToken: string; c
           methodFreeOverMinor: shippingMethod.freeOverMinor,
           methodId: shippingMethod.id,
           methodName: shippingMethod.name,
+        },
+      }),
+      ...(bookingSelection === null ? {} : {
+        booking: {
+          endAt: bookingSelection.endAt,
+          resourceId: bookingSelection.resourceId,
+          startAt: bookingSelection.startAt,
+          variantId: bookingSelection.variantId,
         },
       }),
       shopId: input.shop.id,
@@ -487,6 +532,15 @@ export async function getOrder(input: { env: AppBindings; orderPublicId: string;
     WHERE shop_id = ? AND order_id = ?
     LIMIT 1
   `).bind(input.shop.id, row.id).first();
+  const booking = await input.env.PLATFORM_DB.prepare(`
+    SELECT bookings.start_at AS startAt, bookings.end_at AS endAt,
+      bookings.status AS bookingStatus, booking_resources.name AS resourceName
+    FROM bookings
+    INNER JOIN booking_resources
+      ON booking_resources.shop_id = bookings.shop_id AND booking_resources.id = bookings.resource_id
+    WHERE bookings.shop_id = ? AND bookings.order_id = ?
+    LIMIT 1
+  `).bind(input.shop.id, row.id).first();
   const shipments = await input.env.PLATFORM_DB.prepare(`
     SELECT shipping_state AS shippingState, carrier, tracking_code AS trackingCode, created_at AS createdAt
     FROM fulfillments
@@ -499,6 +553,7 @@ export async function getOrder(input: { env: AppBindings; orderPublicId: string;
   return {
     ...safeOrder,
     ...(shippingAddress === null ? {} : { shippingAddress }),
+    ...(booking === null ? {} : { booking }),
     ...(row.shippingMethodName === null ? {} : { shipments: shipments.results }),
     items: items.results,
   };
@@ -594,6 +649,23 @@ export async function expireUnpaidOrders(env: AppBindings, nowIso = new Date().t
             AND order_items.order_id = ?
         )
     `).bind(order.id, nowIso, order.shopId, order.id, order.id, order.id).run();
+    // Expired booking carts release their slot hold and cancel the appointment.
+    await env.PLATFORM_DB.prepare(`
+      UPDATE booking_holds SET status = 'released', released_at = ?
+      WHERE shop_id = ? AND status = 'active'
+        AND EXISTS (SELECT 1 FROM orders WHERE shop_id = ? AND id = ? AND status = 'expired' AND payment_status = 'expired')
+        AND EXISTS (
+          SELECT 1 FROM order_items
+          WHERE order_items.shop_id = booking_holds.shop_id
+            AND order_items.variant_id = booking_holds.variant_id
+            AND order_items.order_id = ?
+        )
+    `).bind(nowIso, order.shopId, order.shopId, order.id, order.id).run();
+    await env.PLATFORM_DB.prepare(`
+      UPDATE bookings SET status = 'cancelled', cancelled_at = ?, updated_at = ?
+      WHERE shop_id = ? AND order_id = ? AND status = 'booked'
+        AND EXISTS (SELECT 1 FROM orders WHERE shop_id = ? AND id = ? AND status = 'expired' AND payment_status = 'expired')
+    `).bind(nowIso, nowIso, order.shopId, order.id, order.shopId, order.id).run();
     expired += 1;
   }
   return expired;

@@ -18,7 +18,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const shop = await resolveStorefrontShop(request, env);
     assertStorefrontCheckout(shop);
     const body = await readJsonObject(request);
-    rejectUnknownFields(body, ["cartId", "cartToken", "customerEmail", "expected", "quoteEvidence", "shipping", "turnstileToken"]);
+    rejectUnknownFields(body, ["booking", "cartId", "cartToken", "customerEmail", "expected", "quoteEvidence", "shipping", "turnstileToken"]);
     await guardAnonymousCheckout({ env, request, shop, turnstileToken: body.turnstileToken });
     const cart = requireWebsiteCartReference(body.cartId, body.cartToken);
     if (typeof body.quoteEvidence !== "string" || body.quoteEvidence.length < 40 || body.quoteEvidence.length > 4_096) throw new AppError("quote_invalid", 409);
@@ -37,6 +37,12 @@ export const POST: APIRoute = async ({ locals, request }) => {
       idempotencyKey: request.headers.get("Idempotency-Key") ?? "",
       quoteEvidence: body.quoteEvidence,
       ...(shipping === undefined ? {} : { shipping: { address: shipping.address, methodId: shipping.methodId } }),
+      ...(body.booking === undefined ? {} : {
+        booking: {
+          resourceId: (body.booking as Record<string, unknown>).resourceId,
+          startAt: (body.booking as Record<string, unknown>).startAt,
+        },
+      }),
     });
     if (order.access.kind !== "opaque_token") throw new AppError("commerce_contract_invalid", 500, ["website_order_access_invalid"]);
     return Response.json({ ok: true, order: {

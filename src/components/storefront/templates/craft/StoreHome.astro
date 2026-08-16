@@ -1,0 +1,58 @@
+---
+import { formatMoney } from "../../../../lib/storefront/view";
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import type { StorefrontCategory, StorefrontProduct, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  categories: StorefrontCategory[];
+  locale: string;
+  products: StorefrontProduct[];
+  shop: StorefrontShop;
+}
+
+const { categories, locale, products, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const services = products.map((product) => ({
+  duration: product.variants[0]?.title ?? "",
+  price: product.variants[0] ? formatMoney(product.variants[0].priceMinor, product.variants[0].currency, locale) : "",
+  slug: product.slug,
+  soldOut: product.variants.every((variant) => variant.stockState === "out_of_stock"),
+  title: product.title,
+}));
+const steps = [
+  t("storefront.template.desk.steps.1"),
+  t("storefront.template.desk.steps.2"),
+  t("storefront.template.desk.steps.3"),
+];
+---
+<section class="craft-hero" data-mark={shop.name.slice(0, 1).toUpperCase()}>
+  <p class="store-kicker">{shop.name}</p>
+  <h1>{shop.content.headline}</h1>
+  <p>{shop.content.description}</p>
+  <a class="craft-cta" href="#services">{t("storefront.template.craft.cta")} <span aria-hidden="true">↓</span></a>
+</section>
+<section class="craft-services" id="services" aria-labelledby="craft-services-title">
+  <h2 id="craft-services-title">{t("storefront.template.serenity.menu")}</h2>
+  <ul class="craft-service-list">
+    {services.map((service) => (
+      <li>
+        <span class="craft-service-rule" aria-hidden="true"></span>
+        <div class="craft-service-copy">
+          <strong>{service.title.toUpperCase()}</strong>
+          {service.duration !== "" && <small>{service.duration}</small>}
+        </div>
+        <span class="craft-service-price">{service.price}</span>
+        <a class:list={["craft-book-button", service.soldOut && "is-disabled"]} href={`/products/${service.slug}`} aria-disabled={service.soldOut ? "true" : undefined}>{service.soldOut ? t("storefront.product.sold_out") : t("storefront.template.craft.cta")}</a>
+      </li>
+    ))}
+    {services.length === 0 && <li class="empty-cart">{t("storefront.catalog.empty")}</li>}
+  </ul>
+</section>
+<ol class="craft-steps" aria-label={t("storefront.template.clinic.process")}>
+  {steps.map((step, index) => <li><span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>{step}</li>)}
+</ol>
+{categories.length > 0 && (
+  <nav class="craft-categories" aria-label={t("storefront.catalog.category")}>
+    {categories.map((category) => <a href="#services">{category.name}</a>)}
+  </nav>
+)}

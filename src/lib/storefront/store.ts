@@ -33,6 +33,7 @@ type StorefrontShopRow = {
   status: string;
   storefrontJson: string;
   supportContact: string | null;
+  timezone: string;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
   subscriptionState: string | null;
@@ -68,6 +69,7 @@ export type StorefrontVariant = {
   availableStock?: number;
   compareAtMinor: number | null;
   currency: string;
+  durationMinutes?: number;
   id: string;
   maxPerOrder: number;
   minPerOrder: number;
@@ -111,6 +113,7 @@ export type StorefrontShop = {
   slug: string;
   status: string;
   subscriptionState: string;
+  timezone: string;
   currentPeriodEnd?: string | null;
   trialEndsAt?: string | null;
   graceEndsAt?: string | null;
@@ -138,7 +141,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
   if (classifyPlatformHost(hostname, env) !== "tenant-candidate") throw new AppError("storefront_not_found", 404);
   const row = await env.PLATFORM_DB.prepare(`
     SELECT shops.id, shops.public_id AS publicId, shops.slug, shops.name, shops.status,
-      shops.default_locale AS defaultLocale, shops.currency,
+      shops.default_locale AS defaultLocale, shops.currency, shops.timezone,
       shop_domains.hostname_normalized AS currentHostname,
       shop_domains.type AS currentDomainType,
       shop_domains.validation_metadata_json AS currentDomainValidationMetadataJson,
@@ -281,6 +284,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     slug: row.slug,
     status: row.status,
     subscriptionState,
+    timezone: row.timezone,
     currentPeriodEnd: row.currentPeriodEnd,
     trialEndsAt: row.trialEndsAt,
     graceEndsAt: row.graceEndsAt,
@@ -352,7 +356,7 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
         product_variants.options_json AS optionsJson, product_variants.price_minor AS priceMinor,
         product_variants.compare_at_minor AS compareAtMinor, product_variants.currency,
         product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder,
-        product_variants.version AS variantVersion,
+        product_variants.version AS variantVersion, product_variants.duration_minutes AS durationMinutes,
         CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((
           SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved
           FROM variant_stock_levels

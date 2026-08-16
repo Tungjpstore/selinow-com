@@ -38,6 +38,12 @@ const policyLinks = shop === null ? [] : [
         <div class="checkout-merchant"><span>{t("storefront.checkout.merchant")}</span><strong>{shop.name}</strong><small>{t("storefront.checkout.provider")}</small></div>
         <h2>{t("storefront.checkout.contact")}</h2>
         <label>{t("storefront.checkout.email")} <input id="customer-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required /></label>
+        <fieldset class="booking-fields" id="booking-fields" hidden>
+          <h2>{t("storefront.checkout.booking.title")}</h2>
+          <label>{t("storefront.catalog.category")} <input id="booking-date" type="date" /></label>
+          <div id="booking-slots" class="booking-slots" role="radiogroup" aria-label={t("storefront.checkout.booking.title")}></div>
+          <p id="booking-slot-status" class="form-status" role="status" aria-live="polite">{t("storefront.checkout.booking.loading")}</p>
+        </fieldset>
         <fieldset class="shipping-fields" id="shipping-fields" hidden>
           <h2>{t("storefront.checkout.shipping.title")}</h2>
           <div id="shipping-methods" class="shipping-methods" role="radiogroup" aria-label={t("storefront.checkout.shipping.method")}></div>

@@ -29,6 +29,14 @@ export type PhysicalShippingSnapshot = {
   methodFeeMinor: number;
 };
 
+/** One bookable appointment captured at checkout (single-line service carts). */
+export type BookingCheckoutSnapshot = {
+  endAt: string;
+  resourceId: string;
+  startAt: string;
+  variantId: string;
+};
+
 async function resolveOrderUsageLimit(database: D1Database, shopId: string): Promise<number | undefined> {
   try {
     const row = await database.prepare(`
@@ -121,6 +129,8 @@ export type CanonicalCheckoutTransactionInput = {
   discountMinor: number;
   /** Required for physical carts; rejected for digital-only carts. */
   shipping?: PhysicalShippingSnapshot;
+  /** Required for booking carts (one service line, quantity one). */
+  booking?: BookingCheckoutSnapshot;
   reservationToken: string;
   lines: readonly CanonicalCheckoutLine[];
   subtotalMinor: number;
@@ -416,6 +426,19 @@ function assertInputInvariants(input: CanonicalCheckoutTransactionInput): void {
   } else if (input.shipping !== undefined) {
     throw new AppError("validation_failed", 400, ["shipping_method_not_applicable"]);
   }
+  if (input.booking !== undefined) {
+    // Appointments are website-only, paid, single-service carts; the adapter
+    // already proved the variant carries duration_minutes.
+    if (input.channel.code !== WEBSITE_CHANNEL_CODE) throw new AppError("booking_channel_unsupported", 409, ["use_website_checkout"]);
+    if (input.totalMinor <= 0) throw new AppError("validation_failed", 400, ["booking_free_unsupported"]);
+    const bookingLine = input.lines[0];
+    if (bookingLine === undefined || bookingLine.quantity !== 1 || bookingLine.variantId !== input.booking.variantId || bookingLine.deliveryMode !== "digital") {
+      throw new AppError("validation_failed", 400, ["booking_cart_invalid"]);
+    }
+    if (Date.parse(input.booking.startAt) >= Date.parse(input.booking.endAt) || Number.isNaN(Date.parse(input.booking.startAt))) {
+      throw new Error("canonical_checkout_booking_invalid");
+    }
+  }
   const shippingFeeMinor = input.shipping?.methodFeeMinor !== undefined
     ? computeShippingFeeMinor({ feeMinor: input.shipping.methodFeeMinor, freeOverMinor: input.shipping.methodFreeOverMinor, id: input.shipping.methodId, name: input.shipping.methodName }, computedSubtotal - input.discountMinor)
     : 0;
@@ -525,6 +548,41 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     input.shipping.methodFeeMinor,
     input.shipping.methodFreeOverMinor,
   ];
+  // The booking guard proves the slot is still free at insert time: no active
+  // hold and no booked appointment may overlap it on the same resource, and
+  // the resource must remain active. A losing concurrent batch aborts whole.
+  const bookingGuardSql = input.booking === undefined ? "1 = 1" : `NOT EXISTS (
+    SELECT 1 FROM booking_holds AS booking_hold
+    WHERE booking_hold.shop_id = ?
+      AND booking_hold.resource_id = ?
+      AND booking_hold.status = 'active'
+      AND booking_hold.start_at < ?
+      AND booking_hold.end_at > ?
+  ) AND NOT EXISTS (
+    SELECT 1 FROM bookings AS existing_booking
+    WHERE existing_booking.shop_id = ?
+      AND existing_booking.resource_id = ?
+      AND existing_booking.status = 'booked'
+      AND existing_booking.start_at < ?
+      AND existing_booking.end_at > ?
+  ) AND EXISTS (
+    SELECT 1 FROM booking_resources AS booking_resource
+    WHERE booking_resource.shop_id = ?
+      AND booking_resource.id = ?
+      AND booking_resource.status = 'active'
+  )`;
+  const bookingGuardBindings = input.booking === undefined ? [] : [
+    input.shopId,
+    input.booking.resourceId,
+    input.booking.endAt,
+    input.booking.startAt,
+    input.shopId,
+    input.booking.resourceId,
+    input.booking.endAt,
+    input.booking.startAt,
+    input.shopId,
+    input.booking.resourceId,
+  ];
   const isFree = input.totalMinor === 0;
   const hasPrivateFileFulfillment = orderItems.some((item) =>
     privateFileRequirementState.snapshots.has(item.line.productId));
@@ -588,7 +646,7 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     shopId: input.shopId,
     sourceIdempotencyHash: input.eventIdempotencyKey,
   });
-  const orderInsert = database.prepare(`INSERT INTO orders (id, public_id, shop_id, customer_id, order_number, source_channel, status, payment_status, fulfillment_status, subtotal_minor, discount_minor, shipping_method_name, shipping_fee_minor, total_minor, currency, locale, customer_email_masked, checkout_subject_hash, checkout_request_hash, checkout_cart_id, order_token_hash, expires_at, paid_at, fulfilled_at, created_at, updated_at) SELECT ?, ?, ?, ${customer.lookupSql}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${snapshotGuard.sql} AND ${customer.guardSql} AND ${reservationPlan.guardSql} AND ${physicalStockPlan.guardSql} AND ${shippingGuardSql}`).bind(
+  const orderInsert = database.prepare(`INSERT INTO orders (id, public_id, shop_id, customer_id, order_number, source_channel, status, payment_status, fulfillment_status, subtotal_minor, discount_minor, shipping_method_name, shipping_fee_minor, total_minor, currency, locale, customer_email_masked, checkout_subject_hash, checkout_request_hash, checkout_cart_id, order_token_hash, expires_at, paid_at, fulfilled_at, created_at, updated_at) SELECT ?, ?, ?, ${customer.lookupSql}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${snapshotGuard.sql} AND ${customer.guardSql} AND ${reservationPlan.guardSql} AND ${physicalStockPlan.guardSql} AND ${shippingGuardSql} AND ${bookingGuardSql}`).bind(
     input.orderId,
     input.orderPublicId,
     input.shopId,
@@ -621,7 +679,11 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     ...reservationPlan.guardBindings,
     ...physicalStockPlan.guardBindings,
     ...shippingGuardBindings,
+    ...bookingGuardBindings,
   );
+  // Booking statements write the appointment against the single order item;
+  // the invariants above already proved the line exists when booking is set.
+  const bookingItemId = orderItems[0]?.id ?? "";
   const statements: D1PreparedStatement[] = [
     ...(customer.statement === null ? [] : [customer.statement]),
     ...reservationPlan.statements,
@@ -660,6 +722,48 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
       input.shopId,
       input.orderId,
     )]),
+    // Booking carts: hold the slot for this checkout (token-marked for the
+    // expiry release) and persist the appointment against the paid-pending
+    // order; expiry cancels it atomically with the order.
+    ...(input.booking === undefined ? [] : [
+      database.prepare(`
+        INSERT INTO booking_holds (id, shop_id, resource_id, variant_id, hold_token, start_at, end_at, status, created_at)
+        SELECT ?, ?, ?, ?, ?, ?, ?, 'active', ?
+        WHERE EXISTS (SELECT 1 FROM orders WHERE shop_id = ? AND id = ?)
+      `).bind(
+        createId("bhd"),
+        input.shopId,
+        input.booking.resourceId,
+        input.booking.variantId,
+        input.reservationToken,
+        input.booking.startAt,
+        input.booking.endAt,
+        input.nowIso,
+        input.shopId,
+        input.orderId,
+      ),
+      database.prepare(`
+        INSERT INTO bookings (id, shop_id, order_id, order_item_id, variant_id, resource_id, start_at, end_at, status, created_at, updated_at)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'booked', ?, ?
+        WHERE EXISTS (SELECT 1 FROM orders WHERE shop_id = ? AND id = ?)
+          AND EXISTS (SELECT 1 FROM order_items WHERE shop_id = ? AND id = ?)
+      `).bind(
+        createId("bkg"),
+        input.shopId,
+        input.orderId,
+        bookingItemId,
+        input.booking.variantId,
+        input.booking.resourceId,
+        input.booking.startAt,
+        input.booking.endAt,
+        input.nowIso,
+        input.nowIso,
+        input.shopId,
+        input.orderId,
+        input.shopId,
+        orderItems[0]?.id ?? "",
+      ),
+    ]),
     ...orderItems.flatMap((item) => {
       const requirement = privateFileRequirementState.snapshots.get(item.line.productId);
       if (requirement === undefined) return [];

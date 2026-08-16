@@ -30,6 +30,7 @@ const shop: StorefrontShop = {
   slug: "signal",
   status: "active",
   subscriptionState: "active",
+  timezone: "Asia/Ho_Chi_Minh",
   template: FALLBACK_STOREFRONT_TEMPLATE,
   theme: { accent: "#E9A62F", accentInk: "#102824", brand: "#176B5B", brandInk: "#FFF9EA", logoUrl: null },
 };

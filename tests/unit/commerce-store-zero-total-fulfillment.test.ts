@@ -147,6 +147,7 @@ function shop(): StorefrontShop {
     status: "active",
     currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
+    timezone: "Asia/Ho_Chi_Minh",
     template: FALLBACK_STOREFRONT_TEMPLATE,
     theme: {
       accent: "#0F766E",

@@ -42,6 +42,6 @@ describe("low-stock threshold write path", () => {
     // exists in migration 0002. Pins the expected chain tip.
     const migrations = await readdir("migrations");
     const latest = migrations.filter((name) => name.endsWith(".sql")).sort().at(-1);
-    expect(latest).toBe("0102_physical_goods_vertical.sql");
+    expect(latest).toBe("0103_appointment_booking_vertical.sql");
   });
 });
