@@ -260,3 +260,89 @@ export async function upsertBookingSchedule(input: {
   if (inserted === null) throw new AppError("resource_not_found", 404);
   return inserted;
 }
+
+export type SellerBookingView = {
+  bookingId: string;
+  bookingStatus: string;
+  endAt: string;
+  orderPublicId: string;
+  resourceName: string;
+  startAt: string;
+  variantTitle: string;
+};
+
+/** Seller-side: appointments overlapping the requested window (calendar feed). */
+export async function listSellerBookings(input: {
+  env: AppBindings;
+  rangeEndIso: string;
+  rangeStartIso: string;
+  shopPublicId: string;
+  userId: string;
+}): Promise<SellerBookingView[]> {
+  const member = await getShopForMember({ capability: "orders:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  if (!Number.isFinite(Date.parse(input.rangeStartIso)) || !Number.isFinite(Date.parse(input.rangeEndIso)) || input.rangeEndIso <= input.rangeStartIso) {
+    throw new AppError("validation_failed", 400, ["booking_range_invalid"]);
+  }
+  const rows = await input.env.PLATFORM_DB.prepare(`
+    SELECT bookings.id AS bookingId, bookings.status AS bookingStatus,
+      bookings.start_at AS startAt, bookings.end_at AS endAt,
+      orders.public_id AS orderPublicId, booking_resources.name AS resourceName,
+      product_variants.title AS variantTitle
+    FROM bookings
+    INNER JOIN orders ON orders.shop_id = bookings.shop_id AND orders.id = bookings.order_id
+    INNER JOIN booking_resources ON booking_resources.shop_id = bookings.shop_id AND booking_resources.id = bookings.resource_id
+    INNER JOIN product_variants ON product_variants.shop_id = bookings.shop_id AND product_variants.id = bookings.variant_id
+    WHERE bookings.shop_id = ? AND bookings.start_at < ? AND bookings.end_at > ?
+      AND bookings.status != 'cancelled'
+    ORDER BY bookings.start_at, bookings.id
+    LIMIT 200
+  `).bind(member.row.shop_id, input.rangeEndIso, input.rangeStartIso).all<SellerBookingView>();
+  return rows.results;
+}
+
+/**
+ * Seller-side booking transition (completed / no_show / cancelled). The table
+ * state machine only allows transitions from 'booked'; cancelled/no_show set
+ * the terminal timestamp via the CHECK invariant.
+ */
+export async function transitionBooking(input: {
+  bookingId: string;
+  env: AppBindings;
+  nextStatus: unknown;
+  requestId: string;
+  shopPublicId: string;
+  userId: string;
+}): Promise<SellerBookingView> {
+  const member = await getShopForMember({ capability: "fulfillment:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const status = input.nextStatus;
+  if (status !== "completed" && status !== "no_show" && status !== "cancelled") {
+    throw new AppError("validation_failed", 400, ["booking_transition_invalid"]);
+  }
+  const nowIso = new Date().toISOString();
+  const updated = await input.env.PLATFORM_DB.prepare(`
+    UPDATE bookings
+    SET status = ?, cancelled_at = CASE WHEN ? IN ('cancelled', 'no_show') THEN ? ELSE cancelled_at END, updated_at = ?
+    WHERE shop_id = ? AND id = ? AND status = 'booked'
+    RETURNING id AS bookingId, status AS bookingStatus, start_at AS startAt, end_at AS endAt
+  `).bind(status, status, nowIso, nowIso, member.row.shop_id, input.bookingId)
+    .first<{ bookingId: string; bookingStatus: string; endAt: string; startAt: string }>();
+  if (updated === null) throw new AppError("resource_not_found", 404);
+  await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, source_kind, retention_class, created_at)
+    VALUES (?, ?, 'user', ?, 'booking.transitioned', 'bookings', ?, ?, ?, 'application', 'standard', ?)
+  `).bind(createId("aud"), member.row.shop_id, input.userId, input.bookingId, JSON.stringify({ nextStatus: status }), input.requestId, nowIso).run();
+  const view = await input.env.PLATFORM_DB.prepare(`
+    SELECT bookings.id AS bookingId, bookings.status AS bookingStatus,
+      bookings.start_at AS startAt, bookings.end_at AS endAt,
+      orders.public_id AS orderPublicId, booking_resources.name AS resourceName,
+      product_variants.title AS variantTitle
+    FROM bookings
+    INNER JOIN orders ON orders.shop_id = bookings.shop_id AND orders.id = bookings.order_id
+    INNER JOIN booking_resources ON booking_resources.shop_id = bookings.shop_id AND booking_resources.id = bookings.resource_id
+    INNER JOIN product_variants ON product_variants.shop_id = bookings.shop_id AND product_variants.id = bookings.variant_id
+    WHERE bookings.shop_id = ? AND bookings.id = ?
+    LIMIT 1
+  `).bind(member.row.shop_id, input.bookingId).first<SellerBookingView>();
+  if (view === null) throw new AppError("resource_not_found", 404);
+  return view;
+}
