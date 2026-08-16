@@ -4,6 +4,32 @@ Last updated: 2026-08-16
 
 ## Current source of truth
 
+Seller Operations for All Verticals — TV5 (2026-08-16, branch `storefront-templates`):
+Closes the seller-side loop: physical and booking shops are now fully operable from the dashboard.
+- **Product editor (TV5a)**: selling-type select (digital vs physical) persisted through the
+  catalog API (`deliveryMode`); per-variant service duration (`durationMinutes`, 5–720 min) on
+  variant create/update/list; on-hand stock inputs for shipping variants (loaded from
+  `GET /products/:id/stock`, saved via `POST …/stock` alongside variant PUTs, only shown for
+  physical products).
+- **Catalog API**: `duration_minutes` added to `VariantInput`, `parseVariantInput`, and every
+  variant INSERT/UPDATE/RETURNING statement (list projections included).
+- **Store Builder "Vận chuyển" tab (TV5a)**: create shipping methods (name / fee / optional
+  free-over), active-method list with archive; vi/en copy deck; client script follows the
+  builder's CSRF pattern.
+- **`/app/bookings` page (TV5a)** + nav entry: 14-day appointment feed (service · resource ·
+  time range · order ref) with complete / no-show / cancel transitions wired to the recent-auth
+  CSRF endpoint; roles owner/manager/support.
+- **Order-detail dispatch panel (TV5b)**: `getSellerOrder` now projects the shipping block
+  (address snapshot, method + fee, dispatch history); the detail page renders the panel for
+  physical orders — address card, carrier/tracking inputs, packed/shipped/delivered actions
+  (paid orders only, carrier required for shipped, owner/manager).
+- **Verification Gates**: `astro check` (888 files, 0 errors — remaining tsc/eslint hits are
+  the parallel auth stream's in-flight `debugOtp` change) · `npm run test` (334 files,
+  **2624 tests**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known remaining (TV5d, small)**: R2 object purge for soft-deleted media rides the deletion
+  lifecycle; physical restock on payment reversal lands with the reversal milestone; visual
+  regression baselines for the nine templates; onboarding wizard does not set `shops.vertical`.
+
 Appointment Booking Vertical + Full 9-Template Gallery — TV4 (2026-08-16, branch `storefront-templates`):
 Booking services end-to-end (spa/barber/clinic) and the final template trio, completing all three
 verticals and all nine storefront templates selectable in the Store Builder.
