@@ -185,6 +185,45 @@ const remediationStatusLabels: Record<string, string> = {
           </div>}
         </section>
 
+        {order.shipping !== null && (
+          <section class="ledger-panel dispatch-panel" aria-labelledby="dispatch-title" data-dispatch-panel data-shop-public-id={shop?.publicId} data-order-public-id={order.orderId} data-can-manage={canManageFulfillment ? "true" : "false"} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-copy={JSON.stringify({
+            carrierLabel: t("dashboard.order_detail.dispatch.carrier"),
+            carrierPlaceholder: t("dashboard.order_detail.dispatch.carrier_placeholder"),
+            trackingLabel: t("dashboard.order_detail.dispatch.tracking"),
+            markPacked: t("dashboard.order_detail.dispatch.mark_packed"),
+            markShipped: t("dashboard.order_detail.dispatch.mark_shipped"),
+            markDelivered: t("dashboard.order_detail.dispatch.mark_delivered"),
+            error: t("dashboard.order_detail.dispatch.error"),
+            statePacking: t("dashboard.order_detail.dispatch.state.packing"),
+            stateShipped: t("dashboard.order_detail.dispatch.state.shipped"),
+            stateDelivered: t("dashboard.order_detail.dispatch.state.delivered"),
+          })}>
+            <div class="panel-heading"><p class="eyebrow">{t("dashboard.order_detail.dispatch.eyebrow")}</p><h2 id="dispatch-title">{t("dashboard.order_detail.dispatch.title")}</h2></div>
+            <div class="dispatch-address">
+              <strong>{order.shipping.address.fullName} · {order.shipping.address.phone}</strong>
+              <span>{order.shipping.address.addressLine}</span>
+              <span>{order.shipping.address.ward}, {order.shipping.address.district}, {order.shipping.address.province}</span>
+              {order.shipping.address.notes && <small>{order.shipping.address.notes}</small>}
+              {order.shipping.methodName !== null && <small>{t("dashboard.order_detail.dispatch.method")}: {order.shipping.methodName} · <Money value={order.shipping.feeMinor} currency={order.currency} locale={locale ?? "en"} /></small>}
+            </div>
+            {order.shipping.shipments.length > 0 && <ol class="dispatch-shipments">
+              {order.shipping.shipments.map((shipment) => <li><strong>{shipment.shippingState === "delivered" ? t("dashboard.order_detail.dispatch.state.delivered") : shipment.shippingState === "shipped" ? t("dashboard.order_detail.dispatch.state.shipped") : t("dashboard.order_detail.dispatch.state.packing")}</strong>{shipment.carrier && <span> · {shipment.carrier}</span>}{shipment.trackingCode && <code> · {shipment.trackingCode}</code>}</li>)}
+            </ol>}
+            {canManageFulfillment && order.paymentStatus === "paid" && (
+              <div class="dispatch-actions">
+                <label>{t("dashboard.order_detail.dispatch.carrier")}<input data-dispatch-carrier maxlength="80" placeholder={t("dashboard.order_detail.dispatch.carrier_placeholder")} /></label>
+                <label>{t("dashboard.order_detail.dispatch.tracking")}<input data-dispatch-tracking maxlength="64" placeholder="VN123456789" /></label>
+                <div class="dispatch-buttons">
+                  <button class="sln-button" type="button" data-dispatch-state="packing">{t("dashboard.order_detail.dispatch.mark_packed")}</button>
+                  <button class="sln-button" type="button" data-dispatch-state="shipped">{t("dashboard.order_detail.dispatch.mark_shipped")}</button>
+                  <button class="sln-button" type="button" data-dispatch-state="delivered">{t("dashboard.order_detail.dispatch.mark_delivered")}</button>
+                </div>
+              </div>
+            )}
+            <p class="form-feedback" data-dispatch-feedback role="status" aria-live="polite"></p>
+          </section>
+        )}
+
         <div class="timeline-grid">
           <section class="ledger-panel timeline-panel" aria-labelledby="payment-title">
             <div class="panel-heading"><div><p class="eyebrow">{t("dashboard.order_detail.payment_timeline.eyebrow")}</p><h2 id="payment-title">{t("dashboard.order_detail.payment")}</h2></div><PaymentState locale={locale} value={order.paymentStatus} /></div>
@@ -467,4 +506,72 @@ const remediationStatusLabels: Record<string, string> = {
   @media (max-width: 980px) { .order-layout { grid-template-columns: 1fr; }.order-side { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
   @media (max-width: 760px) { .order-status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }.order-status-rail > div:nth-child(2n) { border-right: 0; }.order-status-rail > div:nth-child(n + 3) { border-top: 1px solid var(--sln-border-default); }.timeline-grid, .order-side { grid-template-columns: 1fr; }.ledger-panel { padding: 18px; }.customer-grid { grid-template-columns: 1fr; }.customer-grid > div:nth-child(odd) { margin-right: 0; }.item-row { grid-template-columns: 30px minmax(0, 1fr); }.item-price { grid-column: 2; display: flex; align-items: baseline; justify-content: space-between; justify-items: initial; text-align: left; }.item-total { padding: 14px; } }
   @media (max-width: 470px) { .header-actions { width: 100%; }.header-actions .sln-button { flex: 1; }.order-status-rail > div { padding: 14px 12px; }.order-status-rail strong, .order-status-rail .rail-total { font-size: 16px; }.panel-heading { align-items: start; flex-direction: column; gap: 8px; }.timeline-top { align-items: start; flex-direction: column; }.timeline-top .sln-status { order: 2; } }
+  .dispatch-panel { margin-top: 18px; }
+  .dispatch-address { display: grid; gap: 3px; padding: 12px 0; border-top: 1px solid var(--sln-border-default); }
+  .dispatch-address strong { font: var(--sln-font-label); }
+  .dispatch-address span, .dispatch-address small { color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .dispatch-shipments { display: grid; gap: 6px; margin: 0; padding: 10px 0; border-top: 1px solid var(--sln-border-default); list-style: none; }
+  .dispatch-shipments li { color: var(--sln-text-primary); font: var(--sln-font-caption); }
+  .dispatch-actions { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--sln-border-default); }
+  .dispatch-actions label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-label); }
+  .dispatch-actions input { border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 10px 12px; font: var(--sln-font-body-sm); }
+  .dispatch-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sln-button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 8px 14px; background: var(--sln-bg-surface); color: var(--sln-text-primary); font: var(--sln-font-label); cursor: pointer; }
+  .sln-button:disabled { opacity: .55; cursor: not-allowed; }
 </style>
+
+<script>
+  const dispatchPanel = document.querySelector<HTMLElement>("[data-dispatch-panel]");
+
+  if (dispatchPanel !== null) {
+    const shopPublicId = dispatchPanel.dataset.shopPublicId ?? "";
+    const orderPublicId = dispatchPanel.dataset.orderPublicId ?? "";
+    const canManage = dispatchPanel.dataset.canManage === "true";
+    const csrfCookieName = dispatchPanel.dataset.csrfCookieName ?? "";
+    const copy = (() => {
+      try {
+        const parsed: unknown = JSON.parse(dispatchPanel.dataset.copy ?? "{}");
+        return typeof parsed === "object" && parsed !== null ? parsed as Record<string, string> : {};
+      } catch {
+        return {};
+      }
+    })();
+    const text = (key: string): string => copy[key] ?? "";
+    const feedback = dispatchPanel.querySelector<HTMLElement>("[data-dispatch-feedback]");
+    const carrierInput = dispatchPanel.querySelector<HTMLInputElement>("[data-dispatch-carrier]");
+    const trackingInput = dispatchPanel.querySelector<HTMLInputElement>("[data-dispatch-tracking]");
+    const buttons = [...dispatchPanel.querySelectorAll<HTMLButtonElement>("[data-dispatch-state]")];
+
+    const readCookie = (name: string): string | null =>
+      document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
+
+    const advance = async (shippingState: string): Promise<void> => {
+      if (!canManage) return;
+      const carrier = carrierInput?.value.trim() ?? "";
+      const trackingCode = trackingInput?.value.trim() ?? "";
+      if (shippingState === "shipped" && carrier === "") {
+        if (feedback !== null) feedback.textContent = text("error");
+        return;
+      }
+      buttons.forEach((button) => { button.disabled = true; });
+      try {
+        const csrf = readCookie(csrfCookieName);
+        const response = await fetch(`/api/app/shops/${shopPublicId}/orders/${orderPublicId}/shipping`, {
+          body: JSON.stringify({ ...(carrier === "" ? {} : { carrier }), ...(trackingCode === "" ? {} : { trackingCode }), shippingState }),
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", ...(csrf === null ? {} : { "X-CSRF-Token": decodeURIComponent(csrf) }) },
+          method: "POST",
+        });
+        if (!response.ok) throw new Error("dispatch_failed");
+        window.location.reload();
+      } catch {
+        if (feedback !== null) feedback.textContent = text("error");
+        buttons.forEach((button) => { button.disabled = false; });
+      }
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => { void advance(button.dataset.shippingState ?? ""); });
+    });
+  }
+</script>

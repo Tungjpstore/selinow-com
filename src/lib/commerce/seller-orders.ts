@@ -74,6 +74,12 @@ function sellerPage(input: { cursor?: string | null; limit?: number }): PublicAp
 
 export type SellerOrderDetail = SellerOrderSummary & {
   audit: Array<{ action: string; createdAt: string }>;
+  shipping: {
+    address: { addressLine: string; district: string; fullName: string; notes: string | null; phone: string; province: string; ward: string };
+    feeMinor: number;
+    methodName: string | null;
+    shipments: Array<{ carrier: string | null; createdAt: string; shippingState: string; trackingCode: string | null }>;
+  } | null;
   expiresAt: string;
   fulfilledAt: string | null;
   fulfillment: Array<{ createdAt: string; failedAt: string | null; fulfilledAt: string | null; state: string; type: string }>;
@@ -362,6 +368,7 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
       orders.expires_at AS expiresAt,
       orders.paid_at AS paidAt,
       orders.fulfilled_at AS fulfilledAt,
+      orders.shipping_fee_minor AS shippingFeeMinor, orders.shipping_method_name AS shippingMethodName,
       orders.created_at AS createdAt,
       orders.updated_at AS updatedAt,
       COUNT(order_items.id) AS itemCount,
@@ -373,7 +380,7 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
     WHERE orders.shop_id = ? AND orders.public_id = ?
     GROUP BY orders.id
     LIMIT 1
-  `).bind(shopId, input.orderPublicId).first<SellerOrderSummary & { expiresAt: string; fulfilledAt: string | null; internalId: string; paidAt: string | null }>();
+  `).bind(shopId, input.orderPublicId).first<SellerOrderSummary & { expiresAt: string; fulfilledAt: string | null; internalId: string; paidAt: string | null; shippingFeeMinor: number; shippingMethodName: string | null }>();
   if (row === null) throw new AppError("order_not_found", 404);
 
   const [items, payments, paymentExceptions, remediationRequests, fulfillment, audit, notes, privateDownloads, manualFulfillments] = await Promise.all([
@@ -474,7 +481,25 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
     `).bind(shopId, row.internalId).all<SellerManualFulfillmentRow>(),
   ]);
 
-  const { internalId, ...safe } = row;
+  const [shippingAddressRow, shipmentRows] = await Promise.all([
+    input.env.PLATFORM_DB.prepare(`
+      SELECT full_name AS fullName, phone, address_line AS addressLine,
+        ward, district, province, notes
+      FROM order_shipping_addresses
+      WHERE shop_id = ? AND order_id = ?
+      LIMIT 1
+    `).bind(shopId, row.internalId).first<NonNullable<SellerOrderDetail["shipping"]>["address"]>(),
+    input.env.PLATFORM_DB.prepare(`
+      SELECT shipping_state AS shippingState, carrier, tracking_code AS trackingCode, created_at AS createdAt
+      FROM fulfillments
+      WHERE shop_id = ? AND order_id = ? AND shipping_state IS NOT NULL
+      ORDER BY created_at, id
+    `).bind(shopId, row.internalId).all<NonNullable<SellerOrderDetail["shipping"]>["shipments"][number]>(),
+  ]);
+
+  const { internalId, shippingFeeMinor, shippingMethodName, ...safe } = row;
+  void shippingFeeMinor;
+  void shippingMethodName;
   void internalId;
   const privateDownloadByItem = new Map(privateDownloads.map((download) => [download.orderItemId, {
     downloadCount: download.downloadCount,
@@ -501,6 +526,14 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
   return {
     ...safe,
     audit: audit.results,
+    shipping: shippingAddressRow === null
+      ? null
+      : {
+        address: shippingAddressRow,
+        feeMinor: shippingFeeMinor,
+        methodName: shippingMethodName,
+        shipments: shipmentRows.results,
+      },
     fulfillment: fulfillment.results,
     items: items.results.map((item) => ({
       ...item,
