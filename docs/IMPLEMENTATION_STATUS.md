@@ -4,6 +4,54 @@ Last updated: 2026-08-16
 
 ## Current source of truth
 
+Physical Goods Vertical — TV3 (2026-08-16, branch `storefront-templates`):
+End-to-end physical selling: schema, checkout money path with shipping, dispatch state machine,
+storefront/seller APIs, buyer UX, and the three physical templates (Aurora/Metro/Bustle).
+- **Migration `0102_physical_goods_vertical.sql`** (additive only — no parent table rebuilt, all
+  existing invariant hashes byte-identical; new objects registered in the production invariant
+  registry): `shops.vertical` (digital/physical/booking, default digital), `products.delivery_mode`
+  (digital/shipping; physical keeps `fulfillment_type='manual'`), `orders.shipping_method_name` +
+  `orders.shipping_fee_minor` snapshot, `fulfillments.shipping_state/carrier/tracking_code`,
+  `variant_stock_levels` (on_hand/reserved + token-marked `active_reservation_token` for exact-count
+  batch guards), `shop_shipping_methods` (flat fee + free-over), `order_shipping_addresses`
+  (immutable PII snapshot, UNIQUE per order), `idx_product_variants_shop_id` composite FK target.
+- **Checkout money path**: canonical transaction reserves physical stock with the license-key
+  token-proof pattern, guards the shipping method row (name/fee/free-over snapshot) inside the
+  order INSERT, persists the address after the FK-backed order write; physical carts are
+  website-only and paid-only; delivery modes cannot mix; free-over applies to post-discount
+  amount; quote evidence + request fingerprint bind `shippingMethodId`/`shippingFeeMinor`
+  (backward-compatible claims); order expiry releases reserved stock by order-item quantities.
+- **Storefront UX**: checkout page gains the shipping fieldset (method radios — server defaults
+  to the primary method on first quote — VN address form with `+84` phone normalization, fee row),
+  method switch re-quotes; order status page shows address, method/fee snapshot, and dispatch
+  progress; storefront catalog projects `deliveryMode` + physical stock states
+  (on_hand − reserved, exact-stock opt-in honored).
+- **Seller APIs** (indexed in `API_ENDPOINT_INDEX.csv`, 188 rows): GET/POST
+  `/api/app/shops/:shopPublicId/shipping-methods`, PATCH `/shipping-methods/:methodId`,
+  GET/POST `/products/:productId/stock`, POST `/orders/:orderId/shipping` —
+  `advanceOrderShipping` paid-only state machine (packing → shipped[carrier required] →
+  delivered ⇒ order fulfilled/completed) with audit log.
+- **Templates (TV3b)**: `aurora` (free, editorial lookbook hero over product imagery),
+  `metro` (Pro, dense spec-first grid + trust strip), `bustle` (Pro, voucher-strip marketplace
+  energy with contrast-safe discount accents) — registry availability flipped, dispatcher +
+  shared layout sheets extended, render contracts pin all six available templates.
+- **Tests**: `tests/unit/physical-shipping-checkout.test.ts` — atomic reservation + address +
+  fee snapshot, sell-out race leaves no order and no leaked reservation, free-over threshold,
+  default vs invented methods, phone normalization rejection, idempotent replay (one durable
+  order), expiry releases stock. Existing suites updated for `deliveryMode` (parity, admission
+  policy, generic entitlement, telegram boundary, catalog contracts, migration chain tip 0102).
+- **Verification Gates**: `npm run check` (875 files, 0 errors) · `npm run lint` (0 errors) ·
+  `npm run test` (333 files, **2619 tests passed**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**:
+  - Seller dashboard UI for shipping methods / variant stock / dispatch actions is API-first;
+    the panels ride on the existing endpoints above (next increment).
+  - Telegram cannot sell physical goods by design (`telegram_physical_unsupported`); no COD
+    (PayOS online only); no zone-based shipping rates; one address per order.
+  - Payment reversal/refund does not yet restock physical reserved units (restock-on-refund
+    lands with the reversal milestone in TV5).
+  - `shops.vertical` is schema-only; onboarding does not set it yet (template selection remains
+    the operative control).
+
 Storefront Templates — TV2 Pulse & Desk (2026-08-16, branch `storefront-templates`):
 First two template variants beyond the Swift default, completing the digital-products group
 (swift free · pulse Pro dark · desk Pro) — selectable now in the Store Builder gallery.
