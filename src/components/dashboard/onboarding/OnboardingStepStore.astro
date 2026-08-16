@@ -14,6 +14,7 @@ const {
   platformBaseDomain,
   shopsCount = 0,
 } = Astro.props;
+import Icon from "../../console/Icon.astro";
 ---
 
 <div class="onboarding-step-pane" data-step-pane="store">
@@ -28,7 +29,7 @@ const {
     <div class="form-group">
       <label for="store-name-input">Tên cửa hàng <span class="required-star">*</span></label>
       <div class="input-with-icon">
-        <span class="input-icon">🏪</span>
+        <span class="input-icon"><Icon name="store" size={16} /></span>
         <input
           id="store-name-input"
           name="name"
@@ -75,7 +76,7 @@ const {
       <div class="channel-cards-grid">
         <label class="channel-card active" data-channel-opt="both">
           <input type="radio" name="channelSelection" value="both" checked data-channel-radio />
-          <div class="channel-card-icon">🚀</div>
+          <div class="channel-card-icon"><Icon name="gauge" size={20} /></div>
           <div class="channel-card-body">
             <div class="channel-card-title-wrap">
               <strong>Đa Kênh (Website + Telegram)</strong>
@@ -88,7 +89,7 @@ const {
 
         <label class="channel-card" data-channel-opt="telegram">
           <input type="radio" name="channelSelection" value="telegram" data-channel-radio />
-          <div class="channel-card-icon">📱</div>
+          <div class="channel-card-icon"><Icon name="bot" size={20} /></div>
           <div class="channel-card-body">
             <strong>Chỉ Bot Telegram</strong>
             <p>Khách hàng chỉ mua qua Bot Telegram. Tự động trả key và menu sản phẩm trong khung chat.</p>
@@ -98,7 +99,7 @@ const {
 
         <label class="channel-card" data-channel-opt="website">
           <input type="radio" name="channelSelection" value="website" data-channel-radio />
-          <div class="channel-card-icon">🌐</div>
+          <div class="channel-card-icon"><Icon name="globe" size={20} /></div>
           <div class="channel-card-body">
             <strong>Chỉ Website Storefront</strong>
             <p>Website bán hàng độc lập với địa chỉ riêng, tối ưu SEO và tùy biến thương hiệu.</p>
@@ -110,7 +111,7 @@ const {
 
     <!-- Inline smart-defaults hint -->
     <p class="smart-defaults-hint full-width">
-      ✨ Tiền tệ <code>VND</code>, ngôn ngữ <code>Tiếng Việt</code> và chính sách mẫu được áp dụng tự động — bạn có thể đổi lại bất cứ lúc nào.
+      Tiền tệ <code>VND</code>, ngôn ngữ <code>Tiếng Việt</code> và chính sách mẫu được áp dụng tự động — bạn có thể đổi lại bất cứ lúc nào.
     </p>
 
     <div class="step-actions full-width">
@@ -295,7 +296,7 @@ const {
     align-items: center;
     gap: 14px;
     padding: 14px 18px;
-    border: 1.5px solid var(--sln-border-default);
+    border: 1px solid var(--sln-border-default);
     border-radius: var(--sln-radius-lg);
     background: var(--sln-bg-surface);
     cursor: pointer;
@@ -366,7 +367,7 @@ const {
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    border: 1.5px solid var(--sln-border-strong);
+    border: 1px solid var(--sln-border-strong);
     color: transparent;
     font-size: 12px;
     font-weight: 800;

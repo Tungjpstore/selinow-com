@@ -18,7 +18,7 @@ const { defaultCurrency = "VND" } = Astro.props;
   <!-- Mode Switcher -->
   <div class="product-mode-tabs" role="tablist">
     <button type="button" class="mode-tab active" data-product-mode="preset" role="tab" aria-selected="true">
-      <span>✨ Chọn Mẫu Có Sẵn (1-Click)</span>
+      <span>Chọn Mẫu Có Sẵn (1-Click)</span>
     </button>
     <button type="button" class="mode-tab" data-product-mode="custom" role="tab" aria-selected="false">
       <span>✏️ Tự Nhập Sản Phẩm Mới</span>
@@ -47,7 +47,7 @@ const { defaultCurrency = "VND" } = Astro.props;
             <strong class="preset-title">{preset.title}</strong>
             <span class="preset-price">{preset.priceMinor.toLocaleString("vi-VN")} {preset.currency}</span>
             <small class="preset-type">
-              {preset.fulfillmentType === "license_key" ? "🔑 Tự động giao key" : "📁 Giao thủ công"}
+              {preset.fulfillmentType === "license_key" ? "Tự động giao key" : "Giao thủ công"}
             </small>
           </div>
           <span class="preset-badge-check">✓</span>
@@ -91,7 +91,7 @@ const { defaultCurrency = "VND" } = Astro.props;
     <div class="form-group">
       <label for="product-fulfillment-select">Hình thức giao hàng <span class="required-star">*</span></label>
       <select id="product-fulfillment-select" name="fulfillmentType" data-input-product-fulfillment>
-        <option value="license_key" selected>🔑 Giao License Key / Mã thẻ tự động</option>
+        <option value="license_key" selected>Giao License Key / Mã thẻ tự động</option>
         <option value="manual">📁 Giao thủ công (Tài khoản / Link tải / Liên hệ)</option>
       </select>
     </div>
@@ -206,7 +206,7 @@ const { defaultCurrency = "VND" } = Astro.props;
     align-items: flex-start;
     gap: 12px;
     padding: 14px;
-    border: 1.5px solid var(--sln-border-default);
+    border: 1px solid var(--sln-border-default);
     border-radius: var(--sln-radius-lg);
     background: var(--sln-bg-surface);
     text-align: left;
@@ -265,7 +265,7 @@ const { defaultCurrency = "VND" } = Astro.props;
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    border: 1.5px solid var(--sln-border-strong);
+    border: 1px solid var(--sln-border-strong);
     color: transparent;
     font-size: 10px;
     font-weight: 800;

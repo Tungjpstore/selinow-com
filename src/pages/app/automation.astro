@@ -89,10 +89,8 @@ const tabHref = (tab: "history" | "rules"): string => workspaceHref(`/app/automa
 
 <style>
   .state-space { margin-top:var(--sln-space-8); }
-  .sln-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:10px 16px; font:var(--sln-font-label); text-decoration:none; }
-  .sln-button-secondary { border-color:var(--sln-border-strong); background:var(--sln-bg-surface); color:var(--sln-text-primary); }
   .automation-tabs { display:flex; gap:var(--sln-space-2); margin-top:var(--sln-space-8); border-bottom:1px solid var(--sln-border-default); }
-  .automation-tab { display:inline-flex; align-items:center; min-height:44px; border-bottom:2px solid transparent; padding:var(--sln-space-2) var(--sln-space-4); color:var(--sln-text-secondary); font:var(--sln-font-label); text-decoration:none; }
+  .automation-tab { display:inline-flex; align-items:center; min-height:44px; border-bottom:1px solid transparent; padding:var(--sln-space-2) var(--sln-space-4); color:var(--sln-text-secondary); font:var(--sln-font-label); text-decoration:none; }
   .automation-tab:hover { color:var(--sln-text-primary); }
   .automation-tab.is-active { border-bottom-color:var(--sln-action-primary); color:var(--sln-text-primary); }
 </style>

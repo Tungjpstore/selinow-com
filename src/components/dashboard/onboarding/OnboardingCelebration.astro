@@ -4,11 +4,12 @@ type Props = {
 };
 
 const { platformBaseDomain } = Astro.props;
+import Icon from "../../console/Icon.astro";
 ---
 
 <div class="onboarding-step-pane celebration-pane" data-step-pane="celebration" hidden>
   <div class="celebration-badge-wrap">
-    <div class="celebration-fireworks">🎉</div>
+    
     <span class="celebration-glow-pill">KÍCH HOẠT THÀNH CÔNG</span>
     <h2>Cửa Hàng Của Bạn Đã Sẵn Sàng!</h2>
     <p>Chúc mừng bạn! Tất cả cấu hình cốt lõi đã hoàn tất. Cửa hàng số và bot tự động của bạn đã sẵn sàng nhận đơn và giao key cho khách hàng 24/7.</p>
@@ -17,7 +18,7 @@ const { platformBaseDomain } = Astro.props;
   <div class="celebration-links-cards">
     <!-- Storefront Link -->
     <a href="#" target="_blank" rel="noreferrer" class="launch-link-card web-link" data-celebration-storefront-link>
-      <div class="launch-card-icon">🌐</div>
+      <div class="launch-card-icon"><Icon name="globe" size={20} /></div>
       <div class="launch-card-info">
         <strong>Mở Website Bán Hàng</strong>
         <span data-celebration-slug-display>https://shop.{platformBaseDomain}</span>
@@ -118,7 +119,7 @@ const { platformBaseDomain } = Astro.props;
     align-items: center;
     gap: 14px;
     padding: 16px 20px;
-    border: 1.5px solid var(--sln-border-strong);
+    border: 1px solid var(--sln-border-strong);
     border-radius: var(--sln-radius-lg);
     background: var(--sln-bg-surface);
     text-decoration: none;

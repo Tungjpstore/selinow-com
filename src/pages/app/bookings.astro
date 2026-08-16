@@ -54,8 +54,6 @@ Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
   .booking-copy small { color: var(--sln-text-secondary); font: var(--sln-font-caption); }
   .booking-actions { display: flex; gap: 8px; }
   .booking-actions .sln-button { min-height: 34px; padding: 6px 12px; font: var(--sln-font-caption); }
-  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 15px; font: var(--sln-font-label); text-decoration: none; cursor: pointer; }
   .sln-button:disabled { cursor: not-allowed; opacity: .55; }
-  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   @media (max-width: 640px) { .bookings-list li { grid-template-columns: 1fr; } .booking-actions { width: 100%; justify-content: stretch; } .booking-actions .sln-button { flex: 1; } }
 </style>

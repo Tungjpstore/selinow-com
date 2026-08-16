@@ -67,46 +67,54 @@ const isVisibleForRole = (item: NavItem): boolean => item.roles === undefined
   || (selectedShopRole !== undefined && item.roles.includes(selectedShopRole))
   || (shops.length === 0 && item.visibleWithoutShop === true);
 
+// Console v2 IA (proposal §6.1): groups follow the seller's tasks instead of
+// the system's architecture. Role gating and icon keys are unchanged.
 const groups: readonly NavGroup[] = [
   {
-    key: "operations",
-    label: t("dashboard.nav.operations"),
+    key: "sell",
+    label: t("dashboard.console.nav.sell"),
     items: [
-      { icon: "overview", label: t("dashboard.nav.overview"), path: "/app" },
-      { icon: "automation", label: t("dashboard.nav.automation"), path: "/app/automation" },
-      { icon: "products", label: t("dashboard.nav.products"), path: "/app/products", roles: ["owner", "manager"] },
-      { icon: "inventory", label: t("dashboard.nav.inventory"), path: "/app/inventory", roles: ["owner", "manager"] },
-      { icon: "orders", label: t("dashboard.nav.orders"), path: "/app/orders" },
+      { icon: "overview", label: t("dashboard.console.nav.overview"), path: "/app" },
+      { icon: "orders", label: t("dashboard.console.nav.orders"), path: "/app/orders" },
       { icon: "calendar", label: t("dashboard.nav.bookings"), path: "/app/bookings", roles: ["owner", "manager", "support"] },
-      { icon: "customers", label: t("dashboard.nav.customers"), path: "/app/customers" },
+      { icon: "customers", label: t("dashboard.console.nav.customers"), path: "/app/customers" },
     ],
   },
   {
-    key: "sales_channels",
-    label: t("dashboard.nav.sales_channels"),
+    key: "catalog",
+    label: t("dashboard.console.nav.catalog"),
     items: [
-      { icon: "store", label: t("dashboard.nav.website"), path: "/app/store" },
-      { icon: "plug", label: t("dashboard.nav.channels"), path: "/app/integrations", roles: ["owner", "manager"] },
-      { icon: "payments", label: t("dashboard.nav.payments"), path: "/app/payments", roles: ["owner", "manager"] },
+      { icon: "products", label: t("dashboard.console.nav.products"), path: "/app/products", roles: ["owner", "manager"] },
+      { icon: "inventory", label: t("dashboard.console.nav.inventory"), path: "/app/inventory", roles: ["owner", "manager"] },
     ],
   },
   {
-    key: "configuration",
-    label: t("dashboard.nav.configuration"),
+    key: "automation",
+    label: t("dashboard.console.nav.automation"),
+    items: [
+      { icon: "automation", label: t("dashboard.console.nav.rules"), path: "/app/automation" },
+    ],
+  },
+  {
+    key: "channels",
+    label: t("dashboard.console.nav.channels"),
+    items: [
+      { icon: "store", label: t("dashboard.console.nav.website"), path: "/app/store" },
+      { icon: "plug", label: t("dashboard.console.nav.telegram"), path: "/app/integrations", roles: ["owner", "manager"] },
+      { icon: "payments", label: t("dashboard.console.nav.payments"), path: "/app/payments", roles: ["owner", "manager"] },
+      { icon: "domain", label: t("dashboard.console.nav.domains"), path: "/app/domains", roles: ["owner"] },
+    ],
+  },
+  {
+    key: "settings",
+    label: t("dashboard.console.nav.settings"),
     items: [
       { icon: "check", label: t("dashboard.nav.readiness"), path: "/onboarding", roles: ["owner", "manager"], visibleWithoutShop: true },
-      { icon: "domain", label: t("dashboard.nav.domains"), path: "/app/domains", roles: ["owner"] },
       { icon: "palette", label: t("dashboard.nav.store_brand"), path: "/app/store/settings" },
-      { icon: "developer", label: t("dashboard.nav.developer"), path: "/app/developer", roles: ["owner"] },
-    ],
-  },
-  {
-    key: "administration",
-    label: t("dashboard.nav.administration"),
-    items: [
-      { icon: "lock", label: t("dashboard.nav.security"), path: "/app/security" },
-      { icon: "members", label: t("dashboard.nav.members"), path: "/app/members", roles: ["owner"] },
-      { icon: "billing", label: t("dashboard.nav.billing"), path: "/app/billing", roles: ["owner"] },
+      { icon: "members", label: t("dashboard.console.nav.members"), path: "/app/members", roles: ["owner"] },
+      { icon: "lock", label: t("dashboard.console.nav.security"), path: "/app/security" },
+      { icon: "billing", label: t("dashboard.console.nav.billing"), path: "/app/billing", roles: ["owner"] },
+      { icon: "developer", label: t("dashboard.console.nav.developer"), path: "/app/developer", roles: ["owner"] },
       { icon: "shield", label: t("dashboard.nav.audit_data"), path: "/app/data", roles: ["owner"] },
     ],
   },
@@ -118,20 +126,20 @@ const visibleGroups = groups
 const visibleItem = (path: string): NavItem | undefined => visibleGroups
   .flatMap((group) => group.items)
   .find((item) => item.path === path);
-const channelGroup = visibleGroups.find((group) => group.key === "sales_channels")
-  ?? { items: [], key: "sales_channels", label: t("dashboard.nav.sales_channels") };
+const channelGroup = visibleGroups.find((group) => group.key === "channels")
+  ?? { items: [], key: "channels", label: t("dashboard.console.nav.channels") };
 const mobilePrimaryThird = visibleItem("/app/products") ?? visibleItem("/app/customers");
 const mobileMoreGroups = ([
   {
-    key: "operations",
-    label: t("dashboard.nav.operations"),
+    key: "catalog",
+    label: t("dashboard.console.nav.catalog"),
     items: [visibleItem("/app/inventory"), visibleItem("/app/customers"), visibleItem("/app/automation")]
       .filter((item): item is NavItem => item !== undefined && item.path !== mobilePrimaryThird?.path),
   },
-  visibleGroups.find((group) => group.key === "configuration")
-    ?? { items: [], key: "configuration", label: t("dashboard.nav.configuration") },
-  visibleGroups.find((group) => group.key === "administration")
-    ?? { items: [], key: "administration", label: t("dashboard.nav.administration") },
+  visibleGroups.find((group) => group.key === "channels")
+    ?? { items: [], key: "channels", label: t("dashboard.console.nav.channels") },
+  visibleGroups.find((group) => group.key === "settings")
+    ?? { items: [], key: "settings", label: t("dashboard.console.nav.settings") },
 ] as readonly NavGroup[]).filter((group) => group.items.length > 0);
 const isChannelPath = channelGroup.items.some((item) => isCurrent(item.path));
 const isMorePath = mobileMoreGroups.some((group) => group.items.some((item) => isCurrent(item.path)));

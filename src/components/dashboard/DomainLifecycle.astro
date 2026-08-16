@@ -29,7 +29,9 @@ const steps: readonly DomainLifecycleStep[] = domain === undefined
   : deriveDomainLifecycle(domain, Astro.locals.locale);
 const iconFor = (status: string | null): string => {
   const tone = domainStatusTone(status);
-  return tone === "success" ? "✓" : tone === "error" ? "!" : "·";
+  // Typographic glyphs (not emoji): check mark is U+2713-free on purpose —
+  // use a plain dot/bang so the console no-emoji contract stays simple.
+  return tone === "success" ? "●" : tone === "error" ? "!" : "·";
 };
 ---
 

@@ -441,7 +441,7 @@ const remediationStatusLabels: Record<string, string> = {
   .exception-meta dd { overflow-wrap: anywhere; margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
   .remediation-form { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--sln-border-default); }
   .remediation-form p, .remediation-state { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
-  .remediation-state { overflow-wrap: anywhere; padding: 10px; border-left: 3px solid var(--sln-state-info); background: var(--sln-tint-info); }
+  .remediation-state { overflow-wrap: anywhere; padding: 10px; border-left: 1px solid var(--sln-state-info); background: var(--sln-tint-info); }
   .manual-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
   .manual-form input, .manual-form select { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); }
   .panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: var(--sln-space-6); }
@@ -463,8 +463,8 @@ const remediationStatusLabels: Record<string, string> = {
   .item-copy strong, .item-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-copy span, .item-copy small, .item-price small { color: var(--sln-text-muted); font: var(--sln-font-caption); }
   .item-copy code { color: var(--sln-text-secondary); }
-  .item-copy .private-download-state { display: grid; gap: 3px; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 3px solid var(--sln-state-info); background: var(--sln-tint-info); color: var(--sln-text-secondary); white-space: normal; }
-  .item-copy .manual-fulfillment-state { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 3px solid var(--sln-state-warning); background: var(--sln-tint-warning); color: var(--sln-text-secondary); white-space: normal; }
+  .item-copy .private-download-state { display: grid; gap: 3px; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 1px solid var(--sln-state-info); background: var(--sln-tint-info); color: var(--sln-text-secondary); white-space: normal; }
+  .item-copy .manual-fulfillment-state { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; width: fit-content; max-width: 100%; margin-top: 7px; padding: 9px 11px; border-left: 1px solid var(--sln-state-warning); background: var(--sln-tint-warning); color: var(--sln-text-secondary); white-space: normal; }
   .manual-fulfillment-state small { grid-column: 1 / -1; }
   .private-download-state strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
   .private-download-state span, .private-download-state small { overflow-wrap: anywhere; white-space: normal; }
@@ -478,7 +478,7 @@ const remediationStatusLabels: Record<string, string> = {
   .timeline-list > li { position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 13px; padding: 0 0 22px; }
   .timeline-list > li:last-child { padding-bottom: 0; }
   .timeline-list > li:not(:last-child)::after { position: absolute; top: 15px; bottom: 0; left: 6px; width: 1px; background: var(--sln-border-default); content: ""; }
-  .timeline-marker { position: relative; z-index: 1; width: 13px; height: 13px; margin-top: 5px; border: 3px solid var(--sln-bg-surface); border-radius: 50%; background: var(--sln-action-primary); box-shadow: 0 0 0 1px var(--sln-action-primary); }
+  .timeline-marker { position: relative; z-index: 1; width: 13px; height: 13px; margin-top: 5px; border: 1px solid var(--sln-bg-surface); border-radius: 50%; background: var(--sln-action-primary); box-shadow: 0 0 0 1px var(--sln-action-primary); }
   .timeline-entry { display: grid; gap: 5px; min-width: 0; }
   .timeline-top { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
   .timeline-top strong { font-size: 14px; }
@@ -487,7 +487,7 @@ const remediationStatusLabels: Record<string, string> = {
   .safe-error { width: fit-content; max-width: 100%; overflow-wrap: anywhere; color: var(--sln-state-danger); font: var(--sln-font-caption); }
   .summary-list { display: grid; margin: 0; border-top: 1px solid var(--sln-border-default); }
   .summary-list > div { display: grid; gap: 5px; padding: 14px 0; border-bottom: 1px solid var(--sln-border-default); }
-  .safe-callout { display: grid; gap: 5px; margin-top: 18px; padding: 14px; border-left: 3px solid var(--sln-state-warning); background: var(--sln-tint-warning); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .safe-callout { display: grid; gap: 5px; margin-top: 18px; padding: 14px; border-left: 1px solid var(--sln-state-warning); background: var(--sln-tint-warning); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
   .safe-callout strong { color: var(--sln-text-primary); }
   .audit-list > li { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--sln-border-default); }
   .audit-list > li:last-child { border-bottom: 0; }
@@ -516,7 +516,6 @@ const remediationStatusLabels: Record<string, string> = {
   .dispatch-actions label { display: grid; gap: 6px; color: var(--sln-text-secondary); font: var(--sln-font-label); }
   .dispatch-actions input { border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 10px 12px; font: var(--sln-font-body-sm); }
   .dispatch-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-  .sln-button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-md); padding: 8px 14px; background: var(--sln-bg-surface); color: var(--sln-text-primary); font: var(--sln-font-label); cursor: pointer; }
   .sln-button:disabled { opacity: .55; cursor: not-allowed; }
 </style>
 

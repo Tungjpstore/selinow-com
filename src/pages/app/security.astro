@@ -1,4 +1,5 @@
 ---
+import Icon from "../../components/console/Icon.astro";
 import Button from "../../components/primitives/Button.astro";
 import Input from "../../components/primitives/Input.astro";
 import SecretField from "../../components/primitives/SecretField.astro";
@@ -89,7 +90,7 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
       class="security-tabpanel"
     >
       <section class="security-overview" aria-labelledby="security-overview-title">
-        <span class="overview-mark" aria-hidden="true">✓</span>
+        <span class="overview-mark" aria-hidden="true"><Icon name="check" size={14} /></span>
         <div>
           <p class="eyebrow">{t("dashboard.security.overview.eyebrow")}</p>
           <h2 id="security-overview-title">{t("dashboard.security.overview.title")}</h2>

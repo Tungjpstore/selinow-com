@@ -71,10 +71,10 @@ describe("seller app shell foundation", () => {
       readFile("src/pages/app/store.astro", "utf8"),
     ]);
 
-    for (const key of ["dashboard.nav.overview", "dashboard.nav.orders", "dashboard.nav.products", "dashboard.nav.sales_channels"]) {
+    for (const key of ["dashboard.console.nav.overview", "dashboard.console.nav.orders", "dashboard.console.nav.products", "dashboard.console.nav.channels"]) {
       expect(layout).toContain(`t("${key}")`);
     }
-    expect(layout).toContain('key: "sales_channels"');
+    expect(layout).toContain('key: "channels"');
     expect(layout).toContain('t("dashboard.shell.mobile.more")');
     expect(layout).toContain('const mobilePrimaryThird = visibleItem("/app/products") ?? visibleItem("/app/customers");');
     expect(layout).toContain("<span>{mobilePrimaryThird.label}</span>");
@@ -130,14 +130,14 @@ describe("seller app shell foundation", () => {
       readFile("src/styles/app-shell.css", "utf8"),
     ]);
 
-    for (const navKey of ["dashboard.nav.sales_channels", "dashboard.nav.website", "dashboard.nav.channels", "dashboard.nav.payments", "dashboard.nav.developer"]) {
+    for (const navKey of ["dashboard.console.nav.channels", "dashboard.console.nav.website", "dashboard.console.nav.telegram", "dashboard.console.nav.payments", "dashboard.console.nav.developer"]) {
       expect(layout).toContain(`t("${navKey}")`);
     }
     for (const entryPath of ["/app/store", "/app/integrations", "/app/payments", "/app/developer"]) {
       expect(layout).toContain(`path: "${entryPath}"`);
     }
-    expect(layout).toContain('key: "sales_channels"');
-    expect(layout).toContain('key: "configuration"');
+    expect(layout).toContain('key: "channels"');
+    expect(layout).toContain('key: "settings"');
     expect(layout).toContain("data-nav-group={group.key}");
     expect(layout).toContain("app-nav-channel-group");
     expect(layout).toContain("withSelectedShop(itemPath(item))");

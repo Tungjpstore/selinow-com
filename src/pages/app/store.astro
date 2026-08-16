@@ -273,11 +273,8 @@ const storeBuilderClientCopy = {
 <style>
   [hidden] { display: none !important; }
   .header-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: end; gap: 10px; }
-  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 15px; font: var(--sln-font-label); text-decoration: none; cursor: pointer; }
   .sln-button:disabled { cursor: not-allowed; opacity: .55; }
-  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
   .sln-button-primary:hover:not(:disabled) { background: var(--sln-action-primary-hover); }
-  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .save-state { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-tint-success); color: var(--sln-success-text); font: var(--sln-font-caption); font-weight: 700; }
   .save-state[data-state="never_published"], .save-state[data-state="publishing"], .save-state[data-state="saving"], .save-state[data-state="unpublished_changes"], .save-state[data-state="unsaved"] { background: var(--sln-tint-warning); color: var(--sln-warning-text-strong); }
   .save-state[data-state="failed"], .save-state[data-state="forbidden"], .save-state[data-state="invalid_contrast"] { background: var(--sln-tint-danger); color: var(--sln-danger-text); }
@@ -413,7 +410,7 @@ const storeBuilderClientCopy = {
   .preview-catalog-state strong { display: block; color: var(--preview-text-primary); font-size: 13px; }
   .preview-catalog-state p, .preview-catalog-note { margin: 6px 0 0; color: var(--preview-text-muted); font-size: 10px; line-height: 1.5; }
   .preview-catalog-note { grid-column: 1 / -1; }
-  .store-support { margin-top: 26px; border-left: 3px solid var(--preview-accent); padding: 2px 0 2px 13px; }
+  .store-support { margin-top: 26px; border-left: 1px solid var(--preview-accent); padding: 2px 0 2px 13px; }
   .store-support strong { display: block; color: var(--preview-text-primary); font-size: 12px; }
   .store-support strong:not(:first-child) { margin-top: 12px; }
   .store-support p { margin: 5px 0 0; color: var(--preview-text-muted); font-size: 11px; line-height: 1.5; }

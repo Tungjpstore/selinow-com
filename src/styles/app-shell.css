@@ -1,3 +1,5 @@
+@import "./console.css";
+
 @layer reset, shell, components, responsive;
 
 @layer reset {
@@ -13,6 +15,32 @@
   .app-shell :where(button, a, input, select, textarea) { font: inherit; }
   .app-shell :where(a) { color: inherit; }
   .app-shell :where(:focus-visible) { outline: 3px solid var(--sln-focus-ring); outline-offset: 3px; }
+
+  /*
+   * Console v2 skin (proposal §5): remap the legacy semantic tokens *inside
+   * the app shell only* so every legacy page inherits the hairline border,
+   * calmer radii and lighter elevation without touching each page's markup.
+   * Storefront surfaces keep the original global token values.
+   */
+  .app-shell {
+    --sln-border-default: var(--sln-console-line);
+    --sln-border-strong: var(--sln-console-line);
+    --sln-bg-canvas: var(--sln-console-bg);
+    --sln-bg-surface: var(--sln-console-surface);
+    --sln-bg-subtle: var(--sln-console-raised);
+    --sln-bg-inverse: var(--sln-console-ink);
+    --sln-text-inverse: var(--sln-console-bg);
+    --sln-text-primary: var(--sln-console-ink);
+    --sln-text-secondary: var(--sln-console-ink-2);
+    --sln-text-muted: var(--sln-console-ink-3);
+    --sln-radius-sm: 6px;
+    --sln-radius-md: 8px;
+    --sln-radius-lg: 10px;
+    --sln-radius-xl: 12px;
+    --sln-shadow-xs: none;
+    --sln-shadow-sm: none;
+    --sln-focus-ring: color-mix(in srgb, var(--sln-console-accent) 55%, transparent);
+  }
 }
 
 @layer shell {
@@ -51,8 +79,9 @@
     height: 100vh;
     overflow-y: auto;
     padding: 22px 14px 18px;
-    background: var(--sln-ink-950);
-    color: var(--sln-white);
+    background: var(--sln-console-surface);
+    border-right: 1px solid var(--sln-console-line);
+    color: var(--sln-console-ink);
   }
 
   .app-brand {
@@ -79,7 +108,7 @@
     border-radius: var(--sln-radius-md);
     padding: 10px;
     background: rgb(255 255 255 / 6%);
-    color: var(--sln-white);
+    color: var(--sln-console-ink);
   }
 
   .app-shop-context > span:first-child,
@@ -90,15 +119,15 @@
     place-items: center;
     width: 32px;
     height: 32px;
-    border-radius: 10px;
-    background: var(--sln-brand-gradient);
-    color: var(--sln-white);
+    border-radius: var(--sln-console-radius);
+    background: var(--sln-console-ink);
+    color: var(--sln-console-bg);
     font-size: 13px;
-    font-weight: 800;
+    font-weight: 600;
   }
 
   .app-shop-context > span:nth-child(2) { display: grid; min-width: 0; }
-  .app-shop-context small { color: var(--sln-slate-400); font-size: 10px; line-height: 1.4; }
+  .app-shop-context small { color: var(--sln-console-ink-3); font-size: 10px; line-height: 1.4; }
   .app-shop-context strong { overflow: hidden; font-size: 13px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
   .app-shop-selector summary {
     display: grid;
@@ -112,7 +141,7 @@
   }
   .app-shop-selector summary::-webkit-details-marker { display: none; }
   .app-shop-selector summary:hover,
-  .app-shop-selector[open] summary { background: rgb(255 255 255 / 10%); color: var(--sln-white); }
+  .app-shop-selector[open] summary { background: var(--sln-console-raised); color: var(--sln-console-ink); }
   .app-shop-selector nav {
     position: absolute;
     top: calc(100% + 8px);
@@ -121,9 +150,9 @@
     display: grid;
     gap: 3px;
     padding: 7px;
-    border: 1px solid rgb(255 255 255 / 14%);
-    border-radius: var(--sln-radius-md);
-    background: var(--sln-ink-900);
+    border: 1px solid var(--sln-console-line);
+    border-radius: var(--sln-console-radius-container);
+    background: var(--sln-console-surface);
     box-shadow: var(--sln-shadow-lg);
   }
   .app-shop-selector nav a {
@@ -135,8 +164,8 @@
     text-decoration: none;
   }
   .app-shop-selector nav a:hover,
-  .app-shop-selector nav a[aria-current="true"] { background: rgb(255 255 255 / 10%); }
-  .app-shop-selector nav small { color: var(--sln-slate-400); }
+  .app-shop-selector nav a[aria-current="true"] { background: var(--sln-console-raised); }
+  .app-shop-selector nav small { color: var(--sln-console-ink-3); }
   .app-nav { display: grid; gap: 20px; }
   .app-nav section { display: grid; gap: 3px; }
 
@@ -158,7 +187,7 @@
     height: 20px;
     border: 1px solid rgb(255 255 255 / 14%);
     border-radius: var(--sln-radius-pill);
-    color: var(--sln-slate-400);
+    color: var(--sln-console-ink-3);
     font: 600 10px/1 var(--sln-font-mono);
   }
 
@@ -171,11 +200,11 @@
   }
 
   .app-nav-channel-group .app-nav-group-label { padding-inline: 6px; }
-  .app-nav-channel-group .app-nav-group-label p { margin-inline: 0; color: #8de3d7; }
+  .app-nav-channel-group .app-nav-group-label p { margin-inline: 0; color: var(--sln-console-ink-3); }
 
   .app-nav p {
     margin: 0 10px 6px;
-    color: var(--sln-slate-400);
+    color: var(--sln-console-ink-3);
     font-size: 10px;
     font-weight: 750;
     letter-spacing: .12em;
@@ -190,7 +219,7 @@
     min-height: 42px;
     padding: 9px 11px;
     border-radius: 10px;
-    color: var(--sln-slate-400);
+    color: var(--sln-console-ink-3);
     font-size: 13px;
     font-weight: 620;
     text-decoration: none;
@@ -226,7 +255,7 @@
   .app-nav-item-channel[data-channel="website"] { --channel-accent: var(--sln-slate-300); }
 
   a.app-nav-item:hover,
-  a.app-nav-item[aria-current="page"] { background: rgb(255 255 255 / 9%); color: var(--sln-white); }
+  a.app-nav-item[aria-current="page"] { background: var(--sln-console-raised); color: var(--sln-console-ink); }
 
   a.app-nav-item[aria-current="page"]::before {
     position: absolute;
@@ -241,7 +270,7 @@
 
   a.app-nav-item-channel[aria-current="page"] {
     background: color-mix(in srgb, var(--channel-accent) 16%, transparent);
-    color: var(--sln-white);
+    color: var(--sln-console-ink);
   }
 
   a.app-nav-item-channel[aria-current="page"]::before { background: var(--channel-accent); }
@@ -270,7 +299,7 @@
     gap: 10px;
     margin-top: auto;
     padding: 18px 10px 0;
-    border-top: 1px solid rgb(255 255 255 / 10%);
+    border-top: 1px solid var(--sln-console-raised);
   }
 
   .app-context-mark {
@@ -284,7 +313,7 @@
 
   .app-sidebar-footer div { display: grid; gap: 4px; }
   .app-sidebar-footer strong { font-size: 11px; }
-  .app-sidebar-footer div > span { color: var(--sln-slate-400); font-size: 10px; line-height: 1.55; }
+  .app-sidebar-footer div > span { color: var(--sln-console-ink-3); font-size: 10px; line-height: 1.55; }
   .app-workspace { min-width: 0; }
 
   .app-topbar {
@@ -348,7 +377,7 @@
   }
 
   .app-shell .app-button:hover { transform: translateY(-1px); box-shadow: var(--sln-shadow-sm); }
-  .app-shell .app-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
+  .app-shell .app-button-primary { background: var(--sln-action-primary); color: var(--sln-console-ink); }
   .app-shell .app-button-primary:hover { background: var(--sln-action-primary-hover); }
   .app-shell .app-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .app-shell .app-panel { border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
@@ -433,7 +462,7 @@
       border: 1px solid rgb(255 255 255 / 14%);
       border-radius: 18px;
       background: rgb(8 11 20 / 96%);
-      color: var(--sln-slate-400);
+      color: var(--sln-console-ink-3);
       box-shadow: var(--sln-shadow-lg);
       backdrop-filter: blur(18px);
     }
@@ -456,7 +485,7 @@
       cursor: pointer;
     }
 
-    .app-mobile-nav :where(a, button)[aria-current="page"] { background: rgb(255 255 255 / 10%); color: var(--sln-white); }
+    .app-mobile-nav :where(a, button)[aria-current="page"] { background: var(--sln-console-raised); color: var(--sln-console-ink); }
     .app-mobile-nav button[data-mobile-menu-trigger="channels"] { color: #87e4d8; }
     .app-mobile-nav button[data-mobile-menu-trigger="channels"][aria-current="page"] { background: rgb(20 184 166 / 18%); color: #b4fff5; box-shadow: inset 0 -2px 0 #3ccabb; }
     .app-mobile-nav svg { width: 19px; height: 19px; }
@@ -567,7 +596,7 @@
       border-radius: var(--sln-radius-md);
       padding: 10px 16px;
       background: var(--sln-action-primary);
-      color: var(--sln-white);
+      color: var(--sln-console-ink);
       font-size: 13px;
       font-weight: 750;
       text-decoration: none;
@@ -606,5 +635,32 @@
 
   @media (prefers-reduced-motion: reduce) {
     .app-nav-item, .app-shell .app-button { transition: none; }
+  }
+}
+
+@layer components {
+  /*
+   * Console v2 control skin (proposal §4/§5): flatter buttons inside the app
+   * shell — solid-ink primary, hairline secondary/quiet outline, no lift
+   * animation. Touch targets stay >=44px on phones.
+   */
+  .app-shell .sln-button { min-height: 34px; padding: 0 14px; border-radius: var(--sln-console-radius); font-weight: 500; }
+  .app-shell .sln-button[data-size="sm"] { min-height: 28px; padding: 0 10px; font-size: 12px; }
+  .app-shell .sln-button[data-size="lg"] { min-height: 40px; padding: 0 16px; }
+  .app-shell .sln-button[data-variant="primary"] { background: var(--sln-console-ink); color: var(--sln-console-bg); }
+  .app-shell .sln-button[data-variant="primary"]:hover:not(:disabled) { background: var(--sln-console-ink-2); }
+  .app-shell .sln-button[data-variant="secondary"] { border-color: var(--sln-console-line); background: var(--sln-console-surface); color: var(--sln-console-ink); }
+  .app-shell .sln-button[data-variant="secondary"]:hover:not(:disabled) { background: var(--sln-console-raised); border-color: var(--sln-console-line); color: var(--sln-console-ink); }
+  .app-shell .sln-button[data-variant="quiet"] { color: var(--sln-console-ink-2); }
+  .app-shell .sln-button[data-variant="quiet"]:hover:not(:disabled) { background: var(--sln-console-raised); color: var(--sln-console-ink); }
+  .app-shell .sln-button[data-variant="danger"] { background: transparent; border-color: color-mix(in srgb, var(--sln-console-danger) 35%, var(--sln-console-line)); color: var(--sln-console-danger); }
+  .app-shell .sln-button[data-variant="danger"]:hover:not(:disabled) { background: var(--sln-console-danger-tint); }
+  .app-shell .sln-button:hover:not(:disabled) { transform: none; }
+  .app-shell .sln-button:disabled,
+  .app-shell .sln-button[aria-disabled="true"] { border-color: var(--sln-console-line); background: var(--sln-console-raised); color: var(--sln-console-ink-3); opacity: 0.6; }
+  @media (max-width: 767px) {
+    .app-shell .sln-button { min-height: 44px; }
+    .app-shell .sln-button[data-size="sm"] { min-height: 40px; }
+    .app-shell .sln-button[data-size="lg"] { min-height: 48px; }
   }
 }

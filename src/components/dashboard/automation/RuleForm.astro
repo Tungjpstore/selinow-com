@@ -1,4 +1,5 @@
 ---
+import Icon from "../../console/Icon.astro";
 import Button from "../../primitives/Button.astro";
 import Input from "../../primitives/Input.astro";
 import SelectField from "../../primitives/SelectField.astro";
@@ -73,7 +74,7 @@ const firstConfig = firstAction?.config ?? {};
             <SelectField id={conditionFieldId} label={t("dashboard.automation.rules.field.condition_field")} name="conditionField" options={fieldOptions} value={condition.field} />
             <SelectField id={conditionOperatorId} label={t("dashboard.automation.rules.field.condition_operator")} name="conditionOperator" options={[...operatorOptions]} value={condition.operator} />
             <Input aria-label={t("dashboard.automation.rules.field.condition_value")} id={conditionValueId} label={t("dashboard.automation.rules.field.condition_value")} name="conditionValue" value={conditionValue(condition.value)} />
-            <Button ariaLabel={t("dashboard.automation.rules.condition.remove")} size="sm" type="button" variant="quiet">✕</Button>
+            <Button ariaLabel={t("dashboard.automation.rules.condition.remove")} size="sm" type="button" variant="quiet"><Icon name="x" size={12} /></Button>
           </div>
         );
       })}
@@ -81,7 +82,7 @@ const firstConfig = firstAction?.config ?? {};
         <SelectField id={prototypeFieldId} label={t("dashboard.automation.rules.field.condition_field")} name="conditionField" options={fieldOptions} />
         <SelectField id={prototypeOperatorId} label={t("dashboard.automation.rules.field.condition_operator")} name="conditionOperator" options={[...operatorOptions]} />
         <Input aria-label={t("dashboard.automation.rules.field.condition_value")} id={prototypeValueId} label={t("dashboard.automation.rules.field.condition_value")} name="conditionValue" value="" />
-        <Button ariaLabel={t("dashboard.automation.rules.condition.remove")} size="sm" type="button" variant="quiet">✕</Button>
+        <Button ariaLabel={t("dashboard.automation.rules.condition.remove")} size="sm" type="button" variant="quiet"><Icon name="x" size={12} /></Button>
       </div>
     </div>
     <button class="sln-button" data-rule-condition-add data-size="sm" data-variant="quiet" type="button">+ {t("dashboard.automation.rules.condition.add")}</button>

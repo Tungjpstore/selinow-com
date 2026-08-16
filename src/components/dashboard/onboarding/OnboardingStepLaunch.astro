@@ -4,6 +4,7 @@ type Props = {
 };
 
 const { platformBaseDomain } = Astro.props;
+import Icon from "../../console/Icon.astro";
 ---
 
 <div class="onboarding-step-pane" data-step-pane="launch" hidden>
@@ -18,7 +19,7 @@ const { platformBaseDomain } = Astro.props;
     <!-- Configuration summary -->
     <div class="summary-grid">
       <div class="summary-card">
-        <span class="summary-icon">🏪</span>
+        <span class="summary-icon"><Icon name="store" size={20} /></span>
         <div class="summary-body">
           <small>Cửa hàng</small>
           <strong data-launch-summary-shop>Cửa hàng của bạn</strong>
@@ -26,7 +27,7 @@ const { platformBaseDomain } = Astro.props;
         </div>
       </div>
       <div class="summary-card">
-        <span class="summary-icon">📦</span>
+        <span class="summary-icon"><Icon name="box" size={20} /></span>
         <div class="summary-body">
           <small>Sản phẩm</small>
           <strong data-launch-summary-product>Chưa tạo</strong>
@@ -34,7 +35,7 @@ const { platformBaseDomain } = Astro.props;
         </div>
       </div>
       <div class="summary-card" data-launch-card-payos>
-        <span class="summary-icon">💳</span>
+        <span class="summary-icon"><Icon name="card" size={20} /></span>
         <div class="summary-body">
           <small>Thanh toán PayOS</small>
           <strong data-launch-summary-payos>Chưa kết nối</strong>
@@ -116,7 +117,7 @@ const { platformBaseDomain } = Astro.props;
         ← Quay lại
       </button>
       <button type="button" class="btn-primary-launch" data-step-submit="launch">
-        <span data-btn-label>🚀 Hoàn Tất & Mở Bán Ngay</span>
+        <span data-btn-label>Hoàn Tất & Mở Bán Ngay</span>
       </button>
     </div>
   </div>
@@ -124,7 +125,7 @@ const { platformBaseDomain } = Astro.props;
   <!-- Celebration (hidden until publish) -->
   <div class="celebration-pane" data-launch-celebration hidden>
     <div class="celebration-badge-wrap">
-      <div class="celebration-fireworks">🎉</div>
+      
       <span class="celebration-glow-pill">KÍCH HOẠT THÀNH CÔNG</span>
       <h2>Cửa Hàng Của Bạn Đã Sẵn Sàng!</h2>
       <p>Chúc mừng bạn! Cấu hình cốt lõi đã hoàn tất. Cửa hàng số và bot tự động sẵn sàng nhận đơn và giao key 24/7.</p>
@@ -132,7 +133,7 @@ const { platformBaseDomain } = Astro.props;
 
     <div class="celebration-links-cards">
       <a href="#" target="_blank" rel="noreferrer" class="launch-link-card" data-celebration-storefront-link>
-        <div class="launch-card-icon">🌐</div>
+        <div class="launch-card-icon"><Icon name="globe" size={20} /></div>
         <div class="launch-card-info">
           <strong>Mở Website Bán Hàng</strong>
           <span data-celebration-slug-display>https://shop.{platformBaseDomain}</span>
@@ -402,7 +403,7 @@ const { platformBaseDomain } = Astro.props;
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    border: 2px solid var(--sln-border-strong);
+    border: 1px solid var(--sln-border-strong);
     color: transparent;
     font-size: 12px;
     font-weight: 800;
@@ -561,7 +562,7 @@ const { platformBaseDomain } = Astro.props;
     align-items: center;
     gap: 14px;
     padding: 16px 20px;
-    border: 1.5px solid var(--sln-border-strong);
+    border: 1px solid var(--sln-border-strong);
     border-radius: var(--sln-radius-lg);
     background: var(--sln-bg-surface);
     text-decoration: none;
