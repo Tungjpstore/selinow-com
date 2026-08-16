@@ -2096,3 +2096,27 @@ same requests verified clean over curl):
   (handoff item 5.4) were surveyed but NOT added: 30 local button-class
   declarations and 19 files with raw hexes exist today, so a strict guard
   would fail immediately; needs a dedicated cleanup pass first.
+
+Console v2 — P2+P3 workspace-wide reskin (2026-08-16, third shift; commit
+ad3d29e on `dashboard-redesign-takeover`):
+- AppLayout nav regrouped to seller tasks (Selling/Catalog/Automation/
+  Channels & payments/Settings); mobile groups follow; role gating unchanged.
+- app-shell.css now imports the console token layer and REMAPS the legacy
+  semantic tokens inside `.app-shell` (hairline border everywhere, calmer
+  radii, no static shadows, light sidebar replacing ink-950, solid-ink
+  avatar replacing the brand gradient) plus a console control skin for
+  .sln-button (flat 34px desktop, >=44px touch on phones, no lift).
+- Sweep: all local .sln-button base/modifier skins removed from pages; every
+  >1px border in app/admin/dashboard flattened to the 1px hairline; onboarding
+  wizard emoji replaced with console icons (preview mocks keep storefront
+  emoji payload by design). Design-contract guard extended workspace-wide:
+  no >1px borders, no emoji in workspace UI.
+- Verified in-browser: products/orders/billing/integrations show the new task
+  nav at 1280px and stay horizontal-scroll-free at 375px.
+- Incident during the sweep (resolved): a `perl -pi` one-liner with a manual
+  `print` double-printed 25 dashboard/admin files; restored all of them from
+  HEAD and re-applied the intended line removals; final diff per file is the
+  minimal intended change only.
+- Remaining for a later shift: ~123 direct font-weight>600 declarations in
+  legacy pages (guard stays console-scoped until swept), Playwright-gate run
+  of the 2FA browser flow, and the migration-0100 in-place edit decision.
