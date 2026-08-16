@@ -1,5 +1,13 @@
 import { AppError } from "../core/errors";
 import type { AppBindings } from "../platform/bindings";
+import { hasFeature } from "../tenants/policy";
+import {
+  listStorefrontTemplates,
+  PREMIUM_STOREFRONT_TEMPLATES_FEATURE,
+  resolveStorefrontTemplate,
+  storefrontTemplateSelectionIssue,
+  type StorefrontTemplateDefinition,
+} from "../storefront/templates";
 import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, type StorefrontTheme } from "../storefront/theme";
 import { publishReadyStorefront } from "./readiness";
 import { getShopForMember } from "./store";
@@ -9,10 +17,13 @@ export type StorefrontPublicationState = "never_published" | "published" | "unpu
 export type SellerStorefrontSettings = {
   content: StorefrontContent;
   hasUnpublishedChanges: boolean;
+  premiumTemplatesEnabled: boolean;
   publicationState: StorefrontPublicationState;
   publishedAt: string | null;
   publishedVersion: number;
   shopName: string;
+  template: StorefrontTemplateDefinition;
+  templates: readonly StorefrontTemplateDefinition[];
   theme: StorefrontTheme;
   version: number;
 };
@@ -78,7 +89,7 @@ function publicationState(row: SettingsRow): StorefrontPublicationState {
   return row.publishedVersion === row.version ? "published" : "unpublished_changes";
 }
 
-async function readSettings(env: AppBindings, shopId: string, shopName: string, locale: unknown): Promise<SellerStorefrontSettings> {
+async function readSettings(env: AppBindings, shopId: string, shopName: string, locale: unknown, premiumTemplatesEnabled: boolean): Promise<SellerStorefrontSettings> {
   const row = await env.PLATFORM_DB.prepare(`
     SELECT branding_json AS brandingJson, storefront_json AS storefrontJson, version,
       published_version AS publishedVersion, published_at AS publishedAt
@@ -88,13 +99,17 @@ async function readSettings(env: AppBindings, shopId: string, shopName: string, 
   `).bind(shopId).first<SettingsRow>();
   if (row === null) throw new AppError("resource_not_found", 404);
   const state = publicationState(row);
+  const content = parseStorefrontContent(row.storefrontJson, shopName, locale);
   return {
-    content: parseStorefrontContent(row.storefrontJson, shopName, locale),
+    content,
     hasUnpublishedChanges: state !== "published",
+    premiumTemplatesEnabled,
     publicationState: state,
     publishedAt: row.publishedAt,
     publishedVersion: row.publishedVersion,
     shopName,
+    template: resolveStorefrontTemplate({ premiumEntitled: premiumTemplatesEnabled, templateId: content.templateId }),
+    templates: listStorefrontTemplates(),
     theme: parseStorefrontTheme(row.brandingJson),
     version: row.version,
   };
@@ -102,7 +117,13 @@ async function readSettings(env: AppBindings, shopId: string, shopName: string, 
 
 export async function getSellerStorefrontSettings(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerStorefrontSettings> {
   const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
-  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+  return readSettings(
+    input.env,
+    member.row.shop_id,
+    member.shop.name,
+    member.shop.defaultLocale,
+    hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+  );
 }
 
 export const LOW_STOCK_THRESHOLD_MAX = 1000;
@@ -142,6 +163,7 @@ export async function updateSellerStorefrontSettings(input: {
   userId: string;
 }): Promise<SellerStorefrontSettings> {
   const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const premiumTemplatesEnabled = hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE);
   const version = expectedVersion(input.expectedVersion);
   const existing = await input.env.PLATFORM_DB.prepare(`
     SELECT branding_json AS brandingJson, storefront_json AS storefrontJson, version,
@@ -180,13 +202,19 @@ export async function updateSellerStorefrontSettings(input: {
     if (typeof input.data.showExactStock !== "boolean") throw new AppError("validation_failed", 400, ["show_exact_stock_invalid"]);
     storefront.showExactStock = input.data.showExactStock;
   }
+  if (input.data.templateId !== undefined) {
+    const selection = storefrontTemplateSelectionIssue({ premiumEntitled: premiumTemplatesEnabled, templateId: input.data.templateId });
+    if (selection === "storefront_template_invalid") throw new AppError("validation_failed", 400, [selection]);
+    if (selection === "storefront_template_premium_required") throw new AppError("authorization_denied", 403, [selection]);
+    storefront.templateId = selection.id;
+  }
   if (primaryColor !== undefined) branding.primaryColor = primaryColor;
   if (accentColor !== undefined) branding.accentColor = accentColor;
   if (logoUrl !== undefined) branding.logoUrl = logoUrl;
   const now = new Date().toISOString();
   const updated = await input.env.PLATFORM_DB.prepare(`UPDATE shop_settings SET branding_json = ?, storefront_json = ?, version = version + 1, updated_at = ? WHERE shop_id = ? AND version = ? RETURNING version`).bind(JSON.stringify(branding), JSON.stringify(storefront), now, member.row.shop_id, version).first<{ version: number }>();
   if (updated === null) throw new AppError("resource_conflict", 409);
-  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale, premiumTemplatesEnabled);
 }
 
 export async function publishSellerStorefrontSettings(input: {
@@ -210,5 +238,11 @@ export async function publishSellerStorefrontSettings(input: {
     shopPublicId: input.shopPublicId,
     userId: input.userId,
   });
-  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+  return readSettings(
+    input.env,
+    member.row.shop_id,
+    member.shop.name,
+    member.shop.defaultLocale,
+    hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+  );
 }

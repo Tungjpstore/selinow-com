@@ -15,8 +15,9 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const shop = await resolveStorefrontShop(request, env);
     assertStorefrontCheckout(shop);
     const body = await readJsonObject(request);
-    rejectUnknownFields(body, ["cartId", "cartToken"]);
+    rejectUnknownFields(body, ["cartId", "cartToken", "shippingMethodId"]);
     if (typeof body.cartId !== "string" || !/^cart_[0-9a-f-]{36}$/u.test(body.cartId) || typeof body.cartToken !== "string" || body.cartToken.length < 20) throw new AppError("cart_not_found", 404);
+    if (body.shippingMethodId !== undefined && (typeof body.shippingMethodId !== "string" || body.shippingMethodId.length > 64)) throw new AppError("validation_failed", 400, ["shipping_method_invalid"]);
     const quote = await createWebsiteCommerceApplication(env, shop).quoteCart({
       actor: { kind: "anonymous" },
       channel: { code: WEBSITE_CHANNEL_CODE, connectionId: null },
@@ -25,6 +26,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       shopId: shop.id,
     }, {
       cart: { access: { kind: "opaque_token", token: body.cartToken }, cartId: body.cartId },
+      ...(body.shippingMethodId === undefined ? {} : { shippingMethodId: body.shippingMethodId }),
     });
     return Response.json({ ok: true, quote, requestId: locals.requestId }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
   } catch (error) { return createCaughtErrorResponse(error, locals.requestId); }

@@ -1,0 +1,97 @@
+/* Aurora — editorial fashion storefront. Light, airy, image-first. */
+
+html[data-storefront-template="aurora"] .aurora-lookbook {
+  position: relative;
+  display: grid;
+  align-items: end;
+  min-height: clamp(360px, 52vw, 560px);
+  overflow: hidden;
+  border-radius: var(--sln-radius-xl);
+  background:
+    linear-gradient(to top, rgb(11 16 32 / 55%), rgb(11 16 32 / 8%) 55%, transparent),
+    radial-gradient(circle at 88% 20%, color-mix(in srgb, var(--merchant-accent) 30%, transparent), transparent 45%),
+    var(--sln-brand-gradient);
+  color: var(--sln-white);
+}
+
+html[data-storefront-template="aurora"] .aurora-lookbook[data-image] {
+  background-size: cover;
+  background-position: center;
+}
+
+html[data-storefront-template="aurora"] .aurora-lookbook-copy {
+  display: grid;
+  gap: 14px;
+  max-width: 560px;
+  padding: clamp(28px, 5vw, 56px);
+}
+
+html[data-storefront-template="aurora"] .aurora-lookbook h1 {
+  max-width: 16ch;
+  margin: 0;
+  font-size: clamp(2.2rem, 5vw, 3.8rem);
+  font-weight: 300;
+  letter-spacing: -.02em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+html[data-storefront-template="aurora"] .aurora-lookbook p { margin: 0; color: var(--sln-slate-100); font-size: 1rem; line-height: 1.7; }
+html[data-storefront-template="aurora"] .aurora-lookbook .store-kicker { color: var(--sln-slate-200); }
+
+html[data-storefront-template="aurora"] .aurora-cta {
+  justify-self: start;
+  margin-top: 10px;
+  padding: 12px 26px;
+  border-radius: var(--sln-radius-pill);
+  background: var(--sln-white);
+  color: var(--sln-ink-900);
+  font-size: .875rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+html[data-storefront-template="aurora"] .aurora-cta:hover { box-shadow: var(--sln-shadow-md); }
+
+html[data-storefront-template="aurora"] .aurora-categories {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: 22px auto 0;
+}
+
+html[data-storefront-template="aurora"] .aurora-categories > span {
+  color: var(--sln-text-muted);
+  font-size: .75rem;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+html[data-storefront-template="aurora"] .aurora-categories a {
+  padding: 8px 16px;
+  border: 1px solid var(--sln-border-default);
+  border-radius: var(--sln-radius-pill);
+  background: var(--sln-bg-surface);
+  color: var(--sln-text-primary);
+  font-size: .8125rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+html[data-storefront-template="aurora"] .aurora-categories a:hover { border-color: var(--merchant-brand); }
+
+/* Image-forward 2-column grid; visual takes the full card height. */
+html[data-storefront-template="aurora"] .aurora-product-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 24px; }
+
+html[data-storefront-template="aurora"] .aurora-product-list .product-card { gap: 14px; }
+html[data-storefront-template="aurora"] .aurora-product-list .product-visual { min-height: clamp(260px, 30vw, 420px); border-radius: var(--sln-radius-xl); }
+html[data-storefront-template="aurora"] .aurora-product-list .product-visual strong { font-size: clamp(3.5rem, 7vw, 5.5rem); }
+html[data-storefront-template="aurora"] .aurora-product-list .product-copy h2 { font-size: 1.125rem; font-weight: 650; letter-spacing: -.015em; }
+html[data-storefront-template="aurora"] .aurora-product-list .product-copy > p { font-size: .875rem; }
+
+@media (max-width: 640px) {
+  html[data-storefront-template="aurora"] .aurora-product-list { grid-template-columns: 1fr; }
+}

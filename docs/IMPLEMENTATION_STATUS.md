@@ -4,6 +4,233 @@ Last updated: 2026-08-16
 
 ## Current source of truth
 
+Seller Operations for All Verticals — TV5 (2026-08-16, branch `storefront-templates`):
+Closes the seller-side loop: physical and booking shops are now fully operable from the dashboard.
+- **Product editor (TV5a)**: selling-type select (digital vs physical) persisted through the
+  catalog API (`deliveryMode`); per-variant service duration (`durationMinutes`, 5–720 min) on
+  variant create/update/list; on-hand stock inputs for shipping variants (loaded from
+  `GET /products/:id/stock`, saved via `POST …/stock` alongside variant PUTs, only shown for
+  physical products).
+- **Catalog API**: `duration_minutes` added to `VariantInput`, `parseVariantInput`, and every
+  variant INSERT/UPDATE/RETURNING statement (list projections included).
+- **Store Builder "Vận chuyển" tab (TV5a)**: create shipping methods (name / fee / optional
+  free-over), active-method list with archive; vi/en copy deck; client script follows the
+  builder's CSRF pattern.
+- **`/app/bookings` page (TV5a)** + nav entry: 14-day appointment feed (service · resource ·
+  time range · order ref) with complete / no-show / cancel transitions wired to the recent-auth
+  CSRF endpoint; roles owner/manager/support.
+- **Order-detail dispatch panel (TV5b)**: `getSellerOrder` now projects the shipping block
+  (address snapshot, method + fee, dispatch history); the detail page renders the panel for
+  physical orders — address card, carrier/tracking inputs, packed/shipped/delivered actions
+  (paid orders only, carrier required for shipped, owner/manager).
+- **Verification Gates**: `astro check` (888 files, 0 errors — remaining tsc/eslint hits are
+  the parallel auth stream's in-flight `debugOtp` change) · `npm run test` (334 files,
+  **2624 tests**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known remaining (TV5d, small)**: R2 object purge for soft-deleted media rides the deletion
+  lifecycle; physical restock on payment reversal lands with the reversal milestone; visual
+  regression baselines for the nine templates; onboarding wizard does not set `shops.vertical`.
+
+Appointment Booking Vertical + Full 9-Template Gallery — TV4 (2026-08-16, branch `storefront-templates`):
+Booking services end-to-end (spa/barber/clinic) and the final template trio, completing all three
+verticals and all nine storefront templates selectable in the Store Builder.
+- **Migration `0103_appointment_booking_vertical.sql`** (additive, invariant-registry registered):
+  `product_variants.duration_minutes` (a service = a manual product whose variant carries duration),
+  `booking_resources` (staff/rooms), `booking_resource_schedules` (weekly minute windows),
+  `booking_holds` (token-marked checkout holds with release lifecycle), `bookings` (immutable per
+  order-item appointment with booked→cancelled/completed/no_show guards).
+- **Slot engine `src/lib/commerce/booking.ts`**: timezone-correct availability via Intl two-probe
+  offsets (honors `shops.timezone`), slots = schedule windows stepping by service duration minus
+  active holds and booked appointments; `resolveBookingSelection` re-validates the buyer's slot
+  (window fit + overlap) before checkout; seller resource/schedule upsert with catalog capability.
+- **Checkout money path**: booking carts are website-only, paid-only, exactly one service line with
+  quantity one; the canonical transaction proves slot freedom inside the guarded order INSERT
+  (no overlapping active hold or booked appointment on the resource) and writes the hold + booked
+  appointment; the request fingerprint binds the RAW slot choice (resourceId/startAt) so same-key
+  replays succeed even after the slot is held by the first order; order expiry cancels the booking
+  and releases the hold, making the slot bookable again.
+- **Storefront UX**: checkout slot picker (7-day window from the picked date, per-day grouping,
+  resource names, required radio) shown only for service carts; order status page renders the
+  appointment (date/time range, resource, status); `durationMinutes` flows through the storefront
+  catalog (`CatalogData` → `catalog-dom`) for client-side cart detection.
+- **Public API**: `GET /api/store/booking/slots?variantId&dateStart&dateEnd` (14-day max range,
+  200-slot cap; indexed in `API_ENDPOINT_INDEX.csv`, 189 rows).
+- **Templates (TV4b)**: `serenity` (free — pill service menu, booking-first CTA, pastel hero),
+  `craft` (Pro — dark vintage barbershop, uppercase menu with hairline rules), `clinic`
+  (Pro — medical service `<table>` + process steps) — registry availability flipped: **all nine
+  templates available** (swift/pulse/desk · aurora/metro/bustle · serenity/craft/clinic);
+  dispatcher + shared layout sheets extended; render contracts pin the full set.
+- **Tests**: `tests/unit/booking-appointment-checkout.test.ts` — timezone slot math (ICT→UTC),
+  atomic double-book block across resources, missing slot / misaligned slot / quantity>1
+  rejections, idempotent replay (one durable order + one booking), expiry cancel + release +
+  rebooking. Suites updated for `StorefrontShop.timezone`.
+- **Verification Gates**: `npx tsc --noEmit` clean for this stream (2 pre-existing errors in
+  `src/pages/api/auth/login.ts` belong to the parallel auth stream) · eslint clean in touched
+  areas (1 remaining error likewise foreign) · `npm run test` (334 files, **2624 tests**) ·
+  `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**:
+  - Seller booking management (calendar view, cancel/no-show transitions) is API-partial:
+    resources + schedules upsert exist; booking transitions and `/app/bookings` UI land in TV5.
+  - No buffer times between appointments, no multi-slot bookings, no customer-driven
+    cancellation/rescheduling; Telegram booking unsupported by design (`booking_channel_unsupported`).
+  - Slot generation loads ≤500 busy intervals per 14-day window (adequate for launch scale).
+
+Physical Goods Vertical — TV3 (2026-08-16, branch `storefront-templates`):
+End-to-end physical selling: schema, checkout money path with shipping, dispatch state machine,
+storefront/seller APIs, buyer UX, and the three physical templates (Aurora/Metro/Bustle).
+- **Migration `0102_physical_goods_vertical.sql`** (additive only — no parent table rebuilt, all
+  existing invariant hashes byte-identical; new objects registered in the production invariant
+  registry): `shops.vertical` (digital/physical/booking, default digital), `products.delivery_mode`
+  (digital/shipping; physical keeps `fulfillment_type='manual'`), `orders.shipping_method_name` +
+  `orders.shipping_fee_minor` snapshot, `fulfillments.shipping_state/carrier/tracking_code`,
+  `variant_stock_levels` (on_hand/reserved + token-marked `active_reservation_token` for exact-count
+  batch guards), `shop_shipping_methods` (flat fee + free-over), `order_shipping_addresses`
+  (immutable PII snapshot, UNIQUE per order), `idx_product_variants_shop_id` composite FK target.
+- **Checkout money path**: canonical transaction reserves physical stock with the license-key
+  token-proof pattern, guards the shipping method row (name/fee/free-over snapshot) inside the
+  order INSERT, persists the address after the FK-backed order write; physical carts are
+  website-only and paid-only; delivery modes cannot mix; free-over applies to post-discount
+  amount; quote evidence + request fingerprint bind `shippingMethodId`/`shippingFeeMinor`
+  (backward-compatible claims); order expiry releases reserved stock by order-item quantities.
+- **Storefront UX**: checkout page gains the shipping fieldset (method radios — server defaults
+  to the primary method on first quote — VN address form with `+84` phone normalization, fee row),
+  method switch re-quotes; order status page shows address, method/fee snapshot, and dispatch
+  progress; storefront catalog projects `deliveryMode` + physical stock states
+  (on_hand − reserved, exact-stock opt-in honored).
+- **Seller APIs** (indexed in `API_ENDPOINT_INDEX.csv`, 188 rows): GET/POST
+  `/api/app/shops/:shopPublicId/shipping-methods`, PATCH `/shipping-methods/:methodId`,
+  GET/POST `/products/:productId/stock`, POST `/orders/:orderId/shipping` —
+  `advanceOrderShipping` paid-only state machine (packing → shipped[carrier required] →
+  delivered ⇒ order fulfilled/completed) with audit log.
+- **Templates (TV3b)**: `aurora` (free, editorial lookbook hero over product imagery),
+  `metro` (Pro, dense spec-first grid + trust strip), `bustle` (Pro, voucher-strip marketplace
+  energy with contrast-safe discount accents) — registry availability flipped, dispatcher +
+  shared layout sheets extended, render contracts pin all six available templates.
+- **Tests**: `tests/unit/physical-shipping-checkout.test.ts` — atomic reservation + address +
+  fee snapshot, sell-out race leaves no order and no leaked reservation, free-over threshold,
+  default vs invented methods, phone normalization rejection, idempotent replay (one durable
+  order), expiry releases stock. Existing suites updated for `deliveryMode` (parity, admission
+  policy, generic entitlement, telegram boundary, catalog contracts, migration chain tip 0102).
+- **Verification Gates**: `npm run check` (875 files, 0 errors) · `npm run lint` (0 errors) ·
+  `npm run test` (333 files, **2619 tests passed**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**:
+  - Seller dashboard UI for shipping methods / variant stock / dispatch actions is API-first;
+    the panels ride on the existing endpoints above (next increment).
+  - Telegram cannot sell physical goods by design (`telegram_physical_unsupported`); no COD
+    (PayOS online only); no zone-based shipping rates; one address per order.
+  - Payment reversal/refund does not yet restock physical reserved units (restock-on-refund
+    lands with the reversal milestone in TV5).
+  - `shops.vertical` is schema-only; onboarding does not set it yet (template selection remains
+    the operative control).
+
+Storefront Templates — TV2 Pulse & Desk (2026-08-16, branch `storefront-templates`):
+First two template variants beyond the Swift default, completing the digital-products group
+(swift free · pulse Pro dark · desk Pro) — selectable now in the Store Builder gallery.
+- **Pulse (dark gaming/tech)**: `templates/pulse/StoreHome.astro` + `styles/storefront/templates/pulse.css`
+  — dark ink-token shell (no new palette), merchant-accent hero glow, instant-delivery badge,
+  trust strip, denser 3→2→1 column grid. Stock/payment states render on light chips to keep
+  protected-state contrast (ADR 0011); `<meta name="theme-color">` switches to `#0B1020` via
+  `data-template-scheme="dark"`.
+- **Desk (SaaS/office B2B)**: `templates/desk/StoreHome.astro` + `desk.css` — semantic
+  `<table>` plan comparison built from the first multi-variant product (plan · price · choose,
+  cart-add buttons per row), 3-step activation `<ol>`, tidy row-style catalog on mobile-aware
+  responsive rules.
+- **Wiring**: dispatcher map (`templates/StoreHome.astro`) registers swift/pulse/desk with swift
+  as structural fallback; template sheets load in `StorefrontLayout` (scoped by
+  `[data-storefront-template]`) so cart/checkout/orders keep the template shell; storefront copy
+  keys added to both locale catalogs (`storefront.template.pulse.*`, `storefront.template.desk.*`).
+- **Tests**: render-contract suite added to `storefront-templates.test.ts` — dispatcher map and
+  import per available template, layout sheet loading + html attribute + scheme-aware
+  theme-color, stylesheet scoping attribute per shipped template.
+- **Verification Gates**: `npm run check` (0 errors) · `npm run lint` (0 errors) · `npm run test`
+  (332 files, **2608 tests passed**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**: no flash-sale countdown yet (needs a promo-window model — documented in
+  pulse.md); Desk's plan table binds to the first multi-variant product rather than a curated
+  "featured" flag; product detail page keeps the shared layout for all templates in TV2.
+
+Storefront Media Pipeline — TV1 (2026-08-16, branch `storefront-templates`):
+Product image pipeline over the existing MEDIA R2 bucket with D1 as the authoritative registry;
+unblocks the physical-goods templates (Aurora/Metro/Bustle) and upgrades every storefront card.
+- **Migration `0101_storefront_media_assets.sql`** (forward-only, after 0100):
+  - `media_assets`: tenant-scoped registry (kind product_image/shop_logo/hero_banner, content-type
+    CHECK limited to png/jpeg/webp/avif, ≤10 MB, sha256, etag, soft-delete with status/deleted_at
+    invariant), identity-immutable + transition-guard triggers, `public_id` UNIQUE for URLs.
+  - `product_images`: assignment table with composite tenant FKs to `products` and `media_assets`
+    (image, product, and asset must share one shop), sort_order, soft delete, tenant-leading index
+    `(shop_id, product_id, status, sort_order, id)`.
+  - Registered in `PRODUCTION_DATABASE_INVARIANT_REGISTRY` (hashes generated from the migrated
+    schema) and the release validator's table allow-list; migration chain tip pinned to 0101.
+- **Service `src/lib/media/assets.ts`**: magic-byte sniffing (PNG/JPEG/WebP/AVIF) matched against
+  the claimed content type, plan quota via `plans.limits_json.storageBytes` (Starter 1 GB /
+  Pro 10 GB; soft-deleted assets release their share), R2-put→D1-register→rollback-on-failure,
+  audit log entry, attach/detach/list product images (≤12 per product) all tenant-bound.
+- **APIs** (indexed in `API_ENDPOINT_INDEX.csv`):
+  - `POST /api/app/shops/[shopPublicId]/media` — raw-body upload (mirrors private-files flow).
+  - `GET/POST/DELETE /api/app/shops/[shopPublicId]/products/[productId]/images` — attach,
+    detach, list.
+- **Public serving**: `GET /media/:publicId` — host-agnostic route serving active assets from R2
+  with `Cache-Control: public, max-age=31536000, immutable`, ETag, nosniff; deleted assets 404.
+- **Storefront rendering**: `getStorefrontCatalog` projects the first active product image per
+  product (`StorefrontProduct.imageUrl`); `ProductCard` renders it with `data-visual="image"`
+  (placeholder letter retained as fallback); CSS keeps image cards within token-driven styling.
+- **Seller UX**: product editor dialog gains a "Ảnh sản phẩm" section — upload & attach, thumbnail
+  grid, remove; client script follows the private-file upload pattern with vi/en copy.
+- **Tests**: `tests/unit/media-assets.test.ts` (sniffing matrix, claimed-type mismatch rejection,
+  quota enforcement + release on soft delete, attach/detach ordering, cross-shop isolation both
+  directions, catalog imageUrl projection incl. end-to-end `resolveStorefrontShop`); guard tests
+  updated (chain tip, invariant registry, endpoint inventory count 182).
+- **Verification Gates**: `npm run check` (866 files, 0 errors) · `npm run lint` (0 errors) ·
+  `npm run test` (332 files, **2605 tests passed**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**: storage quota counts `media_assets` only (private digital assets not yet
+  metered against the same limit); no logo/banner surfaces yet (columns reserved kinds); no image
+  reordering UI (sort_order auto-append); R2 purge of deleted objects rides the existing
+  deletion lifecycle to be wired in TV5.
+
+Storefront Template System — TV0 Foundation (2026-08-16, branch `storefront-templates`):
+Foundation of the multi-vertical storefront template program (TV0–TV5) targeting three selling
+verticals: digital keys (existing), physical goods (TV3), and appointment booking (TV4).
+- **Template Registry (code-defined, no migration)**:
+  - `src/lib/storefront/templates.ts`: 9 template definitions (digital: `swift` free default,
+    `pulse` Pro dark, `desk` Pro; physical: `aurora` free, `metro` Pro, `bustle` Pro; booking:
+    `serenity` free, `craft` Pro dark, `clinic` Pro) with per-vertical availability gating
+    (only digital templates selectable until TV3/TV4 ship their verticals).
+  - Render-time safe fallback: unknown / unavailable / premium-without-entitlement ids resolve
+    to `swift` so the storefront never breaks; strict seller-side validation distinguishes
+    `storefront_template_invalid` (400) from `storefront_template_premium_required` (403).
+- **Persistence & Rendering**:
+  - Selection persists in `shop_settings.storefront_json.templateId` through the existing
+    draft→publish flow (0029); Cloudflare storefront cache invalidates via `published_version`.
+  - `StorefrontLayout.astro` sets `data-storefront-template` / `data-storefront-vertical` /
+    `data-template-scheme` on `<html>`; store home dispatches through
+    `src/components/storefront/templates/StoreHome.astro` (swift extracted verbatim from
+    `index.astro` into `templates/swift/StoreHome.astro` — no visual change).
+- **Premium Gating**: `plans.feature_flags_json.premiumStorefrontTemplates` (Pro-only flag per
+  ADR 0022 model); enforced at PATCH settings and re-checked at render for plan downgrades.
+- **Store Builder**: new "Mẫu giao diện" tab in `/app/store` — gallery of 9 wireframe-preview
+  cards grouped by vertical with Pro/Coming-soon badges, entitlement-locked radios, and
+  `templateId` in the draft save payload (`store-builder.ts` radio-aware read/undo).
+- **API**: `PATCH /api/app/shops/[shopPublicId]/settings` (and `/storefront/draft` alias)
+  accepts `templateId`; settings responses now include `template`, `templates` gallery, and
+  `premiumTemplatesEnabled`.
+- **Docs**: `docs/storefront-templates/README.md` + per-template specs (9 files) covering
+  layout, tokens, and a11y per template before implementation (TV2–TV4).
+- **Tests**: `tests/unit/storefront-templates.test.ts` (registry invariants, selection
+  contract, render fallback incl. plan-downgrade degradation); updated
+  `StorefrontShop` literals in 5 suites; i18n dynamic-key allowlist entries for the gallery;
+  RTL/browser-gate contracts updated for the new html attributes and store-home component.
+- **Verification Gates**:
+  - `npm run check`: 859 files, **0 errors**.
+  - `npm run lint`: **0 errors**.
+  - `npm run test`: 331 test files, **2598 tests passed (100%)**.
+  - `npm run build`: Production Cloudflare Worker build succeeded.
+  - `npm run deploy:dry-run`: Worker bundle, bindings, routes, and asset manifests validated.
+- **Known Limitations**:
+  - Only `swift` renders distinctively today; `pulse`/`desk` land in TV2, physical templates
+    in TV3 (blocked on the physical vertical + media pipeline), booking templates in TV4.
+  - Template selection is not yet vertical-bound (no `shops.vertical` column until TV3/TV4);
+    the registry's availability gate is the interim control.
+  - Store Builder preview always renders the current template's layout; per-template live
+    previews arrive with each template milestone.
+
 Landing Page & Visual Commerce Flow Modernization (2026-08-15):
 The public landing page and marketing surface have been comprehensively overhauled with an interactive visual commerce operating system theme:
 - **Visual Design & Interactive Components**:

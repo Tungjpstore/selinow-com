@@ -5,7 +5,24 @@ import { createBrowserOrderAccessStorage } from "./order-access-storage";
 
 type ApiError = { code?: string; requestId?: string };
 type OrderItem = { fulfillmentType: string; lineTotalMinor: number; productTitle: string; quantity: number; variantTitle: string };
-type OrderView = { currency: string; expiresAt: string; fulfillmentStatus: string; items: OrderItem[]; orderNumber: string; paymentStatus: string; status: string; totalMinor: number };
+type ShippingAddress = { addressLine: string; district: string; fullName: string; notes: string | null; phone: string; province: string; ward: string };
+type Shipment = { carrier: string | null; shippingState: string; trackingCode: string | null };
+type BookingDetail = { bookingStatus: string; endAt: string; resourceName: string; startAt: string };
+type OrderView = {
+  currency: string;
+  expiresAt: string;
+  fulfillmentStatus: string;
+  items: OrderItem[];
+  orderNumber: string;
+  paymentStatus: string;
+  booking?: BookingDetail;
+  shipments?: Shipment[];
+  shippingAddress?: ShippingAddress;
+  shippingFeeMinor?: number;
+  shippingMethodName?: string | null;
+  status: string;
+  totalMinor: number;
+};
 type OrderResponse = { order: OrderView } & ApiError;
 type PaymentResponse = { paymentLink?: { checkoutUrl: string } } & ApiError;
 type KeyResponse = { fulfillment?: { keys: Array<{ productTitle: string; value: string; variantTitle: string }> } } & ApiError;
@@ -225,6 +242,8 @@ function renderOrder(order: OrderView): void {
   status.appendChild(lines);
   appendTimeline(status, t("storefront.order.timeline.payment"), paymentStateView(order.paymentStatus, order.status, locale));
   appendTimeline(status, t("storefront.order.timeline.fulfillment"), fulfillmentStateView(order.fulfillmentStatus, order.status, locale));
+  renderBooking(order);
+  renderShipping(order);
   const hasKeyDelivery = order.items.some((item) => item.fulfillmentType === "license_key");
   if (actions instanceof HTMLElement) actions.hidden = false;
   if (paymentButton instanceof HTMLButtonElement) {
@@ -232,6 +251,86 @@ function renderOrder(order: OrderView): void {
   }
   if (revealButton instanceof HTMLButtonElement) {
     revealButton.hidden = !hasKeyDelivery || !(order.status === "completed" && order.paymentStatus === "paid" && order.fulfillmentStatus === "fulfilled");
+  }
+}
+
+function bookingStatusLabel(status: string): string {
+  if (status === "booked") return t("storefront.order.shipping.state.packing");
+  if (status === "cancelled") return t("storefront.order.shipping.state.packing");
+  if (status === "completed") return t("storefront.order.shipping.state.delivered");
+  return status;
+}
+
+function renderBooking(order: OrderView): void {
+  const section = document.querySelector("#booking-section");
+  const detail = document.querySelector("#booking-detail");
+  if (!(section instanceof HTMLElement) || !(detail instanceof HTMLElement)) return;
+  if (order.booking === undefined) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  detail.replaceChildren();
+  const start = new Date(order.booking.startAt);
+  const end = new Date(order.booking.endAt);
+  const when = document.createElement("p");
+  when.textContent = `${start.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" })} · ${start.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}–${end.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`;
+  const who = document.createElement("p");
+  who.textContent = order.booking.resourceName;
+  const state = document.createElement("p");
+  state.textContent = bookingStatusLabel(order.booking.bookingStatus);
+  detail.appendChild(when);
+  detail.appendChild(who);
+  detail.appendChild(state);
+}
+
+function shippingStateLabel(state: string): string {
+  if (state === "packing") return t("storefront.order.shipping.state.packing");
+  if (state === "shipped") return t("storefront.order.shipping.state.shipped");
+  if (state === "delivered") return t("storefront.order.shipping.state.delivered");
+  return state;
+}
+
+function renderShipping(order: OrderView): void {
+  const section = document.querySelector("#shipping-section");
+  const address = document.querySelector("#shipping-address");
+  const shipments = document.querySelector("#shipment-list");
+  if (!(section instanceof HTMLElement) || !(address instanceof HTMLElement) || !(shipments instanceof HTMLElement)) return;
+  const shippingAddress = order.shippingAddress;
+  if (shippingAddress === undefined) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  address.replaceChildren();
+  const lines = [
+    `${shippingAddress.fullName} · ${shippingAddress.phone}`,
+    shippingAddress.addressLine,
+    `${shippingAddress.ward}, ${shippingAddress.district}, ${shippingAddress.province}`,
+    ...(order.shippingMethodName === null || order.shippingMethodName === undefined ? [] : [
+      `${t("storefront.order.shipping.method")}: ${order.shippingMethodName}`
+        + (typeof order.shippingFeeMinor === "number" ? ` · ${formatClientMoney(order.shippingFeeMinor, order.currency)}` : ""),
+    ]),
+    ...(typeof shippingAddress.notes === "string" && shippingAddress.notes.length > 0 ? [shippingAddress.notes] : []),
+  ];
+  for (const line of lines) {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = line;
+    address.appendChild(paragraph);
+  }
+  shipments.replaceChildren();
+  const rows = Array.isArray(order.shipments) ? order.shipments : [];
+  for (const shipment of rows) {
+    const item = document.createElement("p");
+    const carrier = typeof shipment.carrier === "string" && shipment.carrier.length > 0 ? shipment.carrier : t("storefront.order.shipping.state.packing");
+    const tracking = typeof shipment.trackingCode === "string" && shipment.trackingCode.length > 0 ? ` · ${shipment.trackingCode}` : "";
+    item.textContent = `${shippingStateLabel(typeof shipment.shippingState === "string" ? shipment.shippingState : "")} · ${carrier}${tracking}`;
+    shipments.appendChild(item);
+  }
+  if (rows.length === 0) {
+    const pending = document.createElement("p");
+    pending.textContent = t("storefront.order.shipping.state.packing");
+    shipments.appendChild(pending);
   }
 }
 

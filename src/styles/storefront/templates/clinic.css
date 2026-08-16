@@ -1,0 +1,101 @@
+/* Clinic — clean medical minimalism. White canvas, one accent, tidy tables. */
+
+html[data-storefront-template="clinic"] .clinic-hero {
+  display: grid;
+  align-items: center;
+  min-height: 300px;
+  border: 1px solid var(--sln-border-default);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-bg-surface);
+}
+
+html[data-storefront-template="clinic"] .clinic-hero-copy { display: grid; gap: 12px; max-width: 580px; padding: clamp(26px, 4vw, 48px); }
+
+html[data-storefront-template="clinic"] .clinic-hero h1 {
+  max-width: 18ch;
+  margin: 0;
+  font-size: clamp(1.9rem, 4vw, 2.9rem);
+  font-weight: 740;
+  letter-spacing: -.028em;
+  line-height: 1.14;
+}
+
+html[data-storefront-template="clinic"] .clinic-hero p { margin: 0; color: var(--sln-text-secondary); font-size: .9375rem; line-height: 1.7; }
+
+html[data-storefront-template="clinic"] .clinic-cta {
+  justify-self: start;
+  margin-top: 8px;
+  padding: 12px 26px;
+  border-radius: var(--sln-radius-md);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+  font-size: .875rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+html[data-storefront-template="clinic"] .clinic-services {
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: clamp(28px, 4vw, 44px) auto 0;
+}
+
+html[data-storefront-template="clinic"] .clinic-services h2 { margin: 0 0 14px; font-size: 1.4rem; font-weight: 740; letter-spacing: -.02em; }
+
+html[data-storefront-template="clinic"] .clinic-service-table-wrap { overflow-x: auto; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); }
+html[data-storefront-template="clinic"] .clinic-service-table { width: 100%; border-collapse: collapse; }
+html[data-storefront-template="clinic"] .clinic-service-table th, html[data-storefront-template="clinic"] .clinic-service-table td { padding: 14px 18px; border-bottom: 1px solid var(--sln-border-default); text-align: start; font-size: .9375rem; }
+html[data-storefront-template="clinic"] .clinic-service-table thead th { color: var(--sln-text-secondary); font-size: .75rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+html[data-storefront-template="clinic"] .clinic-service-table tbody tr:last-child th, html[data-storefront-template="clinic"] .clinic-service-table tbody tr:last-child td { border-bottom: 0; }
+html[data-storefront-template="clinic"] .clinic-service-table tbody th { font-weight: 700; }
+html[data-storefront-template="clinic"] .clinic-service-table small { color: var(--sln-text-muted); font-weight: 500; }
+html[data-storefront-template="clinic"] .clinic-service-table td { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+html[data-storefront-template="clinic"] .clinic-book-button {
+  padding: 9px 18px;
+  border-radius: var(--sln-radius-sm);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+  font-size: .8125rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+html[data-storefront-template="clinic"] .clinic-book-button.is-disabled { background: var(--sln-disabled-bg); color: var(--sln-disabled-ink); }
+
+html[data-storefront-template="clinic"] .clinic-process {
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: clamp(28px, 4vw, 44px) auto 0;
+}
+
+html[data-storefront-template="clinic"] .clinic-process h2 { margin: 0 0 14px; font-size: 1.4rem; font-weight: 740; letter-spacing: -.02em; }
+
+html[data-storefront-template="clinic"] .clinic-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+
+html[data-storefront-template="clinic"] .clinic-steps li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--sln-border-default);
+  border-radius: var(--sln-radius-sm);
+  background: var(--sln-bg-surface);
+  color: var(--sln-text-secondary);
+  font-size: .875rem;
+  line-height: 1.55;
+}
+
+html[data-storefront-template="clinic"] .clinic-steps li > span { color: var(--merchant-brand); font-family: var(--sln-font-mono); font-weight: 750; }
+html[data-storefront-template="clinic"] .clinic-categories { display: flex; flex-wrap: wrap; gap: 10px; width: min(calc(100% - 32px), var(--store-page-width)); margin: 20px auto 0; }
+html[data-storefront-template="clinic"] .clinic-categories a {
+  padding: 8px 16px;
+  border: 1px solid var(--sln-border-default);
+  color: var(--sln-text-primary);
+  font-size: .8125rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+@media (max-width: 720px) {
+  html[data-storefront-template="clinic"] .clinic-steps { grid-template-columns: 1fr; }
+}

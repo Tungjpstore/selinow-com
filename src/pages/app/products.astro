@@ -312,6 +312,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
           <label>{t("dashboard.products.dialog.product_editor.field.category")}<select name="categoryId"><option value="">{t("dashboard.products.dialog.product_editor.field.uncategorized")}</option>{categories.map((category) => <option value={String(category.id)} selected={category.id === selectedProduct.categoryId}>{String(category.name ?? t("dashboard.products.product.category_fallback"))}</option>)}</select></label>
           <label>{t("dashboard.products.dialog.product_editor.field.description")}<textarea name="description" rows="3" maxlength="10000">{String(selectedProduct.description ?? "")}</textarea></label>
           <label>{t("dashboard.products.dialog.product_editor.field.fulfillment_type")}<select name="fulfillmentType"><option value="license_key" selected={selectedProduct.fulfillmentType === "license_key"}>{t("dashboard.products.dialog.product_editor.fulfillment.license_key")}</option><option value="manual" selected={selectedProduct.fulfillmentType === "manual"}>{t("dashboard.products.dialog.product_editor.fulfillment.manual")}</option></select></label>
+          <label>{t("dashboard.products.dialog.product_editor.field.delivery_mode")}<select name="deliveryMode" data-field="deliveryMode"><option value="digital" selected={selectedProduct.deliveryMode !== "shipping"}>{t("dashboard.products.dialog.product_editor.delivery.digital")}</option><option value="shipping" selected={selectedProduct.deliveryMode === "shipping"}>{t("dashboard.products.dialog.product_editor.delivery.shipping")}</option></select></label>
           <label>{t("dashboard.products.dialog.product_editor.field.status")}<select name="status"><option value="draft" selected={selectedProduct.status === "draft"}>{t("dashboard.products.status.draft")}</option><option value="active" selected={selectedProduct.status === "active"}>{t("dashboard.products.status.active")}</option>{selectedProduct.status === "archived" && <option value="archived" selected>{t("dashboard.products.status.archived")}</option>}<option value="suspended" selected={selectedProduct.status === "suspended"}>{t("dashboard.products.status.suspended")}</option></select></label>
           <fieldset class="private-file-controls" data-private-file-controls hidden={selectedProduct.fulfillmentType !== "manual"}>
             <legend>{t("dashboard.products.dialog.private_file.title")}</legend>
@@ -326,6 +327,14 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
             <p class="private-file-metadata" data-private-file-metadata hidden></p>
             <p class="form-feedback" data-private-file-feedback role="status" aria-live="polite"></p>
           </fieldset>
+          <fieldset class="image-controls" data-product-image-controls>
+            <legend>{t("dashboard.products.dialog.images.title")}</legend>
+            <p class="dialog-copy">{t("dashboard.products.dialog.images.description")}</p>
+            <label>{t("dashboard.products.dialog.images.file_label")}<input type="file" accept="image/png,image/jpeg,image/webp,image/avif" data-product-image-input /></label>
+            <div class="image-actions"><button class="sln-button" data-variant="secondary" type="button" data-upload-product-image>{t("dashboard.products.dialog.images.upload")}</button></div>
+            <ul class="product-image-list" data-product-image-list aria-label={t("dashboard.products.dialog.images.list_aria")}></ul>
+            <p class="form-feedback" data-product-image-feedback role="status" aria-live="polite"></p>
+          </fieldset>
           <div class="variant-editor-list">
             <p class="eyebrow">{t("dashboard.products.dialog.variants.eyebrow")}</p>
             {selectedVariants.map((variant) => <fieldset data-variant-editor data-variant-id={String(variant.id)}>
@@ -335,6 +344,8 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
               <label>{t("dashboard.products.dialog.variants.field.price", { currency: shop.currency })}<input name="priceMajor" type="number" inputmode="decimal" min="0" step={currencyInputStep(shop.currency)} required value={formatMinorAmountForInput(Number(variant.priceMinor ?? 0), shop.currency)} /></label>
               <label>{t("dashboard.products.dialog.variants.field.min_per_order")}<input name="minPerOrder" type="number" min="1" max="1000" required value={String(variant.minPerOrder ?? 1)} /></label>
               <label>{t("dashboard.products.dialog.variants.field.max_per_order")}<input name="maxPerOrder" type="number" min="1" max="1000" required value={String(variant.maxPerOrder ?? 10)} /></label>
+              <label>{t("dashboard.products.dialog.variants.field.duration")}<input name="durationMinutes" type="number" min="5" max="720" step="5" inputmode="numeric" value={typeof variant.durationMinutes === "number" ? String(variant.durationMinutes) : ""} placeholder="45" /></label>
+              <label data-stock-field hidden>{t("dashboard.products.dialog.variants.field.stock")}<input name="stockOnHand" type="number" min="0" max="100000000" inputmode="numeric" value="" data-variant-stock={String(variant.id)} /></label>
               <input name="currency" type="hidden" aria-label={t("dashboard.products.dialog.variants.field.currency")} value={String(variant.currency ?? shop.currency)} />
               <input name="compareAtMinor" type="hidden" aria-label={t("dashboard.products.dialog.variants.field.compare_at")} value={variant.compareAtMinor === null || variant.compareAtMinor === undefined ? "" : String(variant.compareAtMinor)} />
               <input name="optionsJson" type="hidden" aria-label={t("dashboard.products.dialog.variants.field.options")} value={String(variant.optionsJson ?? "{}")} />
@@ -347,6 +358,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
               <label>{t("dashboard.products.dialog.variants.new.field.title")}<input name="newVariantTitle" maxlength="120" placeholder={t("dashboard.products.dialog.variants.new.placeholder.title")} /></label>
               <label>{t("dashboard.products.dialog.variants.new.field.price", { currency: shop.currency })}<input name="newVariantPriceMajor" type="number" min="0" step={currencyInputStep(shop.currency)} inputmode="decimal" placeholder={formatMinorAmountForInput(299000, shop.currency)} /></label>
               <div class="variant-number-grid"><label>{t("dashboard.products.dialog.variants.new.field.min_per_order")}<input name="newVariantMinPerOrder" type="number" min="1" max="1000" value="1" /></label><label>{t("dashboard.products.dialog.variants.new.field.max_per_order")}<input name="newVariantMaxPerOrder" type="number" min="1" max="1000" value="10" /></label></div>
+            <label>{t("dashboard.products.dialog.variants.field.duration")}<input name="newVariantDurationMinutes" type="number" min="5" max="720" step="5" inputmode="numeric" placeholder="45" /></label>
               <label>{t("dashboard.products.dialog.variants.new.field.status")}<select name="newVariantStatus"><option value="active">{t("dashboard.products.status.active")}</option><option value="archived">{t("dashboard.products.status.archived")}</option></select></label>
             </fieldset>
           </div>
@@ -484,6 +496,13 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
   .private-file-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
   .private-file-metadata { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
   .private-file-metadata[hidden] { display: none; }
+  .image-controls { display: grid; gap: 10px; }
+  .image-controls legend { padding-inline: 6px; color: var(--sln-text-primary); font: var(--sln-font-label); font-weight: 750; }
+  .image-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+  .product-image-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .product-image-list li { display: grid; gap: 6px; }
+  .product-image-list img { width: 100%; aspect-ratio: 1; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-sm); background: var(--sln-bg-subtle); object-fit: cover; }
+  .product-image-list .sln-button { min-height: 34px; padding: 6px 10px; font: var(--sln-font-caption); }
   .variant-editor-list { display: grid; gap: 12px; margin-top: 4px; }
   .variant-editor-list > .eyebrow { margin-bottom: 0; }
   .variant-editor-list fieldset { display: grid; gap: 12px; margin: 0; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 14px; }

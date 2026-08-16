@@ -8,6 +8,7 @@ import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } fr
 import { classifyPlatformHost, getCanonicalStorefrontUrl, normalizeHostname } from "./routing";
 import { parseStorefrontPublicDetails, type StorefrontPublicDetails } from "./public-details";
 import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, type StorefrontTheme } from "./theme";
+import { PREMIUM_STOREFRONT_TEMPLATES_FEATURE, resolveStorefrontTemplate, type StorefrontTemplateDefinition } from "./templates";
 
 type StorefrontShopRow = {
   brandingJson: string;
@@ -32,6 +33,7 @@ type StorefrontShopRow = {
   status: string;
   storefrontJson: string;
   supportContact: string | null;
+  timezone: string;
   trialEndsAt: string | null;
   graceEndsAt: string | null;
   subscriptionState: string | null;
@@ -43,6 +45,7 @@ type CatalogRow = {
   categoryId: string | null;
   compareAtMinor: number | null;
   currency: string;
+  deliveryMode: "digital" | "shipping";
   description: string;
   fulfillmentType: "license_key" | "manual";
   maxPerOrder: number;
@@ -66,6 +69,7 @@ export type StorefrontVariant = {
   availableStock?: number;
   compareAtMinor: number | null;
   currency: string;
+  durationMinutes?: number;
   id: string;
   maxPerOrder: number;
   minPerOrder: number;
@@ -79,9 +83,11 @@ export type StorefrontVariant = {
 
 export type StorefrontProduct = {
   categoryId: string | null;
+  deliveryMode: "digital" | "shipping";
   description: string;
   fulfillmentType: "license_key" | "manual";
   id: string;
+  imageUrl: string | null;
   slug: string;
   title: string;
   variants: StorefrontVariant[];
@@ -107,9 +113,11 @@ export type StorefrontShop = {
   slug: string;
   status: string;
   subscriptionState: string;
+  timezone: string;
   currentPeriodEnd?: string | null;
   trialEndsAt?: string | null;
   graceEndsAt?: string | null;
+  template: StorefrontTemplateDefinition;
   theme: StorefrontTheme;
 };
 
@@ -133,7 +141,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
   if (classifyPlatformHost(hostname, env) !== "tenant-candidate") throw new AppError("storefront_not_found", 404);
   const row = await env.PLATFORM_DB.prepare(`
     SELECT shops.id, shops.public_id AS publicId, shops.slug, shops.name, shops.status,
-      shops.default_locale AS defaultLocale, shops.currency,
+      shops.default_locale AS defaultLocale, shops.currency, shops.timezone,
       shop_domains.hostname_normalized AS currentHostname,
       shop_domains.type AS currentDomainType,
       shop_domains.validation_metadata_json AS currentDomainValidationMetadataJson,
@@ -242,6 +250,13 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     fallback: row.defaultLocale,
   });
   const content = parseStorefrontContent(row.storefrontJson, row.name, locale);
+  // Render-time safe fallback: an unknown, unavailable, or premium template on
+  // a plan that lost the entitlement must degrade to the default, never break
+  // the storefront.
+  const template = resolveStorefrontTemplate({
+    premiumEntitled: hasFeature(row.featureFlagsJson, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+    templateId: content.templateId,
+  });
   return {
     access: storefrontAccess(row.status, subscriptionState, row.trialEndsAt, row.graceEndsAt, row.currentPeriodEnd),
     canonicalHostname: row.canonicalHostname === null || (row.canonicalDomainType === "custom" && !customDomainEntitled)
@@ -269,9 +284,11 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     slug: row.slug,
     status: row.status,
     subscriptionState,
+    timezone: row.timezone,
     currentPeriodEnd: row.currentPeriodEnd,
     trialEndsAt: row.trialEndsAt,
     graceEndsAt: row.graceEndsAt,
+    template,
     theme: parseStorefrontTheme(row.brandingJson),
   };
 }
@@ -297,14 +314,16 @@ export function canonicalRedirectFor(request: Request, shop: StorefrontShop): UR
 }
 
 function stockState(row: CatalogRow, threshold: number): StockState {
-  if (row.fulfillmentType === "manual") return "available";
+  // Plain manual digital products are unbounded; keys and physical variants
+  // both report a server-confirmed availability count.
+  if (row.fulfillmentType === "manual" && row.deliveryMode !== "shipping") return "available";
   if (row.availableStock <= 0) return "out_of_stock";
   return row.availableStock <= threshold ? "low_stock" : "available";
 }
 
 export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontShop): Promise<{ categories: StorefrontCategory[]; products: StorefrontProduct[] }> {
   assertStorefrontLive(shop);
-  const [categoryResult, productResult] = await Promise.all([
+  const [categoryResult, productResult, imageResult] = await Promise.all([
     env.PLATFORM_DB.prepare(`
       SELECT categories.id, categories.slug, categories.name, categories.description
       FROM product_categories AS categories
@@ -332,13 +351,18 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
     env.PLATFORM_DB.prepare(`
       SELECT products.id AS productId, products.category_id AS categoryId, products.slug AS productSlug,
         products.title AS productTitle, products.description, products.version AS productVersion,
-        products.fulfillment_type AS fulfillmentType,
+        products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode,
         product_variants.id AS variantId, product_variants.sku, product_variants.title AS variantTitle,
         product_variants.options_json AS optionsJson, product_variants.price_minor AS priceMinor,
         product_variants.compare_at_minor AS compareAtMinor, product_variants.currency,
         product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder,
-        product_variants.version AS variantVersion,
-        COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock
+        product_variants.version AS variantVersion, product_variants.duration_minutes AS durationMinutes,
+        CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((
+          SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved
+          FROM variant_stock_levels
+          WHERE variant_stock_levels.shop_id = product_variants.shop_id
+            AND variant_stock_levels.variant_id = product_variants.id
+        ), 0) ELSE COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) END AS availableStock
       FROM products
       INNER JOIN catalog_channel_visibility
         ON catalog_channel_visibility.shop_id = products.shop_id
@@ -359,16 +383,32 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
       ORDER BY products.created_at, products.id, product_variants.created_at, product_variants.id
       LIMIT 500
     `).bind(shop.id, shop.currency).all<CatalogRow>(),
+    env.PLATFORM_DB.prepare(`
+      SELECT product_images.product_id AS productId, media_assets.public_id AS mediaPublicId
+      FROM product_images
+      INNER JOIN media_assets
+        ON media_assets.shop_id = product_images.shop_id
+        AND media_assets.id = product_images.media_asset_id
+        AND media_assets.status = 'active'
+      WHERE product_images.shop_id = ? AND product_images.status = 'active'
+      ORDER BY product_images.sort_order, product_images.id
+    `).bind(shop.id).all<{ mediaPublicId: string; productId: string }>(),
   ]);
+  const firstImageByProduct = new Map<string, string>();
+  for (const row of imageResult.results) {
+    if (!firstImageByProduct.has(row.productId)) firstImageByProduct.set(row.productId, `/media/${row.mediaPublicId}`);
+  }
   const products = new Map<string, StorefrontProduct>();
   for (const row of productResult.results) {
     let product = products.get(row.productId);
     if (product === undefined) {
       product = {
         categoryId: row.categoryId,
+        deliveryMode: row.deliveryMode,
         description: row.description,
         fulfillmentType: row.fulfillmentType,
         id: row.productId,
+        imageUrl: firstImageByProduct.get(row.productId) ?? null,
         slug: row.productSlug,
         title: row.productTitle,
         variants: [],
@@ -389,7 +429,7 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
       title: row.variantTitle,
       version: row.variantVersion,
     };
-    if (shop.content.showExactStock && row.fulfillmentType === "license_key") variant.availableStock = row.availableStock;
+    if (shop.content.showExactStock && (row.fulfillmentType === "license_key" || row.deliveryMode === "shipping")) variant.availableStock = row.availableStock;
     product.variants.push(variant);
   }
   return { categories: categoryResult.results, products: [...products.values()] };

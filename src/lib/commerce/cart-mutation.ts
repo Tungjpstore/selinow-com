@@ -12,6 +12,7 @@ export type CanonicalCartShop = {
 export type CanonicalCartVariant = {
   availableStock: number;
   currency: string;
+  deliveryMode: "digital" | "shipping";
   fulfillmentType: "license_key" | "manual";
   maxPerOrder: number;
   minPerOrder: number;
@@ -33,7 +34,7 @@ export type CartMutationReplay = {
 };
 
 export async function loadCanonicalCartVariant(env: AppBindings, shopId: string, variantId: string): Promise<CanonicalCartVariant> {
-  const row = await env.PLATFORM_DB.prepare(`SELECT product_variants.id AS variantId, product_variants.product_id AS productId, product_variants.sku, product_variants.title, product_variants.price_minor AS priceMinor, product_variants.currency, product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder, product_variants.status, product_variants.version, products.title AS productTitle, products.status AS productStatus, products.version AS productVersion, products.fulfillment_type AS fulfillmentType, COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock FROM product_variants INNER JOIN products ON products.id = product_variants.product_id AND products.shop_id = product_variants.shop_id LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE product_variants.shop_id = ? AND product_variants.id = ? GROUP BY product_variants.id LIMIT 1`).bind(shopId, variantId).first<CanonicalCartVariant>();
+  const row = await env.PLATFORM_DB.prepare(`SELECT product_variants.id AS variantId, product_variants.product_id AS productId, product_variants.sku, product_variants.title, product_variants.price_minor AS priceMinor, product_variants.currency, product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder, product_variants.status, product_variants.version, products.title AS productTitle, products.status AS productStatus, products.version AS productVersion, products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode, CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved FROM variant_stock_levels WHERE variant_stock_levels.shop_id = product_variants.shop_id AND variant_stock_levels.variant_id = product_variants.id), 0) ELSE COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) END AS availableStock FROM product_variants INNER JOIN products ON products.id = product_variants.product_id AND products.shop_id = product_variants.shop_id LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE product_variants.shop_id = ? AND product_variants.id = ? GROUP BY product_variants.id LIMIT 1`).bind(shopId, variantId).first<CanonicalCartVariant>();
   if (row === null || row.status !== "active" || row.productStatus !== "active") throw new AppError("catalog_changed", 409);
   return row;
 }
@@ -64,7 +65,7 @@ export async function applyCanonicalCartMutation(input: {
     const existing = await input.env.PLATFORM_DB.prepare("SELECT quantity FROM cart_items WHERE cart_id = ? AND shop_id = ? AND variant_id = ? LIMIT 1").bind(cart.cartId, input.shop.id, input.mutation.variantId).first<{ quantity: number }>();
     const quantity = (existing?.quantity ?? 0) + input.mutation.quantity;
     if (quantity < variant.minPerOrder || quantity > variant.maxPerOrder) throw new AppError("quantity_unavailable", 409);
-    if (variant.fulfillmentType === "license_key" && variant.availableStock < quantity) throw new AppError("inventory_unavailable", 409);
+    if ((variant.fulfillmentType === "license_key" || variant.deliveryMode === "shipping") && variant.availableStock < quantity) throw new AppError("inventory_unavailable", 409);
     statements.push(input.env.PLATFORM_DB.prepare(`
       INSERT INTO cart_items (cart_id, shop_id, variant_id, quantity)
       SELECT ?, ?, ?, ?
@@ -88,6 +89,15 @@ export async function applyCanonicalCartMutation(input: {
                 AND status = 'available'
             ) >= ?
           )
+          AND (
+            product.delivery_mode != 'shipping'
+            OR (
+              SELECT COALESCE(variant_stock_levels.on_hand - variant_stock_levels.reserved, 0)
+              FROM variant_stock_levels
+              WHERE variant_stock_levels.shop_id = variant.shop_id
+                AND variant_stock_levels.variant_id = variant.id
+            ) >= ?
+          )
       )
       ON CONFLICT(cart_id, variant_id) DO UPDATE SET
         quantity = cart_items.quantity + excluded.quantity
@@ -101,7 +111,7 @@ export async function applyCanonicalCartMutation(input: {
             AND variant.shop_id = excluded.shop_id
             AND variant.status = 'active' AND product.status = 'active'
             AND variant.currency = ?
-            AND cart_items.quantity + excluded.quantity
+              AND cart_items.quantity + excluded.quantity
               BETWEEN variant.min_per_order AND variant.max_per_order
             AND (
               product.fulfillment_type != 'license_key'
@@ -109,6 +119,15 @@ export async function applyCanonicalCartMutation(input: {
                 SELECT COUNT(*) FROM inventory_keys
                 WHERE shop_id = variant.shop_id AND variant_id = variant.id
                   AND status = 'available'
+              ) >= cart_items.quantity + excluded.quantity
+            )
+            AND (
+              product.delivery_mode != 'shipping'
+              OR (
+                SELECT COALESCE(variant_stock_levels.on_hand - variant_stock_levels.reserved, 0)
+                FROM variant_stock_levels
+                WHERE variant_stock_levels.shop_id = variant.shop_id
+                  AND variant_stock_levels.variant_id = variant.id
               ) >= cart_items.quantity + excluded.quantity
             )
         )
@@ -123,6 +142,7 @@ export async function applyCanonicalCartMutation(input: {
       input.mutation.variantId,
       input.shop.id,
       input.shop.currency,
+      input.mutation.quantity,
       input.mutation.quantity,
       input.mutation.quantity,
       input.shop.currency,
@@ -152,7 +172,7 @@ export async function applyCanonicalCartMutation(input: {
       const current = await input.env.PLATFORM_DB.prepare("SELECT quantity FROM cart_items WHERE cart_id = ? AND shop_id = ? AND variant_id = ? LIMIT 1").bind(cart.cartId, input.shop.id, input.mutation.variantId).first<{ quantity: number }>();
       const quantity = (current?.quantity ?? 0) + input.mutation.quantity;
       if (quantity < variant.minPerOrder || quantity > variant.maxPerOrder) throw new AppError("quantity_unavailable", 409);
-      if (variant.fulfillmentType === "license_key" && variant.availableStock < quantity) throw new AppError("inventory_unavailable", 409);
+      if ((variant.fulfillmentType === "license_key" || variant.deliveryMode === "shipping") && variant.availableStock < quantity) throw new AppError("inventory_unavailable", 409);
     }
     throw new AppError("cart_failed", 409);
   }

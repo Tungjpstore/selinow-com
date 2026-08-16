@@ -1,0 +1,70 @@
+---
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import { formatMoney } from "../../../../lib/storefront/view";
+import type { StorefrontCategory, StorefrontProduct, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  categories: StorefrontCategory[];
+  locale: string;
+  products: StorefrontProduct[];
+  shop: StorefrontShop;
+}
+
+const { categories, locale, products, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const services = products.map((product) => ({
+  duration: product.variants[0]?.title ?? "",
+  price: product.variants[0] ? formatMoney(product.variants[0].priceMinor, product.variants[0].currency, locale) : "",
+  slug: product.slug,
+  soldOut: product.variants.every((variant) => variant.stockState === "out_of_stock"),
+  title: product.title,
+}));
+const steps = [
+  t("storefront.template.desk.steps.1"),
+  t("storefront.template.desk.steps.2"),
+  t("storefront.template.desk.steps.3"),
+];
+---
+<section class="clinic-hero" data-mark={shop.name.slice(0, 1).toUpperCase()}>
+  <div class="clinic-hero-copy">
+    <p class="store-kicker">{shop.name}</p>
+    <h1>{shop.content.headline}</h1>
+    <p>{shop.content.description}</p>
+    <a class="clinic-cta" href="#services">{t("storefront.template.serenity.cta")} <span aria-hidden="true">↓</span></a>
+  </div>
+</section>
+<section class="clinic-services" id="services" aria-labelledby="clinic-services-title">
+  <h2 id="clinic-services-title">{t("storefront.template.serenity.menu")}</h2>
+  <div class="clinic-service-table-wrap">
+    <table class="clinic-service-table">
+      <thead>
+        <tr>
+          <th scope="col">{t("storefront.template.desk.compare.plan")}</th>
+          <th scope="col">{t("storefront.template.desk.compare.price")}</th>
+          <th scope="col">{t("storefront.template.serenity.cta")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {services.map((service) => (
+          <tr>
+            <th scope="row">{service.title}{service.duration !== "" && <small> · {service.duration}</small>}</th>
+            <td>{service.price}</td>
+            <td><a class:list={["clinic-book-button", service.soldOut && "is-disabled"]} href={`/products/${service.slug}`} aria-disabled={service.soldOut ? "true" : undefined}>{service.soldOut ? t("storefront.product.sold_out") : t("storefront.template.serenity.cta")}</a></td>
+          </tr>
+        ))}
+        {services.length === 0 && <tr><td class="empty-cart" colspan="3">{t("storefront.catalog.empty")}</td></tr>}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="clinic-process" aria-labelledby="clinic-process-title">
+  <h2 id="clinic-process-title">{t("storefront.template.clinic.process")}</h2>
+  <ol class="clinic-steps">
+    {steps.map((step, index) => <li><span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>{step}</li>)}
+  </ol>
+</section>
+{categories.length > 0 && (
+  <nav class="clinic-categories" aria-label={t("storefront.catalog.category")}>
+    {categories.map((category) => <a href="#services">{category.name}</a>)}
+  </nav>
+)}

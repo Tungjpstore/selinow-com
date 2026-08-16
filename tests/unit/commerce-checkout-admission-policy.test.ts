@@ -22,7 +22,7 @@ function checkoutInput(overrides: Partial<CanonicalCheckoutTransactionInput> = {
     eventIdempotencyKey: "event-key",
     expiresAt: "2026-08-08T12:00:00.000Z",
     fulfillmentIdempotencyPrefix: "checkout",
-    lines: [{ fulfillmentType: "manual", priceMinor: 100, productId: "product-manual", productTitle: "Manual", productVersion: 1, quantity: 1, sku: "MANUAL", title: "Manual", variantId: "variant-manual", variantVersion: 1 }],
+    lines: [{ deliveryMode: "digital", fulfillmentType: "manual", priceMinor: 100, productId: "product-manual", productTitle: "Manual", productVersion: 1, quantity: 1, sku: "MANUAL", title: "Manual", variantId: "variant-manual", variantVersion: 1 }],
     locale: "en",
     nowIso: "2026-08-08T10:00:00.000Z",
     orderId: "order-internal",
@@ -42,7 +42,7 @@ describe("canonical checkout admission policy", () => {
     const input = checkoutInput({
       customer: { kind: "anonymous", maskedEmail: null },
       env: { PLATFORM_DB: { prepare } } as unknown as AppBindings,
-      lines: [{ fulfillmentType: "manual", priceMinor: 0, productId: "product-manual", productTitle: "Manual", productVersion: 1, quantity: 1, sku: "MANUAL", title: "Manual", variantId: "variant-manual", variantVersion: 1 }],
+      lines: [{ deliveryMode: "digital", fulfillmentType: "manual", priceMinor: 0, productId: "product-manual", productTitle: "Manual", productVersion: 1, quantity: 1, sku: "MANUAL", title: "Manual", variantId: "variant-manual", variantVersion: 1 }],
       subtotalMinor: 0,
       totalMinor: 0,
     });
@@ -59,8 +59,8 @@ describe("canonical checkout admission policy", () => {
     const input = checkoutInput({
       env: { PLATFORM_DB: { prepare } } as unknown as AppBindings,
       lines: [
-        { fulfillmentType: "manual", priceMinor: 100, productId: "product-manual", productTitle: "Manual", productVersion: 1, quantity: 1, sku: "MANUAL", title: "Manual", variantId: "variant-manual", variantVersion: 1 },
-        { fulfillmentType: "license_key", priceMinor: 200, productId: "product-key", productTitle: "Key", productVersion: 1, quantity: 1, sku: "KEY", title: "Key", variantId: "variant-key", variantVersion: 1 },
+        { deliveryMode: "digital", fulfillmentType: "manual", priceMinor: 100, productId: "product-manual", productTitle: "Manual", productVersion: 1, quantity: 1, sku: "MANUAL", title: "Manual", variantId: "variant-manual", variantVersion: 1 },
+        { deliveryMode: "digital", fulfillmentType: "license_key", priceMinor: 200, productId: "product-key", productTitle: "Key", productVersion: 1, quantity: 1, sku: "KEY", title: "Key", variantId: "variant-key", variantVersion: 1 },
       ],
       subtotalMinor: 300,
       totalMinor: 300,

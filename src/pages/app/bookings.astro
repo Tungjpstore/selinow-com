@@ -1,0 +1,61 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import PageHeader from "../../components/workspace/PageHeader.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import { authenticateRequest } from "../../lib/auth/session";
+import { getBindings } from "../../lib/platform/bindings";
+import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
+import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
+import { createDashboardTranslator } from "../../lib/i18n";
+
+const env = getBindings();
+const auth = await authenticateRequest(Astro.request, env).catch(() => null);
+if (auth === null) return Astro.redirect("/login");
+const shops = await listShopsForMember({ env, userId: auth.userId });
+const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
+const locale = Astro.locals.locale ?? shop?.defaultLocale;
+const t = createDashboardTranslator(locale);
+const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+---
+<AppLayout activePath="/app/bookings" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.bookings.title")}>
+  <PageHeader eyebrow={t("dashboard.bookings.eyebrow")} title={t("dashboard.bookings.title")} description={t("dashboard.bookings.description")}>
+    <span slot="actions" class="range-note">{t("dashboard.bookings.range")}</span>
+  </PageHeader>
+
+  {shop === undefined ? (
+    <WorkspaceState title={t("dashboard.store_builder.no_store.title")} description={t("dashboard.store_builder.no_store.description")} actionHref={withSelectedShop("/onboarding", undefined, Astro.url.origin)} actionLabel={t("dashboard.store_builder.no_store.action")} tone="info" />
+  ) : (
+    <section class="bookings-panel" data-bookings data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-locale={locale ?? "en"} data-copy={JSON.stringify({
+      cancel: t("dashboard.bookings.cancel"),
+      complete: t("dashboard.bookings.complete"),
+      empty: t("dashboard.bookings.empty"),
+      error: t("dashboard.bookings.error"),
+      loading: t("dashboard.bookings.loading"),
+      noShow: t("dashboard.bookings.no_show"),
+    })}>
+      <p class="bookings-status" data-bookings-status role="status" aria-live="polite">{t("dashboard.bookings.loading")}</p>
+      <ul class="bookings-list" data-bookings-list></ul>
+    </section>
+  )}
+</AppLayout>
+
+<script src="../../scripts/dashboard/bookings.ts"></script>
+
+<style>
+  .range-note { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-tint-info); color: var(--sln-info-text); font: var(--sln-font-caption); font-weight: 700; }
+  .bookings-panel { margin-top: var(--sln-space-8); padding: var(--sln-space-6); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
+  .bookings-status { margin: 0 0 14px; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .bookings-list { display: grid; margin: 0; padding: 0; list-style: none; }
+  .bookings-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .bookings-list li:last-child { border-bottom: 0; }
+  .booking-copy { display: grid; gap: 3px; min-width: 0; }
+  .booking-copy strong { font: var(--sln-font-label); }
+  .booking-copy small { color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .booking-actions { display: flex; gap: 8px; }
+  .booking-actions .sln-button { min-height: 34px; padding: 6px 12px; font: var(--sln-font-caption); }
+  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 15px; font: var(--sln-font-label); text-decoration: none; cursor: pointer; }
+  .sln-button:disabled { cursor: not-allowed; opacity: .55; }
+  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
+  @media (max-width: 640px) { .bookings-list li { grid-template-columns: 1fr; } .booking-actions { width: 100%; justify-content: stretch; } .booking-actions .sln-button { flex: 1; } }
+</style>

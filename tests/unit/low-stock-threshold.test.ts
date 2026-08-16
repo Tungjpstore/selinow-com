@@ -38,9 +38,10 @@ describe("low-stock threshold write path", () => {
     expect(page).toContain("const thresholdOf =");
     expect(page).toContain("stock <= thresholdOf(variant)");
 
-    // No new migration: the column already exists in migration 0002.
+    // No new migration for the threshold write path: the column already
+    // exists in migration 0002. Pins the expected chain tip.
     const migrations = await readdir("migrations");
     const latest = migrations.filter((name) => name.endsWith(".sql")).sort().at(-1);
-    expect(latest).toBe("0100_automation_rule_builder.sql");
+    expect(latest).toBe("0103_appointment_booking_vertical.sql");
   });
 });

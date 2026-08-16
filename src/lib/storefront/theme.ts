@@ -20,6 +20,7 @@ export type StorefrontContent = {
   seoTitle: string;
   showExactStock: boolean;
   supportText: string;
+  templateId: string | null;
 };
 
 function parseJsonObject(value: string): JsonObject {
@@ -92,6 +93,11 @@ export function parseStorefrontContent(storefrontJson: string, shopName: string,
   const description = readText(storefront.description, t("storefront.defaults.description"), 240);
   const seoDescriptionFallback = truncateText(description, 160);
   const seoTitleFallback = truncateText(t("storefront.defaults.seo_title", { shop: shopName }), 60);
+  // Raw persisted selection; the template registry resolves or safely falls
+  // it back at render time, so parsing only needs to surface a plain string.
+  const templateId = typeof storefront.templateId === "string" && storefront.templateId.trim().length > 0
+    ? storefront.templateId.trim().slice(0, 32)
+    : null;
   return {
     announcement,
     deliveryText: readText(storefront.deliveryText, t("storefront.defaults.delivery"), 240),
@@ -102,5 +108,6 @@ export function parseStorefrontContent(storefrontJson: string, shopName: string,
     seoTitle: readText(storefront.seoTitle, seoTitleFallback, 60),
     showExactStock: storefront.showExactStock === true,
     supportText: readText(storefront.supportText, t("storefront.defaults.support"), 180),
+    templateId,
   };
 }

@@ -13,6 +13,7 @@ type StorefrontDraft = {
   seoTitle: string;
   showExactStock: boolean;
   supportText: string;
+  templateId: string;
 };
 
 type StorefrontSettingsResponse = {
@@ -53,7 +54,8 @@ if (builder !== null) {
         || typeof draft.seoDescription !== "string"
         || typeof draft.seoTitle !== "string"
         || typeof draft.showExactStock !== "boolean"
-        || typeof draft.supportText !== "string") return null;
+        || typeof draft.supportText !== "string"
+        || typeof draft.templateId !== "string") return null;
       return {
         accentColor: draft.accentColor,
         announcement: typeof draft.announcement === "string" ? draft.announcement : "",
@@ -67,6 +69,7 @@ if (builder !== null) {
         seoTitle: draft.seoTitle,
         showExactStock: draft.showExactStock,
         supportText: draft.supportText,
+        templateId: draft.templateId,
       };
     } catch {
       return null;
@@ -116,6 +119,7 @@ if (builder !== null) {
 
     const readDraft = (): StorefrontDraft => {
       const stockField = field("showExactStock");
+      const templateField = builder.querySelector<HTMLInputElement>('[data-field="templateId"]:checked');
       return {
         accentColor: field("accentColor")?.value.toUpperCase() ?? saved.accentColor,
         announcement: field("announcement")?.value.trim() ?? "",
@@ -129,7 +133,14 @@ if (builder !== null) {
         seoTitle: field("seoTitle")?.value.trim() ?? "",
         showExactStock: stockField instanceof HTMLInputElement ? stockField.checked : saved.showExactStock,
         supportText: field("supportText")?.value.trim() ?? "",
+        templateId: templateField?.value ?? saved.templateId,
       };
+    };
+
+    const setTemplateSelection = (templateId: string): void => {
+      builder.querySelectorAll<HTMLInputElement>('[data-field="templateId"]').forEach((radio) => {
+        radio.checked = radio.value === templateId;
+      });
     };
 
     const setState = (state: string): void => {
@@ -293,11 +304,13 @@ if (builder !== null) {
 
     undoButton?.addEventListener("click", () => {
       (Object.entries(saved) as Array<[keyof StorefrontDraft, string | boolean]>).forEach(([key, value]) => {
+        if (key === "templateId") return;
         const input = field(key);
         if (input === null) return;
         if (typeof value === "boolean" && input instanceof HTMLInputElement) input.checked = value;
         else if (typeof value === "string") input.value = value;
       });
+      setTemplateSelection(saved.templateId);
       const validation = updateControls(saved);
       contrastWasValid = validation.valid;
       setFeedback(validation.valid ? text("undone") : contrastMessage(validation));
@@ -426,6 +439,107 @@ if (builder !== null) {
       });
     });
 
+    // Shipping methods management (physical vertical, TV5).
+    const shippingList = builder.querySelector<HTMLElement>("[data-shipping-list]");
+    const shippingFeedback = builder.querySelector<HTMLElement>("[data-shipping-feedback]");
+    const shippingCreateButton = builder.querySelector<HTMLButtonElement>("[data-shipping-create]");
+    const shippingNameInput = builder.querySelector<HTMLInputElement>("[data-shipping-name]");
+    const shippingFeeInput = builder.querySelector<HTMLInputElement>("[data-shipping-fee]");
+    const shippingFreeOverInput = builder.querySelector<HTMLInputElement>("[data-shipping-free-over]");
+    type ShippingMethodRow = { feeMinor: number; freeOverMinor: number | null; id: string; name: string; status: string };
+    const shippingCsrf = (): string | null => readCookie(csrfCookieName);
+    const renderShippingMethods = (rows: ShippingMethodRow[]): void => {
+      if (shippingList === null) return;
+      shippingList.replaceChildren();
+      const active = rows.filter((method) => method.status === "active");
+      for (const row of active) {
+        const item = document.createElement("li");
+        const copy = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = row.name;
+        const detail = document.createElement("small");
+        const feeLabel = text("shippingFeeLabel") + ": " + row.feeMinor.toLocaleString("vi-VN");
+        detail.textContent = row.freeOverMinor === null
+          ? feeLabel
+          : feeLabel + " · " + text("shippingFreeOverLabel") + ": " + row.freeOverMinor.toLocaleString("vi-VN");
+        copy.appendChild(name);
+        copy.appendChild(detail);
+        const archive = document.createElement("button");
+        archive.type = "button";
+        archive.className = "sln-button";
+        archive.dataset.variant = "danger";
+        archive.textContent = text("shippingArchive");
+        archive.addEventListener("click", () => { void archiveShippingMethod(row.id); });
+        item.appendChild(copy);
+        item.appendChild(archive);
+        shippingList.appendChild(item);
+      }
+      if (active.length === 0) {
+        const empty = document.createElement("li");
+        const emptyText = document.createElement("small");
+        emptyText.textContent = text("shippingEmpty");
+        empty.appendChild(emptyText);
+        shippingList.appendChild(empty);
+      }
+    };
+    const loadShippingMethods = async (): Promise<void> => {
+      try {
+        const response = await fetch("/api/app/shops/" + shopPublicId + "/shipping-methods", { credentials: "same-origin" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (typeof payload !== "object" || payload === null || !Array.isArray((payload as { methods?: unknown }).methods)) return;
+        renderShippingMethods((payload as { methods: ShippingMethodRow[] }).methods);
+      } catch {
+        // Best-effort panel; the API remains the source of truth.
+      }
+    };
+    const createShippingMethod = async (): Promise<void> => {
+      if (shippingCreateButton === null || shippingNameInput === null || shippingFeeInput === null) return;
+      const name = shippingNameInput.value.trim();
+      const feeMinor = Number(shippingFeeInput.value);
+      const freeOverRaw = shippingFreeOverInput === null ? "" : shippingFreeOverInput.value.trim();
+      if (name === "" || !Number.isSafeInteger(feeMinor) || feeMinor < 0) {
+        if (shippingFeedback !== null) shippingFeedback.textContent = text("shippingInvalid");
+        return;
+      }
+      shippingCreateButton.disabled = true;
+      try {
+        const csrf = shippingCsrf();
+        const response = await fetch("/api/app/shops/" + shopPublicId + "/shipping-methods", {
+          body: JSON.stringify({ feeMinor, freeOverMinor: freeOverRaw === "" ? null : Number(freeOverRaw), name }),
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", ...(csrf === null ? {} : { "X-CSRF-Token": decodeURIComponent(csrf) }) },
+          method: "POST",
+        });
+        if (!response.ok) throw new Error("shipping_create_failed");
+        shippingNameInput.value = "";
+        shippingFeeInput.value = "";
+        if (shippingFreeOverInput !== null) shippingFreeOverInput.value = "";
+        if (shippingFeedback !== null) shippingFeedback.textContent = text("shippingCreated");
+        await loadShippingMethods();
+      } catch {
+        if (shippingFeedback !== null) shippingFeedback.textContent = text("shippingError");
+      } finally {
+        shippingCreateButton.disabled = false;
+      }
+    };
+    const archiveShippingMethod = async (methodId: string): Promise<void> => {
+      try {
+        const csrf = shippingCsrf();
+        const response = await fetch("/api/app/shops/" + shopPublicId + "/shipping-methods/" + methodId, {
+          body: JSON.stringify({ status: "archived" }),
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", ...(csrf === null ? {} : { "X-CSRF-Token": decodeURIComponent(csrf) }) },
+          method: "PATCH",
+        });
+        if (!response.ok) throw new Error("shipping_archive_failed");
+        await loadShippingMethods();
+      } catch {
+        if (shippingFeedback !== null) shippingFeedback.textContent = text("shippingError");
+      }
+    };
+    shippingCreateButton?.addEventListener("click", () => { void createShippingMethod(); });
+    void loadShippingMethods();
     updatePublicationBadge();
     setMobileView("settings");
     const initialValidation = updateControls(saved);

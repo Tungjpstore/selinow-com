@@ -1,0 +1,79 @@
+/* Bustle — vibrant marketplace storefront (chợ online energy, token-safe). */
+
+html[data-storefront-template="bustle"] .bustle-hero {
+  display: grid;
+  align-items: center;
+  min-height: 300px;
+  border-radius: var(--sln-radius-xl);
+  background:
+    radial-gradient(circle at 8% 110%, color-mix(in srgb, var(--merchant-accent) 42%, transparent), transparent 42%),
+    radial-gradient(circle at 95% -10%, color-mix(in srgb, var(--merchant-brand) 52%, transparent), transparent 45%),
+    var(--sln-brand-gradient);
+  color: var(--sln-white);
+}
+
+html[data-storefront-template="bustle"] .bustle-hero-copy {
+  display: grid;
+  gap: 12px;
+  max-width: 620px;
+  padding: clamp(28px, 5vw, 52px);
+}
+
+html[data-storefront-template="bustle"] .bustle-hero h1 {
+  max-width: 17ch;
+  margin: 0;
+  font-size: clamp(2rem, 4.6vw, 3.4rem);
+  font-weight: 800;
+  letter-spacing: -.04em;
+  line-height: 1.06;
+}
+
+html[data-storefront-template="bustle"] .bustle-hero p { margin: 0; color: var(--sln-slate-100); font-size: 1rem; line-height: 1.65; }
+
+html[data-storefront-template="bustle"] .bustle-cta {
+  justify-self: start;
+  margin-top: 10px;
+  padding: 12px 28px;
+  border-radius: var(--sln-radius-pill);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+  font-size: .9375rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+html[data-storefront-template="bustle"] .bustle-voucher-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: 16px auto 0;
+  padding: 12px 18px;
+  border: 1px dashed color-mix(in srgb, var(--merchant-brand) 55%, var(--sln-border-default));
+  border-radius: var(--sln-radius-md);
+  background: color-mix(in srgb, var(--sln-tint-warning) 45%, var(--sln-bg-surface));
+}
+
+html[data-storefront-template="bustle"] .bustle-voucher-strip p { margin: 0; color: var(--sln-warning-text-strong); font-size: .875rem; font-weight: 700; }
+
+/* Deal rows: the first tiles get an accent price treatment (tokens only). */
+html[data-storefront-template="bustle"] .bustle-product-list { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 12px; }
+
+html[data-storefront-template="bustle"] .bustle-product-list .product-card { gap: 10px; padding-bottom: 14px; }
+html[data-storefront-template="bustle"] .bustle-product-list .product-visual { min-height: 140px; border-radius: var(--sln-radius-md); }
+html[data-storefront-template="bustle"] .bustle-product-list .product-visual strong { font-size: clamp(2.4rem, 3.6vw, 3.2rem); }
+html[data-storefront-template="bustle"] .bustle-product-list .product-visual span { inset-block-start: 8px; inset-inline-start: 8px; font-size: .625rem; }
+html[data-storefront-template="bustle"] .bustle-product-list .product-copy { gap: 6px; }
+html[data-storefront-template="bustle"] .bustle-product-list .product-copy > p { display: none; }
+html[data-storefront-template="bustle"] .bustle-product-list .product-copy h2 { font-size: .875rem; line-height: 1.3; }
+html[data-storefront-template="bustle"] .bustle-product-list .product-copy .stock { margin: 0; font-size: .6875rem; }
+html[data-storefront-template="bustle"] .bustle-product-list .product-buy-row strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+
+/* Discounted tiles pop with the danger-tint price family (4.5:1 safe). */
+html[data-storefront-template="bustle"] .bustle-product-list .product-card:has(del) .product-buy-row strong {
+  color: var(--sln-danger-text);
+}
+
+@media (max-width: 1020px) { html[data-storefront-template="bustle"] .bustle-product-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px) { html[data-storefront-template="bustle"] .bustle-product-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 460px) { html[data-storefront-template="bustle"] .bustle-product-list { grid-template-columns: 1fr; } }

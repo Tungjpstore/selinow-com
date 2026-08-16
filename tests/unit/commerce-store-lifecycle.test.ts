@@ -15,6 +15,7 @@ import {
 } from "../../src/lib/commerce/store";
 import { createQuoteEvidence, verifyQuoteEvidence } from "../../src/lib/commerce/quote-evidence";
 import type { StorefrontShop } from "../../src/lib/storefront/store";
+import { FALLBACK_STOREFRONT_TEMPLATE } from "../../src/lib/storefront/templates";
 
 class SqliteStatement {
   private values: SQLInputValue[] = [];
@@ -120,6 +121,7 @@ function shop(): StorefrontShop {
       seoTitle: "Lifecycle",
       showExactStock: false,
       supportText: "Support",
+      templateId: null,
     },
     currency: "VND",
     currentHostname: "lifecycle.selinow.com",
@@ -141,6 +143,8 @@ function shop(): StorefrontShop {
     status: "active",
     currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
+    timezone: "Asia/Ho_Chi_Minh",
+    template: FALLBACK_STOREFRONT_TEMPLATE,
     theme: {
       accent: "#7C3AED",
       accentInk: "#FFFFFF",

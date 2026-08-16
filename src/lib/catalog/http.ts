@@ -30,15 +30,22 @@ export function parseCategoryInput(body: Record<string, unknown>): CategoryInput
 }
 
 export function parseProductInput(body: Record<string, unknown>): ProductInput {
-  rejectUnknownFields(body, ["categoryId", "description", "fulfillmentType", "slug", "status", "title"]);
+  rejectUnknownFields(body, ["categoryId", "deliveryMode", "description", "fulfillmentType", "slug", "status", "title"]);
   const categoryId = body.categoryId === null || body.categoryId === undefined ? null : body.categoryId;
   if (categoryId !== null && (typeof categoryId !== "string" || !/^cat_[0-9a-f-]{36}$/u.test(categoryId))) {
     throw new AppError("validation_failed", 400, ["category_id_invalid"]);
   }
+  const fulfillmentType = body.fulfillmentType === undefined ? "license_key" : oneOf(body.fulfillmentType, ["license_key", "manual"], "fulfillment_type");
+  const deliveryMode = body.deliveryMode === undefined ? "digital" : oneOf(body.deliveryMode, ["digital", "shipping"], "delivery_mode");
+  // Physical goods ship by hand: they are always seller-fulfilled products.
+  if (deliveryMode === "shipping" && fulfillmentType !== "manual") {
+    throw new AppError("validation_failed", 400, ["delivery_mode_fulfillment_mismatch"]);
+  }
   return {
     categoryId,
+    deliveryMode,
     description: normalizeDescription(body.description),
-    fulfillmentType: body.fulfillmentType === undefined ? "license_key" : oneOf(body.fulfillmentType, ["license_key", "manual"], "fulfillment_type"),
+    fulfillmentType,
     slug: normalizeCatalogSlug(body.slug),
     status: body.status === undefined ? "draft" : oneOf(body.status, ["active", "archived", "draft", "suspended"], "status"),
     title: normalizeCatalogName(body.title, "title"),
@@ -49,7 +56,7 @@ export function parseProductWithInitialVariantInput(
   body: Record<string, unknown>,
   defaultCurrency?: string,
 ): { product: ProductInput; variant: VariantInput } {
-  rejectUnknownFields(body, ["categoryId", "description", "fulfillmentType", "initialVariant", "slug", "status", "title"]);
+  rejectUnknownFields(body, ["categoryId", "deliveryMode", "description", "fulfillmentType", "initialVariant", "slug", "status", "title"]);
   const initialVariant = body.initialVariant;
   if (typeof initialVariant !== "object" || initialVariant === null || Array.isArray(initialVariant)) {
     throw new AppError("validation_failed", 400, ["initial_variant_required"]);
@@ -57,6 +64,7 @@ export function parseProductWithInitialVariantInput(
   return {
     product: parseProductInput({
       categoryId: body.categoryId,
+      deliveryMode: body.deliveryMode,
       description: body.description,
       fulfillmentType: body.fulfillmentType,
       slug: body.slug,
@@ -68,11 +76,14 @@ export function parseProductWithInitialVariantInput(
 }
 
 export function parseVariantInput(body: Record<string, unknown>, defaultCurrency?: string): VariantInput {
-  rejectUnknownFields(body, ["compareAtMinor", "currency", "maxPerOrder", "minPerOrder", "options", "priceMinor", "sku", "status", "title"]);
+  rejectUnknownFields(body, ["compareAtMinor", "currency", "durationMinutes", "maxPerOrder", "minPerOrder", "options", "priceMinor", "sku", "status", "title"]);
   const priceMinor = requireInteger(body.priceMinor, "price_minor", 0, 9_000_000_000_000);
   const compareAtMinor = body.compareAtMinor === null || body.compareAtMinor === undefined
     ? null
     : requireInteger(body.compareAtMinor, "compare_at_minor", priceMinor, 9_000_000_000_000);
+  const durationMinutes = body.durationMinutes === null || body.durationMinutes === undefined
+    ? null
+    : requireInteger(body.durationMinutes, "duration_minutes", 5, 720);
   const minPerOrder = body.minPerOrder === undefined ? 1 : requireInteger(body.minPerOrder, "min_per_order", 1, 1_000);
   const maxPerOrder = body.maxPerOrder === undefined ? 10 : requireInteger(body.maxPerOrder, "max_per_order", minPerOrder, 1_000);
   const currency = body.currency === undefined && defaultCurrency === undefined
@@ -81,6 +92,7 @@ export function parseVariantInput(body: Record<string, unknown>, defaultCurrency
   return {
     compareAtMinor,
     currency,
+    durationMinutes,
     maxPerOrder,
     minPerOrder,
     optionsJson: normalizeOptions(body.options),

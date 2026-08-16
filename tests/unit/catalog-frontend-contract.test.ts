@@ -96,7 +96,7 @@ describe("seller catalog frontend contract", () => {
       readFile("src/lib/catalog/store.ts", "utf8"),
     ]);
 
-    expect(store).toContain("category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, version, created_at AS createdAt, updated_at AS updatedAt FROM products");
+    expect(store).toContain("category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, delivery_mode AS deliveryMode, version, created_at AS createdAt, updated_at AS updatedAt FROM products");
     expect(page).toContain('t("dashboard.products.table.updated")');
     expect(page).toContain('const projectedUpdatedAt = typeof product.updatedAt === "string" ? product.updatedAt : ""');
     expect(page).toContain('const updatedAt = projectedUpdatedAt !== "" && !Number.isNaN(updatedDate.getTime()) ? projectedUpdatedAt : ""');
