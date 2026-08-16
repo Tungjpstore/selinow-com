@@ -415,6 +415,7 @@ if (workspaceElement !== null) {
       domains = Array.isArray(record.domains) ? record.domains.filter(isDomainRecord) : [];
       hasServerSnapshot = true;
       renderDomains(focusDomainId);
+      scheduleAutoCheck();
       if (panelState !== null) panelState.textContent = t("dashboard.domains.panel.count", { count: domains.length });
     } catch (error) {
       if (sequence !== loadSequence) return;
@@ -452,6 +453,74 @@ if (workspaceElement !== null) {
       setFeedback(messageForError(error), "error");
     }
   }
+
+  // --- Automatic DNS re-check ---
+  // While the page stays open, keep re-checking custom domains whose DNS is
+  // not verified yet: a seller who adds the record at Cloudflare and returns
+  // to this tab sees the domain confirm itself without pressing Check again.
+  const AUTO_CHECK_INTERVAL_MS = 15_000;
+  const AUTO_CHECK_MAX_ROUNDS = 8;
+  const VISIBLE_RECHECK_MIN_GAP_MS = 30_000;
+  let autoCheckTimer: number | null = null;
+  let autoCheckRounds = 0;
+  let lastAutoCheckAt = 0;
+
+  function stopAutoCheck(): void {
+    if (autoCheckTimer !== null) {
+      window.clearInterval(autoCheckTimer);
+      autoCheckTimer = null;
+    }
+    autoCheckRounds = 0;
+  }
+
+  function pendingCheckDomains(): DomainRecord[] {
+    const shop = getSelectedShop();
+    if (shop === null || mutationsBlocked(shop)) return [];
+    return domains.filter((domain) => domain.type === "custom"
+      && domain.status !== "ownership_expired"
+      && !isDomainReady(domain));
+  }
+
+  async function autoCheckPending(force: boolean): Promise<void> {
+    const now = Date.now();
+    const minGap = force ? VISIBLE_RECHECK_MIN_GAP_MS : AUTO_CHECK_INTERVAL_MS;
+    if (now - lastAutoCheckAt < minGap) return;
+    const pending = pendingCheckDomains();
+    if (pending.length === 0) {
+      stopAutoCheck();
+      return;
+    }
+    lastAutoCheckAt = now;
+    const shop = getSelectedShop();
+    if (shop === null) return;
+    await Promise.allSettled(pending.map((domain) =>
+      requestApi(`/api/app/shops/${encodeURIComponent(shop.id)}/domains/${encodeURIComponent(domain.id)}/checks`, {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      })));
+    await loadDomains();
+  }
+
+  function scheduleAutoCheck(): void {
+    if (pendingCheckDomains().length === 0) {
+      stopAutoCheck();
+      return;
+    }
+    if (autoCheckTimer !== null) return;
+    autoCheckTimer = window.setInterval(() => {
+      autoCheckRounds += 1;
+      if (autoCheckRounds > AUTO_CHECK_MAX_ROUNDS) {
+        stopAutoCheck();
+        return;
+      }
+      void autoCheckPending(false);
+    }, AUTO_CHECK_INTERVAL_MS);
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void autoCheckPending(true);
+  });
 
   function openDeleteDialog(domain: DomainRecord, opener: HTMLButtonElement): void {
     if (deleteDialog === null) return;

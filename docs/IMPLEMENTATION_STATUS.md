@@ -1807,3 +1807,142 @@ Known limitations carried forward:
   (separate cleanup candidate).
 - The legacy `--selinow-*` alias layer is fully removed; any external
   stylesheet referencing those names must migrate to `--sln-*`.
+
+Dashboard Redesign Takeover — wave 2: E2E smoke, ultra review, hardening
+and channel/domain automation upgrades (2026-08-16, later shift):
+Branch `dashboard-redesign-takeover`. Scope: Task 7 (browser E2E smoke of
+the main dashboard flows) + Task 8 (3-way ultra review) + fixes for the
+findings + seller-requested automation upgrades for Telegram bot setup and
+custom-domain DNS confirmation.
+
+Browser E2E smoke (dev server `http://app.localhost:4330`, see environment
+notes below) — verified flows:
+- Register → OTP verify → password login → logout → login (password-only;
+  2FA login path not exercised in-browser, see known issues).
+- Onboarding wizard: create store (multi-channel), 1-click product template,
+  finish wizard; store context propagates `?shop=` through the app shell.
+- App shell nav: Operations/Sales channels/Configuration/Administration
+  groups, `/app/telegram` 307-redirects to `/app/integrations?focus=telegram`
+  preserving `shop`; `/app/developer` renders API credentials surface.
+- Products: server-side search (`q=Beta` filters rows + URL), URL-driven sort
+  (`sort=title` orders A→Z), rows-per-page control, CSV export button (no
+  error state; blob download not observable from the embedded browser).
+- Automation rules: create rule (order.paid → Telegram notify) persisted and
+  rendered with Edit/Turn off/Delete; unsafe webhook (`http://127.0.0.1`)
+  rejected server-side without creating a rule; toggle verified via UI.
+- Billing: plan hero, entitlements, invoice history (empty state), usage
+  meters render; Integrations hub: Telegram row + config panel, payments and
+  domains summary cards, developer link; Domains: platform subdomain card,
+  PlanLimitState correctly disables custom-domain connect on trial plan.
+
+Ultra review (3 dimensions, base `bcf9692`):
+- COMPLETENESS: no blockers; majors = D1 bulk actions never implemented nor
+  deferred in reports; takeover docs overclaim server-side search for
+  inventory/members/admin-appeals (they lack it); DomainList still carries a
+  duplicate `<template data-domain-template>` markup-drift risk.
+- CORRECTNESS: no blockers; major = CSV export lacked formula-injection
+  escaping (`=`/`+`/`-`/`@` from customer-controlled names reach seller
+  spreadsheets); minors = webhook guard missed trailing-dot hostnames
+  (`localhost.`), rule PATCH changing trigger without re-validating legacy
+  actions, client Idempotency-Key regenerated per attempt (dedup defeated),
+  billing usage meter rendered limit `0` as "no numeric limit" while the
+  dispatcher fail-closes to blocked.
+- IMPACT: report pending at the time of this entry (agent still running);
+  spot-checks from the other two reviews: ownership attribution for
+  migration 0099 predates the takeover checkpoint, `src/pages/app/index.astro`
+  still links `/app/telegram` (redirect keeps it working).
+
+Fixes applied this shift (all verified by targeted tests):
+- `src/lib/dashboard/csv-export.ts` — neutralize leading `=+-@\t\r` with a
+  `'` guard (OWASP CSV-injection guidance); new cases in
+  `tests/unit/csv-export.test.ts`.
+- `src/lib/automation/rules/webhook-guard.ts` — strip trailing dots from the
+  hostname before matching (`localhost.`, `foo.internal.` now blocked); new
+  cases in `tests/unit/automation-rules-executors.test.ts`.
+- `src/components/dashboard/onboarding/OnboardingPreviewDrawer.astro` —
+  `.preview-drawer-panel[hidden] { display: none; }`: the author `display:
+  flex` overrode the UA `[hidden]` rule, so the "closed" preview drawer
+  stayed painted over the wizard form and blocked the "Tạo Cửa Hàng" button
+  (reproduced in-browser before the fix; click works after).
+- `src/components/dashboard/automation/RuleForm.astro` — same `[hidden]`
+  override for the prototype condition row: it rendered like a real row in
+  the create dialog, but the collector only reads `[data-rule-condition-row]`
+  clones, so operator/value typed into the prototype were silently dropped
+  (rule saved with "0 conditions" — reproduced in-browser).
+- `src/pages/app/billing.astro` — usageLimit now accepts configured `0`
+  limits and the percent math treats `limit === 0` as fully blocked, matching
+  dispatcher enforcement instead of showing "no numeric limit".
+- `src/scripts/dashboard/automation-rules.ts` — create Idempotency-Key is
+  stable per draft session (new salt only after a confirmed create), so a
+  retried submit after a lost response deduplicates server-side.
+- `src/scripts/dashboard/security.ts` — surfaces the server's local-only
+  `debugOtp` in the 2FA feedback line (`APP_ENV=local` only) so enrollment
+  is testable without a mail provider.
+
+Channel & domain automation upgrades (seller request "auto-jump to
+BotFather / Cloudflare and auto-confirm"):
+- Telegram (`src/pages/app/integrations.astro`, `src/scripts/dashboard/
+  integrations.ts`): config panel now offers a one-click "Copy /newbot
+  command" button next to the BotFather deep link; client-side token format
+  validation (`^\d{6,}:[A-Za-z0-9_-]{30,}$`) fails fast with a clear message
+  (verified in-browser with an invalid token — no server round-trip); after a
+  successful connect the script automatically fires the existing
+  health-check endpoint so the seller sees bot+webhook verification finish
+  without another manual click.
+- Domains (`src/components/dashboard/domains/DomainList.astro`,
+  `src/scripts/dashboard/domains.ts`): DNS instruction cards now include an
+  "Open Cloudflare DNS" deep link (plus the existing copy-name/copy-target
+  buttons) and an auto-recheck note; while the page is open, pending custom
+  domains are re-checked automatically (15s interval, max 8 rounds, plus an
+  immediate re-check with a 30s throttle when the tab becomes visible).
+- i18n: new keys added to both EN and VI catalogs for all of the above
+  (`dashboard.integrations.telegram.copy_command*`, `token_invalid`,
+  `auto_verify`, `dashboard.domains.card.dns.open_cloudflare`,
+  `auto_check_note`).
+
+Verification (this shift):
+- Targeted: `vitest run` for csv-export, all 4 automation-rules suites,
+  i18n-call-site-contract, security-account-tabs-ui,
+  integrations-frontend-contract, tenant-link-static-fallback,
+  billing-invoice-history — all pass (100 tests).
+- `npm run lint` — clean on every file touched by this shift.
+- `npm run test` (full) — 2615/2616 pass; the single failure
+  (`storefront.order.shipping.kicker` missing from the EN storefront catalog
+  for `src/pages/orders/[orderPublicId].astro`) and 22 `astro check` type
+  errors (`ProductInput.deliveryMode`) both come from a *parallel
+  workstream's* uncommitted edits to `src/lib/commerce/**`,
+  `src/lib/catalog/**`, `src/pages/orders/**` and `src/pages/api/store/**`
+  present in the same working tree — not from this shift's changes; left for
+  that stream to resolve.
+
+Known issues / follow-ups from this shift:
+- Embedded-browser (IAB) cookie jar kept failing CSRF-protected POSTs from
+  `/app/security` even with a fresh session, while the same flow verified
+  clean via curl (login → CSRF GET `/api/auth/sessions` → 200) and all
+  account-security unit/integration suites pass. Full 2FA enable/disable +
+  password-change E2E should be re-run with the repo's standard Playwright
+  gate (`scripts/local-auth-browser-gate.mjs`) instead of the IAB.
+- `requireRecentAuth` failures surface as "The security token is no longer
+  valid" on the security page, which reads like a CSRF/technical fault;
+  consider a dedicated re-auth message + inline "Sign out to authenticate
+  again" affordance (the button already exists in the Sessions panel).
+- Custom-domain auto-recheck path could not be exercised end-to-end in-browser
+  because the trial plan correctly blocks custom-domain connect
+  (PlanLimitState); logic is unit-covered by the shared scripts contract
+  tests and the wiring is live for entitled shops.
+
+Local environment notes for the next shift:
+- Dev server runs on `http://127.0.0.1:4330` (`--host 127.0.0.1 --port 4330
+  --allowed-hosts app.localhost,localhost,127.0.0.1`); ports 4321/4322 are
+  occupied by unrelated projects on this machine.
+- `.dev.vars` (git-ignored) now carries `PLATFORM_ORIGIN` /
+  `DASHBOARD_ORIGIN` / `API_ORIGIN` overrides pointing at `*.localhost:4330`
+  so host-based routing works off the default port; pre-edit backup at
+  `/tmp/selinow-dev-vars-takeover.bak`.
+- Local D1 had not applied migrations 0098–0100 (register/login failed with
+  `no such column: password_hash`); applied via
+  `npx wrangler d1 migrations apply PLATFORM_DB --local`.
+- Disposable E2E account: `takeover-e2e@selinow.invalid` /
+  `TakeoverE2E@2026x` with store `Takeover E2E Store`
+  (`shop_a13c5fcb-bbcf-42fc-8c80-109e342f4a9f`) + 3 draft products, local DB
+  only.
