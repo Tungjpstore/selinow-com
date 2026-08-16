@@ -30,7 +30,9 @@ type NavItem = {
 };
 
 type NavGroup = {
-  key: "administration" | "configuration" | "operations" | "sales_channels";
+  // "sales_channels" is retained in the union so the legacy class/badge
+  // comparisons below stay type-valid; no group uses it at runtime.
+  key: "automation" | "catalog" | "channels" | "sales_channels" | "sell" | "settings";
   label: string;
   items: readonly NavItem[];
 };
