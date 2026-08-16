@@ -4,6 +4,50 @@ Last updated: 2026-08-16
 
 ## Current source of truth
 
+Appointment Booking Vertical + Full 9-Template Gallery — TV4 (2026-08-16, branch `storefront-templates`):
+Booking services end-to-end (spa/barber/clinic) and the final template trio, completing all three
+verticals and all nine storefront templates selectable in the Store Builder.
+- **Migration `0103_appointment_booking_vertical.sql`** (additive, invariant-registry registered):
+  `product_variants.duration_minutes` (a service = a manual product whose variant carries duration),
+  `booking_resources` (staff/rooms), `booking_resource_schedules` (weekly minute windows),
+  `booking_holds` (token-marked checkout holds with release lifecycle), `bookings` (immutable per
+  order-item appointment with booked→cancelled/completed/no_show guards).
+- **Slot engine `src/lib/commerce/booking.ts`**: timezone-correct availability via Intl two-probe
+  offsets (honors `shops.timezone`), slots = schedule windows stepping by service duration minus
+  active holds and booked appointments; `resolveBookingSelection` re-validates the buyer's slot
+  (window fit + overlap) before checkout; seller resource/schedule upsert with catalog capability.
+- **Checkout money path**: booking carts are website-only, paid-only, exactly one service line with
+  quantity one; the canonical transaction proves slot freedom inside the guarded order INSERT
+  (no overlapping active hold or booked appointment on the resource) and writes the hold + booked
+  appointment; the request fingerprint binds the RAW slot choice (resourceId/startAt) so same-key
+  replays succeed even after the slot is held by the first order; order expiry cancels the booking
+  and releases the hold, making the slot bookable again.
+- **Storefront UX**: checkout slot picker (7-day window from the picked date, per-day grouping,
+  resource names, required radio) shown only for service carts; order status page renders the
+  appointment (date/time range, resource, status); `durationMinutes` flows through the storefront
+  catalog (`CatalogData` → `catalog-dom`) for client-side cart detection.
+- **Public API**: `GET /api/store/booking/slots?variantId&dateStart&dateEnd` (14-day max range,
+  200-slot cap; indexed in `API_ENDPOINT_INDEX.csv`, 189 rows).
+- **Templates (TV4b)**: `serenity` (free — pill service menu, booking-first CTA, pastel hero),
+  `craft` (Pro — dark vintage barbershop, uppercase menu with hairline rules), `clinic`
+  (Pro — medical service `<table>` + process steps) — registry availability flipped: **all nine
+  templates available** (swift/pulse/desk · aurora/metro/bustle · serenity/craft/clinic);
+  dispatcher + shared layout sheets extended; render contracts pin the full set.
+- **Tests**: `tests/unit/booking-appointment-checkout.test.ts` — timezone slot math (ICT→UTC),
+  atomic double-book block across resources, missing slot / misaligned slot / quantity>1
+  rejections, idempotent replay (one durable order + one booking), expiry cancel + release +
+  rebooking. Suites updated for `StorefrontShop.timezone`.
+- **Verification Gates**: `npx tsc --noEmit` clean for this stream (2 pre-existing errors in
+  `src/pages/api/auth/login.ts` belong to the parallel auth stream) · eslint clean in touched
+  areas (1 remaining error likewise foreign) · `npm run test` (334 files, **2624 tests**) ·
+  `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**:
+  - Seller booking management (calendar view, cancel/no-show transitions) is API-partial:
+    resources + schedules upsert exist; booking transitions and `/app/bookings` UI land in TV5.
+  - No buffer times between appointments, no multi-slot bookings, no customer-driven
+    cancellation/rescheduling; Telegram booking unsupported by design (`booking_channel_unsupported`).
+  - Slot generation loads ≤500 busy intervals per 14-day window (adequate for launch scale).
+
 Physical Goods Vertical — TV3 (2026-08-16, branch `storefront-templates`):
 End-to-end physical selling: schema, checkout money path with shipping, dispatch state machine,
 storefront/seller APIs, buyer UX, and the three physical templates (Aurora/Metro/Bustle).
