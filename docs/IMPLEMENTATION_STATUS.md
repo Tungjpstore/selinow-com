@@ -2174,3 +2174,131 @@ commit 92e2e47):
   (<=600), emoji, and semantic-hex-on-tokens. Full suite 2629/2630 — the
   single failure is the parallel landing-v4 stream's uncommitted footer
   edit (out of scope). Verified /app in-browser after the changes.
+
+Backend — remediation terminal closure + reversal restock (2026-08-17):
+- Migration 0104_remediation_completion.sql (forward-only, 0103 was tip):
+  rebuilds payment_remediation_requests to replace 0054's biconditional
+  reviewed-fields CHECK, which stranded approved requests in
+  provider_pending forever; completed/failed are now reachable from
+  provider_pending. Indexes and the three triggers are recreated; the
+  transition guard now allows provider_pending -> completed|failed and
+  failed -> requested retry while keeping reviewed-at-approval audit
+  fields intact.
+- src/lib/payments/remediation.ts: reviewPaymentRemediationRequest now
+  accepts terminal decisions completed|failed (from provider_pending)
+  alongside the unchanged requested -> provider_pending|rejected flow,
+  with the same role gate (owner/risk), idempotency + request-hash
+  replay, optimistic version guard (pre-batch 409), audit_logs and
+  idempotency_records writes. completed on kind=refund invokes
+  applyVerifiedPaymentReversal with verificationMethod
+  "direct_reconciliation" (manual_reconciliation is not an allowed value
+  and validation was not loosened), providerReference
+  "remediation:<requestPublicId>", idempotency key
+  "remediation-completion:<requestPublicId>". partial_refund completes
+  WITHOUT reversal side effects and records audit metadata
+  manualPartialSettlement=true (reversal engine cannot express partials;
+  fail-closed choice). Seller-side create keeps the 503 with distinct
+  issue codes payos_refund_api_unavailable + manual_admin_settlement_required;
+  no PayOS refund API integration.
+- src/lib/commerce/payment-reversal.ts: revocation batch now releases
+  physical inventory in the same fenced batch — inventory_keys rows with
+  status='sold' whose sold_order_item_id belongs to the reversed order's
+  items return to available with sold fields cleared; idempotent via the
+  status='sold' predicate and the shared revoking-event EXISTS fence.
+- src/pages/api/admin/appeals/[requestPublicId].ts accepts the new
+  decisions plus optional failureCode with the same validation style.
+- Tests: new tests/unit/payment-remediation-completion.test.ts (10 tests:
+  completed refund end-to-end + idempotent replay + late retry conflict,
+  stale version/state/authz rejections, restock tenant-isolation with a
+  concurrent same-variant checkout race, failed-decision audit without
+  reversal + failureCode drift conflict, partial_refund/manual_review
+  completion paths, blocked completion when order already refunded,
+  seller create 503 detail codes, concurrent completed-vs-failed
+  serialization, claim-crash recovery retry, legacy hash-shape replay).
+  Existing suites updated (payment-reversal-entitlement-revocation now
+  asserts restock; seller-operations-backend asserts completed review
+  succeeds).
+- Race-fix hardening (same shift, after 3-perspective code review):
+  terminal reviews now use claim-then-apply serialization — a dedicated
+  claim batch bumps version provider_pending -> provider_pending BEFORE
+  the reversal runs (with a payment.remediation_review_claimed audit
+  row), so a concurrent reviewer holding the same expectedVersion gets
+  version_conflict before any money moves; the final batch fences on the
+  post-claim version. Crash recovery: if the worker dies between claim
+  and final, the row stays provider_pending at the bumped version with
+  no idempotency record; an admin retry at the bumped version re-claims
+  and finishes, and the remediation-completion:<requestPublicId>
+  reversal key replays the money side instead of double-refunding.
+- requestHash backward compatibility: failureCode joins the review
+  request hash only when non-null, keeping the pre-failureCode
+  { decision, expectedVersion, requestPublicId } shape byte-identical so
+  in-flight idempotency replays recorded before failed-decision support
+  shipped still match.
+- Verification: five remediation/release suites 59/59 pass after the
+  race fix; npx tsc --noEmit clean; eslint clean; astro check shows only
+  the pre-existing frontend baseline errors in src/layouts/AppLayout.astro
+  (8; the src/pages/solutions/index.astro error was fixed by a parallel
+  stream).
+- Known limitations: partial refunds settle manually (audit note only)
+  until the provider exposes a refund API; reversal completion depends on
+  an authoritative paid_exact payment chain, otherwise completion is
+  blocked with payment_remediation_completion_blocked 409.
+
+Backend — worker queue + cron hardening (2026-08-17):
+- delivery_provider_unsupported queue outcomes now settle terminally:
+  kind:"failed" single pass with a dead-letter record and no retry churn
+  (previously requeued indefinitely).
+- 8 purge/retention cron jobs in the scheduled handler now run in
+  parallel via Promise.allSettled with per-job error isolation; provider-
+  touching jobs remain sequential.
+- worker-configuration.d.ts regenerated via npm run cf-typegen:staging.
+- Known limitations: the remaining sequential jobs stay sequential until
+  their independence is proven; typegen is staging-shaped (EMAIL_*
+  required), so a union-shaped default-env typegen would break the email
+  code path.
+
+Backend — custom-domain Turnstile admission proactive refresh (2026-08-17):
+- The Turnstile admission cron now proactively refreshes domains whose
+  admission expires within a 7h threshold (< the 12h serve gate), with a
+  30-minute per-domain retry throttle and a per-tick cap of 10 refreshes
+  (TURNSTILE_REFRESH_MAX_PER_TICK). Fail-closed on admission API errors.
+- Authoritative revocation demotes the domain to validating with
+  platform-domain failover and records the new audit action
+  domain.turnstile_admission_expired.
+- Seller-visible statuses reuse the existing
+  domain_turnstile_admission_pending / domain_turnstile_admission_lookup_failed
+  / subscription_required codes (no new seller-facing surface).
+- Known limitation: if the Cloudflare admission API is down >12h, domains
+  expire into the seller-visible fail-closed state by design.
+
+Release tooling — migration 0104 registry sync (2026-08-17):
+- Added the 0104_remediation_completion.sql entry to
+  PRODUCTION_DATABASE_INVARIANT_REGISTRY in scripts/lib/release.mjs
+  (full payment_remediation_requests column shapes + index/trigger
+  object hashes recomputed from the real post-migration SQLite schema);
+  bumped the migration-tip pin in tests/unit/low-stock-threshold.test.ts.
+- Verified by tests/unit/production-deploy-continuation-guard.test.ts
+  11/11 (previously 4 failures from the unregistered migration).
+
+Session review record — cross-stream findings + verification (2026-08-17):
+- BEHAVIOR CHANGE: the physical inventory restock in the reversal engine
+  also applies to the pre-existing PayOS signed refund/chargeback webhook
+  path — refunded keys return to available and become resellable; seller
+  deliveredStock and low-stock automation counts shift accordingly, and
+  the buyer key page already 409s on refunded orders.
+- KNOWN LIMITATION (frontend frozen): the admin appeals console
+  (src/pages/admin/appeals.astro + src/scripts/dashboard/admin-appeals.ts)
+  cannot yet issue completed/failed decisions — terminal closure is
+  API-only until a frontend change is permitted. Tracked as a follow-up.
+- OPS FOLLOW-UPS: reconcile PLATFORM_ORIGIN / DASHBOARD_ORIGIN /
+  API_ORIGIN var-vs-secret duplication on staging before the next deploy
+  (wrangler secret list --env staging); provision DODO_PAYMENTS_WEBHOOK_KEY
+  if still absent; the Cloudflare-side secret inventory and live ledger
+  query remain external-ops prerequisites for the production release per
+  docs/PRODUCTION_RELEASE.md.
+- Verification evidence: full gates green before the race fix
+  (check baseline-only: 8 pre-existing AppLayout.astro errors, lint
+  clean, full suite 2651/2651); post-fix 59/59 across the five
+  remediation/release suites — final full-suite re-run pending. The
+  3-perspective code review completed with no critical findings (the one
+  MAJOR race and one MINOR hash-shape finding are both fixed above).

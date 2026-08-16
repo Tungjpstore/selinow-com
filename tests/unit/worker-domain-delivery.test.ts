@@ -534,7 +534,7 @@ describe("Worker generic domain delivery contract", () => {
     expect(message.ack).toHaveBeenCalledOnce();
   });
 
-  it("settles unknown providers retryably and never invokes the Telegram adapter", async () => {
+  it("settles unknown providers terminally in one pass and never invokes the Telegram adapter", async () => {
     dependencies.claimDeliveryJobReference.mockResolvedValue(deliveryClaim({
       attempts: 3,
       providerCode: "whatsapp",
@@ -552,14 +552,27 @@ describe("Worker generic domain delivery contract", () => {
       queueKind: "integration",
     }));
     expect(dependencies.deliverTelegramJob).not.toHaveBeenCalled();
+    expect(dependencies.terminalizeDeliveryProviderOutcomeUnknown).not.toHaveBeenCalled();
     expect(dependencies.settleDeliveryJob).toHaveBeenCalledWith(expect.objectContaining({
       settlement: {
         errorCode: "delivery_provider_unsupported",
-        nextAttemptAt: "2026-07-27T12:02:00.000Z",
-        status: "retryable",
+        status: "failed",
       },
     }));
+    expect(dependencies.recordDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
+      failureCode: "delivery_provider_unsupported",
+      providerAttempts: 3,
+      referenceId: "delivery-worker-001",
+      referenceType: "outbox_job",
+    }));
     expect(message.ack).toHaveBeenCalledOnce();
+    expect(message.retry).not.toHaveBeenCalled();
+    expect(loggedMetrics("delivery.queue_batch_processed")).toMatchObject({
+      acknowledged: 1,
+      channelDeliveryFailed: 1,
+      retried: 0,
+      unsupportedProviders: 1,
+    });
   });
 
   it("retries without ACK when claim, settlement, or terminal recording is not durable", async () => {
@@ -674,6 +687,71 @@ describe("Worker generic domain delivery contract", () => {
       deliveryJobsCandidates: 0,
       deliveryJobsFailed: 0,
       deliveryJobsSent: 0,
+      scheduledJobFailures: 1,
+    });
+  });
+
+  it("runs purge jobs in a parallel batch while provider jobs stay sequential and unaffected by purge failures", async () => {
+    let releasePurges!: () => void;
+    const purgeGate = new Promise<void>((resolve) => {
+      releasePurges = resolve;
+    });
+    const admissionsCompleted = vi.fn();
+    dependencies.purgeAdmissions.mockImplementation(() => purgeGate.then(() => {
+      admissionsCompleted();
+      return 5;
+    }));
+    dependencies.purgeSecurityRateLimits.mockImplementation(() => purgeGate.then(() => 7));
+    dependencies.purgeDataExports.mockRejectedValueOnce(new Error("purge exploded"));
+    const controller: ScheduledController = {
+      cron: "*/5 * * * *",
+      noRetry: vi.fn(),
+      scheduledTime: NOW.getTime(),
+    };
+
+    const flushMicrotasks = async () => {
+      for (let index = 0; index < 60; index += 1) await Promise.resolve();
+    };
+
+    const scheduledRun = worker.scheduled(controller, testEnv());
+    await flushMicrotasks();
+
+    // The batch started both gated purge jobs before either could complete.
+    expect(dependencies.purgeAdmissions).toHaveBeenCalledOnce();
+    expect(dependencies.purgeSecurityRateLimits).toHaveBeenCalledOnce();
+    expect(admissionsCompleted).not.toHaveBeenCalled();
+    // Provider-touching jobs started before the purge batch.
+    expect(dependencies.enqueueDueDeliveryJobs.mock.invocationCallOrder[0]).toBeLessThan(
+      dependencies.purgeAdmissions.mock.invocationCallOrder[0] as number,
+    );
+    expect(dependencies.dispatchDueDomainEvents.mock.invocationCallOrder[0]).toBeLessThan(
+      dependencies.purgeSecurityRateLimits.mock.invocationCallOrder[0] as number,
+    );
+
+    releasePurges();
+    await scheduledRun;
+
+    expect(admissionsCompleted).toHaveBeenCalledOnce();
+    expect(dependencies.purgeBuyerOrderRecovery).toHaveBeenCalledOnce();
+    expect(dependencies.purgeCartMutationReplays).toHaveBeenCalledOnce();
+    expect(dependencies.purgeTelegramUpdates).toHaveBeenCalledOnce();
+    expect(dependencies.purgeAnonymousLimits).toHaveBeenCalledOnce();
+    expect(dependencies.purgeDeliveryGrantClaims).toHaveBeenCalledOnce();
+    // The failing purge is isolated: recorded with safe metadata only.
+    expect(dependencies.loggerError).toHaveBeenCalledWith({
+      errorCode: "scheduled_data_export_purge_failed",
+      event: "infrastructure.cron_job_failed",
+      queue: "data_export_purge",
+      requestId: `cron-${String(NOW.getTime())}`,
+      source: "scheduled",
+    });
+    expect(JSON.stringify(dependencies.loggerError.mock.calls)).not.toContain("purge exploded");
+    expect(loggedMetrics("infrastructure.cron_completed")).toMatchObject({
+      deliveryJobsCandidates: 2,
+      purgedAuthRequestAdmissions: 5,
+      purgedDataExportCandidates: 0,
+      purgedDataExports: 0,
+      purgedSecurityRateLimits: 7,
       scheduledJobFailures: 1,
     });
   });

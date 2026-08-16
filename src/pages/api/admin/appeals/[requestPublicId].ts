@@ -5,7 +5,7 @@ import { requireResourceId } from "../../../../lib/catalog/policy";
 import { readJsonObject, rejectUnknownFields } from "../../../../lib/http/request";
 import { createCaughtErrorResponse, PRIVATE_RESPONSE_HEADERS } from "../../../../lib/http/security";
 import { getBindings } from "../../../../lib/platform/bindings";
-import { reviewPaymentRemediationRequest } from "../../../../lib/payments/remediation";
+import { reviewPaymentRemediationRequest, type PaymentRemediationReviewDecision } from "../../../../lib/payments/remediation";
 
 export const PATCH: APIRoute = async ({ locals, params, request }) => {
   try {
@@ -13,11 +13,12 @@ export const PATCH: APIRoute = async ({ locals, params, request }) => {
     const auth = await requireCsrfSession(request, env);
     requireRecentAuth(auth);
     const body = await readJsonObject(request, 4 * 1024);
-    rejectUnknownFields(body, ["decision", "expectedVersion"]);
+    rejectUnknownFields(body, ["decision", "expectedVersion", "failureCode"]);
     const result = await reviewPaymentRemediationRequest({
-      decision: body.decision as "provider_pending" | "rejected",
+      decision: body.decision as PaymentRemediationReviewDecision,
       env,
       expectedVersion: body.expectedVersion as number,
+      failureCode: body.failureCode,
       idempotencyKey: request.headers.get("Idempotency-Key"),
       requestPublicId: requireResourceId(params.requestPublicId, "prem"),
       requestId: locals.requestId,

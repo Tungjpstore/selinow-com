@@ -507,6 +507,21 @@ export async function applyVerifiedPaymentReversal(input: ApplyVerifiedPaymentRe
       nowIso,
       ...eventFenceValues,
     ));
+    // Release physical inventory back to sellable stock. The status predicate
+    // keeps the restock idempotent and the tenant-fenced subquery only matches
+    // order items of the reversed order, so concurrent checkouts on the same
+    // variant are untouched.
+    statements.push(input.env.PLATFORM_DB.prepare(`
+      UPDATE inventory_keys
+      SET status = 'available', sold_order_item_id = NULL, sold_at = NULL
+      WHERE shop_id = ? AND status = 'sold'
+        AND sold_order_item_id IN (
+          SELECT order_items.id
+          FROM order_items
+          WHERE order_items.order_id = ? AND order_items.shop_id = ?
+        )
+        AND ${revokingEventExists()}
+    `).bind(input.shopId, input.orderId, input.shopId, ...eventFenceValues));
     statements.push(...await buildGenericTransitionStatements({
       database: input.env.PLATFORM_DB,
       entitlementIds: genericTargets,

@@ -616,7 +616,10 @@ describe("seller operations backend contracts", () => {
     expect(reviewed).toMatchObject({ status: "provider_pending", version: 2 });
     expect(await reviewPaymentRemediationRequest({ decision: "provider_pending", env: bindings, expectedVersion: 1, idempotencyKey: "payment-review-1", requestPublicId: request.requestPublicId, requestId: "request-remediation-review-retry", userId: ADMIN, now: NOW })).toEqual(reviewed);
     await expect(reviewPaymentRemediationRequest({ decision: "rejected", env: bindings, expectedVersion: 2, idempotencyKey: "payment-review-terminal", requestPublicId: request.requestPublicId, requestId: "request-remediation-terminal", userId: ADMIN, now: NOW })).rejects.toMatchObject({ code: "payment_remediation_state_conflict" });
-    await expect(reviewPaymentRemediationRequest({ decision: "completed" as never, env: bindings, expectedVersion: 2, idempotencyKey: "payment-review-invalid", requestPublicId: request.requestPublicId, requestId: "request-remediation-invalid", userId: ADMIN, now: NOW })).rejects.toMatchObject({ code: "validation_failed" });
+    await expect(reviewPaymentRemediationRequest({ decision: "canceled" as never, env: bindings, expectedVersion: 2, idempotencyKey: "payment-review-invalid", requestPublicId: request.requestPublicId, requestId: "request-remediation-invalid", userId: ADMIN, now: NOW })).rejects.toMatchObject({ code: "validation_failed" });
+    const completed = await reviewPaymentRemediationRequest({ decision: "completed", env: bindings, expectedVersion: 2, idempotencyKey: "payment-review-complete", requestPublicId: request.requestPublicId, requestId: "request-remediation-complete", userId: ADMIN, now: NOW });
+    expect(completed).toMatchObject({ status: "completed", version: 4 });
+    expect(database.prepare("SELECT completed_at IS NOT NULL AS completed, provider_reference_hash IS NOT NULL AS referenced FROM payment_remediation_requests WHERE public_id = ?").get(request.requestPublicId)).toEqual({ completed: 1, referenced: 1 });
     expect(database.prepare("SELECT payment_status FROM orders WHERE id = ?").get(ORDER_A)).toEqual({ payment_status: "pending" });
     expect(() => database.prepare("DELETE FROM payment_remediation_requests WHERE id = ?").run(request.requestPublicId)).toThrow("payment_remediation_request_immutable");
   });

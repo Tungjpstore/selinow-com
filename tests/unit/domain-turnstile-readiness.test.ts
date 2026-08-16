@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   CUSTOM_DOMAIN_TURNSTILE_ADMISSION_MAX_AGE_MS,
+  CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS,
+  CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS,
   customDomainTurnstileAdmissionSql,
   hasFreshExactTurnstileAdmission,
+  isExactTurnstileAdmissionRefreshDue,
+  turnstileAdmissionRefreshWindow,
   turnstileAdmissionWindow,
 } from "../../src/lib/domains/readiness";
 
@@ -59,5 +63,39 @@ describe("custom-domain Turnstile readiness", () => {
     expect(sql).toContain("julianday('now', '-12 hours')");
     expect(sql).toContain("<= julianday('now')");
     expect(() => customDomainTurnstileAdmissionSql("unsafe.alias")).toThrow(/invalid_sql_alias/u);
+  });
+
+  it("exposes refresh thresholds strictly inside the serve-gate window", () => {
+    expect(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS).toBeGreaterThan(0);
+    expect(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS).toBeLessThan(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_MAX_AGE_MS);
+    expect(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS).toBeGreaterThan(0);
+    expect(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS).toBeLessThan(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS);
+    expect(turnstileAdmissionRefreshWindow(NOW)).toEqual({
+      dueBefore: new Date(NOW.getTime() - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS).toISOString(),
+      retryBefore: new Date(NOW.getTime() - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS).toISOString(),
+    });
+  });
+
+  it("marks only stale exact active admissions as refresh-due", () => {
+    const dueBoundary = new Date(NOW.getTime() - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS).toISOString();
+    expect(isExactTurnstileAdmissionRefreshDue({ hostname: "shop.customer.com", now: NOW, validationMetadataJson: metadata(dueBoundary) })).toBe(true);
+    expect(isExactTurnstileAdmissionRefreshDue({
+      hostname: "shop.customer.com",
+      now: NOW,
+      validationMetadataJson: metadata(new Date(NOW.getTime() - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS + 1).toISOString()),
+    })).toBe(false);
+  });
+
+  it.each([
+    ["future", new Date(NOW.getTime() + 60_000).toISOString(), {}],
+    ["wrong hostname", new Date(NOW.getTime() - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS - 1).toISOString(), { hostname: "other.customer.com" }],
+    ["pending", new Date(NOW.getTime() - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS - 1).toISOString(), { status: "pending" }],
+    ["invalid checkedAt", "not-a-timestamp", {}],
+  ])("does not mark %s admission evidence as refresh-due", (_label, checkedAt, overrides) => {
+    expect(isExactTurnstileAdmissionRefreshDue({
+      hostname: "shop.customer.com",
+      now: NOW,
+      validationMetadataJson: metadata(checkedAt, overrides),
+    })).toBe(false);
   });
 });

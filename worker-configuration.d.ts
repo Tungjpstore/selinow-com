@@ -11,7 +11,6 @@ interface __BaseEnv_Env {
 	INTEGRATION_QUEUE: Queue;
 	NOTIFICATION_QUEUE: Queue;
 	ASSETS: Fetcher;
-	API_ORIGIN: "https://api-staging.selinow.com";
 	APP_ENV: "staging";
 	DODO_PAYMENTS_ENVIRONMENT: "test_mode";
 	DODO_PAYMENTS_WEBHOOK_PUBLIC_ID: "ddowh_18dde01c-6208-4f8a-8d92-538c973f9856";
@@ -19,7 +18,6 @@ interface __BaseEnv_Env {
 	ACTIVE_CREDENTIAL_KEY_VERSION: "v1";
 	ACTIVE_INVENTORY_KEY_VERSION: "v1";
 	CREDENTIAL_KEY_VERSION: "v1";
-	DASHBOARD_ORIGIN: "https://app-staging.selinow.com";
 	DEFAULT_CURRENCY: "VND";
 	DEFAULT_LOCALE: "en";
 	DEFAULT_TIMEZONE: "Asia/Ho_Chi_Minh";
@@ -30,7 +28,6 @@ interface __BaseEnv_Env {
 	LOG_LEVEL: "info";
 	PLATFORM_BASE_DOMAIN: "staging.selinow.com";
 	PLATFORM_NAME: "Selinow Staging";
-	PLATFORM_ORIGIN: "https://staging.selinow.com";
 	RESOURCE_MANIFEST_VERSION: "d979abe2b8dad825";
 	SAAS_CNAME_TARGET: "customers.selinow.com";
 	SESSION_COOKIE_NAME: "selinow_staging_session";
@@ -48,6 +45,9 @@ interface __BaseEnv_Env {
 	INVENTORY_KEK_V1: string;
 	IDENTIFIER_HMAC_SECRET: string;
 	CREDENTIAL_KEK_V1: string;
+	PLATFORM_ORIGIN: string;
+	DASHBOARD_ORIGIN: string;
+	API_ORIGIN: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

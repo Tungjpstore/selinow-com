@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CloudflareCustomHostname } from "../../src/lib/domains/cloudflare";
-import { hasFreshExactTurnstileAdmission } from "../../src/lib/domains/readiness";
-import { reconcileCustomDomains } from "../../src/lib/domains/reconciliation";
+import {
+  CUSTOM_DOMAIN_TURNSTILE_ADMISSION_MAX_AGE_MS,
+  CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS,
+  CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS,
+  hasFreshExactTurnstileAdmission,
+} from "../../src/lib/domains/readiness";
+import { reconcileCustomDomains, TURNSTILE_REFRESH_MAX_PER_TICK } from "../../src/lib/domains/reconciliation";
 import { checkCustomDomain, createCustomDomain as createCustomDomainClaim, customDomainBackoffSeconds, deleteCustomDomain, listShopDomains, setPrimaryDomain, type DomainProvider } from "../../src/lib/domains/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
@@ -119,6 +124,27 @@ class DomainDatabase {
       bind(...values: unknown[]) {
         const statement = {
           all() {
+            if (sql.includes("domain:refresh-turnstile-due")) {
+              const dueBefore = String(values[0]);
+              const now = String(values[1]);
+              const retryBefore = String(values[2]);
+              const due = Array.from(domains.values()).filter((row) => {
+                if (row.type !== "custom" || row.deletedAt !== null || row.deleteRequestedAt !== null || row.status !== "active" || row.ownershipVerifiedAt === undefined || row.ownershipVerifiedAt === null) return false;
+                if (row.hostnameStatus !== "active" || row.sslStatus !== "active" || row.dnsStatus !== "active") return false;
+                let admission: Record<string, unknown>;
+                try {
+                  const parsed = JSON.parse(row.validationMetadataJson) as { turnstile?: unknown };
+                  admission = typeof parsed.turnstile === "object" && parsed.turnstile !== null ? parsed.turnstile as Record<string, unknown> : {};
+                } catch {
+                  return false;
+                }
+                if (admission.status !== "active" || admission.hostname !== row.hostname || admission.mode !== "operator_managed" || admission.source !== "cloudflare_widget_domains") return false;
+                if (typeof admission.checkedAt !== "string" || admission.checkedAt > now || admission.checkedAt >= dueBefore) return false;
+                if (row.leaseExpiresAt !== null && row.leaseExpiresAt > now) return false;
+                return (row.lastCheckedAt ?? "") <= retryBefore;
+              });
+              return Promise.resolve({ results: due.map((row) => ({ id: row.id, shopId: row.shopId })) });
+            }
             if (sql.includes("FROM custom_domain_claims")) {
               return Promise.resolve({ results: Array.from(claims.values()).filter((row) => row.shopId === values[0]) });
             }
@@ -196,6 +222,76 @@ class DomainDatabase {
             return Promise.resolve(null);
           },
           run() {
+            if (sql.includes("domain:claim-turnstile-refresh-lease")) {
+              const row = domains.get(String(values[3]));
+              const now = String(values[5]);
+              if (row === undefined || row.shopId !== values[4] || row.type !== "custom" || row.deletedAt !== null || row.deleteRequestedAt !== null || row.status !== "active" || (row.leaseExpiresAt !== null && row.leaseExpiresAt > now)) {
+                return Promise.resolve({ meta: { changes: 0 } });
+              }
+              Object.assign(row, { leaseExpiresAt: values[1], leaseToken: values[0], updatedAt: values[2] });
+              return Promise.resolve({ meta: { changes: 1 } });
+            }
+            if (sql.includes("domain:refresh-turnstile-admission")) {
+              const row = domains.get(String(values[5]));
+              if (row === undefined || row.shopId !== values[6] || row.deletedAt !== null || row.deleteRequestedAt !== null || row.status !== "active" || row.leaseToken !== values[7] || row.version !== values[8]) {
+                return Promise.resolve({ meta: { changes: 0 } });
+              }
+              const cappedNextCheckAt = String(values[3]);
+              Object.assign(row, {
+                lastCheckedAt: values[1],
+                lastSafeErrorCode: null,
+                leaseExpiresAt: null,
+                leaseToken: null,
+                nextCheckAt: row.nextCheckAt !== null && row.nextCheckAt < cappedNextCheckAt ? row.nextCheckAt : cappedNextCheckAt,
+                updatedAt: values[4],
+                validationMetadataJson: values[0],
+                version: row.version + 1,
+              });
+              return Promise.resolve({ meta: { changes: 1 } });
+            }
+            if (sql.includes("domain:persist-turnstile-refresh-failure")) {
+              const row = domains.get(String(values[3]));
+              if (row === undefined || row.shopId !== values[4] || row.deletedAt !== null || row.deleteRequestedAt !== null || row.leaseToken !== values[5] || row.version !== values[6]) {
+                return Promise.resolve({ meta: { changes: 0 } });
+              }
+              Object.assign(row, { lastCheckedAt: values[0], lastSafeErrorCode: values[1], leaseExpiresAt: null, leaseToken: null, updatedAt: values[2], version: row.version + 1 });
+              return Promise.resolve({ meta: { changes: 1 } });
+            }
+            if (sql.includes("domain:persist-turnstile-revocation")) {
+              const row = domains.get(String(values[5]));
+              const expectedCanonical = typeof values[11] === "string" ? values[11] : null;
+              if (row === undefined || row.shopId !== values[6] || row.deleteRequestedAt !== null || row.leaseToken !== values[7] || row.version !== values[8] || row.isPrimary !== values[9] || (canonical.get(String(values[10])) ?? null) !== expectedCanonical) {
+                return Promise.resolve({ meta: { changes: 0 } });
+              }
+              Object.assign(row, {
+                checkAttempts: values[1],
+                isPrimary: 0,
+                lastCheckedAt: values[3],
+                lastSafeErrorCode: "domain_turnstile_admission_pending",
+                leaseExpiresAt: null,
+                leaseToken: null,
+                nextCheckAt: values[2],
+                status: "validating",
+                updatedAt: values[4],
+                validationMetadataJson: values[0],
+                version: row.version + 1,
+              });
+              return Promise.resolve({ meta: { changes: 1 } });
+            }
+            if (sql.includes("domain:release-turnstile-refresh-lease")) {
+              const row = domains.get(String(values[1]));
+              if (row === undefined || row.shopId !== values[2] || row.leaseToken !== values[3]) return Promise.resolve({ meta: { changes: 0 } });
+              Object.assign(row, { leaseExpiresAt: null, leaseToken: null, updatedAt: values[0] });
+              return Promise.resolve({ meta: { changes: 1 } });
+            }
+            if (sql.includes("domain:turnstile-admission-expired-audit")) {
+              const row = domains.get(String(values[6]));
+              const visible = row !== undefined
+                && row.deletedAt === null
+                && (row.lastSafeErrorCode === "domain_turnstile_admission_pending" || row.lastSafeErrorCode === "domain_turnstile_admission_lookup_failed");
+              if (visible) auditActions.push("domain.turnstile_admission_expired");
+              return Promise.resolve({ meta: { changes: visible ? 1 : 0 } });
+            }
             if (sql.includes("domain:suspend-missing-entitlement")) {
               const row = domains.get(String(values[2]));
               const expectedCanonical = typeof values[8] === "string" ? values[8] : null;
@@ -1662,5 +1758,183 @@ describe("custom domain store", () => {
     expect(customDomainBackoffSeconds(20, "validating")).toBe(3_600);
     expect(customDomainBackoffSeconds(2, "active")).toBe(21_600);
     expect(customDomainBackoffSeconds(2, "failed")).toBe(86_400);
+  });
+});
+
+describe("custom domain Turnstile admission refresh", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function turnstileOf(row: FakeDomain): { checkedAt: string; status: string } {
+    return (JSON.parse(row.validationMetadataJson) as { turnstile: { checkedAt: string; status: string } }).turnstile;
+  }
+
+  function markAdmission(row: FakeDomain, checkedAt: Date): void {
+    row.validationMetadataJson = JSON.stringify({
+      ...(JSON.parse(row.validationMetadataJson) as Record<string, unknown>),
+      turnstile: {
+        checkedAt: checkedAt.toISOString(),
+        hostname: row.hostname,
+        mode: "operator_managed",
+        source: "cloudflare_widget_domains",
+        status: "active",
+      },
+    });
+  }
+
+  async function createStaleActiveDomain(input: { checkedAt: Date; database: DomainDatabase; env: AppBindings; provider: Provider }): Promise<FakeDomain> {
+    const created = await createCustomDomain({
+      env: input.env,
+      hostname: "shop.customer.com",
+      requestId: "request-a",
+      runtime: { dnsVerifier: activeDns, now: NOW, provider: input.provider },
+      shopPublicId: "shop_public_a",
+      userId: "user-a",
+    });
+    const row = input.database.domains.get(created.domain.id) as FakeDomain;
+    markAdmission(row, input.checkedAt);
+    row.lastCheckedAt = input.checkedAt.toISOString();
+    // Push the scheduled full check far out (mirrors a provider Retry-After
+    // delay) so only the proactive Turnstile refresh pass sees this domain.
+    row.nextCheckAt = new Date(input.checkedAt.getTime() + 30 * 60 * 60_000).toISOString();
+    return row;
+  }
+
+  it("keeps the refresh threshold and retry spacing safely inside the 12-hour serve window", () => {
+    expect(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS).toBeGreaterThan(0);
+    expect(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS).toBeLessThan(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_MAX_AGE_MS);
+    expect(CUSTOM_DOMAIN_TURNSTILE_ADMISSION_MAX_AGE_MS - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS)
+      .toBeGreaterThanOrEqual(2 * CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS);
+    expect(TURNSTILE_REFRESH_MAX_PER_TICK).toBeGreaterThan(0);
+  });
+
+  it("refreshes a stale admission and updates checkedAt on the next reconcile", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const checkedAt = new Date(NOW.getTime() + 60 * 60_000);
+    const row = await createStaleActiveDomain({ checkedAt, database, env, provider });
+    const admissionPoll = vi.spyOn(provider, "verifyTurnstileHostnameAdmission");
+
+    const reconcileAt = new Date(checkedAt.getTime() + 8 * 60 * 60_000);
+    await expect(reconcileCustomDomains(env, reconcileAt, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 1, deleted: 0, failed: 0 });
+
+    expect(admissionPoll).toHaveBeenCalledTimes(1);
+    expect(admissionPoll).toHaveBeenCalledWith("0xSiteKeyThatLooksConfigured123456", row.hostname);
+    const refreshed = database.domains.get(row.id) as FakeDomain;
+    expect(refreshed.status).toBe("active");
+    expect(refreshed.leaseToken).toBeNull();
+    expect(refreshed.leaseExpiresAt).toBeNull();
+    expect(refreshed.lastSafeErrorCode).toBeNull();
+    expect(refreshed.lastCheckedAt).toBe(reconcileAt.toISOString());
+    expect(turnstileOf(refreshed)).toMatchObject({ checkedAt: reconcileAt.toISOString(), hostname: row.hostname, status: "active" });
+    expect(refreshed.nextCheckAt).toBe(new Date(reconcileAt.getTime() + customDomainBackoffSeconds(refreshed.checkAttempts, "active") * 1_000).toISOString());
+    expect(hasFreshExactTurnstileAdmission({ hostname: row.hostname, now: reconcileAt, validationMetadataJson: refreshed.validationMetadataJson })).toBe(true);
+  });
+
+  it("leaves admission untouched when the Cloudflare lookup fails and retries after the throttle", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const checkedAt = new Date(NOW.getTime() + 60 * 60_000);
+    const row = await createStaleActiveDomain({ checkedAt, database, env, provider });
+    provider.verifyTurnstileHostnameAdmission = () => Promise.reject(new Error("provider timeout"));
+    const admissionPoll = vi.spyOn(provider, "verifyTurnstileHostnameAdmission");
+
+    const reconcileAt = new Date(checkedAt.getTime() + 8 * 60 * 60_000);
+    await expect(reconcileCustomDomains(env, reconcileAt, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 0, deleted: 0, failed: 1 });
+
+    const after = database.domains.get(row.id) as FakeDomain;
+    expect(after.status).toBe("active");
+    expect(after.leaseToken).toBeNull();
+    expect(after.leaseExpiresAt).toBeNull();
+    expect(after.lastCheckedAt).toBe(reconcileAt.toISOString());
+    expect(after.lastSafeErrorCode).toBeNull();
+    expect(turnstileOf(after)).toMatchObject({ checkedAt: checkedAt.toISOString(), status: "active" });
+
+    // An immediate retry is throttled so a failing API is not hammered.
+    await expect(reconcileCustomDomains(env, new Date(reconcileAt.getTime() + 5 * 60_000), { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 0, deleted: 0, failed: 0 });
+    expect(admissionPoll).toHaveBeenCalledTimes(1);
+
+    // After the retry spacing the refresh is attempted again.
+    await expect(reconcileCustomDomains(env, new Date(reconcileAt.getTime() + CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS + 60_000), { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 0, deleted: 0, failed: 1 });
+    expect(admissionPoll).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces an expired admission through status, error code, and audit when the hostname is no longer admitted", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const checkedAt = new Date(NOW.getTime() - 13 * 60 * 60_000);
+    const row = await createStaleActiveDomain({ checkedAt, database, env, provider });
+    provider.nextTurnstileStatus = "pending";
+    const admissionPoll = vi.spyOn(provider, "verifyTurnstileHostnameAdmission");
+
+    await expect(reconcileCustomDomains(env, NOW, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 1, deleted: 0, failed: 0 });
+
+    expect(admissionPoll).toHaveBeenCalledTimes(1);
+    const after = database.domains.get(row.id) as FakeDomain;
+    expect(after.status).toBe("validating");
+    expect(after.isPrimary).toBe(0);
+    expect(after.lastSafeErrorCode).toBe("domain_turnstile_admission_pending");
+    expect(turnstileOf(after)).toMatchObject({ checkedAt: NOW.toISOString(), status: "pending" });
+    expect(database.auditActions.filter((action) => action === "domain.turnstile_admission_expired")).toHaveLength(1);
+  });
+
+  it("surfaces an expired admission it cannot re-verify without clearing the existing evidence", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const checkedAt = new Date(NOW.getTime() - 13 * 60 * 60_000);
+    const row = await createStaleActiveDomain({ checkedAt, database, env, provider });
+    provider.verifyTurnstileHostnameAdmission = () => Promise.reject(new Error("provider timeout"));
+    const admissionPoll = vi.spyOn(provider, "verifyTurnstileHostnameAdmission");
+
+    await expect(reconcileCustomDomains(env, NOW, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 0, deleted: 0, failed: 1 });
+
+    expect(admissionPoll).toHaveBeenCalledTimes(1);
+    const after = database.domains.get(row.id) as FakeDomain;
+    expect(after.status).toBe("active");
+    expect(after.lastSafeErrorCode).toBe("domain_turnstile_admission_lookup_failed");
+    expect(turnstileOf(after)).toMatchObject({ checkedAt: checkedAt.toISOString(), status: "active" });
+    expect(database.auditActions.filter((action) => action === "domain.turnstile_admission_expired")).toHaveLength(1);
+  });
+
+  it("does not re-check fresh admissions", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const created = await createCustomDomain({ env, hostname: "shop.customer.com", requestId: "request-a", runtime: { dnsVerifier: activeDns, now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
+    const row = database.domains.get(created.domain.id) as FakeDomain;
+    row.nextCheckAt = new Date(NOW.getTime() + 30 * 60 * 60_000).toISOString();
+    const admissionPoll = vi.spyOn(provider, "verifyTurnstileHostnameAdmission");
+
+    await expect(reconcileCustomDomains(env, new Date(NOW.getTime() + 2 * 60 * 60_000), { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 0, deleted: 0, failed: 0 });
+    expect(admissionPoll).not.toHaveBeenCalled();
+  });
+
+  it("suspends through the refresh pass when the plan entitlement is lost", async () => {
+    const database = new DomainDatabase();
+    const provider = new Provider();
+    const env = environment(database);
+    const checkedAt = new Date(NOW.getTime() + 60 * 60_000);
+    const row = await createStaleActiveDomain({ checkedAt, database, env, provider });
+    database.customDomainFeature.set("shop-a", false);
+    const admissionPoll = vi.spyOn(provider, "verifyTurnstileHostnameAdmission");
+
+    const reconcileAt = new Date(checkedAt.getTime() + 8 * 60 * 60_000);
+    await expect(reconcileCustomDomains(env, reconcileAt, { dnsVerifier: activeDns, provider })).resolves.toEqual({ checked: 1, deleted: 0, failed: 0 });
+
+    expect(admissionPoll).not.toHaveBeenCalled();
+    const after = database.domains.get(row.id) as FakeDomain;
+    expect(after.status).toBe("suspended");
+    expect(after.lastSafeErrorCode).toBe("subscription_required");
+    expect(after.nextCheckAt).toBeNull();
   });
 });

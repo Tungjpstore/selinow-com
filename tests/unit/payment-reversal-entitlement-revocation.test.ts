@@ -563,7 +563,8 @@ describe("verified payment reversal access revocation", () => {
       { id: "grant-consumed-a", status: "consumed" },
     ]);
     expect(database.prepare("SELECT COUNT(*) AS count FROM delivery_grant_consumptions").get()).toEqual({ count: 1 });
-    expect(database.prepare("SELECT status FROM inventory_keys WHERE id = 'key-a'").get()).toEqual({ status: "sold" });
+    expect(database.prepare("SELECT status, sold_order_item_id AS soldOrderItemId, sold_at AS soldAt FROM inventory_keys WHERE id = 'key-a'").get())
+      .toEqual({ soldAt: null, soldOrderItemId: null, status: "available" });
     expect(database.prepare("SELECT state FROM fulfillments WHERE id = 'fulfillment-a'").get()).toEqual({ state: "fulfilled" });
     const ledger = database.prepare("SELECT provider_reference_hash AS providerReferenceHash, evidence_hash AS evidenceHash FROM payment_reversal_events").get() as Record<string, unknown>;
     expect(JSON.stringify(ledger)).not.toContain("provider-reversal-reference-a");

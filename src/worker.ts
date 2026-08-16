@@ -461,7 +461,9 @@ export default {
           providerResult = { errorCode: "telegram_delivery_exception", kind: "retryable" };
         }
       } else {
-        providerResult = { errorCode: "delivery_provider_unsupported", kind: "retryable" };
+        // Unsupported providers can never succeed, so settle terminally in one
+        // pass instead of burning retries and backoff until the DLQ.
+        providerResult = { errorCode: "delivery_provider_unsupported", kind: "failed" };
         metrics.unsupportedProviders += 1;
       }
 
@@ -656,54 +658,71 @@ export default {
       () => expireDueGenericEntitlements({ env: bindings, nowIso: scheduledTimeIso }),
       0,
     );
-    const purgedAuthRequestAdmissions = await run(
-      "auth_request_admission_purge",
-      "scheduled_auth_request_admission_purge_failed",
-      () => purgeAuthRequestAdmissions(bindings, scheduledAt),
-      0,
-    );
-    const purgedBuyerOrderRecovery = await run(
-      "buyer_order_recovery_purge",
-      "scheduled_buyer_order_recovery_purge_failed",
-      () => purgeBuyerOrderRecoveryArtifacts({ env: bindings, now: scheduledAt }),
-      { deleted: 0, redacted: 0 },
-    );
-    const purgedCartMutationReplays = await run(
-      "cart_mutation_replay_purge",
-      "scheduled_cart_mutation_replay_purge_failed",
-      () => purgeCartMutationReplays(bindings, scheduledAt),
-      0,
-    );
-    const purgedTelegramUpdates = await run(
-      "telegram_update_purge",
-      "scheduled_telegram_update_purge_failed",
-      () => purgeTelegramUpdateHistory(bindings, scheduledAt),
-      0,
-    );
-    const purgedAnonymousLimits = await run(
-      "anonymous_limit_purge",
-      "scheduled_anonymous_limit_purge_failed",
-      () => purgeAnonymousLimits(bindings, scheduledAt),
-      0,
-    );
-    const purgedDeliveryGrantClaims = await run(
-      "delivery_grant_claim_purge",
-      "scheduled_delivery_grant_claim_purge_failed",
-      () => purgeExpiredDeliveryGrantClaims(bindings, scheduledAt),
-      0,
-    );
-    const purgedSecurityRateLimits = await run(
-      "security_rate_limit_purge",
-      "scheduled_security_rate_limit_purge_failed",
-      () => purgeExpiredSecurityRateLimits(bindings, scheduledAt),
-      0,
-    );
-    const purgedDataExports = await run(
-      "data_export_purge",
-      "scheduled_data_export_purge_failed",
-      () => purgeExpiredDataExports(bindings, scheduledAt),
-      { candidates: 0, deleted: 0, failed: 0, invalidObjectKeys: 0 },
-    );
+    // Purge/retention/maintenance jobs are mutually independent, so run them
+    // concurrently. Each keeps its own runScheduledJob wrapper, preserving
+    // per-job error capture, failure logging, and metric fallbacks.
+    const purgeSettlements = await Promise.allSettled([
+      run(
+        "auth_request_admission_purge",
+        "scheduled_auth_request_admission_purge_failed",
+        () => purgeAuthRequestAdmissions(bindings, scheduledAt),
+        0,
+      ),
+      run(
+        "buyer_order_recovery_purge",
+        "scheduled_buyer_order_recovery_purge_failed",
+        () => purgeBuyerOrderRecoveryArtifacts({ env: bindings, now: scheduledAt }),
+        { deleted: 0, redacted: 0 },
+      ),
+      run(
+        "cart_mutation_replay_purge",
+        "scheduled_cart_mutation_replay_purge_failed",
+        () => purgeCartMutationReplays(bindings, scheduledAt),
+        0,
+      ),
+      run(
+        "telegram_update_purge",
+        "scheduled_telegram_update_purge_failed",
+        () => purgeTelegramUpdateHistory(bindings, scheduledAt),
+        0,
+      ),
+      run(
+        "anonymous_limit_purge",
+        "scheduled_anonymous_limit_purge_failed",
+        () => purgeAnonymousLimits(bindings, scheduledAt),
+        0,
+      ),
+      run(
+        "delivery_grant_claim_purge",
+        "scheduled_delivery_grant_claim_purge_failed",
+        () => purgeExpiredDeliveryGrantClaims(bindings, scheduledAt),
+        0,
+      ),
+      run(
+        "security_rate_limit_purge",
+        "scheduled_security_rate_limit_purge_failed",
+        () => purgeExpiredSecurityRateLimits(bindings, scheduledAt),
+        0,
+      ),
+      run(
+        "data_export_purge",
+        "scheduled_data_export_purge_failed",
+        () => purgeExpiredDataExports(bindings, scheduledAt),
+        { candidates: 0, deleted: 0, failed: 0, invalidObjectKeys: 0 },
+      ),
+    ]);
+    const purgeValue = <T>(index: number, fallback: T): T => {
+      const settlement = purgeSettlements[index];
+      return settlement?.status === "fulfilled" ? settlement.value as T : fallback;
+    };
+    const purgedAuthRequestAdmissions = purgeValue(0, 0);
+    const purgedBuyerOrderRecovery = purgeValue(1, { deleted: 0, redacted: 0 });
+    const purgedCartMutationReplays = purgeValue(2, 0);
+    const purgedTelegramUpdates = purgeValue(3, 0);
+    const purgedAnonymousLimits = purgeValue(4, 0);
+    const purgedDeliveryGrantClaims = purgeValue(5, 0);
+    const purgedSecurityRateLimits = purgeValue(6, 0);
+    const purgedDataExports = purgeValue(7, { candidates: 0, deleted: 0, failed: 0, invalidObjectKeys: 0 });
     logger.info({
       event: "infrastructure.cron_completed",
       metrics: {
