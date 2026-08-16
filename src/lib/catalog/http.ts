@@ -76,11 +76,14 @@ export function parseProductWithInitialVariantInput(
 }
 
 export function parseVariantInput(body: Record<string, unknown>, defaultCurrency?: string): VariantInput {
-  rejectUnknownFields(body, ["compareAtMinor", "currency", "maxPerOrder", "minPerOrder", "options", "priceMinor", "sku", "status", "title"]);
+  rejectUnknownFields(body, ["compareAtMinor", "currency", "durationMinutes", "maxPerOrder", "minPerOrder", "options", "priceMinor", "sku", "status", "title"]);
   const priceMinor = requireInteger(body.priceMinor, "price_minor", 0, 9_000_000_000_000);
   const compareAtMinor = body.compareAtMinor === null || body.compareAtMinor === undefined
     ? null
     : requireInteger(body.compareAtMinor, "compare_at_minor", priceMinor, 9_000_000_000_000);
+  const durationMinutes = body.durationMinutes === null || body.durationMinutes === undefined
+    ? null
+    : requireInteger(body.durationMinutes, "duration_minutes", 5, 720);
   const minPerOrder = body.minPerOrder === undefined ? 1 : requireInteger(body.minPerOrder, "min_per_order", 1, 1_000);
   const maxPerOrder = body.maxPerOrder === undefined ? 10 : requireInteger(body.maxPerOrder, "max_per_order", minPerOrder, 1_000);
   const currency = body.currency === undefined && defaultCurrency === undefined
@@ -89,6 +92,7 @@ export function parseVariantInput(body: Record<string, unknown>, defaultCurrency
   return {
     compareAtMinor,
     currency,
+    durationMinutes,
     maxPerOrder,
     minPerOrder,
     optionsJson: normalizeOptions(body.options),

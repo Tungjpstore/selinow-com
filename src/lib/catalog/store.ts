@@ -92,7 +92,7 @@ function mapCatalogCurrencyWriteError(error: unknown): AppError | null {
 
 export type CategoryInput = { description: string; name: string; slug: string; sortOrder: number; status: "active" | "archived" | "draft" };
 export type ProductInput = { categoryId: string | null; deliveryMode?: "digital" | "shipping"; description: string; fulfillmentType: "license_key" | "manual"; slug: string; status: "active" | "archived" | "draft" | "suspended"; title: string };
-export type VariantInput = { compareAtMinor: number | null; currency: string | undefined; maxPerOrder: number; minPerOrder: number; optionsJson: string; priceMinor: number; sku: string; status: "active" | "archived" | "suspended"; title: string };
+export type VariantInput = { compareAtMinor: number | null; currency: string | undefined; durationMinutes?: number | null; maxPerOrder: number; minPerOrder: number; optionsJson: string; priceMinor: number; sku: string; status: "active" | "archived" | "suspended"; title: string };
 
 export type ProductView = ProductInput & { createdAt: string; id: string; updatedAt: string; version: number };
 export type VariantView = Omit<VariantInput, "currency" | "optionsJson"> & { createdAt: string; currency: string; id: string; optionsJson: string; productId: string; updatedAt: string; version: number };
@@ -122,7 +122,7 @@ export async function listSellerCatalog(input: { env: AppBindings; shopPublicId:
         product_variants.currency,
         product_variants.min_per_order AS minPerOrder,
         product_variants.max_per_order AS maxPerOrder,
-        product_variants.status, product_variants.version,
+        product_variants.status, product_variants.version, product_variants.duration_minutes AS durationMinutes,
         COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock,
         COUNT(CASE WHEN inventory_keys.status = 'reserved' THEN 1 END) AS reservedStock,
         COUNT(CASE WHEN inventory_keys.status = 'sold' THEN 1 END) AS deliveredStock,
@@ -484,9 +484,9 @@ export async function createProductWithInitialVariant(input: {
         INSERT INTO product_variants (
           id, shop_id, product_id, sku, title, options_json, price_minor,
           compare_at_minor, currency, min_per_order, max_per_order, status,
-          version, created_at, updated_at
+          version, duration_minutes, created_at, updated_at
         )
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?
         WHERE EXISTS (SELECT 1 FROM products WHERE id = ? AND shop_id = ?)
       `).bind(
         variantId,
@@ -501,6 +501,7 @@ export async function createProductWithInitialVariant(input: {
         input.initialVariant.minPerOrder,
         input.initialVariant.maxPerOrder,
         input.initialVariant.status,
+        input.initialVariant.durationMinutes ?? null,
         nowIso,
         nowIso,
         productId,
@@ -687,9 +688,9 @@ export async function createVariant(input: { data: VariantInput; env: AppBinding
       INSERT INTO product_variants (
         id, shop_id, product_id, sku, title, options_json, price_minor,
         compare_at_minor, currency, min_per_order, max_per_order, status,
-        version, created_at, updated_at
+        version, duration_minutes, created_at, updated_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?
       FROM shops
       WHERE shops.id = ?
         AND shops.currency = ?
@@ -701,12 +702,12 @@ export async function createVariant(input: { data: VariantInput; env: AppBinding
         options_json AS optionsJson, price_minor AS priceMinor,
         compare_at_minor AS compareAtMinor, currency,
         min_per_order AS minPerOrder, max_per_order AS maxPerOrder,
-        status, version, created_at AS createdAt, updated_at AS updatedAt
+        status, version, duration_minutes AS durationMinutes, created_at AS createdAt, updated_at AS updatedAt
     `).bind(
       id, actor.shopId, input.productId, input.data.sku, input.data.title,
       input.data.optionsJson, input.data.priceMinor, input.data.compareAtMinor,
       variantCurrency, input.data.minPerOrder, input.data.maxPerOrder,
-      input.data.status, now, now, actor.shopId, variantCurrency, input.productId,
+      input.data.status, now, input.data.durationMinutes ?? null, now, actor.shopId, variantCurrency, input.productId,
     ).first();
     if (row !== null) return row;
     throw new AppError("validation_failed", 409, ["currency_mismatch"]);
@@ -724,7 +725,7 @@ export async function updateVariant(input: { data: VariantInput; env: AppBinding
       UPDATE product_variants
       SET sku = ?, title = ?, options_json = ?, price_minor = ?,
         compare_at_minor = ?, currency = ?, min_per_order = ?,
-        max_per_order = ?, status = ?, version = version + 1,
+        max_per_order = ?, status = ?, duration_minutes = ?, version = version + 1,
         updated_at = ?
       WHERE id = ? AND shop_id = ?
         AND EXISTS (
@@ -736,11 +737,12 @@ export async function updateVariant(input: { data: VariantInput; env: AppBinding
         options_json AS optionsJson, price_minor AS priceMinor,
         compare_at_minor AS compareAtMinor, currency,
         min_per_order AS minPerOrder, max_per_order AS maxPerOrder,
-        status, version, created_at AS createdAt, updated_at AS updatedAt
+        status, version, duration_minutes AS durationMinutes, created_at AS createdAt, updated_at AS updatedAt
     `).bind(
       input.data.sku, input.data.title, input.data.optionsJson,
       input.data.priceMinor, input.data.compareAtMinor, variantCurrency,
       input.data.minPerOrder, input.data.maxPerOrder, input.data.status,
+      input.data.durationMinutes ?? null,
       new Date().toISOString(), input.variantId, actor.shopId, variantCurrency,
     ).first();
     if (row === null) {

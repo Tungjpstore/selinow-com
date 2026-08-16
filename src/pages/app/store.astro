@@ -102,6 +102,13 @@ const storeBuilderClientCopy = {
   publishConflict: t("dashboard.store_builder.runtime.publish_conflict"),
   publishError: t("dashboard.store_builder.runtime.publish_error", { error: "__ERROR__" }),
   publishFailed: t("dashboard.store_builder.runtime.publish_failed"),
+  shippingArchive: t("dashboard.store_builder.shipping.archive"),
+  shippingCreated: t("dashboard.store_builder.shipping.created"),
+  shippingEmpty: t("dashboard.store_builder.shipping.empty"),
+  shippingError: t("dashboard.store_builder.shipping.error"),
+  shippingFeeLabel: t("dashboard.store_builder.shipping.fee_label"),
+  shippingFreeOverLabel: t("dashboard.store_builder.shipping.free_over_label"),
+  shippingInvalid: t("dashboard.store_builder.shipping.invalid"),
 };
 ---
 
@@ -129,6 +136,7 @@ const storeBuilderClientCopy = {
           <button class="builder-tab is-active" id="tab-content" type="button" role="tab" aria-selected="true" aria-controls="panel-content" data-tab="content">{t("dashboard.store_builder.tab.content")}</button>
           <button class="builder-tab" id="tab-brand" type="button" role="tab" aria-selected="false" aria-controls="panel-brand" data-tab="brand">{t("dashboard.store_builder.tab.brand")}</button>
           <button class="builder-tab" id="tab-template" type="button" role="tab" aria-selected="false" aria-controls="panel-template" data-tab="template">{t("dashboard.store_builder.tab.template")}</button>
+          <button class="builder-tab" id="tab-shipping" type="button" role="tab" aria-selected="false" aria-controls="panel-shipping" data-tab="shipping">{t("dashboard.store_builder.tab.shipping")}</button>
           <button class="builder-tab" id="tab-layout" type="button" role="tab" aria-selected="false" aria-controls="panel-layout" data-tab="layout">{t("dashboard.store_builder.tab.layout")}</button>
           <button class="builder-tab" id="tab-seo" type="button" role="tab" aria-selected="false" aria-controls="panel-seo" data-tab="seo">{t("dashboard.store_builder.tab.seo")}</button>
           <button class="builder-tab" id="tab-support" type="button" role="tab" aria-selected="false" aria-controls="panel-support" data-tab="support">{t("dashboard.store_builder.tab.support")}</button>
@@ -196,6 +204,20 @@ const storeBuilderClientCopy = {
                 ))}
               </div>
               <p class="template-preview-note">{t("dashboard.store_builder.template.preview_note")}</p>
+            </fieldset>
+          </div>
+
+          <div class="tab-panel" id="panel-shipping" role="tabpanel" aria-labelledby="tab-shipping" data-panel="shipping" hidden>
+            <div class="panel-heading"><p class="eyebrow">{t("dashboard.store_builder.shipping.eyebrow")}</p><h2>{t("dashboard.store_builder.shipping.title")}</h2><p>{t("dashboard.store_builder.shipping.description")}</p></div>
+            <fieldset disabled={!canManage}>
+              <div class="shipping-method-form">
+                <label>{t("dashboard.store_builder.shipping.field.name")}<input data-shipping-name maxlength="80" placeholder={t("dashboard.store_builder.shipping.field.name_placeholder")} /></label>
+                <label>{t("dashboard.store_builder.shipping.field.fee", { currency: shop.currency })}<input data-shipping-fee type="number" min="0" step="1000" inputmode="numeric" placeholder="30000" /></label>
+                <label>{t("dashboard.store_builder.shipping.field.free_over", { currency: shop.currency })}<input data-shipping-free-over type="number" min="0" step="1000" inputmode="numeric" placeholder={t("dashboard.store_builder.shipping.field.free_over_placeholder")} /></label>
+                <button class="sln-button sln-button-secondary" type="button" data-shipping-create>{t("dashboard.store_builder.shipping.create")}</button>
+              </div>
+              <ul class="shipping-method-list" data-shipping-list aria-label={t("dashboard.store_builder.shipping.list_aria")}></ul>
+              <p class="form-feedback" data-shipping-feedback role="status" aria-live="polite"></p>
             </fieldset>
           </div>
 
@@ -346,6 +368,14 @@ const storeBuilderClientCopy = {
   .template-locked-note { color: var(--sln-warning-text-strong); }
   .template-preview-note { margin: 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
   @media (max-width: 560px) { .template-gallery { grid-template-columns: 1fr; } }
+  .shipping-method-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+  .shipping-method-form .sln-button { min-height: 42px; }
+  .shipping-method-list { display: grid; margin: 6px 0 0; padding: 0; list-style: none; }
+  .shipping-method-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .shipping-method-list li strong { font: var(--sln-font-label); }
+  .shipping-method-list li small { color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .shipping-method-list .sln-button { min-height: 34px; padding: 6px 12px; font: var(--sln-font-caption); }
+  @media (max-width: 720px) { .shipping-method-form { grid-template-columns: 1fr; } }
   .read-only-list { display: grid; border-top: 1px solid var(--sln-border-default); }
   .read-only-list > div { display: grid; gap: 4px; padding: 14px 0; border-bottom: 1px solid var(--sln-border-default); }
   .read-only-list strong { font: var(--sln-font-label); }

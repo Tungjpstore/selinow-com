@@ -72,6 +72,8 @@ function createDatabase(): SqliteD1 {
     // shipping columns (physical vertical, TV3 → 0006 + 0102).
     "migrations/0006_payos_payments.sql",
     "migrations/0102_physical_goods_vertical.sql",
+    // Variant writes persist duration_minutes (booking vertical, TV4).
+    "migrations/0103_appointment_booking_vertical.sql",
   ]) {
     database.exec(readFileSync(filename, "utf8"));
   }

@@ -365,6 +365,7 @@ if (editor !== null && editorForm !== null && saveButton !== null && archiveButt
     const data = new FormData(editorForm);
     return {
       categoryId: data.get("categoryId") || null,
+      deliveryMode: data.get("deliveryMode") === "shipping" ? "shipping" : "digital",
       description: data.get("description") ?? "",
       fulfillmentType: data.get("fulfillmentType") ?? "license_key",
       slug: data.get("slug") ?? "",
@@ -410,10 +411,44 @@ if (editor !== null && editorForm !== null && saveButton !== null && archiveButt
       options: {},
       priceMinor,
       sku,
+      durationMinutes: (() => { const raw = editorForm.querySelector<HTMLInputElement>("[name='newVariantDurationMinutes']")?.value.trim() ?? ""; return raw === "" ? null : Number(raw); })(),
       status: statusInput instanceof HTMLSelectElement ? statusInput.value : "active",
       title,
     };
   };
+  const editorDeliveryMode = (): "digital" | "shipping" => {
+    const select = editorForm.querySelector("[data-field='deliveryMode']");
+    return select instanceof HTMLSelectElement && select.value === "shipping" ? "shipping" : "digital";
+  };
+  const syncStockFields = (): void => {
+    const shipping = editorDeliveryMode() === "shipping";
+    editorForm.querySelectorAll<HTMLElement>("[data-stock-field]").forEach((field) => {
+      field.hidden = !shipping;
+      const input = field.querySelector("input");
+      if (input !== null) input.required = shipping;
+    });
+  };
+  editorForm.querySelector("[data-field='deliveryMode']")?.addEventListener("change", () => { syncStockFields(); });
+  const loadVariantStock = async (): Promise<void> => {
+    try {
+      const response = await fetch(`/api/app/shops/${editorShopId}/products/${editorProductId}/stock`, { credentials: "same-origin" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (typeof payload !== "object" || payload === null || !Array.isArray((payload as JsonObject).levels)) return;
+      const levels = new Map<string, number>();
+      for (const level of (payload as { levels: Array<{ onHand: number; variantId: string }> }).levels) {
+        if (typeof level.variantId === "string" && typeof level.onHand === "number") levels.set(level.variantId, level.onHand);
+      }
+      editorForm.querySelectorAll<HTMLInputElement>("[data-variant-stock]").forEach((input) => {
+        const value = levels.get(input.dataset.variantStock ?? "");
+        if (value !== undefined) input.value = String(value);
+      });
+    } catch {
+      // Stock display is best-effort; saving still validates server-side.
+    }
+  };
+  syncStockFields();
+  void loadVariantStock();
   const saveProduct = async (statusOverride?: string): Promise<void> => {
     if (!editorForm.reportValidity()) return;
     setEditorBusy(true, t("dashboard.products.client.editor_pending"));
@@ -431,6 +466,7 @@ if (editor !== null && editorForm !== null && saveButton !== null && archiveButt
             if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) fields.append(field.name, field.value);
           }
           const compareAtRaw = fields.get("compareAtMinor");
+          const durationRaw = fields.get("durationMinutes");
           const priceValue = fields.get("priceMajor");
           const priceMinor = parseMajorAmountToMinor(typeof priceValue === "string" ? priceValue : "", editorDefaultCurrency);
           if (priceMinor === null || priceMinor > 9_000_000_000_000) throw new Error("new_variant_price_invalid");
@@ -441,10 +477,15 @@ if (editor !== null && editorForm !== null && saveButton !== null && archiveButt
             minPerOrder: Number(fields.get("minPerOrder") ?? 1),
             options: parseOptions(fields.get("optionsJson")),
             priceMinor,
+            durationMinutes: durationRaw === null || durationRaw === "" ? null : Number(durationRaw),
             sku: fields.get("sku") ?? "",
             status: fields.get("status") ?? "active",
             title: fields.get("title") ?? "",
           });
+          const stockRaw = fields.get("stockOnHand");
+          if (stockRaw !== null && stockRaw !== "" && editorDeliveryMode() === "shipping") {
+            await editorRequest(`/api/app/shops/${editorShopId}/products/${editorProductId}/stock`, "POST", { onHand: Number(stockRaw), variantId });
+          }
         }
         if (nextVariant !== null) {
           await editorRequest(`/api/app/shops/${editorShopId}/products/${editorProductId}/variants`, "POST", nextVariant);
