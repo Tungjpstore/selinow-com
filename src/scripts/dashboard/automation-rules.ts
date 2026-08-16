@@ -55,8 +55,14 @@ function apiBase(shopPublicId: string): string {
   return `/api/app/shops/${encodeURIComponent(shopPublicId)}/automation/rules`;
 }
 
+// Stable per draft session: a retried create after a lost response must reuse
+// the same key so the server deduplicates instead of creating a twin rule.
+let createIdempotencySalt = crypto.randomUUID();
+
 function idempotencyKey(prefix: string): string {
-  return `${prefix}_${crypto.randomUUID()}`;
+  return prefix === "rule_create"
+    ? `${prefix}_${createIdempotencySalt}`
+    : `${prefix}_${crypto.randomUUID()}`;
 }
 
 function setFeedback(root: HTMLElement, message: string, tone: "danger" | "info" | "success" = "info"): void {
@@ -557,6 +563,7 @@ if (root !== null) {
       void request
         .then(async (payload) => {
           if (parseSingleRule(payload) === null) throw new RulesApiError("rules_projection_invalid", null);
+          if (!isEdit) createIdempotencySalt = crypto.randomUUID();
           await loadRules(root, shopPublicId);
           setFeedback(root, copy(root, "copySaveSuccess"), "success");
           detail.complete();

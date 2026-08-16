@@ -35,7 +35,9 @@ export function assertSafeWebhookUrl(value: unknown): string {
   if (url.username !== "" || url.password !== "") throw unsafe();
   if (url.port !== "" && url.port !== "443") throw unsafe();
 
-  const host = url.hostname.toLowerCase();
+  // Strip trailing dots first: WHATWG URL keeps "localhost." / "foo.internal."
+  // as-is, which would otherwise slip past the exact and suffix matches below.
+  const host = url.hostname.toLowerCase().replace(/\.+$/u, "");
   if (host === "") throw unsafe();
   // IPv6 literals (URL exposes them bracketed) or bare colons.
   if (host.includes("[") || host.includes(":")) throw unsafe();

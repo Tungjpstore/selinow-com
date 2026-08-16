@@ -61,7 +61,9 @@ const money = (amountMinor: number, currency: string): string => {
 };
 const usageLimit = (limits: Record<string, unknown>, metric: string): number | null => {
   const value = limits[metric];
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  // A configured limit of 0 is real: the dispatcher fail-closes and blocks all
+  // runs for that metric, so the UI must show "0", not "no numeric limit".
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 };
 const formatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
 const date = (value: string | null): string => value === null ? t("dashboard.billing.not_configured") : formatter.format(new Date(value));
@@ -120,7 +122,7 @@ const conversionHref = workspaceHref("/app/billing");
       <section class="billing-panel" aria-labelledby="invoices-title" data-billing-invoices><header><div><p class="eyebrow">{t("dashboard.billing.invoices.eyebrow")}</p><h2 id="invoices-title">{t("dashboard.billing.invoices.title")}</h2><p class="billing-request-description">{t("dashboard.billing.invoices.description")}</p></div></header>{invoices.length === 0 ? <WorkspaceState title={t("dashboard.billing.invoices.empty_title")} description={t("dashboard.billing.invoices.empty_description")} tone="neutral" /> : <div class="invoice-ledger" role="list" aria-label={t("dashboard.billing.invoices.title")}>{invoices.map((invoice) => <div class="invoice-row" role="listitem"><div class="invoice-copy"><strong>{date(invoice.paidAt ?? invoice.createdAt)}</strong><span>{money(invoice.amountMinor, invoice.currency)}{invoice.providerInvoiceRef !== null ? ` · ${t("dashboard.billing.invoices.reference")} ${invoice.providerInvoiceRef}` : ""}</span></div><StatusBadge label={t(`dashboard.billing.invoices.status.${invoice.status}`)} tone={invoiceTones[invoice.status]} /></div>)}</div>}</section>
       <section class="billing-panel" aria-labelledby="usage-title"><header><div><p class="eyebrow">{t("dashboard.billing.usage.eyebrow")}</p><h2 id="usage-title">{t("dashboard.billing.usage.title")}</h2></div></header>{billing.usage.length === 0 ? <WorkspaceState title={t("dashboard.billing.usage.empty_title")} description={t("dashboard.billing.usage.empty_description")} tone="neutral" /> : <div class="usage-ledger">{billing.usage.map((item) => {
         const limit = usageLimit(billing.limits, item.metric);
-        const percent = limit === null ? null : Math.round((item.value / limit) * 100);
+        const percent = limit === null ? null : limit === 0 ? (item.value > 0 ? 100 : 0) : Math.round((item.value / limit) * 100);
         const tone = percent === null ? "neutral" : percent >= 100 ? "danger" : percent >= 80 ? "warning" : "success";
         return <div class="usage-meter-row" data-tone={tone}><span class="usage-metric">{item.metric} · {item.periodKey}</span>{limit !== null && percent !== null ? <><div class="usage-meter" role="progressbar" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(item.value, limit)} aria-label={item.metric}><span class="usage-meter-fill" style={`width:${String(Math.min(percent, 100))}%`} data-tone={tone}></span></div><strong>{t("dashboard.billing.usage.of_limit", { value: item.value, limit })}</strong><small>{t("dashboard.billing.usage.percent_used", { percent })}</small></> : <><strong>{item.value}</strong><small>{t("dashboard.billing.usage.no_numeric_limit")}</small></>}<small class="usage-updated">{date(item.updatedAt)}</small></div>;
       })}</div>}</section>
