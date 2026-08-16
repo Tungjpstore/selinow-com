@@ -2120,3 +2120,22 @@ ad3d29e on `dashboard-redesign-takeover`):
 - Remaining for a later shift: ~123 direct font-weight>600 declarations in
   legacy pages (guard stays console-scoped until swept), Playwright-gate run
   of the 2FA browser flow, and the migration-0100 in-place edit decision.
+
+Console v2 — type ramp + semantic hex sweep (2026-08-16, fourth shift;
+commit 92e2e47):
+- .app-shell now also remaps the shared heading/label font tokens to the
+  console working ramp (<=600), so legacy pages render working typography
+  with zero markup changes; sidebar divider switched to border-inline-end
+  (logical property, satisfies the RTL contract).
+- 132 direct font-weight>600 declarations across workspace pages/dashboard
+  components flattened to 600/500; semantic raw hexes mapped to tokens
+  (brand/channel accents + preview mocks keep literals; meta theme-color
+  restored to a literal after a sweep accidentally replaced it with a var
+  in StorefrontLayout — caught by storefront-templates contract test).
+- Console overview restored localized PaymentState/FulfillmentState badges
+  plus the #dashboard-overview-date / data-visual-dynamic anchors the
+  authenticated-browser spec selects.
+- Design-contract guard now workspace-wide for borders (1px), weights
+  (<=600), emoji, and semantic-hex-on-tokens. Full suite 2629/2630 — the
+  single failure is the parallel landing-v4 stream's uncommitted footer
+  edit (out of scope). Verified /app in-browser after the changes.
