@@ -63,7 +63,7 @@ export const STOREFRONT_TEMPLATES: readonly StorefrontTemplateDefinition[] = [
     vertical: "digital",
   },
   {
-    available: false,
+    available: true,
     id: "aurora",
     name: "Aurora",
     premium: false,
@@ -71,7 +71,7 @@ export const STOREFRONT_TEMPLATES: readonly StorefrontTemplateDefinition[] = [
     vertical: "physical",
   },
   {
-    available: false,
+    available: true,
     id: "metro",
     name: "Metro",
     premium: true,
@@ -79,7 +79,7 @@ export const STOREFRONT_TEMPLATES: readonly StorefrontTemplateDefinition[] = [
     vertical: "physical",
   },
   {
-    available: false,
+    available: true,
     id: "bustle",
     name: "Bustle",
     premium: true,

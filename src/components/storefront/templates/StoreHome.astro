@@ -4,7 +4,10 @@
  * registry (unknown ids never reach here), so each shipped template registers
  * its home component in the map below; swift stays the structural fallback.
  */
+import AuroraStoreHome from "./aurora/StoreHome.astro";
+import BustleStoreHome from "./bustle/StoreHome.astro";
 import DeskStoreHome from "./desk/StoreHome.astro";
+import MetroStoreHome from "./metro/StoreHome.astro";
 import PulseStoreHome from "./pulse/StoreHome.astro";
 import SwiftStoreHome from "./swift/StoreHome.astro";
 import type { StorefrontCategory, StorefrontProduct, StorefrontShop } from "../../../lib/storefront/store";
@@ -18,7 +21,10 @@ interface Props {
 
 const { categories, locale, products, shop } = Astro.props;
 const storeHomeByTemplate: Record<string, typeof SwiftStoreHome> = {
+  aurora: AuroraStoreHome,
+  bustle: BustleStoreHome,
   desk: DeskStoreHome,
+  metro: MetroStoreHome,
   pulse: PulseStoreHome,
   swift: SwiftStoreHome,
 };

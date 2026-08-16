@@ -134,8 +134,8 @@ describe("storefront template registry", () => {
     expect(resolveStorefrontTemplate({ premiumEntitled: false, templateId: "does-not-exist" }).id).toBe("swift");
     expect(resolveStorefrontTemplate({ premiumEntitled: false, templateId: null }).id).toBe("swift");
     expect(resolveStorefrontTemplate({ premiumEntitled: false, templateId: 42 }).id).toBe("swift");
-    // aurora is not premium but its vertical has not shipped yet.
-    expect(resolveStorefrontTemplate({ premiumEntitled: true, templateId: "aurora" }).id).toBe("swift");
+    // serenity is not premium but its vertical has not shipped yet.
+    expect(resolveStorefrontTemplate({ premiumEntitled: true, templateId: "serenity" }).id).toBe("swift");
     // pulse is premium: entitled shops keep it, others degrade to the default.
     expect(resolveStorefrontTemplate({ premiumEntitled: true, templateId: "pulse" }).id).toBe("pulse");
     expect(resolveStorefrontTemplate({ premiumEntitled: false, templateId: "pulse" }).id).toBe("swift");
@@ -145,7 +145,7 @@ describe("storefront template registry", () => {
     expect(storefrontTemplateSelectionIssue({ premiumEntitled: false, templateId: "swift" })).toMatchObject({ id: "swift" });
     expect(storefrontTemplateSelectionIssue({ premiumEntitled: false, templateId: "nope" })).toBe("storefront_template_invalid");
     expect(storefrontTemplateSelectionIssue({ premiumEntitled: false, templateId: 7 })).toBe("storefront_template_invalid");
-    expect(storefrontTemplateSelectionIssue({ premiumEntitled: true, templateId: "aurora" })).toBe("storefront_template_invalid");
+    expect(storefrontTemplateSelectionIssue({ premiumEntitled: true, templateId: "serenity" })).toBe("storefront_template_invalid");
     expect(storefrontTemplateSelectionIssue({ premiumEntitled: false, templateId: "pulse" })).toBe("storefront_template_premium_required");
     expect(storefrontTemplateSelectionIssue({ premiumEntitled: true, templateId: "pulse" })).toMatchObject({ id: "pulse" });
   });
@@ -184,7 +184,7 @@ describe("seller template selection contract", () => {
     const database = createDatabase();
     seedTenant(database.database);
     const env = appEnv(database);
-    for (const templateId of ["does-not-exist", "aurora", "serenity"]) {
+    for (const templateId of ["does-not-exist", "serenity", "craft"]) {
       await expect(updateSellerStorefrontSettings({
         data: { templateId },
         env,
@@ -247,7 +247,7 @@ describe("template render contracts", () => {
   it("registers every available template in the store-home dispatcher", () => {
     const dispatcher = readFileSync("src/components/storefront/templates/StoreHome.astro", "utf8");
     const available = STOREFRONT_TEMPLATES.filter((template) => template.available);
-    expect(available.map((template) => template.id).sort()).toEqual(["desk", "pulse", "swift"]);
+    expect(available.map((template) => template.id).sort()).toEqual(["aurora", "bustle", "desk", "metro", "pulse", "swift"]);
     for (const template of available) {
       // Map entry `id: Component` plus its import line under templates/<id>/.
       expect(dispatcher, template.id).toMatch(new RegExp(`\\b${template.id}:\\s*\\w+StoreHome`, "u"));
