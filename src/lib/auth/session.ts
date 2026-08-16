@@ -89,6 +89,8 @@ export type PasswordLoginResult = {
 export type TwoFactorChallengeResult = {
   challengeToken: string;
   cooldownSeconds: number;
+  /** Present only when APP_ENV=local — dev/test parity aid. */
+  debugOtp?: string;
   expiresAt: string;
   twoFactorRequired: true;
 };

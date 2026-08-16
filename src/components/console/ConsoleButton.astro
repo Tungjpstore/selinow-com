@@ -1,0 +1,60 @@
+---
+/**
+ * Console button — flat, single-weight labels, hairline outlines only.
+ * Variants: primary (solid ink), secondary (hairline), quiet (text),
+ * danger (state-colored for destructive actions). Heights 32/36.
+ */
+type Props = {
+  variant?: "primary" | "secondary" | "quiet" | "danger";
+  size?: "sm" | "md";
+  type?: "button" | "submit";
+  href?: string;
+  target?: string;
+  rel?: string;
+  disabled?: boolean;
+  class?: string;
+};
+const { variant = "secondary", size = "md", type = "button", href, target, rel, disabled = false, class: className } = Astro.props;
+const Tag = href === undefined ? "button" : "a";
+---
+
+<Tag
+  class:list={["console-btn", `console-btn--${variant}`, `console-btn--${size}`, className]}
+  {type}
+  {href}
+  {target}
+  {rel}
+  aria-disabled={disabled ? "true" : undefined}
+  {...disabled && href === undefined ? { disabled: true } : {}}
+>
+  <slot />
+</Tag>
+
+<style>
+  .console-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid transparent;
+    border-radius: var(--sln-console-radius);
+    font: var(--sln-console-text-sm);
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  .console-btn:focus-visible { outline: none; box-shadow: var(--sln-console-focus); }
+  .console-btn--md { height: 34px; padding: 0 14px; }
+  .console-btn--sm { height: 28px; padding: 0 10px; font-size: 12px; }
+  .console-btn--primary { background: var(--sln-console-ink); color: var(--sln-console-bg); }
+  .console-btn--primary:hover { background: var(--sln-console-ink-2); }
+  .console-btn--secondary { background: var(--sln-console-surface); border-color: var(--sln-console-line); color: var(--sln-console-ink); }
+  .console-btn--secondary:hover { background: var(--sln-console-raised); }
+  .console-btn--quiet { background: transparent; color: var(--sln-console-ink-2); }
+  .console-btn--quiet:hover { color: var(--sln-console-ink); background: var(--sln-console-raised); }
+  .console-btn--danger { background: transparent; border-color: color-mix(in srgb, var(--sln-console-danger) 35%, var(--sln-console-line)); color: var(--sln-console-danger); }
+  .console-btn--danger:hover { background: var(--sln-console-danger-tint); }
+  .console-btn[disabled], .console-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+</style>

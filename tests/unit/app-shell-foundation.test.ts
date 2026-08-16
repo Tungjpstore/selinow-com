@@ -14,7 +14,9 @@ describe("seller app shell foundation", () => {
 
     expect(layout).toContain('content="#F8FAFC"');
     expect(layout).toContain('path: "/app/domains"');
-    expect(overview).toContain("<AppLayout");
+    // The overview page is the Console v2 pilot: it rides the new shared
+    // ConsoleLayout instead of AppLayout, staying light-first as well.
+    expect(overview).toMatch(/<(App|Console)Layout/);
     expect(overview).not.toContain('data-theme="dark"');
     expect(domains).toContain("<DomainManager");
     expect(domains).not.toContain('data-theme="dark"');

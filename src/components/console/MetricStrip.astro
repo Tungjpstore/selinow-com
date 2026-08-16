@@ -1,0 +1,53 @@
+---
+/**
+ * Metric strip — numbers on a flat surface separated by hairline dividers.
+ * Replaces the per-metric bordered cards: no boxes, no shadows (proposal §4.4).
+ */
+type Metric = {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "neutral" | "danger" | "success" | "warning";
+};
+type Props = { metrics: readonly Metric[] };
+const { metrics } = Astro.props;
+---
+
+<div class="console-metrics" role="list">
+  {metrics.map((metric) => (
+    <div class="console-metric" role="listitem">
+      <span class="console-metric__label">{metric.label}</span>
+      <span class:list={["console-metric__value", metric.tone && metric.tone !== "neutral" ? `is-${metric.tone}` : ""]}>{metric.value}</span>
+      {metric.hint && <span class="console-metric__hint">{metric.hint}</span>}
+    </div>
+  ))}
+</div>
+
+<style>
+  .console-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    border-block: 1px solid var(--sln-console-line);
+  }
+  .console-metric {
+    display: grid;
+    gap: 2px;
+    flex: 1 1 140px;
+    min-width: 128px;
+    padding: 14px 20px 14px 0;
+  }
+  .console-metric + .console-metric { border-left: 1px solid var(--sln-console-line); padding-left: 20px; }
+  .console-metric__label { color: var(--sln-console-ink-3); font: var(--sln-console-label); text-transform: none; letter-spacing: 0.01em; }
+  .console-metric__value { color: var(--sln-console-ink); font: var(--sln-console-metric); font-variant: var(--sln-console-metric-font-variant); }
+  .console-metric__value.is-danger { color: var(--sln-console-danger); }
+  .console-metric__value.is-success { color: var(--sln-console-success); }
+  .console-metric__value.is-warning { color: var(--sln-console-warning); }
+  .console-metric__hint { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
+  @media (max-width: 767px) {
+    .console-metrics { border-top: 0; }
+    .console-metric { flex: 1 1 40%; padding: 10px 12px 10px 0; }
+    .console-metric + .console-metric { padding-left: 12px; }
+    .console-metric:nth-child(3) { border-left: 0; padding-left: 0; }
+  }
+</style>

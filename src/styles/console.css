@@ -1,0 +1,83 @@
+/*
+ * Selinow Console — design language v2 for the seller/admin workspace.
+ * Proposal: docs/DASHBOARD_REDESIGN_V2_PROPOSAL_2026-08-16.md
+ *
+ * Principles encoded here:
+ * - One hairline: a single --sln-console-line token, 1px, used for every
+ *   divider/border; no strong variant, no chunky accents, no border+shadow.
+ * - Neutral first: background/foreground/muted live on one neutral ramp;
+ *   color appears only for primary action, semantic states, and focus.
+ * - Working typography: body 14px, weights capped at 600; display sizes are
+ *   reserved for the storefront marketing surface, not the console.
+ *
+ * This layer is additive: legacy --sln-* tokens keep serving pages that have
+ * not migrated yet. Console pages opt in via [data-console] on <html>.
+ */
+
+:root {
+  /* Neutral ramp (light) */
+  --sln-console-bg: #fafafa;
+  --sln-console-surface: #ffffff;
+  --sln-console-raised: #f4f4f5;
+  --sln-console-line: #e7e7ea;
+  --sln-console-ink: #18181b;
+  --sln-console-ink-2: #52525b;
+  --sln-console-ink-3: #a1a1aa;
+
+  /* Single accent + semantic states (ink-first usage, tints only for state
+     surfaces and never above ~6% chroma) */
+  --sln-console-accent: #4f46e5;
+  --sln-console-accent-ink: #ffffff;
+  --sln-console-danger: #dc2626;
+  --sln-console-danger-tint: #fef2f2;
+  --sln-console-warning: #b45309;
+  --sln-console-warning-tint: #fffbeb;
+  --sln-console-success: #15803d;
+  --sln-console-success-tint: #f0fdf4;
+  --sln-console-info: #1d4ed8;
+  --sln-console-info-tint: #eff6ff;
+
+  /* Focus ring is the only place the accent may appear at full width */
+  --sln-console-focus: 0 0 0 2px #ffffff, 0 0 0 4px color-mix(in srgb, var(--sln-console-accent) 55%, transparent);
+
+  /* Working type scale (workspace only) */
+  --sln-console-text-2xl: 600 26px/32px var(--sln-font-sans);
+  --sln-console-text-xl: 600 20px/28px var(--sln-font-sans);
+  --sln-console-text-lg: 500 16px/24px var(--sln-font-sans);
+  --sln-console-text: 400 14px/22px var(--sln-font-sans);
+  --sln-console-text-sm: 400 13px/20px var(--sln-font-sans);
+  --sln-console-label: 500 12px/16px var(--sln-font-sans);
+  --sln-console-metric: 600 26px/30px var(--sln-font-sans);
+  --sln-console-metric-font-variant: tabular-nums;
+
+  /* Geometry: 6px controls, 10px containers, pill reserved for status chips */
+  --sln-console-radius: 6px;
+  --sln-console-radius-container: 10px;
+  --sln-console-radius-pill: 999px;
+
+  /* Elevations: only interactive overlays. Static cards get neither. */
+  --sln-console-shadow-overlay: 0 8px 24px rgba(24, 24, 27, 0.12), 0 2px 6px rgba(24, 24, 27, 0.08);
+
+  /* Shell metrics */
+  --sln-console-sidebar-w: 236px;
+  --sln-console-topbar-h: 48px;
+  --sln-console-content-max: 1200px;
+}
+
+[data-console-theme="dark"] {
+  --sln-console-bg: #101013;
+  --sln-console-surface: #17171a;
+  --sln-console-raised: #1f1f23;
+  --sln-console-line: #27272a;
+  --sln-console-ink: #f4f4f5;
+  --sln-console-ink-2: #a1a1aa;
+  --sln-console-ink-3: #71717a;
+  --sln-console-danger: #f87171;
+  --sln-console-danger-tint: #2a1517;
+  --sln-console-warning: #fbbf24;
+  --sln-console-warning-tint: #2a2214;
+  --sln-console-success: #4ade80;
+  --sln-console-success-tint: #122a1b;
+  --sln-console-info: #93c5fd;
+  --sln-console-info-tint: #14213a;
+}
