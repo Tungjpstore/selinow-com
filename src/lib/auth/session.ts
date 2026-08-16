@@ -572,6 +572,8 @@ export async function loginWithPassword(input: {
     return {
       challengeToken,
       cooldownSeconds: challenge.cooldownSeconds,
+      // Local/test aid only; createAndSendOtp attaches this when APP_ENV=local.
+      ...(challenge.debugOtp === undefined ? {} : { debugOtp: challenge.debugOtp }),
       expiresAt: challenge.expiresAt,
       twoFactorRequired: true,
     };

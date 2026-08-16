@@ -31,6 +31,8 @@ export const POST: APIRoute = async ({ locals, request }) => {
       return Response.json({
         challengeToken: result.challengeToken,
         cooldownSeconds: result.cooldownSeconds,
+        // Local/test aid only (APP_ENV=local); parity with enable-2fa-request.
+        ...(result.debugOtp === undefined ? {} : { debugOtp: result.debugOtp }),
         expiresAt: result.expiresAt,
         ok: true,
         requestId: locals.requestId,
