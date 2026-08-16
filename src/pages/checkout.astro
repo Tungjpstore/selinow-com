@@ -38,6 +38,20 @@ const policyLinks = shop === null ? [] : [
         <div class="checkout-merchant"><span>{t("storefront.checkout.merchant")}</span><strong>{shop.name}</strong><small>{t("storefront.checkout.provider")}</small></div>
         <h2>{t("storefront.checkout.contact")}</h2>
         <label>{t("storefront.checkout.email")} <input id="customer-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required /></label>
+        <fieldset class="shipping-fields" id="shipping-fields" hidden>
+          <h2>{t("storefront.checkout.shipping.title")}</h2>
+          <div id="shipping-methods" class="shipping-methods" role="radiogroup" aria-label={t("storefront.checkout.shipping.method")}></div>
+          <label>{t("storefront.checkout.shipping.full_name")} <input id="ship-full-name" name="fullName" autocomplete="name" required maxlength="120" /></label>
+          <label>{t("storefront.checkout.shipping.phone")} <input id="ship-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" required maxlength="16" placeholder="0901 234 567" /></label>
+          <label>{t("storefront.checkout.shipping.address")} <input id="ship-address" name="addressLine" autocomplete="street-address" required maxlength="300" /></label>
+          <div class="shipping-grid">
+            <label>{t("storefront.checkout.shipping.ward")} <input id="ship-ward" name="ward" required maxlength="120" /></label>
+            <label>{t("storefront.checkout.shipping.district")} <input id="ship-district" name="district" required maxlength="120" /></label>
+          </div>
+          <label>{t("storefront.checkout.shipping.province")} <input id="ship-province" name="province" autocomplete="address-level1" required maxlength="120" /></label>
+          <label>{t("storefront.checkout.shipping.notes")} <input id="ship-notes" name="notes" maxlength="300" /></label>
+        </fieldset>
+        <div class="summary-row" id="shipping-fee-row" hidden><span>{t("storefront.checkout.shipping.fee")}</span><strong id="shipping-fee"></strong></div>
         <div class="summary-row total"><span>{t("storefront.checkout.total")}</span><strong id="checkout-total">{t("storefront.checking")}</strong></div>
         {turnstileSiteKey && <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-action="storefront_checkout" data-theme="light" data-size="flexible"></div>}
         <p id="checkout-status" class="form-status" aria-live="polite" aria-atomic="true">{t("storefront.checkout.confirming")}</p>

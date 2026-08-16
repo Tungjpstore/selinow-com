@@ -236,8 +236,7 @@ export async function updateShippingMethod(input: {
   return updated;
 }
 
-function parseShippingMethodInput(data: Record<string, unknown>, partial = false): { feeMinor: number; freeOverMinor: number | null; name: string; sortOrder: number } {
-  const unknown = Object.keys(data).filter((key) => !new Set(["name", "feeMinor", "freeOverMinor", "sortOrder", "status"]).has(key));
+function parseShippingMethodInput(data: Record<string, unknown>, partial = false): { feeMinor: number; freeOverMinor: number | null; name: string; sortOrder: number } {  const unknown = Object.keys(data).filter((key) => !new Set(["name", "feeMinor", "freeOverMinor", "sortOrder", "status"]).has(key));
   if (unknown.length > 0) throw new AppError("validation_failed", 400, ["shipping_method_field_invalid"]);
   const name = data.name;
   if (typeof name !== "string" || name.trim().length < 1 || name.trim().length > 80) throw new AppError("validation_failed", 400, ["shipping_method_name_invalid"]);
@@ -253,4 +252,101 @@ function parseShippingMethodInput(data: Record<string, unknown>, partial = false
     throw new AppError("validation_failed", 400, ["shipping_method_free_over_invalid"]);
   }
   return { feeMinor, freeOverMinor: freeOverRaw, name: name.trim(), sortOrder };
+}
+
+export type ShippingProgressView = {
+  carrier: string | null;
+  shippingState: "packing" | "shipped" | "delivered";
+  trackingCode: string | null;
+};
+
+/**
+ * Seller-side dispatch progress for a physical order. Packing opens a
+ * 'manual' fulfillment row with shipping_state; shipped attaches carrier and
+ * tracking; delivered closes it and marks the order fulfilled.
+ */
+export async function advanceOrderShipping(input: {
+  carrier?: unknown;
+  env: AppBindings;
+  orderId: string;
+  requestId: string;
+  shippingState: unknown;
+  shopPublicId: string;
+  trackingCode?: unknown;
+  userId: string;
+}): Promise<ShippingProgressView> {
+  const member = await getShopForMember({ capability: "fulfillment:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const state = input.shippingState;
+  if (state !== "packing" && state !== "shipped" && state !== "delivered") {
+    throw new AppError("validation_failed", 400, ["shipping_state_invalid"]);
+  }
+  const carrier = input.carrier === undefined || input.carrier === null || input.carrier === ""
+    ? null
+    : typeof input.carrier === "string" && input.carrier.trim().length >= 2 && input.carrier.trim().length <= 80 ? input.carrier.trim() : null;
+  if (input.carrier !== undefined && input.carrier !== null && input.carrier !== "" && carrier === null) {
+    throw new AppError("validation_failed", 400, ["shipping_carrier_invalid"]);
+  }
+  const trackingCode = input.trackingCode === undefined || input.trackingCode === null || input.trackingCode === ""
+    ? null
+    : typeof input.trackingCode === "string" && input.trackingCode.trim().length >= 4 && input.trackingCode.trim().length <= 64 ? input.trackingCode.trim() : null;
+  if (input.trackingCode !== undefined && input.trackingCode !== null && input.trackingCode !== "" && trackingCode === null) {
+    throw new AppError("validation_failed", 400, ["shipping_tracking_invalid"]);
+  }
+  if (state === "shipped" && carrier === null) {
+    throw new AppError("validation_failed", 400, ["shipping_carrier_required"]);
+  }
+  const nowIso = new Date().toISOString();
+  const order = await input.env.PLATFORM_DB.prepare(`
+    SELECT orders.id AS orderId, orders.payment_status AS paymentStatus, orders.status,
+      orders.fulfillment_status AS fulfillmentStatus,
+      EXISTS (
+        SELECT 1 FROM order_items
+        INNER JOIN products ON products.shop_id = order_items.shop_id AND products.id = order_items.product_id
+        WHERE order_items.shop_id = orders.shop_id AND order_items.order_id = orders.id
+          AND products.delivery_mode = 'shipping'
+      ) AS hasPhysical
+    FROM orders
+    WHERE orders.shop_id = ? AND orders.public_id = ?
+    LIMIT 1
+  `).bind(member.row.shop_id, input.orderId).first<{ fulfillmentStatus: string; hasPhysical: number; orderId: string; paymentStatus: string; status: string }>();
+  if (order === null || order.hasPhysical !== 1) throw new AppError("resource_not_found", 404);
+  if (order.paymentStatus !== "paid" || (order.status !== "processing" && order.status !== "completed")) {
+    throw new AppError("order_not_paid", 409, ["shipping_dispatch_not_ready"]);
+  }
+  if (order.fulfillmentStatus === "fulfilled" && state !== "delivered") {
+    throw new AppError("shipping_already_delivered", 409);
+  }
+  const existing = await input.env.PLATFORM_DB.prepare(`
+    SELECT id, shipping_state AS shippingState FROM fulfillments
+    WHERE shop_id = ? AND order_id = ? AND fulfillment_type = 'manual' AND shipping_state IS NOT NULL
+    ORDER BY created_at, id LIMIT 1
+  `).bind(member.row.shop_id, order.orderId).first<{ id: string; shippingState: string }>();
+  const results = await input.env.PLATFORM_DB.batch([
+    existing === null
+      ? input.env.PLATFORM_DB.prepare(`
+          INSERT INTO fulfillments (id, shop_id, order_id, fulfillment_type, state, shipping_state, carrier, tracking_code, idempotency_key, created_at)
+          SELECT ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?
+          WHERE EXISTS (SELECT 1 FROM orders WHERE shop_id = ? AND id = ? AND payment_status = 'paid')
+        `).bind(createId("ful"), member.row.shop_id, order.orderId, state === "delivered" ? "fulfilled" : "pending", state, carrier, trackingCode, `shipping:${order.orderId}:${state}`, nowIso, member.row.shop_id, order.orderId)
+      : input.env.PLATFORM_DB.prepare(`
+          UPDATE fulfillments
+          SET state = ?, shipping_state = ?, carrier = COALESCE(?, carrier), tracking_code = COALESCE(?, tracking_code),
+            fulfilled_at = CASE WHEN ? = 'delivered' THEN ? ELSE fulfilled_at END
+          WHERE shop_id = ? AND id = ?
+        `).bind(state === "delivered" ? "fulfilled" : "pending", state, carrier, trackingCode, state, nowIso, member.row.shop_id, existing.id),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE orders
+      SET fulfillment_status = CASE WHEN ? = 'delivered' THEN 'fulfilled' ELSE 'reserved' END,
+        status = CASE WHEN ? = 'delivered' THEN 'completed' ELSE status END,
+        fulfilled_at = CASE WHEN ? = 'delivered' THEN COALESCE(fulfilled_at, ?) ELSE fulfilled_at END,
+        updated_at = ?
+      WHERE shop_id = ? AND id = ?
+    `).bind(state, state, state, nowIso, nowIso, member.row.shop_id, order.orderId),
+    input.env.PLATFORM_DB.prepare(`
+      INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, source_kind, retention_class, created_at)
+      VALUES (?, ?, 'user', ?, 'order.shipping_advanced', 'order', ?, ?, ?, 'application', 'standard', ?)
+    `).bind(createId("aud"), member.row.shop_id, input.userId, input.orderId, JSON.stringify({ carrier, shippingState: state, trackingCode }), input.requestId, nowIso),
+  ]);
+  if ((results[0]?.meta.changes ?? 0) !== 1) throw new AppError("order_not_paid", 409, ["shipping_dispatch_not_ready"]);
+  return { carrier, shippingState: state, trackingCode };
 }

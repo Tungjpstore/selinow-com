@@ -5,7 +5,22 @@ import { createBrowserOrderAccessStorage } from "./order-access-storage";
 
 type ApiError = { code?: string; requestId?: string };
 type OrderItem = { fulfillmentType: string; lineTotalMinor: number; productTitle: string; quantity: number; variantTitle: string };
-type OrderView = { currency: string; expiresAt: string; fulfillmentStatus: string; items: OrderItem[]; orderNumber: string; paymentStatus: string; status: string; totalMinor: number };
+type ShippingAddress = { addressLine: string; district: string; fullName: string; notes: string | null; phone: string; province: string; ward: string };
+type Shipment = { carrier: string | null; shippingState: string; trackingCode: string | null };
+type OrderView = {
+  currency: string;
+  expiresAt: string;
+  fulfillmentStatus: string;
+  items: OrderItem[];
+  orderNumber: string;
+  paymentStatus: string;
+  shipments?: Shipment[];
+  shippingAddress?: ShippingAddress;
+  shippingFeeMinor?: number;
+  shippingMethodName?: string | null;
+  status: string;
+  totalMinor: number;
+};
 type OrderResponse = { order: OrderView } & ApiError;
 type PaymentResponse = { paymentLink?: { checkoutUrl: string } } & ApiError;
 type KeyResponse = { fulfillment?: { keys: Array<{ productTitle: string; value: string; variantTitle: string }> } } & ApiError;
@@ -225,6 +240,7 @@ function renderOrder(order: OrderView): void {
   status.appendChild(lines);
   appendTimeline(status, t("storefront.order.timeline.payment"), paymentStateView(order.paymentStatus, order.status, locale));
   appendTimeline(status, t("storefront.order.timeline.fulfillment"), fulfillmentStateView(order.fulfillmentStatus, order.status, locale));
+  renderShipping(order);
   const hasKeyDelivery = order.items.some((item) => item.fulfillmentType === "license_key");
   if (actions instanceof HTMLElement) actions.hidden = false;
   if (paymentButton instanceof HTMLButtonElement) {
@@ -232,6 +248,56 @@ function renderOrder(order: OrderView): void {
   }
   if (revealButton instanceof HTMLButtonElement) {
     revealButton.hidden = !hasKeyDelivery || !(order.status === "completed" && order.paymentStatus === "paid" && order.fulfillmentStatus === "fulfilled");
+  }
+}
+
+function shippingStateLabel(state: string): string {
+  if (state === "packing") return t("storefront.order.shipping.state.packing");
+  if (state === "shipped") return t("storefront.order.shipping.state.shipped");
+  if (state === "delivered") return t("storefront.order.shipping.state.delivered");
+  return state;
+}
+
+function renderShipping(order: OrderView): void {
+  const section = document.querySelector("#shipping-section");
+  const address = document.querySelector("#shipping-address");
+  const shipments = document.querySelector("#shipment-list");
+  if (!(section instanceof HTMLElement) || !(address instanceof HTMLElement) || !(shipments instanceof HTMLElement)) return;
+  const shippingAddress = order.shippingAddress;
+  if (shippingAddress === undefined) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  address.replaceChildren();
+  const lines = [
+    `${shippingAddress.fullName} · ${shippingAddress.phone}`,
+    shippingAddress.addressLine,
+    `${shippingAddress.ward}, ${shippingAddress.district}, ${shippingAddress.province}`,
+    ...(order.shippingMethodName === null || order.shippingMethodName === undefined ? [] : [
+      `${t("storefront.order.shipping.method")}: ${order.shippingMethodName}`
+        + (typeof order.shippingFeeMinor === "number" ? ` · ${formatClientMoney(order.shippingFeeMinor, order.currency)}` : ""),
+    ]),
+    ...(typeof shippingAddress.notes === "string" && shippingAddress.notes.length > 0 ? [shippingAddress.notes] : []),
+  ];
+  for (const line of lines) {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = line;
+    address.appendChild(paragraph);
+  }
+  shipments.replaceChildren();
+  const rows = Array.isArray(order.shipments) ? order.shipments : [];
+  for (const shipment of rows) {
+    const item = document.createElement("p");
+    const carrier = typeof shipment.carrier === "string" && shipment.carrier.length > 0 ? shipment.carrier : t("storefront.order.shipping.state.packing");
+    const tracking = typeof shipment.trackingCode === "string" && shipment.trackingCode.length > 0 ? ` · ${shipment.trackingCode}` : "";
+    item.textContent = `${shippingStateLabel(typeof shipment.shippingState === "string" ? shipment.shippingState : "")} · ${carrier}${tracking}`;
+    shipments.appendChild(item);
+  }
+  if (rows.length === 0) {
+    const pending = document.createElement("p");
+    pending.textContent = t("storefront.order.shipping.state.packing");
+    shipments.appendChild(pending);
   }
 }
 

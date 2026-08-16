@@ -60,13 +60,16 @@ export async function projectCanonicalCartQuote(input: {
   if (isPhysical) {
     const methods = await listStorefrontShippingMethods(input.env, input.shop.id);
     if (methods.length === 0) throw new AppError("shipping_method_unavailable", 409, ["shipping_not_configured"]);
-    if (input.shippingMethodId === undefined) throw new AppError("validation_failed", 400, ["shipping_method_required"]);
-    const method = methods.find((candidate) => candidate.id === input.shippingMethodId);
-    if (method === undefined) throw new AppError("shipping_method_not_found", 404);
-    shippingFeeMinor = computeShippingFeeMinor(method, subtotalMinor - discountMinor);
+    // The first quote renders before the buyer picks a method; default to the
+    // shop's primary method so totals and evidence exist immediately.
+    const selected = input.shippingMethodId === undefined
+      ? methods[0]
+      : methods.find((candidate) => candidate.id === input.shippingMethodId);
+    if (selected === undefined) throw new AppError("shipping_method_not_found", 404);
+    shippingFeeMinor = computeShippingFeeMinor(selected, subtotalMinor - discountMinor);
     shipping = {
       feeMinor: shippingFeeMinor,
-      methodId: method.id,
+      methodId: selected.id,
       methods: methods.map((candidate) => ({ feeMinor: candidate.feeMinor, freeOverMinor: candidate.freeOverMinor, id: candidate.id, name: candidate.name })),
     };
   } else if (input.shippingMethodId !== undefined) {

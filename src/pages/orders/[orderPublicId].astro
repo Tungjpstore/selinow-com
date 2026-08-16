@@ -35,6 +35,12 @@ Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
       <a id="order-support" class="store-button secondary" href={shop.publicDetails.support.href ?? "#store-support"} rel={shop.publicDetails.support.href?.startsWith("https://") ? "noreferrer" : undefined}>{t("storefront.contact")}</a>
     </div>
     <p id="order-action-status" class="form-status" aria-live="polite"></p>
+    <section id="shipping-section" class="shipping-order-section" aria-labelledby="shipping-order-title" hidden>
+      <p class="order-kicker">{t("storefront.order.shipping.kicker")}</p>
+      <h2 id="shipping-order-title">{t("storefront.order.shipping.title")}</h2>
+      <div id="shipping-address" class="shipping-address-card"></div>
+      <div id="shipment-list" class="shipment-list"></div>
+    </section>
     <div id="key-list" class="key-list"></div>
     <section id="download-section" class="download-section" aria-labelledby="download-title" hidden>
       <div class="download-heading"><div><p>{t("storefront.order.downloads.kicker")}</p><h2 id="download-title">{t("storefront.order.downloads.title")}</h2></div><span>{t("storefront.order.downloads.private")}</span></div>

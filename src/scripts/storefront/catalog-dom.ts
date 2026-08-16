@@ -3,6 +3,7 @@ import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
 
 export type CatalogEntry = {
   currency: string;
+  deliveryMode: "digital" | "shipping";
   maxQuantity: number;
   minQuantity: number;
   priceMinor: number;
@@ -26,6 +27,7 @@ export function readCatalog(): Map<string, CatalogEntry> {
     if (currency === null) continue;
     catalog.set(node.dataset.variantId, {
       currency,
+      deliveryMode: node.dataset.deliveryMode === "shipping" ? "shipping" : "digital",
       maxQuantity: Number.parseInt(node.dataset.maxQuantity ?? "1", 10),
       minQuantity: Number.parseInt(node.dataset.minQuantity ?? "1", 10),
       priceMinor: Number.parseInt(node.dataset.priceMinor ?? "0", 10),

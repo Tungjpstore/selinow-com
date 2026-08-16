@@ -44,6 +44,7 @@ type CatalogRow = {
   categoryId: string | null;
   compareAtMinor: number | null;
   currency: string;
+  deliveryMode: "digital" | "shipping";
   description: string;
   fulfillmentType: "license_key" | "manual";
   maxPerOrder: number;
@@ -80,6 +81,7 @@ export type StorefrontVariant = {
 
 export type StorefrontProduct = {
   categoryId: string | null;
+  deliveryMode: "digital" | "shipping";
   description: string;
   fulfillmentType: "license_key" | "manual";
   id: string;
@@ -308,7 +310,9 @@ export function canonicalRedirectFor(request: Request, shop: StorefrontShop): UR
 }
 
 function stockState(row: CatalogRow, threshold: number): StockState {
-  if (row.fulfillmentType === "manual") return "available";
+  // Plain manual digital products are unbounded; keys and physical variants
+  // both report a server-confirmed availability count.
+  if (row.fulfillmentType === "manual" && row.deliveryMode !== "shipping") return "available";
   if (row.availableStock <= 0) return "out_of_stock";
   return row.availableStock <= threshold ? "low_stock" : "available";
 }
@@ -343,13 +347,18 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
     env.PLATFORM_DB.prepare(`
       SELECT products.id AS productId, products.category_id AS categoryId, products.slug AS productSlug,
         products.title AS productTitle, products.description, products.version AS productVersion,
-        products.fulfillment_type AS fulfillmentType,
+        products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode,
         product_variants.id AS variantId, product_variants.sku, product_variants.title AS variantTitle,
         product_variants.options_json AS optionsJson, product_variants.price_minor AS priceMinor,
         product_variants.compare_at_minor AS compareAtMinor, product_variants.currency,
         product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder,
         product_variants.version AS variantVersion,
-        COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock
+        CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((
+          SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved
+          FROM variant_stock_levels
+          WHERE variant_stock_levels.shop_id = product_variants.shop_id
+            AND variant_stock_levels.variant_id = product_variants.id
+        ), 0) ELSE COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) END AS availableStock
       FROM products
       INNER JOIN catalog_channel_visibility
         ON catalog_channel_visibility.shop_id = products.shop_id
@@ -391,6 +400,7 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
     if (product === undefined) {
       product = {
         categoryId: row.categoryId,
+        deliveryMode: row.deliveryMode,
         description: row.description,
         fulfillmentType: row.fulfillmentType,
         id: row.productId,
@@ -415,7 +425,7 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
       title: row.variantTitle,
       version: row.variantVersion,
     };
-    if (shop.content.showExactStock && row.fulfillmentType === "license_key") variant.availableStock = row.availableStock;
+    if (shop.content.showExactStock && (row.fulfillmentType === "license_key" || row.deliveryMode === "shipping")) variant.availableStock = row.availableStock;
     product.variants.push(variant);
   }
   return { categories: categoryResult.results, products: [...products.values()] };

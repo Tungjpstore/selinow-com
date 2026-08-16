@@ -8,7 +8,8 @@ const t = createStorefrontTranslator(locale);
 type ApiError = { code?: string; requestId?: string };
 type CartResponse = { cartId: string; cartToken: string; expiresAt?: string };
 type QuoteItem = { productTitle: string; quantity: number; unitPriceMinor: number; variantId: string; variantTitle: string; variantVersion: number };
-type QuoteResponse = { currency: string; expiresAt: string; items: QuoteItem[]; quoteEvidence: string; totalMinor: number };
+type ShippingMethod = { feeMinor: number; freeOverMinor: number | null; id: string; name: string };
+type QuoteResponse = { currency: string; expiresAt: string; items: QuoteItem[]; quoteEvidence: string; shipping?: { feeMinor: number; methodId: string | null; methods: ShippingMethod[] }; totalMinor: number };
 type CheckoutResponse = { order: { orderId: string; orderToken: string } };
 type RecoveryAction = "cart" | "quote" | "recover" | "submit";
 type CheckoutIntent = {
@@ -65,10 +66,15 @@ if (emptyElement instanceof HTMLElement) emptyElement.hidden = items.length > 0;
 let cart: CartResponse | null = null;
 let quote: QuoteResponse | null = null;
 let quoteExpiryTimer: number | undefined;
+let selectedShippingMethodId: string | null = null;
 const status = document.querySelector("#checkout-status");
 const retry = document.querySelector("#checkout-retry");
 const submit = document.querySelector("#checkout-submit");
 const total = document.querySelector("#checkout-total");
+const shippingFields = document.querySelector("#shipping-fields");
+const shippingMethodsElement = document.querySelector("#shipping-methods");
+const shippingFeeRow = document.querySelector("#shipping-fee-row");
+const shippingFee = document.querySelector("#shipping-fee");
 let recoveryAction: RecoveryAction | null = null;
 let pendingIntent: CheckoutIntent | null = null;
 const accessStorage = createBrowserOrderAccessStorage();
@@ -197,6 +203,10 @@ function errorMessage(code: unknown, requestId?: string): string {
     quantity_unavailable: t("storefront.checkout.error.quantity_unavailable"),
     quote_expired: t("storefront.checkout.error.quote_expired"),
     quote_invalid: t("storefront.checkout.error.quote_invalid"),
+    shipping_method_unavailable: t("storefront.checkout.error.shipping_method_unavailable"),
+    shipping_method_not_found: t("storefront.checkout.error.shipping_method_not_found"),
+    shipping_address_invalid: t("storefront.checkout.error.shipping_address_invalid"),
+    shipping_phone_invalid: t("storefront.checkout.error.shipping_phone_invalid"),
     checkout_recovery_expired: t("storefront.checkout.error.checkout_recovery_expired"),
     idempotency_conflict: t("storefront.checkout.error.idempotency_conflict"),
     rate_limited: t("storefront.checkout.error.rate_limited"),
@@ -268,6 +278,81 @@ function renderAuthoritativeQuote(input: QuoteResponse): boolean {
   return changed;
 }
 
+function isPhysicalCart(): boolean {
+  return items.some((item) => catalog.get(item.variantId)?.deliveryMode === "shipping");
+}
+
+function readShippingAddress(): Record<string, string> | null {
+  const value = (id: string): string => {
+    const input = document.querySelector(id);
+    return input instanceof HTMLInputElement ? input.value.trim() : "";
+  };
+  const address = {
+    addressLine: value("#ship-address"),
+    district: value("#ship-district"),
+    fullName: value("#ship-full-name"),
+    notes: value("#ship-notes"),
+    phone: value("#ship-phone"),
+    province: value("#ship-province"),
+    ward: value("#ship-ward"),
+  };
+  return address;
+}
+
+function renderShipping(currentQuote: QuoteResponse): void {
+  if (currentQuote.shipping === undefined) {
+    if (shippingFields instanceof HTMLFieldSetElement) shippingFields.hidden = true;
+    if (shippingFeeRow instanceof HTMLElement) shippingFeeRow.hidden = true;
+    selectedShippingMethodId = null;
+    return;
+  }
+  if (shippingFields instanceof HTMLFieldSetElement) shippingFields.hidden = false;
+  selectedShippingMethodId = currentQuote.shipping.methodId;
+  if (shippingMethodsElement instanceof HTMLElement) {
+    shippingMethodsElement.replaceChildren();
+    for (const method of currentQuote.shipping.methods) {
+      const label = document.createElement("label");
+      label.className = "shipping-method";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "shippingMethodId";
+      input.value = method.id;
+      input.required = true;
+      input.checked = method.id === currentQuote.shipping.methodId;
+      const copy = document.createElement("span");
+      copy.className = "shipping-method-copy";
+      const name = document.createElement("strong");
+      name.textContent = method.name;
+      copy.appendChild(name);
+      if (method.freeOverMinor !== null) {
+        const hint = document.createElement("small");
+        hint.textContent = t("storefront.checkout.shipping.free_over", { amount: formatClientMoney(method.freeOverMinor, currentQuote.currency) });
+        copy.appendChild(hint);
+      }
+      const fee = document.createElement("span");
+      fee.className = "shipping-method-fee";
+      fee.textContent = method.feeMinor === 0 ? t("storefront.checkout.shipping.free") : formatClientMoney(method.feeMinor, currentQuote.currency);
+      label.appendChild(input);
+      label.appendChild(copy);
+      label.appendChild(fee);
+      shippingMethodsElement.appendChild(label);
+    }
+  }
+  if (shippingFeeRow instanceof HTMLElement) shippingFeeRow.hidden = false;
+  if (shippingFee instanceof HTMLElement) {
+    shippingFee.textContent = currentQuote.shipping.feeMinor === 0
+      ? t("storefront.checkout.shipping.free")
+      : formatClientMoney(currentQuote.shipping.feeMinor, currentQuote.currency);
+  }
+}
+
+shippingMethodsElement?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.name !== "shippingMethodId") return;
+  selectedShippingMethodId = target.value;
+  void prepareWithRecovery(cart ?? undefined);
+});
+
 async function prepare(existingCart?: CartResponse, expectedItems?: QuoteItem[]): Promise<{ cart: CartResponse; quote: QuoteResponse } | null> {
   setRecovery(null);
   cart = existingCart ?? null;
@@ -292,7 +377,11 @@ async function prepare(existingCart?: CartResponse, expectedItems?: QuoteItem[])
     cart = cartBody;
   }
   const quoteResponse = await fetch("/api/store/quote", {
-    body: JSON.stringify({ cartId: cart.cartId, cartToken: cart.cartToken }),
+    body: JSON.stringify({
+      cartId: cart.cartId,
+      cartToken: cart.cartToken,
+      ...(isPhysicalCart() && selectedShippingMethodId !== null ? { shippingMethodId: selectedShippingMethodId } : {}),
+    }),
     headers: { "Content-Type": "application/json" },
     method: "POST",
   });
@@ -310,6 +399,7 @@ async function prepare(existingCart?: CartResponse, expectedItems?: QuoteItem[])
     return null;
   }
   const quoteChanged = renderAuthoritativeQuote(quote);
+  renderShipping(quote);
   if (total !== null) total.textContent = formatClientMoney(quote.totalMinor, quote.currency);
   if (status instanceof HTMLElement) {
     const heldUntil = new Date(expiresAtMs).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
@@ -371,6 +461,7 @@ function renderIntent(intent: CheckoutIntent): void {
   const email = document.querySelector("#customer-email");
   if (email instanceof HTMLInputElement) email.value = intent.customerEmail;
   const quoteChanged = renderAuthoritativeQuote(intent.quote);
+  renderShipping(intent.quote);
   if (total !== null) total.textContent = formatClientMoney(intent.quote.totalMinor, intent.quote.currency);
   const expiresAtMs = Date.parse(intent.quote.expiresAt);
   if (Number.isFinite(expiresAtMs) && status instanceof HTMLElement) {
@@ -455,6 +546,7 @@ async function submitCheckout(event: Event): Promise<void> {
   const tokenInput = document.querySelector('input[name="cf-turnstile-response"]');
   try {
     const intent = await createCheckoutIntent();
+    const physical = isPhysicalCart() && selectedShippingMethodId !== null;
     const response = await fetch("/api/store/checkout", {
       body: JSON.stringify({
         cartId: intent.cart.cartId,
@@ -462,6 +554,7 @@ async function submitCheckout(event: Event): Promise<void> {
         customerEmail: intent.customerEmail,
         expected: intent.expected.map(({ quantity, unitPriceMinor, variantId, variantVersion }) => ({ quantity, unitPriceMinor, variantId, variantVersion })),
         quoteEvidence: intent.quote.quoteEvidence,
+        ...(physical ? { shipping: { address: readShippingAddress(), methodId: selectedShippingMethodId } } : {}),
         turnstileToken: tokenInput instanceof HTMLInputElement ? tokenInput.value : undefined,
       }),
       headers: { "Content-Type": "application/json", "Idempotency-Key": intent.idempotencyKey },

@@ -18,6 +18,7 @@ const { products } = Astro.props;
       data-min-quantity={variant.minPerOrder}
       data-max-quantity={variant.maxPerOrder}
       data-stock-state={variant.stockState}
+      data-delivery-mode={product.deliveryMode}
     ></i>
   )))}
 </template>
