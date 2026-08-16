@@ -1866,7 +1866,8 @@ custom-domain DNS confirmation.
 Browser E2E smoke (dev server `http://app.localhost:4330`, see environment
 notes below) — verified flows:
 - Register → OTP verify → password login → logout → login (password-only;
-  2FA login path not exercised in-browser, see known issues).
+  2FA lifecycle completed via API below after the embedded browser hit its
+  cookie-jar limitation).
 - Onboarding wizard: create store (multi-channel), 1-click product template,
   finish wizard; store context propagates `?shop=` through the app shell.
 - App shell nav: Operations/Sales channels/Configuration/Administration
@@ -1895,10 +1896,19 @@ Ultra review (3 dimensions, base `bcf9692`):
   actions, client Idempotency-Key regenerated per attempt (dedup defeated),
   billing usage meter rendered limit `0` as "no numeric limit" while the
   dispatcher fail-closes to blocked.
-- IMPACT: report pending at the time of this entry (agent still running);
-  spot-checks from the other two reviews: ownership attribution for
-  migration 0099 predates the takeover checkpoint, `src/pages/app/index.astro`
-  still links `/app/telegram` (redirect keeps it working).
+- IMPACT (final): no blockers; majors = migration `0100` was EDITED in place
+  inside the review range (commit `d750297` added `automation_rule_action_runs
+  .task_id` + its index to a CREATE TABLE that already existed at the base
+  checkpoint) — this violates the forward-only rule IF any environment had
+  already applied the WIP 0100; needs a product-owner decision (either
+  confirm no shared DB applied the WIP version, or add a follow-up migration
+  to add the missing column/index on such environments). Minors = release
+  registry entry for 0100 does not pin the two objects added later; trigger
+  hooks are fire-and-forget without `waitUntil` (existing repo convention,
+  eviction risk); CSV `'` guard makes `@handle`/negative-number cells textual;
+  `--sln-border-control` semantic token never canonicalised (usages point at
+  raw `--sln-slate-500`). Ownership/routes/test-edit/blast-radius checks all
+  clean, including for follow-up commits 08264dc/c156930.
 
 Fixes applied this shift (all verified by targeted tests):
 - `src/lib/dashboard/csv-export.ts` — neutralize leading `=+-@\t\r` with a
@@ -1994,3 +2004,25 @@ Local environment notes for the next shift:
   `TakeoverE2E@2026x` with store `Takeover E2E Store`
   (`shop_a13c5fcb-bbcf-42fc-8c80-109e342f4a9f`) + 3 draft products, local DB
   only.
+
+Wave-2 addendum (same shift, later): account-security lifecycle closed
+end-to-end via API (curl session against the local dev server, after the
+embedded browser's cookie jar kept failing CSRF-protected POSTs while the
+same requests verified clean over curl):
+- enable-2fa-request → local debugOtp → enable-2fa-verify → two_factor on.
+- password login now correctly returns `twoFactorRequired` + challenge
+  (no session issued); login-2fa with the OTP issues the session.
+- GET login-history returns real outcomes (success/2FA entries).
+- disable-2fa with the current password succeeds.
+- To make the challenge step locally testable, the login 2FA response now
+  carries the same APP_ENV=local-only `debugOtp` parity aid that
+  enable-2fa-request already had (`src/lib/auth/session.ts`,
+  `src/pages/api/auth/login.ts`); 27 auth/2FA unit tests still pass.
+- Follow-up fix from the correctness review: `updateAutomationRule` now
+  re-validates kept conditions/actions under the NEW trigger when a PATCH
+  changes `triggerType` without resubmitting them (previously such rules
+  saved fine but could never match at runtime); 3 new service tests.
+- Regression guards for local `.sln-button` declarations / raw hex colors
+  (handoff item 5.4) were surveyed but NOT added: 30 local button-class
+  declarations and 19 files with raw hexes exist today, so a strict guard
+  would fail immediately; needs a dedicated cleanup pass first.
