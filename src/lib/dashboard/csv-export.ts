@@ -8,8 +8,12 @@ export type CsvColumn<T> = { header: string; value: (row: T) => string | number 
 
 function escapeCsvCell(value: string | number | null | undefined): string {
   const text = value === null || value === undefined ? "" : String(value);
-  if (/[",\n]/u.test(text)) return `"${text.replaceAll('"', '""')}"`;
-  return text;
+  // Neutralize spreadsheet formula injection: a leading =, +, -, @, tab or CR
+  // would otherwise execute as a formula when the seller opens the export in
+  // Excel/Sheets, and cells like customer names are attacker-controllable.
+  const guarded = /^[=+\-@\t\r]/u.test(text) ? `'${text}` : text;
+  if (/[",\n]/u.test(guarded)) return `"${guarded.replaceAll('"', '""')}"`;
+  return guarded;
 }
 
 export function buildCsv<T>(rows: readonly T[], columns: readonly CsvColumn<T>[]): string {

@@ -194,6 +194,12 @@ const {
   }
 
   /* ---- Drawer panel ---- */
+  /* display:flex below would otherwise override the UA's [hidden] { display: none }
+     and keep the "closed" drawer painted over the wizard form. */
+  .preview-drawer-panel[hidden] {
+    display: none;
+  }
+
   .preview-drawer-panel {
     position: fixed;
     top: 0;

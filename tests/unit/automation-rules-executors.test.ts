@@ -182,6 +182,11 @@ describe("webhook SSRF guard", () => {
       "https://localhost/hook",
       "https://db.local/hook",
       "https://svc.internal/hook",
+      // WHATWG URLs keep a trailing dot verbatim for non-IP hosts; without
+      // trimming, "localhost." / "metadata.google.internal." would slip through.
+      "https://localhost./hook",
+      "https://foo.localhost./hook",
+      "https://metadata.google.internal./hook",
       "https://user:pass@example.com/hook",
       "https://example.com:8443/hook",
       "https://intranet/hook",

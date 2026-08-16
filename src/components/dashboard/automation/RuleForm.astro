@@ -117,6 +117,9 @@ const firstConfig = firstAction?.config ?? {};
 
 <style>
   .rule-form { display:grid; gap:var(--sln-space-4); }
+  /* display:grid below would otherwise override the UA's [hidden] rule and
+     paint the hidden prototype condition row as if it were a real one. */
+  .rule-condition-row[hidden] { display:none; }
   .rule-form__section { display:grid; gap:var(--sln-space-3); }
   .rule-form__section-label { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-label); }
   .rule-conditions { display:grid; gap:var(--sln-space-3); }

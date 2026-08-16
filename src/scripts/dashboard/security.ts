@@ -11,6 +11,7 @@ type SafeSession = {
 type ApiPayload = {
   code?: unknown;
   cooldownSeconds?: unknown;
+  debugOtp?: unknown;
   enabledAt?: unknown;
   entries?: unknown;
   issues?: unknown;
@@ -351,7 +352,10 @@ if (root !== null) {
   const requestEnrollmentOtp = async (cooldownButton: HTMLButtonElement | null): Promise<void> => {
     const payload = await postAccount("/api/app/account/enable-2fa-request", {});
     if (enrollForm !== null) enrollForm.hidden = false;
-    setFeedback(t("dashboard.security.two_factor.otp_sent"), "success");
+    // The server only attaches debugOtp when APP_ENV=local (dev/test aid);
+    // surfacing it here keeps local flows usable without a mail provider.
+    const debugSuffix = typeof payload.debugOtp === "string" ? ` [local] ${payload.debugOtp}` : "";
+    setFeedback(`${t("dashboard.security.two_factor.otp_sent")}${debugSuffix}`, "success");
     startCooldown(cooldownButton, payload.cooldownSeconds, t("dashboard.security.two_factor.resend"));
   };
 
