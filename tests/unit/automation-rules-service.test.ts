@@ -209,6 +209,51 @@ describe("automation rules service lifecycle", () => {
       .rejects.toMatchObject({ code: "automation_rule_not_found", status: 404 });
   });
 
+  it("rejects a trigger change that would strand customer-aware actions from the previous trigger", async () => {
+    const created = await createAutomationRule(createInput({ body: ruleDraft({ conditions: [] }) }));
+    await expect(updateAutomationRule({
+      body: { triggerType: "inventory.low_stock" },
+      env,
+      expectedVersion: created.rule.version,
+      requestId: "request_rules_service",
+      ruleId: created.rule.id,
+      shopPublicId: SHOP_A_PUBLIC,
+      userId: OWNER_A,
+    })).rejects.toMatchObject({ code: "validation_failed", issues: ["action_requires_customer_trigger"] });
+  });
+
+  it("rejects a trigger change that would strand conditions outside the new trigger's field allow-list", async () => {
+    const created = await createAutomationRule(createInput());
+    await expect(updateAutomationRule({
+      body: { triggerType: "inventory.low_stock" },
+      env,
+      expectedVersion: created.rule.version,
+      requestId: "request_rules_service",
+      ruleId: created.rule.id,
+      shopPublicId: SHOP_A_PUBLIC,
+      userId: OWNER_A,
+    })).rejects.toMatchObject({ code: "validation_failed", issues: ["condition_field_not_allowed"] });
+  });
+
+  it("applies a trigger change when compatible replacement conditions and actions are supplied", async () => {
+    const created = await createAutomationRule(createInput());
+    const updated = await updateAutomationRule({
+      body: {
+        triggerType: "inventory.low_stock",
+        conditions: [{ field: "stock.remaining", operator: "lte", value: 5 }],
+        actions: [{ type: "rule_call_webhook", config: { url: "https://example.com/restock" } }],
+      },
+      env,
+      expectedVersion: created.rule.version,
+      requestId: "request_rules_service",
+      ruleId: created.rule.id,
+      shopPublicId: SHOP_A_PUBLIC,
+      userId: OWNER_A,
+    });
+    expect(updated.rule.triggerType).toBe("inventory.low_stock");
+    expect(updated.rule.actions).toEqual([{ config: { url: "https://example.com/restock" }, type: "rule_call_webhook" }]);
+  });
+
   it("replays an identical create with the same idempotency key", async () => {
     const first = await createAutomationRule(createInput());
     const replay = await createAutomationRule(createInput());

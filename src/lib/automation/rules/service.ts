@@ -348,12 +348,21 @@ export async function updateAutomationRule(input: {
   if (!hasName && !hasTrigger && !hasConditions && !hasActions) throw validationError("rule_patch_empty");
 
   const triggerType = hasTrigger ? parseTriggerType(input.body.triggerType) : existing.triggerType;
+  const triggerChanged = triggerType !== existing.triggerType;
+  // Re-validate whatever is kept from the existing rule under the NEW trigger:
+  // silently keeping legacy conditions/actions would produce a rule the create
+  // path would have rejected (e.g. a customer-aware action on a trigger with
+  // no customer payload) — it would then never match at runtime.
   const conditions = hasConditions
     ? parseConditionsDraft(triggerType, input.body.conditions)
-    : [...existing.conditions];
+    : triggerChanged
+      ? parseConditionsDraft(triggerType, existing.conditions)
+      : [...existing.conditions];
   const actions = hasActions
     ? parseActionsDraft(triggerType, input.body.actions)
-    : [...existing.actions];
+    : triggerChanged
+      ? parseActionsDraft(triggerType, existing.actions)
+      : [...existing.actions];
   let name = existing.name;
   if (hasName) {
     const candidate = typeof input.body.name === "string" ? input.body.name.trim() : "";
