@@ -94,7 +94,8 @@ describe("accessible design-system gate", () => {
     expect(login).not.toContain("background: var(--sln-bg-inverse);");
     expect(admin).toContain('import AdminLayout from "../../layouts/AdminLayout.astro"');
     expect(operations).toContain('import AdminLayout from "../../layouts/AdminLayout.astro"');
-    expect(adminLayout).toContain('<html lang={locale} dir={directionForLocale(locale)} data-theme="dark">');
+    expect(adminLayout).toContain('<html lang={locale} dir={directionForLocale(locale)}>');
+    expect(adminLayout).not.toContain('data-theme="dark"');
     expect(adminCss).toContain("background: var(--sln-bg-canvas);");
     expect(adminCss).toContain("color: var(--sln-text-primary);");
     expect(adminCss).not.toContain("background: var(--sln-bg-inverse);");

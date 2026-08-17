@@ -13,7 +13,7 @@ describe("document direction contract", () => {
     ]);
 
     expect(platform).toContain('<html lang={locale} dir={directionForLocale(locale)}>');
-    expect(admin).toContain('<html lang={locale} dir={directionForLocale(locale)} data-theme="dark">');
+    expect(admin).toContain('<html lang={locale} dir={directionForLocale(locale)}>');
     expect(storefront).toContain(
       '<html lang={documentLocale} dir={directionForLocale(documentLocale)} style={style} data-storefront-template={shop.template.id} data-storefront-vertical={shop.template.vertical} data-template-scheme={shop.template.scheme}>',
     );
@@ -72,7 +72,6 @@ describe("document direction contract", () => {
     expect(admin).toContain("border-inline-end: 1px");
     expect(admin).toContain("padding-inline-start: 12px");
     expect(admin).toContain("border-inline-start: 1px");
-    expect(admin).toContain("border-inline-start: 3px");
     expect(admin).toContain("margin-inline-start: auto");
     expect(admin).toContain("inset-inline-start: 0");
     expect(admin).not.toMatch(/(?:^|;)\s*(?:margin|padding|border|inset)-(?:left|right)\s*:/imu);

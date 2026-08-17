@@ -1,3 +1,66 @@
+@import "./console.css";
+
+/*
+ * Console v2 skin (proposal §5, admin scope): remap the legacy semantic and
+ * dark-ramp tokens *inside the admin shell only* so every admin surface
+ * inherits the same hairline border, neutral ramp and calmer typography as
+ * the seller dashboard without rewriting the ops-critical markup. admin.css
+ * is only ever bundled into /admin pages, so the remap cannot leak elsewhere.
+ */
+.admin-shell {
+  /* Legacy dark ramp → console light neutral ramp (roles preserved:
+     950 canvas/deep wells → bg, 900 cards → surface, 800 hover → raised,
+     700 dividers → the single hairline). */
+  --sln-ink-950: var(--sln-console-bg);
+  --sln-ink-900: var(--sln-console-surface);
+  --sln-ink-800: var(--sln-console-raised);
+  --sln-ink-700: var(--sln-console-line);
+  /* Slate text ramp inverts with the theme: brighter slate → darker ink.
+     slate-500 doubles as control borders, so it lands on the hairline. */
+  --sln-slate-100: var(--sln-console-ink);
+  --sln-slate-200: var(--sln-console-ink);
+  --sln-slate-300: var(--sln-console-ink-2);
+  --sln-slate-400: var(--sln-console-ink-3);
+  --sln-slate-500: var(--sln-console-line);
+  /* Semantic tokens → console equivalents (same contract as .app-shell). */
+  --sln-bg-canvas: var(--sln-console-bg);
+  --sln-bg-surface: var(--sln-console-surface);
+  --sln-bg-subtle: var(--sln-console-raised);
+  --sln-text-primary: var(--sln-console-ink);
+  --sln-text-secondary: var(--sln-console-ink-2);
+  --sln-text-muted: var(--sln-console-ink-3);
+  --sln-border-default: var(--sln-console-line);
+  --sln-border-strong: var(--sln-console-line);
+  --sln-action-primary: var(--sln-console-accent);
+  --sln-action-primary-hover: var(--sln-console-accent);
+  --sln-action-primary-ink: var(--sln-console-accent-ink);
+  --sln-state-success: var(--sln-console-success);
+  --sln-state-warning: var(--sln-console-warning);
+  --sln-state-danger: var(--sln-console-danger);
+  --sln-state-info: var(--sln-console-info);
+  --sln-success-text: var(--sln-console-success);
+  --sln-warning-text: var(--sln-console-warning);
+  --sln-danger-text: var(--sln-console-danger);
+  --sln-info-text: var(--sln-console-info);
+  --sln-disabled-bg: var(--sln-console-raised);
+  --sln-disabled-ink: var(--sln-console-ink-3);
+  --sln-focus-ring: color-mix(in srgb, var(--sln-console-accent) 55%, transparent);
+  --sln-radius-sm: 6px;
+  --sln-radius-md: 8px;
+  --sln-radius-lg: 10px;
+  --sln-radius-xl: 12px;
+  --sln-shadow-xs: none;
+  --sln-shadow-sm: none;
+  /* Working type ramp (proposal §4.4): cap shared heading/label tokens at
+     weight 600 so admin pages stop rendering display-grade text. */
+  --sln-font-h1: 600 24px/32px var(--sln-font-sans);
+  --sln-font-h2: 600 20px/28px var(--sln-font-sans);
+  --sln-font-h3: 600 18px/26px var(--sln-font-sans);
+  --sln-font-h4: 600 15px/22px var(--sln-font-sans);
+  --sln-font-label: 500 13px/18px var(--sln-font-sans);
+  --sln-font-caption: 500 12px/16px var(--sln-font-sans);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -5,7 +68,7 @@
 html {
   min-width: 320px;
   overflow-x: clip;
-  background: var(--sln-ink-950);
+  background: var(--sln-console-bg);
   scroll-behavior: smooth;
 }
 
@@ -13,7 +76,7 @@ body {
   margin: 0;
   min-width: 320px;
   overflow-x: clip;
-  background: var(--sln-bg-canvas);
+  background: var(--sln-console-bg);
   color: var(--sln-text-primary);
   font-family: var(--sln-font-sans);
 }
@@ -51,32 +114,41 @@ select {
   min-width: 0;
   padding: 24px 16px 16px;
   border-inline-end: 1px solid var(--sln-ink-700);
-  background: var(--sln-ink-950);
+  background: var(--sln-console-surface);
 }
 
 .admin-brand {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-height: 48px;
   padding: 0 10px 20px;
   border-bottom: 1px solid var(--sln-ink-700);
-  color: var(--sln-white);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .12em;
+  color: var(--sln-console-ink);
+  font-size: 15px;
+  font-weight: 600;
   text-decoration: none;
-  text-transform: uppercase;
 }
 
-.admin-brand img {
-  width: 112px;
-  height: auto;
+.admin-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--sln-radius-sm);
+  background: var(--sln-console-ink);
+  color: var(--sln-console-bg);
+  font: 600 12px/1 var(--sln-font-sans);
 }
 
-.admin-brand span {
+.admin-brand > span:last-child {
   padding-inline-start: 12px;
   border-inline-start: 1px solid var(--sln-ink-700);
+  color: var(--sln-console-ink-3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 
 .admin-nav {
@@ -132,7 +204,7 @@ select {
 .admin-nav-item[aria-current="page"] {
   border-color: var(--sln-ink-700);
   background: var(--sln-ink-800);
-  color: var(--sln-white);
+  color: var(--sln-console-ink);
 }
 
 .admin-nav-item[aria-current="page"] {
@@ -151,7 +223,7 @@ select {
 }
 
 .admin-nav-unavailable {
-  color: var(--sln-slate-500);
+  color: var(--sln-console-ink-3);
   cursor: not-allowed;
 }
 
@@ -174,7 +246,7 @@ select {
   border-radius: 50%;
   background: var(--sln-ink-800);
   color: var(--sln-action-primary-hover);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .admin-identity > span:last-child {
@@ -200,11 +272,7 @@ select {
 
 .admin-workspace {
   min-width: 0;
-  background:
-    linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px),
-    var(--sln-bg-canvas);
-  background-size: 48px 48px;
+  background: var(--sln-bg-canvas);
 }
 
 .admin-topbar {
@@ -218,7 +286,7 @@ select {
   min-height: 64px;
   padding: 0 32px;
   border-bottom: 1px solid var(--sln-ink-700);
-  background: rgb(8 11 20 / 94%);
+  background: color-mix(in srgb, var(--sln-console-bg) 92%, transparent);
   backdrop-filter: blur(12px);
 }
 
@@ -250,7 +318,7 @@ select {
   height: 7px;
   border-radius: 50%;
   background: var(--sln-state-success);
-  box-shadow: 0 0 0 4px rgb(52 211 153 / 10%);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--sln-console-success) 12%, transparent);
 }
 
 .admin-main {
@@ -276,7 +344,7 @@ select {
 .admin-eyebrow {
   margin: 0 0 10px;
   color: var(--sln-action-primary-hover);
-  font: 700 10px/1.4 var(--sln-font-mono);
+  font: 600 10px/1.4 var(--sln-font-mono);
   letter-spacing: .12em;
   text-transform: uppercase;
 }
@@ -285,7 +353,7 @@ select {
   max-width: 18ch;
   margin: 0;
   font-size: clamp(32px, 5vw, 54px);
-  font-weight: 750;
+  font-weight: 600;
   line-height: 1.02;
   letter-spacing: -.035em;
 }
@@ -368,7 +436,7 @@ select {
 .admin-section-heading h2 {
   margin: 0;
   font-size: 22px;
-  font-weight: 720;
+  font-weight: 600;
   letter-spacing: -.02em;
 }
 
@@ -410,7 +478,7 @@ select {
   background: var(--sln-ink-950);
   color: var(--sln-slate-400);
   font-size: 9px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -469,7 +537,7 @@ select {
   border-radius: var(--sln-radius-pill);
   color: var(--sln-slate-300);
   font-size: 9px;
-  font-weight: 750;
+  font-weight: 600;
   letter-spacing: .05em;
   text-transform: uppercase;
 }
@@ -503,7 +571,7 @@ select {
   padding: 8px 16px;
   color: var(--sln-action-primary-hover);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -535,7 +603,7 @@ select {
 }
 
 .admin-safe-facts dt {
-  color: var(--sln-slate-500);
+  color: var(--sln-console-ink-3);
   font-size: 9px;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -574,7 +642,7 @@ select {
   background: transparent;
   color: var(--sln-slate-200);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 600;
   text-decoration: none;
   cursor: pointer;
 }
@@ -584,7 +652,7 @@ select {
 .admin-form button:hover {
   border-color: var(--sln-action-primary-hover);
   background: var(--sln-ink-800);
-  color: var(--sln-white);
+  color: var(--sln-console-ink);
 }
 
 .admin-button-primary,
@@ -594,10 +662,19 @@ select {
   color: var(--sln-action-primary-ink);
 }
 
+/* Primary keeps its accent fill on hover (the generic hover above is tuned
+   for ghost buttons on the light ramp). */
+.admin-button-primary:hover,
+.admin-form button[type="submit"]:hover {
+  border-color: var(--sln-action-primary);
+  background: color-mix(in srgb, var(--sln-console-accent) 88%, black);
+  color: var(--sln-action-primary-ink);
+}
+
 .admin-actions .danger,
 .admin-form .danger {
   border-color: var(--sln-state-danger);
-  background: rgb(248 113 113 / 8%);
+  background: var(--sln-console-danger-tint);
   color: var(--sln-danger-text);
 }
 
@@ -619,7 +696,8 @@ select {
 }
 
 .admin-form-panel[data-risk="high"] {
-  border-inline-start: 3px solid var(--sln-state-danger);
+  border-inline-start: 1px solid var(--sln-state-danger);
+  background: var(--sln-console-danger-tint);
 }
 
 .admin-form-panel > p {
@@ -640,7 +718,7 @@ select {
   gap: 7px;
   color: var(--sln-slate-400);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: .05em;
   text-transform: uppercase;
 }
@@ -663,7 +741,7 @@ select {
   border: 1px solid var(--sln-slate-500);
   border-radius: var(--sln-radius-md);
   background: var(--sln-ink-950);
-  color: var(--sln-white);
+  color: var(--sln-console-ink);
 }
 
 .admin-form-actions {
@@ -690,9 +768,9 @@ select {
   gap: 8px;
   padding: 16px;
   border: 1px solid var(--sln-ink-700);
-  border-inline-start: 3px solid var(--sln-state-info);
+  border-inline-start: 1px solid var(--sln-state-info);
   border-radius: var(--sln-radius-md);
-  background: var(--sln-ink-950);
+  background: var(--sln-console-info-tint);
 }
 
 .admin-readonly-note strong {
@@ -792,7 +870,7 @@ select {
 
 .admin-ledger small {
   grid-column: 2;
-  color: var(--sln-slate-500);
+  color: var(--sln-console-ink-3);
   font-size: 10px;
 }
 
@@ -839,7 +917,7 @@ select {
   width: 12px;
   height: 12px;
   margin-top: 5px;
-  border: 2px solid currentColor;
+  border: 1px solid currentColor;
   border-radius: 50%;
   color: var(--sln-slate-400);
 }
@@ -860,7 +938,7 @@ select {
   margin: 0 0 8px;
   color: var(--sln-slate-400);
   font-size: 10px;
-  font-weight: 750;
+  font-weight: 600;
   letter-spacing: .1em;
   text-transform: uppercase;
 }
@@ -893,7 +971,7 @@ select {
 .admin-state a {
   color: var(--sln-action-primary-hover);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 600;
 }
 
 :focus-visible {
@@ -921,7 +999,7 @@ select {
     display: block;
     color: var(--sln-slate-400);
     font-size: 8px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: .08em;
     text-transform: uppercase;
   }

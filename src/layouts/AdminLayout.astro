@@ -58,12 +58,12 @@ const roleLabel = role === null ? t("admin.layout.role.unverified") : t(`admin.l
 ---
 
 <!doctype html>
-<html lang={locale} dir={directionForLocale(locale)} data-theme="dark">
+<html lang={locale} dir={directionForLocale(locale)}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
-    <meta name="theme-color" content="#080b14" />
+    <meta name="theme-color" content="#fafafa" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/selinow-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/selinow-180.png" />
     <title>{title} — Selinow</title>
@@ -73,7 +73,8 @@ const roleLabel = role === null ? t("admin.layout.role.unverified") : t(`admin.l
     <div class="admin-shell">
       <aside class="admin-sidebar" aria-label={t("admin.layout.sidebar_aria")}>
         <a class="admin-brand" href="/admin" aria-label={t("admin.layout.brand_aria")}>
-          <img src="/brand/logo/selinow-logo-reversed.svg" alt="Selinow" width="126" height="34" />
+          <span class="admin-brand-mark" aria-hidden="true">S</span>
+          <span class="admin-brand-name">Selinow</span>
           <span>{t("admin.layout.brand_label")}</span>
         </a>
 
