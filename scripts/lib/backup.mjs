@@ -22,6 +22,11 @@ import {
   buildPinnedCloudflareEnvironment,
   repositoryRoot,
 } from "./platform.mjs";
+import {
+  buildChunkedImportPlan,
+  renderChunkSql,
+  splitSqlStatements,
+} from "./sql-import-plan.mjs";
 
 const BACKUP_ROOT = resolve(repositoryRoot, ".wrangler/backups");
 const DRILL_REPORT_ROOT = resolve(repositoryRoot, ".wrangler/restore-drills");
@@ -421,6 +426,36 @@ function exportArgs(target, environment, outputPath) {
     outputPath,
     "--skip-confirmation",
   ];
+}
+
+// D1 remote executes uploaded files as batched transactions (~100 statements)
+// and rejects explicit BEGIN/COMMIT, so a raw dump import fails whenever the
+// dump relies on file-wide deferred foreign keys (forward FK references,
+// FK cycles). Import the artifact as dependency-ordered chunks instead; each
+// chunk stays under the batch limit and re-asserts defer_foreign_keys where
+// the plan requires it. Chunk files live under the drill's private temp
+// directory and are removed with it.
+async function importSqlArtifactChunked(runner, targetName, environment, artifactPath, chunkDirectory, runnerOptions) {
+  let plan;
+  try {
+    plan = buildChunkedImportPlan(splitSqlStatements(await readFile(artifactPath, "utf8")));
+  } catch {
+    throw new Error("restore_import_plan_invalid");
+  }
+  if (plan.chunks.length === 0) throw new Error("restore_import_plan_empty");
+  await mkdir(chunkDirectory, { recursive: true, mode: 0o700 });
+  let index = 0;
+  for (const chunk of plan.chunks) {
+    index += 1;
+    const chunkName = `chunk_${String(index).padStart(3, "0")}.sql`;
+    const chunkPath = join(chunkDirectory, chunkName);
+    await writeFile(chunkPath, renderChunkSql(chunk), { encoding: "utf8", mode: 0o600 });
+    safeRunner(runner, [
+      "d1", "execute", targetName, "--remote", "--env", environment,
+      "--file", chunkPath, "--yes",
+    ], `restore_import_failed:${chunkName}`, runnerOptions);
+  }
+  return plan.summary;
 }
 
 export async function createBackup(options) {
@@ -1765,9 +1800,11 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
   const sourceExport = resolve(tempDirectory, "source.sql");
   const targetExport = resolve(tempDirectory, "target.sql");
   const targetVerificationDatabase = resolve(tempDirectory, "target-verification.sqlite");
+  const importChunkDirectory = resolve(tempDirectory, "import-chunks");
   let createdTarget = false;
   let cleanupFailure = false;
   let operationError = null;
+  let importSummary = null;
   let outcome;
   try {
     safeRunner(runner, [
@@ -1797,10 +1834,14 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       throw new Error("staging_backup_artifact_invalid");
     }
     if (protectedBackup !== null) {
-      safeRunner(runner, [
-        "d1", "execute", targetName, "--remote", "--env", environment,
-        "--file", sourceArtifact, "--yes",
-      ], "restore_import_failed", runnerOptions);
+      importSummary = await importSqlArtifactChunked(
+        runner,
+        targetName,
+        environment,
+        sourceArtifact,
+        importChunkDirectory,
+        runnerOptions,
+      );
     }
     const sourceQueryTarget = protectedBackup === null ? target.databaseName : targetName;
     const sourceTableRows = parseWranglerRows(remoteExecute(
@@ -1828,10 +1869,14 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       runnerOptions,
     ), sourceCountTables);
     if (protectedBackup === null) {
-      safeRunner(runner, [
-        "d1", "execute", targetName, "--remote", "--env", environment,
-        "--file", sourceArtifact, "--yes",
-      ], "restore_import_failed", runnerOptions);
+      importSummary = await importSqlArtifactChunked(
+        runner,
+        targetName,
+        environment,
+        sourceArtifact,
+        importChunkDirectory,
+        runnerOptions,
+      );
     }
     const repositoryMigrationNames = await expectedMigrationNames();
     const initialMigrationRows = parseWranglerRows(remoteExecute(
@@ -1906,6 +1951,34 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       runnerOptions,
     ));
     if (crossLedgerMismatchCount !== 0) throw new Error("restore_cross_ledger_mismatch");
+    const remoteForeignKeyRows = parseWranglerRows(remoteExecute(
+      runner,
+      targetName,
+      environment,
+      "SELECT COUNT(*) AS foreign_key_violations FROM pragma_foreign_key_check();",
+      "restore_remote_foreign_key_check_failed",
+      runnerOptions,
+    ), "restore_remote_foreign_key_check_invalid");
+    const remoteForeignKeyViolationCount = Number(remoteForeignKeyRows[0]?.foreign_key_violations);
+    if (!Number.isSafeInteger(remoteForeignKeyViolationCount) || remoteForeignKeyViolationCount !== 0) {
+      throw new Error("restore_remote_foreign_key_check_failed");
+    }
+    const objectCensusRows = parseWranglerRows(remoteExecute(
+      runner,
+      targetName,
+      environment,
+      "SELECT type, COUNT(*) AS object_count FROM sqlite_master"
+      + " WHERE name NOT LIKE '_cf_%' AND name NOT LIKE 'sqlite_%' GROUP BY type;",
+      "restore_object_census_failed",
+      runnerOptions,
+    ), "restore_object_census_invalid");
+    const restoredObjectCounts = Object.fromEntries(objectCensusRows.map((row) => {
+      const objectCount = Number(row?.object_count);
+      if (typeof row?.type !== "string" || !Number.isSafeInteger(objectCount) || objectCount < 0) {
+        throw new Error("restore_object_census_invalid");
+      }
+      return [row.type, objectCount];
+    }));
     safeRunner(runner, [
       "d1", "export", targetName, "--remote", "--env", environment,
       "--output", targetExport, "--skip-confirmation",
@@ -1980,10 +2053,16 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       },
       verification: {
         foreignKeyViolationCount,
+        importedChunks: importSummary?.chunkCount ?? null,
+        importedCycleTables: importSummary?.cycleTables ?? null,
+        importedDeferredChunks: importSummary?.deferredChunkCount ?? null,
+        importedStatementCount: importSummary?.statementCount ?? null,
         integrityOk,
         migrationNames: appliedMigrationNames,
         normalizedMigrationAliases: normalizedMigrationLedger.normalizedMigrationAliases,
         crossLedgerMismatchCount,
+        remoteForeignKeyViolationCount,
+        restoredObjectCounts,
       },
     };
   } catch (error) {

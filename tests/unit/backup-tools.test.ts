@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,6 +29,13 @@ import {
   normalizeHistoricalMigrationAliases,
   runRestoreDrill,
 } from "../../scripts/lib/backup.mjs";
+import {
+  buildChunkedImportPlan,
+  DEFAULT_MAX_STATEMENTS_PER_CHUNK,
+  DEFERRED_FOREIGN_KEYS_PRAGMA,
+  renderChunkSql,
+  splitSqlStatements,
+} from "../../scripts/lib/sql-import-plan.mjs";
 
 const STAGING_ACCOUNT_ID = "ef250a88911fd24073cb73d1c07e0218";
 const STAGING_DATABASE_ID = "c86d76a0-7407-42b6-ba92-f9f9623d0730";
@@ -1099,6 +1106,7 @@ describe("backup CLI dry runs", () => {
       args: string[];
       ci: string | undefined;
     }> = [];
+    const importedChunkContents: string[] = [];
     let migrationLedgerQueries = 0;
     try {
       const result = await runRestoreDrill({
@@ -1137,6 +1145,13 @@ describe("backup CLI dry runs", () => {
             writeFileSync(outputPath, "CREATE TABLE restored_fixture (id TEXT);\n");
             return { stderr: "", stdout: "" };
           }
+          if (args[0] === "d1" && args[1] === "execute" && args.includes("--file")) {
+            const filePath = args[args.indexOf("--file") + 1];
+            if (typeof filePath === "string" && filePath.includes("import-chunks")) {
+              importedChunkContents.push(readFileSync(filePath, "utf8"));
+            }
+            return { stderr: "", stdout: "" };
+          }
           if (args[0] === "d1" && args[1] === "execute" && args.includes("--command")) {
             const sql = args[args.indexOf("--command") + 1] ?? "";
             if (sql.includes("FROM d1_migrations")) {
@@ -1151,6 +1166,24 @@ describe("backup CLI dry runs", () => {
             }
             if (sql.startsWith("INSERT INTO d1_migrations")) {
               return { stderr: "", stdout: JSON.stringify([{ results: [] }]) };
+            }
+            if (sql.includes("FROM pragma_foreign_key_check()")) {
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{ results: [{ foreign_key_violations: 0 }] }]),
+              };
+            }
+            if (sql.includes("GROUP BY type")) {
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{
+                  results: [
+                    { object_count: 135, type: "table" },
+                    { object_count: 307, type: "index" },
+                    { object_count: 298, type: "trigger" },
+                  ],
+                }]),
+              };
             }
             if (sql.includes("FROM sqlite_master")) {
               const source = args[2] === "selinow-staging";
@@ -1194,8 +1227,22 @@ describe("backup CLI dry runs", () => {
         args[0] === "d1"
         && args[1] === "execute"
         && args.includes("--file")
-        && args[args.indexOf("--file") + 1] === PROTECTED_STAGING_ARTIFACT
+        && /import-chunks[/\\]chunk_\d{3}\.sql$/u.test(args[args.indexOf("--file") + 1] ?? "")
       ))).toBe(true);
+      expect(commands.every(({ args }) => (
+        !(args[0] === "d1" && args[1] === "execute" && args.includes("--file"))
+        || args[args.indexOf("--file") + 1] !== PROTECTED_STAGING_ARTIFACT
+      ))).toBe(true);
+      expect(importedChunkContents.length).toBeGreaterThanOrEqual(1);
+      for (const chunkContent of importedChunkContents) {
+        const statementCount = chunkContent.split("\n").filter((line) => line.endsWith(";")).length;
+        expect(statementCount).toBeLessThanOrEqual(DEFAULT_MAX_STATEMENTS_PER_CHUNK);
+        expect(statementCount).toBeGreaterThanOrEqual(1);
+        expect(chunkContent).not.toMatch(/^\s*(?:BEGIN|COMMIT)\s*;?\s*$/mu);
+        if (chunkContent.includes(DEFERRED_FOREIGN_KEYS_PRAGMA)) {
+          expect(chunkContent.startsWith(`${DEFERRED_FOREIGN_KEYS_PRAGMA};`)).toBe(true);
+        }
+      }
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "migrations"))
         .toBe(false);
       expect(commands.some(({ args, ci }) => (
@@ -1206,7 +1253,7 @@ describe("backup CLI dry runs", () => {
         && ci === "1"
       ))).toBe(true);
       expect(commands.filter(({ args }) => args[0] === "d1" && args[1] === "execute" && args.includes("--command")))
-        .toHaveLength(8);
+        .toHaveLength(10);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "delete")).toBe(true);
       const report = JSON.parse(await readFile(reportPath, "utf8")) as {
         records: {
@@ -1382,6 +1429,18 @@ describe("backup CLI dry runs", () => {
                 stdout: JSON.stringify([{ results: migrationNames.map((name) => ({ name })) }]),
               };
             }
+            if (sql.includes("FROM pragma_foreign_key_check()")) {
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{ results: [{ foreign_key_violations: 0 }] }]),
+              };
+            }
+            if (sql.includes("GROUP BY type")) {
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{ results: [{ object_count: 1, type: "table" }] }]),
+              };
+            }
             if (sql.includes("FROM sqlite_master")) {
               return {
                 stderr: "",
@@ -1421,6 +1480,139 @@ describe("backup CLI dry runs", () => {
       expect(commands.every(({ accountId }) => accountId === STAGING_ACCOUNT_ID)).toBe(true);
     } finally {
       await rm(reportPath, { force: true });
+    }
+  });
+});
+
+describe("chunked D1 import plan", () => {
+  it("splits statements quote-aware and keeps trigger bodies as one statement", () => {
+    const sql = [
+      "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+      "INSERT INTO \"parents\" VALUES (1, 'semi;colon')",
+      "CREATE TRIGGER audit AFTER INSERT ON \"parents\" BEGIN",
+      "  INSERT INTO log (note) VALUES ('x; y')",
+      "  UPDATE counters SET n = n + 1",
+      "END",
+    ].join(";\n") + ";";
+    const statements = splitSqlStatements(sql);
+    expect(statements).toHaveLength(3);
+    expect(statements[1]).toContain("'semi;colon'");
+    expect(statements[2]).toContain("INSERT INTO log");
+    expect(statements[2]).toMatch(/END$/u);
+  });
+
+  it("fails closed on unparsed trailing content", () => {
+    expect(() => splitSqlStatements("CREATE TABLE x (id INT)"))
+      .toThrow("sql_import_plan_unparsed_trailing_content");
+  });
+
+  it("rejects explicit transaction control statements", () => {
+    expect(() => buildChunkedImportPlan(["BEGIN", "CREATE TABLE x (id INT)", "COMMIT"]))
+      .toThrow("sql_import_plan_transaction_control_unsupported");
+  });
+
+  it("reorders forward FK CREATE TABLEs and INSERTs parent-before-child", () => {
+    const statements = splitSqlStatements([
+      "PRAGMA defer_foreign_keys=TRUE",
+      "CREATE TABLE \"child\" (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id))",
+      "CREATE TABLE parent (id INTEGER PRIMARY KEY)",
+      "INSERT INTO \"child\" VALUES (1, 1)",
+      "INSERT INTO \"parent\" VALUES (1)",
+    ].join(";\n") + ";");
+    const plan = buildChunkedImportPlan(statements);
+    const flat = plan.chunks.flatMap((chunk) => chunk.statements);
+    expect(flat).toHaveLength(4); // dump pragma stripped, nothing lost
+    const parentCreate = flat.findIndex((statement) => statement.startsWith("CREATE TABLE parent"));
+    const childCreate = flat.findIndex((statement) => statement.startsWith("CREATE TABLE \"child\""));
+    expect(parentCreate).toBeGreaterThanOrEqual(0);
+    expect(parentCreate).toBeLessThan(childCreate);
+    const parentInsert = flat.findIndex((statement) => statement.startsWith("INSERT INTO \"parent\""));
+    const childInsert = flat.findIndex((statement) => statement.startsWith("INSERT INTO \"child\""));
+    expect(parentInsert).toBeLessThan(childInsert);
+    // No dump-wide deferral needed: FKs resolve eagerly in this order.
+    expect(plan.chunks.every((chunk) => !chunk.deferredForeignKeys)).toBe(true);
+    expect(plan.summary.strippedDeferPragmaCount).toBe(1);
+  });
+
+  it("isolates a CREATE TABLE FK cycle into one deferred chunk", () => {
+    const statements = splitSqlStatements([
+      "CREATE TABLE gamma (id INTEGER PRIMARY KEY)",
+      "CREATE TABLE alpha (id INTEGER PRIMARY KEY, beta_id INTEGER REFERENCES beta(id))",
+      "CREATE TABLE beta (id INTEGER PRIMARY KEY, alpha_id INTEGER REFERENCES alpha(id))",
+      "INSERT INTO \"gamma\" VALUES (1)",
+    ].join(";\n") + ";");
+    const plan = buildChunkedImportPlan(statements);
+    const deferredChunks = plan.chunks.filter((chunk) => chunk.deferredForeignKeys);
+    expect(deferredChunks).toHaveLength(1);
+    const cycleChunk = deferredChunks[0];
+    expect(cycleChunk?.statements.some((statement) => statement.startsWith("CREATE TABLE alpha"))).toBe(true);
+    expect(cycleChunk?.statements.some((statement) => statement.startsWith("CREATE TABLE beta"))).toBe(true);
+    expect([...plan.summary.cycleTables].sort()).toEqual(["alpha", "beta"]);
+    const rendered = renderChunkSql(cycleChunk ?? { deferredForeignKeys: false, statements: [] });
+    expect(rendered.startsWith(`${DEFERRED_FOREIGN_KEYS_PRAGMA};\n`)).toBe(true);
+    expect(rendered.split("\n").filter((line) => line.endsWith(";")).length)
+      .toBeLessThanOrEqual(DEFAULT_MAX_STATEMENTS_PER_CHUNK);
+  });
+
+  it("groups FK-cycle INSERT data into a single deferred chunk", () => {
+    const statements = splitSqlStatements([
+      "CREATE TABLE a (id INTEGER PRIMARY KEY, b_id INTEGER REFERENCES b(id))",
+      "CREATE TABLE b (id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id))",
+      "INSERT INTO \"a\" VALUES (1, NULL)",
+      "INSERT INTO \"b\" VALUES (1, 1)",
+    ].join(";\n") + ";");
+    const plan = buildChunkedImportPlan(statements);
+    const deferredChunks = plan.chunks.filter((chunk) => chunk.deferredForeignKeys);
+    expect(deferredChunks).toHaveLength(2); // CREATE unit + INSERT group
+    const insertChunk = deferredChunks.find((chunk) => (
+      chunk.statements.some((statement) => statement.startsWith("INSERT"))
+    ));
+    expect(insertChunk).toBeDefined();
+    expect(insertChunk?.statements).toHaveLength(2);
+  });
+
+  it("marks self-referencing table INSERT chunks as deferred", () => {
+    const statements = splitSqlStatements([
+      "CREATE TABLE tree (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES tree(id))",
+      "INSERT INTO \"tree\" VALUES (1, NULL)",
+    ].join(";\n") + ";");
+    const plan = buildChunkedImportPlan(statements);
+    const insertChunk = plan.chunks.find((chunk) => (
+      chunk.statements.some((statement) => statement.startsWith("INSERT"))
+    ));
+    expect(insertChunk?.deferredForeignKeys).toBe(true);
+    expect(plan.summary.selfReferencingTables).toEqual(["tree"]);
+  });
+
+  it("keeps every chunk within the statement budget including the pragma", () => {
+    const statements = ["CREATE TABLE big (id INTEGER PRIMARY KEY)"];
+    for (let index = 0; index < 250; index += 1) {
+      statements.push(`INSERT INTO "big" VALUES (${String(index)})`);
+    }
+    const plan = buildChunkedImportPlan(statements, { maxStatementsPerChunk: 10 });
+    expect(plan.chunks.length).toBeGreaterThan(25);
+    for (const chunk of plan.chunks) {
+      const total = chunk.statements.length + (chunk.deferredForeignKeys ? 1 : 0);
+      expect(total).toBeLessThanOrEqual(10);
+      expect(chunk.statements.length).toBeGreaterThanOrEqual(1);
+    }
+    const insertCount = plan.chunks
+      .flatMap((chunk) => chunk.statements)
+      .filter((statement) => statement.startsWith("INSERT"))
+      .length;
+    expect(insertCount).toBe(250);
+  });
+
+  it("renders chunks with terminated statements and no transaction control", () => {
+    const plan = buildChunkedImportPlan([
+      "CREATE TABLE parent (id INTEGER PRIMARY KEY)",
+      "INSERT INTO \"parent\" VALUES (1)",
+    ]);
+    for (const chunk of plan.chunks) {
+      const rendered = renderChunkSql(chunk);
+      expect(rendered.endsWith(";\n")).toBe(true);
+      expect(rendered).not.toMatch(/^\s*(?:BEGIN|COMMIT)\s*;/mu);
+      expect(rendered.includes("PRAGMA defer_foreign_keys")).toBe(chunk.deferredForeignKeys);
     }
   });
 });
