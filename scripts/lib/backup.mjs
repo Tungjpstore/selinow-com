@@ -443,13 +443,14 @@ async function importSqlArtifactChunked(runner, targetName, environment, artifac
     throw new Error("restore_import_plan_invalid");
   }
   if (plan.chunks.length === 0) throw new Error("restore_import_plan_empty");
-  await mkdir(chunkDirectory, { recursive: true, mode: 0o700 });
+  await ensurePrivateDirectory(chunkDirectory);
   let index = 0;
   for (const chunk of plan.chunks) {
     index += 1;
     const chunkName = `chunk_${String(index).padStart(3, "0")}.sql`;
     const chunkPath = join(chunkDirectory, chunkName);
     await writeFile(chunkPath, renderChunkSql(chunk), { encoding: "utf8", mode: 0o600 });
+    await chmod(chunkPath, 0o600);
     safeRunner(runner, [
       "d1", "execute", targetName, "--remote", "--env", environment,
       "--file", chunkPath, "--yes",

@@ -17,6 +17,7 @@ const operationalDocs = [
   "docs/IMPLEMENTATION_STATUS.md",
   "docs/release/CURRENT_HANDOFF_2026-08-09.md",
   "docs/release/CURRENT_HANDOFF_2026-08-11.md",
+  "docs/release/CURRENT_HANDOFF_2026-08-17.md",
 ] as const;
 const content = Object.fromEntries(operationalDocs.map((path) => [path, readFileSync(path, "utf8")]));
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
@@ -77,10 +78,14 @@ describe("operational migration-ledger documentation", () => {
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("DODO_PAYMENTS_WEBHOOK_KEY");
     expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0097_telegram_action_generation_and_delivery_interlock.sql`");
     expect(content["docs/DOMAINS.md"]).toContain("0093_custom_domain_turnstile_runtime_guard.sql");
-    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0097`");
+    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Operational source migration chain at that checkpoint: contiguous `0001`-`0097`");
     expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Production D1 ledger\n> is at `0098`");
     expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Source migrations `0099`-`0105` (7 pending, `0100`\n> never applied remotely)");
     expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("`docs/release/CURRENT_HANDOFF_2026-08-17.md`");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-17.md"]).toContain("Deploy commit: `9caf835`");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-17.md"]).toContain("Production D1 ledger: applied through `0098`");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-17.md"]).toContain("Migrations `0099`-`0105` are unapplied");
+    expect(content["docs/release/CURRENT_HANDOFF_2026-08-17.md"]).toContain("Production Worker: version `c18f5738`");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-09.md"]).toContain("`0091`-`0094` over the retained `0090` staging ledger");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`2df45cf5936755bf4e31fabbb06891de8789c271`");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`34ac903aea8b737fa1860d6e6aaf99c454279eda`");
@@ -141,5 +146,6 @@ describe("operational migration-ledger documentation", () => {
     expect(content["docs/DOMAINS.md"]).toContain("Production platform routing is live");
     expect(content["docs/DOMAINS.md"]).not.toContain("Production platform handoff matrix (not live)");
     expect(content["docs/IMPLEMENTATION_STATUS.md"]).not.toContain("Current frontend slice deployment boundary | The PromptOS frontend kit is traffic-deployed on Worker version `6ca9c890");
+    expect(content["docs/IMPLEMENTATION_STATUS.md"]).not.toContain("Current operational source migration chain: contiguous `0001`-`0097`");
   });
 });

@@ -534,7 +534,7 @@ protected backup/restore evidence and an approved mutation window.
   `4489cc8fa123bd0126211c07f0bdacc5a235fe0e`. It is not a post-documentation
   HEAD or a deployed identity; the next release ceremony must recapture the
   final clean commit and tree.
-- Current operational source migration chain: contiguous `0001`-`0097`.
+- Operational source migration chain at that checkpoint: contiguous `0001`-`0097`.
   Staging post-migration evidence for release
   `stg_20260808T235913Z_73d0c27493ea` records all 90 migrations through
   `0090_payos_provider_claim_clear_guard.sql`, bound to commit

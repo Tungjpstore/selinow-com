@@ -1260,6 +1260,7 @@ describe("backup CLI dry runs", () => {
           backup_snapshots: Array<Record<string, unknown>>;
           restore_drills: Array<{ backup_snapshot_id: string }>;
         };
+        verification: Record<string, unknown>;
       };
       const protectedBackup = await protectedStagingBackupEvidence();
       expect(report.records.backup_snapshots[0]).toMatchObject({
@@ -1271,6 +1272,23 @@ describe("backup CLI dry runs", () => {
       expect(firstDrill).toBeDefined();
       if (firstDrill === undefined) throw new Error("restore_drill_record_missing");
       expect(firstDrill.backup_snapshot_id).toBe(PROTECTED_STAGING_SNAPSHOT_ID);
+      const expectedImportPlan = buildChunkedImportPlan(
+        splitSqlStatements(readFileSync(PROTECTED_STAGING_ARTIFACT, "utf8")),
+      );
+      expect(report.verification).toMatchObject({
+        foreignKeyViolationCount: 0,
+        importedChunks: expectedImportPlan.summary.chunkCount,
+        importedCycleTables: expectedImportPlan.summary.cycleTables,
+        importedDeferredChunks: expectedImportPlan.summary.deferredChunkCount,
+        importedStatementCount: expectedImportPlan.summary.statementCount,
+        integrityOk: true,
+        remoteForeignKeyViolationCount: 0,
+        restoredObjectCounts: { index: 307, table: 135, trigger: 298 },
+      });
+      expect(report.verification.importedChunks).toBe(importedChunkContents.length);
+      expect(report.verification.importedDeferredChunks).toBe(
+        importedChunkContents.filter((chunk) => chunk.includes(DEFERRED_FOREIGN_KEYS_PRAGMA)).length,
+      );
     } finally {
       await rm(reportPath, { force: true });
     }
@@ -1614,5 +1632,73 @@ describe("chunked D1 import plan", () => {
       expect(rendered).not.toMatch(/^\s*(?:BEGIN|COMMIT)\s*;/mu);
       expect(rendered.includes("PRAGMA defer_foreign_keys")).toBe(chunk.deferredForeignKeys);
     }
+  });
+
+  it("rejects invalid chunk budgets fail-closed", () => {
+    const statements = ["CREATE TABLE t (id INTEGER PRIMARY KEY)"];
+    for (const invalid of [1, 0, -3, 2.5, Number.NaN]) {
+      expect(() => buildChunkedImportPlan(statements, { maxStatementsPerChunk: invalid }))
+        .toThrow("sql_import_plan_chunk_size_invalid");
+    }
+  });
+
+  it("rejects non-string dump input fail-closed", () => {
+    const invalidInputs: unknown[] = [42, null, undefined, {}, []];
+    for (const invalid of invalidInputs) {
+      expect(() => splitSqlStatements(invalid as string))
+        .toThrow("sql_import_plan_input_invalid");
+    }
+    // An empty (but valid) dump plans to zero chunks; callers fail closed on
+    // that separately (`restore_import_plan_empty`).
+    expect(splitSqlStatements("")).toEqual([]);
+    expect(buildChunkedImportPlan([]).chunks).toEqual([]);
+  });
+
+  it("rejects an FK-cycle unit that cannot fit into one deferred chunk", () => {
+    const statements = splitSqlStatements([
+      "CREATE TABLE one (id INTEGER PRIMARY KEY, three_id INTEGER REFERENCES three(id))",
+      "CREATE TABLE two (id INTEGER PRIMARY KEY, one_id INTEGER REFERENCES one(id))",
+      "CREATE TABLE three (id INTEGER PRIMARY KEY, two_id INTEGER REFERENCES two(id))",
+    ].join(";\n") + ";");
+    expect(() => buildChunkedImportPlan(statements, { maxStatementsPerChunk: 3 }))
+      .toThrow("sql_import_plan_cycle_unit_too_large");
+    // Same cycle fits once the budget reserves room for the pragma.
+    const plan = buildChunkedImportPlan(statements, { maxStatementsPerChunk: 4 });
+    expect(plan.summary.cycleTables).toHaveLength(3);
+    expect(plan.chunks.filter((chunk) => chunk.deferredForeignKeys)).toHaveLength(1);
+  });
+
+  it("rejects self-referencing INSERT groups that exceed the deferred budget", () => {
+    const statements = [
+      "CREATE TABLE tree (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES tree(id))",
+      "INSERT INTO \"tree\" VALUES (1, NULL)",
+      "INSERT INTO \"tree\" VALUES (2, 1)",
+      "INSERT INTO \"tree\" VALUES (3, 2)",
+    ];
+    expect(() => buildChunkedImportPlan(statements, { maxStatementsPerChunk: 3 }))
+      .toThrow("sql_import_plan_deferred_insert_group_too_large");
+  });
+
+  it("rejects FK-cycle INSERT data that cannot share one deferred chunk", () => {
+    const statements = [
+      "CREATE TABLE a (id INTEGER PRIMARY KEY, b_id INTEGER REFERENCES b(id))",
+      "CREATE TABLE b (id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id))",
+      "INSERT INTO \"a\" VALUES (1, NULL)",
+      "INSERT INTO \"b\" VALUES (1, 1)",
+      "INSERT INTO \"a\" VALUES (2, 1)",
+    ];
+    expect(() => buildChunkedImportPlan(statements, { maxStatementsPerChunk: 3 }))
+      .toThrow("sql_import_plan_deferred_insert_group_too_large");
+  });
+
+  it("rejects unresolvable statement ordering fail-closed", () => {
+    // A dump defining the same table twice has no unambiguous topological
+    // ordering; the planner must fail closed rather than ship a losing plan.
+    const statements = [
+      "CREATE TABLE dup (id INTEGER PRIMARY KEY)",
+      "CREATE TABLE dup (name TEXT)",
+    ];
+    expect(() => buildChunkedImportPlan(statements))
+      .toThrow("sql_import_plan_unresolvable_order");
   });
 });

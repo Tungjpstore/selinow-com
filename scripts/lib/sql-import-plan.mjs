@@ -119,6 +119,9 @@ export function buildChunkedImportPlan(statements, options = {}) {
     const createMatch = statement.match(CREATE_TABLE_PATTERN);
     if (createMatch) {
       const name = createMatch[1];
+      // A dump defining the same table twice has no unambiguous topological
+      // order; fail closed instead of letting D1 reject it mid-import.
+      if (tableParents.has(name)) throw new Error("sql_import_plan_unresolvable_order");
       const references = [...statement.matchAll(REFERENCE_PATTERN)].map((match) => match[1]);
       if (references.includes(name)) selfReferencingTables.add(name);
       tableParents.set(name, new Set(references.filter((parent) => parent !== name)));
