@@ -106,6 +106,8 @@ function seedRuntime(): { database: DatabaseSync; env: AppBindings } {
     INSERT INTO platform_admins (user_id, role, status, created_at, updated_at) VALUES
       ('${ADMIN_RISK}', 'risk', 'active', '${NOW}', '${NOW}'),
       ('${ADMIN_SUPPORT}', 'support', 'active', '${NOW}', '${NOW}');
+    UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = '${NOW}'
+    WHERE id IN ('${ADMIN_RISK}', '${ADMIN_SUPPORT}');
     INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, readiness_version, created_at, updated_at) VALUES
       ('shop-a', '${SHOP_A_PUBLIC}', 'remediation-a', 'Remediation A', 'active', 'en', 'USD', 'UTC', 1, '${NOW}', '${NOW}'),
       ('shop-b', '${SHOP_B_PUBLIC}', 'remediation-b', 'Remediation B', 'active', 'en', 'USD', 'UTC', 1, '${NOW}', '${NOW}');
@@ -432,6 +434,45 @@ describe("payment remediation terminal review", () => {
     expect(database.prepare("SELECT status, version FROM payment_remediation_requests WHERE public_id = 'prem-refund-a'").get())
       .toEqual({ status: "provider_pending", version: 3 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'payment.remediation_completed'").get()).toEqual({ count: 0 });
+  });
+
+  it("denies an un-enrolled owner/risk admin a terminal review until two-factor enrollment completes", async () => {
+    const { database, env } = seedRuntime();
+    const ADMIN_UNENROLLED = "admin-remediation-unenrolled";
+    database.exec(`
+      INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+      VALUES ('${ADMIN_UNENROLLED}', 'admin-unenrolled-remediation@example.test', 'Unenrolled Risk Admin', 'active', '${NOW}', '${NOW}');
+      INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
+      VALUES ('${ADMIN_UNENROLLED}', 'risk', 'active', '${NOW}', '${NOW}');
+    `);
+    const input = reviewInput(env, {
+      idempotencyKey: "review-unenrolled-0001",
+      requestId: "request-unenrolled-review",
+      userId: ADMIN_UNENROLLED,
+    });
+    // The fail-closed role lookup collapses un-enrolled admins to no role, so
+    // the owner/risk check denies them before any remediation state moves.
+    await expect(reviewPaymentRemediationRequest(input))
+      .rejects.toMatchObject({ code: "authorization_denied", status: 403 });
+    expect(database.prepare("SELECT status, version FROM payment_remediation_requests WHERE public_id = 'prem-refund-a'").get())
+      .toEqual({ status: "provider_pending", version: 2 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM payment_reversal_events").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action LIKE 'payment.remediation_%'").get())
+      .toEqual({ count: 0 });
+
+    database.prepare(`
+      UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+      WHERE id = '${ADMIN_UNENROLLED}'
+    `).run(NOW);
+    const completed = await reviewPaymentRemediationRequest(reviewInput(env, {
+      idempotencyKey: "review-unenrolled-0001",
+      requestId: "request-unenrolled-review-enrolled",
+      userId: ADMIN_UNENROLLED,
+    }));
+    expect(completed).toMatchObject({ kind: "refund", status: "completed", version: 4 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM payment_reversal_events").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action = 'payment.remediation_completed' AND resource_id = 'prem-refund-a'").get())
+      .toEqual({ count: 1 });
   });
 
   it("keeps seller refund creation rejected with a manual-settlement detail code", async () => {

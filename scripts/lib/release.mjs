@@ -536,6 +536,14 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       payment_remediation_requests_transition_guard: "a50886c52ea06669fe04124e4ab65011af851d1fb1db84f04f7fe1a9819619e9",
     }),
   }),
+  "0105_ops_platform_indexes.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_delivery_jobs_platform_attention: "e338257f5b8705f7e92f60b643e56ec99faa302629438c8f54314307a305b7bf",
+      idx_payment_exceptions_platform_status: "519fe99e4091fa7693a062603b4e47b2222c0ffee195c178b464bd1c273dfc94",
+      idx_queue_dead_letters_platform_status: "e8fe97147c2c5e04f4b0d2d7895d51b1d1b70186244ea52bcc58431a87a4bab3",
+    }),
+  }),
 });
 
 

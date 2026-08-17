@@ -1,8 +1,10 @@
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { encodeCreatedIdCursor, parseCreatedIdCursor, requireListLimit } from "../core/pagination";
 import { createGeneratedLicenseQueueEnvelope } from "../commerce/generated-license";
 import type { AppBindings } from "../platform/bindings";
+import { describePlatformAdminAccess } from "../tenants/store";
 import {
   operationsScopeKey,
   safeOperationsReference,
@@ -77,6 +79,7 @@ export type ActiveDeadLetterList = {
   hasMore: boolean;
   items: DeadLetterView[];
   limit: number;
+  nextCursor?: string | null;
 };
 
 type GeneratedLicenseDeadLetterRow = {
@@ -318,26 +321,33 @@ async function ensureOutboxReplayLink(input: {
 }
 
 export async function listActiveDeadLetters(input: {
+  cursor?: string | null;
   env: AppBindings;
   limit?: number;
 }): Promise<ActiveDeadLetterList> {
-  const limit = input.limit ?? 100;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
-    throw new AppError("operations_validation_failed", 400, ["limit_invalid"]);
-  }
+  const limit = requireListLimit(input.limit, 100);
+  const cursor = parseCreatedIdCursor(input.cursor);
   const result = await input.env.PLATFORM_DB.prepare(`${DEAD_LETTER_SELECT}
     WHERE status IN ('open', 'acknowledged', 'retry_requested')
-    ORDER BY CASE status
-      WHEN 'open' THEN 3
-      WHEN 'retry_requested' THEN 2
-      ELSE 1
-    END DESC, last_seen_at DESC, id
+      AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?))
+    ORDER BY created_at DESC, id DESC
     LIMIT ?
-  `).bind(limit + 1).all<DeadLetterRow>();
+  `).bind(
+    cursor?.createdAt ?? null,
+    cursor?.createdAt ?? null,
+    cursor?.createdAt ?? null,
+    cursor?.id ?? null,
+    limit + 1,
+  ).all<DeadLetterRow>();
+  const page = result.results.slice(0, limit);
+  const last = page.at(-1);
   return {
     hasMore: result.results.length > limit,
-    items: result.results.slice(0, limit).map(mapDeadLetter),
+    items: page.map(mapDeadLetter),
     limit,
+    nextCursor: result.results.length > limit && last !== undefined
+      ? encodeCreatedIdCursor({ createdAt: last.createdAt, id: last.id })
+      : null,
   };
 }
 
@@ -688,11 +698,12 @@ async function findGeneratedLicenseDeadLetterById(
 }
 
 async function requireReplayOperator(env: AppBindings, userId: string): Promise<void> {
-  const row = await env.PLATFORM_DB.prepare(`
-    SELECT role FROM platform_admins
-    WHERE user_id = ? AND status = 'active' LIMIT 1
-  `).bind(userId).first<{ role: "owner" | "risk" | "support" }>();
-  if (row === null || !new Set(["owner", "risk"]).has(row.role)) {
+  // 2FA-aware lookup: un-enrolled admins cannot trigger dead-letter replays.
+  const access = await describePlatformAdminAccess({ env, userId });
+  if (access.kind === "two_factor_required") {
+    throw new AppError("admin_two_factor_required", 403);
+  }
+  if (access.kind !== "authorized" || !new Set(["owner", "risk"]).has(access.role)) {
     throw new AppError("authorization_denied", 403);
   }
 }

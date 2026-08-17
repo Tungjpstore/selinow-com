@@ -2,6 +2,7 @@ import { applyVerifiedPaymentReversal } from "../commerce/payment-reversal";
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { parseCreatedIdCursor } from "../core/pagination";
 import type { AppBindings } from "../platform/bindings";
 import { getPlatformAdminRole } from "../tenants/store";
 import { getShopForMember } from "../tenants/store";
@@ -176,13 +177,18 @@ export async function createPaymentRemediationRequest(input: {
 }
 
 export async function listAdminPaymentRemediationRequests(input: {
+  cursor?: string | null;
   env: AppBindings;
+  limit?: number;
   status?: string | null;
   userId: string;
 }): Promise<AdminPaymentRemediationRequest[]> {
   if (await getPlatformAdminRole({ env: input.env, userId: input.userId }) === null) throw new AppError("authorization_denied", 403);
   const status = input.status?.trim() ?? "";
   if (status !== "" && !/^[a-z_]{3,32}$/u.test(status)) throw new AppError("validation_failed", 400, ["status_invalid"]);
+  const limit = input.limit ?? 100;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AppError("validation_failed", 400, ["limit_invalid"]);
+  const cursor = parseCreatedIdCursor(input.cursor);
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT requests.id, requests.payment_exception_id AS exceptionId,
       orders.public_id AS orderPublicId, requests.kind, requests.status,
@@ -195,9 +201,18 @@ export async function listAdminPaymentRemediationRequests(input: {
     INNER JOIN orders ON orders.id = requests.order_id AND orders.shop_id = requests.shop_id
     INNER JOIN shops ON shops.id = requests.shop_id
     WHERE (? = '' OR requests.status = ?)
+      AND (? IS NULL OR requests.created_at < ? OR (requests.created_at = ? AND requests.id < ?))
     ORDER BY requests.created_at DESC, requests.id DESC
-    LIMIT 100
-  `).bind(status, status).all<RequestRow & { shopName: string; shopPublicId: string }>();
+    LIMIT ?
+  `).bind(
+    status,
+    status,
+    cursor?.createdAt ?? null,
+    cursor?.createdAt ?? null,
+    cursor?.createdAt ?? null,
+    cursor?.id ?? null,
+    limit,
+  ).all<RequestRow & { shopName: string; shopPublicId: string }>();
   return rows.results.map((row) => ({ ...mapRequest(row), shopName: row.shopName, shopPublicId: row.shopPublicId }));
 }
 

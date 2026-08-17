@@ -1,5 +1,6 @@
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import { encodeCreatedIdCursor, parseCreatedIdCursor, requireListLimit } from "../core/pagination";
 import type { AppBindings } from "../platform/bindings";
 
 const INCIDENT_CATEGORIES = [
@@ -73,6 +74,7 @@ export type ActiveIncidentList = {
   hasMore: boolean;
   items: IncidentView[];
   limit: number;
+  nextCursor?: string | null;
 };
 
 const INCIDENT_SELECT = `
@@ -167,27 +169,33 @@ function requireIncident(row: IncidentRow | null): IncidentRow {
 }
 
 export async function listActiveIncidents(input: {
+  cursor?: string | null;
   env: AppBindings;
   limit?: number;
 }): Promise<ActiveIncidentList> {
-  const limit = input.limit ?? 100;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
-    throw new AppError("operations_validation_failed", 400, ["limit_invalid"]);
-  }
+  const limit = requireListLimit(input.limit, 100);
+  const cursor = parseCreatedIdCursor(input.cursor);
   const result = await input.env.PLATFORM_DB.prepare(`${INCIDENT_SELECT}
     WHERE status IN ('open', 'acknowledged')
-    ORDER BY CASE severity
-      WHEN 'critical' THEN 4
-      WHEN 'high' THEN 3
-      WHEN 'medium' THEN 2
-      ELSE 1
-    END DESC, last_seen_at DESC, id
+      AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?))
+    ORDER BY created_at DESC, id DESC
     LIMIT ?
-  `).bind(limit + 1).all<IncidentRow>();
+  `).bind(
+    cursor?.createdAt ?? null,
+    cursor?.createdAt ?? null,
+    cursor?.createdAt ?? null,
+    cursor?.id ?? null,
+    limit + 1,
+  ).all<IncidentRow>();
+  const page = result.results.slice(0, limit);
+  const last = page.at(-1);
   return {
     hasMore: result.results.length > limit,
-    items: result.results.slice(0, limit).map(mapIncident),
+    items: page.map(mapIncident),
     limit,
+    nextCursor: result.results.length > limit && last !== undefined
+      ? encodeCreatedIdCursor({ createdAt: last.createdAt, id: last.id })
+      : null,
   };
 }
 

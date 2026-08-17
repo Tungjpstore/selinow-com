@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 
 import { requireCsrfSession, requireRecentAuth } from "../../../../../lib/auth/session";
 import { AppError } from "../../../../../lib/core/errors";
+import { guardAdminMutationRate } from "../../../../../lib/http/admin-rate-limit";
 import { readJsonObject, rejectUnknownFields } from "../../../../../lib/http/request";
 import { createCaughtErrorResponse } from "../../../../../lib/http/security";
 import {
@@ -15,7 +16,7 @@ import {
 } from "../../../../../lib/operations/dead-letters";
 import { safeOperationsReference } from "../../../../../lib/operations/incidents";
 import { getBindings } from "../../../../../lib/platform/bindings";
-import { getPlatformAdminRole } from "../../../../../lib/tenants/store";
+import { requirePlatformAdminApiAccess } from "../../../../../lib/tenants/store";
 
 function requireExpectedVersion(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
@@ -32,11 +33,9 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
-    const adminRole = await getPlatformAdminRole({ env, userId: auth.userId });
-    if (adminRole === null) {
-      throw new AppError("authorization_denied", 403);
-    }
+    await guardAdminMutationRate({ env, family: "operations_dead_letters", request });
+    requireRecentAuth(auth, 5);
+    const adminRole = await requirePlatformAdminApiAccess({ env, userId: auth.userId });
     const body = await readJsonObject(request, 2 * 1_024);
     rejectUnknownFields(body, ["action", "expectedVersion", "resolutionCode", "shopId"]);
     const common = {

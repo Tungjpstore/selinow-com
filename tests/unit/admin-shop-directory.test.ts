@@ -81,6 +81,10 @@ function seed(database: DatabaseSync): void {
     INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
     VALUES ('admin-support', 'support', 'active', ?, ?)
   `).run(now, now);
+  database.prepare(`
+    UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+    WHERE id = 'admin-support'
+  `).run(now);
 
   const shops: Array<{
     id: string;

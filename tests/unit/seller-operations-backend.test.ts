@@ -128,6 +128,7 @@ function seed(database: DatabaseSync): void {
       ('${OWNER_B}', 'owner-b@example.test', 'Owner B', 'active', '${now}', '${now}'),
       ('${ADMIN}', 'admin@example.test', 'Admin', 'active', '${now}', '${now}');
     INSERT INTO platform_admins (user_id, role, status, created_at, updated_at) VALUES ('${ADMIN}', 'support', 'active', '${now}', '${now}');
+    UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = '${now}' WHERE id = '${ADMIN}';
     INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, readiness_version, created_at, updated_at) VALUES
       ('${SHOP_A}', '${SHOP_A_PUBLIC}', 'ops-a', 'Operations A', 'active', 'en', 'USD', 'UTC', 1, '${now}', '${now}'),
       ('${SHOP_B}', '${SHOP_B_PUBLIC}', 'ops-b', 'Operations B', 'active', 'en', 'USD', 'UTC', 1, '${now}', '${now}');

@@ -766,17 +766,60 @@ export function selectShopForMember(shops: readonly ShopView[], requestedPublicI
 
 export type PlatformAdminRole = "owner" | "risk" | "support";
 
+export type PlatformAdminAccess =
+  | { kind: "authorized"; role: PlatformAdminRole }
+  | { kind: "not_admin" }
+  | { kind: "two_factor_required" };
+
+/**
+ * Resolves platform-admin access while distinguishing the fail-closed reasons.
+ * An active admin who has not confirmed two-factor enrollment is surfaced as
+ * `two_factor_required` so API routes can return the dedicated
+ * `admin_two_factor_required` code and the console can show an enrollment hint.
+ */
+export async function describePlatformAdminAccess(input: {
+  env: AppBindings;
+  userId: string;
+}): Promise<PlatformAdminAccess> {
+  const row = await input.env.PLATFORM_DB.prepare(`
+    SELECT admins.role AS role, COALESCE(users.two_factor_enabled, 0) AS twoFactorEnabled
+    FROM platform_admins AS admins
+    INNER JOIN platform_users AS users ON users.id = admins.user_id
+    WHERE admins.user_id = ? AND admins.status = 'active'
+    LIMIT 1
+  `).bind(input.userId).first<{ role: PlatformAdminRole; twoFactorEnabled: number }>();
+  if (row === null) return { kind: "not_admin" };
+  if (row.twoFactorEnabled !== 1) return { kind: "two_factor_required" };
+  return { kind: "authorized", role: row.role };
+}
+
+/**
+ * Fail-closed platform-admin role lookup. Returns the role only for an active
+ * platform admin whose platform_users row has confirmed two-factor enrollment;
+ * admins without 2FA and non-admins both resolve to null so existing
+ * `=== null` callers stay safely denied. Never bypasses the 2FA requirement.
+ */
 export async function getPlatformAdminRole(input: {
   env: AppBindings;
   userId: string;
 }): Promise<PlatformAdminRole | null> {
-  const admin = await input.env.PLATFORM_DB.prepare(`
-    SELECT role
-    FROM platform_admins
-    WHERE user_id = ? AND status = 'active'
-    LIMIT 1
-  `).bind(input.userId).first<{ role: PlatformAdminRole }>();
-  return admin?.role ?? null;
+  const access = await describePlatformAdminAccess(input);
+  return access.kind === "authorized" ? access.role : null;
+}
+
+/**
+ * API-route guard that surfaces the distinct two-factor enrollment state. Throws
+ * `admin_two_factor_required` (403) for admins without confirmed 2FA so the UI
+ * can offer an enrollment hint, and `authorization_denied` (403) for non-admins.
+ */
+export async function requirePlatformAdminApiAccess(input: {
+  env: AppBindings;
+  userId: string;
+}): Promise<PlatformAdminRole> {
+  const access = await describePlatformAdminAccess(input);
+  if (access.kind === "authorized") return access.role;
+  if (access.kind === "two_factor_required") throw new AppError("admin_two_factor_required", 403);
+  throw new AppError("authorization_denied", 403);
 }
 
 export async function isPlatformAdmin(input: {

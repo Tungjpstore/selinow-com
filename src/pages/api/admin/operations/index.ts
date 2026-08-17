@@ -1,7 +1,6 @@
 import type { APIRoute } from "astro";
 
 import { authenticateRequest } from "../../../../lib/auth/session";
-import { AppError } from "../../../../lib/core/errors";
 import { createCaughtErrorResponse } from "../../../../lib/http/security";
 import {
   listActiveDeadLetters,
@@ -10,29 +9,33 @@ import {
 import { listActiveDeletionRequests } from "../../../../lib/operations/deletion";
 import { listActiveIncidents } from "../../../../lib/operations/incidents";
 import { getBindings } from "../../../../lib/platform/bindings";
-import { isPlatformAdmin } from "../../../../lib/tenants/store";
+import { requirePlatformAdminApiAccess } from "../../../../lib/tenants/store";
 
 export const GET: APIRoute = async ({ locals, request }) => {
   try {
     const env = getBindings();
     const auth = await authenticateRequest(request, env);
-    if (!(await isPlatformAdmin({ env, userId: auth.userId }))) {
-      throw new AppError("authorization_denied", 403);
-    }
+    await requirePlatformAdminApiAccess({ env, userId: auth.userId });
+    const url = new URL(request.url);
+    const deadLettersCursor = url.searchParams.get("deadLettersCursor");
+    const deletionsCursor = url.searchParams.get("deletionsCursor");
+    const incidentsCursor = url.searchParams.get("incidentsCursor");
     const [deadLetterOverview, generatedLicenseDeadLetterOverview, deletionOverview, incidentOverview] = await Promise.all([
-      listActiveDeadLetters({ env }),
+      listActiveDeadLetters({ cursor: deadLettersCursor, env }),
       listActiveGeneratedLicenseDeadLetters({ env }),
-      listActiveDeletionRequests({ env, userId: auth.userId }),
-      listActiveIncidents({ env }),
+      listActiveDeletionRequests({ cursor: deletionsCursor, env, userId: auth.userId }),
+      listActiveIncidents({ cursor: incidentsCursor, env }),
     ]);
     return Response.json({
       deadLetters: deadLetterOverview.items,
       deadLettersHasMore: deadLetterOverview.hasMore,
+      deadLettersNextCursor: deadLetterOverview.nextCursor ?? null,
       deletionOverview,
       generatedLicenseDeadLetters: generatedLicenseDeadLetterOverview.items,
       generatedLicenseDeadLettersHasMore: generatedLicenseDeadLetterOverview.hasMore,
       incidents: incidentOverview.items,
       incidentsHasMore: incidentOverview.hasMore,
+      incidentsNextCursor: incidentOverview.nextCursor ?? null,
       ok: true,
       operationsListLimit: {
         deadLetters: deadLetterOverview.limit,

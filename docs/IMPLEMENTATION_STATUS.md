@@ -4,6 +4,63 @@ Last updated: 2026-08-17
 
 ## Current source of truth
 
+Platform Admin Console Ops Upgrade (2026-08-17, branch `dashboard-redesign-takeover`):
+Security-first upgrade of the platform admin surface — mandatory 2FA fail-closed
+on every console and API entry path, per-IP admin mutation rate limiting, tighter
+recent-auth windows on high-risk mutations, keyset pagination across the
+operational listings, a bounded ops overview endpoint + control center UI, and the
+appeals terminal-remediation closure path.
+- **Migration `0105_ops_platform_indexes.sql`** (forward-only, additive): platform-leading
+  indexes for cross-tenant admin listings — `queue_dead_letters(status, created_at DESC,
+  id DESC)`, `payment_exceptions(status, created_at DESC, id DESC)`, and a partial
+  `delivery_jobs(status, updated_at DESC, id DESC) WHERE status IN ('failed','dead_letter')`.
+  Column directions are aligned to the keyset `ORDER BY` of the admin list services.
+  Registered in the production invariant registry (`scripts/lib/release.mjs`) with
+  recomputed hashes.
+- **Mandatory platform-admin 2FA (fail-closed)**: `getPlatformAdminRole` /
+  `describePlatformAdminAccess` now deny access when `platform_users.two_factor_enabled`
+  is not set. All five admin pages render a dedicated enrollment state
+  (`admin_two_factor_required`, linking to `/app/security`); all ten admin mutation
+  routes plus the service guards (abuse moderation, encryption rotation, deletion
+  lifecycle, dead-letter replay, remediation) are routed through the 2FA-aware lookup,
+  and the bootstrap CLI (`scripts/lib/platform-admin-bootstrap.mjs`) prints an enrollment
+  note. **DEPLOY PREREQUISITE: verify every active platform admin has
+  `two_factor_enabled=1` before promoting to production — otherwise admins are locked
+  out of the console/API with an actionable enrollment hint.**
+- **Per-IP admin mutation rate limiting**: `src/lib/http/admin-rate-limit.ts` backed by
+  `security_rate_limits` — 30 requests / 60 seconds per IP per family; the existing cron
+  purge is reused for row cleanup. The admin islands map the `rate_limited` outcome to
+  dedicated copy.
+- **Recent-auth tightening**: `requireRecentAuth` tightened to 5 minutes for the appeals
+  PATCH, deletion legal-hold, rotation process, and dead-letter replay routes; the islands
+  surface explicit re-login guidance on expiry.
+- **Keyset pagination** (cursor contract: base64url `{createdAt ISO-normalized, id}`,
+  `ORDER BY created_at DESC, id DESC`, `limit+1` for `hasMore`) applied to the dead-letter,
+  incident, deletion, and remediation list services and wired into `operations.astro` and
+  `appeals.astro` with First/Next links; pages re-sort client-side for severity-first
+  triage. The appeals route keeps a backward-compatible limit (default/max 100).
+- **Ops overview + control center**: `GET /api/admin/operations/overview` returns bounded
+  aggregates with `no-store` headers; registered in `API_ENDPOINT_INDEX.csv` (row 193).
+  `/admin` gains an ops control center with 30-second auto-refresh that pauses when the tab
+  is hidden, built to ui-ux-pro-max standards (contrast ≥4.5:1, visible focus rings,
+  tabular numerals, reduced-motion support). The audit browser on `investigations.astro`
+  gains filters limited to endpoint-native parameters.
+- **Appeals terminal remediation UI**: complete/fail actions on `appeals.astro` carrying
+  `failureCode` on failure, restricted to owner/risk roles, with irreversible-confirm copy
+  and per-row + per-decision idempotency keys.
+- **Behavior changes**: admins without 2FA are denied console/API access at deploy; the
+  admin list ordering changed from priority-first to newest-first at the API layer (pages
+  re-sort for triage); the appeals API now defaults to a 100-row page limit with cursor
+  support.
+- **Verification**: `npm run check` 0 errors · `npm run lint` clean · `npm run test` green
+  at 2,689+ tests (final total to be confirmed) · `npm run build` OK ·
+  `npm run deploy:dry-run` OK. Ultra Review 3-dimension findings all resolved, including
+  the critical 2FA bypass, and re-verified PASS.
+- **Known limitations / follow-ups**: cron job run persistence (`cron_job_runs`) remains a
+  deferred backlog item; audit browser filters are limited to endpoint-native parameters;
+  the rate limiter shares one budget per NAT IP; the Dodo webhook key and production
+  operator tokens remain external prerequisites for the release ceremony.
+
 Marketing v5 "Commerce Flow OS" rebuild (2026-08-16/17, branch `dashboard-redesign-takeover`):
 The rejected "Landing V4 Aurora" attempt was fully torn down (tracked files restored to the v3
 commit, untracked v4 artifacts deleted; backup tarball + working-tree diff in `/tmp/landing-v4-*`)

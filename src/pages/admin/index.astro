@@ -4,7 +4,7 @@ import AdminLayout from "../../layouts/AdminLayout.astro";
 import { authenticateRequest } from "../../lib/auth/session";
 import { listAdminAbuseReports, listRecentModerationActions } from "../../lib/operations/abuse";
 import { getBindings } from "../../lib/platform/bindings";
-import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { describePlatformAdminAccess, type PlatformAdminAccess } from "../../lib/tenants/store";
 import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
 import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
 
@@ -19,13 +19,15 @@ Astro.response.headers.set("Pragma", "no-cache");
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
 Astro.response.headers.set("Referrer-Policy", "no-referrer");
 
-let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let adminAccess: PlatformAdminAccess = { kind: "not_admin" };
 let roleLookupFailed = false;
 try {
-  adminRole = await getPlatformAdminRole({ env, userId: auth.userId });
+  adminAccess = await describePlatformAdminAccess({ env, userId: auth.userId });
 } catch {
   roleLookupFailed = true;
 }
+const adminRole = adminAccess.kind === "authorized" ? adminAccess.role : null;
+const twoFactorRequired = adminAccess.kind === "two_factor_required";
 
 if (roleLookupFailed) Astro.response.status = 503;
 else if (adminRole === null) Astro.response.status = 403;
@@ -90,7 +92,9 @@ const clientCopy = {
   "admin.overview.client.error.csrf_missing": t("admin.overview.client.error.csrf_missing"),
   "admin.overview.client.error.generic": t("admin.overview.client.error.generic"),
   "admin.overview.client.error.moderation_state_conflict": t("admin.overview.client.error.moderation_state_conflict"),
+  "admin.overview.client.error.rate_limited": t("admin.security.rate_limited"),
   "admin.overview.client.error.recent_auth_required": t("admin.overview.client.error.recent_auth_required"),
+  "admin.overview.client.error.two_factor_required": `${t("admin.security.two_factor_required")} ${t("admin.security.two_factor_required_hint")}`,
   "admin.overview.client.feedback.applied": t("admin.overview.client.feedback.applied"),
   "admin.overview.client.feedback.applying": t("admin.overview.client.feedback.applying"),
   "admin.overview.client.manual.confirm": t("admin.overview.client.manual.confirm"),
@@ -103,6 +107,37 @@ const clientCopy = {
   "admin.overview.client.reference.code": t("admin.overview.client.reference.code"),
   "admin.overview.client.reference.request": t("admin.overview.client.reference.request"),
 };
+
+// Ops control center copy handed to the live-overview island. Keys mirror the
+// island's DEFAULT_COPY so the server translation wins when present.
+const opsClientCopy = {
+  "admin.ops.client.updated": t("admin.ops.client.updated"),
+  "admin.ops.client.loading": t("admin.ops.client.loading"),
+  "admin.ops.client.refreshed": t("admin.ops.client.refreshed"),
+  "admin.ops.client.paused": t("admin.ops.client.paused"),
+  "admin.ops.client.error.generic": t("admin.ops.client.error.generic"),
+  "admin.ops.client.error.two_factor_required": t("admin.ops.client.error.two_factor_required"),
+  "admin.ops.client.error.two_factor_hint": t("admin.ops.client.error.two_factor_hint"),
+  "admin.ops.client.error.two_factor_link": t("admin.ops.client.error.two_factor_link"),
+  "admin.overview.unavailable": t("admin.overview.unavailable"),
+  "admin.ops.client.state.unknown": t("admin.ops.client.state.unknown"),
+  "admin.ops.tone.attention": t("admin.ops.tone.attention"),
+  "admin.ops.tone.watch": t("admin.ops.tone.watch"),
+  "admin.ops.tone.nominal": t("admin.ops.tone.nominal"),
+  "admin.ops.tone.unknown": t("admin.ops.tone.unknown"),
+  "admin.ops.subscriptions.state_other": t("admin.ops.subscriptions.state_other"),
+};
+
+const opsSubscriptionLabels = {
+  active: t("admin.shops.subscription.active"),
+  canceled: t("admin.shops.subscription.canceled"),
+  grace_period: t("admin.shops.subscription.grace_period"),
+  past_due: t("admin.shops.subscription.past_due"),
+  suspended: t("admin.shops.subscription.suspended"),
+  trialing: t("admin.shops.subscription.trialing"),
+};
+
+const opsUnknown = t("admin.ops.client.state.unknown");
 
 const safeDate = (value: string): Date | null => {
   const parsed = new Date(value);
@@ -134,6 +169,16 @@ const age = (value: string): string => {
       code={t("admin.common.request", { requestId: Astro.locals.requestId })}
       actionHref="/admin"
       actionLabel={t("admin.common.reload")}
+    />
+  ) : twoFactorRequired ? (
+    <AdminState
+      tone="warning"
+      eyebrow={t("admin.overview.forbidden.eyebrow")}
+      title={t("admin.security.two_factor_required")}
+      description={t("admin.security.two_factor_required_hint")}
+      code="admin_two_factor_required"
+      actionHref="/app/security"
+      actionLabel={t("admin.ops.client.error.two_factor_link")}
     />
   ) : adminRole === null ? (
     <AdminState
@@ -178,6 +223,136 @@ const age = (value: string): string => {
       <p class="admin-feedback" data-operations-status data-tone="neutral" role="status" aria-live="polite" aria-atomic="true">
         {t("admin.overview.feedback")}
       </p>
+
+      <section
+        class="admin-section ops-overview"
+        id="ops"
+        aria-labelledby="ops-title"
+        data-ops-overview
+        data-copy={JSON.stringify(opsClientCopy)}
+        data-subscription-labels={JSON.stringify(opsSubscriptionLabels)}
+        aria-busy="false"
+      >
+        <div class="admin-section-heading">
+          <div>
+            <p class="admin-eyebrow">{t("admin.ops.section.eyebrow")}</p>
+            <h2 id="ops-title">{t("admin.ops.section.title")}</h2>
+            <p>{t("admin.ops.section.description")}</p>
+          </div>
+        </div>
+
+        <div class="ops-toolbar">
+          <p class="ops-status" data-ops-status data-tone="neutral" role="status" aria-live="polite" aria-atomic="true">
+            {t("admin.ops.client.loading")}
+          </p>
+          <div class="ops-controls">
+            <span class="ops-auto">{t("admin.ops.toolbar.auto")}</span>
+            <button
+              type="button"
+              data-ops-refresh
+              data-label={t("admin.ops.toolbar.refresh")}
+              data-busy-label={t("admin.ops.toolbar.refreshing")}
+            >{t("admin.ops.toolbar.refresh")}</button>
+          </div>
+        </div>
+
+        <div class="ops-2fa" data-ops-2fa role="alert" hidden>
+          <strong data-ops-2fa-title></strong>
+          <span data-ops-2fa-hint></span>
+          <a href="/app/security" data-ops-2fa-link>{t("admin.ops.client.error.two_factor_link")}</a>
+        </div>
+
+        <div class="ops-grid">
+          <article class="ops-card" data-ops-card="deadLetters" data-tone="neutral" data-state="unknown">
+            <div class="ops-card-head">
+              <h3>{t("admin.ops.card.dead_letters")}</h3>
+              <span class="admin-badge ops-badge" data-ops-badge data-tone="info">{t("admin.ops.tone.unknown")}</span>
+            </div>
+            <dl class="ops-metrics">
+              <div><dt>{t("admin.ops.card.dead_letters.open")}</dt><dd class="ops-num" data-ops-value="deadLetters.open" data-ops-tone="danger">{opsUnknown}</dd></div>
+              <div><dt>{t("admin.ops.card.dead_letters.retry_requested")}</dt><dd class="ops-num" data-ops-value="deadLetters.retryRequested" data-ops-tone="warning">{opsUnknown}</dd></div>
+            </dl>
+            <a class="ops-drill" href="/admin/operations" aria-label={t("admin.ops.drill_aria", { target: t("admin.ops.link.operations") })}>{t("admin.ops.link.operations")}<span aria-hidden="true">→</span></a>
+          </article>
+
+          <article class="ops-card" data-ops-card="paymentExceptions" data-tone="neutral" data-state="unknown">
+            <div class="ops-card-head">
+              <h3>{t("admin.ops.card.payment_exceptions")}</h3>
+              <span class="admin-badge ops-badge" data-ops-badge data-tone="info">{t("admin.ops.tone.unknown")}</span>
+            </div>
+            <dl class="ops-metrics">
+              <div><dt>{t("admin.ops.card.payment_exceptions.open")}</dt><dd class="ops-num" data-ops-value="paymentExceptions.open" data-ops-tone="danger">{opsUnknown}</dd></div>
+            </dl>
+            <a class="ops-drill" href="/admin/appeals" aria-label={t("admin.ops.drill_aria", { target: t("admin.ops.link.appeals") })}>{t("admin.ops.link.appeals")}<span aria-hidden="true">→</span></a>
+          </article>
+
+          <article class="ops-card" data-ops-card="remediationRequests" data-tone="neutral" data-state="unknown">
+            <div class="ops-card-head">
+              <h3>{t("admin.ops.card.remediation")}</h3>
+              <span class="admin-badge ops-badge" data-ops-badge data-tone="info">{t("admin.ops.tone.unknown")}</span>
+            </div>
+            <dl class="ops-metrics">
+              <div><dt>{t("admin.ops.card.remediation.requested")}</dt><dd class="ops-num" data-ops-value="remediationRequests.requested" data-ops-tone="warning">{opsUnknown}</dd></div>
+              <div><dt>{t("admin.ops.card.remediation.provider_pending")}</dt><dd class="ops-num" data-ops-value="remediationRequests.providerPending" data-ops-tone="warning">{opsUnknown}</dd></div>
+            </dl>
+            <a class="ops-drill" href="/admin/appeals" aria-label={t("admin.ops.drill_aria", { target: t("admin.ops.link.appeals") })}>{t("admin.ops.link.appeals")}<span aria-hidden="true">→</span></a>
+          </article>
+
+          <article class="ops-card" data-ops-card="incidents" data-tone="neutral" data-state="unknown">
+            <div class="ops-card-head">
+              <h3>{t("admin.ops.card.incidents")}</h3>
+              <span class="admin-badge ops-badge" data-ops-badge data-tone="info">{t("admin.ops.tone.unknown")}</span>
+            </div>
+            <dl class="ops-metrics">
+              <div><dt>{t("admin.ops.card.incidents.open")}</dt><dd class="ops-num" data-ops-value="incidents.open" data-ops-tone="danger">{opsUnknown}</dd></div>
+              <div><dt>{t("admin.ops.card.incidents.acknowledged")}</dt><dd class="ops-num" data-ops-value="incidents.acknowledged" data-ops-tone="warning">{opsUnknown}</dd></div>
+            </dl>
+            <a class="ops-drill" href="/admin/operations" aria-label={t("admin.ops.drill_aria", { target: t("admin.ops.link.operations") })}>{t("admin.ops.link.operations")}<span aria-hidden="true">→</span></a>
+          </article>
+
+          <article class="ops-card" data-ops-card="deliveryJobs" data-tone="neutral" data-state="unknown">
+            <div class="ops-card-head">
+              <h3>{t("admin.ops.card.delivery_jobs")}</h3>
+              <span class="admin-badge ops-badge" data-ops-badge data-tone="info">{t("admin.ops.tone.unknown")}</span>
+            </div>
+            <dl class="ops-metrics">
+              <div><dt>{t("admin.ops.card.delivery_jobs.failed")}</dt><dd class="ops-num" data-ops-value="deliveryJobs.failed" data-ops-tone="danger">{opsUnknown}</dd></div>
+              <div><dt>{t("admin.ops.card.delivery_jobs.dead_letter")}</dt><dd class="ops-num" data-ops-value="deliveryJobs.deadLetter" data-ops-tone="danger">{opsUnknown}</dd></div>
+            </dl>
+            <a class="ops-drill" href="/admin/operations" aria-label={t("admin.ops.drill_aria", { target: t("admin.ops.link.operations") })}>{t("admin.ops.link.operations")}<span aria-hidden="true">→</span></a>
+          </article>
+
+          <article class="ops-card" data-ops-card="subscriptions" data-tone="neutral" data-state="unknown">
+            <div class="ops-card-head">
+              <h3>{t("admin.ops.card.subscriptions")}</h3>
+              <span class="admin-badge ops-badge" data-ops-badge data-tone="info">{t("admin.ops.tone.unknown")}</span>
+            </div>
+            <dl class="ops-metrics" data-ops-subscriptions>
+              <div><dt>{t("admin.ops.tone.unknown")}</dt><dd class="ops-num">{opsUnknown}</dd></div>
+            </dl>
+            <a class="ops-drill" href="/admin/shops" aria-label={t("admin.ops.drill_aria", { target: t("admin.layout.nav.shops") })}>{t("admin.layout.nav.shops")}<span aria-hidden="true">→</span></a>
+          </article>
+
+          <article class="ops-card" data-ops-card="providers" data-tone="neutral" data-state="unknown">
+            <div class="ops-card-head">
+              <h3>{t("admin.ops.card.providers")}</h3>
+              <span class="admin-badge ops-badge" data-ops-badge data-tone="info">{t("admin.ops.tone.unknown")}</span>
+            </div>
+            <dl class="ops-metrics">
+              <div><dt>{t("admin.ops.card.providers.payos_active")}</dt><dd class="ops-num" data-ops-value="providerHealth.payosActive">{opsUnknown}</dd></div>
+              <div><dt>{t("admin.ops.card.providers.telegram_active")}</dt><dd class="ops-num" data-ops-value="providerHealth.telegramActive">{opsUnknown}</dd></div>
+              <div><dt>{t("admin.ops.card.providers.telegram_recent")}</dt><dd class="ops-num" data-ops-value="providerHealth.telegramRecentlyChecked">{opsUnknown}</dd></div>
+            </dl>
+            <a class="ops-drill" href="/admin/operations" aria-label={t("admin.ops.drill_aria", { target: t("admin.ops.link.operations") })}>{t("admin.ops.link.operations")}<span aria-hidden="true">→</span></a>
+          </article>
+        </div>
+
+        <nav class="ops-links" aria-label={t("admin.ops.section.title")}>
+          <a class="admin-button" href="/admin/operations">{t("admin.ops.link.operations")}</a>
+          <a class="admin-button" href="/admin/appeals">{t("admin.ops.link.appeals")}</a>
+          <a class="admin-button" href="/admin/investigations">{t("admin.ops.link.investigations")}</a>
+        </nav>
+      </section>
 
       <section class="admin-section" id="reports" aria-labelledby="reports-title">
         <div class="admin-section-heading">
@@ -317,4 +492,44 @@ const age = (value: string): string => {
 
 <script>
   import "../../scripts/dashboard/admin-operations";
+  import "../../scripts/dashboard/admin-ops-overview";
 </script>
+
+<style>
+  .ops-overview { margin-top:24px; }
+  .ops-toolbar { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px 20px; align-items:center; margin-bottom:14px; padding:12px 14px; border:1px solid var(--sln-ink-700); border-radius:var(--sln-radius-md); background:var(--sln-ink-900); }
+  .ops-status { margin:0; min-height:1.6em; color:var(--sln-slate-400); font:600 11px/1.6 var(--sln-font-mono); letter-spacing:.02em; }
+  .ops-status[data-tone="success"] { color:var(--sln-success-text); }
+  .ops-status[data-tone="error"] { color:var(--sln-danger-text); }
+  .ops-controls { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+  .ops-auto { color:var(--sln-slate-500); font:600 9px/1.4 var(--sln-font-mono); letter-spacing:.08em; text-transform:uppercase; }
+  .ops-controls button { display:inline-flex; align-items:center; justify-content:center; min-height:44px; min-width:44px; padding:9px 14px; border:1px solid var(--sln-slate-500); border-radius:var(--sln-radius-md); background:transparent; color:var(--sln-slate-200); font-size:11px; font-weight:600; letter-spacing:.04em; cursor:pointer; transition:border-color var(--sln-duration-default) var(--sln-ease-standard), background var(--sln-duration-default) var(--sln-ease-standard), color var(--sln-duration-default) var(--sln-ease-standard); }
+  .ops-controls button:hover { border-color:var(--sln-action-primary-hover); background:var(--sln-ink-800); color:var(--sln-white); }
+  .ops-controls button:disabled { border-color:var(--sln-slate-500); background:var(--sln-disabled-bg); color:var(--sln-disabled-ink); cursor:wait; }
+  .ops-2fa { display:grid; gap:6px; margin-bottom:14px; padding:16px; border:1px solid var(--sln-state-warning); border-inline-start:3px solid var(--sln-state-warning); border-radius:var(--sln-radius-md); background:var(--sln-ink-950); }
+  .ops-2fa strong { color:var(--sln-warning-text); font-size:13px; }
+  .ops-2fa span { color:var(--sln-slate-300); font-size:12px; line-height:1.6; }
+  .ops-2fa a { width:fit-content; margin-top:4px; color:var(--sln-action-primary-hover); font-size:12px; font-weight:600; letter-spacing:.01em; }
+  .ops-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(248px, 1fr)); gap:14px; }
+  .ops-card { display:grid; grid-template-rows:auto minmax(96px, 1fr) auto; gap:12px; padding:16px; border:1px solid var(--sln-ink-700); border-radius:var(--sln-radius-lg); background:var(--sln-ink-900); transition:border-color var(--sln-duration-default) var(--sln-ease-standard); }
+  .ops-card:hover { border-color:var(--sln-slate-500); }
+  .ops-card[data-tone="danger"] { border-inline-start:3px solid var(--sln-state-danger); }
+  .ops-card[data-tone="warning"] { border-inline-start:3px solid var(--sln-state-warning); }
+  .ops-card[data-tone="success"] { border-inline-start:3px solid var(--sln-state-success); }
+  .ops-card-head { display:flex; justify-content:space-between; gap:10px; align-items:start; }
+  .ops-card-head h3 { margin:0; font-size:14px; font-weight:600; letter-spacing:-.01em; }
+  .ops-badge { flex:0 0 auto; }
+  .ops-metrics { display:grid; gap:8px; margin:0; align-content:start; }
+  .ops-metrics > div { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:12px; align-items:baseline; }
+  .ops-metrics dt { color:var(--sln-slate-400); font-size:9px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+  .ops-metrics dd { margin:0; min-width:3ch; text-align:end; }
+  .ops-num { color:var(--sln-slate-100); font:600 20px/1.2 var(--sln-font-mono); font-variant-numeric:tabular-nums; }
+  .ops-num[data-level="alert"] { color:var(--sln-danger-text); }
+  .ops-num[data-level="watch"] { color:var(--sln-warning-text); }
+  .ops-drill { display:inline-flex; align-items:center; gap:6px; min-height:28px; width:fit-content; color:var(--sln-action-primary-hover); font-size:11px; font-weight:600; letter-spacing:.02em; text-decoration:none; }
+  .ops-drill span { transition:transform var(--sln-duration-fast) var(--sln-ease-standard); }
+  .ops-drill:hover span { transform:translateX(3px); }
+  .ops-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+  @media (max-width:520px) { .ops-toolbar { flex-direction:column; align-items:stretch; } .ops-controls { justify-content:space-between; } .ops-controls button { flex:1; } .ops-links { display:grid; grid-template-columns:1fr; } }
+  @media (prefers-reduced-motion: reduce) { .ops-card, .ops-controls button, .ops-drill span { transition:none; } .ops-drill:hover span { transform:none; } }
+</style>

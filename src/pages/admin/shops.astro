@@ -11,7 +11,7 @@ import {
   type AdminShopDirectoryItem,
 } from "../../lib/operations/admin-shop-directory";
 import { getBindings } from "../../lib/platform/bindings";
-import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { describePlatformAdminAccess, type PlatformAdminAccess } from "../../lib/tenants/store";
 import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
 import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
 
@@ -26,13 +26,15 @@ Astro.response.headers.set("Pragma", "no-cache");
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
 Astro.response.headers.set("Referrer-Policy", "no-referrer");
 
-let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let adminAccess: PlatformAdminAccess = { kind: "not_admin" };
 let roleLookupFailed = false;
 try {
-  adminRole = await getPlatformAdminRole({ env, userId: auth.userId });
+  adminAccess = await describePlatformAdminAccess({ env, userId: auth.userId });
 } catch {
   roleLookupFailed = true;
 }
+let adminRole = adminAccess.kind === "authorized" ? adminAccess.role : null;
+const twoFactorRequired = adminAccess.kind === "two_factor_required";
 
 if (roleLookupFailed) Astro.response.status = 503;
 else if (adminRole === null) Astro.response.status = 403;
@@ -167,6 +169,16 @@ const shopExportRows: AdminShopExportRow[] = shops.map((shop) => ({
       code={t("admin.common.request", { requestId: Astro.locals.requestId })}
       actionHref="/admin/shops"
       actionLabel={t("admin.common.reload")}
+    />
+  ) : twoFactorRequired ? (
+    <AdminState
+      tone="warning"
+      eyebrow={t("admin.shops.forbidden.eyebrow")}
+      title={t("admin.security.two_factor_required")}
+      description={t("admin.security.two_factor_required_hint")}
+      code="admin_two_factor_required"
+      actionHref="/app/security"
+      actionLabel={t("admin.ops.client.error.two_factor_link")}
     />
   ) : adminRole === null ? (
     <AdminState

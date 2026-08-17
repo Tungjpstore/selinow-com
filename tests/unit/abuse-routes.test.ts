@@ -15,6 +15,10 @@ vi.mock("../../src/lib/auth/session", () => ({
   requireRecentAuth: dependencies.recentAuth,
 }));
 
+vi.mock("../../src/lib/http/admin-rate-limit", () => ({
+  guardAdminMutationRate: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../../src/lib/platform/bindings", () => ({ getBindings: () => dependencies.env }));
 
 vi.mock("../../src/lib/operations/abuse", () => ({

@@ -114,6 +114,10 @@ function seed(database: DatabaseSync): void {
       ('user-platform-owner', 'owner', 'active', ?, ?),
       ('user-support', 'support', 'active', ?, ?)
   `).run(now, now, now, now, now, now);
+  database.prepare(`
+    UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+    WHERE id IN ('user-admin', 'user-platform-owner', 'user-support')
+  `).run(now);
   const shops: Array<[string, string, string, string]> = [
     ["shop-a", "shop_00000000-0000-4000-8000-000000000001", "shop-a", "user-owner-a"],
     ["shop-b", "shop_00000000-0000-4000-8000-000000000002", "shop-b", "user-owner-b"],
@@ -440,6 +444,56 @@ describe("abuse and moderation operations", () => {
       idempotencyKey: "moderation-action-restore-again",
       reportPublicId: null,
     })).rejects.toMatchObject({ code: "moderation_restore_unavailable", status: 409 });
+  });
+
+  it("denies an un-enrolled admin on moderation mutations until two-factor enrollment completes", async () => {
+    const now = NOW.toISOString();
+    database.prepare(`
+      INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+      VALUES ('user-unenrolled', 'unenrolled@example.test', 'user-unenrolled', 'active', ?, ?)
+    `).run(now, now);
+    database.prepare(`
+      INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
+      VALUES ('user-unenrolled', 'risk', 'active', ?, ?)
+    `).run(now, now);
+    const report = await createPublicAbuseReport({
+      category: "prohibited_content",
+      env,
+      idempotencyKey: "unenrolled-moderation-report",
+      now: NOW,
+      request: publicRequest(31),
+      requestId: "request-unenrolled-report",
+      shop: shopA(),
+      summary: "Shop co dau hieu vi pham chinh sach can kiem tra boi quan tri vien chua dang ky 2FA.",
+      targetKind: "shop",
+    });
+    const suspendInput = {
+      actionKind: "shop_suspend" as const,
+      actorScope: "platform_admin" as const,
+      actorUserId: "user-unenrolled",
+      env,
+      idempotencyKey: "unenrolled-moderation-action",
+      now: NOW,
+      reasonCode: "reported_abuse",
+      reportPublicId: report.report.publicId,
+      requestId: "request-unenrolled-action",
+      shopPublicId: shopA().publicId,
+    };
+
+    await expect(applyModerationAction(suspendInput))
+      .rejects.toMatchObject({ code: "admin_two_factor_required", status: 403 });
+    expect(database.prepare("SELECT status FROM shops WHERE public_id = ?").get(shopA().publicId))
+      .toEqual({ status: "active" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM moderation_actions").get()).toEqual({ count: 0 });
+
+    database.prepare(`
+      UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+      WHERE id = 'user-unenrolled'
+    `).run(now);
+    const applied = await applyModerationAction(suspendInput);
+    expect(applied.newStatus).toBe("suspended");
+    expect(database.prepare("SELECT status FROM shops WHERE public_id = ?").get(shopA().publicId))
+      .toEqual({ status: "suspended" });
   });
 
   it("allows only the exact shop owner to take voluntary product action", async () => {
