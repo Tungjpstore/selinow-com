@@ -401,17 +401,27 @@ The previous 2026-08-11 reconciliation recorded candidate
 identity is superseded by the later `92869a04` staging ceremony above and
 must not be reused.
 
-The combined staging release remains `provider_pending`. Genuine Dodo TEST and
-controlled PayOS staging UAT are not accepted, and their artifacts are not yet
-bound to the exact manifest, commit, tree, and Worker version. Production
-remains **NO-GO** at D1 `0052` and runtime phase 6, with the canonical Dodo
-webhook and current public routes absent from the deployed Worker, queue
-consumers and the current cron schedule missing, and production backup/restore,
-rollback, monitoring, legal/support decisions, pilots, named approvals, secret
-admission, provider handoff, and combined release admission outstanding. The
-authoritative handoff is
-`docs/release/CURRENT_HANDOFF_2026-08-11.md`. No production migration,
-deployment, provider activation, or payment-collection claim is authorized.
+> **Historical note (as of the 2026-08-11 handoff checkpoint).** The combined
+> staging release remained `provider_pending`. Genuine Dodo TEST and controlled
+> PayOS staging UAT were not accepted, and their artifacts were not yet bound to
+> the exact manifest, commit, tree, and Worker version. Production was
+> **NO-GO** at D1 `0052` and runtime phase 6, with the canonical Dodo webhook
+> and current public routes absent from the deployed Worker, queue consumers and
+> the current cron schedule missing, and production backup/restore, rollback,
+> monitoring, legal/support decisions, pilots, named approvals, secret
+> admission, provider handoff, and combined release admission outstanding. The
+> authoritative handoff at that time was
+> `docs/release/CURRENT_HANDOFF_2026-08-11.md`.
+>
+> **Current state (read-only live checks, 2026-08-17).** Production D1 ledger
+> is at `0098` (the `0053`-`0098` continuation has been applied remotely since
+> the checkpoint above), and the live production Worker is version `c18f5738`
+> (deployed 2026-08-15). Source migrations `0099`-`0105` (7 pending, `0100`
+> never applied remotely) form the 2026-08-17 release continuation from deploy
+> commit `9caf835`. The authoritative handoff is
+> `docs/release/CURRENT_HANDOFF_2026-08-17.md`. No production migration,
+> deployment, provider activation, or payment-collection claim is authorized by
+> this documentation sync.
 
 ## Superseded current checkpoints
 
@@ -785,6 +795,12 @@ or seller pilot was performed for P3.
 
 ## Phase status
 
+The table below is a **historical checkpoint snapshot** (its ledger references
+date to the 2026-08-03/04 admission era). Production D1 has since advanced to
+`0098` (Worker `c18f5738`, live check 2026-08-17) and the 2026-08-17 release
+continues with `0099`-`0105`; see the current-state note above and
+`docs/release/CURRENT_HANDOFF_2026-08-17.md`.
+
 | Phase | Status | Acceptance artifact |
 | --- | --- | --- |
 | 0 — Repository bootstrap | Complete | Astro/Cloudflare scaffold, strict TypeScript, quality scripts, security baseline, docs and acceptance evidence |
@@ -796,8 +812,8 @@ or seller pilot was performed for P3.
 | 6 — Storefront/subdomain | Complete | Marketing/pricing, tenant storefront flow, hostname-safe caching, Turnstile/rate limits and remote Selinow staging acceptance |
 | 7 — Custom domains | Complete | External hostname ownership, Cloudflare for SaaS provisioning, SSL/DNS activation, primary switching, tenant rendering, redirect, deletion and DNS cleanup passed on staging |
 | 8 — Automated onboarding | In progress | Repository wizard, readiness, tenant automation API, durable task scheduling, guarded continuation evidence and Selinow-owned executors are live on staging; fresh-seller and external-provider acceptance remain pending |
-| 9 — Operations/security/platform extensibility | In progress | Operations runtime, channel-neutral connections, normalized order attribution, transactional domain events, generic queue fan-out/delivery, DLQ replay, accessibility gates, public-flow axe scans and read-only staging QA are accepted. Phase B globalization and the Phase C entitlement, reversal and generated-license execution slices through migration `0052` are implemented. Migrations `0053`-`0069` add seller operations and channel/provider contract boundaries. Paid Starter/Pro pricing, seven-day trial, three-day paid-renewal grace, Dodo evidence processing, role/plan/state gates, usage metering, activation analytics, Phase 1 billing/restore hardening, and durable catalog activation timestamps are implemented through migration `0080`. Provider activation and remote migration remain pending. Production remains on the previously admitted `0001`-`0052` schema until separately approved migrations are applied. |
-| 10 — Production release | CONTINUATION NO-GO | The guarded first-production ceremony completed on 2026-07-30 and production remains on D1 `0001`-`0052` / runtime phase 6. Current route ownership is `selinow.com/*`, `*.selinow.com/*`, and `*/*` on `selinow-com-production`, with only the exact staging exceptions on `selinow-com-staging`. The current source through `0097`, production cron/queue consumers, provider acceptance, legal/support approval, backup/restore, rollback, pilot, and monitoring evidence remain pending; no continuation production deployment is admitted. |
+| 9 — Operations/security/platform extensibility | In progress | Operations runtime, channel-neutral connections, normalized order attribution, transactional domain events, generic queue fan-out/delivery, DLQ replay, accessibility gates, public-flow axe scans and read-only staging QA are accepted. Phase B globalization and the Phase C entitlement, reversal and generated-license execution slices through migration `0052` are implemented. Migrations `0053`-`0069` add seller operations and channel/provider contract boundaries. Paid Starter/Pro pricing, seven-day trial, three-day paid-renewal grace, Dodo evidence processing, role/plan/state gates, usage metering, activation analytics, Phase 1 billing/restore hardening, and durable catalog activation timestamps are implemented through migration `0080`. Provider activation and remote migration remain pending. Historical checkpoint: production remained on the previously admitted `0001`-`0052` schema (superseded 2026-08-17 — production is now at `0098` with `0099`-`0105` pending). |
+| 10 — Production release | CONTINUATION NO-GO | Historical checkpoint: the guarded first-production ceremony completed on 2026-07-30 and production was then on D1 `0001`-`0052` / runtime phase 6. Current route ownership is `selinow.com/*`, `*.selinow.com/*`, and `*/*` on `selinow-com-production`, with only the exact staging exceptions on `selinow-com-staging`. Superseded 2026-08-17: production D1 is at `0098` (Worker `c18f5738`), source continues through `0105`, and the `0099`-`0105` continuation, provider acceptance, legal/support approval, backup/restore, rollback, pilot, and monitoring evidence are tracked in `docs/release/CURRENT_HANDOFF_2026-08-17.md`; no continuation production deployment is admitted by this snapshot. |
 
 ### Phase 1 completion candidate R3 (2026-08-03)
 

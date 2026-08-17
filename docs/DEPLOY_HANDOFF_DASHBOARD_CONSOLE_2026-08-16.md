@@ -1,5 +1,13 @@
 # Bàn giao deploy — Dashboard Redesign + Console v2 (2026-08-16)
 
+> **⚠️ SUPERSEDED / ĐÃ ĐƯỢC THAY THẾ (2026-08-17).** Tài liệu này đã được thay
+> thế bởi kế hoạch release production 2026-08-17:
+> `docs/release/CURRENT_HANDOFF_2026-08-17.md`. Phạm vi migration thực tế của
+> release hiện kéo dài tới `0105` (không chỉ 0099–0103 như bản gốc), và commit
+> deploy chính thức là `9caf835`. Các mục liên quan bên dưới đã được cập nhật
+> tại chỗ (2026-08-17) để không còn mâu thuẫn, nhưng mọi quyết định deploy
+> phải theo handoff 2026-08-17.
+
 Người viết: ca takeover dashboard-redesign (ZCode session 2026-08-16).
 Đối tượng: task deploy thực hiện release production cho nhánh
 `dashboard-redesign-takeover`.
@@ -16,15 +24,22 @@ Người viết: ca takeover dashboard-redesign (ZCode session 2026-08-16).
 1. **Deploy từ một checkout SẠCH của commit đã chọn, không phải working tree
    hiện tại.** Repo này có nhiều luồng làm việc song song; tại thời điểm viết,
    working tree còn ~14 file dở của luồng remediation (payment-reversal,
-   worker.ts, appeals API…) và file `migrations/0104_remediation_completion.sql`
-   là **untracked — KHÔNG thuộc bất kỳ commit nào của nhánh này**. Không deploy
-   bất cứ thứ gì chưa được commit.
+   worker.ts, appeals API…). Cập nhật 2026-08-17: file
+   `migrations/0104_remediation_completion.sql` **đã được commit** (`5f4bc71`,
+   có entry trong `scripts/lib/release.mjs`) và thuộc phạm vi release — cảnh
+   báo "untracked" ở bản gốc không còn đúng. Nguyên tắc vẫn giữ nguyên: không
+   deploy bất cứ thứ gì chưa được commit.
 2. **Migrations forward-only, không rollback tự động.** Trước khi apply,
    backup/bookmark D1 production theo quy ước AGENTS.md.
 3. Không đổi secrets/vars trong đợt này (xem mục 5) — không thao tác secrets
    nào ngoài quy trình chuẩn.
 
 ## 1. Commit đề xuất deploy
+
+**Cập nhật 2026-08-17: commit deploy thực tế của release là `9caf835`** (tip
+nhánh `dashboard-redesign-takeover` sau khi `0104` được commit tại `5f4bc71`
+và chuỗi ops/remediation hoàn tất) — không phải `7580477`/`6e40571` như đề
+xuất ban đầu. Ghi chép gốc giữ bên dưới để đối chiếu lịch sử.
 
 Tip nhánh tại thời điểm viết: `7580477` (gồm marketing v5/v5.2 đã có handoff
 riêng). Nếu task deploy chỉ muốn phạm vi dashboard/console (không marketing),
@@ -47,26 +62,37 @@ Nhánh chứa, theo thứ tự lịch sử:
 
 ## 2. Migrations bắt buộc (theo thứ tự)
 
-Production hiện đang ở ≤ 0098. Cần apply đúng thứ tự:
+Production hiện đang ở **0098** (đã verify trực tiếp trên remote ngày
+2026-08-17; bản gốc ghi "≤ 0098"). Cần apply đúng thứ tự `0099` → `0105`:
 
 | # | File | Nội dung chính | Ghi chú |
 | --- | --- | --- | --- |
 | 1 | `0099_account_security_hardening.sql` | `platform_users.two_factor_enabled*`, bảng `auth_login_history` (append-only + trigger chặn UPDATE/DELETE), index tenant-leading | Đã tồn tại từ trước checkpoint; KHÔNG bị sửa trong phạm vi review (`git diff bcf9692..HEAD -- migrations/0099` = 0) |
-| 2 | `0100_automation_rule_builder.sql` | Bảng `automation_rules`, `automation_rule_action_runs`, `automation_customer_tags`, cột `automation_tasks.rule_id`, index | ⚠️ Điểm chú ý đặc biệt — xem mục 3 |
+| 2 | `0100_automation_rule_builder.sql` | Bảng `automation_rules`, `automation_rule_action_runs`, `automation_customer_tags`, cột `automation_tasks.rule_id`, index | ⚠️ Điểm chú ý đặc biệt — xem mục 3 (rủi ro in-place đã được xác minh là không còn) |
 | 3 | `0101_storefront_media_assets.sql` | Bảng media assets cho template pipeline (luồng TV) | — |
 | 4 | `0102_physical_goods_vertical.sql` | Bảng vertical physical goods (shipping…) | — |
 | 5 | `0103_appointment_booking_vertical.sql` | Bảng booking vertical | — |
+| 6 | `0104_remediation_completion.sql` | Rebuild `payment_remediation_requests` để mở khóa các trạng thái terminal `completed`/`failed` (CHECK biconditional của 0054 khiến approved requests bị kẹt ở `provider_pending`), giữ nguyên vết duyệt | Đã commit tại `5f4bc71` và đăng ký trong `scripts/lib/release.mjs` — **BẮT BUỘC apply**, là một phần của release |
+| 7 | `0105_ops_platform_indexes.sql` | Index platform-leading cho admin console cross-tenant (`queue_dead_letters`, `payment_exceptions`, partial index `delivery_jobs`) khớp hướng `ORDER BY` của keyset pagination | Thuần additive (CREATE INDEX IF NOT EXISTS), không đổi dữ liệu |
 
-**KHÔNG deploy** `0104_remediation_completion.sql` nếu thấy nó trong checkout —
-nó untracked/dở của luồng khác, chưa thuộc nhánh, chưa có entry trong
-`scripts/lib/release.mjs`.
+Bản gốc từng ghi "**KHÔNG deploy** `0104_remediation_completion.sql`" vì khi
+đó nó untracked/dở. Cập nhật 2026-08-17: cảnh báo đó **hết hiệu lực** —
+`0104` đã được commit (`5f4bc71`), có entry trong release registry, và nằm
+trong chuỗi bắt buộc `0099` → `0105` của release này.
 
 Kiểm tra trạng thái remote trước khi apply (chạy từ repo, không đổi gì):
-`npx wrangler d1 migrations list PLATFORM_DB --remote` — kỳ vọng 0099→0103
-hiện là "unapplied". Nếu có migration nào đã applied (đặc biệt 0100), DỪNG và
+`npx wrangler d1 migrations list PLATFORM_DB --remote` — kỳ vọng 0099→0105
+hiện là "unapplied" (đã xác nhận đúng ngày 2026-08-17: production ở 0098,
+7 migration pending). Nếu có migration nào đã applied (đặc biệt 0100), DỪNG và
 đối chiếu mục 3.
 
 ## 3. ⚠️ Rủi ro đã biết riêng migration 0100 (quyết định cần xác nhận)
+
+**Cập nhật 2026-08-17 — ĐÃ GIẢI QUYẾT:** kiểm tra read-only trực tiếp trên
+remote (`wrangler d1 migrations list PLATFORM_DB --remote`) xác nhận `0100`
+**chưa từng được apply** trên production (ledger dừng ở 0098). Nhánh "DỪNG
+deploy" bên dưới không còn áp dụng: apply bản 0100 đầy đủ bình thường, an
+toàn. Ghi chép gốc giữ lại để đối chiếu.
 
 Trong chuỗi commit takeover, `0100` đã bị **sửa in-place một lần** (commit
 `d750297` thêm cột `automation_rule_action_runs.task_id` + index vào CREATE
@@ -83,8 +109,9 @@ environment nào áp dụng bản 0100-WIP cũ:
   COLUMN + CREATE INDEX IF NOT EXISTS theo schema mới) thay vì sửa 0100 lần
   nữa. Local dev DB của máy này đã áp bản đầy đủ (đã verify).
 
-Release registry (`scripts/lib/release.mjs`) đã có entry invariant cho
-0099–0103 (kiểm tra tại dòng 334–446) — deploy gate sẽ tự đối chiếu.
+Release registry (`scripts/lib/release.mjs`) đã có entry invariant cho toàn
+chuỗi 0099–0105 (cập nhật 2026-08-17: bản gốc chỉ ghi 0099–0103; `0104`
+được đăng ký tại `5f4bc71`) — deploy gate sẽ tự đối chiếu.
 
 ## 4. Verification gate (bắt buộc chạy lại trên checkout sạch)
 
@@ -146,10 +173,10 @@ test của bạn, không dùng tài khoản thật của khách):
 
 - **Worker/routes:** rollback theo quy trình deploy chuẩn của repo (phiên bản
   worker trước đó) — CSS/UI changes là thuần render, an toàn để rollback.
-- **Migrations: forward-only, KHÔNG rollback tự động.** 0099–0103 thêm
-  bảng/cột/index mới, không đổi dữ liệu hiện có; nếu cần hoàn tác phải có
-  migration bù do chủ sản phẩm duyệt. Đây là lý do backup/bookmark DB ở mục 0
-  là bắt buộc.
+- **Migrations: forward-only, KHÔNG rollback tự động.** 0099–0105 thêm
+  bảng/cột/index mới và rebuild bảng remediation (0104) với dữ liệu được bảo
+  toàn, không phá dữ liệu hiện có; nếu cần hoàn tác phải có migration bù do
+  chủ sản phẩm duyệt. Đây là lý do backup/bookmark DB ở mục 0 là bắt buộc.
 
 ## 8. Known issues KHÔNG chặn deploy
 
@@ -166,15 +193,20 @@ test của bạn, không dùng tài khoản thật của khách):
 
 ## 9. Checklist rút gọn cho task deploy
 
+Cập nhật 2026-08-17: commit `9caf835`, chuỗi migration `0099` → `0105`
+(gồm `0104` đã commit tại `5f4bc71`), production hiện ở 0098. Kịch bản đầy
+đủ xem `docs/release/CURRENT_HANDOFF_2026-08-17.md`.
+
 ```
-[ ] Chọn commit (7580477 hoặc 6e40571), clone/checkout SẠCH — không working tree dở
-[ ] npx wrangler d1 migrations list PLATFORM_DB --remote  → 0099..0103 unapplied, KHÔNG có 0104
-[ ]     ↳ nếu 0100 đã applied → DỪNG, báo chủ sản phẩm (mục 3)
+[ ] Checkout commit 9caf835 SẠCH — không working tree dở
+[ ] Xác nhận mọi platform admin đang hoạt động có two_factor_enabled=1
+[ ]     ↳ (2FA fail-closed: admin chưa bật 2FA sẽ bị khóa console/API)
+[ ] npx wrangler d1 migrations list PLATFORM_DB --remote  → 0099..0105 unapplied (ledger 0098)
 [ ] Backup/bookmark D1 production
 [ ] npm run check && npm run lint && npm run test   (test phải 100% pass trên commit sạch)
 [ ] npm run build && npm run deploy:dry-run
-[ ] Apply migrations theo thứ tự 0099 → 0103
-[ ] Deploy worker
+[ ] Apply migrations theo thứ tự 0099 → 0105 (0104 là BẮT BUỘC, đã commit 5f4bc71)
+[ ] Deploy worker (ghi lại version UUID mới làm bằng chứng)
 [ ] Smoke test mục 6
-[ ] Cập nhật docs/IMPLEMENTATION_STATUS.md với bằng chứng
+[ ] Cập nhật docs/IMPLEMENTATION_STATUS.md + docs/release/CURRENT_HANDOFF_2026-08-17.md với bằng chứng
 ```
