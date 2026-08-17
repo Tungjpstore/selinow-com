@@ -7,6 +7,10 @@ type AuthenticatedRoute = {
   path: string | ((projectName: string) => string);
   query?: string;
   screenshot: string;
+  // Temporary: a brand-new route may not yet have a committed screenshot
+  // baseline. Skip the pixel assertion while still running the heading,
+  // console/network (403), stability and a11y checks for that route.
+  skipScreenshot?: boolean;
   expectedStatus?: number;
   expectedSummary?: readonly string[];
 };
@@ -139,6 +143,13 @@ const routes: readonly AuthenticatedRoute[] = [
     headingLevel: 1,
     path: "/app/billing",
     screenshot: "authenticated-billing.png",
+  },
+  {
+    heading: "Account security",
+    headingLevel: 1,
+    path: "/app/security",
+    screenshot: "authenticated-security.png",
+    skipScreenshot: true,
   },
   {
     heading: "Điều tra nhanh.",
@@ -410,6 +421,7 @@ test("local magic link opens deterministic authenticated seller surfaces", async
     await expectStablePage(page);
     expect(runtimeIssues, runtimeIssues.join("\n")).toEqual([]);
     await expectNoWcagViolations(page);
+    if (route.skipScreenshot === true) continue;
     if (path === "/app") {
       await expect(page).toHaveScreenshot(route.screenshot, {
         fullPage: false,
