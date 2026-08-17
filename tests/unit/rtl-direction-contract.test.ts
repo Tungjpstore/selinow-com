@@ -32,10 +32,13 @@ describe("document direction contract", () => {
     ]);
 
     expect(shell).toContain("inset-inline-start: 12px");
-    expect(shell).toContain("inset-inline-start: -14px");
-    expect(shell).toContain("margin-inline-start: auto");
+    expect(shell).toContain("margin-inline: auto");
+    expect(shell).toContain("padding-inline: 16px");
+    expect(shell).toContain("border-inline-end: 1px");
+    expect(shell).toContain("inset-inline: 0");
+    expect(shell).toContain("inset-inline: 8px");
     expect(shell).toContain("text-align: start");
-    expect(shell).toContain("inset-inline: 10px");
+    expect(shell).toContain("scroll-padding-block-end");
     expect(shell).not.toMatch(/\bleft:\s*-?\d/iu);
     expect(shell).not.toMatch(/\bright:\s*-?\d/iu);
     expect(shell).not.toContain("margin-left");

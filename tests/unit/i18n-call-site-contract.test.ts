@@ -240,6 +240,13 @@ const DYNAMIC_TRANSLATION_ALLOWLIST: readonly DynamicAllowlistEntry[] = [
     path: "src/scripts/marketing/login.ts",
   },
   {
+    catalog: "system",
+    expression: "messageKeys[code] ?? \"auth.login.generic_error\"",
+    guard: /const messageKeys: Readonly<Record<string, string>>[\s\S]*t\(messageKeys\[code\] \?\? "auth\.login\.generic_error"\)/u,
+    identifier: "t",
+    path: "src/scripts/marketing/magic-link.ts",
+  },
+  {
     catalog: "dashboard",
     expression: "entry.safeDescriptionKey",
     guard: /listChannelExpansionCatalog\(\)\.map\(\(entry\) => \(\{[\s\S]*description: t\(entry\.safeDescriptionKey\)/u,

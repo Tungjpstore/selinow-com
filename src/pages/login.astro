@@ -113,6 +113,36 @@ const t = createSystemTranslator(locale);
             <p id="status" class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
           </form>
 
+          <div class="auth-divider" aria-hidden="true"><span>{t("auth.login.magic_divider")}</span></div>
+
+          <form class="auth-form" data-magic-link-form>
+            <div class="field-group">
+              <label for="magic-display-name">{t("auth.login.display_name_label")}</label>
+              <div class="input-control">
+                <input
+                  id="magic-display-name"
+                  name="displayName"
+                  type="text"
+                  autocomplete="name"
+                  maxlength="80"
+                  data-magic-display-name
+                />
+              </div>
+            </div>
+            <button type="submit" class="btn-secondary" data-magic-submit>{t("auth.login.magic_submit")}</button>
+            <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-magic-status></p>
+          </form>
+
+          <div class="auth-form magic-confirmation" data-login-confirmation hidden>
+            <p class="confirmation-intro">
+              <strong>{t("auth.login.confirmation_title")}</strong>
+              <span>{t("auth.login.confirmation_intro")} <strong data-login-confirm-destination></strong></span>
+            </p>
+            <button type="button" class="btn-primary" data-login-confirm>
+              <span>{t("auth.login.confirmation_action")}</span>
+            </button>
+          </div>
+
           <div id="login-2fa-panel" class="auth-form" data-login-2fa hidden>
             <div class="auth-heading two-factor-heading">
               <h2>{t("auth.login.two_factor.heading")}</h2>
@@ -163,6 +193,7 @@ const t = createSystemTranslator(locale);
 
     <script>
       import "../scripts/marketing/auth";
+      import "../scripts/marketing/magic-link";
     </script>
   </body>
 </html>
@@ -414,6 +445,63 @@ const t = createSystemTranslator(locale);
     color: #475467;
     font-size: 12px;
   }
+
+  /* Magic-link block */
+  .auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0 16px;
+    color: #94A3B8;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .auth-divider::before,
+  .auth-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #F1F5F9;
+  }
+
+  .btn-secondary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 46px;
+    border: 1px solid var(--border-strong, #D9DCE5);
+    border-radius: 10px;
+    padding: 12px 20px;
+    background: #FFFFFF;
+    color: #0F172A;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btn-secondary:hover { background: #F8FAFC; border-color: #94A3B8; }
+  .btn-secondary:disabled { cursor: wait; opacity: 0.72; }
+
+  .status-msg a { color: inherit; font-weight: 700; text-decoration: underline; }
+
+  .magic-confirmation {
+    margin-top: 16px;
+    border: 1px solid var(--border-strong, #D9DCE5);
+    border-radius: 12px;
+    padding: 18px;
+    background: #F8FAFC;
+  }
+  .confirmation-intro {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    color: #334155;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .confirmation-intro > strong { color: #0F172A; font-size: 14px; }
+  .magic-confirmation .btn-primary { margin-top: 4px; }
 
   /* Two-factor step */
   .two-factor-heading {

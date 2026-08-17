@@ -52,10 +52,11 @@ describe("dashboard shell and shared state localization", () => {
     expect(source).toContain("const locale = Astro.locals.locale;");
     expect(source).toContain("const t = createDashboardTranslator(locale);");
     expect(source).toContain('<html lang={locale ?? "en"} dir={directionForLocale(locale)}>');
-    expect(source).toContain('data-menu-title-channels={t("dashboard.nav.sales_channels")}');
+    expect(source).toContain('aria-label={t("dashboard.shell.workspace_nav_aria")}');
+    expect(source).toContain('aria-label={t("dashboard.shell.mobile.nav_aria")}');
     expect(source).toContain('data-logout-pending={t("dashboard.shell.account.logging_out")}');
-    expect(source).toContain("shell?.dataset.menuTitleChannels");
     expect(source).toContain("shell?.dataset.logoutFailed");
+    expect(source).not.toContain("menuTitleChannels");
     expect(source).not.toContain('<html lang="vi">');
     expect(source).not.toContain("Chuyển đến nội dung");
     expect(source).not.toContain("Đang đăng xuất…");

@@ -73,8 +73,8 @@ const lowStockThreshold = variants.reduce<number>((threshold, variant) => {
 }, 5);
 const updatedAtFormatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeStyle: "short", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
 const catalogVisibilityChannels = [
-  { code: "website", label: t("dashboard.nav.website") },
-  { code: "telegram", label: t("dashboard.nav.telegram") },
+  { code: "website", label: t("dashboard.console.nav.website") },
+  { code: "telegram", label: t("dashboard.console.nav.telegram") },
   { code: "telegram.mini_app", label: t("dashboard.integrations.channel_expansion.name.telegram_mini_app") },
   { code: "zalo.mini_app", label: t("dashboard.integrations.channel_expansion.name.zalo_mini_app") },
   { code: "zalo.oa", label: t("dashboard.integrations.channel_expansion.name.zalo_oa") },

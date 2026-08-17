@@ -64,7 +64,16 @@ const isCurrent = (path: string): boolean => activePath === path || (path !== "/
 const isCurrentItem = (item: NavItem): boolean => isCurrent(item.path);
 const itemPath = (item: NavItem): string => item.href ?? item.path;
 const withSelectedShop = (path: string): string => appendSelectedShop(path, selectedShopPublicId, Astro.url.origin);
+// Server-rendered tenant switch: shopSwitchHref clears filters/search and
+// resets order-detail paths so entity ids never leak across shops. The
+// topbar shop select only navigates to these precomputed hrefs client-side.
 const shopSelectionHref = (shopPublicId: string): string => shopSwitchHref(Astro.url, shopPublicId);
+const shopSwitchOptions = shops.map((shop) => ({
+  href: shopSelectionHref(shop.publicId),
+  name: shop.name,
+  publicId: shop.publicId,
+  selected: shop.publicId === selectedShopPublicId,
+}));
 const isVisibleForRole = (item: NavItem): boolean => item.roles === undefined
   || (selectedShopRole !== undefined && item.roles.includes(selectedShopRole))
   || (shops.length === 0 && item.visibleWithoutShop === true);
@@ -78,7 +87,7 @@ const groups: readonly NavGroup[] = [
     items: [
       { icon: "overview", label: t("dashboard.console.nav.overview"), path: "/app" },
       { icon: "orders", label: t("dashboard.console.nav.orders"), path: "/app/orders" },
-      { icon: "calendar", label: t("dashboard.nav.bookings"), path: "/app/bookings", roles: ["owner", "manager", "support"] },
+      { icon: "calendar", label: t("dashboard.console.nav.bookings"), path: "/app/bookings", roles: ["owner", "manager", "support"] },
       { icon: "customers", label: t("dashboard.console.nav.customers"), path: "/app/customers" },
     ],
   },
@@ -111,13 +120,13 @@ const groups: readonly NavGroup[] = [
     key: "settings",
     label: t("dashboard.console.nav.settings"),
     items: [
-      { icon: "check", label: t("dashboard.nav.readiness"), path: "/onboarding", roles: ["owner", "manager"], visibleWithoutShop: true },
-      { icon: "palette", label: t("dashboard.nav.store_brand"), path: "/app/store/settings" },
+      { icon: "check", label: t("dashboard.console.nav.readiness"), path: "/onboarding", roles: ["owner", "manager"], visibleWithoutShop: true },
+      { icon: "palette", label: t("dashboard.console.nav.store_brand"), path: "/app/store/settings" },
       { icon: "members", label: t("dashboard.console.nav.members"), path: "/app/members", roles: ["owner"] },
       { icon: "lock", label: t("dashboard.console.nav.security"), path: "/app/security" },
       { icon: "billing", label: t("dashboard.console.nav.billing"), path: "/app/billing", roles: ["owner"] },
       { icon: "developer", label: t("dashboard.console.nav.developer"), path: "/app/developer", roles: ["owner"] },
-      { icon: "shield", label: t("dashboard.nav.audit_data"), path: "/app/data", roles: ["owner"] },
+      { icon: "shield", label: t("dashboard.console.nav.audit_data"), path: "/app/data", roles: ["owner"] },
     ],
   },
 ] as const;
@@ -143,12 +152,11 @@ const mobileMoreGroups = ([
   visibleGroups.find((group) => group.key === "settings")
     ?? { items: [], key: "settings", label: t("dashboard.console.nav.settings") },
 ] as readonly NavGroup[]).filter((group) => group.items.length > 0);
-const isChannelPath = channelGroup.items.some((item) => isCurrent(item.path));
-const isMorePath = mobileMoreGroups.some((group) => group.items.some((item) => isCurrent(item.path)));
 
 const icons: Record<string, string> = {
   overview: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
   automation: '<path d="M5 7h14M5 12h14M5 17h14"/><circle cx="8" cy="7" r="1.5"/><circle cx="16" cy="12" r="1.5"/><circle cx="10" cy="17" r="1.5"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
   products: '<path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 7 8 4 8-4v10l-8 4-8-4V7Z"/>',
   inventory: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
   orders: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>',
@@ -167,7 +175,6 @@ const icons: Record<string, string> = {
   developer: '<path d="m9 8-4 4 4 4M15 8l4 4-4 4"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
-  close: '<path d="m6 6 12 12M18 6 6 18"/>',
 };
 ---
 
@@ -189,35 +196,15 @@ const icons: Record<string, string> = {
       data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`}
       data-logout-failed={t("dashboard.shell.account.logout_failed")}
       data-logout-pending={t("dashboard.shell.account.logging_out")}
-      data-menu-title-channels={t("dashboard.nav.sales_channels")}
-      data-menu-title-more={t("dashboard.shell.mobile.more")}
-      data-menu-title-shop={t("dashboard.shell.store")}
-      data-menu-title-workspace={t("dashboard.shell.workspace")}
       data-selected-shop-public-id={selectedShopPublicId}
     >
       <a class="app-skip-link selinow-skip-link" href="#app-content">{t("dashboard.shell.skip")}</a>
       <div class="app-layout">
         <aside class="app-sidebar" aria-label={t("dashboard.shell.workspace_nav_aria")}>
           <a class="app-brand" href={withSelectedShop("/app")} aria-label={t("dashboard.shell.brand_aria")}>
-            <img src="/brand/logo/selinow-logo-reversed.svg" alt="Selinow" width="126" height="34" />
+            <span class="app-brand__mark" aria-hidden="true">S</span>
+            <span class="app-brand__name">Selinow</span>
           </a>
-
-          <div class="app-shop-context" aria-label={t("dashboard.shell.current_shop_aria", { shop: selectedShopName })}>
-            <span aria-hidden="true">{selectedShopName.slice(0, 1).toUpperCase()}</span>
-            <span><small>{selectedRoleLabel === null ? t("dashboard.shell.current_shop") : t("dashboard.shell.current_shop_role", { role: selectedRoleLabel })}</small><strong>{selectedShopName}</strong></span>
-            {shops.length > 1 && (
-              <details class="app-shop-selector">
-                <summary aria-label={t("dashboard.shell.switch_shop")} title={t("dashboard.shell.switch_shop")}>⌄</summary>
-                <nav aria-label={t("dashboard.shell.select_shop")}>
-                  {shops.map((shop) => (
-                    <a href={shopSelectionHref(shop.publicId)} aria-current={shop.publicId === selectedShopPublicId ? "true" : undefined}>
-                      <strong>{shop.name}</strong><small>{shop.slug}</small>
-                    </a>
-                  ))}
-                </nav>
-              </details>
-            )}
-          </div>
 
           <nav class="app-nav" aria-label={t("dashboard.shell.workspace")}>
             {visibleGroups.map((group) => (
@@ -232,11 +219,6 @@ const icons: Record<string, string> = {
               </section>
             ))}
           </nav>
-
-          <div class="app-sidebar-footer">
-            <span class="app-context-mark" aria-hidden="true"></span>
-            <div><strong>{selectedRoleLabel === null ? t("dashboard.shell.footer_private") : t("dashboard.shell.footer_role", { role: selectedRoleLabel })}</strong><span>{t("dashboard.shell.footer_security")}</span></div>
-          </div>
         </aside>
 
         <div class="app-workspace">
@@ -246,34 +228,30 @@ const icons: Record<string, string> = {
               <strong>{displayName}</strong>
             </div>
 
-            <div class="app-mobile-topbar">
-              <button
-                class="app-mobile-shop-trigger"
-                type="button"
-                aria-haspopup="dialog"
-                aria-controls="app-mobile-menu"
-                aria-expanded="false"
-                data-mobile-menu-trigger="shop"
-              >
-                <span aria-hidden="true">{selectedShopName.slice(0, 1).toUpperCase()}</span>
-                <span><small>{selectedRoleLabel === null ? t("dashboard.shell.store") : t("dashboard.shell.store_role", { role: selectedRoleLabel })}</small><strong>{selectedShopName}</strong></span>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg>
-              </button>
-              <div class="app-mobile-topbar-actions">
-                <a class="app-icon-action" href={withSelectedShop("/app#actions-title")} aria-label={t("dashboard.shell.mobile.attention_aria")}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.bell}></svg>
-                </a>
-                <button class="app-icon-action" type="button" aria-label={t("dashboard.shell.mobile.menu_aria")} aria-haspopup="dialog" aria-controls="app-mobile-menu" aria-expanded="false" data-mobile-menu-trigger="more">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.menu}></svg>
-                </button>
-              </div>
-            </div>
+            <div class="app-topbar-right">
+              {shops.length > 0 ? (
+                <label class="app-shop-switch">
+                  <span class="app-shop-switch__label">{t("dashboard.console.shell.store")}</span>
+                  <select class="app-shop-select" aria-label={t("dashboard.shell.select_shop")} data-app-shop-select>
+                    {shopSwitchOptions.map((shop) => (
+                      <option value={shop.publicId} selected={shop.selected} data-shop-href={shop.href}>{shop.name}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <span class="app-shop-none">{selectedShopName}</span>
+              )}
 
-            <div class="app-account">
-              <span class="app-account-mark" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
-              <span><strong>{displayName}</strong><small>{email}</small></span>
-              <a href="/" aria-label={t("dashboard.shell.account.home_aria")} title={t("dashboard.shell.account.home_title")}>↗</a>
-              <button type="button" data-app-logout>{t("dashboard.shell.account.logout")}</button>
+              <a class="app-icon-action" href={withSelectedShop("/app#actions-title")} aria-label={t("dashboard.shell.mobile.attention_aria")}>
+                <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.bell}></svg>
+              </a>
+
+              <div class="app-account">
+                <span class="app-account-mark" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
+                <span><strong>{displayName}</strong><small>{email}</small></span>
+                <a href="/" aria-label={t("dashboard.shell.account.home_aria")} title={t("dashboard.shell.account.home_title")}>↗</a>
+                <button type="button" data-app-logout>{t("dashboard.shell.account.logout")}</button>
+              </div>
             </div>
           </header>
           <main id="app-content" class="app-main selinow-focus-target" tabindex="-1">
@@ -282,133 +260,90 @@ const icons: Record<string, string> = {
         </div>
       </div>
 
-      <nav class="app-mobile-nav" aria-label={t("dashboard.shell.mobile.nav_aria")}>
-        <a href={withSelectedShop("/app")} aria-current={isCurrent("/app") ? "page" : undefined}>
+      <nav class="app-tabbar" aria-label={t("dashboard.shell.mobile.nav_aria")}>
+        <a class:list={["app-tab", isCurrent("/app") && "is-active"]} href={withSelectedShop("/app")} aria-current={isCurrent("/app") ? "page" : undefined}>
           <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.overview}></svg>
-          <span>{t("dashboard.nav.overview")}</span>
+          <span>{t("dashboard.console.nav.overview")}</span>
         </a>
-        <a href={withSelectedShop("/app/orders")} aria-current={isCurrent("/app/orders") ? "page" : undefined}>
+        <a class:list={["app-tab", isCurrent("/app/orders") && "is-active"]} href={withSelectedShop("/app/orders")} aria-current={isCurrent("/app/orders") ? "page" : undefined}>
           <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.orders}></svg>
-          <span>{t("dashboard.nav.orders")}</span>
+          <span>{t("dashboard.console.nav.orders")}</span>
         </a>
-        {mobilePrimaryThird !== undefined && <a href={withSelectedShop(mobilePrimaryThird.path)} aria-current={isCurrent(mobilePrimaryThird.path) ? "page" : undefined}>
-          <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[mobilePrimaryThird.icon]}></svg>
-          <span>{mobilePrimaryThird.label}</span>
-        </a>}
-        <button type="button" aria-haspopup="dialog" aria-controls="app-mobile-menu" aria-expanded="false" aria-current={isChannelPath ? "page" : undefined} data-mobile-menu-trigger="channels">
-          <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.store}></svg>
-          <span>{t("dashboard.nav.sales_channels")}</span>
-        </button>
-        <button type="button" aria-haspopup="dialog" aria-controls="app-mobile-menu" aria-expanded="false" aria-current={isMorePath ? "page" : undefined} data-mobile-menu-trigger="more">
-          <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.more}></svg>
-          <span>{t("dashboard.shell.mobile.more")}</span>
-        </button>
-      </nav>
+        {mobilePrimaryThird !== undefined && (
+          <a class:list={["app-tab", isCurrent(mobilePrimaryThird.path) && "is-active"]} href={withSelectedShop(mobilePrimaryThird.path)} aria-current={isCurrent(mobilePrimaryThird.path) ? "page" : undefined}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[mobilePrimaryThird.icon]}></svg>
+            <span>{mobilePrimaryThird.label}</span>
+          </a>
+        )}
+        <details class="app-tab app-tab--more">
+          <summary>
+            <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.menu}></svg>
+            <span>{t("dashboard.console.nav.more")}</span>
+          </summary>
+          <div class="app-sheet">
+            <section class="app-sheet-section">
+              <p>{t("dashboard.shell.store")}</p>
+              <div class="app-sheet-shop">
+                <strong>{selectedShopName}</strong>
+                {selectedRoleLabel !== null && <small>{selectedRoleLabel}</small>}
+              </div>
+              {shops.length > 1 && (
+                <select class="app-shop-select" aria-label={t("dashboard.shell.select_shop")} data-app-shop-select>
+                  {shopSwitchOptions.map((shop) => (
+                    <option value={shop.publicId} selected={shop.selected} data-shop-href={shop.href}>{shop.name}</option>
+                  ))}
+                </select>
+              )}
+              {canOpenShopSetup ? <a class="app-sheet-link" href={withSelectedShop("/onboarding#shop")}>{t("dashboard.shell.mobile.setup")}</a> : <p class="app-sheet-note">{t("dashboard.shell.mobile.permission")}</p>}
+            </section>
 
-      <dialog id="app-mobile-menu" class="app-mobile-menu" data-app-mobile-menu aria-labelledby="app-mobile-menu-title">
-        <header>
-          <div>
-            <small>{t("dashboard.shell.workspace")}</small>
-            <h2 id="app-mobile-menu-title" data-mobile-menu-title>{t("dashboard.shell.mobile.more")}</h2>
-          </div>
-          <button class="app-icon-action" type="button" aria-label={t("dashboard.shell.mobile.close_aria")} data-mobile-menu-close>
-            <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.close}></svg>
-          </button>
-        </header>
-
-        <section class="app-mobile-menu-panel" data-mobile-menu-panel="shop" hidden>
-          <div class="app-mobile-shop-card">
-            <span aria-hidden="true">{selectedShopName.slice(0, 1).toUpperCase()}</span>
-            <div><small>{t("dashboard.shell.mobile.current_shop")}</small><strong>{selectedShopName}</strong></div>
-          </div>
-          {shops.length > 1 ? (
-            <nav class="app-mobile-shop-list" aria-label={t("dashboard.shell.select_shop")}>
-              {shops.map((shop) => (
-                <a href={shopSelectionHref(shop.publicId)} aria-current={shop.publicId === selectedShopPublicId ? "true" : undefined}>
-                  <strong>{shop.name}</strong><small>{shop.slug}</small>
-                </a>
-              ))}
-            </nav>
-          ) : (
-            <p>{t("dashboard.shell.mobile.only_shop")}</p>
-          )}
-          {canOpenShopSetup ? <a class="app-menu-primary" href={withSelectedShop("/onboarding#shop")}>{t("dashboard.shell.mobile.setup")}</a> : <p class="app-menu-permission-note">{t("dashboard.shell.mobile.permission")}</p>}
-        </section>
-
-        <section class="app-mobile-menu-panel" data-mobile-menu-panel="channels" hidden>
-          <nav aria-label={t("dashboard.shell.mobile.sales_channels_aria")}>
-            <p>{channelGroup.label}</p>
-            {channelGroup.items.map((item) => (
-              <a class="app-menu-link" href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined}>
-                <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
-                <span><strong>{item.label}</strong><small>{t("dashboard.shell.mobile.channel_open")}</small></span>
-              </a>
-            ))}
-          </nav>
-        </section>
-
-        <section class="app-mobile-menu-panel" data-mobile-menu-panel="more" hidden>
-          <nav aria-label={t("dashboard.shell.mobile.more_areas_aria")}>
-            {mobileMoreGroups.map((group) => (
-              <section>
-                <p>{group.label}</p>
-                {group.items.map((item) => (
-                  <a class="app-menu-link" href={withSelectedShop(itemPath(item))} aria-current={isCurrent(itemPath(item)) ? "page" : undefined}>
+            {channelGroup.items.length > 0 && (
+              <section class="app-sheet-section">
+                <p>{channelGroup.label}</p>
+                {channelGroup.items.map((item) => (
+                  <a class="app-sheet-link" href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined}>
                     <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
-                    <span><strong>{item.label}</strong><small>{t("dashboard.shell.mobile.channel_open")}</small></span>
+                    <span>{item.label}</span>
                   </a>
                 ))}
               </section>
+            )}
+
+            {mobileMoreGroups.map((group) => (
+              group.items.length > 0 && (
+                <section class="app-sheet-section">
+                  <p>{group.label}</p>
+                  {group.items.map((item) => (
+                    <a class="app-sheet-link" href={withSelectedShop(itemPath(item))} aria-current={isCurrent(itemPath(item)) ? "page" : undefined}>
+                      <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
+                      <span>{item.label}</span>
+                    </a>
+                  ))}
+                </section>
+              )
             ))}
-          </nav>
-          <button class="app-menu-logout" type="button" data-app-logout>{t("dashboard.shell.mobile.sign_out")}</button>
-        </section>
-      </dialog>
+
+            <button class="app-sheet-logout" type="button" data-app-logout>{t("dashboard.shell.mobile.sign_out")}</button>
+          </div>
+        </details>
+      </nav>
     </div>
 
     <script>
       import { withSelectedShop } from "../lib/dashboard/shop-navigation";
 
-      const mobileMenu = document.querySelector<HTMLDialogElement>("[data-app-mobile-menu]");
-      const mobileMenuTitle = document.querySelector<HTMLElement>("[data-mobile-menu-title]");
-      const mobileMenuPanels = [...document.querySelectorAll<HTMLElement>("[data-mobile-menu-panel]")];
       const shell = document.querySelector<HTMLElement>("[data-app-shell]");
-      let mobileMenuOpener: HTMLElement | null = null;
 
-      const menuTitles: Record<string, string> = {
-        channels: shell?.dataset.menuTitleChannels ?? "",
-        more: shell?.dataset.menuTitleMore ?? "",
-        shop: shell?.dataset.menuTitleShop ?? "",
-      };
-
-      for (const trigger of document.querySelectorAll<HTMLElement>("[data-mobile-menu-trigger]")) {
-        trigger.addEventListener("click", () => {
-          if (mobileMenu === null) return;
-          const view = trigger.dataset.mobileMenuTrigger ?? "more";
-          mobileMenuOpener = trigger;
-          for (const menuTrigger of document.querySelectorAll<HTMLElement>("[data-mobile-menu-trigger]")) {
-            menuTrigger.setAttribute("aria-expanded", menuTrigger === trigger ? "true" : "false");
-          }
-          mobileMenu.dataset.view = view;
-          if (mobileMenuTitle !== null) {
-            mobileMenuTitle.textContent = menuTitles[view]
-              ?? shell?.dataset.menuTitleWorkspace
-              ?? mobileMenuTitle.textContent;
-          }
-          for (const panel of mobileMenuPanels) panel.hidden = panel.dataset.mobileMenuPanel !== view;
-          if (!mobileMenu.open) mobileMenu.showModal();
-          mobileMenu.querySelector<HTMLElement>("[data-mobile-menu-close]")?.focus();
+      // Shop switching navigates to the server-rendered shopSwitchHref targets
+      // (filters/search cleared, order-detail paths reset) instead of mutating
+      // query params client-side, which would leak tenant filters across shops.
+      for (const element of Array.from(document.querySelectorAll("[data-app-shop-select]"))) {
+        const shopSelect = element as unknown as HTMLSelectElement;
+        shopSelect.addEventListener("change", () => {
+          const target = shopSelect.selectedOptions[0]?.dataset.shopHref;
+          if (typeof target === "string" && target !== "") window.location.assign(target);
         });
       }
-
-      document.querySelector<HTMLElement>("[data-mobile-menu-close]")?.addEventListener("click", () => mobileMenu?.close());
-      mobileMenu?.addEventListener("click", (event) => {
-        if (event.target === mobileMenu) mobileMenu.close();
-      });
-      mobileMenu?.addEventListener("close", () => {
-        mobileMenuOpener?.setAttribute("aria-expanded", "false");
-        mobileMenuOpener?.focus();
-      });
 
       const csrfCookieName = shell?.dataset.csrfCookieName;
       const selectedShopPublicId = shell?.dataset.selectedShopPublicId;

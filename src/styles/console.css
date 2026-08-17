@@ -22,7 +22,9 @@
   --sln-console-line: #e7e7ea;
   --sln-console-ink: #18181b;
   --sln-console-ink-2: #52525b;
-  --sln-console-ink-3: #a1a1aa;
+  /* zinc-500: the quietest text tone still clears WCAG AA (4.5:1) on the
+     light canvas/surface ramp — a11y gate enforces this on /app chrome. */
+  --sln-console-ink-3: #71717a;
 
   /* Single accent + semantic states (ink-first usage, tints only for state
      surfaces and never above ~6% chroma) */

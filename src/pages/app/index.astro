@@ -1,5 +1,5 @@
 ---
-import ConsoleLayout from "../../layouts/ConsoleLayout.astro";
+import AppLayout from "../../layouts/AppLayout.astro";
 import ConsoleButton from "../../components/console/ConsoleButton.astro";
 import Icon from "../../components/console/Icon.astro";
 import MetricStrip from "../../components/console/MetricStrip.astro";
@@ -223,7 +223,7 @@ const revenueLabel = formatMoney(verifiedValue, shopCurrency, typeof locale === 
 const fulfillmentLabel = fulfillmentRate === null ? "—" : percentFormatter.format(fulfillmentRate);
 ---
 
-<ConsoleLayout activePath="/app" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.overview.title")}>
+<AppLayout activePath="/app" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.overview.title")}>
   {workspaceState === "unavailable" ? (
     <section class="console-empty">
       <Icon name="alert" size={24} />
@@ -323,7 +323,7 @@ const fulfillmentLabel = fulfillmentRate === null ? "—" : percentFormatter.for
       </section>
     </div>
   )}
-</ConsoleLayout>
+</AppLayout>
 
 <style>
   .console-empty {

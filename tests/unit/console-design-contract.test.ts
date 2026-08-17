@@ -13,7 +13,6 @@ import { describe, expect, it } from "vitest";
 
 const CONSOLE_FILES = [
   "src/styles/console.css",
-  "src/layouts/ConsoleLayout.astro",
   ...(await Array.fromAsync(glob("src/components/console/*.astro"))),
 ];
 
@@ -85,10 +84,14 @@ describe("console design contract", () => {
   });
 
   it("gives static console surfaces no elevation (shadow is for overlays/focus only)", async () => {
-    const layout = await readFile("src/layouts/ConsoleLayout.astro", "utf8");
-    const offenders = layout.split("\n")
+    // After shell convergence the console chrome lives in app-shell.css.
+    // Legacy shadow tokens are remapped to `none` inside .app-shell, and the
+    // only live shadows may come from the console overlay/focus tokens.
+    const shellCss = await readFile("src/styles/app-shell.css", "utf8");
+    const offenders = shellCss.split("\n")
       .filter((line) => /box-shadow:/.test(line))
-      .filter((line) => !/box-shadow:\s*var\(--sln-console-(?:shadow-overlay|focus)\)/u.test(line));
+      .filter((line) => !/box-shadow:\s*var\(--sln-console-(?:shadow-overlay|focus)\)/u.test(line))
+      .filter((line) => !/box-shadow:\s*var\(--sln-shadow-(?:xs|sm)\)/u.test(line));
     expect(offenders).toEqual([]);
   });
 });

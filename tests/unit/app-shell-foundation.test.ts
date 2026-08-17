@@ -14,9 +14,9 @@ describe("seller app shell foundation", () => {
 
     expect(layout).toContain('content="#F8FAFC"');
     expect(layout).toContain('path: "/app/domains"');
-    // The overview page is the Console v2 pilot: it rides the new shared
-    // ConsoleLayout instead of AppLayout, staying light-first as well.
-    expect(overview).toMatch(/<(App|Console)Layout/);
+    // Shell convergence (Console v2): the overview rides the single V2-ified
+    // AppLayout; ConsoleLayout is retired.
+    expect(overview).toContain("<AppLayout");
     expect(overview).not.toContain('data-theme="dark"');
     expect(domains).toContain("<DomainManager");
     expect(domains).not.toContain('data-theme="dark"');
@@ -75,7 +75,7 @@ describe("seller app shell foundation", () => {
       expect(layout).toContain(`t("${key}")`);
     }
     expect(layout).toContain('key: "channels"');
-    expect(layout).toContain('t("dashboard.shell.mobile.more")');
+    expect(layout).toContain('t("dashboard.console.nav.more")');
     expect(layout).toContain('const mobilePrimaryThird = visibleItem("/app/products") ?? visibleItem("/app/customers");');
     expect(layout).toContain("<span>{mobilePrimaryThird.label}</span>");
     expect(layout).toContain("item.roles.includes(selectedShopRole)");
@@ -93,34 +93,46 @@ describe("seller app shell foundation", () => {
     expect(integrations).toContain('id="telegram"');
     expect(store).toContain('id="store-settings"');
     expect(layout).toContain('path: "/app/data"');
-    expect(layout).toContain('data-mobile-menu-trigger="channels"');
-    expect(layout).toContain('data-mobile-menu-trigger="more"');
-    expect(layout).toContain("mobileMenu.showModal()");
-    expect(layout).toContain('withSelectedShop("/app#actions-title")');
+    // Shop switching stays server-rendered: the topbar/sheet selects navigate
+    // to shopSwitchHref targets (filters cleared), never client param edits.
+    expect(layout).toContain("data-app-shop-select");
+    expect(layout).toContain("data-shop-href={shop.href}");
+    expect(layout).toContain("href: shopSelectionHref(shop.publicId)");
     expect(layout).toContain("shopSwitchHref(Astro.url, shopPublicId)");
-    expect(css).toContain("grid-template-columns: repeat(5, 1fr);");
-    expect(css).toContain("min-height: 52px;");
-    expect(css).toContain("scroll-padding-block-end: calc(132px + env(safe-area-inset-bottom));");
-    expect(css).toContain("padding-bottom: calc(140px + env(safe-area-inset-bottom));");
+    expect(layout).not.toContain("url.searchParams.set(\"shop\"");
+    expect(layout).toContain('withSelectedShop("/app#actions-title")');
+    expect(css).toContain(".app-tabbar {");
+    expect(css).toContain("grid-template-columns: var(--sln-console-sidebar-w) minmax(0, 1fr);");
+    expect(css).toContain("height: var(--sln-console-topbar-h);");
+    expect(css).toContain("scroll-padding-block-end: calc(120px + env(safe-area-inset-bottom));");
+    expect(css).toContain("padding-bottom: calc(120px + env(safe-area-inset-bottom));");
     expect(layout).toContain("data-nav-group={group.key}");
     expect(layout).toContain("app-nav-channel-group");
   });
 
-  it("keeps the mobile workspace menu truthful and exposes its dialog state", async () => {
+  it("keeps the mobile workspace sheet truthful and preserves role gating", async () => {
     const [layout, css] = await Promise.all([
       readFile("src/layouts/AppLayout.astro", "utf8"),
       readFile("src/styles/app-shell.css", "utf8"),
     ]);
 
-    expect(layout).toContain('id="app-mobile-menu"');
-    expect(layout.match(/aria-controls="app-mobile-menu"/gu)).toHaveLength(4);
-    expect(layout.match(/aria-expanded="false"/gu)).toHaveLength(4);
-    expect(layout).toContain('menuTrigger.setAttribute("aria-expanded", menuTrigger === trigger ? "true" : "false")');
-    expect(layout).toContain('mobileMenuOpener?.setAttribute("aria-expanded", "false")');
+    // V2 chrome: text brand mark instead of the SVG logo, tab bar + sheet
+    // instead of the 3-panel dialog, shop context moved to the topbar.
+    expect(layout).toContain('class="app-brand__mark" aria-hidden="true">S</span>');
+    expect(layout).toContain('<span class="app-brand__name">Selinow</span>');
+    expect(layout).not.toContain("selinow-logo-reversed.svg");
+    expect(layout).toContain('class="app-sheet"');
+    expect(layout).toContain("app-tab--more");
+    expect(layout).not.toContain("app-mobile-menu");
+    expect(layout).not.toContain("app-sidebar-footer");
     expect(layout).toContain('selectedShopRole === "owner" || selectedShopRole === "manager"');
     expect(layout).toContain('t("dashboard.shell.mobile.permission")');
-    expect(css).toContain('.app-icon-action[aria-expanded="true"]');
-    expect(css).toContain(".app-context-mark {");
+    expect(layout).toContain('t("dashboard.shell.mobile.setup")');
+    // Logout stays on the double-submit CSRF flow with decoded cookie value.
+    expect(layout).toContain('headers: { "X-CSRF-Token": decodeURIComponent(csrf) }');
+    expect(css).toContain(".app-sheet {");
+    expect(css).toContain(".app-sheet-link {");
+    expect(css).toContain(".app-tab--more summary");
     expect(css).not.toContain(".app-live-dot");
   });
 
@@ -142,7 +154,7 @@ describe("seller app shell foundation", () => {
     expect(layout).toContain("app-nav-channel-group");
     expect(layout).toContain("withSelectedShop(itemPath(item))");
     expect(css).toContain(".app-nav-channel-group");
-    expect(css).toContain(".app-menu-link-channel");
+    expect(css).toContain(".app-sheet-link");
   });
 
   it("keeps shared page headings within the 320px workspace canvas", async () => {
