@@ -32,14 +32,19 @@ const productionEvidenceExample = JSON.parse(readFileSync("infra/release/product
 };
 
 describe("operational migration-ledger documentation", () => {
-  it("keeps current operational sections on the complete 0097 source chain", () => {
+  it("keeps current operational sections on the documented release ledger (production continuation 0099-0105)", () => {
     expect(content["docs/RELEASE.md"]).toContain("source covers `0001`-`0097`");
     expect(content["docs/RELEASE.md"]).toContain("The current staging deployment is bound by immutable Cloudflare deployment evidence");
     expect(content["docs/RELEASE.md"]).toContain("production remains at `0052` with `0053`-`0097` pending");
     expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).toContain("Exact pending migrations: `0053`-`0097`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("explicit `releaseScope`");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("reviewed live `migrationLedgerPrefix`");
-    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Continuation migration admission (`0053`-`0097`)");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Production D1 is at the applied `0001`-`0098` ledger");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("current source migrations `0099`-`0105` are pending");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("Continuation migration admission (`0099`-`0105`)");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("For current candidate migrations `0099`-`0105`");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("The reviewed production baseline is explicitly recorded as `0001`-`0098`");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("continuation migration (`0099`-`0105`)");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("npm run deploy -- --env production --confirm-production --release-manifest");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("release:rollback:rehearsal -- --execute --confirm-production");
     expect(content["docs/PRODUCTION_RELEASE.md"]).toContain("--maintenance-drain-evidence");
@@ -73,6 +78,9 @@ describe("operational migration-ledger documentation", () => {
     expect(content["docs/DATA_MODEL.md"]).toContain("authoritative numbered source chain is contiguous through `0097_telegram_action_generation_and_delivery_interlock.sql`");
     expect(content["docs/DOMAINS.md"]).toContain("0093_custom_domain_turnstile_runtime_guard.sql");
     expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Current operational source migration chain: contiguous `0001`-`0097`");
+    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Production D1 ledger\n> is at `0098`");
+    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("Source migrations `0099`-`0105` (7 pending, `0100`\n> never applied remotely)");
+    expect(content["docs/IMPLEMENTATION_STATUS.md"]).toContain("`docs/release/CURRENT_HANDOFF_2026-08-17.md`");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-09.md"]).toContain("`0091`-`0094` over the retained `0090` staging ledger");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`2df45cf5936755bf4e31fabbb06891de8789c271`");
     expect(content["docs/release/CURRENT_HANDOFF_2026-08-11.md"]).toContain("`34ac903aea8b737fa1860d6e6aaf99c454279eda`");
@@ -128,6 +136,7 @@ describe("operational migration-ledger documentation", () => {
     expect(content["docs/PRODUCTION_MUTATION_REVIEW_PACKAGE.md"]).not.toContain("Exact pending migrations: `0053`-`0077`");
     expect(content["docs/PROVIDER_GATE_AUDIT.md"]).not.toContain("source has forward-only `0053`-`0077`");
     expect(content["docs/RUNBOOKS.md"]).not.toContain("for the current ledger that is the complete `0029`-`0077` chain");
+    expect(content["docs/PRODUCTION_RELEASE.md"]).not.toContain("Continuation migration admission (`0053`-`0097`)");
     expect(content["docs/DATA_MODEL.md"]).not.toContain("The current numbered source chain extends through `0076_dodo_platform_price_provider.sql`");
     expect(content["docs/DOMAINS.md"]).toContain("Production platform routing is live");
     expect(content["docs/DOMAINS.md"]).not.toContain("Production platform handoff matrix (not live)");
