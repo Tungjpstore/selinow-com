@@ -1,8 +1,7 @@
 ---
 import "../styles/selinow-tokens.css";
 import "../styles/selinow-a11y.css";
-import "../styles/marketing/tokens.css";
-import ProductFlowIllustration from "../components/marketing/ProductFlowIllustration.astro";
+import "../styles/auth.css";
 import { authenticateRequest } from "../lib/auth/session";
 import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
@@ -33,7 +32,7 @@ const t = createSystemTranslator(locale);
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
-    <meta name="theme-color" content="#F8FAFC" />
+    <meta name="theme-color" content="#fafafa" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/selinow-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/selinow-180.png" />
     <title>{t("auth.login.title")}</title>
@@ -41,155 +40,150 @@ const t = createSystemTranslator(locale);
   <body>
     <a class="selinow-skip-link" href="#main-content">{t("auth.login.skip")}</a>
 
-    <div class="login-split-shell">
-      <main id="main-content" class="login-main-panel selinow-focus-target" tabindex="-1">
-        <div class="brand-wrapper">
-          <a class="brand" href="/" aria-label={t("auth.login.brand_aria")}>
-            <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="144" height="38" />
-          </a>
-        </div>
-
-        <div class="auth-card">
-          <div class="auth-heading">
-            <h1>{locale === "vi-VN" ? "Đăng nhập để tiếp tục" : "Log in to continue"}</h1>
-            <p>{t("auth.login.intro")}</p>
-          </div>
-
-          <form id="login-form" class="auth-form" data-login-form>
-            <div class="field-group">
-              <label for="email">{t("auth.login.email_label")}</label>
-              <div class="input-control">
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  inputmode="email"
-                  autocomplete="email"
-                  required
-                  maxlength="254"
-                  placeholder="name@company.com"
-                  data-login-email
-                />
-              </div>
-            </div>
-
-            <div class="field-group">
-              <div class="password-label-row">
-                <label for="password">{t("auth.login.password_label")}</label>
-                <a href="/forgot-password" class="forgot-link">{t("auth.login.forgot_password")}</a>
-              </div>
-              <div class="input-control has-toggle">
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autocomplete="current-password"
-                  required
-                  maxlength="128"
-                  placeholder="••••••••"
-                  data-login-password
-                  data-password-input
-                />
-                <button type="button" class="btn-reveal-pwd" data-toggle-password aria-label="Ẩn/hiện mật khẩu">
-                  <svg class="icon-eye" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div class="remember-row">
-              <label class="checkbox-label">
-                <input type="checkbox" name="rememberMe" data-login-remember />
-                <span>{t("auth.login.remember_me")}</span>
-              </label>
-            </div>
-
-            <button type="submit" class="btn-primary" data-login-submit>
-              <span data-submit-label>{t("auth.login.submit")}</span>
-              <span class="btn-arrow" aria-hidden="true">→</span>
-            </button>
-            <p id="status" class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
-          </form>
-
-          <div class="auth-divider" aria-hidden="true"><span>{t("auth.login.magic_divider")}</span></div>
-
-          <form class="auth-form" data-magic-link-form>
-            <div class="field-group">
-              <label for="magic-display-name">{t("auth.login.display_name_label")}</label>
-              <div class="input-control">
-                <input
-                  id="magic-display-name"
-                  name="displayName"
-                  type="text"
-                  autocomplete="name"
-                  maxlength="80"
-                  data-magic-display-name
-                />
-              </div>
-            </div>
-            <button type="submit" class="btn-secondary" data-magic-submit>{t("auth.login.magic_submit")}</button>
-            <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-magic-status></p>
-          </form>
-
-          <div class="auth-form magic-confirmation" data-login-confirmation hidden>
-            <p class="confirmation-intro">
-              <strong>{t("auth.login.confirmation_title")}</strong>
-              <span>{t("auth.login.confirmation_intro")} <strong data-login-confirm-destination></strong></span>
-            </p>
-            <button type="button" class="btn-primary" data-login-confirm>
-              <span>{t("auth.login.confirmation_action")}</span>
-            </button>
-          </div>
-
-          <div id="login-2fa-panel" class="auth-form" data-login-2fa hidden>
-            <div class="auth-heading two-factor-heading">
-              <h2>{t("auth.login.two_factor.heading")}</h2>
-              <p>{t("auth.login.two_factor.intro")} <strong data-login-2fa-email></strong></p>
-            </div>
-            <div class="field-group">
-              <label for="login-2fa-otp">{t("auth.login.two_factor.otp_label")}</label>
-              <div class="input-control">
-                <input
-                  id="login-2fa-otp"
-                  name="otp"
-                  type="text"
-                  inputmode="numeric"
-                  autocomplete="one-time-code"
-                  maxlength="6"
-                  placeholder="000000"
-                  data-login-2fa-otp
-                />
-              </div>
-            </div>
-            <button type="button" class="btn-primary" data-login-2fa-submit>
-              <span data-submit-label>{t("auth.login.two_factor.submit")}</span>
-              <span class="btn-arrow" aria-hidden="true">→</span>
-            </button>
-            <div class="two-factor-actions">
-              <button type="button" class="link-button" data-login-2fa-resend>{t("auth.login.two_factor.resend")}</button>
-              <button type="button" class="link-button" data-login-2fa-back>{t("auth.login.two_factor.back")}</button>
-            </div>
-            <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-2fa-status></p>
-          </div>
-
-          <div class="card-footer">
-            <div class="switch-auth">
-              <span>{t("auth.login.no_account")}</span>
-              <a href="/register" class="link-bold">{t("auth.login.register_now")}</a>
-            </div>
-            <div class="privacy-note">
-              <span>{t("auth.login.privacy")}</span>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      <div class="login-aside-panel">
-        <ProductFlowIllustration locale={locale} />
+    <main id="main-content" class="auth-main selinow-focus-target" tabindex="-1">
+      <div class="brand-wrapper">
+        <a class="auth-brand" href="/" aria-label={t("auth.login.brand_aria")}>
+          <span class="auth-brand__mark" aria-hidden="true">S</span>
+          <span class="auth-brand__name">Selinow</span>
+        </a>
       </div>
-    </div>
+
+      <div class="auth-card">
+        <div class="auth-heading">
+          <h1>{locale === "vi-VN" ? "Đăng nhập để tiếp tục" : "Log in to continue"}</h1>
+          <p>{t("auth.login.intro")}</p>
+        </div>
+
+        <form id="login-form" class="auth-form" data-login-form>
+          <div class="field-group">
+            <label for="email">{t("auth.login.email_label")}</label>
+            <div class="input-control">
+              <input
+                id="email"
+                name="email"
+                type="email"
+                inputmode="email"
+                autocomplete="email"
+                required
+                maxlength="254"
+                placeholder="name@company.com"
+                data-login-email
+              />
+            </div>
+          </div>
+
+          <div class="field-group">
+            <div class="password-label-row">
+              <label for="password">{t("auth.login.password_label")}</label>
+              <a href="/forgot-password" class="forgot-link">{t("auth.login.forgot_password")}</a>
+            </div>
+            <div class="input-control has-toggle">
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                required
+                maxlength="128"
+                placeholder="••••••••"
+                data-login-password
+                data-password-input
+              />
+              <button type="button" class="btn-reveal-pwd" data-toggle-password aria-label="Ẩn/hiện mật khẩu">
+                <svg class="icon-eye" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="remember-row">
+            <label class="checkbox-label">
+              <input type="checkbox" name="rememberMe" data-login-remember />
+              <span>{t("auth.login.remember_me")}</span>
+            </label>
+          </div>
+
+          <button type="submit" class="btn-primary" data-login-submit>
+            <span data-submit-label>{t("auth.login.submit")}</span>
+            <span class="btn-arrow" aria-hidden="true">→</span>
+          </button>
+          <p id="status" class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-status></p>
+        </form>
+
+        <div class="auth-divider" aria-hidden="true"><span>{t("auth.login.magic_divider")}</span></div>
+
+        <form class="auth-form" data-magic-link-form>
+          <div class="field-group">
+            <label for="magic-display-name">{t("auth.login.display_name_label")}</label>
+            <div class="input-control">
+              <input
+                id="magic-display-name"
+                name="displayName"
+                type="text"
+                autocomplete="name"
+                maxlength="80"
+                data-magic-display-name
+              />
+            </div>
+          </div>
+          <button type="submit" class="btn-secondary" data-magic-submit>{t("auth.login.magic_submit")}</button>
+          <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-magic-status></p>
+        </form>
+
+        <div class="auth-form magic-confirmation" data-login-confirmation hidden>
+          <p class="confirmation-intro">
+            <strong>{t("auth.login.confirmation_title")}</strong>
+            <span>{t("auth.login.confirmation_intro")} <strong data-login-confirm-destination></strong></span>
+          </p>
+          <button type="button" class="btn-primary" data-login-confirm>
+            <span>{t("auth.login.confirmation_action")}</span>
+          </button>
+        </div>
+
+        <div id="login-2fa-panel" class="auth-form" data-login-2fa hidden>
+          <div class="auth-heading two-factor-heading">
+            <h2>{t("auth.login.two_factor.heading")}</h2>
+            <p>{t("auth.login.two_factor.intro")} <strong data-login-2fa-email></strong></p>
+          </div>
+          <div class="field-group">
+            <label for="login-2fa-otp">{t("auth.login.two_factor.otp_label")}</label>
+            <div class="input-control">
+              <input
+                id="login-2fa-otp"
+                name="otp"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                maxlength="6"
+                placeholder="000000"
+                data-login-2fa-otp
+              />
+            </div>
+          </div>
+          <button type="button" class="btn-primary" data-login-2fa-submit>
+            <span data-submit-label>{t("auth.login.two_factor.submit")}</span>
+            <span class="btn-arrow" aria-hidden="true">→</span>
+          </button>
+          <div class="two-factor-actions">
+            <button type="button" class="link-button" data-login-2fa-resend>{t("auth.login.two_factor.resend")}</button>
+            <button type="button" class="link-button" data-login-2fa-back>{t("auth.login.two_factor.back")}</button>
+          </div>
+          <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-2fa-status></p>
+        </div>
+
+        <div class="card-footer">
+          <div class="switch-auth">
+            <span>{t("auth.login.no_account")}</span>
+            <a href="/register" class="link-bold">{t("auth.login.register_now")}</a>
+          </div>
+          <div class="privacy-note">
+            <span>{t("auth.login.privacy")}</span>
+          </div>
+        </div>
+      </div>
+    </main>
 
     <script>
       import "../scripts/marketing/auth";
@@ -199,346 +193,41 @@ const t = createSystemTranslator(locale);
 </html>
 
 <style>
-  :global(*) { box-sizing: border-box; }
+  /*
+   * Login-only residue: the legacy token names below resolve to the console
+   * ramp through the :root remap in styles/auth.css. They stay here because
+   * design-system-accessibility.test.ts pins these exact declarations to the
+   * login page.
+   */
   :global(body) {
-    margin: 0;
-    min-width: 320px;
-    min-height: 100vh;
     background: var(--sln-bg-canvas);
     color: var(--sln-text-primary);
-    font-family: var(--sln-font-sans);
-    -webkit-font-smoothing: antialiased;
   }
 
-  .login-split-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 42fr) minmax(0, 58fr);
-    min-height: 100vh;
-    width: 100%;
-  }
-
-  .login-main-panel {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: clamp(32px, 6vw, 64px) var(--space-6);
-    box-sizing: border-box;
-    width: 100%;
-    max-width: 540px;
-    margin-inline: auto;
-  }
-
-  .login-aside-panel {
-    background:
-      radial-gradient(700px 420px at 70% 10%, rgba(101, 82, 232, 0.06), transparent 62%),
-      var(--surface-muted, #F6F7FA);
-    border-left: 1px solid var(--border-soft);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .brand-wrapper {
-    margin-bottom: 24px;
-    align-self: flex-start;
-  }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    text-decoration: none;
-    transition: opacity 0.2s ease;
-  }
-  .brand:hover { opacity: 0.88; }
-  .brand img { display: block; width: 140px; height: auto; }
-
-  /* Auth Card */
-  .auth-card {
-    width: 100%;
-    background: #FFFFFF;
-    border: 1px solid var(--border-strong, #D9DCE5);
-    border-radius: 16px;
-    padding: 36px 32px;
-    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px rgba(16, 24, 40, 0.06);
-    position: relative;
-  }
-
-  /* Headings */
-  .auth-heading {
-    text-align: left;
-    margin-bottom: 24px;
-  }
-  .auth-heading h1 {
-    margin: 0;
-    font-size: 24px;
-    font-weight: 750;
-    letter-spacing: -0.025em;
-    color: #0F172A;
-  }
-  .auth-heading p {
-    margin: 8px 0 0;
-    color: #64748B;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-
-  /* Form controls */
-  .auth-form {
-    display: grid;
-    gap: 16px;
-  }
-  .field-group {
-    display: grid;
-    gap: 6px;
-  }
-  .field-group label {
-    font-size: 13px;
-    font-weight: 600;
-    color: #334155;
-  }
-  .password-label-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .forgot-link {
-    color: var(--sln-action-primary);
-    font-size: 12px;
-    font-weight: 600;
-    text-decoration: none;
-  }
-  .forgot-link:hover { text-decoration: underline; }
-
-  .input-control {
-    position: relative;
-    display: flex;
-    align-items: center;
-  }
-  .input-control input {
-    width: 100%;
-    min-height: 46px;
-    border: 1px solid var(--sln-slate-500);
-    border-radius: 12px;
-    padding: 10px 14px;
-    background: #F8FAFC;
-    color: #0F172A;
-    font-size: 14px;
-    outline: none;
-    transition: all 0.2s ease;
-  }
-  .input-control.has-toggle input {
-    padding-right: 42px;
-  }
-  .input-control input:focus {
-    background: #FFFFFF;
-    border-color: var(--sln-action-primary);
-    box-shadow: 0 0 0 3px rgba(101, 82, 232, 0.14);
-    outline: none;
-  }
-  .btn-reveal-pwd {
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: transparent;
-    border: none;
-    padding: 6px;
-    color: #94A3B8;
-    cursor: pointer;
-    border-radius: 8px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .btn-reveal-pwd:hover { color: #475569; }
-
-  .remember-row {
-    display: flex;
-    align-items: center;
-    margin-top: 2px;
-  }
-  .checkbox-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
-    cursor: pointer;
-    font-size: 13px;
-    color: #475569;
-  }
-  .checkbox-label input {
-    width: 16px;
-    height: 16px;
-    margin: 0;
-    cursor: pointer;
-    accent-color: var(--sln-action-primary);
-  }
-
-  /* Primary Button */
-  .btn-primary {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    min-height: 48px;
-    margin-top: 8px;
-    border: 1px solid #5140C9;
-    border-radius: 10px;
-    padding: 12px 20px;
-    background: var(--sln-action-primary);
-    color: #FFFFFF;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .btn-primary:hover {
-    background: var(--sln-action-primary-hover);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(101, 82, 232, 0.24);
-  }
-  .btn-primary:active { transform: translateY(0); }
-  .btn-primary:disabled { cursor: wait; opacity: 0.72; transform: none; }
-  .btn-arrow { font-size: 16px; transition: transform 0.2s ease; }
-  .btn-primary:hover .btn-arrow { transform: translateX(3px); }
-
-  /* Status messages */
-  .status-msg {
-    min-height: 0;
-    margin: 12px 0 0;
-    padding: 0;
-    border-radius: 10px;
-    font-size: 13px;
-    font-weight: 500;
-    text-align: center;
-    transition: all 0.2s ease;
-  }
-  .status-msg:not(:empty) { padding: 10px 14px; }
-  .status-msg[data-tone="pending"] { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
-  .status-msg[data-tone="success"] { background: #ECFDF5; color: var(--sln-success-text); border: 1px solid #A7F3D0; }
-  .status-msg[data-tone="error"] { background: #FEF2F2; color: var(--sln-danger-text); border: 1px solid #FECACA; }
-
-  /* Card Footer */
-  .card-footer {
-    margin-top: 28px;
-    padding-top: 20px;
-    border-top: 1px solid #F1F5F9;
-    text-align: center;
-  }
-  .switch-auth {
-    font-size: 14px;
-    color: #475467;
-  }
-  .link-bold {
-    color: var(--sln-action-primary);
-    font-weight: 600;
-    text-decoration: none;
-    margin-left: 4px;
-  }
-  .link-bold:hover { text-decoration: underline; }
-  .privacy-note {
-    margin-top: 12px;
-    color: #475467;
-    font-size: 12px;
-  }
-
-  /* Magic-link block */
-  .auth-divider {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 20px 0 16px;
-    color: #94A3B8;
-    font-size: 12px;
-    font-weight: 600;
-  }
-  .auth-divider::before,
-  .auth-divider::after {
-    content: "";
-    flex: 1;
-    height: 1px;
-    background: #F1F5F9;
-  }
-
-  .btn-secondary {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    min-height: 46px;
-    border: 1px solid var(--border-strong, #D9DCE5);
-    border-radius: 10px;
-    padding: 12px 20px;
-    background: #FFFFFF;
-    color: #0F172A;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-  .btn-secondary:hover { background: #F8FAFC; border-color: #94A3B8; }
-  .btn-secondary:disabled { cursor: wait; opacity: 0.72; }
-
-  .status-msg a { color: inherit; font-weight: 700; text-decoration: underline; }
-
+  /* Magic-link confirmation panel */
   .magic-confirmation {
     margin-top: 16px;
-    border: 1px solid var(--border-strong, #D9DCE5);
-    border-radius: 12px;
+    border: 1px solid var(--sln-slate-500);
+    border-radius: var(--sln-console-radius-container);
     padding: 18px;
-    background: #F8FAFC;
+    background: var(--sln-console-raised);
   }
   .confirmation-intro {
     display: grid;
     gap: 6px;
     margin: 0;
-    color: #334155;
+    color: var(--sln-console-ink-2);
     font-size: 13px;
     line-height: 1.5;
   }
-  .confirmation-intro > strong { color: #0F172A; font-size: 14px; }
+  .confirmation-intro > strong {
+    color: var(--sln-console-ink);
+    font-size: 14px;
+    font-weight: 600;
+  }
   .magic-confirmation .btn-primary { margin-top: 4px; }
 
-  /* Two-factor step */
-  .two-factor-heading {
-    margin-bottom: 4px;
-  }
-  .two-factor-heading h2 {
-    margin: 0;
-    font-size: 19px;
-    font-weight: 750;
-    letter-spacing: -0.02em;
-    color: #0F172A;
-  }
-  .two-factor-actions {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .link-button {
-    background: transparent;
-    border: none;
-    padding: 0;
-    color: var(--sln-action-primary);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .link-button:hover { text-decoration: underline; }
-  .link-button:disabled { color: #94A3B8; cursor: wait; text-decoration: none; }
-
-  @media (max-width: 960px) {
-    .login-split-shell { grid-template-columns: 1fr; }
-    .login-aside-panel { display: none; }
-    .login-main-panel { max-width: 440px; padding: 32px 16px; }
-  }
-
-  @media (max-width: 480px) {
-    .login-main-panel { width: 100%; padding: 24px 12px 48px; }
-    .auth-card { padding: 28px 18px; border-radius: 20px; }
-  }
+  /* AA text tones for the status surface (override the shared tint ink) */
+  .status-msg[data-tone="success"] { color: var(--sln-success-text); }
+  .status-msg[data-tone="error"] { color: var(--sln-danger-text); }
 </style>
