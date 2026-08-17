@@ -924,10 +924,14 @@ export async function assertFreshProductionBootstrapBackupEvidence(options) {
     artifactPath,
     completedAt: completedAt.toISOString(),
     checksumSha256: record.checksum_sha256,
+    createdAt: typeof record.created_at === "string" ? record.created_at : completedAt.toISOString(),
+    expiresAt: typeof record.expires_at === "string" ? record.expires_at : null,
     providerBookmarkRecorded: true,
+    providerReference: record.provider_reference,
     reportRef: options.backupRoot === undefined ? relativeReportPath(reportPath) : reportPath,
     sizeBytes: record.size_bytes,
     snapshotId: record.id,
+    snapshotKind: record.snapshot_kind,
   };
 }
 
@@ -1793,6 +1797,19 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       now: options.now ?? new Date(),
     })
     : null;
+  // Production continuation admission binds the drill report to the fresh
+  // protected bootstrap backup, so the drill resolves that evidence too and
+  // records it as the report's protected snapshot (see export_snapshots for
+  // the drill's own source export record).
+  const productionBootstrapBackup = environment === "production"
+    ? await (options.productionBackupEvidenceImplementation ?? assertFreshProductionBootstrapBackupEvidence)({
+      accountId: approvedIdentity.accountId,
+      backupRoot: options.backupRoot,
+      databaseId: approvedIdentity.databaseId,
+      databaseName: approvedIdentity.databaseName,
+      now: options.now ?? new Date(),
+    })
+    : null;
   if (databases.some((database) => database.name === targetName)) {
     throw new Error("restore_target_already_exists");
   }
@@ -1827,12 +1844,20 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     const sourceStat = await stat(sourceArtifact);
     if (!sourceStat.isFile() || sourceStat.size === 0) throw new Error("database_export_empty");
     const artifactChecksumSha256 = await sha256File(sourceArtifact);
-    const checksumSha256 = protectedBackup?.checksumSha256 ?? artifactChecksumSha256;
+    const checksumSha256 = protectedBackup?.checksumSha256
+      ?? productionBootstrapBackup?.checksumSha256
+      ?? artifactChecksumSha256;
     if (protectedBackup !== null && sourceStat.size !== protectedBackup.sizeBytes) {
       throw new Error("staging_backup_artifact_invalid");
     }
     if (protectedBackup !== null && artifactChecksumSha256 !== protectedBackup.checksumSha256) {
       throw new Error("staging_backup_artifact_invalid");
+    }
+    // The production drill exports the live database; its source artifact must
+    // be byte-size-equivalent to the protected bootstrap backup the report is
+    // bound to, otherwise the drill is not evidence for that backup.
+    if (productionBootstrapBackup !== null && sourceStat.size !== productionBootstrapBackup.sizeBytes) {
+      throw new Error("production_backup_source_size_drift");
     }
     if (protectedBackup !== null) {
       importSummary = await importSqlArtifactChunked(
@@ -2012,24 +2037,28 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     if (foreignKeyViolationCount !== 0) throw new Error("restore_foreign_keys_failed");
     assertRequiredRestoreTables(schemaNames);
     const completedAt = new Date().toISOString();
+    // Admission binds the drill to the protected backup snapshot; staging uses
+    // its own protected backup, production the bootstrap backup (the drill's
+    // live source export is retained under export_snapshots).
+    const boundBackup = protectedBackup ?? productionBootstrapBackup;
     const snapshotRecord = buildBackupSnapshotRecord({
       checksumSha256,
-      completedAt: protectedBackup?.completedAt ?? completedAt,
-      createdAt: protectedBackup?.createdAt ?? identifiers.startedAt,
+      completedAt: boundBackup?.completedAt ?? completedAt,
+      createdAt: boundBackup?.createdAt ?? identifiers.startedAt,
       environment,
-      expiresAt: protectedBackup?.expiresAt,
-      id: protectedBackup?.snapshotId ?? identifiers.snapshotId,
+      expiresAt: boundBackup?.expiresAt,
+      id: boundBackup?.snapshotId ?? identifiers.snapshotId,
       itemCount: sumCounts(sourceCounts),
-      providerReference: protectedBackup?.providerReference,
+      providerReference: boundBackup?.providerReference,
       requestId: identifiers.requestId,
       resourceRef: target.resourceRef,
-      sizeBytes: sourceStat.size,
-      snapshotKind: protectedBackup?.snapshotKind ?? "export",
+      sizeBytes: boundBackup?.sizeBytes ?? sourceStat.size,
+      snapshotKind: boundBackup?.snapshotKind ?? "export",
       status: "available",
-      updatedAt: protectedBackup?.completedAt ?? completedAt,
+      updatedAt: boundBackup?.completedAt ?? completedAt,
     });
     const drillRecord = buildRestoreDrillRecord({
-      backupSnapshotId: protectedBackup?.snapshotId ?? identifiers.snapshotId,
+      backupSnapshotId: boundBackup?.snapshotId ?? identifiers.snapshotId,
       completedAt,
       createdAt: identifiers.startedAt,
       environment: environment === "production" ? "isolated" : environment,
@@ -2043,8 +2072,25 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       targetResourceRef: `d1:${targetName}`,
       updatedAt: completedAt,
     });
+    const exportSnapshotRecord = protectedBackup === null
+      ? buildBackupSnapshotRecord({
+        checksumSha256: artifactChecksumSha256,
+        completedAt,
+        createdAt: identifiers.startedAt,
+        environment,
+        id: identifiers.snapshotId,
+        itemCount: sumCounts(sourceCounts),
+        requestId: identifiers.requestId,
+        resourceRef: target.resourceRef,
+        sizeBytes: sourceStat.size,
+        snapshotKind: "export",
+        status: "available",
+        updatedAt: completedAt,
+      })
+      : undefined;
     outcome = {
       drillRecord,
+      exportSnapshotRecord,
       snapshotRecord,
       source: {
         account_id: approvedIdentity.accountId,
@@ -2118,6 +2164,7 @@ export async function runRestoreDrill(options) {
     await writePrivateJson(reportPath, {
       records: {
         backup_snapshots: [result.snapshotRecord],
+        export_snapshots: result.exportSnapshotRecord === undefined ? [] : [result.exportSnapshotRecord],
         restore_drills: [result.drillRecord],
       },
       report_version: 1,

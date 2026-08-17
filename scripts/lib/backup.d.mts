@@ -226,10 +226,14 @@ export function assertFreshProductionBootstrapBackupEvidence(options: {
   artifactPath: string;
   completedAt: string;
   checksumSha256: string;
+  createdAt: string;
+  expiresAt: string | null;
   providerBookmarkRecorded: true;
+  providerReference: string;
   reportRef: string;
   sizeBytes: number;
   snapshotId: string;
+  snapshotKind: BackupSnapshotRecord["snapshot_kind"];
 }>;
 
 export function assertFreshProductionContinuationEvidence(options: {
@@ -246,10 +250,14 @@ export function assertFreshProductionContinuationEvidence(options: {
     artifactPath: string;
     completedAt: string;
     checksumSha256: string;
+    createdAt: string;
+    expiresAt: string | null;
     providerBookmarkRecorded: true;
+    providerReference: string;
     reportRef: string;
     sizeBytes: number;
     snapshotId: string;
+    snapshotKind: BackupSnapshotRecord["snapshot_kind"];
   };
   reviewedCommitSha: string;
   restore: {
@@ -280,6 +288,7 @@ export function createBackup(options: {
 }): Promise<OperationResult>;
 
 export function runRestoreDrill(options: {
+  backupRoot?: string;
   config?: WranglerConfig;
   dryRun: boolean;
   environment: BackupEnvironment;
@@ -287,6 +296,24 @@ export function runRestoreDrill(options: {
   reviewedCommitSha?: string;
   randomBytesImplementation?: (size: number) => Buffer;
   runner?: WranglerRunner;
+  productionBackupEvidenceImplementation?: (options: {
+    accountId: string;
+    backupRoot?: string;
+    databaseId: string;
+    databaseName: string;
+    now?: Date;
+  }) => Promise<{
+    artifactPath: string;
+    checksumSha256: string;
+    completedAt: string;
+    createdAt?: string;
+    expiresAt?: string | null;
+    providerReference?: string | null;
+    reportRef: string;
+    sizeBytes: number;
+    snapshotId: string;
+    snapshotKind?: BackupSnapshotRecord["snapshot_kind"];
+  }>;
   stagingBackupEvidenceImplementation?: (options: {
     accountId: string;
     backupRoot?: string;

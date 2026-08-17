@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -14,6 +14,7 @@ import {
   assertDistinctRestoreTarget,
   assertFreshStagingBackupEvidence,
   assertFreshProductionBootstrapBackupEvidence,
+  assertFreshProductionContinuationEvidence,
   assertProductionBackupAdmission,
   buildBackupSnapshotRecord,
   buildRestoreDrillRecord,
@@ -173,6 +174,31 @@ async function writeProductionBackupEvidence(root: string, completedAt: string) 
     },
   }), "utf8");
   return { snapshotDirectory, snapshotId };
+}
+
+// Column sets required by readCrossLedgerMismatches / remoteCrossLedgerSql so
+// the fixture schema parses even though every table stays empty.
+const CROSS_LEDGER_FIXTURE_COLUMNS: Record<string, string> = {
+  activation_milestones: "id TEXT PRIMARY KEY, milestone_code TEXT, projection_json TEXT, shop_id TEXT",
+  billing_accounts: "id TEXT PRIMARY KEY, currency TEXT, provider_code TEXT, shop_id TEXT",
+  billing_checkout_sessions: "id TEXT PRIMARY KEY, plan_id TEXT, price_id TEXT, provider_code TEXT, shop_id TEXT, subscription_id TEXT",
+  billing_invoices: "id TEXT PRIMARY KEY, billing_account_id TEXT, currency TEXT, provider_code TEXT, shop_id TEXT",
+  billing_provider_events: "id TEXT PRIMARY KEY, shop_id TEXT, status TEXT",
+  plan_prices: "id TEXT PRIMARY KEY, plan_id TEXT, provider_code TEXT",
+  shop_domains: "id TEXT PRIMARY KEY, delete_requested_at TEXT, deleted_at TEXT, dns_status TEXT, hostname_normalized TEXT, hostname_status TEXT, is_primary INTEGER, ownership_verified_at TEXT, shop_id TEXT, ssl_status TEXT, status TEXT, type TEXT, validation_metadata_json TEXT",
+  shop_subscriptions: "id TEXT PRIMARY KEY, shop_id TEXT",
+  shops: "id TEXT PRIMARY KEY, canonical_domain_id TEXT",
+  subscription_events: "id TEXT PRIMARY KEY, provider_event_id TEXT, shop_id TEXT, source_kind TEXT, to_state TEXT",
+};
+
+function buildRestoreDrillFixtureSql() {
+  const statements = [...restoreValidationTables].map((table) => (
+    `CREATE TABLE ${table} (${CROSS_LEDGER_FIXTURE_COLUMNS[table] ?? "id TEXT PRIMARY KEY"})`
+  ));
+  statements.push(
+    "CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
+  );
+  return `${statements.join(";\n")};\n`;
 }
 
 describe("backup target safety", () => {
@@ -1291,6 +1317,224 @@ describe("backup CLI dry runs", () => {
       );
     } finally {
       await rm(reportPath, { force: true });
+    }
+  });
+
+  it("binds production drill evidence to the protected bootstrap backup for continuation admission", async () => {
+    // Mirrors infra/environments/production.json and infra/generated/production.json,
+    // which runRemoteRestoreDrill loads as the approved production identity.
+    const productionManifestAccountId = "ef250a88911fd24073cb73d1c07e0218";
+    const productionManifestDatabaseId = "75102e37-45f6-40ed-a32a-9e700fd184db";
+    const now = new Date();
+    const backupCompletedAt = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    const backupRoot = await mkdtemp(join(tmpdir(), "selinow-production-backup-"));
+    const fixtureSql = buildRestoreDrillFixtureSql();
+    // Same byte size, different content: a live export never matches the
+    // time-travel backup checksum, so the drill must bind records explicitly.
+    const backupArtifact = `${"-- bootstrap backup fixture".padEnd(48, " ")}\n${fixtureSql}`;
+    const liveExportArtifact = `${"-- live source export fixture".padEnd(48, " ")}\n${fixtureSql}`;
+    const backupChecksum = createHash("sha256").update(backupArtifact).digest("hex");
+    const liveExportChecksum = createHash("sha256").update(liveExportArtifact).digest("hex");
+    expect(backupChecksum).not.toBe(liveExportChecksum);
+    expect(Buffer.byteLength(backupArtifact)).toBe(Buffer.byteLength(liveExportArtifact));
+    const snapshotId = "bkp_20260101000000_030303030303";
+    const snapshotDirectory = resolve(backupRoot, snapshotId);
+    const migrationNames = readdirSync(resolve(import.meta.dirname, "../../migrations"))
+      .filter((name) => /^\d{4}_.+\.sql$/u.test(name))
+      .sort();
+    const commands: string[][] = [];
+    let reportPath: string | null = null;
+    try {
+      await mkdir(snapshotDirectory, { recursive: true });
+      await writeFile(resolve(snapshotDirectory, "database.sql"), backupArtifact, { encoding: "utf8", mode: 0o600 });
+      await chmod(resolve(snapshotDirectory, "database.sql"), 0o600);
+      await writeFile(resolve(snapshotDirectory, "snapshot.json"), JSON.stringify({
+        artifact: { format: "sql", path: "database.sql" },
+        records: {
+          backup_snapshots: [{
+            checksum_sha256: backupChecksum,
+            completed_at: backupCompletedAt,
+            created_at: backupCompletedAt,
+            environment: "production",
+            id: snapshotId,
+            provider_reference: "bookmark-production-fixture",
+            resource_ref: "d1:selinow-production",
+            size_bytes: Buffer.byteLength(backupArtifact),
+            snapshot_kind: "time_travel",
+            status: "available",
+          }],
+        },
+        report_version: 2,
+        source: {
+          account_id: productionManifestAccountId,
+          database_id: productionManifestDatabaseId,
+          database_name: "selinow-production",
+          resource_ref: "d1:selinow-production",
+        },
+      }), { encoding: "utf8", mode: 0o600 });
+      await chmod(resolve(snapshotDirectory, "snapshot.json"), 0o600);
+
+      const result = await runRestoreDrill({
+        backupRoot,
+        config: {
+          ...CONFIG,
+          env: {
+            ...CONFIG.env,
+            production: {
+              d1_databases: [{
+                binding: "PLATFORM_DB",
+                database_id: productionManifestDatabaseId,
+                database_name: "selinow-production",
+              }],
+            },
+          },
+        },
+        dryRun: false,
+        environment: "production",
+        now,
+        randomBytesImplementation: () => Buffer.alloc(6, 9),
+        reviewedCommitSha: REVIEWED_COMMIT_SHA,
+        runner: (args) => {
+          commands.push(args);
+          if (args[0] === "whoami") {
+            return {
+              stderr: "",
+              stdout: JSON.stringify({
+                accounts: [{ id: productionManifestAccountId, name: "Approved account" }],
+                loggedIn: true,
+              }),
+            };
+          }
+          if (args[0] === "d1" && args[1] === "list") {
+            return {
+              stderr: "",
+              stdout: JSON.stringify([{ name: "selinow-production", uuid: productionManifestDatabaseId }]),
+            };
+          }
+          if (args[0] === "d1" && args[1] === "export") {
+            const outputPath = args[args.indexOf("--output") + 1];
+            if (typeof outputPath !== "string") throw new Error("test_output_path_missing");
+            writeFileSync(outputPath, args[2] === "selinow-production" ? liveExportArtifact : fixtureSql);
+            return { stderr: "", stdout: "" };
+          }
+          if (args[0] === "d1" && args[1] === "execute" && args.includes("--file")) {
+            return { stderr: "", stdout: "" };
+          }
+          if (args[0] === "d1" && args[1] === "execute" && args.includes("--command")) {
+            const sql = args[args.indexOf("--command") + 1] ?? "";
+            if (sql.includes("FROM d1_migrations")) {
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{ results: migrationNames.map((name) => ({ name })) }]),
+              };
+            }
+            if (sql.includes("FROM pragma_foreign_key_check()")) {
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{ results: [{ foreign_key_violations: 0 }] }]),
+              };
+            }
+            if (sql.includes("GROUP BY type")) {
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{
+                  results: [
+                    { object_count: 148, type: "table" },
+                    { object_count: 329, type: "index" },
+                    { object_count: 314, type: "trigger" },
+                  ],
+                }]),
+              };
+            }
+            if (sql.includes("AS mismatch_count")) {
+              return { stderr: "", stdout: JSON.stringify([{ results: [{ mismatch_count: 0 }] }]) };
+            }
+            if (sql.includes("FROM sqlite_master")) {
+              const tables = args[2] === "selinow-production"
+                ? restoreCountValidationTables
+                : restoreValidationTables;
+              return {
+                stderr: "",
+                stdout: JSON.stringify([{ results: tables.map((name) => ({ name })) }]),
+              };
+            }
+            const aliases = Array.from(sql.matchAll(/\) AS ([a-z][a-z0-9_]*)/gu), (match) => match[1])
+              .filter((table): table is string => table !== undefined);
+            return { stderr: "", stdout: JSON.stringify([{ results: [Object.fromEntries(
+              aliases.map((table) => [table, table === "shops" ? 6 : 0]),
+            )] }]) };
+          }
+          return { stderr: "", stdout: "" };
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(commands.some((args) => args[0] === "d1" && args[1] === "create")).toBe(true);
+      expect(commands.filter((args) => args[0] === "d1" && args[1] === "export")).toHaveLength(2);
+      expect(commands.some((args) => args[0] === "d1" && args[1] === "delete")).toBe(true);
+      const reportRef = result.reportRef;
+      if (typeof reportRef !== "string") throw new Error("report_ref_missing");
+      reportPath = resolve(import.meta.dirname, "../..", reportRef);
+
+      const report = JSON.parse(await readFile(reportPath, "utf8")) as {
+        records: {
+          backup_snapshots: Array<Record<string, unknown>>;
+          export_snapshots: Array<Record<string, unknown>>;
+          restore_drills: Array<{ backup_snapshot_id: string }>;
+        };
+        reviewed_commit_sha: string | null;
+      };
+      expect(report.reviewed_commit_sha).toBe(REVIEWED_COMMIT_SHA);
+      expect(report.records.backup_snapshots[0]).toMatchObject({
+        checksum_sha256: backupChecksum,
+        id: snapshotId,
+        size_bytes: Buffer.byteLength(backupArtifact),
+        snapshot_kind: "time_travel",
+        status: "available",
+      });
+      expect(report.records.export_snapshots[0]).toMatchObject({
+        checksum_sha256: liveExportChecksum,
+        size_bytes: Buffer.byteLength(liveExportArtifact),
+        snapshot_kind: "export",
+      });
+      const drillRecord = report.records.restore_drills[0];
+      expect(drillRecord).toBeDefined();
+      if (drillRecord === undefined) throw new Error("restore_drill_record_missing");
+      expect(drillRecord.backup_snapshot_id).toBe(snapshotId);
+
+      // End-to-end admission binding: the probe gating db:migrate must accept
+      // exactly this report without any admission-side change.
+      const evidence = await assertFreshProductionContinuationEvidence({
+        accountId: productionManifestAccountId,
+        backupRoot,
+        databaseId: productionManifestDatabaseId,
+        databaseName: "selinow-production",
+        now: new Date(),
+        reviewedCommitSha: REVIEWED_COMMIT_SHA,
+      });
+      expect(evidence.backup.checksumSha256).toBe(backupChecksum);
+      expect(evidence.restore.snapshotId).toBe(snapshotId);
+
+      // Regression pin: recording the drill's own export record where the
+      // protected backup snapshot belongs must fail admission (the
+      // vacuous-pass defect observed before the binding fix).
+      const tamperedReport = structuredClone(report);
+      const exportRecord = tamperedReport.records.export_snapshots[0];
+      if (exportRecord === undefined) throw new Error("export_snapshot_record_missing");
+      tamperedReport.records.backup_snapshots = [exportRecord];
+      await writeFile(reportPath, JSON.stringify(tamperedReport, null, 2), { encoding: "utf8", mode: 0o600 });
+      await chmod(reportPath, 0o600);
+      await expect(assertFreshProductionContinuationEvidence({
+        accountId: productionManifestAccountId,
+        backupRoot,
+        databaseId: productionManifestDatabaseId,
+        databaseName: "selinow-production",
+        now: new Date(),
+        reviewedCommitSha: REVIEWED_COMMIT_SHA,
+      })).rejects.toThrow("production_continuation_restore_evidence_invalid");
+    } finally {
+      if (reportPath !== null) await rm(reportPath, { force: true });
+      await rm(backupRoot, { force: true, recursive: true });
     }
   });
 
