@@ -21,15 +21,15 @@ const routes: readonly PublicRoute[] = [
     origin: marketingOrigin,
     path: "/",
     screenshot: "public-marketing-home.png",
-    title: "Selinow - Biến mọi cuộc trò chuyện thành đơn hàng",
+    title: "Selinow — Nền tảng bán sản phẩm số trên Website & Telegram",
   },
   {
-    heading: "Một gói phù hợp với nhịp vận hành của bạn.",
+    heading: "Gói bán sản phẩm số phù hợp nhịp vận hành của bạn.",
     id: "pricing",
     origin: marketingOrigin,
     path: "/pricing",
     screenshot: "public-pricing.png",
-    title: "Bảng giá Selinow - Chọn mức vận hành phù hợp",
+    title: "Bảng giá Selinow — Gói bán sản phẩm số cho Website & Telegram",
   },
   {
     heading: "Đăng nhập để tiếp tục",
@@ -38,6 +38,22 @@ const routes: readonly PublicRoute[] = [
     path: "/login",
     screenshot: "public-login.png",
     title: "Đăng nhập — Selinow",
+  },
+  {
+    heading: "Tạo tài khoản mới",
+    id: "register",
+    origin: dashboardOrigin,
+    path: "/register",
+    screenshot: "public-register.png",
+    title: "Đăng ký tài khoản — Selinow",
+  },
+  {
+    heading: "Khôi phục mật khẩu",
+    id: "forgot-password",
+    origin: dashboardOrigin,
+    path: "/forgot-password",
+    screenshot: "public-forgot-password.png",
+    title: "Quên mật khẩu — Selinow",
   },
   {
     heading: "Sản phẩm số, sẵn sàng khi bạn cần.",
@@ -122,7 +138,7 @@ async function expectNoWcagViolations(page: Page): Promise<void> {
 }
 
 function expectNoPrivateLeakage(route: PublicRoute, headers: Record<string, string>): void {
-  if (route.id === "login") {
+  if (route.id === "login" || route.id === "register" || route.id === "forgot-password") {
     expect(headers["cache-control"]).toContain("private");
     expect(headers["cache-control"]).toContain("no-store");
     expect(headers["x-robots-tag"]).toContain("noindex");

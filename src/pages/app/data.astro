@@ -149,7 +149,7 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
 
 <AppLayout activePath="/app/data" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.data.title")}>
   <PageHeader eyebrow={t("dashboard.data.eyebrow")} title={t("dashboard.data.title")} description={t("dashboard.data.description")}>
-    {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app")}>{t("dashboard.data.back")}</a>}
+    {shop !== undefined && <a slot="actions" class="sln-button" data-variant="secondary" href={workspaceHref("/app")}>{t("dashboard.data.back")}</a>}
   </PageHeader>
 
   {shopLoadState === "unavailable" ? (
@@ -178,14 +178,14 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
         <div class="export-options">
           <article>
             <div><strong>{t("dashboard.data.exports.standard.title")}</strong><p>{t("dashboard.data.exports.standard.description")}</p></div>
-            <button class="sln-button sln-button-primary" type="button" data-create-export="standard">{t("dashboard.data.exports.standard.action")}</button>
+            <button class="sln-button" data-variant="primary" type="button" data-create-export="standard">{t("dashboard.data.exports.standard.action")}</button>
           </article>
           <article class="risk-option">
             <div><strong>{t("dashboard.data.exports.plaintext.title")}</strong><p>{t("dashboard.data.exports.plaintext.description")}</p></div>
             <details>
               <summary>{t("dashboard.data.exports.plaintext.summary")}</summary>
               <label><input type="checkbox" data-plaintext-ack /> {t("dashboard.data.exports.plaintext.ack")}</label>
-              <button class="sln-button sln-button-danger" type="button" data-create-export="inventory_keys_plaintext">{t("dashboard.data.exports.plaintext.action")}</button>
+              <button class="sln-button" data-variant="danger" type="button" data-create-export="inventory_keys_plaintext">{t("dashboard.data.exports.plaintext.action")}</button>
             </details>
           </article>
         </div>
@@ -246,7 +246,8 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
                         ? t("dashboard.data.abuse.moderation.restore_detail")
                         : t("dashboard.data.abuse.moderation.suspend_detail")}</p>
                       <button
-                        class:list={["sln-button", canRestore ? "sln-button-secondary" : "sln-button-danger"]}
+                        class="sln-button"
+                        data-variant={canRestore ? "secondary" : "danger"}
                         type="button"
                         data-moderation-action={canRestore ? "product_restore" : "product_suspend"}
                         data-moderation-report={report.publicId}
@@ -289,7 +290,7 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
               <label>{t("dashboard.data.deletion.start.confirm")} <code>DELETE SHOP</code>
                 <input name="confirmation" autocomplete="off" required pattern="DELETE SHOP" />
               </label>
-              <button class="sln-button sln-button-danger" type="submit">{t("dashboard.data.deletion.start.action")}</button>
+              <button class="sln-button" data-variant="danger" type="submit">{t("dashboard.data.deletion.start.action")}</button>
             </form>
           </div>
         ) : (
@@ -316,8 +317,8 @@ const canResumeDeletion = deletion !== null && new Set(["blocked", "failed", "re
 
             {(canResumeDeletion || canCancelDeletion) && (
               <div class="deletion-actions">
-                {canResumeDeletion && <button class="sln-button sln-button-primary" type="button" data-deletion-resume>{t("dashboard.data.deletion.action.resume")}</button>}
-                {canCancelDeletion && <button class="sln-button sln-button-secondary" type="button" data-deletion-cancel>{t("dashboard.data.deletion.action.cancel")}</button>}
+                {canResumeDeletion && <button class="sln-button" data-variant="primary" type="button" data-deletion-resume>{t("dashboard.data.deletion.action.resume")}</button>}
+                {canCancelDeletion && <button class="sln-button" data-variant="secondary" type="button" data-deletion-cancel>{t("dashboard.data.deletion.action.cancel")}</button>}
               </div>
             )}
           </div>

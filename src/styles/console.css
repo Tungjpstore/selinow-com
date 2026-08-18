@@ -30,7 +30,8 @@
      surfaces and never above ~6% chroma) */
   --sln-console-accent: #4f46e5;
   --sln-console-accent-ink: #ffffff;
-  --sln-console-danger: #dc2626;
+  /* red-700 so danger text/buttons clear WCAG AA on the raised surface ramp */
+  --sln-console-danger: #b91c1c;
   --sln-console-danger-tint: #fef2f2;
   --sln-console-warning: #b45309;
   --sln-console-warning-tint: #fffbeb;

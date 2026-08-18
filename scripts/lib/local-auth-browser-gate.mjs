@@ -184,6 +184,8 @@ export function validatePlaywrightArguments(args) {
   if (args.length === 0) return [];
   if (args.length === 1 && args[0] === "--update-snapshots") return [...args];
   const allowedProjects = new Set([
+    "flows-desktop",
+    "flows-mobile-390",
     "kit-auth-desktop-1440",
     "kit-auth-tablet-768",
     "kit-auth-mobile-390",

@@ -55,7 +55,7 @@ const tabHref = (tab: "history" | "rules"): string => workspaceHref(`/app/automa
 
 <AppLayout activePath="/app/automation" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.automation.title")}>
   <PageHeader eyebrow={t("dashboard.automation.eyebrow")} title={t("dashboard.automation.title")} description={t("dashboard.automation.description")}>
-    {shop !== undefined && <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/onboarding#readiness")}>{t("dashboard.automation.open_readiness")} <span aria-hidden="true">↗</span></a>}
+    {shop !== undefined && <a slot="actions" class="sln-button" data-variant="secondary" href={workspaceHref("/onboarding#readiness")}>{t("dashboard.automation.open_readiness")} <span aria-hidden="true">↗</span></a>}
   </PageHeader>
 
   {state === "unavailable" ? (

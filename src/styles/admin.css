@@ -702,7 +702,7 @@ select {
 
 .admin-form-panel > p {
   margin: 0 0 18px;
-  color: var(--sln-slate-400);
+  color: var(--sln-console-ink-2);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -716,7 +716,7 @@ select {
 .admin-form label {
   display: grid;
   gap: 7px;
-  color: var(--sln-slate-400);
+  color: var(--sln-console-ink-2);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: .05em;

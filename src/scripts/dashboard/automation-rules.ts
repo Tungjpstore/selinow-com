@@ -158,6 +158,10 @@ function renderRules(root: HTMLElement, rules: readonly RuleView[]): void {
     row.dataset.rule = "true";
     row.dataset.ruleId = rule.id;
     row.dataset.ruleVersion = String(rule.version);
+    // Mirrors the SSR row (RuleList.astro): ruleFromRow re-parses this payload
+    // for toggle/edit/delete, so a re-rendered list must keep it or every
+    // action after the first mutation fails with rules_projection_invalid.
+    row.dataset.ruleJson = JSON.stringify(rule);
 
     const copyBlock = document.createElement("div");
     copyBlock.className = "rule-row__copy";

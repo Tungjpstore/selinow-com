@@ -56,7 +56,7 @@ describe("accessible design-system gate", () => {
     expect(layout).toContain('class="app-skip-link selinow-skip-link"');
     expect(onboardingPage).toContain("<OnboardingShell");
     expect(onboardingShell).toContain('class="onboarding-v2-shell"');
-    expect(onboardingShell).toContain('role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"');
+    expect(onboardingShell).toContain('role="progressbar" aria-label="Tiến trình thiết lập" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"');
     expect(onboardingShell).toContain('data-onboarding-toast role="status" aria-live="polite"');
     expect(contrast(token(tokens, "sln-action-primary"), token(tokens, "sln-white"))).toBeGreaterThanOrEqual(4.5);
     expect(domainList).toContain('role="alert" aria-atomic="true"');

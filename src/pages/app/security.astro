@@ -51,7 +51,7 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
 
 <AppLayout activePath="/app/security" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.security.title")}>
   <PageHeader eyebrow={t("dashboard.security.eyebrow")} title={t("dashboard.security.title")} description={t("dashboard.security.description")}>
-    <a slot="actions" class="sln-button sln-button-secondary" href={workspaceHref("/app")}>{t("dashboard.data.back")}</a>
+    <a slot="actions" class="sln-button" data-variant="secondary" href={workspaceHref("/app")}>{t("dashboard.data.back")}</a>
   </PageHeader>
 
   <div
@@ -104,7 +104,7 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
             <h2 id="active-sessions-title">{t("dashboard.security.sessions.title")}</h2>
             <p>{t("dashboard.security.sessions.description")}</p>
           </div>
-          <button class="sln-button sln-button-secondary" type="button" data-security-refresh>{t("dashboard.security.refresh")}</button>
+          <button class="sln-button" data-variant="secondary" type="button" data-security-refresh>{t("dashboard.security.refresh")}</button>
         </header>
         <div class="session-ledger" role="list" aria-label={t("dashboard.security.sessions.aria")} data-security-session-list>
           <article class="session-loading" role="listitem" aria-busy="true">
@@ -121,8 +121,8 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
           <p>{t("dashboard.security.revoke.description")}</p>
         </div>
         <div class="danger-actions">
-          <button class="sln-button sln-button-danger" type="button" data-security-revoke-all>{t("dashboard.security.revoke.action")}</button>
-          <button class="sln-button sln-button-secondary" type="button" data-security-reauth hidden>{t("dashboard.security.client.reauth_action")}</button>
+          <button class="sln-button" data-variant="danger" type="button" data-security-revoke-all>{t("dashboard.security.revoke.action")}</button>
+          <button class="sln-button" data-variant="secondary" type="button" data-security-reauth hidden>{t("dashboard.security.client.reauth_action")}</button>
         </div>
       </section>
     </div>
@@ -252,7 +252,7 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
             <h2 id="history-title">{t("dashboard.security.history.title")}</h2>
             <p>{t("dashboard.security.history.description")}</p>
           </div>
-          <button class="sln-button sln-button-secondary" type="button" data-security-history-refresh>{t("dashboard.security.refresh")}</button>
+          <button class="sln-button" data-variant="secondary" type="button" data-security-history-refresh>{t("dashboard.security.refresh")}</button>
         </header>
         <div class="history-ledger" role="list" aria-label={t("dashboard.security.history.title")} data-security-history-list>
           <div class="history-empty" role="listitem" data-security-history-empty hidden>

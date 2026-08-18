@@ -1,16 +1,14 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type ConsoleMessage, type Page } from "@playwright/test";
 
+import { authenticateThroughVisibleMagicLink } from "../helpers/magic-link";
+
 type AuthenticatedRoute = {
   heading: string | ((projectName: string) => string);
   headingLevel: 1 | 2;
   path: string | ((projectName: string) => string);
   query?: string;
   screenshot: string;
-  // Temporary: a brand-new route may not yet have a committed screenshot
-  // baseline. Skip the pixel assertion while still running the heading,
-  // console/network (403), stability and a11y checks for that route.
-  skipScreenshot?: boolean;
   expectedStatus?: number;
   expectedSummary?: readonly string[];
 };
@@ -37,14 +35,14 @@ const routes: readonly AuthenticatedRoute[] = [
     screenshot: "authenticated-dashboard.png",
   },
   {
-    heading: "Mở cửa hàng,",
-    headingLevel: 1,
+    heading: "Hồ sơ Cửa hàng & Kênh Bán",
+    headingLevel: 2,
     path: "/onboarding",
     screenshot: "authenticated-onboarding.png",
   },
   {
-    heading: "Tên miền riêng",
-    headingLevel: 2,
+    heading: "Tên miền",
+    headingLevel: 1,
     path: "/app/domains",
     screenshot: "authenticated-domains.png",
   },
@@ -145,11 +143,40 @@ const routes: readonly AuthenticatedRoute[] = [
     screenshot: "authenticated-billing.png",
   },
   {
-    heading: "Account security",
+    heading: "Bảo mật tài khoản",
     headingLevel: 1,
     path: "/app/security",
     screenshot: "authenticated-security.png",
-    skipScreenshot: true,
+  },
+  {
+    heading: "Chỉ ghi nhận thanh toán đã xác minh",
+    headingLevel: 1,
+    path: "/app/payments",
+    screenshot: "authenticated-payments.png",
+  },
+  {
+    heading: "Lịch hẹn",
+    headingLevel: 1,
+    path: "/app/bookings",
+    screenshot: "authenticated-bookings.png",
+  },
+  {
+    heading: "API & nhà phát triển",
+    headingLevel: 1,
+    path: "/app/developer",
+    screenshot: "authenticated-developer.png",
+  },
+  {
+    heading: "Bằng chứng đơn hàng, thanh toán và audit",
+    headingLevel: 1,
+    path: "/admin/investigations",
+    screenshot: "authenticated-admin-investigations.png",
+  },
+  {
+    heading: "Khiếu nại và hoàn tiền",
+    headingLevel: 1,
+    path: "/admin/appeals",
+    screenshot: "authenticated-admin-appeals.png",
   },
   {
     heading: "Điều tra nhanh.",
@@ -209,134 +236,6 @@ function expectPrivateHeaders(headers: Record<string, string>): void {
   expect(headers["x-robots-tag"]).toContain("noindex");
 }
 
-async function authenticateThroughVisibleMagicLink(
-  page: Page,
-  projectName: string,
-  options: {
-    beforeOpen?: () => Promise<void>;
-    confirmationRequired?: boolean;
-    emailPrefix?: string;
-  } = {},
-): Promise<void> {
-  await page.goto("/login");
-  await expect(page).toHaveTitle("Đăng nhập — Selinow");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Đăng nhập để tiếp tục");
-  await page
-    .getByRole("textbox", { name: "Email", exact: true })
-    .fill(`${options.emailPrefix ?? "browser-gate"}-${projectName}@selinow.invalid`);
-  await page.getByLabel("Tên hiển thị").fill("Browser Gate");
-  const magicLinkResponsePromise = page.waitForResponse((response) => {
-    try {
-      return new URL(response.url()).pathname === "/api/auth/magic-link/request";
-    } catch {
-      return false;
-    }
-  });
-  await page.getByRole("button", { name: /Gửi liên kết đăng nhập/u }).click();
-  const magicLinkResponse = await magicLinkResponsePromise;
-  let magicLinkRequestState = {
-    code: "response_unreadable",
-    hasDebugLink: false,
-    status: magicLinkResponse.status(),
-  };
-  try {
-    const body: unknown = await magicLinkResponse.json();
-    const record = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
-    magicLinkRequestState = {
-      code: typeof record.code === "string" ? record.code : "none",
-      hasDebugLink: typeof record.debugMagicLink === "string",
-      status: magicLinkResponse.status(),
-    };
-  } catch {
-    // The diagnostic intentionally records no response values beyond safe status metadata.
-  }
-
-  // Poll and activate by visible text inside the page so Playwright never serializes
-  // the token-bearing anchor attributes into action failure logs.
-  let lastLoginState = { hasVisibleLink: false, statusText: "", tone: "" };
-  try {
-    await expect.poll(async () => {
-      lastLoginState = await page.evaluate(() => {
-        const status = document.querySelector<HTMLElement>("[data-login-status]");
-        const links = [...document.querySelectorAll("a")];
-        const link = links.find((candidate) => candidate.textContent.trim() === "mở liên kết đăng nhập");
-        const style = link instanceof HTMLAnchorElement ? getComputedStyle(link) : null;
-        const bounds = link instanceof HTMLAnchorElement ? link.getBoundingClientRect() : null;
-        return {
-          hasVisibleLink: style !== null
-          && bounds !== null
-          && style.display !== "none"
-          && style.visibility !== "hidden"
-          && bounds.width > 0
-          && bounds.height > 0,
-          statusText: status?.textContent.trim() ?? "",
-          tone: status?.dataset.tone ?? "",
-        };
-      });
-      return lastLoginState;
-    }, {
-      message: "local magic-link action did not become visible",
-      timeout: 15_000,
-    }).toMatchObject({ hasVisibleLink: true });
-  } catch {
-    throw new Error(`local_magic_link_not_visible status=${JSON.stringify({
-      request: magicLinkRequestState,
-      statusText: lastLoginState.statusText,
-      tone: lastLoginState.tone,
-    })}`);
-  }
-  await options.beforeOpen?.();
-  const consumeResponsePromise = page.waitForResponse((response) => {
-    try {
-      return new URL(response.url()).pathname === "/api/auth/magic-link/consume";
-    } catch {
-      return false;
-    }
-  });
-  await page.evaluate(() => {
-    const links = [...document.querySelectorAll("a")];
-    const link = links.find((candidate) => candidate.textContent.trim() === "mở liên kết đăng nhập");
-    if (!(link instanceof HTMLAnchorElement)) throw new Error("local_magic_link_action_missing");
-    link.click();
-  });
-  const consumeResponse = await consumeResponsePromise;
-  const consumeState = await consumeResponse.json().then((body: unknown) => {
-    const record = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
-    return {
-      authenticated: record.authenticated === true,
-      code: typeof record.code === "string" ? record.code : "none",
-      confirmationRequired: record.confirmationRequired === true,
-      requestId: typeof record.requestId === "string" ? record.requestId : "none",
-      status: consumeResponse.status(),
-    };
-  }).catch(() => ({
-    authenticated: false,
-    code: "response_unreadable",
-    confirmationRequired: false,
-    requestId: "none",
-    status: consumeResponse.status(),
-  }));
-
-  if (options.confirmationRequired === true) {
-    expect(consumeState).toMatchObject({ confirmationRequired: true, status: 202 });
-    await expect(page.locator("[data-login-confirmation]")).toBeVisible();
-    await expect(page.locator("[data-login-confirm-destination]")).not.toBeEmpty();
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
-    await page.locator("[data-login-confirm]").click();
-  } else {
-    expect(consumeState).toMatchObject({ authenticated: true, status: 200 });
-  }
-
-  // Read only the final path so a failed assertion cannot print a magic-link token.
-  await expect.poll(async () => {
-    try {
-      return await page.evaluate(() => location.pathname);
-    } catch {
-      return "navigation_in_progress";
-    }
-  }, { message: "local magic-link navigation did not reach the dashboard" }).toBe("/app");
-  await expect(page.locator("[data-app-shell] .app-topbar-context > strong")).toHaveText("Browser Gate");
-}
 
 test.describe.configure({ mode: "serial" });
 
@@ -377,6 +276,8 @@ test("local magic link opens deterministic authenticated seller surfaces", async
   });
 
   await authenticateThroughVisibleMagicLink(page, testInfo.project.name);
+  // V2 topbar chrome: the workspace context block carries the display name.
+  await expect(page.locator("[data-app-shell] .app-topbar-context > strong")).toHaveText("Browser Gate");
 
   for (const alias of routeAliases) {
     const response = await page.goto(alias.path);
@@ -396,20 +297,22 @@ test("local magic link opens deterministic authenticated seller surfaces", async
     expectPrivateHeaders(response?.headers() ?? {});
     const pathname = await page.evaluate(() => location.pathname);
     expect(pathname).toBe(path);
-    await expect(page.getByRole("heading", { level: route.headingLevel })).toContainText(heading);
+    // Name-scoped: /onboarding renders several section headings at once.
+    await expect(page.getByRole("heading", { level: route.headingLevel, name: heading })).toContainText(heading);
     if (route.expectedSummary !== undefined) {
       const summary = page.locator(".order-status-rail");
       for (const text of route.expectedSummary) await expect(summary).toContainText(text);
     }
     if (path === "/onboarding") {
-      await expect(page.locator("[data-global-feedback]")).toBeHidden();
-      await expect(page.locator("[data-progress-percent]")).toHaveText("13%");
-      await expect(page.locator("[data-progress-copy]")).toHaveText("1/8 nhóm bước đã hoàn tất hoặc được bỏ qua an toàn.");
+      // Quickstart shell (Console v2): single progress topbar + step panes.
+      await expect(page.locator("[data-quickstart-root]")).toBeVisible();
+      await expect(page.locator('.topbar-progress-section [role="progressbar"]')).toHaveAttribute("aria-valuenow", "0");
       if (testInfo.project.name === "mobile") {
-        await expect(page.locator("[data-mobile-progress-completed]")).toHaveText("1");
-        await expect(page.locator("[data-mobile-step-status]")).toBeVisible();
-        await expect(page.locator(".mobile-step-selector summary")).toContainText("Các bước thiết lập cửa hàng");
-        await expect(page.locator(".step-rail")).toBeHidden();
+        // Step labels collapse below 900px.
+        await expect(page.locator(".progress-step-labels")).toBeHidden();
+      } else {
+        await expect(page.locator('[data-progress-label="store"]')).toBeVisible();
+        await expect(page.locator('[data-progress-label="launch"]')).toBeVisible();
       }
     }
     if (path === "/app/domains") {
@@ -421,13 +324,24 @@ test("local magic link opens deterministic authenticated seller surfaces", async
     await expectStablePage(page);
     expect(runtimeIssues, runtimeIssues.join("\n")).toEqual([]);
     await expectNoWcagViolations(page);
-    if (route.skipScreenshot === true) continue;
     if (path === "/app") {
       await expect(page).toHaveScreenshot(route.screenshot, {
         fullPage: false,
         mask: [
           page.locator("#dashboard-overview-date"),
           page.locator("[data-visual-dynamic]"),
+        ],
+        maskColor: "#E2E8F0",
+      });
+    } else if (path === "/app/security") {
+      // Session/history ledgers and the feedback line carry run-specific
+      // timestamps and request ids; mask them like the overview clock.
+      await expect(page).toHaveScreenshot(route.screenshot, {
+        fullPage: false,
+        mask: [
+          page.locator("[data-security-feedback]"),
+          page.locator("[data-security-session-list]"),
+          page.locator("[data-security-history-list]"),
         ],
         maskColor: "#E2E8F0",
       });

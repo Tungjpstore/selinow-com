@@ -246,7 +246,9 @@ describe("deterministic local authenticated browser gate", () => {
     expect(config).not.toContain("deviceScaleFactor: 2");
 
     expect(config).toContain("local-authenticated-viewport-matrix\\.spec\\.ts");
-    expect(matrixSpec).toContain("browser-gate-${projectName}@selinow.invalid");
+    const magicLinkHelper = readFileSync("tests/helpers/magic-link.ts", "utf8");
+    expect(matrixSpec).toContain('from "../helpers/magic-link"');
+    expect(magicLinkHelper).toContain("}-${projectName}@selinow.invalid");
     expect(matrixSpec).toContain('request.method() === "GET" || request.method() === "HEAD"');
     expect(matrixSpec).toContain('route.abort("blockedbyclient")');
     expect(matrixSpec).toContain("expect(nonReadOnlyRequests).toEqual([])");

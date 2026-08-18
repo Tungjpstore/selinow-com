@@ -354,7 +354,7 @@
   }
 
   .app-shell .app-button:hover { transform: translateY(-1px); box-shadow: var(--sln-shadow-sm); }
-  .app-shell .app-button-primary { background: var(--sln-action-primary); color: var(--sln-console-ink); }
+  .app-shell .app-button-primary { background: var(--sln-action-primary); color: var(--sln-console-accent-ink); }
   .app-shell .app-button-primary:hover { background: var(--sln-action-primary-hover); }
   .app-shell .app-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .app-shell .app-panel { border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
@@ -536,8 +536,13 @@
   .app-shell .sln-button[data-variant="danger"] { background: transparent; border-color: color-mix(in srgb, var(--sln-console-danger) 35%, var(--sln-console-line)); color: var(--sln-console-danger); }
   .app-shell .sln-button[data-variant="danger"]:hover:not(:disabled) { background: var(--sln-console-danger-tint); }
   .app-shell .sln-button:hover:not(:disabled) { transform: none; }
+  /*
+   * Disabled tones stay AA on the raised surface without relying on the
+   * disabled-element exemption: axe may sample the button mid
+   * disabled<->enabled transition, when the exemption no longer applies.
+   */
   .app-shell .sln-button:disabled,
-  .app-shell .sln-button[aria-disabled="true"] { border-color: var(--sln-console-line); background: var(--sln-console-raised); color: var(--sln-console-ink-3); opacity: 0.6; }
+  .app-shell .sln-button[aria-disabled="true"] { border-color: var(--sln-console-line); background: var(--sln-console-raised); color: var(--sln-console-ink-2); opacity: 1; }
   @media (max-width: 767px) {
     .app-shell .sln-button { min-height: 44px; }
     .app-shell .sln-button[data-size="sm"] { min-height: 40px; }

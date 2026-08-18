@@ -1,18 +1,23 @@
 -- Disposable local-browser fixture only. The gate runs against a fresh local D1 state.
+-- Platform-admin pages require two_factor_enabled=1 (migration 0099), so every
+-- render-gate user is seeded enrolled; the flows fixture below keeps one user
+-- unenrolled on purpose to exercise the 2FA enrollment lifecycle.
 INSERT OR IGNORE INTO platform_users (
-  id, email_normalized, display_name, status, created_at, updated_at
+  id, email_normalized, display_name, status, created_at, updated_at,
+  two_factor_enabled, two_factor_enabled_at
 ) VALUES
-  ('usr_browser_desktop', 'browser-gate-desktop@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
-  ('usr_browser_mobile', 'browser-gate-mobile@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+  ('usr_browser_desktop', 'browser-gate-desktop@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z', 1, '2026-07-27T00:00:00.000Z'),
+  ('usr_browser_mobile', 'browser-gate-mobile@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z', 1, '2026-07-27T00:00:00.000Z');
 
 INSERT OR IGNORE INTO platform_users (
-  id, email_normalized, display_name, status, created_at, updated_at
+  id, email_normalized, display_name, status, created_at, updated_at,
+  two_factor_enabled, two_factor_enabled_at
 ) VALUES
-  ('usr_browser_kit_desktop', 'browser-gate-kit-auth-desktop-1440@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
-  ('usr_browser_kit_tablet', 'browser-gate-kit-auth-tablet-768@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
-  ('usr_browser_kit_mobile', 'browser-gate-kit-auth-mobile-390@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
-  ('usr_browser_kit_minimum', 'browser-gate-kit-auth-minimum-320@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
-  ('usr_browser_kit_zoom', 'browser-gate-kit-auth-zoom-200@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+  ('usr_browser_kit_desktop', 'browser-gate-kit-auth-desktop-1440@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z', 1, '2026-07-27T00:00:00.000Z'),
+  ('usr_browser_kit_tablet', 'browser-gate-kit-auth-tablet-768@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z', 1, '2026-07-27T00:00:00.000Z'),
+  ('usr_browser_kit_mobile', 'browser-gate-kit-auth-mobile-390@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z', 1, '2026-07-27T00:00:00.000Z'),
+  ('usr_browser_kit_minimum', 'browser-gate-kit-auth-minimum-320@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z', 1, '2026-07-27T00:00:00.000Z'),
+  ('usr_browser_kit_zoom', 'browser-gate-kit-auth-zoom-200@selinow.invalid', 'Browser Gate', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z', 1, '2026-07-27T00:00:00.000Z');
 
 INSERT OR IGNORE INTO platform_admins (user_id, role, status, created_at, updated_at) VALUES
   ('usr_browser_desktop', 'owner', 'active', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
@@ -184,3 +189,105 @@ INSERT OR IGNORE INTO audit_logs (
   ('aud_browser_m_204', 'shp_browser_mobile', 'system', NULL, 'order.failed', 'order', 'ord_browser_m_failed', '{}', 'browser-request-m-204', '2026-07-27T02:15:00.000Z');
 
 UPDATE shops SET status = 'draft' WHERE id IN ('shp_browser_desktop', 'shp_browser_mobile');
+
+-- Console interaction-flow fixture (tests/authenticated/console-flows.spec.ts):
+-- one member of TWO shops (tenant-switch hygiene), one seeded automation rule
+-- (toggle flow), one order per shop (order-detail shop switch resets to list).
+-- usr_browser_flows stays 2FA-unenrolled on purpose: the security flow exercises
+-- the email-OTP enrollment lifecycle and ends by disabling 2FA again.
+-- usr_browser_admin is pre-enrolled so the admin-directory flow can reach the
+-- platform console without touching the lifecycle account.
+INSERT OR IGNORE INTO platform_users (
+  id, email_normalized, display_name, status, created_at, updated_at
+) VALUES
+  ('usr_browser_flows', 'browser-gate-flows@selinow.invalid', 'Console Flows', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+
+INSERT OR IGNORE INTO platform_users (
+  id, email_normalized, display_name, status, created_at, updated_at,
+  two_factor_enabled, two_factor_enabled_at
+) VALUES
+  ('usr_browser_admin', 'browser-gate-admin@selinow.invalid', 'Console Admin', 'pending', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z', 1, '2026-07-27T00:00:00.000Z');
+
+INSERT OR IGNORE INTO platform_admins (user_id, role, status, created_at, updated_at) VALUES
+  ('usr_browser_flows', 'owner', 'active', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
+  ('usr_browser_admin', 'owner', 'active', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+
+INSERT OR IGNORE INTO shops (
+  id, public_id, slug, name, status, default_locale, currency, timezone,
+  canonical_domain_id, readiness_version, created_at, updated_at
+) VALUES
+  ('shp_flows_alpha', 'shop_00000000-0000-4000-8000-0000000000f1', 'browser-gate-flows-alpha', 'Flows Alpha', 'draft', 'vi', 'VND', 'Asia/Ho_Chi_Minh', NULL, 1, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
+  ('shp_flows_beta', 'shop_00000000-0000-4000-8000-0000000000f2', 'browser-gate-flows-beta', 'Flows Beta', 'draft', 'vi', 'VND', 'Asia/Ho_Chi_Minh', NULL, 1, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+
+INSERT OR IGNORE INTO shop_members (shop_id, user_id, role, status, created_at, updated_at) VALUES
+  ('shp_flows_alpha', 'usr_browser_flows', 'owner', 'active', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
+  ('shp_flows_beta', 'usr_browser_flows', 'owner', 'active', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
+  -- Membership gives the admin-directory fixture account a valid /app landing.
+  ('shp_flows_alpha', 'usr_browser_admin', 'manager', 'active', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+
+INSERT OR IGNORE INTO shop_settings (
+  shop_id, branding_json, storefront_json, order_expiry_minutes,
+  low_stock_threshold, version, updated_at
+) VALUES
+  ('shp_flows_alpha', '{}', '{}', 30, 5, 1, '2026-07-27T00:00:00.000Z'),
+  ('shp_flows_beta', '{}', '{}', 30, 5, 1, '2026-07-27T00:00:00.000Z');
+
+INSERT OR IGNORE INTO shop_subscriptions (
+  id, shop_id, plan_id, state, trial_ends_at, created_at, updated_at
+) VALUES
+  ('sub_flows_alpha', 'shp_flows_alpha', 'plan_business_v1', 'trialing', '2030-01-01T00:00:00.000Z', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
+  -- One evaluation trial per account: the second shop must not be 'trialing'
+  -- (trial-claim trigger). It uses 'suspended' because 'canceled' shops are
+  -- hidden from member navigation and the admin directory has no label for
+  -- 'pending_payment' (would 500 — reported app bug).
+  ('sub_flows_beta', 'shp_flows_beta', 'plan_business_v1', 'suspended', NULL, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+
+INSERT OR IGNORE INTO products (
+  id, shop_id, category_id, slug, title, description, status,
+  fulfillment_type, version, created_at, updated_at
+) VALUES
+  ('prd_flows_alpha', 'shp_flows_alpha', NULL, 'flows-alpha-license', 'Flows Alpha License', 'Deterministic local flow fixture.', 'active', 'manual', 1, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
+  ('prd_flows_beta', 'shp_flows_beta', NULL, 'flows-beta-license', 'Flows Beta License', 'Deterministic local flow fixture.', 'active', 'manual', 1, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+
+INSERT OR IGNORE INTO product_variants (
+  id, shop_id, product_id, sku, title, options_json, price_minor,
+  compare_at_minor, currency, min_per_order, max_per_order, status,
+  version, created_at, updated_at
+) VALUES
+  ('var_flows_alpha', 'shp_flows_alpha', 'prd_flows_alpha', 'FLOWS-ALPHA', 'Lifetime', '{}', 249000, NULL, 'VND', 1, 1, 'active', 1, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z'),
+  ('var_flows_beta', 'shp_flows_beta', 'prd_flows_beta', 'FLOWS-BETA', 'Lifetime', '{}', 249000, NULL, 'VND', 1, 1, 'active', 1, '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+
+UPDATE shops SET status = 'active' WHERE id IN ('shp_flows_alpha', 'shp_flows_beta');
+
+INSERT OR IGNORE INTO orders (
+  id, public_id, shop_id, customer_id, order_number, source_channel,
+  status, payment_status, fulfillment_status, subtotal_minor,
+  discount_minor, total_minor, currency, locale, customer_email_masked,
+  checkout_subject_hash, order_token_hash, expires_at, paid_at,
+  fulfilled_at, created_at, updated_at
+) VALUES
+  ('ord_flows_alpha', 'order_00000000-0000-4000-8000-0000000000f1', 'shp_flows_alpha', NULL, 'BR-F-301', 'web', 'pending_payment', 'unpaid', 'unfulfilled', 249000, 0, 249000, 'VND', 'vi', 'fl***@example.test', 'subject-flows-alpha', 'token-flows-alpha', '2030-01-01T00:30:00.000Z', NULL, NULL, '2026-07-27T03:01:00.000Z', '2026-07-27T03:01:00.000Z'),
+  ('ord_flows_beta', 'order_00000000-0000-4000-8000-0000000000f2', 'shp_flows_beta', NULL, 'BR-F-401', 'web', 'pending_payment', 'unpaid', 'unfulfilled', 249000, 0, 249000, 'VND', 'vi', 'fl***@example.test', 'subject-flows-beta', 'token-flows-beta', '2030-01-01T00:30:00.000Z', NULL, NULL, '2026-07-27T04:01:00.000Z', '2026-07-27T04:01:00.000Z');
+
+INSERT OR IGNORE INTO order_items (
+  id, shop_id, order_id, product_id, variant_id, product_title,
+  variant_title, sku, unit_price_minor, quantity, line_total_minor,
+  fulfillment_type, created_at
+) VALUES
+  ('oit_flows_alpha', 'shp_flows_alpha', 'ord_flows_alpha', 'prd_flows_alpha', 'var_flows_alpha', 'Flows Alpha License', 'Lifetime', 'FLOWS-ALPHA', 249000, 1, 249000, 'manual', '2026-07-27T03:01:00.000Z'),
+  ('oit_flows_beta', 'shp_flows_beta', 'ord_flows_beta', 'prd_flows_beta', 'var_flows_beta', 'Flows Beta License', 'Lifetime', 'FLOWS-BETA', 249000, 1, 249000, 'manual', '2026-07-27T04:01:00.000Z');
+
+UPDATE shops SET status = 'draft' WHERE id IN ('shp_flows_alpha', 'shp_flows_beta');
+
+-- The console UI parser only surfaces rule ids matching `rule_<uuid>`; keep this format.
+INSERT OR IGNORE INTO automation_rules (
+  id, shop_id, name, trigger_type, conditions_json, actions_json, enabled,
+  version, create_idempotency_key_hash, create_request_hash, created_by,
+  updated_by, last_triggered_at, created_at, updated_at
+) VALUES
+  ('rule_00000000-0000-4000-8000-0000000000f1', 'shp_flows_alpha', 'Browser gate fixture rule', 'order.paid', '[]',
+   '[{"type":"rule_notify_telegram","config":{"message":"Browser gate automation fixture"}}]', 1,
+   1, 'aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffff0000000011111111',
+   'aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffff0000000022222222',
+   'usr_browser_flows', 'usr_browser_flows', NULL,
+   '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');

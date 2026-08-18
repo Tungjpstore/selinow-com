@@ -212,7 +212,8 @@ function renderTasks(root: HTMLElement, tasks: readonly AutomationTaskView[], sh
     const canManage = canManageAutomationTask(task, role);
     if (canManage && canResumeAutomationTask(task)) {
       const button = document.createElement("button");
-      button.className = "sln-button sln-button-primary automation-control";
+      button.className = "sln-button automation-control";
+      button.dataset.variant = "primary";
       button.type = "button";
       button.dataset.automationAction = "resume";
       button.dataset.taskVersion = String(task.version);
@@ -221,7 +222,8 @@ function renderTasks(root: HTMLElement, tasks: readonly AutomationTaskView[], sh
     }
     if (canManage && task.canCancel) {
       const button = document.createElement("button");
-      button.className = "sln-button sln-button-danger automation-control";
+      button.className = "sln-button automation-control";
+      button.dataset.variant = "danger";
       button.type = "button";
       button.dataset.automationAction = "cancel";
       button.dataset.taskVersion = String(task.version);

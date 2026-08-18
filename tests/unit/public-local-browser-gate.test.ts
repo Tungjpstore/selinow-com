@@ -91,11 +91,13 @@ describe("deterministic local public PromptOS browser gate", () => {
     const snapshots = readdirSync("tests/visual/local-public.spec.ts-snapshots", { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith(".png"))
       .map((entry) => entry.name);
-    expect(snapshots).toHaveLength(16);
+    expect(snapshots).toHaveLength(20);
     for (const stem of [
       "public-marketing-home",
       "public-pricing",
       "public-login",
+      "public-register",
+      "public-forgot-password",
       "public-storefront-home",
       "public-storefront-product-detail",
       "public-storefront-cart",

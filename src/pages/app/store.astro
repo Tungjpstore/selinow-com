@@ -116,8 +116,8 @@ const storeBuilderClientCopy = {
   <PageHeader eyebrow={t("dashboard.store_builder.eyebrow")} title={t("dashboard.store_builder.title")} description={t("dashboard.store_builder.description")}>
     <div slot="actions" class="header-actions">
       <span class="save-state" data-save-state data-state={settings === null ? "forbidden" : settings.publicationState} role="status" aria-live="polite">{settings === null ? t("dashboard.store_builder.state.unavailable") : settings.publicationState === "published" ? t("dashboard.store_builder.state.published") : settings.publicationState === "never_published" ? t("dashboard.store_builder.state.never_published") : t("dashboard.store_builder.state.unpublished_changes")}</span>
-      <a class="sln-button sln-button-secondary" href={previewHost ?? workspaceHref("/onboarding")} target={previewHost ? "_blank" : undefined} rel={previewHost ? "noreferrer" : undefined}>{previewHost ? t("dashboard.store_builder.open_live") : t("dashboard.store_builder.setup")}<span aria-hidden="true">↗</span></a>
-      {canPublish && <button class="sln-button sln-button-primary" type="button" data-publish disabled={settings === null || settings.publicationState === "published"}>{t("dashboard.store_builder.publish")} <span aria-hidden="true">→</span></button>}
+      <a class="sln-button" data-variant="secondary" href={previewHost ?? workspaceHref("/onboarding")} target={previewHost ? "_blank" : undefined} rel={previewHost ? "noreferrer" : undefined}>{previewHost ? t("dashboard.store_builder.open_live") : t("dashboard.store_builder.setup")}<span aria-hidden="true">↗</span></a>
+      {canPublish && <button class="sln-button" data-variant="primary" type="button" data-publish disabled={settings === null || settings.publicationState === "published"}>{t("dashboard.store_builder.publish")} <span aria-hidden="true">→</span></button>}
     </div>
   </PageHeader>
 
@@ -214,7 +214,7 @@ const storeBuilderClientCopy = {
                 <label>{t("dashboard.store_builder.shipping.field.name")}<input data-shipping-name maxlength="80" placeholder={t("dashboard.store_builder.shipping.field.name_placeholder")} /></label>
                 <label>{t("dashboard.store_builder.shipping.field.fee", { currency: shop.currency })}<input data-shipping-fee type="number" min="0" step="1000" inputmode="numeric" placeholder="30000" /></label>
                 <label>{t("dashboard.store_builder.shipping.field.free_over", { currency: shop.currency })}<input data-shipping-free-over type="number" min="0" step="1000" inputmode="numeric" placeholder={t("dashboard.store_builder.shipping.field.free_over_placeholder")} /></label>
-                <button class="sln-button sln-button-secondary" type="button" data-shipping-create>{t("dashboard.store_builder.shipping.create")}</button>
+                <button class="sln-button" data-variant="secondary" type="button" data-shipping-create>{t("dashboard.store_builder.shipping.create")}</button>
               </div>
               <ul class="shipping-method-list" data-shipping-list aria-label={t("dashboard.store_builder.shipping.list_aria")}></ul>
               <p class="form-feedback" data-shipping-feedback role="status" aria-live="polite"></p>
@@ -246,7 +246,7 @@ const storeBuilderClientCopy = {
           <div class="settings-footer">
             {!canManage && <p class="permission-note">{t("dashboard.store_builder.permission.viewer", { role: shop.role })}</p>}
             {canManage && !canPublish && <p class="permission-note">{t("dashboard.store_builder.permission.manager")}</p>}
-            <div class="settings-actions"><button class="sln-button sln-button-secondary" type="button" data-undo disabled>{t("dashboard.store_builder.undo")}</button><button class="sln-button sln-button-primary" type="button" data-save disabled>{t("dashboard.store_builder.save")}</button></div>
+            <div class="settings-actions"><button class="sln-button" data-variant="secondary" type="button" data-undo disabled>{t("dashboard.store_builder.undo")}</button><button class="sln-button" data-variant="primary" type="button" data-save disabled>{t("dashboard.store_builder.save")}</button></div>
             <p class="form-feedback" data-feedback role="status" aria-live="polite"></p>
           </div>
         </section>
@@ -274,7 +274,6 @@ const storeBuilderClientCopy = {
   [hidden] { display: none !important; }
   .header-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: end; gap: 10px; }
   .sln-button:disabled { cursor: not-allowed; opacity: .55; }
-  .sln-button-primary:hover:not(:disabled) { background: var(--sln-action-primary-hover); }
   .save-state { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-tint-success); color: var(--sln-success-text); font: var(--sln-font-caption); font-weight: 600; }
   .save-state[data-state="never_published"], .save-state[data-state="publishing"], .save-state[data-state="saving"], .save-state[data-state="unpublished_changes"], .save-state[data-state="unsaved"] { background: var(--sln-tint-warning); color: var(--sln-warning-text-strong); }
   .save-state[data-state="failed"], .save-state[data-state="forbidden"], .save-state[data-state="invalid_contrast"] { background: var(--sln-tint-danger); color: var(--sln-danger-text); }

@@ -27,11 +27,17 @@ const {
   type = "button",
   value,
   variant = "primary",
+  ...rest
 } = Astro.props;
+// Forward data-*/aria-* hooks so client scripts and tests can target them.
+const passthrough = Object.fromEntries(
+  Object.entries(rest).filter(([key]) => key.startsWith("data") || key.startsWith("aria")),
+);
 const classes = ["sln-button", className].filter(Boolean).join(" ");
 ---
 
 <button
+  {...passthrough}
   aria-busy={loading ? "true" : undefined}
   aria-label={ariaLabel}
   class={classes}

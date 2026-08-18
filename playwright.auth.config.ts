@@ -55,6 +55,18 @@ export default defineConfig({
       testMatch: /local-authenticated-viewport-matrix\.spec\.ts$/u,
       use: { viewport: { height: 512, width: 720 } },
     },
+    // Interaction flows share one seeded two-shop account; the mobile project runs
+    // first so the desktop 2FA lifecycle (last) cannot pollute earlier logins.
+    {
+      name: "flows-mobile-390",
+      testMatch: /console-flows\.spec\.ts$/u,
+      use: { viewport: { height: 844, width: 390 } },
+    },
+    {
+      name: "flows-desktop",
+      testMatch: /console-flows\.spec\.ts$/u,
+      use: { viewport: { height: 1024, width: 1440 } },
+    },
   ],
   reporter: [
     ["list"],
