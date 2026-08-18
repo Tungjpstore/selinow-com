@@ -1,8 +1,19 @@
 # Implementation Status
 
-Last updated: 2026-08-17
+Last updated: 2026-08-18
 
 ## Current source of truth
+
+Production Release — Platform Admin Console & Security Hardening (2026-08-18, Worker Version `c751dbd2-e0ce-4401-85b9-3f9935ff78ef`):
+Successfully deployed the complete console, security hardening (2FA disable flow, admin shop filter status), and marketing v5 surfaces to Cloudflare production at 100% traffic allocation.
+- **Worker Version**: `c751dbd2-e0ce-4401-85b9-3f9935ff78ef` deployed at 100% traffic to `selinow-com-production`.
+- **Database Status**: Production D1 ledger verified at migrations `0001`-`0105_ops_platform_indexes.sql`.
+- **Live Smoke & Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://selinow.com/` -> HTTP 200 OK (Marketing v5 / bilingual en/vi routing verified)
+  - `https://app.selinow.com/login` -> HTTP 200 OK (Console login, 2FA challenge and flow active)
+  - `https://api.selinow.com/api/health` -> HTTP 200 OK
+- **Quality Gates**: `astro check` (0 errors), `eslint` (clean), `vitest` (2,698/2,698 passed), `astro build` (clean), `deploy:dry-run` (clean).
 
 Platform Admin Console Ops Upgrade (2026-08-17, branch `dashboard-redesign-takeover`):
 Security-first upgrade of the platform admin surface — mandatory 2FA fail-closed
