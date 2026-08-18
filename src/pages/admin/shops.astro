@@ -91,6 +91,7 @@ const subscriptionLabels = {
   canceled: { label: t("admin.shops.subscription.canceled"), tone: "neutral" },
   grace_period: { label: t("admin.shops.subscription.grace_period"), tone: "warning" },
   past_due: { label: t("admin.shops.subscription.past_due"), tone: "warning" },
+  pending_payment: { label: t("admin.shops.subscription.pending_payment"), tone: "warning" },
   suspended: { label: t("admin.shops.subscription.suspended"), tone: "danger" },
   trialing: { label: t("admin.shops.subscription.trialing"), tone: "info" },
 } as const;
@@ -258,6 +259,7 @@ const shopExportRows: AdminShopExportRow[] = shops.map((shop) => ({
                 <option value="active" selected={subscriptionValue === "active"}>{t("admin.shops.subscription.active")}</option>
                 <option value="past_due" selected={subscriptionValue === "past_due"}>{t("admin.shops.subscription.past_due")}</option>
                 <option value="grace_period" selected={subscriptionValue === "grace_period"}>{t("admin.shops.subscription.grace_period")}</option>
+                <option value="pending_payment" selected={subscriptionValue === "pending_payment"}>{t("admin.shops.subscription.pending_payment")}</option>
                 <option value="suspended" selected={subscriptionValue === "suspended"}>{t("admin.shops.subscription.suspended")}</option>
                 <option value="canceled" selected={subscriptionValue === "canceled"}>{t("admin.shops.subscription.canceled")}</option>
               </select>

@@ -67,6 +67,21 @@ describe("admin Sellers & Shops PromptOS surface", () => {
     expect(css).toContain("@media (max-width: 520px)");
   });
 
+  it("covers the pending_payment subscription state in filter, labels, and catalogs", async () => {
+    const [page, service] = await Promise.all([
+      readFile("src/pages/admin/shops.astro", "utf8"),
+      readFile("src/lib/operations/admin-shop-directory.ts", "utf8"),
+    ]);
+
+    // Regression: the filter enum, label map, select option and i18n keys
+    // all omitted pending_payment, causing 400 filters and 500 renders.
+    expect(service).toContain('"pending_payment"');
+    expect(page).toContain('pending_payment: { label: t("admin.shops.subscription.pending_payment"), tone: "warning" }');
+    expect(page).toContain('<option value="pending_payment" selected={subscriptionValue === "pending_payment"}>');
+    expect(adminCatalogs.en["admin.shops.subscription.pending_payment"]).toBe("Payment pending");
+    expect(adminCatalogs["vi-VN"]["admin.shops.subscription.pending_payment"]).toBe("Chờ thanh toán");
+  });
+
   it("exposes a GET-only private API boundary", async () => {
     const route = await readFile("src/pages/api/admin/shops/index.ts", "utf8");
     expect(route).toContain("export const GET");

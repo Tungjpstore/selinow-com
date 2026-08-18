@@ -4,6 +4,7 @@ import {
   confirmTwoFactorEnrollment,
   disableTwoFactor,
   getTwoFactorStatus,
+  requestTwoFactorDisableOtp,
   requestTwoFactorEnrollmentOtp,
 } from "../../src/lib/auth/two-factor";
 import type { AuthContext } from "../../src/lib/auth/session";
@@ -282,14 +283,51 @@ describe("account two-factor service", () => {
     expect(user.twoFactorEnabled).toBe(1);
   });
 
-  it("disables two-factor with a fresh OTP instead of the password", async () => {
+  it("disables two-factor with a fresh disable OTP instead of the password", async () => {
     const now = new Date("2026-08-15T12:00:00.000Z");
-    const requested = await requestTwoFactorEnrollmentOtp({ auth, env, now });
     user.twoFactorEnabled = 1;
+    user.twoFactorEnabledAt = "2026-08-01T00:00:00.000Z";
+
+    const requested = await requestTwoFactorDisableOtp({ auth, env, now });
+    expect(requested.debugOtp).toHaveLength(6);
 
     await disableTwoFactor({ auth, env, now, otp: requested.debugOtp ?? "" });
 
     expect(user.twoFactorEnabled).toBe(0);
+    expect(user.twoFactorEnabledAt).toBeNull();
+  });
+
+  it("rejects disable-OTP requests when two-factor is not enabled", async () => {
+    await expect(requestTwoFactorDisableOtp({ auth, env })).rejects.toMatchObject({
+      code: "validation_failed",
+      issues: ["two_factor_not_enabled"],
+      status: 409,
+    });
+  });
+
+  it("completes the full enroll→disable cycle through dedicated OTP flows", async () => {
+    const enrollNow = new Date("2026-08-15T12:00:00.000Z");
+    const requested = await requestTwoFactorEnrollmentOtp({ auth, env, now: enrollNow });
+    await confirmTwoFactorEnrollment({ auth, env, now: enrollNow, otp: requested.debugOtp ?? "" });
+    expect(user.twoFactorEnabled).toBe(1);
+
+    // Regression: while enabled, the enrollment endpoint answered the
+    // disable-OTP request with 409 two_factor_already_enabled. The disable
+    // flow must use its own state-correct request helper.
+    await expect(requestTwoFactorEnrollmentOtp({ auth, env, now: new Date("2026-08-15T12:02:00.000Z") })).rejects.toMatchObject({
+      code: "validation_failed",
+      issues: ["two_factor_already_enabled"],
+      status: 409,
+    });
+
+    const disableNow = new Date("2026-08-15T12:02:00.000Z");
+    const disableRequest = await requestTwoFactorDisableOtp({ auth, env, now: disableNow });
+    await disableTwoFactor({ auth, env, now: disableNow, otp: disableRequest.debugOtp ?? "" });
+    expect(user.twoFactorEnabled).toBe(0);
+    await expect(getTwoFactorStatus({ env, userId: USER_ID })).resolves.toEqual({
+      enabled: false,
+      enabledAt: null,
+    });
   });
 
   it("requires re-authentication before disabling two-factor", async () => {
@@ -319,6 +357,10 @@ describe("account two-factor service", () => {
       status: 401,
     });
     await expect(confirmTwoFactorEnrollment({ auth, env, otp: "123456" })).rejects.toMatchObject({
+      code: "authentication_required",
+      status: 401,
+    });
+    await expect(requestTwoFactorDisableOtp({ auth, env })).rejects.toMatchObject({
       code: "authentication_required",
       status: 401,
     });

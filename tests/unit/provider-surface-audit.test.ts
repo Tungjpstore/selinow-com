@@ -84,7 +84,7 @@ describe("provider surface audit", () => {
       .split(/\r?\n/)
       .slice(1)
       .map(parseCsvRow);
-    expect(rows).toHaveLength(193);
+    expect(rows).toHaveLength(194);
 
 
 
@@ -109,6 +109,7 @@ describe("provider surface audit", () => {
     expect(inventory).toContain("/api/app/account/enable-2fa-request");
     expect(inventory).toContain("/api/app/account/enable-2fa-verify");
     expect(inventory).toContain("/api/app/account/disable-2fa");
+    expect(inventory).toContain("/api/app/account/disable-2fa-request");
     expect(inventory).toContain("/api/app/account/change-password");
     expect(inventory).toContain("/api/app/account/login-history");
     expect(inventory).toContain("/api/admin/operations");

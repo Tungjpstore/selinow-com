@@ -402,7 +402,7 @@ if (root !== null) {
     });
     disableOtpRequest?.addEventListener("click", () => {
       runGuarded(disableOtpRequest, async () => {
-        const payload = await postAccount("/api/app/account/enable-2fa-request", {});
+        const payload = await postAccount("/api/app/account/disable-2fa-request", {});
         setFeedback(t("dashboard.security.two_factor.otp_sent"), "success");
         startCooldown(disableOtpRequest, payload.cooldownSeconds, t("dashboard.security.two_factor.send_otp"));
       });

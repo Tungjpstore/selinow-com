@@ -10,6 +10,7 @@ const dependencies = vi.hoisted(() => ({
     SESSION_COOKIE_NAME: "selinow_session",
   },
   recent: vi.fn(),
+  requestDisableOtp: vi.fn(),
   requestOtp: vi.fn(),
   requireCsrf: vi.fn(),
 }));
@@ -27,6 +28,7 @@ vi.mock("../../src/lib/auth/session", async (importOriginal) => ({
 vi.mock("../../src/lib/auth/two-factor", () => ({
   confirmTwoFactorEnrollment: dependencies.confirm,
   disableTwoFactor: dependencies.disable,
+  requestTwoFactorDisableOtp: dependencies.requestDisableOtp,
   requestTwoFactorEnrollmentOtp: dependencies.requestOtp,
 }));
 

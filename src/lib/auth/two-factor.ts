@@ -73,6 +73,36 @@ export async function requestTwoFactorEnrollmentOtp(input: {
 }
 
 /**
+ * Starts email-OTP two-factor DISABLEMENT by sending an OTP (purpose
+ * "login_2fa") to the account's own email. Mirrors the enrollment request
+ * but enforces the opposite state precondition: two-factor must currently
+ * be enabled. Reuses the existing createAndSendOtp cooldown/anti-spam guard.
+ */
+export async function requestTwoFactorDisableOtp(input: {
+  auth: AuthContext;
+  env: AppBindings;
+  locale?: unknown;
+  now?: Date;
+}): Promise<{ cooldownSeconds: number; debugOtp?: string; expiresAt: string }> {
+  const account = await loadTwoFactorAccount(input.env, input.auth.userId);
+  if (account === null || account.status === "suspended") {
+    throw new AppError("authentication_required", 401);
+  }
+  if (account.twoFactorEnabled !== 1) {
+    throw new AppError("validation_failed", 409, ["two_factor_not_enabled"]);
+  }
+
+  return createAndSendOtp({
+    ...(input.locale === undefined ? {} : { locale: input.locale }),
+    ...(input.now === undefined ? {} : { now: input.now }),
+    email: input.auth.email,
+    env: input.env,
+    purpose: "login_2fa",
+    userId: input.auth.userId,
+  });
+}
+
+/**
  * Confirms enrollment: verifying one OTP (reusing otp.ts's existing
  * attempts/expiry enforcement) is required before two_factor_enabled is
  * ever set. A bare toggle is never sufficient.
