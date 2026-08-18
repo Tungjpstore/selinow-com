@@ -42,7 +42,7 @@ import Icon from "../../console/Icon.astro";
         </div>
       </div>
       <div class="summary-card" data-launch-card-telegram>
-        <span class="summary-icon">🤖</span>
+        <span class="summary-icon"><Icon name="bot" size={20} /></span>
         <div class="summary-body">
           <small>Bot Telegram</small>
           <strong data-launch-summary-telegram>Chưa kết nối</strong>
@@ -53,7 +53,7 @@ import Icon from "../../console/Icon.astro";
     <!-- Optional settings -->
     <details class="optional-settings">
       <summary>
-        <span>📋 Thông tin liên hệ & chính sách <em>(không bắt buộc)</em></span>
+        <span>Thông tin liên hệ & chính sách <em>(không bắt buộc)</em></span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
       </summary>
       <form class="settings-form" data-launch-settings-form novalidate>
@@ -142,7 +142,7 @@ import Icon from "../../console/Icon.astro";
       </a>
 
       <a href="#" target="_blank" rel="noreferrer" class="launch-link-card" data-celebration-telegram-link hidden>
-        <div class="launch-card-icon">🤖</div>
+        <div class="launch-card-icon"><Icon name="bot" size={20} /></div>
         <div class="launch-card-info">
           <strong>Mở Bot Telegram</strong>
           <span data-celebration-bot-display>@your_bot</span>
@@ -418,7 +418,13 @@ import Icon from "../../console/Icon.astro";
   }
 
   .checklist-row.is-done .check-dot::before {
-    content: "✓";
+    content: "";
+    width: 5px;
+    height: 9px;
+    margin-block-start: -2px;
+    border-inline-end: 2px solid currentcolor;
+    border-block-end: 2px solid currentcolor;
+    transform: rotate(45deg);
   }
 
   .checklist-row.is-done .check-text {
@@ -468,7 +474,7 @@ import Icon from "../../console/Icon.astro";
     padding: 12px 26px;
     border: none;
     border-radius: var(--sln-radius-pill);
-    background: linear-gradient(135deg, var(--sln-state-success), #059669);
+    background: var(--sln-state-success);
     color: var(--sln-white);
     font-size: 14px;
     font-weight: 600;

@@ -6,9 +6,11 @@ import { describe, expect, it } from "vitest";
 /**
  * Console v2 design contract — guards the rules that define the new language
  * (docs/DASHBOARD_REDESIGN_V2_PROPOSAL_2026-08-16.md §5):
- * one hairline border weight, working (≤600) font weights, and no emoji in
- * workspace UI. Scoped to the console surface only; legacy pages migrate in
- * P2 before this guard can be broadened.
+ * one hairline border weight, working (≤600) font weights, no emoji in
+ * workspace UI, and token-only semantic color. Scope covers every seller,
+ * admin, auth and shared dashboard surface; onboarding preview mocks are
+ * exempt because their emoji model the seller's storefront/Telegram content,
+ * not console UI (they carry explicit data-preview-* markers).
  */
 
 const CONSOLE_FILES = [
@@ -16,18 +18,25 @@ const CONSOLE_FILES = [
   ...(await Array.fromAsync(glob("src/components/console/*.astro"))),
 ];
 
-// Workspace-wide scopes (P2): every seller/admin page and shared dashboard
-// component. Onboarding preview mocks are exempt — their emoji model the
-// seller's storefront content, not console UI.
+// Workspace-wide scopes: every seller/admin/auth page, both layouts, and all
+// shared dashboard components (recursive — onboarding included).
 const WORKSPACE_ASTRO = [
   ...(await Array.fromAsync(glob("src/pages/app/**/*.astro"))),
   ...(await Array.fromAsync(glob("src/pages/admin/*.astro"))),
+  "src/pages/login.astro",
+  "src/pages/register.astro",
+  "src/pages/forgot-password.astro",
   "src/layouts/AppLayout.astro",
-  ...(await Array.fromAsync(glob("src/components/dashboard/*.astro"))),
-  ...(await Array.fromAsync(glob("src/components/dashboard/domains/*.astro"))),
-  ...(await Array.fromAsync(glob("src/components/dashboard/automation/*.astro"))),
+  "src/layouts/AdminLayout.astro",
+  ...(await Array.fromAsync(glob("src/components/dashboard/**/*.astro"))),
 ];
-const ONBOARDING_PREVIEW_MOCKS = /data-preview-product-icon|mock-product-emoji|mock-logo-icon/;
+// Chrome/skin stylesheets that must obey the same hairline/weight/hex rules.
+const WORKSPACE_CSS = [
+  "src/styles/auth.css",
+  "src/styles/admin.css",
+  "src/styles/app-shell.css",
+];
+const ONBOARDING_PREVIEW_MOCKS = /data-preview-product-icon|mock-product-emoji|mock-logo-icon|data-preview-mock/;
 
 const EMOJI_RANGE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 const THICK_BORDER = /\bborder(?:-top|-right|-bottom|-left|-width)?:\s*(?:[2-9]|1\.5)px/u;
@@ -42,7 +51,7 @@ describe("console design contract", () => {
   });
 
   it("flattens every workspace border to the 1px hairline (P2 sweep)", async () => {
-    for (const file of WORKSPACE_ASTRO) {
+    for (const file of [...WORKSPACE_ASTRO, ...WORKSPACE_CSS]) {
       const source = await readFile(file, "utf8");
       const offenders = source.split("\n").filter((line) => THICK_BORDER.test(line));
       expect(offenders, `${file} still has >1px borders`).toEqual([]);
@@ -50,7 +59,7 @@ describe("console design contract", () => {
   });
 
   it("caps font weights at 600 across the console and the workspace", async () => {
-    for (const file of [...CONSOLE_FILES, ...WORKSPACE_ASTRO]) {
+    for (const file of [...CONSOLE_FILES, ...WORKSPACE_ASTRO, ...WORKSPACE_CSS]) {
       const source = await readFile(file, "utf8");
       const heavy = source.match(/font-weight:\s*(6[5-9]\d|[7-9]\d\d)\b/gu)
         ?? source.match(/\b(6[5-9]\d|[7-9]\d\d)\s\d+px\/\d+px/gu)
@@ -73,7 +82,7 @@ describe("console design contract", () => {
   it("keeps semantic colors on tokens — raw hex only for brand/channel accents and preview mocks", async () => {
     const brandOrMock = /--channel-accent|--merchant-|brand|telegram|zalo|whatsapp|discord|mock|preview/i;
     const hex = /#[0-9a-fA-F]{6}\b/;
-    for (const file of WORKSPACE_ASTRO) {
+    for (const file of [...WORKSPACE_ASTRO, ...WORKSPACE_CSS]) {
       const source = await readFile(file, "utf8");
       const offenders = source.split("\n")
         .filter((line) => hex.test(line))

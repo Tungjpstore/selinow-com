@@ -1,5 +1,6 @@
 ---
 import { ONBOARDING_PRODUCT_PRESETS } from "../../../lib/onboarding/presets";
+import Icon from "../../console/Icon.astro";
 
 type Props = {
   defaultCurrency?: string;
@@ -21,7 +22,7 @@ const { defaultCurrency = "VND" } = Astro.props;
       <span>Chọn Mẫu Có Sẵn (1-Click)</span>
     </button>
     <button type="button" class="mode-tab" data-product-mode="custom" role="tab" aria-selected="false">
-      <span>✏️ Tự Nhập Sản Phẩm Mới</span>
+      <span>Tự Nhập Sản Phẩm Mới</span>
     </button>
   </div>
 
@@ -50,7 +51,7 @@ const { defaultCurrency = "VND" } = Astro.props;
               {preset.fulfillmentType === "license_key" ? "Tự động giao key" : "Giao thủ công"}
             </small>
           </div>
-          <span class="preset-badge-check">✓</span>
+          <span class="preset-badge-check"><Icon name="check" size={12} /></span>
         </button>
       ))}
     </div>
@@ -92,7 +93,7 @@ const { defaultCurrency = "VND" } = Astro.props;
       <label for="product-fulfillment-select">Hình thức giao hàng <span class="required-star">*</span></label>
       <select id="product-fulfillment-select" name="fulfillmentType" data-input-product-fulfillment>
         <option value="license_key" selected>Giao License Key / Mã thẻ tự động</option>
-        <option value="manual">📁 Giao thủ công (Tài khoản / Link tải / Liên hệ)</option>
+        <option value="manual">Giao thủ công (Tài khoản / Link tải / Liên hệ)</option>
       </select>
     </div>
 

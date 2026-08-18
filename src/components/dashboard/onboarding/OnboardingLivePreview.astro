@@ -83,7 +83,7 @@ const {
     <!-- Telegram Bot Mockup -->
     <div class="preview-canvas tg-canvas" data-canvas="telegram" hidden>
       <div class="tg-header">
-        <div class="tg-bot-avatar">🤖</div>
+        <div class="tg-bot-avatar" data-preview-mock>🤖</div>
         <div class="tg-bot-info">
           <strong data-preview-bot-name>Selinow Store Bot</strong>
           <small>bot • trực tuyến</small>
@@ -92,18 +92,18 @@ const {
       <div class="tg-messages-body">
         <div class="tg-message tg-bot-msg">
           <div class="tg-msg-bubble">
-            <p>👋 Chào mừng bạn đến với <strong data-preview-shop-name>{initialShopName}</strong>!</p>
+            <p data-preview-mock>👋 Chào mừng bạn đến với <strong data-preview-shop-name>{initialShopName}</strong>!</p>
             <p>Hệ thống hỗ trợ đặt mua sản phẩm số và nhận mã kích hoạt tự động 100% qua VietQR.</p>
             <hr class="tg-msg-divider" />
-            <p>🔥 <strong>Sản phẩm nổi bật:</strong></p>
+            <p data-preview-mock>🔥 <strong>Sản phẩm nổi bật:</strong></p>
             <p>• <span data-preview-product-title>Windows 11 Pro Retail Bản Quyền</span> — <span data-preview-product-price>199.000 {defaultCurrency}</span></p>
           </div>
           <div class="tg-inline-keyboard">
             <button type="button" class="tg-btn" tabindex="-1">
-              <span>🛒 Mua <span data-preview-product-title-short>Windows 11 Pro</span></span>
+              <span data-preview-mock>🛒 Mua <span data-preview-product-title-short>Windows 11 Pro</span></span>
             </button>
             <button type="button" class="tg-btn tg-btn-subtle" tabindex="-1">
-              <span>📋 Xem danh mục sản phẩm</span>
+              <span data-preview-mock>📋 Xem danh mục sản phẩm</span>
             </button>
           </div>
         </div>
@@ -407,12 +407,21 @@ const {
   }
 
   /* Telegram Canvas */
+  /* Telegram preview-mock palette: models the seller's bot UI, not console chrome. */
+  .tg-canvas {
+    --tg-mock-accent: #24A1DE;
+    --tg-mock-bg: #0e1621;
+    --tg-mock-surface: #182533;
+    --tg-mock-link-bg: #2b5278;
+    --tg-mock-link-ink: #64b5f6;
+  }
+
   .tg-header {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 10px 14px;
-    background: #24A1DE;
+    background: var(--tg-mock-accent);
     color: white;
   }
 
@@ -443,7 +452,7 @@ const {
 
   .tg-messages-body {
     padding: 16px 12px;
-    background: #0e1621;
+    background: var(--tg-mock-bg);
     color: var(--sln-bg-subtle);
     flex: 1;
     display: flex;
@@ -459,7 +468,7 @@ const {
   }
 
   .tg-msg-bubble {
-    background: #182533;
+    background: var(--tg-mock-surface);
     padding: 12px 14px;
     border-radius: 12px 12px 12px 2px;
     font-size: 12px;
@@ -489,8 +498,8 @@ const {
   .tg-btn {
     padding: 9px 12px;
     border-radius: 8px;
-    background: #2b5278;
-    color: #64b5f6;
+    background: var(--tg-mock-link-bg);
+    color: var(--tg-mock-link-ink);
     border: none;
     font-size: 12px;
     font-weight: 600;

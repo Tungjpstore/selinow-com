@@ -73,7 +73,7 @@
     border-radius: var(--sln-radius-sm);
     background: var(--sln-bg-inverse);
     color: var(--sln-text-inverse);
-    font-weight: 700;
+    font-weight: 600;
     text-decoration: none;
   }
 
@@ -348,7 +348,7 @@
     border: 1px solid transparent;
     border-radius: var(--sln-radius-md);
     font-size: 13px;
-    font-weight: 750;
+    font-weight: 600;
     text-decoration: none;
     transition: transform var(--sln-duration-default) var(--sln-ease-standard), box-shadow var(--sln-duration-default) var(--sln-ease-standard), background var(--sln-duration-default) var(--sln-ease-standard);
   }
@@ -358,8 +358,8 @@
   .app-shell .app-button-primary:hover { background: var(--sln-action-primary-hover); }
   .app-shell .app-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
   .app-shell .app-panel { border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-xs); }
-  .app-shell .app-kicker { margin: 0; color: var(--sln-action-primary); font-size: 11px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
-  .app-shell .app-status { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font-size: 11px; font-weight: 650; }
+  .app-shell .app-kicker { margin: 0; color: var(--sln-action-primary); font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  .app-shell .app-status { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font-size: 11px; font-weight: 600; }
   .app-shell .app-status::before { width: 7px; height: 7px; border-radius: 50%; background: currentcolor; content: ""; }
   .app-shell .app-status[data-tone="success"] { background: var(--sln-tint-success); color: var(--sln-state-success); }
   .app-shell .app-status[data-tone="warning"] { background: var(--sln-tint-warning); color: var(--sln-warning-text); }

@@ -1,4 +1,5 @@
 ---
+import Icon from "../../console/Icon.astro";
 ---
 
 <div class="onboarding-step-pane" data-step-pane="connect">
@@ -23,7 +24,7 @@
       </div>
 
       <div class="connect-guide-box">
-        <strong>💡 Hướng dẫn nhanh:</strong>
+        <strong>Hướng dẫn nhanh:</strong>
         <ol>
           <li>Đăng nhập <a href="https://payos.vn" target="_blank" rel="noreferrer">payos.vn ↗</a> và tạo <em>Kênh thanh toán</em> mới.</li>
           <li>Sao chép 3 thông số: <code>Client ID</code>, <code>API Key</code>, <code>Checksum Key</code> và dán vào dưới đây.</li>
@@ -57,7 +58,7 @@
     <section class="connect-card telegram-card" data-telegram-connect-section>
       <div class="connect-card-header">
         <div class="connect-title-icon">
-          <span class="provider-logo-badge telegram-badge">🤖</span>
+          <span class="provider-logo-badge telegram-badge"><Icon name="bot" size={18} /></span>
           <div>
             <h3>Bot Telegram Bán Hàng</h3>
             <p>Tự động gửi menu sản phẩm, tạo link thanh toán QR và gửi key trong tin nhắn riêng.</p>
@@ -67,7 +68,7 @@
       </div>
 
       <div class="connect-guide-box">
-        <strong>💡 Hướng dẫn nhanh:</strong>
+        <strong>Hướng dẫn nhanh:</strong>
         <ol>
           <li>Mở Telegram, tìm bot <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather ↗</a> và gửi lệnh <code>/newbot</code>.</li>
           <li>Đặt tên và username cho bot, sau đó sao chép <code>HTTP API Token</code> dán vào đây.</li>
@@ -81,7 +82,7 @@
         </div>
         <div class="connect-form-actions full-width">
           <button type="submit" class="btn-verify-connect" data-btn-verify-telegram>
-            <span>🤖 Kết nối Bot & Cấu hình Webhook</span>
+            <span>Kết nối Bot & Cấu hình Webhook</span>
           </button>
         </div>
       </form>
@@ -185,12 +186,14 @@
   }
 
   .payos-badge {
-    background: #0066FF;
+    --channel-accent: #0066FF;
+    background: var(--channel-accent);
     color: white;
   }
 
   .telegram-badge {
-    background: #24A1DE;
+    --channel-accent: #24A1DE;
+    background: var(--channel-accent);
     color: white;
   }
 
@@ -417,7 +420,7 @@
     padding: 12px 26px;
     border: none;
     border-radius: var(--sln-radius-pill);
-    background: linear-gradient(135deg, var(--sln-state-success), #059669);
+    background: var(--sln-state-success);
     color: var(--sln-white);
     font-size: 14px;
     font-weight: 600;
