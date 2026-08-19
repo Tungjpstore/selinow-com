@@ -4,6 +4,8 @@ import "../styles/base.css";
 import "../styles/primitives.css";
 import "../styles/app-shell.css";
 import "../styles/selinow-a11y.css";
+import CommandPalette from "../components/workspace/CommandPalette.astro";
+import LiveActivityRadar from "../components/console/LiveActivityRadar.astro";
 import { shopSwitchHref, withSelectedShop as appendSelectedShop } from "../lib/dashboard/shop-navigation";
 import { createDashboardTranslator } from "../lib/i18n/catalogs/dashboard";
 import { directionForLocale } from "../lib/i18n/locale";
@@ -152,6 +154,7 @@ const icons: Record<string, string> = {
   products: '<path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 7 8 4 8-4v10l-8 4-8-4V7Z"/>',
   inventory: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
   orders: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   customers: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   store: '<path d="M4 10v10h16V10"/><path d="M3 10 5 4h14l2 6"/><path d="M3 10c0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0"/>',
   plug: '<path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-6 6v4"/>',
@@ -242,8 +245,12 @@ const icons: Record<string, string> = {
         <div class="app-workspace">
           <header class="app-topbar">
             <div class="app-topbar-context">
-              <small>{t("dashboard.shell.sales_workspace")}</small>
-              <strong>{displayName}</strong>
+              <div class="app-breadcrumb">
+                <span class="breadcrumb-shop">{selectedShopName}</span>
+                <span class="breadcrumb-sep">/</span>
+                <strong class="breadcrumb-title">{title.replace(" — Selinow", "")}</strong>
+              </div>
+              <LiveActivityRadar label="Hệ thống trực tuyến" tone="success" />
             </div>
 
             <div class="app-mobile-topbar">
@@ -260,6 +267,12 @@ const icons: Record<string, string> = {
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg>
               </button>
               <div class="app-mobile-topbar-actions">
+                <button class="app-icon-action" type="button" aria-label="Tìm kiếm" data-command-palette-trigger>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </button>
                 <a class="app-icon-action" href={withSelectedShop("/app#actions-title")} aria-label={t("dashboard.shell.mobile.attention_aria")}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.bell}></svg>
                 </a>
@@ -269,11 +282,28 @@ const icons: Record<string, string> = {
               </div>
             </div>
 
-            <div class="app-account">
-              <span class="app-account-mark" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
-              <span><strong>{displayName}</strong><small>{email}</small></span>
-              <a href="/" aria-label={t("dashboard.shell.account.home_aria")} title={t("dashboard.shell.account.home_title")}>↗</a>
-              <button type="button" data-app-logout>{t("dashboard.shell.account.logout")}</button>
+            <div class="app-topbar-right">
+              <button type="button" class="app-command-trigger" data-command-palette-trigger title="Mở tìm kiếm nhanh (⌘K)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span>Tìm kiếm...</span>
+                <kbd>⌘K</kbd>
+              </button>
+
+              {selectedShopPublicId && (
+                <a class="app-storefront-link" href={withSelectedShop("/app/store")} title="Mở trang Storefront">
+                  <span>Storefront</span>
+                  <span class="link-arrow">↗</span>
+                </a>
+              )}
+              <div class="app-account">
+                <span class="app-account-mark" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
+                <span><strong>{displayName}</strong><small>{email}</small></span>
+                <a href="/" aria-label={t("dashboard.shell.account.home_aria")} title={t("dashboard.shell.account.home_title")}>↗</a>
+                <button type="button" data-app-logout>{t("dashboard.shell.account.logout")}</button>
+              </div>
             </div>
           </header>
           <main id="app-content" class="app-main selinow-focus-target" tabindex="-1">
@@ -461,5 +491,6 @@ const icons: Record<string, string> = {
         });
       }
     </script>
+    <CommandPalette />
   </body>
 </html>

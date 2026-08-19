@@ -12,7 +12,7 @@ import { getPaymentIntegration, type PaymentIntegrationView } from "../../lib/pa
 import { getTelegramIntegration, type TelegramIntegrationView } from "../../lib/telegram/integrations";
 import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
 import { createDashboardTranslator } from "../../lib/i18n";
-import Icon from "../../components/console/Icon.astro";
+import ProviderLogo from "../../components/console/ProviderLogo.astro";
 import { listChannelExpansionCatalog } from "../../lib/channels/expansion";
 
 const env = getBindings();
@@ -195,7 +195,7 @@ const integrationClientCopy = {
               <span>{t("dashboard.integrations.group.channels.description")}</span>
             </header>
             <article id="telegram" class="integration-row" data-provider-row="telegram" data-readable={canReadProviders && telegramError === null ? "true" : "false"}>
-              <div class="provider-mark provider-mark-telegram" aria-hidden="true"><Icon name="bot" size={18} /></div>
+              <div class="provider-mark" aria-hidden="true"><ProviderLogo name="telegram" size={28} /></div>
               <div class="provider-copy"><h3>Telegram</h3><p class="provider-summary" data-summary>{canReadProviders ? telegramView.summary : unavailableTelegram.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? telegramView.checked : unavailableTelegram.checked}</p></div>
               <StatusBadge label={canReadProviders ? telegramView.label : unavailableTelegram.label} tone={canReadProviders ? telegramView.tone : unavailableTelegram.tone} />
               <div class="provider-actions">
@@ -221,7 +221,7 @@ const integrationClientCopy = {
                 <article id={`channel-${channel.slug}`} class={`channel-expansion-card channel-expansion-card--${channel.slug}`} data-channel-code={channel.code} data-channel-placeholder>
                   <div class="channel-expansion-card-head">
                     <div class="channel-expansion-identity">
-                      <span class="channel-provider-mark" aria-hidden="true"><Icon name={channel.code.includes("telegram") ? "bot" : channel.code.includes("zalo") ? "zap" : channel.code.includes("whatsapp") ? "zap" : "bot"} size={18} /></span>
+                      <span class="channel-provider-mark" aria-hidden="true"><ProviderLogo name={channel.code.includes("telegram") ? "telegram" : channel.code.includes("zalo") ? "zalo" : channel.code.includes("whatsapp") ? "whatsapp" : "discord"} size={26} /></span>
                       <div><h3>{channel.name}</h3><div class="channel-expansion-code">{channel.code}</div></div>
                     </div>
                     <StatusBadge label={channel.providerStage} tone={channel.providerPending ? "warning" : "info"} />
@@ -248,8 +248,8 @@ const integrationClientCopy = {
               <span>{t("dashboard.integrations.group.payments.description")}</span>
             </header>
             <article class="integration-row" data-provider-row="payos" data-readable={canReadProviders && payosError === null ? "true" : "false"}>
-              <div class="provider-mark provider-mark-payos" aria-hidden="true"><Icon name="card" size={18} /></div>
-              <div class="provider-copy"><h3>PayOS</h3><p class="provider-summary" data-summary>{canReadProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? payosView.checked : unavailablePayos.checked}</p></div>
+              <div class="provider-mark" aria-hidden="true"><ProviderLogo name="payos" size={28} /></div>
+              <div class="provider-copy"><h3>PayOS (VietQR)</h3><p class="provider-summary" data-summary>{canReadProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? payosView.checked : unavailablePayos.checked}</p></div>
               <StatusBadge label={canReadProviders ? payosView.label : unavailablePayos.label} tone={canReadProviders ? payosView.tone : unavailablePayos.tone} />
               <div class="provider-actions">{canReadProviders ? <a class="app-button app-button-secondary" href={workspaceHref("/app/payments")}>{t("dashboard.integrations.provider.manage_payments")}</a> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}</div>
               <p class="provider-error" data-error hidden={!canReadProviders || payosView.error === null}>{canReadProviders ? payosView.error : ""}</p>
@@ -262,8 +262,8 @@ const integrationClientCopy = {
               <span>{t("dashboard.integrations.group.infrastructure.description")}</span>
             </header>
             <article class="integration-row" data-provider-row="domains" data-readable={canReadDomains && domainsError === null ? "true" : "false"}>
-              <div class="provider-mark provider-mark-domain" aria-hidden="true"><Icon name="globe" size={18} /></div>
-              <div class="provider-copy"><h3>{t("dashboard.integrations.provider.domain")}</h3><p class="provider-summary" data-summary>{canReadDomains ? domainsView.summary : unavailableDomains.summary}</p><p class="provider-check" data-last-check>{canReadDomains ? domainsView.checked : unavailableDomains.checked}</p></div>
+              <div class="provider-mark" aria-hidden="true"><ProviderLogo name="cloudflare" size={28} /></div>
+              <div class="provider-copy"><h3>{t("dashboard.integrations.provider.domain")} (Cloudflare)</h3><p class="provider-summary" data-summary>{canReadDomains ? domainsView.summary : unavailableDomains.summary}</p><p class="provider-check" data-last-check>{canReadDomains ? domainsView.checked : unavailableDomains.checked}</p></div>
               <StatusBadge label={canReadDomains ? domainsView.label : unavailableDomains.label} tone={canReadDomains ? domainsView.tone : unavailableDomains.tone} />
               <div class="provider-actions">{canManageDomains ? <a class="app-button app-button-secondary" href={workspaceHref("/app/domains")}>{t("dashboard.integrations.provider.manage_domains")}</a> : canReadDomains ? <span class="provider-note">{t("dashboard.integrations.channel_expansion.read_only")}</span> : <span class="provider-note">{t("dashboard.integrations.provider.unavailable")}</span>}</div>
               <p class="provider-error" data-error hidden={!canReadDomains || domainsView.error === null}>{canReadDomains ? domainsView.error : ""}</p>

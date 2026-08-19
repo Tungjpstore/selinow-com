@@ -32,6 +32,8 @@ const {
   platformBaseDomain,
   shops,
 } = Astro.props;
+void displayName;
+void email;
 
 const initialShop = shops[0];
 
@@ -57,13 +59,6 @@ const steps = [
   <!-- Top navigation bar -->
   <header class="v2-topbar">
     <div class="v2-topbar-inner">
-      <div class="topbar-brand">
-        <a href="/app" class="brand-link" aria-label="Selinow">
-          <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="100" height="28" />
-        </a>
-        <span class="topbar-mode-badge">Thiết lập</span>
-      </div>
-
       <!-- Progress bar -->
       <div class="topbar-progress-section" aria-label="Tiến trình thiết lập">
         <div class="progress-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
@@ -76,14 +71,6 @@ const steps = [
             </span>
           ))}
         </div>
-      </div>
-
-      <div class="topbar-user">
-        <span class="user-avatar" title={displayName}>{displayName.trim().charAt(0).toUpperCase() || "S"}</span>
-        <span class="user-email">{email}</span>
-        <a href="/app" class="btn-exit" title="Lưu tiến trình và vào Dashboard">
-          Dashboard ↗
-        </a>
       </div>
     </div>
   </header>
@@ -123,64 +110,27 @@ const steps = [
 </script>
 
 <style>
-  :global(*) { box-sizing: border-box; }
-
-  :global(body) {
-    margin: 0;
-    min-width: 320px;
-    min-height: 100vh;
-    background: var(--sln-bg-canvas);
-    color: var(--sln-text-primary);
-    font-family: var(--sln-font-sans);
-  }
-
   .onboarding-v2-shell {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
-    background: var(--sln-bg-canvas);
+    width: 100%;
   }
 
-  /* ---- Top bar ---- */
+  /* ---- Top progress card ---- */
   .v2-topbar {
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    background: var(--sln-bg-surface);
-    border-bottom: 1px solid var(--sln-border-default);
-    box-shadow: var(--sln-shadow-xs);
+    position: relative;
+    background: var(--sln-glass-bg);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--sln-glass-border);
+    border-radius: var(--sln-console-radius-container);
+    box-shadow: var(--sln-console-shadow-card);
+    margin-bottom: 20px;
   }
 
   .v2-topbar-inner {
     display: flex;
     align-items: center;
-    gap: 24px;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 12px 32px;
-  }
-
-  .topbar-brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-  }
-
-  .brand-link {
-    display: flex;
-    text-decoration: none;
-  }
-
-  .topbar-mode-badge {
-    padding: 2px 10px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-primary);
-    color: var(--sln-action-primary);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    padding: 16px 20px;
   }
 
   /* ---- Progress bar ---- */
@@ -188,7 +138,7 @@ const steps = [
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
   }
 
@@ -196,16 +146,16 @@ const steps = [
     width: 100%;
     height: 6px;
     border-radius: var(--sln-radius-pill);
-    background: var(--sln-border-strong);
+    background: var(--sln-console-line);
     overflow: hidden;
   }
 
   .progress-fill {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, var(--sln-action-primary), #06b6d4);
+    background: linear-gradient(90deg, #6552E8, #3B82F6);
     width: 0%;
-    transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .progress-step-labels {
@@ -215,66 +165,20 @@ const steps = [
   }
 
   .progress-label-item {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--sln-text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--sln-console-ink-3);
     transition: color 0.2s ease;
     white-space: nowrap;
   }
 
   .progress-label-item.active {
-    color: var(--sln-action-primary);
+    color: var(--sln-console-accent);
     font-weight: 600;
   }
 
   .progress-label-item.done {
-    color: var(--sln-state-success);
-  }
-
-  /* ---- User & exit ---- */
-  .topbar-user {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    flex-shrink: 0;
-  }
-
-  .user-avatar {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    background: var(--sln-tint-primary);
-    color: var(--sln-action-primary);
-    font-size: 13px;
-    font-weight: 600;
-    flex-shrink: 0;
-  }
-
-  .user-email {
-    font-size: 12px;
-    color: var(--sln-text-muted);
-  }
-
-  .btn-exit {
-    display: inline-flex;
-    align-items: center;
-    padding: 7px 14px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-bg-surface);
-    color: var(--sln-text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    text-decoration: none;
-    transition: all 0.15s ease;
-  }
-
-  .btn-exit:hover {
-    background: var(--sln-bg-subtle);
-    color: var(--sln-text-primary);
-    border-color: var(--sln-action-primary);
+    color: var(--sln-console-success);
   }
 
   /* ---- Toast ---- */

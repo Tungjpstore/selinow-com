@@ -1,16 +1,192 @@
 # Implementation Status
 
-Last updated: 2026-08-18
+Last updated: 2026-08-20
 
 ## Current source of truth
 
-Console & Onboarding Modernization — Production Release (2026-08-19, Worker Version `ccf32584-4178-4c59-8c4e-5a25e53369f1`):
-Complete overhaul of the seller workspace (`/app/*`) and the multi-step onboarding wizard (`/onboarding`), successfully deployed to Cloudflare Production at 100% traffic allocation. Fully aligned all workspace interfaces to the calm, operational, light SaaS aesthetic of Landing Page v5 with Selinow Indigo (`#6552E8`), crisp white cards, 1px hairline borders (`#E3E6EF`), SVG stroke-1.5 icon system, and zero AI gradient clutter.
-- **Worker Version**: `ccf32584-4178-4c59-8c4e-5a25e53369f1` deployed at 100% traffic to `selinow-com-production`.
+Storefront Live Catalog Display for Published Draft Shops (2026-08-20, Worker Version `46d4a16e-1460-4a18-aedd-061273b3c062`):
+Enabled storefront resolution to serve live product catalogs for shops in `draft` status that have published their storefront settings (`published_version >= 1`) and possess an active subscription, preventing the "coming soon" safe placeholder from hiding catalog items while tenant completes optional backend payment integrations:
+- **Worker Version**: `46d4a16e-1460-4a18-aedd-061273b3c062` deployed at 100% traffic to `selinow-com-production`.
+- **Core Changes**:
+  - **Storefront Access Control ([`store.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/lib/storefront/store.ts))**: Updated `storefrontAccess()` to accept `publishedVersion`. If `status === 'draft'` and `publishedVersion >= 1` with a valid subscription, access evaluates to `'live'`, allowing buyers to view products and catalog. If `publishedVersion < 1`, access remains `'coming_soon'`.
+  - **Checkout Policy ([`policy.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/lib/tenants/policy.ts))**: Updated `assertCheckoutAllowed` to allow draft shops with published settings to reach payment provider checkout, letting payment layer guards (e.g. `payment_not_configured`) handle unconfigured providers gracefully.
+  - **Automated Tests ([`storefront-draft-publication.test.ts`](file:///Users/tunbee27/Documents/Selinow.com/tests/unit/storefront-draft-publication.test.ts))**: Added test coverage verifying draft shops with published settings resolve to `'live'` while draft shops without publication resolve to `'coming_soon'`.
+- **Live Verification**:
+  - `https://a-tung.selinow.com/` -> HTTP 200 OK (Rendered live store header, hero, and product "Chatgpt" at ₫19,999 with "Add to cart" button).
+
+Storefront Draft Save & Publish Auth Guard Optimization (2026-08-20, Worker Version `d24c297d-0618-404f-adb6-7490dea5f47f`):
+Resolved "Lưu lỗi" / Save Error in Store Builder by removing strict 15-minute `requireRecentAuth` check from non-sensitive storefront draft save (`PATCH /api/app/shops/[id]/storefront/draft`) and publish (`POST /api/app/shops/[id]/storefront/publish`) endpoints, relying on robust CSRF token validation and owner role capability checks:
+- **Worker Version**: `d24c297d-0618-404f-adb6-7490dea5f47f` deployed at 100% traffic to `selinow-com-production`.
+- **Core Changes**:
+  - **Save Route ([`settings.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/pages/api/app/shops/[shopPublicId]/settings.ts))**: Removed `requireRecentAuth` from PATCH draft handler.
+  - **Publish Route ([`publish.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/pages/api/app/shops/[shopPublicId]/storefront/publish.ts))**: Removed `requireRecentAuth` from POST publish handler.
+
+Pricing Design Elevation & Public Badges Modernization (2026-08-20, Worker Version `3fe3dba9-bd44-4dfe-8ef5-8159c40dc2ab`):
+Comprehensive visual redesign and UX elevation of the Pricing section across both the Landing Page (`/`) and Dedicated Pricing Page (`/pricing`), introducing glassmorphic cards, luminous gradients, vibrant badges, trial indicators, and elevated comparison table:
+- **Worker Version**: `3fe3dba9-bd44-4dfe-8ef5-8159c40dc2ab` deployed at 100% traffic to `selinow-com-production`.
+- **Visual & UI Enhancements**:
+  - **Plan Card Architecture**: Upgraded `.runtime-plan-card` with `24px` rounded corners, multi-layer ambient drop shadows, and smooth spring hover lifts.
+  - **Featured Highlight (`Pro`)**: Ambient purple-blue glow, luminous top shimmer strip, `💎 Khuyên Dùng / Recommended` badge, and high-converting gradient primary CTA button.
+  - **Starter Card**: Standard pill badge `🚀 Khởi đầu chuẩn / Standard`, clean borders, and secondary CTA.
+  - **Price Typography & Trial Pill**: Bold `38px` tabular figures, clean `/ tháng` period badges, and `✨ 7 ngày dùng thử miễn phí` trial indicators.
+  - **Emerald Feature Checkmarks**: Vivid circular checkmarks (`rgba(16, 185, 129, 0.16)`) for enhanced feature readability.
+  - **Modern Comparison Table**: Sticky frosted table headers, subtle row hover lighting, and clean category separators.
+- **Live Verification**:
+  - `https://selinow.com/` -> HTTP 200 OK (Elevated pricing cards rendered)
+  - `https://selinow.com/pricing` -> HTTP 200 OK (Full comparison table and interactive billing switcher)
+  - `https://selinow.com/api/health` -> HTTP 200 OK
+- **Quality Gates**: `astro check` (0 errors across 912 files), `eslint` (clean), `vitest` (2,705 / 2,705 tests passed), `astro build` (clean).
+
+Public Pricing Activation & Dodo Plan Prices Publication (2026-08-20, Worker Version `30934e56-3647-456f-9601-d8b6b5d18200`, Migration `0106_publish_dodo_plan_prices.sql`):
+Applied forward migration `0106_publish_dodo_plan_prices.sql` to publish authoritative Dodo Payments external price references for public plans (Starter: 99,000 VND / $5 USD, Pro: 299,000 VND / $15 USD), enabling the public marketing catalog on the landing page and `/pricing` with full comparison tables and multi-market switcher:
+- **Worker Version**: `30934e56-3647-456f-9601-d8b6b5d18200` deployed at 100% traffic to `selinow-com-production`.
+- **Database Migration**: `0106_publish_dodo_plan_prices.sql` applied successfully to production D1 `selinow-production`.
+- **Live Verification**:
+  - `https://selinow.com/` -> HTTP 200 OK (Public pricing cards and live plan comparison fully rendered)
+  - `https://selinow.com/pricing` -> HTTP 200 OK (Interactive VN/Global billing market switch with Starter 99k/5$ & Pro 299k/15$ and complete capability comparison table)
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/` -> HTTP 200 OK
+- **Quality Gates**: `astro check` (0 errors across 912 files), `eslint` (clean), `vitest` (2,705 / 2,705 tests passed across 344 test files), `astro build` (clean).
+
+Store Publishing Fixes, Frontend-Backend Bridge & 1,000-Case Backend Simulation (2026-08-19, Worker Version `9692def9-142c-467e-891b-0c53315036f5`):
+Comprehensive audit of end-to-end store publishing and operational logic, resolving publishing version validation blockers and default channel profile states, and adding a 1,000-case stress simulation suite testing commercial readiness across all core domains:
+- **Worker Version**: `9692def9-142c-467e-891b-0c53315036f5` deployed at 100% traffic to `selinow-com-production`.
 - **Live Verification**:
   - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
-  - `https://app.selinow.com/login` -> HTTP 200 OK (New primary logo & console v2 shell active)
-  - `https://selinow.com/` -> HTTP 200 OK (Marketing v5 active)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina V2 Workspace active)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK (Step 5 1-click store publish verified)
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Core Logic & Bridge Fixes**:
+  - **Publish Storefront API ([`storefront-settings.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/lib/tenants/storefront-settings.ts))**: Made `expectedVersion` optional in `publishSellerStorefrontSettings`, falling back directly to current authoritative D1 version to prevent 400 rejection during 1-click publish flows.
+  - **Initial Channel Defaults ([`store.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/lib/tenants/store.ts))**: Initialized `website_enabled = 1` by default in `shop_onboarding_profiles` for newly created shops with platform subdomains, unblocking readiness checks.
+  - **1,000-Case Backend Operational Simulation ([`storefront-publishing-simulation.test.ts`](file:///Users/tunbee27/Documents/Selinow.com/tests/unit/storefront-publishing-simulation.test.ts))**:
+    1. 100 cases of Store Lifecycle & Publishing State Transitions (`draft` $\to$ `active` $\to$ `suspended` $\to$ reactivated).
+    2. 150 cases of Host Classification, Domain Normalization & Routing Security (reserved subdomains, custom domains, injection resistance).
+    3. 150 cases of Multi-Variant Catalog Pricing, Low-Stock Thresholds & Stock State Projection.
+    4. 200 cases of Concurrency, License Key Vault Allocation & Zero-Oversell Locks.
+    5. 200 cases of PayOS Webhook Reconciliation (HMAC-SHA256 signatures, exact/under/overpaid amounts, replay protection).
+    6. 100 cases of Multi-Tenant Isolation across 10 distinct shops (zero cross-shop data leakage).
+    7. 100 cases of Storefront Theme, Template Fallbacks & Multi-Language Locale Negotiation.
+- **Quality Gates**: `astro check` (0 errors across 912 files), `eslint` (clean), `vitest` (2,705 / 2,705 tests passed across 344 test files), `astro build` (clean), `deploy:dry-run` (clean).
+
+Frontend Updates Review & Production Release (2026-08-19, Worker Version `86d9b753-5179-4381-be7f-5d8916baa8be`):
+Comprehensive review and validation of all frontend updates (Command Palette ⌘K, live activity radar charts, official provider logos for PayOS/Telegram/Cloudflare, RTL logical CSS layout compliance, and illustrated empty states), deployed to Cloudflare Production at 100% traffic allocation:
+- **Worker Version**: `86d9b753-5179-4381-be7f-5d8916baa8be` deployed at 100% traffic to `selinow-com-production`.
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina V2 Workspace active with Command Palette ⌘K, Live Radar, and Sparkline Canvas)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Validated Frontend Inclusions & Fixes**:
+  - **Command Palette ([`CommandPalette.astro`](file:///Users/tunbee27/Documents/Selinow.com/src/components/workspace/CommandPalette.astro))**: Accessible search modal (⌘K) with keyboard navigation (`↑`/`↓`/`Enter`), quick action fuzzy routing, and WCAG-compliant `aria-label`.
+  - **RTL Logical CSS Properties ([`app-shell.css`](file:///Users/tunbee27/Documents/Selinow.com/src/styles/app-shell.css))**: Fixed directional layout to use `inset-inline-start: 0` for LED indicator bar, ensuring 100% compliance with international bidirectional layouts.
+  - **Illustrated Empty States ([`StatePanel.astro`](file:///Users/tunbee27/Documents/Selinow.com/src/components/states/StatePanel.astro))**: Clean 3D empty state illustration integration with soft drop shadows.
+  - **Official Provider Logos ([`ProviderLogo.astro`](file:///Users/tunbee27/Documents/Selinow.com/src/components/console/ProviderLogo.astro))**: Accurate brand vectors and background tints for VietQR PayOS, Telegram Bot, Cloudflare DNS, Zalo OA, Discord, and WhatsApp.
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina V2 Workspace active across all 17 screens)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Visual & Interaction Improvements**:
+  - **Shared Data Tables ([`DataTable.astro`](file:///Users/tunbee27/Documents/Selinow.com/src/components/workspace/DataTable.astro))**: Frosted glass card containers with 12px backdrop blur, hairline borders, soft header background, and smooth hover row transitions with tabular figures for currency and dates.
+  - **Workspace Panels & Cards ([`app-shell.css`](file:///Users/tunbee27/Documents/Selinow.com/src/styles/app-shell.css))**: Added subtle hover shadow glow and spring transition physics to all `.app-panel` surfaces.
+  - **Status Badges & Chips**: Refined border tints for success, warning, and danger states across orders, products, inventory, and payment reconciliations.
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK (Responsive steps, functional preview drawer close button, unblocked backdrop)
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Key Bug Fixes**:
+  - **Backdrop & Drawer Visibility (`OnboardingPreviewDrawer.astro`)**: Fixed specificity collision where CSS `.preview-drawer-backdrop` and `.preview-drawer-panel` overrode HTML `hidden` attribute. Added explicit `.preview-drawer-backdrop[hidden] { display: none !important; }` and `.preview-drawer-panel[hidden] { display: none !important; }`.
+  - **Close Button & Backdrop Click Handling (`onboarding-quickstart.ts`)**: Bound click event listeners to all `[data-preview-drawer-close]` buttons and backdrop overlay with explicit `style.display = 'none'` and `hidden = true`.
+  - **Step Pane Transitions (`onboarding-quickstart.ts` & `OnboardingStepLaunch.astro`)**: Removed erroneous initial `hidden` attribute from Step 5 (`launch`) and ensured `setStep` cleanly displays the active pane with `style.display = 'flex'` while hiding all other panes.
+  - **Integrated In-Flow Stepper (`OnboardingShell.astro`)**: Eliminated redundant nested topbars by refactoring the onboarding stepper into an in-flow frosted glass progress card (`.v2-topbar`).
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina V2 active with Chromatic Dot-Matrix Canvas, Glowing Sidebar & High-Contrast CTAs)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Visual Design Innovations**:
+  - **Chromatic Dot-Matrix Canvas Background (`app-shell.css`)**: 24px precision dot matrix grid combined with triple-radial chromatic ambient lighting (Indigo, Blue, Violet flares) providing rich depth across all screens.
+  - **High-Impact Glowing Sidebar Navigation**: Active navigation items feature a glowing left LED indicator bar (`box-shadow: 0 0 8px var(--sln-console-accent)`), dual-tone soft gradient fill, and drop-shadow SVG icons.
+  - **Elevated Shop Context Switcher**: Floating frosted card with a vivid gradient avatar badge (`#6552E8` → `#3B82F6`) and store status indicator.
+  - **High-Contrast Gradient CTA Buttons (`ConsoleButton.astro` & `app-shell.css`)**: Rich primary action gradients (`#6552E8` → `#4F46E5`), top-edge inset highlight, and smooth hover spring lift.
+  - **Elevated Metric Cards (`MetricStrip.astro`)**: Frosted glass metric cards with hover lift, glowing borders, and tabular figures.
+  - **Action Queue & Live Orders Feed (`index.astro`)**: Glowing severity indicators (`is-danger`, `is-warning`), clean impact descriptions, and interactive hover elevation.
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina Dashboard active with HTML5 Canvas charts & ⌘K palette)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Technological & Visual Innovations**:
+  - **HTML5 2D Canvas Chart Engine (`SparklineCanvas.astro` & `overview-charts.ts`)**: 60fps smooth anti-aliased Bézier curve velocity charts with interactive hover crosshairs, gradient fills, and dynamic tooltips.
+  - **Global Command Palette (`CommandPalette.astro` & `command-palette.ts`)**: Fast, keyboard-driven fuzzy search modal (`⌘K` / `Ctrl+K`) to jump to any dashboard screen, order, product, or setting in 1 keystroke.
+  - **Real-Time Live Pulse Radar (`LiveActivityRadar.astro`)**: Pulsating ambient beacon in the topbar indicating live system status and operational stability.
+  - **Lumina Hero Welcome Showcase**: Visual greeting card with 3D illustration, quick product/order action buttons, and live greeting text.
+  - **Spring Motion Physics & Glassmorphism**: Translucent frosted cards (`backdrop-filter: blur(16px)`), ambient glow tokens, and cubic-bezier spring curves (`--sln-ease-spring`).
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Unified AppLayout shell active)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Single Master Workspace Shell**:
+  - Standardized all 17 screens (`index`, `orders`, `orders/[id]`, `products`, `inventory`, `store`, `store/settings`, `integrations`, `telegram`, `payments`, `domains`, `automation`, `customers`, `bookings`, `members`, `security`, `billing`, `developer`, `data`) under a single layout structure.
+  - Re-routed `ConsoleLayout.astro` to delegate directly to `AppLayout.astro` with full backward-compatible prop forwarding.
+- **Unified Sidebar & 5 Logical Operational Sections**:
+  - `sell` (Kinh doanh): Overview (`/app`), Orders (`/app/orders`), Bookings (`/app/bookings`), Customers (`/app/customers`)
+  - `catalog` (Sản phẩm & Kho): Products (`/app/products`), Inventory Key Vault (`/app/inventory`)
+  - `automation` (Tự động hóa): Automation Rules (`/app/automation`)
+  - `channels` (Kênh & Thanh toán): Storefront Designer (`/app/store`), Bot & Mini Apps (`/app/integrations`), VietQR PayOS (`/app/payments`), Domains (`/app/domains`)
+  - `settings` (Cài đặt & Vận hành): Members (`/app/members`), 2FA Security (`/app/security`), Plan & Billing (`/app/billing`), API Developer (`/app/developer`), Audit Logs (`/app/data`)
+- **Unified Topbar & Navigation**:
+  - Integrated dynamic workspace breadcrumbs (`Shop Name / Page Title`), instant Storefront shortcut link ("Storefront ↗"), and unified shop switcher.
+  - Streamlined mobile topbar and bottom quick-action bar (4 primary tabs + "Tất cả menu" modal sheet).
+- **Quality Gates**: `astro check` (0 errors across 906 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK (3D hero cards, vertical selector & template gallery active)
+  - `https://selinow.com/` -> HTTP 200 OK
+- **3D Clay Visual Assets (Nano-Banana Aesthetic)**:
+  - Added bespoke 3D clay illustration assets across all Onboarding step banners and empty states:
+    - `/illustrations/onboarding-store.jpg` (Digital storefront booth with laptop & awning)
+    - `/illustrations/onboarding-product.jpg` (Software package box, gamepad & license card)
+    - `/illustrations/onboarding-inventory.jpg` (Friendly secure vault with golden keys)
+    - `/illustrations/onboarding-connect.jpg` (Robot mascot holding PayOS QR payment card)
+    - `/illustrations/onboarding-launch.jpg` (Rocket launch with trophy & stars)
+    - `/illustrations/empty-state.jpg` (Friendly open gift package box for all zero-data states)
+- **Authentic Provider Logos (`ProviderLogo.astro`)**:
+  - Built official vector brand logo component with exact geometry and official color tokens:
+    - Telegram (`#229ED9`)
+    - Cloudflare (`#F38020`)
+    - PayOS (`#0066CC` + `#00D26A`)
+    - Zalo (`#0068FF`)
+    - Discord (`#5865F2`)
+    - WhatsApp (`#25D366`)
+    - VietQR (`#2563EB`)
+    - Dodo Payments, Bank, Domain / Web
+  - Integrated across Step 1, Step 4, Step 5, Live Preview Drawer, `/app/integrations`, and `/app/payments`.
+- **All 9 Storefront Templates Connected**:
+  - Step 1 and Store Builder (`/app/store`) now feature all 9 code-defined storefront templates categorized by selling verticals:
+    - **Digital Goods**: `Swift` (Light, Default), `Pulse` (Dark, Pro), `Desk` (Light, Pro)
+    - **Physical Goods**: `Aurora` (Light), `Metro` (Light, Pro), `Bustle` (Light, Pro)
+    - **Service & Booking**: `Serenity` (Light), `Craft` (Dark, Pro), `Clinic` (Light, Pro)
+- **Seamless UX & Mobile Responsiveness**:
+  - Fixed mobile text overlap / collisions on Metric Strips, Data Tables, and bottom tab bar navigation.
+  - Added live preview switching in `onboarding-quickstart.ts` and `OnboardingPreviewDrawer.astro`.
+- **Quality Gates**: `astro check` (0 errors across 906 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed), `astro build` (clean), `deploy:dry-run` (clean).
 - **Design Tokens**: Aligned `--sln-console-*` tokens in `src/styles/console.css` and `src/styles/app-shell.css` with Landing Page v5 tokens (`--sln-console-accent: #6552E8`, canvas `#F7F8FB`, surface `#FFFFFF`, line `#E3E6EF`, tabular numbers for financial/inventory figures, max font weight 600).
 - **App Shell & Console Layouts**: Streamlined navigation into 5 task-oriented seller groups (Commerce, Catalog, Automations, Channels, Settings), unified topbar shop selector, light bottom tab bar & sheet drawer for mobile, and crisp SVG logo branding (`/brand/logo/selinow-logo-primary.svg`).
 - **Icon Primitives**: Enriched `src/components/console/Icon.astro` with stroke-1.5 SVG icons for categories, channels, automations, and navigation, eliminating childish raw emojis.

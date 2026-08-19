@@ -5,7 +5,6 @@ import { AppError } from "../../src/lib/core/errors";
 const dependencies = vi.hoisted(() => ({
   bindings: { PLATFORM_DB: {} },
   publish: vi.fn(),
-  recentAuth: vi.fn(),
   csrfSession: vi.fn(),
 }));
 
@@ -13,7 +12,6 @@ vi.mock("../../src/lib/platform/bindings", () => ({ getBindings: () => dependenc
 vi.mock("../../src/lib/tenants/storefront-settings", () => ({ publishSellerStorefrontSettings: dependencies.publish }));
 vi.mock("../../src/lib/auth/session", () => ({
   requireCsrfSession: dependencies.csrfSession,
-  requireRecentAuth: dependencies.recentAuth,
 }));
 vi.mock("../../src/lib/catalog/policy", () => ({ requireResourceId: (value: string | undefined) => value ?? "" }));
 
@@ -31,7 +29,6 @@ function request(): Request {
 
 beforeEach(() => {
   dependencies.publish.mockReset();
-  dependencies.recentAuth.mockReset();
   dependencies.csrfSession.mockReset();
   dependencies.csrfSession.mockResolvedValue(auth);
   dependencies.publish.mockResolvedValue({
@@ -42,7 +39,7 @@ beforeEach(() => {
 });
 
 describe("storefront publication route", () => {
-  it("requires cookie CSRF/recent auth and forwards the tenant-bound version", async () => {
+  it("requires cookie CSRF and forwards the tenant-bound version", async () => {
     const response = await POST({
       locals: { requestId: "request-publish-route" },
       params: { shopPublicId: "public-a" },
@@ -51,7 +48,6 @@ describe("storefront publication route", () => {
 
     expect(response.status).toBe(200);
     expect(dependencies.csrfSession).toHaveBeenCalledWith(expect.any(Request), dependencies.bindings);
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
     expect(dependencies.publish).toHaveBeenCalledWith({
       env: dependencies.bindings,
       expectedVersion: 4,
@@ -71,7 +67,6 @@ describe("storefront publication route", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ code: "csrf_invalid", ok: false });
-    expect(dependencies.recentAuth).not.toHaveBeenCalled();
     expect(dependencies.publish).not.toHaveBeenCalled();
   });
 });

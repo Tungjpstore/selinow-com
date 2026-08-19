@@ -405,7 +405,7 @@ export async function createShop(input: {
         INSERT INTO shop_onboarding_profiles (
           shop_id, website_enabled, telegram_enabled, custom_domain_preference,
           current_step, version, created_at, updated_at
-        ) VALUES (?, 0, 0, 'later', 'channel_selected', 1, ?, ?)
+        ) VALUES (?, 1, 0, 'later', 'channel_selected', 1, ?, ?)
       `).bind(shopId, nowIso, nowIso),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO account_trial_claims (user_id, shop_id, claimed_at)

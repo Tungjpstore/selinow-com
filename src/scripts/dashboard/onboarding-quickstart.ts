@@ -193,15 +193,27 @@ function initQuickstart(): void {
     const nextPane = root.querySelector<HTMLElement>(`[data-step-pane="${step}"]`);
     if (!nextPane) return;
 
+    // Reset all step panes display
+    for (const pane of root.querySelectorAll<HTMLElement>("[data-step-pane]")) {
+      if (pane !== nextPane && pane !== currentPane) {
+        pane.classList.remove("is-active", "is-exiting-left", "is-exiting-right");
+        pane.style.display = "none";
+      }
+    }
+
     if (currentPane && currentPane !== nextPane) {
       const exitClass = forward ? "is-exiting-left" : "is-exiting-right";
       currentPane.classList.remove("is-active", "is-exiting-left", "is-exiting-right");
       currentPane.classList.add(exitClass);
       setTimeout(() => {
         currentPane.classList.remove(exitClass);
+        currentPane.style.display = "none";
       }, 260);
     }
 
+    nextPane.hidden = false;
+    nextPane.removeAttribute("hidden");
+    nextPane.style.display = "flex";
     nextPane.classList.remove("is-exiting-left", "is-exiting-right");
     nextPane.classList.add("is-active");
     currentStep = step;
@@ -243,6 +255,8 @@ function initQuickstart(): void {
     if (!drawerPanel || !drawerBackdrop || !drawerTrigger) return;
     drawerPanel.hidden = false;
     drawerBackdrop.hidden = false;
+    drawerPanel.style.display = "flex";
+    drawerBackdrop.style.display = "block";
     drawerTrigger.setAttribute("aria-expanded", "true");
   }
 
@@ -250,15 +264,32 @@ function initQuickstart(): void {
     if (!drawerPanel || !drawerBackdrop || !drawerTrigger) return;
     drawerPanel.hidden = true;
     drawerBackdrop.hidden = true;
+    drawerPanel.style.display = "none";
+    drawerBackdrop.style.display = "none";
     drawerTrigger.setAttribute("aria-expanded", "false");
   }
 
-  drawerTrigger?.addEventListener("click", () => {
-    if (drawerPanel?.hidden) openDrawer();
+  // Ensure closed on init
+  closeDrawer();
+
+  drawerTrigger?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (drawerPanel && (drawerPanel.hidden || drawerPanel.style.display === "none")) openDrawer();
     else closeDrawer();
   });
-  drawerBackdrop?.addEventListener("click", closeDrawer);
-  root.querySelector<HTMLButtonElement>("[data-preview-drawer-close]")?.addEventListener("click", closeDrawer);
+  drawerBackdrop?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeDrawer();
+  });
+  for (const closeBtn of root.querySelectorAll<HTMLButtonElement>("[data-preview-drawer-close]")) {
+    closeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeDrawer();
+    });
+  }
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && drawerPanel && !drawerPanel.hidden) closeDrawer();
   });
@@ -327,10 +358,51 @@ function initQuickstart(): void {
     radio.addEventListener("change", () => {
       channelCards.forEach((card) => {
         card.classList.toggle("active", card.contains(radio));
+        card.classList.toggle("is-selected", card.contains(radio));
       });
       const tgSection = root.querySelector<HTMLElement>("[data-telegram-connect-section]");
       if (tgSection) {
         tgSection.hidden = radio.value === "website";
+      }
+    });
+  });
+
+  // --- Step 1: Selling Vertical & Template Selector ---
+  const verticalRadios = root.querySelectorAll<HTMLInputElement>("[data-vertical-radio]");
+  const verticalCards = root.querySelectorAll<HTMLElement>("[data-vertical-option]");
+  const templatesGroups = root.querySelectorAll<HTMLElement>("[data-templates-group]");
+  const templateRadios = root.querySelectorAll<HTMLInputElement>("[data-template-radio]");
+  const templateCards = root.querySelectorAll<HTMLElement>("[data-template-id]");
+
+  verticalRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      const selectedVertical = radio.value;
+      verticalCards.forEach((card) => {
+        card.classList.toggle("is-selected", card.dataset.verticalOption === selectedVertical);
+      });
+      templatesGroups.forEach((group) => {
+        const matches = group.dataset.templatesGroup === selectedVertical;
+        group.hidden = !matches;
+        if (matches) {
+          const firstRadio = group.querySelector<HTMLInputElement>("[data-template-radio]");
+          if (firstRadio) {
+            firstRadio.checked = true;
+            firstRadio.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+      });
+    });
+  });
+
+  templateRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      templateCards.forEach((card) => {
+        card.classList.toggle("is-selected", card.contains(radio));
+      });
+      const tplId = radio.value;
+      const previewDrawer = root.querySelector<HTMLElement>("[data-preview-surface]");
+      if (previewDrawer) {
+        previewDrawer.dataset.previewTemplate = tplId;
       }
     });
   });
@@ -920,8 +992,10 @@ function initQuickstart(): void {
             `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/storefront/publish`,
             { body: JSON.stringify({}), method: "POST" },
           );
-          if (!res.ok) {
-            showToast("Cửa hàng đã lưu nhưng chưa publish được — bạn có thể publish lại từ Dashboard.", "error");
+          if (res.ok) {
+            showToast("Chúc mừng! Cửa hàng của bạn đã chính thức mở bán!");
+          } else {
+            showToast("Cửa hàng đã lưu nhưng chưa publish được — bạn có thể kích hoạt lại từ Dashboard.", "error");
           }
         }
       } catch {

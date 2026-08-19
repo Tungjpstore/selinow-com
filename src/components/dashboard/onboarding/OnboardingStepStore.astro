@@ -1,4 +1,8 @@
 ---
+import { STOREFRONT_TEMPLATES } from "../../../lib/storefront/templates";
+import Icon from "../../console/Icon.astro";
+import ProviderLogo from "../../console/ProviderLogo.astro";
+
 type Props = {
   defaultCurrency?: string;
   defaultLocale?: string;
@@ -14,13 +18,23 @@ const {
   platformBaseDomain,
   shopsCount = 0,
 } = Astro.props;
-import Icon from "../../console/Icon.astro";
+
+const digitalTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "digital");
+const physicalTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "physical");
+const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "booking");
 ---
 
-<div class="onboarding-step-pane" data-step-pane="store">
-  <div class="step-intro-header">
-    <h2>Hồ sơ Cửa hàng & Kênh Bán</h2>
-    <p>Đặt tên cho cửa hàng và lựa chọn các kênh phân phối sản phẩm số tự động của bạn.</p>
+<div class="onboarding-step-pane is-active" data-step-pane="store">
+  <!-- 3D Hero Welcome Banner -->
+  <div class="step-hero-card">
+    <div class="hero-content">
+      <span class="hero-step-pill">BƯỚC 1 / 5</span>
+      <h2>Hồ sơ Cửa hàng & Giao diện Bán hàng</h2>
+      <p>Đặt tên cho cửa hàng, chọn mô hình kinh doanh và phong cách giao diện phù hợp nhất với sản phẩm của bạn.</p>
+    </div>
+    <div class="hero-image-wrap">
+      <img src="/illustrations/onboarding-store.jpg" alt="" class="hero-illustration" width="130" height="130" />
+    </div>
   </div>
 
   <form class="step-form-grid" data-store-form novalidate>
@@ -28,21 +42,21 @@ import Icon from "../../console/Icon.astro";
     <div class="form-group">
       <label for="store-name-input">Tên cửa hàng <span class="required-star">*</span></label>
       <div class="input-with-icon">
-        <span class="input-icon"><Icon name="store" size={16} /></span>
+        <span class="input-icon"><Icon name="store" size={18} /></span>
         <input
           id="store-name-input"
           name="name"
           type="text"
           minlength="2"
           maxlength="80"
-          placeholder="Ví dụ: Tạp Hóa MMO, Key Bản Quyền 247..."
+          placeholder="Ví dụ: Tiệm Key Bản Quyền, DigiStore 247..."
           value={initialShopName}
           required
           autofocus
           data-input-shop-name
         />
       </div>
-      <small class="field-hint">Tên hiển thị thương hiệu trên trang thanh toán và thông báo bot.</small>
+      <small class="field-hint">Tên hiển thị thương hiệu trên trang thanh toán và thông báo Telegram.</small>
     </div>
 
     <!-- Store Slug / Domain -->
@@ -56,7 +70,7 @@ import Icon from "../../console/Icon.astro";
           minlength="3"
           maxlength="48"
           pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
-          placeholder="tap-hoa-mmo"
+          placeholder="tiem-key-ban-quyen"
           value={initialShopSlug}
           required
           data-input-shop-slug
@@ -69,53 +83,180 @@ import Icon from "../../console/Icon.astro";
       </div>
     </div>
 
-    <!-- Sales Channels Selector (Visual Cards) -->
+    <!-- Selling Model / Vertical Selector -->
     <div class="form-group full-width">
-      <label class="channels-label">Lựa chọn Kênh Bán Hàng <span class="required-star">*</span></label>
-      <div class="channel-cards-grid">
-        <label class="channel-card active" data-channel-opt="both">
-          <input type="radio" name="channelSelection" value="both" checked data-channel-radio />
-          <div class="channel-card-icon"><Icon name="gauge" size={20} /></div>
-          <div class="channel-card-body">
-            <div class="channel-card-title-wrap">
-              <strong>Đa Kênh (Website + Telegram)</strong>
-              <span class="recommend-pill">Khuyên Dùng</span>
-            </div>
-            <p>Bán song song cả Web Storefront và Bot Telegram tự động 24/7. Khách mua ở đâu cũng nhận được key ngay.</p>
+      <label class="section-heading-label">Mô hình kinh doanh chính <span class="required-star">*</span></label>
+      <div class="vertical-cards-grid" role="radiogroup" aria-label="Mô hình kinh doanh">
+        <label class="vertical-card is-selected" data-vertical-option="digital">
+          <input type="radio" name="sellingVertical" value="digital" checked data-vertical-radio />
+          <div class="vertical-icon"><Icon name="zap" size={20} /></div>
+          <div class="vertical-info">
+            <strong>Sản phẩm số & Key phần mềm</strong>
+            <p>Phần mềm, license key, tài khoản, tài liệu tải về. Tự động giao mã tức thì 24/7.</p>
           </div>
-          <div class="channel-card-check">✓</div>
+          <span class="card-check">✓</span>
         </label>
 
-        <label class="channel-card" data-channel-opt="telegram">
-          <input type="radio" name="channelSelection" value="telegram" data-channel-radio />
-          <div class="channel-card-icon"><Icon name="bot" size={20} /></div>
-          <div class="channel-card-body">
-            <strong>Chỉ Bot Telegram</strong>
-            <p>Khách hàng chỉ mua qua Bot Telegram. Tự động trả key và menu sản phẩm trong khung chat.</p>
+        <label class="vertical-card" data-vertical-option="physical">
+          <input type="radio" name="sellingVertical" value="physical" data-vertical-radio />
+          <div class="vertical-icon"><Icon name="box" size={20} /></div>
+          <div class="vertical-info">
+            <strong>Hàng hóa vật lý & Merch</strong>
+            <p>Thời trang, phụ kiện, đồ thủ công, quà tặng. Hỗ trợ biểu phí vận chuyển và địa chỉ giao hàng.</p>
           </div>
-          <div class="channel-card-check">✓</div>
+          <span class="card-check">✓</span>
         </label>
 
-        <label class="channel-card" data-channel-opt="website">
-          <input type="radio" name="channelSelection" value="website" data-channel-radio />
-          <div class="channel-card-icon"><Icon name="globe" size={20} /></div>
-          <div class="channel-card-body">
-            <strong>Chỉ Website Storefront</strong>
-            <p>Website bán hàng độc lập với địa chỉ riêng, tối ưu SEO và tùy biến thương hiệu.</p>
+        <label class="vertical-card" data-vertical-option="booking">
+          <input type="radio" name="sellingVertical" value="booking" data-vertical-radio />
+          <div class="vertical-icon"><Icon name="calendar" size={20} /></div>
+          <div class="vertical-info">
+            <strong>Dịch vụ & Lịch hẹn tư vấn</strong>
+            <p>Khóa học, tư vấn 1-1, dịch vụ kỹ thuật. Đặt lịch và xác nhận thanh toán trực tuyến.</p>
           </div>
-          <div class="channel-card-check">✓</div>
+          <span class="card-check">✓</span>
         </label>
       </div>
     </div>
 
-    <!-- Inline smart-defaults hint -->
-    <p class="smart-defaults-hint full-width">
-      Tiền tệ <code>VND</code>, ngôn ngữ <code>Tiếng Việt</code> và chính sách mẫu được áp dụng tự động — bạn có thể đổi lại bất cứ lúc nào.
-    </p>
+    <!-- Storefront Template Selector (Connected to all 9 core templates) -->
+    <div class="form-group full-width template-selection-group">
+      <div class="template-heading-row">
+        <div>
+          <label class="section-heading-label">Giao diện Storefront Mẫu</label>
+          <p class="section-subtext">Chọn giao diện khởi đầu được tối ưu riêng cho ngành hàng của bạn.</p>
+        </div>
+      </div>
 
+      <!-- Digital Templates -->
+      <div class="templates-grid" data-templates-group="digital">
+        {digitalTemplates.map((tpl, i) => (
+          <label class={`template-preset-card ${i === 0 ? "is-selected" : ""}`} data-template-id={tpl.id}>
+            <input type="radio" name="storefrontTemplate" value={tpl.id} checked={i === 0} data-template-radio />
+            <div class="tpl-swatch" data-scheme={tpl.scheme}>
+              <div class="tpl-swatch-bar"></div>
+              <div class="tpl-swatch-hero"><i></i><i></i></div>
+              <div class="tpl-swatch-grid"><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="tpl-meta">
+              <div class="tpl-name-row">
+                <strong>{tpl.name}</strong>
+                <span class="tpl-scheme-badge" data-scheme={tpl.scheme}>{tpl.scheme === "dark" ? "Giao diện Tối" : "Giao diện Sáng"}</span>
+              </div>
+              <p class="tpl-desc">
+                {tpl.id === "swift" ? "Tối giản, tải trang siêu tốc, tập trung vào nút mua ngay." : tpl.id === "pulse" ? "Phong cách Cyber/Gamer với nền tối và neon glow hiện đại." : "Bố cục ngăn nắp, bảng so sánh tính năng trực quan."}
+              </p>
+            </div>
+            <span class="card-check">✓</span>
+          </label>
+        ))}
+      </div>
+
+      <!-- Physical Templates -->
+      <div class="templates-grid" data-templates-group="physical" hidden>
+        {physicalTemplates.map((tpl, i) => (
+          <label class={`template-preset-card ${i === 0 ? "is-selected" : ""}`} data-template-id={tpl.id}>
+            <input type="radio" name="storefrontTemplate" value={tpl.id} data-template-radio />
+            <div class="tpl-swatch" data-scheme={tpl.scheme}>
+              <div class="tpl-swatch-bar"></div>
+              <div class="tpl-swatch-hero"><i></i><i></i></div>
+              <div class="tpl-swatch-grid"><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="tpl-meta">
+              <div class="tpl-name-row">
+                <strong>{tpl.name}</strong>
+                <span class="tpl-scheme-badge" data-scheme={tpl.scheme}>Giao diện Sáng</span>
+              </div>
+              <p class="tpl-desc">
+                {tpl.id === "aurora" ? "Thanh lịch, làm nổi bật hình ảnh sản phẩm và bộ sưu tập." : tpl.id === "metro" ? "Hiện đại, bố cục danh mục dạng lưới cho cửa hàng nhiều mặt hàng." : "Năng động, tối ưu giỏ hàng và thanh toán nhanh."}
+              </p>
+            </div>
+            <span class="card-check">✓</span>
+          </label>
+        ))}
+      </div>
+
+      <!-- Booking Templates -->
+      <div class="templates-grid" data-templates-group="booking" hidden>
+        {bookingTemplates.map((tpl, i) => (
+          <label class={`template-preset-card ${i === 0 ? "is-selected" : ""}`} data-template-id={tpl.id}>
+            <input type="radio" name="storefrontTemplate" value={tpl.id} data-template-radio />
+            <div class="tpl-swatch" data-scheme={tpl.scheme}>
+              <div class="tpl-swatch-bar"></div>
+              <div class="tpl-swatch-hero"><i></i><i></i></div>
+              <div class="tpl-swatch-grid"><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="tpl-meta">
+              <div class="tpl-name-row">
+                <strong>{tpl.name}</strong>
+                <span class="tpl-scheme-badge" data-scheme={tpl.scheme}>{tpl.scheme === "dark" ? "Giao diện Tối" : "Giao diện Sáng"}</span>
+              </div>
+              <p class="tpl-desc">
+                {tpl.id === "serenity" ? "Nhẹ nhàng, thư thái, tối ưu chọn khung giờ hẹn." : tpl.id === "craft" ? "Phong cách nghệ nhân, tập trung vào portfolio & dịch vụ riêng." : "Chuyên nghiệp, hồ sơ năng lực và đặt lịch tư vấn chuẩn."}
+              </p>
+            </div>
+            <span class="card-check">✓</span>
+          </label>
+        ))}
+      </div>
+    </div>
+
+    <!-- Sales Channels Selector with Authentic Provider Logos -->
+    <div class="form-group full-width">
+      <label class="section-heading-label">Kênh bán hàng kích hoạt <span class="required-star">*</span></label>
+      <div class="channel-cards-grid">
+        <label class="channel-card is-selected" data-channel-opt="both">
+          <input type="radio" name="channelSelection" value="both" checked data-channel-radio />
+          <div class="channel-card-icons">
+            <ProviderLogo name="domain" size={24} />
+            <ProviderLogo name="telegram" size={24} />
+          </div>
+          <div class="channel-card-body">
+            <div class="channel-card-title-wrap">
+              <strong>Đa Kênh (Website + Bot Telegram)</strong>
+              <span class="recommend-pill">Khuyên Dùng</span>
+            </div>
+            <p>Bán song song cả Web Storefront độc lập và Bot Telegram tự động 24/7. Khách mua ở đâu cũng nhận được sản phẩm ngay.</p>
+          </div>
+          <span class="card-check">✓</span>
+        </label>
+
+        <label class="channel-card" data-channel-opt="telegram">
+          <input type="radio" name="channelSelection" value="telegram" data-channel-radio />
+          <div class="channel-card-icons">
+            <ProviderLogo name="telegram" size={26} />
+          </div>
+          <div class="channel-card-body">
+            <strong>Chỉ Bot Telegram</strong>
+            <p>Khách hàng chỉ mua qua Bot Telegram. Tự động trả key và menu sản phẩm mượt mà trong khung chat.</p>
+          </div>
+          <span class="card-check">✓</span>
+        </label>
+
+        <label class="channel-card" data-channel-opt="website">
+          <input type="radio" name="channelSelection" value="website" data-channel-radio />
+          <div class="channel-card-icons">
+            <ProviderLogo name="domain" size={26} />
+          </div>
+          <div class="channel-card-body">
+            <strong>Chỉ Website Storefront</strong>
+            <p>Website bán hàng độc lập với địa chỉ riêng, tối ưu SEO, hỗ trợ tên miền tùy chỉnh.</p>
+          </div>
+          <span class="card-check">✓</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Smart Defaults Notice -->
+    <div class="smart-defaults-box full-width">
+      <Icon name="shield" size={16} />
+      <span>Hệ thống tự động thiết lập tiền tệ <code>VND</code>, cổng thanh toán <code>PayOS QR</code> và bảo mật đa tầng Cloudflare.</span>
+    </div>
+
+    <!-- Actions -->
     <div class="step-actions full-width">
       <button type="submit" class="btn-primary-next" data-step-submit="store">
-        <span data-btn-label>{shopsCount > 0 ? "Lưu & Tiếp Tục: Sản Phẩm" : "Tạo Cửa Hàng & Tiếp Tục"}</span>
+        <span data-btn-label>{shopsCount > 0 ? "Lưu & Tiếp Tục: Thêm Sản Phẩm" : "Tạo Cửa Hàng & Tiếp Tục"}</span>
         <span class="btn-arrow" aria-hidden="true">→</span>
       </button>
     </div>
@@ -123,47 +264,76 @@ import Icon from "../../console/Icon.astro";
 </div>
 
 <style>
-  /* Display & animation are managed globally by OnboardingShell. */
   .onboarding-step-pane {
+    display: none;
     flex-direction: column;
-    gap: 24px;
+    gap: 28px;
   }
 
-  .step-intro-header {
+  .onboarding-step-pane.is-active {
+    display: flex;
+  }
+
+  /* 3D Hero Card */
+  .step-hero-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 24px 28px;
+    border-radius: var(--sln-console-radius-container, 16px);
+    background: linear-gradient(135deg, #FFFFFF 0%, #F5F3FF 100%);
+    border: 1px solid #E4E1FC;
+    box-shadow: 0 4px 20px rgba(101, 82, 232, 0.06);
+  }
+
+  .hero-content {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
 
-  .step-num-badge {
+  .hero-step-pill {
     align-self: flex-start;
     padding: 3px 10px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-primary);
-    color: var(--sln-action-primary);
+    border-radius: var(--sln-console-radius-pill, 999px);
+    background: #6552E8;
+    color: #FFFFFF;
     font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
   }
 
-  .step-intro-header h2 {
+  .hero-content h2 {
     margin: 0;
-    font-size: clamp(22px, 3.5vw, 28px);
-    font-weight: 600;
-    color: var(--sln-text-primary);
-    letter-spacing: -0.03em;
+    font-size: clamp(20px, 3vw, 24px);
+    font-weight: 700;
+    color: #101828;
+    letter-spacing: -0.02em;
   }
 
-  .step-intro-header p {
+  .hero-content p {
     margin: 0;
-    font-size: 14px;
-    color: var(--sln-text-secondary);
+    font-size: 13.5px;
     line-height: 1.5;
+    color: #475467;
   }
 
+  .hero-image-wrap {
+    flex-shrink: 0;
+  }
+
+  .hero-illustration {
+    border-radius: 12px;
+    object-fit: cover;
+    box-shadow: 0 4px 12px rgba(101, 82, 232, 0.12);
+  }
+
+  /* Form Layout */
   .step-form-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 20px;
   }
 
@@ -180,86 +350,94 @@ import Icon from "../../console/Icon.astro";
   label {
     font-size: 13px;
     font-weight: 600;
-    color: var(--sln-text-primary);
+    color: #344054;
+  }
+
+  .section-heading-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: #101828;
+  }
+
+  .section-subtext {
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    color: #667085;
   }
 
   .required-star {
-    color: var(--sln-state-danger);
-  }
-
-  .field-hint {
-    font-size: 12px;
-    color: var(--sln-text-muted);
+    color: #E02424;
   }
 
   .input-with-icon {
-    position: relative;
     display: flex;
     align-items: center;
+    position: relative;
   }
 
   .input-icon {
     position: absolute;
-    left: 14px;
-    font-size: 16px;
+    inset-inline-start: 12px;
+    color: #667085;
     pointer-events: none;
   }
 
   .input-with-icon input {
-    padding-left: 44px;
-  }
-
-  input[type="text"] {
     width: 100%;
-    min-height: 48px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-md);
-    padding: 10px 14px;
-    background: var(--sln-bg-surface);
-    color: var(--sln-text-primary);
+    height: 44px;
+    padding-inline-start: 38px;
+    padding-inline-end: 14px;
+    border: 1px solid #D0D5DD;
+    border-radius: var(--sln-console-radius, 8px);
+    background: #FFFFFF;
     font-size: 14px;
-    outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    color: #101828;
+    transition: all 0.15s ease;
   }
 
-  input[type="text"]:focus {
-    border-color: var(--sln-focus-ring);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+  .input-with-icon input:focus {
+    outline: none;
+    border-color: #6552E8;
+    box-shadow: 0 0 0 3px rgba(101, 82, 232, 0.15);
   }
 
   .input-slug-wrap {
     display: flex;
     align-items: center;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-md);
-    background: var(--sln-bg-surface);
+    border: 1px solid #D0D5DD;
+    border-radius: var(--sln-console-radius, 8px);
+    background: #FFFFFF;
+    height: 44px;
     overflow: hidden;
-  }
-
-  .input-slug-wrap input {
-    border: none;
-    border-radius: 0;
-    min-height: 48px;
-    padding: 10px 14px;
-    flex: 1;
+    transition: all 0.15s ease;
   }
 
   .input-slug-wrap:focus-within {
-    border-color: var(--sln-focus-ring);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+    border-color: #6552E8;
+    box-shadow: 0 0 0 3px rgba(101, 82, 232, 0.15);
+  }
+
+  .input-slug-wrap input {
+    flex: 1;
+    border: none;
+    height: 100%;
+    padding: 0 14px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #101828;
+    outline: none;
   }
 
   .slug-suffix {
-    padding: 0 14px;
-    color: var(--sln-text-muted);
+    padding-inline-end: 14px;
+    color: #667085;
     font-size: 13px;
-    font-family: var(--sln-font-mono);
-    background: var(--sln-bg-subtle);
-    border-left: 1px solid var(--sln-border-default);
-    height: 48px;
+    font-weight: 500;
+    background: #F9FAFB;
+    height: 100%;
     display: flex;
     align-items: center;
-    user-select: none;
+    border-inline-start: 1px solid #EAECF0;
   }
 
   .slug-status {
@@ -267,7 +445,7 @@ import Icon from "../../console/Icon.astro";
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    color: var(--sln-state-success);
+    color: #0E9F6E;
     font-weight: 500;
   }
 
@@ -275,17 +453,244 @@ import Icon from "../../console/Icon.astro";
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--sln-state-success);
+    background: #0E9F6E;
+  }
+
+  .field-hint {
+    font-size: 12px;
+    color: #667085;
+  }
+
+  /* Vertical Cards Grid */
+  .vertical-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .vertical-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border: 1.5px solid #EAECF0;
+    border-radius: 12px;
+    background: #FFFFFF;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .vertical-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .vertical-card:hover {
+    border-color: #C7D2FE;
+    background: #FAF5FF;
+  }
+
+  .vertical-card.is-selected {
+    border-color: #6552E8;
+    background: #F4F3FF;
+    box-shadow: 0 0 0 1px #6552E8, 0 4px 12px rgba(101, 82, 232, 0.08);
+  }
+
+  .vertical-icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: #ECE9FF;
+    color: #6552E8;
+  }
+
+  .vertical-info strong {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #101828;
+    margin-bottom: 4px;
+  }
+
+  .vertical-info p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #475467;
+  }
+
+  .card-check {
+    position: absolute;
+    top: 12px;
+    inset-inline-end: 12px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #6552E8;
+    color: #FFFFFF;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 800;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: all 0.18s ease;
+  }
+
+  .vertical-card.is-selected .card-check,
+  .template-preset-card.is-selected .card-check,
+  .channel-card.is-selected .card-check {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* Templates Grid */
+  .templates-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 8px;
+  }
+
+  .template-preset-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    border: 1.5px solid #EAECF0;
+    border-radius: 12px;
+    background: #FFFFFF;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .template-preset-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .template-preset-card:hover {
+    border-color: #C7D2FE;
+    background: #FDF4FF;
+  }
+
+  .template-preset-card.is-selected {
+    border-color: #6552E8;
+    background: #F4F3FF;
+    box-shadow: 0 0 0 1px #6552E8, 0 4px 12px rgba(101, 82, 232, 0.08);
+  }
+
+  .tpl-swatch {
+    height: 72px;
+    border-radius: 8px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .tpl-swatch[data-scheme="dark"] {
+    background: #0F172A;
+    border-color: #1E293B;
+  }
+
+  .tpl-swatch-bar {
+    height: 6px;
+    width: 60%;
+    border-radius: 3px;
+    background: #6552E8;
+  }
+
+  .tpl-swatch-hero {
+    display: flex;
+    gap: 4px;
+  }
+
+  .tpl-swatch-hero i {
+    display: block;
+    height: 10px;
+    border-radius: 2px;
+    background: #E2E8F0;
+  }
+
+  .tpl-swatch[data-scheme="dark"] .tpl-swatch-hero i {
+    background: #334155;
+  }
+
+  .tpl-swatch-hero i:first-child { width: 45%; }
+  .tpl-swatch-hero i:last-child { width: 30%; }
+
+  .tpl-swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    margin-top: auto;
+  }
+
+  .tpl-swatch-grid i {
+    display: block;
+    height: 18px;
+    border-radius: 3px;
+    background: #E2E8F0;
+  }
+
+  .tpl-swatch[data-scheme="dark"] .tpl-swatch-grid i {
+    background: #1E293B;
+  }
+
+  .tpl-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .tpl-name-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .tpl-name-row strong {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #101828;
+  }
+
+  .tpl-scheme-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #F1F5F9;
+    color: #475467;
+  }
+
+  .tpl-scheme-badge[data-scheme="dark"] {
+    background: #1E293B;
+    color: #F8FAFC;
+  }
+
+  .tpl-desc {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: #667085;
   }
 
   /* Channel Cards */
-  .channels-label {
-    margin-bottom: 2px;
-  }
-
   .channel-cards-grid {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 10px;
   }
 
@@ -293,24 +698,13 @@ import Icon from "../../console/Icon.astro";
     position: relative;
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 14px 18px;
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-lg);
-    background: var(--sln-bg-surface);
+    gap: 16px;
+    padding: 16px 20px;
+    border: 1.5px solid #EAECF0;
+    border-radius: 12px;
+    background: #FFFFFF;
     cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .channel-card:hover {
-    border-color: var(--sln-border-strong);
-    background: var(--sln-bg-subtle);
-  }
-
-  .channel-card.active {
-    border-color: var(--sln-action-primary);
-    background: color-mix(in srgb, var(--sln-action-primary) 4%, var(--sln-bg-surface));
-    box-shadow: 0 0 0 1px var(--sln-action-primary);
+    transition: all 0.18s ease;
   }
 
   .channel-card input[type="radio"] {
@@ -319,83 +713,82 @@ import Icon from "../../console/Icon.astro";
     pointer-events: none;
   }
 
-  .channel-card-icon {
-    font-size: 24px;
+  .channel-card:hover {
+    border-color: #C7D2FE;
+    background: #FAF5FF;
+  }
+
+  .channel-card.is-selected {
+    border-color: #6552E8;
+    background: #F4F3FF;
+    box-shadow: 0 0 0 1px #6552E8, 0 4px 12px rgba(101, 82, 232, 0.08);
+  }
+
+  .channel-card-icons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     flex-shrink: 0;
   }
 
   .channel-card-body {
     flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
+    min-width: 0;
   }
 
   .channel-card-title-wrap {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-bottom: 3px;
   }
 
+  .channel-card-title-wrap strong,
   .channel-card-body strong {
     font-size: 14px;
-    font-weight: 600;
-    color: var(--sln-text-primary);
+    font-weight: 700;
+    color: #101828;
   }
 
   .recommend-pill {
     padding: 2px 8px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-success);
-    color: var(--sln-state-success);
+    border-radius: 999px;
+    background: #0E9F6E;
+    color: #FFFFFF;
     font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
+    font-weight: 700;
   }
 
   .channel-card-body p {
     margin: 0;
-    font-size: 12px;
-    color: var(--sln-text-secondary);
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: #475467;
+  }
+
+  /* Smart Defaults */
+  .smart-defaults-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: #F0FDF4;
+    border: 1px solid #BBF7D0;
+    color: #166534;
+    font-size: 12.5px;
     line-height: 1.4;
   }
 
-  .channel-card-check {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 1px solid var(--sln-border-strong);
-    color: transparent;
-    font-size: 12px;
+  .smart-defaults-box code {
+    background: #DCFCE7;
+    padding: 2px 6px;
+    border-radius: 4px;
     font-weight: 600;
-    transition: all 0.15s ease;
+    font-size: 11.5px;
   }
 
-  .channel-card.active .channel-card-check {
-    background: var(--sln-action-primary);
-    border-color: var(--sln-action-primary);
-    color: var(--sln-white);
-  }
-
-  /* Smart defaults inline hint */
-  .smart-defaults-hint {
-    margin: 0;
-    font-size: 12px;
-    color: var(--sln-text-muted);
-    line-height: 1.5;
-  }
-
-  .smart-defaults-hint code {
-    background: var(--sln-bg-subtle);
-    padding: 1px 6px;
-    border-radius: var(--sln-radius-sm);
-    font-size: 11px;
-    font-family: var(--sln-font-mono);
-  }
-
-  /* Step Actions */
+  /* Actions */
   .step-actions {
     display: flex;
     justify-content: flex-end;
@@ -406,26 +799,42 @@ import Icon from "../../console/Icon.astro";
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-height: 48px;
-    padding: 12px 24px;
+    padding: 12px 28px;
+    border-radius: 999px;
+    background: #6552E8;
+    color: #FFFFFF;
     border: none;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-action-primary);
-    color: var(--sln-white);
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 14.5px;
+    font-weight: 700;
     cursor: pointer;
-    transition: background 0.15s, transform 0.1s;
+    box-shadow: 0 4px 16px rgba(101, 82, 232, 0.35);
+    transition: all 0.18s ease;
   }
 
   .btn-primary-next:hover {
-    background: var(--sln-action-primary-hover);
-    transform: translateX(2px);
+    background: #5140C9;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(101, 82, 232, 0.45);
   }
 
-  .btn-primary-next:disabled {
-    opacity: 0.6;
-    cursor: wait;
-    transform: none;
+  @media (max-width: 768px) {
+    .step-hero-card {
+      flex-direction: column-reverse;
+      text-align: center;
+      padding: 20px 16px;
+    }
+
+    .hero-step-pill {
+      align-self: center;
+    }
+
+    .step-form-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .vertical-cards-grid,
+    .templates-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

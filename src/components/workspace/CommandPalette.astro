@@ -1,0 +1,224 @@
+---
+/**
+ * CommandPalette.astro
+ * Sleek, keyboard-driven navigation modal (⌘K) with frosted glass aesthetic.
+ */
+---
+
+<dialog class="command-palette-dialog" data-command-palette-dialog aria-label="Tìm kiếm nhanh">
+  <div class="command-palette-box">
+    <div class="command-palette-header">
+      <svg class="command-search-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <input
+        type="search"
+        class="command-palette-input"
+        data-command-palette-input
+        aria-label="Tìm nhanh trang, đơn hàng, cấu hình (⌘K)"
+        placeholder="Tìm nhanh trang, đơn hàng, cấu hình... (⌘K)"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <span class="command-shortcut-hint">ESC</span>
+    </div>
+
+    <div class="command-palette-results" data-command-palette-results>
+      <!-- Populated dynamically via command-palette.ts -->
+    </div>
+
+    <div class="command-palette-footer">
+      <div class="command-footer-tip">
+        <span><kbd>↑</kbd> <kbd>↓</kbd> để di chuyển</span>
+        <span><kbd>↵</kbd> để chọn</span>
+        <span><kbd>ESC</kbd> để đóng</span>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script src="../../scripts/dashboard/command-palette.ts"></script>
+
+<style>
+  .command-palette-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: var(--sln-z-dialog, 80);
+    display: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 0;
+    border: none;
+    background: rgba(16, 24, 40, 0.45);
+    backdrop-filter: blur(8px);
+    opacity: 0;
+    transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .command-palette-dialog[open] {
+    display: grid;
+    place-items: start center;
+    padding-top: clamp(40px, 12vh, 120px);
+    opacity: 1;
+  }
+
+  .command-palette-box {
+    width: min(92vw, 580px);
+    border-radius: var(--sln-console-radius-container, 14px);
+    border: 1px solid var(--sln-glass-border, rgba(227, 230, 239, 0.8));
+    background: var(--sln-glass-bg, rgba(255, 255, 255, 0.95));
+    backdrop-filter: blur(20px);
+    box-shadow: var(--sln-console-shadow-overlay, 0 8px 24px rgba(16, 24, 40, 0.12));
+    overflow: hidden;
+    animation: commandSlideDown 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes commandSlideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-16px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .command-palette-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--sln-console-line, #e3e6ef);
+  }
+
+  .command-search-icon {
+    width: 18px;
+    height: 18px;
+    stroke: var(--sln-console-ink-3, #667085);
+    stroke-width: 2;
+    fill: none;
+    flex-shrink: 0;
+  }
+
+  .command-palette-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--sln-console-ink, #101828);
+    outline: none;
+  }
+
+  .command-palette-input::placeholder {
+    color: var(--sln-console-ink-3, #667085);
+    font-weight: 400;
+  }
+
+  .command-shortcut-hint {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--sln-console-line, #e3e6ef);
+    background: var(--sln-console-raised, #f6f7fa);
+    color: var(--sln-console-ink-3, #667085);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .command-palette-results {
+    max-height: 340px;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  :global(.command-item) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: var(--sln-console-radius, 8px);
+    color: var(--sln-console-ink, #101828);
+    text-decoration: none;
+    transition: background 0.12s ease;
+  }
+
+  :global(.command-item:hover),
+  :global(.command-item.is-selected) {
+    background: var(--sln-console-accent-soft, #ece9ff);
+    color: var(--sln-console-accent, #6552e8);
+  }
+
+  :global(.command-item__body) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  :global(.command-item__title) {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  :global(.command-item__category) {
+    font-size: 11px;
+    color: var(--sln-console-ink-3, #667085);
+  }
+
+  :global(.command-item.is-selected .command-item__category) {
+    color: var(--sln-console-accent, #6552e8);
+    opacity: 0.8;
+  }
+
+  :global(.command-item__enter) {
+    font-size: 12px;
+    color: var(--sln-console-ink-3, #667085);
+    opacity: 0;
+  }
+
+  :global(.command-item.is-selected .command-item__enter) {
+    opacity: 1;
+    color: var(--sln-console-accent, #6552e8);
+  }
+
+  :global(.command-empty) {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--sln-console-ink-3, #667085);
+    font-size: 13px;
+  }
+
+  .command-palette-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    border-top: 1px solid var(--sln-console-line, #e3e6ef);
+    background: var(--sln-console-raised, #f6f7fa);
+    font-size: 11px;
+    color: var(--sln-console-ink-3, #667085);
+  }
+
+  .command-footer-tip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .command-footer-tip kbd {
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    border: 1px solid var(--sln-console-line, #e3e6ef);
+    background: #fff;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+  }
+</style>

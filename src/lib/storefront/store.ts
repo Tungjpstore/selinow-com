@@ -121,10 +121,10 @@ export type StorefrontShop = {
   theme: StorefrontTheme;
 };
 
-function storefrontAccess(status: string, subscriptionState: string, trialEndsAt: string | null, graceEndsAt: string | null, currentPeriodEnd: string | null): StorefrontAccess {
-  if (status === "draft") return "coming_soon";
-  if (status === "active" && subscriptionAllows({ currentPeriodEnd, graceEndsAt, subscriptionState, trialEndsAt })) return "live";
-  return "suspended";
+function storefrontAccess(status: string, subscriptionState: string, trialEndsAt: string | null, graceEndsAt: string | null, currentPeriodEnd: string | null, publishedVersion: number): StorefrontAccess {
+  if (status === "draft" && publishedVersion < 1) return "coming_soon";
+  if ((status === "active" || (status === "draft" && publishedVersion >= 1)) && subscriptionAllows({ currentPeriodEnd, graceEndsAt, subscriptionState, trialEndsAt })) return "live";
+  return status === "draft" ? "coming_soon" : "suspended";
 }
 
 function safeJson(value: string): Record<string, unknown> {
@@ -258,7 +258,7 @@ export async function resolveStorefrontShop(request: Request, env: AppBindings):
     templateId: content.templateId,
   });
   return {
-    access: storefrontAccess(row.status, subscriptionState, row.trialEndsAt, row.graceEndsAt, row.currentPeriodEnd),
+    access: storefrontAccess(row.status, subscriptionState, row.trialEndsAt, row.graceEndsAt, row.currentPeriodEnd, row.settingsVersion),
     canonicalHostname: row.canonicalHostname === null || (row.canonicalDomainType === "custom" && !customDomainEntitled)
       ? null
       : normalizeHostname(row.canonicalHostname),

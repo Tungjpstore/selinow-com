@@ -1,18 +1,27 @@
 ---
+import Icon from "../../console/Icon.astro";
+import ProviderLogo from "../../console/ProviderLogo.astro";
+
 type Props = {
   platformBaseDomain: string;
 };
 
 const { platformBaseDomain } = Astro.props;
-import Icon from "../../console/Icon.astro";
 ---
 
-<div class="onboarding-step-pane" data-step-pane="launch" hidden>
+<div class="onboarding-step-pane" data-step-pane="launch">
   <!-- Pre-launch review -->
   <div data-launch-review>
-    <div class="step-intro-header">
-      <h2>Kiểm tra & Mở Bán</h2>
-      <p>Xem lại toàn bộ cấu hình, bổ sung thông tin liên hệ nếu cần và kích hoạt cửa hàng của bạn.</p>
+    <!-- 3D Hero Banner -->
+    <div class="step-hero-card">
+      <div class="hero-content">
+        <span class="hero-step-pill">BƯỚC 5 / 5</span>
+        <h2>Kiểm tra Sẵn sàng & Mở Bán</h2>
+        <p>Kiểm tra danh mục cấu hình, xác nhận kết nối và mở bán cửa hàng trực tuyến của bạn ngay hôm nay.</p>
+      </div>
+      <div class="hero-image-wrap">
+        <img src="/illustrations/onboarding-launch.jpg" alt="" class="hero-illustration" width="130" height="130" />
+      </div>
     </div>
 
     <!-- Configuration summary -->
@@ -34,14 +43,14 @@ import Icon from "../../console/Icon.astro";
         </div>
       </div>
       <div class="summary-card" data-launch-card-payos>
-        <span class="summary-icon"><Icon name="card" size={20} /></span>
+        <div class="summary-provider-logo"><ProviderLogo name="payos" size={24} /></div>
         <div class="summary-body">
           <small>Thanh toán PayOS</small>
           <strong data-launch-summary-payos>Chưa kết nối</strong>
         </div>
       </div>
       <div class="summary-card" data-launch-card-telegram>
-        <span class="summary-icon"><Icon name="bot" size={20} /></span>
+        <div class="summary-provider-logo"><ProviderLogo name="telegram" size={24} /></div>
         <div class="summary-body">
           <small>Bot Telegram</small>
           <strong data-launch-summary-telegram>Chưa kết nối</strong>
@@ -91,69 +100,71 @@ import Icon from "../../console/Icon.astro";
     <div class="launch-checklist">
       <div class="checklist-row" data-launch-check="shop">
         <span class="check-dot"></span>
-        <span class="check-text">Cửa hàng đã được tạo</span>
+        <span class="check-text">Cửa hàng đã được tạo thành công</span>
       </div>
       <div class="checklist-row" data-launch-check="product">
         <span class="check-dot"></span>
-        <span class="check-text">Có ít nhất một sản phẩm</span>
+        <span class="check-text">Có ít nhất một sản phẩm khởi đầu</span>
       </div>
       <div class="checklist-row" data-launch-check="inventory">
         <span class="check-dot"></span>
-        <span class="check-text">Kho key đã được nạp (hoặc giao thủ công)</span>
+        <span class="check-text">Kho key đã sẵn sàng giao tự động</span>
       </div>
       <div class="checklist-row" data-launch-check="payos">
         <span class="check-dot"></span>
-        <span class="check-text">PayOS đã kết nối để nhận thanh toán</span>
+        <span class="check-text">PayOS VietQR đã kết nối nhận tiền</span>
       </div>
       <div class="checklist-row" data-launch-check="telegram">
         <span class="check-dot"></span>
-        <span class="check-text">Bot Telegram đã kết nối</span>
+        <span class="check-text">Bot Telegram đã kết nối 24/7</span>
       </div>
     </div>
 
-    <div class="step-actions split-actions">
+    <div class="step-actions split-actions full-width">
       <button type="button" class="btn-secondary-back" data-step-back="connect">
         ← Quay lại
       </button>
       <button type="button" class="btn-primary-launch" data-step-submit="launch">
-        <span data-btn-label>Hoàn Tất & Mở Bán Ngay</span>
+        <span data-btn-label>🚀 Xác Nhận & Mở Bán Cửa Hàng</span>
       </button>
     </div>
   </div>
 
-  <!-- Celebration (hidden until publish) -->
+  <!-- Celebration (revealed on publish) -->
   <div class="celebration-pane" data-launch-celebration hidden>
+    <div class="celebration-hero-art">
+      <img src="/illustrations/onboarding-launch.jpg" alt="" class="celebration-illustration" width="160" height="160" />
+    </div>
     <div class="celebration-badge-wrap">
-      
-      <span class="celebration-glow-pill">KÍCH HOẠT THÀNH CÔNG</span>
-      <h2>Cửa Hàng Của Bạn Đã Sẵn Sàng!</h2>
-      <p>Chúc mừng bạn! Cấu hình cốt lõi đã hoàn tất. Cửa hàng số và bot tự động sẵn sàng nhận đơn và giao key 24/7.</p>
+      <span class="celebration-glow-pill">KÍCH HOẠT THÀNH CÔNG 🎉</span>
+      <h2>Cửa Hàng Của Bạn Đã Mở Bán Trực Tuyến!</h2>
+      <p>Chúc mừng bạn! Cửa hàng đã được triển khai hoàn chỉnh. Hệ thống sẵn sàng nhận đơn, tạo mã QR ngân hàng và tự động trả key cho khách hàng 24/7.</p>
     </div>
 
     <div class="celebration-links-cards">
       <a href="#" target="_blank" rel="noreferrer" class="launch-link-card" data-celebration-storefront-link>
-        <div class="launch-card-icon"><Icon name="globe" size={20} /></div>
+        <div class="launch-card-icon"><ProviderLogo name="domain" size={28} /></div>
         <div class="launch-card-info">
-          <strong>Mở Website Bán Hàng</strong>
+          <strong>Website Storefront Bán Hàng</strong>
           <span data-celebration-slug-display>https://shop.{platformBaseDomain}</span>
         </div>
-        <span class="launch-arrow">↗</span>
+        <span class="launch-arrow">↗ Mở Ngay</span>
       </a>
 
       <a href="#" target="_blank" rel="noreferrer" class="launch-link-card" data-celebration-telegram-link hidden>
-        <div class="launch-card-icon"><Icon name="bot" size={20} /></div>
+        <div class="launch-card-icon"><ProviderLogo name="telegram" size={28} /></div>
         <div class="launch-card-info">
-          <strong>Mở Bot Telegram</strong>
-          <span data-celebration-bot-display>@your_bot</span>
+          <strong>Bot Telegram Tự Động 24/7</strong>
+          <span data-celebration-bot-display>@bot</span>
         </div>
-        <span class="launch-arrow">↗</span>
+        <span class="launch-arrow">↗ Mở Chat</span>
       </a>
     </div>
 
-    <div class="celebration-footer-action">
-      <a href="/app" class="btn-go-dashboard" data-celebration-dashboard-link>
-        <span>Đi Tới Bảng Điều Khiển (Dashboard)</span>
-        <span aria-hidden="true">→</span>
+    <div class="celebration-actions">
+      <a href="/app" class="btn-to-dashboard">
+        <span>Vào Trang Quản Trị Cửa Hàng (Dashboard)</span>
+        <span class="btn-arrow" aria-hidden="true">→</span>
       </a>
     </div>
   </div>
@@ -161,68 +172,103 @@ import Icon from "../../console/Icon.astro";
 
 <style>
   .onboarding-step-pane {
-    display: flex;
+    display: none;
     flex-direction: column;
     gap: 24px;
   }
 
-  .step-intro-header {
+  .onboarding-step-pane.is-active {
+    display: flex;
+  }
+
+  /* 3D Hero Card */
+  .step-hero-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 24px 28px;
+    border-radius: var(--sln-console-radius-container, 16px);
+    background: linear-gradient(135deg, #FFFFFF 0%, #F5F3FF 100%);
+    border: 1px solid #E4E1FC;
+    box-shadow: 0 4px 20px rgba(101, 82, 232, 0.06);
+    margin-bottom: 20px;
+  }
+
+  .hero-content {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
 
-  .step-num-badge {
+  .hero-step-pill {
     align-self: flex-start;
     padding: 3px 10px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-primary);
-    color: var(--sln-action-primary);
+    border-radius: var(--sln-console-radius-pill, 999px);
+    background: #6552E8;
+    color: #FFFFFF;
     font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
   }
 
-  .step-intro-header h2 {
+  .hero-content h2 {
     margin: 0;
-    font-size: clamp(22px, 3.5vw, 28px);
-    font-weight: 600;
-    color: var(--sln-text-primary);
-    letter-spacing: -0.03em;
+    font-size: clamp(20px, 3vw, 24px);
+    font-weight: 700;
+    color: #101828;
+    letter-spacing: -0.02em;
   }
 
-  .step-intro-header p {
+  .hero-content p {
     margin: 0;
-    font-size: 14px;
-    color: var(--sln-text-secondary);
+    font-size: 13.5px;
     line-height: 1.5;
+    color: #475467;
   }
 
-  /* ---- Summary grid ---- */
+  .hero-image-wrap {
+    flex-shrink: 0;
+  }
+
+  .hero-illustration {
+    border-radius: 12px;
+    object-fit: cover;
+    box-shadow: 0 4px 12px rgba(101, 82, 232, 0.12);
+  }
+
+  /* Summary Grid */
   .summary-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 12px;
+    margin-bottom: 16px;
   }
 
   .summary-card {
     display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 16px;
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-lg);
-    background: var(--sln-bg-surface);
-    transition: border-color 0.2s ease;
-  }
-
-  .summary-card.is-ready {
-    border-color: color-mix(in srgb, var(--sln-state-success) 35%, var(--sln-border-default));
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: 12px;
+    background: #FFFFFF;
+    border: 1.5px solid #EAECF0;
+    box-shadow: 0 2px 6px rgba(16, 24, 40, 0.03);
   }
 
   .summary-icon {
-    font-size: 22px;
-    line-height: 1;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: #ECE9FF;
+    color: #6552E8;
+    flex-shrink: 0;
+  }
+
+  .summary-provider-logo {
     flex-shrink: 0;
   }
 
@@ -234,79 +280,59 @@ import Icon from "../../console/Icon.astro";
   }
 
   .summary-body small {
-    font-size: 11px;
-    color: var(--sln-text-muted);
+    font-size: 11.5px;
+    color: #667085;
     font-weight: 600;
   }
 
   .summary-body strong {
     font-size: 14px;
-    font-weight: 600;
-    color: var(--sln-text-primary);
+    font-weight: 700;
+    color: #101828;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .summary-sub {
-    font-size: 11px;
-    color: var(--sln-text-muted);
-    font-family: var(--sln-font-mono);
+    font-size: 12px;
+    color: #0E9F6E;
+    font-weight: 500;
   }
 
-  /* ---- Optional settings ---- */
+  /* Optional Settings */
   .optional-settings {
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-lg);
-    background: var(--sln-bg-surface);
-    overflow: hidden;
+    border: 1px solid #EAECF0;
+    border-radius: 12px;
+    background: #FFFFFF;
+    padding: 14px 18px;
+    margin-bottom: 16px;
   }
 
   .optional-settings summary {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding: 14px 18px;
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 600;
-    color: var(--sln-text-primary);
+    color: #344054;
     cursor: pointer;
-    list-style: none;
-    transition: background 0.15s ease;
-  }
-
-  .optional-settings summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .optional-settings summary:hover {
-    background: var(--sln-bg-subtle);
+    user-select: none;
   }
 
   .optional-settings summary em {
     font-style: normal;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--sln-text-muted);
-  }
-
-  .optional-settings summary svg {
-    color: var(--sln-text-muted);
-    transition: transform 0.2s ease;
-    flex-shrink: 0;
-  }
-
-  .optional-settings[open] summary svg {
-    transform: rotate(180deg);
+    color: #667085;
+    font-weight: 400;
   }
 
   .settings-form {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    padding: 16px 18px 18px;
-    border-top: 1px solid var(--sln-border-default);
+    gap: 12px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #EAECF0;
   }
 
   .form-row {
@@ -322,185 +348,146 @@ import Icon from "../../console/Icon.astro";
   }
 
   label {
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 600;
-    color: var(--sln-text-primary);
+    color: #344054;
   }
 
-  input[type="text"], input[type="url"] {
+  input {
     width: 100%;
-    min-height: 44px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-md);
-    padding: 9px 13px;
-    background: var(--sln-bg-surface);
-    color: var(--sln-text-primary);
+    border: 1px solid #D0D5DD;
+    border-radius: 8px;
+    padding: 8px 12px;
     font-size: 13px;
-    outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-
-  input:focus {
-    border-color: var(--sln-focus-ring);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
-  }
-
-  .field-hint {
-    font-size: 11px;
-    color: var(--sln-text-muted);
+    color: #101828;
   }
 
   .btn-save-settings {
     align-self: flex-start;
-    padding: 9px 18px;
-    border: 1px solid var(--sln-action-primary);
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-primary);
-    color: var(--sln-action-primary);
-    font-size: 13px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    background: #F2F4F7;
+    border: 1px solid #D0D5DD;
+    color: #344054;
+    font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s ease;
   }
 
-  .btn-save-settings:hover {
-    background: var(--sln-action-primary);
-    color: var(--sln-white);
-  }
-
-  .btn-save-settings:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-
-  /* ---- Checklist ---- */
+  /* Checklist */
   .launch-checklist {
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-lg);
-    overflow: hidden;
-    background: var(--sln-bg-surface);
+    gap: 10px;
+    padding: 18px 20px;
+    border-radius: 12px;
+    background: #F8FAFC;
+    border: 1px solid #EAECF0;
+    margin-bottom: 20px;
   }
 
   .checklist-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--sln-border-default);
-    transition: background 0.2s ease;
-  }
-
-  .checklist-row:last-child {
-    border-bottom: none;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #475467;
   }
 
   .check-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #E2E8F0;
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 1px solid var(--sln-border-strong);
-    color: transparent;
-    font-size: 12px;
-    font-weight: 600;
     flex-shrink: 0;
-    transition: all 0.25s ease;
+    transition: all 0.2s ease;
   }
 
-  .checklist-row.is-done .check-dot {
-    background: var(--sln-state-success);
-    border-color: var(--sln-state-success);
-    color: var(--sln-white);
+  .checklist-row.is-complete .check-dot {
+    background: #0E9F6E;
   }
 
-  .checklist-row.is-done .check-dot::before {
+  .checklist-row.is-complete .check-dot::after {
     content: "✓";
+    color: #FFFFFF;
+    font-size: 11px;
+    font-weight: 800;
   }
 
-  .checklist-row.is-done .check-text {
-    color: var(--sln-text-muted);
-  }
-
-  .check-text {
-    font-size: 13px;
+  .checklist-row.is-complete {
+    color: #101828;
     font-weight: 600;
-    color: var(--sln-text-secondary);
   }
 
-  /* ---- Actions ---- */
+  /* Actions */
   .step-actions {
     display: flex;
     align-items: center;
+    gap: 12px;
+  }
+
+  .split-actions {
     justify-content: space-between;
-    margin-top: 8px;
-    padding-top: 16px;
-    border-top: 1px solid var(--sln-border-default);
   }
 
   .btn-secondary-back {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 18px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-bg-surface);
-    color: var(--sln-text-secondary);
-    font-size: 13px;
+    padding: 12px 22px;
+    border-radius: 999px;
+    background: #FFFFFF;
+    border: 1.5px solid #D0D5DD;
+    color: #344054;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-  }
-
-  .btn-secondary-back:hover {
-    background: var(--sln-bg-subtle);
-    color: var(--sln-text-primary);
   }
 
   .btn-primary-launch {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-height: 48px;
-    padding: 12px 26px;
+    padding: 14px 32px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #6552E8 0%, #4338CA 100%);
+    color: #FFFFFF;
     border: none;
-    border-radius: var(--sln-radius-pill);
-    background: linear-gradient(135deg, var(--sln-state-success), #059669);
-    color: var(--sln-white);
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 800;
     cursor: pointer;
-    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
-    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 6px 20px rgba(101, 82, 232, 0.4);
+    transition: all 0.18s ease;
   }
 
   .btn-primary-launch:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(101, 82, 232, 0.5);
   }
 
-  .btn-primary-launch:disabled {
-    opacity: 0.6;
-    cursor: wait;
-    transform: none;
-  }
-
-  /* ---- Celebration ---- */
+  /* Celebration Pane */
   .celebration-pane {
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
-    gap: 28px;
-    padding: 24px 12px 12px;
-    animation: celebrationPop 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    gap: 24px;
+    padding: 32px 20px;
+    animation: celebrationFadeIn 0.4s ease forwards;
   }
 
-  @keyframes celebrationPop {
-    0% { opacity: 0; transform: scale(0.92); }
-    100% { opacity: 1; transform: scale(1); }
+  @keyframes celebrationFadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .celebration-hero-art {
+    margin-bottom: 8px;
+  }
+
+  .celebration-illustration {
+    border-radius: 20px;
+    box-shadow: 0 8px 30px rgba(101, 82, 232, 0.2);
   }
 
   .celebration-badge-wrap {
@@ -508,44 +495,32 @@ import Icon from "../../console/Icon.astro";
     flex-direction: column;
     align-items: center;
     gap: 12px;
-    max-width: 520px;
-  }
-
-  .celebration-fireworks {
-    font-size: 54px;
-    line-height: 1;
-    animation: bounce 1.5s infinite alternate ease-in-out;
-  }
-
-  @keyframes bounce {
-    0% { transform: translateY(0) scale(1); }
-    100% { transform: translateY(-8px) scale(1.1); }
+    max-width: 580px;
   }
 
   .celebration-glow-pill {
     padding: 4px 14px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-success);
-    color: var(--sln-state-success);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    border: 1px solid color-mix(in srgb, var(--sln-state-success) 30%, transparent);
+    border-radius: 999px;
+    background: #DCFCE7;
+    color: #15803D;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
   }
 
   .celebration-badge-wrap h2 {
     margin: 0;
-    font-size: clamp(24px, 4vw, 32px);
-    font-weight: 600;
-    color: var(--sln-text-primary);
+    font-size: clamp(24px, 4vw, 30px);
+    font-weight: 800;
+    color: #101828;
     letter-spacing: -0.03em;
   }
 
   .celebration-badge-wrap p {
     margin: 0;
-    font-size: 15px;
-    color: var(--sln-text-secondary);
+    font-size: 14.5px;
     line-height: 1.6;
+    color: #475467;
   }
 
   .celebration-links-cards {
@@ -553,30 +528,30 @@ import Icon from "../../console/Icon.astro";
     flex-direction: column;
     gap: 12px;
     width: 100%;
-    max-width: 480px;
+    max-width: 520px;
   }
 
   .launch-link-card {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 16px;
     padding: 16px 20px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-lg);
-    background: var(--sln-bg-surface);
+    border-radius: 14px;
+    background: #FFFFFF;
+    border: 1.5px solid #EAECF0;
     text-decoration: none;
-    transition: all 0.15s ease;
-    box-shadow: var(--sln-shadow-xs);
+    transition: all 0.18s ease;
+    box-shadow: 0 2px 8px rgba(16, 24, 40, 0.04);
   }
 
   .launch-link-card:hover {
-    border-color: var(--sln-action-primary);
+    border-color: #6552E8;
+    background: #F4F3FF;
     transform: translateY(-2px);
-    box-shadow: var(--sln-shadow-md);
+    box-shadow: 0 6px 20px rgba(101, 82, 232, 0.15);
   }
 
   .launch-card-icon {
-    font-size: 26px;
     flex-shrink: 0;
   }
 
@@ -584,79 +559,66 @@ import Icon from "../../console/Icon.astro";
     flex: 1;
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: 2px;
-    text-align: left;
-    min-width: 0;
   }
 
   .launch-card-info strong {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--sln-text-primary);
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #101828;
   }
 
   .launch-card-info span {
-    font-size: 12px;
-    color: var(--sln-action-primary);
-    font-family: var(--sln-font-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 13px;
+    color: #6552E8;
+    font-weight: 500;
   }
 
   .launch-arrow {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--sln-text-muted);
+    font-size: 13px;
+    font-weight: 700;
+    color: #6552E8;
   }
 
-  .celebration-footer-action {
-    margin-top: 8px;
-    width: 100%;
-    max-width: 480px;
+  .celebration-actions {
+    margin-top: 12px;
   }
 
-  .btn-go-dashboard {
-    display: flex;
+  .btn-to-dashboard {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
     gap: 10px;
-    width: 100%;
-    min-height: 52px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-action-primary);
-    color: var(--sln-white);
+    padding: 14px 36px;
+    border-radius: 999px;
+    background: #101828;
+    color: #FFFFFF;
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 700;
     text-decoration: none;
-    box-shadow: 0 4px 16px color-mix(in srgb, var(--sln-action-primary) 35%, transparent);
-    transition: transform 0.15s, background 0.15s;
+    transition: all 0.18s ease;
+    box-shadow: 0 4px 16px rgba(16, 24, 40, 0.2);
   }
 
-  .btn-go-dashboard:hover {
-    background: var(--sln-action-primary-hover);
-    transform: translateY(-2px);
+  .btn-to-dashboard:hover {
+    background: #1D2939;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(16, 24, 40, 0.3);
   }
 
-  /* ---- Responsive ---- */
-  @media (max-width: 640px) {
-    .summary-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .form-row {
-      grid-template-columns: 1fr;
-    }
-
-    .step-actions {
+  @media (max-width: 768px) {
+    .step-hero-card {
       flex-direction: column-reverse;
-      gap: 12px;
-      align-items: stretch;
+      text-align: center;
+      padding: 20px 16px;
     }
 
-    .btn-primary-launch, .btn-secondary-back {
-      width: 100%;
-      justify-content: center;
+    .hero-step-pill {
+      align-self: center;
+    }
+
+    .summary-grid, .form-row {
+      grid-template-columns: 1fr;
     }
   }
 </style>

@@ -10,7 +10,7 @@ import { getBindings } from "../../lib/platform/bindings";
 import { getPaymentIntegration, type PaymentIntegrationView } from "../../lib/payments/integrations";
 import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
 import { createDashboardTranslator } from "../../lib/i18n";
-import Icon from "../../components/console/Icon.astro";
+import ProviderLogo from "../../components/console/ProviderLogo.astro";
 
 const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
@@ -62,7 +62,7 @@ const integrationClientCopy = {
 };
 ---
 
-<AppLayout activePath="/app/payments" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.nav.payments")}>
+<AppLayout activePath="/app/payments" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={`${t("dashboard.integrations.group.payments.title")} — Selinow`}>
   <div
     class="payments-page"
     data-payments-workspace
@@ -99,8 +99,8 @@ const integrationClientCopy = {
         <div class="workspace-feedback" data-workspace-feedback role="status" aria-live="polite" hidden></div>
         <section class="integration-group" aria-label={t("dashboard.integrations.group.payments.title")}>
           <article class="integration-row" data-provider-row="payos" data-readable={canReadProviders && payosError === null ? "true" : "false"}>
-            <div class="provider-mark provider-mark-payos" aria-hidden="true"><Icon name="card" size={18} /></div>
-            <div class="provider-copy"><h3>PayOS</h3><p class="provider-summary" data-summary>{canReadProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? payosView.checked : unavailablePayos.checked}</p></div>
+            <div class="provider-mark" aria-hidden="true"><ProviderLogo name="payos" size={28} /></div>
+            <div class="provider-copy"><h3>PayOS (VietQR)</h3><p class="provider-summary" data-summary>{canReadProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? payosView.checked : unavailablePayos.checked}</p></div>
             <StatusBadge label={canReadProviders ? payosView.label : unavailablePayos.label} tone={canReadProviders ? payosView.tone : unavailablePayos.tone} />
             <div class="provider-actions">
               {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{payos === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note" data-reason-code={canReadProviders ? "owner_required" : "permission_unavailable"}>{canReadProviders ? t("dashboard.integrations.channel_expansion.read_only") : t("dashboard.integrations.provider.unavailable")}</span>}

@@ -1,0 +1,100 @@
+---
+/**
+ * Authentic Provider & Platform Logos — Faithful to official brand vectors and colors.
+ * Used across Onboarding, Integrations, Payments, and Domains.
+ */
+type Props = {
+  name: "telegram" | "cloudflare" | "payos" | "zalo" | "discord" | "whatsapp" | "dodo" | "vietqr" | "bank" | "domain";
+  size?: number;
+  class?: string;
+};
+
+const { name, size = 24, class: className } = Astro.props;
+---
+
+{name === "telegram" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="sln-tg-grad" x1="16" y1="0" x2="16" y2="32" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#2AABEE" />
+        <stop offset="1" stop-color="#229ED9" />
+      </linearGradient>
+    </defs>
+    <circle cx="16" cy="16" r="16" fill="url(#sln-tg-grad)" />
+    <path d="M7 15.5L23.5 9.2c.8-.3 1.4.1 1.2 1.1l-2.8 13.2c-.2 1-.8 1.2-1.6.8l-4.3-3.2-2.1 2c-.2.2-.4.4-.8.4l.3-4.4 8-7.2c.3-.3-.1-.5-.5-.2L11 17.8l-4.2-1.3c-.9-.3-.9-.9.2-1z" fill="#FFFFFF" />
+  </svg>
+)}
+
+{name === "cloudflare" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#FFF7ED" />
+    <path d="M23.3 18.2c-.1-.7-.4-1.3-.9-1.8-.4-.4-1-.7-1.6-.8-.2-.8-.7-1.6-1.4-2.1-.8-.6-1.8-.9-2.8-.8-1.3.1-2.4.7-3.1 1.7-.5-.3-1.1-.4-1.7-.3-.6.1-1.1.4-1.5.8-.4.5-.6 1.1-.6 1.7-.5.1-.9.4-1.2.7-.3.4-.5.9-.5 1.4 0 .6.2 1.1.6 1.5.4.4.9.7 1.5.7h13.2c.6 0 1.2-.2 1.6-.6.4-.4.7-1 .7-1.6 0-.8-.3-1.5-.7-2.1z" fill="#F38020" />
+    <path d="M19.8 19.5c.2-.5.1-1-.1-1.4-.3-.4-.7-.7-1.2-.8h-.4c-.1 0-.2-.1-.2-.2 0-.4-.2-.8-.5-1.1-.4-.3-.8-.5-1.3-.5-.7 0-1.3.3-1.7.9-.1.1-.2.2-.3.2-.3 0-.6.1-.8.4-.2.3-.3.6-.3.9 0 .1-.1.2-.2.2h-.4c-.3 0-.6.1-.8.3-.2.2-.4.5-.4.8 0 .3.1.6.4.8.2.2.5.3.8.3h6.6c.3 0 .7-.1.9-.4.2-.3.4-.6.4-.9z" fill="#FAAE40" />
+  </svg>
+)}
+
+{name === "payos" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#F0FDF4" />
+    <path d="M7 11a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H10a3 3 0 0 1-3-3V11z" fill="#0066CC" />
+    <path d="M7 13h18v3H7v-3z" fill="#00D26A" />
+    <rect x="10" y="18" width="4" height="2" rx="0.5" fill="#FFFFFF" opacity="0.9" />
+    <rect x="16" y="18" width="6" height="2" rx="0.5" fill="#FFFFFF" opacity="0.6" />
+  </svg>
+)}
+
+{name === "zalo" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#0068FF" />
+    <path d="M16 7c-5 0-9 3.4-9 7.6 0 2.4 1.3 4.6 3.4 6l-.8 2.8c-.1.3.2.6.5.4l3.3-1.7c.8.2 1.7.3 2.6.3 5 0 9-3.4 9-7.6S21 7 16 7z" fill="#FFFFFF" />
+    <text x="16" y="17.5" fill="#0068FF" font-size="7" font-weight="900" text-anchor="middle" font-family="system-ui, sans-serif">Zalo</text>
+  </svg>
+)}
+
+{name === "discord" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#5865F2" />
+    <path d="M22.7 9.8c-1.3-.6-2.7-1-4.2-1.3-.2.3-.4.8-.5 1.1-1.6-.2-3.1-.2-4.6 0-.2-.4-.4-.8-.6-1.1-1.5.3-2.9.7-4.2 1.3-2.6 3.9-3.3 7.7-3 11.5 1.7 1.3 3.4 2.1 5.1 2.6.4-.6.8-1.2 1.1-1.8-1-.4-2-.9-2.8-1.5.2-.2.5-.3.7-.5 3.3 1.5 6.8 1.5 10 0 .2.2.5.3.7.5-.9.6-1.8 1.1-2.8 1.5.3.7.7 1.2 1.1 1.8 1.7-.5 3.4-1.3 5.1-2.6.4-4.4-.7-8.2-3.1-11.5zM12.3 18.2c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm7.4 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z" fill="#FFFFFF" />
+  </svg>
+)}
+
+{name === "whatsapp" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <circle cx="16" cy="16" r="16" fill="#25D366" />
+    <path d="M22.5 18.5c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.2-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.5-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.2.2-.3.3-.5.1-.2 0-.4 0-.5-.1-.2-.7-1.7-1-2.3-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4-.3.3-1.2 1.2-1.2 2.9s1.2 3.4 1.4 3.6c.2.2 2.4 3.7 5.8 5.1.8.3 1.4.6 1.9.7.8.3 1.6.2 2.2.1.7-.1 1.9-.8 2.2-1.5.3-.7.3-1.4.2-1.5-.1-.1-.3-.2-.6-.3z" fill="#FFFFFF" />
+  </svg>
+)}
+
+{name === "dodo" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#1E293B" />
+    <circle cx="16" cy="16" r="8" fill="#F59E0B" />
+    <path d="M14 12h4a4 4 0 0 1 4 4v0a4 4 0 0 1-4 4h-4v-8z" fill="#1E293B" />
+  </svg>
+)}
+
+{name === "vietqr" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#EFF6FF" />
+    <path d="M9 9h5v5H9V9zm9 0h5v5h-5V9zM9 18h5v5H9v-5zm11 0h3v3h-3v-3zm0 4h3v1h-3v-1zm-2-4h1v5h-1v-5z" fill="#2563EB" />
+    <rect x="10.5" y="10.5" width="2" height="2" fill="#2563EB" />
+    <rect x="19.5" y="10.5" width="2" height="2" fill="#2563EB" />
+    <rect x="10.5" y="19.5" width="2" height="2" fill="#2563EB" />
+  </svg>
+)}
+
+{name === "bank" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#F4F3FF" />
+    <path d="M8 12l8-5 8 5v2H8v-2zm2 4h2v6h-2v-6zm5 0h2v6h-2v-6zm5 0h2v6h-2v-6zM7 24h18v2H7v-2z" fill="#6552E8" />
+  </svg>
+)}
+
+{name === "domain" && (
+  <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect width="32" height="32" rx="8" fill="#FAF5FF" />
+    <circle cx="16" cy="16" r="7" stroke="#9333EA" stroke-width="1.5" />
+    <ellipse cx="16" cy="16" rx="3.5" ry="7" stroke="#9333EA" stroke-width="1.5" />
+    <line x1="9" y1="16" x2="23" y2="16" stroke="#9333EA" stroke-width="1.5" />
+  </svg>
+)}

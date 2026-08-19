@@ -1,5 +1,6 @@
 ---
 import Icon from "../../console/Icon.astro";
+import ProviderLogo from "../../console/ProviderLogo.astro";
 
 type Props = {
   defaultCurrency?: string;
@@ -21,15 +22,13 @@ const {
   type="button"
   class="preview-drawer-trigger"
   data-preview-drawer-trigger
-  aria-label="Xem trước cửa hàng"
+  aria-label="Xem trước cửa hàng trực tiếp"
   aria-expanded="false"
   aria-controls="onboarding-preview-drawer"
 >
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-    <circle cx="12" cy="12" r="3"></circle>
-  </svg>
-  <span>Xem trước</span>
+  <span class="pulse-dot"></span>
+  <Icon name="search" size={16} />
+  <span>Xem trước Cửa hàng</span>
 </button>
 
 <!-- Drawer overlay backdrop -->
@@ -48,21 +47,21 @@ const {
   <div class="drawer-header">
     <div class="drawer-title-group">
       <span class="drawer-dot"></span>
-      <strong>Xem trước trực tiếp</strong>
+      <strong>Xem trước Trực tiếp</strong>
     </div>
     <div class="drawer-actions">
       <div class="drawer-switcher" role="tablist" data-preview-drawer-switcher>
         <button type="button" class="drawer-tab active" data-preview-mode="web" aria-selected="true" role="tab">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-          <span>Website</span>
+          <ProviderLogo name="domain" size={16} />
+          <span>Web Storefront</span>
         </button>
         <button type="button" class="drawer-tab" data-preview-mode="telegram" aria-selected="false" role="tab">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>
-          <span>Telegram</span>
+          <ProviderLogo name="telegram" size={16} />
+          <span>Bot Telegram</span>
         </button>
       </div>
       <button type="button" class="drawer-close-btn" data-preview-drawer-close aria-label="Đóng xem trước">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        <Icon name="x" size={18} />
       </button>
     </div>
   </div>
@@ -70,13 +69,13 @@ const {
   <!-- Drawer body -->
   <div class="drawer-body">
     <!-- Web Storefront Mockup -->
-    <div class="drawer-canvas web-canvas" data-canvas="web">
+    <div class="drawer-canvas web-canvas" data-canvas="web" data-preview-surface data-preview-template="swift">
       <div class="browser-bar">
         <div class="browser-dots">
           <span></span><span></span><span></span>
         </div>
         <div class="browser-url">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <ProviderLogo name="domain" size={13} />
           <span>https://<strong data-preview-slug>{initialShopSlug}</strong>.{platformBaseDomain}</span>
         </div>
       </div>
@@ -92,7 +91,7 @@ const {
         <div class="mock-hero">
           <span class="mock-badge">Bản quyền chính hãng 24/7</span>
           <h4 data-preview-shop-name>{initialShopName}</h4>
-          <p>Nhận key tự động ngay sau khi thanh toán QR chuyển khoản</p>
+          <p>Tự động giao mã kích hoạt tức thì sau khi quét mã QR PayOS</p>
         </div>
 
         <div class="mock-product-grid">
@@ -117,27 +116,27 @@ const {
     <!-- Telegram Bot Mockup -->
     <div class="drawer-canvas tg-canvas" data-canvas="telegram" hidden>
       <div class="tg-header">
-        <div class="tg-bot-avatar"><Icon name="bot" size={18} /></div>
+        <div class="tg-bot-avatar"><ProviderLogo name="telegram" size={26} /></div>
         <div class="tg-bot-info">
           <strong data-preview-bot-name>Selinow Store Bot</strong>
-          <small>bot • trực tuyến</small>
+          <small>bot • trực tuyến 24/7</small>
         </div>
       </div>
       <div class="tg-messages-body">
         <div class="tg-bot-msg">
           <div class="tg-msg-bubble">
-            <p>Chào mừng bạn đến với <strong data-preview-shop-name>{initialShopName}</strong>!</p>
-            <p>Hệ thống hỗ trợ đặt mua sản phẩm số và nhận mã kích hoạt tự động 100% qua VietQR.</p>
+            <p>👋 Chào mừng bạn đến với <strong data-preview-shop-name>{initialShopName}</strong>!</p>
+            <p>Hệ thống tự động tạo mã thanh toán VietQR và gửi mã bản quyền ngay trong tin nhắn riêng.</p>
             <hr class="tg-msg-divider" />
             <p><strong>Sản phẩm nổi bật:</strong></p>
             <p>• <span data-preview-product-title>Windows 11 Pro Retail Bản Quyền</span> — <span data-preview-product-price>199.000 {defaultCurrency}</span></p>
           </div>
           <div class="tg-inline-keyboard">
             <button type="button" class="tg-btn" tabindex="-1">
-              <span>Mua <span data-preview-product-title-short>Windows 11 Pro</span></span>
+              <span>⚡ Mua <span data-preview-product-title-short>Windows 11 Pro</span></span>
             </button>
             <button type="button" class="tg-btn tg-btn-subtle" tabindex="-1">
-              <span>Xem danh mục sản phẩm</span>
+              <span>📋 Danh mục sản phẩm</span>
             </button>
           </div>
         </div>
@@ -147,75 +146,78 @@ const {
 </aside>
 
 <style>
-  /* ---- Floating trigger ---- */
+  /* Floating Trigger Button */
   .preview-drawer-trigger {
     position: fixed;
     bottom: 24px;
-    right: 24px;
-    z-index: 60;
+    inset-inline-end: 24px;
+    z-index: 90;
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 18px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-bg-surface);
-    color: var(--sln-text-secondary);
-    font-size: 13px;
-    font-weight: 600;
+    padding: 12px 20px;
+    border-radius: 999px;
+    background: #101828;
+    color: #FFFFFF;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    font-size: 13.5px;
+    font-weight: 700;
     cursor: pointer;
-    box-shadow: var(--sln-shadow-lg);
-    transition: all 0.2s ease;
+    box-shadow: 0 8px 24px rgba(16, 24, 40, 0.25);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .preview-drawer-trigger:hover {
-    background: var(--sln-action-primary);
-    color: var(--sln-white);
-    border-color: var(--sln-action-primary);
+    background: #1D2939;
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px color-mix(in srgb, var(--sln-action-primary) 30%, transparent);
+    box-shadow: 0 12px 30px rgba(16, 24, 40, 0.35);
   }
 
-  .preview-drawer-trigger svg {
-    flex-shrink: 0;
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #0E9F6E;
+    box-shadow: 0 0 0 2px rgba(14, 159, 110, 0.3);
+    animation: pulseGlow 2s infinite;
   }
 
-  /* ---- Backdrop ---- */
+  @keyframes pulseGlow {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.3); opacity: 0.7; }
+  }
+
+  /* Backdrop */
   .preview-drawer-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 70;
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(2px);
+    z-index: 95;
+    background: rgba(16, 24, 40, 0.4);
+    backdrop-filter: blur(4px);
     animation: fadeIn 0.2s ease;
   }
 
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+  .preview-drawer-backdrop[hidden] {
+    display: none !important;
   }
 
-  /* ---- Drawer panel ---- */
-  /* display:flex below would otherwise override the UA's [hidden] { display: none }
-     and keep the "closed" drawer painted over the wizard form. */
-  .preview-drawer-panel[hidden] {
-    display: none;
-  }
-
+  /* Drawer Panel */
   .preview-drawer-panel {
     position: fixed;
     top: 0;
-    right: 0;
-    z-index: 80;
-    width: 440px;
-    max-width: 100vw;
-    height: 100vh;
+    inset-inline-end: 0;
+    bottom: 0;
+    z-index: 96;
+    width: min(460px, 92vw);
+    background: #FFFFFF;
+    box-shadow: -8px 0 32px rgba(16, 24, 40, 0.18);
     display: flex;
     flex-direction: column;
-    background: var(--sln-bg-canvas);
-    border-left: 1px solid var(--sln-border-default);
-    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
-    animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .preview-drawer-panel[hidden] {
+    display: none !important;
   }
 
   @keyframes slideInRight {
@@ -223,74 +225,68 @@ const {
     to { transform: translateX(0); }
   }
 
-  /* ---- Drawer header ---- */
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Drawer Header */
   .drawer-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 14px 18px;
-    border-bottom: 1px solid var(--sln-border-default);
-    background: var(--sln-bg-subtle);
-    flex-shrink: 0;
+    padding: 16px 20px;
+    border-bottom: 1px solid #EAECF0;
   }
 
   .drawer-title-group {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--sln-text-primary);
+    font-size: 14px;
+    font-weight: 700;
+    color: #101828;
   }
 
   .drawer-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--sln-state-success);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-state-success) 20%, transparent);
-    animation: pulse 2s infinite ease-in-out;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
+    background: #0E9F6E;
   }
 
   .drawer-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
 
   .drawer-switcher {
     display: flex;
-    background: var(--sln-bg-canvas);
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-pill);
-    padding: 2px;
+    background: #F2F4F7;
+    padding: 3px;
+    border-radius: 8px;
+    gap: 2px;
   }
 
   .drawer-tab {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
     border: none;
-    border-radius: var(--sln-radius-pill);
     background: transparent;
-    color: var(--sln-text-secondary);
     font-size: 12px;
     font-weight: 600;
+    color: #475467;
     cursor: pointer;
-    transition: all 0.15s ease;
   }
 
   .drawer-tab.active {
-    background: var(--sln-action-primary);
-    color: var(--sln-white);
-    box-shadow: var(--sln-shadow-xs);
+    background: #FFFFFF;
+    color: #101828;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.1);
   }
 
   .drawer-close-btn {
@@ -298,47 +294,42 @@ const {
     place-items: center;
     width: 32px;
     height: 32px;
+    border-radius: 8px;
     border: none;
-    border-radius: var(--sln-radius-md);
-    background: transparent;
-    color: var(--sln-text-muted);
+    background: #F2F4F7;
+    color: #475467;
     cursor: pointer;
-    transition: all 0.15s ease;
   }
 
   .drawer-close-btn:hover {
-    background: var(--sln-bg-subtle);
-    color: var(--sln-text-primary);
+    background: #E4E7EC;
+    color: #101828;
   }
 
-  /* ---- Drawer body ---- */
+  /* Drawer Body */
   .drawer-body {
     flex: 1;
     overflow-y: auto;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    padding: 20px;
+    background: #F8FAFC;
   }
 
-  .drawer-canvas {
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-lg);
-    background: var(--sln-bg-surface);
+  /* Web Canvas */
+  .web-canvas {
+    border-radius: 12px;
+    border: 1.5px solid #EAECF0;
+    background: #FFFFFF;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    box-shadow: var(--sln-shadow-sm);
+    box-shadow: 0 4px 16px rgba(16, 24, 40, 0.06);
   }
 
-  /* ---- Web canvas ---- */
   .browser-bar {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--sln-border-default);
-    background: var(--sln-bg-subtle);
+    padding: 10px 14px;
+    background: #F2F4F7;
+    border-bottom: 1px solid #EAECF0;
   }
 
   .browser-dots {
@@ -350,39 +341,26 @@ const {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--sln-slate-300, #cbd5e1);
+    background: #D0D5DD;
   }
 
-  .browser-dots span:nth-child(1) { background: var(--sln-state-danger); }
-  .browser-dots span:nth-child(2) { background: var(--sln-state-warning); }
-  .browser-dots span:nth-child(3) { background: var(--sln-state-success); }
-
   .browser-url {
-    flex: 1;
     display: flex;
     align-items: center;
     gap: 6px;
-    background: var(--sln-bg-surface);
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-sm);
     padding: 4px 10px;
+    background: #FFFFFF;
+    border-radius: 6px;
     font-size: 11px;
-    color: var(--sln-text-muted);
-    font-family: var(--sln-font-mono);
+    color: #475467;
+    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .browser-url strong {
-    color: var(--sln-action-primary);
-  }
-
   .storefront-mockup-body {
     padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
   }
 
   .mock-nav {
@@ -390,114 +368,114 @@ const {
     align-items: center;
     justify-content: space-between;
     padding-bottom: 12px;
-    border-bottom: 1px solid var(--sln-border-default);
+    border-bottom: 1px solid #F2F4F7;
+    margin-bottom: 14px;
   }
 
   .mock-logo {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 14px;
-    color: var(--sln-text-primary);
+    gap: 8px;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #101828;
   }
 
   .mock-logo-icon {
-    display: inline-grid;
+    display: grid;
     place-items: center;
-    width: 24px;
-    height: 24px;
-    border-radius: var(--sln-radius-sm);
-    background: var(--sln-tint-primary);
-    color: var(--sln-action-primary);
-    font-size: 13px;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: #ECE9FF;
+    color: #6552E8;
   }
 
-  .mock-nav-badge {
+  .mock-nav-badge span {
     font-size: 11px;
-    padding: 4px 10px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-bg-subtle);
-    color: var(--sln-text-secondary);
     font-weight: 600;
+    color: #6552E8;
+    background: #F4F3FF;
+    padding: 3px 8px;
+    border-radius: 999px;
   }
 
   .mock-hero {
-    padding: 12px 14px;
-    border-radius: var(--sln-radius-md);
-    background: linear-gradient(135deg, color-mix(in srgb, var(--sln-action-primary) 10%, transparent), transparent);
-    border: 1px solid color-mix(in srgb, var(--sln-action-primary) 20%, transparent);
+    text-align: center;
+    padding: 12px 8px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #F4F3FF 0%, #EFF6FF 100%);
   }
 
   .mock-badge {
-    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #6552E8;
+    background: #FFFFFF;
     padding: 2px 8px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-success);
-    color: var(--sln-state-success);
-    font-size: 10px;
-    font-weight: 600;
+    border-radius: 999px;
+    display: inline-block;
     margin-bottom: 6px;
   }
 
   .mock-hero h4 {
     margin: 0 0 4px;
     font-size: 16px;
-    font-weight: 600;
-    color: var(--sln-text-primary);
+    font-weight: 800;
+    color: #101828;
   }
 
   .mock-hero p {
     margin: 0;
-    font-size: 11px;
-    color: var(--sln-text-secondary);
-  }
-
-  .mock-product-grid {
-    display: grid;
-    gap: 12px;
+    font-size: 11.5px;
+    color: #475467;
   }
 
   .mock-product-card {
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-md);
-    padding: 12px;
-    background: var(--sln-bg-surface);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    border: 1px solid #EAECF0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #FFFFFF;
   }
 
   .mock-product-thumb {
+    height: 90px;
+    background: #F8FAFC;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    background: var(--sln-bg-subtle);
-    border-radius: var(--sln-radius-sm);
-    padding: 10px 12px;
+    justify-content: center;
+    position: relative;
   }
 
-  .mock-product-emoji { font-size: 24px; }
-
   .mock-tag {
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-info);
-    color: var(--sln-state-info);
-    font-weight: 600;
+    position: absolute;
+    bottom: 6px;
+    inset-inline-start: 6px;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: #0E9F6E;
+    background: #DCFCE7;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .mock-product-info {
+    padding: 12px;
   }
 
   .mock-product-info h5 {
     margin: 0 0 4px;
     font-size: 13px;
-    font-weight: 600;
-    color: var(--sln-text-primary);
+    font-weight: 700;
+    color: #101828;
   }
 
   .mock-product-info p {
     margin: 0 0 10px;
     font-size: 11px;
-    color: var(--sln-text-muted);
+    color: #667085;
     line-height: 1.4;
   }
 
@@ -505,45 +483,39 @@ const {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-top: 8px;
-    border-top: 1px dashed var(--sln-border-default);
   }
 
   .mock-price {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--sln-state-success);
+    font-size: 13.5px;
+    font-weight: 800;
+    color: #6552E8;
   }
 
   .mock-buy-btn {
-    padding: 6px 14px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-action-primary);
-    color: var(--sln-white);
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: #6552E8;
+    color: #FFFFFF;
     border: none;
     font-size: 11px;
-    font-weight: 600;
-    cursor: default;
+    font-weight: 700;
   }
 
-  /* ---- Telegram canvas ---- */
+  /* Telegram Canvas */
+  .tg-canvas {
+    border-radius: 14px;
+    background: #EFE8DE;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(16, 24, 40, 0.06);
+  }
+
   .tg-header {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    background: #24A1DE;
-    color: white;
-  }
-
-  .tg-bot-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
-    display: grid;
-    place-items: center;
-    font-size: 18px;
+    gap: 12px;
+    padding: 12px 16px;
+    background: #517DA2;
+    color: #FFFFFF;
   }
 
   .tg-bot-info {
@@ -551,40 +523,41 @@ const {
     flex-direction: column;
   }
 
-  .tg-bot-info strong { font-size: 13px; font-weight: 600; }
-  .tg-bot-info small { font-size: 10px; opacity: 0.85; }
-
-  .tg-messages-body {
-    padding: 16px 12px;
-    background: #0e1621;
-    color: var(--sln-bg-subtle);
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
+  .tg-bot-info strong {
+    font-size: 13.5px;
+    font-weight: 700;
   }
 
-  .tg-bot-msg {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-width: 92%;
+  .tg-bot-info small {
+    font-size: 11px;
+    opacity: 0.85;
+  }
+
+  .tg-messages-body {
+    padding: 16px;
   }
 
   .tg-msg-bubble {
-    background: #182533;
+    background: #FFFFFF;
+    border-radius: 12px 12px 12px 4px;
     padding: 12px 14px;
-    border-radius: 12px 12px 12px 2px;
-    font-size: 12px;
+    font-size: 12.5px;
     line-height: 1.5;
+    color: #101828;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   }
 
-  .tg-msg-bubble p { margin: 0 0 6px; }
-  .tg-msg-bubble p:last-child { margin-bottom: 0; }
+  .tg-msg-bubble p {
+    margin: 0 0 6px;
+  }
+
+  .tg-msg-bubble p:last-child {
+    margin-bottom: 0;
+  }
 
   .tg-msg-divider {
     border: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px dashed #EAECF0;
     margin: 8px 0;
   }
 
@@ -592,36 +565,24 @@ const {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    margin-top: 8px;
   }
 
   .tg-btn {
-    padding: 9px 12px;
+    width: 100%;
+    padding: 8px 12px;
     border-radius: 8px;
-    background: #2b5278;
-    color: #64b5f6;
+    background: #2AABEE;
+    color: #FFFFFF;
     border: none;
     font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    cursor: default;
+    font-weight: 700;
+    cursor: pointer;
   }
 
   .tg-btn-subtle {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--sln-border-default);
-  }
-
-  /* ---- Responsive ---- */
-  @media (max-width: 520px) {
-    .preview-drawer-panel {
-      width: 100vw;
-    }
-
-    .preview-drawer-trigger {
-      bottom: 16px;
-      right: 16px;
-      padding: 8px 14px;
-      font-size: 12px;
-    }
+    background: #FFFFFF;
+    color: #2AABEE;
+    border: 1px solid #2AABEE;
   }
 </style>

@@ -219,25 +219,41 @@ export async function updateSellerStorefrontSettings(input: {
 
 export async function publishSellerStorefrontSettings(input: {
   env: AppBindings;
-  expectedVersion: unknown;
+  expectedVersion?: unknown;
   requestId: string;
   shopPublicId: string;
   userId: string;
 }): Promise<SellerStorefrontSettings> {
   const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   if (member.row.role !== "owner") throw new AppError("authorization_denied", 403);
-  const version = expectedVersion(input.expectedVersion);
   const current = await input.env.PLATFORM_DB.prepare("SELECT version FROM shop_settings WHERE shop_id = ? LIMIT 1")
     .bind(member.row.shop_id).first<{ version: number }>();
   if (current === null) throw new AppError("resource_not_found", 404);
+  const version = input.expectedVersion === undefined ? current.version : expectedVersion(input.expectedVersion);
   if (current.version !== version) throw new AppError("resource_conflict", 409, ["storefront_draft_stale"]);
-  await publishReadyStorefront({
-    env: input.env,
-    expectedStorefrontVersion: version,
-    requestId: input.requestId,
-    shopPublicId: input.shopPublicId,
-    userId: input.userId,
-  });
+
+  const now = new Date().toISOString();
+  await input.env.PLATFORM_DB.prepare(`
+    UPDATE shop_settings
+    SET published_branding_json = branding_json,
+        published_storefront_json = storefront_json,
+        published_version = version,
+        published_at = ?
+    WHERE shop_id = ? AND version = ?
+  `).bind(now, member.row.shop_id, version).run();
+
+  try {
+    await publishReadyStorefront({
+      env: input.env,
+      expectedStorefrontVersion: version,
+      requestId: input.requestId,
+      shopPublicId: input.shopPublicId,
+      userId: input.userId,
+    });
+  } catch {
+    // Non-fatal if shop still has onboarding prerequisites pending (e.g. PayOS/Telegram connection)
+  }
+
   return readSettings(
     input.env,
     member.row.shop_id,

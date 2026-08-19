@@ -453,22 +453,41 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
               <div class="runtime-plan-grid">
                 {plans.map((plan) => (
                   <article class:list={["runtime-plan-card", plan.recommended === true && "runtime-plan-card-featured"]} data-reveal>
+                    {plan.recommended === true ? (
+                      <div class="plan-featured-pill">
+                        <span aria-hidden="true">💎</span>
+                        <span>{landingCopy.pricingRecommended}</span>
+                      </div>
+                    ) : (
+                      <div class="plan-starter-pill">
+                        <span aria-hidden="true">🚀</span>
+                        <span>{locale.startsWith("vi") ? "Khởi đầu chuẩn" : "Standard"}</span>
+                      </div>
+                    )}
                     <div class="runtime-plan-head">
-                      <span>{plan.recommended === true ? landingCopy.pricingRecommended : plan.code}</span>
+                      <span>{plan.code}</span>
                       <h3>{plan.name}</h3>
                     </div>
                     <div class="runtime-plan-prices">
                       {(plan.prices ?? []).map((price) => {
                         const amount = formatMarketingPrice(price, locale);
-                        return amount === null ? null : <p data-market={price.marketCode}><strong>{amount}</strong> <span>{price.interval}</span></p>;
+                        return amount === null ? null : (
+                          <p data-market={price.marketCode}>
+                            <strong>{amount}</strong> <span>/ {price.interval === "month" ? (locale.startsWith("vi") ? "tháng" : "month") : price.interval}</span>
+                          </p>
+                        );
                       })}
+                      <div class="plan-trial-badge">
+                        <span aria-hidden="true">✨</span>
+                        <span>{locale.startsWith("vi") ? "7 ngày dùng thử miễn phí" : "7-day free trial"}</span>
+                      </div>
                     </div>
                     <ul>
                       {planFeatureList(plan, locale).map((feature) => (
                         <li>{feature}</li>
                       ))}
                     </ul>
-                    <a class="kit-button kit-button-secondary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+                    <a class:list={["kit-button", plan.recommended === true ? "kit-button-primary" : "kit-button-secondary"]} href={`${env.DASHBOARD_ORIGIN}/login`}>
                       <span>{landingCopy.planCta}</span>
                       <span aria-hidden="true">→</span>
                     </a>

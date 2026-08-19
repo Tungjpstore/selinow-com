@@ -1,7 +1,6 @@
 ---
 /**
- * Metric strip — numbers on a flat surface separated by hairline dividers.
- * Replaces the per-metric bordered cards: no boxes, no shadows (proposal §4.4).
+ * Metric strip — Lumina elevated metric cards.
  */
 type Metric = {
   label: string;
@@ -16,7 +15,9 @@ const { metrics } = Astro.props;
 <div class="console-metrics" role="list">
   {metrics.map((metric) => (
     <div class="console-metric" role="listitem">
-      <span class="console-metric__label">{metric.label}</span>
+      <div class="console-metric__header">
+        <span class="console-metric__label">{metric.label}</span>
+      </div>
       <span class:list={["console-metric__value", metric.tone && metric.tone !== "neutral" ? `is-${metric.tone}` : ""]}>{metric.value}</span>
       {metric.hint && <span class="console-metric__hint">{metric.hint}</span>}
     </div>
@@ -25,29 +26,43 @@ const { metrics } = Astro.props;
 
 <style>
   .console-metrics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0;
-    border-block: 1px solid var(--sln-console-line);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    padding: 0;
   }
   .console-metric {
-    display: grid;
-    gap: 2px;
-    flex: 1 1 140px;
-    min-width: 128px;
-    padding: 14px 20px 14px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 18px;
+    border-radius: var(--sln-console-radius-container);
+    border: 1px solid var(--sln-glass-border);
+    background: var(--sln-glass-bg);
+    backdrop-filter: blur(12px);
+    box-shadow: var(--sln-console-shadow-card);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .console-metric + .console-metric { border-left: 1px solid var(--sln-console-line); padding-left: 20px; }
-  .console-metric__label { color: var(--sln-console-ink-3); font: var(--sln-console-label); text-transform: none; letter-spacing: 0.01em; }
-  .console-metric__value { color: var(--sln-console-ink); font: var(--sln-console-metric); font-variant: var(--sln-console-metric-font-variant); }
+  .console-metric:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--sln-console-shadow-glow);
+    border-color: var(--sln-console-accent);
+  }
+  .console-metric__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .console-metric__label { color: var(--sln-console-ink-3); font: var(--sln-console-label); font-size: 12px; font-weight: 500; }
+  .console-metric__value { color: var(--sln-console-ink); font: var(--sln-console-metric); font-variant: var(--sln-console-metric-font-variant); font-size: 22px; font-weight: 600; }
   .console-metric__value.is-danger { color: var(--sln-console-danger); }
   .console-metric__value.is-success { color: var(--sln-console-success); }
   .console-metric__value.is-warning { color: var(--sln-console-warning); }
-  .console-metric__hint { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
+  .console-metric__hint { color: var(--sln-console-ink-3); font: var(--sln-console-label); font-size: 11px; }
   @media (max-width: 767px) {
-    .console-metrics { border-top: 0; }
-    .console-metric { flex: 1 1 40%; padding: 10px 12px 10px 0; }
-    .console-metric + .console-metric { padding-left: 12px; }
-    .console-metric:nth-child(3) { border-left: 0; padding-left: 0; }
+    .console-metrics {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
   }
 </style>

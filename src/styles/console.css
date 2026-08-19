@@ -32,6 +32,20 @@
   --sln-console-accent-subtle: #F4F3FF;
   --sln-console-accent-ink: #FFFFFF;
 
+  /* Official Provider & Integration Brand Colors */
+  --sln-brand-telegram: #229ED9;
+  --sln-brand-telegram-bg: #E8F5FC;
+  --sln-brand-cloudflare: #F38020;
+  --sln-brand-cloudflare-bg: #FFF7ED;
+  --sln-brand-payos: #0066CC;
+  --sln-brand-payos-bg: #F0FDF4;
+  --sln-brand-zalo: #0068FF;
+  --sln-brand-zalo-bg: #EFF6FF;
+  --sln-brand-discord: #5865F2;
+  --sln-brand-discord-bg: #EEF0FF;
+  --sln-brand-whatsapp: #25D366;
+  --sln-brand-whatsapp-bg: #F0FDF4;
+
   /* Semantic states (Protected ADR 0011) */
   --sln-console-danger: #E02424;
   --sln-console-danger-tint: #FEF2F2;
@@ -55,17 +69,34 @@
   --sln-console-metric: 600 26px/30px var(--sln-font-sans);
   --sln-console-metric-font-variant: tabular-nums;
 
-  /* Geometry: 6px controls, 10px containers, pill reserved for status chips */
-  --sln-console-radius: 6px;
-  --sln-console-radius-container: 10px;
+  /* Geometry: soft rounded containers, pill chips */
+  --sln-console-radius: 8px;
+  --sln-console-radius-container: 14px;
   --sln-console-radius-pill: 999px;
 
-  /* Elevations: only interactive overlays. Static cards get neither. */
+  /* Elevations & Glows */
+  --sln-console-shadow-card: 0 1px 3px rgba(16, 24, 40, 0.04), 0 1px 2px rgba(16, 24, 40, 0.02);
+  --sln-console-shadow-glow: 0 4px 20px rgba(101, 82, 232, 0.08);
   --sln-console-shadow-overlay: 0 8px 24px rgba(16, 24, 40, 0.12), 0 2px 6px rgba(16, 24, 40, 0.08);
+
+  /* Lumina Glass & Motion Tokens */
+  --sln-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --sln-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --sln-glass-bg: rgba(255, 255, 255, 0.85);
+  --sln-glass-border: rgba(227, 230, 239, 0.8);
+  --sln-glass-blur: blur(16px);
+  --sln-ambient-gradient: radial-gradient(circle at 50% 0%, rgba(101, 82, 232, 0.06) 0%, transparent 70%);
+
+  /* HTML5 Canvas Chart Tokens */
+  --sln-chart-line: #6552E8;
+  --sln-chart-grad-top: rgba(101, 82, 232, 0.24);
+  --sln-chart-grad-bottom: rgba(101, 82, 232, 0.01);
+  --sln-chart-point: #5140C9;
+  --sln-chart-grid: rgba(227, 230, 239, 0.5);
 
   /* Shell metrics */
   --sln-console-sidebar-w: 240px;
-  --sln-console-topbar-h: 48px;
+  --sln-console-topbar-h: 56px;
   --sln-console-content-max: 1200px;
 }
 
