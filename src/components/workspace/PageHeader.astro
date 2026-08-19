@@ -6,13 +6,13 @@ interface Props {
   title: string;
 }
 
-const { description, descriptionId, eyebrow = "Workspace", title } = Astro.props;
+const { description, descriptionId, eyebrow, title } = Astro.props;
 const hasActions = Astro.slots.has("actions");
 ---
 
 <header class="sln-page-header">
   <div>
-    <p>{eyebrow}</p>
+    {eyebrow && <p>{eyebrow}</p>}
     <h1>{title}</h1>
     {description && <div class="description" id={descriptionId}>{description}</div>}
   </div>

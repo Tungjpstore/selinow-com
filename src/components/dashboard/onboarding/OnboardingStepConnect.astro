@@ -1,9 +1,9 @@
 ---
+import Icon from "../../console/Icon.astro";
 ---
 
 <div class="onboarding-step-pane" data-step-pane="connect">
   <div class="step-intro-header">
-    <span class="step-num-badge">BƯỚC 04/05</span>
     <h2>Kết nối Thanh toán & Kênh Phân phối</h2>
     <p>Liên kết cổng thanh toán QR VietQR (PayOS) và Bot Telegram để vận hành bán hàng tự động 100%.</p>
   </div>
@@ -13,7 +13,7 @@
     <section class="connect-card payos-card">
       <div class="connect-card-header">
         <div class="connect-title-icon">
-          <span class="provider-logo-badge payos-badge">QR</span>
+          <span class="provider-logo-badge payos-badge"><Icon name="card" size={18} /></span>
           <div>
             <h3>Cổng Thanh Toán VietQR (PayOS)</h3>
             <p>Khách quét mã QR chuyển khoản ngân hàng, tiền về thẳng STK cá nhân/doanh nghiệp của bạn.</p>
@@ -23,7 +23,7 @@
       </div>
 
       <div class="connect-guide-box">
-        <strong>💡 Hướng dẫn nhanh:</strong>
+        <strong>Hướng dẫn kết nối:</strong>
         <ol>
           <li>Đăng nhập <a href="https://payos.vn" target="_blank" rel="noreferrer">payos.vn ↗</a> và tạo <em>Kênh thanh toán</em> mới.</li>
           <li>Sao chép 3 thông số: <code>Client ID</code>, <code>API Key</code>, <code>Checksum Key</code> và dán vào dưới đây.</li>
@@ -57,7 +57,7 @@
     <section class="connect-card telegram-card" data-telegram-connect-section>
       <div class="connect-card-header">
         <div class="connect-title-icon">
-          <span class="provider-logo-badge telegram-badge">🤖</span>
+          <span class="provider-logo-badge telegram-badge"><Icon name="bot" size={18} /></span>
           <div>
             <h3>Bot Telegram Bán Hàng</h3>
             <p>Tự động gửi menu sản phẩm, tạo link thanh toán QR và gửi key trong tin nhắn riêng.</p>
@@ -67,7 +67,7 @@
       </div>
 
       <div class="connect-guide-box">
-        <strong>💡 Hướng dẫn nhanh:</strong>
+        <strong>Hướng dẫn kết nối:</strong>
         <ol>
           <li>Mở Telegram, tìm bot <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather ↗</a> và gửi lệnh <code>/newbot</code>.</li>
           <li>Đặt tên và username cho bot, sau đó sao chép <code>HTTP API Token</code> dán vào đây.</li>

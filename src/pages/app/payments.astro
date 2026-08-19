@@ -10,6 +10,7 @@ import { getBindings } from "../../lib/platform/bindings";
 import { getPaymentIntegration, type PaymentIntegrationView } from "../../lib/payments/integrations";
 import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
 import { createDashboardTranslator } from "../../lib/i18n";
+import Icon from "../../components/console/Icon.astro";
 
 const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
@@ -98,7 +99,7 @@ const integrationClientCopy = {
         <div class="workspace-feedback" data-workspace-feedback role="status" aria-live="polite" hidden></div>
         <section class="integration-group" aria-label={t("dashboard.integrations.group.payments.title")}>
           <article class="integration-row" data-provider-row="payos" data-readable={canReadProviders && payosError === null ? "true" : "false"}>
-            <div class="provider-mark provider-mark-payos" aria-hidden="true">PO</div>
+            <div class="provider-mark provider-mark-payos" aria-hidden="true"><Icon name="card" size={18} /></div>
             <div class="provider-copy"><h3>PayOS</h3><p class="provider-summary" data-summary>{canReadProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? payosView.checked : unavailablePayos.checked}</p></div>
             <StatusBadge label={canReadProviders ? payosView.label : unavailablePayos.label} tone={canReadProviders ? payosView.tone : unavailablePayos.tone} />
             <div class="provider-actions">

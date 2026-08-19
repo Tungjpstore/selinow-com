@@ -1,4 +1,6 @@
 ---
+import Icon from "../../console/Icon.astro";
+
 type Props = {
   defaultCurrency?: string;
   initialShopName?: string | undefined;
@@ -81,7 +83,7 @@ const {
       <div class="storefront-mockup-body">
         <header class="mock-nav">
           <div class="mock-logo">
-            <span class="mock-logo-icon">⚡</span>
+            <span class="mock-logo-icon"><Icon name="store" size={16} /></span>
             <strong data-preview-shop-name>{initialShopName}</strong>
           </div>
           <div class="mock-nav-badge"><span>Giỏ hàng (0)</span></div>
@@ -96,7 +98,7 @@ const {
         <div class="mock-product-grid">
           <article class="mock-product-card">
             <div class="mock-product-thumb">
-              <span class="mock-product-emoji" data-preview-product-icon>🪟</span>
+              <span class="mock-product-emoji" data-preview-product-icon><Icon name="box" size={24} /></span>
               <span class="mock-tag" data-preview-fulfillment>Tự động giao key</span>
             </div>
             <div class="mock-product-info">
@@ -115,7 +117,7 @@ const {
     <!-- Telegram Bot Mockup -->
     <div class="drawer-canvas tg-canvas" data-canvas="telegram" hidden>
       <div class="tg-header">
-        <div class="tg-bot-avatar">🤖</div>
+        <div class="tg-bot-avatar"><Icon name="bot" size={18} /></div>
         <div class="tg-bot-info">
           <strong data-preview-bot-name>Selinow Store Bot</strong>
           <small>bot • trực tuyến</small>
@@ -124,18 +126,18 @@ const {
       <div class="tg-messages-body">
         <div class="tg-bot-msg">
           <div class="tg-msg-bubble">
-            <p>👋 Chào mừng bạn đến với <strong data-preview-shop-name>{initialShopName}</strong>!</p>
+            <p>Chào mừng bạn đến với <strong data-preview-shop-name>{initialShopName}</strong>!</p>
             <p>Hệ thống hỗ trợ đặt mua sản phẩm số và nhận mã kích hoạt tự động 100% qua VietQR.</p>
             <hr class="tg-msg-divider" />
-            <p>🔥 <strong>Sản phẩm nổi bật:</strong></p>
+            <p><strong>Sản phẩm nổi bật:</strong></p>
             <p>• <span data-preview-product-title>Windows 11 Pro Retail Bản Quyền</span> — <span data-preview-product-price>199.000 {defaultCurrency}</span></p>
           </div>
           <div class="tg-inline-keyboard">
             <button type="button" class="tg-btn" tabindex="-1">
-              <span>🛒 Mua <span data-preview-product-title-short>Windows 11 Pro</span></span>
+              <span>Mua <span data-preview-product-title-short>Windows 11 Pro</span></span>
             </button>
             <button type="button" class="tg-btn tg-btn-subtle" tabindex="-1">
-              <span>📋 Xem danh mục sản phẩm</span>
+              <span>Xem danh mục sản phẩm</span>
             </button>
           </div>
         </div>

@@ -123,9 +123,8 @@ const mobileTabs: readonly NavItem[] = [
 
     <div class="console-shell">
       <aside class="console-sidebar" aria-label="Workspace">
-        <a class="console-brand" href={href("/app")}>
-          <span class="console-brand__mark" aria-hidden="true">S</span>
-          <span class="console-brand__name">Selinow</span>
+        <a class="console-brand" href={href("/app")} aria-label="Selinow">
+          <img src="/brand/logo/selinow-logo-primary.svg" alt="" width="112" height="28" />
         </a>
         <nav class="console-nav" aria-label={t("dashboard.console.shell.store")}>
           {nav.map((group) => (
@@ -334,7 +333,8 @@ const mobileTabs: readonly NavItem[] = [
     font: var(--sln-console-text-sm);
   }
   [data-console] .console-nav__item:hover { background: var(--sln-console-raised); color: var(--sln-console-ink); }
-  [data-console] .console-nav__item.is-active { background: var(--sln-console-raised); color: var(--sln-console-ink); font-weight: 500; }
+  [data-console] .console-nav__item.is-active { background: var(--sln-console-accent-subtle); color: var(--sln-console-accent); font-weight: 600; }
+  [data-console] .console-nav__item.is-active svg { color: var(--sln-console-accent); }
   [data-console] .console-nav__item:focus-visible { outline: none; box-shadow: var(--sln-console-focus); }
 
   [data-console] .console-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }

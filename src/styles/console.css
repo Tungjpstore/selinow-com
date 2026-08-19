@@ -15,33 +15,38 @@
  */
 
 :root {
-  /* Neutral ramp (light) */
-  --sln-console-bg: #fafafa;
-  --sln-console-surface: #ffffff;
-  --sln-console-raised: #f4f4f5;
-  --sln-console-line: #e7e7ea;
-  --sln-console-ink: #18181b;
-  --sln-console-ink-2: #52525b;
-  --sln-console-ink-3: #a1a1aa;
+  /* Neutral ramp (Selinow Canvas + Surface) */
+  --sln-console-bg: #F7F8FB;
+  --sln-console-surface: #FFFFFF;
+  --sln-console-raised: #F6F7FA;
+  --sln-console-line: #E3E6EF;
+  --sln-console-ink: #101828;
+  --sln-console-ink-2: #344054;
+  --sln-console-ink-3: #667085;
 
-  /* Single accent + semantic states (ink-first usage, tints only for state
-     surfaces and never above ~6% chroma) */
-  --sln-console-accent: #4f46e5;
-  --sln-console-accent-ink: #ffffff;
-  --sln-console-danger: #dc2626;
-  --sln-console-danger-tint: #fef2f2;
-  --sln-console-warning: #b45309;
-  --sln-console-warning-tint: #fffbeb;
-  --sln-console-success: #15803d;
-  --sln-console-success-tint: #f0fdf4;
-  --sln-console-info: #1d4ed8;
-  --sln-console-info-tint: #eff6ff;
+  /* Brand / Primary — Selinow Indigo (Matches Landing Page v5) */
+  --sln-console-accent: #6552E8;
+  --sln-console-accent-hover: #5140C9;
+  --sln-console-accent-active: #4436A5;
+  --sln-console-accent-soft: #ECE9FF;
+  --sln-console-accent-subtle: #F4F3FF;
+  --sln-console-accent-ink: #FFFFFF;
 
-  /* Focus ring is the only place the accent may appear at full width */
-  --sln-console-focus: 0 0 0 2px #ffffff, 0 0 0 4px color-mix(in srgb, var(--sln-console-accent) 55%, transparent);
+  /* Semantic states (Protected ADR 0011) */
+  --sln-console-danger: #E02424;
+  --sln-console-danger-tint: #FEF2F2;
+  --sln-console-warning: #D97706;
+  --sln-console-warning-tint: #FFFBEB;
+  --sln-console-success: #0E9F6E;
+  --sln-console-success-tint: #ECFDF5;
+  --sln-console-info: #3F83F8;
+  --sln-console-info-tint: #EFF6FF;
+
+  /* Focus ring */
+  --sln-console-focus: 0 0 0 2px #FFFFFF, 0 0 0 4px color-mix(in srgb, var(--sln-console-accent) 45%, transparent);
 
   /* Working type scale (workspace only) */
-  --sln-console-text-2xl: 600 26px/32px var(--sln-font-sans);
+  --sln-console-text-2xl: 600 24px/32px var(--sln-font-sans);
   --sln-console-text-xl: 600 20px/28px var(--sln-font-sans);
   --sln-console-text-lg: 500 16px/24px var(--sln-font-sans);
   --sln-console-text: 400 14px/22px var(--sln-font-sans);
@@ -56,10 +61,10 @@
   --sln-console-radius-pill: 999px;
 
   /* Elevations: only interactive overlays. Static cards get neither. */
-  --sln-console-shadow-overlay: 0 8px 24px rgba(24, 24, 27, 0.12), 0 2px 6px rgba(24, 24, 27, 0.08);
+  --sln-console-shadow-overlay: 0 8px 24px rgba(16, 24, 40, 0.12), 0 2px 6px rgba(16, 24, 40, 0.08);
 
   /* Shell metrics */
-  --sln-console-sidebar-w: 236px;
+  --sln-console-sidebar-w: 240px;
   --sln-console-topbar-h: 48px;
   --sln-console-content-max: 1200px;
 }
