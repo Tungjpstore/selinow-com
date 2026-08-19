@@ -20,3 +20,6 @@ selinow-frontend-source.zip
 
 # Local agent tooling plans/artifacts
 .zcode/
+
+# IDE config (IntelliJ/WebStorm)
+.idea/
