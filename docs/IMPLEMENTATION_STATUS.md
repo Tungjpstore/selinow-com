@@ -4,8 +4,13 @@ Last updated: 2026-08-18
 
 ## Current source of truth
 
-Console & Onboarding Modernization — Unified Workspace Design System (2026-08-18):
-Complete overhaul of the seller workspace (`/app/*`) and the multi-step onboarding wizard (`/onboarding`), aligning 100% of workspace interfaces to the calm, operational, light SaaS aesthetic of Landing Page v5 with Selinow Indigo (`#6552E8`), crisp white cards, 1px hairline borders (`#E3E6EF`), SVG stroke-1.5 icon system, and zero AI gradient clutter.
+Console & Onboarding Modernization — Production Release (2026-08-19, Worker Version `ccf32584-4178-4c59-8c4e-5a25e53369f1`):
+Complete overhaul of the seller workspace (`/app/*`) and the multi-step onboarding wizard (`/onboarding`), successfully deployed to Cloudflare Production at 100% traffic allocation. Fully aligned all workspace interfaces to the calm, operational, light SaaS aesthetic of Landing Page v5 with Selinow Indigo (`#6552E8`), crisp white cards, 1px hairline borders (`#E3E6EF`), SVG stroke-1.5 icon system, and zero AI gradient clutter.
+- **Worker Version**: `ccf32584-4178-4c59-8c4e-5a25e53369f1` deployed at 100% traffic to `selinow-com-production`.
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK (New primary logo & console v2 shell active)
+  - `https://selinow.com/` -> HTTP 200 OK (Marketing v5 active)
 - **Design Tokens**: Aligned `--sln-console-*` tokens in `src/styles/console.css` and `src/styles/app-shell.css` with Landing Page v5 tokens (`--sln-console-accent: #6552E8`, canvas `#F7F8FB`, surface `#FFFFFF`, line `#E3E6EF`, tabular numbers for financial/inventory figures, max font weight 600).
 - **App Shell & Console Layouts**: Streamlined navigation into 5 task-oriented seller groups (Commerce, Catalog, Automations, Channels, Settings), unified topbar shop selector, light bottom tab bar & sheet drawer for mobile, and crisp SVG logo branding (`/brand/logo/selinow-logo-primary.svg`).
 - **Icon Primitives**: Enriched `src/components/console/Icon.astro` with stroke-1.5 SVG icons for categories, channels, automations, and navigation, eliminating childish raw emojis.
