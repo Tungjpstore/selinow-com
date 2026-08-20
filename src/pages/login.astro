@@ -249,23 +249,6 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
       import "../scripts/marketing/auth";
       import "../scripts/marketing/login";
     </script>
-    <script is:inline>
-      const modeTabs = document.querySelectorAll("[data-mode-tab]");
-      const modePanels = document.querySelectorAll("[data-mode-panel]");
-      for (const tab of modeTabs) {
-        tab.addEventListener("click", () => {
-          const mode = tab.dataset.modeTab;
-          for (const t of modeTabs) {
-            const active = t === tab;
-            t.classList.toggle("is-active", active);
-            t.setAttribute("aria-selected", String(active));
-          }
-          for (const panel of modePanels) {
-            panel.hidden = panel.dataset.modePanel !== mode;
-          }
-        });
-      }
-    </script>
     {turnstileSiteKey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>}
   </body>
 </html>

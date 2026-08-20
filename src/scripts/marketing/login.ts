@@ -157,10 +157,25 @@ function appendLocalDebugLink(value: string): boolean {
   }
 }
 
-function activateMagicMode(): void {
+function setAuthMode(mode: string): void {
   document.querySelectorAll<HTMLElement>("[data-mode-tab]").forEach((tab) => {
-    if (tab.dataset.modeTab === "magic") tab.click();
+    const active = tab.dataset.modeTab === mode;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
   });
+  document.querySelectorAll<HTMLElement>("[data-mode-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.modePanel !== mode;
+  });
+}
+
+function setupModeToggle(): void {
+  document.querySelectorAll<HTMLElement>("[data-mode-tab]").forEach((tab) => {
+    tab.addEventListener("click", () => { setAuthMode(tab.dataset.modeTab ?? "password"); });
+  });
+}
+
+function activateMagicMode(): void {
+  setAuthMode("magic");
 }
 
 function showMagicLinkConfirmation(maskedDestination: string): void {
@@ -322,6 +337,7 @@ resend?.addEventListener("click", () => { form?.requestSubmit(); });
 restart?.addEventListener("click", restartLogin);
 confirmMagicLink?.addEventListener("click", () => { void consumePendingMagicLink(true); });
 window.addEventListener("hashchange", () => { consumeMagicTokenFromFragment(); });
+setupModeToggle();
 
 if (!consumeMagicTokenFromFragment() && form?.dataset.authenticatedSession === "true") {
   window.location.replace("/app");
