@@ -326,7 +326,7 @@
 .plan-prices span {
   font-size: 15px;
   font-weight: 600;
-  color: #64748B;
+  color: #475569;
   margin-left: 6px;
 }
 
@@ -420,7 +420,7 @@
   border: none;
   cursor: pointer;
   background: transparent;
-  color: #64748B;
+  color: #475569;
   transition: all 0.18s ease;
 }
 
@@ -432,7 +432,7 @@
 
 .pricing-note {
   font-size: 13.5px;
-  color: #64748B;
+  color: #475569;
   text-align: center;
   max-width: 68ch;
   margin: var(--space-6) auto 0;

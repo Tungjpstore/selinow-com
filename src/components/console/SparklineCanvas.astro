@@ -2,27 +2,49 @@
 /**
  * SparklineCanvas.astro
  * HTML5 2D Canvas component for high-performance interactive trendlines.
+ * P0: khi chưa có dữ liệu (mọi điểm = 0), hiển thị empty-state có chủ đích
+ * thay vì một đường thẳng phẳng trông như lỗi render.
  */
 interface Props {
   data: readonly { label: string; value: number }[];
   height?: number;
   title?: string;
+  emptyTitle?: string;
+  emptyHint?: string;
 }
 
-const { data = [], height = 180, title } = Astro.props;
+const {
+  data = [],
+  height = 180,
+  title,
+  emptyTitle = "Chưa có dữ liệu doanh thu",
+  emptyHint = "Khi có đơn hàng đã thanh toán, biểu đồ tốc độ tăng trưởng sẽ hiển thị ở đây.",
+} = Astro.props;
 const serializedData = JSON.stringify(data);
+const hasData = data.some((point) => point.value > 0);
 ---
 
 <div class="sparkline-card">
   {title && (
     <div class="sparkline-header">
       <h3>{title}</h3>
-      <span class="sparkline-badge">60fps Live</span>
+      {hasData && <span class="sparkline-badge">60fps Live</span>}
     </div>
   )}
-  <div class="sparkline-canvas-wrap" style={`height: ${height}px;`}>
-    <canvas class="sparkline-canvas" data-velocity-chart data-chart-data={serializedData}></canvas>
-  </div>
+  {hasData ? (
+    <div class="sparkline-canvas-wrap" style={`height: ${height}px;`}>
+      <canvas class="sparkline-canvas" data-velocity-chart data-chart-data={serializedData}></canvas>
+    </div>
+  ) : (
+    <div class="sparkline-empty" style={`height: ${height}px;`} role="status">
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 19a9 9 0 1 1 16 0" />
+        <path d="m12 14 4-5" />
+      </svg>
+      <p class="sparkline-empty__title">{emptyTitle}</p>
+      <p class="sparkline-empty__hint">{emptyHint}</p>
+    </div>
+  )}
 </div>
 
 <script src="../../scripts/dashboard/overview-charts.ts"></script>
@@ -81,4 +103,22 @@ const serializedData = JSON.stringify(data);
     display: block;
     cursor: crosshair;
   }
+
+  .sparkline-empty {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-align: center;
+    border: 1px dashed var(--sln-console-border);
+    border-radius: 10px;
+    color: var(--sln-console-ink-3);
+    background: color-mix(in srgb, var(--sln-glass-bg) 60%, transparent);
+    padding: 16px;
+  }
+  .sparkline-empty svg { color: var(--sln-console-accent); opacity: 0.7; }
+  .sparkline-empty__title { margin: 4px 0 0; font-size: 13px; font-weight: 600; color: var(--sln-console-ink-2); }
+  .sparkline-empty__hint { margin: 0; font-size: 12px; color: var(--sln-console-ink-3); max-width: 320px; }
 </style>

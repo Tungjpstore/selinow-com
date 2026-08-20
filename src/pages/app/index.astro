@@ -269,11 +269,11 @@ const chartPoints = [
       </header>
 
       <MetricStrip metrics={[
-        { label: t("dashboard.console.overview.metrics.needs_action"), value: String(needsActionCount), tone: needsActionCount > 0 ? "warning" : "neutral" },
-        { label: t("dashboard.console.overview.metrics.paid"), value: String(paidOrders.length) },
-        { label: t("dashboard.console.overview.metrics.revenue"), value: revenueLabel },
-        { label: t("dashboard.console.overview.metrics.fulfillment_rate"), value: fulfillmentLabel },
-        { label: t("dashboard.console.overview.metrics.products"), value: String(catalog.products.length) },
+        { icon: "alert", label: t("dashboard.console.overview.metrics.needs_action"), value: String(needsActionCount), tone: needsActionCount > 0 ? "warning" : "neutral" },
+        { icon: "receipt", label: t("dashboard.console.overview.metrics.paid"), value: String(paidOrders.length) },
+        { icon: "card", label: t("dashboard.console.overview.metrics.revenue"), value: revenueLabel },
+        { icon: "gauge", label: t("dashboard.console.overview.metrics.fulfillment_rate"), value: fulfillmentLabel },
+        { icon: "box", label: t("dashboard.console.overview.metrics.products"), value: String(catalog.products.length) },
       ]} />
 
       <div class="console-grid-2col">

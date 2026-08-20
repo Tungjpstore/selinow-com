@@ -1,12 +1,18 @@
 ---
 /**
  * Metric strip — Lumina elevated metric cards.
+ * P0: mỗi metric giờ có icon phân loại (đơn / doanh thu / khách / sản phẩm)
+ * và hỗ trợ delta trend + đơn vị, để phân biệt count / currency / percent.
  */
+import Icon from "./Icon.astro";
+
 type Metric = {
   label: string;
   value: string;
   hint?: string;
   tone?: "neutral" | "danger" | "success" | "warning";
+  icon?: string;
+  delta?: { text: string; direction: "up" | "down" | "flat" };
 };
 type Props = { metrics: readonly Metric[] };
 const { metrics } = Astro.props;
@@ -17,9 +23,32 @@ const { metrics } = Astro.props;
     <div class="console-metric" role="listitem">
       <div class="console-metric__header">
         <span class="console-metric__label">{metric.label}</span>
+        {metric.icon && (
+          <span class="console-metric__icon" aria-hidden="true">
+            <Icon name={metric.icon} size={16} />
+          </span>
+        )}
       </div>
       <span class:list={["console-metric__value", metric.tone && metric.tone !== "neutral" ? `is-${metric.tone}` : ""]}>{metric.value}</span>
-      {metric.hint && <span class="console-metric__hint">{metric.hint}</span>}
+      {(metric.delta || metric.hint) && (
+        <div class="console-metric__footer">
+          {metric.delta && (
+            <span class:list={["console-metric__delta", `is-${metric.delta.direction}`]}>
+              <svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                {metric.delta.direction === "down" ? (
+                  <path d="M6 3v6M3.5 6.5 6 9l2.5-2.5" />
+                ) : metric.delta.direction === "up" ? (
+                  <path d="M6 9V3M3.5 5.5 6 3l2.5 2.5" />
+                ) : (
+                  <path d="M3 6h6" />
+                )}
+              </svg>
+              {metric.delta.text}
+            </span>
+          )}
+          {metric.hint && <span class="console-metric__hint">{metric.hint}</span>}
+        </div>
+      )}
     </div>
   ))}
 </div>
@@ -52,12 +81,36 @@ const { metrics } = Astro.props;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
   }
   .console-metric__label { color: var(--sln-console-ink-3); font: var(--sln-console-label); font-size: 12px; font-weight: 500; }
+  .console-metric__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    background: var(--sln-console-accent-soft);
+    color: var(--sln-console-accent);
+    flex-shrink: 0;
+  }
   .console-metric__value { color: var(--sln-console-ink); font: var(--sln-console-metric); font-variant: var(--sln-console-metric-font-variant); font-size: 22px; font-weight: 600; }
   .console-metric__value.is-danger { color: var(--sln-console-danger); }
   .console-metric__value.is-success { color: var(--sln-console-success); }
   .console-metric__value.is-warning { color: var(--sln-console-warning); }
+  .console-metric__footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .console-metric__delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font: var(--sln-console-label);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .console-metric__delta.is-up { color: var(--sln-console-success); }
+  .console-metric__delta.is-down { color: var(--sln-console-danger); }
+  .console-metric__delta.is-flat { color: var(--sln-console-ink-3); }
   .console-metric__hint { color: var(--sln-console-ink-3); font: var(--sln-console-label); font-size: 11px; }
   @media (max-width: 767px) {
     .console-metrics {
