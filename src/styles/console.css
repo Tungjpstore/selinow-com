@@ -16,20 +16,20 @@
 
 :root {
   /* Neutral ramp (Selinow Canvas + Surface) */
-  --sln-console-bg: #F7F8FB;
+  --sln-console-bg: #F4F1F8;
   --sln-console-surface: #FFFFFF;
-  --sln-console-raised: #F6F7FA;
-  --sln-console-line: #E3E6EF;
+  --sln-console-raised: #FAF8FD;
+  --sln-console-line: #E5E0F0;
   --sln-console-ink: #101828;
   --sln-console-ink-2: #344054;
   --sln-console-ink-3: #667085;
 
   /* Brand / Primary — Selinow Indigo (Matches Landing Page v5) */
-  --sln-console-accent: #6552E8;
-  --sln-console-accent-hover: #5140C9;
-  --sln-console-accent-active: #4436A5;
-  --sln-console-accent-soft: #ECE9FF;
-  --sln-console-accent-subtle: #F4F3FF;
+  --sln-console-accent: #6C5CE7;
+  --sln-console-accent-hover: #5546CF;
+  --sln-console-accent-active: #4A3CB0;
+  --sln-console-accent-soft: #F0EDFC;
+  --sln-console-accent-subtle: #F0EDFC;
   --sln-console-accent-ink: #FFFFFF;
 
   /* Official Provider & Integration Brand Colors */
@@ -70,29 +70,29 @@
   --sln-console-metric-font-variant: tabular-nums;
 
   /* Geometry: soft rounded containers, pill chips */
-  --sln-console-radius: 8px;
-  --sln-console-radius-container: 14px;
+  --sln-console-radius: 12px;
+  --sln-console-radius-container: 18px;
   --sln-console-radius-pill: 999px;
 
   /* Elevations & Glows */
   --sln-console-shadow-card: 0 1px 3px rgba(16, 24, 40, 0.04), 0 1px 2px rgba(16, 24, 40, 0.02);
-  --sln-console-shadow-glow: 0 4px 20px rgba(101, 82, 232, 0.08);
+  --sln-console-shadow-glow: 0 4px 20px rgba(108, 92, 231, 0.08);
   --sln-console-shadow-overlay: 0 8px 24px rgba(16, 24, 40, 0.12), 0 2px 6px rgba(16, 24, 40, 0.08);
 
   /* Lumina Glass & Motion Tokens */
   --sln-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
   --sln-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
   --sln-glass-bg: rgba(255, 255, 255, 0.85);
-  --sln-glass-border: rgba(227, 230, 239, 0.8);
+  --sln-glass-border: rgba(229, 224, 240, 0.8);
   --sln-glass-blur: blur(16px);
-  --sln-ambient-gradient: radial-gradient(circle at 50% 0%, rgba(101, 82, 232, 0.06) 0%, transparent 70%);
+  --sln-ambient-gradient: radial-gradient(circle at 50% 0%, rgba(108, 92, 231, 0.06) 0%, transparent 70%);
 
   /* HTML5 Canvas Chart Tokens */
-  --sln-chart-line: #6552E8;
-  --sln-chart-grad-top: rgba(101, 82, 232, 0.24);
-  --sln-chart-grad-bottom: rgba(101, 82, 232, 0.01);
-  --sln-chart-point: #5140C9;
-  --sln-chart-grid: rgba(227, 230, 239, 0.5);
+  --sln-chart-line: #6C5CE7;
+  --sln-chart-grad-top: rgba(108, 92, 231, 0.24);
+  --sln-chart-grad-bottom: rgba(108, 92, 231, 0.01);
+  --sln-chart-point: #5546CF;
+  --sln-chart-grid: rgba(229, 224, 240, 0.5);
 
   /* Shell metrics */
   --sln-console-sidebar-w: 240px;
