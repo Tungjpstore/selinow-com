@@ -212,6 +212,7 @@ const verifiedValue = paidOrders.reduce((sum, order) => sum + order.totalMinor, 
 const percentFormatter = new Intl.NumberFormat(typeof locale === "string" ? locale : "en", { maximumFractionDigits: 1, style: "percent" });
 const fulfillmentRate = paidOrders.length === 0 ? null : fulfilledOrders.length / paidOrders.length;
 const recentOrders = orders.slice(0, 6);
+const isStarterShop = catalogState === "ready" && catalog.products.length === 0 && recentOrders.length === 0;
 const channelLabel = (value: string): string => value === "telegram" ? "Telegram" : value === "web" ? "Website" : value;
 
 
@@ -284,12 +285,24 @@ const chartPoints = [
         />
         <section class="console-hero-card">
           <div class="console-hero-content">
-            <h2 class="console-hero-heading">Chào mừng trở lại, {displayName}</h2>
-            <p class="console-hero-sub">Hệ thống Selinow đang hoạt động tối ưu. Kiểm tra hàng đợi và mở rộng kênh phân phối ngay hôm nay.</p>
-            <div class="console-hero-buttons">
-              <ConsoleButton variant="primary" size="sm" href={workspaceHref("/app/products")}>+ Thêm sản phẩm</ConsoleButton>
-              <ConsoleButton variant="secondary" size="sm" href={workspaceHref("/app/orders")}>Xem đơn hàng</ConsoleButton>
-            </div>
+            {isStarterShop ? (
+              <>
+                <h2 class="console-hero-heading">{t("dashboard.overview.hero.starter_title")}</h2>
+                <p class="console-hero-sub">{t("dashboard.overview.hero.starter_sub")}</p>
+                <div class="console-hero-buttons">
+                  <ConsoleButton variant="primary" size="sm" href={workspaceHref("/app/products")}>{t("dashboard.overview.hero.starter_cta")}</ConsoleButton>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 class="console-hero-heading">{t("dashboard.overview.hero.welcome_title", { name: displayName })}</h2>
+                <p class="console-hero-sub">{t("dashboard.overview.hero.welcome_sub")}</p>
+                <div class="console-hero-buttons">
+                  <ConsoleButton variant="primary" size="sm" href={workspaceHref("/app/products")}>{t("dashboard.overview.hero.welcome_cta_products")}</ConsoleButton>
+                  <ConsoleButton variant="secondary" size="sm" href={workspaceHref("/app/orders")}>{t("dashboard.overview.hero.welcome_cta_orders")}</ConsoleButton>
+                </div>
+              </>
+            )}
           </div>
           <img src="/illustrations/onboarding-store.jpg" alt="" class="console-hero-img" width="104" height="104" loading="lazy" />
         </section>

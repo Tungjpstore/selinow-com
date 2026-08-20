@@ -8,7 +8,8 @@ import { loadErrorState, unavailableState, paymentState } from "../../lib/dashbo
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { getBindings } from "../../lib/platform/bindings";
 import { getPaymentIntegration, type PaymentIntegrationView } from "../../lib/payments/integrations";
-import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
+import { listPaymentExceptions, parsePaymentExceptionEvidence, type PaymentExceptionEvidence, type PaymentExceptionView } from "../../lib/payments/reconciliation";
+import { getShopForMember, listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
 import { createDashboardTranslator } from "../../lib/i18n";
 import ProviderLogo from "../../components/console/ProviderLogo.astro";
 
@@ -28,6 +29,18 @@ if (shop !== undefined && canReadProviders) {
   try { payos = await getPaymentIntegration({ env, shopPublicId: shop.publicId, userId: auth.userId }); } catch (error) { payosError = error; }
 }
 
+let paymentExceptions: PaymentExceptionView[] = [];
+let paymentExceptionsAvailable = false;
+if (shop !== undefined && canReadProviders) {
+  try {
+    const member = await getShopForMember({ capability: "payments:read", env, shopPublicId: shop.publicId, userId: auth.userId });
+    paymentExceptions = await listPaymentExceptions({ env, shopId: member.row.shop_id });
+    paymentExceptionsAvailable = true;
+  } catch {
+    // Reconciliation summary is supplemental; the payments page keeps rendering.
+  }
+}
+
 const timeZone = shop?.timezone ?? "Asia/Ho_Chi_Minh";
 const locale = Astro.locals.locale ?? shop?.defaultLocale;
 const t = createDashboardTranslator(locale);
@@ -37,6 +50,26 @@ const payosView = payosError === null
 const unavailablePayos = unavailableState("PayOS", locale);
 const payosConnected = payos !== null && payos.status !== "disabled" && payos.status !== "disconnected";
 const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
+const exceptionTypeLabel = (value: string): string => t(
+  `dashboard.orders.exception.type.${["identity_mismatch", "inconsistent", "late", "manual_review", "overpaid", "partial", "failed"].includes(value) ? value : "default"}`,
+);
+const exceptionImpact = (type: string, evidence: PaymentExceptionEvidence): string => {
+  if (type === "partial") return t("dashboard.orders.exception.impact.partial");
+  if (type === "overpaid") return t("dashboard.orders.exception.impact.overpaid");
+  if (type === "late") return t("dashboard.orders.exception.impact.late");
+  if (type === "identity_mismatch") return t("dashboard.orders.exception.impact.identity_mismatch");
+  if (type === "inconsistent") {
+    if (evidence.expectedKeys !== null && evidence.reservedKeys !== null && evidence.expectedKeys !== evidence.reservedKeys) return t("dashboard.orders.exception.impact.inconsistent_mismatch");
+    return t("dashboard.orders.exception.impact.inconsistent");
+  }
+  if (type === "failed") return t("dashboard.orders.exception.impact.failed");
+  return t("dashboard.orders.exception.impact.default");
+};
+const exceptionRecords = paymentExceptions.map(({ safeEvidenceJson, ...exception }) => ({
+  evidence: parsePaymentExceptionEvidence(safeEvidenceJson),
+  exception,
+}));
+const openExceptionCount = paymentExceptions.filter((exception) => exception.status === "open").length;
 const csrfCookieName = `${env.SESSION_COOKIE_NAME}_csrf`;
 const integrationClientCopy = {
   refresh: t("dashboard.integrations.refresh"),
@@ -97,6 +130,30 @@ const integrationClientCopy = {
     ) : (
       <>
         <div class="workspace-feedback" data-workspace-feedback role="status" aria-live="polite" hidden></div>
+        {canReadProviders && paymentExceptionsAvailable && (
+          <section class="reconciliation-panel" aria-labelledby="reconciliation-title">
+            <div class="reconciliation-head">
+              <div><p class="reconciliation-kicker">{t("dashboard.payments.reconciliation.eyebrow")}</p><h2 id="reconciliation-title">{t("dashboard.payments.reconciliation.title")}</h2><p class="reconciliation-intro">{t("dashboard.payments.reconciliation.intro")}</p></div>
+              <span class="reconciliation-count" data-tone={openExceptionCount > 0 ? "warning" : "success"}>{t("dashboard.payments.reconciliation.count", { count: openExceptionCount })}</span>
+            </div>
+            {openExceptionCount > 0 ? (
+              <>
+                <div class="reconciliation-list" role="list">
+                  {exceptionRecords.filter(({ exception }) => exception.status === "open").map(({ evidence, exception }) => (
+                    <article class="reconciliation-item" role="listitem">
+                      <span class="reconciliation-icon" aria-hidden="true">!</span>
+                      <div class="reconciliation-item-main"><strong>{exceptionTypeLabel(exception.type)}</strong><p>{exceptionImpact(exception.type, evidence)}</p></div>
+                      {exception.orderPublicId !== null ? <a class="reconciliation-order" href={`/app/orders/${encodeURIComponent(exception.orderPublicId)}?shop=${encodeURIComponent(shop.publicId)}`}>{t("dashboard.orders.exceptions.order")} · {exception.orderPublicId} →</a> : <span class="reconciliation-order">{t("dashboard.orders.exceptions.no_safe_link")}</span>}
+                    </article>
+                  ))}
+                </div>
+                <a class="reconciliation-more" href={workspaceHref("/app/orders")}>{t("dashboard.payments.reconciliation.view_orders")} <span aria-hidden="true">→</span></a>
+              </>
+            ) : (
+              <p class="reconciliation-ok">{t("dashboard.payments.reconciliation.clean")}</p>
+            )}
+          </section>
+        )}
         <section class="integration-group" aria-label={t("dashboard.integrations.group.payments.title")}>
           <article class="integration-row" data-provider-row="payos" data-readable={canReadProviders && payosError === null ? "true" : "false"}>
             <div class="provider-mark" aria-hidden="true"><ProviderLogo name="payos" size={28} /></div>
@@ -181,4 +238,23 @@ const integrationClientCopy = {
   .disconnect-panel .app-button { margin-top: 14px; }
   @media (max-width: 900px) { .integration-row { grid-template-columns: 44px minmax(0, 1fr) auto; } .integration-row > .sln-status { grid-column: 3; grid-row: 1; } .provider-actions { grid-column: 2 / -1; justify-content: start; } .provider-error { grid-column: 1 / -1; } }
   @media (max-width: 560px) { .header-actions, .header-actions .app-button { width: 100%; } .integration-row { gap: 12px; padding: 18px 0; } .provider-copy h3 { font-size: 18px; } .provider-summary { white-space: normal; } .provider-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; } .provider-actions .app-button { width: 100%; } .provider-actions .text-action { justify-self: start; } .provider-note { text-align: left; } .secure-panel-head, .form-heading { flex-direction: column; } .form-heading a { min-height: 40px; } }
+  .reconciliation-panel { display: grid; gap: 16px; padding: clamp(20px, 4vw, 28px); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-sm); }
+  .reconciliation-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+  .reconciliation-head h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }
+  .reconciliation-kicker { margin: 0 0 6px; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  .reconciliation-intro { max-width: 680px; margin: 8px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .reconciliation-count { flex-shrink: 0; border-radius: var(--sln-radius-pill); padding: 7px 13px; font: var(--sln-font-label); white-space: nowrap; }
+  .reconciliation-count[data-tone="warning"] { background: var(--sln-tint-warning); color: var(--sln-warning-text); }
+  .reconciliation-count[data-tone="success"] { background: var(--sln-tint-success); color: var(--sln-success-text); }
+  .reconciliation-list { display: grid; gap: 10px; }
+  .reconciliation-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: start; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 14px; background: var(--sln-bg-canvas); }
+  .reconciliation-icon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--sln-tint-warning); color: var(--sln-warning-text); font: 800 12px/1 var(--sln-font-sans); }
+  .reconciliation-item-main strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .reconciliation-item-main p { margin: 3px 0 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .reconciliation-order { color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 600; text-decoration: none; white-space: nowrap; }
+  .reconciliation-order:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .reconciliation-more { justify-self: start; color: var(--sln-action-primary); font: var(--sln-font-label); text-decoration: none; }
+  .reconciliation-more:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .reconciliation-ok { margin: 0; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--sln-state-success) 30%, var(--sln-border-default)); border-radius: var(--sln-radius-md); background: var(--sln-tint-success); color: var(--sln-success-text); font: var(--sln-font-body-sm); }
+  @media (max-width: 560px) { .reconciliation-item { grid-template-columns: 24px minmax(0, 1fr); } .reconciliation-order { grid-column: 2; } .reconciliation-head { flex-direction: column; } }
 </style>
