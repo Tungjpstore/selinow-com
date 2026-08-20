@@ -151,8 +151,8 @@ const { defaultCurrency = "VND" } = Astro.props;
     padding: 24px 28px;
     border-radius: var(--sln-console-radius-container, 16px);
     background: linear-gradient(135deg, #FFFFFF 0%, #F5F3FF 100%);
-    border: 2px solid #E5E0F0;
-    box-shadow: 0 4px 20px rgba(108, 92, 231, 0.06);
+    border: 2px solid #DAD2EE;
+    box-shadow: 0 4px 20px rgba(124, 106, 240, 0.06);
   }
 
   .hero-content {
@@ -166,7 +166,7 @@ const { defaultCurrency = "VND" } = Astro.props;
     align-self: flex-start;
     padding: 3px 10px;
     border-radius: var(--sln-console-radius-pill, 999px);
-    background: #6C5CE7;
+    background: #7C6AF0;
     color: #FFFFFF;
     font-size: 11px;
     font-weight: 700;
@@ -195,7 +195,7 @@ const { defaultCurrency = "VND" } = Astro.props;
   .hero-illustration {
     border-radius: 12px;
     object-fit: cover;
-    box-shadow: 0 4px 12px rgba(108, 92, 231, 0.12);
+    box-shadow: 0 4px 12px rgba(124, 106, 240, 0.12);
   }
 
   /* Mode Tabs */
@@ -205,7 +205,7 @@ const { defaultCurrency = "VND" } = Astro.props;
     background: #F2F4F7;
     padding: 4px;
     border-radius: 12px;
-    border: 2px solid #E5E0F0;
+    border: 2px solid #DAD2EE;
   }
 
   .mode-tab {
@@ -231,7 +231,7 @@ const { defaultCurrency = "VND" } = Astro.props;
 
   .mode-tab.active {
     background: #FFFFFF;
-    color: #6C5CE7;
+    color: #7C6AF0;
     box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
   }
 
@@ -262,7 +262,7 @@ const { defaultCurrency = "VND" } = Astro.props;
     align-items: flex-start;
     gap: 12px;
     padding: 16px;
-    border: 2px solid #E5E0F0;
+    border: 2px solid #DAD2EE;
     border-radius: 14px;
     background: #FFFFFF;
     text-align: start;
@@ -271,15 +271,15 @@ const { defaultCurrency = "VND" } = Astro.props;
   }
 
   .preset-card:hover {
-    border-color: #D3CBE8;
-    background: #FAF8FD;
+    border-color: #C9BDE4;
+    background: #F5F2FB;
     transform: translateY(-1px);
   }
 
   .preset-card.selected {
-    border-color: #6C5CE7;
-    background: #F0EDFC;
-    box-shadow: 0 0 0 1px #6C5CE7, 0 4px 12px rgba(108, 92, 231, 0.1);
+    border-color: #7C6AF0;
+    background: #EDE8FB;
+    box-shadow: 0 0 0 1px #7C6AF0, 0 4px 12px rgba(124, 106, 240, 0.1);
   }
 
   .preset-icon {
@@ -288,8 +288,8 @@ const { defaultCurrency = "VND" } = Astro.props;
     width: 40px;
     height: 40px;
     border-radius: 10px;
-    background: #F0EDFC;
-    color: #6C5CE7;
+    background: #EDE8FB;
+    color: #7C6AF0;
   }
 
   .preset-details {
@@ -309,7 +309,7 @@ const { defaultCurrency = "VND" } = Astro.props;
   .preset-price {
     font-size: 13.5px;
     font-weight: 800;
-    color: #6C5CE7;
+    color: #7C6AF0;
     font-variant-numeric: tabular-nums;
   }
 
@@ -324,8 +324,8 @@ const { defaultCurrency = "VND" } = Astro.props;
   }
 
   .preset-card.selected .preset-type-badge {
-    background: #F0EDFC;
-    color: #6C5CE7;
+    background: #EDE8FB;
+    color: #7C6AF0;
   }
 
   .preset-badge-check {
@@ -335,7 +335,7 @@ const { defaultCurrency = "VND" } = Astro.props;
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: #6C5CE7;
+    background: #7C6AF0;
     color: #FFFFFF;
     display: grid;
     place-items: center;
@@ -380,7 +380,7 @@ const { defaultCurrency = "VND" } = Astro.props;
 
   input, select, textarea {
     width: 100%;
-    border: 2px solid #E5E0F0;
+    border: 2px solid #DAD2EE;
     border-radius: var(--sln-console-radius, 8px);
     background: #FFFFFF;
     padding: 10px 14px;
@@ -391,8 +391,8 @@ const { defaultCurrency = "VND" } = Astro.props;
 
   input:focus, select:focus, textarea:focus {
     outline: none;
-    border-color: #6C5CE7;
-    box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
+    border-color: #7C6AF0;
+    box-shadow: 0 0 0 3px rgba(124, 106, 240, 0.15);
   }
 
   /* Action Buttons */
@@ -411,7 +411,7 @@ const { defaultCurrency = "VND" } = Astro.props;
     padding: 12px 22px;
     border-radius: 999px;
     background: #FFFFFF;
-    border: 2px solid #E5E0F0;
+    border: 2px solid #DAD2EE;
     color: #344054;
     font-size: 14px;
     font-weight: 600;
@@ -430,20 +430,20 @@ const { defaultCurrency = "VND" } = Astro.props;
     gap: 8px;
     padding: 12px 28px;
     border-radius: 999px;
-    background: #6C5CE7;
+    background: #7C6AF0;
     color: #FFFFFF;
     border: none;
     font-size: 14.5px;
     font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 4px 16px rgba(108, 92, 231, 0.35);
+    box-shadow: 0 4px 16px rgba(124, 106, 240, 0.35);
     transition: all 0.18s ease;
   }
 
   .btn-primary-next:hover {
-    background: #5546CF;
+    background: #6957DE;
     transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(108, 92, 231, 0.45);
+    box-shadow: 0 6px 20px rgba(124, 106, 240, 0.45);
   }
 
   @media (max-width: 768px) {

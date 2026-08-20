@@ -7,17 +7,17 @@
  * touching the marketing/storefront surfaces that share the global tokens.
  */
 body {
-  --sln-action-primary: #6C5CE7;
-  --sln-action-primary-hover: #5546CF;
-  --sln-action-primary-strong: #5546CF;
-  --sln-brand-indigo: #6C5CE7;
-  --sln-brand-indigo-hover: #5546CF;
+  --sln-action-primary: #7C6AF0;
+  --sln-action-primary-hover: #6957DE;
+  --sln-action-primary-strong: #6957DE;
+  --sln-brand-indigo: #7C6AF0;
+  --sln-brand-indigo-hover: #6957DE;
   --sln-brand-violet: #8B7BFF;
-  --sln-focus-ring: #6C5CE7;
-  --sln-bg-canvas: #F4F1F8;
-  --sln-bg-subtle: #FAF8FD;
-  --sln-border-default: #E5E0F0;
-  --sln-border-strong: #D3CBE8;
-  --sln-tint-indigo: #F0EDFC;
-  background-color: #F4F1F8;
+  --sln-focus-ring: #7C6AF0;
+  --sln-bg-canvas: #EBE6F8;
+  --sln-bg-subtle: #F5F2FB;
+  --sln-border-default: #DAD2EE;
+  --sln-border-strong: #C9BDE4;
+  --sln-tint-indigo: #EDE8FB;
+  background-color: #EBE6F8;
 }
