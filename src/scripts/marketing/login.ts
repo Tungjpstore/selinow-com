@@ -1,18 +1,18 @@
 import { createSystemTranslator } from "../../lib/i18n";
 
-const form = document.querySelector<HTMLFormElement>("[data-login-form]");
-const email = document.querySelector<HTMLInputElement>("[data-login-email]");
-const statusElement = document.querySelector<HTMLElement>("[data-login-status]");
-const submit = document.querySelector<HTMLButtonElement>("[data-login-submit]");
-const submitLabel = document.querySelector<HTMLElement>("[data-login-submit-label]");
-const recovery = document.querySelector<HTMLElement>("[data-login-recovery]");
-const resend = document.querySelector<HTMLButtonElement>("[data-login-resend]");
-const restart = document.querySelector<HTMLButtonElement>("[data-login-restart]");
-const challenge = document.querySelector<HTMLElement>("[data-login-challenge]");
-const turnstileContainer = document.querySelector<HTMLElement>("[data-login-turnstile]");
-const confirmation = document.querySelector<HTMLElement>("[data-login-confirmation]");
-const confirmationDestination = document.querySelector<HTMLElement>("[data-login-confirm-destination]");
-const confirmMagicLink = document.querySelector<HTMLButtonElement>("[data-login-confirm]");
+const form = document.querySelector<HTMLFormElement>("[data-magic-form]");
+const email = document.querySelector<HTMLInputElement>("[data-magic-email]");
+const statusElement = document.querySelector<HTMLElement>("[data-magic-status]");
+const submit = document.querySelector<HTMLButtonElement>("[data-magic-submit]");
+const submitLabel = document.querySelector<HTMLElement>("[data-magic-submit-label]");
+const recovery = document.querySelector<HTMLElement>("[data-magic-recovery]");
+const resend = document.querySelector<HTMLButtonElement>("[data-magic-resend]");
+const restart = document.querySelector<HTMLButtonElement>("[data-magic-restart]");
+const challenge = document.querySelector<HTMLElement>("[data-magic-challenge]");
+const turnstileContainer = document.querySelector<HTMLElement>("[data-magic-turnstile]");
+const confirmation = document.querySelector<HTMLElement>("[data-magic-confirmation]");
+const confirmationDestination = document.querySelector<HTMLElement>("[data-magic-confirm-destination]");
+const confirmMagicLink = document.querySelector<HTMLButtonElement>("[data-magic-confirm]");
 const t = createSystemTranslator(document.documentElement.lang);
 
 const messageKeys: Readonly<Record<string, string>> = {
@@ -157,7 +157,14 @@ function appendLocalDebugLink(value: string): boolean {
   }
 }
 
+function activateMagicMode(): void {
+  document.querySelectorAll<HTMLElement>("[data-mode-tab]").forEach((tab) => {
+    if (tab.dataset.modeTab === "magic") tab.click();
+  });
+}
+
 function showMagicLinkConfirmation(maskedDestination: string): void {
+  activateMagicMode();
   if (form !== null) form.hidden = true;
   if (recovery !== null) recovery.hidden = true;
   if (confirmationDestination !== null) confirmationDestination.textContent = maskedDestination;

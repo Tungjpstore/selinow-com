@@ -6,6 +6,7 @@ import ProductFlowIllustration from "../components/marketing/ProductFlowIllustra
 import { authenticateRequest } from "../lib/auth/session";
 import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
+import { resolveTurnstileConfiguration } from "../lib/storefront/turnstile";
 
 const env = getBindings();
 if (Astro.url.origin !== env.DASHBOARD_ORIGIN) {
@@ -25,6 +26,7 @@ Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
 const locale = resolvePresentationLocale(Astro.locals.locale ?? DEFAULT_LOCALE);
 const t = createSystemTranslator(locale);
+const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
 ---
 
 <!doctype html>
@@ -55,6 +57,12 @@ const t = createSystemTranslator(locale);
             <p>{t("auth.login.intro")}</p>
           </div>
 
+          <div class="auth-mode-switch" role="tablist" aria-label={locale === "vi-VN" ? "Phương thức đăng nhập" : "Sign-in method"}>
+            <button type="button" class="auth-mode-tab is-active" role="tab" aria-selected="true" data-mode-tab="password">{t("auth.login.mode_password")}</button>
+            <button type="button" class="auth-mode-tab" role="tab" aria-selected="false" data-mode-tab="magic">{t("auth.login.mode_magic")}</button>
+          </div>
+
+          <div data-mode-panel="password">
           <form id="login-form" class="auth-form" data-login-form>
             <div class="field-group">
               <label for="email">{t("auth.login.email_label")}</label>
@@ -144,6 +152,82 @@ const t = createSystemTranslator(locale);
             <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-2fa-status></p>
           </div>
 
+          </div>
+
+          <div data-mode-panel="magic" hidden>
+            <form id="magic-form" class="auth-form" data-magic-form>
+              <div class="field-group">
+                <label for="magic-email">{t("auth.login.email_label")}</label>
+                <div class="input-control">
+                  <input
+                    id="magic-email"
+                    name="email"
+                    type="email"
+                    inputmode="email"
+                    autocomplete="email"
+                    required
+                    maxlength="254"
+                    placeholder="name@company.com"
+                    data-magic-email
+                  />
+                </div>
+                <p class="field-help" id="magic-email-help">{t("auth.login.email_help")}</p>
+              </div>
+
+              <div class="field-group">
+                <label for="magic-display-name">{t("auth.login.display_name_label")} <span class="optional-badge">{t("auth.login.optional")}</span></label>
+                <div class="input-control">
+                  <input
+                    id="magic-display-name"
+                    name="displayName"
+                    type="text"
+                    autocomplete="name"
+                    maxlength="80"
+                    data-magic-display-name
+                  />
+                </div>
+              </div>
+
+              <div class="login-challenge" data-magic-challenge hidden>
+                <p>{t("auth.login.challenge_required")}</p>
+                <div
+                  data-magic-turnstile
+                  data-sitekey={turnstileSiteKey ?? undefined}
+                  data-action="magic_link_request"
+                ></div>
+              </div>
+
+              <button type="submit" class="btn-primary" data-magic-submit>
+                <span data-magic-submit-label>{t("auth.login.magic_submit")}</span>
+                <span class="btn-arrow" aria-hidden="true">→</span>
+              </button>
+              <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-magic-status></p>
+            </form>
+
+            <section class="magic-confirmation" aria-labelledby="magic-confirmation-title" data-magic-confirmation hidden>
+              <p class="recovery-kicker">{t("auth.login.confirmation_kicker")}</p>
+              <h2 id="magic-confirmation-title">{t("auth.login.confirmation_title")}</h2>
+              <p>{t("auth.login.confirmation_intro")} <strong data-magic-confirm-destination></strong></p>
+              <button type="button" class="btn-primary" data-magic-confirm>{t("auth.login.confirmation_action")}</button>
+            </section>
+
+            <section class="magic-recovery" aria-labelledby="magic-recovery-title" data-magic-recovery hidden>
+              <p class="recovery-kicker">{t("auth.login.recovery_kicker")}</p>
+              <h2 id="magic-recovery-title">{t("auth.login.recovery_title")}</h2>
+              <p>{t("auth.login.recovery_intro")}</p>
+              <ol>
+                <li>{t("auth.login.recovery_same_browser")}</li>
+                <li>{t("auth.login.recovery_expiry")}</li>
+                <li>{t("auth.login.recovery_wrong_device")}</li>
+              </ol>
+              <div class="recovery-actions">
+                <button type="button" class="btn-primary" data-magic-resend>{t("auth.login.resend")}</button>
+                <button type="button" class="link-button" data-magic-restart>{t("auth.login.restart")}</button>
+              </div>
+              <p class="recovery-privacy">{t("auth.login.recovery_privacy")}</p>
+            </section>
+          </div>
+
           <div class="card-footer">
             <div class="switch-auth">
               <span>{t("auth.login.no_account")}</span>
@@ -163,7 +247,26 @@ const t = createSystemTranslator(locale);
 
     <script>
       import "../scripts/marketing/auth";
+      import "../scripts/marketing/login";
     </script>
+    <script is:inline>
+      const modeTabs = document.querySelectorAll("[data-mode-tab]");
+      const modePanels = document.querySelectorAll("[data-mode-panel]");
+      for (const tab of modeTabs) {
+        tab.addEventListener("click", () => {
+          const mode = tab.dataset.modeTab;
+          for (const t of modeTabs) {
+            const active = t === tab;
+            t.classList.toggle("is-active", active);
+            t.setAttribute("aria-selected", String(active));
+          }
+          for (const panel of modePanels) {
+            panel.hidden = panel.dataset.modePanel !== mode;
+          }
+        });
+      }
+    </script>
+    {turnstileSiteKey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>}
   </body>
 </html>
 
@@ -453,4 +556,87 @@ const t = createSystemTranslator(locale);
     .login-main-panel { width: 100%; padding: 24px 12px 48px; }
     .auth-card { padding: 28px 18px; border-radius: 20px; }
   }
+
+  /* Auth mode switch */
+  .auth-mode-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 24px;
+    background: var(--surface-muted, #F6F7FA);
+    border: 1px solid var(--border-soft, #E4E7EE);
+    border-radius: 12px;
+  }
+  .auth-mode-tab {
+    border: none;
+    background: transparent;
+    padding: 9px 12px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #64748B;
+    cursor: pointer;
+    transition: background 0.16s ease, color 0.16s ease;
+  }
+  .auth-mode-tab:hover { color: #334155; }
+  .auth-mode-tab.is-active {
+    background: #FFFFFF;
+    color: #312E81;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  }
+
+  /* Magic-link form */
+  .field-help {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #64748B;
+  }
+  .optional-badge {
+    font-weight: 500;
+    color: #94A3B8;
+    font-size: 12px;
+  }
+  .login-challenge { margin-bottom: 16px; }
+  .login-challenge p {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: #475569;
+  }
+  .magic-confirmation,
+  .magic-recovery { margin-top: 4px; }
+  .recovery-kicker {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sln-action-primary);
+  }
+  .magic-confirmation h2,
+  .magic-recovery h2 {
+    margin: 0 0 12px;
+    font-size: 19px;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    color: #0F172A;
+  }
+  .magic-confirmation p,
+  .magic-recovery p { margin: 0 0 16px; font-size: 14px; color: #475569; }
+  .magic-recovery ol {
+    margin: 0 0 16px;
+    padding-left: 18px;
+    font-size: 14px;
+    color: #475569;
+    display: grid;
+    gap: 6px;
+  }
+  .recovery-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .recovery-privacy { font-size: 12px; color: #94A3B8; }
 </style>

@@ -210,6 +210,7 @@ async function authenticateThroughVisibleMagicLink(
   await page.goto("/login");
   await expect(page).toHaveTitle("Đăng nhập — Selinow");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Đăng nhập để tiếp tục");
+  await page.getByRole("tab", { name: "Không cần mật khẩu" }).click();
   await page
     .getByRole("textbox", { name: "Email", exact: true })
     .fill(`${options.emailPrefix ?? "browser-gate"}-${projectName}@selinow.invalid`);
