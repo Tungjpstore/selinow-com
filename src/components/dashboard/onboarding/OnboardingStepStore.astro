@@ -1,5 +1,5 @@
 ---
-import { STOREFRONT_TEMPLATES } from "../../../lib/storefront/templates";
+import { templatesForCategory } from "../../../lib/storefront/templates";
 import Icon from "../../console/Icon.astro";
 import ProviderLogo from "../../console/ProviderLogo.astro";
 
@@ -19,9 +19,9 @@ const {
   shopsCount = 0,
 } = Astro.props;
 
-const digitalTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "digital");
-const physicalTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "physical");
-const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "booking");
+const softwareTemplates = templatesForCategory("software");
+const physicalTemplates = templatesForCategory("physical");
+const serviceTemplates = templatesForCategory("service");
 ---
 
 <div class="onboarding-step-pane is-active" data-step-pane="store">
@@ -30,7 +30,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     <div class="hero-content">
       <span class="hero-step-pill">BƯỚC 1 / 5</span>
       <h2>Hồ sơ Cửa hàng & Giao diện Bán hàng</h2>
-      <p>Đặt tên cho cửa hàng, chọn mô hình kinh doanh và phong cách giao diện phù hợp nhất với sản phẩm của bạn.</p>
+      <p>Đặt tên cho cửa hàng, chọn danh mục ngành hàng và phong cách giao diện phù hợp nhất với sản phẩm của bạn.</p>
     </div>
     <div class="hero-image-wrap">
       <img src="/illustrations/onboarding-store.jpg" alt="" class="hero-illustration" width="130" height="130" />
@@ -85,13 +85,13 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
 
     <!-- Selling Model / Vertical Selector -->
     <div class="form-group full-width">
-      <label class="section-heading-label">Mô hình kinh doanh chính <span class="required-star">*</span></label>
-      <div class="vertical-cards-grid" role="radiogroup" aria-label="Mô hình kinh doanh">
+      <label class="section-heading-label">Danh mục ngành hàng <span class="required-star">*</span></label>
+      <div class="vertical-cards-grid" role="radiogroup" aria-label="Danh mục ngành hàng">
         <label class="vertical-card is-selected" data-vertical-option="digital">
           <input type="radio" name="sellingVertical" value="digital" checked data-vertical-radio />
           <div class="vertical-icon"><Icon name="zap" size={20} /></div>
           <div class="vertical-info">
-            <strong>Sản phẩm số & Key phần mềm</strong>
+            <strong>Phần mềm & Key bản quyền</strong>
             <p>Phần mềm, license key, tài khoản, tài liệu tải về. Tự động giao mã tức thì 24/7.</p>
           </div>
           <span class="card-check">✓</span>
@@ -101,7 +101,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
           <input type="radio" name="sellingVertical" value="physical" data-vertical-radio />
           <div class="vertical-icon"><Icon name="box" size={20} /></div>
           <div class="vertical-info">
-            <strong>Hàng hóa vật lý & Merch</strong>
+            <strong>Hàng hoá vật lý</strong>
             <p>Thời trang, phụ kiện, đồ thủ công, quà tặng. Hỗ trợ biểu phí vận chuyển và địa chỉ giao hàng.</p>
           </div>
           <span class="card-check">✓</span>
@@ -111,7 +111,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
           <input type="radio" name="sellingVertical" value="booking" data-vertical-radio />
           <div class="vertical-icon"><Icon name="calendar" size={20} /></div>
           <div class="vertical-info">
-            <strong>Dịch vụ & Lịch hẹn tư vấn</strong>
+            <strong>Dịch vụ & Đặt lịch</strong>
             <p>Khóa học, tư vấn 1-1, dịch vụ kỹ thuật. Đặt lịch và xác nhận thanh toán trực tuyến.</p>
           </div>
           <span class="card-check">✓</span>
@@ -130,7 +130,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
 
       <!-- Digital Templates -->
       <div class="templates-grid" data-templates-group="digital">
-        {digitalTemplates.map((tpl, i) => (
+        {softwareTemplates.map((tpl, i) => (
           <label class={`template-preset-card ${i === 0 ? "is-selected" : ""}`} data-template-id={tpl.id}>
             <input type="radio" name="storefrontTemplate" value={tpl.id} checked={i === 0} data-template-radio />
             <div class="tpl-swatch" data-scheme={tpl.scheme}>
@@ -178,7 +178,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
 
       <!-- Booking Templates -->
       <div class="templates-grid" data-templates-group="booking" hidden>
-        {bookingTemplates.map((tpl, i) => (
+        {serviceTemplates.map((tpl, i) => (
           <label class={`template-preset-card ${i === 0 ? "is-selected" : ""}`} data-template-id={tpl.id}>
             <input type="radio" name="storefrontTemplate" value={tpl.id} data-template-radio />
             <div class="tpl-swatch" data-scheme={tpl.scheme}>
@@ -284,7 +284,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     border-radius: var(--sln-console-radius-container, 16px);
     background: linear-gradient(135deg, #FFFFFF 0%, #F5F3FF 100%);
     border: 1px solid #E4E1FC;
-    box-shadow: 0 4px 20px rgba(101, 82, 232, 0.06);
+    box-shadow: 0 4px 20px rgba(108, 92, 231, 0.06);
   }
 
   .hero-content {
@@ -298,7 +298,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     align-self: flex-start;
     padding: 3px 10px;
     border-radius: var(--sln-console-radius-pill, 999px);
-    background: #6552E8;
+    background: #6C5CE7;
     color: #FFFFFF;
     font-size: 11px;
     font-weight: 700;
@@ -327,7 +327,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
   .hero-illustration {
     border-radius: 12px;
     object-fit: cover;
-    box-shadow: 0 4px 12px rgba(101, 82, 232, 0.12);
+    box-shadow: 0 4px 12px rgba(108, 92, 231, 0.12);
   }
 
   /* Form Layout */
@@ -387,7 +387,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     height: 44px;
     padding-inline-start: 38px;
     padding-inline-end: 14px;
-    border: 1px solid #D0D5DD;
+    border: 2px solid #E5E0F0;
     border-radius: var(--sln-console-radius, 8px);
     background: #FFFFFF;
     font-size: 14px;
@@ -397,14 +397,14 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
 
   .input-with-icon input:focus {
     outline: none;
-    border-color: #6552E8;
-    box-shadow: 0 0 0 3px rgba(101, 82, 232, 0.15);
+    border-color: #6C5CE7;
+    box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
   }
 
   .input-slug-wrap {
     display: flex;
     align-items: center;
-    border: 1px solid #D0D5DD;
+    border: 2px solid #E5E0F0;
     border-radius: var(--sln-console-radius, 8px);
     background: #FFFFFF;
     height: 44px;
@@ -413,8 +413,8 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
   }
 
   .input-slug-wrap:focus-within {
-    border-color: #6552E8;
-    box-shadow: 0 0 0 3px rgba(101, 82, 232, 0.15);
+    border-color: #6C5CE7;
+    box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
   }
 
   .input-slug-wrap input {
@@ -437,7 +437,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     height: 100%;
     display: flex;
     align-items: center;
-    border-inline-start: 1px solid #EAECF0;
+    border-inline-start: 1px solid #E5E0F0;
   }
 
   .slug-status {
@@ -474,8 +474,8 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     flex-direction: column;
     gap: 10px;
     padding: 16px;
-    border: 1.5px solid #EAECF0;
-    border-radius: 12px;
+    border: 2px solid #E5E0F0;
+    border-radius: 16px;
     background: #FFFFFF;
     cursor: pointer;
     transition: all 0.18s ease;
@@ -488,14 +488,14 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
   }
 
   .vertical-card:hover {
-    border-color: #C7D2FE;
-    background: #FAF5FF;
+    border-color: #D3CBE8;
+    background: #FAF8FD;
   }
 
   .vertical-card.is-selected {
-    border-color: #6552E8;
-    background: #F4F3FF;
-    box-shadow: 0 0 0 1px #6552E8, 0 4px 12px rgba(101, 82, 232, 0.08);
+    border-color: #6C5CE7;
+    background: #F0EDFC;
+    box-shadow: 0 0 0 1px #6C5CE7, 0 4px 12px rgba(108, 92, 231, 0.08);
   }
 
   .vertical-icon {
@@ -504,8 +504,8 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     width: 36px;
     height: 36px;
     border-radius: 10px;
-    background: #ECE9FF;
-    color: #6552E8;
+    background: #F0EDFC;
+    color: #6C5CE7;
   }
 
   .vertical-info strong {
@@ -530,7 +530,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: #6552E8;
+    background: #6C5CE7;
     color: #FFFFFF;
     display: grid;
     place-items: center;
@@ -562,8 +562,8 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     flex-direction: column;
     gap: 12px;
     padding: 14px;
-    border: 1.5px solid #EAECF0;
-    border-radius: 12px;
+    border: 2px solid #E5E0F0;
+    border-radius: 16px;
     background: #FFFFFF;
     cursor: pointer;
     transition: all 0.18s ease;
@@ -576,14 +576,14 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
   }
 
   .template-preset-card:hover {
-    border-color: #C7D2FE;
-    background: #FDF4FF;
+    border-color: #D3CBE8;
+    background: #FAF8FD;
   }
 
   .template-preset-card.is-selected {
-    border-color: #6552E8;
-    background: #F4F3FF;
-    box-shadow: 0 0 0 1px #6552E8, 0 4px 12px rgba(101, 82, 232, 0.08);
+    border-color: #6C5CE7;
+    background: #F0EDFC;
+    box-shadow: 0 0 0 1px #6C5CE7, 0 4px 12px rgba(108, 92, 231, 0.08);
   }
 
   .tpl-swatch {
@@ -607,7 +607,7 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     height: 6px;
     width: 60%;
     border-radius: 3px;
-    background: #6552E8;
+    background: #6C5CE7;
   }
 
   .tpl-swatch-hero {
@@ -700,8 +700,8 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     align-items: center;
     gap: 16px;
     padding: 16px 20px;
-    border: 1.5px solid #EAECF0;
-    border-radius: 12px;
+    border: 2px solid #E5E0F0;
+    border-radius: 16px;
     background: #FFFFFF;
     cursor: pointer;
     transition: all 0.18s ease;
@@ -714,14 +714,14 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
   }
 
   .channel-card:hover {
-    border-color: #C7D2FE;
-    background: #FAF5FF;
+    border-color: #D3CBE8;
+    background: #FAF8FD;
   }
 
   .channel-card.is-selected {
-    border-color: #6552E8;
-    background: #F4F3FF;
-    box-shadow: 0 0 0 1px #6552E8, 0 4px 12px rgba(101, 82, 232, 0.08);
+    border-color: #6C5CE7;
+    background: #F0EDFC;
+    box-shadow: 0 0 0 1px #6C5CE7, 0 4px 12px rgba(108, 92, 231, 0.08);
   }
 
   .channel-card-icons {
@@ -801,20 +801,20 @@ const bookingTemplates = STOREFRONT_TEMPLATES.filter((t) => t.vertical === "book
     gap: 8px;
     padding: 12px 28px;
     border-radius: 999px;
-    background: #6552E8;
+    background: #6C5CE7;
     color: #FFFFFF;
     border: none;
     font-size: 14.5px;
     font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 4px 16px rgba(101, 82, 232, 0.35);
+    box-shadow: 0 4px 16px rgba(108, 92, 231, 0.35);
     transition: all 0.18s ease;
   }
 
   .btn-primary-next:hover {
     background: #5140C9;
     transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(101, 82, 232, 0.45);
+    box-shadow: 0 6px 20px rgba(108, 92, 231, 0.45);
   }
 
   @media (max-width: 768px) {

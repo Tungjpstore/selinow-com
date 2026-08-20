@@ -170,3 +170,49 @@ export function storefrontTemplateSelectionIssue(input: {
   if (template.premium && !input.premiumEntitled) return "storefront_template_premium_required";
   return template;
 }
+
+/**
+ * ── Selling category (danh mục kinh doanh) ──────────────────────────────
+ *
+ * The friendly, business-facing layer over `StorefrontVertical`. A seller
+ * picks a category ("Phần mềm & Key bản quyền") and it maps to the vertical
+ * whose templates + onboarding presets are relevant. Kept in one place so the
+ * onboarding gallery, the store builder template tab, and server-side
+ * validation all agree on the same mapping.
+ */
+export type StorefrontCategoryId = "software" | "physical" | "service";
+
+export type StorefrontCategory = {
+  id: StorefrontCategoryId;
+  vertical: StorefrontVertical;
+  /** Icon key resolved by the dashboard `<Icon name=...>` component. */
+  icon: string;
+};
+
+export const STOREFRONT_CATEGORIES: readonly StorefrontCategory[] = [
+  { id: "software", vertical: "digital", icon: "zap" },
+  { id: "physical", vertical: "physical", icon: "box" },
+  { id: "service", vertical: "booking", icon: "calendar" },
+];
+
+const CATEGORIES_BY_ID: ReadonlyMap<StorefrontCategoryId, StorefrontCategory> = new Map(
+  STOREFRONT_CATEGORIES.map((category) => [category.id, category] as const),
+);
+
+export function getStorefrontCategory(id: StorefrontCategoryId): StorefrontCategory {
+  const category = CATEGORIES_BY_ID.get(id);
+  if (category === undefined) throw new Error(`storefront_category_unknown:${id}`);
+  return category;
+}
+
+/** Templates relevant to a selling category (filters by the mapped vertical). */
+export function templatesForCategory(categoryId: StorefrontCategoryId): readonly StorefrontTemplateDefinition[] {
+  const vertical = getStorefrontCategory(categoryId).vertical;
+  return STOREFRONT_TEMPLATES.filter((template) => template.vertical === vertical);
+}
+
+/** First non-premium available template for a category (safe gallery default). */
+export function defaultTemplateForCategory(categoryId: StorefrontCategoryId): StorefrontTemplateDefinition {
+  const vertical = getStorefrontCategory(categoryId).vertical;
+  return defaultStorefrontTemplateFor(vertical);
+}
