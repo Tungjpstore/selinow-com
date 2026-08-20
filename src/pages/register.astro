@@ -1,5 +1,6 @@
 ---
 import "../styles/selinow-tokens.css";
+import "../styles/auth-soft.css";
 import "../styles/selinow-a11y.css";
 import { authenticateRequest } from "../lib/auth/session";
 import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
@@ -239,7 +240,7 @@ const t = createSystemTranslator(locale);
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
-    background: radial-gradient(circle at 50% 0%, #EEF2FF 0%, #F8FAFC 60%, #F1F5F9 100%);
+    background: radial-gradient(circle at 50% 0%, #F0EDFC 0%, #F4F1F8 60%, #FAF8FD 100%);
     color: var(--sln-text-primary);
     font-family: var(--sln-font-sans);
     -webkit-font-smoothing: antialiased;
@@ -483,7 +484,7 @@ const t = createSystemTranslator(locale);
     width: 56px;
     height: 56px;
     border-radius: 16px;
-    background: #EEF2FF;
+    background: #F0EDFC;
     color: var(--sln-action-primary);
     margin-bottom: 16px;
   }
