@@ -31,9 +31,12 @@ evidence, queue payloads, or database rows.
 
 ## Acceptance checks
 
-- Login with an unknown Google identity fails without creating an account.
-- Registration creates one active platform user and one Google identity.
-- A matching existing email requires explicit linking from account security.
+- Login and registration with an unknown Google identity create one active
+  platform user and one Google identity from the verified Google profile.
+- A matching existing email is attached to that platform user atomically; a
+  pending account is activated because Google has verified the email.
+- Explicit linking remains available from account security for users who want
+  to attach a Google identity after signing in with another method.
 - Linking a Google identity already owned by another user fails closed.
 - Replaying or moving a callback to another browser fails without a session.
 - A user with 2FA receives no session until the email OTP succeeds.

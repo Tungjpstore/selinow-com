@@ -92,7 +92,9 @@ export const GET: APIRoute = async ({ request, url }) => {
       target.searchParams.set("google", "linked");
       return privateRedirect(target.toString(), headers);
     }
-    const identity = await resolveGoogleIdentity({ ...env, allowCreate: consumed.flow === "register", claims });
+    // Both login and registration provision the Google account on first use.
+    // The verified Google email is persisted as the Selinow account identity.
+    const identity = await resolveGoogleIdentity({ ...env, allowCreate: true, claims });
     const user = await env.PLATFORM_DB.prepare(`SELECT status, COALESCE(two_factor_enabled, 0) AS twoFactorEnabled FROM platform_users WHERE id = ? LIMIT 1`).bind(identity.userId).first<{ status: string; twoFactorEnabled: number }>();
     if (user === null || user.status !== "active") throw new AppError("authentication_required", 401);
     const requesterAddress = cloudflareRequesterAddress(request);

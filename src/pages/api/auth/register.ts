@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 
 import { AppError, isAppError } from "../../../lib/core/errors";
+import { claimOtpAdmission, cloudflareRequesterAddress } from "../../../lib/auth/admission";
 import { normalizeEmail, normalizeDisplayName, validatePasswordStrength } from "../../../lib/auth/policy";
 import { createAndSendOtp } from "../../../lib/auth/otp";
 import { hashPassword } from "../../../lib/core/crypto";
@@ -20,6 +21,14 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const displayName = normalizeDisplayName(body.displayName, email);
     const password = validatePasswordStrength(body.password);
 
+    await claimOtpAdmission({
+      email,
+      env,
+      now: new Date(),
+      purpose: "register_verify",
+      requesterAddress: cloudflareRequesterAddress(request),
+    });
+
     // Hash password
     const passwordHash = await hashPassword(password);
     const nowIso = new Date().toISOString();
@@ -32,14 +41,20 @@ export const POST: APIRoute = async ({ locals, request }) => {
     let userId: string;
 
     if (existingUser) {
+      if (existingUser.status === "suspended") {
+        throw new AppError("authentication_required", 401);
+      }
       if (existingUser.status === "active" && existingUser.password_hash !== null) {
         throw new AppError("email_exists", 409, ["email_already_registered"]);
       }
       // If user exists but is pending OR has no password (migrated from magic-link), update password and send verification OTP
       userId = existingUser.id;
+      const passwordColumn = existingUser.status === "active" && existingUser.password_hash === null
+        ? "pending_password_hash"
+        : "password_hash";
       await env.PLATFORM_DB.prepare(`
         UPDATE platform_users
-        SET display_name = COALESCE(?, display_name), password_hash = ?, updated_at = ?
+        SET display_name = COALESCE(?, display_name), ${passwordColumn} = ?, updated_at = ?
         WHERE id = ?
       `).bind(displayName, passwordHash, nowIso, userId).run();
     } else {

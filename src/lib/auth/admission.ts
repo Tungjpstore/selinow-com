@@ -19,6 +19,10 @@ const DEFAULT_SHOP_CREATE_REQUESTER_LIMIT = 10;
 const DEFAULT_SHOP_CREATE_SUBJECT_LIMIT = 5;
 const DEFAULT_SHOP_CREATE_WINDOW_SECONDS = 15 * 60;
 const TURNSTILE_RESPONSE_MAX_BYTES = 16_384;
+const DEFAULT_OTP_GLOBAL_LIMIT = 200;
+const DEFAULT_OTP_REQUESTER_LIMIT = 20;
+const DEFAULT_OTP_SUBJECT_LIMIT = 5;
+const DEFAULT_OTP_WINDOW_SECONDS = 15 * 60;
 
 type TurnstileEnvelope = {
   action?: unknown;
@@ -41,6 +45,58 @@ export function cloudflareRequesterAddress(request: Request): string {
 }
 
 export const magicLinkRequesterAddress = cloudflareRequesterAddress;
+
+export async function claimOtpAdmission(input: {
+  email: string;
+  env: AppBindings;
+  now: Date;
+  purpose: "register_verify" | "password_reset";
+  requesterAddress: string;
+}): Promise<void> {
+  const windowMs = DEFAULT_OTP_WINDOW_SECONDS * 1_000;
+  const windowStartMs = Math.floor(input.now.getTime() / windowMs) * windowMs;
+  const windowStartedAt = new Date(windowStartMs).toISOString();
+  const windowEndsAt = new Date(windowStartMs + windowMs).toISOString();
+  const requesterHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, "otp-requester:v1", input.requesterAddress.trim() || "unknown");
+  const subjectHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `otp-email:${input.purpose}:v1`, input.email);
+  const claimed = await input.env.PLATFORM_DB.prepare(`
+    INSERT INTO auth_otp_admissions (
+      id, purpose, requester_hash, subject_hash, window_started_at, window_ends_at, created_at
+    )
+    SELECT ?, ?, ?, ?, ?, ?, ?
+    WHERE (
+      SELECT COUNT(*) FROM auth_otp_admissions
+      WHERE purpose = ? AND window_started_at = ?
+    ) < ? AND (
+      SELECT COUNT(*) FROM auth_otp_admissions
+      WHERE purpose = ? AND requester_hash = ? AND window_started_at = ?
+    ) < ? AND (
+      SELECT COUNT(*) FROM auth_otp_admissions
+      WHERE purpose = ? AND subject_hash = ? AND window_started_at = ?
+    ) < ?
+    RETURNING id
+  `).bind(
+    createId("adm"),
+    input.purpose,
+    requesterHash,
+    subjectHash,
+    windowStartedAt,
+    windowEndsAt,
+    input.now.toISOString(),
+    input.purpose,
+    windowStartedAt,
+    DEFAULT_OTP_GLOBAL_LIMIT,
+    input.purpose,
+    requesterHash,
+    windowStartedAt,
+    DEFAULT_OTP_REQUESTER_LIMIT,
+    input.purpose,
+    subjectHash,
+    windowStartedAt,
+    DEFAULT_OTP_SUBJECT_LIMIT,
+  ).first<{ id: string }>();
+  if (claimed === null) throw new AppError("rate_limited", 429);
+}
 
 type ProvisioningAdmissionAction = "google_oauth_start" | "shop_create";
 

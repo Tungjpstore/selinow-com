@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 
-import { isAppError } from "../../../../lib/core/errors";
+import { AppError, isAppError } from "../../../../lib/core/errors";
 import { normalizeEmail } from "../../../../lib/auth/policy";
 import { appendSessionCookies, completeRegistrationWithOtp, createPasswordResetToken } from "../../../../lib/auth/session";
 import { verifyOtp, type OtpPurpose } from "../../../../lib/auth/otp";
@@ -17,7 +17,11 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
     const email = normalizeEmail(body.email);
     const otp = typeof body.otp === "string" ? body.otp : "";
-    const purpose = body.purpose as OtpPurpose;
+    const rawPurpose = body.purpose;
+    if (rawPurpose !== "register_verify" && rawPurpose !== "password_reset" && rawPurpose !== "login_2fa") {
+      throw new AppError("validation_failed", 400, ["otp_purpose_invalid"]);
+    }
+    const purpose: OtpPurpose = rawPurpose;
 
     if (purpose === "register_verify") {
       const result = await completeRegistrationWithOtp({
@@ -53,7 +57,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     });
 
     const resetToken = purpose === "password_reset"
-      ? await createPasswordResetToken(env.SESSION_SECRET, email, verified.userId)
+      ? await createPasswordResetToken(env, verified.userId)
       : undefined;
 
     return Response.json({

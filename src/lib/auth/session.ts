@@ -46,6 +46,7 @@ type UserAccountRow = {
   failedLoginCount: number;
   lockedUntil: string | null;
   passwordHash: string | null;
+  pendingPasswordHash: string | null;
   status: string;
   twoFactorEnabled: number;
   userId: string;
@@ -62,6 +63,7 @@ export type AuthContext = {
 
 export type SessionCredentials = {
   csrfToken: string;
+  sessionMaxAgeSeconds?: number;
   sessionToken: string;
 };
 
@@ -114,9 +116,10 @@ export type BrowserMagicLinkConsumptionResult =
     credentials: SessionCredentials;
   };
 
-export function createSessionCredentials(): SessionCredentials {
+export function createSessionCredentials(sessionMaxAgeSeconds?: number): SessionCredentials {
   return {
     csrfToken: createOpaqueToken(),
+    ...(sessionMaxAgeSeconds === undefined ? {} : { sessionMaxAgeSeconds }),
     sessionToken: createOpaqueToken(),
   };
 }
@@ -261,6 +264,7 @@ async function loadUserAccountByEmail(env: AppBindings, email: string): Promise<
       display_name AS displayName, 
       status, 
       password_hash AS passwordHash,
+      pending_password_hash AS pendingPasswordHash,
       COALESCE(failed_login_count, 0) AS failedLoginCount,
       locked_until AS lockedUntil,
       COALESCE(two_factor_enabled, 0) AS twoFactorEnabled
@@ -280,6 +284,7 @@ async function loadUserAccountById(env: AppBindings, userId: string): Promise<Us
       display_name AS displayName, 
       status, 
       password_hash AS passwordHash,
+      pending_password_hash AS pendingPasswordHash,
       COALESCE(failed_login_count, 0) AS failedLoginCount,
       locked_until AS lockedUntil,
       COALESCE(two_factor_enabled, 0) AS twoFactorEnabled
@@ -312,7 +317,8 @@ async function consumeLoadedMagicLink(input: {
       SELECT ?, ?, ?, ?, 'active', ?, ?, ?, ?
       FROM magic_link_tokens
       INNER JOIN platform_users ON platform_users.id = magic_link_tokens.user_id
-      WHERE magic_link_tokens.id = ? AND magic_link_tokens.consumed_at IS NULL AND magic_link_tokens.expires_at > ?
+      WHERE magic_link_tokens.id = ? AND magic_link_tokens.consumed_at IS NULL
+        AND magic_link_tokens.expires_at > ? AND platform_users.status != 'suspended'
 
     `).bind(
       sessionId,
@@ -339,7 +345,8 @@ async function consumeLoadedMagicLink(input: {
   ]);
 
 
-  if ((results[0]?.meta.changes ?? 0) !== 1 || (results[1]?.meta.changes ?? 0) !== 1) {
+  if ((results[0]?.meta.changes ?? 0) !== 1 || (results[1]?.meta.changes ?? 0) !== 1
+    || (results[2]?.meta.changes ?? 0) !== 1) {
     throw new AppError("authentication_required", 401);
   }
 
@@ -417,7 +424,7 @@ async function issueSessionForUser(input: {
   user: UserAccountRow;
 }): Promise<PasswordLoginResult> {
   const nowIso = input.now.toISOString();
-  const credentials = createSessionCredentials();
+  const credentials = createSessionCredentials(input.rememberMe ? 30 * 24 * 60 * 60 : SESSION_TTL_SECONDS);
   const sessionId = createId("ses");
   const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
   const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
@@ -560,7 +567,7 @@ export async function loginWithPassword(input: {
 
   if (user.status === "suspended") {
     await recordLoginHistory({ env: input.env, now, outcome: "account_suspended", requesterAddress, userId: user.userId });
-    throw new AppError("authentication_required", 401, ["account_suspended"]);
+    throw new AppError("authentication_required", 401, ["invalid_credentials"]);
   }
 
   // Check account lockout
@@ -573,25 +580,36 @@ export async function loginWithPassword(input: {
 
   if (!user.passwordHash) {
     await recordLoginHistory({ env: input.env, now, outcome: "invalid_credentials", requesterAddress, userId: user.userId });
-    throw new AppError("authentication_required", 401, ["password_not_set"]);
+    throw new AppError("authentication_required", 401, ["invalid_credentials"]);
   }
 
   const isValid = await verifyPassword(input.password, user.passwordHash);
 
   if (!isValid) {
-    const nextFailed = user.failedLoginCount + 1;
-    let lockedUntil: string | null = null;
-    if (nextFailed >= MAX_FAILED_LOGIN_ATTEMPTS) {
-      lockedUntil = new Date(now.getTime() + LOCKOUT_DURATION_MS).toISOString();
+    const lockoutUntil = new Date(now.getTime() + LOCKOUT_DURATION_MS).toISOString();
+    const updated = await input.env.PLATFORM_DB.prepare(`
+      UPDATE platform_users
+      SET failed_login_count = COALESCE(failed_login_count, 0) + 1,
+          locked_until = CASE
+            WHEN COALESCE(failed_login_count, 0) + 1 >= ? THEN ?
+            ELSE locked_until
+          END,
+          updated_at = ?
+      WHERE id = ? AND status != 'suspended'
+        AND (locked_until IS NULL OR locked_until <= ?)
+      RETURNING failed_login_count AS failedLoginCount, locked_until AS lockedUntil
+    `).bind(MAX_FAILED_LOGIN_ATTEMPTS, lockoutUntil, nowIso, user.userId, nowIso).first<{ failedLoginCount: number; lockedUntil: string | null }>();
+
+    if (!updated) {
+      const current = await loadUserAccountById(input.env, user.userId);
+      if (current?.lockedUntil && Date.parse(current.lockedUntil) > now.getTime()) {
+        await recordLoginHistory({ env: input.env, now, outcome: "account_locked", requesterAddress, userId: user.userId });
+        throw new AppError("account_locked", 423, ["too_many_attempts_account_locked"]);
+      }
+      throw new AppError("authentication_required", 401, ["invalid_credentials"]);
     }
 
-    await input.env.PLATFORM_DB.prepare(`
-      UPDATE platform_users
-      SET failed_login_count = ?, locked_until = ?, updated_at = ?
-      WHERE id = ?
-    `).bind(nextFailed, lockedUntil, nowIso, user.userId).run();
-
-    if (lockedUntil) {
+    if (updated.lockedUntil) {
       await recordLoginHistory({ env: input.env, now, outcome: "account_locked", requesterAddress, userId: user.userId });
       throw new AppError("account_locked", 423, ["too_many_attempts_account_locked"]);
     }
@@ -679,6 +697,27 @@ export async function completeTwoFactorLogin(input: {
   return result;
 }
 
+export async function resendTwoFactorLoginOtp(input: {
+  challengeToken: string;
+  env: AppBindings;
+  locale?: unknown;
+  now?: Date;
+}): Promise<{ cooldownSeconds: number; debugOtp?: string; expiresAt: string }> {
+  const { email, userId } = await verifyTwoFactorChallengeToken(input.env.SESSION_SECRET, input.challengeToken);
+  const user = await loadUserAccountById(input.env, userId);
+  if (!user || user.status !== "active" || user.emailNormalized !== email) {
+    throw new AppError("authentication_required", 401);
+  }
+  return createAndSendOtp({
+    email: user.emailNormalized,
+    env: input.env,
+    ...(input.locale === undefined ? {} : { locale: input.locale }),
+    ...(input.now === undefined ? {} : { now: input.now }),
+    purpose: "login_2fa",
+    userId: user.userId,
+  });
+}
+
 export async function completeRegistrationWithOtp(input: {
   email: string;
   env: AppBindings;
@@ -701,33 +740,44 @@ export async function completeRegistrationWithOtp(input: {
   if (!user) throw new AppError("authentication_required", 401);
 
   // Activate user account
-  await input.env.PLATFORM_DB.prepare(`
-    UPDATE platform_users
-    SET status = 'active', email_verified_at = ?, updated_at = ?, last_login_at = ?
-    WHERE id = ? AND status != 'suspended'
-  `).bind(nowIso, nowIso, nowIso, user.userId).run();
-
   const credentials = createSessionCredentials();
   const sessionId = createId("ses");
   const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
   const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
   const expiresAt = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
 
-  await input.env.PLATFORM_DB.prepare(`
-    INSERT INTO auth_sessions (
-      id, user_id, token_hash, csrf_token_hash, status, authenticated_at,
-      expires_at, last_seen_at, created_at
-    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
-  `).bind(
-    sessionId,
-    user.userId,
-    sessionTokenHash,
-    csrfTokenHash,
-    nowIso,
-    expiresAt,
-    nowIso,
-    nowIso,
-  ).run();
+  const results = await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE platform_users
+      SET status = 'active',
+          password_hash = COALESCE(pending_password_hash, password_hash),
+          pending_password_hash = NULL,
+          email_verified_at = ?, updated_at = ?, last_login_at = ?
+      WHERE id = ? AND status != 'suspended'
+    `).bind(nowIso, nowIso, nowIso, user.userId),
+    input.env.PLATFORM_DB.prepare(`
+      INSERT INTO auth_sessions (
+        id, user_id, token_hash, csrf_token_hash, status, authenticated_at,
+        expires_at, last_seen_at, created_at
+      )
+      SELECT ?, ?, ?, ?, 'active', ?, ?, ?, ?
+      FROM platform_users
+      WHERE id = ? AND status = 'active'
+    `).bind(
+      sessionId,
+      user.userId,
+      sessionTokenHash,
+      csrfTokenHash,
+      nowIso,
+      expiresAt,
+      nowIso,
+      nowIso,
+      user.userId,
+    ),
+  ]);
+  if ((results[0]?.meta.changes ?? 0) !== 1 || (results[1]?.meta.changes ?? 0) !== 1) {
+    throw new AppError("authentication_required", 401);
+  }
 
 
   return {
@@ -767,38 +817,64 @@ export async function requestPasswordResetOtp(input: {
   });
 }
 
-export async function createPasswordResetToken(secret: string, email: string, userId?: string | null): Promise<string> {
-  const expiresAt = Date.now() + 15 * 60 * 1000;
-  const payload = `${email}:${String(expiresAt)}:${userId ?? ""}`;
-  const signature = await hmacToken(secret, "password-reset-token", payload);
-  const encodedPayload = btoa(payload);
-  return `${encodedPayload}.${signature}`;
+export async function resendRegistrationOtp(input: {
+  email: string;
+  env: AppBindings;
+  locale?: unknown;
+  now?: Date;
+}): Promise<{ cooldownSeconds: number; debugOtp?: string; expiresAt: string }> {
+  const user = await loadUserAccountByEmail(input.env, input.email);
+  if (!user || user.status === "suspended" || (user.status === "active" && user.passwordHash !== null)) {
+    throw new AppError("authentication_required", 401);
+  }
+  return createAndSendOtp({
+    email: user.emailNormalized,
+    env: input.env,
+    ...(input.locale === undefined ? {} : { locale: input.locale }),
+    ...(input.now === undefined ? {} : { now: input.now }),
+    purpose: "register_verify",
+    userId: user.userId,
+  });
 }
 
-export async function verifyPasswordResetToken(secret: string, email: string, token: string): Promise<void> {
-  const parts = token.split(".");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+export async function createPasswordResetToken(env: AppBindings, userId?: string | null): Promise<string> {
+  if (!userId) throw new AppError("authentication_required", 401);
+  const token = createOpaqueToken(32);
+  const tokenHash = await hmacToken(env.SESSION_SECRET, "password-reset-token", token);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+  const inserted = await env.PLATFORM_DB.batch([
+    env.PLATFORM_DB.prepare(`
+      DELETE FROM password_reset_tokens
+      WHERE user_id = ? AND (expires_at <= ? OR created_at <= ?)
+    `).bind(userId, now.toISOString(), new Date(now.getTime() - 15 * 60 * 1000).toISOString()),
+    env.PLATFORM_DB.prepare(`
+      INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(createId("prt"), userId, tokenHash, expiresAt, now.toISOString()),
+  ]);
+  if ((inserted[1]?.meta.changes ?? 0) !== 1) throw new AppError("provider_unavailable", 503);
+  return token;
+}
+
+export async function verifyPasswordResetToken(env: AppBindings, email: string, token: string): Promise<{ userId: string }> {
+  if (token.length < 32 || token.length > 512) {
     throw new AppError("authentication_required", 401);
   }
-  const [encodedPayload, signature] = parts;
-  let payload: string;
-  try {
-    payload = atob(encodedPayload);
-  } catch {
+  const tokenHash = await hmacToken(env.SESSION_SECRET, "password-reset-token", token);
+  const row = await env.PLATFORM_DB.prepare(`
+    SELECT password_reset_tokens.user_id AS userId
+    FROM password_reset_tokens
+    INNER JOIN platform_users ON platform_users.id = password_reset_tokens.user_id
+    WHERE password_reset_tokens.token_hash = ?
+      AND platform_users.email_normalized = ?
+      AND password_reset_tokens.expires_at > ?
+    LIMIT 1
+  `).bind(tokenHash, email, new Date().toISOString()).first<{ userId: string }>();
+  if (!row) {
     throw new AppError("authentication_required", 401);
   }
-  const [tokenEmail, expiresAtStr] = payload.split(":");
-  if (tokenEmail !== email || !expiresAtStr) {
-    throw new AppError("authentication_required", 401);
-  }
-  const expiresAt = Number(expiresAtStr);
-  if (isNaN(expiresAt) || Date.now() > expiresAt) {
-    throw new AppError("validation_failed", 400, ["reset_token_expired"]);
-  }
-  const expectedSig = await hmacToken(secret, "password-reset-token", payload);
-  if (!constantTimeEqual(signature, expectedSig)) {
-    throw new AppError("authentication_required", 401);
-  }
+  return row;
 }
 
 export async function resetPasswordWithOtp(input: {
@@ -814,8 +890,12 @@ export async function resetPasswordWithOtp(input: {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
 
+  let resetTokenHash: string | undefined;
+  let resetTokenUserId: string | undefined;
   if (input.resetToken) {
-    await verifyPasswordResetToken(input.env.SESSION_SECRET, input.email, input.resetToken);
+    const resetIdentity = await verifyPasswordResetToken(input.env, input.email, input.resetToken);
+    resetTokenHash = await hmacToken(input.env.SESSION_SECRET, "password-reset-token", input.resetToken);
+    resetTokenUserId = resetIdentity.userId;
   } else if (input.otp) {
     await verifyOtp({
       ...(input.now === undefined ? {} : { now }),
@@ -837,19 +917,34 @@ export async function resetPasswordWithOtp(input: {
   const newHash = await hashPassword(validatedPassword);
 
   // Update password, clear lockouts, and revoke ALL active sessions
-  await input.env.PLATFORM_DB.batch([
+  const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
       UPDATE platform_users
       SET password_hash = ?, failed_login_count = 0, locked_until = NULL,
           status = 'active', updated_at = ?
-      WHERE id = ?
-    `).bind(newHash, nowIso, user.userId),
+      WHERE id = ? AND status != 'suspended'
+        AND (
+          ? IS NULL OR EXISTS (
+            SELECT 1 FROM password_reset_tokens
+            WHERE token_hash = ? AND user_id = ? AND expires_at > ?
+          )
+        )
+    `).bind(newHash, nowIso, user.userId, resetTokenHash ?? null, resetTokenHash ?? null, resetTokenUserId ?? user.userId, nowIso),
+    ...(resetTokenHash === undefined ? [] : [input.env.PLATFORM_DB.prepare(`
+      DELETE FROM password_reset_tokens
+      WHERE token_hash = ? AND user_id = ? AND expires_at > ?
+    `).bind(resetTokenHash, user.userId, nowIso)]),
     input.env.PLATFORM_DB.prepare(`
       UPDATE auth_sessions
       SET status = 'revoked', revoked_at = ?
       WHERE user_id = ? AND status = 'active'
     `).bind(nowIso, user.userId),
   ]);
+  const updateResult = results[0]?.meta.changes ?? 0;
+  const tokenDeleteResult = resetTokenHash === undefined ? 1 : (results[1]?.meta.changes ?? 0);
+  if (updateResult !== 1 || tokenDeleteResult !== 1) {
+    throw new AppError("authentication_required", 401);
+  }
 
   // Send security alert email
   await sendPasswordChangedAlertEmail({
@@ -1037,13 +1132,13 @@ export function appendSessionCookies(headers: Headers, credentials: SessionCrede
   const secure = env.APP_ENV !== "local";
   headers.append("Set-Cookie", serializeCookie(env.SESSION_COOKIE_NAME, credentials.sessionToken, {
     httpOnly: true,
-    maxAge: SESSION_TTL_SECONDS,
+    maxAge: credentials.sessionMaxAgeSeconds ?? SESSION_TTL_SECONDS,
     sameSite: "Lax",
     secure,
   }));
   headers.append("Set-Cookie", serializeCookie(`${env.SESSION_COOKIE_NAME}_csrf`, credentials.csrfToken, {
     httpOnly: false,
-    maxAge: SESSION_TTL_SECONDS,
+    maxAge: credentials.sessionMaxAgeSeconds ?? SESSION_TTL_SECONDS,
     sameSite: "Strict",
     secure,
   }));

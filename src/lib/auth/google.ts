@@ -105,6 +105,13 @@ function timestamp(value: Date | undefined): string {
   return date.toISOString();
 }
 
+function monotonicTimestamp(candidate: string, previous: string): string {
+  const candidateMs = Date.parse(candidate);
+  const previousMs = Date.parse(previous);
+  if (!Number.isFinite(previousMs)) return candidate;
+  return new Date(Math.max(candidateMs, previousMs + 1)).toISOString();
+}
+
 function stateLookupHash(env: Pick<GoogleBindings, "SESSION_SECRET">, state: string): Promise<string> {
   return hmacToken(env.SESSION_SECRET, "google-oauth-state-lookup:v1", state);
 }
@@ -198,6 +205,31 @@ async function loadState(env: GoogleBindings, lookupHash: string): Promise<State
     FROM auth_google_oauth_states
     WHERE state_lookup_hash = ? LIMIT 1
   `).bind(lookupHash).first<StateRow>();
+}
+
+async function refreshGoogleIdentity(input: GoogleBindings & { identityId: string; now: string }): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const row = await input.PLATFORM_DB.prepare(`
+      SELECT version, last_authenticated_at AS lastAuthenticatedAt,
+        updated_at AS updatedAt
+      FROM auth_google_identities WHERE id = ? LIMIT 1
+    `).bind(input.identityId).first<{ lastAuthenticatedAt: string; updatedAt: string; version: number }>();
+    if (row === null) throw new AppError("authentication_required", 401);
+    const authenticatedAt = monotonicTimestamp(input.now, row.lastAuthenticatedAt);
+    const updatedAt = monotonicTimestamp(input.now, row.updatedAt);
+    try {
+      const mutation = await input.PLATFORM_DB.prepare(`
+        UPDATE auth_google_identities
+        SET last_authenticated_at = ?, updated_at = ?, version = version + 1
+        WHERE id = ? AND version = ?
+      `).bind(authenticatedAt, updatedAt, input.identityId, row.version).run();
+      if (mutation.meta.changes === 1) return;
+    } catch {
+      // A concurrent callback may trip the immutable timestamp guard. Reload
+      // the row and retry against its latest version.
+    }
+  }
+  throw new AppError("google_identity_refresh_conflict", 409);
 }
 
 async function loadPendingState(input: GoogleBindings & { now?: Date; receivedState: string; browserBinding: string }): Promise<{ lookup: string; now: string; row: StateRow }> {
@@ -390,15 +422,40 @@ export async function exchangeAndVerifyGoogleCode(input: GoogleBindings & { code
   return verifyGoogleIdToken({ clientId: config.clientId, fetcher, idToken, nonce, now: input.now ?? new Date() });
 }
 
-export async function resolveGoogleIdentity(input: GoogleBindings & { allowCreate?: boolean; claims: GoogleClaims; now?: Date; initiatedUserId?: string | null }): Promise<GoogleIdentityResult> {
+export async function resolveGoogleIdentity(input: GoogleBindings & { allowCreate?: boolean; claims: GoogleClaims; now?: Date; initiatedUserId?: string | null; retryingEmailRace?: boolean }): Promise<GoogleIdentityResult> {
   const email = normalizeGoogleEmail(input.claims.email);
   const displayName = userDisplayName(input.claims);
   const subject = await subjectHash(input, input.claims.sub);
   const now = timestamp(input.now);
-  const existing = await input.PLATFORM_DB.prepare(`SELECT id, user_id AS userId FROM auth_google_identities WHERE subject_hash = ? LIMIT 1`).bind(subject).first<{ id: string; userId: string }>();
+  const existing = await input.PLATFORM_DB.prepare(`
+    SELECT auth_google_identities.id, auth_google_identities.user_id AS userId,
+      platform_users.status
+    FROM auth_google_identities
+    INNER JOIN platform_users ON platform_users.id = auth_google_identities.user_id
+    WHERE auth_google_identities.subject_hash = ? LIMIT 1
+  `).bind(subject).first<{ id: string; status: "active" | "pending" | "suspended"; userId: string }>();
   if (existing !== null) {
+    if (existing.status === "suspended") throw new AppError("authentication_required", 401);
     if (input.initiatedUserId !== undefined && input.initiatedUserId !== null && existing.userId !== input.initiatedUserId) throw new AppError("google_identity_in_use", 409);
-    await input.PLATFORM_DB.prepare(`UPDATE auth_google_identities SET last_authenticated_at = ?, updated_at = ?, version = version + 1 WHERE id = ?`).bind(now, now, existing.id).run();
+    const refreshIdentity = () => refreshGoogleIdentity({ ...input, identityId: existing.id, now });
+    if (input.allowCreate === true) {
+      // Self-heal a partial/legacy registration: the Google identity is
+      // authoritative, so a pending user must not remain locked out after a
+      // retry observes the already-persisted identity.
+      await refreshIdentity();
+      const activation = await input.PLATFORM_DB.prepare(`
+        UPDATE platform_users
+        SET status = 'active', email_verified_at = COALESCE(email_verified_at, ?),
+          is_verified = 1, verified_at = COALESCE(verified_at, ?), updated_at = ?
+        WHERE id = ? AND status = 'pending'
+      `).bind(now, now, now, existing.userId).run();
+      if (activation.meta.changes !== 1) {
+        const user = await input.PLATFORM_DB.prepare(`SELECT status FROM platform_users WHERE id = ? LIMIT 1`).bind(existing.userId).first<{ status: string }>();
+        if (user?.status !== "active") throw new AppError("authentication_required", 401);
+      }
+    } else {
+      await refreshIdentity();
+    }
     return { created: false, displayName, email, identityId: existing.id, userId: existing.userId };
   }
   if (input.initiatedUserId !== undefined && input.initiatedUserId !== null) {
@@ -420,19 +477,72 @@ export async function resolveGoogleIdentity(input: GoogleBindings & { allowCreat
     }
     return { created: false, displayName, email, identityId, userId: user.id };
   }
-  const existingEmail = await input.PLATFORM_DB.prepare(`SELECT id FROM platform_users WHERE email_normalized = ? LIMIT 1`).bind(email).first<{ id: string }>();
-  if (existingEmail !== null) throw new AppError("google_account_link_required", 409);
+  const existingEmail = await input.PLATFORM_DB.prepare(`
+    SELECT id, status FROM platform_users WHERE email_normalized = ? LIMIT 1
+  `).bind(email).first<{ id: string; status: "active" | "pending" | "suspended" }>();
+  if (existingEmail !== null) {
+    if (existingEmail.status === "suspended") throw new AppError("authentication_required", 401);
+    if (input.allowCreate !== true) throw new AppError("google_account_link_required", 409);
+
+    // A verified Google email is an explicit proof of ownership for the same
+    // email account. Attach it atomically so Google login works for accounts
+    // that were originally created with a password or magic link.
+    const identityId = createId("gid");
+    let attachResults: Array<{ meta: { changes: number } }>;
+    try {
+      attachResults = await input.PLATFORM_DB.batch([
+        input.PLATFORM_DB.prepare(`
+          UPDATE platform_users
+          SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+            email_verified_at = COALESCE(email_verified_at, ?), is_verified = 1,
+            verified_at = COALESCE(verified_at, ?), updated_at = ?
+          WHERE id = ? AND status != 'suspended'
+        `).bind(now, now, now, existingEmail.id),
+        input.PLATFORM_DB.prepare(`
+          INSERT INTO auth_google_identities (
+            id, user_id, subject_hash, subject_key_version, created_at,
+            last_authenticated_at, updated_at, version
+          )
+          SELECT ?, ?, ?, 'v1', ?, ?, ?, 1
+          FROM platform_users
+          WHERE id = ? AND status != 'suspended'
+        `).bind(identityId, existingEmail.id, subject, now, now, now, existingEmail.id),
+      ]);
+    } catch {
+      const [subjectOwner, userIdentity] = await Promise.all([
+        input.PLATFORM_DB.prepare(`SELECT id, user_id AS userId FROM auth_google_identities WHERE subject_hash = ? LIMIT 1`).bind(subject).first<{ id: string; userId: string }>(),
+        input.PLATFORM_DB.prepare(`SELECT id FROM auth_google_identities WHERE user_id = ? LIMIT 1`).bind(existingEmail.id).first<{ id: string }>(),
+      ]);
+      if (subjectOwner?.userId === existingEmail.id) {
+        return { created: false, displayName, email, identityId: subjectOwner.id, userId: existingEmail.id };
+      }
+      if (subjectOwner !== null) throw new AppError("google_identity_in_use", 409);
+      if (userIdentity !== null) throw new AppError("google_already_linked", 409);
+      throw new AppError("google_link_conflict", 409);
+    }
+    if (attachResults[0]?.meta.changes !== 1 || attachResults[1]?.meta.changes !== 1) {
+      throw new AppError("authentication_required", 401);
+    }
+    return { created: false, displayName, email, identityId, userId: existingEmail.id };
+  }
   if (input.allowCreate !== true) throw new AppError("google_account_not_found", 404);
   const userId = createId("usr");
   const identityId = createId("gid");
   try {
     await input.PLATFORM_DB.batch([
-      input.PLATFORM_DB.prepare(`INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at, email_verified_at) VALUES (?, ?, ?, 'active', ?, ?, ?)`).bind(userId, email, displayName, now, now, now),
+      input.PLATFORM_DB.prepare(`INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at, is_verified, verified_at, email_verified_at) VALUES (?, ?, ?, 'active', ?, ?, 1, ?, ?)`).bind(userId, email, displayName, now, now, now, now),
       input.PLATFORM_DB.prepare(`INSERT INTO auth_google_identities (id, user_id, subject_hash, subject_key_version, created_at, last_authenticated_at, updated_at, version) VALUES (?, ?, ?, 'v1', ?, ?, ?, 1)`).bind(identityId, userId, subject, now, now, now),
     ]);
   } catch {
     const raced = await input.PLATFORM_DB.prepare(`SELECT id, user_id AS userId FROM auth_google_identities WHERE subject_hash = ? LIMIT 1`).bind(subject).first<{ id: string; userId: string }>();
     if (raced !== null) return { created: false, displayName, email, identityId: raced.id, userId: raced.userId };
+    // A password/magic-link registration may have claimed this email between
+    // the lookup above and the batch insert. Re-enter the existing-email path
+    // so the same Google callback can attach instead of forcing a restart.
+    const racedEmail = await input.PLATFORM_DB.prepare(`SELECT id FROM platform_users WHERE email_normalized = ? LIMIT 1`).bind(email).first<{ id: string }>();
+    if (racedEmail !== null && input.retryingEmailRace !== true) {
+      return resolveGoogleIdentity({ ...input, retryingEmailRace: true });
+    }
     throw new AppError("google_registration_conflict", 409);
   }
   return { created: true, displayName, email, identityId, userId };

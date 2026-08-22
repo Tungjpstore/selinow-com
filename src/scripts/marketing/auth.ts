@@ -379,7 +379,10 @@ if (loginForm) {
 
       try {
         const res = await fetch("/api/auth/otp/resend", {
-          body: JSON.stringify({ email: twoFactorEmail, purpose: "login_2fa" }),
+          body: JSON.stringify({
+            ...(googleTwoFactorMode ? {} : { challengeToken: twoFactorChallengeToken }),
+            purpose: "login_2fa",
+          }),
           headers: { "Content-Type": "application/json" },
           method: "POST",
         });

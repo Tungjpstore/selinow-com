@@ -514,7 +514,79 @@ describe("Google account identity resolution", () => {
       .get("new.seller@example.test")).toEqual({ count: 1 });
   });
 
-  it("does not register during login or silently link an existing email", async () => {
+  it("provisions on Google login and attaches a verified Gmail to an existing account", async () => {
+    database.prepare(`
+      INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'pending', ?, ?)
+    `).run("usr-google-pending", "pending@example.test", "Pending Seller", NOW.toISOString(), NOW.toISOString());
+
+    await expect(resolveGoogleIdentity({
+      ...env,
+      allowCreate: true,
+      claims: baseClaims({ email: "missing@example.test", sub: "google-missing-account" }),
+      now: NOW,
+    })).resolves.toMatchObject({ created: true, email: "missing@example.test" });
+
+    const linked = await resolveGoogleIdentity({
+      ...env,
+      allowCreate: true,
+      claims: baseClaims({ email: "existing-a@example.test", sub: "google-existing-email" }),
+      now: NOW,
+    });
+    expect(linked).toMatchObject({ created: false, userId: USER_A });
+
+    const pending = await resolveGoogleIdentity({
+      ...env,
+      allowCreate: true,
+      claims: baseClaims({ email: "pending@example.test", sub: "google-pending-email" }),
+      now: NOW,
+    });
+    expect(pending).toMatchObject({ created: false, userId: "usr-google-pending" });
+    expect(database.prepare(`SELECT status, email_verified_at AS verifiedAt FROM platform_users WHERE id = ?`)
+      .get("usr-google-pending")).toEqual({ status: "active", verifiedAt: NOW.toISOString() });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_google_identities").get()).toEqual({ count: 3 });
+
+    database.prepare("UPDATE platform_users SET status = 'pending', email_verified_at = NULL WHERE id = ?")
+      .run("usr-google-pending");
+    const retry = await resolveGoogleIdentity({
+      ...env,
+      allowCreate: true,
+      claims: baseClaims({ email: "pending@example.test", sub: "google-pending-email" }),
+      now: new Date(NOW.getTime() + 1_000),
+    });
+    expect(retry).toMatchObject({ created: false, userId: "usr-google-pending" });
+    expect(database.prepare(`SELECT status, email_verified_at AS verifiedAt FROM platform_users WHERE id = ?`)
+      .get("usr-google-pending")).toEqual({ status: "active", verifiedAt: new Date(NOW.getTime() + 1_000).toISOString() });
+
+    const sameNow = new Date(NOW.getTime() + 2_000);
+    await expect(resolveGoogleIdentity({
+      ...env,
+      allowCreate: true,
+      claims: baseClaims({ email: "pending@example.test", sub: "google-pending-email" }),
+      now: sameNow,
+    })).resolves.toMatchObject({ userId: "usr-google-pending" });
+    await expect(resolveGoogleIdentity({
+      ...env,
+      allowCreate: true,
+      claims: baseClaims({ email: "pending@example.test", sub: "google-pending-email" }),
+      now: sameNow,
+    })).resolves.toMatchObject({ userId: "usr-google-pending" });
+
+    database.prepare(`
+      INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'suspended', ?, ?)
+    `).run("usr-google-suspended", "suspended@example.test", "Suspended Seller", NOW.toISOString(), NOW.toISOString());
+    await expect(resolveGoogleIdentity({
+      ...env,
+      allowCreate: true,
+      claims: baseClaims({ email: "suspended@example.test", sub: "google-suspended-email" }),
+      now: sameNow,
+    })).rejects.toMatchObject({ code: "authentication_required", status: 401 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_google_identities WHERE user_id = ?")
+      .get("usr-google-suspended")).toEqual({ count: 0 });
+  });
+
+  it("keeps the legacy explicit-link guard when provisioning is disabled", async () => {
     await expect(resolveGoogleIdentity({
       ...env,
       claims: baseClaims({ email: "missing@example.test", sub: "google-missing-account" }),
@@ -522,11 +594,9 @@ describe("Google account identity resolution", () => {
     })).rejects.toMatchObject({ code: "google_account_not_found", status: 404 });
     await expect(resolveGoogleIdentity({
       ...env,
-      allowCreate: true,
       claims: baseClaims({ email: "existing-a@example.test", sub: "google-existing-email" }),
       now: NOW,
     })).rejects.toMatchObject({ code: "google_account_link_required", status: 409 });
-    expect(database.prepare("SELECT COUNT(*) AS count FROM auth_google_identities").get()).toEqual({ count: 0 });
   });
 
   it("links only the initiated account and fences identity collisions", async () => {
