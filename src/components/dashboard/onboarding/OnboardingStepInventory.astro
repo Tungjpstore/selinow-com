@@ -102,7 +102,7 @@ const isKeyless = activeVertical === "booking";
   <form class="step-form-grid" data-inventory-form novalidate>
     <div class="form-group full-width" data-inventory-key-section hidden={isKeyless}>
       <div class="label-with-count">
-        <label for="inventory-keys-input" data-inv-label>{config.label} <span class="required-star">*</span></label>
+        <label for="inventory-keys-input"><span data-inv-label>{config.label}</span> <span class="required-star">*</span></label>
         <span class="keys-count-badge" data-inventory-count-badge>0 {config.unitBadge}</span>
       </div>
       <div class="textarea-keys-wrap">

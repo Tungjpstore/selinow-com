@@ -62,6 +62,10 @@ type ResumeState = {
     hasStock: boolean;
     totalAvailableStock: number;
   };
+  channels: {
+    telegramEnabled: boolean;
+    websiteEnabled: boolean;
+  };
   integrations: {
     payosReady: boolean;
     telegramBotUsername: string | null;
@@ -73,6 +77,7 @@ type ResumeState = {
     templateId: string;
     vertical: Vertical;
   };
+  storefrontVersion: number;
   wizardStep: WizardStep;
 };
 
@@ -873,8 +878,10 @@ function initQuickstart(): void {
           });
           const chosenTemplate = selectedTemplateValue();
           if (chosenTemplate !== null) {
+            // Use the server-known draft version from the resume projection;
+            // fall back to 1 for fresh drafts created outside this wizard.
             await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/settings`, {
-              body: JSON.stringify({ expectedVersion: 1, templateId: chosenTemplate }),
+              body: JSON.stringify({ expectedVersion: resume?.storefrontVersion ?? 1, templateId: chosenTemplate }),
               method: "PATCH",
             }).catch(() => undefined);
           }
@@ -1394,6 +1401,16 @@ function initQuickstart(): void {
     payosVerified = resume.integrations.payosReady;
     telegramConnected = resume.integrations.telegramReady;
     telegramBotUser = resume.integrations.telegramBotUsername ?? "";
+    // Reflect the persisted channel choice so re-submitting step 1 for an
+    // existing shop can never silently flip channels back to "both".
+    const resumedChannel = resume.channels.websiteEnabled && resume.channels.telegramEnabled
+      ? "both"
+      : resume.channels.telegramEnabled ? "telegram" : "website";
+    const channelRadio = Array.from(channelRadios).find((radio) => radio.value === resumedChannel);
+    if (channelRadio) {
+      channelRadio.checked = true;
+      channelRadio.dispatchEvent(new Event("change", { bubbles: true }));
+    }
     if (payosVerified && payosStatusPill) {
       payosStatusPill.dataset.status = "verified";
       payosStatusPill.textContent = "✓ Đã xác thực";

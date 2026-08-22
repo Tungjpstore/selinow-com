@@ -25,6 +25,10 @@ export type OnboardingResumeState = {
     hasStock: boolean;
     totalAvailableStock: number;
   };
+  channels: {
+    telegramEnabled: boolean;
+    websiteEnabled: boolean;
+  };
   integrations: {
     payosReady: boolean;
     telegramBotUsername: string | null;
@@ -36,6 +40,8 @@ export type OnboardingResumeState = {
     templateId: string;
     vertical: StorefrontVertical;
   };
+  /** Current shop_settings.version so template PATCHes use a real version. */
+  storefrontVersion: number;
   /** First wizard step that still needs seller action. */
   wizardStep: OnboardingWizardStep;
 };
@@ -44,7 +50,10 @@ type ShopResumeRow = {
   name: string;
   slug: string;
   storefrontJson: string;
+  storefrontVersion: number;
+  telegramChannelEnabled: number;
   vertical: StorefrontVertical | null;
+  websiteChannelEnabled: number;
 };
 
 export async function getOnboardingResume(input: {
@@ -63,9 +72,13 @@ export async function getOnboardingResume(input: {
 
   const [settingsRow, catalog, telegram, payos] = await Promise.all([
     input.env.PLATFORM_DB.prepare(`
-      SELECT shops.name, shops.slug, shops.vertical, shop_settings.storefront_json AS storefrontJson
+      SELECT shops.name, shops.slug, shops.vertical, shop_settings.storefront_json AS storefrontJson,
+        shop_settings.version AS storefrontVersion,
+        profile.website_enabled AS websiteChannelEnabled,
+        profile.telegram_enabled AS telegramChannelEnabled
       FROM shops
       INNER JOIN shop_settings ON shop_settings.shop_id = shops.id
+      INNER JOIN shop_onboarding_profiles profile ON profile.shop_id = shops.id
       WHERE shops.id = ?
       LIMIT 1
     `).bind(member.row.shop_id).first<ShopResumeRow>(),
@@ -106,12 +119,14 @@ export async function getOnboardingResume(input: {
 
   // Mirrors the onboarding overview's nextStep ordering: catalog → inventory →
   // payments → telegram → readiness. The wizard never resumes past a step
-  // that still blocks publish.
+  // that still blocks publish. Telegram gating follows the CHANNEL flag (a
+  // shop with the channel on but no bot yet must resume at Connect).
+  const telegramChannelEnabled = settingsRow.telegramChannelEnabled === 1;
   let wizardStep: OnboardingWizardStep;
   if (!hasProducts) wizardStep = "product";
   else if (!hasStock) wizardStep = "inventory";
   else if (!payosReady) wizardStep = "connect";
-  else if (!telegramReady && telegramConfigured) wizardStep = "connect";
+  else if (telegramChannelEnabled && !telegramReady) wizardStep = "connect";
   else wizardStep = "launch";
 
   return {
@@ -122,6 +137,10 @@ export async function getOnboardingResume(input: {
       hasProducts,
       hasStock,
       totalAvailableStock,
+    },
+    channels: {
+      telegramEnabled: telegramChannelEnabled,
+      websiteEnabled: settingsRow.websiteChannelEnabled === 1,
     },
     integrations: {
       payosReady,
@@ -134,6 +153,7 @@ export async function getOnboardingResume(input: {
       templateId,
       vertical,
     },
+    storefrontVersion: settingsRow.storefrontVersion,
     wizardStep,
   };
 }

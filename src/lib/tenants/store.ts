@@ -456,7 +456,7 @@ export async function createShop(input: {
       `).bind(
         shopId, shopPublicId, input.slug, input.name, defaultLocale,
         currency, input.env.DEFAULT_TIMEZONE, domainId, merchantCountry, businessCountry,
-        input.vertical ?? "digital", nowIso, nowIso,
+        vertical, nowIso, nowIso,
       ),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
