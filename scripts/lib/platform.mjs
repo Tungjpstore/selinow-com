@@ -1438,15 +1438,10 @@ export function validateProductionWorkerRouteInventory(
     [contract.canaryDnsCarrier.hostname, contract.canaryDnsCarrier.service],
   ]);
   const domainKeys = new Set();
-  let domainInventoryOk = liveDomains.every((domain) => {
-    const identity = liveWorkerDomainIdentity(domain);
-    return identity !== null && (
-      identity.zoneId === contract.zoneId
-      || identity.zoneName === contract.zoneName
-      || identity.hostname === contract.zoneName
-      || identity.hostname.endsWith(`.${contract.zoneName}`)
-    );
-  });
+  // The Cloudflare account may host Workers for other products; only domains
+  // inside this zone are admitted, and the per-domain allowlist below scopes
+  // them. Out-of-zone domains just have to parse.
+  let domainInventoryOk = liveDomains.every((domain) => liveWorkerDomainIdentity(domain) !== null);
   for (const domain of domainsInZone) {
     if (
       domainKeys.has(domain.hostname)
@@ -1709,13 +1704,29 @@ function normalizeLiveConsumer(raw) {
   }
   const settingsSource = raw.settings ?? raw;
   const script = normalizedSetting(raw, ["script", "script_name", "scriptName", "worker", "worker_name"]);
+  // Cloudflare renamed the consumer batch-timeout field: current APIs report
+  // max_wait_time_ms in milliseconds while the contract is expressed in seconds.
+  const rawBatchTimeout = normalizedSetting(settingsSource, ["batchTimeout", "batch_timeout"]);
+  const rawMaxWaitMs = normalizedSetting(settingsSource, ["maxWaitTimeMs", "max_wait_time_ms"]);
+  const batchTimeout = rawBatchTimeout !== undefined
+    ? rawBatchTimeout
+    : Number.isInteger(rawMaxWaitMs) && rawMaxWaitMs > 0 && rawMaxWaitMs % 1000 === 0
+      ? rawMaxWaitMs / 1000
+      : undefined;
+  // Cloudflare reports retry_delay=0 on consumers that never set one (the
+  // DLQ consumer); the contract omits the field entirely in that case.
+  const rawRetryDelay = normalizedSetting(settingsSource, ["retryDelaySecs", "retry_delay_secs", "retry_delay"]);
+  const retryDelaySecs = rawRetryDelay === 0 ? undefined : rawRetryDelay;
   const settings = {
     batchSize: normalizedSetting(settingsSource, ["batchSize", "batch_size"]),
-    batchTimeout: normalizedSetting(settingsSource, ["batchTimeout", "batch_timeout"]),
-    deadLetterQueue: normalizedSetting(settingsSource, ["deadLetterQueue", "dead_letter_queue"]),
+    ...(batchTimeout === undefined ? {} : { batchTimeout }),
+    deadLetterQueue: [
+      normalizedSetting(settingsSource, ["deadLetterQueue", "dead_letter_queue"]),
+      normalizedSetting(raw, ["deadLetterQueue", "dead_letter_queue"]),
+    ].find((value) => typeof value === "string") ,
     maxConcurrency: normalizedSetting(settingsSource, ["maxConcurrency", "max_concurrency"]),
     maxRetries: normalizedSetting(settingsSource, ["maxRetries", "max_retries", "messageRetries"]),
-    retryDelaySecs: normalizedSetting(settingsSource, ["retryDelaySecs", "retry_delay_secs", "retry_delay"]),
+    ...(retryDelaySecs === undefined ? {} : { retryDelaySecs }),
   };
   for (const key of Object.keys(settings)) {
     if (settings[key] === undefined) delete settings[key];
@@ -1803,11 +1814,15 @@ async function discoverProductionCustomHostnames(input) {
     }
     const currentPage = resultInfo?.page;
     const totalPages = resultInfo?.total_pages;
+    // Cloudflare reports total_pages=0 (with total_count=0) for an empty
+    // custom-hostname inventory; treat that as a complete single empty page.
+    const emptyInventory = currentPage === 1 && totalPages === 0
+      && Number.isInteger(resultInfo?.total_count) && resultInfo.total_count === 0;
     if (!Number.isInteger(currentPage) || !Number.isInteger(totalPages)
-      || currentPage !== page || totalPages < page || totalPages > 100) {
+      || currentPage !== page || (totalPages < page && !emptyInventory) || totalPages > 100) {
       throw new Error("production_saas_custom_hostname_pagination_invalid");
     }
-    if (page === totalPages) return inventory;
+    if (page === totalPages || emptyInventory) return inventory;
   }
   throw new Error("production_saas_custom_hostname_pagination_invalid");
 }
