@@ -1,6 +1,260 @@
 # Implementation Status
 
-Last updated: 2026-08-20
+Last updated: 2026-08-22
+
+## CA — Commercial Architecture (2026-08-22)
+
+Structural upgrades answering "vẫn quá đơn giản, kiến trúc chưa thể thương mại hoá" — this is layout density and composition, not CSS polish. Three pillars (~400 lines CSS + markup changes across all 9 templates + layout):
+
+### CA1: Hero multi-layer composition
+- **Stats bar**: every template hero now carries 3 live stat items (product count, real sold count, 24/7 support) — large tabular-nums numbers with uppercase labels, creating a data-rich first impression.
+- **Trust bar**: compact glassmorphic strip with checkmark badges (secure payment / instant delivery / 24/7 support) below stats — immediate trust signaling.
+- **Decorative ring**: layered geometric accent (3 concentric rings in merchant-brand at 12%/8%/15% opacity) creating visual depth.
+- **Applied to all 9 templates** — each template's hero now has: headline → description → stats bar → trust bar → CTA → deco ring, instead of just headline + description.
+
+### CA2: Premium product card
+- **Price overlay on visual**: price + compare-at sit ON the product image (glassmorphic backdrop-blur card), not below it — saves vertical space, creates editorial feel.
+- **Quick actions on visual**: add-to-cart (+) and view-detail (→) buttons on the image overlay (36px circular, backdrop-blur).
+- **Product metadata row**: soldCount badge + variant count as dot-separated inline metadata under the title.
+- **Larger visuals**: `min-height: clamp(220px, 32vw, 380px)` — cards are image-first, not text-first.
+
+### CA3: Mega footer (replaces single-line footer)
+- **4-column layout**: Brand (name + footer text + payment badges: PayOS, VietQR, Banking, MoMo) / Shop links / Support links / Trust points.
+- **Footer bottom**: copyright year + "Powered by Selinow".
+- **Responsive**: 4→2→1 column at 820/560px.
+- **Wired in StorefrontLayout** — applies to every storefront page.
+
+### Verification
+- 150 TM+EX tests green, check 0 errors, build + dry-run pass.
+- Build required fixing corrupted template insertions in 5 templates (bustle/serenity/aurora/craft/clinic/desk had broken HTML from earlier hero-stats insertion). All repaired.
+
+## TV — Template Vitality (2026-08-22)
+
+Direct response to owner critique: "vẫn quá đơn điệu, thiếu sức sống, không có điểm nhấn, lệch nhịp, chưa tối ưu responsive/UX." One vitality layer in `sections.css` (~300 lines, all on `--tmpl-*` tokens) + reveal-boot wiring across all 9 booking templates:
+
+### 1. Section rhythm (đơn điệu → nhịp)
+- Alternating section backgrounds: `main > section:nth-of-type(even)` gets a subtle tint lift (40% panel over canvas).
+- Varied section padding: catalog gets `clamp(48px, 7vw, 88px)` vs USP/FAQ at `clamp(32px, 5vw, 56px)` — breathing rhythm.
+- Gradient hairline dividers between major sections (`::before` with merchant-brand gradient, 120px centered).
+
+### 2. Hero vitality (thiếu sức sống → motion + drama)
+- **Animated gradient mesh**: `::after` pseudo-element on every template hero with two radial gradients drifting via 20s keyframe (`hero-mesh-drift`) — creates ambient depth.
+- **Staggered text entrance**: hero children enter one-by-one with 80ms delay (`hero-text-enter`, 240ms standard ease).
+- **Typography drama**: fluid `clamp(2.5rem, 7vw, 5.5rem)` on all hero h1 + `text-wrap: balance`.
+
+### 3. Card interactions (điểm nhấn)
+- **Hover elevation**: `translateY(-3px)` + shadow on `.product-card:hover` (120ms standard ease).
+- **Image zoom**: `.product-visual img` scales to 1.06 on card hover (240ms panel ease).
+- **Border accent**: `::before` ring shifts to merchant-brand on hover.
+- **Service rows**: border-color transition on hover for booking templates.
+
+### 4. Responsive fluid (responsive/UX)
+- **Auto-fill grids**: product lists use `repeat(auto-fill, minmax(clamp(240px, 28vw, 340px), 1fr))` — intelligent column count per viewport. Aurora gets wider min (280px), Metro/Bustle tighter (200px).
+- **Fluid headings**: all h1/h2 headings get `clamp()` sizing.
+- **Mobile quick-add**: the Aurora popover becomes a bottom-sheet (`position: fixed; inset-block-end: 12px`) at ≤560px.
+- **Touch spec-peek**: Metro overlay uses `:active` instead of `:hover` on `(hover: none)` devices.
+- **Scrollbar styling**: thin, brand-tinted scrollbars on horizontal rails.
+- **Scroll-snap padding**: flash rail gets `scroll-padding-inline` for proper snap alignment.
+
+### 5. Scroll-based section stagger (sức sống)
+- All home sections with `data-reveal` now stagger their **children** too: each child enters with 30ms incremental delay (`--child-i` CSS variable, `section-child-enter` keyframe).
+- Booking templates' service/process sections gained `data-reveal` + the marketing `reveal-boot.ts` loads on all 9 homes.
+
+### Reduced motion
+Every animation and transition in the vitality layer has a `prefers-reduced-motion: reduce` branch that disables it cleanly.
+
+### Tests (+2, now 16 in `storefront-sections-settings.test.ts`)
+- TV vitality contract: section rhythm selectors, hero mesh/entrance keyframes, card hover/zoom, auto-fill grid values, mobile bottom-sheet, touch spec-peek, child stagger, reduced-motion coverage — all asserted against the CSS.
+- All 9 template homes load `reveal-boot.ts` for scroll entrance.
+- Full TM+EX battery: 158 green; build + check + dry-run pass.
+
+## TM4 — honest merchandising intelligence (2026-08-22)
+
+Conversion tools that use real signals only — no fabricated social proof:
+
+- **soldCount (SQL)**: the catalog projection now carries each product's real paid-order count (`order_items` joined on `payment_status = 'paid'` orders, tenant-scoped subquery) plus `createdAt` — the substrate for every badge and curation default.
+- **Auto badges** (`ProductCard`): `BEST` (≥5 real paid orders, shows the count), `HOT` (has compare-at), `NEW` (created ≤21 days) — priority BEST > HOT > NEW, one badge max per card, rendered on the visual; i18n en + vi-VN ("BÁN CHẠY · N đã bán").
+- **Recently viewed** (`tm4-merchandising.ts`): detail pages record the visited slug/title into `selinow-viewed:v1:{host}` (≤8, deduped); every template home renders a scroll-snap rail that self-removes when empty; localStorage-unavailable = no rail.
+- **Cart cross-sell**: the cart page gains a "Thường mua cùng" grid — suggestions come from the already-embedded catalog data (same categories as the cart's items, ≤3, excluding in-cart slugs), client-side only, no new network call; empty cart or no suggestions = section removed.
+- **Tests** (+3 in `storefront-sections-settings.test.ts`, now 14): soldCount SQL + type exposure, badge derivation from real signals, recently-viewed + cross-sell + detail-tracking wiring across all 9 homes/cart/detail. Build + check + dry-run pass; 164 TM+EX tests green together.
+
+TM program state: TM0–TM4 ✅. Remaining: TM5 gates (VR re-baseline with signatures, contrast × intensity presets, perf budget measurement).
+
+## TM3 — signature moments ×9 (2026-08-22)
+
+Every template now has its plan-§4 "5-second recognition" moments — the "too simple, no highlights" critique is answered in code, not just specs. One behaviors bundle (`src/scripts/storefront/tm3-signatures.ts`) loads per template id:
+
+- **Swift — instant-search dropdown**: hero search gains a combobox-style live result list (thumb initial + title + price, ≤5 matches) with Esc/outside-click close; keyboard-navigable role=listbox; zero new network calls (reuses the existing client-side card filter data).
+- **Pulse — flash rail**: scroll-snap horizontal rail of deal cards each with a live per-card countdown driven by the first active promotion's `endsAt`; cards self-remove when expired; countdown ticks are disabled under reduced-motion (static text remains).
+- **Aurora — quick-add popover**: product cards carry `data-quick-add-variants` (in-stock variants as `{id,label,max}`); a "＋" trigger opens a size-option popover that adds directly to cart via the existing `readCart/saveCart` (no new server call, no new risk surface).
+- **Metro — spec-peek overlay**: cards carry their first 3 product attributes (`label: value` joined); hover/focus-within reveals a mono overlay on the visual — pure CSS on `--tmpl-*` tokens, pointer-events:none.
+- **Bustle — stock progress bar**: when exact stock is available (`showExactStock` + `availableStock`), a thin progress bar renders on the card visual (green >25%, amber ≤25%); absent data = no bar (honest absence).
+- **Serenity / Craft / Clinic — next-slot chip**: after the hero CTA, a chip queries the public slots API for the first bookable service's next open slot (`slots[0].startAt`) and shows "Còn trống: [date time]" — real data only; network failure or no slots = honest empty label, never a fake time. Click navigates to the service detail for full slot picking.
+- **CSS**: all signature styles live in `sections.css` on `--tmpl-*` tokens (dark Pulse/Craft render correctly); every animation has a `prefers-reduced-motion` branch; the only loop is the countdown tick (already contract-tested).
+- **Tests** (+2 in `storefront-sections-settings.test.ts`, now 11): the behaviors bundle exports all six binds + hooks the real slots API URL; every template home carries its data hooks (`data-flash-countdown`, `data-quick-add-variants`, `data-spec-peek`, `data-stock-total`, `data-next-slot-chip`); CSS covers all six selectors with the reduced-motion block; next-slot sources from `slots[0]` only with a network-failure comment. Build + check + dry-run pass; 153 TM+EX tests green together.
+
+Next: TM4 merchandising (soldCount SQL, NEW/BEST badges, recently viewed, cart cross-sell, bundle nudge), TM5 gates (VR re-baseline, contrast × intensity, perf budget).
+
+## TM2 — merchant-edited section content (2026-08-22)
+
+The Bố cục tab now edits what the universal sections say, not just where they sit.
+
+- **Registry**: `parseSettings` gains one bounded array-of-records level (≤8 items, ≤6 scalar fields each, strings ≤300) carrying section item lists; `universalSectionSettings` surfaces a section's settings; `parseSectionItems` is the render-side semantic view (drops blank entries, caps titles/questions/answers) so storage stays a general cleaner while rendering stays honest.
+- **Components**: `USPGrid` and `FAQSection` accept `settings` — merchant items fill from index 0 with the per-vertical i18n defaults back-filling the remainder (`[...custom, ...defaults].slice(0, 3)`); all nine homes pass `universalSectionSettings(shop.content.sections, type)` through.
+- **Builder**: the Bố cục panel renders item editors below the stack — 3× (title + body) for USP, 3× (question + answer) for FAQ — pre-filled from persisted settings over i18n defaults, with "leave empty to keep the default" guidance; typing marks the draft unsaved and `readSectionItems` embeds non-empty fields into the hidden JSON's `settings.items` on every rebuild (restore-defaults keeps editors untouched — empty means default).
+- **Tests** (+4 in `storefront-sections-settings.test.ts`, now 9): array cleaning through parse + blank filtering at parseSectionItems, 8-item flood cap, builder item-input contract, component/home consumption contract. Full TM+EX battery: **151 green**; check 0 errors; build + dry-run pass; lint clean on touched files.
+
+Next: TM3 signature moments ×9 per plan §4.
+
+## TM1 — Store Builder "Bố cục" tab (2026-08-22)
+
+Merchants now control the home-section stack: the plan's §2.3 v1 (toggle/reorder/restore, no drag) is live end-to-end.
+
+- **Registry semantics**: `resolveUniversalSections` — the persisted array is authoritative for the universal tail (usp/faq) only; native blocks always render in template order, a config disabling everything falls back to the default tail (never a bare page). Disabled tail types are filtered out.
+- **Persistence**: `parseStorefrontContent` surfaces `sections` (bounded parse) onto `shop.content`; `updateSellerStorefrontSettings` accepts `sections` (parse = validator; empty array stores absent), and both `/settings` + `/storefront/draft` routes allow the field — the builder's existing draft→publish flow carries it.
+- **Builder**: new "Bố cục" tab — server renders the resolved stack as rows (native rows locked with a note; usp/faq rows with toggle + up/down), hidden `data-field="sections"` input carries the JSON, interactions rebuild the config and mark the draft unsaved; "Khôi phục bố cục mẫu" rebuilds from the embedded default stack; the live preview gains USP/FAQ placeholder blocks that follow the toggles. Copy via the EX console catalog (en + vi-VN, 24 new keys).
+- **Render**: all nine `StoreHome` components render the universal tail through `universalTail.map(...)` from the resolved config — toggling in the builder changes the live storefront on publish.
+- **Tests** `storefront-sections-settings.test.ts` (5): default-tail fallback + persisted order/enable semantics, dirty-array cleaning through the settings draft (sqlite round-trip incl. settings read-back), empty-array-as-absent, builder render contract (tab/panel/hidden field/preview hooks/ALLOWED), per-template `resolveUniversalSections` consumption. Full TM+EX battery: 137 green; check 0 errors; build + dry-run pass. (The parallel stream landed `hero-canvas.ts`/`flow-scene.ts` mid-session — the canvas hex fallback joined the spine-contract allowlist; flow-scape's TS error is theirs.)
+
+Next: TM2 content plane (hero media + USP/FAQ items as merchant-editable settings), TM3 signature moments ×9.
+
+## TM0 — Template Mastery foundation (2026-08-22)
+
+First slice of `docs/storefront-templates/TEMPLATE_MASTERY_PLAN_2026-08-22.md`: the home page becomes a registry-driven section stack and every template immediately gains two rich universal sections — answering the "too simple, no highlights" critique with the architecture to keep layering on.
+
+- **SectionRegistry** (`src/lib/storefront/sections/registry.ts`): 28 section types (today's native blocks + the TM catalog), `DEFAULT_HOME_STACKS` per template documenting what each home renders, bounded `parseHomeSections` (≤12 sections, unknown types/ids dropped, settings capped) surfaced via `parseStorefrontSections` in `theme.ts` — persisted inside `storefront_json.sections` with **zero migrations**; garbage config degrades to the default stack, never a broken page. `resolveHomeSections` filters enabled order for render.
+- **Universal sections**: `USPGrid` (3 trust cards, per-vertical default copy — honest, references the shop's real policy surfaces) and `FAQSection` (3 native details/summary items per vertical) — wired into **all nine** template homes on the stack tail, skinned by the `--tmpl-*` token layer (dark Pulse/Craft included). i18n: 76 new keys (en + vi-VN). Every homepage went from 3–4 blocks to 5–6 with zero merchant effort; TM2 turns the copy into merchant-editable settings.
+- **Tests** `storefront-sections-registry.test.ts` (6): default stacks for all 9, bounded parsing/dedup/caps, enabled-order resolution with defaults fallback, raw-JSON surfacing, and the render contract (every home carries USP+FAQ on `shop.template.vertical`; CSS + i18n coverage per vertical). Verification: `check` 0 errors, lint clean on touched files, build + dry-run pass; 60 EX/TM-adjacent tests green together.
+
+Next per plan: TM1 Builder "Bố cục" tab (toggle/reorder/edit), TM2 content plane, TM3 signature moments ×9.
+
+## EX3.4b — seller discount management API (2026-08-22)
+
+Fifth EX slice, closing the promo story for sellers (`src/lib/commerce/seller-discounts.ts` + `GET/POST /api/app/shops/:id/discounts`, `PATCH .../discounts/:discountId`; CSV 202 rows):
+
+- Forward-only lifecycle per the money-adjacent convention: **create + enable/disable only** (no edits, no hard deletes); every flip audit-logged (`seller.discount.created/disabled/enabled`).
+- Validation: code `A-Z0-9_-` 3–32 normalized uppercase; percentage capped at 90; fixed values bind the shop currency; optional ISO window with `ends > starts`; duplicate code → `discount_conflict`. Capability split: list `catalog:read`, writes `catalog:manage` (CSRF on mutations).
+- Tests `seller-discounts.test.ts` (4): bounds/window validation, create→list→disable→enable with audit trail, duplicate + tenant scoping, cross-shop id → `resource_not_found`. All EX suites now at 129 green tests together.
+
+**EX program state after this slice**: EX0 ✅, EX3.1/3.2 ✅, EX3.4a+EX4.1 ✅, EX3.4b ✅ (API; a Store Builder "Khuyến mãi" tab UI remains), EX5 core ✅. Still gated: EX1/EX2 UI (dashboard stream still holds index/products/bookings/inventory/security.astro + dashboard.ts uncommitted), EX5 leftovers (vertical-aware presets, Launch Center, platform.css archival), EX7 console VR/axe gates. All work remains uncommitted on the shared branch for selective commit.
+
+## EX5 slice — onboarding persistence + marketing motion (2026-08-22)
+
+Fourth EX slice (§9.1/9.2/9.3 of the plan, scoped to the unblocked items):
+
+- **Onboarding persists real choices (EX5.2)**: shop creation now accepts `vertical` (validated against digital/physical/booking, persisted to `shops.vertical` — the 0102 column finally carries onboarding truth); the quickstart sends the selected vertical with the create payload and, after channels config, PATCHes the chosen `templateId` into the storefront draft (`expectedVersion: 1` on the fresh draft; best-effort so a premium-without-entitlement pick degrades to swift silently, surfaced later in Store Builder). Product presets per vertical remain deferred.
+- **Marketing motion (EX5.1)**: HeroFlowSim becomes the staged flow-trace MOTION.md allowed — chips → message → order → outcome → caption enter over ~2.6s on `--sln-duration-marketing`/standard ease and then rest (no loop), connector lines draw via scaleX; the global reduced-motion clamp collapses it to the final frame. `reveal-boot.ts` now also observes `[data-count-to]` and ticks tabular count-ups on view (consumer attrs land with EX1/EX5 follow-ups).
+- **Auth parity (EX5.3)**: the login card gains the register-style enter motion on token timings (`--sln-duration-panel` + `--sln-ease-spring`).
+- Reduced-motion audit note: the global clamp in `selinow-tokens.css` already freezes keyframe animations (duration 1ms, one iteration) — the onboarding wizard motion debt from the dashboard audit is thereby covered without per-component passes.
+- Contracts: `ex0-experience-contract.test.ts` grows to 13 tests (vertical payload/route/lib, staged trace without loops on tokens, countup boot, login motion). Build + dry-run pass. Deferred: vertical-aware product presets, Launch Center v1 (store.astro publish tab), platform.css archival, wire-or-delete for OnboardingCelebration/LivePreview.
+
+## EX3.4a + EX4.1 — promo code at checkout (2026-08-22)
+
+Third EX slice: the buyer-facing promo flow goes live end-to-end (the apply path was already atomic server-side; only the remove mutation and UI were missing).
+
+- **`discount.remove` cart mutation (EX3.4a)**: added to the canonical mutation chain (`contracts.ts` union → `application.ts` strict validator → `applyCanonicalCartMutation`): removing an absent code is a clean no-op (no writes, no replay ledger entry), removing an applied code clears `carts.discount_code_normalized` under the same active/expiry guards; Telegram port rejects the website-only kind with `discount_remove_unsupported` (its flows only surface apply).
+- **Checkout promo UI (EX4.1)**: `checkout.astro` gains the promo field (mono uppercase input + apply), applied chip with remove, a live discount row (`-money` under the quote), and a status line; `checkout.ts` renders it from every quote refresh (`renderPromo` on both the prepare and recovery paths), applies/removes via `/api/store/cart` with auto Idempotency-Key and maps `discount_invalid` to a protected-style error message; Enter submits. Bustle voucher chips now also drop a `selinow-promo-draft` sessionStorage hint that pre-fills the checkout input (copy + prefill, best effort). Styles live in `sections.css` on `--tmpl-*` tokens (pill chip, AA success tones).
+- **Tests**: `storefront-promo-flow.test.ts` — sqlite-backed apply→remove, no-op remove, invalid-code rejection through `applyWebsiteCartMutation`, plus the render contract (markup hooks, both render paths, draft wiring, styles). 4/4 green; build + dry-run pass.
+- Deferred: seller-side discounts CRUD (EX3.4b) remains open; the storefront UI surfaces codes seeded/managed until that lands.
+
+## EX3 backend batch — metrics + Today read model (2026-08-22)
+
+Second EX slice (EX3.1/EX3.2 from `docs/FRONTEND_EXPERIENCE_UPGRADE_PLAN_2026-08-22.md`). Mid-session, the parallel dashboard stream started the same surface (`today-snapshot.ts`, `/today`, `/metrics/range`, `seller-today-metrics.test.ts`); the streams reconciled on their consumer/test contract — `src/lib/dashboard/metrics.ts` implements it (`parseMetricsDays`, sparse timezone-aware day `points`, `totalMinor`, foreign-currency paid orders counted not summed, membership-resolved like every seller read model).
+
+- **Migration 0109** (`0109_seller_metrics_index.sql`): tenant-leading `idx_orders_shop_paid_at` backing the range aggregate; registered in the production invariant registry; chain-tip test pinned to 0109. The parallel stream's in-flight `0108_dodo_billing_reconciliation.sql` remains theirs to register.
+- **`GET /api/app/shops/:id/today`** (EX3.2): `getSellerTodaySnapshot` — sections `health/metrics/queue/activity/recentOrders` each with the six-state WorkspaceDataState contract; queue kinds are machine codes (readiness fail/warning, payment/fulfillment exceptions, stockouts, automation waiting_user, section outages) severity-sorted; readiness+audit owner-only degrade to `forbidden`, never empty. Route is ETag-conditional (304 revalidation for the EX freshness poller) — fixed a real bug where the validator hashed the rotating `requestId` and could never 304.
+- **`GET /api/app/shops/:id/metrics/range?days=7|30`** (EX3.1): real revenue series replacing the fabricated sparkline (EX1 UI consumes it when the dashboard stream releases index.astro).
+- **Tests**: `seller-today-metrics.test.ts` (4: aggregation/timezone/foreign-exclusion, parser, snapshot sections + role-gating) and `seller-today-route.test.ts` (3: ETag strong, 304 on match, recompute on stale) — both green; both routes registered in `API_ENDPOINT_INDEX.csv` (199 rows).
+- Verification: `check` 0 errors, lint clean on all touched files, `build` + `deploy:dry-run` pass. Remaining suite failures are the parallel stream's in-flight work (0108 registry, billing routes/astro, dodo, i18n-call-site, worker-domain-delivery).
+
+## Experience Platform 2.0 — EX0 foundation (2026-08-22)
+
+First implementation slice of `docs/FRONTEND_EXPERIENCE_UPGRADE_PLAN_2026-08-22.md` (EX0 + quick win EX3.7), delivered alongside the CD program on the same shared branch; EX1/EX2 remain gated on the dashboard stream releasing its dirty files (plan §13).
+
+### Artifacts
+
+- **Token spine v2**: the Selinow Soft family (`--sln-soft-accent #7C6AF0`, fill-safe `--sln-soft-accent-strong #6957DE`, canvas/tint/borders) plus `--sln-ease-spring` now live once in `selinow-tokens.css`. `auth-soft.css` became a pure alias layer; marketing tokens (`--mk-brand`) moved to the Soft family; ~110 scattered Soft/legacy-indigo hexes across onboarding components, app-shell, marketing pages, ConsoleButton/ProviderLogo, register/login fallbacks were replaced with spine vars (canvas charts read the token via getComputedStyle). Contract: no Soft hex outside token files (`tests/unit/ex0-experience-contract.test.ts`).
+- **Client libs** `src/scripts/lib/`: `cookie` (CSRF helper), `data-state` (WorkspaceDataState six-state contract + response mapping), `mutation` (`mutate()` — auto CSRF + Idempotency-Key incl. caller-owned stable keys, optimistic/rollback, toasts, recent-auth hook), `toast` (ToastRegion controller, danger persists), `reveal` (IntersectionObserver for the previously-dead `data-reveal`, reduced-motion inert), `poll` (freshness protocol: pause-when-hidden, backoff, `data-fresh-at` stamping), `countup` (tabular ticker). Toast card + reveal CSS joined primitives.css on token timings with a real reduced-motion branch.
+- **Wiring**: ToastRegion mounted in AppLayout (`toast-boot.ts`); command palette fully i18n'd via the new `console` catalog (en + vi-VN parity) and rendered through DOM APIs (no innerHTML), shell strings (LiveActivityRadar/search triggers) key'd; marketing sections carry `data-reveal` (7 on home + staggered pricing cards) with `reveal-boot.ts` in PlatformLayout; moderation actions in data-lifecycle converted to `mutate()` with in-place action swap, stable replay key, toast — one `location.reload()` eliminated; developer.astro credentials ledger shows Skeleton placeholders while loading.
+- **EX3.7**: the seller orders API now accepts the full table contract (`q/status/sort/page/pageSize`) via the existing lib parsers — the client-side record workspaces (EX2) and palette record search can query it without new backend surface.
+- **Docs**: `frontend-prompt-os` token sheet + COLOR_AND_SURFACES gained the Soft spine section.
+
+### Verification
+
+- `npm run check` 0 errors; `npm run lint` clean for all touched files; `npm run build` and `deploy:dry-run` pass. New suite `tests/unit/ex0-experience-contract.test.ts` (10 contracts) green; `seller-data-ui` updated for the mutate() moderation flow (stable idempotency key preserved).
+- Full `npm run test`: the remaining failing files belong to the parallel stream's in-flight work (their new `0108_dodo_billing_reconciliation.sql` migration + billing operations/preview routes landed mid-session: chain-tip, provider inventory, billing.astro a11y/surface contracts, dodo suites).
+
+### Known limitations / next
+
+- poll.ts ships without a consumer (first consumer is the EX1 `/today` freshness loop, per plan §5.3); drawer.ts deferred to EX2 where the record drawer lands; the big dashboard.ts vi catalog migration stays queued behind the dashboard stream's ownership.
+
+Seller dashboard upgrade proposal: [`docs/SELLER_DASHBOARD_UPGRADE_PROPOSAL.md`](./SELLER_DASHBOARD_UPGRADE_PROPOSAL.md). The proposal keeps the current modular-monolith and tenant/payment invariants while introducing a Today cockpit, explicit read-state contracts, record workspaces, and a guided Launch Center.
+
+## Storefront Template Completion — CD program (2026-08-22)
+
+Implemented the full-journey template program from `docs/storefront-templates/TEMPLATE_COMPLETION_DESIGN_PLAN_2026-08-22.md` in one pass: CD0 (fixes + `--tmpl-*` feel-token layer), CD1 (per-template product detail, superseding the pending PD plan), CD2 (money-screen skins incl. dark-flow completion for Pulse/Craft), CD3 (buyer order history + payment-return states), and — in a follow-up pass the same day — **CD4 (Store Builder per-template preview) and CD5 (visual regression + contrast gate)**.
+
+### Artifacts
+
+- **Migration 0107** (`0107_storefront_template_completion.sql`, additive): `products.attributes_json` (seller spec rows), `orders.customer_email_lookup_hash` (HMAC-SHA256 base64url of the normalized checkout email under `order-email-lookup:v1:{shopId}`), tenant-leading `idx_orders_shop_email_created`. Registered in the production invariant registry (`scripts/lib/release.mjs`) with computed column metadata and index digest; also registered the data-only 0106 entry that was missing from the registry.
+- **Detail program (CD1)**: `Detail.astro` dispatcher mapping all 9 templates to `templates/<id>/ProductDetail.astro` (swift fallback). Shared sections in `src/components/storefront/sections/`: `BuyBox` (single source of the purchase contract: variant radios, `#detail-add`, `#detail-quantity`, refresh status), `VariantList`, `Swatches` (single-dimension option chips wrapping the real radios; degrades to the list), `Gallery` (thumbnails + keyboard switching, `gallery.ts`), `SpecTable`, `PromoCountdown` (server-rendered static deadline; live tick via `promo-countdown.ts` under reduced-motion-safe rules), `RelatedGrid`, `SlotPickerInline` (booking PDP picker via the public slots API, `slot-picker-inline.ts`), `PolicyPanel`. Data enrichment in `getStorefrontCatalog`/`getStorefrontProduct`: full `images[]` (≤8), parsed `attributes`, `durationMinutes` projection, same-category `related` (≤4), active `promotions` (≤3 from `discounts`). Seller API accepts `attributes` on product create/update (`normalizeProductAttributes`, ≤20 rows, 40/120 chars) — dashboard editor UI for attributes is deferred.
+- **Template fixes (CD0)**: Aurora hero image now renders server-side (the `data-image` bug), `data-store-category-jump` drives the real category filter in `store-search.ts`, Bustle deal cards get a real `.is-deal` badge + voucher chips with one-tap copy (`voucher-copy.ts`), sold-out booking rows are non-focusable (`span`, no href), booking homes use real `durationMinutes`, craft/clinic own their i18n copy (steps/menu/table).
+- **Money-screen skins (CD2)**: shared storefront surfaces (cart, checkout, order, quote banners, policy panel, safe states) now resolve through the `--tmpl-*` token layer declared in `storefront.css` (`:root` swift defaults) and overridden per template. Pulse and Craft flow dark end-to-end (dark panels/fields/lines, protected stock/payment/quote states keep the light AA tints); Desk adopts dotted invoice leaders, Aurora a system-serif display stack (`Georgia/"Times New Roman"/"Noto Serif"` — CSP-safe, no web fonts), Metro squared density, Serenity pill radius, Clinic mono uppercase labels. New `styles/storefront/sections.css` loaded by `StorefrontLayout`.
+- **Order history + payment return (CD3)**: `/orders` page (email + Turnstile → masked summaries via `orders-history.ts`), `POST /api/store/orders/lookup` (same-origin, `guardAnonymousOrderLookup` with Turnstile-from-first-request and a tight rate window `STOREFRONT_ORDER_LOOKUP_RATE_LIMIT`, uniform success payload, no tokens/keys; registered in `docs/frontend-rebuild-handoff/API_ENDPOINT_INDEX.csv`). Opening an order still requires the existing per-order recovery flow. Checkout writes the email lookup hash inside the guarded INSERT (bind-only, guards unchanged). `order.ts` renders `?payment=return` (poll ≤60s) and `?payment=cancel` (retry CTA) states; header gains a "My orders" link; Turnstile widgets theme with the template scheme.
+
+### Verification
+
+- `npm run check`: 0 errors. `npm run lint`: clean for all touched code (remaining errors are the other session's `scripts/.*.tmp.mjs` artifacts). `npm run build`: passed. `npm run deploy:dry-run`: passed.
+- Full `npm run test`: 2,669 passed / 49 failed in 6 files — all pre-existing failures from the parallel stream's committed 0106/dashboard work (`dodo-billing*`, `paid-plan-billing-migrations`, `i18n-call-site-contract`, `console-design-contract`; stale expectations like `pending:dodo:%` counts and console font-weight scans on files this program never touched). New/updated suites all green: `storefront-templates` (dispatcher + purchase-contract + token-layer + slot-picker render contracts), `storefront-order-lookup` (HMAC match, origin guard, uniform empty, invalid email, migration contract), `catalog-atomic-create`, `telegram-commerce-tenant-boundary`, `storefront-buyer-contracts`, `provider-surface-audit` (195 rows), `production-deploy-continuation-guard`, chain-tip (`low-stock-threshold` → 0107).
+
+### External requirements
+
+- `wrangler secret`/var `STOREFRONT_ORDER_LOOKUP_RATE_LIMIT` (optional; default 5 per 600s window) to tighten the lookup endpoint in production.
+
+### CD4 — Store Builder per-template preview (2026-08-22, second pass)
+
+- The builder preview surface carries `data-template-preview={settings.template.id}`; `store-builder.ts` swaps the attribute with the draft `templateId` in `updatePreview`, so picking a template re-skins the live preview instantly (no round-trip). Swift stays the unscoped default; the other eight ship skins in `src/styles/dashboard/store-builder-preview-skins.css` (mirroring each template's `--tmpl-*` palette: pulse dark + glow, desk invoice rows, aurora serif lookbook, metro squared, bustle dashed deal card, serenity pill, craft warm-dark uppercase hairlines, clinic mono records). Raw hex lives in that sheet only — storefront theme data — keeping `store.astro` itself on semantic tokens per the frontend-route-ux contract (verified green).
+
+### CD5 — Visual regression + contrast gate (2026-08-22, second pass)
+
+- **VR1 fixtures** `seeds/0005_storefront_template_fixtures.sql`: eight live shops (pulse/desk/aurora/metro/bustle/serenity/craft/clinic at `<id>.localhost`; swift covered by the signal demo shop) with vertical-correct catalogs (physical stock via `variant_stock_levels`, booking `duration_minutes`, metro/clinic `attributes_json`), published `templateId`, and the `premiumStorefrontTemplates` flag granted on the local store plan (boolean `true` — number flags fail `hasFeature`).
+- **VR2/VR3 spec + baselines** `tests/visual/local-public-templates.spec.ts` (44 baselines on this capture machine): 9 templates × {home, product detail} × {1440, 390} + cart/checkout shells on aurora + serenity; asserts the rendered `data-storefront-template`, the purchase contract (`#detail-add`, variant radios), no horizontal overflow, and a clean console. The local gate seeds 0005 and allows/maps the eight new hosts (`scripts/local-public-browser-gate.mjs`, `playwright.public-local.config.ts`).
+- Two real bugs the baselines caught and fixed: booking detail pages overflowed 390px (grid `1fr` tracks with min-width auto + absolutely-positioned radio inputs whose containing block was the viewport — fixed with `minmax(0,1fr)` tracks and `position: relative` on slot/swatch/booking-slot labels), and aurora's muted text `#8a8a8a` measured 3.3–3.45:1.
+- **VR4 contrast gate** `tests/unit/storefront-template-contrast.test.ts` (82 cases): every template's `--tmpl-text/-2/-3` against its opaque `--tmpl-panel-bg-solid/-nested/field-bg` must hold WCAG AA 4.5:1; template sheets overlay literal hex on the swift baseline. Aurora's muted text was bumped to `#6f6f6f` (≥4.8:1). Merchant brand/ink pairs stay with the seller-side clamp; protected tints stay out of scope.
+- Visual verification: `npm run test:browser:public:local` — all storefront/template specs pass with stable baselines; the only failures are the parallel stream's marketing/pricing/login routes (their in-flight title/contrast changes).
+
+### Known limitations / next
+
+- Aurora's swatch mapping is single-dimension (multi-dimensional options fall back to the standard variant list). The Bustle voucher chips display codes but checkout does not yet accept a promo-code input (flagged `CD2-note` in the plan). Seller-side attributes editor UI is pending. `.ics` export for bookings was not taken (open decision §19). Builder template thumbnails remain wireframe shapes (LP2's "mini-render thumbnails" would need template CSS unscoped into the dashboard; the live preview pane now carries the real language instead).
+- The parallel session's stale suites (6 files) should be reconciled by that stream; the invariant-registry gap for their 0106 was patched here as data-only.
+
+## Seller Dashboard Flow Audit (2026-08-21)
+
+Completed an end-to-end review of the authenticated seller workspace, covering onboarding and all seller screens under the shared `AppLayout`: overview, products, inventory, orders and order detail, customers, bookings, storefront builder, integrations, payments, domains, automation, members, security, billing, developer, and data. The route inventory and tenant navigation were checked for continuity across shop switching, redirects, role gates, mutation boundaries, empty/loading/error states, and mobile shell navigation.
+
+### Findings resolved
+
+- Booking list remains readable for support, while booking status mutations are rendered only for owner/manager roles (`fulfillment:manage` boundary); this prevents predictable 403 actions from being exposed in the UI.
+- Security tab links now preserve the selected `shop` query context, so switching between sessions, 2FA, password, and login-history tabs cannot silently change tenant workspace.
+- Product and inventory catalog read failures now render explicit unavailable/retry states instead of showing a false empty workspace.
+- Overview now has the first Today Cockpit slice: four health cards, truthful unavailable KPI values, and an action queue that promotes blocked data/readiness issues before warnings.
+
+### Remaining risks / product follow-ups
+
+- The products page still needs a separate unavailable state for a failed paginated ledger query when the summary catalog read succeeds.
+- The Today Cockpit is currently server-rendered per request; a later phase can add bounded refresh/polling only after a read-model endpoint and freshness budget are defined.
+- Invalid `shop` query values generally fall back to the first authorized shop. This is safe for isolation but should eventually expose a clear “workspace not found” state for less surprising navigation.
+- A small number of dashboard shell strings remain hardcoded Vietnamese, and onboarding/store motion should receive a complete `prefers-reduced-motion` pass.
+- Booking date/time formatting is local-component based rather than shared timezone-aware formatting.
+
+### Verification
+
+- Focused seller UX and tenant tests: 29 passed across 5 files; the latest cockpit/i18n pass also completed with 19 tests across 3 files.
+- `npm run check`: passed with 0 errors (4 existing hints).
+- `npm run build`: passed.
+- `npm run deploy:dry-run`: passed using local bindings only.
+- `npm run lint`: blocked only by pre-existing temporary review scripts under `scripts/.*.tmp.mjs`; these user artifacts were left untouched.
+- Full `npm run test`: 2,654 passed, 52 failed in 7 unrelated pre-existing Dodo billing/catalog, deploy-continuation, i18n-contract, and console-design suites; no seller-dashboard-specific failure was introduced by this audit.
 
 ## Current source of truth
 
@@ -2560,3 +2814,122 @@ Session review record — cross-stream findings + verification (2026-08-17):
   remediation/release suites — final full-suite re-run pending. The
   3-perspective code review completed with no critical findings (the one
   MAJOR race and one MINOR hash-shape finding are both fixed above).
+
+Seller billing and Dodo subscription redesign (2026-08-22):
+- Replaced the seller-facing technical request ledger with a state-driven
+  plans and billing workspace: current plan, next billing event, usage,
+  invoices, plan comparison, review/confirm dialogs, scheduled cancellation,
+  resume, and provider-operation polling. Provider references and reason codes
+  are no longer exposed as the primary seller workflow.
+- Added an owner-authenticated billing operations API that persists the
+  idempotent command and attempts Dodo immediately; retryable provider failures
+  remain durable for the scheduled worker instead of requiring another seller
+  submission.
+- Dodo change-plan requests now include quantity, proration mode, effective
+  timing, and payment-failure behavior; empty 200/202/204 acknowledgements are
+  accepted. Upgrade is immediate; downgrade stays scheduled until provider
+  truth confirms the renewal transition; cancel is period-end and resumable.
+- Added a seller-scoped plan preview endpoint backed by Dodo's
+  `change-plan/preview`; the upgrade confirmation dialog displays the
+  provider-calculated immediate charge before it submits the mutation.
+- Migration 0108 adds tenant-scoped scheduled-plan evidence and reconciliation
+  metadata. The worker now reconciles acknowledged changes against Dodo so a
+  lost webhook cannot leave an operation pending forever.
+- Opening hosted checkout no longer removes a valid local trial. The selected
+  Starter/Pro intent is also preserved through pricing, password/2FA/magic-link
+  login, and onboarding.
+- Verification: 54 focused billing/funnel tests pass; focused ESLint,
+  production build, and `npm run deploy:dry-run` pass.
+  Full `npm run check` remains blocked by unrelated parallel dashboard/template
+  errors in CommandPalette/AppLayout/console catalog. Full lint is blocked only
+  by untracked temporary scripts from the parallel stream.
+- External requirement: Dodo test/live catalog rotation, product trial removal,
+  portal policy, recovery settings, return URL, and webhook creation require the
+  separately confirmed provider-dashboard change. Product IDs are intentionally
+  not embedded in migration 0108 because test and live catalogs differ.
+- Dodo dashboard confirmation completed on 2026-08-22: test and live products
+  have provider trials disabled; subscription updates are enabled; multiple
+  active subscriptions and pause are disabled; cancellation remains enabled;
+  upgrade/downgrade defaults are immediate/prorated and next-cycle respectively;
+  failed change charges prevent the plan mutation; dunning and payment retries
+  are enabled for 13 days.
+- Customer Portal return URLs are configured for staging and production. Both
+  webhook endpoints are enabled for all Dodo event types; the production signing
+  secret is stored in Worker secret `DODO_PAYMENTS_WEBHOOK_KEY` without logging.
+  Non-billing events are durably acknowledged as ignored to prevent retry loops.
+- Migration 0108 catalog placeholders now match the reconciliation contract:
+  `pending:dodo:{plan}:{market}:month:v1`.
+
+Seller billing staging incident and repair (2026-08-22, follow-up):
+- Root cause confirmed from read-only staging D1 evidence: migration
+  `0076_dodo_platform_price_provider.sql` left `subscription_events`,
+  `subscription_change_requests` and `usage_events` foreign keys pointing at
+  dropped `shop_subscriptions_legacy_0076` /
+  `billing_provider_events_legacy_0076` tables. The successful Dodo payment
+  `pay_0NluV11ozW0gnmanweNkp` (`299000 VND`) therefore reached the webhook
+  transition, failed when inserting `subscription_events`, rolled back, and
+  left the checkout open / subscription `pending_payment`.
+- Added forward-only `migrations/0110_repair_subscription_ledger_foreign_keys.sql`.
+  It rebuilds the three child ledgers against canonical parent tables,
+  preserves rows/columns/indexes/triggers (including `0108` reconciliation
+  fields), recreates the scheduled-target guards, and finishes with
+  `PRAGMA foreign_key_check`. The complete local migration replay passes
+  integrity and foreign-key checks.
+- Backend hardening verified: Dodo empty `200/202/204` mutation acknowledgements
+  are accepted; upgrade uses immediate prorated billing; downgrade uses
+  next-billing scheduling; cancel/resume remain period-end and idempotent;
+  reconciliation polls the provider after an acknowledged action; trial
+  checkout does not revoke a valid local trial; checkout webhook market and
+  currency are read from the selected checkout price instead of an old
+  subscription snapshot.
+- Dodo dashboard confirmation: the Pro VN subscription product is configured
+  at `299000 VND/month`, tax-inclusive, with provider trial disabled;
+  subscription updates are enabled, cancellation is enabled, multiple active
+  subscriptions and pause are disabled, and failed change charges prevent the
+  mutation. Do not alter this catalog configuration until the staging repair
+  is deployed and replayed.
+- Focused verification after the final fixes: billing/Dodo/UI/webhook suites
+  `97/97` pass; migration-chain integration `8/8` passes; focused ESLint and
+  production `npm run build` and `npm run deploy:dry-run` pass. Full
+  `npm run check` remains blocked by unrelated parallel storefront/template
+  and dashboard edits (16 diagnostics), while full lint is blocked only by
+  untracked temporary scripts from that parallel stream. Billing-scoped diff
+  checking is clean; the repository-wide `git diff --check` currently reports
+  one unrelated trailing-space edit in the parallel Serenity template stream.
+- Staging rollout is intentionally not claimed here. The guarded sequence is:
+  fresh staging backup/restore evidence, apply migrations through `0110`
+  (including `0108`), deploy the Worker, then replay only Dodo delivery
+  `msg_3IFVNBBiLruPDHQlCz4hsTIp9cN`. Verify
+  `billing_provider_events.status=processed`, checkout `completed`,
+  subscription `active`, provider subscription reference populated, invoice
+  created, and exactly one provider `subscription_events` row before browser
+  E2E.
+- Known product follow-ups remain: verified Dodo payment-recovery/customer
+  portal contract for `past_due`/`grace_period`, visible target plan plus undo
+  for `downgrade_scheduled`, durable operation SLA/notification beyond the
+  30-second browser poll, centralized billing i18n, and profile-derived
+  merchant country confirmation. These are separate from the FK incident
+  repair.
+- Final local completion pass: upgrade/downgrade presentation and execution now
+  classify direction from the authoritative current/target amount instead of a
+  hard-coded Starter-to-Pro assumption; terminal scheduled-provider failures
+  move to `rejected` with the reviewer/timestamp required by the ledger
+  constraint; cancel is available directly beside plan management; invoice and
+  usage copy is seller-facing and localized. The final focused billing suite is
+  `114/114`, billing-scoped ESLint and diff checking pass, and production build
+  passes.
+- Live read-only confirmation on 2026-08-22 still shows the exact staging
+  corruption before rollout: all three repaired ledgers reference deleted
+  `*_legacy_0076` parents; Dodo lists subscription
+  `sub_0NluV12JxhiMdaPM80hyi` as active, while staging keeps checkout
+  `bchk_64843faa-fbe3-42a3-8050-15f1073174f0` expired, local subscription
+  `sub_09145aac-78ff-4d0a-b211-0493275a74c4` in `pending_payment`, and delivery
+  `msg_3IFVNBBiLruPDHQlCz4hsTIp9cN` failed. This is expected until migration
+  `0110`, the Worker deployment, and the single-delivery replay complete.
+- Remote completion remains blocked by guarded release admission, not by source
+  code: staging is applied through `0097` with `0098`-`0110` pending; the latest
+  protected backup/restore evidence is stale, the release manifest is expired,
+  the shared candidate is dirty due the parallel template/dashboard stream,
+  and the dedicated D1/platform/route/deploy operator tokens are not exported.
+  No ad-hoc migration, deploy, production mutation, or broad webhook replay was
+  performed.
