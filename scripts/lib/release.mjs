@@ -2348,9 +2348,9 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   const quotedObjectNames = objectNames.map((name) => `'${name}'`).join(", ");
   const objectSql = `SELECT type, name, sql FROM sqlite_schema WHERE name IN (${quotedObjectNames}) ORDER BY type, name;`;
   const columnsByTable = Map.groupBy(Object.keys(expectedColumns), (name) => name.split(".")[0]);
-  // D1 caps the number of terms in one compound SELECT; with the registry
-  // past ~40 tables a single UNION ALL breaches that limit, so the column
-  // inventory is queried in bounded batches and the rows concatenated.
+  // D1 caps compound SELECT terms at a handful of UNION arms regardless of
+  // payload size, so the column inventory is queried in very small batches
+  // and the rows concatenated.
   const columnSelectFor = (table) => `SELECT '${table}' AS table_name, name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info('${table}') WHERE name IN (${columnsByTable.get(table).map((name) => `'${name.split(".")[1]}'`).join(", ")})`;
   const dataSql = `SELECT
     (SELECT COUNT(*) FROM shop_subscriptions AS subscription
@@ -2560,8 +2560,8 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   }
   const columnTables = [...columnsByTable.keys()];
   const columnRows = [];
-  for (let offset = 0; offset < columnTables.length; offset += 10) {
-    const batchSql = columnTables.slice(offset, offset + 10)
+  for (let offset = 0; offset < columnTables.length; offset += 4) {
+    const batchSql = columnTables.slice(offset, offset + 4)
       .map((table) => columnSelectFor(table))
       .join(" UNION ALL ")
       .concat(" ORDER BY table_name, name;");
