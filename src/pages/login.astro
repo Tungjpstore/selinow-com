@@ -346,6 +346,11 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     display: grid;
     gap: 16px;
   }
+  /* The .auth-form display rule above would defeat the hidden attribute's
+     UA display:none, leaving the two-factor panel visible on first paint. */
+  [hidden] {
+    display: none !important;
+  }
   .field-group {
     display: grid;
     gap: 6px;
