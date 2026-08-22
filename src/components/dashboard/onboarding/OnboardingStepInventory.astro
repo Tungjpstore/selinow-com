@@ -1,34 +1,109 @@
 ---
 import Icon from "../../console/Icon.astro";
+import type { StorefrontVertical } from "../../../lib/storefront/templates";
+
+type Props = {
+  initialVertical?: string;
+};
+
+const { initialVertical = "digital" } = Astro.props;
+const activeVertical: StorefrontVertical = initialVertical === "physical" || initialVertical === "booking" ? initialVertical : "digital";
+
+// Per-vertical inventory copy (OB-A3): digital shops stock license keys,
+// physical shops stock serial/SKU codes, booking services need no vault.
+const inventoryConfig: Record<StorefrontVertical, {
+  heroDesc: string;
+  heroTitle: string;
+  label: string;
+  metricValid: string;
+  orSeparator: string;
+  placeholder: string;
+  sampleBtn: string;
+  skipLabel: string;
+  submitLabel: string;
+  unitBadge: string;
+  vaultNote: string;
+}> = {
+  booking: {
+    heroDesc: "Sản phẩm dịch vụ được xác nhận theo khung giờ khách chọn — không cần nhập kho. Bạn có thể bổ sung khung giờ hoạt động sau trong Dashboard.",
+    heroTitle: "Dịch vụ theo lịch hẹn — không cần kho",
+    label: "",
+    metricValid: "",
+    orSeparator: "",
+    placeholder: "",
+    sampleBtn: "",
+    skipLabel: "Bỏ qua",
+    submitLabel: "Tiếp Tục: Kết Nối Cổng Thanh Toán",
+    unitBadge: "không cần kho",
+    vaultNote: "",
+  },
+  digital: {
+    heroDesc: "Nạp sẵn danh sách key vào két bảo mật số để hệ thống tự động trả ngay cho khách hàng 24/7 sau khi họ thanh toán thành công.",
+    heroTitle: "Nhập kho Mã Kích Hoạt (License Keys)",
+    label: "Danh sách License Keys (Mỗi dòng 1 key)",
+    metricValid: "Key hợp lệ",
+    orSeparator: "hoặc dán danh sách key thực tế của bạn vào ô dưới",
+    placeholder: "W269N-WFGWX-YVC9B-4J6C9-T83GX\nVK7JG-NPHTM-C97JM-9MPGT-3V66T\nMH37W-N47XK-V7XM9-C7227-GCQG9",
+    sampleBtn: "Nạp nhanh 5 Key Thử Nghiệm Mẫu",
+    skipLabel: "Nhập kho sau",
+    submitLabel: "Tiếp Tục: Kết Nối Cổng Thanh Toán",
+    unitBadge: "key trong kho",
+    vaultNote: "Toàn bộ key được mã hóa phong bì (AES-256-GCM + Cloudflare KMS) trước khi lưu vào D1 Database.",
+  },
+  physical: {
+    heroDesc: "Dán mã serial / SKU của từng món hàng để hệ thống trừ đúng tồn kho mỗi khi có đơn; bạn cũng có thể bỏ qua và quản lý tồn kho sau trong Dashboard.",
+    heroTitle: "Nhập kho & Mã Hàng Hoá",
+    label: "Danh sách mã serial / SKU (Mỗi dòng 1 mã)",
+    metricValid: "Mã hợp lệ",
+    orSeparator: "hoặc dán mã serial / SKU thực tế của bạn vào ô dưới",
+    placeholder: "TEE-LOCAL-0001\nTEE-LOCAL-0002\nTEE-LOCAL-0003",
+    sampleBtn: "Tạo nhanh 5 mã hàng thử nghiệm",
+    skipLabel: "Nhập kho sau",
+    submitLabel: "Tiếp Tục: Kết Nối Cổng Thanh Toán",
+    unitBadge: "mã trong kho",
+    vaultNote: "Mã hàng được mã hoá và đối chiếu từng đơn giống hệt kho key số (AES-256-GCM + Cloudflare KMS).",
+  },
+};
+const config = inventoryConfig[activeVertical];
+const isKeyless = activeVertical === "booking";
 ---
 
-<div class="onboarding-step-pane" data-step-pane="inventory">
+<div class="onboarding-step-pane" data-step-pane="inventory" data-inventory-config={JSON.stringify(inventoryConfig)} data-active-vertical={activeVertical}>
   <!-- 3D Hero Banner -->
   <div class="step-hero-card">
     <div class="hero-content">
       <span class="hero-step-pill">BƯỚC 3 / 5</span>
-      <h2>Nhập kho Mã Kích Hoạt (License Keys)</h2>
-      <p>Nạp sẵn danh sách key vào két bảo mật số để hệ thống tự động trả ngay cho khách hàng 24/7 sau khi họ thanh toán thành công.</p>
+      <h2 data-inv-hero-title>{config.heroTitle}</h2>
+      <p data-inv-hero-desc>{config.heroDesc}</p>
     </div>
     <div class="hero-image-wrap">
       <img src="/illustrations/onboarding-inventory.jpg" alt="" class="hero-illustration" width="130" height="130" />
     </div>
   </div>
 
+  <!-- Booking: services run on appointment slots, no vault needed -->
+  <div class="keyless-info-box" data-inventory-keyless-panel hidden={!isKeyless}>
+    <div class="keyless-icon"><Icon name="calendar" size={28} /></div>
+    <div class="keyless-body">
+      <strong>Dịch vụ của bạn không cần nhập kho</strong>
+      <p>Khách chọn khung giờ trống trên storefront, hệ thống chặn trùng lịch và xác nhận thanh toán. Khung giờ làm việc có thể tinh chỉnh sau trong Dashboard.</p>
+    </div>
+  </div>
+
   <!-- Quick Action Bar -->
-  <div class="inventory-quick-actions">
+  <div class="inventory-quick-actions" data-inventory-key-section hidden={isKeyless}>
     <button type="button" class="btn-sample-keys" data-action-generate-sample-keys>
       <Icon name="zap" size={16} />
-      <span>Nạp nhanh 5 Key Thử Nghiệm Mẫu</span>
+      <span data-inv-sample-btn>{config.sampleBtn}</span>
     </button>
-    <span class="or-separator">hoặc dán danh sách key thực tế của bạn vào ô dưới</span>
+    <span class="or-separator" data-inv-or-separator>{config.orSeparator}</span>
   </div>
 
   <form class="step-form-grid" data-inventory-form novalidate>
-    <div class="form-group full-width">
+    <div class="form-group full-width" data-inventory-key-section hidden={isKeyless}>
       <div class="label-with-count">
-        <label for="inventory-keys-input">Danh sách License Keys (Mỗi dòng 1 key) <span class="required-star">*</span></label>
-        <span class="keys-count-badge" data-inventory-count-badge>0 key trong kho</span>
+        <label for="inventory-keys-input" data-inv-label>{config.label} <span class="required-star">*</span></label>
+        <span class="keys-count-badge" data-inventory-count-badge>0 {config.unitBadge}</span>
       </div>
       <div class="textarea-keys-wrap">
         <textarea
@@ -36,26 +111,24 @@ import Icon from "../../console/Icon.astro";
           name="keysData"
           rows="6"
           spellcheck="false"
-          placeholder="W269N-WFGWX-YVC9B-4J6C9-T83GX
-VK7JG-NPHTM-C97JM-9MPGT-3V66T
-MH37W-N47XK-V7XM9-C7227-GCQG9"
+          placeholder={config.placeholder}
           data-input-inventory-keys
         ></textarea>
       </div>
       <div class="security-vault-note">
         <Icon name="lock" size={15} />
-        <span>Toàn bộ key được mã hóa phong bì cấp quân sự (AES-256-GCM + Cloudflare KMS) trước khi lưu vào D1 Database.</span>
+        <span data-inv-vault-note>{config.vaultNote}</span>
       </div>
     </div>
 
     <!-- Live Parser Strip -->
-    <div class="keys-metrics-strip full-width" data-inventory-metrics>
+    <div class="keys-metrics-strip full-width" data-inventory-metrics data-inventory-key-section hidden={isKeyless}>
       <div class="metric-item">
         <span class="metric-label">Tổng dòng nhận</span>
         <strong class="metric-value" data-metric-total>0</strong>
       </div>
       <div class="metric-item highlight-success">
-        <span class="metric-label">Key hợp lệ</span>
+        <span class="metric-label" data-inv-metric-valid>{config.metricValid}</span>
         <strong class="metric-value" data-metric-valid>0</strong>
       </div>
       <div class="metric-item">
@@ -70,11 +143,11 @@ MH37W-N47XK-V7XM9-C7227-GCQG9"
       ← Quay lại
     </button>
     <div class="right-actions">
-      <button type="button" class="btn-skip-link" data-step-skip="inventory">
-        Nhập kho sau
+      <button type="button" class="btn-skip-link" data-step-skip="inventory" data-inv-skip-label>
+        {config.skipLabel}
       </button>
       <button type="button" class="btn-primary-next" data-step-submit="inventory">
-        <span data-btn-label>Tiếp Tục: Kết Nối Cổng Thanh Toán</span>
+        <span data-btn-label data-inv-submit-label>{config.submitLabel}</span>
         <span class="btn-arrow" aria-hidden="true">→</span>
       </button>
     </div>
@@ -90,6 +163,43 @@ MH37W-N47XK-V7XM9-C7227-GCQG9"
 
   .onboarding-step-pane.is-active {
     display: flex;
+  }
+
+  /* Booking vertical: no-vault info panel */
+  .keyless-info-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px 24px;
+    border-radius: 14px;
+    border: 2px solid #BBF7D0;
+    background: #F0FDF4;
+  }
+
+  .keyless-icon {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: #DCFCE7;
+    color: #166534;
+    flex-shrink: 0;
+  }
+
+  .keyless-body strong {
+    display: block;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #14532D;
+    margin-bottom: 4px;
+  }
+
+  .keyless-body p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #166534;
   }
 
   /* 3D Hero Card */

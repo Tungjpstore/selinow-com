@@ -3,11 +3,12 @@ import { parseHomeSections } from "../storefront/sections/registry";
 import type { AppBindings } from "../platform/bindings";
 import { hasFeature } from "../tenants/policy";
 import {
-  listStorefrontTemplates,
+  listTemplatesForVertical,
   PREMIUM_STOREFRONT_TEMPLATES_FEATURE,
   resolveStorefrontTemplate,
   storefrontTemplateSelectionIssue,
   type StorefrontTemplateDefinition,
+  type StorefrontVertical,
 } from "../storefront/templates";
 import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, type StorefrontTheme } from "../storefront/theme";
 import { publishReadyStorefront } from "./readiness";
@@ -90,7 +91,7 @@ function publicationState(row: SettingsRow): StorefrontPublicationState {
   return row.publishedVersion === row.version ? "published" : "unpublished_changes";
 }
 
-async function readSettings(env: AppBindings, shopId: string, shopName: string, locale: unknown, premiumTemplatesEnabled: boolean): Promise<SellerStorefrontSettings> {
+async function readSettings(env: AppBindings, shopId: string, shopName: string, locale: unknown, premiumTemplatesEnabled: boolean, vertical: StorefrontVertical): Promise<SellerStorefrontSettings> {
   const row = await env.PLATFORM_DB.prepare(`
     SELECT branding_json AS brandingJson, storefront_json AS storefrontJson, version,
       published_version AS publishedVersion, published_at AS publishedAt
@@ -101,6 +102,15 @@ async function readSettings(env: AppBindings, shopId: string, shopName: string, 
   if (row === null) throw new AppError("resource_not_found", 404);
   const state = publicationState(row);
   const content = parseStorefrontContent(row.storefrontJson, shopName, locale);
+  const template = resolveStorefrontTemplate({ premiumEntitled: premiumTemplatesEnabled, templateId: content.templateId });
+  // Vertical-scoped gallery (OB-A1): sellers only browse templates for their
+  // selling category. A persisted template outside the vertical (legacy shops
+  // predating vertical-aware creation) stays visible so the current pick can
+  // still be seen and changed.
+  let templates = listTemplatesForVertical(vertical);
+  if (!templates.some((candidate) => candidate.id === template.id)) {
+    templates = [template, ...templates];
+  }
   return {
     content,
     hasUnpublishedChanges: state !== "published",
@@ -109,8 +119,8 @@ async function readSettings(env: AppBindings, shopId: string, shopName: string, 
     publishedAt: row.publishedAt,
     publishedVersion: row.publishedVersion,
     shopName,
-    template: resolveStorefrontTemplate({ premiumEntitled: premiumTemplatesEnabled, templateId: content.templateId }),
-    templates: listStorefrontTemplates(),
+    template,
+    templates,
     theme: parseStorefrontTheme(row.brandingJson),
     version: row.version,
   };
@@ -124,6 +134,7 @@ export async function getSellerStorefrontSettings(input: { env: AppBindings; sho
     member.shop.name,
     member.shop.defaultLocale,
     hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+    member.shop.vertical,
   );
 }
 
@@ -214,6 +225,8 @@ export async function updateSellerStorefrontSettings(input: {
     const selection = storefrontTemplateSelectionIssue({ premiumEntitled: premiumTemplatesEnabled, templateId: input.data.templateId });
     if (selection === "storefront_template_invalid") throw new AppError("validation_failed", 400, [selection]);
     if (selection === "storefront_template_premium_required") throw new AppError("authorization_denied", 403, [selection]);
+    // OB-A1: template picks must stay inside the shop's selling vertical.
+    if (selection.vertical !== member.shop.vertical) throw new AppError("validation_failed", 400, ["storefront_template_vertical_mismatch"]);
     storefront.templateId = selection.id;
   }
   if (primaryColor !== undefined) branding.primaryColor = primaryColor;
@@ -222,7 +235,7 @@ export async function updateSellerStorefrontSettings(input: {
   const now = new Date().toISOString();
   const updated = await input.env.PLATFORM_DB.prepare(`UPDATE shop_settings SET branding_json = ?, storefront_json = ?, version = version + 1, updated_at = ? WHERE shop_id = ? AND version = ? RETURNING version`).bind(JSON.stringify(branding), JSON.stringify(storefront), now, member.row.shop_id, version).first<{ version: number }>();
   if (updated === null) throw new AppError("resource_conflict", 409);
-  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale, premiumTemplatesEnabled);
+  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale, premiumTemplatesEnabled, member.shop.vertical);
 }
 
 export async function publishSellerStorefrontSettings(input: {
@@ -268,5 +281,6 @@ export async function publishSellerStorefrontSettings(input: {
     member.shop.name,
     member.shop.defaultLocale,
     hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+    member.shop.vertical,
   );
 }

@@ -125,7 +125,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
     const body = await readJsonObject(request);
-        rejectUnknownFields(body, ["businessCountry", "currency", "defaultLocale", "merchantCountry", "name", "planCode", "slug", "vertical"]);
+        rejectUnknownFields(body, ["businessCountry", "channels", "currency", "defaultLocale", "merchantCountry", "name", "planCode", "slug", "templateId", "vertical"]);
     const planCode = body.planCode === undefined ? "starter" : typeof body.planCode === "string" ? body.planCode : "";
     if (!(PUBLIC_PLAN_CODES as readonly string[]).includes(planCode)) {
       throw new AppError("validation_failed", 400, ["plan_invalid"]);
@@ -136,8 +136,14 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const vertical = body.vertical === undefined || body.vertical === null ? undefined
       : body.vertical === "digital" || body.vertical === "physical" || body.vertical === "booking" ? body.vertical
         : (() => { throw new AppError("validation_failed", 400, ["vertical_invalid"]); })();
+    // OB-B1 one-request provisioning: optional template pick + channel choice.
+    const templateId = body.templateId === undefined || body.templateId === null ? undefined
+      : typeof body.templateId === "string" ? body.templateId
+        : (() => { throw new AppError("validation_failed", 400, ["storefront_template_invalid"]); })();
+    const channels = parseChannels(body.channels);
     const result = await createShop({
       ...(businessCountry === undefined ? {} : { businessCountry }),
+      ...(channels === undefined ? {} : { channels }),
       ...(body.currency === undefined ? {} : { currency: body.currency }),
       ...(body.defaultLocale === undefined ? {} : { defaultLocale: body.defaultLocale }),
       env,
@@ -148,6 +154,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       requesterAddress: cloudflareRequesterAddress(request),
       requestId: locals.requestId,
       slug: normalizeSlug(body.slug),
+      ...(templateId === undefined ? {} : { templateId }),
       userId: auth.userId,
       ...(vertical === undefined ? {} : { vertical }),
     });
@@ -159,3 +166,22 @@ export const POST: APIRoute = async ({ locals, request }) => {
     return createCaughtErrorResponse(error, locals.requestId);
   }
 };
+
+function parseChannels(value: unknown): { customDomainPreference: "connect" | "later" | "skip"; telegramEnabled: boolean; websiteEnabled: boolean } | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new AppError("validation_failed", 400, ["channels_invalid"]);
+  }
+  const channels = value as Record<string, unknown>;
+  rejectUnknownFields(channels, ["customDomainPreference", "telegramEnabled", "websiteEnabled"]);
+  const websiteEnabled = channels.websiteEnabled;
+  const telegramEnabled = channels.telegramEnabled;
+  if (typeof websiteEnabled !== "boolean" || typeof telegramEnabled !== "boolean") {
+    throw new AppError("validation_failed", 400, ["channels_invalid"]);
+  }
+  const preference = channels.customDomainPreference ?? "later";
+  if (preference !== "connect" && preference !== "later" && preference !== "skip") {
+    throw new AppError("validation_failed", 400, ["custom_domain_preference_invalid"]);
+  }
+  return { customDomainPreference: preference, telegramEnabled, websiteEnabled };
+}

@@ -1,5 +1,5 @@
 ---
-import { templatesForCategory } from "../../../lib/storefront/templates";
+import { defaultTemplateForCategory, STOREFRONT_CATEGORIES, templatesForCategory, type StorefrontTemplateDefinition } from "../../../lib/storefront/templates";
 import Icon from "../../console/Icon.astro";
 import ProviderLogo from "../../console/ProviderLogo.astro";
 
@@ -8,6 +8,8 @@ type Props = {
   defaultLocale?: string;
   initialShopName?: string | undefined;
   initialShopSlug?: string | undefined;
+  initialTemplateId?: string | null;
+  initialVertical?: string;
   platformBaseDomain: string;
   shopsCount?: number;
 };
@@ -15,13 +17,48 @@ type Props = {
 const {
   initialShopName = "",
   initialShopSlug = "",
+  initialTemplateId = null,
+  initialVertical = "digital",
   platformBaseDomain,
   shopsCount = 0,
 } = Astro.props;
 
-const softwareTemplates = templatesForCategory("software");
-const physicalTemplates = templatesForCategory("physical");
-const serviceTemplates = templatesForCategory("service");
+const TEMPLATE_DESCRIPTIONS: Record<string, string> = {
+  aurora: "Thanh lịch, làm nổi bật hình ảnh sản phẩm và bộ sưu tập.",
+  bustle: "Năng động, tối ưu giỏ hàng và thanh toán nhanh.",
+  clinic: "Chuyên nghiệp, hồ sơ năng lực và đặt lịch tư vấn chuẩn.",
+  craft: "Phong cách nghệ nhân, tập trung vào portfolio & dịch vụ riêng.",
+  desk: "Bố cục ngăn nắp, bảng so sánh tính năng trực quan.",
+  metro: "Hiện đại, bố cục danh mục dạng lưới cho cửa hàng nhiều mặt hàng.",
+  pulse: "Phong cách Cyber/Gamer với nền tối và neon glow hiện đại.",
+  serenity: "Nhẹ nhàng, thư thái, tối ưu chọn khung giờ hẹn.",
+  swift: "Tối giản, tải trang siêu tốc, tập trung vào nút mua ngay.",
+};
+
+const verticalOf = (value: string): "digital" | "physical" | "booking" =>
+  value === "physical" || value === "booking" ? value : "digital";
+const activeVertical = verticalOf(initialVertical);
+
+// One data map for every vertical; the client renders exactly one group for
+// the selected category so sellers only ever see relevant templates (OB-A1).
+const templatesMap = Object.fromEntries(
+  STOREFRONT_CATEGORIES.map((category) => [
+    category.vertical,
+    templatesForCategory(category.id).map((template: StorefrontTemplateDefinition) => ({
+      description: TEMPLATE_DESCRIPTIONS[template.id] ?? "",
+      id: template.id,
+      name: template.name,
+      premium: template.premium,
+      scheme: template.scheme,
+    })),
+  ]),
+) as Record<"digital" | "physical" | "booking", Array<{ description: string; id: string; name: string; premium: boolean; scheme: string }>>;
+
+const initialTemplates = templatesMap[activeVertical];
+const fallbackTemplateId = defaultTemplateForCategory(activeVertical === "digital" ? "software" : activeVertical === "physical" ? "physical" : "service").id;
+const selectedTemplateId = initialTemplateId !== null && initialTemplates.some((template) => template.id === initialTemplateId)
+  ? initialTemplateId
+  : fallbackTemplateId;
 ---
 
 <div class="onboarding-step-pane is-active" data-step-pane="store">
@@ -87,8 +124,8 @@ const serviceTemplates = templatesForCategory("service");
     <div class="form-group full-width">
       <label class="section-heading-label">Danh mục ngành hàng <span class="required-star">*</span></label>
       <div class="vertical-cards-grid" role="radiogroup" aria-label="Danh mục ngành hàng">
-        <label class="vertical-card is-selected" data-vertical-option="digital">
-          <input type="radio" name="sellingVertical" value="digital" checked data-vertical-radio />
+        <label class={`vertical-card ${activeVertical === "digital" ? "is-selected" : ""}`} data-vertical-option="digital">
+          <input type="radio" name="sellingVertical" value="digital" checked={activeVertical === "digital"} data-vertical-radio />
           <div class="vertical-icon"><Icon name="zap" size={20} /></div>
           <div class="vertical-info">
             <strong>Phần mềm & Key bản quyền</strong>
@@ -97,8 +134,8 @@ const serviceTemplates = templatesForCategory("service");
           <span class="card-check">✓</span>
         </label>
 
-        <label class="vertical-card" data-vertical-option="physical">
-          <input type="radio" name="sellingVertical" value="physical" data-vertical-radio />
+        <label class={`vertical-card ${activeVertical === "physical" ? "is-selected" : ""}`} data-vertical-option="physical">
+          <input type="radio" name="sellingVertical" value="physical" checked={activeVertical === "physical"} data-vertical-radio />
           <div class="vertical-icon"><Icon name="box" size={20} /></div>
           <div class="vertical-info">
             <strong>Hàng hoá vật lý</strong>
@@ -107,8 +144,8 @@ const serviceTemplates = templatesForCategory("service");
           <span class="card-check">✓</span>
         </label>
 
-        <label class="vertical-card" data-vertical-option="booking">
-          <input type="radio" name="sellingVertical" value="booking" data-vertical-radio />
+        <label class={`vertical-card ${activeVertical === "booking" ? "is-selected" : ""}`} data-vertical-option="booking">
+          <input type="radio" name="sellingVertical" value="booking" checked={activeVertical === "booking"} data-vertical-radio />
           <div class="vertical-icon"><Icon name="calendar" size={20} /></div>
           <div class="vertical-info">
             <strong>Dịch vụ & Đặt lịch</strong>
@@ -119,20 +156,19 @@ const serviceTemplates = templatesForCategory("service");
       </div>
     </div>
 
-    <!-- Storefront Template Selector (Connected to all 9 core templates) -->
+    <!-- Storefront Template Selector — renders only the selected category's templates -->
     <div class="form-group full-width template-selection-group">
       <div class="template-heading-row">
         <div>
           <label class="section-heading-label">Giao diện Storefront Mẫu</label>
-          <p class="section-subtext">Chọn giao diện khởi đầu được tối ưu riêng cho ngành hàng của bạn.</p>
+          <p class="section-subtext" data-templates-subtext>Chọn giao diện khởi đầu được tối ưu riêng cho ngành hàng của bạn.</p>
         </div>
       </div>
 
-      <!-- Digital Templates -->
-      <div class="templates-grid" data-templates-group="digital">
-        {softwareTemplates.map((tpl, i) => (
-          <label class={`template-preset-card ${i === 0 ? "is-selected" : ""}`} data-template-id={tpl.id}>
-            <input type="radio" name="storefrontTemplate" value={tpl.id} checked={i === 0} data-template-radio />
+      <div class="templates-grid" data-templates-grid data-templates-map={JSON.stringify(templatesMap)}>
+        {initialTemplates.map((tpl) => (
+          <label class={`template-preset-card ${tpl.id === selectedTemplateId ? "is-selected" : ""}`} data-template-id={tpl.id}>
+            <input type="radio" name="storefrontTemplate" value={tpl.id} checked={tpl.id === selectedTemplateId} data-template-radio />
             <div class="tpl-swatch" data-scheme={tpl.scheme}>
               <div class="tpl-swatch-bar"></div>
               <div class="tpl-swatch-hero"><i></i><i></i></div>
@@ -143,58 +179,9 @@ const serviceTemplates = templatesForCategory("service");
                 <strong>{tpl.name}</strong>
                 <span class="tpl-scheme-badge" data-scheme={tpl.scheme}>{tpl.scheme === "dark" ? "Giao diện Tối" : "Giao diện Sáng"}</span>
               </div>
-              <p class="tpl-desc">
-                {tpl.id === "swift" ? "Tối giản, tải trang siêu tốc, tập trung vào nút mua ngay." : tpl.id === "pulse" ? "Phong cách Cyber/Gamer với nền tối và neon glow hiện đại." : "Bố cục ngăn nắp, bảng so sánh tính năng trực quan."}
-              </p>
+              <p class="tpl-desc">{tpl.description}</p>
             </div>
-            <span class="card-check">✓</span>
-          </label>
-        ))}
-      </div>
-
-      <!-- Physical Templates -->
-      <div class="templates-grid" data-templates-group="physical" hidden>
-        {physicalTemplates.map((tpl, i) => (
-          <label class={`template-preset-card ${i === 0 ? "is-selected" : ""}`} data-template-id={tpl.id}>
-            <input type="radio" name="storefrontTemplate" value={tpl.id} data-template-radio />
-            <div class="tpl-swatch" data-scheme={tpl.scheme}>
-              <div class="tpl-swatch-bar"></div>
-              <div class="tpl-swatch-hero"><i></i><i></i></div>
-              <div class="tpl-swatch-grid"><i></i><i></i><i></i><i></i></div>
-            </div>
-            <div class="tpl-meta">
-              <div class="tpl-name-row">
-                <strong>{tpl.name}</strong>
-                <span class="tpl-scheme-badge" data-scheme={tpl.scheme}>Giao diện Sáng</span>
-              </div>
-              <p class="tpl-desc">
-                {tpl.id === "aurora" ? "Thanh lịch, làm nổi bật hình ảnh sản phẩm và bộ sưu tập." : tpl.id === "metro" ? "Hiện đại, bố cục danh mục dạng lưới cho cửa hàng nhiều mặt hàng." : "Năng động, tối ưu giỏ hàng và thanh toán nhanh."}
-              </p>
-            </div>
-            <span class="card-check">✓</span>
-          </label>
-        ))}
-      </div>
-
-      <!-- Booking Templates -->
-      <div class="templates-grid" data-templates-group="booking" hidden>
-        {serviceTemplates.map((tpl, i) => (
-          <label class={`template-preset-card ${i === 0 ? "is-selected" : ""}`} data-template-id={tpl.id}>
-            <input type="radio" name="storefrontTemplate" value={tpl.id} data-template-radio />
-            <div class="tpl-swatch" data-scheme={tpl.scheme}>
-              <div class="tpl-swatch-bar"></div>
-              <div class="tpl-swatch-hero"><i></i><i></i></div>
-              <div class="tpl-swatch-grid"><i></i><i></i><i></i><i></i></div>
-            </div>
-            <div class="tpl-meta">
-              <div class="tpl-name-row">
-                <strong>{tpl.name}</strong>
-                <span class="tpl-scheme-badge" data-scheme={tpl.scheme}>{tpl.scheme === "dark" ? "Giao diện Tối" : "Giao diện Sáng"}</span>
-              </div>
-              <p class="tpl-desc">
-                {tpl.id === "serenity" ? "Nhẹ nhàng, thư thái, tối ưu chọn khung giờ hẹn." : tpl.id === "craft" ? "Phong cách nghệ nhân, tập trung vào portfolio & dịch vụ riêng." : "Chuyên nghiệp, hồ sơ năng lực và đặt lịch tư vấn chuẩn."}
-              </p>
-            </div>
+            {tpl.premium ? <span class="tpl-pro-badge">PRO</span> : ""}
             <span class="card-check">✓</span>
           </label>
         ))}
@@ -685,6 +672,27 @@ const serviceTemplates = templatesForCategory("service");
     font-size: 11.5px;
     line-height: 1.4;
     color: #667085;
+  }
+
+  .tpl-pro-badge {
+    position: absolute;
+    top: 12px;
+    inset-inline-end: 40px;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    background: linear-gradient(135deg, #F59E0B, #F97316);
+    color: #FFFFFF;
+  }
+
+  .template-preset-card.is-locked {
+    opacity: 0.62;
+  }
+
+  .template-preset-card.is-locked .tpl-swatch {
+    filter: grayscale(0.6);
   }
 
   /* Channel Cards */

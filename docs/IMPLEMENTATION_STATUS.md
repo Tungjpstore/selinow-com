@@ -2,6 +2,38 @@
 
 Last updated: 2026-08-22
 
+## OB — Onboarding upgrade: category-scoped verticals + one-request provisioning (2026-08-22)
+
+Major onboarding slice answering "danh mục → template/preset riêng + tạo shop nhanh". No new migration (reuses `shops.vertical` from 0102).
+
+### OB-A1: vertical-scoped templates everywhere
+- `listTemplatesForVertical()` in `src/lib/storefront/templates.ts`; `getSellerStorefrontSettings` now scopes `templates` to the shop's vertical, so the Store Builder gallery only renders the relevant 3 templates instead of all 9. A legacy out-of-vertical persisted pick (pre-0102 shops) stays visible so the current template can be reviewed.
+- `updateSellerStorefrontSettings` rejects cross-vertical picks (`storefront_template_vertical_mismatch`), keeping the builder consistent with the scoped gallery.
+- Onboarding step 1 renders one data-driven template group (`data-templates-map` JSON + client re-render on category change) instead of three static server-rendered groups; premium templates carry a PRO badge and are locked (toast hint) when the plan lacks `premiumStorefrontTemplates`.
+
+### OB-B1: one-request shop provisioning
+- `POST /api/app/shops` accepts optional `templateId` + `channels {websiteEnabled, telegramEnabled, customDomainPreference}`; `createShop` validates the template (unknown / premium-without-entitlement / cross-vertical) against the plan's feature flags, seeds `shop_settings.storefront_json` with the chosen template (or the vertical's safe default — aurora/serenity/swift) and lands the channel flags plus onboarding step states (`channel_selected` complete, `telegram_ready` skipped when Telegram is off) in the same D1 transaction. The wizard's step-1 submit is now a single round-trip (was create → channels → PATCH template).
+- Idempotency request hashes now include vertical/templateId/channels, so a same-key replay with a different payload surfaces `idempotency_conflict` instead of silently replaying the old shop (only requests spanning this deploy boundary with a reused key are affected).
+- The shop-creation admission (`getShopCreationAdmission`) is finally consumed by the wizard: a blocked account cannot submit step 1.
+
+### OB-A2: vertical-scoped product presets
+- `OnboardingProductPreset` carries `vertical`; three local preset packs ship — digital (5, incl. renamed `steam-wallet`), physical (3: tee / accessory combo / handmade giftbox), booking (3: consulting / online course / brand design). `presetsForVertical()` filters; `seed-preset` rejects cross-vertical seeds (`preset_vertical_mismatch`) after a membership check.
+
+### OB-A3: adaptive product & inventory steps
+- Step 2 renders only the active category's presets (data-driven) and swaps custom-form copy/defaults/fulfillment options per vertical (physical → shipping manual, booking → appointment manual, digital → license_key|manual).
+- Step 3 adapts per vertical: digital keeps the license-key vault, physical shows serial/SKU codes (same encrypted import pipeline), booking shows a no-vault info panel (appointment services need no stock).
+
+### OB-B3: express path
+- Preset submit jumps straight to Connect (samples already seeded / no vault needed); only custom digital license products route through the inventory step.
+
+### OB-B4: server-truth resume
+- New `src/lib/onboarding/resume.ts` computes `{wizardStep, vertical, templateId, catalog facts, integration states}` from server data; `/onboarding` hydrates the wizard from it — refreshes and returning sellers re-enter at the first unfinished step with real PayOS/Telegram/stock state instead of restarting at step 1.
+
+### Contracts & verification
+- `storefront-templates.test.ts`: gallery scoping (digital/physical + legacy cross-vertical visibility), cross-vertical PATCH rejection, and three new OB-B1 provisioning cases (template+channels in one transaction, vertical-safe default template, premium/cross-vertical/channel-less rejection). `onboarding-shop-route.test.ts` gains POST parse tests; `onboarding-presets.test.ts` covers the per-vertical packs; `ex0-experience-contract.test.ts` updated to the one-request contract; `shop-selection`/`storefront-preview-catalog` adjusted for `ShopView.vertical`.
+- Focused verification: 68 tests across the touched suites pass; ESLint clean on every touched file; `npm run build` and `npm run deploy:dry-run` pass; `astro check` reports zero errors in the files this slice touched.
+- Known repository-wide limitations (unrelated, parallel sessions): `astro check` still fails on `store.astro`, `AppLayout.astro`, StoreHome templates, `auth/google.ts`, `bindings.ts`; full `npm run test` still fails on console-design/i18n-contract/accessibility/store-builder suites and the Google-auth migration 0112 invariant registry (pending that session's registry update). None of these files were touched by OB.
+
 ## Authenticated onboarding handoff — 2026-08-22
 
 - Preserved a paid plan selected on pricing and the landing runtime through password, 2FA, and magic-link login into `/onboarding?plan=...`.
@@ -2977,3 +3009,28 @@ EX0 contract 13/13, home/pricing/login + inner pages 200 with 0 axe AA violation
 overflow at 320/390/1440, console clean, i18n click-through EN/VI verified.
 Known limitations: hero WebGL intentionally disabled under reduced-motion (static CSS
 aurora); Google sign-in button shows a notice until the OAuth backend lands.
+
+## Google sign-in provider provisioning (2026-08-22)
+
+- Created the independent Google Cloud project `selinow-auth`; no Fball, DigiStore,
+  Supabase, or other product OAuth configuration was reused.
+- Configured Google Auth Platform for the external `Selinow` application in testing
+  status, with the approved support/contact account added as a test user.
+- Created separate Web OAuth clients for local, staging, and production. Registered
+  callbacks are `http://localhost:4321/api/auth/google/callback`,
+  `https://app-staging.selinow.com/api/auth/google/callback`, and
+  `https://app.selinow.com/api/auth/google/callback`. Google rejected the
+  `app.localhost` HTTP hostname, so real local OAuth requires a localhost callback
+  bridge; provider acceptance should primarily run against staging.
+- Stored the staging and production client ID/secret pairs as environment-scoped
+  Cloudflare Worker secrets. Stored the local pair and callback in the Git-ignored
+  `.dev.vars` file with mode `0600`. Only secret names and presence were verified;
+  credential values were not recorded in this document or committed.
+- Rotated the production OAuth client secret after provisioning, updated the
+  production Worker binding, and disabled and permanently deleted the superseded
+  Google client secrets. The production OAuth client now retains one active secret.
+- External requirement completed: provider project, audience, test user, clients, and
+  secret provisioning. Known limitation: the repository still has no Google OAuth
+  start/callback implementation, provider-identity schema, one-use state/nonce/PKCE
+  ledger, account-linking flow, or OAuth tests, so the existing Google button continues
+  to display the honest coming-soon notice.

@@ -128,15 +128,21 @@ describe("EX0 palette and shell de-hardcoding", () => {
 });
 
 describe("EX5 marketing/onboarding/auth wiring", () => {
-  it("onboarding persists vertical at shop creation and template into the draft", () => {
+  it("onboarding persists vertical, template and channels in one create request (OB-B1)", () => {
     const quickstart = readFileSync("src/scripts/dashboard/onboarding-quickstart.ts", "utf8");
-    expect(quickstart).toContain("vertical: selectedVerticalValue()");
-    expect(quickstart).toContain("expectedVersion: 1, templateId: chosenTemplate");
+    expect(quickstart).toContain("vertical: currentVertical");
+    expect(quickstart).toContain("templateId: selectedTemplateValue() ?? undefined");
+    expect(quickstart).toContain("telegramEnabled: selectedChannel !== \"website\"");
     const route = readFileSync("src/pages/api/app/shops/index.ts", "utf8");
-    expect(route).toContain('"slug", "vertical"');
+    expect(route).toContain('"templateId", "vertical"');
     expect(route).toContain("vertical_invalid");
+    expect(route).toContain("channels_invalid");
     const store = readFileSync("src/lib/tenants/store.ts", "utf8");
     expect(store).toContain('input.vertical ?? "digital"');
+    // The storefront draft is seeded with the vertical's template in the same
+    // transaction instead of a follow-up PATCH.
+    expect(store).toContain("JSON.stringify({ templateId })");
+    expect(store).toContain("storefront_template_vertical_mismatch");
   });
 
   it("ships the staged HeroFlowSim trace on token timings without looping", () => {

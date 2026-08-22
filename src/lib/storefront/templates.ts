@@ -216,3 +216,14 @@ export function defaultTemplateForCategory(categoryId: StorefrontCategoryId): St
   const vertical = getStorefrontCategory(categoryId).vertical;
   return defaultStorefrontTemplateFor(vertical);
 }
+
+/**
+ * Templates scoped to a shop vertical for gallery surfaces. Verticals are the
+ * seller-facing category axis, so a physical shop never browses digital or
+ * booking skins. Falls back to the full registry for an unknown vertical so
+ * the gallery can never render empty.
+ */
+export function listTemplatesForVertical(vertical: StorefrontVertical): readonly StorefrontTemplateDefinition[] {
+  const scoped = STOREFRONT_TEMPLATES.filter((template) => template.vertical === vertical && template.available);
+  return scoped.length > 0 ? scoped : STOREFRONT_TEMPLATES;
+}

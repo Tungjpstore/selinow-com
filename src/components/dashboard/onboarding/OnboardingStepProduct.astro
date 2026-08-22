@@ -1,21 +1,95 @@
 ---
 import { ONBOARDING_PRODUCT_PRESETS } from "../../../lib/onboarding/presets";
+import type { StorefrontVertical } from "../../../lib/storefront/templates";
 import Icon from "../../console/Icon.astro";
 
 type Props = {
   defaultCurrency?: string;
+  initialVertical?: string;
 };
 
-const { defaultCurrency = "VND" } = Astro.props;
+const { defaultCurrency = "VND", initialVertical = "digital" } = Astro.props;
+
+const activeVertical: StorefrontVertical = initialVertical === "physical" || initialVertical === "booking" ? initialVertical : "digital";
+
+// Presets are vertical-scoped (OB-A2): each selling category only offers its
+// own samples. One map powers the client swap when the seller changes
+// category in step 1.
+const presetsMap: Record<StorefrontVertical, typeof ONBOARDING_PRODUCT_PRESETS> = {
+  booking: ONBOARDING_PRODUCT_PRESETS.filter((preset) => preset.vertical === "booking"),
+  digital: ONBOARDING_PRODUCT_PRESETS.filter((preset) => preset.vertical === "digital"),
+  physical: ONBOARDING_PRODUCT_PRESETS.filter((preset) => preset.vertical === "physical"),
+};
+const initialPresets = presetsMap[activeVertical];
+
+// Per-vertical copy + form defaults; applied server-side for the initial
+// vertical and re-applied by the client on category change (OB-A3).
+const productConfig: Record<StorefrontVertical, {
+  customDescDefault: string;
+  customDescPlaceholder: string;
+  customTitleDefault: string;
+  customTitlePlaceholder: string;
+  fulfillmentLabel: string;
+  fulfillmentOptions: Array<{ label: string; value: string }>;
+  heroDesc: string;
+  heroTitle: string;
+  presetsSublabel: string;
+  priceDefault: number;
+  submitLabel: string;
+}> = {
+  booking: {
+    customDescDefault: "Buổi tư vấn 1-1 kéo dài 60 phút qua video call về chiến lược bán hàng số, đặt lịch theo khung giờ bạn chọn.",
+    customDescPlaceholder: "Thời lượng, phạm vi công việc, kết quả nhận được...",
+    customTitleDefault: "Tư Vấn 1-1 Trực Tuyến (60 phút)",
+    customTitlePlaceholder: "Ví dụ: Buổi tư vấn 1-1, Khóa học trực tuyến...",
+    fulfillmentLabel: "Hình thức xác nhận & hoàn thành",
+    fulfillmentOptions: [{ label: "📅 Khách đặt lịch — xác nhận và hoàn thành thủ công", value: "manual" }],
+    heroDesc: "Chọn mẫu dịch vụ có sẵn hoặc tự tạo với giá và mô tả; khách đặt lịch trực tiếp trên trang của bạn.",
+    heroTitle: "Thêm Dịch vụ Đầu tiên",
+    presetsSublabel: "Chọn một mẫu dưới đây để tự động điền giá và mô tả dịch vụ:",
+    priceDefault: 500000,
+    submitLabel: "Tiếp Tục: Kết Nối Thanh Toán",
+  },
+  digital: {
+    customDescDefault: "Khóa kích hoạt bản quyền Windows 11 Pro Retail vĩnh viễn, nhận key và kích hoạt ngay.",
+    customDescPlaceholder: "Thời hạn, quyền lợi và bảo hành...",
+    customTitleDefault: "Windows 11 Pro Retail Bản Quyền",
+    customTitlePlaceholder: "Ví dụ: Windows 11 Pro Bản Quyền, Netflix 1 Tháng...",
+    fulfillmentLabel: "Hình thức giao hàng",
+    fulfillmentOptions: [
+      { label: "⚡ Giao License Key / Mã thẻ tự động 24/7", value: "license_key" },
+      { label: "📁 Giao thủ công (Tài khoản / Link tải / Liên hệ)", value: "manual" },
+    ],
+    heroDesc: "Chọn nhanh một mẫu sản phẩm bán chạy có sẵn (được cấu hình sẵn giá, mô tả và kho key) hoặc tự tạo sản phẩm của riêng bạn.",
+    heroTitle: "Thêm Sản phẩm Đầu tiên",
+    presetsSublabel: "Chọn một mẫu dưới đây để tự động điền giá, mô tả & nạp key thử nghiệm:",
+    priceDefault: 199000,
+    submitLabel: "Tiếp Tục: Quản Lý Kho Key",
+  },
+  physical: {
+    customDescDefault: "Áo thun cotton 100% form regular unisex, in ấn theo thiết kế riêng, giao toàn quốc.",
+    customDescPlaceholder: "Chất liệu, kích cỡ, chính sách đổi trả...",
+    customTitleDefault: "Áo Thun Local Brand Unisex",
+    customTitlePlaceholder: "Ví dụ: Áo thun local brand, Ốp lưng điện thoại...",
+    fulfillmentLabel: "Hình thức giao hàng",
+    fulfillmentOptions: [{ label: "🚚 Giao hàng vận chuyển — xử lý từng đơn thủ công", value: "manual" }],
+    heroDesc: "Chọn mẫu sản phẩm vật lý có sẵn hoặc tự tạo với giá, mô tả và hình thức giao hàng.",
+    heroTitle: "Thêm Sản phẩm Đầu tiên",
+    presetsSublabel: "Chọn một mẫu dưới đây để tự động điền giá và mô tả sản phẩm:",
+    priceDefault: 250000,
+    submitLabel: "Tiếp Tục: Kết Nối Thanh Toán",
+  },
+};
+const config = productConfig[activeVertical];
 ---
 
-<div class="onboarding-step-pane" data-step-pane="product">
+<div class="onboarding-step-pane" data-step-pane="product" data-product-config={JSON.stringify(productConfig)} data-presets-map={JSON.stringify(presetsMap)} data-active-vertical={activeVertical}>
   <!-- 3D Hero Banner -->
   <div class="step-hero-card">
     <div class="hero-content">
       <span class="hero-step-pill">BƯỚC 2 / 5</span>
-      <h2>Thêm Sản phẩm Đầu tiên</h2>
-      <p>Chọn nhanh một mẫu sản phẩm bán chạy có sẵn (được cấu hình sẵn giá, mô tả và kho key) hoặc tự tạo sản phẩm của riêng bạn.</p>
+      <h2 data-product-hero-title>{config.heroTitle}</h2>
+      <p data-product-hero-desc>{config.heroDesc}</p>
     </div>
     <div class="hero-image-wrap">
       <img src="/illustrations/onboarding-product.jpg" alt="" class="hero-illustration" width="130" height="130" />
@@ -34,13 +108,13 @@ const { defaultCurrency = "VND" } = Astro.props;
     </button>
   </div>
 
-  <!-- Presets Grid -->
+  <!-- Presets Grid — renders only the active category's samples -->
   <div class="presets-section" data-presets-container>
     <div class="presets-header-row">
-      <p class="section-sublabel">Chọn một mẫu dưới đây để tự động điền giá, mô tả & nạp key thử nghiệm:</p>
+      <p class="section-sublabel" data-presets-sublabel>{config.presetsSublabel}</p>
     </div>
-    <div class="presets-grid">
-      {ONBOARDING_PRODUCT_PRESETS.map((preset, index) => (
+    <div class="presets-grid" data-presets-grid>
+      {initialPresets.map((preset, index) => (
         <button
           type="button"
           class={`preset-card ${index === 0 ? "selected" : ""}`}
@@ -58,7 +132,7 @@ const { defaultCurrency = "VND" } = Astro.props;
             <strong class="preset-title">{preset.title}</strong>
             <span class="preset-price">{preset.priceMinor.toLocaleString("vi-VN")} {preset.currency}</span>
             <span class="preset-type-badge">
-              {preset.fulfillmentType === "license_key" ? "⚡ Giao key tự động" : "📁 Giao thủ công"}
+              {preset.fulfillmentType === "license_key" ? "⚡ Giao key tự động" : preset.vertical === "booking" ? "📅 Dịch vụ đặt lịch" : "🚚 Giao hàng thủ công"}
             </span>
           </div>
           <span class="preset-badge-check">✓</span>
@@ -77,8 +151,8 @@ const { defaultCurrency = "VND" } = Astro.props;
         type="text"
         minlength="2"
         maxlength="120"
-        placeholder="Ví dụ: Windows 11 Pro Bản Quyền, Netflix 1 Tháng..."
-        value="Windows 11 Pro Retail Bản Quyền"
+        placeholder={config.customTitlePlaceholder}
+        value={config.customTitleDefault}
         required
         data-input-product-title
       />
@@ -93,17 +167,18 @@ const { defaultCurrency = "VND" } = Astro.props;
         min="0"
         step="1000"
         placeholder="199000"
-        value="199000"
+        value={config.priceDefault}
         required
         data-input-product-price
       />
     </div>
 
     <div class="form-group">
-      <label for="product-fulfillment-select">Hình thức giao hàng <span class="required-star">*</span></label>
+      <label for="product-fulfillment-select" data-fulfillment-label>{config.fulfillmentLabel}</label>
       <select id="product-fulfillment-select" name="fulfillmentType" data-input-product-fulfillment>
-        <option value="license_key" selected>⚡ Giao License Key / Mã thẻ tự động 24/7</option>
-        <option value="manual">📁 Giao thủ công (Tài khoản / Link tải / Liên hệ)</option>
+        {config.fulfillmentOptions.map((option) => (
+          <option value={option.value} selected={option.value === config.fulfillmentOptions[0]?.value}>{option.label}</option>
+        ))}
       </select>
     </div>
 
@@ -114,9 +189,9 @@ const { defaultCurrency = "VND" } = Astro.props;
         name="description"
         rows="2"
         maxlength="500"
-        placeholder="Thời hạn, quyền lợi và bảo hành..."
+        placeholder={config.customDescPlaceholder}
         data-input-product-desc
-      >Khóa kích hoạt bản quyền Windows 11 Pro Retail vĩnh viễn, nhận key và kích hoạt ngay.</textarea>
+      >{config.customDescDefault}</textarea>
     </div>
   </form>
 
@@ -125,7 +200,7 @@ const { defaultCurrency = "VND" } = Astro.props;
       ← Quay lại
     </button>
     <button type="button" class="btn-primary-next" data-step-submit="product">
-      <span data-btn-label>Tiếp Tục: Quản Lý Kho Key</span>
+      <span data-btn-label data-product-submit-label>{config.submitLabel}</span>
       <span class="btn-arrow" aria-hidden="true">→</span>
     </button>
   </div>

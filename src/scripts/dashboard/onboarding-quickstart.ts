@@ -1,6 +1,80 @@
 type WizardStep = "connect" | "inventory" | "launch" | "product" | "store";
+type Vertical = "digital" | "physical" | "booking";
 
 const STEP_ORDER: WizardStep[] = ["store", "product", "inventory", "connect", "launch"];
+
+type TemplateCardData = {
+  description: string;
+  id: string;
+  name: string;
+  premium: boolean;
+  scheme: string;
+};
+
+type PresetCardData = {
+  currency: string;
+  description: string;
+  fulfillmentType: string;
+  icon: string;
+  id: string;
+  priceMinor: number;
+  sampleKeys: string[];
+  sku: string;
+  slug: string;
+  title: string;
+  vertical: Vertical;
+};
+
+type ProductStepConfig = {
+  customDescDefault: string;
+  customDescPlaceholder: string;
+  customTitleDefault: string;
+  customTitlePlaceholder: string;
+  fulfillmentLabel: string;
+  fulfillmentOptions: Array<{ label: string; value: string }>;
+  heroDesc: string;
+  heroTitle: string;
+  presetsSublabel: string;
+  priceDefault: number;
+  submitLabel: string;
+};
+
+type InventoryStepConfig = {
+  heroDesc: string;
+  heroTitle: string;
+  label: string;
+  metricValid: string;
+  orSeparator: string;
+  placeholder: string;
+  sampleBtn: string;
+  skipLabel: string;
+  submitLabel: string;
+  unitBadge: string;
+  vaultNote: string;
+};
+
+type ResumeState = {
+  catalog: {
+    firstVariantId: string | null;
+    firstVariantTitle: string | null;
+    hasManualProduct: boolean;
+    hasProducts: boolean;
+    hasStock: boolean;
+    totalAvailableStock: number;
+  };
+  integrations: {
+    payosReady: boolean;
+    telegramBotUsername: string | null;
+    telegramReady: boolean;
+  };
+  shop: {
+    name: string;
+    slug: string;
+    templateId: string;
+    vertical: Vertical;
+  };
+  wizardStep: WizardStep;
+};
 
 type ShopResponse = {
   shop?: {
@@ -132,6 +206,15 @@ function readCookie(name: string): string | null {
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
+function parseJsonAttribute<T>(value: string | undefined, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 function initQuickstart(): void {
   const _root = document.querySelector<HTMLElement>("[data-quickstart-root]");
   if (!_root) return;
@@ -141,12 +224,14 @@ function initQuickstart(): void {
   const platformBaseDomain = root.dataset.platformBaseDomain || "selinow.com";
   const defaultCurrency = root.dataset.defaultCurrency || "VND";
   const toastEl = root.querySelector<HTMLElement>("[data-onboarding-toast]");
+  const premiumTemplatesEntitled = root.dataset.premiumTemplatesEntitled === "true";
+  const creationAllowed = root.dataset.creationAllowed !== "false";
 
   let activeShopPublicId = root.dataset.activeShopPublicId || "";
   let activeShopSlug = "";
   let activeShopName = "";
   let createdVariantId = "";
-  let selectedPresetId = "win11pro";
+  let selectedPresetId = "";
   let currentProductMode: "custom" | "preset" = "preset";
   let importedKeysCount = 0;
   let productIsManual = false;
@@ -155,6 +240,11 @@ function initQuickstart(): void {
   let telegramConnected = false;
   let telegramBotUser = "";
   let currentStep: WizardStep = "store";
+  let currentVertical: Vertical = "digital";
+  let currentUnitBadge = "key trong kho";
+
+  // OB-B4: server-computed resume state for the selected shop.
+  const resume = parseJsonAttribute<ResumeState | null>(root.dataset.resumeState, null);
 
   function showToast(message: string, tone: "error" | "success" = "success"): void {
     if (!toastEl) return;
@@ -367,137 +457,289 @@ function initQuickstart(): void {
     });
   });
 
-  // --- Step 1: Selling Vertical & Template Selector ---
-  const verticalRadios = root.querySelectorAll<HTMLInputElement>("[data-vertical-radio]");
-  const verticalCards = root.querySelectorAll<HTMLElement>("[data-vertical-option]");
-  const templatesGroups = root.querySelectorAll<HTMLElement>("[data-templates-group]");
-  const templateRadios = root.querySelectorAll<HTMLInputElement>("[data-template-radio]");
-  const templateCards = root.querySelectorAll<HTMLElement>("[data-template-id]");
+  // --- Step 1: Vertical, template & preset data-driven rendering (OB-A1/A2) ---
+  const templatesGrid = root.querySelector<HTMLElement>("[data-templates-grid]");
+  const templatesMap = parseJsonAttribute<Partial<Record<Vertical, TemplateCardData[]>>>(templatesGrid?.dataset.templatesMap, {});
 
-  verticalRadios.forEach((radio) => {
-    radio.addEventListener("change", () => {
-      const selectedVertical = radio.value;
-      verticalCards.forEach((card) => {
-        card.classList.toggle("is-selected", card.dataset.verticalOption === selectedVertical);
-      });
-      templatesGroups.forEach((group) => {
-        const matches = group.dataset.templatesGroup === selectedVertical;
-        group.hidden = !matches;
-        if (matches) {
-          const firstRadio = group.querySelector<HTMLInputElement>("[data-template-radio]");
-          if (firstRadio) {
-            firstRadio.checked = true;
-            firstRadio.dispatchEvent(new Event("change", { bubbles: true }));
-          }
-        }
-      });
+  function selectedTemplateValue(): string | null {
+    return root.querySelector<HTMLInputElement>("input[data-template-radio]:checked")?.value ?? null;
+  }
+
+  function applyTemplatePreview(templateId: string): void {
+    const previewDrawer = root.querySelector<HTMLElement>("[data-preview-surface]");
+    if (previewDrawer) {
+      previewDrawer.dataset.previewTemplate = templateId;
+    }
+  }
+
+  function buildTemplateCard(tpl: TemplateCardData, selected: boolean): HTMLLabelElement {
+    const locked = tpl.premium && !premiumTemplatesEntitled;
+    const card = document.createElement("label");
+    card.className = `template-preset-card${selected ? " is-selected" : ""}${locked ? " is-locked" : ""}`;
+    card.dataset.templateId = tpl.id;
+
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "storefrontTemplate";
+    radio.value = tpl.id;
+    radio.checked = selected;
+    radio.dataset.templateRadio = "true";
+    if (locked) radio.disabled = true;
+    card.appendChild(radio);
+
+    const swatch = document.createElement("div");
+    swatch.className = "tpl-swatch";
+    swatch.dataset.scheme = tpl.scheme;
+    for (const [className, bars] of [["tpl-swatch-bar", 1], ["tpl-swatch-hero", 2], ["tpl-swatch-grid", 4]] as const) {
+      const row = document.createElement("div");
+      row.className = className;
+      for (let i = 0; i < bars; i += 1) row.appendChild(document.createElement("i"));
+      swatch.appendChild(row);
+    }
+    card.appendChild(swatch);
+
+    const meta = document.createElement("div");
+    meta.className = "tpl-meta";
+    const nameRow = document.createElement("div");
+    nameRow.className = "tpl-name-row";
+    const strong = document.createElement("strong");
+    strong.textContent = tpl.name;
+    const schemeBadge = document.createElement("span");
+    schemeBadge.className = "tpl-scheme-badge";
+    schemeBadge.dataset.scheme = tpl.scheme;
+    schemeBadge.textContent = tpl.scheme === "dark" ? "Giao diện Tối" : "Giao diện Sáng";
+    nameRow.appendChild(strong);
+    nameRow.appendChild(schemeBadge);
+    const desc = document.createElement("p");
+    desc.className = "tpl-desc";
+    desc.textContent = tpl.description;
+    meta.appendChild(nameRow);
+    meta.appendChild(desc);
+    card.appendChild(meta);
+
+    if (tpl.premium) {
+      const proBadge = document.createElement("span");
+      proBadge.className = "tpl-pro-badge";
+      proBadge.textContent = "PRO";
+      card.appendChild(proBadge);
+    }
+
+    const check = document.createElement("span");
+    check.className = "card-check";
+    check.textContent = "✓";
+    card.appendChild(check);
+    return card;
+  }
+
+  function renderTemplateCards(vertical: Vertical, preferredId: string | null): void {
+    if (!templatesGrid) return;
+    const templates = templatesMap[vertical] ?? [];
+    const preferred = preferredId !== null && templates.some((tpl) => tpl.id === preferredId && !(tpl.premium && !premiumTemplatesEntitled))
+      ? preferredId
+      : (templates.find((tpl) => !tpl.premium) ?? templates[0])?.id ?? null;
+    templatesGrid.replaceChildren(...templates.map((tpl) => buildTemplateCard(tpl, tpl.id === preferred)));
+    if (preferred !== null) applyTemplatePreview(preferred);
+  }
+
+  // Delegated template card handling (grid content is re-rendered per vertical)
+  templatesGrid?.addEventListener("change", (event) => {
+    const radio = event.target as HTMLInputElement | null;
+    if (!radio?.matches("input[data-template-radio]")) return;
+    templatesGrid.querySelectorAll<HTMLElement>("[data-template-id]").forEach((card) => {
+      card.classList.toggle("is-selected", card.contains(radio));
     });
+    applyTemplatePreview(radio.value);
   });
 
-  const selectedVerticalValue = (): string => Array.from(verticalRadios).find((radio) => radio.checked)?.value ?? "digital";
-  const selectedTemplateValue = (): string | null => Array.from(templateRadios).find((radio) => radio.checked)?.value ?? null;
-
-  templateRadios.forEach((radio) => {
-    radio.addEventListener("change", () => {
-      templateCards.forEach((card) => {
-        card.classList.toggle("is-selected", card.contains(radio));
-      });
-      const tplId = radio.value;
-      const previewDrawer = root.querySelector<HTMLElement>("[data-preview-surface]");
-      if (previewDrawer) {
-        previewDrawer.dataset.previewTemplate = tplId;
-      }
-    });
+  templatesGrid?.addEventListener("click", (event) => {
+    const lockedCard = (event.target as HTMLElement | null)?.closest<HTMLElement>(".template-preset-card.is-locked");
+    if (lockedCard) {
+      showToast("Giao diện PRO cần gói Pro — hãy chọn giao diện chuẩn hoặc nâng cấp sau trong Thanh toán.", "error");
+    }
   });
 
-  storeForm?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    void (async () => {
-      const name = nameInput?.value.trim() || "";
-      const slug = slugInput?.value.trim() || slugify(name);
+  // Initial premium lock pass for the server-rendered cards (no re-render yet).
+  if (!premiumTemplatesEntitled) {
+    const initialTemplates = templatesMap[currentVertical] ?? [];
+    for (const tpl of initialTemplates) {
+      if (!tpl.premium) continue;
+      templatesGrid?.querySelector<HTMLElement>(`[data-template-id="${tpl.id}"]`)?.classList.add("is-locked");
+    }
+  }
 
-      if (!name || !slug) {
-        showToast("Vui lòng nhập tên cửa hàng hợp lệ.", "error");
-        return;
-      }
-
-      const submitBtn = storeForm.querySelector<HTMLButtonElement>("[data-step-submit='store']");
-      if (submitBtn) submitBtn.disabled = true;
-
-      try {
-        let shopPubId = activeShopPublicId;
-
-        if (!shopPubId) {
-          const res = await apiRequest("/api/app/shops", {
-            body: JSON.stringify({
-              currency: defaultCurrency,
-              defaultLocale: "vi-VN",
-              name,
-              planCode: "starter",
-              slug,
-              vertical: selectedVerticalValue(),
-            }),
-            headers: {
-              "Idempotency-Key": `shop-create-${slug}-${String(Date.now())}`,
-            },
-            method: "POST",
-          });
-
-          if (!res.ok) {
-            showToast("Không thể tạo cửa hàng. Vui lòng kiểm tra lại slug hoặc kết nối mạng.", "error");
-            if (submitBtn) submitBtn.disabled = false;
-            return;
-          }
-
-          const shopData = res.data as ShopResponse;
-          shopPubId = shopData.shop?.publicId ?? "";
-          activeShopPublicId = shopPubId;
-        }
-
-        activeShopSlug = slug;
-        activeShopName = name;
-
-        // Configure Channels
-        const selectedChannel = Array.from(channelRadios).find((r) => r.checked)?.value || "both";
-        await apiRequest(`/api/app/shops/${encodeURIComponent(shopPubId)}/onboarding/channels`, {
-          body: JSON.stringify({
-            customDomainPreference: "later",
-            telegramEnabled: selectedChannel !== "website",
-            websiteEnabled: selectedChannel !== "telegram",
-          }),
-          method: "POST",
-        });
-
-        // EX5.2: persist the chosen storefront template into the draft so the
-        // publish step and Store Builder start from the seller's selection.
-        const chosenTemplate = selectedTemplateValue();
-        if (chosenTemplate !== null) {
-          await apiRequest(`/api/app/shops/${encodeURIComponent(shopPubId)}/settings`, {
-            body: JSON.stringify({ expectedVersion: 1, templateId: chosenTemplate }),
-            method: "PATCH",
-          }).catch(() => undefined);
-        }
-
-        showToast("Đã lưu thông tin cửa hàng thành công!");
-        setStep("product");
-      } catch {
-        showToast("Có lỗi xảy ra khi lưu thông tin cửa hàng.", "error");
-      } finally {
-        if (submitBtn) submitBtn.disabled = false;
-      }
-    })();
-  });
-
-  // --- Step 2: Products & Presets ---
+  // --- Step 2: per-vertical product config (OB-A2/A3) ---
+  const productPane = root.querySelector<HTMLElement>('[data-step-pane="product"]');
+  const productConfig = parseJsonAttribute<Partial<Record<Vertical, ProductStepConfig>>>(productPane?.dataset.productConfig, {});
+  const presetsMap = parseJsonAttribute<Partial<Record<Vertical, PresetCardData[]>>>(productPane?.dataset.presetsMap, {});
+  const presetsGrid = root.querySelector<HTMLElement>("[data-presets-grid]");
   const modeTabs = root.querySelectorAll<HTMLButtonElement>("[data-product-mode]");
-  const presetsContainer = root.querySelector<HTMLElement>("[data-presets-container]");
   const customProductForm = root.querySelector<HTMLFormElement>("[data-product-form]");
-  const presetCards = root.querySelectorAll<HTMLButtonElement>("[data-preset-card]");
 
   const customTitleInput = root.querySelector<HTMLInputElement>("[data-input-product-title]");
   const customPriceInput = root.querySelector<HTMLInputElement>("[data-input-product-price]");
   const customFulfillmentSelect = root.querySelector("[data-input-product-fulfillment]") as HTMLSelectElement | null;
   const customDescTextarea = root.querySelector<HTMLTextAreaElement>("[data-input-product-desc]");
+
+  // Console Icon renders SVG; preset cards built client-side use matching glyphs.
+  const PRESET_ICON_GLYPHS: Record<string, string> = {
+    book: "📘",
+    box: "📦",
+    calendar: "📅",
+    gamepad: "🎮",
+    music: "🎵",
+    palette: "🎨",
+    window: "🪟",
+    zap: "⚡",
+  };
+
+  function buildPresetCard(preset: PresetCardData, selected: boolean): HTMLButtonElement {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `preset-card${selected ? " selected" : ""}`;
+    card.dataset.presetCard = preset.id;
+    card.dataset.presetTitle = preset.title;
+    card.dataset.presetPrice = String(preset.priceMinor);
+    card.dataset.presetCurrency = preset.currency;
+    card.dataset.presetIcon = preset.icon;
+    card.dataset.presetFulfillment = preset.fulfillmentType;
+    card.dataset.presetDesc = preset.description;
+
+    const icon = document.createElement("span");
+    icon.className = "preset-icon";
+    icon.textContent = PRESET_ICON_GLYPHS[preset.icon] ?? "⚡";
+    card.appendChild(icon);
+
+    const details = document.createElement("div");
+    details.className = "preset-details";
+    const title = document.createElement("strong");
+    title.className = "preset-title";
+    title.textContent = preset.title;
+    const price = document.createElement("span");
+    price.className = "preset-price";
+    price.textContent = `${preset.priceMinor.toLocaleString("vi-VN")} ${preset.currency}`;
+    const typeBadge = document.createElement("span");
+    typeBadge.className = "preset-type-badge";
+    typeBadge.textContent = preset.fulfillmentType === "license_key"
+      ? "⚡ Giao key tự động"
+      : preset.vertical === "booking" ? "📅 Dịch vụ đặt lịch" : "🚚 Giao hàng thủ công";
+    details.appendChild(title);
+    details.appendChild(price);
+    details.appendChild(typeBadge);
+    card.appendChild(details);
+
+    const check = document.createElement("span");
+    check.className = "preset-badge-check";
+    check.textContent = "✓";
+    card.appendChild(check);
+    return card;
+  }
+
+  function renderPresetCards(vertical: Vertical): void {
+    if (!presetsGrid) return;
+    const presets = presetsMap[vertical] ?? [];
+    presetsGrid.replaceChildren(...presets.map((preset, index) => buildPresetCard(preset, index === 0)));
+    const first = presets[0];
+    selectedPresetId = first?.id ?? "";
+    if (first) {
+      productTitle = first.title;
+      previewProductTitleEls.forEach((el) => { el.textContent = first.title; });
+      previewProductTitleShortEls.forEach((el) => { el.textContent = first.title.split(" ")[0] || first.title; });
+      previewProductPriceEls.forEach((el) => { el.textContent = `${first.priceMinor.toLocaleString("vi-VN")} ${first.currency}`; });
+      previewProductIconEls.forEach((el) => { el.textContent = PRESET_ICON_GLYPHS[first.icon] ?? "⚡"; });
+      previewProductDescEls.forEach((el) => { el.textContent = first.description; });
+      previewFulfillmentEls.forEach((el) => {
+        el.textContent = first.fulfillmentType === "manual" ? "Giao thủ công" : "Tự động giao key";
+      });
+    }
+  }
+
+  function applyProductConfig(vertical: Vertical): void {
+    const config = productConfig[vertical];
+    if (!config || !productPane) return;
+    setText("[data-product-hero-title]", config.heroTitle);
+    setText("[data-product-hero-desc]", config.heroDesc);
+    setText("[data-presets-sublabel]", config.presetsSublabel);
+    setText("[data-product-submit-label]", config.submitLabel);
+    setText("[data-fulfillment-label]", config.fulfillmentLabel);
+    if (customTitleInput) {
+      customTitleInput.placeholder = config.customTitlePlaceholder;
+      customTitleInput.value = config.customTitleDefault;
+    }
+    if (customPriceInput) customPriceInput.value = String(config.priceDefault);
+    if (customDescTextarea) {
+      customDescTextarea.placeholder = config.customDescPlaceholder;
+      customDescTextarea.value = config.customDescDefault;
+    }
+    if (customFulfillmentSelect) {
+      const previous = customFulfillmentSelect.value;
+      while (customFulfillmentSelect.firstChild) {
+        customFulfillmentSelect.removeChild(customFulfillmentSelect.firstChild);
+      }
+      for (const option of config.fulfillmentOptions) {
+        const el = document.createElement("option");
+        el.value = option.value;
+        el.textContent = option.label;
+        customFulfillmentSelect.appendChild(el);
+      }
+      const stillPresent = config.fulfillmentOptions.some((option) => option.value === previous);
+      customFulfillmentSelect.value = stillPresent ? previous : (config.fulfillmentOptions[0]?.value ?? "manual");
+    }
+    productPane.dataset.activeVertical = vertical;
+  }
+
+  function setText(selector: string, value: string): void {
+    root.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+      el.textContent = value;
+    });
+  }
+
+  // --- Step 3: per-vertical inventory config (OB-A3) ---
+  const inventoryPane = root.querySelector<HTMLElement>('[data-step-pane="inventory"]');
+  const inventoryConfig = parseJsonAttribute<Partial<Record<Vertical, InventoryStepConfig>>>(inventoryPane?.dataset.inventoryConfig, {});
+
+  function applyInventoryConfig(vertical: Vertical): void {
+    const config = inventoryConfig[vertical];
+    if (!config || !inventoryPane) return;
+    const keyless = vertical === "booking";
+    inventoryPane.dataset.activeVertical = vertical;
+    inventoryPane.querySelector<HTMLElement>("[data-inventory-keyless-panel]")?.toggleAttribute("hidden", !keyless);
+    inventoryPane.querySelectorAll<HTMLElement>("[data-inventory-key-section]").forEach((el) => {
+      el.hidden = keyless;
+    });
+    setText("[data-inv-hero-title]", config.heroTitle);
+    setText("[data-inv-hero-desc]", config.heroDesc);
+    setText("[data-inv-sample-btn]", config.sampleBtn);
+    setText("[data-inv-or-separator]", config.orSeparator);
+    setText("[data-inv-label]", config.label);
+    setText("[data-inv-vault-note]", config.vaultNote);
+    setText("[data-inv-metric-valid]", config.metricValid);
+    setText("[data-inv-submit-label]", config.submitLabel);
+    setText("[data-inv-skip-label]", config.skipLabel);
+    const keysTextarea = root.querySelector<HTMLTextAreaElement>("[data-input-inventory-keys]");
+    if (keysTextarea) keysTextarea.placeholder = config.placeholder;
+    currentUnitBadge = config.unitBadge;
+    updateKeyMetrics();
+  }
+
+  function setVertical(vertical: Vertical): void {
+    currentVertical = vertical;
+    root.querySelectorAll<HTMLElement>("[data-vertical-option]").forEach((card) => {
+      card.classList.toggle("is-selected", card.dataset.verticalOption === vertical);
+    });
+    renderTemplateCards(vertical, selectedTemplateValue());
+    renderPresetCards(vertical);
+    applyProductConfig(vertical);
+    applyInventoryConfig(vertical);
+  }
+
+  const verticalRadios = root.querySelectorAll<HTMLInputElement>("[data-vertical-radio]");
+  verticalRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      if (radio.value === "digital" || radio.value === "physical" || radio.value === "booking") {
+        setVertical(radio.value);
+      }
+    });
+  });
 
   modeTabs.forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -508,36 +750,37 @@ function initQuickstart(): void {
       tab.classList.add("active");
       tab.setAttribute("aria-selected", "true");
 
+      const presetsSection = root.querySelector<HTMLElement>("[data-presets-container]");
       currentProductMode = tab.dataset.productMode === "custom" ? "custom" : "preset";
-      if (presetsContainer && customProductForm) {
-        presetsContainer.hidden = currentProductMode !== "preset";
+      if (presetsSection && customProductForm) {
+        presetsSection.hidden = currentProductMode !== "preset";
         customProductForm.hidden = currentProductMode !== "custom";
       }
     });
   });
 
-  presetCards.forEach((card) => {
-    card.addEventListener("click", () => {
-      presetCards.forEach((c) => {
-        c.classList.remove("selected");
-      });
-      card.classList.add("selected");
-      selectedPresetId = card.dataset.presetCard || "win11pro";
-
-      const title = card.dataset.presetTitle || "";
-      const price = Number(card.dataset.presetPrice || 0);
-      const icon = card.dataset.presetIcon || "⚡";
-      const desc = card.dataset.presetDesc || "";
-      const fulfillment = card.dataset.presetFulfillment === "manual" ? "Giao thủ công" : "Tự động giao key";
-
-      productTitle = title;
-      previewProductTitleEls.forEach((el) => { el.textContent = title; });
-      previewProductTitleShortEls.forEach((el) => { el.textContent = title.split(" ")[0] || title; });
-      previewProductPriceEls.forEach((el) => { el.textContent = `${price.toLocaleString("vi-VN")} ${defaultCurrency}`; });
-      previewProductIconEls.forEach((el) => { el.textContent = icon; });
-      previewProductDescEls.forEach((el) => { el.textContent = desc; });
-      previewFulfillmentEls.forEach((el) => { el.textContent = fulfillment; });
+  // Delegated preset card selection (cards re-render per vertical)
+  presetsGrid?.addEventListener("click", (event) => {
+    const card = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-preset-card]");
+    if (!card || !presetsGrid.contains(card)) return;
+    presetsGrid.querySelectorAll<HTMLElement>("[data-preset-card]").forEach((candidate) => {
+      candidate.classList.toggle("selected", candidate === card);
     });
+    selectedPresetId = card.dataset.presetCard || "";
+
+    const title = card.dataset.presetTitle || "";
+    const price = Number(card.dataset.presetPrice || 0);
+    const icon = card.dataset.presetIcon || "zap";
+    const desc = card.dataset.presetDesc || "";
+    const fulfillment = card.dataset.presetFulfillment === "manual" ? "Giao thủ công" : "Tự động giao key";
+
+    productTitle = title;
+    previewProductTitleEls.forEach((el) => { el.textContent = title; });
+    previewProductTitleShortEls.forEach((el) => { el.textContent = title.split(" ")[0] || title; });
+    previewProductPriceEls.forEach((el) => { el.textContent = `${price.toLocaleString("vi-VN")} ${defaultCurrency}`; });
+    previewProductIconEls.forEach((el) => { el.textContent = PRESET_ICON_GLYPHS[icon] ?? "⚡"; });
+    previewProductDescEls.forEach((el) => { el.textContent = desc; });
+    previewFulfillmentEls.forEach((el) => { el.textContent = fulfillment; });
   });
 
   customTitleInput?.addEventListener("input", () => {
@@ -556,6 +799,101 @@ function initQuickstart(): void {
     previewProductDescEls.forEach((el) => { el.textContent = val; });
   });
 
+  // --- Step 1 submit: one-request provisioning (OB-B1) ---
+  storeForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    void (async () => {
+      const name = nameInput?.value.trim() || "";
+      const slug = slugInput?.value.trim() || slugify(name);
+
+      if (!name || !slug) {
+        showToast("Vui lòng nhập tên cửa hàng hợp lệ.", "error");
+        return;
+      }
+
+      if (!creationAllowed && !activeShopPublicId) {
+        showToast("Tài khoản cần hoàn tất thanh toán gói hiện tại trước khi tạo thêm cửa hàng.", "error");
+        return;
+      }
+
+      const submitBtn = storeForm.querySelector<HTMLButtonElement>("[data-step-submit='store']");
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {
+        if (!activeShopPublicId) {
+          // Single round-trip: shop + channels + storefront template land in
+          // one transaction on the server.
+          const selectedChannel = Array.from(channelRadios).find((r) => r.checked)?.value || "both";
+          const res = await apiRequest("/api/app/shops", {
+            body: JSON.stringify({
+              channels: {
+                customDomainPreference: "later",
+                telegramEnabled: selectedChannel !== "website",
+                websiteEnabled: selectedChannel !== "telegram",
+              },
+              currency: defaultCurrency,
+              defaultLocale: "vi-VN",
+              name,
+              planCode: "starter",
+              slug,
+              templateId: selectedTemplateValue() ?? undefined,
+              vertical: currentVertical,
+            }),
+            headers: {
+              "Idempotency-Key": `shop-create-${slug}-${String(Date.now())}`,
+            },
+            method: "POST",
+          });
+
+          if (!res.ok) {
+            const issues = Array.isArray(res.data.issues) ? res.data.issues.map(String) : [];
+            if (issues.includes("storefront_template_premium_required")) {
+              showToast("Giao diện PRO cần gói Pro — hãy chọn giao diện chuẩn hoặc nâng cấp sau trong Thanh toán.", "error");
+            } else if (issues.includes("slug_unavailable")) {
+              showToast("Địa chỉ web đã có người dùng — vui lòng chọn đường dẫn khác.", "error");
+            } else {
+              showToast("Không thể tạo cửa hàng. Vui lòng kiểm tra lại slug hoặc kết nối mạng.", "error");
+            }
+            if (submitBtn) submitBtn.disabled = false;
+            return;
+          }
+
+          const shopData = res.data as ShopResponse;
+          activeShopPublicId = shopData.shop?.publicId ?? "";
+        } else {
+          // Existing shop: update channels + template through their endpoints.
+          const selectedChannel = Array.from(channelRadios).find((r) => r.checked)?.value || "both";
+          await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/onboarding/channels`, {
+            body: JSON.stringify({
+              customDomainPreference: "later",
+              telegramEnabled: selectedChannel !== "website",
+              websiteEnabled: selectedChannel !== "telegram",
+            }),
+            method: "POST",
+          });
+          const chosenTemplate = selectedTemplateValue();
+          if (chosenTemplate !== null) {
+            await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/settings`, {
+              body: JSON.stringify({ expectedVersion: 1, templateId: chosenTemplate }),
+              method: "PATCH",
+            }).catch(() => undefined);
+          }
+        }
+
+        activeShopSlug = slug;
+        activeShopName = name;
+
+        showToast("Đã lưu thông tin cửa hàng thành công!");
+        setStep("product");
+      } catch {
+        showToast("Có lỗi xảy ra khi lưu thông tin cửa hàng.", "error");
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    })();
+  });
+
+  // --- Step 2 submit: presets seed everything, custom follows vertical (OB-A3/B3) ---
   const productSubmitBtn = root.querySelector<HTMLButtonElement>("[data-step-submit='product']");
   productSubmitBtn?.addEventListener("click", () => {
     void (async () => {
@@ -578,7 +916,12 @@ function initQuickstart(): void {
           );
 
           if (!res.ok) {
-            showToast("Không thể tạo sản phẩm mẫu. Vui lòng thử lại.", "error");
+            const issues = Array.isArray(res.data.issues) ? res.data.issues.map(String) : [];
+            if (issues.includes("preset_vertical_mismatch")) {
+              showToast("Mẫu sản phẩm không thuộc danh mục cửa hàng — hãy chọn lại mẫu.", "error");
+            } else {
+              showToast("Không thể tạo sản phẩm mẫu. Vui lòng thử lại.", "error");
+            }
             productSubmitBtn.disabled = false;
             return;
           }
@@ -587,11 +930,16 @@ function initQuickstart(): void {
           createdVariantId = seedData.variant?.id ?? "";
           importedKeysCount = seedData.importedKeysCount ?? 0;
           productIsManual = false;
-          showToast(`Đã tạo sản phẩm và nạp ${String(importedKeysCount)} key mẫu vào kho!`);
+          // Express path (OB-B3): the preset already seeded samples/needs no
+          // vault, so jump straight to connections.
+          showToast(importedKeysCount > 0
+            ? `Đã tạo sản phẩm và nạp ${String(importedKeysCount)} key mẫu — nhập thêm key sau trong Dashboard!`
+            : "Đã tạo sản phẩm mẫu thành công!");
+          setStep("connect");
         } else {
           const title = customTitleInput?.value.trim() || "Sản phẩm mới";
           const price = Number(customPriceInput?.value || 0);
-          const fulfillmentType = customFulfillmentSelect?.value || "license_key";
+          const fulfillmentType = customFulfillmentSelect?.value || "manual";
           const description = customDescTextarea?.value.trim() || "";
           productTitle = title;
 
@@ -634,9 +982,10 @@ function initQuickstart(): void {
           createdVariantId = prodData.variant?.id ?? "";
           productIsManual = fulfillmentType === "manual";
           showToast("Đã tạo sản phẩm thành công!");
+          // Digital license products still need keys; everything else skips
+          // the vault and moves to connections.
+          setStep(fulfillmentType === "license_key" ? "inventory" : "connect");
         }
-
-        setStep("inventory");
       } catch {
         showToast("Có lỗi xảy ra khi tạo sản phẩm.", "error");
       } finally {
@@ -645,7 +994,7 @@ function initQuickstart(): void {
     })();
   });
 
-  // --- Step 3: Inventory Keys ---
+  // --- Step 3: Inventory keys / serial codes ---
   const keysTextarea = root.querySelector<HTMLTextAreaElement>("[data-input-inventory-keys]");
   const countBadge = root.querySelector<HTMLElement>("[data-inventory-count-badge]");
   const totalMetric = root.querySelector<HTMLElement>("[data-metric-total]");
@@ -663,7 +1012,7 @@ function initQuickstart(): void {
     const valid = unique.size;
     const dups = total - valid;
 
-    if (countBadge) countBadge.textContent = `${String(valid)} key`;
+    if (countBadge) countBadge.textContent = `${String(valid)} ${currentUnitBadge}`;
     if (totalMetric) totalMetric.textContent = String(total);
     if (validMetric) validMetric.textContent = String(valid);
     if (dupMetric) dupMetric.textContent = String(dups);
@@ -672,17 +1021,15 @@ function initQuickstart(): void {
   keysTextarea?.addEventListener("input", updateKeyMetrics);
 
   genSampleKeysBtn?.addEventListener("click", () => {
-    const samples = [
-      `WIN11-PRO-${Math.random().toString(36).slice(2, 7).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
-      `WIN11-PRO-${Math.random().toString(36).slice(2, 7).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
-      `WIN11-PRO-${Math.random().toString(36).slice(2, 7).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
-      `WIN11-PRO-${Math.random().toString(36).slice(2, 7).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
-      `WIN11-PRO-${Math.random().toString(36).slice(2, 7).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
-    ];
+    const prefix = currentVertical === "physical" ? "UNIT" : "WIN11-PRO";
+    const samples = Array.from({ length: 5 }, () => {
+      const segment = () => Math.random().toString(36).slice(2, 7).toUpperCase();
+      return `${prefix}-${segment()}-${segment()}`;
+    });
     if (keysTextarea) {
       keysTextarea.value = samples.join("\n");
       updateKeyMetrics();
-      showToast("Đã tạo 5 key thử nghiệm!");
+      showToast("Đã tạo 5 mã thử nghiệm!");
     }
   });
 
@@ -745,13 +1092,13 @@ function initQuickstart(): void {
           const importData = importRes.data as InventoryImportResponse;
           const accepted = importData.acceptedCount ?? 0;
           importedKeysCount += accepted;
-          showToast(`Đã mã hóa và nạp ${String(accepted)} key vào kho an toàn!`);
+          showToast(`Đã mã hóa và nạp ${String(accepted)} mã vào kho an toàn!`);
           setStep("connect");
         } else {
-          showToast("Có lỗi xảy ra khi nạp key vào kho.", "error");
+          showToast("Có lỗi xảy ra khi nạp mã vào kho.", "error");
         }
       } catch {
-        showToast("Có lỗi xảy ra khi nạp key.", "error");
+        showToast("Có lỗi xảy ra khi nạp mã.", "error");
       } finally {
         inventorySubmitBtn.disabled = false;
       }
@@ -902,8 +1249,8 @@ function initQuickstart(): void {
     if (slugEl) slugEl.textContent = activeShopSlug ? `${activeShopSlug}.${platformBaseDomain}` : "—";
     if (productEl) productEl.textContent = productTitle || (createdVariantId ? "Đã tạo" : "Chưa tạo");
     if (keysEl) keysEl.textContent = productIsManual
-      ? "Giao thủ công — không cần key"
-      : `${String(importedKeysCount)} key trong kho`;
+      ? "Giao thủ công — không cần kho"
+      : `${String(importedKeysCount)} mã trong kho`;
 
     const payosCard = root.querySelector<HTMLElement>("[data-launch-card-payos]");
     if (payosEl) payosEl.textContent = payosVerified ? "✓ Đã xác thực" : "Chưa kết nối";
@@ -1030,9 +1377,47 @@ function initQuickstart(): void {
   });
 
   // --- Initial state ---
+  const initialVerticalFromDom = productPane?.dataset.activeVertical;
+  currentVertical = initialVerticalFromDom === "physical" || initialVerticalFromDom === "booking" ? initialVerticalFromDom : "digital";
+
+  // OB-B4: hydrate the wizard from the server resume projection so refreshes
+  // and returning sellers re-enter at the first unfinished step.
+  if (resume !== null) {
+    activeShopPublicId = activeShopPublicId || root.dataset.activeShopPublicId || "";
+    activeShopSlug = resume.shop.slug;
+    activeShopName = resume.shop.name;
+    currentVertical = resume.shop.vertical;
+    createdVariantId = resume.catalog.firstVariantId ?? "";
+    productTitle = resume.catalog.firstVariantTitle ?? "";
+    productIsManual = resume.catalog.hasManualProduct;
+    importedKeysCount = resume.catalog.totalAvailableStock;
+    payosVerified = resume.integrations.payosReady;
+    telegramConnected = resume.integrations.telegramReady;
+    telegramBotUser = resume.integrations.telegramBotUsername ?? "";
+    if (payosVerified && payosStatusPill) {
+      payosStatusPill.dataset.status = "verified";
+      payosStatusPill.textContent = "✓ Đã xác thực";
+    }
+    if (telegramConnected && tgStatusPill) {
+      tgStatusPill.dataset.status = "verified";
+      tgStatusPill.textContent = `✓ Đã kết nối @${telegramBotUser}`;
+    }
+    // Re-render data-driven groups for the resumed vertical + template.
+    renderTemplateCards(currentVertical, resume.shop.templateId);
+    renderPresetCards(currentVertical);
+    applyProductConfig(currentVertical);
+    applyInventoryConfig(currentVertical);
+  } else {
+    selectedPresetId = (presetsMap[currentVertical] ?? [])[0]?.id ?? "";
+  }
+
   const initialPane = root.querySelector<HTMLElement>(`[data-step-pane="${currentStep}"]`);
   initialPane?.classList.add("is-active");
   updateProgress();
+
+  if (resume !== null && STEP_ORDER.includes(resume.wizardStep) && resume.wizardStep !== "store") {
+    setStep(resume.wizardStep);
+  }
 }
 
 if (document.readyState === "loading") {

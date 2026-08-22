@@ -9,6 +9,7 @@ import { readJsonObject, rejectUnknownFields } from "../../../../../../lib/http/
 import { createCaughtErrorResponse } from "../../../../../../lib/http/security";
 import { findPresetById, ONBOARDING_PRODUCT_PRESETS } from "../../../../../../lib/onboarding/presets";
 import { getBindings } from "../../../../../../lib/platform/bindings";
+import { getShopForMember } from "../../../../../../lib/tenants/store";
 
 const PRIVATE_HEADERS = { "Cache-Control": "private, no-store, max-age=0" };
 
@@ -45,6 +46,18 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     }
 
     const shopPublicId = requireResourceId(params.shopPublicId, "shop");
+    // OB-A2: presets are vertical-scoped — a preset from another selling
+    // category must never seed a shop's first product.
+    const member = await getShopForMember({
+      capability: "shop:update",
+      env,
+      shopPublicId,
+      subscriptionAction: "draft_setup",
+      userId: auth.userId,
+    });
+    if (preset.vertical !== member.shop.vertical) {
+      throw new AppError("validation_failed", 400, ["preset_vertical_mismatch"]);
+    }
     const uniqueSuffix = createId("seed").slice(-6).toLowerCase();
     const idempotencyKey = `seed-preset-${preset.id}-${createId("idm")}`;
 

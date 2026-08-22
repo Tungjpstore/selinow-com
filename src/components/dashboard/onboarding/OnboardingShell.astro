@@ -5,6 +5,7 @@ import OnboardingStepInventory from "./OnboardingStepInventory.astro";
 import OnboardingStepLaunch from "./OnboardingStepLaunch.astro";
 import OnboardingStepProduct from "./OnboardingStepProduct.astro";
 import OnboardingStepStore from "./OnboardingStepStore.astro";
+import type { OnboardingResumeState } from "../../../lib/onboarding/resume";
 
 type ShopView = {
   name: string;
@@ -14,33 +15,41 @@ type ShopView = {
 };
 
 type Props = {
+  creationAllowed?: boolean;
   csrfCookieName: string;
   defaultCurrency?: string;
   defaultLocale?: string;
   displayName: string;
   email: string;
   platformBaseDomain: string;
+  premiumTemplatesEntitled?: boolean;
+  resume?: OnboardingResumeState | null;
   shops: ShopView[];
 };
 
 const {
+  creationAllowed = true,
   csrfCookieName,
   defaultCurrency = "VND",
   defaultLocale = "vi-VN",
   displayName,
   email,
   platformBaseDomain,
+  premiumTemplatesEntitled = false,
+  resume = null,
   shops,
 } = Astro.props;
 void displayName;
 void email;
 
 const initialShop = shops[0];
+const initialVertical = resume?.shop.vertical ?? "digital";
+const initialTemplateId = resume?.shop.templateId ?? null;
 
 const steps = [
   { code: "store", label: "Cửa hàng" },
   { code: "product", label: "Sản phẩm" },
-  { code: "inventory", label: "Kho key" },
+  { code: "inventory", label: "Kho hàng" },
   { code: "connect", label: "Kết nối" },
   { code: "launch", label: "Mở bán" },
 ] as const;
@@ -55,6 +64,9 @@ const steps = [
   data-default-locale={defaultLocale}
   data-shops={JSON.stringify(shops)}
   data-active-shop-public-id={initialShop?.publicId ?? ""}
+  data-creation-allowed={creationAllowed ? "true" : "false"}
+  data-premium-templates-entitled={premiumTemplatesEntitled ? "true" : "false"}
+  data-resume-state={resume === null ? "" : JSON.stringify(resume)}
 >
   <!-- Top navigation bar -->
   <header class="v2-topbar">
@@ -86,11 +98,13 @@ const steps = [
         defaultLocale={defaultLocale}
         initialShopName={initialShop?.name}
         initialShopSlug={initialShop?.slug}
+        initialTemplateId={initialTemplateId}
+        initialVertical={initialVertical}
         platformBaseDomain={platformBaseDomain}
         shopsCount={shops.length}
       />
-      <OnboardingStepProduct defaultCurrency={defaultCurrency} />
-      <OnboardingStepInventory />
+      <OnboardingStepProduct defaultCurrency={defaultCurrency} initialVertical={initialVertical} />
+      <OnboardingStepInventory initialVertical={initialVertical} />
       <OnboardingStepConnect />
       <OnboardingStepLaunch platformBaseDomain={platformBaseDomain} />
     </div>
