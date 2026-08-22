@@ -217,7 +217,9 @@ describe("production Worker continuation deploy admission", () => {
       "telegram_integrations_generation_switch_required",
       "telegram_updates_generation_insert_guard",
     ]));
-    expect(runner).toHaveBeenCalledTimes(3);
+    // object + data inventories run as single queries; the column inventory
+    // runs in batches of 10 tables (D1 caps compound SELECT terms).
+    expect(runner.mock.calls.length).toBeGreaterThanOrEqual(3);
     expect(runner.mock.calls.every(([args]) => args[4] === "production")).toBe(true);
   });
 

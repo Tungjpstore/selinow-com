@@ -2348,9 +2348,10 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   const quotedObjectNames = objectNames.map((name) => `'${name}'`).join(", ");
   const objectSql = `SELECT type, name, sql FROM sqlite_schema WHERE name IN (${quotedObjectNames}) ORDER BY type, name;`;
   const columnsByTable = Map.groupBy(Object.keys(expectedColumns), (name) => name.split(".")[0]);
-  const columnSql = [...columnsByTable.entries()].map(([table, names]) => (
-    `SELECT '${table}' AS table_name, name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info('${table}') WHERE name IN (${names.map((name) => `'${name.split(".")[1]}'`).join(", ")})`
-  )).join(" UNION ALL ").concat(" ORDER BY table_name, name;");
+  // D1 caps the number of terms in one compound SELECT; with the registry
+  // past ~40 tables a single UNION ALL breaches that limit, so the column
+  // inventory is queried in bounded batches and the rows concatenated.
+  const columnSelectFor = (table) => `SELECT '${table}' AS table_name, name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info('${table}') WHERE name IN (${columnsByTable.get(table).map((name) => `'${name.split(".")[1]}'`).join(", ")})`;
   const dataSql = `SELECT
     (SELECT COUNT(*) FROM shop_subscriptions AS subscription
       WHERE subscription.state = 'trialing'
@@ -2557,7 +2558,15 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     }
     observedObjects.set(row.name, digest);
   }
-  const columnRows = run(columnSql, "production_database_invariant_column_query");
+  const columnTables = [...columnsByTable.keys()];
+  const columnRows = [];
+  for (let offset = 0; offset < columnTables.length; offset += 10) {
+    const batchSql = columnTables.slice(offset, offset + 10)
+      .map((table) => columnSelectFor(table))
+      .join(" UNION ALL ")
+      .concat(" ORDER BY table_name, name;");
+    columnRows.push(...run(batchSql, "production_database_invariant_column_query"));
+  }
   const observedColumns = {};
   for (const row of columnRows) {
     const key = `${row?.table_name}.${row?.name}`;
