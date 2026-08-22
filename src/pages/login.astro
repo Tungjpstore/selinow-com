@@ -3,7 +3,6 @@ import "../styles/selinow-tokens.css";
 import "../styles/auth-soft.css";
 import "../styles/selinow-a11y.css";
 import "../styles/marketing/tokens.css";
-import ProductFlowIllustration from "../components/marketing/ProductFlowIllustration.astro";
 import { authenticateRequest } from "../lib/auth/session";
 import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
@@ -37,7 +36,7 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
-    <meta name="theme-color" content="#F8FAFC" />
+    <meta name="theme-color" content="#FFFFFF" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/selinow-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/selinow-180.png" />
     <title>{t("auth.login.title")}</title>
@@ -45,26 +44,25 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
   <body>
     <a class="selinow-skip-link" href="#main-content">{t("auth.login.skip")}</a>
 
-    <div class="login-split-shell">
-      <main id="main-content" class="login-main-panel selinow-focus-target" tabindex="-1">
-        <div class="brand-wrapper">
-          <a class="brand" href="/" aria-label={t("auth.login.brand_aria")}>
-            <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="144" height="38" />
-          </a>
+    <main id="main-content" class="login-shell selinow-focus-target" tabindex="-1">
+      <div class="brand-wrapper">
+        <a class="brand" href="/" aria-label={t("auth.login.brand_aria")}>
+          <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="144" height="38" />
+        </a>
+      </div>
+
+      <div class="auth-card">
+        <div class="auth-heading">
+          <h1>{locale === "vi-VN" ? "Đăng nhập để tiếp tục" : "Log in to continue"}</h1>
+          <p>{t("auth.login.intro")}</p>
         </div>
 
-        <div class="auth-card">
-          <div class="auth-heading">
-            <h1>{locale === "vi-VN" ? "Đăng nhập để tiếp tục" : "Log in to continue"}</h1>
-            <p>{t("auth.login.intro")}</p>
-          </div>
+        <div class="auth-mode-switch" role="tablist" aria-label={locale === "vi-VN" ? "Phương thức đăng nhập" : "Sign-in method"}>
+          <button type="button" class="auth-mode-tab is-active" role="tab" aria-selected="true" data-mode-tab="password">{t("auth.login.mode_password")}</button>
+          <button type="button" class="auth-mode-tab" role="tab" aria-selected="false" data-mode-tab="magic">{t("auth.login.mode_magic")}</button>
+        </div>
 
-          <div class="auth-mode-switch" role="tablist" aria-label={locale === "vi-VN" ? "Phương thức đăng nhập" : "Sign-in method"}>
-            <button type="button" class="auth-mode-tab is-active" role="tab" aria-selected="true" data-mode-tab="password">{t("auth.login.mode_password")}</button>
-            <button type="button" class="auth-mode-tab" role="tab" aria-selected="false" data-mode-tab="magic">{t("auth.login.mode_magic")}</button>
-          </div>
-
-          <div data-mode-panel="password">
+        <div data-mode-panel="password">
           <form id="login-form" class="auth-form" data-login-form>
             <div class="field-group">
               <label for="email">{t("auth.login.email_label")}</label>
@@ -153,103 +151,113 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
             </div>
             <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-login-2fa-status></p>
           </div>
+        </div>
 
-          </div>
-
-          <div data-mode-panel="magic" hidden>
-            <form id="magic-form" class="auth-form" data-magic-form>
-              <div class="field-group">
-                <label for="magic-email">{t("auth.login.email_label")}</label>
-                <div class="input-control">
-                  <input
-                    id="magic-email"
-                    name="email"
-                    type="email"
-                    inputmode="email"
-                    autocomplete="email"
-                    required
-                    maxlength="254"
-                    placeholder="name@company.com"
-                    data-magic-email
-                  />
-                </div>
-                <p class="field-help" id="magic-email-help">{t("auth.login.email_help")}</p>
+        <div data-mode-panel="magic" hidden>
+          <form id="magic-form" class="auth-form" data-magic-form>
+            <div class="field-group">
+              <label for="magic-email">{t("auth.login.email_label")}</label>
+              <div class="input-control">
+                <input
+                  id="magic-email"
+                  name="email"
+                  type="email"
+                  inputmode="email"
+                  autocomplete="email"
+                  required
+                  maxlength="254"
+                  placeholder="name@company.com"
+                  data-magic-email
+                />
               </div>
-
-              <div class="field-group">
-                <label for="magic-display-name">{t("auth.login.display_name_label")} <span class="optional-badge">{t("auth.login.optional")}</span></label>
-                <div class="input-control">
-                  <input
-                    id="magic-display-name"
-                    name="displayName"
-                    type="text"
-                    autocomplete="name"
-                    maxlength="80"
-                    data-magic-display-name
-                  />
-                </div>
-              </div>
-
-              <div class="login-challenge" data-magic-challenge hidden>
-                <p>{t("auth.login.challenge_required")}</p>
-                <div
-                  data-magic-turnstile
-                  data-sitekey={turnstileSiteKey ?? undefined}
-                  data-action="magic_link_request"
-                ></div>
-              </div>
-
-              <button type="submit" class="btn-primary" data-magic-submit>
-                <span data-magic-submit-label>{t("auth.login.magic_submit")}</span>
-                <span class="btn-arrow" aria-hidden="true">→</span>
-              </button>
-              <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-magic-status></p>
-            </form>
-
-            <section class="magic-confirmation" aria-labelledby="magic-confirmation-title" data-magic-confirmation hidden>
-              <p class="recovery-kicker">{t("auth.login.confirmation_kicker")}</p>
-              <h2 id="magic-confirmation-title">{t("auth.login.confirmation_title")}</h2>
-              <p>{t("auth.login.confirmation_intro")} <strong data-magic-confirm-destination></strong></p>
-              <button type="button" class="btn-primary" data-magic-confirm>{t("auth.login.confirmation_action")}</button>
-            </section>
-
-            <section class="magic-recovery" aria-labelledby="magic-recovery-title" data-magic-recovery hidden>
-              <p class="recovery-kicker">{t("auth.login.recovery_kicker")}</p>
-              <h2 id="magic-recovery-title">{t("auth.login.recovery_title")}</h2>
-              <p>{t("auth.login.recovery_intro")}</p>
-              <ol>
-                <li>{t("auth.login.recovery_same_browser")}</li>
-                <li>{t("auth.login.recovery_expiry")}</li>
-                <li>{t("auth.login.recovery_wrong_device")}</li>
-              </ol>
-              <div class="recovery-actions">
-                <button type="button" class="btn-primary" data-magic-resend>{t("auth.login.resend")}</button>
-                <button type="button" class="link-button" data-magic-restart>{t("auth.login.restart")}</button>
-              </div>
-              <p class="recovery-privacy">{t("auth.login.recovery_privacy")}</p>
-            </section>
-          </div>
-
-          <div class="card-footer">
-            <div class="switch-auth">
-              <span>{t("auth.login.no_account")}</span>
-              <a href="/register" class="link-bold">{t("auth.login.register_now")}</a>
+              <p class="field-help" id="magic-email-help">{t("auth.login.email_help")}</p>
             </div>
-            <div class="privacy-note">
-              <span>{t("auth.login.privacy")}</span>
+
+            <div class="field-group">
+              <label for="magic-display-name">{t("auth.login.display_name_label")} <span class="optional-badge">{t("auth.login.optional")}</span></label>
+              <div class="input-control">
+                <input
+                  id="magic-display-name"
+                  name="displayName"
+                  type="text"
+                  autocomplete="name"
+                  maxlength="80"
+                  data-magic-display-name
+                />
+              </div>
             </div>
+
+            <div class="login-challenge" data-magic-challenge hidden>
+              <p>{t("auth.login.challenge_required")}</p>
+              <div
+                data-magic-turnstile
+                data-sitekey={turnstileSiteKey ?? undefined}
+                data-action="magic_link_request"
+              ></div>
+            </div>
+
+            <button type="submit" class="btn-primary" data-magic-submit>
+              <span data-magic-submit-label>{t("auth.login.magic_submit")}</span>
+              <span class="btn-arrow" aria-hidden="true">→</span>
+            </button>
+            <p class="status-msg" role="status" aria-live="polite" aria-atomic="true" data-magic-status></p>
+          </form>
+
+          <section class="magic-confirmation" aria-labelledby="magic-confirmation-title" data-magic-confirmation hidden>
+            <p class="recovery-kicker">{t("auth.login.confirmation_kicker")}</p>
+            <h2 id="magic-confirmation-title">{t("auth.login.confirmation_title")}</h2>
+            <p>{t("auth.login.confirmation_intro")} <strong data-magic-confirm-destination></strong></p>
+            <button type="button" class="btn-primary" data-magic-confirm>{t("auth.login.confirmation_action")}</button>
+          </section>
+
+          <section class="magic-recovery" aria-labelledby="magic-recovery-title" data-magic-recovery hidden>
+            <p class="recovery-kicker">{t("auth.login.recovery_kicker")}</p>
+            <h2 id="magic-recovery-title">{t("auth.login.recovery_title")}</h2>
+            <p>{t("auth.login.recovery_intro")}</p>
+            <ol>
+              <li>{t("auth.login.recovery_same_browser")}</li>
+              <li>{t("auth.login.recovery_expiry")}</li>
+              <li>{t("auth.login.recovery_wrong_device")}</li>
+            </ol>
+            <div class="recovery-actions">
+              <button type="button" class="btn-primary" data-magic-resend>{t("auth.login.resend")}</button>
+              <button type="button" class="link-button" data-magic-restart>{t("auth.login.restart")}</button>
+            </div>
+            <p class="recovery-privacy">{t("auth.login.recovery_privacy")}</p>
+          </section>
+        </div>
+
+        <div class="auth-divider" aria-hidden="true">
+          <span>{t("auth.divider.or")}</span>
+        </div>
+
+        <button type="button" class="auth-google-btn" data-google-oauth>
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 48 48">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24s.92 7.54 2.56 10.78l7.97-6.19z" />
+            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+          </svg>
+          <span>{t("auth.google.continue")}</span>
+        </button>
+        <p class="auth-google-soon" role="status" aria-live="polite" data-google-soon hidden>{t("auth.google.soon")}</p>
+
+        <div class="card-footer">
+          <div class="switch-auth">
+            <span>{t("auth.login.no_account")}</span>
+            <a href="/register" class="link-bold">{t("auth.login.register_now")}</a>
+          </div>
+          <div class="privacy-note">
+            <span>{t("auth.login.privacy")}</span>
           </div>
         </div>
-      </main>
-
-      <div class="login-aside-panel">
-        <ProductFlowIllustration locale={locale} />
       </div>
-    </div>
+    </main>
 
     <script>
       import "../scripts/marketing/auth";
       import "../scripts/marketing/login";
+      import "../scripts/marketing/auth-google";
     </script>
     {turnstileSiteKey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>}
   </body>
@@ -261,46 +269,32 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
-    background: var(--sln-bg-canvas);
+    background:
+      radial-gradient(720px 420px at 50% -10%, var(--mk-ed-glow), transparent 60%),
+      radial-gradient(560px 360px at 8% 100%, color-mix(in srgb, var(--sln-brand-blue) 10%, transparent), transparent 66%),
+      var(--mk-ed-canvas, #FFFFFF);
     color: var(--sln-text-primary);
     font-family: var(--sln-font-sans);
     -webkit-font-smoothing: antialiased;
   }
 
-  .login-split-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 42fr) minmax(0, 58fr);
-    min-height: 100vh;
-    width: 100%;
-  }
-
-  .login-main-panel {
+  /* Centered single-column shell (Google/OpenAI pattern) */
+  .login-shell {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: clamp(32px, 6vw, 64px) var(--space-6);
-    box-sizing: border-box;
+    min-height: 100vh;
     width: 100%;
-    max-width: 540px;
+    max-width: 448px;
     margin-inline: auto;
-  }
-
-  .login-aside-panel {
-    background:
-      radial-gradient(700px 420px at 70% 10%, rgba(124, 106, 240, 0.06), transparent 62%),
-      var(--surface-muted, var(--sln-soft-surface));
-    border-left: 1px solid var(--border-soft);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
+    padding: clamp(28px, 5vh, 56px) 20px 48px;
   }
 
   .brand-wrapper {
-    margin-bottom: 24px;
-    align-self: flex-start;
+    margin-bottom: 22px;
+    display: flex;
+    justify-content: center;
   }
   .brand {
     display: inline-flex;
@@ -309,9 +303,8 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     transition: opacity 0.2s ease;
   }
   .brand:hover { opacity: 0.88; }
-  .brand img { display: block; width: 140px; height: auto; }
+  .brand img { display: block; width: 136px; height: auto; }
 
-  /* Auth Card */
   @keyframes fadeInEnter {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: none; }
@@ -320,33 +313,34 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     animation: fadeInEnter var(--sln-duration-panel) var(--sln-ease-spring) both;
     width: 100%;
     background: #FFFFFF;
-    border: 1px solid var(--border-strong, #D9DCE5);
-    border-radius: 16px;
-    padding: 36px 32px;
-    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px rgba(16, 24, 40, 0.06);
+    border: 1px solid var(--mk-ed-hairline, #E4E9F4);
+    border-radius: 20px;
+    padding: 34px 30px;
+    box-shadow:
+      0 1px 2px rgba(16, 24, 40, 0.04),
+      0 20px 48px -28px color-mix(in srgb, var(--sln-soft-accent) 38%, transparent);
     position: relative;
   }
 
-  /* Headings */
   .auth-heading {
     text-align: left;
-    margin-bottom: 24px;
+    margin-bottom: 22px;
   }
   .auth-heading h1 {
     margin: 0;
-    font-size: 24px;
-    font-weight: 750;
-    letter-spacing: -0.025em;
-    color: #0F172A;
+    font-family: var(--mk-font-display, var(--sln-font-sans));
+    font-size: 25px;
+    font-weight: 700;
+    letter-spacing: -0.028em;
+    color: var(--mk-ed-ink, #0E1526);
   }
   .auth-heading p {
     margin: 8px 0 0;
-    color: #64748B;
+    color: var(--mk-ed-ink-soft, #46527A);
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.55;
   }
 
-  /* Form controls */
   .auth-form {
     display: grid;
     gap: 16px;
@@ -438,7 +432,6 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     accent-color: var(--sln-action-primary);
   }
 
-  /* Primary Button */
   .btn-primary {
     display: flex;
     align-items: center;
@@ -447,28 +440,85 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     width: 100%;
     min-height: 48px;
     margin-top: 8px;
-    border: 1px solid #5140C9;
-    border-radius: 10px;
+    border: none;
+    border-radius: 12px;
     padding: 12px 20px;
-    background: var(--sln-action-primary);
+    background: var(--mk-ed-gradient-cta, var(--sln-action-primary));
     color: #FFFFFF;
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 10px 26px -12px color-mix(in srgb, var(--sln-soft-accent) 50%, transparent);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), filter 0.2s ease, box-shadow 0.2s ease;
   }
   .btn-primary:hover {
-    background: var(--sln-action-primary-hover);
+    filter: brightness(1.05);
     transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(124, 106, 240, 0.24);
   }
   .btn-primary:active { transform: translateY(0); }
-  .btn-primary:disabled { cursor: wait; opacity: 0.72; transform: none; }
+  .btn-primary:disabled { cursor: wait; opacity: 0.72; transform: none; filter: none; }
   .btn-arrow { font-size: 16px; transition: transform 0.2s ease; }
   .btn-primary:hover .btn-arrow { transform: translateX(3px); }
 
-  /* Status messages */
+  /* Divider + Google button (OpenAI ordering: form, divider, social) */
+  .auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 22px 0 16px;
+    color: var(--mk-ed-ink-muted, #5A6485);
+    font-family: var(--mk-font-mono, monospace);
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .auth-divider::before,
+  .auth-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--mk-ed-hairline, #E4E9F4);
+  }
+
+  .auth-google-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 46px;
+    border: 1px solid var(--mk-ed-hairline-strong, #C9D3E8);
+    border-radius: 12px;
+    background: #FFFFFF;
+    color: #1F1F1F;
+    font-size: 14.5px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+    transition: background-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  }
+  .auth-google-btn:hover {
+    background: #F7F9FC;
+    box-shadow: 0 4px 14px -6px rgba(16, 24, 40, 0.18);
+    transform: translateY(-1px);
+  }
+  .auth-google-btn:focus-visible {
+    outline: 3px solid var(--mk-focus);
+    outline-offset: 2px;
+  }
+
+  .auth-google-soon {
+    margin: 10px 0 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--mk-ed-tint, #F1EFFE);
+    border: 1px solid color-mix(in srgb, var(--sln-soft-accent) 30%, transparent);
+    color: var(--mk-ed-accent-ink, #5140C9);
+    font-size: 12.5px;
+    line-height: 1.5;
+    text-align: center;
+  }
+
   .status-msg {
     min-height: 0;
     margin: 12px 0 0;
@@ -484,10 +534,9 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
   .status-msg[data-tone="success"] { background: #ECFDF5; color: var(--sln-success-text); border: 1px solid #A7F3D0; }
   .status-msg[data-tone="error"] { background: #FEF2F2; color: var(--sln-danger-text); border: 1px solid #FECACA; }
 
-  /* Card Footer */
   .card-footer {
-    margin-top: 28px;
-    padding-top: 20px;
+    margin-top: 24px;
+    padding-top: 18px;
     border-top: 1px solid #F1F5F9;
     text-align: center;
   }
@@ -508,14 +557,13 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     font-size: 12px;
   }
 
-  /* Two-factor step */
   .two-factor-heading {
     margin-bottom: 4px;
   }
   .two-factor-heading h2 {
     margin: 0;
     font-size: 19px;
-    font-weight: 750;
+    font-weight: 700;
     letter-spacing: -0.02em;
     color: #0F172A;
   }
@@ -536,24 +584,12 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
   .link-button:hover { text-decoration: underline; }
   .link-button:disabled { color: #94A3B8; cursor: wait; text-decoration: none; }
 
-  @media (max-width: 960px) {
-    .login-split-shell { grid-template-columns: 1fr; }
-    .login-aside-panel { display: none; }
-    .login-main-panel { max-width: 440px; padding: 32px 16px; }
-  }
-
-  @media (max-width: 480px) {
-    .login-main-panel { width: 100%; padding: 24px 12px 48px; }
-    .auth-card { padding: 28px 18px; border-radius: 20px; }
-  }
-
-  /* Auth mode switch */
   .auth-mode-switch {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 4px;
     padding: 4px;
-    margin-bottom: 24px;
+    margin-bottom: 22px;
     background: var(--surface-muted, var(--sln-soft-surface));
     border: 1px solid var(--border-soft, #E4E7EE);
     border-radius: 12px;
@@ -565,18 +601,17 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     border-radius: 9px;
     font-size: 13px;
     font-weight: 600;
-    color: #64748B;
+    color: #475569;
     cursor: pointer;
     transition: background 0.16s ease, color 0.16s ease;
   }
-  .auth-mode-tab:hover { color: #334155; }
+  .auth-mode-tab:hover { color: #0F172A; }
   .auth-mode-tab.is-active {
     background: #FFFFFF;
     color: #312E81;
     box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
   }
 
-  /* Magic-link form */
   .field-help {
     margin: 6px 0 0;
     font-size: 12px;
@@ -608,7 +643,7 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
   .magic-recovery h2 {
     margin: 0 0 12px;
     font-size: 19px;
-    font-weight: 750;
+    font-weight: 700;
     letter-spacing: -0.02em;
     color: #0F172A;
   }
@@ -629,4 +664,15 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     margin-bottom: 16px;
   }
   .recovery-privacy { font-size: 12px; color: #94A3B8; }
+
+  @media (max-width: 480px) {
+    .login-shell { padding: 24px 12px 48px; }
+    .auth-card { padding: 26px 18px; border-radius: 18px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .auth-card,
+    .btn-primary,
+    .auth-google-btn { animation: none; transition: none; }
+  }
 </style>
