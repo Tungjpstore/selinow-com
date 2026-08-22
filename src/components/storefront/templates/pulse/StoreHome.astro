@@ -17,7 +17,7 @@ interface Props {
 
 const { categories, locale, products, promotions = [], shop } = Astro.props;
 const t = createStorefrontTranslator(locale);
-const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections);
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections ?? []);
 const trustItems = [
   t("storefront.template.pulse.trust.pay"),
   t("storefront.template.pulse.trust.keys"),

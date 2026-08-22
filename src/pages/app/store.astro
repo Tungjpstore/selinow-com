@@ -11,6 +11,7 @@ import { getSellerStorefrontPreviewCatalog, type SellerPreviewCatalog } from "..
 import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
 import { getSellerStorefrontSettings, type SellerStorefrontSettings } from "../../lib/tenants/storefront-settings";
 import { createDashboardTranslator } from "../../lib/i18n";
+import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
 import "../../styles/dashboard/store-builder-preview-skins.css";
 import { getConsoleClientCopy } from "../../lib/i18n/catalogs/console";
 import { defaultHomeStack, parseSectionItems, resolveHomeSections, universalSectionSettings } from "../../lib/storefront/sections/registry";
@@ -25,6 +26,7 @@ const canManage = shop !== undefined && (shop.role === "owner" || shop.role === 
 const canPublish = shop?.role === "owner";
 const locale = Astro.locals.locale ?? shop?.defaultLocale;
 const t = createDashboardTranslator(locale);
+const ts = createStorefrontTranslator(locale);
 let settings: SellerStorefrontSettings | null = null;
 let settingsError: string | null = null;
 let previewCatalog: SellerPreviewCatalog = { products: [], truncated: false };
@@ -70,10 +72,12 @@ const templateGallery = settings === null ? [] : settings.templates.map((templat
   verticalLabel: t(`dashboard.store_builder.template.vertical.${template.vertical}`),
 }));
 // TM1: home layout rows — native blocks render locked; universal blocks are
-// toggle/reorderable and persist into storefront_json.sections.
+// toggle/reorderable and persist into storefront_json.sections. All derived
+// rows collapse to empty defaults while settings failed to load; the render
+// below swaps in the unavailable state instead of the builder.
 const sectionCopy = getConsoleClientCopy(locale ?? "en");
 const UNIVERSAL_SECTION_TYPES = new Set(["usp", "faq"]);
-const resolvedStack = resolveHomeSections(settings.template.id, settings.content.sections ?? []);
+const resolvedStack = settings === null ? [] : resolveHomeSections(settings.template.id, settings.content.sections ?? []);
 const sectionRows = resolvedStack.map((type, index) => ({
   editable: UNIVERSAL_SECTION_TYPES.has(type),
   label: sectionCopy[`console.builder.sections.type.${type}`] ?? type,
@@ -84,16 +88,17 @@ const sectionRows = resolvedStack.map((type, index) => ({
   type,
   variants: String(index),
 }));
-const persistedSectionsJson = JSON.stringify(settings.content.sections ?? []);
-const uspSettings = universalSectionSettings(settings.content.sections ?? [], "usp");
-const faqSettings = universalSectionSettings(settings.content.sections ?? [], "faq");
+const persistedSectionsJson = JSON.stringify(settings?.content.sections ?? []);
+const uspSettings = settings === null ? { items: "[]" } : universalSectionSettings(settings.content.sections ?? [], "usp");
+const faqSettings = settings === null ? { items: "[]" } : universalSectionSettings(settings.content.sections ?? [], "faq");
+const builderVertical = settings?.template.vertical ?? "digital";
 const uspDefaults = [1, 2, 3].map((index) => ({
-  body: t(`storefront.section.usp.${settings.template.vertical}.${index}.body`),
-  title: t(`storefront.section.usp.${settings.template.vertical}.${index}.title`),
+  body: ts(`storefront.section.usp.${builderVertical}.${index}.body`),
+  title: ts(`storefront.section.usp.${builderVertical}.${index}.title`),
 }));
 const faqDefaults = [1, 2, 3].map((index) => ({
-  a: t(`storefront.section.faq.${settings.template.vertical}.${index}.a`),
-  q: t(`storefront.section.faq.${settings.template.vertical}.${index}.q`),
+  a: ts(`storefront.section.faq.${builderVertical}.${index}.a`),
+  q: ts(`storefront.section.faq.${builderVertical}.${index}.q`),
 }));
 const uspItems = parseSectionItems(uspSettings.items);
 const faqItems = parseSectionItems(faqSettings.items);
@@ -246,7 +251,7 @@ const storeBuilderClientCopy = {
           <div class="tab-panel" id="panel-sections" role="tabpanel" aria-labelledby="tab-sections" data-panel="sections" hidden>
             <div class="panel-heading"><p class="eyebrow">{sectionCopy["console.builder.sections.tab"]}</p><h2>{sectionCopy["console.builder.sections.title"]}</h2><p>{sectionCopy["console.builder.sections.description"]}</p></div>
             <fieldset disabled={!canManage}>
-              <input type="hidden" data-field="sections" value={persistedSectionsJson} />
+              <input type="hidden" data-field="sections" value={persistedSectionsJson} aria-label="sections" />
               <ul class="section-stack-list" data-section-stack data-default-stack={JSON.stringify(defaultHomeStack(settings.template.id).map((type) => ({ enabled: true, id: `cfg-${type}`, settings: {}, type })))}>
                 {sectionRows.map((row) => (
                   <li class:list={["section-stack-row", !row.editable && "is-locked"]} data-section-row={row.type}>
@@ -333,7 +338,7 @@ const storeBuilderClientCopy = {
             <div class="storefront-preview" data-preview-surface data-template-preview={settings.template.id}>
               <header class="store-header"><div class="store-logo" data-preview-logo>{settings.theme.logoUrl ? <img src={settings.theme.logoUrl} alt="" /> : <span>{shop.name.slice(0, 1).toUpperCase()}</span>}</div><strong>{shop.name}</strong><span class="preview-cart-link" aria-label={t("dashboard.store_builder.preview.cart")}>{t("dashboard.store_builder.preview.cart")} <span aria-hidden="true">0</span></span></header>
               <div class="store-announcement" data-preview-announcement hidden={!settings.content.announcement}>{settings.content.announcement}</div>
-              <section class="store-main" aria-label={t("dashboard.store_builder.preview.content")}><p class="store-kicker">{t("dashboard.store_builder.preview.kicker")}</p><h2 data-preview-headline>{settings.content.headline}</h2><p class="store-description" data-preview-description>{settings.content.description}</p><div class="store-search" aria-hidden="true"><span>⌕</span> {t("dashboard.store_builder.preview.search")}</div><section class="preview-products" aria-label={t("dashboard.store_builder.preview.catalog")} data-preview-products>{previewCatalogError !== null ? <div class="preview-catalog-state" data-tone="danger"><strong>{t("dashboard.store_builder.preview.catalog_error.title")}</strong><p>{t("dashboard.store_builder.preview.catalog_error.description")}</p></div> : previewCatalog.products.length === 0 ? <div class="preview-catalog-state"><strong>{t("dashboard.store_builder.preview.catalog_empty.title")}</strong><p>{t("dashboard.store_builder.preview.catalog_empty.description")}</p></div> : previewCatalog.products.slice(0, 4).map((product, index) => <StorefrontPreviewCard index={index} locale={locale ?? shop.defaultLocale} product={product} showExactStock={settings.content.showExactStock} />)}</section>{previewCatalog.truncated && <p class="preview-catalog-note">{t("dashboard.store_builder.preview.catalog_truncated")}</p>}<div class="preview-usp" data-preview-usp><strong>✓</strong> <span>3 trust cards render here</span></div>
+              <section class="store-main" aria-label={t("dashboard.store_builder.preview.content")}><p class="store-kicker">{t("dashboard.store_builder.preview.kicker")}</p><h2 data-preview-headline>{settings.content.headline}</h2><p class="store-description" data-preview-description>{settings.content.description}</p><div class="store-search" aria-hidden="true"><span aria-hidden="true">⌕</span> {t("dashboard.store_builder.preview.search")}</div><section class="preview-products" aria-label={t("dashboard.store_builder.preview.catalog")} data-preview-products>{previewCatalogError !== null ? <div class="preview-catalog-state" data-tone="danger"><strong>{t("dashboard.store_builder.preview.catalog_error.title")}</strong><p>{t("dashboard.store_builder.preview.catalog_error.description")}</p></div> : previewCatalog.products.length === 0 ? <div class="preview-catalog-state"><strong>{t("dashboard.store_builder.preview.catalog_empty.title")}</strong><p>{t("dashboard.store_builder.preview.catalog_empty.description")}</p></div> : previewCatalog.products.slice(0, 4).map((product, index) => <StorefrontPreviewCard index={index} locale={locale ?? shop.defaultLocale} product={product} showExactStock={settings.content.showExactStock} />)}</section>{previewCatalog.truncated && <p class="preview-catalog-note">{t("dashboard.store_builder.preview.catalog_truncated")}</p>}<div class="preview-usp" data-preview-usp><strong aria-hidden="true">•</strong> <span>3 trust cards render here</span></div>
               <div class="preview-faq" data-preview-faq><span></span><span></span><span></span></div>
               <aside class="store-support"><strong>{t("dashboard.store_builder.preview.delivery")}</strong><p data-preview-delivery>{settings.content.deliveryText}</p><strong>{t("dashboard.store_builder.preview.support")}</strong><p data-preview-support>{settings.content.supportText}</p></aside></section>
               <footer data-preview-footer>{settings.content.footerText}</footer>
@@ -536,7 +541,7 @@ const storeBuilderClientCopy = {
   .section-item-fields label { display: grid; gap: 4px; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
   .section-item-fields input, .section-item-fields textarea { width: 100%; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); font: var(--sln-font-body-sm); }
   .section-item-fields textarea { resize: vertical; }
-  .preview-usp strong { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--preview-success-text); color: #fff; font-size: 10px; }
+  .preview-usp strong { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--preview-success-text); color: var(--sln-bg-canvas); font-size: 10px; }
   .preview-faq { display: grid; gap: 6px; margin-top: 10px; }
   .preview-faq span { height: 10px; border: 1px solid var(--preview-border); border-radius: 5px; background: var(--preview-surface); }
 </style>

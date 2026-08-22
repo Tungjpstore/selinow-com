@@ -16,7 +16,7 @@ interface Props {
 
 const { categories, locale, products, shop } = Astro.props;
 const t = createStorefrontTranslator(locale);
-const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections);
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections ?? []);
 ---
 <section class="store-hero" data-mark={shop.name.slice(0, 1).toUpperCase()}>
   <div class="store-hero-heading">

@@ -52,7 +52,7 @@ function renderRecentlyViewed(): void {
     return;
   }
   const heading = host.closest(".recently-viewed-section")?.querySelector("h2");
-  if (heading instanceof HTMLElement && heading.textContent === null) heading.textContent = "Recently viewed";
+  if (heading instanceof HTMLElement && heading.textContent.trim() === "") heading.textContent = "Recently viewed";
   for (const entry of entries) {
     const card = document.createElement("a");
     card.className = "recently-viewed-card";

@@ -233,7 +233,7 @@ async function bindNextSlotChip(): Promise<void> {
       const params = new URLSearchParams({ dateEnd, dateStart, variantId });
       const response = await fetch(`/api/store/booking/slots?${params.toString()}`);
       if (!response.ok) return;
-      const body = (await response.json()) as { slots?: Array<{ startAt: string }> };
+      const body: { slots?: Array<{ startAt: string }> } = await response.json();
       const first = body.slots?.[0];
       if (first === undefined) {
         if (label !== null) label.textContent = anchor.dataset.nextSlotEmpty ?? "";

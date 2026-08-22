@@ -18,7 +18,7 @@ const { categories, locale, products, shop } = Astro.props;
 const t = createStorefrontTranslator(locale);
 const firstBookable = products.find((product) => product.variants.some((variant) => variant.durationMinutes !== undefined));
 const firstVariantId = firstBookable?.variants.find((variant) => variant.durationMinutes !== undefined)?.id ?? "";
-const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections);
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections ?? []);
 const services = products.map((product) => {
   const firstVariant = product.variants[0];
   const durationMinutes = firstVariant?.durationMinutes ?? undefined;

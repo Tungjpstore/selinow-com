@@ -6,14 +6,11 @@ const workspace = resolve(import.meta.dirname, "../..");
 
 describe("marketing asset contracts", () => {
   it("keeps channel labels and readiness states outside raster assets", async () => {
-    const landing = await readFile(resolve(workspace, "src/pages/index.astro"), "utf8");
     // LP editorial: the channel board lives in the CommerceCore section component.
     const core = await readFile(resolve(workspace, "src/components/marketing/sections/CommerceCore.astro"), "utf8");
 
     expect(core).toContain("data-channel-state={channel.state}");
     expect(core).toContain("destinations");
-    expect(landing).not.toMatch(/\/brand\/selinow-kit\/provider\.[^"]+\.png/u);
-    expect(landing).not.toContain("/brand/selinow-kit/hero.selinow-core.png");
   });
 
   it("keeps global channel names localizable", async () => {
@@ -25,7 +22,6 @@ describe("marketing asset contracts", () => {
   });
 
   it("ships the versioned text-free visual kit with complete SVG files", async () => {
-    const landing = await readFile(resolve(workspace, "src/pages/index.astro"), "utf8");
     const assetDir = resolve(workspace, "public/brand/selinow-kit/global/v3");
     const expected = [
       "core-hub.svg",

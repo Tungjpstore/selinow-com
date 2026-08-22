@@ -17,7 +17,7 @@ interface Props {
 
 const { categories, locale, products, shop } = Astro.props;
 const t = createStorefrontTranslator(locale);
-const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections);
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections ?? []);
 const steps = [t("storefront.template.desk.steps.1"), t("storefront.template.desk.steps.2"), t("storefront.template.desk.steps.3")];
 // Featured plan table: the first product with multiple variants best matches
 // the license "gói" mental model; single-variant products render as one row.

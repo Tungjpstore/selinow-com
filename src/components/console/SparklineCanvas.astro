@@ -113,7 +113,7 @@ const hasData = data.some((point) => point.value > 0);
     gap: 6px;
     text-align: center;
     border: 1px dashed var(--sln-console-border);
-    border-radius: 10px;
+    border-radius: var(--sln-console-radius, 10px);
     color: var(--sln-console-ink-3);
     background: color-mix(in srgb, var(--sln-glass-bg) 60%, transparent);
     padding: 16px;

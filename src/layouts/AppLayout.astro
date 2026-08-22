@@ -20,7 +20,7 @@ interface Props {
   email: string;
   selectedShopName?: string | undefined;
   selectedShopPublicId?: string | undefined;
-  shops?: readonly { name: string; publicId: string; role: ShopRole; slug: string }[];
+  shops?: readonly { name: string; publicId: string; role: ShopRole; slug: string; defaultLocale?: string }[];
   title: string;
 }
 
@@ -43,7 +43,6 @@ type NavGroup = {
 
 const locale = Astro.locals.locale;
 const t = createDashboardTranslator(locale);
-const ct = createConsoleTranslator(Astro.locals.locale ?? shop?.defaultLocale);
 const {
   activePath = Astro.url.pathname,
   displayName,
@@ -53,6 +52,8 @@ const {
   shops = [],
   title,
 } = Astro.props;
+const shellLocale = Astro.locals.locale ?? shops.find((candidate) => candidate.publicId === selectedShopPublicId)?.defaultLocale;
+const ct = createConsoleTranslator(shellLocale);
 const env = getBindings();
 const selectedShopRole = shops.find((shop) => shop.publicId === selectedShopPublicId)?.role;
 const roleLabels: Record<ShopRole, string> = {
@@ -495,7 +496,7 @@ const icons: Record<string, string> = {
       }
     </script>
     <ToastRegion label={ct("console.toast.region_label")} />
-    <CommandPalette locale={Astro.locals.locale ?? shop?.defaultLocale} />
+    <CommandPalette locale={shellLocale} />
     <script src="../scripts/dashboard/toast-boot.ts"></script>
   </body>
 </html>

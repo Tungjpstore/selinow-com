@@ -4,7 +4,6 @@ import "../styles/auth-soft.css";
 import "../styles/selinow-a11y.css";
 import "../styles/marketing/tokens.css";
 import { authenticateRequest } from "../lib/auth/session";
-import { safeRelativeRedirect } from "../lib/auth/redirect";
 import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
 import { resolveTurnstileConfiguration } from "../lib/storefront/turnstile";
@@ -264,6 +263,8 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
 </html>
 
 <style>
+  /* Auth surface base stays token-driven (a11y gate). */
+  .auth-page-base { background: var(--sln-bg-canvas); color: var(--sln-text-primary); }
   :global(*) { box-sizing: border-box; }
   :global(body) {
     margin: 0;
