@@ -2,6 +2,16 @@
 
 Last updated: 2026-08-22
 
+## Release execution — staging shipped through 0112; production awaits the owner ceremony (2026-08-22, later same day)
+
+**Staging is fully released** at commit `fde9705b` (tree also includes OB, Google auth, and the pipeline fixes through `ea97cca`; the two post-manifest commits touch release tooling only and do not change the Worker bundle):
+
+- Staging D1 migrated `0098`–`0112` (incl. Google auth foundation) with invariants passing after two pipeline fixes: invariant column inventories are now queried in batches of 4 tables (D1 caps compound SELECT terms at ~5–8 UNION arms, error 7500), and `splitDumpForImport` re-emits a restore dump as four passes (tables → indexes → FK-topologically-ordered rows with NULL-then-repair for the shops↔shop_domains cycle → triggers) because D1 verifies FK state per import transaction and node:sqlite defaults FK ON. The drill's target-export verification also loads with FK enforcement off.
+- Ceremony completed in order per RELEASE.md: backup → drill → manifest `stg_20260822T080922Z_fde9705b0e20` → migrate (completion written) → post-migration backup `bkp_20260822081227` + drill `rdr_20260822081253` → `db:complete-release` → worker deploy (version `488d9fbd-2acc-4740-8604-f317791e1c5a`) → deployment evidence written → route-preflight, doctor, migrate:status, preflight all green. Live checks: staging.selinow.com, app-staging login, api-staging health, and the signal storefront all return 200.
+- Production prep done and blocked exactly where designed: fresh production backup `bkp_20260822081914` + restore drill `rdr_20260822083827_00b1e7282aa7` passed (first production-shaped drill since the pipeline fixes; six debug drill databases used during diagnosis were deleted). `db.mjs migrate --env production` stops at `production_rollback_artifact_binding_mismatch` because the retained production evidence `.wrangler/release/production-evidence.json` (`prd_20260813t000000z_2df45cf59367`) still has all five owner approvals `pending`, a placeholder candidate worker version, and no rollback-rehearsal artifact — the release closeout ceremony (owner approvals, route-neutral candidate/rollback version uploads, real maintenance drain with queue producers paused, pilot smoke storefront, live rollback rehearsal) is an owner decision per docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md and was not auto-executed.
+- Temporary Cloudflare account tokens (`selinow-release-write-20260822` all-write, `selinow-release-read-20260822` all-read, plus the user-scoped "Create Additional Tokens" factory token) were created through the dashboard for this ceremony and are exported from `/tmp/cfenv.sh` (mode 0600, no expiry). Delete them from the Cloudflare dashboard after the production ceremony, or immediately if abandoning it.
+- Pipeline fixes committed: `3710aff` (batch 10), `fde9705` (batch 4), `4783fdf` (four-pass drill import), `ea97cca` (FK-off verification load). Guard suites pass (52/52).
+
 ## OB — Onboarding upgrade: category-scoped verticals + one-request provisioning (2026-08-22)
 
 Major onboarding slice answering "danh mục → template/preset riêng + tạo shop nhanh". No new migration (reuses `shops.vertical` from 0102).
