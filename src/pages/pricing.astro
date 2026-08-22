@@ -45,6 +45,11 @@ if (validHost) {
 const previewPlans = validHost && env.APP_ENV === "local" ? getMarketingPreviewPlans() : [];
 const displayPlans = plans.length === 2 ? plans : previewPlans;
 const availableMarkets = getMarketingAvailableMarkets(plans);
+const loginHrefForPlan = (planCode: string): string => {
+  const login = new URL("/login", dashboardOrigin);
+  login.searchParams.set("redirect", `/onboarding?plan=${encodeURIComponent(planCode)}`);
+  return login.toString();
+};
 
 const everyPlanModules = [
   { icon: icons.receipt(14), label: t("marketing.home.architecture.module.ai") },
@@ -140,7 +145,7 @@ const pricingStructuredData = {
   noindex={!validHost}
   structuredData={validHost ? pricingStructuredData : undefined}
 >
-  {validHost ? <>
+  {validHost ? <div class="landing-page"><>
     <MarketingHeader dashboardOrigin={dashboardOrigin} locale={locale} />
     <main id="main-content" class="pricing-page">
       <section class="pricing-hero">
@@ -213,8 +218,8 @@ const pricingStructuredData = {
             </div>
 
             <div class:list={["plan-grid", displayPlans.length === 1 && "plan-grid-single", displayPlans.length === 2 && "plan-grid-pair", displayPlans.length >= 4 && "plan-grid-many"]}>
-              {displayPlans.map((plan) => (
-                <article class:list={["plan", "runtime-plan-card", plan.recommended === true && "plan-recommended", pricingState === "unavailable" && "plan-preview"]}>
+              {displayPlans.map((plan, index) => (
+                <article class:list={["plan", "runtime-plan-card", plan.recommended === true && "plan-recommended", pricingState === "unavailable" && "plan-preview"]} data-reveal data-reveal-stagger={String(index)}>
                   {plan.recommended === true ? (
                     <div class="plan-recommended-label">
                       <span aria-hidden="true">💎</span>
@@ -223,7 +228,7 @@ const pricingStructuredData = {
                   ) : (
                     <div class="plan-starter-pill">
                       <span aria-hidden="true">🚀</span>
-                      <span>{locale.startsWith("vi") ? "Khởi đầu chuẩn" : "Standard"}</span>
+                      <span>{t("marketing.home.pricing.starter_pill")}</span>
                     </div>
                   )}
                   <div class="runtime-plan-head">
@@ -253,11 +258,11 @@ const pricingStructuredData = {
                     )}
                     <div class="plan-trial-badge">
                       <span aria-hidden="true">✨</span>
-                      <span>{locale.startsWith("vi") ? "7 ngày dùng thử miễn phí" : "7-day free trial"}</span>
+                      <span>{t("marketing.home.pricing.trial_badge")}</span>
                     </div>
                   </div>
                   <ul>{planFeatureList(plan, locale).map((feature) => <li>{feature}</li>)}</ul>
-                  <a class:list={["kit-button", plan.recommended === true ? "kit-button-primary" : "kit-button-secondary", "button", plan.recommended === true ? "primary" : "secondary"]} href={`${dashboardOrigin}/login`} data-pricing-cta>
+                  <a class:list={["kit-button", plan.recommended === true ? "kit-button-primary" : "kit-button-secondary", "button", plan.recommended === true ? "primary" : "secondary"]} href={loginHrefForPlan(plan.code)} data-pricing-cta data-plan-code={plan.code}>
                     <span>{t("marketing.pricing.cta")}</span>
                     <span aria-hidden="true">→</span>
                   </a>
@@ -368,7 +373,7 @@ const pricingStructuredData = {
     </main>
 
     <MarketingFooter dashboardOrigin={dashboardOrigin} locale={locale} />
-  </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{t("marketing.pricing.host_only")}</p></div></main>}
+  </></div> : <main class="platform-shell error-page"><div><h1>404</h1><p>{t("marketing.pricing.host_only")}</p></div></main>}
 </PlatformLayout>
 
 <script>

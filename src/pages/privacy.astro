@@ -17,6 +17,7 @@ Astro.response.headers.set("Cache-Control", "public, max-age=300");
   locale={locale}
   canonical="https://selinow.com/privacy"
 >
+  <div class="landing-page">
   <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
   <PublicationGate
     eyebrow="PRIVACY STATUS"
@@ -26,4 +27,5 @@ Astro.response.headers.set("Cache-Control", "public, max-age=300");
     locale={locale}
   />
   <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+</div>
 </PlatformLayout>

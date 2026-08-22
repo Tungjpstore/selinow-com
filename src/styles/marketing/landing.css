@@ -16,6 +16,7 @@
 @import "./editorial/shell.css";
 @import "./editorial/hero.css";
 @import "./editorial/sections.css";
+@import "./editorial/pages.css";
 
 /* --------------------------------------------------------------------------
    1. HERO — layered canvas + dense composition

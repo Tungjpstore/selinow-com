@@ -67,7 +67,7 @@ const structuredData = content === null || !validHost ? undefined : {
   noindex={!validHost || content === null}
   structuredData={structuredData}
 >
-  {validHost && content ? <>
+  {validHost && content ? <div class="landing-page"><>
     <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
     <main id="main-content" class="solution-page">
       <section class="solution-hero">
@@ -200,5 +200,5 @@ const structuredData = content === null || !validHost ? undefined : {
     </main>
 
     <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-  </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
+  </></div> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
 </PlatformLayout>

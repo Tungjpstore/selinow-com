@@ -66,7 +66,7 @@ if (!validHost) {
   noindex={!validHost}
   structuredData={structuredData}
 >
-  {validHost ? <>
+  {validHost ? <div class="landing-page"><>
     <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
     <main id="main-content" class="solution-page solution-hub-page" data-marketing-surface="solutions-hub">
       <section class="solution-hero">
@@ -156,5 +156,5 @@ if (!validHost) {
     </main>
 
     <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-  </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
+  </></div> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
 </PlatformLayout>
