@@ -209,8 +209,11 @@ UAT blocked and do not run the collector.
 
    Before any D1 write, apply fetches every product from the fixed Dodo test/live
    API origin using the protected API key. It requires the exact product identity,
-   nested recurring price type, amount, currency, monthly frequency, inclusive
-   tax, zero trial days, zero discount, `saas` tax category, and null pricing mode.
+   nested recurring price type, amount, currency, monthly payment frequency,
+   a 20-year subscription period for ongoing renewal, inclusive tax, zero trial
+   days, zero discount, `saas` tax category, and null pricing mode. Dodo expires
+   a subscription after one cycle when its subscription period equals its
+   payment frequency, so `1 Month` is not a valid ongoing monthly plan.
    HTTP, JSON, identity, schema, or configuration mismatch fails closed without
    logging credentials or provider response bodies.
 

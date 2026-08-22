@@ -359,8 +359,8 @@ function validateDodoCatalogProduct(product, offer, reference) {
     || price.currency !== offer.currency
     || price.payment_frequency_count !== 1
     || price.payment_frequency_interval !== "Month"
-    || price.subscription_period_count !== 1
-    || price.subscription_period_interval !== "Month"
+    || price.subscription_period_count !== 20
+    || price.subscription_period_interval !== "Year"
     || price.tax_inclusive !== true
     || price.trial_period_days !== 0
     || price.discount !== 0) {
