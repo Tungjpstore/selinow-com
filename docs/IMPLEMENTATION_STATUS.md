@@ -2945,3 +2945,27 @@ Seller billing staging incident and repair (2026-08-22, follow-up):
   billing-scoped ESLint, `tsc --noEmit`, and `git diff --check` pass. Full Astro
   check remains blocked only by the separate storefront/template, AppLayout,
   login, and store-builder stream; those files were not changed here.
+
+## LP — Editorial Commerce landing program (2026-08-22, commits f33a375..LP5)
+
+Owner-approved full redesign of the marketing surface + auth, applied on
+`wip/onboarding-redesign-20260820`:
+
+- LP0 art pipeline (nanobanana gateway, env-keyed), variable fonts, editorial tokens.
+- LP1 homepage v3 "light premium" (3 owner review rounds; ivory + dark rejected), WebGL
+  aurora hero, scenario art set per section, scrollytelling flow, AA contrast audit.
+- LP2/LP2b editorial language across pricing/solutions/support/legal; project-wide locale
+  flow (first-touch + switch cookie `selinow_locale`, `Domain=.selinow.com`, clean links);
+  polished vi/en copy.
+- LP3 auth trio restyled as centered Google/OpenAI-style cards with a Google button wired
+  for the upcoming OAuth (`auth-google.ts` shows an honest notice until the route ships).
+- LP4 editorial OG cover + MOTION.md allowlist.
+- LP5 contract tests realigned (marketing assets, i18n dynamic-call allowlist) and public
+  browser-gate baselines recaptured: 66/71 pass — remaining failures are storefront
+  axe/a11y items in parallel-session WIP files, not LP scope.
+
+Verification at LP checkpoints: astro check 0 errors (LP files), lint clean (LP files),
+EX0 contract 13/13, home/pricing/login + inner pages 200 with 0 axe AA violations, no
+overflow at 320/390/1440, console clean, i18n click-through EN/VI verified.
+Known limitations: hero WebGL intentionally disabled under reduced-motion (static CSS
+aurora); Google sign-in button shows a notice until the OAuth backend lands.
