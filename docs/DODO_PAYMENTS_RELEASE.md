@@ -11,9 +11,11 @@ while only a final staging release can produce accepted provider evidence.
   `live_mode`. The current staging Worker has the API-key and webhook-key
   secret names configured. Production provider secrets remain subject to the
   production release ceremony and are not implied by staging state.
-- Both test and live catalogs are tax-inclusive SaaS subscriptions with a
-  provider-managed 7-day trial. Four products are used per environment so a
-  webhook lookup cannot ambiguously cross currency or amount.
+- Both test and live catalogs are tax-inclusive monthly SaaS subscriptions with
+  provider trials disabled. Selinow's seven-day trial is local D1 entitlement
+  state; opening Dodo checkout must not replace or extend it. Four products are
+  used per environment so a webhook lookup cannot ambiguously cross currency or
+  amount.
 - The canonical staging webhook route is live and rejects an unsigned probe
   with `401 webhook_signature_invalid`. The Dodo test account has exactly one
   usable webhook for that endpoint with the required event contract. This
@@ -182,10 +184,49 @@ UAT blocked and do not run the collector.
    then create post-migration evidence and deploy that same manifest.
 4. Reprobe the canonical webhook route; it must reject unsigned input rather than
    return `404`.
-5. Register the environment-specific Dodo webhook, set the webhook secret through
-   Cloudflare Worker secrets, reconcile the four staging provider references, and
-   execute test-mode checkout -> signed webhook -> subscription UAT.
-6. Revoke temporary audit credentials and preserve only reference-only evidence.
+5. Inspect D1 before mutation. Product IDs are intentionally optional for this
+   read-only mode, so an operator without protected catalog references can still
+   determine whether the four rows are pending or already published:
+
+   ```bash
+   DODO_PAYMENTS_ENVIRONMENT=test_mode npm run dodo:catalog:reconcile -- \
+     --env=staging --inspect --json
+   ```
+
+   `--inspect` performs remote SELECT/classification only and never uses `--file`
+   or `--yes`. Without product IDs, published states are deliberately reported
+   as `published_unverified` or `rotated_unverified`; export all four IDs only
+   when exact identity classification is required.
+6. Register the environment-specific Dodo webhook, set the webhook secret through
+   Cloudflare Worker secrets, export the API key and all four protected product
+   IDs, then reconcile the staging provider references:
+
+   ```bash
+   DODO_PAYMENTS_ENVIRONMENT=test_mode npm run dodo:catalog:reconcile -- \
+     --env=staging --apply --confirm-catalog-update \
+     --confirm-staging-test-catalog --json
+   ```
+
+   Before any D1 write, apply fetches every product from the fixed Dodo test/live
+   API origin using the protected API key. It requires the exact product identity,
+   nested recurring price type, amount, currency, monthly frequency, inclusive
+   tax, zero trial days, zero discount, `saas` tax category, and null pricing mode.
+   HTTP, JSON, identity, schema, or configuration mismatch fails closed without
+   logging credentials or provider response bodies.
+
+   Dodo's detail schema permits `pricing_mode`, `tax_inclusive`, and
+   `trial_period_days` to be omitted or nullable even when their provider
+   defaults behave like null/true/zero. This release guard intentionally requires
+   explicit `null`, `true`, and `0`; if Dodo omits any field in the selected
+   account/API version, reconciliation remains blocked until an owner verifies
+   the response contract and explicitly revises policy.
+
+   The guarded apply marks `dodo_catalog_reconciliation_required=false` only in
+   the same SQL execution that proves all four exact offers are published; the
+   command then re-inspects D1 and fails closed if the marker or catalog disagrees.
+7. Execute test-mode checkout -> signed webhook -> subscription UAT. Provider
+   checkout must bill the first paid period; it must not create a second trial.
+8. Revoke temporary audit credentials and preserve only reference-only evidence.
 
 Production remains blocked until the non-Dodo admission contract, backup/restore,
 monitoring, rollback, owner, pilot, PayOS and other provider gates are accepted.

@@ -221,6 +221,16 @@ describe("production Worker continuation deploy admission", () => {
     // runs in batches of 10 tables (D1 caps compound SELECT terms).
     expect(runner.mock.calls.length).toBeGreaterThanOrEqual(3);
     expect(runner.mock.calls.every(([args]) => args[4] === "production")).toBe(true);
+    const emittedSql = runner.mock.calls
+      .map(([args]) => args[args.indexOf("--command") + 1] ?? "")
+      .join("\n");
+    expect(emittedSql).toContain("billing_checkout_sessions");
+    expect(emittedSql).toContain("idx_billing_checkout_sessions_reconciliation");
+    expect(emittedSql).toContain("idx_billing_checkout_sessions_shop_reconciliation");
+    expect(emittedSql).toContain("reconciliation_attempts");
+    expect(emittedSql).toContain("next_reconciliation_at");
+    expect(emittedSql).toContain("last_reconciliation_at");
+    expect(emittedSql).toContain("reconciliation_failure_code");
   });
 
   it("pins staging invariant queries to the staging D1 environment", () => {
@@ -409,6 +419,9 @@ describe("production Worker continuation deploy admission", () => {
       ["index", "idx_auth_google_oauth_states_lookup", "CREATE INDEX idx_auth_google_oauth_states_lookup ON auth_google_oauth_states(id)"],
       ["index", "idx_auth_google_oauth_states_expiry", "CREATE INDEX idx_auth_google_oauth_states_expiry ON auth_google_oauth_states(id)"],
       ["index", "idx_auth_google_oauth_states_retention", "CREATE INDEX idx_auth_google_oauth_states_retention ON auth_google_oauth_states(id)"],
+      ["table", "billing_checkout_sessions", "CREATE TABLE billing_checkout_sessions (id TEXT)"],
+      ["index", "idx_billing_checkout_sessions_reconciliation", "CREATE INDEX idx_billing_checkout_sessions_reconciliation ON billing_checkout_sessions(id)"],
+      ["index", "idx_billing_checkout_sessions_shop_reconciliation", "CREATE INDEX idx_billing_checkout_sessions_shop_reconciliation ON billing_checkout_sessions(id)"],
     ] as const;
     for (const [type, name, replacementSql] of admissionObjectReplacements) {
       const runner = vi.fn((args: string[]) => {

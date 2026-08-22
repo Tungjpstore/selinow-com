@@ -4,7 +4,7 @@ import { processActivationMilestoneBackfill } from "./lib/analytics/activation";
 import { purgeAuthRequestAdmissions } from "./lib/auth/admission";
 import { purgeGoogleOAuthStates } from "./lib/auth/google-state-maintenance";
 import { processScheduledAutomationTasks } from "./lib/automation/scheduler";
-import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, reconcileDodoSubscriptionChanges, suspendExpiredBillingGracePeriods, suspendExpiredTrials } from "./lib/billing/service";
+import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, reconcileDodoBillingCheckouts, reconcileDodoSubscriptionChanges, suspendExpiredBillingGracePeriods, suspendExpiredTrials } from "./lib/billing/service";
 import { purgeCartMutationReplays } from "./lib/commerce/cart-mutation";
 import { purgeBuyerOrderRecoveryArtifacts } from "./lib/commerce/buyer-order-recovery";
 import { expireDueGenericEntitlements } from "./lib/commerce/entitlements";
@@ -635,6 +635,12 @@ export default {
       () => reconcileDodoSubscriptionChanges({ env: bindings, now: scheduledAt, limit: 100 }),
       { candidates: 0, completed: 0, failed: 0, pending: 0 },
     );
+    const billingCheckoutReconciliation = await run(
+      "billing_checkout_reconciliation",
+      "scheduled_billing_checkout_reconciliation_failed",
+      () => reconcileDodoBillingCheckouts({ env: bindings, now: scheduledAt, limit: 100 }),
+      { candidates: 0, completed: 0, expired: 0, failed: 0, pending: 0, quarantined: 0 },
+    );
     const expiredBillingCheckouts = await run(
       "billing_checkout_expiration",
       "scheduled_billing_checkout_expiration_failed",
@@ -779,6 +785,10 @@ export default {
         expiredBillingGracePeriods,
         expiredBillingTrials,
         expiredGenericEntitlements,
+        billingCheckoutReconciliationCompleted: billingCheckoutReconciliation.completed,
+        billingCheckoutReconciliationExpired: billingCheckoutReconciliation.expired,
+        billingCheckoutReconciliationFailed: billingCheckoutReconciliation.failed,
+        billingCheckoutReconciliationPending: billingCheckoutReconciliation.pending,
         billingReconciliationCompleted: billingReconciliation.completed,
         billingReconciliationFailed: billingReconciliation.failed,
         billingReconciliationPending: billingReconciliation.pending,

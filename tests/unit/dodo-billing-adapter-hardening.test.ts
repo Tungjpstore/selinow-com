@@ -11,6 +11,7 @@ import {
   getDodoConfig,
   parseDodoEvent,
   previewDodoSubscriptionChange,
+  retrieveDodoCheckout,
   resumeDodoSubscription,
   verifyDodoWebhookSignature,
 } from "../../src/lib/billing/dodo";
@@ -115,6 +116,99 @@ describe("Dodo billing adapter hardening", () => {
       checkoutUrl: "https://test.checkout.dodopayments.com/session/chk_test_123",
       providerCheckoutId: "chk_test_123",
       providerTransactionId: "chk_test_123",
+    });
+  });
+
+  it("passes the service-validated return URL to hosted checkout", async () => {
+    const config = getDodoConfig(environment("local"));
+    const fetcher: typeof fetch = (_input, init) => {
+      expect(JSON.parse(init?.body as string)).toMatchObject({
+        return_url: "https://app.selinow.com/app/billing?billing_return=1&shop=shop_test_123",
+      });
+      return Promise.resolve(Response.json({
+        checkout_url: "https://test.checkout.dodopayments.com/session/chk_return_123",
+        session_id: "chk_return_123",
+      }));
+    };
+
+    await expect(createDodoCheckout({
+      config,
+      currency: "USD",
+      customData: { checkoutSessionId: "bchk_local_123" },
+      fetcher,
+      idempotencyKey: "checkout-return-key",
+      priceId: "prod_test_123",
+      returnUrl: "https://app.selinow.com/app/billing?billing_return=1&shop=shop_test_123",
+    })).resolves.toMatchObject({ providerCheckoutId: "chk_return_123" });
+  });
+
+  it.each([400, 401, 403, 404, 409, 422])("classifies deterministic checkout HTTP %i failures as terminal", async (status) => {
+    const config = getDodoConfig(environment("local"));
+    await expect(createDodoCheckout({
+      config,
+      currency: "USD",
+      customData: { checkoutSessionId: "bchk_local_123" },
+      fetcher: () => Promise.resolve(new Response("provider detail must stay opaque", { status })),
+      idempotencyKey: `checkout-terminal-${String(status)}`,
+      priceId: "prod_test_123",
+    })).rejects.toMatchObject({ code: "billing_provider_request_rejected", issues: undefined, status: 502 });
+  });
+
+  it.each([408, 425, 429, 500, 503])("keeps transient checkout HTTP %i failures retryable", async (status) => {
+    const config = getDodoConfig(environment("local"));
+    await expect(createDodoCheckout({
+      config,
+      currency: "USD",
+      customData: { checkoutSessionId: "bchk_local_123" },
+      fetcher: () => Promise.resolve(new Response(null, { status })),
+      idempotencyKey: `checkout-retryable-${String(status)}`,
+      priceId: "prod_test_123",
+    })).rejects.toMatchObject({ code: "billing_provider_unavailable", status: 503 });
+  });
+
+  it("retrieves payment truth without requiring a reusable hosted checkout URL", async () => {
+    const config = getDodoConfig(environment("local"));
+    await expect(retrieveDodoCheckout({
+      config,
+      fetcher: () => Promise.resolve(Response.json({
+        created_at: "2026-08-03T00:00:00.000Z",
+        id: "chk_truth_123",
+        payment_id: "pay_truth_123",
+        payment_status: "Succeeded",
+        subscription_id: "sub_truth_123",
+      })),
+      providerTransactionId: "chk_truth_123",
+    })).resolves.toEqual({
+      amountMinor: null,
+      checkoutUrl: null,
+      createdAt: "2026-08-03T00:00:00.000Z",
+      currency: null,
+      paymentId: "pay_truth_123",
+      paymentStatus: "succeeded",
+      priceId: null,
+      providerCheckoutId: "chk_truth_123",
+      providerTransactionId: "chk_truth_123",
+      subscriptionId: "sub_truth_123",
+    });
+  });
+
+  it("accepts the documented details-collection checkout state", async () => {
+    const config = getDodoConfig(environment("local"));
+    await expect(retrieveDodoCheckout({
+      config,
+      fetcher: () => Promise.resolve(Response.json({
+        created_at: "2026-08-03T00:00:00.000Z",
+        id: "chk_empty_123",
+        payment_id: null,
+        payment_status: null,
+      })),
+      providerTransactionId: "chk_empty_123",
+    })).resolves.toMatchObject({
+      checkoutUrl: null,
+      createdAt: "2026-08-03T00:00:00.000Z",
+      paymentId: null,
+      paymentStatus: null,
+      providerCheckoutId: "chk_empty_123",
     });
   });
 

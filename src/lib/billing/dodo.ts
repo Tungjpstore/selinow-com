@@ -11,9 +11,33 @@ export type DodoConfig = {
 };
 
 export type DodoCheckout = {
+  checkoutUrl: string;
   providerCheckoutId: string;
   providerTransactionId: string;
-  checkoutUrl: string;
+};
+
+export type DodoRetrievedCheckout = {
+  amountMinor: number | null;
+  checkoutUrl: string | null;
+  createdAt: string;
+  currency: string | null;
+  paymentId: string | null;
+  paymentStatus: string | null;
+  priceId: string | null;
+  providerCheckoutId: string;
+  providerTransactionId: string;
+  subscriptionId: string | null;
+};
+
+export type DodoPayment = {
+  amountMinor: number | null;
+  checkoutSessionId: string | null;
+  currency: string | null;
+  customData: Record<string, unknown>;
+  paymentId: string;
+  priceId: string | null;
+  status: string | null;
+  subscriptionId: string | null;
 };
 
 export type DodoSubscriptionOperation = {
@@ -162,6 +186,13 @@ function requireProviderReference(value: unknown, issue: string): string {
   const reference = readProviderReference(value);
   if (reference === null) throw new AppError("billing_provider_invalid", 502, [issue]);
   return reference;
+}
+
+function throwCheckoutHttpError(response: Response): never {
+  if (response.status >= 400 && response.status < 500 && !new Set([408, 425, 429]).has(response.status)) {
+    throw new AppError("billing_provider_request_rejected", 502);
+  }
+  throw new AppError("billing_provider_unavailable", 503);
 }
 
 function readDate(value: unknown): string | null {
@@ -349,9 +380,10 @@ export async function createDodoCheckout(input: {
   idempotencyKey: string;
   priceId: string;
   customData: Record<string, string>;
+  returnUrl?: string;
   fetcher?: typeof fetch;
 }): Promise<DodoCheckout> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const providerPriceId = requireProviderReference(input.priceId, "product_reference");
   let response: Response;
   try {
@@ -360,6 +392,7 @@ export async function createDodoCheckout(input: {
         billing_currency: input.currency.toUpperCase(),
         metadata: input.customData,
         product_cart: [{ product_id: providerPriceId, quantity: 1 }],
+        ...(input.returnUrl === undefined ? {} : { return_url: input.returnUrl }),
       }),
       headers: {
         Authorization: `Bearer ${input.config.apiKey}`,
@@ -373,23 +406,29 @@ export async function createDodoCheckout(input: {
   } catch {
     throw new AppError("billing_provider_unavailable", 503);
   }
-  if (!response.ok) throw new AppError("billing_provider_unavailable", 503);
+  if (!response.ok) throwCheckoutHttpError(response);
   let body: unknown;
   try { body = await response.json(); } catch { throw new AppError("billing_provider_invalid", 502, ["response_json"]); }
   const data = asObject(body);
   const providerCheckoutId = readProviderReference(data.session_id) ?? readProviderReference(data.checkout_id) ?? readProviderReference(data.id);
   const checkoutUrl = readString(data.checkout_url) ?? readString(data.checkoutUrl);
   if (providerCheckoutId === null || checkoutUrl === null) throw new AppError("billing_provider_invalid", 502, ["checkout_response"]);
-  return { checkoutUrl: checkoutUrlForEnvironment(input.config, checkoutUrl, "checkout_response"), providerCheckoutId, providerTransactionId: providerCheckoutId };
+  return {
+    checkoutUrl: checkoutUrlForEnvironment(input.config, checkoutUrl, "checkout_response"),
+    providerCheckoutId,
+    providerTransactionId: providerCheckoutId,
+  };
 }
 
 /** Retrieve a durable checkout reference without persisting the bearer URL. */
-export async function retrieveDodoCheckout(input: {
+type RetrieveDodoCheckoutInput = {
   config: DodoConfig;
   providerTransactionId: string;
   fetcher?: typeof fetch;
-}): Promise<DodoCheckout> {
-  const fetcher = input.fetcher ?? fetch;
+};
+
+export async function retrieveDodoCheckout(input: RetrieveDodoCheckoutInput): Promise<DodoRetrievedCheckout> {
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const requestedCheckoutId = requireProviderReference(input.providerTransactionId, "checkout_reference");
   let response: Response;
   try {
@@ -400,14 +439,70 @@ export async function retrieveDodoCheckout(input: {
   } catch {
     throw new AppError("billing_provider_unavailable", 503);
   }
-  if (!response.ok) throw new AppError("billing_provider_unavailable", 503);
+  if (!response.ok) throwCheckoutHttpError(response);
   let body: unknown;
   try { body = await response.json(); } catch { throw new AppError("billing_provider_invalid", 502, ["checkout_response_json"]); }
   const data = asObject(body);
   const checkoutUrl = readString(data.checkout_url) ?? readString(data.checkoutUrl);
-  const providerCheckoutId = readProviderReference(data.session_id) ?? readProviderReference(data.checkout_id) ?? readProviderReference(data.id) ?? requestedCheckoutId;
-  if (checkoutUrl === null) throw new AppError("billing_provider_invalid", 502, ["checkout_response_url"]);
-  return { checkoutUrl: checkoutUrlForEnvironment(input.config, checkoutUrl, "checkout_response_url"), providerCheckoutId, providerTransactionId: providerCheckoutId };
+  const providerCheckoutId = readProviderReference(data.id);
+  const createdAt = readDate(data.created_at);
+  if (providerCheckoutId !== requestedCheckoutId) throw new AppError("billing_provider_invalid", 502, ["checkout_identity"]);
+  if (createdAt === null) throw new AppError("billing_provider_invalid", 502, ["checkout_created_at"]);
+  const paymentId = readProviderReference(data.payment_id);
+  const paymentStatus = readString(data.payment_status)?.trim().toLowerCase() ?? null;
+  const subscriptionId = readProviderReference(data.subscription_id);
+  const currency = (readString(data.currency) ?? readString(data.billing_currency))?.toUpperCase() ?? null;
+  const amountMinor = minorAmount(data.total_amount ?? data.amount ?? data.amount_minor ?? data.total, currency);
+  const priceId = findPriceId(data);
+  const normalizedCheckoutUrl = checkoutUrl === null ? null : checkoutUrlForEnvironment(input.config, checkoutUrl, "checkout_response_url");
+  return {
+    amountMinor,
+    checkoutUrl: normalizedCheckoutUrl,
+    createdAt,
+    currency,
+    paymentId,
+    paymentStatus,
+    priceId,
+    providerCheckoutId,
+    providerTransactionId: providerCheckoutId,
+    subscriptionId,
+  };
+}
+
+/** Retrieve the captured payment before applying any subscription entitlement. */
+export async function retrieveDodoPayment(input: {
+  config: DodoConfig;
+  paymentId: string;
+  fetcher?: typeof fetch;
+}): Promise<DodoPayment> {
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
+  const requestedPaymentId = requireProviderReference(input.paymentId, "payment_reference");
+  let response: Response;
+  try {
+    response = await fetcher(`${input.config.apiBaseUrl}/payments/${encodeURIComponent(requestedPaymentId)}`, {
+      headers: { Authorization: `Bearer ${input.config.apiKey}` },
+      method: "GET",
+    });
+  } catch {
+    throw new AppError("billing_provider_unavailable", 503);
+  }
+  if (!response.ok) throwCheckoutHttpError(response);
+  let body: unknown;
+  try { body = await response.json(); } catch { throw new AppError("billing_provider_invalid", 502, ["payment_response_json"]); }
+  const data = asObject(body);
+  const paymentId = readProviderReference(data.payment_id) ?? readProviderReference(data.id) ?? requestedPaymentId;
+  if (paymentId !== requestedPaymentId) throw new AppError("billing_provider_invalid", 502, ["payment_identity"]);
+  const currency = readString(data.currency)?.toUpperCase() ?? null;
+  return {
+    amountMinor: minorAmount(data.total_amount ?? data.amount ?? data.amount_minor ?? data.total, currency),
+    checkoutSessionId: readProviderReference(data.checkout_session_id) ?? readProviderReference(data.checkout_id),
+    currency,
+    customData: readMetadata(data.metadata),
+    paymentId,
+    priceId: findPriceId(data),
+    status: readString(data.status)?.trim().toLowerCase() ?? null,
+    subscriptionId: readProviderReference(data.subscription_id),
+  };
 }
 
 /** Retrieve provider truth for webhook fields that Dodo may omit. */
@@ -416,7 +511,7 @@ export async function retrieveDodoSubscription(input: {
   providerSubscriptionId: string;
   fetcher?: typeof fetch;
 }): Promise<DodoSubscription> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const requestedSubscriptionId = requireProviderReference(input.providerSubscriptionId, "subscription_reference");
   let response: Response;
   try {
@@ -459,7 +554,7 @@ async function dodoSubscriptionOperation(input: {
   providerSubscriptionId: string;
   fetcher?: typeof fetch;
 }): Promise<DodoSubscriptionOperation> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const providerSubscriptionId = requireProviderReference(input.providerSubscriptionId, "subscription_reference");
   let response: Response;
   try {
@@ -536,7 +631,7 @@ export async function previewDodoSubscriptionChange(input: {
   providerSubscriptionId: string;
   fetcher?: typeof fetch;
 }): Promise<DodoPlanChangePreview> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const subscriptionId = requireProviderReference(input.providerSubscriptionId, "subscription_reference");
   const productId = requireProviderReference(input.priceId, "product_reference");
   let response: Response;
@@ -624,7 +719,7 @@ export async function createDodoCustomerPortalSession(input: {
   sendEmail?: boolean;
   fetcher?: typeof fetch;
 }): Promise<DodoCustomerPortalSession> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const customerId = requireProviderReference(input.customerId, "customer_reference");
   const query = new URLSearchParams({ return_url: input.returnUrl });
   if (input.sendEmail !== undefined) query.set("send_email", String(input.sendEmail));

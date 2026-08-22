@@ -1,6 +1,31 @@
 # Implementation Status
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
+
+## Commercial billing checkout release candidate (2026-08-23)
+
+- Built a billing-only candidate from production base `8b132b193c52`; parallel auth migrations and source changes are intentionally excluded.
+- Unified landing, pricing, onboarding, seller plan listing, preview, and checkout behind one sellable Dodo catalog contract.
+- Added response-loss-safe checkout idempotency, exact return polling, signed-webhook state transitions, scheduled reconciliation, and forward-only migration `0113_dodo_checkout_reconciliation.sql`.
+- Added a guarded remote catalog inspector/reconciler that clears `dodo_catalog_reconciliation_required` only when all four environment-specific offers match exactly.
+- Catalog inspect and dry-run no longer require protected product IDs. Published
+  rows inspected without IDs are explicitly labeled unverified rather than being
+  mistaken for an exact catalog match.
+- Before any catalog D1 mutation, reconciliation now GETs all four products from
+  the fixed environment-specific Dodo API origin and verifies exact product ID,
+  nested recurring amount/currency/monthly cadence, tax inclusion, zero provider
+  trial/discount, SaaS tax category, and null pricing mode. Provider/API/schema
+  failures stop before writes and do not expose the API key or response body.
+- Provider-schema limitation: Dodo documents `pricing_mode`, `tax_inclusive`,
+  and `trial_period_days` as omittable/nullable. The release guard intentionally
+  requires explicit `null`/`true`/`0` and therefore fails closed if Dodo returns
+  only defaults; an owner must verify and approve any future relaxation.
+- Verification for catalog hardening: 49/49 focused catalog/webhook tests pass;
+  focused ESLint passes; `npm run check` completes with zero errors/warnings and
+  four unrelated existing TypeScript conversion hints.
+- Dodo provider trials are disabled. Selinow retains the existing seven-day local D1 evaluation trial; checkout requires the full paid catalog amount before activating a subscription.
+- Redesigned `/app/billing` into a low-cognitive-load SaaS billing workspace with overview, plans, usage, payment, and invoices sections.
+- Source verification and remote rollout evidence are recorded below as the candidate advances; production is not declared GO until genuine signed live payment evidence is observed.
 
 ## Release execution — staging shipped through 0112; production awaits the owner ceremony (2026-08-22, later same day)
 

@@ -8,6 +8,7 @@ import {
   getMarketingStructuredOffers,
   isMarketingPricingReady,
   type MarketingPlan,
+  type MarketingPrice,
 } from "../../src/lib/storefront/marketing";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
@@ -15,7 +16,7 @@ function plan(code: string, prices: MarketingPlan["prices"] = []): MarketingPlan
   return { code, features: {}, limits: {}, name: code, prices };
 }
 
-function price(marketCode: "vn" | "global", providerPriceRef: string) {
+function price(marketCode: "vn" | "global", providerPriceRef: string): MarketingPrice {
   return {
     amountMinor: marketCode === "vn" ? 99_000 : 500,
     currency: marketCode === "vn" ? "VND" : "USD",
@@ -36,10 +37,10 @@ describe("marketing pricing runtime truthfulness", () => {
             bind() { return this; },
             all: () => Promise.resolve(sql.includes("plan_prices")
               ? { results: [
-                { code: "starter", marketCode: "vn", currency: "VND", amountMinor: 99_000, interval: "month", providerCode: "dodo", providerPriceRef: "pending:dodo:starter:vn:month:v1" },
-                { code: "starter", marketCode: "global", currency: "USD", amountMinor: 500, interval: "month", providerCode: "dodo", providerPriceRef: "price_starter_global" },
-                { code: "pro", marketCode: "vn", currency: "VND", amountMinor: 299_000, interval: "month", providerCode: "dodo", providerPriceRef: "pending:dodo:pro:vn:month:v1" },
-                { code: "pro", marketCode: "global", currency: "USD", amountMinor: 1_500, interval: "month", providerCode: "dodo", providerPriceRef: "price_pro_global" },
+                { id: "starter-vn", planCode: "starter", effectiveFrom: "2026-08-01T00:00:00.000Z", version: 1, marketCode: "vn", currency: "VND", amountMinor: 99_000, interval: "month", providerCode: "dodo", providerPriceRef: "pending:dodo:starter:vn:month:v1" },
+                { id: "starter-global", planCode: "starter", effectiveFrom: "2026-08-01T00:00:00.000Z", version: 1, marketCode: "global", currency: "USD", amountMinor: 500, interval: "month", providerCode: "dodo", providerPriceRef: "price_starter_global" },
+                { id: "pro-vn", planCode: "pro", effectiveFrom: "2026-08-01T00:00:00.000Z", version: 1, marketCode: "vn", currency: "VND", amountMinor: 299_000, interval: "month", providerCode: "dodo", providerPriceRef: "pending:dodo:pro:vn:month:v1" },
+                { id: "pro-global", planCode: "pro", effectiveFrom: "2026-08-01T00:00:00.000Z", version: 1, marketCode: "global", currency: "USD", amountMinor: 1_500, interval: "month", providerCode: "dodo", providerPriceRef: "price_pro_global" },
               ] }
               : { results: [
                 { code: "starter", name: "Starter", featureFlagsJson: "{}", limitsJson: "{}" },
@@ -53,7 +54,7 @@ describe("marketing pricing runtime truthfulness", () => {
 
     const plans = await getMarketingPlans(env);
 
-    expect(calls[1]).toContain("provider_code = 'dodo'");
+    expect(calls[1]).toContain("plan_prices.effective_from <= ?");
     expect(plans.flatMap((entry) => entry.prices ?? [])).toEqual([
       expect.objectContaining({ marketCode: "global", currency: "USD" }),
       expect.objectContaining({ marketCode: "global", currency: "USD" }),

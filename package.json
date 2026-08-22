@@ -28,6 +28,7 @@
     "trigger:inventory": "node scripts/trigger-inventory.mjs",
     "platform:route-preflight": "node scripts/staging-route-preflight.mjs --env staging",
     "staging:phase-a:smoke": "node scripts/staging-phase-a-smoke.mjs --env staging",
+    "dodo:catalog:reconcile": "node scripts/dodo-catalog-reconcile.mjs",
     "dodo:uat:validate": "node scripts/dodo-uat-validate.mjs",
     "dodo:webhook:register": "node scripts/dodo-webhook-register.mjs",
     "payos:staging:attest": "node scripts/payos-staging-attest.mjs",

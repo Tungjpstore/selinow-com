@@ -666,6 +666,19 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       auth_google_oauth_states_transition_guard: "89d1f14766dce98d5b5c129a3d53f240a3b71eda0e6f89a7816d97c167de4d0e",
     }),
   }),
+  "0113_dodo_checkout_reconciliation.sql": Object.freeze({
+    columns: Object.freeze({
+      "billing_checkout_sessions.reconciliation_attempts": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "billing_checkout_sessions.next_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "billing_checkout_sessions.last_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "billing_checkout_sessions.reconciliation_failure_code": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      billing_checkout_sessions: "3f49e55a14b8ba4c9303d4089f9797426796667bf532ea21930da75435544f1a",
+      idx_billing_checkout_sessions_reconciliation: "cc74f5b4aea8f96ba558affeecc8ec93421bd16afa6725b9d0230fa6d1432edf",
+      idx_billing_checkout_sessions_shop_reconciliation: "cbec4665173db5f6502f1412673ac06f22f17d9b9dab86f6b6519a5a78630bda",
+    }),
+  }),
 });
 
 
@@ -2547,7 +2560,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_google_identities", "auth_google_oauth_states", "auth_request_admissions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
+    if (["auth_google_identities", "auth_google_oauth_states", "auth_request_admissions", "billing_checkout_sessions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
