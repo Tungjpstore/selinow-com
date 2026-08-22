@@ -2,11 +2,18 @@ import type { APIRoute } from "astro";
 
 import { cloudflareRequesterAddress } from "../../../../lib/auth/admission";
 import { authenticateRequest, requireCsrfSession } from "../../../../lib/auth/session";
+import {
+  EFFECTIVE_PLAN_OFFER_SQL_PREDICATE,
+  projectLatestSellablePlanOffers,
+  SELLABLE_PUBLIC_PLAN_SQL_PREDICATE,
+  type PlanOfferRevision,
+  type SellablePlanOffer,
+} from "../../../../lib/billing/catalog";
+import { PUBLIC_PLAN_CODES } from "../../../../lib/billing/plan-catalog";
 import { AppError } from "../../../../lib/core/errors";
 import { readJsonObject, rejectUnknownFields } from "../../../../lib/http/request";
 import { createCaughtErrorResponse } from "../../../../lib/http/security";
 import { getBindings } from "../../../../lib/platform/bindings";
-import { PUBLIC_PLAN_CODES } from "../../../../lib/billing/plan-catalog";
 import { normalizeOptionalCountryCode } from "../../../../lib/tenants/country";
 import { normalizeShopName, normalizeSlug } from "../../../../lib/tenants/policy";
 import { createShop, getShopCreationAdmission } from "../../../../lib/tenants/store";
@@ -16,19 +23,6 @@ type PublicPlanRow = {
   feature_flags_json: string;
   limits_json: string;
   name: string;
-};
-
-type PublicPlanOfferRow = {
-  amount_minor: number;
-  currency: string;
-  effective_from: string;
-  id: string;
-  interval: string;
-  market_code: string;
-  plan_code: string;
-  provider_code: string;
-  provider_price_ref: string;
-  version: number;
 };
 
 function safeJsonObject(value: string): Record<string, unknown> {
@@ -51,50 +45,33 @@ export const GET: APIRoute = async ({ locals, request }) => {
       env.PLATFORM_DB.prepare(`
         SELECT code, name, feature_flags_json, limits_json
         FROM plans
-        WHERE is_active = 1 AND is_public = 1 AND is_assignable = 1
+        WHERE ${SELLABLE_PUBLIC_PLAN_SQL_PREDICATE}
           AND code IN (?, ?)
       `).bind(...PUBLIC_PLAN_CODES).all<PublicPlanRow>(),
       env.PLATFORM_DB.prepare(`
-        SELECT prices.id, plans.code AS plan_code, prices.market_code, prices.currency,
-          prices.amount_minor, prices.interval, prices.provider_code,
-          prices.provider_price_ref, prices.effective_from, prices.version
-        FROM plan_prices AS prices
-        INNER JOIN plans ON plans.id = prices.plan_id
-        WHERE plans.is_active = 1 AND plans.is_public = 1 AND plans.is_assignable = 1
+        SELECT plan_prices.id, plans.code AS planCode,
+          plan_prices.market_code AS marketCode, plan_prices.currency,
+          plan_prices.amount_minor AS amountMinor, plan_prices.interval,
+          plan_prices.provider_code AS providerCode,
+          plan_prices.provider_price_ref AS providerPriceRef,
+          plan_prices.effective_from AS effectiveFrom, plan_prices.version
+        FROM plan_prices
+        INNER JOIN plans ON plans.id = plan_prices.plan_id
+        WHERE ${SELLABLE_PUBLIC_PLAN_SQL_PREDICATE}
           AND plans.code IN (?, ?)
-          AND prices.is_active = 1
-          AND prices.interval = 'month'
-          AND ((prices.market_code = 'vn' AND prices.currency = 'VND')
-            OR (prices.market_code = 'global' AND prices.currency = 'USD'))
-          AND prices.effective_from <= ?
-          AND (prices.effective_to IS NULL OR prices.effective_to > ?)
-        ORDER BY plans.code, prices.market_code, prices.currency, prices.interval,
-          prices.effective_from DESC, prices.version DESC, prices.id DESC
-      `).bind(...PUBLIC_PLAN_CODES, nowIso, nowIso).all<PublicPlanOfferRow>(),
+          AND plan_prices.market_code IN ('vn', 'global')
+          AND plan_prices.currency IN ('VND', 'USD')
+          AND ${EFFECTIVE_PLAN_OFFER_SQL_PREDICATE}
+        ORDER BY plans.code, plan_prices.market_code, plan_prices.currency, plan_prices.interval,
+          plan_prices.effective_from DESC, plan_prices.version DESC, plan_prices.id DESC
+      `).bind(...PUBLIC_PLAN_CODES, nowIso, nowIso).all<PlanOfferRevision>(),
       getShopCreationAdmission({ env, userId: auth.userId }),
     ]);
-    const latestOffers = new Map<string, PublicPlanOfferRow>();
-    for (const offer of offersResult.results) {
-      if (offer.interval !== "month"
-        || !((offer.market_code === "vn" && offer.currency === "VND")
-          || (offer.market_code === "global" && offer.currency === "USD"))) continue;
-      const key = `${offer.plan_code}:${offer.market_code}:${offer.currency}:${offer.interval}`;
-      const previous = latestOffers.get(key);
-      if (previous === undefined
-        || offer.effective_from > previous.effective_from
-        || (offer.effective_from === previous.effective_from && offer.version > previous.version)
-        || (offer.effective_from === previous.effective_from && offer.version === previous.version && offer.id > previous.id)) {
-        latestOffers.set(key, offer);
-      }
-    }
-    const offersByPlan = new Map<string, PublicPlanOfferRow[]>();
-    for (const offer of latestOffers.values()) {
-      if (offer.provider_code !== "dodo" || offer.provider_price_ref.length === 0
-        || offer.provider_price_ref.startsWith("pending:")
-        || !Number.isSafeInteger(offer.amount_minor) || offer.amount_minor <= 0) continue;
-      const offers = offersByPlan.get(offer.plan_code) ?? [];
+    const offersByPlan = new Map<string, SellablePlanOffer[]>();
+    for (const { planCode, ...offer } of projectLatestSellablePlanOffers(offersResult.results)) {
+      const offers = offersByPlan.get(planCode) ?? [];
       offers.push(offer);
-      offersByPlan.set(offer.plan_code, offers);
+      offersByPlan.set(planCode, offers);
     }
     const planRowsByCode = new Map(plansResult.results.map((plan) => [plan.code, plan]));
     const plans = PUBLIC_PLAN_CODES.flatMap((code) => {
@@ -104,12 +81,7 @@ export const GET: APIRoute = async ({ locals, request }) => {
         features: safeJsonObject(plan.feature_flags_json),
         limits: safeJsonObject(plan.limits_json),
         name: plan.name,
-        offers: (offersByPlan.get(plan.code) ?? []).map((offer) => ({
-          amountMinor: offer.amount_minor,
-          currency: offer.currency,
-          interval: offer.interval,
-          marketCode: offer.market_code,
-        })),
+        offers: offersByPlan.get(plan.code) ?? [],
       }];
     });
     return Response.json({ creationAdmission, ok: true, plans, requestId: locals.requestId }, {

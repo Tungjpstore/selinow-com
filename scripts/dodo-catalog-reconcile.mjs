@@ -2,6 +2,8 @@ import process from "node:process";
 
 import {
   parseDodoCatalogArguments,
+  inspectDodoCatalog,
+  readOptionalDodoCatalogReferences,
   readDodoCatalogReferences,
   readDodoCatalogProviderMode,
   reconcileDodoCatalog,
@@ -17,6 +19,7 @@ function output(value, json) {
   process.stdout.write(`= catalog: ${value.action}\n`);
   process.stdout.write(`= pending_rows: ${value.pendingCount}\n`);
   process.stdout.write(`= published_rows: ${value.publishedCount}\n`);
+  process.stdout.write(`= reconciliation_required: ${String(value.reconciliationRequired ?? "not_checked")}\n`);
   process.stdout.write(`= closed_rows: ${value.closedCount}\n`);
   process.stdout.write(`= inserted_rows: ${value.insertedCount}\n`);
   process.stdout.write(`= updated_rows: ${value.updatedCount}\n`);
@@ -24,8 +27,21 @@ function output(value, json) {
 
 try {
   const options = parseDodoCatalogArguments(process.argv.slice(2));
-  const references = readDodoCatalogReferences(process.env);
-  if (!options.apply) {
+  if (options.inspect) {
+    const providerMode = readDodoCatalogProviderMode(process.env);
+    const result = inspectDodoCatalog({
+      environment: options.environment,
+      providerMode,
+      references: readOptionalDodoCatalogReferences(process.env),
+    });
+    output({
+      action: "catalog_inspected_read_only",
+      closedCount: 0,
+      insertedCount: 0,
+      updatedCount: 0,
+      ...result,
+    }, options.json);
+  } else if (!options.apply) {
     output({
       action: "would_reconcile_four_dodo_catalog_rows",
       environment: options.environment,
@@ -37,6 +53,7 @@ try {
       updatedCount: 0,
     }, options.json);
   } else {
+    const references = readDodoCatalogReferences(process.env);
     const providerMode = readDodoCatalogProviderMode(process.env);
     validateDodoCatalogTarget({
       confirmProduction: options.confirmProduction,
@@ -50,6 +67,7 @@ try {
       confirmProductionLiveCatalog: options.confirmProductionLiveCatalog,
       confirmStagingTestCatalog: options.confirmStagingTestCatalog,
       environment: options.environment,
+      apiKey: process.env.DODO_PAYMENTS_API_KEY,
       providerMode,
       references,
     });

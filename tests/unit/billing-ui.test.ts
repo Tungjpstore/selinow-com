@@ -117,6 +117,10 @@ describe("subscription state presentation", () => {
     expect(isTerminalFailure).toBeTypeOf("function");
     expect(billingModule.billingPlanChangeDirection).toBeTypeOf("function");
     expect(isTerminalFailure({ code: "billing_provider_unavailable", terminalResponse: true })).toBe(false);
+    expect(isTerminalFailure({ code: "billing_provider_invalid", terminalResponse: true })).toBe(false);
+    expect(isTerminalFailure({ code: "billing_checkout_persistence_conflict", terminalResponse: true })).toBe(false);
+    expect(isTerminalFailure({ code: "http_502", terminalResponse: true })).toBe(false);
+    expect(isTerminalFailure({ code: "billing_provider_request_rejected", terminalResponse: true })).toBe(true);
     expect(isTerminalFailure({ code: "plan_price_unavailable", terminalResponse: true })).toBe(true);
 
     const storage = memoryStorage();
@@ -129,7 +133,7 @@ describe("subscription state presentation", () => {
     const persisted = storage.value("selinow.billing.checkout-attempt.v1");
     expect(persisted).not.toBeNull();
     expect(JSON.parse(persisted ?? "null")).toEqual({
-      expiresAt: 1_801_000,
+      expiresAt: 86_701_000,
       idempotencyKey: "checkout-key-1",
       planCode: "starter",
       recovery: false,
@@ -297,7 +301,9 @@ describe("subscription state presentation", () => {
     expect(controller).toContain('effectiveAt !== "immediately" && effectiveAt !== "next_billing_date"');
     expect(controller).toContain('effectiveAt === "immediately" ? text("effectiveNow")');
     expect(controller).toContain("pollBillingReturn");
-    expect(controller).toContain('if (hasBillingReturn) void pollBillingReturn()');
+    expect(controller).toContain('const checkoutSessionId = urlState.get("checkout")');
+    expect(controller).toContain('/billing/checkouts/${encodeURIComponent(checkoutSessionId)}');
+    expect(controller).toContain("void pollBillingReturn(checkoutSessionId)");
     expect(controller).not.toContain('if (hasBillingReturn) setUrlState("billing_return", null)');
     expect(controller).toContain('typeof subscription.planCode === "string" && subscription.planCode !== currentPlanCode');
     expect(controller).toContain("subscription.version !== subscriptionVersion");
@@ -309,6 +315,7 @@ describe("subscription state presentation", () => {
     expect(page).toContain("date(cancelEffectiveAt)");
     expect(page).toContain('data-billing-operation aria-labelledby="operation-title" role="status" aria-live="polite" hidden=');
     expect(page.match(/data-focus-billing-market/gu)).toHaveLength(1);
+    expect(page.match(/data-open-plan-dialog/gu)).toHaveLength(1);
     expect(page.match(/data-open-cancel-dialog/gu)).toHaveLength(1);
     expect(page.match(/data-dialog-feedback/gu)).toHaveLength(1);
     expect(page.match(/data-cancel-feedback/gu)).toHaveLength(1);
@@ -324,9 +331,14 @@ describe("subscription state presentation", () => {
     expect(controller).toContain("handleFailure(error);\n          return;");
     expect(controller).toContain("billingPlanChangeDirection");
     expect(controller).not.toContain('currentPlanCode === "starter" && plan.code === "pro"');
+    expect(controller).toContain('failure.code === "billing_provider_request_rejected"');
     expect(page).toContain("invoicesDescription");
     expect(page).toContain("metric_orders_created");
     expect(page).toContain("billing.scheduledPlanName");
+    expect(page).toContain("type BillingPrimaryAction =");
+    expect(page).toContain("const primaryAction: BillingPrimaryAction =");
+    expect(page).toContain("canManagePayment && !canOpenPortal");
+    expect(page).toContain('billing.billingProviderCode === "dodo" ? "Dodo Payments" : pageCopy.paymentNotConfigured');
     expect(page).toContain('role="status" aria-live="polite"');
     expect(page).toContain("Đăng xuất để xác thực lại");
     expect(page).not.toContain("Checkout chưa sẵn sàng");

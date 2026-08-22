@@ -13,6 +13,7 @@ const dependencies = vi.hoisted(() => ({
   activationBackfill: vi.fn(),
   automation: vi.fn(),
   billingChanges: vi.fn(),
+  billingCheckoutReconciliation: vi.fn(),
   billingReconciliation: vi.fn(),
   claimDeliveryJobReference: vi.fn(),
   claimDeliveryProviderAttempt: vi.fn(),
@@ -63,6 +64,7 @@ vi.mock("../../src/lib/automation/scheduler", () => ({ processScheduledAutomatio
 vi.mock("../../src/lib/billing/service", () => ({
   expireBillingCheckoutSessions: dependencies.expireBillingCheckouts,
   processDueDodoSubscriptionChanges: dependencies.billingChanges,
+  reconcileDodoBillingCheckouts: dependencies.billingCheckoutReconciliation,
   reconcileDodoSubscriptionChanges: dependencies.billingReconciliation,
   suspendExpiredBillingGracePeriods: dependencies.suspendBillingGracePeriods,
   suspendExpiredTrials: dependencies.suspendBillingTrials,
@@ -298,6 +300,7 @@ beforeEach(() => {
   });
   dependencies.activationBackfill.mockResolvedValue({ attempted: 2, created: 1, failed: 0, shops: 1 });
   dependencies.billingChanges.mockResolvedValue({ attempted: 1, candidates: 1, failed: 0, providerPending: 1 });
+  dependencies.billingCheckoutReconciliation.mockResolvedValue({ candidates: 0, completed: 0, expired: 0, failed: 0, pending: 0, quarantined: 0 });
   dependencies.billingReconciliation.mockResolvedValue({ candidates: 0, completed: 0, failed: 0, pending: 0 });
   dependencies.expireBillingCheckouts.mockResolvedValue(1);
   dependencies.suspendBillingGracePeriods.mockResolvedValue(1);
