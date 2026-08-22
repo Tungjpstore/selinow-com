@@ -21,10 +21,12 @@ const locale = Astro.locals.locale;
 const t = createDashboardTranslator(locale);
 let catalog: { products: unknown[]; variants: unknown[] } = { products: [], variants: [] };
 let canManage = false;
+let catalogLoadFailed = false;
 if (shop !== undefined && (shop.role === "owner" || shop.role === "manager")) {
   canManage = true;
   const loaded = await listSellerCatalog({ env, shopPublicId: shop.publicId, userId: auth.userId }).catch(() => null);
   if (loaded !== null) catalog = loaded;
+  else catalogLoadFailed = true;
 }
 const products = catalog.products as Array<Record<string, unknown>>;
 const variants = catalog.variants as Array<Record<string, unknown>>;
@@ -76,6 +78,8 @@ const inventoryExportHeaders = [
     <WorkspaceState title={t("dashboard.inventory.no_store.title")} description={t("dashboard.inventory.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.inventory.no_store.action")} tone="info" />
   ) : !canManage ? (
     <WorkspaceState title={t("dashboard.inventory.forbidden.title")} description={t("dashboard.inventory.forbidden.description")} tone="warning" />
+  ) : catalogLoadFailed ? (
+    <WorkspaceState title={t("dashboard.inventory.unavailable.title")} description={t("dashboard.inventory.unavailable.description")} actionHref={workspaceHref("/app/inventory")} actionLabel={t("dashboard.state.error.retry")} tone="danger" />
   ) : (
     <>
       <section class="inventory-rail" aria-label={t("dashboard.inventory.rail.aria")}>

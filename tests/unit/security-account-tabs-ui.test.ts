@@ -22,7 +22,7 @@ describe("account security tabs UI", () => {
       expect(page).toContain(`hidden={activeTab !== "${tab}"}`);
     }
     expect(page).toContain("t(`dashboard.security.tabs.${tab}`)");
-    expect(page).toContain("const tabHref = (tab: SecurityTab): string => `/app/security?tab=${tab}`");
+    expect(page).toContain("const tabHref = (tab: SecurityTab): string => workspaceHref(`/app/security?tab=${tab}`);");
     expect(page).toContain('aria-selected={activeTab === tab ? "true" : "false"}');
     expect(page).toContain('aria-controls={`security-tabpanel-${tab}`}');
     // Unknown ?tab= values fall back to the sessions tab.

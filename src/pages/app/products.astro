@@ -37,9 +37,12 @@ let ledgerProducts: Array<Record<string, unknown>> = [];
 let ledgerTotalCount = 0;
 let ledgerTotalPages = 1;
 let canManage = false;
+let catalogLoadFailed = false;
 if (shop !== undefined && (shop.role === "owner" || shop.role === "manager")) {
   canManage = true;
-  catalog = await listSellerCatalog({ env, shopPublicId: shop.publicId, userId: auth.userId }).catch(() => catalog);
+  const loadedCatalog = await listSellerCatalog({ env, shopPublicId: shop.publicId, userId: auth.userId }).catch(() => null);
+  if (loadedCatalog === null) catalogLoadFailed = true;
+  else catalog = loadedCatalog;
   const parsedLedgerPage = Number.parseInt(searchParams.get("page") ?? "", 10);
   const requestedLedgerPage = Number.isSafeInteger(parsedLedgerPage) && parsedLedgerPage >= 1 ? parsedLedgerPage : 1;
   const parsedLedgerPageSize = Number.parseInt(searchParams.get("pageSize") ?? "", 10);
@@ -161,6 +164,8 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
     <WorkspaceState title={t("dashboard.products.no_store.title")} description={t("dashboard.products.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.products.no_store.action")} tone="info" />
   ) : !canManage ? (
     <WorkspaceState title={t("dashboard.products.forbidden.title")} description={t("dashboard.products.forbidden.description")} tone="warning" />
+  ) : catalogLoadFailed ? (
+    <WorkspaceState title={t("dashboard.products.unavailable.title")} description={t("dashboard.products.unavailable.description")} actionHref={workspaceHref("/app/products")} actionLabel={t("dashboard.state.error.retry")} tone="danger" />
   ) : (
     <>
       <section class="catalog-summary" aria-label={t("dashboard.products.summary.aria")}>

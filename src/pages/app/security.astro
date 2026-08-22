@@ -35,7 +35,7 @@ const requestedTab = Astro.url.searchParams.get("tab");
 const activeTab: SecurityTab = (tabKeys as readonly string[]).includes(requestedTab ?? "")
   ? (requestedTab as SecurityTab)
   : "sessions";
-const tabHref = (tab: SecurityTab): string => `/app/security?tab=${tab}`;
+const tabHref = (tab: SecurityTab): string => workspaceHref(`/app/security?tab=${tab}`);
 
 let twoFactor = { enabled: false, enabledAt: null as string | null };
 try {

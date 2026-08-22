@@ -16,6 +16,7 @@ const panel = document.querySelector<HTMLElement>("[data-bookings]");
 
 if (panel !== null) {
   const shopPublicId = panel.dataset.shopPublicId ?? "";
+  const canManage = panel.dataset.canManage === "true";
   const csrfCookieName = panel.dataset.csrfCookieName ?? "";
   const locale = panel.dataset.locale || "en";
   const copy = (() => {
@@ -86,24 +87,26 @@ if (panel !== null) {
       detail.textContent = `${formatSlot(row.startAt, row.endAt)} · ${row.orderPublicId}`;
       copyBlock.appendChild(title);
       copyBlock.appendChild(detail);
-      const actions = document.createElement("div");
-      actions.className = "booking-actions";
-      for (const [label, nextStatus, variant] of [
-        [text("complete"), "completed", "secondary"],
-        [text("noShow"), "no_show", "secondary"],
-        [text("cancel"), "cancelled", "danger"],
-      ] as const) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "sln-button";
-        button.dataset.variant = variant;
-        button.dataset.bookingAction = "";
-        button.textContent = label;
-        button.addEventListener("click", () => { void transitionBooking(row.bookingId, nextStatus); });
-        actions.appendChild(button);
-      }
       item.appendChild(copyBlock);
-      item.appendChild(actions);
+      if (canManage) {
+        const actions = document.createElement("div");
+        actions.className = "booking-actions";
+        for (const [label, nextStatus, variant] of [
+          [text("complete"), "completed", "secondary"],
+          [text("noShow"), "no_show", "secondary"],
+          [text("cancel"), "cancelled", "danger"],
+        ] as const) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "sln-button";
+          button.dataset.variant = variant;
+          button.dataset.bookingAction = "";
+          button.textContent = label;
+          button.addEventListener("click", () => { void transitionBooking(row.bookingId, nextStatus); });
+          actions.appendChild(button);
+        }
+        item.appendChild(actions);
+      }
       listElement.appendChild(item);
     }
   };

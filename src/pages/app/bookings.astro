@@ -26,7 +26,7 @@ Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
   {shop === undefined ? (
     <WorkspaceState title={t("dashboard.store_builder.no_store.title")} description={t("dashboard.store_builder.no_store.description")} actionHref={withSelectedShop("/onboarding", undefined, Astro.url.origin)} actionLabel={t("dashboard.store_builder.no_store.action")} tone="info" />
   ) : (
-    <section class="bookings-panel" data-bookings data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-locale={locale ?? "en"} data-copy={JSON.stringify({
+    <section class="bookings-panel" data-bookings data-can-manage={shop.role === "owner" || shop.role === "manager" ? "true" : "false"} data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-locale={locale ?? "en"} data-copy={JSON.stringify({
       cancel: t("dashboard.bookings.cancel"),
       complete: t("dashboard.bookings.complete"),
       empty: t("dashboard.bookings.empty"),

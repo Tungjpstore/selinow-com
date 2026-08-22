@@ -33,6 +33,12 @@ type ActionItem = {
   severity: "blocked" | "warning";
   title: string;
 };
+type HealthCard = {
+  label: string;
+  value: string;
+  detail: string;
+  tone: Tone;
+};
 
 const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
@@ -152,6 +158,37 @@ const actionItems: ActionItem[] = (readiness?.checks ?? [])
     title: readinessCopy[check.code]?.title ?? check.code,
   }));
 
+if (ordersState === "unavailable") {
+  actionItems.push({
+    actionLabel: t("dashboard.overview.cockpit.open_orders"),
+    actionUrl: workspaceHref("/app/orders"),
+    evidence: t("dashboard.overview.cockpit.data_unavailable_evidence"),
+    impact: t("dashboard.overview.cockpit.orders_unavailable_impact"),
+    severity: "blocked",
+    title: t("dashboard.overview.cockpit.orders_unavailable_title"),
+  });
+}
+if (catalogState === "unavailable") {
+  actionItems.push({
+    actionLabel: t("dashboard.overview.cockpit.open_catalog"),
+    actionUrl: workspaceHref("/app/products"),
+    evidence: t("dashboard.overview.cockpit.data_unavailable_evidence"),
+    impact: t("dashboard.overview.cockpit.catalog_unavailable_impact"),
+    severity: "blocked",
+    title: t("dashboard.overview.cockpit.catalog_unavailable_title"),
+  });
+}
+if (readinessState === "unavailable") {
+  actionItems.push({
+    actionLabel: t("dashboard.overview.cockpit.open_readiness"),
+    actionUrl: workspaceHref("/onboarding#readiness"),
+    evidence: t("dashboard.overview.cockpit.data_unavailable_evidence"),
+    impact: t("dashboard.overview.cockpit.readiness_unavailable_impact"),
+    severity: "blocked",
+    title: t("dashboard.overview.cockpit.readiness_unavailable_title"),
+  });
+}
+
 const paymentExceptions = new Set(["partial", "overpaid", "failed"]);
 const fulfillmentExceptions = new Set(["failed", "manual_review"]);
 const paymentExceptionOrders = orders.filter((order) => paymentExceptions.has(order.paymentStatus));
@@ -206,6 +243,9 @@ if (catalogState === "ready" && stockoutVariants.length > 0) {
   });
 }
 
+const severityRank: Record<ActionItem["severity"], number> = { blocked: 0, warning: 1 };
+actionItems.sort((left, right) => severityRank[left.severity] - severityRank[right.severity]);
+
 const paidOrders = orders.filter((order) => order.paymentStatus === "paid");
 const fulfilledOrders = paidOrders.filter((order) => order.fulfillmentStatus === "fulfilled");
 const verifiedValue = paidOrders.reduce((sum, order) => sum + order.totalMinor, 0);
@@ -219,10 +259,40 @@ const channelLabel = (value: string): string => value === "telegram" ? "Telegram
 const dayFormatter = new Intl.DateTimeFormat(typeof locale === "string" ? locale : "en", { dateStyle: "full", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
 const todayLabel = dayFormatter.format(new Date());
 
-const needsActionCount = paymentExceptionOrders.length + fulfillmentExceptionOrders.length;
 const shopCurrency = shop?.currency ?? "VND";
 const revenueLabel = formatMoney(verifiedValue, shopCurrency, typeof locale === "string" ? locale : "en");
 const fulfillmentLabel = fulfillmentRate === null ? "—" : percentFormatter.format(fulfillmentRate);
+const unavailableMetricValue = t("dashboard.overview.cockpit.unavailable_value");
+const ordersMetricValue = ordersState === "ready" ? String(paidOrders.length) : unavailableMetricValue;
+const revenueMetricValue = ordersState === "ready" ? revenueLabel : unavailableMetricValue;
+const fulfillmentMetricValue = ordersState === "ready" ? fulfillmentLabel : unavailableMetricValue;
+const productsMetricValue = catalogState === "ready" ? String(catalog.products.length) : unavailableMetricValue;
+const healthCards: HealthCard[] = [
+  {
+    label: t("dashboard.overview.cockpit.selling.label"),
+    value: shopStatus,
+    detail: sellabilityCopy[sellability].summary,
+    tone: shopTone,
+  },
+  {
+    label: t("dashboard.overview.cockpit.orders.label"),
+    value: ordersState === "ready" ? t("dashboard.overview.cockpit.state.ready") : t("dashboard.overview.cockpit.state.unavailable"),
+    detail: ordersState === "ready" ? t("dashboard.overview.cockpit.orders.ready_detail", { count: orders.length }) : t("dashboard.overview.cockpit.orders.unavailable_detail"),
+    tone: ordersState === "ready" ? "success" : "danger",
+  },
+  {
+    label: t("dashboard.overview.cockpit.catalog.label"),
+    value: catalogState === "ready" ? t("dashboard.overview.cockpit.state.ready") : catalogState === "forbidden" ? t("dashboard.overview.cockpit.state.owner_only") : t("dashboard.overview.cockpit.state.unavailable"),
+    detail: catalogState === "ready" ? t("dashboard.overview.cockpit.catalog.ready_detail", { count: catalog.products.length }) : catalogState === "forbidden" ? t("dashboard.overview.cockpit.catalog.owner_only_detail") : t("dashboard.overview.cockpit.catalog.unavailable_detail"),
+    tone: catalogState === "ready" ? "success" : catalogState === "forbidden" ? "neutral" : "danger",
+  },
+  {
+    label: t("dashboard.overview.cockpit.readiness.label"),
+    value: readinessState === "ready" ? (readiness?.ready === true ? t("dashboard.overview.cockpit.state.ready") : t("dashboard.overview.cockpit.state.action_required")) : readinessState === "forbidden" ? t("dashboard.overview.cockpit.state.owner_only") : t("dashboard.overview.cockpit.state.unavailable"),
+    detail: readinessState === "ready" ? t("dashboard.overview.cockpit.readiness.ready_detail") : readinessState === "forbidden" ? t("dashboard.overview.cockpit.readiness.owner_only_detail") : t("dashboard.overview.cockpit.readiness.unavailable_detail"),
+    tone: readinessState === "ready" ? (readiness?.ready === true ? "success" : "warning") : readinessState === "forbidden" ? "neutral" : "danger",
+  },
+];
 
 // Generate 7-day velocity points for 60fps HTML5 Canvas chart
 const chartPoints = [
@@ -269,12 +339,35 @@ const chartPoints = [
         </div>
       </header>
 
+      <section class="console-cockpit" aria-labelledby="console-cockpit-title">
+        <div class="console-cockpit__head">
+          <div>
+            <p class="console-cockpit__eyebrow">{t("dashboard.overview.cockpit.eyebrow")}</p>
+            <h2 id="console-cockpit-title">{t("dashboard.overview.cockpit.title")}</h2>
+            <p>{t("dashboard.overview.cockpit.description")}</p>
+          </div>
+          <span class="console-cockpit__freshness">{t("dashboard.overview.cockpit.freshness", { time: todayLabel })}</span>
+        </div>
+        <div class="console-health-grid">
+          {healthCards.map((card) => (
+            <article class="console-health-card">
+              <div class:list={["console-health-card__dot", `is-${card.tone}`]} aria-hidden="true"></div>
+              <div class="console-health-card__body">
+                <span class="console-health-card__label">{card.label}</span>
+                <strong>{card.value}</strong>
+                <small>{card.detail}</small>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <MetricStrip metrics={[
-        { icon: "alert", label: t("dashboard.console.overview.metrics.needs_action"), value: String(needsActionCount), tone: needsActionCount > 0 ? "warning" : "neutral" },
-        { icon: "receipt", label: t("dashboard.console.overview.metrics.paid"), value: String(paidOrders.length) },
-        { icon: "card", label: t("dashboard.console.overview.metrics.revenue"), value: revenueLabel },
-        { icon: "gauge", label: t("dashboard.console.overview.metrics.fulfillment_rate"), value: fulfillmentLabel },
-        { icon: "box", label: t("dashboard.console.overview.metrics.products"), value: String(catalog.products.length) },
+        { icon: "alert", label: t("dashboard.console.overview.metrics.needs_action"), value: String(actionItems.length), tone: actionItems.length > 0 ? "warning" : "neutral" },
+        { icon: "receipt", label: t("dashboard.console.overview.metrics.paid"), value: ordersMetricValue },
+        { icon: "card", label: t("dashboard.console.overview.metrics.revenue"), value: revenueMetricValue },
+        { icon: "gauge", label: t("dashboard.console.overview.metrics.fulfillment_rate"), value: fulfillmentMetricValue },
+        { icon: "box", label: t("dashboard.console.overview.metrics.products"), value: productsMetricValue },
       ]} />
 
       <div class="console-grid-2col">
@@ -324,11 +417,12 @@ const chartPoints = [
           <ul class="console-queue" role="list">
             {actionItems.map((item) => (
               <li>
-                <a class="console-queue__item" href={item.actionUrl}>
+                <a class="console-queue__item" href={item.actionUrl} aria-label={`${item.actionLabel}: ${item.title}`}>
                   <span class:list={["console-queue__dot", item.severity === "blocked" ? "is-danger" : "is-warning"]} aria-hidden="true"></span>
                   <span class="console-queue__body">
                     <span class="console-queue__title">{item.title}</span>
                     <span class="console-queue__impact" data-visual-dynamic>{item.impact}</span>
+                    <span class="console-queue__evidence">{item.evidence}</span>
                   </span>
                   {item.count !== undefined && <span class="console-queue__count">{item.count}</span>}
                   <Icon name="chevronRight" size={14} />
@@ -382,6 +476,28 @@ const chartPoints = [
   .console-empty p { margin: 0; max-width: 420px; font: var(--sln-console-text-sm); }
 
   .console-page { display: grid; gap: 20px; }
+  .console-cockpit {
+    display: grid;
+    gap: 18px;
+    padding: 22px 24px;
+    border: 1px solid var(--sln-console-accent);
+    border-radius: var(--sln-console-radius-container);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--sln-console-accent-soft) 72%, var(--sln-glass-bg)), var(--sln-glass-bg));
+    box-shadow: var(--sln-console-shadow-card);
+  }
+  .console-cockpit__head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+  .console-cockpit__eyebrow { margin: 0 0 5px; color: var(--sln-console-accent); font: var(--sln-console-label); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .console-cockpit h2 { margin: 0; color: var(--sln-console-ink); font-size: 20px; letter-spacing: -.025em; }
+  .console-cockpit__head p:not(.console-cockpit__eyebrow) { margin: 5px 0 0; color: var(--sln-console-ink-2); font: var(--sln-console-text-sm); }
+  .console-cockpit__freshness { flex: 0 0 auto; color: var(--sln-console-ink-3); font: var(--sln-console-label); text-align: right; }
+  .console-health-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .console-health-card { display: flex; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--sln-console-line); border-radius: var(--sln-console-radius); background: color-mix(in srgb, var(--sln-glass-bg) 76%, transparent); }
+  .console-health-card__dot { flex: 0 0 auto; width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--sln-console-ink-3); }
+  .console-health-card__dot.is-success { background: var(--sln-console-success); }.console-health-card__dot.is-warning { background: var(--sln-console-warning); }.console-health-card__dot.is-danger { background: var(--sln-console-danger); }
+  .console-health-card__body { display: grid; gap: 3px; min-width: 0; }
+  .console-health-card__label, .console-health-card__body small { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
+  .console-health-card__body strong { overflow: hidden; color: var(--sln-console-ink); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+  .console-health-card__body small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .console-page-head {
     display: flex;
     align-items: center;
@@ -504,6 +620,7 @@ const chartPoints = [
   .console-queue__body { display: grid; gap: 1px; min-width: 0; flex: 1; }
   .console-queue__title { color: var(--sln-console-ink); font: var(--sln-console-text-sm); font-weight: 500; }
   .console-queue__impact { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
+  .console-queue__evidence { color: var(--sln-console-ink-3); font: var(--sln-console-label); opacity: .8; }
   .console-queue__count {
     display: inline-flex;
     align-items: center;
@@ -523,8 +640,16 @@ const chartPoints = [
   .console-page-head__date { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
 
   @media (max-width: 767px) {
+    .console-cockpit { padding: 18px; }
+    .console-cockpit__head { display: grid; gap: 8px; }
+    .console-cockpit__freshness { text-align: left; }
+    .console-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .console-order__states { display: none; }
     .console-order__item { display: none; }
     .console-hero-img { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .console-hero-card, .console-block, .console-queue__item, .console-order { transition: none; }
+    .console-hero-card:hover, .console-queue__item:hover, .console-order:hover { transform: none; }
   }
 </style>
