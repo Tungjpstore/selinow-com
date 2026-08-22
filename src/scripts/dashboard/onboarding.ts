@@ -373,6 +373,7 @@ function renderPlanOptions(root: HTMLElement, plans: readonly PublicPlan[], plan
   const submit = query<HTMLButtonElement>(root, "[data-shop-submit]");
   if (select === null) return false;
   const previous = select.value;
+  const requested = new URLSearchParams(window.location.search).get("plan");
   select.replaceChildren();
   const ready = plans.length === planCodes.length
     && plans.every((plan, index) => plan.code === planCodes[index]);
@@ -383,7 +384,11 @@ function renderPlanOptions(root: HTMLElement, plans: readonly PublicPlan[], plan
     return false;
   }
   for (const plan of plans) select.add(new Option(planLabel(plan.code), plan.code));
-  select.value = plans.some((plan) => plan.code === previous) ? previous : planCodes[0] ?? "";
+  select.value = plans.some((plan) => plan.code === previous)
+    ? previous
+    : plans.some((plan) => plan.code === requested)
+      ? requested ?? ""
+      : planCodes[0] ?? "";
   select.disabled = false;
   if (submit !== null) submit.disabled = false;
   return true;

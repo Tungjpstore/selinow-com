@@ -79,6 +79,8 @@ describe("onboarding localization contract", () => {
     expect(route).toContain("is_public = 1 AND is_assignable = 1");
     expect(client).toContain('requestApi(root, "/api/app/shops", { method: "GET" })');
     expect(client).toContain("formatMoney(offer.amountMinor, offer.currency, activeLocale)");
+    expect(client).toContain('new URLSearchParams(window.location.search).get("plan")');
+    expect(client).toContain("plans.some((plan) => plan.code === requested)");
   });
 
   it("uses server-owned creation admission for new shops and canceled billing recovery", () => {

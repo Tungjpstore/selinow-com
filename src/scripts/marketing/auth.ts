@@ -1,4 +1,5 @@
 import { createSystemTranslator } from "../../lib/i18n";
+import { safeRelativeRedirect } from "../../lib/auth/redirect";
 
 const lang = document.documentElement.lang || "vi-VN";
 const t = createSystemTranslator(lang);
@@ -308,9 +309,7 @@ if (loginForm) {
         }
 
         setStatus(statusEl, "success", t("auth.login.success"));
-        const params = new URLSearchParams(window.location.search);
-        const redirectUrl = params.get("redirect") || "/app";
-        window.location.href = redirectUrl;
+        window.location.href = safeRelativeRedirect(new URLSearchParams(window.location.search).get("redirect"));
       } catch {
         setStatus(statusEl, "error", t("auth.login.generic_error"));
         setBusy(submitBtn, false, t("auth.login.submitting"), t("auth.login.submit"));
@@ -357,9 +356,7 @@ if (loginForm) {
         }
 
         setStatus(twoFactorStatusEl, "success", t("auth.login.success"));
-        const params = new URLSearchParams(window.location.search);
-        const redirectUrl = params.get("redirect") || "/app";
-        window.location.href = redirectUrl;
+        window.location.href = safeRelativeRedirect(new URLSearchParams(window.location.search).get("redirect"));
       } catch {
         setStatus(twoFactorStatusEl, "error", t("auth.login.generic_error"));
         setBusy(twoFactorSubmitBtn, false, t("auth.login.two_factor.submitting"), t("auth.login.two_factor.submit"));

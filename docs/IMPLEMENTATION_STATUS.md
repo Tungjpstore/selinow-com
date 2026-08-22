@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-22
 
+## Authenticated onboarding handoff — 2026-08-22
+
+- Preserved a paid plan selected on pricing and the landing runtime through password, 2FA, and magic-link login into `/onboarding?plan=...`.
+- Centralized post-auth redirect validation in `src/lib/auth/redirect.ts`; absolute, protocol-relative, backslash, and encoded backslash redirects fall back to `/app`.
+- Updated onboarding plan hydration to prefer a valid `?plan=` request when the server catalog finishes loading, without overriding an already selected plan.
+- Updated marketing surface contracts for the editorial landing and billing projection; focused verification: 22 tests passed, touched-file ESLint passed, and `npm run build` passed.
+- Known repository-wide limitations: `npm run check`, full lint, and full test still report unrelated pre-existing failures in store-builder/template, console/i18n, worker-delivery, and untracked review-script areas.
+
 ## CA — Commercial Architecture (2026-08-22)
 
 Structural upgrades answering "vẫn quá đơn giản, kiến trúc chưa thể thương mại hoá" — this is layout density and composition, not CSS polish. Three pillars (~400 lines CSS + markup changes across all 9 templates + layout):

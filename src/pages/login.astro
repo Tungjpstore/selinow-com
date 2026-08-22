@@ -4,6 +4,7 @@ import "../styles/auth-soft.css";
 import "../styles/selinow-a11y.css";
 import "../styles/marketing/tokens.css";
 import { authenticateRequest } from "../lib/auth/session";
+import { safeRelativeRedirect } from "../lib/auth/redirect";
 import { createSystemTranslator, DEFAULT_LOCALE, directionForLocale, resolvePresentationLocale } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
 import { resolveTurnstileConfiguration } from "../lib/storefront/turnstile";
@@ -17,8 +18,8 @@ if (Astro.url.origin !== env.DASHBOARD_ORIGIN) {
 
 try {
   await authenticateRequest(Astro.request, env);
-  const requested = Astro.url.searchParams.get("redirect");
-  return Astro.redirect(requested !== null && requested.startsWith("/") && !requested.startsWith("//") && !requested.includes("\\") ? requested : "/app", 302);
+  const redirectTarget = safeRelativeRedirect(Astro.url.searchParams.get("redirect"));
+  return Astro.redirect(redirectTarget, 302);
 } catch {
   // Anonymous visitors continue to login form
 }

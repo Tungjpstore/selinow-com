@@ -1,4 +1,5 @@
 import { createSystemTranslator } from "../../lib/i18n";
+import { safeRelativeRedirect } from "../../lib/auth/redirect";
 
 const form = document.querySelector<HTMLFormElement>("[data-magic-form]");
 const email = document.querySelector<HTMLInputElement>("[data-magic-email]");
@@ -222,7 +223,7 @@ async function consumePendingMagicLink(confirm: boolean): Promise<void> {
     }
     if (body.authenticated === true && body.redirectTo === "/app") {
       pendingMagicToken = null;
-      window.location.assign("/app");
+      window.location.assign(safeRelativeRedirect(new URLSearchParams(window.location.search).get("redirect")));
       return;
     }
     throw new Error("magic_link_response_invalid");
@@ -340,7 +341,7 @@ window.addEventListener("hashchange", () => { consumeMagicTokenFromFragment(); }
 setupModeToggle();
 
 if (!consumeMagicTokenFromFragment() && form?.dataset.authenticatedSession === "true") {
-  window.location.replace("/app");
+  window.location.replace(safeRelativeRedirect(new URLSearchParams(window.location.search).get("redirect")));
 }
 
 export {};

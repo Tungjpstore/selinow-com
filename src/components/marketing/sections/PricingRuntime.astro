@@ -18,6 +18,11 @@ import { getMarketingPlans, formatMarketingPrice, planFeatureList } from "../../
 const { dashboardOrigin, locale: propLocale, plans, pricingState } = Astro.props;
 const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
 const t = createMarketingTranslator(locale);
+const loginHrefForPlan = (planCode: string): string => {
+  const login = new URL("/login", dashboardOrigin);
+  login.searchParams.set("redirect", `/onboarding?plan=${encodeURIComponent(planCode)}`);
+  return login.toString();
+};
 ---
 
 <section class="ed-pricing" id="pricing" data-pricing-state={pricingState} aria-labelledby="ed-pricing-title">
@@ -58,7 +63,7 @@ const t = createMarketingTranslator(locale);
                 <li>{feature}</li>
               ))}
             </ul>
-            <a class:list={["ed-button", plan.recommended === true ? "ed-button-primary" : "ed-button-ghost"]} href={`${dashboardOrigin}/login`}>
+            <a class:list={["ed-button", plan.recommended === true ? "ed-button-primary" : "ed-button-ghost"]} href={loginHrefForPlan(plan.code)} data-plan-code={plan.code}>
               <span>{t("marketing.home.pricing.create")}</span>
               <span aria-hidden="true">→</span>
             </a>
