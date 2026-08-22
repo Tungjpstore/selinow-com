@@ -180,6 +180,9 @@ describe("production Worker continuation deploy admission", () => {
     expect(result.ok).toBe(true);
     expect(result.checks.every((check) => check.ok)).toBe(true);
     expect(result.invariantNames).toEqual(expect.arrayContaining([
+      "billing_checkout_sessions",
+      "idx_billing_checkout_sessions_reconciliation",
+      "idx_billing_checkout_sessions_shop_reconciliation",
       "shop_subscriptions_trial_claim_insert_guard",
       "payment_integrations_payos_claim_state_insert_guard",
       "idx_payment_integrations_provider_claim_nonce",

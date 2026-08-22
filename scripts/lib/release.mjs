@@ -97,6 +97,9 @@ export const REQUIRED_LEGAL_SUPPORT_DECISION_KEYS = Object.freeze([
 ]);
 export const REQUIRED_SECRET_INVENTORY_SCHEMA_VERSION = 1;
 export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
+  "billing_checkout_sessions",
+  "idx_billing_checkout_sessions_reconciliation",
+  "idx_billing_checkout_sessions_shop_reconciliation",
   "billing_checkout_sessions_scope_guard",
   "billing_checkout_sessions_scope_update_guard",
   "shop_subscriptions_provider_ref_guard",

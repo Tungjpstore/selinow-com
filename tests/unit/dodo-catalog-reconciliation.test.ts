@@ -59,6 +59,8 @@ function dodoProduct(offer: (typeof DODO_CATALOG_OFFERS)[number], reference: str
       payment_frequency_count: 1,
       payment_frequency_interval: "Month",
       price: offer.amountMinor,
+      subscription_period_count: 1,
+      subscription_period_interval: "Month",
       tax_inclusive: true,
       trial_period_days: 0,
       type: "recurring_price",
@@ -440,11 +442,14 @@ describe("Dodo catalog reconciliation", () => {
 
   it.each([
     ["product identity", (product: Record<string, unknown>) => { product.product_id = "pdt_wrong"; }],
+    ["recurring product flag", (product: Record<string, unknown>) => { product.is_recurring = false; }],
     ["price type", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).type = "one_time_price"; }],
     ["amount", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).price = 1; }],
     ["currency", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).currency = "EUR"; }],
     ["frequency count", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).payment_frequency_count = 2; }],
     ["frequency interval", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).payment_frequency_interval = "Year"; }],
+    ["subscription period count", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).subscription_period_count = 12; }],
+    ["subscription period interval", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).subscription_period_interval = "Year"; }],
     ["tax inclusion", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).tax_inclusive = false; }],
     ["provider trial", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).trial_period_days = 7; }],
     ["discount", (product: Record<string, unknown>) => { (product.price as Record<string, unknown>).discount = 10; }],
