@@ -18,6 +18,9 @@ infra/generated/*.tmp
 selinow-frontend-source.zip
 *.zip
 
+# AI art raw renders (re-derivable via scripts/art — only processed output is committed)
+art-raw/
+
 # Local agent tooling plans/artifacts
 .zcode/
 

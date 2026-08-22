@@ -58,6 +58,12 @@ export default tseslint.config(
         document: "readonly",
         process: "readonly",
         window: "readonly",
+        // Node built-ins used by dev scripts (fetch/timers/AbortController/Buffer).
+        AbortController: "readonly",
+        Buffer: "readonly",
+        clearTimeout: "readonly",
+        fetch: "readonly",
+        setTimeout: "readonly",
       },
     },
   },

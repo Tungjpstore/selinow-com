@@ -2,6 +2,13 @@
    SELINOW COMMERCE FLOW OS — MARKETING DESIGN TOKENS
    ========================================================================== */
 
+/* Self-hosted variable fonts (LP editorial) — bundled by Vite/Astro, served
+   same-origin so the CSP `font-src 'self'` policy stays untouched. Vietnamese
+   subsets ship in every package. */
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/playfair-display";
+@import "@fontsource-variable/jetbrains-mono";
+
 :root {
   /* Brand / Primary Palette — Selinow Indigo */
   --brand-50:  #F4F3FF;
@@ -10,17 +17,17 @@
   --brand-300: #C0B7FF;
   --brand-400: #9C8BFF;
   --brand-500: #7965F5;
-  --brand-600: #6552E8;
+  --brand-600: #7C6AF0;
   --brand-700: #5140C9;
   --brand-800: #4436A5;
   --brand-900: #3A3183;
 
   /* Marketing Namespace Aliases */
-  --mk-brand: #6552E8;
-  --mk-brand-hover: #5140C9;
-  --mk-brand-active: #4436A5;
-  --mk-brand-soft: #ECE9FF;
-  --mk-brand-subtle: #F4F3FF;
+  --mk-brand: #6957DE;
+  --mk-brand-hover: #5B49D1;
+  --mk-brand-active: #4E3EBC;
+  --mk-brand-soft: #EDE8FB;
+  --mk-brand-subtle: #F5F2FB;
 
   /* Neutral Surface System */
   --surface-page:    #FCFCFD;
@@ -161,13 +168,54 @@
   --mk-prose-max: 72ch;
 
   /* Typography Stack */
-  --font-sans: Inter, "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+  --font-sans: "Inter Variable", Inter, "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Playfair Display Variable", "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
 
   --mk-font-sans: var(--font-sans);
+  --mk-font-display: var(--font-display);
   --mk-font-mono: var(--font-mono);
 
   /* Focus Indicator */
-  --mk-focus: #6552E8;
+  --mk-focus: #7C6AF0;
   --mk-focus-offset: 3px;
+
+  /* ── Editorial Commerce layer (LP program, 2026-08-22) ──────────────────
+     Warm ivory editorial canvas for the marketing surface. Accent roles
+     reference the Selinow Soft spine so the EX0 contract keeps holding:
+     no Soft hex may appear outside the token files. */
+  --mk-ed-canvas:        var(--mk-canvas-warm);
+  --mk-ed-canvas-deep:   #F1EEE6;
+  --mk-ed-surface:       #FFFFFF;
+  --mk-ed-ink:           #181425;
+  --mk-ed-ink-soft:      #4C4763;
+  --mk-ed-hairline:      #E7E3D8;
+  --mk-ed-hairline-strong: #D7D1C0;
+  --mk-ed-accent:        var(--sln-soft-accent);
+  --mk-ed-accent-strong: var(--sln-soft-accent-strong);
+  --mk-ed-accent-ink:    #3B2E8F;
+  --mk-ed-tint:          var(--sln-soft-tint);
+  --mk-ed-glow:          color-mix(in srgb, var(--sln-soft-accent) 16%, transparent);
+  --mk-ed-glow-strong:   color-mix(in srgb, var(--sln-soft-accent) 30%, transparent);
+  --mk-ed-veil:          color-mix(in srgb, var(--sln-ink-900) 68%, transparent);
+  --mk-ed-gradient-silk: linear-gradient(120deg, #F3EFFD 0%, #FAF9F6 46%, #EAF1FD 100%);
+
+  --radius-2xl: 28px;
+  --mk-radius-2xl: var(--radius-2xl);
+
+  /* Motion — LP editorial choreography. Everything maps back to the shared
+     SLN timings; only hero/scene/ticker add marketing-only durations. */
+  --mk-duration-fast:      var(--sln-duration-fast);
+  --mk-duration-default:   var(--sln-duration-default);
+  --mk-duration-panel:     var(--sln-duration-panel);
+  --mk-duration-marketing: var(--sln-duration-marketing);
+  --mk-duration-hero:      720ms;
+  --mk-duration-scene:     560ms;
+  --mk-duration-ticker:    28s;
+  --mk-ease-standard:      var(--sln-ease-standard);
+  --mk-ease-spring:        var(--sln-ease-spring);
+  --mk-ease-editorial:     cubic-bezier(.22, .61, .21, 1);
+
+  --mk-shell-wide: 1360px;
+  --mk-header-h: 72px;
 }
