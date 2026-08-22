@@ -129,6 +129,8 @@ describe("PromptOS marketing surfaces", () => {
     expect(magicLogin).toContain("safeRelativeRedirect(");
     expect(passwordLogin).toContain("new URLSearchParams(window.location.search).get(\"redirect\")");
     expect(magicLogin).toContain("new URLSearchParams(window.location.search).get(\"redirect\")");
+    expect(magicLogin).toContain("redirect === \"\" ? {} : { redirect }");
+    expect(magicLogin).toContain("linkUrl.searchParams.get(\"redirect\")");
   });
 
   it("covers password-based login feedback and security controls", async () => {
