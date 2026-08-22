@@ -3081,3 +3081,46 @@ aurora).
   failures are design-system/store-builder/accessibility/i18n contracts and do not
   reference Google OAuth source. Production release still requires a clean combined
   candidate with all global gates passing.
+
+## Production release 8b132b1 shipped (2026-08-22)
+
+- Candidate `8b132b1` (tree `1b8211f`) deployed to production Worker
+  `selinow-com-production` as version `32478104-c96a-4a49-8db3-4c3b2ea1a1ec`
+  at 100% (release `prd_20260822t101500z_8b132b193c52`). Rollback version
+  `9616a86c-30d3-42e4-a2fb-e26a5e7a9bc0` (commit `7ed44f2`) rehearsed live and
+  route-neutral; previous version `a3e1e975` verified restorable.
+- Production D1 `PLATFORM_DB` migrated through `0112_google_auth_foundation.sql`
+  (migration admission + preflight + post-migration contract verified; ledger
+  complete, `db status --env production` reports no pending migrations).
+- Commerce acceptance closed with genuine provider UAT bound to staging release
+  `stg_20260822T101231Z_8b132b193c52` / Worker version `6e48dde5`: Dodo
+  test-mode 32 scenarios (real checkout `pay_0Nlwk8VLaIEisW7fm4QLO` + signed
+  webhooks landed in staging `billing_provider_events`) and PayOS 14 scenarios
+  (payment lane accepted; signed refund/chargeback documented as
+  provider-unsupported). Closeout audit: `0/284` checks blocked with
+  `--secret-names .wrangler/releases/prd_20260822t101500z_8b132b193c52/secret-names-array.json`.
+- Post-deploy verification: `/api/health` `{ok:true}`, marketing site, dashboard
+  login, `llms.txt`, canary and both pilot storefronts
+  (`a-tung.selinow.com`, `anh-ba.selinow.com`) return 200; queue consumers and
+  `*/15` cron verified `reuse` by the trigger ceremony; continuation routes
+  applied and admitted.
+
+### Known limitations and follow-ups (owner/operator)
+
+- Release-tooling defects at tree `8b132b1` were bridged at runtime for this
+  ceremony only and must be fixed in the next commit:
+  `scripts/lib/production-trigger-ceremony.mjs normalizeConsumer` rejects the
+  Cloudflare API encodings `max_wait_time_ms`/consumer-level
+  `dead_letter_queue`/`retry_delay: 0` that `scripts/lib/platform.mjs
+  normalizeLiveConsumer` already documents as equivalent, and
+  `scripts/production-trigger.mjs` parses `--confirm-production` but never
+  forwards `confirmProduction` into `executeProductionTriggerCeremony`.
+- Staging Worker UAT secrets (Dodo test mode) were restored after the release;
+  the staging "latest deployment" invariant will re-pin on the next staging
+  release. Staging Dodo dashboard still has a stale LIVE-mode API key
+  ("Selinow staging Worker UAT 2026-08-22") that the owner should delete.
+- Google OAuth external launch blockers (publish state, legal URLs, scopes,
+  test-user acceptance) remain as recorded above.
+- Cloudflare account tokens in `/tmp/cfenv.sh` (release ceremony roles) should
+  be revoked from the dashboard now that the release has shipped; local files
+  can then be deleted.
