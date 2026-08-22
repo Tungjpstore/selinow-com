@@ -6,7 +6,7 @@
    same-origin so the CSP `font-src 'self'` policy stays untouched. Vietnamese
    subsets ship in every package. */
 @import "@fontsource-variable/inter";
-@import "@fontsource-variable/playfair-display";
+@import "@fontsource-variable/space-grotesk";
 @import "@fontsource-variable/jetbrains-mono";
 
 :root {
@@ -169,7 +169,7 @@
 
   /* Typography Stack */
   --font-sans: "Inter Variable", Inter, "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Playfair Display Variable", "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-display: "Space Grotesk Variable", "Space Grotesk", var(--font-sans);
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
 
   --mk-font-sans: var(--font-sans);
@@ -180,25 +180,32 @@
   --mk-focus: #7C6AF0;
   --mk-focus-offset: 3px;
 
-  /* ── Editorial Commerce layer (LP program, 2026-08-22) ──────────────────
-     Warm ivory editorial canvas for the marketing surface. Accent roles
-     reference the Selinow Soft spine so the EX0 contract keeps holding:
-     no Soft hex may appear outside the token files. */
-  --mk-ed-canvas:        var(--mk-canvas-warm);
-  --mk-ed-canvas-deep:   #F1EEE6;
-  --mk-ed-surface:       #FFFFFF;
-  --mk-ed-ink:           #181425;
-  --mk-ed-ink-soft:      #4C4763;
-  --mk-ed-hairline:      #E7E3D8;
-  --mk-ed-hairline-strong: #D7D1C0;
-  --mk-ed-accent:        var(--sln-soft-accent);
-  --mk-ed-accent-strong: var(--sln-soft-accent-strong);
-  --mk-ed-accent-ink:    #3B2E8F;
-  --mk-ed-tint:          var(--sln-soft-tint);
-  --mk-ed-glow:          color-mix(in srgb, var(--sln-soft-accent) 16%, transparent);
-  --mk-ed-glow-strong:   color-mix(in srgb, var(--sln-soft-accent) 30%, transparent);
-  --mk-ed-veil:          color-mix(in srgb, var(--sln-ink-900) 68%, transparent);
-  --mk-ed-gradient-silk: linear-gradient(120deg, #F3EFFD 0%, #FAF9F6 46%, #EAF1FD 100%);
+  /* ── Editorial Commerce layer (LP program, v3 light premium — owner review
+     2026-08-22). Cool-white canvas, deep navy ink for high contrast, vivid
+     Soft accents; accent roles still reference the Selinow Soft spine so the
+     EX0 contract keeps holding. Contrast pairs (audited):
+     ink #0E1526 on canvas 16.7:1 · ink-soft #46527A on canvas 7.9:1 ·
+     accent-ink #5140C9 on canvas 7.0:1 · white on gradient-cta ≥5.2:1 —
+     all AA/AAA for their text sizes. */
+  --mk-ed-canvas:          #FFFFFF;
+  --mk-ed-canvas-deep:     #F5F7FB;
+  --mk-ed-surface:         #FFFFFF;
+  --mk-ed-surface-raised:  #FFFFFF;
+  --mk-ed-ink:             #0E1526;
+  --mk-ed-ink-soft:        #46527A;
+  --mk-ed-ink-muted:       #5A6485;
+  --mk-ed-hairline:        #E4E9F4;
+  --mk-ed-hairline-strong: #C9D3E8;
+  --mk-ed-accent:          var(--sln-soft-accent);
+  --mk-ed-accent-strong:   var(--sln-soft-accent-strong);
+  --mk-ed-accent-ink:      #5140C9;
+  --mk-ed-tint:            #F1EFFE;
+  --mk-ed-glow:            color-mix(in srgb, var(--sln-soft-accent) 20%, transparent);
+  --mk-ed-glow-strong:     color-mix(in srgb, var(--sln-soft-accent) 36%, transparent);
+  --mk-ed-veil:            color-mix(in srgb, var(--sln-ink-950) 62%, transparent);
+  --mk-ed-gradient-silk:   linear-gradient(120deg, #F2EFFE 0%, #FFFFFF 46%, #EBF3FE 100%);
+  --mk-ed-gradient-cta:    linear-gradient(120deg, var(--sln-soft-accent-strong), var(--sln-brand-indigo) 55%, var(--sln-brand-blue));
+  --mk-ed-glass:           color-mix(in srgb, var(--mk-ed-surface) 94%, transparent);
 
   --radius-2xl: 28px;
   --mk-radius-2xl: var(--radius-2xl);

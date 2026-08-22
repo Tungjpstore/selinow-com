@@ -1,0 +1,60 @@
+---
+/**
+ * LP Editorial Commerce — final call to action (LP1).
+ * Full-bleed campaign photograph under a deep indigo veil; serif headline
+ * and the two closing actions.
+ */
+interface Props {
+  dashboardOrigin: string;
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+
+const { dashboardOrigin, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+---
+
+<section class="ed-final" aria-labelledby="ed-final-title">
+  <div class="ed-final-media" aria-hidden="true">
+    <picture>
+      <source
+        type="image/avif"
+        srcset="/brand/landing/v1/final-cta-wide-1248.avif 1248w, /brand/landing/v1/final-cta-wide-960.avif 960w, /brand/landing/v1/final-cta-wide-720.avif 720w"
+        sizes="100vw"
+      />
+      <source
+        type="image/webp"
+        srcset="/brand/landing/v1/final-cta-wide-1248.webp 1248w, /brand/landing/v1/final-cta-wide-960.webp 960w, /brand/landing/v1/final-cta-wide-720.webp 720w"
+        sizes="100vw"
+      />
+      <img
+        src="/brand/landing/v1/final-cta-wide-960.webp"
+        alt={t("marketing.home.final.art_alt")}
+        width="1248"
+        height="832"
+        loading="lazy"
+        decoding="async"
+      />
+    </picture>
+  </div>
+  <div class="platform-shell ed-final-inner">
+    <div class="ed-final-copy">
+      <p class="ed-kicker ed-kicker-inverse">{t("marketing.home.final.kicker")}</p>
+      <h2 id="ed-final-title">{t("marketing.home.final.title")}</h2>
+      <p>{t("marketing.home.final.description")}</p>
+    </div>
+    <div class="ed-final-actions">
+      <a class="ed-button ed-button-primary" href={`${dashboardOrigin}/login`}>
+        <span>{t("marketing.home.final.cta")}</span>
+        <span aria-hidden="true">→</span>
+      </a>
+      <a class="ed-button ed-button-outline" href="#flow">
+        <span>{t("marketing.home.hero.secondary")}</span>
+        <span aria-hidden="true">↓</span>
+      </a>
+    </div>
+  </div>
+</section>

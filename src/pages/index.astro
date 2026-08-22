@@ -1,17 +1,22 @@
 ---
 import MarketingHeader from "../components/marketing/MarketingHeader.astro";
 import MarketingFooter from "../components/marketing/MarketingFooter.astro";
-import HeroFlowSim from "../components/marketing/HeroFlowSim.astro";
-import CommerceFlowRail from "../components/marketing/CommerceFlowRail.astro";
-import SolutionWorkflowCard from "../components/marketing/SolutionWorkflowCard.astro";
+import HeroEditorial from "../components/marketing/sections/HeroEditorial.astro";
+import FlowChapter from "../components/marketing/sections/FlowChapter.astro";
+import WhyBento from "../components/marketing/sections/WhyBento.astro";
+import CommerceCore from "../components/marketing/sections/CommerceCore.astro";
+import SolutionsShowcase from "../components/marketing/sections/SolutionsShowcase.astro";
+import TrustLedger from "../components/marketing/sections/TrustLedger.astro";
+import PricingRuntime from "../components/marketing/sections/PricingRuntime.astro";
+import FaqAccordion from "../components/marketing/sections/FaqAccordion.astro";
+import FinalCta from "../components/marketing/sections/FinalCta.astro";
 import PlatformLayout from "../layouts/PlatformLayout.astro";
-import { icons } from "../components/marketing/icons";
 import StoreHome from "../components/storefront/templates/StoreHome.astro";
 import StorefrontLayout from "../layouts/StorefrontLayout.astro";
 import { getSolutionPage } from "../lib/content/solutions";
 import { isAppError } from "../lib/core/errors";
 import { getBindings } from "../lib/platform/bindings";
-import { formatMarketingPrice, getMarketingPlans, isMarketingPricingReady, planFeatureList } from "../lib/storefront/marketing";
+import { getMarketingPlans, isMarketingPricingReady } from "../lib/storefront/marketing";
 import { loggerFor } from "../lib/operations/logger";
 import { classifyPlatformHost, normalizeHostname } from "../lib/storefront/routing";
 import { canonicalRedirectFor, getStorefrontCatalog, resolveStorefrontShop, type StorefrontCategory, type StorefrontProduct, type StorefrontShop } from "../lib/storefront/store";
@@ -30,113 +35,21 @@ let mode: "error" | "marketing" | "storefront" = "error";
 let shop: StorefrontShop | null = null;
 let products: StorefrontProduct[] = [];
 let categories: StorefrontCategory[] = [];
+let promotions: Awaited<ReturnType<typeof getStorefrontCatalog>>["promotions"] = [];
 let plans = [] as Awaited<ReturnType<typeof getMarketingPlans>>;
 let pricingState: "ready" | "unavailable" = "unavailable";
 let locale = Astro.locals.locale ?? normalizeSupportedLocale(env.DEFAULT_LOCALE);
 let t = createStorefrontTranslator(locale);
 const mt = createMarketingTranslator(locale);
 
-const channelIcons: Record<string, string> = {
-  website: icons.globe(18),
-  telegram: icons.send(18),
-  whatsapp: icons.chat(18),
-  zalo: icons.chat(18),
-  discord: icons.chat(18),
-  api: icons.code(18),
-};
-
 const landingCopy = {
   seoTitle: mt("marketing.home.seo_title"),
   seoDescription: mt("marketing.home.seo_description"),
-  eyebrow: mt("marketing.home.hero.eyebrow"),
-  heroTitle: mt("marketing.home.hero.title"),
-  heroHighlight: mt("marketing.home.hero.highlight"),
-  heroDescription: mt("marketing.home.hero.lead"),
-  heroPrimary: mt("marketing.home.hero.primary"),
-  heroSecondary: mt("marketing.home.hero.secondary"),
-  heroProof: [
-    mt("marketing.home.hero.proof.no_card"),
-    mt("marketing.home.hero.proof.locales"),
-    mt("marketing.home.hero.proof.verify_before_delivery"),
-  ],
-  whyEyebrow: mt("marketing.home.why.kicker"),
-  whyTitle: mt("marketing.home.why.title"),
-  whyDescription: mt("marketing.home.why.lead"),
-  why: [
-    { icon: icons.database(18), title: mt("marketing.home.why.one_catalog.title"), description: mt("marketing.home.why.one_catalog.description") },
-    { icon: icons.shieldCheck(18), title: mt("marketing.home.why.fulfillment.title"), description: mt("marketing.home.why.fulfillment.description") },
-    { icon: icons.layers(18), title: mt("marketing.home.why.channels.title"), description: mt("marketing.home.why.channels.description") },
-    { icon: icons.pulse(18), title: mt("marketing.home.why.visibility.title"), description: mt("marketing.home.why.visibility.description") },
-  ],
-  channelsLabel: mt("marketing.home.channels.label"),
-  channelStatus: {
-    live: mt("marketing.home.channels.status.live"),
-    next: mt("marketing.home.channels.status.next"),
-    planned: mt("marketing.home.channels.status.planned"),
-  },
-  channelNames: {
-    website: mt("marketing.home.channels.name.website"),
-    telegram: mt("marketing.home.channels.name.telegram"),
-    whatsapp: mt("marketing.home.channels.name.whatsapp"),
-    zalo: mt("marketing.home.channels.name.zalo"),
-    discord: mt("marketing.home.channels.name.discord"),
-    api: mt("marketing.home.channels.name.api"),
-  },
-  channelCards: [
-    { key: "website", state: "live", label: mt("marketing.home.channels.name.website"), status: mt("marketing.home.channels.status.live") },
-    { key: "telegram", state: "next", label: mt("marketing.home.channels.name.telegram"), status: mt("marketing.home.channels.status.next") },
-    { key: "whatsapp", state: "next", label: mt("marketing.home.channels.name.whatsapp"), status: mt("marketing.home.channels.status.next") },
-    { key: "zalo", state: "next", label: mt("marketing.home.channels.name.zalo"), status: mt("marketing.home.channels.status.next") },
-    { key: "discord", state: "next", label: mt("marketing.home.channels.name.discord"), status: mt("marketing.home.channels.status.next") },
-    { key: "api", state: "planned", label: mt("marketing.home.channels.name.api"), status: mt("marketing.home.channels.status.planned") },
-  ],
-  architectureEyebrow: mt("marketing.home.architecture.eyebrow"),
-  architectureTitle: mt("marketing.home.architecture.title"),
-  architectureDescription: mt("marketing.home.architecture.description"),
-  architectureRight: mt("marketing.home.architecture.destinations"),
-  architectureCore: mt("marketing.home.architecture.core"),
-  architectureModules: [
-    mt("marketing.home.architecture.module.ai"),
-    mt("marketing.home.architecture.module.automation"),
-    mt("marketing.home.architecture.module.workflow"),
-    mt("marketing.home.architecture.module.analytics"),
-    mt("marketing.home.architecture.module.security"),
-  ],
-  architectureChannels: [
-    [mt("marketing.home.channels.name.website"), mt("marketing.home.channels.status.live")],
-    [mt("marketing.home.channels.name.telegram"), mt("marketing.home.channels.status.next")],
-    [`${mt("marketing.home.channels.name.whatsapp")}, ${mt("marketing.home.channels.name.zalo")}, ${mt("marketing.home.channels.name.discord")}, ${mt("marketing.home.channels.name.api")}`, mt("marketing.home.channels.status.planned")],
-  ],
-  architectureCoreDetail: mt("marketing.home.architecture.core_detail"),
-  solutionsEyebrow: mt("marketing.home.solutions.kicker"),
-  solutionsTitle: mt("marketing.home.solutions.title"),
-  solutionsDescription: mt("marketing.home.solutions.description"),
-  trustEyebrow: mt("marketing.home.trust.kicker"),
-  trustTitle: mt("marketing.home.trust.title"),
-  trustDescription: mt("marketing.home.trust.description"),
-  trustPoints: [
-    mt("marketing.home.trust.point.provider"),
-    mt("marketing.home.trust.point.event"),
-    mt("marketing.home.trust.point.state"),
-  ],
-  pricingEyebrow: mt("marketing.home.pricing.kicker"),
-  pricingTitle: mt("marketing.home.pricing.title"),
-  pricingDescription: mt("marketing.home.pricing.description"),
-  pricingUnavailable: mt("marketing.pricing.unavailable.title"),
-  pricingUnavailableDetail: mt("marketing.pricing.unavailable.description"),
-  planCta: mt("marketing.home.pricing.create"),
-  pricingCompare: mt("marketing.home.pricing.compare"),
-  pricingRecommended: mt("marketing.home.pricing.recommended"),
   faq: [
     [mt("marketing.home.faq.telegram.question"), mt("marketing.home.faq.telegram.answer")],
     [mt("marketing.home.faq.money.question"), mt("marketing.home.faq.money.answer")],
     [mt("marketing.home.faq.test.question"), mt("marketing.home.faq.test.answer")],
-  ],
-  finalEyebrow: mt("marketing.home.final.kicker"),
-  finalTitle: mt("marketing.home.final.title"),
-  finalDescription: mt("marketing.home.final.description"),
-  finalPrimary: mt("marketing.home.final.cta"),
-  finalSecondary: mt("marketing.home.hero.secondary"),
+  ] as [string, string][],
 };
 
 const solutionPreviews = [
@@ -228,6 +141,7 @@ if (hostKind === "marketing") {
       const catalog = await getStorefrontCatalog(env, shop);
       products = catalog.products;
       categories = catalog.categories;
+      promotions = catalog.promotions;
       Astro.response.headers.set("X-Storefront-Cacheable", "1");
     } else {
       Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
@@ -270,297 +184,49 @@ const storefrontStructuredData = mode === "storefront" && shop?.access === "live
       <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
 
       <main id="main-content">
-        <!-- 1. HERO -->
-        <section class="mk-hero">
-          <div class="platform-shell mk-hero-grid">
-            <div class="mk-hero-copy">
-              <p class="mk-hero-eyebrow">{landingCopy.eyebrow}</p>
-              <h1 class="mk-hero-title">{landingCopy.heroTitle} <strong>{landingCopy.heroHighlight}</strong></h1>
-              <p class="mk-hero-lead">{landingCopy.heroDescription}</p>
-              <div class="mk-hero-actions">
-                <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
-                  <span>{landingCopy.heroPrimary}</span>
-                  <span aria-hidden="true">→</span>
-                </a>
-                <a class="kit-button kit-button-ghost" href="#flow">
-                  <span>{landingCopy.heroSecondary}</span>
-                  <span aria-hidden="true">→</span>
-                </a>
-              </div>
-              <ul class="mk-hero-proof">
-                {landingCopy.heroProof.map((proof) => (
-                  <li><span set:html={icons.check(13)} aria-hidden="true"></span>{proof}</li>
-                ))}
-              </ul>
-            </div>
+        <HeroEditorial dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
 
-            <div class="mk-hero-visual">
-              <HeroFlowSim locale={locale} />
-            </div>
-          </div>
+        <div data-reveal>
+          <FlowChapter locale={locale} />
+        </div>
 
-          <div class="mk-hero-strip" role="list">
-            <div role="listitem">
-              <strong>{landingCopy.channelNames.website}</strong>
-              <span class="status-chip" data-state="live"><span class="status-chip-dot" aria-hidden="true"></span>{landingCopy.channelStatus.live}</span>
-            </div>
-            <div role="listitem">
-              <strong>{landingCopy.channelNames.telegram}</strong>
-              <span class="status-chip" data-state="next"><span class="status-chip-dot" aria-hidden="true"></span>{landingCopy.channelStatus.next}</span>
-            </div>
-            <div role="listitem">
-              <strong>{landingCopy.heroProof[1]}</strong>
-              <span class="mk-hero-strip-note">{landingCopy.eyebrow}</span>
-            </div>
-            <div role="listitem">
-              <strong>{mt("marketing.home.flow.payment")}</strong>
-              <span class="mk-hero-strip-note">{mt("marketing.home.flow.payment_detail")}</span>
-            </div>
-          </div>
-        </section>
+        <div data-reveal>
+          <WhyBento locale={locale} />
+        </div>
 
-        <!-- 2. COMMERCE FLOW RAIL -->
-        <CommerceFlowRail locale={locale} />
+        <div data-reveal>
+          <CommerceCore locale={locale} />
+        </div>
 
-        <!-- 3. WHY SELINOW -->
-        <section class="kit-section platform-shell" id="why" aria-labelledby="why-title">
-          <div class="kit-section-heading">
-            <div>
-              <p class="kit-kicker">{landingCopy.whyEyebrow}</p>
-              <h2 class="section-title" id="why-title">{landingCopy.whyTitle}</h2>
-            </div>
-            <p class="section-description">{landingCopy.whyDescription}</p>
-          </div>
-          <div class="mk-why-grid">
-            {landingCopy.why.map((item) => (
-              <article class="mk-why-item">
-                <span class="mk-why-icon" set:html={item.icon} aria-hidden="true"></span>
-                <h3>{item.title}</h3>
-                <p>{item.description}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+        <div data-reveal>
+          <SolutionsShowcase locale={locale} solutions={solutionPreviews} />
+        </div>
 
-        <!-- 4. ONE COMMERCE CORE -->
-        <section class="kit-section platform-shell mk-core-section" id="core" aria-labelledby="core-title">
-          <div class="kit-section-heading">
-            <div>
-              <p class="kit-kicker">{landingCopy.architectureEyebrow}</p>
-              <h2 class="section-title" id="core-title">{landingCopy.architectureTitle}</h2>
-            </div>
-            <p class="section-description">{landingCopy.architectureDescription}</p>
-          </div>
+        <div data-reveal>
+          <TrustLedger locale={locale} />
+        </div>
 
-          <div class="mk-core-board">
-            <div class="mk-core-column">
-              <p class="mk-core-column-title">{landingCopy.channelsLabel}</p>
-              {landingCopy.channelCards.map((channel) => (
-                <div class="mk-channel-tile" data-channel-state={channel.state}>
-                  <span class="mk-channel-tile-icon" set:html={channelIcons[channel.key]} aria-hidden="true"></span>
-                  <span class="mk-channel-tile-copy">
-                    <strong>{channel.label}</strong>
-                    <small>{channel.status}</small>
-                  </span>
-                </div>
-              ))}
-            </div>
+        <div data-reveal>
+          <PricingRuntime dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} plans={plans} pricingState={pricingState} />
+        </div>
 
-            <div class="mk-core-hub" aria-label={landingCopy.architectureCore}>
-              <img src="/brand/selinow-kit/global/v3/core-hub.svg" alt="" width="72" height="72" loading="lazy" />
-              <strong>{landingCopy.architectureCore}</strong>
-              <small>{landingCopy.architectureCoreDetail}</small>
-              <ul class="mk-core-modules">
-                {landingCopy.architectureModules.map((module) => (
-                  <li><span set:html={icons.spark(12)} aria-hidden="true"></span>{module}</li>
-                ))}
-              </ul>
-            </div>
+        <div data-reveal>
+          <FaqAccordion locale={locale} faq={landingCopy.faq} />
+        </div>
 
-            <div class="mk-core-column">
-              <p class="mk-core-column-title">{landingCopy.architectureRight}</p>
-              {landingCopy.architectureChannels.map((channel, index) => (
-                <div class="mk-channel-tile" data-channel-state={index === 0 ? "live" : index === 1 ? "next" : "planned"}>
-                  <span class="mk-channel-tile-icon" set:html={index === 0 ? icons.globe(18) : index === 1 ? icons.send(18) : icons.code(18)} aria-hidden="true"></span>
-                  <span class="mk-channel-tile-copy">
-                    <strong>{channel[0]}</strong>
-                    <small>{channel[1]}</small>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div class="mk-core-legend">
-            <span><i data-state="live"></i>{landingCopy.channelStatus.live}</span>
-            <span><i data-state="next"></i>{landingCopy.channelStatus.next}</span>
-            <span><i data-state="planned"></i>{landingCopy.channelStatus.planned}</span>
-          </div>
-        </section>
-
-        <!-- 5. SOLUTIONS PREVIEW -->
-        <section class="kit-section platform-shell" id="solutions" aria-labelledby="solutions-title">
-          <div class="kit-section-heading">
-            <div>
-              <p class="kit-kicker">{landingCopy.solutionsEyebrow}</p>
-              <h2 class="section-title" id="solutions-title">{landingCopy.solutionsTitle}</h2>
-            </div>
-            <p class="section-description">{landingCopy.solutionsDescription}</p>
-          </div>
-          <div class="mk-solutions-grid">
-            {solutionPreviews.map((solution) => (
-              <SolutionWorkflowCard
-                slug={solution.slug}
-                index={solution.index}
-                eyebrow={solution.eyebrow}
-                title={solution.title}
-                lead={solution.lead}
-                href={solution.href}
-                locale={locale}
-              />
-            ))}
-          </div>
-        </section>
-
-        <!-- 6. PAYMENT OWNERSHIP -->
-        <section class="kit-section platform-shell mk-trust-section" id="trust" aria-labelledby="trust-title">
-          <div class="mk-trust-grid">
-            <div>
-              <p class="kit-kicker">{landingCopy.trustEyebrow}</p>
-              <h2 class="section-title" id="trust-title">{landingCopy.trustTitle}</h2>
-              <p class="section-description">{landingCopy.trustDescription}</p>
-            </div>
-            <ul class="mk-trust-points">
-              {landingCopy.trustPoints.map((point) => (
-                <li><span set:html={icons.check(14)} aria-hidden="true"></span>{point}</li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        <!-- 7. RUNTIME PRICING PREVIEW -->
-        <section class="kit-section platform-shell mk-pricing-preview" id="pricing" data-pricing-state={pricingState} aria-labelledby="pricing-title">
-          <div class="kit-section-heading">
-            <div>
-              <p class="kit-kicker">{landingCopy.pricingEyebrow}</p>
-              <h2 class="section-title" id="pricing-title">{landingCopy.pricingTitle}</h2>
-            </div>
-            <p class="section-description">{landingCopy.pricingDescription}</p>
-          </div>
-
-          {pricingState === "ready" ? (
-            <>
-              <div class="runtime-plan-grid">
-                {plans.map((plan) => (
-                  <article class:list={["runtime-plan-card", plan.recommended === true && "runtime-plan-card-featured"]} data-reveal>
-                    {plan.recommended === true ? (
-                      <div class="plan-featured-pill">
-                        <span aria-hidden="true">💎</span>
-                        <span>{landingCopy.pricingRecommended}</span>
-                      </div>
-                    ) : (
-                      <div class="plan-starter-pill">
-                        <span aria-hidden="true">🚀</span>
-                        <span>{locale.startsWith("vi") ? "Khởi đầu chuẩn" : "Standard"}</span>
-                      </div>
-                    )}
-                    <div class="runtime-plan-head">
-                      <span>{plan.code}</span>
-                      <h3>{plan.name}</h3>
-                    </div>
-                    <div class="runtime-plan-prices">
-                      {(plan.prices ?? []).map((price) => {
-                        const amount = formatMarketingPrice(price, locale);
-                        return amount === null ? null : (
-                          <p data-market={price.marketCode}>
-                            <strong>{amount}</strong> <span>/ {price.interval === "month" ? (locale.startsWith("vi") ? "tháng" : "month") : price.interval}</span>
-                          </p>
-                        );
-                      })}
-                      <div class="plan-trial-badge">
-                        <span aria-hidden="true">✨</span>
-                        <span>{locale.startsWith("vi") ? "7 ngày dùng thử miễn phí" : "7-day free trial"}</span>
-                      </div>
-                    </div>
-                    <ul>
-                      {planFeatureList(plan, locale).map((feature) => (
-                        <li>{feature}</li>
-                      ))}
-                    </ul>
-                    <a class:list={["kit-button", plan.recommended === true ? "kit-button-primary" : "kit-button-secondary"]} href={`${env.DASHBOARD_ORIGIN}/login`}>
-                      <span>{landingCopy.planCta}</span>
-                      <span aria-hidden="true">→</span>
-                    </a>
-                  </article>
-                ))}
-              </div>
-              <div class="mk-pricing-footer">
-                <a class="kit-button kit-button-ghost" href={locale === "en" ? "/pricing" : "/pricing?lang=vi-VN"}>
-                  <span>{landingCopy.pricingCompare}</span>
-                  <span aria-hidden="true">→</span>
-                </a>
-              </div>
-            </>
-          ) : (
-            <div class="pricing-empty">
-              <h3>{landingCopy.pricingUnavailable}</h3>
-              <p>{landingCopy.pricingUnavailableDetail}</p>
-            </div>
-          )}
-        </section>
-
-        <!-- 8. FAQ -->
-        <section class="kit-section platform-shell" id="faq" aria-labelledby="faq-title">
-          <div class="kit-section-heading kit-section-heading-centered">
-            <div>
-              <p class="kit-kicker">{mt("marketing.home.faq.kicker")}</p>
-              <h2 class="section-title" id="faq-title">{mt("marketing.home.faq.title")}</h2>
-            </div>
-          </div>
-          <div class="faq-kit-list">
-            {landingCopy.faq.map((item) => (
-              <details>
-                <summary>
-                  <span>{item[0]}</span>
-                  <span aria-hidden="true">+</span>
-                </summary>
-                <p>{item[1]}</p>
-              </details>
-            ))}
-          </div>
-        </section>
-
-        <!-- 9. FINAL CTA -->
-        <section class="mk-final">
-          <div class="platform-shell mk-final-inner">
-            <div>
-              <p class="kit-kicker">{landingCopy.finalEyebrow}</p>
-              <h2>{landingCopy.finalTitle}</h2>
-              <p>{landingCopy.finalDescription}</p>
-            </div>
-            <div class="mk-final-actions">
-              <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
-                <span>{landingCopy.finalPrimary}</span>
-                <span aria-hidden="true">→</span>
-              </a>
-              <a class="kit-button kit-button-ghost" href="#flow">
-                <span>{landingCopy.finalSecondary}</span>
-                <span aria-hidden="true">→</span>
-              </a>
-            </div>
-          </div>
-        </section>
+        <div data-reveal>
+          <FinalCta dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+        </div>
       </main>
 
       <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
     </div>
   </PlatformLayout>
 )}
-
 {mode === "storefront" && shop && (
   <StorefrontLayout shop={shop} title={shop.content.seoTitle} description={shop.content.seoDescription} noindex={shop.access !== "live"} structuredData={storefrontStructuredData}>
     {shop.access === "live" ? (
-      <StoreHome categories={categories} locale={locale} products={products} shop={shop} />
+      <StoreHome categories={categories} locale={locale} products={products} promotions={promotions} shop={shop} />
     ) : (
       <section class="safe-state">
         <div class="state-number">{shop.access === "coming_soon" ? "01" : "—"}</div>

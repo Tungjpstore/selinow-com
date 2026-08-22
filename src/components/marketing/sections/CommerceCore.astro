@@ -1,0 +1,110 @@
+---
+/**
+ * LP Editorial Commerce — one commerce core diagram (LP1).
+ * Channels → core hub → customer touchpoints rendered as a horizontal
+ * editorial spread instead of the legacy three-column board. Keeps the
+ * brand core-hub.svg as the centerpiece.
+ */
+interface Props {
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+import { icons } from "../icons";
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const channelIcons: Record<string, string> = {
+  website: icons.globe(18),
+  telegram: icons.send(18),
+  whatsapp: icons.chat(18),
+  zalo: icons.chat(18),
+  discord: icons.chat(18),
+  api: icons.code(18),
+};
+
+const channels = [
+  { key: "website", state: "live" },
+  { key: "telegram", state: "next" },
+  { key: "whatsapp", state: "next" },
+  { key: "zalo", state: "next" },
+  { key: "discord", state: "next" },
+  { key: "api", state: "planned" },
+] as const;
+
+const destinations = [
+  { label: t("marketing.home.channels.name.website"), status: t("marketing.home.channels.status.live"), icon: icons.globe(18), state: "live" },
+  { label: t("marketing.home.channels.name.telegram"), status: t("marketing.home.channels.status.next"), icon: icons.send(18), state: "next" },
+  { label: `${t("marketing.home.channels.name.whatsapp")}, ${t("marketing.home.channels.name.zalo")}, ${t("marketing.home.channels.name.discord")}, ${t("marketing.home.channels.name.api")}`, status: t("marketing.home.channels.status.planned"), icon: icons.code(18), state: "planned" },
+];
+
+const modules = [
+  t("marketing.home.architecture.module.ai"),
+  t("marketing.home.architecture.module.automation"),
+  t("marketing.home.architecture.module.workflow"),
+  t("marketing.home.architecture.module.analytics"),
+  t("marketing.home.architecture.module.security"),
+];
+---
+
+<section class="ed-core" id="core" aria-labelledby="ed-core-title">
+  <div class="platform-shell">
+    <header class="ed-section-heading">
+      <p class="ed-kicker">{t("marketing.home.architecture.eyebrow")}</p>
+      <h2 class="ed-title" id="ed-core-title">{t("marketing.home.architecture.title")}</h2>
+      <p class="ed-lead">{t("marketing.home.architecture.description")}</p>
+    </header>
+
+    <div class="ed-core-board">
+      <div class="ed-core-column">
+        <p class="ed-core-column-title">{t("marketing.home.channels.label")}</p>
+        <ul class="ed-core-tiles">
+          {channels.map((channel) => (
+            <li class="ed-channel-tile" data-channel-state={channel.state}>
+              <span class="ed-channel-tile-icon" set:html={channelIcons[channel.key]} aria-hidden="true"></span>
+              <span class="ed-channel-tile-copy">
+                <strong>{t(`marketing.home.channels.name.${channel.key}`)}</strong>
+                <small>{t(`marketing.home.channels.status.${channel.state}`)}</small>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div class="ed-core-hub" aria-label={t("marketing.home.architecture.core")}>
+        <img src="/brand/selinow-kit/global/v3/core-hub.svg" alt="" width="72" height="72" loading="lazy" />
+        <strong>{t("marketing.home.architecture.core")}</strong>
+        <small>{t("marketing.home.architecture.core_detail")}</small>
+        <ul class="ed-core-modules">
+          {modules.map((module) => (
+            <li><span set:html={icons.spark(12)} aria-hidden="true"></span>{module}</li>
+          ))}
+        </ul>
+      </div>
+
+      <div class="ed-core-column">
+        <p class="ed-core-column-title">{t("marketing.home.architecture.destinations")}</p>
+        <ul class="ed-core-tiles">
+          {destinations.map((destination) => (
+            <li class="ed-channel-tile" data-channel-state={destination.state}>
+              <span class="ed-channel-tile-icon" set:html={destination.icon} aria-hidden="true"></span>
+              <span class="ed-channel-tile-copy">
+                <strong>{destination.label}</strong>
+                <small>{destination.status}</small>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+
+    <div class="ed-core-legend">
+      <span><i data-state="live"></i>{t("marketing.home.channels.status.live")}</span>
+      <span><i data-state="next"></i>{t("marketing.home.channels.status.next")}</span>
+      <span><i data-state="planned"></i>{t("marketing.home.channels.status.planned")}</span>
+    </div>
+  </div>
+</section>

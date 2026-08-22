@@ -4,7 +4,18 @@
    hairlines, floating status chips, structured card interiors.
    Shared primitives (kit-button, kit-section, status-chip, runtime-plan-*,
    faq-kit-list, landing-footer) stay in their own sheets.
+
+   LP1 (2026-08-22): the Editorial Commerce layer below restyles the homepage
+   (`/`); the legacy blocks kept in this file are still consumed by
+   /pricing and /solutions until LP2 adopts the editorial language there.
    ========================================================================== */
+
+/* Editorial Commerce layer (LP program) — imported first so legacy blocks
+   below can still override their own selectors without touching the new
+   ed-* namespace (which legacy never references). */
+@import "./editorial/shell.css";
+@import "./editorial/hero.css";
+@import "./editorial/sections.css";
 
 /* --------------------------------------------------------------------------
    1. HERO — layered canvas + dense composition
@@ -1321,4 +1332,35 @@
   .flow-sim-ghost {
     display: none;
   }
+}
+
+/* ── EX5.1: HeroFlowSim staged flow-trace (MOTION.md allowlist) — plays once
+   on load (~2.6s), then rests; the global reduced-motion clamp collapses it
+   to the final frame instantly. No looping animation on the storefront. ── */
+@keyframes mk-flow-step {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mk-flow-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.flow-sim-scene .flow-sim-chip,
+.flow-sim .flow-sim-msg,
+.flow-sim .flow-sim-order,
+.flow-sim .flow-sim-outcome,
+.flow-sim .flow-sim-caption {
+  animation: mk-flow-step var(--sln-duration-marketing) var(--sln-ease-standard) both;
+}
+.flow-sim-scene .flow-sim-chip-verified { animation-delay: .1s; }
+.flow-sim .flow-sim-msg { animation-delay: .35s; }
+.flow-sim-scene .flow-sim-chip-allocated { animation-delay: .55s; }
+.flow-sim-scene .flow-sim-chip-delivered { animation-delay: 1s; }
+.flow-sim .flow-sim-order { animation-delay: 1.05s; }
+.flow-sim .flow-sim-outcome { animation-delay: 1.6s; }
+.flow-sim .flow-sim-caption { animation-delay: 2.1s; }
+.flow-sim-link { overflow: hidden; }
+.flow-sim-link .flow-sim-link-line {
+  transform-origin: left center;
+  animation: mk-flow-draw 500ms var(--sln-ease-standard) .85s both;
 }

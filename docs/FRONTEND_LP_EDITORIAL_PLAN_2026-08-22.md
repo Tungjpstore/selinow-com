@@ -4,6 +4,21 @@ Ngày: 2026-08-22 · Trạng thái: **ĐÃ DUYỆT OWNER** (phê duyệt trong p
 Nhánh: `wip/onboarding-redesign-20260820` (giữ nguyên — có session song song; commit LP chỉ add
 file của LP bằng đường dẫn tường minh, không bao giờ `git add -A`).
 
+> **Nhật ký art direction (owner review cùng ngày):**
+> - **v1 ivory editorial** → "quá phèn, background nhạt nhòa, ảnh không liên quan dự án, font
+>   không phù hợp" → bỏ.
+> - **v2 dark cinematic** → "nền tối không ra cái thể gì" → bỏ.
+> - **v3 light premium (chốt):** nền trắng mát #FFFFFF/#F5F7FB kiểu Stripe, mực navy #0E1526
+>   tương phản cao, accent gradient Soft rực, card trắng viền tinh tế + shadow mềm; font display
+>   **Space Grotesk Variable** (bỏ Playfair), UI Inter, label JetBrains Mono. Bộ ảnh nanobanana
+>   **v3 scenario riêng**: mỗi section một bối cảnh gắn nội dung (hero = workspace người bán buổi
+>   sáng; flow = chat boutique / macro checkmark teal / unboxing buổi tối; solutions = hành lang
+>   office notification, macro key crystal, vault kho mã; final-CTA = rooftop bình minh; auth =
+>   bàn làm việc buổi sớm). Hero cân bằng 2 nửa 6/6, art frame 5:5.4 + chips commerce nổi.
+>   Audit tương phản 11 cặp token đều ≥ 4.5:1 AA (`scripts/art/contrast-audit.mjs`).
+>   Reduced-motion: không tạo WebGL context (tránh driver warning làm fail gate) — hero dùng
+>   aurora CSS tĩnh, ticker wrap tĩnh.
+
 ## 0. Quyết định đã chốt
 
 | Quyết định | Lựa chọn |

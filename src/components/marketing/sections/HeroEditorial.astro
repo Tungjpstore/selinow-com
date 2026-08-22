@@ -1,0 +1,130 @@
+---
+/**
+ * LP Editorial Commerce — hero (LP1).
+ *
+ * Split editorial hero: kinetic serif headline on the left, AI editorial
+ * portrait in a clipped frame on the right, WebGL silk field behind, and a
+ * channel marquee strip below. The H1 text nodes come straight from the
+ * `marketing.home.hero.*` catalog contract — the browser gate asserts the
+ * accessible name, so keep the two-part title structure intact.
+ */
+interface Props {
+  dashboardOrigin: string;
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+import { icons } from "../icons";
+
+const { dashboardOrigin, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const channels = [
+  { key: "website", state: "live" },
+  { key: "telegram", state: "next" },
+  { key: "whatsapp", state: "next" },
+  { key: "zalo", state: "next" },
+  { key: "discord", state: "next" },
+  { key: "api", state: "planned" },
+] as const;
+---
+
+<section class="ed-hero" aria-labelledby="ed-hero-title">
+  <canvas class="ed-hero-canvas" data-hero-canvas aria-hidden="true"></canvas>
+
+  <div class="platform-shell ed-hero-grid">
+    <div class="ed-hero-copy">
+      <p class="ed-hero-issue">
+        <span>{t("marketing.home.hero.mag_issue")}</span>
+        <span class="ed-hero-issue-sep" aria-hidden="true"></span>
+        <span>{t("marketing.home.hero.eyebrow")}</span>
+      </p>
+      <h1 class="ed-hero-title" id="ed-hero-title">{t("marketing.home.hero.title")} <em>{t("marketing.home.hero.highlight")}</em></h1>
+      <p class="ed-hero-lead">{t("marketing.home.hero.lead")}</p>
+      <div class="ed-hero-actions">
+        <a class="ed-button ed-button-primary" href={`${dashboardOrigin}/login`}>
+          <span>{t("marketing.home.hero.primary")}</span>
+          <span aria-hidden="true">→</span>
+        </a>
+        <a class="ed-button ed-button-ghost" href="#flow">
+          <span>{t("marketing.home.hero.secondary")}</span>
+          <span aria-hidden="true">↓</span>
+        </a>
+      </div>
+      <ul class="ed-hero-proof">
+        <li><span set:html={icons.check(13)} aria-hidden="true"></span>{t("marketing.home.hero.proof.no_card")}</li>
+        <li><span set:html={icons.check(13)} aria-hidden="true"></span>{t("marketing.home.hero.proof.locales")}</li>
+        <li><span set:html={icons.check(13)} aria-hidden="true"></span>{t("marketing.home.hero.proof.verify_before_delivery")}</li>
+      </ul>
+    </div>
+
+    <figure class="ed-hero-art" data-reveal data-hero-art>
+      <div class="ed-hero-art-frame">
+        <picture>
+          <source
+            type="image/avif"
+            media="(max-width: 767px)"
+            srcset="/brand/landing/v1/hero-editorial-mobile-832.avif 832w, /brand/landing/v1/hero-editorial-mobile-640.avif 640w, /brand/landing/v1/hero-editorial-mobile-480.avif 480w"
+            sizes="100vw"
+          />
+          <source
+            type="image/webp"
+            media="(max-width: 767px)"
+            srcset="/brand/landing/v1/hero-editorial-mobile-832.webp 832w, /brand/landing/v1/hero-editorial-mobile-640.webp 640w, /brand/landing/v1/hero-editorial-mobile-480.webp 480w"
+            sizes="100vw"
+          />
+          <source
+            type="image/avif"
+            srcset="/brand/landing/v1/hero-editorial-desktop-1248.avif 1248w, /brand/landing/v1/hero-editorial-desktop-960.avif 960w, /brand/landing/v1/hero-editorial-desktop-720.avif 720w"
+            sizes="(min-width: 1024px) 46vw, 92vw"
+          />
+          <source
+            type="image/webp"
+            srcset="/brand/landing/v1/hero-editorial-desktop-1248.webp 1248w, /brand/landing/v1/hero-editorial-desktop-960.webp 960w, /brand/landing/v1/hero-editorial-desktop-720.webp 720w"
+            sizes="(min-width: 1024px) 46vw, 92vw"
+          />
+          <img
+            src="/brand/landing/v1/hero-editorial-desktop-960.webp"
+            alt={t("marketing.home.hero.art_alt")}
+            width="1248"
+            height="832"
+            fetchpriority="high"
+            decoding="async"
+          />
+        </picture>
+      </div>
+      <span class="ed-hero-chip ed-hero-chip-order" aria-hidden="true">
+        <strong>{t("marketing.home.sim.message")}</strong>
+        <small>{t("marketing.home.sim.created")}</small>
+        <em>{t("marketing.home.sim.amount")}</em>
+      </span>
+      <span class="ed-hero-chip ed-hero-chip-verified" aria-hidden="true">
+        <strong>{t("marketing.home.sim.product")}</strong>
+        <small>{t("marketing.home.sim.verified")} · {t("marketing.home.sim.delivered")}</small>
+      </span>
+      <span class="ed-hero-art-tag" aria-hidden="true">{t("marketing.home.hero.mag_issue")}</span>
+    </figure>
+  </div>
+
+  <div class="ed-ticker" aria-label={t("marketing.home.ticker.aria")}>
+    <div class="ed-ticker-track">
+      {[0, 1].map((copy) => (
+        <ul class="ed-ticker-list" aria-hidden={copy === 1 ? "true" : undefined}>
+          {channels.map((channel) => (
+            <li data-state={channel.state}>
+              <strong>{t(`marketing.home.channels.name.${channel.key}`)}</strong>
+              <span class="ed-ticker-dot" aria-hidden="true"></span>
+              <small>{t(`marketing.home.channels.status.${channel.state}`)}</small>
+            </li>
+          ))}
+        </ul>
+      ))}
+    </div>
+  </div>
+</section>
+
+<script>
+  import "../../../scripts/marketing/hero-canvas";
+</script>

@@ -1,0 +1,46 @@
+---
+/**
+ * LP Editorial Commerce — why bento (LP1).
+ * Four operating outcomes as an asymmetric bento board: one wide editorial
+ * tile plus three standard tiles, numbered like magazine departments.
+ */
+interface Props {
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+import { icons } from "../icons";
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const tiles = [
+  { key: "one_catalog", icon: icons.database(20), wide: true },
+  { key: "fulfillment", icon: icons.shieldCheck(20), wide: false },
+  { key: "channels", icon: icons.layers(20), wide: false },
+  { key: "visibility", icon: icons.pulse(20), wide: false },
+];
+---
+
+<section class="ed-why" id="why" aria-labelledby="ed-why-title">
+  <div class="platform-shell">
+    <header class="ed-section-heading">
+      <p class="ed-kicker">{t("marketing.home.why.kicker")}</p>
+      <h2 class="ed-title" id="ed-why-title">{t("marketing.home.why.title")}</h2>
+      <p class="ed-lead">{t("marketing.home.why.lead")}</p>
+    </header>
+
+    <div class="ed-why-grid">
+      {tiles.map((tile, index) => (
+        <article class:list={["ed-tile", tile.wide && "ed-tile-wide"]}>
+          <span class="ed-tile-num" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+          <span class="ed-tile-icon" set:html={tile.icon} aria-hidden="true"></span>
+          <h3>{t(`marketing.home.why.${tile.key}.title`)}</h3>
+          <p>{t(`marketing.home.why.${tile.key}.description`)}</p>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
