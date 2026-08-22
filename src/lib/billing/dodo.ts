@@ -351,7 +351,7 @@ export async function createDodoCheckout(input: {
   customData: Record<string, string>;
   fetcher?: typeof fetch;
 }): Promise<DodoCheckout> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const providerPriceId = requireProviderReference(input.priceId, "product_reference");
   let response: Response;
   try {
@@ -389,7 +389,7 @@ export async function retrieveDodoCheckout(input: {
   providerTransactionId: string;
   fetcher?: typeof fetch;
 }): Promise<DodoCheckout> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const requestedCheckoutId = requireProviderReference(input.providerTransactionId, "checkout_reference");
   let response: Response;
   try {
@@ -416,7 +416,7 @@ export async function retrieveDodoSubscription(input: {
   providerSubscriptionId: string;
   fetcher?: typeof fetch;
 }): Promise<DodoSubscription> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const requestedSubscriptionId = requireProviderReference(input.providerSubscriptionId, "subscription_reference");
   let response: Response;
   try {
@@ -459,7 +459,7 @@ async function dodoSubscriptionOperation(input: {
   providerSubscriptionId: string;
   fetcher?: typeof fetch;
 }): Promise<DodoSubscriptionOperation> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const providerSubscriptionId = requireProviderReference(input.providerSubscriptionId, "subscription_reference");
   let response: Response;
   try {
@@ -536,7 +536,7 @@ export async function previewDodoSubscriptionChange(input: {
   providerSubscriptionId: string;
   fetcher?: typeof fetch;
 }): Promise<DodoPlanChangePreview> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const subscriptionId = requireProviderReference(input.providerSubscriptionId, "subscription_reference");
   const productId = requireProviderReference(input.priceId, "product_reference");
   let response: Response;
@@ -624,7 +624,7 @@ export async function createDodoCustomerPortalSession(input: {
   sendEmail?: boolean;
   fetcher?: typeof fetch;
 }): Promise<DodoCustomerPortalSession> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   const customerId = requireProviderReference(input.customerId, "customer_reference");
   const query = new URLSearchParams({ return_url: input.returnUrl });
   if (input.sendEmail !== undefined) query.set("send_email", String(input.sendEmail));

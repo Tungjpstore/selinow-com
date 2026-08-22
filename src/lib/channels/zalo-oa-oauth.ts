@@ -176,7 +176,7 @@ export async function exchangeZaloOfficialAccountAuthorizationCode(input: {
   const codeVerifier = requireCodeVerifier(input.codeVerifier);
   requireRedirectUri(input.redirectUri);
   const secretKey = requireSecretKey(input.secretKey);
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   let response: Response;
   try {
     response = await fetcher(TOKEN_ENDPOINT, {
@@ -220,7 +220,7 @@ export async function refreshZaloOfficialAccountToken(input: {
   const appId = requireAppId(input.appId);
   const refreshToken = requireToken(input.refreshToken, "refresh_token_invalid");
   const secretKey = requireSecretKey(input.secretKey);
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
   let response: Response;
   try {
     response = await fetcher(TOKEN_ENDPOINT, {

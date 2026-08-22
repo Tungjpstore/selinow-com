@@ -385,8 +385,9 @@ export async function exchangeAndVerifyGoogleCode(input: GoogleBindings & { code
   const nonce = requireToken(input.nonce, "nonce_invalid");
   const verifier = requireString(input.verifier, "code_verifier_invalid", 128);
   if (!SAFE_CODE_VERIFIER.test(verifier)) invalid("code_verifier_invalid");
-  const idToken = await exchangeCode({ clientId: config.clientId, clientSecret: config.clientSecret, code, redirectUri: config.redirectUri, verifier, fetcher: input.fetcher ?? fetch });
-  return verifyGoogleIdToken({ clientId: config.clientId, fetcher: input.fetcher ?? fetch, idToken, nonce, now: input.now ?? new Date() });
+  const fetcher = input.fetcher ?? fetch.bind(globalThis);
+  const idToken = await exchangeCode({ clientId: config.clientId, clientSecret: config.clientSecret, code, redirectUri: config.redirectUri, verifier, fetcher });
+  return verifyGoogleIdToken({ clientId: config.clientId, fetcher, idToken, nonce, now: input.now ?? new Date() });
 }
 
 export async function resolveGoogleIdentity(input: GoogleBindings & { allowCreate?: boolean; claims: GoogleClaims; now?: Date; initiatedUserId?: string | null }): Promise<GoogleIdentityResult> {

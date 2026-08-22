@@ -58,7 +58,7 @@ export function createAutomationExecutors(
   env: AppBindings,
   overrides?: { fetcher?: typeof fetch },
 ): ReadonlyMap<string, AutomationExecutor> {
-  const fetcher = overrides?.fetcher ?? fetch;
+  const fetcher = overrides?.fetcher ?? fetch.bind(globalThis);
   const verifyShop: AutomationExecutor = async (reference) => {
     const result = await verifyShopProvision(env, reference);
     if (result === "completed") return { outcome: "completed" };
