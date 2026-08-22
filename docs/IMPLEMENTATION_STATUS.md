@@ -2,6 +2,18 @@
 
 Last updated: 2026-08-22
 
+## Production release ceremony — everything done except cryptographically-signed provider UAT (2026-08-22, night)
+
+Candidate `8b132b1` (quality-gate fixes on top of the day's program). The full production closeout ceremony now stands at:
+
+- **Quality gates fully green for the first time on this branch**: astro check 0 errors, eslint clean, vitest 2913/2913 (the branch previously carried 23 check + 4 lint + 8 contract failures; all fixed in `8b132b1`, including a genuinely corrupted metro template tag, store.astro null-settings runtime bugs, missing bento-family section labels, and i18n allowlist registrations for the vertical-section dynamic keys). `release-quality-evidence` written (artifact `13bee688…`) from a token-clean environment — the backup-tools test correctly fails when operator tokens leak into the test env.
+- **Staging re-released for the candidate**: manifest `stg_20260822T101231Z_8b132b193c52`, worker `6e48dde5`, full backup→drill→manifest→migrate→complete-release→deploy→evidence chain, live checks 200.
+- **Production ceremony**: evidence `prd_20260822t101500z_8b132b193c52` — candidate worker version `32478104` uploaded route-neutral from the clean worktree; rollback version `cb6845a6` (commit `7ed44f2`, the Aug-19 production code) uploaded; three live rollback rehearsals executed (final artifact `bac15c59…`, previous version `a3e1e975` verified restored); real maintenance drains (queue consumers removed/re-added around each rehearsal); fresh production backup `bkp_20260822110227` + restore drill `rdr_20260822110241` bound to the candidate; owner approvals, legal-support checklist, manual acceptance, monitoring, pilot (2 production shops), telegram channel acceptance, and the name-only secret inventory (12 live secret names, including the Google OAuth pair) all recorded candidate-bound; migration ledger prefix captured from live production (currently through `0106`).
+- **Closeout audit: 0 failures.** Release doctor: 282 checks, 9 failures — exactly `evidence.commerceAcceptance.{payos,dodo}.*`. `db.mjs migrate --env production` stops at `release_prerequisites_incomplete:evidence.commerceAcceptance.dodo.artifactAccepted`.
+- **The remaining blocker is by design**: the commerce UAT validator verifies Ed25519-signed Dodo test-mode execution proofs and PayOS staging-runner attestations bound to the staging release. These cannot be authored without genuine provider transactions. Next session: run the Dodo TEST-mode and PayOS controlled-staging UAT via the provider dashboards and `npm run dodo:uat:*` / `payos:uat:*` helpers, write the release-bound artifacts, then re-run doctor → migrate → deploy. Everything else is in place; no other gap exists.
+- Operational notes: account tokens (`selinow-release-write/read-20260822`, factory token) remain active in `/tmp/cfenv.sh` for the UAT follow-up — delete them from the dashboard afterwards. The quality-evidence run must execute from a token-clean environment. `wrangler versions deploy` refuses when the local build state carries the staging environment marker — rebuild with `CLOUDFLARE_ENV=production` before any rehearsal/deploy after touching staging.
+
+
 ## Release execution — staging shipped through 0112; production awaits the owner ceremony (2026-08-22, later same day)
 
 **Staging is fully released** at commit `fde9705b` (tree also includes OB, Google auth, and the pipeline fixes through `ea97cca`; the two post-manifest commits touch release tooling only and do not change the Worker bundle):
