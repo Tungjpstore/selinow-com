@@ -2078,6 +2078,10 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     }
     const targetDatabase = new DatabaseSync(targetVerificationDatabase);
     try {
+      // node:sqlite defaults to foreign_keys=ON, and a D1 export interleaves
+      // CREATE/INSERT statements in database order, so child rows can legally
+      // precede their parent tables. Verification only needs the data.
+      targetDatabase.exec("PRAGMA foreign_keys=OFF");
       targetDatabase.exec(await readFile(targetExport, "utf8"));
     } catch (error) {
       throw new Error("restore_target_export_invalid", { cause: error });
