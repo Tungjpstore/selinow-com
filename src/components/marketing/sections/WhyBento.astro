@@ -35,10 +35,21 @@ const tiles = [
     <div class="ed-why-grid">
       {tiles.map((tile, index) => (
         <article class:list={["ed-tile", tile.wide && "ed-tile-wide"]}>
-          <span class="ed-tile-num" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-          <span class="ed-tile-icon" set:html={tile.icon} aria-hidden="true"></span>
-          <h3>{t(`marketing.home.why.${tile.key}.title`)}</h3>
-          <p>{t(`marketing.home.why.${tile.key}.description`)}</p>
+          {tile.wide ? (
+            <figure class="ed-tile-wide-media">
+              <picture>
+                <source type="image/avif" srcset="/brand/landing/v1/flow-delivery-832.avif 832w, /brand/landing/v1/flow-delivery-640.avif 640w" sizes="(min-width: 1024px) 208px, 92vw" />
+                <source type="image/webp" srcset="/brand/landing/v1/flow-delivery-832.webp 832w, /brand/landing/v1/flow-delivery-640.webp 640w" sizes="(min-width: 1024px) 208px, 92vw" />
+                <img src="/brand/landing/v1/flow-delivery-640.webp" alt={t("marketing.home.flow.art.delivery")} width="832" height="640" loading="lazy" decoding="async" />
+              </picture>
+            </figure>
+          ) : null}
+          <div class="ed-tile-copy">
+            <span class="ed-tile-num" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+            <span class="ed-tile-icon" set:html={tile.icon} aria-hidden="true"></span>
+            <h3>{t(`marketing.home.why.${tile.key}.title`)}</h3>
+            <p>{t(`marketing.home.why.${tile.key}.description`)}</p>
+          </div>
         </article>
       ))}
     </div>

@@ -64,7 +64,7 @@ const solutionPreviews = [
     eyebrow: solution.eyebrow,
     title: solution.title,
     lead: solution.lead,
-    href: locale === "en" ? `/solutions/${slug}` : `/solutions/${slug}?lang=${locale}`,
+    href: `/solutions/${slug}`,
   };
 }).filter((item): item is NonNullable<typeof item> => item !== null);
 

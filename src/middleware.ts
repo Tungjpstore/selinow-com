@@ -30,12 +30,22 @@ export const onRequest = defineMiddleware(async (context, next) => {
       explicit: requestUrl.searchParams.get("lang"),
     });
     const locale = localeResolution.source === "default" ? undefined : localeResolution.locale;
-    const localePreferenceCookie = localeResolution.source === "explicit"
+    // Locale persistence (project-wide): an explicit `?lang=` switch and the
+    // first-touch Accept-Language detection both persist a one-year cookie so
+    // navigation is stable without `?lang` spam in internal links. On the
+    // platform domain the cookie is shared across app./storefront subdomains;
+    // dev localhost keeps host-only cookies.
+    const persistsLocale = localeResolution.source === "explicit" || localeResolution.source === "accept-language";
+    const localeCookieDomain = requestUrl.hostname.endsWith(`.${env.PLATFORM_BASE_DOMAIN}`)
+      ? `.${env.PLATFORM_BASE_DOMAIN}`
+      : undefined;
+    const localePreferenceCookie = persistsLocale
       ? serializeCookie(LOCALE_COOKIE_NAME, localeResolution.locale, {
         httpOnly: false,
         maxAge: 31_536_000,
         sameSite: "Lax",
         secure: requestUrl.protocol === "https:",
+        ...(localeCookieDomain === undefined ? {} : { domain: localeCookieDomain }),
       })
       : null;
     // Leave locale unset when the request has no supported browser hint. Tenant

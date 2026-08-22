@@ -10,14 +10,14 @@ const { dashboardOrigin, locale } = Astro.props;
 const t = createMarketingTranslator(locale ?? Astro.locals.locale);
 const activeLocale = locale === "vi-VN" ? "vi-VN" : "en";
 const languageLabel = activeLocale === "vi-VN" ? "Ngôn ngữ" : "Language";
-const marketingHref = (pathname: string): string => {
-  const url = new URL(pathname, Astro.url.origin);
-  if (activeLocale !== "en") url.searchParams.set("lang", activeLocale);
-  return `${url.pathname}${url.search}${url.hash}`;
-};
+// Internal navigation stays on clean paths — the persisted selinow_locale
+// cookie (set by the middleware on switch or first touch) drives the locale.
+const marketingHref = (pathname: string): string => `${pathname}${Astro.url.hash}`;
+// The switcher always carries an explicit `?lang=`, including English, so the
+// middleware records the choice and the render honors it for that request.
 const localeHref = (targetLocale: "en" | "vi-VN"): string => {
   const url = new URL(Astro.url.pathname, Astro.url.origin);
-  if (targetLocale !== "en") url.searchParams.set("lang", targetLocale);
+  url.searchParams.set("lang", targetLocale);
   return `${url.pathname}${url.search}`;
 };
 const navLinks = [

@@ -11,12 +11,8 @@ const { dashboardOrigin = "https://app.selinow.com", locale: propLocale } = Astr
 const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
 const t = createMarketingTranslator(locale);
 
-const localizedPath = (pathname: string): string => {
-  if (locale === "en") return pathname;
-  const url = new URL(pathname, "https://selinow.com");
-  url.searchParams.set("lang", locale);
-  return `${url.pathname}${url.search}${url.hash}`;
-};
+// Clean internal paths; the persisted locale cookie drives the language.
+const localizedPath = (pathname: string): string => `${pathname}${Astro.url.hash}`;
 ---
 
 <footer class="landing-footer">
