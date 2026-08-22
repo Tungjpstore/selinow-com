@@ -113,6 +113,20 @@ H1/title **"Biến mọi cuộc trò chuyện thành đơn hàng."** (gate asser
 
 ## 5. Phases & acceptance
 
+- **LP2b — i18n flow chuẩn hoá toàn dự án (2026-08-22, theo owner review):**
+  - Nghiên cứu: middleware đã có precedence `?lang` > cookie `selinow_locale` > Accept-Language
+    > tenant fallback; `?lang` đã set cookie. **Bug gốc**: link chuyển EN không mang `?lang=en`
+    → cookie vi vẫn thắng → bấm EN không đổi ngôn ngữ.
+  - Thiết kế đúng (áp mọi surface — marketing/app/storefront cùng một middleware):
+    1. Switcher luôn mang `?lang=` (kể cả `en`) → middleware ghi cookie + render đúng request đó.
+    2. Auto-detect lần đầu (Accept-Language) cũng được persist thành cookie (first-touch).
+    3. Cookie `Domain=.selinow.com` trên production → app. và storefront dùng chung lựa chọn
+       ngôn ngữ; dev localhost giữ host-only.
+    4. Link nội bộ sạch (không `?lang`) — cookie điều khiển; URL `?lang=` vẫn render được cho
+       hreflang/canonical SEO (không redirect).
+    5. Storefront: browser hint (nay gồm cookie dùng chung) vẫn ưu tiên trước tenant default —
+       đúng intent "buyer hint first" hiện có.
+
 - **LP0 — Foundation & asset pipeline**: plan doc, fontsource + sharp devDeps, prompt library,
   script generate + sinh & commit bộ ảnh, mở rộng marketing tokens. *Acceptance:* manifest đủ,
   ảnh ≤ ~250KB/variants, `npm run check` pass.
