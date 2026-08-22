@@ -397,6 +397,149 @@ function safeRunner(runner, args, errorCode, options = {}) {
   }
 }
 
+/**
+ * Split a wrangler D1 export into schema-first and data-second payloads.
+ * D1 executes --file payloads in independent transactions and verifies
+ * foreign keys as each one commits, so a naive re-emission fails on
+ * populated databases: CREATE statements can reference tables that appear
+ * later in the dump, and INSERT batches can reference parent rows that have
+ * not been restored yet (including the shops <-> shop_domains cycle).
+ *
+ * The dump is loaded into an in-memory SQLite database (FK enforcement off)
+ * and re-emitted as:
+ *  - a schema pass: tables (alphabetical) first, then indexes/triggers —
+ *    every table exists before any row is inserted;
+ *  - a data pass: rows grouped per table in foreign-key topological order,
+ *    with cyclic foreign-key columns inserted as NULL and repaired by
+ *    UPDATE statements once every table is populated.
+ */
+export function splitDumpForImport(dump) {
+  if (typeof dump !== "string" || dump.length === 0) {
+    throw new Error("restore_dump_split_invalid");
+  }
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec("PRAGMA foreign_keys=OFF");
+    database.exec(dump);
+    const objectRows = database.prepare(`
+      SELECT type, name, sql FROM sqlite_master
+      WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'
+      ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name
+    `).all();
+    if (objectRows.length === 0) throw new Error("restore_dump_split_invalid");
+    const DEFER = "PRAGMA defer_foreign_keys=TRUE;";
+    const schema = [DEFER];
+    const indexes = [DEFER];
+    const data = [DEFER];
+    const triggers = [DEFER];
+    const tableNames = [];
+    for (const row of objectRows) {
+      if (typeof row?.name !== "string" || typeof row?.sql !== "string") {
+        throw new Error("restore_dump_split_invalid");
+      }
+      const statement = `${row.sql.replace(/;\s*$/u, "")};`;
+      if (row.type === "table") {
+        schema.push(statement);
+        tableNames.push(row.name);
+      } else if (row.type === "index") {
+        // Foreign keys targeting non-primary-key columns need the parent's
+        // UNIQUE indexes in place before any child row is inserted.
+        indexes.push(statement);
+      } else {
+        // Triggers land after the data pass: guards like
+        // shop_subscriptions_trialing_insert_guard must not fire while
+        // historical rows are being restored.
+        triggers.push(statement);
+      }
+    }
+
+    const foreignKeys = new Map();
+    for (const table of tableNames) {
+      const rows = database.prepare(`PRAGMA foreign_key_list("${table}")`).all();
+      foreignKeys.set(table, rows.map((row) => ({
+        column: String(row.from),
+        parentTable: String(row.table),
+        parentColumn: String(row.to),
+      })));
+    }
+    const parentsOf = (table) => new Set(
+      foreignKeys.get(table)
+        ?.map((key) => key.parentTable)
+        .filter((parent) => tableNames.includes(parent) && parent !== table) ?? [],
+    );
+
+    // Kahn topological order; when only cyclic tables remain, accept the
+    // smallest one and defer its outgoing cycle foreign keys to the repair
+    // phase so the loop always terminates.
+    const ordered = [];
+    const deferredColumns = new Map();
+    const remaining = new Set(tableNames);
+    while (remaining.size > 0) {
+      const ready = [...remaining].filter((table) => [...parentsOf(table)].every((parent) => !remaining.has(parent)));
+      let batch;
+      if (ready.length > 0) {
+        batch = ready.sort();
+      } else {
+        const cyclic = [...remaining].sort((a, b) => parentsOf(a).size - parentsOf(b).size || a.localeCompare(b));
+        const table = cyclic[0];
+        deferredColumns.set(table, foreignKeys.get(table)
+          ?.filter((key) => remaining.has(key.parentTable))
+          .map((key) => key.column) ?? []);
+        batch = [table];
+      }
+      for (const table of batch) {
+        ordered.push(table);
+        remaining.delete(table);
+      }
+    }
+
+    const quote = (value) => {
+      if (value === null) return "NULL";
+      if (typeof value === "number") return String(value);
+      if (typeof value === "bigint") return value.toString();
+      if (value instanceof Uint8Array) return "X'" + Buffer.from(value).toString("hex") + "'";
+      return `'${String(value).replace(/'/gu, "''")}'`;
+    };
+    const repairs = [];
+    for (const table of ordered) {
+      const deferred = new Set(deferredColumns.get(table) ?? []);
+      const rows = database.prepare(`SELECT * FROM "${table}"`).all();
+      if (rows.length === 0) continue;
+      const columns = Object.keys(rows[0] ?? {});
+      const columnList = columns.map((column) => `"${column}"`).join(",");
+      rows.forEach((row, index) => {
+        if (index % 50 === 0) data.push(DEFER);
+        const values = columns.map((column) => (deferred.has(column) ? "NULL" : quote(row[column]))).join(",");
+        data.push(`INSERT INTO "${table}" (${columnList}) VALUES (${values});`);
+        if (deferred.size > 0) {
+          const setList = [...deferred].map((column) => `"${column}"=${quote(row[column])}`).join(",");
+          const primaryKey = database.prepare(`PRAGMA table_info("${table}")`).all()
+            .filter((info) => info.pk > 0)
+            .sort((a, b) => a.pk - b.pk)
+            .map((info) => `"${info.name}"=${quote(row[info.name])}`)
+            .join(" AND ");
+          if (primaryKey.length === 0) throw new Error("restore_dump_split_invalid");
+          repairs.push(`UPDATE "${table}" SET ${setList} WHERE ${primaryKey};`);
+        }
+      });
+    }
+    if (repairs.length > 0) {
+      repairs.forEach((statement, index) => {
+        if (index % 50 === 0) data.push(DEFER);
+        data.push(statement);
+      });
+    }
+    return {
+      dataSql: data.join("\n").concat("\n"),
+      indexSql: indexes.join("\n").concat("\n"),
+      schemaSql: schema.join("\n").concat("\n"),
+      triggerSql: triggers.join("\n").concat("\n"),
+    };
+  } finally {
+    database.close();
+  }
+}
+
 function parseTimeTravelBookmark(output) {
   let payload;
   try {
@@ -1830,10 +1973,26 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       runnerOptions,
     ), sourceCountTables);
     if (protectedBackup === null) {
-      safeRunner(runner, [
-        "d1", "execute", targetName, "--remote", "--env", environment,
-        "--file", sourceArtifact, "--yes",
-      ], "restore_import_failed", runnerOptions);
+      // D1 executes --file payloads in independent batches, so a raw dump that
+      // interleaves CREATE and INSERT statements fails mid-import on populated
+      // databases whenever a CREATE's foreign-key target appears later in the
+      // dump. Import the schema first, then the rows.
+      const dump = await readFile(sourceArtifact, "utf8");
+      const { dataSql, indexSql, schemaSql, triggerSql } = splitDumpForImport(dump);
+      const schemaFile = resolve(tempDirectory, "import-schema.sql");
+      const indexFile = resolve(tempDirectory, "import-indexes.sql");
+      const dataFile = resolve(tempDirectory, "import-data.sql");
+      const triggerFile = resolve(tempDirectory, "import-triggers.sql");
+      await writeFile(schemaFile, schemaSql, { encoding: "utf8", mode: 0o600 });
+      await writeFile(indexFile, indexSql, { encoding: "utf8", mode: 0o600 });
+      await writeFile(dataFile, dataSql, { encoding: "utf8", mode: 0o600 });
+      await writeFile(triggerFile, triggerSql, { encoding: "utf8", mode: 0o600 });
+      for (const importFile of [schemaFile, indexFile, dataFile, triggerFile]) {
+        safeRunner(runner, [
+          "d1", "execute", targetName, "--remote", "--env", environment,
+          "--file", importFile, "--yes",
+        ], "restore_import_failed", runnerOptions);
+      }
     }
     const repositoryMigrationNames = await expectedMigrationNames();
     const initialMigrationRows = parseWranglerRows(remoteExecute(
