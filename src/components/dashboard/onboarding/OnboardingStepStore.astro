@@ -298,7 +298,7 @@ const serviceTemplates = templatesForCategory("service");
     align-self: flex-start;
     padding: 3px 10px;
     border-radius: var(--sln-console-radius-pill, 999px);
-    background: #7C6AF0;
+    background: var(--sln-soft-accent);
     color: #FFFFFF;
     font-size: 11px;
     font-weight: 700;
@@ -387,7 +387,7 @@ const serviceTemplates = templatesForCategory("service");
     height: 44px;
     padding-inline-start: 38px;
     padding-inline-end: 14px;
-    border: 2px solid #DAD2EE;
+    border: 2px solid var(--sln-soft-border);
     border-radius: var(--sln-console-radius, 8px);
     background: #FFFFFF;
     font-size: 14px;
@@ -397,14 +397,14 @@ const serviceTemplates = templatesForCategory("service");
 
   .input-with-icon input:focus {
     outline: none;
-    border-color: #7C6AF0;
+    border-color: var(--sln-soft-accent);
     box-shadow: 0 0 0 3px rgba(124, 106, 240, 0.15);
   }
 
   .input-slug-wrap {
     display: flex;
     align-items: center;
-    border: 2px solid #DAD2EE;
+    border: 2px solid var(--sln-soft-border);
     border-radius: var(--sln-console-radius, 8px);
     background: #FFFFFF;
     height: 44px;
@@ -413,7 +413,7 @@ const serviceTemplates = templatesForCategory("service");
   }
 
   .input-slug-wrap:focus-within {
-    border-color: #7C6AF0;
+    border-color: var(--sln-soft-accent);
     box-shadow: 0 0 0 3px rgba(124, 106, 240, 0.15);
   }
 
@@ -437,7 +437,7 @@ const serviceTemplates = templatesForCategory("service");
     height: 100%;
     display: flex;
     align-items: center;
-    border-inline-start: 1px solid #DAD2EE;
+    border-inline-start: 1px solid var(--sln-soft-border);
   }
 
   .slug-status {
@@ -474,7 +474,7 @@ const serviceTemplates = templatesForCategory("service");
     flex-direction: column;
     gap: 10px;
     padding: 16px;
-    border: 2px solid #DAD2EE;
+    border: 2px solid var(--sln-soft-border);
     border-radius: 16px;
     background: #FFFFFF;
     cursor: pointer;
@@ -488,14 +488,14 @@ const serviceTemplates = templatesForCategory("service");
   }
 
   .vertical-card:hover {
-    border-color: #C9BDE4;
-    background: #F5F2FB;
+    border-color: var(--sln-soft-border-strong);
+    background: var(--sln-soft-surface);
   }
 
   .vertical-card.is-selected {
-    border-color: #7C6AF0;
-    background: #EDE8FB;
-    box-shadow: 0 0 0 1px #7C6AF0, 0 4px 12px rgba(124, 106, 240, 0.08);
+    border-color: var(--sln-soft-accent);
+    background: var(--sln-soft-tint);
+    box-shadow: 0 0 0 1px var(--sln-soft-accent), 0 4px 12px rgba(124, 106, 240, 0.08);
   }
 
   .vertical-icon {
@@ -504,8 +504,8 @@ const serviceTemplates = templatesForCategory("service");
     width: 36px;
     height: 36px;
     border-radius: 10px;
-    background: #EDE8FB;
-    color: #7C6AF0;
+    background: var(--sln-soft-tint);
+    color: var(--sln-soft-accent);
   }
 
   .vertical-info strong {
@@ -530,7 +530,7 @@ const serviceTemplates = templatesForCategory("service");
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: #7C6AF0;
+    background: var(--sln-soft-accent);
     color: #FFFFFF;
     display: grid;
     place-items: center;
@@ -562,7 +562,7 @@ const serviceTemplates = templatesForCategory("service");
     flex-direction: column;
     gap: 12px;
     padding: 14px;
-    border: 2px solid #DAD2EE;
+    border: 2px solid var(--sln-soft-border);
     border-radius: 16px;
     background: #FFFFFF;
     cursor: pointer;
@@ -576,14 +576,14 @@ const serviceTemplates = templatesForCategory("service");
   }
 
   .template-preset-card:hover {
-    border-color: #C9BDE4;
-    background: #F5F2FB;
+    border-color: var(--sln-soft-border-strong);
+    background: var(--sln-soft-surface);
   }
 
   .template-preset-card.is-selected {
-    border-color: #7C6AF0;
-    background: #EDE8FB;
-    box-shadow: 0 0 0 1px #7C6AF0, 0 4px 12px rgba(124, 106, 240, 0.08);
+    border-color: var(--sln-soft-accent);
+    background: var(--sln-soft-tint);
+    box-shadow: 0 0 0 1px var(--sln-soft-accent), 0 4px 12px rgba(124, 106, 240, 0.08);
   }
 
   .tpl-swatch {
@@ -607,7 +607,7 @@ const serviceTemplates = templatesForCategory("service");
     height: 6px;
     width: 60%;
     border-radius: 3px;
-    background: #7C6AF0;
+    background: var(--sln-soft-accent);
   }
 
   .tpl-swatch-hero {
@@ -700,7 +700,7 @@ const serviceTemplates = templatesForCategory("service");
     align-items: center;
     gap: 16px;
     padding: 16px 20px;
-    border: 2px solid #DAD2EE;
+    border: 2px solid var(--sln-soft-border);
     border-radius: 16px;
     background: #FFFFFF;
     cursor: pointer;
@@ -714,14 +714,14 @@ const serviceTemplates = templatesForCategory("service");
   }
 
   .channel-card:hover {
-    border-color: #C9BDE4;
-    background: #F5F2FB;
+    border-color: var(--sln-soft-border-strong);
+    background: var(--sln-soft-surface);
   }
 
   .channel-card.is-selected {
-    border-color: #7C6AF0;
-    background: #EDE8FB;
-    box-shadow: 0 0 0 1px #7C6AF0, 0 4px 12px rgba(124, 106, 240, 0.08);
+    border-color: var(--sln-soft-accent);
+    background: var(--sln-soft-tint);
+    box-shadow: 0 0 0 1px var(--sln-soft-accent), 0 4px 12px rgba(124, 106, 240, 0.08);
   }
 
   .channel-card-icons {
@@ -801,7 +801,7 @@ const serviceTemplates = templatesForCategory("service");
     gap: 8px;
     padding: 12px 28px;
     border-radius: 999px;
-    background: #7C6AF0;
+    background: var(--sln-soft-accent);
     color: #FFFFFF;
     border: none;
     font-size: 14.5px;

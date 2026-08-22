@@ -129,6 +129,24 @@
   --sln-duration-panel: 240ms;
   --sln-duration-marketing: 400ms;
   --sln-ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --sln-ease-spring: cubic-bezier(.16, 1, .3, 1);
+
+  /* ── Selinow Soft accent spine (EX0) ─────────────────────────────────────
+   * One warm-violet family shared by marketing, auth, and onboarding; the
+   * console keeps its own --sln-console-* Soft projection (console.css).
+   * Contrast roles: accent-strong is the fill-safe tone for white ink
+   * (#6957DE on white ≈ 5.2:1); accent is for tints, borders, and dark-ink
+   * surfaces (white on #7C6AF0 ≈ 4.0:1 — never use it as a white-text fill). */
+  --sln-soft-accent: #7C6AF0;
+  --sln-soft-accent-strong: #6957DE;
+  --sln-soft-accent-violet: #8B7BFF;
+  --sln-soft-focus: #7C6AF0;
+  --sln-soft-canvas: #EBE6F8;
+  --sln-soft-surface: #F5F2FB;
+  --sln-soft-border: #DAD2EE;
+  --sln-soft-border-strong: #C9BDE4;
+  --sln-soft-tint: #EDE8FB;
+
   --sln-z-base: 0;
   --sln-z-sticky: 20;
   --sln-z-dropdown: 40;

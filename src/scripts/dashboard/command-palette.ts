@@ -1,15 +1,46 @@
 /**
  * Command Palette Controller (⌘K)
  * Fast, keyboard-driven navigation across the Selinow Workspace.
+ * Titles/categories resolve from the serialized console catalog copy (EX0);
+ * results render through DOM APIs (no innerHTML).
  */
+
+type PaletteCopy = Record<string, string>;
+
+type NavDefinition = {
+  categoryKey: string;
+  id: string;
+  keywords: string[];
+  path: string;
+  titleKey: string;
+};
+
+const NAV_DEFINITIONS: readonly NavDefinition[] = [
+  { categoryKey: "console.palette.category.commerce", id: "overview", keywords: ["home", "dashboard", "doanh thu", "tong quan"], path: "/app", titleKey: "console.palette.item.overview" },
+  { categoryKey: "console.palette.category.commerce", id: "orders", keywords: ["don hang", "order", "thanh toan"], path: "/app/orders", titleKey: "console.palette.item.orders" },
+  { categoryKey: "console.palette.category.commerce", id: "bookings", keywords: ["lich", "booking", "hen"], path: "/app/bookings", titleKey: "console.palette.item.bookings" },
+  { categoryKey: "console.palette.category.commerce", id: "customers", keywords: ["khach hang", "user", "buyer"], path: "/app/customers", titleKey: "console.palette.item.customers" },
+  { categoryKey: "console.palette.category.catalog", id: "products", keywords: ["san pham", "product", "item"], path: "/app/products", titleKey: "console.palette.item.products" },
+  { categoryKey: "console.palette.category.catalog", id: "inventory", keywords: ["kho", "key", "license", "ma"], path: "/app/inventory", titleKey: "console.palette.item.inventory" },
+  { categoryKey: "console.palette.category.automation", id: "automation", keywords: ["rule", "auto", "quy tac"], path: "/app/automation", titleKey: "console.palette.item.automation" },
+  { categoryKey: "console.palette.category.channels", id: "store", keywords: ["giao dien", "web", "template", "storefront"], path: "/app/store", titleKey: "console.palette.item.store" },
+  { categoryKey: "console.palette.category.channels", id: "integrations", keywords: ["telegram", "bot", "zalo", "discord"], path: "/app/integrations", titleKey: "console.palette.item.integrations" },
+  { categoryKey: "console.palette.category.channels", id: "payments", keywords: ["payos", "vietqr", "ngan hang"], path: "/app/payments", titleKey: "console.palette.item.payments" },
+  { categoryKey: "console.palette.category.channels", id: "domains", keywords: ["domain", "cname", "dns", "cloudflare"], path: "/app/domains", titleKey: "console.palette.item.domains" },
+  { categoryKey: "console.palette.category.settings", id: "onboarding", keywords: ["onboarding", "setup", "huong dan"], path: "/onboarding", titleKey: "console.palette.item.onboarding" },
+  { categoryKey: "console.palette.category.settings", id: "members", keywords: ["member", "team", "nhan vien"], path: "/app/members", titleKey: "console.palette.item.members" },
+  { categoryKey: "console.palette.category.settings", id: "security", keywords: ["bao mat", "2fa", "mat khau", "totp"], path: "/app/security", titleKey: "console.palette.item.security" },
+  { categoryKey: "console.palette.category.settings", id: "billing", keywords: ["billing", "goi", "thanh toan saas"], path: "/app/billing", titleKey: "console.palette.item.billing" },
+  { categoryKey: "console.palette.category.settings", id: "developer", keywords: ["api", "developer", "webhook", "token"], path: "/app/developer", titleKey: "console.palette.item.developer" },
+  { categoryKey: "console.palette.category.settings", id: "data", keywords: ["audit", "log", "lich su", "xoa"], path: "/app/data", titleKey: "console.palette.item.data" },
+];
 
 export type CommandItem = {
   id: string;
   title: string;
   category: string;
   url: string;
-  icon?: string;
-  keywords?: string[];
+  keywords: string[];
 };
 
 export class CommandPaletteController {
@@ -19,6 +50,7 @@ export class CommandPaletteController {
   private items: CommandItem[] = [];
   private selectedIndex = 0;
   private filteredItems: CommandItem[] = [];
+  private copy: PaletteCopy = {};
 
   constructor() {
     this.dialog = document.querySelector<HTMLDialogElement>("[data-command-palette-dialog]");
@@ -26,6 +58,11 @@ export class CommandPaletteController {
 
     this.input = this.dialog.querySelector<HTMLInputElement>("[data-command-palette-input]");
     this.resultsContainer = this.dialog.querySelector<HTMLElement>("[data-command-palette-results]");
+    try {
+      this.copy = JSON.parse(this.dialog.dataset.copy ?? "{}") as PaletteCopy;
+    } catch {
+      this.copy = {};
+    }
 
     this.collectDefaultItems();
     this.bindEvents();
@@ -36,34 +73,13 @@ export class CommandPaletteController {
     const withShop = (path: string): string =>
       shopParam ? `${path}?shop=${encodeURIComponent(shopParam)}` : path;
 
-    this.items = [
-      // Commerce
-      { id: "overview", title: "Tổng quan Dashboard", category: "Kinh doanh", url: withShop("/app"), keywords: ["home", "dashboard", "doanh thu"] },
-      { id: "orders", title: "Quản lý Đơn hàng", category: "Kinh doanh", url: withShop("/app/orders"), keywords: ["don hang", "order", "thanh toan"] },
-      { id: "bookings", title: "Lịch hẹn & Bookings", category: "Kinh doanh", url: withShop("/app/bookings"), keywords: ["lich", "booking", "hen"] },
-      { id: "customers", title: "Khách hàng", category: "Kinh doanh", url: withShop("/app/customers"), keywords: ["khach hang", "user", "buyer"] },
-
-      // Catalog & Inventory
-      { id: "products", title: "Danh mục Sản phẩm", category: "Sản phẩm & Kho", url: withShop("/app/products"), keywords: ["san pham", "product", "item"] },
-      { id: "inventory", title: "Kho Mã kích hoạt & License Keys", category: "Sản phẩm & Kho", url: withShop("/app/inventory"), keywords: ["kho", "key", "license", "ma"] },
-
-      // Automation
-      { id: "automation", title: "Quy tắc Tự động hóa", category: "Tự động hóa", url: withShop("/app/automation"), keywords: ["rule", "auto", "quy tac"] },
-
-      // Channels & Payments
-      { id: "store", title: "Thiết kế Storefront Website", category: "Kênh bán", url: withShop("/app/store"), keywords: ["giao dien", "web", "template"] },
-      { id: "integrations", title: "Kênh Bot Telegram, Zalo, Discord", category: "Kênh bán", url: withShop("/app/integrations"), keywords: ["telegram", "bot", "zalo", "discord"] },
-      { id: "payments", title: "Cổng VietQR & PayOS", category: "Kênh bán", url: withShop("/app/payments"), keywords: ["payos", "vietqr", "ngan hang"] },
-      { id: "domains", title: "Tên miền Tuỳ chỉnh", category: "Kênh bán", url: withShop("/app/domains"), keywords: ["domain", "cname", "dns", "cloudflare"] },
-
-      // Settings
-      { id: "onboarding", title: "Hướng dẫn & Setup Readiness", category: "Cài đặt", url: withShop("/onboarding"), keywords: ["onboarding", "setup", "huong dan"] },
-      { id: "members", title: "Thành viên & Phân quyền", category: "Cài đặt", url: withShop("/app/members"), keywords: ["member", "team", "nhan vien"] },
-      { id: "security", title: "Bảo mật & Xác thực 2FA", category: "Cài đặt", url: withShop("/app/security"), keywords: ["bao mat", "2fa", "mat khau", "totp"] },
-      { id: "billing", title: "Gói cước & Đăng ký SaaS", category: "Cài đặt", url: withShop("/app/billing"), keywords: ["billing", "goi", "thanh toan saas"] },
-      { id: "developer", title: "API Keys & Webhooks Developer", category: "Cài đặt", url: withShop("/app/developer"), keywords: ["api", "developer", "webhook", "token"] },
-      { id: "data", title: "Nhật ký Kiểm toán & Dữ liệu", category: "Cài đặt", url: withShop("/app/data"), keywords: ["audit", "log", "lich su", "xoa"] },
-    ];
+    this.items = NAV_DEFINITIONS.map((definition) => ({
+      category: this.copy[definition.categoryKey] ?? definition.categoryKey,
+      id: definition.id,
+      keywords: definition.keywords,
+      title: this.copy[definition.titleKey] ?? definition.id,
+      url: withShop(definition.path),
+    }));
   }
 
   private bindEvents(): void {
@@ -86,8 +102,9 @@ export class CommandPaletteController {
     if (!this.dialog || !this.input) return;
 
     // Filter on typing
-    this.input.addEventListener("input", () => {
-      this.filter(this.input?.value.trim() ?? "");
+    this.input.addEventListener("input", (event) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement) this.filter(target.value.trim());
     });
 
     // Keyboard navigation within palette
@@ -145,7 +162,7 @@ export class CommandPaletteController {
       this.filteredItems = this.items.filter((item) => {
         const matchTitle = item.title.toLowerCase().includes(q);
         const matchCategory = item.category.toLowerCase().includes(q);
-        const matchKeywords = item.keywords?.some((k) => k.toLowerCase().includes(q)) ?? false;
+        const matchKeywords = item.keywords.some((keyword) => keyword.toLowerCase().includes(q));
         return matchTitle || matchCategory || matchKeywords;
       });
     }
@@ -169,39 +186,43 @@ export class CommandPaletteController {
 
   private render(): void {
     if (!this.resultsContainer) return;
+    this.resultsContainer.replaceChildren();
 
     if (this.filteredItems.length === 0) {
-      this.resultsContainer.innerHTML = `
-        <div class="command-empty">
-          <p>Không tìm thấy kết quả phù hợp</p>
-        </div>
-      `;
+      const empty = document.createElement("div");
+      empty.className = "command-empty";
+      const message = document.createElement("p");
+      message.textContent = this.copy["console.palette.empty"] ?? "";
+      empty.appendChild(message);
+      this.resultsContainer.appendChild(empty);
       return;
     }
 
-    const html = this.filteredItems
-      .map((item, index) => {
-        const isSelected = index === this.selectedIndex;
-        return `
-          <a class="command-item ${isSelected ? "is-selected" : ""}" href="${item.url}" data-index="${String(index)}">
-            <div class="command-item__body">
-              <span class="command-item__title">${item.title}</span>
-              <span class="command-item__category">${item.category}</span>
-            </div>
-            <span class="command-item__enter">↵</span>
-          </a>
-        `;
-      })
-      .join("");
-
-    this.resultsContainer.innerHTML = html;
-
-    // Bind item click
-    for (const el of this.resultsContainer.querySelectorAll<HTMLAnchorElement>(".command-item")) {
-      el.addEventListener("click", () => {
-        const idx = Number(el.dataset.index);
-        this.selectedIndex = idx;
+    for (const [index, item] of this.filteredItems.entries()) {
+      const link = document.createElement("a");
+      link.className = "command-item";
+      if (index === this.selectedIndex) link.classList.add("is-selected");
+      link.href = item.url;
+      link.dataset.index = String(index);
+      const body = document.createElement("div");
+      body.className = "command-item__body";
+      const title = document.createElement("span");
+      title.className = "command-item__title";
+      title.textContent = item.title;
+      const category = document.createElement("span");
+      category.className = "command-item__category";
+      category.textContent = item.category;
+      body.appendChild(title);
+      body.appendChild(category);
+      const enter = document.createElement("span");
+      enter.className = "command-item__enter";
+      enter.textContent = "↵";
+      link.appendChild(body);
+      link.appendChild(enter);
+      link.addEventListener("click", () => {
+        this.selectedIndex = index;
       });
+      this.resultsContainer.appendChild(link);
     }
   }
 }

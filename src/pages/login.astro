@@ -18,7 +18,8 @@ if (Astro.url.origin !== env.DASHBOARD_ORIGIN) {
 
 try {
   await authenticateRequest(Astro.request, env);
-  return Astro.redirect("/app", 302);
+  const requested = Astro.url.searchParams.get("redirect");
+  return Astro.redirect(requested !== null && requested.startsWith("/") && !requested.startsWith("//") && !requested.includes("\\") ? requested : "/app", 302);
 } catch {
   // Anonymous visitors continue to login form
 }
@@ -288,7 +289,7 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
   .login-aside-panel {
     background:
       radial-gradient(700px 420px at 70% 10%, rgba(124, 106, 240, 0.06), transparent 62%),
-      var(--surface-muted, #F5F2FB);
+      var(--surface-muted, var(--sln-soft-surface));
     border-left: 1px solid var(--border-soft);
     display: flex;
     align-items: center;
@@ -311,7 +312,12 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
   .brand img { display: block; width: 140px; height: auto; }
 
   /* Auth Card */
+  @keyframes fadeInEnter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
   .auth-card {
+    animation: fadeInEnter var(--sln-duration-panel) var(--sln-ease-spring) both;
     width: 100%;
     background: #FFFFFF;
     border: 1px solid var(--border-strong, #D9DCE5);
@@ -548,7 +554,7 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     gap: 4px;
     padding: 4px;
     margin-bottom: 24px;
-    background: var(--surface-muted, #F5F2FB);
+    background: var(--surface-muted, var(--sln-soft-surface));
     border: 1px solid var(--border-soft, #E4E7EE);
     border-radius: 12px;
   }

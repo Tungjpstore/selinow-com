@@ -2,22 +2,24 @@
  * Selinow Soft — Auth surface (login / register / forgot-password).
  *
  * Scoped to the auth pages only (imported by each page after selinow-tokens.css):
- * remaps the legacy --sln-* accent tokens to the warm "Selinow Soft" palette so
- * Auth reads as one seamless flow with the onboarding + dashboard console, without
- * touching the marketing/storefront surfaces that share the global tokens.
+ * remaps the legacy --sln-* accent tokens onto the shared Selinow Soft spine
+ * (EX0) so Auth reads as one seamless flow with the onboarding + dashboard
+ * console. All color values live in selinow-tokens.css; this file only
+ * aliases them. Fills use accent-strong (white ink ≈ 5.2:1) per the spine
+ * contrast roles.
  */
 body {
-  --sln-action-primary: #7C6AF0;
-  --sln-action-primary-hover: #6957DE;
-  --sln-action-primary-strong: #6957DE;
-  --sln-brand-indigo: #7C6AF0;
-  --sln-brand-indigo-hover: #6957DE;
-  --sln-brand-violet: #8B7BFF;
-  --sln-focus-ring: #7C6AF0;
-  --sln-bg-canvas: #EBE6F8;
-  --sln-bg-subtle: #F5F2FB;
-  --sln-border-default: #DAD2EE;
-  --sln-border-strong: #C9BDE4;
-  --sln-tint-indigo: #EDE8FB;
-  background-color: #EBE6F8;
+  --sln-action-primary: var(--sln-soft-accent-strong);
+  --sln-action-primary-hover: var(--sln-soft-accent-strong);
+  --sln-action-primary-strong: var(--sln-soft-accent-strong);
+  --sln-brand-indigo: var(--sln-soft-accent);
+  --sln-brand-indigo-hover: var(--sln-soft-accent-strong);
+  --sln-brand-violet: var(--sln-soft-accent-violet);
+  --sln-focus-ring: var(--sln-soft-focus);
+  --sln-bg-canvas: var(--sln-soft-canvas);
+  --sln-bg-subtle: var(--sln-soft-surface);
+  --sln-border-default: var(--sln-soft-border);
+  --sln-border-strong: var(--sln-soft-border-strong);
+  --sln-tint-indigo: var(--sln-soft-tint);
+  background-color: var(--sln-soft-canvas);
 }

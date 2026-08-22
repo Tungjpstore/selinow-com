@@ -11,6 +11,7 @@ type StorefrontDraft = {
   primaryColor: string;
   seoDescription: string;
   seoTitle: string;
+  sections?: unknown;
   showExactStock: boolean;
   supportText: string;
   templateId: string;
@@ -67,6 +68,7 @@ if (builder !== null) {
         primaryColor: draft.primaryColor,
         seoDescription: draft.seoDescription,
         seoTitle: draft.seoTitle,
+        sections: draft.sections,
         showExactStock: draft.showExactStock,
         supportText: draft.supportText,
         templateId: draft.templateId,
@@ -117,6 +119,16 @@ if (builder !== null) {
       }
     };
 
+    const readSectionsField = (fallback: unknown): unknown => {
+      try {
+        const raw = field("sections")?.value ?? "";
+        if (raw.trim() === "") return fallback;
+        return JSON.parse(raw) as unknown;
+      } catch {
+        return fallback;
+      }
+    };
+
     const readDraft = (): StorefrontDraft => {
       const stockField = field("showExactStock");
       const templateField = builder.querySelector<HTMLInputElement>('[data-field="templateId"]:checked');
@@ -131,6 +143,7 @@ if (builder !== null) {
         primaryColor: field("primaryColor")?.value.toUpperCase() ?? saved.primaryColor,
         seoDescription: field("seoDescription")?.value.trim() ?? "",
         seoTitle: field("seoTitle")?.value.trim() ?? "",
+        sections: readSectionsField(saved.sections),
         showExactStock: stockField instanceof HTMLInputElement ? stockField.checked : saved.showExactStock,
         supportText: field("supportText")?.value.trim() ?? "",
         templateId: templateField?.value ?? saved.templateId,
@@ -216,6 +229,9 @@ if (builder !== null) {
         root.style.setProperty("--preview-accent", next.accentColor);
         root.style.setProperty("--preview-brand-ink", validation.brand.ink);
         root.style.setProperty("--preview-accent-ink", validation.accent.ink);
+        // Per-template preview skin (CD4): the draft templateId re-skins the
+        // live preview without a round-trip; swift is the unscoped default.
+        root.dataset.templatePreview = next.templateId;
       }
       if (headline !== null) headline.textContent = next.headline || text("headlineFallback");
       if (description !== null) description.textContent = next.description || text("descriptionFallback");
@@ -337,6 +353,7 @@ if (builder !== null) {
           announcement: next.announcement || null,
           expectedVersion: draftVersion,
           logoUrl: next.logoUrl || null,
+          ...(next.sections === undefined || next.sections === null ? {} : { sections: next.sections }),
         });
         saved = next;
         draftVersion = response.settings.version;
@@ -438,6 +455,146 @@ if (builder !== null) {
       if (frame !== null) frame.dataset.device = device;
       });
     });
+
+    // TM1: home layout panel — toggle/reorder universal sections, persist the
+    // full config through the same draft save (hidden input carries the JSON).
+    const sectionStack: HTMLElement | null = builder.querySelector("[data-section-stack]");
+    const sectionNote = builder.querySelector<HTMLElement>("[data-section-note]");
+    const sectionsField = builder.querySelector<HTMLInputElement>('[data-field="sections"]');
+
+    type SectionRowState = { enabled: boolean; type: string };
+
+    const readSectionRows = (): SectionRowState[] => [...(sectionStack?.querySelectorAll<HTMLElement>("[data-section-row]") ?? [])].map((row) => ({
+      enabled: row.dataset.sectionDisabled !== "true",
+      type: row.dataset.sectionRow ?? "",
+    }));
+
+    const readSectionItems = (sectionType: string): Array<Record<string, string>> => {
+      const inputs = [...builder.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(`[data-section-item="${sectionType}"]`)];
+      const byIndex = new Map<number, Record<string, string>>();
+      for (const input of inputs) {
+        const index = Number.parseInt(input.dataset.sectionItemIndex ?? "0", 10);
+        const field = input.dataset.sectionItemField ?? "";
+        const value = input.value.trim();
+        if (!Number.isSafeInteger(index) || field.length === 0) continue;
+        const record = byIndex.get(index) ?? {};
+        if (value.length > 0) record[field] = value;
+        byIndex.set(index, record);
+      }
+      return [...byIndex.entries()]
+        .filter(([, record]) => Object.keys(record).length > 0)
+        .map(([index, record]) => ({ _index: index, ...record }))
+        .sort((left, right) => left._index - right._index)
+        .map(({ _index, ...record }) => {
+          void _index;
+          return record;
+        });
+    };
+
+    const writeSectionsField = (): void => {
+      if (sectionsField === null) return;
+      const rows = readSectionRows();
+      // Persist the FULL stack (native locked rows included) so the config is
+      // self-describing; the server parser bounds and cleans it. Universal
+      // sections carry their merchant-edited item lists in settings.
+      const config = rows
+        .filter((row) => row.enabled)
+        .map((row) => {
+          if (row.type !== "usp" && row.type !== "faq") return { enabled: true, id: `cfg-${row.type}`, settings: {}, type: row.type };
+          const items = readSectionItems(row.type);
+          return { enabled: true, id: `cfg-${row.type}`, settings: items.length > 0 ? { items } : {}, type: row.type };
+        });
+      sectionsField.value = JSON.stringify(config);
+      if (sectionNote !== null) {
+        const anyUniversalEnabled = rows.some((row) => (row.type === "usp" || row.type === "faq") && row.enabled);
+        sectionNote.textContent = anyUniversalEnabled ? "" : text("console.builder.sections.empty_warning");
+      }
+      syncSectionPreview(rows);
+      updateControls(readDraft());
+    };
+
+    const syncSectionPreview = (rows: SectionRowState[]): void => {
+      const usp: HTMLElement | null = builder.querySelector("[data-preview-usp]");
+      const faq: HTMLElement | null = builder.querySelector("[data-preview-faq]");
+      const uspEnabled = rows.some((row) => row.type === "usp" && row.enabled);
+      const faqEnabled = rows.some((row) => row.type === "faq" && row.enabled);
+      if (usp !== null) usp.hidden = !uspEnabled;
+      if (faq !== null) faq.hidden = !faqEnabled;
+    };
+
+    const refreshSectionRowChrome = (): void => {
+      const rows = [...(sectionStack?.querySelectorAll<HTMLElement>("[data-section-row]") ?? [])];
+      const editableRows = rows.filter((row) => row.dataset.sectionRow === "usp" || row.dataset.sectionRow === "faq");
+      for (const [index, row] of editableRows.entries()) {
+        const up = row.querySelector<HTMLButtonElement>('[data-section-move="up"]');
+        const down = row.querySelector<HTMLButtonElement>('[data-section-move="down"]');
+        if (up !== null) up.disabled = index === 0;
+        if (down !== null) down.disabled = index === editableRows.length - 1;
+      }
+    };
+
+    sectionStack?.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const move = target.closest<HTMLButtonElement>("[data-section-move]");
+      if (move !== null) {
+        const direction = move.dataset.sectionMove === "up" ? -1 : 1;
+        const row = move.closest<HTMLElement>("[data-section-row]");
+        if (row !== null) {
+          const editable = [...sectionStack.querySelectorAll<HTMLElement>("[data-section-row]")].filter((candidate) => candidate.dataset.sectionRow === "usp" || candidate.dataset.sectionRow === "faq");
+          const index = editable.indexOf(row);
+          const swapWith: HTMLElement | undefined = editable[index + direction];
+          if (index >= 0 && swapWith !== undefined) {
+            const anchor: Node | null = direction === -1 ? swapWith : swapWith.nextSibling;
+            sectionStack.insertBefore(row, anchor);
+            refreshSectionRowChrome();
+            writeSectionsField();
+          }
+        }
+        return;
+      }
+      const restore = target.closest<HTMLButtonElement>("[data-section-restore]");
+      if (restore !== null) {
+        try {
+          const defaults = JSON.parse(sectionStack.dataset.defaultStack ?? "[]") as Array<{ type: string }>;
+          sectionStack.replaceChildren(...defaults.map((entry) => buildSectionRow(entry.type)));
+        } catch {
+          // Default stack markup is server-rendered; a parse failure here means
+          // the dataset was tampered with — rebuilding from locked rows is fine.
+        }
+        refreshSectionRowChrome();
+        writeSectionsField();
+        if (sectionNote !== null) sectionNote.textContent = text("console.builder.sections.restored");
+        return;
+      }
+    });
+
+    const itemsEditor = builder.querySelector<HTMLElement>("[data-section-items-editor]");
+    itemsEditor?.addEventListener("input", () => {
+      writeSectionsField();
+    });
+
+    sectionStack?.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.hasAttribute("data-section-toggle")) return;
+      const row = target.closest<HTMLElement>("[data-section-row]");
+      if (row !== null) row.dataset.sectionDisabled = target.checked ? "true" : "false";
+      row?.classList.toggle("is-off", !target.checked);
+      writeSectionsField();
+    });
+
+    const buildSectionRow = (type: string): HTMLElement => {
+      // Reuse the server-rendered locked row as the clone source so restored
+      // rows keep exact markup and styles.
+      const source = sectionStack === null ? null : sectionStack.querySelector<HTMLElement>(`[data-section-row="${CSS.escape(type)}"]`);
+      if (source !== null) return source.cloneNode(true) as HTMLElement;
+      const fallback = document.createElement("li");
+      fallback.dataset.sectionRow = type;
+      return fallback;
+    };
+
+    refreshSectionRowChrome();
+    syncSectionPreview(readSectionRows());
 
     // Shipping methods management (physical vertical, TV5).
     const shippingList = builder.querySelector<HTMLElement>("[data-shipping-list]");

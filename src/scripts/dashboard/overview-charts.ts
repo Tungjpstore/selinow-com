@@ -157,7 +157,7 @@ export class VelocityChartRenderer {
         this.ctx.bezierCurveTo(cpX, curr.y, cpX, next.y, next.x, next.y);
       }
     }
-    this.ctx.strokeStyle = "#6552E8";
+    this.ctx.strokeStyle = getComputedStyle(this.canvas).getPropertyValue("--sln-soft-accent").trim() || "#7C6AF0";
     this.ctx.lineWidth = 2.5;
     this.ctx.lineCap = "round";
     this.ctx.lineJoin = "round";
@@ -188,7 +188,7 @@ export class VelocityChartRenderer {
         // Point center
         this.ctx.beginPath();
         this.ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        this.ctx.fillStyle = "#6552E8";
+        this.ctx.fillStyle = getComputedStyle(this.canvas).getPropertyValue("--sln-soft-accent").trim() || "#7C6AF0";
         this.ctx.fill();
         this.ctx.strokeStyle = "#FFFFFF";
         this.ctx.lineWidth = 2;

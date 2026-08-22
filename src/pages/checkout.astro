@@ -57,9 +57,22 @@ const policyLinks = shop === null ? [] : [
           <label>{t("storefront.checkout.shipping.province")} <input id="ship-province" name="province" autocomplete="address-level1" required maxlength="120" /></label>
           <label>{t("storefront.checkout.shipping.notes")} <input id="ship-notes" name="notes" maxlength="300" /></label>
         </fieldset>
+        <div class="promo-field" id="promo-field">
+          <label for="promo-input">{t("storefront.checkout.promo.label")}</label>
+          <div class="promo-row">
+            <input id="promo-input" autocomplete="off" spellcheck="false" maxlength="32" placeholder={t("storefront.checkout.promo.placeholder")} data-promo-input />
+            <button class="store-button secondary" type="button" data-promo-apply>{t("storefront.checkout.promo.apply")}</button>
+          </div>
+        </div>
+        <div class="promo-applied" id="promo-applied" hidden>
+          <span class="promo-chip" data-promo-code></span>
+          <button class="promo-remove" type="button" data-promo-remove>{t("storefront.checkout.promo.remove")}</button>
+        </div>
+        <p class="promo-status form-status" role="status" aria-live="polite" data-promo-status></p>
+        <div class="summary-row" id="discount-row" hidden><span data-discount-label></span><strong id="discount-value"></strong></div>
         <div class="summary-row" id="shipping-fee-row" hidden><span>{t("storefront.checkout.shipping.fee")}</span><strong id="shipping-fee"></strong></div>
         <div class="summary-row total"><span>{t("storefront.checkout.total")}</span><strong id="checkout-total">{t("storefront.checking")}</strong></div>
-        {turnstileSiteKey && <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-action="storefront_checkout" data-theme="light" data-size="flexible"></div>}
+        {turnstileSiteKey && <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-action="storefront_checkout" data-theme={shop.template.scheme === "dark" ? "dark" : "light"} data-size="flexible"></div>}
         <p id="checkout-status" class="form-status" aria-live="polite" aria-atomic="true">{t("storefront.checkout.confirming")}</p>
         <button id="checkout-retry" class="store-button checkout-retry" type="button" hidden>{t("storefront.retry")}</button>
         <button id="checkout-submit" class="store-button" type="submit" disabled>{t("storefront.checkout.submit")}</button>

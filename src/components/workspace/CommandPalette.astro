@@ -2,10 +2,20 @@
 /**
  * CommandPalette.astro
  * Sleek, keyboard-driven navigation modal (⌘K) with frosted glass aesthetic.
+ * Copy is i18n-driven (console catalog, EX0): localized strings serialize into
+ * data-copy for the client controller.
  */
+import { getConsoleClientCopy } from "../../lib/i18n/catalogs/console";
+
+interface Props {
+  locale?: unknown;
+}
+
+const { locale } = Astro.props;
+const copy = getConsoleClientCopy(locale);
 ---
 
-<dialog class="command-palette-dialog" data-command-palette-dialog aria-label="Tìm kiếm nhanh">
+<dialog class="command-palette-dialog" data-command-palette-dialog aria-label={copy["console.palette.aria_dialog"]} data-copy={JSON.stringify(copy)}>
   <div class="command-palette-box">
     <div class="command-palette-header">
       <svg class="command-search-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -16,8 +26,8 @@
         type="search"
         class="command-palette-input"
         data-command-palette-input
-        aria-label="Tìm nhanh trang, đơn hàng, cấu hình (⌘K)"
-        placeholder="Tìm nhanh trang, đơn hàng, cấu hình... (⌘K)"
+        aria-label={copy["console.palette.aria_input"]}
+        placeholder={copy["console.palette.placeholder"]}
         autocomplete="off"
         spellcheck="false"
       />
@@ -30,9 +40,9 @@
 
     <div class="command-palette-footer">
       <div class="command-footer-tip">
-        <span><kbd>↑</kbd> <kbd>↓</kbd> để di chuyển</span>
-        <span><kbd>↵</kbd> để chọn</span>
-        <span><kbd>ESC</kbd> để đóng</span>
+        <span><kbd>↑</kbd> <kbd>↓</kbd> {copy["console.palette.tip_move"]}</span>
+        <span><kbd>↵</kbd> {copy["console.palette.tip_select"]}</span>
+        <span><kbd>ESC</kbd> {copy["console.palette.tip_close"]}</span>
       </div>
     </div>
   </div>
@@ -152,7 +162,7 @@
   :global(.command-item:hover),
   :global(.command-item.is-selected) {
     background: var(--sln-console-accent-soft, #ece9ff);
-    color: var(--sln-console-accent, #6552e8);
+    color: var(--sln-console-accent, var(--sln-soft-accent));
   }
 
   :global(.command-item__body) {
@@ -172,7 +182,7 @@
   }
 
   :global(.command-item.is-selected .command-item__category) {
-    color: var(--sln-console-accent, #6552e8);
+    color: var(--sln-console-accent, var(--sln-soft-accent));
     opacity: 0.8;
   }
 
@@ -184,7 +194,7 @@
 
   :global(.command-item.is-selected .command-item__enter) {
     opacity: 1;
-    color: var(--sln-console-accent, #6552e8);
+    color: var(--sln-console-accent, var(--sln-soft-accent));
   }
 
   :global(.command-empty) {

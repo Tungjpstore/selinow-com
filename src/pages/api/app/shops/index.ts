@@ -125,13 +125,17 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
     const body = await readJsonObject(request);
-    rejectUnknownFields(body, ["businessCountry", "currency", "defaultLocale", "merchantCountry", "name", "planCode", "slug"]);
+        rejectUnknownFields(body, ["businessCountry", "currency", "defaultLocale", "merchantCountry", "name", "planCode", "slug", "vertical"]);
     const planCode = body.planCode === undefined ? "starter" : typeof body.planCode === "string" ? body.planCode : "";
     if (!(PUBLIC_PLAN_CODES as readonly string[]).includes(planCode)) {
       throw new AppError("validation_failed", 400, ["plan_invalid"]);
     }
     const businessCountry = normalizeOptionalCountryCode(body.businessCountry, "business_country_invalid");
     const merchantCountry = normalizeOptionalCountryCode(body.merchantCountry, "merchant_country_invalid");
+    // EX5.2: onboarding persists the chosen selling vertical (advisory since 0102).
+    const vertical = body.vertical === undefined || body.vertical === null ? undefined
+      : body.vertical === "digital" || body.vertical === "physical" || body.vertical === "booking" ? body.vertical
+        : (() => { throw new AppError("validation_failed", 400, ["vertical_invalid"]); })();
     const result = await createShop({
       ...(businessCountry === undefined ? {} : { businessCountry }),
       ...(body.currency === undefined ? {} : { currency: body.currency }),
@@ -145,6 +149,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       requestId: locals.requestId,
       slug: normalizeSlug(body.slug),
       userId: auth.userId,
+      ...(vertical === undefined ? {} : { vertical }),
     });
     return Response.json({ ok: true, requestId: locals.requestId, shop: result.shop }, {
       status: result.created ? 201 : 200,

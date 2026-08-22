@@ -394,6 +394,9 @@ function initQuickstart(): void {
     });
   });
 
+  const selectedVerticalValue = (): string => Array.from(verticalRadios).find((radio) => radio.checked)?.value ?? "digital";
+  const selectedTemplateValue = (): string | null => Array.from(templateRadios).find((radio) => radio.checked)?.value ?? null;
+
   templateRadios.forEach((radio) => {
     radio.addEventListener("change", () => {
       templateCards.forEach((card) => {
@@ -432,6 +435,7 @@ function initQuickstart(): void {
               name,
               planCode: "starter",
               slug,
+              vertical: selectedVerticalValue(),
             }),
             headers: {
               "Idempotency-Key": `shop-create-${slug}-${String(Date.now())}`,
@@ -463,6 +467,16 @@ function initQuickstart(): void {
           }),
           method: "POST",
         });
+
+        // EX5.2: persist the chosen storefront template into the draft so the
+        // publish step and Store Builder start from the seller's selection.
+        const chosenTemplate = selectedTemplateValue();
+        if (chosenTemplate !== null) {
+          await apiRequest(`/api/app/shops/${encodeURIComponent(shopPubId)}/settings`, {
+            body: JSON.stringify({ expectedVersion: 1, templateId: chosenTemplate }),
+            method: "PATCH",
+          }).catch(() => undefined);
+        }
 
         showToast("Đã lưu thông tin cửa hàng thành công!");
         setStep("product");

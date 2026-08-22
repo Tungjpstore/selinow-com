@@ -5,9 +5,11 @@ import "../styles/primitives.css";
 import "../styles/app-shell.css";
 import "../styles/selinow-a11y.css";
 import CommandPalette from "../components/workspace/CommandPalette.astro";
+import ToastRegion from "../components/primitives/ToastRegion.astro";
 import LiveActivityRadar from "../components/console/LiveActivityRadar.astro";
 import { shopSwitchHref, withSelectedShop as appendSelectedShop } from "../lib/dashboard/shop-navigation";
 import { createDashboardTranslator } from "../lib/i18n/catalogs/dashboard";
+import { createConsoleTranslator } from "../lib/i18n/catalogs/console";
 import { directionForLocale } from "../lib/i18n/locale";
 import { getBindings } from "../lib/platform/bindings";
 import type { ShopRole } from "../lib/tenants/policy";
@@ -41,6 +43,7 @@ type NavGroup = {
 
 const locale = Astro.locals.locale;
 const t = createDashboardTranslator(locale);
+const ct = createConsoleTranslator(Astro.locals.locale ?? shop?.defaultLocale);
 const {
   activePath = Astro.url.pathname,
   displayName,
@@ -250,7 +253,7 @@ const icons: Record<string, string> = {
                 <span class="breadcrumb-sep">/</span>
                 <strong class="breadcrumb-title">{title.replace(" — Selinow", "")}</strong>
               </div>
-              <LiveActivityRadar label="Hệ thống trực tuyến" tone="success" />
+              <LiveActivityRadar label={ct("console.shell.activity_online")} tone="success" />
             </div>
 
             <div class="app-mobile-topbar">
@@ -267,7 +270,7 @@ const icons: Record<string, string> = {
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg>
               </button>
               <div class="app-mobile-topbar-actions">
-                <button class="app-icon-action" type="button" aria-label="Tìm kiếm" data-command-palette-trigger>
+                <button class="app-icon-action" type="button" aria-label={ct("console.shell.search")} data-command-palette-trigger>
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <circle cx="11" cy="11" r="8"></circle>
                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -283,17 +286,17 @@ const icons: Record<string, string> = {
             </div>
 
             <div class="app-topbar-right">
-              <button type="button" class="app-command-trigger" data-command-palette-trigger title="Mở tìm kiếm nhanh (⌘K)">
+              <button type="button" class="app-command-trigger" data-command-palette-trigger title={ct("console.shell.search_hint")}>
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <circle cx="11" cy="11" r="8"></circle>
                   <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                 </svg>
-                <span>Tìm kiếm...</span>
+                <span>{ct("console.shell.search_placeholder")}</span>
                 <kbd>⌘K</kbd>
               </button>
 
               {selectedShopPublicId && (
-                <a class="app-storefront-link" href={withSelectedShop("/app/store")} title="Mở trang Storefront">
+                <a class="app-storefront-link" href={withSelectedShop("/app/store")} title={ct("console.shell.storefront_open")}>
                   <span>Storefront</span>
                   <span class="link-arrow">↗</span>
                 </a>
@@ -491,6 +494,8 @@ const icons: Record<string, string> = {
         });
       }
     </script>
-    <CommandPalette />
+    <ToastRegion label={ct("console.toast.region_label")} />
+    <CommandPalette locale={Astro.locals.locale ?? shop?.defaultLocale} />
+    <script src="../scripts/dashboard/toast-boot.ts"></script>
   </body>
 </html>

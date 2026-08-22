@@ -219,6 +219,8 @@ export async function createShop(input: {
   requestId: string;
   slug: string;
   userId: string;
+  /** EX5.2: advisory selling vertical chosen during onboarding (0102 column). */
+  vertical?: "booking" | "digital" | "physical";
 }): Promise<{ created: boolean; shop: ShopView }> {
   const requestedPlanCode = input.planCode ?? "starter";
   if (!(PUBLIC_PLAN_CODES as readonly string[]).includes(requestedPlanCode)) {
@@ -374,11 +376,12 @@ export async function createShop(input: {
         INSERT INTO shops (
           id, public_id, slug, name, status, default_locale, currency, timezone,
           canonical_domain_id, readiness_version, merchant_country_code, business_country_code,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, 1, ?, ?, ?, ?)
+          vertical, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
       `).bind(
         shopId, shopPublicId, input.slug, input.name, defaultLocale,
-        currency, input.env.DEFAULT_TIMEZONE, domainId, merchantCountry, businessCountry, nowIso, nowIso,
+        currency, input.env.DEFAULT_TIMEZONE, domainId, merchantCountry, businessCountry,
+        input.vertical ?? "digital", nowIso, nowIso,
       ),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)

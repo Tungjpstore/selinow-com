@@ -180,6 +180,54 @@
     pointer-events: none;
   }
 
+  /* EX0: toast cards + reveal states (consumed by scripts/lib/toast.ts and reveal.ts). */
+  .sln-toast {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--sln-space-2);
+    align-items: start;
+    padding: var(--sln-space-3) var(--sln-space-4);
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-md);
+    background: var(--sln-bg-surface);
+    box-shadow: var(--sln-shadow-md);
+    color: var(--sln-text-primary);
+    pointer-events: auto;
+    animation: sln-toast-in var(--sln-duration-default) var(--sln-ease-standard);
+  }
+  .sln-toast p { margin: 0; font: var(--sln-font-body-sm); line-height: 1.5; }
+  .sln-toast button {
+    min-height: 28px;
+    padding: 0 6px;
+    border: 0;
+    background: transparent;
+    color: var(--sln-text-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .sln-toast[data-tone="success"] { border-inline-start: 3px solid var(--sln-state-success); }
+  .sln-toast[data-tone="danger"] { border-inline-start: 3px solid var(--sln-state-danger); }
+  .sln-toast[data-tone="warning"] { border-inline-start: 3px solid var(--sln-state-warning); }
+  .sln-toast[data-tone="info"] { border-inline-start: 3px solid var(--sln-state-info); }
+  @keyframes sln-toast-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  [data-reveal-state="hidden"] { opacity: 0; transform: translateY(8px); }
+  [data-reveal-state="visible"] {
+    opacity: 1;
+    transform: none;
+    transition: opacity var(--sln-duration-panel) var(--sln-ease-standard), transform var(--sln-duration-panel) var(--sln-ease-standard);
+    transition-delay: calc(var(--reveal-i, 0) * 40ms);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sln-toast { animation: none; }
+    [data-reveal-state="hidden"] { opacity: 1; transform: none; }
+    [data-reveal-state="visible"] { transition: none; }
+  }
+
   .sln-skeleton {
     min-height: 16px;
     border-radius: var(--sln-radius-sm);

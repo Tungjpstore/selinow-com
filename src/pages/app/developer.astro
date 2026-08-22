@@ -109,7 +109,10 @@ const developerClientCopy = {
               <input id="api-credential-expiry" name="expiresAt" type="datetime-local" />
               <button class="app-button app-button-primary" type="submit">{t("dashboard.integrations.api_credentials.issue")}</button>
             </form>
-            <div class="api-credential-ledger" data-api-credentials-list role="list" aria-live="polite"></div>
+            <div class="api-credential-ledger" data-api-credentials-list role="list" aria-live="polite">
+              <span class="sln-skeleton" data-shape="line" style="width:72%" aria-hidden="true"></span>
+              <span class="sln-skeleton" data-shape="line" style="width:54%" aria-hidden="true"></span>
+            </div>
           </div>
         ) : (
           <p class="provider-note api-credentials-unavailable">{t("dashboard.integrations.api_credentials.unavailable")}</p>

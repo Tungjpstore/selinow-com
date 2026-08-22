@@ -7,7 +7,7 @@ import { createCaughtErrorResponse } from "../../../../../lib/http/security";
 import { getBindings } from "../../../../../lib/platform/bindings";
 import { getSellerStorefrontSettings, updateSellerStorefrontSettings } from "../../../../../lib/tenants/storefront-settings";
 
-const ALLOWED = ["accentColor", "announcement", "deliveryText", "description", "expectedVersion", "footerText", "headline", "logoUrl", "primaryColor", "seoDescription", "seoTitle", "showExactStock", "supportText", "templateId"];
+const ALLOWED = ["accentColor", "announcement", "deliveryText", "description", "expectedVersion", "footerText", "headline", "logoUrl", "primaryColor", "seoDescription", "seoTitle", "sections", "showExactStock", "supportText", "templateId"];
 const PRIVATE_HEADERS = { "Cache-Control": "private, no-store, max-age=0" };
 
 export const GET: APIRoute = async ({ locals, params, request }) => {

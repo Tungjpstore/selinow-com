@@ -1,4 +1,5 @@
 import { AppError } from "../core/errors";
+import { parseHomeSections } from "../storefront/sections/registry";
 import type { AppBindings } from "../platform/bindings";
 import { hasFeature } from "../tenants/policy";
 import {
@@ -201,6 +202,13 @@ export async function updateSellerStorefrontSettings(input: {
   if (input.data.showExactStock !== undefined) {
     if (typeof input.data.showExactStock !== "boolean") throw new AppError("validation_failed", 400, ["show_exact_stock_invalid"]);
     storefront.showExactStock = input.data.showExactStock;
+  }
+  if (input.data.sections !== undefined) {
+    // TM1: bounded parse is the validator; the persisted draft only ever
+    // contains the cleaned array.
+    const parsed = parseHomeSections(input.data.sections);
+    if (parsed.length === 0) delete storefront.sections;
+    else storefront.sections = parsed;
   }
   if (input.data.templateId !== undefined) {
     const selection = storefrontTemplateSelectionIssue({ premiumEntitled: premiumTemplatesEnabled, templateId: input.data.templateId });

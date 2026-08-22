@@ -215,7 +215,7 @@
 
 .runtime-plan-card-featured,
 .plan-recommended {
-  border: 2px solid #6552E8;
+  border: 2px solid var(--sln-soft-accent-strong);
   background: linear-gradient(180deg, #FFFFFF 0%, #FAF8FF 100%);
   box-shadow: 0 20px 44px -10px rgba(101, 82, 232, 0.22), 0 0 0 1px rgba(101, 82, 232, 0.25);
   transform: translateY(-4px);
@@ -224,7 +224,7 @@
 .runtime-plan-card-featured::before,
 .plan-recommended::before {
   height: 4px;
-  background: linear-gradient(90deg, #6552E8, #3B82F6 50%, #8B5CF6);
+  background: linear-gradient(90deg, var(--sln-soft-accent-strong), var(--sln-brand-blue) 50%, var(--sln-soft-accent-violet));
   opacity: 1;
 }
 
@@ -239,7 +239,7 @@
   position: absolute;
   top: 18px;
   inset-inline-end: 20px;
-  background: linear-gradient(135deg, #6552E8 0%, #3B82F6 100%);
+  background: linear-gradient(135deg, var(--sln-soft-accent-strong) 0%, var(--sln-brand-blue) 100%);
   color: #FFFFFF;
   font-size: 11px;
   font-weight: 750;
@@ -284,7 +284,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #6552E8;
+  color: var(--sln-soft-accent-strong);
 }
 
 .runtime-plan-card h3,
