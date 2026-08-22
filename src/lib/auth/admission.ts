@@ -42,7 +42,7 @@ export function cloudflareRequesterAddress(request: Request): string {
 
 export const magicLinkRequesterAddress = cloudflareRequesterAddress;
 
-type ProvisioningAdmissionAction = "shop_create";
+type ProvisioningAdmissionAction = "google_oauth_start" | "shop_create";
 
 type ProvisioningAdmissionLimits = {
   global: number;

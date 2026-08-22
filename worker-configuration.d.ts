@@ -48,6 +48,9 @@ interface __BaseEnv_Env {
 	PLATFORM_ORIGIN: string;
 	DASHBOARD_ORIGIN: string;
 	API_ORIGIN: string;
+	GOOGLE_OAUTH_CLIENT_ID: string;
+	GOOGLE_OAUTH_CLIENT_SECRET: string;
+	GOOGLE_OAUTH_REDIRECT_URI: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

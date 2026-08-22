@@ -34,6 +34,7 @@ export const REQUIRED_PRODUCTION_VARS = [
   "EMAIL_FROM_ADDRESS",
   "EMAIL_FROM_NAME",
   "EXPORT_KEY_VERSION",
+  "GOOGLE_OAUTH_REDIRECT_URI",
   "INVENTORY_KEY_VERSION",
   "LOG_LEVEL",
   "MAGIC_LINK_GLOBAL_RATE_LIMIT",
@@ -63,6 +64,8 @@ export const REQUIRED_WORKER_SECRET_NAMES = [
   "IDENTIFIER_HMAC_SECRET",
   "INVENTORY_KEK_V1",
   "MAGIC_LINK_SECRET",
+  "GOOGLE_OAUTH_CLIENT_ID",
+  "GOOGLE_OAUTH_CLIENT_SECRET",
   "SESSION_SECRET",
   "TURNSTILE_SECRET_KEY",
 ];
@@ -149,6 +152,16 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "idx_auth_request_admissions_requester_window",
   "idx_auth_request_admissions_expiry",
   "idx_auth_request_admissions_subject_window",
+  "auth_google_identities",
+  "idx_auth_google_identities_subject",
+  "idx_auth_google_identities_user",
+  "auth_google_identities_identity_immutable",
+  "auth_google_oauth_states",
+  "idx_auth_google_oauth_states_lookup",
+  "idx_auth_google_oauth_states_expiry",
+  "idx_auth_google_oauth_states_retention",
+  "auth_google_oauth_states_pending_insert_guard",
+  "auth_google_oauth_states_transition_guard",
   "telegram_updates",
   "telegram_actions",
   "telegram_action_history",
@@ -604,6 +617,53 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       shop_subscriptions_scheduled_target_update_guard: "1ab24f8869fdcff78426268cf93d28a8e14cdc2a5ebcd47f47856d67502e5688",
       subscription_change_requests: "4442943e663792ac68fa880a82e72a506d9f240f37ea317905c2a351276b02c8",
       subscription_change_requests_transition_guard: "33a261b3820d0a8a9e6a0c9a80d04f937747a71b52093cce98dd06d130125b5d",
+    }),
+  }),
+  "0112_google_auth_foundation.sql": Object.freeze({
+    columns: Object.freeze({
+      "auth_google_identities.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "auth_google_identities.user_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.subject_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.subject_key_version": Object.freeze({ defaultValue: "'v1'", notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.last_authenticated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.version": Object.freeze({ defaultValue: "1", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "auth_google_oauth_states.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "auth_google_oauth_states.flow": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.initiated_user_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.state_lookup_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.nonce_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.browser_binding_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.redirect_uri": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.return_to": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.code_verifier_ciphertext_b64": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.code_verifier_iv_b64": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.key_version": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.expires_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.consumed_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.revoked_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.version": Object.freeze({ defaultValue: "1", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+    }),
+    objects: Object.freeze({
+      auth_request_admissions: "410b631f2c97a144e3cfe8ddcf7669e0da77ee900adcf1d746f9f9468b6f907d",
+      idx_auth_request_admissions_window: "948c62c46ee63a42a09d18ba42f18a352c1c267c6ab23e102944d5c1e68ea73e",
+      idx_auth_request_admissions_requester_window: "0eae88a37e6f001da33ac076fa37527c747d327580fa25b191e13b050d164734",
+      idx_auth_request_admissions_expiry: "c1d1f0912034e724af8c68488f77bae0f9dcf9439fdf9eef0bd69b956180ef06",
+      idx_auth_request_admissions_subject_window: "fd963cf7fdc62169d6f43742b5d0b8e5dea620fd15feed6b6962675bf61682ac",
+      auth_google_identities: "a30428790d372efd6b3bb9da98444d23876647df6f8d2643c1832c09181edbf8",
+      idx_auth_google_identities_subject: "c2b4ab79c9fcb4eb5620031420b02939cba0d20bbff879d4628dc44f8d30cf33",
+      idx_auth_google_identities_user: "b1924243a8dc83b6e95cbaf5c952e1cc23e3262a73dc4fcfcf5c147208ae0cfe",
+      auth_google_identities_identity_immutable: "10f24b400912e35dcd7d787dc5de322f359101188c0ce2f0e912c8cb112abfdb",
+      auth_google_oauth_states: "c54bc9746b1223a03e6771a356e54ad72a63474e316c5278984a130a11367bb7",
+      idx_auth_google_oauth_states_lookup: "b44c293703dc872473b8fc2f460997579295abd90d2b50402952fc5d3f266dfd",
+      idx_auth_google_oauth_states_expiry: "89d835ab256f2590ff4b41ffbd93d47748191708985019f801588108eeb2da62",
+      idx_auth_google_oauth_states_retention: "ffc141f92fc7a1cc467bbff1a66d6a07d3a4b7eb208c2cb6bbbe885862e7b64b",
+      auth_google_oauth_states_pending_insert_guard: "aaeb73462e3baa97e5fdbef4595b0f28311a3a970cc6155371f85083ee503d9c",
+      auth_google_oauth_states_transition_guard: "89d1f14766dce98d5b5c129a3d53f240a3b71eda0e6f89a7816d97c167de4d0e",
     }),
   }),
 });
@@ -1090,6 +1150,7 @@ function validProductionVar(name, value) {
   if (name === "PLATFORM_BASE_DOMAIN" || name === "SAAS_CNAME_TARGET") return validHostname(value);
   if (name === "RESOURCE_MANIFEST_VERSION") return typeof value === "string" && /^[a-f0-9]{16,64}$/u.test(value);
   if (name === "SESSION_COOKIE_NAME") return value === "selinow_session";
+  if (name === "GOOGLE_OAUTH_REDIRECT_URI") return value === "https://app.selinow.com/api/auth/google/callback";
   return isConfigured(value);
 }
 
@@ -2404,15 +2465,34 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
             AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
       ) AS integrity_0093_custom_domain_canonical,
     (SELECT COUNT(*) FROM auth_request_admissions AS admission
-      WHERE admission.action NOT IN ('magic_link_request', 'shop_create')
+      WHERE admission.action NOT IN ('google_oauth_start', 'magic_link_request', 'shop_create')
         OR length(admission.requester_hash) NOT BETWEEN 16 AND 128
         OR admission.window_ends_at <= admission.window_started_at
         OR (admission.subject_hash IS NOT NULL
           AND length(admission.subject_hash) NOT BETWEEN 16 AND 128)
         OR admission.delivery_permitted NOT IN (0, 1)
-        OR (admission.action = 'shop_create'
+        OR (admission.action IN ('google_oauth_start', 'shop_create')
           AND (admission.subject_hash IS NULL OR admission.delivery_permitted != 1))
       ) AS integrity_0094_auth_request_admission,
+    (SELECT COUNT(*) FROM auth_google_identities AS identity_row
+      WHERE length(identity_row.subject_hash) != 43
+        OR identity_row.subject_hash GLOB '*[^A-Za-z0-9_-]*'
+        OR identity_row.subject_key_version != 'v1'
+        OR identity_row.version <= 0
+        OR identity_row.last_authenticated_at < identity_row.created_at
+        OR identity_row.updated_at < identity_row.last_authenticated_at
+        OR NOT EXISTS (SELECT 1 FROM platform_users AS user_row WHERE user_row.id = identity_row.user_id)
+      ) AS integrity_0112_google_identity,
+    (SELECT COUNT(*) FROM auth_google_oauth_states AS state_row
+      WHERE state_row.flow NOT IN ('link', 'login', 'register')
+        OR (state_row.flow = 'link') != (state_row.initiated_user_id IS NOT NULL)
+        OR state_row.status NOT IN ('pending', 'consumed', 'revoked')
+        OR state_row.expires_at <= state_row.created_at
+        OR state_row.updated_at < state_row.created_at
+        OR (state_row.status = 'pending' AND (state_row.nonce_hash IS NULL OR state_row.browser_binding_hash IS NULL OR state_row.code_verifier_ciphertext_b64 IS NULL OR state_row.code_verifier_iv_b64 IS NULL OR state_row.consumed_at IS NOT NULL OR state_row.revoked_at IS NOT NULL))
+        OR (state_row.status = 'consumed' AND (state_row.nonce_hash IS NOT NULL OR state_row.browser_binding_hash IS NOT NULL OR state_row.code_verifier_ciphertext_b64 IS NOT NULL OR state_row.code_verifier_iv_b64 IS NOT NULL OR state_row.consumed_at IS NULL OR state_row.revoked_at IS NOT NULL))
+        OR (state_row.status = 'revoked' AND (state_row.nonce_hash IS NOT NULL OR state_row.browser_binding_hash IS NOT NULL OR state_row.code_verifier_ciphertext_b64 IS NOT NULL OR state_row.code_verifier_iv_b64 IS NOT NULL OR state_row.consumed_at IS NOT NULL OR state_row.revoked_at IS NULL))
+      ) AS integrity_0112_google_oauth_state,
     (SELECT COUNT(*) FROM outbox_jobs AS job
       WHERE job.kind = 'order_paid' AND job.status != 'completed'
       ) AS integrity_0095_legacy_order_paid_outbox,
@@ -2466,7 +2546,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_request_admissions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
+    if (["auth_google_identities", "auth_google_oauth_states", "auth_request_admissions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
@@ -2513,6 +2593,8 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0095_telegram_update_generation",
     "integrity_0097_telegram_action_generation",
     "integrity_0097_telegram_action_history",
+    "integrity_0112_google_identity",
+    "integrity_0112_google_oauth_state",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

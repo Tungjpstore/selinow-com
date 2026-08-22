@@ -45,6 +45,8 @@ const D1_DATABASE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab]
 const SOURCE_BASELINE_TABLES = ["plans", "shops", "shop_subscriptions", "usage_counters"];
 const CORE_COUNT_TABLES = [
   "api_credentials",
+  "auth_google_identities",
+  "auth_google_oauth_states",
   "plans",
   "plan_prices",
   "shop_subscriptions",

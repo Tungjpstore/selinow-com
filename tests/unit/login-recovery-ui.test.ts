@@ -7,6 +7,7 @@ describe("auth account & password UI contracts", () => {
   const registerPage = readFileSync("src/pages/register.astro", "utf8");
   const forgotPage = readFileSync("src/pages/forgot-password.astro", "utf8");
   const controller = readFileSync("src/scripts/marketing/auth.ts", "utf8");
+  const googleController = readFileSync("src/scripts/marketing/auth-google.ts", "utf8");
   const catalog = readFileSync("src/lib/i18n/catalogs/system.ts", "utf8");
 
   it("offers password login with remember me and navigation to register / forgot-password", () => {
@@ -59,5 +60,24 @@ describe("auth account & password UI contracts", () => {
     expect(catalog).toContain('"auth.register.password_mismatch"');
     expect(catalog).toContain('"auth.otp.invalid"');
     expect(catalog).toContain('"auth.otp.cooldown"');
+  });
+
+  it("starts Google login and registration without exposing callback state", () => {
+    expect(loginPage).toContain('data-google-flow="login"');
+    expect(registerPage).toContain('data-google-flow="register"');
+    expect(registerPage).toContain('data-google-redirect="/onboarding"');
+    expect(googleController).toContain('new URL("/api/auth/google/start"');
+    expect(googleController).toContain('start.searchParams.set("flow", flow)');
+    expect(googleController).toContain("safeRelativeRedirect");
+    expect(googleController).not.toMatch(/localStorage|sessionStorage|console\./u);
+    expect(loginPage).not.toContain("data-google-soon");
+    expect(registerPage).not.toContain("data-google-soon");
+  });
+
+  it("completes cookie-bound Google 2FA without putting its challenge in the URL", () => {
+    expect(controller).toContain('get("auth") === "two_factor"');
+    expect(controller).toContain('await fetch("/api/auth/google/2fa"');
+    expect(controller).toContain("googleTwoFactorMode ? { otp }");
+    expect(controller).not.toMatch(/google.*challengeToken.*searchParams/iu);
   });
 });

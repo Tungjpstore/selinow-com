@@ -29,6 +29,14 @@ Major onboarding slice answering "danh mục → template/preset riêng + tạo 
 ### OB-B4: server-truth resume
 - New `src/lib/onboarding/resume.ts` computes `{wizardStep, vertical, templateId, catalog facts, integration states}` from server data; `/onboarding` hydrates the wizard from it — refreshes and returning sellers re-enter at the first unfinished step with real PayOS/Telegram/stock state instead of restarting at step 1.
 
+### OB audit pass (same day)
+- Fixed the inventory label rewrite destroying its required-star marker: the vertical-swapped text now lives in a dedicated `data-inv-label` span.
+- `getOnboardingResume` now gates the wizard's Connect step on the Telegram **channel flag** (joined from `shop_onboarding_profiles`) instead of integration presence — a shop with the channel on but no bot no longer resumes past Connect; the payload also carries `channels` and `storefrontVersion`.
+- The quickstart hydrates the persisted channel choice on resume (re-submitting step 1 for an existing shop can no longer silently flip channels back to "both") and PATCHes template changes with the server-known draft version instead of a hardcoded `expectedVersion: 1`.
+- `createShop` INSERTs use the validated `vertical` variable (was a second raw `input.vertical ?? "digital"`).
+- Deleted the unreferenced `OnboardingLivePreview.astro` and `OnboardingCelebration.astro` (~700 lines). The legacy `src/scripts/dashboard/onboarding.ts` (~2.4K lines, superseded by `onboarding-quickstart.ts` since the quickstart rewrite) remains because five contract suites (`app-shell-foundation`, `design-system-accessibility`, `inventory-frontend-contract`, `onboarding-publish-version-contract`, `shop-name-frontend-contract`) still pin it; migrating those suites onto the quickstart is a standalone follow-up.
+- New `onboarding-resume.test.ts` (3 cases): fresh shop resumes at product with server truth; a stocked-but-unpaid shop holds at connect; non-members get null so foreign shops never hydrate a wizard.
+
 ### Contracts & verification
 - `storefront-templates.test.ts`: gallery scoping (digital/physical + legacy cross-vertical visibility), cross-vertical PATCH rejection, and three new OB-B1 provisioning cases (template+channels in one transaction, vertical-safe default template, premium/cross-vertical/channel-less rejection). `onboarding-shop-route.test.ts` gains POST parse tests; `onboarding-presets.test.ts` covers the per-vertical packs; `ex0-experience-contract.test.ts` updated to the one-request contract; `shop-selection`/`storefront-preview-catalog` adjusted for `ShopView.vertical`.
 - Focused verification: 68 tests across the touched suites pass; ESLint clean on every touched file; `npm run build` and `npm run deploy:dry-run` pass; `astro check` reports zero errors in the files this slice touched.
@@ -2997,8 +3005,8 @@ Owner-approved full redesign of the marketing surface + auth, applied on
 - LP2/LP2b editorial language across pricing/solutions/support/legal; project-wide locale
   flow (first-touch + switch cookie `selinow_locale`, `Domain=.selinow.com`, clean links);
   polished vi/en copy.
-- LP3 auth trio restyled as centered Google/OpenAI-style cards with a Google button wired
-  for the upcoming OAuth (`auth-google.ts` shows an honest notice until the route ships).
+- LP3 auth trio restyled as centered Google/OpenAI-style cards with the production
+  Google OAuth start flow wired into login and registration.
 - LP4 editorial OG cover + MOTION.md allowlist.
 - LP5 contract tests realigned (marketing assets, i18n dynamic-call allowlist) and public
   browser-gate baselines recaptured: 66/71 pass — remaining failures are storefront
@@ -3008,29 +3016,51 @@ Verification at LP checkpoints: astro check 0 errors (LP files), lint clean (LP 
 EX0 contract 13/13, home/pricing/login + inner pages 200 with 0 axe AA violations, no
 overflow at 320/390/1440, console clean, i18n click-through EN/VI verified.
 Known limitations: hero WebGL intentionally disabled under reduced-motion (static CSS
-aurora); Google sign-in button shows a notice until the OAuth backend lands.
+aurora).
 
-## Google sign-in provider provisioning (2026-08-22)
+## Google sign-in production readiness (2026-08-22)
 
-- Created the independent Google Cloud project `selinow-auth`; no Fball, DigiStore,
-  Supabase, or other product OAuth configuration was reused.
-- Configured Google Auth Platform for the external `Selinow` application in testing
-  status, with the approved support/contact account added as a test user.
-- Created separate Web OAuth clients for local, staging, and production. Registered
-  callbacks are `http://localhost:4321/api/auth/google/callback`,
+- Created the independent Google Cloud project `selinow-auth`; no other product
+  configuration or credentials were reused.
+- Implemented server-side Authorization Code + PKCE (`S256`) with a one-use D1
+  state ledger, nonce validation, browser binding, encrypted transient verifier,
+  HMAC-only Google `sub`, strict RS256/JWKS claim validation, and provider error
+  handling. Google access/refresh tokens are never persisted.
+- Added migration `0112_google_auth_foundation.sql` for global Google identities,
+  OAuth state lifecycle/guards, admission action `google_oauth_start`, retention
+  purge, backup coverage, and production invariant checks. Worker cron purges
+  expired/terminal state rows without retaining transient secrets.
+- Wired login, registration, explicit account linking from `/app/security`, and
+  Google-post-callback email OTP 2FA. Login never silently links an existing email;
+  unknown identities are login-denied and register-created only in the register flow.
+- Registered callbacks are `http://localhost:4321/api/auth/google/callback`,
   `https://app-staging.selinow.com/api/auth/google/callback`, and
-  `https://app.selinow.com/api/auth/google/callback`. Google rejected the
-  `app.localhost` HTTP hostname, so real local OAuth requires a localhost callback
-  bridge; provider acceptance should primarily run against staging.
-- Stored the staging and production client ID/secret pairs as environment-scoped
-  Cloudflare Worker secrets. Stored the local pair and callback in the Git-ignored
-  `.dev.vars` file with mode `0600`. Only secret names and presence were verified;
-  credential values were not recorded in this document or committed.
-- Rotated the production OAuth client secret after provisioning, updated the
-  production Worker binding, and disabled and permanently deleted the superseded
-  Google client secrets. The production OAuth client now retains one active secret.
-- External requirement completed: provider project, audience, test user, clients, and
-  secret provisioning. Known limitation: the repository still has no Google OAuth
-  start/callback implementation, provider-identity schema, one-use state/nonce/PKCE
-  ledger, account-linking flow, or OAuth tests, so the existing Google button continues
-  to display the honest coming-soon notice.
+  `https://app.selinow.com/api/auth/google/callback`. Local uses a callback bridge
+  because Google rejects the `app.localhost` HTTP hostname.
+- Staging/production client secrets are environment-scoped Cloudflare Worker
+  secrets; local values remain only in Git-ignored `.dev.vars` mode `0600`. Secret
+  values are not stored in repository files or logs. Production has one active
+  client secret after rotation.
+- Focused migration/ops verification passed (`60` tests); OAuth core/security,
+  UI/config, and release-invariant suites are tracked alongside this implementation.
+- Live Chrome inspection of the signed-in `selinow-auth` console confirms the
+  production Web client callback is exact and `selinow.com` is authorized. It also
+  confirms `External / Testing`, zero configured test users, no homepage/privacy/
+  terms URLs, no uploaded logo, and no scopes listed on the Data Access page. These
+  are external launch blockers; do not publish or enable broad production access
+  until owner-approved legal URLs/branding exist, the required basic OIDC scopes are
+  reviewed, a staging test user passes acceptance, and the app is deliberately
+  published to `Production` followed by a production canary.
+- Operational sequence and acceptance/rollback gates are recorded in
+  `docs/GOOGLE_OAUTH_RELEASE.md`.
+- Final Google/release-focused verification passes: 9 files / 88 tests, including
+  the dedicated OAuth core suite at 17/17, scoped ESLint, `git diff --check`, staging
+  Worker type generation, credential-pattern scan, `npm run build`,
+  `npm run deploy:dry-run`, and `npm audit --audit-level=high` (0 vulnerabilities).
+- Full-repository gates remain blocked by unrelated in-progress storefront/
+  onboarding/dashboard work in the dirty shared tree: `npm run check` reports 23
+  errors, full lint reports 8 errors, and full Vitest reports 8 failures after the
+  Google migration-tip and route-inventory contracts were updated. The remaining
+  failures are design-system/store-builder/accessibility/i18n contracts and do not
+  reference Google OAuth source. Production release still requires a clean combined
+  candidate with all global gates passing.

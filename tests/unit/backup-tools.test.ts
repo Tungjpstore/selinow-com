@@ -372,6 +372,8 @@ describe("operations report compatibility", () => {
   it("requires generic channel and domain delivery tables in every restored schema", () => {
     expect(restoreValidationTables).toEqual(expect.arrayContaining([
       "api_credentials",
+      "auth_google_identities",
+      "auth_google_oauth_states",
       "catalog_channel_visibility",
       "channel_customer_identities",
       "channel_connector_requests",
@@ -435,6 +437,8 @@ describe("operations report compatibility", () => {
       "telegram_mini_app_sessions",
     ]));
     expect(restoreCountValidationTables).toEqual(expect.arrayContaining([
+      "auth_google_identities",
+      "auth_google_oauth_states",
       "catalog_channel_visibility",
       "channel_connector_requests",
       "channel_oauth_states",

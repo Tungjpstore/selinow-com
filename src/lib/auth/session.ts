@@ -456,6 +456,53 @@ async function issueSessionForUser(input: {
   };
 }
 
+export async function issueSessionForUserId(input: {
+  env: AppBindings;
+  now?: Date;
+  rememberMe?: boolean;
+  userId: string;
+}): Promise<PasswordLoginResult> {
+  const user = await loadUserAccountById(input.env, input.userId);
+  if (user === null || user.status !== "active") throw new AppError("authentication_required", 401);
+  return issueSessionForUser({
+    env: input.env,
+    now: input.now ?? new Date(),
+    ...(input.rememberMe === undefined ? {} : { rememberMe: input.rememberMe }),
+    user,
+  });
+}
+
+export async function issueTwoFactorChallengeForUser(input: {
+  env: AppBindings;
+  now?: Date;
+  rememberMe?: boolean;
+  userId: string;
+}): Promise<TwoFactorChallengeResult> {
+  const now = input.now ?? new Date();
+  const user = await loadUserAccountById(input.env, input.userId);
+  if (user === null || user.status !== "active") throw new AppError("authentication_required", 401);
+  const challenge = await createAndSendOtp({
+    email: user.emailNormalized,
+    env: input.env,
+    now,
+    purpose: "login_2fa",
+    userId: user.userId,
+  });
+  const challengeToken = await createTwoFactorChallengeToken(
+    input.env.SESSION_SECRET,
+    user.emailNormalized,
+    user.userId,
+    input.rememberMe === true,
+  );
+  return {
+    challengeToken,
+    cooldownSeconds: challenge.cooldownSeconds,
+    ...(challenge.debugOtp === undefined ? {} : { debugOtp: challenge.debugOtp }),
+    expiresAt: challenge.expiresAt,
+    twoFactorRequired: true,
+  };
+}
+
 async function createTwoFactorChallengeToken(secret: string, email: string, userId: string, rememberMe: boolean): Promise<string> {
   const expiresAt = Date.now() + OTP_TTL_MINUTES * 60_000;
   const payload = `${email}:${String(expiresAt)}:${userId}:${rememberMe ? "1" : "0"}`;

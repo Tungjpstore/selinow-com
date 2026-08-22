@@ -13,6 +13,7 @@ const dependencies = vi.hoisted(() => ({
   activationBackfill: vi.fn(),
   automation: vi.fn(),
   billingChanges: vi.fn(),
+  billingReconciliation: vi.fn(),
   claimDeliveryJobReference: vi.fn(),
   claimDeliveryProviderAttempt: vi.fn(),
   consumeDeadLetterQueue: vi.fn(),
@@ -34,6 +35,7 @@ const dependencies = vi.hoisted(() => ({
   loggerWarn: vi.fn(),
   paymentReconciliation: vi.fn(),
   purgeAdmissions: vi.fn(),
+  purgeGoogleOAuthStates: vi.fn(),
   purgeAnonymousLimits: vi.fn(),
   purgeBuyerOrderRecovery: vi.fn(),
   purgeCartMutationReplays: vi.fn(),
@@ -56,10 +58,12 @@ const dependencies = vi.hoisted(() => ({
 vi.mock("@astrojs/cloudflare/handler", () => ({ handle: dependencies.handle }));
 vi.mock("../../src/lib/analytics/activation", () => ({ processActivationMilestoneBackfill: dependencies.activationBackfill }));
 vi.mock("../../src/lib/auth/admission", () => ({ purgeAuthRequestAdmissions: dependencies.purgeAdmissions }));
+vi.mock("../../src/lib/auth/google-state-maintenance", () => ({ purgeGoogleOAuthStates: dependencies.purgeGoogleOAuthStates }));
 vi.mock("../../src/lib/automation/scheduler", () => ({ processScheduledAutomationTasks: dependencies.automation }));
 vi.mock("../../src/lib/billing/service", () => ({
   expireBillingCheckoutSessions: dependencies.expireBillingCheckouts,
   processDueDodoSubscriptionChanges: dependencies.billingChanges,
+  reconcileDodoSubscriptionChanges: dependencies.billingReconciliation,
   suspendExpiredBillingGracePeriods: dependencies.suspendBillingGracePeriods,
   suspendExpiredTrials: dependencies.suspendBillingTrials,
 }));
@@ -294,6 +298,7 @@ beforeEach(() => {
   });
   dependencies.activationBackfill.mockResolvedValue({ attempted: 2, created: 1, failed: 0, shops: 1 });
   dependencies.billingChanges.mockResolvedValue({ attempted: 1, candidates: 1, failed: 0, providerPending: 1 });
+  dependencies.billingReconciliation.mockResolvedValue({ candidates: 0, completed: 0, failed: 0, pending: 0 });
   dependencies.expireBillingCheckouts.mockResolvedValue(1);
   dependencies.suspendBillingGracePeriods.mockResolvedValue(1);
   dependencies.suspendBillingTrials.mockResolvedValue(1);
@@ -301,6 +306,7 @@ beforeEach(() => {
   dependencies.paymentReconciliation.mockResolvedValue({ failed: 0, processed: 1 });
   dependencies.expireOrders.mockResolvedValue(0);
   dependencies.purgeAdmissions.mockResolvedValue(0);
+  dependencies.purgeGoogleOAuthStates.mockResolvedValue(0);
   dependencies.purgeBuyerOrderRecovery.mockResolvedValue({ deleted: 0, redacted: 0 });
   dependencies.purgeTelegramUpdates.mockResolvedValue(0);
   dependencies.purgeAnonymousLimits.mockResolvedValue(0);
@@ -625,6 +631,7 @@ describe("Worker generic domain delivery contract", () => {
     expect(dependencies.suspendBillingTrials).toHaveBeenCalledWith({ env: runtimeEnv, limit: 100, now: NOW });
     expect(dependencies.deliverTelegramJob).toHaveBeenCalledOnce();
     expect(dependencies.purgeCartMutationReplays).toHaveBeenCalledWith(expect.any(Object), NOW);
+    expect(dependencies.purgeGoogleOAuthStates).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.purgeBuyerOrderRecovery).toHaveBeenCalledWith({ env: runtimeEnv, now: NOW });
     expect(dependencies.purgeDataExports).toHaveBeenCalledWith(expect.any(Object), NOW);
     expect(dependencies.purgeDeliveryGrantClaims).toHaveBeenCalledWith(expect.any(Object), NOW);
@@ -733,6 +740,7 @@ describe("Worker generic domain delivery contract", () => {
 
     expect(admissionsCompleted).toHaveBeenCalledOnce();
     expect(dependencies.purgeBuyerOrderRecovery).toHaveBeenCalledOnce();
+    expect(dependencies.purgeGoogleOAuthStates).toHaveBeenCalledOnce();
     expect(dependencies.purgeCartMutationReplays).toHaveBeenCalledOnce();
     expect(dependencies.purgeTelegramUpdates).toHaveBeenCalledOnce();
     expect(dependencies.purgeAnonymousLimits).toHaveBeenCalledOnce();

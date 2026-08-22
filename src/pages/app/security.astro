@@ -98,6 +98,16 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
         </div>
       </section>
 
+      <section class="security-panel google-link-panel" aria-labelledby="google-link-title">
+        <div>
+          <p class="eyebrow">{t("dashboard.security.google.eyebrow")}</p>
+          <h2 id="google-link-title">{t("dashboard.security.google.title")}</h2>
+          <p>{t("dashboard.security.google.description")}</p>
+          <p class="google-link-status" role="status" aria-live="polite" data-google-link-status hidden></p>
+        </div>
+        <button class="sln-button sln-button-secondary" type="button" data-google-link>{t("dashboard.security.google.action")}</button>
+      </section>
+
       <section class="security-panel" aria-labelledby="active-sessions-title">
         <header class="panel-heading">
           <div>
@@ -285,6 +295,10 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
   .security-overview h2, .security-panel h2 { margin:0; color:var(--sln-text-primary); font:var(--sln-font-h3); }
   .security-overview div > p:last-child, .panel-heading p, .danger-panel > div > p:last-child { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .security-panel { display:grid; gap:18px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-xl); padding:24px; background:var(--sln-bg-surface); box-shadow:var(--sln-shadow-sm); }
+  .google-link-panel { grid-template-columns:minmax(0,1fr) auto; align-items:center; }
+  .google-link-status { margin:10px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .google-link-status[data-tone="danger"] { color:var(--sln-danger-text); }
+  .google-link-status[data-tone="success"] { color:var(--sln-success-text); }
   .panel-heading { display:flex; justify-content:space-between; gap:20px; align-items:start; }
   .panel-heading .sln-button { flex:0 0 auto; }
   .session-ledger { display:grid; overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); }
@@ -320,5 +334,5 @@ const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Da
   @keyframes security-pulse { to { background-position:-200% 0; } }
   @media (prefers-reduced-motion: reduce) { .session-loading .session-mark { animation:none; } }
   @media (max-width: 980px) { .session-ledger article { grid-template-columns:44px minmax(0,1fr) minmax(130px,.8fr); } .session-meta { grid-column:2 / -1; } }
-  @media (max-width: 680px) { .security-overview, .security-panel { padding:18px; } .security-overview { grid-template-columns:1fr; } .panel-heading, .danger-panel { grid-template-columns:1fr; flex-direction:column; } .panel-heading .sln-button, .danger-actions { width:100%; } .session-ledger article { grid-template-columns:40px minmax(0,1fr); gap:10px; } .session-meta { grid-column:2; } .two-factor-otp-row { grid-template-columns:1fr; } .two-factor-actions, .two-factor-enroll, .two-factor-disable, .password-form { max-width:none; } }
+  @media (max-width: 680px) { .security-overview, .security-panel { padding:18px; } .security-overview { grid-template-columns:1fr; } .panel-heading, .danger-panel, .google-link-panel { grid-template-columns:1fr; flex-direction:column; } .panel-heading .sln-button, .danger-actions, .google-link-panel .sln-button { width:100%; } .session-ledger article { grid-template-columns:40px minmax(0,1fr); gap:10px; } .session-meta { grid-column:2; } .two-factor-otp-row { grid-template-columns:1fr; } .two-factor-actions, .two-factor-enroll, .two-factor-disable, .password-form { max-width:none; } }
 </style>

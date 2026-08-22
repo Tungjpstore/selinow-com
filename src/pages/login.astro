@@ -18,8 +18,7 @@ if (Astro.url.origin !== env.DASHBOARD_ORIGIN) {
 
 try {
   await authenticateRequest(Astro.request, env);
-  const redirectTarget = safeRelativeRedirect(Astro.url.searchParams.get("redirect"));
-  return Astro.redirect(redirectTarget, 302);
+  return Astro.redirect(safeRelativeRedirect(Astro.url.searchParams.get("redirect")), 302);
 } catch {
   // Anonymous visitors continue to login form
 }
@@ -232,7 +231,7 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
           <span>{t("auth.divider.or")}</span>
         </div>
 
-        <button type="button" class="auth-google-btn" data-google-oauth>
+        <button type="button" class="auth-google-btn" data-google-oauth data-google-flow="login">
           <svg aria-hidden="true" width="18" height="18" viewBox="0 0 48 48">
             <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
             <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
@@ -241,7 +240,7 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
           </svg>
           <span>{t("auth.google.continue")}</span>
         </button>
-        <p class="auth-google-soon" role="status" aria-live="polite" data-google-soon hidden>{t("auth.google.soon")}</p>
+        <p class="auth-google-status" role="status" aria-live="polite" data-google-status hidden></p>
 
         <div class="card-footer">
           <div class="switch-auth">
@@ -508,13 +507,13 @@ const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
     outline-offset: 2px;
   }
 
-  .auth-google-soon {
+  .auth-google-status {
     margin: 10px 0 0;
     padding: 10px 12px;
     border-radius: 10px;
-    background: var(--mk-ed-tint, #F1EFFE);
-    border: 1px solid color-mix(in srgb, var(--sln-soft-accent) 30%, transparent);
-    color: var(--mk-ed-accent-ink, #5140C9);
+    background: var(--mk-ed-tint, #F5F7FB);
+    border: 1px solid var(--mk-ed-hairline, #E4E9F4);
+    color: var(--mk-ed-ink-muted, #5A6485);
     font-size: 12.5px;
     line-height: 1.5;
     text-align: center;

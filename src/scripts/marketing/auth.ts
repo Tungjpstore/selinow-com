@@ -243,11 +243,15 @@ if (loginForm) {
   // The challenge token lives in this closure only; it is never persisted.
   let twoFactorChallengeToken = "";
   let twoFactorEmail = "";
+  const googleTwoFactorMode = new URLSearchParams(window.location.search).get("auth") === "two_factor";
 
   const showTwoFactorStep = (cooldownSeconds: number | undefined): void => {
     loginForm.hidden = true;
     if (twoFactorPanel) twoFactorPanel.hidden = false;
     if (twoFactorEmailDisplay) twoFactorEmailDisplay.textContent = twoFactorEmail;
+    if (twoFactorEmailDisplay) twoFactorEmailDisplay.hidden = googleTwoFactorMode && twoFactorEmail === "";
+    if (twoFactorResendBtn) twoFactorResendBtn.hidden = googleTwoFactorMode;
+    if (twoFactorBackBtn) twoFactorBackBtn.hidden = googleTwoFactorMode;
     setStatus(statusEl, "", "");
     setStatus(twoFactorStatusEl, "pending", t("auth.login.two_factor.pending"));
     twoFactorOtpInput?.focus();
@@ -320,7 +324,7 @@ if (loginForm) {
   twoFactorSubmitBtn?.addEventListener("click", () => {
     void (async () => {
       const otp = twoFactorOtpInput?.value.replace(/\D/gu, "") ?? "";
-      if (otp.length !== 6 || twoFactorChallengeToken === "") {
+      if (otp.length !== 6 || (!googleTwoFactorMode && twoFactorChallengeToken === "")) {
         setStatus(twoFactorStatusEl, "error", t("auth.otp.invalid"));
         return;
       }
@@ -329,17 +333,22 @@ if (loginForm) {
       setStatus(twoFactorStatusEl, "pending", t("auth.login.two_factor.submitting"));
 
       try {
-        const res = await fetch("/api/auth/login-2fa", {
-          body: JSON.stringify({ challengeToken: twoFactorChallengeToken, otp }),
+        const request = {
+          body: JSON.stringify(googleTwoFactorMode ? { otp } : { challengeToken: twoFactorChallengeToken, otp }),
           headers: { "Content-Type": "application/json" },
           method: "POST",
-        });
+        } as const;
+        const res = googleTwoFactorMode
+          ? await fetch("/api/auth/google/2fa", request)
+          : await fetch("/api/auth/login-2fa", request);
 
         const data = (await res.json().catch(() => ({}))) as AuthApiResponse;
 
         if (!res.ok) {
           const issue = Array.isArray(data.issues) ? data.issues[0] ?? "" : "";
-          if (data.code === "two_factor_challenge_expired" || data.code === "challenge_token_invalid") {
+          if (data.code === "two_factor_challenge_expired" || data.code === "challenge_token_invalid"
+            || issue === "two_factor_challenge_expired"
+            || data.code === "google_2fa_challenge_expired" || data.code === "google_challenge_invalid") {
             setStatus(twoFactorStatusEl, "error", t("auth.login.two_factor.expired"));
             twoFactorChallengeToken = "";
           } else if (res.status === 423) {
@@ -389,6 +398,10 @@ if (loginForm) {
   });
 
   twoFactorBackBtn?.addEventListener("click", backToLoginForm);
+
+  if (googleTwoFactorMode) {
+    showTwoFactorStep(undefined);
+  }
 }
 
 // ----------------------------------------------------

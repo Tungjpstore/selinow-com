@@ -47,6 +47,16 @@ describe("seller account security UI", () => {
     expect(client).toContain('window.location.assign("/login")');
   });
 
+  it("links Google through a CSRF-protected request and validates the provider URL", () => {
+    expect(page).toContain("data-google-link");
+    expect(page).toContain("data-google-link-status");
+    expect(client).toContain('fetch("/api/auth/google/start?flow=link"');
+    expect(client).toContain('returnTo: "/app/security?tab=sessions"');
+    expect(client).toContain('authorizationUrl.hostname !== "accounts.google.com"');
+    expect(client).toContain('"X-CSRF-Token": csrfToken()');
+    expect(client).toContain('next.searchParams.delete("google_error")');
+  });
+
   it("provides complete English and Vietnamese copy", () => {
     const en = createDashboardTranslator("en-US");
     const vi = createDashboardTranslator("vi-VN");

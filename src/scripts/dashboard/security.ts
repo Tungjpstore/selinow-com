@@ -269,6 +269,30 @@ if (root !== null) {
   // --------------------------------------------------
   const activeTab = root.dataset.activeTab ?? "sessions";
 
+  const googleLinkButton = root.querySelector<HTMLButtonElement>("[data-google-link]");
+  const googleLinkStatus = root.querySelector<HTMLElement>("[data-google-link-status]");
+  const googleCallback = new URLSearchParams(window.location.search);
+  const googleError = googleCallback.get("google_error");
+  const googleLinked = googleCallback.get("google") === "linked" || googleError === "google_already_linked";
+  const googleCallbackMessage = googleLinked
+    ? t("dashboard.security.google.linked")
+    : googleError === "google_identity_in_use"
+      ? t("dashboard.security.google.identity_in_use")
+      : googleError === "google_account_link_required" || googleError === "google_link_required"
+        ? t("dashboard.security.google.link_required")
+        : googleError !== null
+          ? t("dashboard.security.google.error.generic")
+          : null;
+  if (googleCallbackMessage !== null && googleLinkStatus !== null) {
+    googleLinkStatus.hidden = false;
+    googleLinkStatus.dataset.tone = googleLinked ? "success" : "danger";
+    googleLinkStatus.textContent = googleCallbackMessage;
+    const next = new URL(window.location.href);
+    next.searchParams.delete("google");
+    next.searchParams.delete("google_error");
+    window.history.replaceState({}, "", `${next.pathname}${next.search}${next.hash}`);
+  }
+
   const postAccount = async (path: string, body: Record<string, unknown>): Promise<ApiPayload> => {
     const response = await fetch(path, {
       body: JSON.stringify(body),
@@ -284,6 +308,38 @@ if (root !== null) {
     if (!response.ok) throw new SecurityApiError(payload);
     return payload;
   };
+
+  googleLinkButton?.addEventListener("click", () => {
+    void (async () => {
+      googleLinkButton.disabled = true;
+      setFeedback(t("dashboard.security.google.linking"));
+      try {
+        const response = await fetch("/api/auth/google/start?flow=link", {
+          body: JSON.stringify({ returnTo: "/app/security?tab=sessions" }),
+          credentials: "same-origin",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken(),
+          },
+          method: "POST",
+        });
+        const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload & { authorizationUrl?: unknown };
+        if (!response.ok || typeof payload.authorizationUrl !== "string"
+          || payload.authorizationUrl.length > 2048) throw new SecurityApiError(payload);
+        const authorizationUrl = new URL(payload.authorizationUrl);
+        if (authorizationUrl.protocol !== "https:" || authorizationUrl.hostname !== "accounts.google.com"
+          || authorizationUrl.username !== "" || authorizationUrl.password !== "" || authorizationUrl.port !== ""
+          || authorizationUrl.hash !== "") {
+          throw new SecurityApiError({ code: "invalid_response" });
+        }
+        window.location.assign(authorizationUrl.toString());
+      } catch (error) {
+        handleAccountError(error);
+        googleLinkButton.disabled = false;
+      }
+    })();
+  });
 
   const getAccount = async (path: string): Promise<ApiPayload> => {
     const response = await fetch(path, {

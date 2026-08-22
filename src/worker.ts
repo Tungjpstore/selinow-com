@@ -2,6 +2,7 @@ import { handle } from "@astrojs/cloudflare/handler";
 
 import { processActivationMilestoneBackfill } from "./lib/analytics/activation";
 import { purgeAuthRequestAdmissions } from "./lib/auth/admission";
+import { purgeGoogleOAuthStates } from "./lib/auth/google-state-maintenance";
 import { processScheduledAutomationTasks } from "./lib/automation/scheduler";
 import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, reconcileDodoSubscriptionChanges, suspendExpiredBillingGracePeriods, suspendExpiredTrials } from "./lib/billing/service";
 import { purgeCartMutationReplays } from "./lib/commerce/cart-mutation";
@@ -675,6 +676,12 @@ export default {
         0,
       ),
       run(
+        "google_oauth_state_purge",
+        "scheduled_google_oauth_state_purge_failed",
+        () => purgeGoogleOAuthStates(bindings, scheduledAt),
+        0,
+      ),
+      run(
         "buyer_order_recovery_purge",
         "scheduled_buyer_order_recovery_purge_failed",
         () => purgeBuyerOrderRecoveryArtifacts({ env: bindings, now: scheduledAt }),
@@ -722,13 +729,14 @@ export default {
       return settlement?.status === "fulfilled" ? settlement.value as T : fallback;
     };
     const purgedAuthRequestAdmissions = purgeValue(0, 0);
-    const purgedBuyerOrderRecovery = purgeValue(1, { deleted: 0, redacted: 0 });
-    const purgedCartMutationReplays = purgeValue(2, 0);
-    const purgedTelegramUpdates = purgeValue(3, 0);
-    const purgedAnonymousLimits = purgeValue(4, 0);
-    const purgedDeliveryGrantClaims = purgeValue(5, 0);
-    const purgedSecurityRateLimits = purgeValue(6, 0);
-    const purgedDataExports = purgeValue(7, { candidates: 0, deleted: 0, failed: 0, invalidObjectKeys: 0 });
+    const purgedGoogleOAuthStates = purgeValue(1, 0);
+    const purgedBuyerOrderRecovery = purgeValue(2, { deleted: 0, redacted: 0 });
+    const purgedCartMutationReplays = purgeValue(3, 0);
+    const purgedTelegramUpdates = purgeValue(4, 0);
+    const purgedAnonymousLimits = purgeValue(5, 0);
+    const purgedDeliveryGrantClaims = purgeValue(6, 0);
+    const purgedSecurityRateLimits = purgeValue(7, 0);
+    const purgedDataExports = purgeValue(8, { candidates: 0, deleted: 0, failed: 0, invalidObjectKeys: 0 });
     logger.info({
       event: "infrastructure.cron_completed",
       metrics: {
@@ -777,6 +785,7 @@ export default {
         paymentReconciliationFailed: reconciliation.failed,
         paymentReconciliationProcessed: reconciliation.processed,
         purgedAuthRequestAdmissions,
+        purgedGoogleOAuthStates,
         purgedBuyerOrderRecoveryDeleted: purgedBuyerOrderRecovery.deleted,
         purgedBuyerOrderRecoveryRedacted: purgedBuyerOrderRecovery.redacted,
         purgedAnonymousLimits,

@@ -190,9 +190,9 @@ describe("remote post-migration database contract", () => {
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("'$.turnstile.checkedAt'");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("canonical.shop_id = shop.id");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("auth_request_admissions AS admission");
-    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.action NOT IN ('magic_link_request', 'shop_create')");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.action NOT IN ('google_oauth_start', 'magic_link_request', 'shop_create')");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.delivery_permitted NOT IN (0, 1)");
-    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.action = 'shop_create'");
+    expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.action IN ('google_oauth_start', 'shop_create')");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("admission.subject_hash IS NULL");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("job.kind = 'order_paid'");
     expect(POST_MIGRATION_CROSS_LEDGER_SQL).toContain("integration.generation_state NOT IN ('active', 'draining')");
