@@ -77,3 +77,15 @@ html[data-storefront-template="bustle"] .bustle-product-list .product-card:has(d
 @media (max-width: 1020px) { html[data-storefront-template="bustle"] .bustle-product-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 720px) { html[data-storefront-template="bustle"] .bustle-product-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 460px) { html[data-storefront-template="bustle"] .bustle-product-list { grid-template-columns: 1fr; } }
+
+/* ── CD token layer: deal-market energy ── */
+html[data-storefront-template="bustle"] {
+  --tmpl-radius-l: 24px;
+  --tmpl-slot-radius: 999px;
+  --tmpl-heading-weight: 800;
+  --tmpl-heading-track: -.04em;
+}
+
+html[data-storefront-template="bustle"] .cart-summary h2,
+html[data-storefront-template="bustle"] .checkout-form h2 { font-weight: 750; }
+html[data-storefront-template="bustle"] .summary-row strong { font-variant-numeric: tabular-nums; }

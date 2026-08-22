@@ -1,0 +1,37 @@
+---
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+
+/**
+ * Product image gallery with thumbnail switching (scripts/storefront/gallery.ts).
+ * Falls back to the initial-mark visual when the product has no images so
+ * every template keeps its shape.
+ */
+interface Props {
+  aspect?: "portrait" | "square";
+  images: string[];
+  locale: string;
+  title: string;
+}
+
+const { aspect = "square", images, locale, title } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const initial = title.slice(0, 1).toUpperCase();
+---
+{images.length > 0 ? (
+  <div class:list={["product-gallery", aspect]} data-gallery>
+    <figure class="gallery-main">
+      <img src={images[0]} alt={title} data-gallery-main decoding="async" />
+    </figure>
+    {images.length > 1 && (
+      <div class="gallery-thumbs" role="group" aria-label={t("storefront.gallery.thumbs_aria")}>
+        {images.map((image, index) => <button class:list={["gallery-thumb", index === 0 && "is-active"]} type="button" data-gallery-thumb={image} aria-label={t("storefront.gallery.thumb_aria", { index: index + 1 })}>
+          <img src={image} alt="" loading="lazy" decoding="async" />
+        </button>)}
+      </div>
+    )}
+  </div>
+) : (
+  <div class:list={["product-gallery gallery-fallback", aspect]} aria-hidden="true">
+    <span class="gallery-mark">{initial}</span>
+  </div>
+)}

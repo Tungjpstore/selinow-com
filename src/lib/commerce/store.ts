@@ -412,6 +412,10 @@ export async function checkoutCart(input: { booking?: { resourceId: unknown; sta
   });
   try {
     const orderTokenHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, "order-access", orderToken);
+    // Shop-scoped, non-reversible email index enabling the buyer order-history
+    // lookup; never exposed in any buyer-facing projection. customerEmail is
+    // non-null here: normalizeCustomerEmail threw earlier otherwise.
+    const emailLookupHash = await hmacToken(input.env.IDENTIFIER_HMAC_SECRET, `order-email-lookup:v1:${input.shop.id}`, customerEmail);
     const committed = await executeCanonicalCheckoutTransaction({
       cartId: input.cartId,
       cartSnapshot: { discountCode: cart.row.discountCode },
@@ -419,7 +423,14 @@ export async function checkoutCart(input: { booking?: { resourceId: unknown; sta
       checkoutRequestHash: requestHash,
       checkoutSubjectHash: checkoutHash,
       currency: input.shop.currency,
-      customer: { emailNormalized: customerEmail, id: createId("cus"), kind: "upsert_email", locale: cart.row.locale, maskedEmail: maskEmail(customerEmail) ?? "" },
+      customer: {
+        emailLookupHash,
+        emailNormalized: customerEmail,
+        id: createId("cus"),
+        kind: "upsert_email",
+        locale: cart.row.locale,
+        maskedEmail: maskEmail(customerEmail) ?? "",
+      },
       discountMinor,
       env: input.env,
       eventIdempotencyKey: checkoutHash,

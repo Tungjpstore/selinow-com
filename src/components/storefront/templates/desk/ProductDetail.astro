@@ -1,0 +1,35 @@
+---
+import BuyBox from "../../sections/BuyBox.astro";
+import PolicyPanel from "../../sections/PolicyPanel.astro";
+import RelatedGrid from "../../sections/RelatedGrid.astro";
+import SpecTable from "../../sections/SpecTable.astro";
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  locale: string;
+  product: StorefrontProduct;
+  promotions: StorefrontPromotion[];
+  related: StorefrontProduct[];
+  shop: StorefrontShop;
+}
+
+const { locale, product, related, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+---
+<section class="product-detail desk-detail">
+  <div class="desk-detail-main">
+    <a class="back-link" href="/">{t("storefront.product.back")}</a>
+    <h1>{product.title}</h1>
+    <p class="description">{product.description || t("storefront.product.description_fallback")}</p>
+    <SpecTable attributes={product.attributes} locale={locale} />
+    <PolicyPanel locale={locale} shop={shop} />
+  </div>
+  <aside class="desk-buy-panel">
+    <div class="desk-buy-inner">
+      <p class="desk-buy-kicker">{t("storefront.template.desk.compare.choose")}</p>
+      <BuyBox locale={locale} product={product} />
+    </div>
+  </aside>
+</section>
+<RelatedGrid locale={locale} related={related} />

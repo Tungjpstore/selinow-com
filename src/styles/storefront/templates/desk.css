@@ -97,3 +97,29 @@ html[data-storefront-template="desk"] .desk-product-list .product-buy-row { just
   html[data-storefront-template="desk"] .desk-product-list .product-visual { flex-basis: auto; min-height: 160px; }
   html[data-storefront-template="desk"] .desk-product-list .product-copy > p { display: block; }
 }
+
+/* ── CD token layer: invoice minimalism ── */
+html[data-storefront-template="desk"] {
+  --tmpl-panel-bg: #ffffff;
+  --tmpl-panel-bg-solid: #ffffff;
+  --tmpl-panel-nested-bg: #f8fafc;
+  --tmpl-line: #e2e8f0;
+  --tmpl-line-strong: #cbd5e1;
+  --tmpl-radius-s: 8px;
+  --tmpl-radius-m: 12px;
+  --tmpl-radius-l: 16px;
+  --tmpl-panel-shadow: var(--sln-shadow-xs);
+  --tmpl-panel-shadow-soft: var(--sln-shadow-xs);
+  --tmpl-slot-radius: 8px;
+  --tmpl-heading-weight: 740;
+  --tmpl-heading-track: -.03em;
+}
+
+/* Signature: dotted invoice leaders + tabular totals across money screens. */
+html[data-storefront-template="desk"] .summary-row { border-top-style: dotted; }
+html[data-storefront-template="desk"] .summary-row.total { border-top-style: double; border-top-width: 3px; }
+html[data-storefront-template="desk"] .summary-row strong,
+html[data-storefront-template="desk"] .cart-item-controls output,
+html[data-storefront-template="desk"] .shipping-method .shipping-method-fee { font-variant-numeric: tabular-nums; }
+html[data-storefront-template="desk"] .checkout-form label { font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; }
+html[data-storefront-template="desk"] .order-status { box-shadow: none; }

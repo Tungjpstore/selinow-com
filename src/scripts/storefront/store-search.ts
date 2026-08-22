@@ -29,3 +29,15 @@ document.querySelector<HTMLElement>("[data-store-search-reset]")?.addEventListen
   if (categoryFilter instanceof HTMLSelectElement) categoryFilter.value = "";
   filterProducts();
 });
+
+// Category jump links (aurora pills and booking category chips) drive the same
+// filter as the select instead of being decorative anchors.
+for (const jump of [...document.querySelectorAll<HTMLElement>("[data-store-category-jump]")]) {
+  jump.addEventListener("click", () => {
+    const categoryId = jump.dataset.storeCategoryJump ?? "";
+    if (categoryFilter instanceof HTMLSelectElement && [...categoryFilter.options].some((option) => option.value === categoryId)) {
+      categoryFilter.value = categoryId;
+      filterProducts();
+    }
+  });
+}

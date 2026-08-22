@@ -95,3 +95,26 @@ html[data-storefront-template="aurora"] .aurora-product-list .product-copy > p {
 @media (max-width: 640px) {
   html[data-storefront-template="aurora"] .aurora-product-list { grid-template-columns: 1fr; }
 }
+
+/* ── CD token layer: editorial serif ── */
+html[data-storefront-template="aurora"] {
+  --tmpl-panel-bg: #ffffff;
+  --tmpl-panel-bg-solid: #ffffff;
+  --tmpl-panel-nested-bg: #fafafa;
+  --tmpl-line: #e6e4e0;
+  --tmpl-line-strong: #d6d3cd;
+  --tmpl-text: #141414;
+  --tmpl-text-2: #4a4a4a;
+  --tmpl-text-3: #6f6f6f;
+  --tmpl-radius-l: 24px;
+  --tmpl-font-display: Georgia, "Times New Roman", "Noto Serif", serif;
+  --tmpl-heading-weight: 500;
+  --tmpl-heading-track: -.01em;
+}
+
+/* Hero photo now renders server-side; keep the cover treatment unconditional. */
+html[data-storefront-template="aurora"] .aurora-lookbook[style] { background-size: cover; background-position: center; }
+html[data-storefront-template="aurora"] .product-detail h1,
+html[data-storefront-template="aurora"] .order-panel h1 { text-wrap: balance; line-height: 1.08; }
+html[data-storefront-template="aurora"] .checkout-heading p,
+html[data-storefront-template="aurora"] .order-kicker { letter-spacing: .14em; }

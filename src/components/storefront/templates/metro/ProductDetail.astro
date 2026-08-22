@@ -1,0 +1,44 @@
+---
+import BuyBox from "../../sections/BuyBox.astro";
+import Gallery from "../../sections/Gallery.astro";
+import PolicyPanel from "../../sections/PolicyPanel.astro";
+import RelatedGrid from "../../sections/RelatedGrid.astro";
+import SpecTable from "../../sections/SpecTable.astro";
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  locale: string;
+  product: StorefrontProduct;
+  promotions: StorefrontPromotion[];
+  related: StorefrontProduct[];
+  shop: StorefrontShop;
+}
+
+const { locale, product, related, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const warrantyBadges = product.attributes
+  .filter((attribute) => /bảo hành|bảo hành|warranty|chính hãng|authentic/iu.test(attribute.label))
+  .slice(0, 3);
+const specRows = product.attributes.filter((attribute) => !warrantyBadges.includes(attribute));
+---
+<section class="product-detail metro-detail">
+  <div class="product-detail-media">
+    <Gallery images={product.images} locale={locale} title={product.title} />
+  </div>
+  <div class="product-detail-copy">
+    <a class="back-link" href="/">{t("storefront.product.back")}</a>
+    <h1>{product.title}</h1>
+    {warrantyBadges.length > 0 && (
+      <ul class="metro-badges" aria-label={t("storefront.spec.warranty_aria")}>
+        {warrantyBadges.map((badge) => <li><span aria-hidden="true">✓</span> {badge.label}: {badge.value}</li>)}
+      </ul>
+    )}
+    <div class="metro-buy">
+      <BuyBox locale={locale} product={product} />
+    </div>
+    <SpecTable attributes={specRows} locale={locale} />
+    <PolicyPanel locale={locale} shop={shop} />
+  </div>
+</section>
+<RelatedGrid locale={locale} related={related} />

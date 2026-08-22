@@ -51,7 +51,7 @@ function formText(data: FormData, name: string): string {
 }
 
 function resetTurnstile(): void {
-  const turnstileWindow = window as typeof window & { turnstile?: { reset: () => void } };
+  const turnstileWindow = window;
   turnstileWindow.turnstile?.reset();
 }
 

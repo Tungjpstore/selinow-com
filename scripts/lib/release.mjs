@@ -544,6 +544,30 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_queue_dead_letters_platform_status: "e8fe97147c2c5e04f4b0d2d7895d51b1d1b70186244ea52bcc58431a87a4bab3",
     }),
   }),
+  // 0106 only republishes plan_prices provider references (data-only UPDATEs);
+  // it introduces no schema objects or columns.
+  "0106_publish_dodo_plan_prices.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  // Storefront template completion (CD program): seller-authored product spec
+  // attributes plus the privacy-preserving buyer order-history email index.
+  "0107_storefront_template_completion.sql": Object.freeze({
+    columns: Object.freeze({
+      "orders.customer_email_lookup_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "products.attributes_json": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_orders_shop_email_created: "d6386b9052ea8e96e2e8ced0a2b298c6f09d753eb2fde686220816f195ff8212",
+    }),
+  }),
+  // EX3.1: tenant-leading index for the seller metrics day aggregate.
+  "0109_seller_metrics_index.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_orders_shop_paid_at: "1fbe4c8591f6548d021f306e24304c7dcfbe4e43632b3f0045fa8a0b2fc5cdb6",
+    }),
+  }),
 });
 
 

@@ -13,16 +13,17 @@ import DeskStoreHome from "./desk/StoreHome.astro";
 import MetroStoreHome from "./metro/StoreHome.astro";
 import PulseStoreHome from "./pulse/StoreHome.astro";
 import SwiftStoreHome from "./swift/StoreHome.astro";
-import type { StorefrontCategory, StorefrontProduct, StorefrontShop } from "../../../lib/storefront/store";
+import type { StorefrontCategory, StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../lib/storefront/store";
 
 interface Props {
   categories: StorefrontCategory[];
   locale: string;
   products: StorefrontProduct[];
+  promotions?: StorefrontPromotion[];
   shop: StorefrontShop;
 }
 
-const { categories, locale, products, shop } = Astro.props;
+const { categories, locale, products, promotions = [], shop } = Astro.props;
 const storeHomeByTemplate: Record<string, typeof SwiftStoreHome> = {
   aurora: AuroraStoreHome,
   bustle: BustleStoreHome,
@@ -36,4 +37,4 @@ const storeHomeByTemplate: Record<string, typeof SwiftStoreHome> = {
 };
 const StoreHomeComponent = storeHomeByTemplate[shop.template.id] ?? SwiftStoreHome;
 ---
-<StoreHomeComponent categories={categories} locale={locale} products={products} shop={shop} />
+<StoreHomeComponent categories={categories} locale={locale} products={products} promotions={promotions} shop={shop} />

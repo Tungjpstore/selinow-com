@@ -1,4 +1,5 @@
 import { createStorefrontTranslator } from "../i18n/catalogs/storefront";
+import { parseHomeSections, type StorefrontSectionConfig } from "./sections/registry";
 
 type JsonObject = Record<string, unknown>;
 
@@ -13,6 +14,8 @@ export type StorefrontTheme = {
 export type StorefrontContent = {
   announcement: string | null;
   deliveryText: string;
+  /** TM1: persisted home-section stack (empty/absent = template default tail). */
+  sections?: StorefrontSectionConfig[];
   description: string;
   footerText: string;
   headline: string;
@@ -102,6 +105,7 @@ export function parseStorefrontContent(storefrontJson: string, shopName: string,
     announcement,
     deliveryText: readText(storefront.deliveryText, t("storefront.defaults.delivery"), 240),
     description,
+    sections: parseHomeSections(storefront.sections),
     footerText: readText(storefront.footerText, t("storefront.defaults.footer", { shop: shopName }), 160),
     headline: readText(storefront.headline, t("storefront.defaults.headline"), 120),
     seoDescription: readText(storefront.seoDescription, seoDescriptionFallback, 160),
@@ -110,4 +114,10 @@ export function parseStorefrontContent(storefrontJson: string, shopName: string,
     supportText: readText(storefront.supportText, t("storefront.defaults.support"), 180),
     templateId,
   };
+}
+
+/** TM0: persisted home-section stack (empty = template default). */
+export function parseStorefrontSections(storefrontJson: string): StorefrontSectionConfig[] {
+  const storefront = parseJsonObject(storefrontJson);
+  return parseHomeSections(storefront.sections);
 }

@@ -1,0 +1,28 @@
+---
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+import type { StorefrontPromotion } from "../../../lib/storefront/store";
+
+/**
+ * Flash-window countdown bound to an active shop discount with an end date.
+ * Server-renders a static deadline line (no-JS and prefers-reduced-motion keep
+ * it); scripts/storefront/promo-countdown.ts upgrades it to a live counter.
+ * Renders nothing when there is no promo window to show.
+ */
+interface Props {
+  locale: string;
+  promotion: StorefrontPromotion | null;
+}
+
+const { locale, promotion } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const endsAtMs = promotion?.endsAt !== undefined && promotion.endsAt !== null ? Date.parse(promotion.endsAt) : Number.NaN;
+const showCountdown = Number.isFinite(endsAtMs) && endsAtMs - Date.now() > 0 && endsAtMs - Date.now() <= 48 * 60 * 60 * 1_000;
+---
+{showCountdown && promotion !== null && (
+  <p class="promo-countdown" role="status" data-countdown-until={promotion.endsAt}>
+    <span class="promo-countdown-flame" aria-hidden="true">⚡</span>
+    <span>{t("storefront.promo.ends", { time: new Date(endsAtMs).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" }) })}</span>
+    <strong class="promo-countdown-clock" data-countdown-clock aria-hidden="true"></strong>
+    <span class="selinow-sr-only">{t("storefront.promo.sr_deadline")}</span>
+  </p>
+)}

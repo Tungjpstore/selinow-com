@@ -78,7 +78,8 @@ export type CommerceQuoteCommand = {
 
 export type CommerceCartMutation =
   | { kind: "item.increment"; quantity: number; variantId: string }
-  | { code: string; kind: "discount.apply" };
+  | { code: string; kind: "discount.apply" }
+  | { kind: "discount.remove" };
 
 export type CommerceCartMutationTarget =
   | { access: { kind: "opaque_token"; token: string }; cartId: string }

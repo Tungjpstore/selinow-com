@@ -1,0 +1,41 @@
+---
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+import { parseSectionItems } from "../../../lib/storefront/sections/registry";
+
+/**
+ * TM0 universal section — "why buy here" trust grid. TM2: merchants override
+ * the per-vertical default copy through the sections settings plane; skinned
+ * by the shared --tmpl-* token layer.
+ */
+interface Props {
+  locale: string;
+  settings?: Record<string, unknown>;
+  vertical: string;
+}
+
+const { locale, settings, vertical } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const safeVertical = vertical === "physical" || vertical === "booking" ? vertical : "digital";
+const defaults = [1, 2, 3].map((index) => ({
+  body: t(`storefront.section.usp.${safeVertical}.${index}.body`),
+  title: t(`storefront.section.usp.${safeVertical}.${index}.title`),
+}));
+const custom = parseSectionItems(settings?.items);
+const items = custom.length > 0
+  ? [...custom, ...defaults].slice(0, 3).map((item) => ({
+      body: item.body ?? "",
+      title: item.title ?? "",
+    }))
+  : defaults;
+---
+<section class="usp-section" data-vertical={safeVertical} aria-labelledby="usp-section-title">
+  <h2 id="usp-section-title">{t("storefront.section.usp.heading")}</h2>
+  <ul>
+    {items.map((item) => (
+      <li>
+        <span class="usp-check" aria-hidden="true">✓</span>
+        <div><strong>{item.title}</strong><p>{item.body}</p></div>
+      </li>
+    ))}
+  </ul>
+</section>

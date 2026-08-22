@@ -680,5 +680,41 @@ paymentButton?.addEventListener("click", () => { void openPaymentLink(); });
 revealButton?.addEventListener("click", () => { void revealKeys(); });
 downloadRetry?.addEventListener("click", () => { void loadDownloads(); });
 
-if (fragmentRecoveryToken === null) void loadOrder();
-else void consumeRecoveryFragment();
+/**
+ * PayOS return/cancel landing: the return trip polls while the webhook
+ * settles (max 60s); a cancel keeps the order and points back to the payment
+ * link. Neither state ever marks the order paid — only the order view does.
+ */
+const paymentReturn = new URLSearchParams(window.location.search).get("payment");
+const PAYMENT_RETURN_POLL_MS = 5_000;
+const PAYMENT_RETURN_MAX_POLLS = 12;
+
+if (paymentReturn === "cancel") {
+  showState(t("storefront.payment_return.cancel_title"), t("storefront.payment_return.cancel_detail"), "warning");
+}
+
+async function pollPaymentReturn(): Promise<void> {
+  showState(t("storefront.payment_return.pending_title"), t("storefront.payment_return.pending_detail"), "info");
+  for (let attempt = 0; attempt < PAYMENT_RETURN_MAX_POLLS; attempt += 1) {
+    await new Promise((resolve) => { window.setTimeout(resolve, PAYMENT_RETURN_POLL_MS); });
+    const token = orderToken();
+    if (orderId === undefined || token === null) return;
+    try {
+      const response = await fetch(`/api/store/orders/${encodeURIComponent(orderId)}`, { headers: { "X-Order-Access-Token": token } });
+      const body: OrderResponse = await response.json();
+      if (response.ok && body.order.paymentStatus === "paid") {
+        await loadOrder();
+        return;
+      }
+    } catch {
+      // Next poll retries; the manual refresh button stays available.
+    }
+  }
+  setActionStatus(t("storefront.order.update_failed"), true);
+}
+
+if (fragmentRecoveryToken === null) {
+  void loadOrder().then(() => {
+    if (paymentReturn === "return") void pollPaymentReturn();
+  });
+} else void consumeRecoveryFragment();

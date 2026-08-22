@@ -392,6 +392,9 @@ export class TelegramCartMutationPort implements Required<Pick<CommercePort, "cr
     await assertTelegramIntegrationTenant({ env: this.input.env, integrationId: this.input.integrationId, shopId: this.input.shop.id });
     if (input.command.cart.access.kind !== "principal" || input.command.cart.cartId !== null) throw new AppError("commerce_context_mismatch", 403, ["principal_cart_required"]);
     if (input.command.idempotencyKey !== this.input.expectedIdempotencyKey) throw new AppError("commerce_context_mismatch", 403, ["idempotency_key_mismatch"]);
+    // Telegram only surfaces add-variant and apply-discount flows today; the
+    // website-only remove kind is rejected before reaching the shared port.
+    if (input.command.mutation.kind === "discount.remove") throw new AppError("cart_mutation_invalid", 400, ["discount_remove_unsupported"]);
     const result = input.command.mutation.kind === "item.increment"
       ? await addVariant({ env: this.input.env, identity: this.input.identity, idempotencyKey: input.command.idempotencyKey, integrationId: this.input.integrationId, quantity: input.command.mutation.quantity, shop: this.input.shop, updateId: this.input.updateId, variantId: input.command.mutation.variantId })
       : await applyDiscount({ code: input.command.mutation.code, env: this.input.env, identity: this.input.identity, idempotencyKey: input.command.idempotencyKey, integrationId: this.input.integrationId, shop: this.input.shop, updateId: this.input.updateId });

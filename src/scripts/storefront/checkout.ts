@@ -9,7 +9,7 @@ type ApiError = { code?: string; requestId?: string };
 type CartResponse = { cartId: string; cartToken: string; expiresAt?: string };
 type QuoteItem = { productTitle: string; quantity: number; unitPriceMinor: number; variantId: string; variantTitle: string; variantVersion: number };
 type ShippingMethod = { feeMinor: number; freeOverMinor: number | null; id: string; name: string };
-type QuoteResponse = { currency: string; expiresAt: string; items: QuoteItem[]; quoteEvidence: string; shipping?: { feeMinor: number; methodId: string | null; methods: ShippingMethod[] }; totalMinor: number };
+type QuoteResponse = { currency: string; discountCode?: string | null; discountMinor?: number; expiresAt: string; items: QuoteItem[]; quoteEvidence: string; shipping?: { feeMinor: number; methodId: string | null; methods: ShippingMethod[] }; subtotalMinor?: number; totalMinor: number };
 type CheckoutResponse = { order: { orderId: string; orderToken: string } };
 type RecoveryAction = "cart" | "quote" | "recover" | "submit";
 type CheckoutIntent = {
@@ -77,6 +77,17 @@ const shippingFields = document.querySelector("#shipping-fields");
 const shippingMethodsElement = document.querySelector("#shipping-methods");
 const shippingFeeRow = document.querySelector("#shipping-fee-row");
 const shippingFee = document.querySelector("#shipping-fee");
+const promoField = document.querySelector<HTMLElement>("#promo-field");
+const promoInput = document.querySelector<HTMLInputElement>("[data-promo-input]");
+const promoApplyButton = document.querySelector<HTMLButtonElement>("[data-promo-apply]");
+const promoAppliedRow = document.querySelector<HTMLElement>("#promo-applied");
+const promoCodeChip = document.querySelector<HTMLElement>("[data-promo-code]");
+const promoRemoveButton = document.querySelector<HTMLButtonElement>("[data-promo-remove]");
+const promoStatus = document.querySelector<HTMLElement>("[data-promo-status]");
+const discountRow = document.querySelector<HTMLElement>("#discount-row");
+const discountLabel = document.querySelector<HTMLElement>("[data-discount-label]");
+const discountValue = document.querySelector<HTMLElement>("#discount-value");
+const PROMO_DRAFT_KEY = `selinow-promo-draft:v1:${window.location.host}`;
 const bookingFields = document.querySelector("#booking-fields");
 const bookingDateInput = document.querySelector("#booking-date");
 const bookingSlotsElement = document.querySelector("#booking-slots");
@@ -307,6 +318,56 @@ function readShippingAddress(): Record<string, string> | null {
   return address;
 }
 
+function renderPromo(currentQuote: QuoteResponse): void {
+  const code = typeof currentQuote.discountCode === "string" && currentQuote.discountCode.length > 0
+    ? currentQuote.discountCode
+    : null;
+  if (promoAppliedRow !== null) promoAppliedRow.hidden = code === null;
+  if (promoField !== null) promoField.hidden = code !== null;
+  if (code !== null && promoCodeChip !== null) promoCodeChip.textContent = t("storefront.checkout.promo.applied", { code });
+  const discountMinor = typeof currentQuote.discountMinor === "number" ? currentQuote.discountMinor : 0;
+  if (discountRow !== null) {
+    discountRow.hidden = code === null || discountMinor <= 0;
+    if (discountLabel !== null && code !== null) discountLabel.textContent = t("storefront.checkout.promo.discount_row", { code });
+    if (discountValue !== null && discountMinor > 0) discountValue.textContent = `-${formatClientMoney(discountMinor, currentQuote.currency)}`;
+  }
+}
+
+async function runPromoMutation(mutation: { kind: "discount.apply"; code: string } | { kind: "discount.remove" }): Promise<boolean> {
+  if (cart === null) return false;
+  const response = await fetch("/api/store/cart", {
+    body: JSON.stringify({ cartId: cart.cartId, cartToken: cart.cartToken, mutation }),
+    headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+    method: "POST",
+  });
+  if (response.ok) return true;
+  const body = (await response.json().catch(() => ({}))) as { code?: string };
+  if (promoStatus !== null) {
+    promoStatus.textContent = body.code === "discount_invalid"
+      ? t("storefront.checkout.promo.invalid")
+      : t("storefront.checkout.error.quote_failed");
+  }
+  return false;
+}
+
+function prefillPromoDraft(): void {
+  if (promoInput === null) return;
+  try {
+    const draft = window.sessionStorage.getItem(PROMO_DRAFT_KEY);
+    if (draft !== null && promoInput.value === "") promoInput.value = draft;
+  } catch {
+    // Draft is an enhancement only.
+  }
+}
+
+function clearPromoDraft(): void {
+  try {
+    window.sessionStorage.removeItem(PROMO_DRAFT_KEY);
+  } catch {
+    // Best effort.
+  }
+}
+
 function renderShipping(currentQuote: QuoteResponse): void {
   if (currentQuote.shipping === undefined) {
     if (shippingFields instanceof HTMLFieldSetElement) shippingFields.hidden = true;
@@ -359,6 +420,42 @@ function isBookingCart(): boolean {
   return items.length === 1 && entry !== undefined && entry.durationMinutes !== null;
 }
 
+/**
+ * Restore a slot drafted on the service detail page: set the date input and
+ * pre-check the matching radio when it is still offered. The draft only
+ * preselects UI; the guarded checkout still proves the slot atomically.
+ */
+function readBookingDraft(): { resourceId: string; startAt: string; variantId: string } | null {
+  try {
+    const raw = window.sessionStorage.getItem(`selinow-booking-draft:v1:${window.location.host}`);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.variantId !== "string" || typeof record.startAt !== "string" || typeof record.resourceId !== "string") return null;
+    return { resourceId: record.resourceId, startAt: record.startAt, variantId: record.variantId };
+  } catch {
+    return null;
+  }
+}
+
+function applyBookingDraft(): void {
+  if (!(bookingDateInput instanceof HTMLInputElement) || bookingVariantId === null) return;
+  const draft = readBookingDraft();
+  if (draft === null || draft.variantId !== bookingVariantId) return;
+  bookingDateInput.value = draft.startAt.slice(0, 10);
+  const wanted = `${draft.resourceId}|${draft.startAt}`;
+  const match = [...document.querySelectorAll<HTMLInputElement>('input[name="bookingSlot"]')].find((input) => input.value === wanted);
+  if (match === undefined || match.disabled) return;
+  match.checked = true;
+  match.dispatchEvent(new Event("change", { bubbles: true }));
+  try {
+    window.sessionStorage.removeItem(`selinow-booking-draft:v1:${window.location.host}`);
+  } catch {
+    // Leaving the draft behind only means the next visit may preselect again.
+  }
+}
+
 function localDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -403,6 +500,7 @@ async function loadBookingSlots(): Promise<void> {
       label.appendChild(text);
       bookingSlotsElement.appendChild(label);
     }
+    applyBookingDraft();
   } catch {
     bookingSlotStatus.textContent = t("storefront.checkout.booking.empty");
   }
@@ -480,6 +578,7 @@ async function prepare(existingCart?: CartResponse, expectedItems?: QuoteItem[])
   }
   const quoteChanged = renderAuthoritativeQuote(quote);
   renderShipping(quote);
+  renderPromo(quote);
   if (isBookingCart()) {
     if (bookingFields instanceof HTMLFieldSetElement) bookingFields.hidden = false;
     if (bookingVariantId === null) {
@@ -551,6 +650,7 @@ function renderIntent(intent: CheckoutIntent): void {
   if (email instanceof HTMLInputElement) email.value = intent.customerEmail;
   const quoteChanged = renderAuthoritativeQuote(intent.quote);
   renderShipping(intent.quote);
+  renderPromo(intent.quote);
   if (total !== null) total.textContent = formatClientMoney(intent.quote.totalMinor, intent.quote.currency);
   const expiresAtMs = Date.parse(intent.quote.expiresAt);
   if (Number.isFinite(expiresAtMs) && status instanceof HTMLElement) {
@@ -658,7 +758,7 @@ async function submitCheckout(event: Event): Promise<void> {
     const code = errorCode(error);
     setError(errorMessage(code, errorRequestId(error)), recoveryForCheckout(code));
     submit.textContent = t("storefront.checkout.submit");
-    const turnstileWindow = window as typeof window & { turnstile?: { reset: () => void } };
+    const turnstileWindow = window;
     turnstileWindow.turnstile?.reset();
     if (code === "turnstile_invalid" || code === "turnstile_required") {
       setRecovery(null);
@@ -685,4 +785,42 @@ retry?.addEventListener("click", () => {
     return;
   }
   if (recoveryAction === "submit") document.querySelector<HTMLFormElement>("#checkout-form")?.requestSubmit();
+});
+
+// ── EX4.1 promo code wiring ──────────────────────────────────────────────
+prefillPromoDraft();
+promoApplyButton?.addEventListener("click", () => {
+  const code = promoInput === null ? "" : promoInput.value.trim().toUpperCase();
+  if (code === "" || cart === null) return;
+  void (async () => {
+    promoApplyButton.disabled = true;
+    if (promoStatus !== null) promoStatus.textContent = "";
+    const ok = await runPromoMutation({ code, kind: "discount.apply" });
+    if (ok) {
+      clearPromoDraft();
+      if (promoInput !== null) promoInput.value = "";
+      await prepareWithRecovery(cart);
+    }
+    promoApplyButton.disabled = false;
+  })();
+});
+promoInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    promoApplyButton?.click();
+  }
+});
+promoRemoveButton?.addEventListener("click", () => {
+  if (cart === null) return;
+  void (async () => {
+    promoRemoveButton.disabled = true;
+    if (promoStatus !== null) promoStatus.textContent = t("storefront.checkout.promo.removing");
+    const ok = await runPromoMutation({ kind: "discount.remove" });
+    if (ok) {
+      clearPromoDraft();
+      if (promoStatus !== null) promoStatus.textContent = t("storefront.checkout.promo.removed");
+      await prepareWithRecovery(cart);
+    }
+    promoRemoveButton.disabled = false;
+  })();
 });

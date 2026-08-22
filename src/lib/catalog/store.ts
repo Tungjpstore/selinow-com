@@ -91,10 +91,17 @@ function mapCatalogCurrencyWriteError(error: unknown): AppError | null {
 }
 
 export type CategoryInput = { description: string; name: string; slug: string; sortOrder: number; status: "active" | "archived" | "draft" };
-export type ProductInput = { categoryId: string | null; deliveryMode?: "digital" | "shipping"; description: string; fulfillmentType: "license_key" | "manual"; slug: string; status: "active" | "archived" | "draft" | "suspended"; title: string };
+export type ProductInput = { attributesJson?: string | null; categoryId: string | null; deliveryMode?: "digital" | "shipping"; description: string; fulfillmentType: "license_key" | "manual"; slug: string; status: "active" | "archived" | "draft" | "suspended"; title: string };
 export type VariantInput = { compareAtMinor: number | null; currency: string | undefined; durationMinutes?: number | null; maxPerOrder: number; minPerOrder: number; optionsJson: string; priceMinor: number; sku: string; status: "active" | "archived" | "suspended"; title: string };
 
-export type ProductView = ProductInput & { createdAt: string; id: string; updatedAt: string; version: number };
+export type ProductView = Omit<ProductInput, "attributesJson" | "deliveryMode"> & {
+  attributesJson: string | null;
+  createdAt: string;
+  deliveryMode: "digital" | "shipping";
+  id: string;
+  updatedAt: string;
+  version: number;
+};
 export type VariantView = Omit<VariantInput, "currency" | "optionsJson"> & { createdAt: string; currency: string; id: string; optionsJson: string; productId: string; updatedAt: string; version: number };
 
 type StoredCatalogCreate = {
@@ -306,11 +313,11 @@ export async function createProduct(input: { data: ProductInput; env: AppBinding
   try {
     const limit = planLimit(actor.limits, "products_non_archived");
     const product = await input.env.PLATFORM_DB.prepare(`
-      INSERT INTO products (id, shop_id, category_id, slug, title, description, status, fulfillment_type, delivery_mode, version, created_at, updated_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+      INSERT INTO products (id, shop_id, category_id, slug, title, description, attributes_json, status, fulfillment_type, delivery_mode, version, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
       WHERE ? = 'archived' OR ? IS NULL OR (SELECT COUNT(*) FROM products WHERE shop_id = ? AND status != 'archived') < ?
-      RETURNING id, category_id AS categoryId, slug, title, description, status, fulfillment_type AS fulfillmentType, delivery_mode AS deliveryMode, version, created_at AS createdAt, updated_at AS updatedAt
-    `).bind(id, actor.shopId, input.data.categoryId, input.data.slug, input.data.title, input.data.description, input.data.status, input.data.fulfillmentType, deliveryMode, now, now, input.data.status, limit, actor.shopId, limit).first<ProductView>();
+      RETURNING id, category_id AS categoryId, slug, title, description, attributes_json AS attributesJson, status, fulfillment_type AS fulfillmentType, delivery_mode AS deliveryMode, version, created_at AS createdAt, updated_at AS updatedAt
+    `).bind(id, actor.shopId, input.data.categoryId, input.data.slug, input.data.title, input.data.description, input.data.attributesJson ?? null, input.data.status, input.data.fulfillmentType, deliveryMode, now, now, input.data.status, limit, actor.shopId, limit).first<ProductView>();
     if (product === null && input.data.status !== "archived") throw new AppError("quota_exceeded", 409, ["products_non_archived"]);
     if (product === null) throw new AppError("catalog_conflict", 409);
     await meterProductCreate({ actor, database: input.env.PLATFORM_DB, limit, now: new Date(now), product });
@@ -430,6 +437,8 @@ export async function createProductWithInitialVariant(input: {
   const variantId = createId("var");
   const product: ProductView = {
     ...input.data,
+    attributesJson: input.data.attributesJson ?? null,
+    deliveryMode: input.data.deliveryMode ?? "digital",
     createdAt: nowIso,
     id: productId,
     updatedAt: nowIso,
@@ -456,10 +465,10 @@ export async function createProductWithInitialVariant(input: {
       `).bind(input.userId, namespace, keyHash, nowIso),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO products (
-          id, shop_id, category_id, slug, title, description, status,
+          id, shop_id, category_id, slug, title, description, attributes_json, status,
           fulfillment_type, delivery_mode, version, created_at, updated_at
         )
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
         WHERE ? = 'archived' OR ? IS NULL OR (
           SELECT COUNT(*) FROM products WHERE shop_id = ? AND status != 'archived'
         ) < ?
@@ -470,6 +479,7 @@ export async function createProductWithInitialVariant(input: {
         input.data.slug,
         input.data.title,
         input.data.description,
+        input.data.attributesJson ?? null,
         input.data.status,
         input.data.fulfillmentType,
         input.data.deliveryMode ?? "digital",
@@ -602,7 +612,7 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
   try {
     const row = await input.env.PLATFORM_DB.prepare(`
       UPDATE products AS target
-      SET category_id = ?, slug = ?, title = ?, description = ?, status = ?,
+      SET category_id = ?, slug = ?, title = ?, description = ?, attributes_json = ?, status = ?,
         fulfillment_type = ?, delivery_mode = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND shop_id = ?
         AND (
@@ -628,13 +638,14 @@ export async function updateProduct(input: { data: ProductInput; env: AppBinding
             LIMIT 1
           ), 0) = 0
         )
-      RETURNING id, category_id AS categoryId, slug, title, description, status,
+      RETURNING id, category_id AS categoryId, slug, title, description, attributes_json AS attributesJson, status,
         fulfillment_type AS fulfillmentType, delivery_mode AS deliveryMode, version, created_at AS createdAt, updated_at AS updatedAt
     `).bind(
       input.data.categoryId,
       input.data.slug,
       input.data.title,
       input.data.description,
+      input.data.attributesJson ?? null,
       input.data.status,
       input.data.fulfillmentType,
       input.data.deliveryMode ?? "digital",

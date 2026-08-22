@@ -1,17 +1,22 @@
 ---
 import ProductCard from "../../../storefront/ProductCard.astro";
+import USPGrid from "../../sections/USPGrid.astro";
+import FAQSection from "../../sections/FAQSection.astro";
+import { resolveUniversalSections, universalSectionSettings } from "../../../../lib/storefront/sections/registry";
 import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
-import type { StorefrontCategory, StorefrontProduct, StorefrontShop } from "../../../../lib/storefront/store";
+import type { StorefrontCategory, StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
 
 interface Props {
   categories: StorefrontCategory[];
   locale: string;
   products: StorefrontProduct[];
+  promotions?: StorefrontPromotion[];
   shop: StorefrontShop;
 }
 
 const { categories, locale, products, shop } = Astro.props;
 const t = createStorefrontTranslator(locale);
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections);
 const trustItems = [
   t("storefront.template.metro.trust.warranty"),
   t("storefront.template.metro.trust.delivery"),
@@ -32,7 +37,18 @@ const trustItems = [
     <a class="store-hero-cta" href="#products">{t("storefront.search.cta")} <span aria-hidden="true">↓</span></a>
   </div>
 </section>
-<ul class="metro-trust-strip" aria-label={t("storefront.support_aria")}>
+<ul class="hero-stats-bar">
+          <li><strong>{String(products.length)}</strong><small>{t("storefront.ca.stats.products")}</small></li>
+          <li><strong>{String(products.reduce((sum, product) => sum + product.soldCount, 0))}</strong><small>{t("storefront.ca.stats.sold")}</small></li>
+          <li><strong>24/7</strong><small>{t("storefront.ca.stats.support")}</small></li>
+        </ul>
+        <div class="hero-trust-bar">
+          <span>{t("storefront.ca.trust.secure")}</span>
+          <span>{t("storefront.ca.trust.instant")}</span>
+          <span>{t("storefront.ca.trust.support")}</span>
+        </div>
+        <div class="hero-deco-ring" aria-hidden="true"></div>
+        metro-trust-strip" aria-label={t("storefront.support_aria")}>
   {trustItems.map((item) => <li><span aria-hidden="true">✓</span>{item}</li>)}
 </ul>
 <section class="catalog-section" id="products">
@@ -47,9 +63,23 @@ const trustItems = [
     </label>}
   </div>
   <div class="product-list metro-product-list">
-    {products.map((product, index) => <ProductCard locale={locale} product={product} index={index} />)}
+    {products.map((product, index) => (
+  <div data-spec-peek={product.attributes.slice(0, 3).map((attribute) => `${attribute.label}: ${attribute.value}`).join("|")}>
+    <ProductCard locale={locale} product={product} index={index} />
+  </div>
+))}
     {products.length === 0 && <p class="empty-cart">{t("storefront.catalog.empty")}</p>}
   </div>
   {products.length > 0 && <p class="empty-cart catalog-no-results" data-store-search-empty hidden>{t("storefront.catalog.no_results")} <a href="#products" data-store-search-reset>{t("storefront.catalog.show_all")}</a>.</p>}
 </section>
+<section class="recently-viewed-section" aria-label="Recently viewed" hidden>
+  <h2>{t("storefront.tm4.recently_viewed.heading")}</h2>
+  <div class="recently-viewed-scroll" data-recently-viewed-rail></div>
+</section>
+{universalTail.map((type) => type === "usp"
+  ? <USPGrid locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "usp")} vertical={shop.template.vertical} />
+  : <FAQSection locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "faq")} vertical={shop.template.vertical} />)}
 <script src="../../../../scripts/storefront/store-search.ts"></script>
+<script src="../../../../scripts/marketing/reveal-boot.ts"></script>
+<script src="../../../../scripts/storefront/tm3-signatures.ts"></script>
+<script src="../../../../scripts/storefront/tm4-merchandising.ts"></script>

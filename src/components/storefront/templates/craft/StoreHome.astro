@@ -1,38 +1,63 @@
 ---
 import { formatMoney } from "../../../../lib/storefront/view";
+import USPGrid from "../../sections/USPGrid.astro";
+import FAQSection from "../../sections/FAQSection.astro";
+import { resolveUniversalSections, universalSectionSettings } from "../../../../lib/storefront/sections/registry";
 import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
-import type { StorefrontCategory, StorefrontProduct, StorefrontShop } from "../../../../lib/storefront/store";
+import type { StorefrontCategory, StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
 
 interface Props {
   categories: StorefrontCategory[];
   locale: string;
   products: StorefrontProduct[];
+  promotions?: StorefrontPromotion[];
   shop: StorefrontShop;
 }
 
 const { categories, locale, products, shop } = Astro.props;
 const t = createStorefrontTranslator(locale);
-const services = products.map((product) => ({
-  duration: product.variants[0]?.title ?? "",
-  price: product.variants[0] ? formatMoney(product.variants[0].priceMinor, product.variants[0].currency, locale) : "",
-  slug: product.slug,
-  soldOut: product.variants.every((variant) => variant.stockState === "out_of_stock"),
-  title: product.title,
-}));
+const firstBookable = products.find((product) => product.variants.some((variant) => variant.durationMinutes !== undefined));
+const firstVariantId = firstBookable?.variants.find((variant) => variant.durationMinutes !== undefined)?.id ?? "";
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections);
+const services = products.map((product) => {
+  const firstVariant = product.variants[0];
+  const durationMinutes = firstVariant?.durationMinutes ?? undefined;
+  return {
+    duration: durationMinutes !== undefined
+      ? t("storefront.slot_picker.duration", { minutes: durationMinutes })
+      : firstVariant?.title ?? "",
+    price: firstVariant ? formatMoney(firstVariant.priceMinor, firstVariant.currency, locale) : "",
+    slug: product.slug,
+    soldOut: product.variants.every((variant) => variant.stockState === "out_of_stock"),
+    title: product.title,
+  };
+});
 const steps = [
-  t("storefront.template.desk.steps.1"),
-  t("storefront.template.desk.steps.2"),
-  t("storefront.template.desk.steps.3"),
+  t("storefront.template.craft.steps.1"),
+  t("storefront.template.craft.steps.2"),
+  t("storefront.template.craft.steps.3"),
 ];
 ---
 <section class="craft-hero" data-mark={shop.name.slice(0, 1).toUpperCase()}>
   <p class="store-kicker">{shop.name}</p>
   <h1>{shop.content.headline}</h1>
   <p>{shop.content.description}</p>
-  <a class="craft-cta" href="#services">{t("storefront.template.craft.cta")} <span aria-hidden="true">↓</span></a>
+  <ul class="hero-stats-bar">
+          <li><strong>{String(products.length)}</strong><small>{t("storefront.ca.stats.products")}</small></li>
+          <li><strong>{String(products.reduce((sum, product) => sum + product.soldCount, 0))}</strong><small>{t("storefront.ca.stats.sold")}</small></li>
+          <li><strong>24/7</strong><small>{t("storefront.ca.stats.support")}</small></li>
+        </ul>
+        <div class="hero-trust-bar">
+          <span>{t("storefront.ca.trust.secure")}</span>
+          <span>{t("storefront.ca.trust.instant")}</span>
+          <span>{t("storefront.ca.trust.support")}</span>
+        </div>
+    <a class="craft-cta" href="#services">{t("storefront.template.craft.cta")} <span aria-hidden="true">↓</span></a>
+        <div class="hero-deco-ring" aria-hidden="true"></div>
 </section>
-<section class="craft-services" id="services" aria-labelledby="craft-services-title">
-  <h2 id="craft-services-title">{t("storefront.template.serenity.menu")}</h2>
+{firstBookable && <a class="next-slot-chip" data-next-slot-chip data-next-slot-variant={firstVariantId} data-next-slot-empty={t("storefront.tm3.next_slot.empty")} data-next-slot-prefix={t("storefront.tm3.next_slot.prefix")} href={`/products/${firstBookable.slug}`}><span aria-hidden="true">·</span> <span data-next-slot-label>…</span></a>}
+<section class="craft-services" data-reveal id="services" aria-labelledby="craft-services-title">
+  <h2 id="craft-services-title">{t("storefront.template.craft.menu")}</h2>
   <ul class="craft-service-list">
     {services.map((service) => (
       <li>
@@ -42,17 +67,29 @@ const steps = [
           {service.duration !== "" && <small>{service.duration}</small>}
         </div>
         <span class="craft-service-price">{service.price}</span>
-        <a class:list={["craft-book-button", service.soldOut && "is-disabled"]} href={`/products/${service.slug}`} aria-disabled={service.soldOut ? "true" : undefined}>{service.soldOut ? t("storefront.product.sold_out") : t("storefront.template.craft.cta")}</a>
+        {service.soldOut
+          ? <span class="craft-book-button is-disabled" aria-disabled="true">{t("storefront.product.sold_out")}</span>
+          : <a class="craft-book-button" href={`/products/${service.slug}`}>{t("storefront.template.craft.cta")}</a>}
       </li>
     ))}
     {services.length === 0 && <li class="empty-cart">{t("storefront.catalog.empty")}</li>}
   </ul>
 </section>
-<ol class="craft-steps" aria-label={t("storefront.template.clinic.process")}>
+<ol class="craft-steps" aria-label={t("storefront.template.craft.menu")}>
   {steps.map((step, index) => <li><span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>{step}</li>)}
 </ol>
 {categories.length > 0 && (
   <nav class="craft-categories" aria-label={t("storefront.catalog.category")}>
-    {categories.map((category) => <a href="#services">{category.name}</a>)}
+    {categories.map((category) => <a href="#services" data-store-category-jump={category.id}>{category.name}</a>)}
   </nav>
 )}
+<section class="recently-viewed-section" aria-label="Recently viewed" hidden>
+  <h2>{t("storefront.tm4.recently_viewed.heading")}</h2>
+  <div class="recently-viewed-scroll" data-recently-viewed-rail></div>
+</section>
+{universalTail.map((type) => type === "usp"
+  ? <USPGrid locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "usp")} vertical={shop.template.vertical} />
+  : <FAQSection locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "faq")} vertical={shop.template.vertical} />)}
+<script src="../../../../scripts/storefront/tm3-signatures.ts"></script>
+<script src="../../../../scripts/marketing/reveal-boot.ts"></script>
+<script src="../../../../scripts/storefront/tm4-merchandising.ts"></script>

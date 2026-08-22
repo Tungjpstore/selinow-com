@@ -74,6 +74,8 @@ function createDatabase(): SqliteD1 {
     "migrations/0102_physical_goods_vertical.sql",
     // Variant writes persist duration_minutes (booking vertical, TV4).
     "migrations/0103_appointment_booking_vertical.sql",
+    // Product writes persist attributes_json (storefront detail, CD).
+    "migrations/0107_storefront_template_completion.sql",
   ]) {
     database.exec(readFileSync(filename, "utf8"));
   }

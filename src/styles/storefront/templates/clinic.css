@@ -99,3 +99,20 @@ html[data-storefront-template="clinic"] .clinic-categories a {
 @media (max-width: 720px) {
   html[data-storefront-template="clinic"] .clinic-steps { grid-template-columns: 1fr; }
 }
+
+/* ── CD token layer: medical record, one accent, no promo color ── */
+html[data-storefront-template="clinic"] {
+  --tmpl-radius-s: 8px;
+  --tmpl-radius-m: 12px;
+  --tmpl-radius-l: 16px;
+  --tmpl-panel-shadow: none;
+  --tmpl-panel-shadow-soft: none;
+  --tmpl-slot-radius: 8px;
+  --tmpl-heading-weight: 740;
+  --tmpl-heading-track: -.02em;
+}
+
+html[data-storefront-template="clinic"] .checkout-form label { font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; }
+html[data-storefront-template="clinic"] .summary-row strong,
+html[data-storefront-template="clinic"] .orders-history-total { font-variant-numeric: tabular-nums; }
+html[data-storefront-template="clinic"] .spec-table tbody td { font-variant-numeric: tabular-nums; }

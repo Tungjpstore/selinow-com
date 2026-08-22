@@ -89,9 +89,9 @@ export type PrivateFileRequirementSnapshot = {
 
 /** Customer state needed by the transaction, independent of the channel. */
 export type CanonicalCheckoutCustomer =
-  | { kind: "anonymous"; maskedEmail: null }
-  | { kind: "existing"; customerId: string; maskedEmail: string | null }
-  | { emailNormalized: string; id: string; kind: "upsert_email"; maskedEmail: string; locale: string };
+  | { emailLookupHash?: string; kind: "anonymous"; maskedEmail: null }
+  | { customerId: string; emailLookupHash?: string; kind: "existing"; maskedEmail: string | null }
+  | { emailNormalized: string; id: string; emailLookupHash?: string; kind: "upsert_email"; locale: string; maskedEmail: string };
 
 export type CanonicalCheckoutEffects = {
   /** Statements specific to a channel, appended after attribution and cart conversion. */
@@ -646,7 +646,7 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     shopId: input.shopId,
     sourceIdempotencyHash: input.eventIdempotencyKey,
   });
-  const orderInsert = database.prepare(`INSERT INTO orders (id, public_id, shop_id, customer_id, order_number, source_channel, status, payment_status, fulfillment_status, subtotal_minor, discount_minor, shipping_method_name, shipping_fee_minor, total_minor, currency, locale, customer_email_masked, checkout_subject_hash, checkout_request_hash, checkout_cart_id, order_token_hash, expires_at, paid_at, fulfilled_at, created_at, updated_at) SELECT ?, ?, ?, ${customer.lookupSql}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${snapshotGuard.sql} AND ${customer.guardSql} AND ${reservationPlan.guardSql} AND ${physicalStockPlan.guardSql} AND ${shippingGuardSql} AND ${bookingGuardSql}`).bind(
+  const orderInsert = database.prepare(`INSERT INTO orders (id, public_id, shop_id, customer_id, order_number, source_channel, status, payment_status, fulfillment_status, subtotal_minor, discount_minor, shipping_method_name, shipping_fee_minor, total_minor, currency, locale, customer_email_masked, customer_email_lookup_hash, checkout_subject_hash, checkout_request_hash, checkout_cart_id, order_token_hash, expires_at, paid_at, fulfilled_at, created_at, updated_at) SELECT ?, ?, ?, ${customer.lookupSql}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${snapshotGuard.sql} AND ${customer.guardSql} AND ${reservationPlan.guardSql} AND ${physicalStockPlan.guardSql} AND ${shippingGuardSql} AND ${bookingGuardSql}`).bind(
     input.orderId,
     input.orderPublicId,
     input.shopId,
@@ -665,6 +665,7 @@ export async function executeCanonicalCheckoutTransaction(input: CanonicalChecko
     input.currency,
     input.locale,
     input.customer.maskedEmail,
+    input.customer.emailLookupHash ?? null,
     input.checkoutSubjectHash,
     input.checkoutRequestHash,
     input.cartId,

@@ -41,13 +41,16 @@ type StorefrontShopRow = {
 };
 
 type CatalogRow = {
+  attributesJson: string | null;
   availableStock: number;
   categoryId: string | null;
   compareAtMinor: number | null;
   currency: string;
   deliveryMode: "digital" | "shipping";
   description: string;
+  durationMinutes: number | null;
   fulfillmentType: "license_key" | "manual";
+  productCreatedIso: string;
   maxPerOrder: number;
   minPerOrder: number;
   optionsJson: string;
@@ -57,6 +60,7 @@ type CatalogRow = {
   productTitle: string;
   productVersion: number;
   sku: string;
+  soldCount: number;
   variantId: string;
   variantTitle: string;
   variantVersion: number;
@@ -81,17 +85,44 @@ export type StorefrontVariant = {
   version: number;
 };
 
+/** Seller-authored spec row (products.attributes_json, migration 0107). */
+export type StorefrontProductAttribute = { label: string; value: string };
+
 export type StorefrontProduct = {
+  attributes: StorefrontProductAttribute[];
   categoryId: string | null;
   deliveryMode: "digital" | "shipping";
   description: string;
   fulfillmentType: "license_key" | "manual";
+  createdAt: string;
   id: string;
   imageUrl: string | null;
+  images: string[];
   slug: string;
+  /** TM4: real paid-order count (order_items joined on paid orders). */
+  soldCount: number;
   title: string;
   variants: StorefrontVariant[];
   version: number;
+};
+
+/** TM4: auto badge kinds derived from real catalog signals. */
+export type StorefrontBadge = "best" | "hot" | "new";
+
+/** Detail-page product: the catalog product plus neighbors and shop promos. */
+export type StorefrontProductDetail = {
+  product: StorefrontProduct;
+  promotions: StorefrontPromotion[];
+  related: StorefrontProduct[];
+};
+
+/** Active shop discount window surfaced as urgency/voucher data (display-only). */
+export type StorefrontPromotion = {
+  code: string;
+  endsAt: string | null;
+  minimumMinor: number;
+  type: "percentage" | "fixed";
+  value: number;
 };
 
 export type StorefrontCategory = { description: string; id: string; name: string; slug: string };
@@ -321,9 +352,65 @@ function stockState(row: CatalogRow, threshold: number): StockState {
   return row.availableStock <= threshold ? "low_stock" : "available";
 }
 
-export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontShop): Promise<{ categories: StorefrontCategory[]; products: StorefrontProduct[] }> {
+const MAX_PRODUCT_ATTRIBUTES = 20;
+const MAX_ATTRIBUTE_LABEL_LENGTH = 40;
+const MAX_ATTRIBUTE_VALUE_LENGTH = 120;
+
+/**
+ * Parse products.attributes_json into bounded display rows. Malformed input
+ * degrades to an empty list (the spec block simply does not render) instead
+ * of failing the storefront.
+ */
+function parseProductAttributes(raw: string | null): StorefrontProductAttribute[] {
+  if (raw === null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const rows: StorefrontProductAttribute[] = [];
+  for (const entry of parsed.slice(0, MAX_PRODUCT_ATTRIBUTES)) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const label = (entry as Record<string, unknown>).label;
+    const value = (entry as Record<string, unknown>).value;
+    if (typeof label !== "string" || typeof value !== "string") continue;
+    const trimmedLabel = label.trim().slice(0, MAX_ATTRIBUTE_LABEL_LENGTH);
+    const trimmedValue = value.trim().slice(0, MAX_ATTRIBUTE_VALUE_LENGTH);
+    if (trimmedLabel === "" || trimmedValue === "") continue;
+    rows.push({ label: trimmedLabel, value: trimmedValue });
+  }
+  return rows;
+}
+
+const MAX_PROMOTIONS = 3;
+
+async function getStorefrontPromotions(env: AppBindings, shop: StorefrontShop): Promise<StorefrontPromotion[]> {
+  const result = await env.PLATFORM_DB.prepare(`
+    SELECT code_normalized AS code, type, value, minimum_minor AS minimumMinor, ends_at AS endsAt
+    FROM discounts
+    WHERE shop_id = ?
+      AND status = 'active'
+      AND (starts_at IS NULL OR starts_at <= ?)
+      AND (ends_at IS NULL OR ends_at > ?)
+    ORDER BY ends_at IS NULL, ends_at, created_at
+    LIMIT 4
+  `).bind(shop.id, new Date().toISOString(), new Date().toISOString()).all<{
+    code: string;
+    endsAt: string | null;
+    minimumMinor: number;
+    type: "percentage" | "fixed";
+    value: number;
+  }>();
+  return result.results
+    .slice(0, MAX_PROMOTIONS)
+    .map((row) => ({ code: row.code, endsAt: row.endsAt, minimumMinor: row.minimumMinor, type: row.type, value: row.value }));
+}
+
+export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontShop): Promise<{ categories: StorefrontCategory[]; products: StorefrontProduct[]; promotions: StorefrontPromotion[] }> {
   assertStorefrontLive(shop);
-  const [categoryResult, productResult, imageResult] = await Promise.all([
+  const [categoryResult, productResult, imageResult, promotionResult] = await Promise.all([
     env.PLATFORM_DB.prepare(`
       SELECT categories.id, categories.slug, categories.name, categories.description
       FROM product_categories AS categories
@@ -352,11 +439,19 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
       SELECT products.id AS productId, products.category_id AS categoryId, products.slug AS productSlug,
         products.title AS productTitle, products.description, products.version AS productVersion,
         products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode,
+        products.attributes_json AS attributesJson,
+        products.created_at AS productCreatedIso,
         product_variants.id AS variantId, product_variants.sku, product_variants.title AS variantTitle,
         product_variants.options_json AS optionsJson, product_variants.price_minor AS priceMinor,
         product_variants.compare_at_minor AS compareAtMinor, product_variants.currency,
         product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder,
         product_variants.version AS variantVersion, product_variants.duration_minutes AS durationMinutes,
+        (SELECT COUNT(*) FROM order_items AS sold_items
+          INNER JOIN orders AS sold_orders ON sold_orders.id = sold_items.order_id
+            AND sold_orders.shop_id = sold_items.shop_id
+            AND sold_orders.payment_status = 'paid'
+          WHERE sold_items.shop_id = products.shop_id
+            AND sold_items.product_id = products.id) AS soldCount,
         CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((
           SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved
           FROM variant_stock_levels
@@ -393,23 +488,31 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
       WHERE product_images.shop_id = ? AND product_images.status = 'active'
       ORDER BY product_images.sort_order, product_images.id
     `).bind(shop.id).all<{ mediaPublicId: string; productId: string }>(),
+    getStorefrontPromotions(env, shop),
   ]);
-  const firstImageByProduct = new Map<string, string>();
+  const imagesByProduct = new Map<string, string[]>();
   for (const row of imageResult.results) {
-    if (!firstImageByProduct.has(row.productId)) firstImageByProduct.set(row.productId, `/media/${row.mediaPublicId}`);
+    const list = imagesByProduct.get(row.productId) ?? [];
+    if (list.length < 8) list.push(`/media/${row.mediaPublicId}`);
+    imagesByProduct.set(row.productId, list);
   }
   const products = new Map<string, StorefrontProduct>();
   for (const row of productResult.results) {
     let product = products.get(row.productId);
     if (product === undefined) {
+      const images = imagesByProduct.get(row.productId) ?? [];
       product = {
+        attributes: parseProductAttributes(row.attributesJson),
         categoryId: row.categoryId,
         deliveryMode: row.deliveryMode,
         description: row.description,
         fulfillmentType: row.fulfillmentType,
         id: row.productId,
-        imageUrl: firstImageByProduct.get(row.productId) ?? null,
+        imageUrl: images[0] ?? null,
+        images,
+        createdAt: row.productCreatedIso,
         slug: row.productSlug,
+        soldCount: row.soldCount,
         title: row.productTitle,
         variants: [],
         version: row.productVersion,
@@ -429,15 +532,21 @@ export async function getStorefrontCatalog(env: AppBindings, shop: StorefrontSho
       title: row.variantTitle,
       version: row.variantVersion,
     };
+    if (typeof row.durationMinutes === "number" && row.durationMinutes >= 5 && row.durationMinutes <= 720) variant.durationMinutes = row.durationMinutes;
     if (shop.content.showExactStock && (row.fulfillmentType === "license_key" || row.deliveryMode === "shipping")) variant.availableStock = row.availableStock;
     product.variants.push(variant);
   }
-  return { categories: categoryResult.results, products: [...products.values()] };
+  return { categories: categoryResult.results, products: [...products.values()], promotions: promotionResult };
 }
 
-export async function getStorefrontProduct(env: AppBindings, shop: StorefrontShop, slug: string): Promise<StorefrontProduct> {
+export async function getStorefrontProduct(env: AppBindings, shop: StorefrontShop, slug: string): Promise<StorefrontProductDetail> {
   const catalog = await getStorefrontCatalog(env, shop);
   const product = catalog.products.find((candidate) => candidate.slug === slug);
   if (product === undefined) throw new AppError("product_not_found", 404);
-  return product;
+  const related = product.categoryId === null
+    ? []
+    : catalog.products
+      .filter((candidate) => candidate.categoryId === product.categoryId && candidate.id !== product.id)
+      .slice(0, 4);
+  return { product, promotions: catalog.promotions, related };
 }

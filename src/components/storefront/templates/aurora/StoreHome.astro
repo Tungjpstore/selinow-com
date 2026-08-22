@@ -1,25 +1,44 @@
 ---
 import ProductCard from "../../../storefront/ProductCard.astro";
+import USPGrid from "../../sections/USPGrid.astro";
+import FAQSection from "../../sections/FAQSection.astro";
+import { resolveUniversalSections, universalSectionSettings } from "../../../../lib/storefront/sections/registry";
 import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
-import type { StorefrontCategory, StorefrontProduct, StorefrontShop } from "../../../../lib/storefront/store";
+import type { StorefrontCategory, StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
 
 interface Props {
   categories: StorefrontCategory[];
   locale: string;
   products: StorefrontProduct[];
+  promotions?: StorefrontPromotion[];
   shop: StorefrontShop;
 }
 
 const { categories, locale, products, shop } = Astro.props;
 const t = createStorefrontTranslator(locale);
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections);
 const featured = products.find((product) => product.imageUrl !== null) ?? products[0];
+const lookbookStyle = featured?.imageUrl !== undefined && featured.imageUrl !== null
+  ? `background-image:linear-gradient(to top, rgb(11 16 32 / 55%), rgb(11 16 32 / 8%) 55%, transparent),url(${featured.imageUrl})`
+  : undefined;
 ---
-<section class="aurora-lookbook" data-image={featured?.imageUrl ?? undefined}>
+<section class="aurora-lookbook" style={lookbookStyle}>
   <div class="aurora-lookbook-copy">
     <p class="store-kicker">{shop.name}</p>
     <h1>{shop.content.headline}</h1>
     <p>{shop.content.description}</p>
-    <a class="aurora-cta" href="#products">{t("storefront.template.aurora.cta")} <span aria-hidden="true">↓</span></a>
+    <ul class="hero-stats-bar">
+          <li><strong>{String(products.length)}</strong><small>{t("storefront.ca.stats.products")}</small></li>
+          <li><strong>{String(products.reduce((sum, product) => sum + product.soldCount, 0))}</strong><small>{t("storefront.ca.stats.sold")}</small></li>
+          <li><strong>24/7</strong><small>{t("storefront.ca.stats.support")}</small></li>
+        </ul>
+        <div class="hero-trust-bar">
+          <span>{t("storefront.ca.trust.secure")}</span>
+          <span>{t("storefront.ca.trust.instant")}</span>
+          <span>{t("storefront.ca.trust.support")}</span>
+        </div>
+    <a class="aurora-cta" href="#services">{t("storefront.template.aurora.cta")} <span aria-hidden="true">↓</span></a>
+        <div class="hero-deco-ring" aria-hidden="true"></div>
   </div>
 </section>
 {categories.length > 0 && (
@@ -40,9 +59,23 @@ const featured = products.find((product) => product.imageUrl !== null) ?? produc
     </label>}
   </div>
   <div class="product-list aurora-product-list">
-    {products.map((product, index) => <ProductCard locale={locale} product={product} index={index} />)}
+    {products.map((product, index) => (
+  <div data-quick-add-variants={JSON.stringify(product.variants.filter((variant) => variant.stockState !== "out_of_stock").map((variant) => ({ id: variant.id, label: variant.title, max: variant.maxPerOrder })))}>
+    <ProductCard locale={locale} product={product} index={index} />
+  </div>
+))}
     {products.length === 0 && <p class="empty-cart">{t("storefront.catalog.empty")}</p>}
   </div>
   {products.length > 0 && <p class="empty-cart catalog-no-results" data-store-search-empty hidden>{t("storefront.catalog.no_results")} <a href="#products" data-store-search-reset>{t("storefront.catalog.show_all")}</a>.</p>}
 </section>
+<section class="recently-viewed-section" aria-label="Recently viewed" hidden>
+  <h2>{t("storefront.tm4.recently_viewed.heading")}</h2>
+  <div class="recently-viewed-scroll" data-recently-viewed-rail></div>
+</section>
+{universalTail.map((type) => type === "usp"
+  ? <USPGrid locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "usp")} vertical={shop.template.vertical} />
+  : <FAQSection locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "faq")} vertical={shop.template.vertical} />)}
 <script src="../../../../scripts/storefront/store-search.ts"></script>
+<script src="../../../../scripts/marketing/reveal-boot.ts"></script>
+<script src="../../../../scripts/storefront/tm3-signatures.ts"></script>
+<script src="../../../../scripts/storefront/tm4-merchandising.ts"></script>

@@ -147,6 +147,16 @@ export async function applyCanonicalCartMutation(input: {
       input.mutation.quantity,
       input.shop.currency,
     ));
+  } else if (input.mutation.kind === "discount.remove") {
+    // Removing an absent code is a clean no-op: nothing to prove, nothing to
+    // write, and the replay ledger stays untouched.
+    const applied = await input.env.PLATFORM_DB.prepare("SELECT discount_code_normalized AS code FROM carts WHERE id = ? AND shop_id = ? AND state = 'active' AND expires_at > ? LIMIT 1").bind(cart.cartId, input.shop.id, nowIso).first<{ code: string | null }>();
+    if (applied === null) throw new AppError("cart_not_found", 404);
+    if (applied.code !== null) {
+      statements.push(input.env.PLATFORM_DB.prepare("UPDATE carts SET discount_code_normalized = NULL, updated_at = ? WHERE id = ? AND shop_id = ? AND state = 'active' AND expires_at > ? AND discount_code_normalized IS NOT NULL").bind(nowIso, cart.cartId, input.shop.id, nowIso));
+    } else {
+      return { cartId: cart.cartId, replayed: false };
+    }
   } else {
     const discount = await input.env.PLATFORM_DB.prepare("SELECT id FROM discounts WHERE shop_id = ? AND code_normalized = ? AND status = 'active' AND (starts_at IS NULL OR starts_at <= ?) AND (ends_at IS NULL OR ends_at > ?) LIMIT 1").bind(input.shop.id, input.mutation.code, nowIso, nowIso).first();
     if (discount === null) throw new AppError("discount_invalid", 409);

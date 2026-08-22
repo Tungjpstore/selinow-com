@@ -268,4 +268,101 @@ describe("template render contracts", () => {
       expect(sheet, template.id).toContain(`[data-storefront-template="${template.id}"]`);
     }
   });
+
+  it("registers every available template in the detail dispatcher", () => {
+    const dispatcher = readFileSync("src/components/storefront/templates/Detail.astro", "utf8");
+    for (const template of STOREFRONT_TEMPLATES.filter((candidate) => candidate.available)) {
+      expect(dispatcher, template.id).toMatch(new RegExp(`\\b${template.id}:\\s*\\w+ProductDetail`, "u"));
+      expect(dispatcher, template.id).toContain(`./${template.id}/ProductDetail.astro`);
+    }
+  });
+
+  it("keeps the purchase contract in every per-template detail page", () => {
+    for (const template of STOREFRONT_TEMPLATES.filter((candidate) => candidate.available)) {
+      const detail = readFileSync(`src/components/storefront/templates/${template.id}/ProductDetail.astro`, "utf8");
+      // The shared BuyBox renders the load-bearing hooks (variant radios,
+      // #detail-add, #detail-quantity, refresh status) for product-detail.ts.
+      expect(detail, template.id).toMatch(/<BuyBox/);
+      expect(detail, template.id).toContain("back-link");
+    }
+    const buyBox = readFileSync("src/components/storefront/sections/BuyBox.astro", "utf8");
+    expect(buyBox).toContain('id="product-refresh-status"');
+    expect(buyBox).toContain('id="detail-quantity"');
+    expect(buyBox).toContain('id="detail-add"');
+    const variantList = readFileSync("src/components/storefront/sections/VariantList.astro", "utf8");
+    const swatches = readFileSync("src/components/storefront/sections/Swatches.astro", "utf8");
+    expect(variantList).toContain('name="variant"');
+    expect(swatches).toContain('name="variant"');
+    // Swatches must degrade to the standard list when options do not map.
+    expect(swatches).toContain("<VariantList");
+  });
+
+  it("declares the --tmpl- feel-token layer in every template sheet", () => {
+    for (const template of STOREFRONT_TEMPLATES.filter((candidate) => candidate.available && candidate.id !== "swift")) {
+      const sheet = readFileSync(`src/styles/storefront/templates/${template.id}.css`, "utf8");
+      expect(sheet, template.id).toMatch(new RegExp(`html\\[data-storefront-template="${template.id}"\\]\\s*\\{[\\s\\S]*?--tmpl-`, "u"));
+    }
+    // Swift/base defaults live on :root in the shared sheet.
+    const base = readFileSync("src/styles/storefront.css", "utf8");
+    expect(base).toContain("--tmpl-panel-bg:");
+    expect(base).toContain("--tmpl-radius-l:");
+    // The sections sheet is loaded by the shared layout for every template.
+    const layout = readFileSync("src/layouts/StorefrontLayout.astro", "utf8");
+    expect(layout).toContain("storefront/sections.css");
+  });
+
+  it("renders booking templates with the inline slot picker section", () => {
+    for (const templateId of ["serenity", "craft", "clinic"]) {
+      const detail = readFileSync(`src/components/storefront/templates/${templateId}/ProductDetail.astro`, "utf8");
+      expect(detail, templateId).toMatch(/<SlotPickerInline/);
+    }
+    const picker = readFileSync("src/components/storefront/sections/SlotPickerInline.astro", "utf8");
+    expect(picker).toContain("data-slot-picker");
+    expect(picker).toContain("data-slot-picker-book");
+  });
+
+  it("skins money screens through template tokens instead of bespoke panels", () => {
+    // The shared money-screen surfaces must consume the token layer so the
+    // dark templates (pulse/craft) flow dark end-to-end.
+    const base = readFileSync("src/styles/storefront.css", "utf8");
+    expect(base).toMatch(/\.cart-summary, \.checkout-form\s*\{[\s\S]*?--tmpl-panel-bg/);
+    expect(base).toMatch(/\.quote-status\s*\{[\s\S]*?--tmpl-panel-nested-bg/);
+    for (const templateId of ["pulse", "craft"]) {
+      const sheet = readFileSync(`src/styles/storefront/templates/${templateId}.css`, "utf8");
+      expect(sheet, templateId).toContain("--tmpl-panel-bg-solid: #1");
+      expect(sheet, templateId).toContain("--tmpl-text: #");
+    }
+  });
+
+  it("re-skins the Store Builder preview per draft template (CD4)", () => {
+    const store = readFileSync("src/pages/app/store.astro", "utf8");
+    const skins = readFileSync("src/styles/dashboard/store-builder-preview-skins.css", "utf8");
+    expect(store).toContain("data-template-preview={settings.template.id}");
+    expect(store).toContain("store-builder-preview-skins.css");
+    for (const template of STOREFRONT_TEMPLATES.filter((candidate) => candidate.available && candidate.id !== "swift")) {
+      // Swift stays the unscoped default; every other template ships a skin.
+      // Raw palettes live in the skins sheet (storefront theme data), keeping
+      // store.astro itself on semantic tokens (frontend-route-ux contract).
+      expect(skins, template.id).toContain(`[data-template-preview="${template.id}"]`);
+    }
+    const builder = readFileSync("src/scripts/dashboard/store-builder.ts", "utf8");
+    expect(builder).toContain("root.dataset.templatePreview = next.templateId");
+  });
+
+  it("ships visual-regression fixtures and specs for all nine templates (CD5)", () => {
+    const seed = readFileSync("seeds/0005_storefront_template_fixtures.sql", "utf8");
+    const spec = readFileSync("tests/visual/local-public-templates.spec.ts", "utf8");
+    const gate = readFileSync("scripts/local-public-browser-gate.mjs", "utf8");
+    const config = readFileSync("playwright.public-local.config.ts", "utf8");
+    expect(gate).toContain('"--file", "./seeds/0005_storefront_template_fixtures.sql"');
+    for (const template of STOREFRONT_TEMPLATES.filter((candidate) => candidate.available)) {
+      // Swift renders through the signal demo shop (registry fallback), so the
+      // fixture seed only carries the other eight explicit templateIds.
+      const host = template.id === "swift" ? "signal" : template.id;
+      if (template.id !== "swift") expect(seed, template.id).toContain(`"templateId":"${template.id}"`);
+      expect(spec, template.id).toContain(`host: "${host}.localhost"`);
+      expect(gate, template.id).toContain(`${host}.localhost`);
+      expect(config, template.id).toContain(`MAP ${host}.localhost 127.0.0.1`);
+    }
+  });
 });

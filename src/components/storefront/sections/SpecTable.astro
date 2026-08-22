@@ -1,0 +1,30 @@
+---
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProductAttribute } from "../../../lib/storefront/store";
+
+/**
+ * Semantic spec table from seller-authored attributes (products.attributes_json).
+ * Renders nothing when the product carries no attributes.
+ */
+interface Props {
+  attributes: StorefrontProductAttribute[];
+  locale: string;
+}
+
+const { attributes, locale } = Astro.props;
+const t = createStorefrontTranslator(locale);
+---
+{attributes.length > 0 && (
+  <section class="spec-section" aria-labelledby="spec-table-title">
+    <h2 id="spec-table-title">{t("storefront.spec.title")}</h2>
+    <table class="spec-table">
+      <caption class="selinow-sr-only">{t("storefront.spec.caption")}</caption>
+      <thead>
+        <tr><th scope="col">{t("storefront.spec.column.attribute")}</th><th scope="col">{t("storefront.spec.column.value")}</th></tr>
+      </thead>
+      <tbody>
+        {attributes.map((attribute) => <tr><th scope="row">{attribute.label}</th><td>{attribute.value}</td></tr>)}
+      </tbody>
+    </table>
+  </section>
+)}

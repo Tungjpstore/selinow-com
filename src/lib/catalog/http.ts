@@ -6,6 +6,7 @@ import {
   normalizeCurrency,
   normalizeDescription,
   normalizeOptions,
+  normalizeProductAttributes,
   normalizeSku,
   requireInteger,
 } from "./policy";
@@ -30,7 +31,7 @@ export function parseCategoryInput(body: Record<string, unknown>): CategoryInput
 }
 
 export function parseProductInput(body: Record<string, unknown>): ProductInput {
-  rejectUnknownFields(body, ["categoryId", "deliveryMode", "description", "fulfillmentType", "slug", "status", "title"]);
+  rejectUnknownFields(body, ["attributes", "categoryId", "deliveryMode", "description", "fulfillmentType", "slug", "status", "title"]);
   const categoryId = body.categoryId === null || body.categoryId === undefined ? null : body.categoryId;
   if (categoryId !== null && (typeof categoryId !== "string" || !/^cat_[0-9a-f-]{36}$/u.test(categoryId))) {
     throw new AppError("validation_failed", 400, ["category_id_invalid"]);
@@ -42,6 +43,7 @@ export function parseProductInput(body: Record<string, unknown>): ProductInput {
     throw new AppError("validation_failed", 400, ["delivery_mode_fulfillment_mismatch"]);
   }
   return {
+    attributesJson: normalizeProductAttributes(body.attributes),
     categoryId,
     deliveryMode,
     description: normalizeDescription(body.description),
@@ -56,13 +58,14 @@ export function parseProductWithInitialVariantInput(
   body: Record<string, unknown>,
   defaultCurrency?: string,
 ): { product: ProductInput; variant: VariantInput } {
-  rejectUnknownFields(body, ["categoryId", "deliveryMode", "description", "fulfillmentType", "initialVariant", "slug", "status", "title"]);
+  rejectUnknownFields(body, ["attributes", "categoryId", "deliveryMode", "description", "fulfillmentType", "initialVariant", "slug", "status", "title"]);
   const initialVariant = body.initialVariant;
   if (typeof initialVariant !== "object" || initialVariant === null || Array.isArray(initialVariant)) {
     throw new AppError("validation_failed", 400, ["initial_variant_required"]);
   }
   return {
     product: parseProductInput({
+      attributes: body.attributes,
       categoryId: body.categoryId,
       deliveryMode: body.deliveryMode,
       description: body.description,
