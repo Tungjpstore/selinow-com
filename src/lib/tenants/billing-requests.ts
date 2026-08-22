@@ -17,7 +17,7 @@ type PlanPriceRow = {
   planCode: string;
 };
 type RequestRow = {
-  action: "cancel" | "change_plan" | "resume";
+  action: "cancel" | "cancel_scheduled_plan_change" | "change_plan" | "resume";
   createdAt: string;
   executionAttempts: number;
   failureCode: string | null;
@@ -179,7 +179,7 @@ export async function listSubscriptionChangeRequests(input: { env: AppBindings; 
 }
 
 export async function createSubscriptionChangeRequest(input: {
-  action: "cancel" | "change_plan" | "resume";
+  action: "cancel" | "cancel_scheduled_plan_change" | "change_plan" | "resume";
   env: AppBindings;
   expectedSubscriptionVersion: number;
   idempotencyKey: string | null;
@@ -192,7 +192,7 @@ export async function createSubscriptionChangeRequest(input: {
 }): Promise<SubscriptionChangeRequest> {
   const idempotencyKey = requireIdempotencyKey(input.idempotencyKey);
   if (!Number.isSafeInteger(input.expectedSubscriptionVersion) || input.expectedSubscriptionVersion < 1) throw new AppError("validation_failed", 400, ["expected_version_invalid"]);
-  if (!["cancel", "change_plan", "resume"].includes(input.action)) throw new AppError("validation_failed", 400, ["billing_action_invalid"]);
+  if (!["cancel", "cancel_scheduled_plan_change", "change_plan", "resume"].includes(input.action)) throw new AppError("validation_failed", 400, ["billing_action_invalid"]);
   const reasonCode = requireReasonCode(input.reasonCode);
   const actor = await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   let requestedPlanCode: string | null = null;
@@ -216,6 +216,9 @@ export async function createSubscriptionChangeRequest(input: {
   // retry remains deterministic when the subscription version changes.
   const subscription = await currentSubscription(input.env, actor.row.shop_id);
   if (input.action === "resume" && subscription.state !== "cancel_scheduled") throw new AppError("billing_resume_provider_required", 409);
+  if (input.action === "cancel_scheduled_plan_change" && subscription.state !== "downgrade_scheduled") {
+    throw new AppError("billing_scheduled_plan_change_required", 409);
+  }
   if (!new Set(["trialing", "active", "past_due", "grace_period", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"]).has(subscription.state)) {
     throw new AppError("billing_change_requires_request", 409);
   }

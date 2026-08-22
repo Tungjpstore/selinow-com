@@ -187,6 +187,19 @@ describe("Dodo webhook registration", () => {
     await expect(ensureDodoWebhook({ apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher })).resolves.toMatchObject({ created: false });
   });
 
+  it("reuses an endpoint configured to receive all events", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ items: [{
+        id: "wh_test_all_events",
+        url: ENDPOINT_URL,
+        enabled: true,
+        events: [],
+      }] }))
+      .mockResolvedValueOnce(Response.json({ secret: "whsec_dGVzdC13ZWJob29rLXNlY3JldA==" }));
+
+    await expect(ensureDodoWebhook({ apiBaseUrl: API_BASE_URL, apiKey: "test-api-key-value", endpointUrl: ENDPOINT_URL, fetcher })).resolves.toMatchObject({ created: false });
+  });
+
   it.each([
     ["disabled flag", { disabled: true }],
     ["disabled status", { status: "disabled" }],

@@ -84,7 +84,7 @@ describe("provider surface audit", () => {
       .split(/\r?\n/)
       .slice(1)
       .map(parseCsvRow);
-    expect(rows).toHaveLength(205);
+    expect(rows).toHaveLength(206);
 
 
 

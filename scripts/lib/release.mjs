@@ -568,6 +568,44 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_orders_shop_paid_at: "1fbe4c8591f6548d021f306e24304c7dcfbe4e43632b3f0045fa8a0b2fc5cdb6",
     }),
   }),
+  "0108_dodo_billing_reconciliation.sql": Object.freeze({
+    columns: Object.freeze({
+      "shop_subscriptions.scheduled_plan_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "shop_subscriptions.scheduled_price_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "shop_subscriptions.scheduled_effective_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "shop_subscriptions.scheduled_change_request_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "subscription_change_requests.provider_acknowledged_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "subscription_change_requests.reconciliation_attempts": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "subscription_change_requests.next_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "subscription_change_requests.last_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "subscription_change_requests.reconciliation_failure_code": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_shop_subscriptions_scheduled: "4575b32b806a6f7f9c7344bc2825592a05d97bfec9757d1848a04100855abf13",
+      idx_subscription_change_requests_reconciliation: "b9d0c9f1ae1f23dd4e29817aa4c69c4d483248fb22f19074bdfa0ec06d7e5105",
+      idx_subscription_change_requests_request_subscription: "9a40135c8a9fd3ea83841c9337a6df8d491d7e509dd92c91ed825b6654242f11",
+      shop_subscriptions_scheduled_target_guard: "c8a2d870fe7df1232659ca704c0079520a8571e76d3b0dd9d24d9102a20aeee6",
+      shop_subscriptions_scheduled_target_update_guard: "45cc73c4600641490118874124d60bb23779bda40d92ed8307ed4a9b9b9bb7f7",
+      subscription_change_requests_reconciliation_guard: "3f3a3dad86a3b8de9121aa14146c720abfa21cef27cddbf7988530c9dedf848e",
+    }),
+  }),
+  "0110_repair_subscription_ledger_foreign_keys.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      subscription_change_requests: "20998d6f6ef158f71222f61a706ffe439d4c5efe690399381f505a056fccbf59",
+      subscription_events: "e5db98135cc1615b6cf85c019acf50797590eeb3ed10fdaed8c078ac9a7c5093",
+      usage_events: "c64f608f73cd0543c1bd8e91b10f64261efa9d425486c8b4cfd143280072fafe",
+    }),
+  }),
+  "0111_allow_scheduled_plan_change_cancel.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      shop_subscriptions_scheduled_target_guard: "0899bed8897d795f9acf62aa45eb40da3cbcb634d449b4053ce74b92971f44fd",
+      shop_subscriptions_scheduled_target_update_guard: "1ab24f8869fdcff78426268cf93d28a8e14cdc2a5ebcd47f47856d67502e5688",
+      subscription_change_requests: "4442943e663792ac68fa880a82e72a506d9f240f37ea317905c2a351276b02c8",
+      subscription_change_requests_transition_guard: "33a261b3820d0a8a9e6a0c9a80d04f937747a71b52093cce98dd06d130125b5d",
+    }),
+  }),
 });
 
 
@@ -2428,7 +2466,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_request_admissions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "telegram_actions", "telegram_action_history", "telegram_updates", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
+    if (["auth_request_admissions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");

@@ -2,7 +2,7 @@ import type { APIRoute } from "astro";
 
 import { backfillActivationMilestones } from "../../../../../lib/analytics/activation";
 import { processDodoWebhookRequest } from "../../../../../lib/billing/service";
-import { AppError } from "../../../../../lib/core/errors";
+import { AppError, isAppError } from "../../../../../lib/core/errors";
 import { createCaughtErrorResponse } from "../../../../../lib/http/security";
 import { getBindings } from "../../../../../lib/platform/bindings";
 
@@ -62,6 +62,12 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     await backfillProcessedWebhookShop({ env, request, result });
     return Response.json({ data: result, ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    console.error(JSON.stringify({
+      code: isAppError(error) ? error.code : "internal_error",
+      event: "dodo_billing_webhook_failed",
+      requestId: locals.requestId,
+      webhookId: request.headers.get("webhook-id"),
+    }));
     return createCaughtErrorResponse(error, locals.requestId);
   }
 };

@@ -2933,3 +2933,15 @@ Seller billing staging incident and repair (2026-08-22, follow-up):
   and the dedicated D1/platform/route/deploy operator tokens are not exported.
   No ad-hoc migration, deploy, production mutation, or broad webhook replay was
   performed.
+- Seller billing UX follow-up is implemented locally: provider-backed
+  `past_due`, `grace_period`, and `suspended` subscriptions open a tenant-scoped
+  Dodo Customer Portal session for payment-method recovery; scheduled
+  downgrades expose a one-click, idempotent “keep current plan” action; and a
+  checkout return keeps its confirmation banner visible while polling the
+  authoritative subscription state/plan/version instead of treating the return
+  URL as payment evidence. The portal return is pinned to
+  `/app/billing?shop=<shopPublicId>` and both server/client reject non-Dodo or
+  unsafe portal URLs. Focused UI/API/provider tests pass (`37/37` plus `44/44`),
+  billing-scoped ESLint, `tsc --noEmit`, and `git diff --check` pass. Full Astro
+  check remains blocked only by the separate storefront/template, AppLayout,
+  login, and store-builder stream; those files were not changed here.

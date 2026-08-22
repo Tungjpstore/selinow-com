@@ -10,6 +10,7 @@ const mutationRoutes = [
   "src/pages/api/app/shops/[shopPublicId]/customers/[customerPublicId]/notes/index.ts",
   "src/pages/api/app/shops/[shopPublicId]/customers/[customerPublicId]/notes/[notePublicId].ts",
   "src/pages/api/app/shops/[shopPublicId]/billing/requests.ts",
+  "src/pages/api/app/shops/[shopPublicId]/billing/operations.ts",
   "src/pages/api/app/shops/[shopPublicId]/payments/remediation.ts",
   "src/pages/api/admin/appeals/[requestPublicId].ts",
 ] as const;
@@ -32,6 +33,7 @@ describe("seller operations API contracts", () => {
       readFile("src/pages/api/admin/investigations/audit.ts", "utf8"),
       readFile("src/pages/api/admin/appeals/index.ts", "utf8"),
       readFile("src/pages/api/app/shops/[shopPublicId]/billing/plans.ts", "utf8"),
+      readFile("src/pages/api/app/shops/[shopPublicId]/billing/operations.ts", "utf8"),
     ]);
     for (const source of sources) {
       expect(source).toContain("authenticateRequest");

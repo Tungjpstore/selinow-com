@@ -177,6 +177,200 @@ describe("paid pricing and billing migrations", () => {
     `).run("c".repeat(64), NOW, NOW)).toThrow(/FOREIGN KEY/u);
   });
 
+  it("repairs subscription ledger foreign keys to canonical billing tables", () => {
+    const expectedParents: Record<string, string[]> = {
+      subscription_change_requests: ["shop_subscriptions"],
+      subscription_events: ["billing_provider_events", "shop_subscriptions"],
+      usage_events: ["shop_subscriptions"],
+    };
+    for (const [table, expected] of Object.entries(expectedParents)) {
+      const parents = database.prepare(`PRAGMA foreign_key_list(${table})`).all()
+        .map((row) => (row as { table: string }).table)
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .sort();
+      expect(parents).toEqual(expect.arrayContaining(expected));
+      expect(parents.some((parent) => parent.includes("legacy_0076") || parent.includes("repair_0110"))).toBe(false);
+    }
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(database.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE name LIKE '%legacy_0110' OR name LIKE '%repair_0110'
+    `).all()).toEqual([]);
+  });
+
+  it("repairs the legacy 0076 foreign-key metadata shape without losing ledger rows", () => {
+    const broken = new DatabaseSync(":memory:");
+    try {
+      broken.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE shops (id TEXT PRIMARY KEY) STRICT;
+        CREATE TABLE plans (id TEXT PRIMARY KEY) STRICT;
+        CREATE TABLE platform_users (id TEXT PRIMARY KEY) STRICT;
+        CREATE TABLE shop_members (
+          shop_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          status TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE plan_prices (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          provider_code TEXT NOT NULL,
+          market_code TEXT NOT NULL,
+          currency TEXT NOT NULL,
+          interval TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE shop_subscriptions (
+          id TEXT PRIMARY KEY,
+          shop_id TEXT NOT NULL,
+          plan_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          billing_provider_code TEXT,
+          market_code TEXT,
+          price_currency TEXT,
+          scheduled_plan_id TEXT,
+          scheduled_price_id TEXT,
+          scheduled_effective_at TEXT,
+          scheduled_change_request_id TEXT,
+          UNIQUE (shop_id, id)
+        ) STRICT;
+        CREATE TABLE billing_provider_events (
+          id TEXT PRIMARY KEY,
+          shop_id TEXT
+        ) STRICT;
+        CREATE TABLE subscription_change_requests (
+          id TEXT PRIMARY KEY NOT NULL,
+          public_id TEXT NOT NULL UNIQUE,
+          shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE RESTRICT,
+          subscription_id TEXT NOT NULL,
+          current_plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
+          requested_plan_id TEXT REFERENCES plans(id) ON DELETE RESTRICT,
+          action TEXT NOT NULL,
+          status TEXT NOT NULL,
+          expected_subscription_version INTEGER NOT NULL,
+          reason_code TEXT NOT NULL,
+          requested_by_user_id TEXT NOT NULL REFERENCES platform_users(id) ON DELETE RESTRICT,
+          reviewed_by_user_id TEXT REFERENCES platform_users(id) ON DELETE SET NULL,
+          reviewed_at TEXT,
+          completed_at TEXT,
+          idempotency_key_hash TEXT NOT NULL,
+          request_hash TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          provider_action_ref TEXT,
+          provider_event_id TEXT,
+          failure_code TEXT,
+          execution_attempts INTEGER NOT NULL DEFAULT 0,
+          last_attempt_at TEXT,
+          provider_acknowledged_at TEXT,
+          reconciliation_attempts INTEGER NOT NULL DEFAULT 0,
+          next_reconciliation_at TEXT,
+          last_reconciliation_at TEXT,
+          reconciliation_failure_code TEXT,
+          UNIQUE (shop_id, id),
+          UNIQUE (shop_id, idempotency_key_hash),
+          FOREIGN KEY (shop_id, subscription_id)
+            REFERENCES shop_subscriptions_legacy_0076(shop_id, id) ON DELETE RESTRICT
+        ) STRICT;
+        CREATE TABLE subscription_events (
+          id TEXT PRIMARY KEY NOT NULL,
+          shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE RESTRICT,
+          subscription_id TEXT NOT NULL,
+          provider_event_id TEXT REFERENCES billing_provider_events_legacy_0076(id) ON DELETE RESTRICT,
+          source_kind TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          from_state TEXT,
+          to_state TEXT NOT NULL,
+          event_hash TEXT NOT NULL,
+          safe_metadata_json TEXT NOT NULL DEFAULT '{}',
+          occurred_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE (shop_id, id),
+          UNIQUE (shop_id, subscription_id, event_hash),
+          FOREIGN KEY (shop_id, subscription_id)
+            REFERENCES shop_subscriptions_legacy_0076(shop_id, id) ON DELETE RESTRICT
+        ) STRICT;
+        CREATE TABLE usage_events (
+          id TEXT PRIMARY KEY NOT NULL,
+          shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+          subscription_id TEXT,
+          metric TEXT NOT NULL,
+          period_kind TEXT NOT NULL,
+          period_key TEXT NOT NULL,
+          source_kind TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          delta INTEGER NOT NULL,
+          occurred_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE (shop_id, metric, period_key, source_kind, source_id),
+          FOREIGN KEY (shop_id, subscription_id)
+            REFERENCES shop_subscriptions_legacy_0076(shop_id, id) ON DELETE RESTRICT
+        ) STRICT;
+
+        INSERT INTO shops VALUES ('shop-repair');
+        INSERT INTO plans VALUES ('plan_pro_v1');
+        INSERT INTO platform_users VALUES ('user-repair');
+        INSERT INTO shop_members VALUES ('shop-repair', 'user-repair', 'active');
+        INSERT INTO plan_prices VALUES ('price_pro_v1', 'plan_pro_v1', 'dodo', 'vn', 'VND', 'month');
+        INSERT INTO shop_subscriptions VALUES (
+          'sub-repair', 'shop-repair', 'plan_pro_v1', 1, 'dodo', 'vn', 'VND',
+          NULL, NULL, NULL, NULL
+        );
+        INSERT INTO billing_provider_events VALUES ('provider-event-repair', 'shop-repair');
+        INSERT INTO subscription_change_requests (
+          id, public_id, shop_id, subscription_id, current_plan_id, requested_plan_id,
+          action, status, expected_subscription_version, reason_code,
+          requested_by_user_id, reviewed_by_user_id, reviewed_at, completed_at,
+          idempotency_key_hash, request_hash, version, created_at, updated_at
+        ) VALUES (
+          'request-repair', 'request-public-repair', 'shop-repair', 'sub-repair',
+          'plan_pro_v1', NULL, 'cancel', 'requested', 1, 'seller_requested',
+          'user-repair', NULL, NULL, NULL, 'key-repair', 'hash-repair', 1, '${NOW}', '${NOW}'
+        );
+        INSERT INTO subscription_events VALUES (
+          'event-repair', 'shop-repair', 'sub-repair', 'provider-event-repair',
+          'provider', 'payment.succeeded', 'pending_payment', 'active',
+          '${"e".repeat(64)}', '{}', '${NOW}', '${NOW}'
+        );
+        INSERT INTO usage_events VALUES (
+          'usage-repair', 'shop-repair', 'sub-repair', 'orders.created', 'billing',
+          '2026-08', 'order', 'order-repair', 1, '${NOW}', '${NOW}'
+        );
+        PRAGMA foreign_keys = ON;
+      `);
+
+      expect(() => broken.prepare(`
+        EXPLAIN INSERT INTO subscription_events (
+          id, shop_id, subscription_id, provider_event_id, source_kind, event_type,
+          from_state, to_state, event_hash, safe_metadata_json, occurred_at, created_at
+        ) VALUES (
+          'event-before-repair', 'shop-repair', 'sub-repair', 'provider-event-repair',
+          'provider', 'payment.succeeded', 'pending_payment', 'active',
+          '${"f".repeat(64)}', '{}', '${NOW}', '${NOW}'
+        )
+      `)).toThrow(/legacy_0076/u);
+
+      broken.exec(readFileSync(join(process.cwd(), "migrations/0110_repair_subscription_ledger_foreign_keys.sql"), "utf8"));
+
+      expect(broken.prepare("SELECT COUNT(*) AS count FROM subscription_change_requests").get()).toEqual({ count: 1 });
+      expect(broken.prepare("SELECT COUNT(*) AS count FROM subscription_events").get()).toEqual({ count: 1 });
+      expect(broken.prepare("SELECT COUNT(*) AS count FROM usage_events").get()).toEqual({ count: 1 });
+      expect(broken.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      expect(() => broken.prepare(`
+        EXPLAIN INSERT INTO subscription_events (
+          id, shop_id, subscription_id, provider_event_id, source_kind, event_type,
+          from_state, to_state, event_hash, safe_metadata_json, occurred_at, created_at
+        ) VALUES (
+          'event-after-repair', 'shop-repair', 'sub-repair', 'provider-event-repair',
+          'provider', 'payment.succeeded', 'pending_payment', 'active',
+          '${"f".repeat(64)}', '{}', '${NOW}', '${NOW}'
+        )
+      `)).not.toThrow();
+    } finally {
+      broken.close();
+    }
+  });
+
   it("enforces Dodo reference uniqueness and billing write-scope guards", () => {
     insertShopFixture(database);
     database.exec(`

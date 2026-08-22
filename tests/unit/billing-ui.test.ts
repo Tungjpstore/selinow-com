@@ -18,10 +18,19 @@ type AttemptTracker = {
   fail: (attempt: Pick<Attempt, "idempotencyKey">, terminalResponse: boolean) => void;
   finish: (attempt: Pick<Attempt, "idempotencyKey">) => void;
 };
+type OperationAttempt = { action: "cancel" | "cancel_scheduled_plan_change" | "change_plan" | "resume"; expectedSubscriptionVersion: number; idempotencyKey: string; requestedPlanCode: string | null; shopPublicId: string };
+type OperationAttemptTracker = {
+  begin: (input: Omit<OperationAttempt, "idempotencyKey">) => OperationAttempt;
+  fail: (attempt: Pick<OperationAttempt, "idempotencyKey">, terminalResponse: boolean) => void;
+  finish: (attempt: Pick<OperationAttempt, "idempotencyKey">) => void;
+};
 type BillingScriptModule = {
   acceptBillingCheckoutResponse: (payload: Record<string, unknown> | null, attempt: Attempt, tracker: AttemptTracker) => string;
+  acceptBillingPortalResponse: (payload: Record<string, unknown> | null) => string;
   BillingCheckoutAttemptTracker: new (input: { createKey: () => string; now: () => number; storage: AttemptStorage; ttlMs?: number }) => AttemptTracker;
+  BillingOperationAttemptTracker: new (input: { createKey: () => string; now: () => number; storage: AttemptStorage; ttlMs?: number }) => OperationAttemptTracker;
   isBillingCheckoutTerminalFailure: (error: unknown) => boolean;
+  billingPlanChangeDirection: (current: { amountMinor: number; currency: string; interval: string; marketCode: string } | null, target: { amountMinor: number; currency: string; interval: string; marketCode: string } | undefined) => "downgrade" | "unknown" | "upgrade";
 };
 
 function memoryStorage(): AttemptStorage & { value: (key: string) => string | null } {
@@ -89,6 +98,15 @@ describe("subscription state presentation", () => {
     expect(source).not.toMatch(/paddle/iu);
   });
 
+  it("accepts only a safe Dodo customer portal URL", async () => {
+    const billingModule = await loadBillingScript();
+    expect(billingModule.acceptBillingPortalResponse({ portal: { provider: "dodo", portalUrl: "https://billing.dodopayments.com/session/abc" } })).toBe("https://billing.dodopayments.com/session/abc");
+    expect(() => billingModule.acceptBillingPortalResponse({ portal: { provider: "stripe", portalUrl: "https://billing.dodopayments.com/session/abc" } })).toThrow();
+    expect(() => billingModule.acceptBillingPortalResponse({ portal: { provider: "dodo", portalUrl: "http://billing.dodopayments.com/session/abc" } })).toThrow();
+    expect(() => billingModule.acceptBillingPortalResponse({ portal: { provider: "dodo", portalUrl: "https://user:pass@billing.dodopayments.com/session/abc" } })).toThrow();
+    expect(() => billingModule.acceptBillingPortalResponse({ portal: { provider: "dodo", portalUrl: "https://billing.example.test/session/abc" } })).toThrow();
+  });
+
   it("reuses a scoped checkout key after reload without persisting credentials", async () => {
     const billingModule = await loadBillingScript();
     const Tracker = billingModule.BillingCheckoutAttemptTracker;
@@ -97,6 +115,7 @@ describe("subscription state presentation", () => {
     expect(Tracker).toBeTypeOf("function");
     expect(acceptResponse).toBeTypeOf("function");
     expect(isTerminalFailure).toBeTypeOf("function");
+    expect(billingModule.billingPlanChangeDirection).toBeTypeOf("function");
     expect(isTerminalFailure({ code: "billing_provider_unavailable", terminalResponse: true })).toBe(false);
     expect(isTerminalFailure({ code: "plan_price_unavailable", terminalResponse: true })).toBe(true);
 
@@ -135,6 +154,15 @@ describe("subscription state presentation", () => {
     expect(source).toContain("if (pending || shopPublicId === undefined");
   });
 
+  it("classifies plan changes from the server-selected price, not plan names", async () => {
+    const billingModule = await loadBillingScript();
+    const current = { amountMinor: 299_000, currency: "VND", interval: "month", marketCode: "vn" };
+    expect(billingModule.billingPlanChangeDirection(current, { ...current, amountMinor: 399_000 })).toBe("upgrade");
+    expect(billingModule.billingPlanChangeDirection(current, { ...current, amountMinor: 99_000 })).toBe("downgrade");
+    expect(billingModule.billingPlanChangeDirection(current, { ...current, currency: "USD", amountMinor: 999 })).toBe("unknown");
+    expect(billingModule.billingPlanChangeDirection(null, { ...current })).toBe("unknown");
+  });
+
   it("retains the persisted key until a successful checkout response is fully validated", async () => {
     const billingModule = await loadBillingScript();
     const storage = memoryStorage();
@@ -171,6 +199,29 @@ describe("subscription state presentation", () => {
     }));
     const boundedExpiry = new billingModule.BillingCheckoutAttemptTracker({ createKey: () => "checkout-key-bounded", now: () => 4_000, storage, ttlMs: 1_000 });
     expect(boundedExpiry.begin({ planCode: "starter", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-bounded");
+  });
+
+  it("reuses a scoped subscription-operation key after a lost response", async () => {
+    const billingModule = await loadBillingScript();
+    const storage = memoryStorage();
+    const firstTracker = new billingModule.BillingOperationAttemptTracker({ createKey: () => "operation-key-1", now: () => 1_000, storage });
+    const first = firstTracker.begin({ action: "change_plan", expectedSubscriptionVersion: 7, requestedPlanCode: "pro", shopPublicId: "shop-a" });
+    firstTracker.fail(first, false);
+
+    const keys = ["operation-key-2", "operation-key-3"];
+    const reloaded = new billingModule.BillingOperationAttemptTracker({ createKey: () => keys.shift() ?? "unexpected-key", now: () => 2_000, storage });
+    expect(reloaded.begin({ action: "change_plan", expectedSubscriptionVersion: 7, requestedPlanCode: "pro", shopPublicId: "shop-a" }).idempotencyKey).toBe("operation-key-1");
+    expect(JSON.parse(storage.value("selinow.billing.operation-attempt.v1") ?? "null")).toMatchObject({
+      action: "change_plan",
+      expectedSubscriptionVersion: 7,
+      idempotencyKey: "operation-key-1",
+      requestedPlanCode: "pro",
+      shopPublicId: "shop-a",
+    });
+
+    expect(reloaded.begin({ action: "cancel", expectedSubscriptionVersion: 7, requestedPlanCode: null, shopPublicId: "shop-a" }).idempotencyKey).toBe("operation-key-2");
+    reloaded.finish({ idempotencyKey: "operation-key-2" });
+    expect(storage.value("selinow.billing.operation-attempt.v1")).toBeNull();
   });
 
   it("explains that a missing merchant country blocks paid plan projection", () => {
@@ -217,13 +268,78 @@ describe("subscription state presentation", () => {
     expect(controller).toContain('requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}`, {');
     expect(controller).toContain('JSON.stringify({ merchantCountry: value.trim().toUpperCase() })');
     expect(controller).toContain('method: "PATCH"');
-    expect(controller).toContain('showCheckoutFeedback(text("checkoutMarketSaved"), "success")');
+    expect(controller).toContain('showFeedback(text("checkoutMarketSaved"), "success")');
     expect(controller).toContain("getBillingCheckoutAdmission");
     for (const locale of ["en", "vi-VN"] as const) {
       const translate = createDashboardTranslator(locale);
       expect(translate("dashboard.billing.checkout.market_required").length).toBeGreaterThan(20);
       expect(translate("dashboard.billing.checkout.market_action").length).toBeGreaterThan(5);
     }
+  });
+
+  it("uses a state-driven preview and hides the internal request ledger", () => {
+    const page = readFileSync("src/pages/app/billing.astro", "utf8");
+    const controller = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
+    expect(page).toContain("data-plan-dialog");
+    expect(page).toContain("data-plan-stage=\"review\"");
+    expect(page).toContain("data-open-cancel-dialog");
+    expect(page).toContain("data-billing-resume");
+    expect(page).not.toContain("data-billing-request-ledger");
+    expect(page).not.toContain('name="reasonCode"');
+    expect(controller).toContain("/billing/operations");
+    expect(controller).toContain("pollOperation");
+    expect(controller).toContain("BillingOperationAttemptTracker");
+    expect(controller).toContain("previewReady = false");
+    expect(controller).toContain("sequence !== previewSequence");
+    expect(controller).toContain("if (selectedPlan === null || !previewReady || pending) return;");
+    expect(controller).toContain("if (!checkout) {");
+    expect(controller).not.toContain("if (upgrade && !checkout)");
+    expect(controller).toContain('effectiveAt !== "immediately" && effectiveAt !== "next_billing_date"');
+    expect(controller).toContain('effectiveAt === "immediately" ? text("effectiveNow")');
+    expect(controller).toContain("pollBillingReturn");
+    expect(controller).toContain('if (hasBillingReturn) void pollBillingReturn()');
+    expect(controller).not.toContain('if (hasBillingReturn) setUrlState("billing_return", null)');
+    expect(controller).toContain('typeof subscription.planCode === "string" && subscription.planCode !== currentPlanCode');
+    expect(controller).toContain("subscription.version !== subscriptionVersion");
+    expect(page).toContain('data-review-title tabindex="-1"');
+    expect(page).toContain("data-review-announcement");
+    expect(page).toContain("data-review-provider-note");
+    expect(page).toContain("data-plan-confirm disabled");
+    expect(page).not.toContain("data-plan-continue");
+    expect(page).toContain("date(cancelEffectiveAt)");
+    expect(page).toContain('data-billing-operation aria-labelledby="operation-title" role="status" aria-live="polite" hidden=');
+    expect(page.match(/data-focus-billing-market/gu)).toHaveLength(1);
+    expect(page.match(/data-open-cancel-dialog/gu)).toHaveLength(1);
+    expect(page.match(/data-dialog-feedback/gu)).toHaveLength(1);
+    expect(page.match(/data-cancel-feedback/gu)).toHaveLength(1);
+    expect(page.match(/data-billing-recent-auth-action/gu)).toHaveLength(3);
+    expect(page).toContain('autocomplete="off"');
+    expect(page).toContain('merchantCountryPlaceholder: "US"');
+    expect(page).toContain("Gói chỉ được kích hoạt sau khi Dodo Payments xác nhận thanh toán.");
+    expect(page).toContain("Hạ gói đã được lên lịch cho kỳ gia hạn tiếp theo.");
+    expect(controller).not.toContain("renderRequests");
+    expect(controller).not.toContain("planContinue");
+    expect(controller).toContain("void reviewPlan();");
+    expect(controller).toContain('showFeedback(text("operationRejected"), "danger")');
+    expect(controller).toContain("handleFailure(error);\n          return;");
+    expect(controller).toContain("billingPlanChangeDirection");
+    expect(controller).not.toContain('currentPlanCode === "starter" && plan.code === "pro"');
+    expect(page).toContain("invoicesDescription");
+    expect(page).toContain("metric_orders_created");
+    expect(page).toContain("billing.scheduledPlanName");
+    expect(page).toContain('role="status" aria-live="polite"');
+    expect(page).toContain("Đăng xuất để xác thực lại");
+    expect(page).not.toContain("Checkout chưa sẵn sàng");
+    expect(page).not.toContain("Subscription không bị thay đổi");
+    const operationsRoute = readFileSync("src/pages/api/app/shops/[shopPublicId]/billing/operations.ts", "utf8");
+    expect(operationsRoute).toContain("scheduledEffectiveAt: billing.scheduledEffectiveAt");
+    expect(operationsRoute).toContain("scheduledPlanCode: billing.scheduledPlanCode");
+    expect(operationsRoute).toContain('"cancel_scheduled_plan_change"');
+    const portalRoute = readFileSync("src/pages/api/app/shops/[shopPublicId]/billing/portal.ts", "utf8");
+    expect(portalRoute).toContain("requireRecentAuth");
+    expect(portalRoute).toContain("createTenantBillingPortalSession");
+    expect(portalRoute).toContain('const returnUrl = new URL("/app/billing", request.url)');
+    expect(portalRoute).toContain('returnUrl.searchParams.set("shop", shopPublicId)');
   });
 
   it("retains safe API error codes and request IDs for checkout support", () => {
@@ -251,6 +367,7 @@ describe("subscription state presentation", () => {
     expect(controller).toContain("readBillingApiFailure");
     expect(controller).toContain("checkoutErrorCode");
     expect(controller).toContain("checkoutRequestId");
+    expect(controller).toContain('querySelectorAll<HTMLButtonElement>("[data-billing-recent-auth-action]")');
     for (const locale of ["en", "vi-VN"] as const) {
       const translate = createDashboardTranslator(locale);
       expect(translate("dashboard.billing.checkout.recent_auth_required").length).toBeGreaterThan(20);

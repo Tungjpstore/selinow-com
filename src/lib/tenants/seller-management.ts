@@ -62,6 +62,7 @@ export type SellerMemberView = {
 };
 
 export type SellerBillingView = {
+  billingProviderCode: string | null;
   canceledAt: string | null;
   currentPeriodEnd: string | null;
   currentPeriodStart: string | null;
@@ -73,10 +74,14 @@ export type SellerBillingView = {
   } | null;
   features: Record<string, unknown>;
   graceEndsAt: string | null;
+  hasProviderSubscription: boolean;
   limits: Record<string, unknown>;
   planCode: string;
   planName: string;
   planVersion: number;
+  scheduledEffectiveAt: string | null;
+  scheduledPlanCode: string | null;
+  scheduledPlanName: string | null;
   state: string;
   subscriptionVersion: number;
   trialEndsAt: string | null;
@@ -293,6 +298,7 @@ export async function getSellerBilling(input: { env: AppBindings; shopPublicId: 
   const row = await input.env.PLATFORM_DB.prepare(`
     SELECT plans.code AS planCode, plans.name AS planName, plans.version AS planVersion,
       plans.feature_flags_json AS featuresJson, plans.limits_json AS limitsJson,
+      shop_subscriptions.billing_provider_code AS billingProviderCode,
       shop_subscriptions.state, shop_subscriptions.version AS subscriptionVersion, shop_subscriptions.trial_ends_at AS trialEndsAt,
       shop_subscriptions.current_period_start AS currentPeriodStart,
       shop_subscriptions.current_period_end AS currentPeriodEnd,
@@ -300,13 +306,18 @@ export async function getSellerBilling(input: { env: AppBindings; shopPublicId: 
       shop_subscriptions.market_code AS marketCode,
       shop_subscriptions.price_currency AS priceCurrency,
       shop_subscriptions.price_amount_minor AS priceAmountMinor,
-      shop_subscriptions.price_interval AS priceInterval
+      shop_subscriptions.price_interval AS priceInterval,
+      shop_subscriptions.provider_subscription_ref AS providerSubscriptionRef,
+      shop_subscriptions.scheduled_effective_at AS scheduledEffectiveAt,
+      scheduled_plan.code AS scheduledPlanCode,
+      scheduled_plan.name AS scheduledPlanName
     FROM shop_subscriptions
     INNER JOIN plans ON plans.id = shop_subscriptions.plan_id
+    LEFT JOIN plans AS scheduled_plan ON scheduled_plan.id = shop_subscriptions.scheduled_plan_id
     WHERE shop_subscriptions.shop_id = ?
     ORDER BY shop_subscriptions.created_at DESC, shop_subscriptions.id DESC
     LIMIT 1
-  `).bind(member.row.shop_id).first<{ canceledAt: string | null; currentPeriodEnd: string | null; currentPeriodStart: string | null; featuresJson: string; graceEndsAt: string | null; limitsJson: string; marketCode: string | null; planCode: string; planName: string; planVersion: number; priceAmountMinor: number | null; priceCurrency: string | null; priceInterval: string | null; state: string; subscriptionVersion?: number; trialEndsAt: string | null }>();
+  `).bind(member.row.shop_id).first<{ billingProviderCode: string | null; canceledAt: string | null; currentPeriodEnd: string | null; currentPeriodStart: string | null; featuresJson: string; graceEndsAt: string | null; limitsJson: string; marketCode: string | null; planCode: string; planName: string; planVersion: number; priceAmountMinor: number | null; priceCurrency: string | null; priceInterval: string | null; providerSubscriptionRef: string | null; scheduledEffectiveAt: string | null; scheduledPlanCode: string | null; scheduledPlanName: string | null; state: string; subscriptionVersion?: number; trialEndsAt: string | null }>();
   if (row === null) throw new AppError("subscription_required", 409);
   const currentPrice = row.marketCode !== null
     && row.priceCurrency !== null
@@ -329,16 +340,21 @@ export async function getSellerBilling(input: { env: AppBindings; shopPublicId: 
     LIMIT 100
   `).bind(member.row.shop_id).all<SellerBillingView["usage"][number]>();
   return {
+    billingProviderCode: row.billingProviderCode,
     canceledAt: row.canceledAt,
     currentPeriodEnd: row.currentPeriodEnd,
     currentPeriodStart: row.currentPeriodStart,
     currentPrice,
     features: parseObject(row.featuresJson),
     graceEndsAt: row.graceEndsAt,
+    hasProviderSubscription: row.providerSubscriptionRef !== null,
     limits: parseObject(row.limitsJson),
     planCode: row.planCode,
     planName: row.planName,
     planVersion: row.planVersion,
+    scheduledEffectiveAt: row.scheduledEffectiveAt,
+    scheduledPlanCode: row.scheduledPlanCode,
+    scheduledPlanName: row.scheduledPlanName,
     state: row.state,
     subscriptionVersion: Number.isSafeInteger(row.subscriptionVersion) && (row.subscriptionVersion ?? 0) > 0 ? (row.subscriptionVersion ?? 1) : 1,
     trialEndsAt: row.trialEndsAt,

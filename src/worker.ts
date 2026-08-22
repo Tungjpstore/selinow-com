@@ -3,7 +3,7 @@ import { handle } from "@astrojs/cloudflare/handler";
 import { processActivationMilestoneBackfill } from "./lib/analytics/activation";
 import { purgeAuthRequestAdmissions } from "./lib/auth/admission";
 import { processScheduledAutomationTasks } from "./lib/automation/scheduler";
-import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, suspendExpiredBillingGracePeriods, suspendExpiredTrials } from "./lib/billing/service";
+import { expireBillingCheckoutSessions, processDueDodoSubscriptionChanges, reconcileDodoSubscriptionChanges, suspendExpiredBillingGracePeriods, suspendExpiredTrials } from "./lib/billing/service";
 import { purgeCartMutationReplays } from "./lib/commerce/cart-mutation";
 import { purgeBuyerOrderRecoveryArtifacts } from "./lib/commerce/buyer-order-recovery";
 import { expireDueGenericEntitlements } from "./lib/commerce/entitlements";
@@ -628,6 +628,12 @@ export default {
       () => processDueDodoSubscriptionChanges({ env: bindings, now: scheduledAt }),
       { attempted: 0, candidates: 0, failed: 0, providerPending: 0 },
     );
+    const billingReconciliation = await run(
+      "billing_reconciliation",
+      "scheduled_billing_reconciliation_failed",
+      () => reconcileDodoSubscriptionChanges({ env: bindings, now: scheduledAt, limit: 100 }),
+      { candidates: 0, completed: 0, failed: 0, pending: 0 },
+    );
     const expiredBillingCheckouts = await run(
       "billing_checkout_expiration",
       "scheduled_billing_checkout_expiration_failed",
@@ -765,6 +771,9 @@ export default {
         expiredBillingGracePeriods,
         expiredBillingTrials,
         expiredGenericEntitlements,
+        billingReconciliationCompleted: billingReconciliation.completed,
+        billingReconciliationFailed: billingReconciliation.failed,
+        billingReconciliationPending: billingReconciliation.pending,
         paymentReconciliationFailed: reconciliation.failed,
         paymentReconciliationProcessed: reconciliation.processed,
         purgedAuthRequestAdmissions,

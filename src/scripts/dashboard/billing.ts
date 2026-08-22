@@ -4,14 +4,25 @@ import { getBillingCheckoutAdmission } from "../../lib/dashboard/billing-checkou
 type JsonObject = Record<string, unknown>;
 type Price = { amountMinor: number; currency: string; displayAmount: string | null; interval: string; marketCode: string };
 type Plan = { code: string; name: string; prices: Price[]; version: number };
-type ChangeRequest = { action: string; currentPlanCode: string; requestedPlanCode: string | null; reasonCode: string; requestPublicId: string; status: string; updatedAt: string; version: number };
+type BillingOperation = { action: "cancel" | "cancel_scheduled_plan_change" | "change_plan" | "resume"; operationId: string; requestedPlanCode: string | null; status: string };
+type BillingOperationAttemptInput = {
+  action: BillingOperation["action"];
+  expectedSubscriptionVersion: number;
+  requestedPlanCode: string | null;
+  shopPublicId: string;
+};
+type BillingOperationAttempt = BillingOperationAttemptInput & { idempotencyKey: string };
+type BillingOperationAttemptRecord = BillingOperationAttempt & { expiresAt: number; version: 1 };
 type BillingCheckoutAttemptInput = { planCode: string; recovery: boolean; shopPublicId: string };
 type BillingCheckoutAttempt = BillingCheckoutAttemptInput & { idempotencyKey: string };
 type BillingCheckoutAttemptRecord = BillingCheckoutAttempt & { expiresAt: number; version: 1 };
 type BillingCheckoutAttemptStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
+type BillingPlanChangeDirection = "downgrade" | "unknown" | "upgrade";
 
 const BILLING_CHECKOUT_ATTEMPT_STORAGE_KEY = "selinow.billing.checkout-attempt.v1";
 const BILLING_CHECKOUT_ATTEMPT_TTL_MS = 30 * 60_000;
+const BILLING_OPERATION_ATTEMPT_STORAGE_KEY = "selinow.billing.operation-attempt.v1";
+const BILLING_OPERATION_ATTEMPT_TTL_MS = 30 * 60_000;
 
 function createBillingIdempotencyKey(): string {
   try { return `billing_ui_${crypto.randomUUID()}`; }
@@ -92,6 +103,83 @@ export class BillingCheckoutAttemptTracker {
   }
 }
 
+export class BillingOperationAttemptTracker {
+  private current: BillingOperationAttemptRecord | null;
+  private readonly createKey: () => string;
+  private readonly now: () => number;
+  private readonly storage: BillingCheckoutAttemptStorage | null;
+  private readonly ttlMs: number;
+
+  constructor(input: {
+    createKey?: () => string;
+    now?: () => number;
+    storage?: BillingCheckoutAttemptStorage | null;
+    ttlMs?: number;
+  } = {}) {
+    this.createKey = input.createKey ?? createBillingIdempotencyKey;
+    this.now = input.now ?? Date.now;
+    this.storage = input.storage ?? null;
+    this.ttlMs = input.ttlMs ?? BILLING_OPERATION_ATTEMPT_TTL_MS;
+    this.current = this.load();
+  }
+
+  begin(input: BillingOperationAttemptInput): BillingOperationAttempt {
+    if (this.current !== null && this.current.expiresAt <= this.now()) this.clear();
+    if (this.current !== null
+      && this.current.action === input.action
+      && this.current.expectedSubscriptionVersion === input.expectedSubscriptionVersion
+      && this.current.requestedPlanCode === input.requestedPlanCode
+      && this.current.shopPublicId === input.shopPublicId) return this.current;
+    this.clear();
+    this.current = { ...input, expiresAt: this.now() + this.ttlMs, idempotencyKey: this.createKey(), version: 1 };
+    this.persist();
+    return this.current;
+  }
+
+  finish(attempt: Pick<BillingOperationAttempt, "idempotencyKey">): void {
+    if (this.current?.idempotencyKey === attempt.idempotencyKey) this.clear();
+  }
+
+  fail(attempt: Pick<BillingOperationAttempt, "idempotencyKey">, terminalResponse: boolean): void {
+    if (terminalResponse) this.finish(attempt);
+  }
+
+  private clear(): void {
+    this.current = null;
+    try { this.storage?.removeItem(BILLING_OPERATION_ATTEMPT_STORAGE_KEY); } catch { /* Storage denial falls back to memory-only recovery. */ }
+  }
+
+  private load(): BillingOperationAttemptRecord | null {
+    let raw: string | null;
+    try { raw = this.storage?.getItem(BILLING_OPERATION_ATTEMPT_STORAGE_KEY) ?? null; } catch { return null; }
+    if (raw === null) return null;
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("invalid");
+      const record = value as Partial<BillingOperationAttemptRecord>;
+      const now = this.now();
+      if (record.version !== 1
+        || (record.action !== "cancel" && record.action !== "cancel_scheduled_plan_change" && record.action !== "change_plan" && record.action !== "resume")
+        || !Number.isSafeInteger(record.expectedSubscriptionVersion) || (record.expectedSubscriptionVersion ?? 0) < 1
+        || (record.action === "change_plan" && record.requestedPlanCode !== "starter" && record.requestedPlanCode !== "pro")
+        || (record.action !== "change_plan" && record.requestedPlanCode !== null)
+        || typeof record.shopPublicId !== "string" || record.shopPublicId.length === 0
+        || typeof record.idempotencyKey !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/u.test(record.idempotencyKey)
+        || typeof record.expiresAt !== "number" || !Number.isSafeInteger(record.expiresAt)
+        || record.expiresAt <= now || record.expiresAt > now + this.ttlMs) throw new Error("invalid");
+      return record as BillingOperationAttemptRecord;
+    } catch {
+      try { this.storage?.removeItem(BILLING_OPERATION_ATTEMPT_STORAGE_KEY); } catch { /* Ignore unavailable storage cleanup. */ }
+      return null;
+    }
+  }
+
+  private persist(): void {
+    if (this.current === null) return;
+    try { this.storage?.setItem(BILLING_OPERATION_ATTEMPT_STORAGE_KEY, JSON.stringify(this.current)); } catch { /* Storage denial keeps the in-memory attempt usable. */ }
+  }
+}
+
 export function isBillingCheckoutTerminalFailure(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   const failure = error as { code?: unknown; terminalResponse?: unknown };
@@ -126,22 +214,60 @@ export function acceptBillingCheckoutResponse(payload: JsonObject | null, attemp
   return checkoutUrl.toString();
 }
 
+export function acceptBillingPortalResponse(payload: JsonObject | null): string {
+  const portal = payload?.portal;
+  const provider = typeof portal === "object" && portal !== null && typeof (portal as { provider?: unknown }).provider === "string" ? (portal as { provider: string }).provider : "";
+  const rawUrl = typeof portal === "object" && portal !== null && typeof (portal as { portalUrl?: unknown }).portalUrl === "string" ? (portal as { portalUrl: string }).portalUrl : "";
+  const requestId = typeof payload?.requestId === "string" && /^[A-Za-z0-9._-]{8,128}$/u.test(payload.requestId) ? payload.requestId : null;
+  if (provider !== "dodo") throw new BillingApiError({ code: "billing_portal_provider_invalid", requestId });
+  let portalUrl: URL;
+  try { portalUrl = new URL(rawUrl); } catch { throw new BillingApiError({ code: "billing_portal_url_invalid", requestId }); }
+  const hostname = portalUrl.hostname.toLowerCase();
+  if (portalUrl.protocol !== "https:"
+    || portalUrl.username.length > 0
+    || portalUrl.password.length > 0
+    || portalUrl.port.length > 0
+    || portalUrl.pathname.length < 2
+    || (hostname !== "dodopayments.com" && !hostname.endsWith(".dodopayments.com"))) {
+    throw new BillingApiError({ code: "billing_portal_url_invalid", requestId });
+  }
+  return portalUrl.toString();
+}
+
+export function billingPlanChangeDirection(current: Price | null, target: Price | undefined): BillingPlanChangeDirection {
+  if (current === null || target === undefined
+    || current.currency !== target.currency
+    || current.interval !== target.interval
+    || current.marketCode !== target.marketCode
+    || current.amountMinor === target.amountMinor) return "unknown";
+  return target.amountMinor > current.amountMinor ? "upgrade" : "downgrade";
+}
+
 const root = document.querySelector<HTMLElement>("[data-billing-root]");
 
 if (root !== null && root.dataset.canManage === "true") {
   const shopPublicId = root.dataset.shopPublicId;
   const csrfCookieName = root.dataset.csrfCookieName ?? "";
   const feedback = root.querySelector<HTMLElement>("[data-billing-feedback]");
-  const planSelect = root.querySelector<HTMLElement>("[data-billing-plan]") as HTMLSelectElement | null;
-  const actionSelect = root.querySelector<HTMLElement>("[data-billing-action]") as HTMLSelectElement | null;
-  const form = root.querySelector<HTMLFormElement>("[data-billing-request-form]");
-  const ledger = root.querySelector<HTMLElement>("[data-billing-request-ledger]");
-  const checkoutForm = root.querySelector<HTMLFormElement>("[data-billing-checkout-form]");
+  const planDialogFeedback = root.querySelector<HTMLElement>("[data-dialog-feedback]");
+  const cancelDialogFeedback = root.querySelector<HTMLElement>("[data-cancel-feedback]");
+  const supportReference = root.querySelector<HTMLElement>("[data-billing-support-reference]");
+  const recentAuthActions = root.querySelectorAll<HTMLButtonElement>("[data-billing-recent-auth-action]");
   const marketForm = root.querySelector<HTMLFormElement>("[data-billing-market-form]");
-  const checkoutPlanSelect = root.querySelector<HTMLElement>("[data-billing-checkout-plan]") as HTMLSelectElement | null;
-  const checkoutSubmit = root.querySelector<HTMLElement>("[data-billing-checkout-submit]") as HTMLButtonElement | null;
-  const checkoutFeedback = root.querySelector<HTMLElement>("[data-billing-checkout-feedback]");
-  const checkoutRecentAuthAction = root.querySelector<HTMLButtonElement>("[data-billing-recent-auth-action]");
+  const merchantCountryInput = root.querySelector<HTMLInputElement>("#billing-merchant-country");
+  const planDialog = root.querySelector<HTMLDialogElement>("[data-plan-dialog]");
+  const cancelDialog = root.querySelector<HTMLDialogElement>("[data-cancel-dialog]");
+  const planOptions = root.querySelector<HTMLElement>("[data-plan-options]");
+  const selectStage = root.querySelector<HTMLElement>('[data-plan-stage="select"]');
+  const reviewStage = root.querySelector<HTMLElement>('[data-plan-stage="review"]');
+  const reviewTitle = root.querySelector<HTMLElement>("[data-review-title]");
+  const reviewAnnouncement = root.querySelector<HTMLElement>("[data-review-announcement]");
+  const reviewProviderNote = root.querySelector<HTMLElement>("[data-review-provider-note]");
+  const planBack = root.querySelector<HTMLButtonElement>("[data-plan-back]");
+  const planConfirm = root.querySelector<HTMLButtonElement>("[data-plan-confirm]");
+  const cancelConfirm = root.querySelector<HTMLButtonElement>("[data-cancel-confirm]");
+  const operationBanner = root.querySelector<HTMLElement>("[data-billing-operation]");
+  const operationTitle = root.querySelector<HTMLElement>("[data-operation-title]");
   const copy = (() => {
     try {
       const parsed: unknown = JSON.parse(root.dataset.copy ?? "{}");
@@ -153,18 +279,47 @@ if (root !== null && root.dataset.canManage === "true") {
   const billingState = root.dataset.billingState ?? "";
   const billingMarketReady = root.dataset.billingMarketReady === "true";
   const subscriptionVersion = Number(root.dataset.subscriptionVersion);
+  const currentPeriodEnd = root.dataset.currentPeriodEnd ?? "";
+  const locale = document.documentElement.lang || "en";
   const checkoutAttemptStorage = (() => {
     try { return window.sessionStorage; } catch { return null; }
   })();
   const checkoutAttempts = new BillingCheckoutAttemptTracker({ storage: checkoutAttemptStorage });
+  const operationAttempts = new BillingOperationAttemptTracker({ storage: checkoutAttemptStorage });
+  let plans: Plan[] = [];
+  let selectedPlan: Plan | null = null;
   let pending = false;
+  let activeOperationId: string | null = null;
+  let previewSequence = 0;
+  let previewReady = false;
 
   const readCookie = (name: string): string | null => document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
+  const setUrlState = (key: "action" | "billing_return" | "manage", value: string | null): void => {
+    const url = new URL(window.location.href);
+    if (value === null) url.searchParams.delete(key);
+    else url.searchParams.set(key, value);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  };
   const showFeedback = (message: string, tone: "danger" | "info" | "success" = "info"): void => {
-    if (feedback === null) return;
-    feedback.textContent = message;
-    feedback.dataset.tone = tone;
-    feedback.hidden = message.length === 0;
+    for (const target of [feedback, planDialogFeedback, cancelDialogFeedback]) {
+      if (target === null) continue;
+      target.textContent = message;
+      target.dataset.tone = tone;
+      target.hidden = message.length === 0 || (target === planDialogFeedback && planDialog?.open !== true) || (target === cancelDialogFeedback && cancelDialog?.open !== true);
+    }
+  };
+  const clearFeedback = (target: HTMLElement | null): void => {
+    if (target === null) return;
+    target.textContent = "";
+    target.hidden = true;
+    delete target.dataset.tone;
+  };
+  const showSupportReference = (failure: BillingApiFailure): void => {
+    if (supportReference === null) return;
+    const values = [text("checkoutErrorCode").replace("{code}", failure.code)];
+    if (failure.requestId !== null) values.push(text("checkoutRequestId").replace("{requestId}", failure.requestId));
+    supportReference.textContent = values.join(" · ");
+    supportReference.hidden = false;
   };
   const requestApi = async (url: string, options: RequestInit = {}, idempotencyKey?: string): Promise<JsonObject | null> => {
     const headers = new Headers(options.headers);
@@ -178,15 +333,12 @@ if (root !== null && root.dataset.canManage === "true") {
     }
     const response = await fetch(url, { ...options, credentials: "same-origin", headers });
     let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
+    try { payload = await response.json(); }
+    catch {
       if (response.ok && method !== "GET" && method !== "HEAD") throw new BillingApiError({ code: "billing_response_unavailable", requestId: null });
       payload = null;
     }
-    if (!response.ok) {
-      throw new BillingApiError(readBillingApiFailure(payload, response.status), true);
-    }
+    if (!response.ok) throw new BillingApiError(readBillingApiFailure(payload, response.status), true);
     return typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload as JsonObject : null;
   };
   const priceFrom = (value: unknown): Price | null => {
@@ -195,193 +347,414 @@ if (root !== null && root.dataset.canManage === "true") {
     if (!Number.isSafeInteger(item.amountMinor) || typeof item.currency !== "string" || typeof item.interval !== "string" || typeof item.marketCode !== "string") return null;
     return { amountMinor: item.amountMinor as number, currency: item.currency, displayAmount: typeof item.displayAmount === "string" ? item.displayAmount : null, interval: item.interval, marketCode: item.marketCode };
   };
+  const currentPrice = (() => {
+    try { return priceFrom(JSON.parse(root.dataset.currentPrice ?? "null")); }
+    catch { return null; }
+  })();
   const plansFrom = (payload: JsonObject | null): Plan[] => {
     const values = payload?.plans;
     if (!Array.isArray(values)) return [];
     return values.filter((item): item is JsonObject => typeof item === "object" && item !== null && !Array.isArray(item)).map((item) => {
       const rawPrices = Array.isArray(item.prices) ? item.prices : Array.isArray(item.offers) ? item.offers : [];
       return { code: typeof item.code === "string" ? item.code : "", name: typeof item.name === "string" ? item.name : "", prices: rawPrices.map(priceFrom).filter((price): price is Price => price !== null), version: typeof item.version === "number" ? item.version : 0 };
-    }).filter((plan) => plan.code.length > 0 && plan.name.length > 0);
+    }).filter((plan) => (plan.code === "starter" || plan.code === "pro") && plan.name.length > 0);
   };
-  const requestsFrom = (payload: JsonObject | null): ChangeRequest[] => {
-    const values = payload?.requests;
-    if (!Array.isArray(values)) return [];
-    return values.filter((item): item is JsonObject => typeof item === "object" && item !== null && !Array.isArray(item)).map((item) => ({ action: typeof item.action === "string" ? item.action : "unknown", currentPlanCode: typeof item.currentPlanCode === "string" ? item.currentPlanCode : "", requestedPlanCode: item.requestedPlanCode === null || typeof item.requestedPlanCode === "string" ? item.requestedPlanCode : null, reasonCode: typeof item.reasonCode === "string" ? item.reasonCode : "", requestPublicId: typeof item.requestPublicId === "string" ? item.requestPublicId : "", status: typeof item.status === "string" ? item.status : "unknown", updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : "", version: typeof item.version === "number" ? item.version : 0 })).filter((request) => request.requestPublicId.length > 0);
+  const formatPrice = (price: Price | undefined): string => {
+    if (price === undefined) return text("checkoutUnavailable");
+    if (price.displayAmount !== null) return `${price.displayAmount} / ${price.interval}`;
+    const divisor = ["JPY", "KRW", "VND"].includes(price.currency) ? 1 : 100;
+    return `${new Intl.NumberFormat(locale, { currency: price.currency, style: "currency" }).format(price.amountMinor / divisor)} / ${text("perMonth")}`;
   };
-  const statusLabel = (status: string): string => status === "requested" ? text("statusRequested") : status === "provider_pending" ? text("statusProviderPending") : status === "completed" ? text("statusCompleted") : status === "canceled" ? text("statusCanceled") : status === "rejected" ? text("statusRejected") : status;
-  const renderPlans = (plans: readonly Plan[]): void => {
-    if (planSelect === null) return;
-    planSelect.replaceChildren();
-    for (const plan of plans) {
-      if (plan.code === currentPlanCode) continue;
-      const option = document.createElement("option");
-      option.value = plan.code;
-      const price = plan.prices[0];
-      const priceLabel = price === undefined ? "" : ` · ${price.displayAmount ?? new Intl.NumberFormat(document.documentElement.lang || "en", { style: "currency", currency: price.currency, maximumFractionDigits: price.currency === "VND" ? 0 : 2 }).format(price.amountMinor / (price.currency === "VND" ? 1 : 100))} / ${price.interval}`;
-      option.textContent = `${plan.name} (${plan.code})${priceLabel}`;
-      planSelect.appendChild(option);
+  const eligiblePlans = (): Plan[] => {
+    if (["trialing", "pending_payment", "suspended", "canceled"].includes(billingState)) {
+      return getBillingCheckoutAdmission({ billingState, currentPlanCode, marketReady: billingMarketReady, plans }).eligible;
     }
+    return plans.filter((plan) => plan.code !== currentPlanCode && plan.prices.length > 0);
   };
-  const renderCheckoutPlans = (plans: readonly Plan[]): void => {
-    if (checkoutPlanSelect === null) return;
-    checkoutPlanSelect.replaceChildren();
-    const admission = getBillingCheckoutAdmission({ billingState, currentPlanCode, marketReady: billingMarketReady, plans });
-    const eligible = admission.eligible;
+  const resetDialog = (): void => {
+    previewSequence += 1;
+    previewReady = false;
+    selectedPlan = null;
+    clearFeedback(planDialogFeedback);
+    if (selectStage !== null) selectStage.hidden = false;
+    if (reviewStage !== null) {
+      reviewStage.hidden = true;
+      reviewStage.removeAttribute("aria-busy");
+    }
+    if (planConfirm !== null) {
+      planConfirm.disabled = true;
+      planConfirm.removeAttribute("aria-busy");
+      planConfirm.textContent = text("confirmChange");
+    }
+    if (reviewAnnouncement !== null) reviewAnnouncement.textContent = "";
+    if (reviewProviderNote !== null) reviewProviderNote.textContent = "";
+    root.querySelector<HTMLElement>("[data-review-today]")?.replaceChildren();
+    for (const choice of root.querySelectorAll<HTMLElement>("[data-plan-choice]")) choice.setAttribute("aria-pressed", "false");
+  };
+  const isReviewHidden = (): boolean => reviewStage === null || reviewStage.hidden === true;
+  const renderPlans = (): void => {
+    if (planOptions === null) return;
+    planOptions.replaceChildren();
+    const eligible = eligiblePlans();
+    if (eligible.length === 0) {
+      const empty = document.createElement("p");
+      empty.textContent = billingMarketReady ? text("checkoutUnavailable") : text("marketDescription");
+      planOptions.appendChild(empty);
+      return;
+    }
     for (const plan of eligible) {
-      const option = document.createElement("option");
-      option.value = plan.code;
-      const price = plan.prices[0];
-      const priceLabel = price === undefined ? "" : ` · ${price.displayAmount ?? new Intl.NumberFormat(document.documentElement.lang || "en", { style: "currency", currency: price.currency, maximumFractionDigits: price.currency === "VND" ? 0 : 2 }).format(price.amountMinor / (price.currency === "VND" ? 1 : 100))} / ${price.interval}`;
-      option.textContent = `${plan.name}${priceLabel}`;
-      checkoutPlanSelect.appendChild(option);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "plan-choice";
+      button.dataset.planChoice = plan.code;
+      button.setAttribute("aria-pressed", "false");
+      const name = document.createElement("strong");
+      name.textContent = plan.name;
+      const price = document.createElement("span");
+      price.textContent = formatPrice(plan.prices[0]);
+      const effect = document.createElement("small");
+      const checkout = ["trialing", "pending_payment", "suspended", "canceled"].includes(billingState);
+      const direction = billingPlanChangeDirection(currentPrice, plan.prices[0]);
+      effect.textContent = checkout || direction === "upgrade"
+        ? text("effectiveNow")
+        : direction === "downgrade" ? text("effectiveRenewal") : text("continue");
+      button.appendChild(name);
+      button.appendChild(price);
+      button.appendChild(effect);
+      button.addEventListener("click", () => {
+        selectedPlan = plan;
+        for (const choice of root.querySelectorAll<HTMLElement>("[data-plan-choice]")) choice.setAttribute("aria-pressed", String(choice === button));
+        void reviewPlan();
+      });
+      planOptions.appendChild(button);
     }
-    if (checkoutSubmit !== null) checkoutSubmit.disabled = eligible.length === 0;
-    if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = true;
-    if (admission.reasonCode === "billing_market_unavailable") showCheckoutFeedback(text("checkoutMarketRequired"), "danger");
-    else if (admission.reasonCode === "plan_price_unavailable") showCheckoutFeedback(text("checkoutUnavailable"), "danger");
-    else showCheckoutFeedback("");
   };
-  const showCheckoutFeedback = (message: string, tone: "danger" | "info" | "success" = "info"): void => {
-    if (checkoutFeedback === null) return;
-    checkoutFeedback.textContent = message;
-    checkoutFeedback.dataset.tone = tone;
-    checkoutFeedback.hidden = message.length === 0;
+  const openPlanDialog = (): void => {
+    resetDialog();
+    renderPlans();
+    setUrlState("manage", "plan");
+    planDialog?.showModal();
   };
+  const reviewPlan = async (): Promise<void> => {
+    if (selectedPlan === null || shopPublicId === undefined) return;
+    const plan = selectedPlan;
+    const sequence = ++previewSequence;
+    previewReady = false;
+    if (selectStage !== null) selectStage.hidden = true;
+    if (reviewStage !== null) {
+      reviewStage.hidden = false;
+      reviewStage.setAttribute("aria-busy", "true");
+    }
+    const checkout = ["trialing", "pending_payment", "suspended", "canceled"].includes(billingState);
+    if (planConfirm !== null) {
+      planConfirm.disabled = true;
+      planConfirm.setAttribute("aria-busy", "true");
+      planConfirm.textContent = checkout ? text("continueToDodo") : text("confirmChange");
+    }
+    if (reviewAnnouncement !== null) reviewAnnouncement.textContent = text("reviewLoading");
+    reviewTitle?.focus();
+    root.querySelector<HTMLElement>("[data-review-current]")?.replaceChildren(document.createTextNode(text(`plan_${currentPlanCode}`) || currentPlanCode));
+    root.querySelector<HTMLElement>("[data-review-target]")?.replaceChildren(document.createTextNode(`${plan.name} · ${formatPrice(plan.prices[0])}`));
+    const effective = root.querySelector<HTMLElement>("[data-review-effective]");
+    effective?.replaceChildren(document.createTextNode(checkout ? text("effectiveNow") : text("previewLoading")));
+    const today = root.querySelector<HTMLElement>("[data-review-today]");
+    today?.replaceChildren(document.createTextNode(text("previewLoading")));
+    if (planConfirm !== null) planConfirm.textContent = checkout ? text("continueToDodo") : text("confirmChange");
+    if (!checkout) {
+      try {
+        const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/preview`, {
+          body: JSON.stringify({ planCode: plan.code }),
+          method: "POST",
+        });
+        if (sequence !== previewSequence || selectedPlan !== plan || isReviewHidden()) return;
+        const preview = typeof payload?.preview === "object" && payload.preview !== null ? payload.preview as JsonObject : null;
+        const amountMinor = preview?.amountMinor;
+        const currency = preview?.currency;
+        const effectiveAt = preview?.effectiveAt;
+        if (!Number.isSafeInteger(amountMinor)
+          || typeof currency !== "string"
+          || (effectiveAt !== "immediately" && effectiveAt !== "next_billing_date")) throw new Error("billing_preview_invalid");
+        const divisor = ["JPY", "KRW", "VND"].includes(currency) ? 1 : 100;
+        const renewalDate = currentPeriodEnd === "" ? "" : ` · ${new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(currentPeriodEnd))}`;
+        effective?.replaceChildren(document.createTextNode(effectiveAt === "immediately" ? text("effectiveNow") : `${text("effectiveRenewal")}${renewalDate}`));
+        today?.replaceChildren(document.createTextNode((amountMinor as number) === 0
+          ? text("nothingDueToday")
+          : new Intl.NumberFormat(locale, { currency, style: "currency" }).format((amountMinor as number) / divisor)));
+        if (reviewProviderNote !== null) reviewProviderNote.textContent = effectiveAt === "immediately" ? text("upgradeProviderNote") : text("downgradeProviderNote");
+        if (planConfirm !== null) planConfirm.textContent = effectiveAt === "immediately" ? text("confirmUpgrade") : text("confirmDowngrade");
+      } catch (error) {
+        if (sequence !== previewSequence || selectedPlan !== plan || isReviewHidden()) return;
+        if (reviewStage !== null) reviewStage.removeAttribute("aria-busy");
+        if (planConfirm !== null) planConfirm.removeAttribute("aria-busy");
+        today?.replaceChildren(document.createTextNode(text("previewUnavailable")));
+        if (reviewAnnouncement !== null) reviewAnnouncement.textContent = text("reviewFailed");
+        handleFailure(error);
+        return;
+      }
+    } else {
+      today?.replaceChildren(document.createTextNode(text("providerConfirms")));
+      if (reviewProviderNote !== null) reviewProviderNote.textContent = text("checkoutProviderNote");
+    }
+    if (sequence !== previewSequence || selectedPlan !== plan || isReviewHidden()) return;
+    previewReady = true;
+    if (reviewStage !== null) reviewStage.removeAttribute("aria-busy");
+    if (planConfirm !== null) {
+      planConfirm.disabled = false;
+      planConfirm.removeAttribute("aria-busy");
+    }
+    if (reviewAnnouncement !== null) reviewAnnouncement.textContent = text("reviewReady");
+  };
+  const billingFailure = (error: unknown): BillingApiFailure => error instanceof BillingApiError
+    ? { code: error.code, requestId: error.requestId }
+    : { code: error instanceof Error ? error.message : "internal_error", requestId: null };
+  const handleFailure = (error: unknown): void => {
+    const failure = billingFailure(error);
+    for (const action of recentAuthActions) action.toggleAttribute("hidden", !isBillingRecentAuthFailure(failure.code));
+    showSupportReference(failure);
+    const message = isBillingRecentAuthFailure(failure.code)
+      ? text("checkoutRecentAuthRequired")
+      : ["billing_market_unavailable", "plan_price_unavailable", "provider_not_ready"].includes(failure.code)
+        ? text("marketUnavailable")
+        : ["billing_change_pending", "billing_provider_unavailable", "billing_provider_operation_unavailable", "billing_operation_response_invalid"].includes(failure.code)
+          ? text("operationUnavailable")
+          : text("errorRetry");
+    showFeedback(message, "danger");
+  };
+  const setBusy = (button: HTMLButtonElement | null, busy: boolean): void => {
+    if (button === null) return;
+    button.disabled = busy;
+    button.toggleAttribute("aria-busy", busy);
+  };
+  const parseOperation = (payload: JsonObject | null): BillingOperation | null => {
+    const value = payload?.operation;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    const operation = value as JsonObject;
+    if ((operation.action !== "cancel" && operation.action !== "cancel_scheduled_plan_change" && operation.action !== "change_plan" && operation.action !== "resume") || typeof operation.operationId !== "string" || typeof operation.status !== "string") return null;
+    return { action: operation.action, operationId: operation.operationId, requestedPlanCode: typeof operation.requestedPlanCode === "string" ? operation.requestedPlanCode : null, status: operation.status };
+  };
+  const pollOperation = async (operationId: string | null, attempts = 15): Promise<void> => {
+    if (shopPublicId === undefined) return;
+    activeOperationId = operationId;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+      const query = operationId === null ? "" : `?operation=${encodeURIComponent(operationId)}`;
+      try {
+        const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/operations${query}`);
+        if (activeOperationId !== operationId) return;
+        const operation = parseOperation(payload);
+        const subscription = typeof payload?.subscription === "object" && payload.subscription !== null ? payload.subscription as JsonObject : null;
+        if (operation?.status === "rejected") {
+          showFeedback(text("operationRejected"), "danger");
+          operationBanner?.setAttribute("hidden", "");
+          return;
+        }
+        if (operation === null) {
+          if (operationId !== null && attempt < attempts - 1) {
+            operationBanner?.removeAttribute("hidden");
+            continue;
+          }
+          if (operationId !== null) showFeedback(text("operationUnavailable"), "danger");
+          operationBanner?.setAttribute("hidden", "");
+          return;
+        }
+        if (operation.status === "completed" || operation.status === "canceled") {
+          const subscriptionChanged = subscription !== null && (
+            (typeof subscription.state === "string" && subscription.state !== billingState)
+            || (typeof subscription.planCode === "string" && subscription.planCode !== currentPlanCode)
+            || (Number.isSafeInteger(subscription.version) && subscription.version !== subscriptionVersion)
+          );
+          if (operationId !== null || subscriptionChanged) {
+            window.location.reload();
+            return;
+          }
+          operationBanner?.setAttribute("hidden", "");
+          return;
+        }
+        if (operation.status !== "requested" && operation.status !== "provider_pending") {
+          operationBanner?.setAttribute("hidden", "");
+          window.location.reload();
+          return;
+        }
+        operationBanner?.removeAttribute("hidden");
+      } catch (error) {
+        if (attempt === attempts - 1) {
+          handleFailure(error);
+          return;
+        }
+      }
+    }
+    showFeedback(text("operationDescription"), "info");
+  };
+  const pollBillingReturn = async (attempts = 15): Promise<void> => {
+    if (shopPublicId === undefined) return;
+    if (operationTitle !== null) operationTitle.textContent = text("returnOperationTitle");
+    operationBanner?.removeAttribute("hidden");
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+      try {
+        const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/operations`);
+        const subscription = typeof payload?.subscription === "object" && payload.subscription !== null ? payload.subscription as JsonObject : null;
+        const subscriptionChanged = subscription !== null && (
+          (typeof subscription.state === "string" && subscription.state !== billingState)
+          || (typeof subscription.planCode === "string" && subscription.planCode !== currentPlanCode)
+          || (Number.isSafeInteger(subscription.version) && subscription.version !== subscriptionVersion)
+        );
+        if (subscriptionChanged) {
+          setUrlState("billing_return", null);
+          window.location.reload();
+          return;
+        }
+      } catch (error) {
+        if (attempt === attempts - 1) {
+          handleFailure(error);
+          return;
+        }
+      }
+    }
+    showFeedback(text("operationDescription"), "info");
+  };
+  const startOperation = async (action: BillingOperation["action"], requestedPlanCode?: string): Promise<void> => {
+    if (pending || shopPublicId === undefined || !Number.isSafeInteger(subscriptionVersion)) return;
+    if (action === "change_plan" && requestedPlanCode !== "starter" && requestedPlanCode !== "pro") return;
+    const attempt = operationAttempts.begin({
+      action,
+      expectedSubscriptionVersion: subscriptionVersion,
+      requestedPlanCode: action === "change_plan" ? requestedPlanCode ?? null : null,
+      shopPublicId,
+    });
+    pending = true;
+    const button = action === "cancel"
+      ? cancelConfirm
+      : action === "change_plan"
+        ? planConfirm
+        : action === "cancel_scheduled_plan_change"
+          ? root.querySelector<HTMLButtonElement>("[data-billing-cancel-scheduled-plan-change]")
+          : root.querySelector<HTMLButtonElement>("[data-billing-resume]");
+    const buttonLabel = button?.textContent ?? null;
+    setBusy(button, true);
+    if (action === "cancel_scheduled_plan_change" && button !== null) button.textContent = text("cancelScheduledPlanChangePending");
+    showFeedback(text("operationDescription"), "info");
+    try {
+      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/operations`, {
+        body: JSON.stringify({ action, expectedSubscriptionVersion: subscriptionVersion, ...(requestedPlanCode === undefined ? {} : { requestedPlanCode }) }),
+        method: "POST",
+      }, attempt.idempotencyKey);
+      const operation = parseOperation(payload);
+      if (operation === null) throw new BillingApiError({ code: "billing_operation_response_invalid", requestId: null });
+      operationAttempts.finish(attempt);
+      planDialog?.close();
+      cancelDialog?.close();
+      setUrlState("manage", null);
+      setUrlState("action", null);
+      await pollOperation(operation.operationId);
+    } catch (error) {
+      operationAttempts.fail(attempt, isBillingCheckoutTerminalFailure(error));
+      handleFailure(error);
+    } finally {
+      pending = false;
+      setBusy(button, false);
+      if (button !== null && buttonLabel !== null) button.textContent = buttonLabel;
+    }
+  };
+  const startCheckout = async (plan: Plan): Promise<void> => {
+    if (pending || shopPublicId === undefined) return;
+    const recovery = billingState === "suspended" || billingState === "canceled";
+    const attempt = checkoutAttempts.begin({ planCode: plan.code, recovery, shopPublicId });
+    pending = true;
+    setBusy(planConfirm, true);
+    showFeedback(text("checkoutOpening"), "info");
+    try {
+      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { body: JSON.stringify({ planCode: plan.code, recovery }), method: "POST" }, attempt.idempotencyKey);
+      const url = acceptBillingCheckoutResponse(payload, attempt, checkoutAttempts);
+      window.location.assign(url);
+    } catch (error) {
+      checkoutAttempts.fail(attempt, isBillingCheckoutTerminalFailure(error));
+      handleFailure(error);
+      setBusy(planConfirm, false);
+      pending = false;
+    }
+  };
+  const openBillingPortal = async (): Promise<void> => {
+    if (pending || shopPublicId === undefined) return;
+    const button = root.querySelector<HTMLButtonElement>("[data-billing-portal]");
+    pending = true;
+    setBusy(button, true);
+    showFeedback(text("portalOpening"), "info");
+    try {
+      const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/portal`, { method: "POST" });
+      window.location.assign(acceptBillingPortalResponse(payload));
+    } catch (error) {
+      const failure = billingFailure(error);
+      if (isBillingRecentAuthFailure(failure.code)) handleFailure(error);
+      else {
+        showSupportReference(failure);
+        showFeedback(text("portalUnavailable"), "danger");
+      }
+      pending = false;
+      setBusy(button, false);
+    }
+  };
+
   marketForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     if (pending || shopPublicId === undefined || !marketForm.reportValidity()) return;
     const value = new FormData(marketForm).get("merchantCountry");
     if (typeof value !== "string" || !/^[A-Za-z]{2}$/u.test(value.trim())) return;
-    const button = marketForm.querySelector<HTMLButtonElement>("button[type=submit]");
+    const button = marketForm.querySelector<HTMLButtonElement>('button[type="submit"]');
     pending = true;
-    if (button !== null) {
-      button.disabled = true;
-      button.textContent = text("checkoutMarketSaving");
+    setBusy(button, true);
+    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}`, { body: JSON.stringify({ merchantCountry: value.trim().toUpperCase() }), method: "PATCH" })
+      .then(() => { showFeedback(text("checkoutMarketSaved"), "success"); window.location.reload(); })
+      .catch(handleFailure)
+      .finally(() => { pending = false; setBusy(button, false); });
+  });
+  for (const trigger of root.querySelectorAll<HTMLButtonElement>("[data-open-plan-dialog]")) trigger.addEventListener("click", openPlanDialog);
+  root.querySelector<HTMLButtonElement>("[data-focus-billing-market]")?.addEventListener("click", () => {
+    merchantCountryInput?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    merchantCountryInput?.focus({ preventScroll: true });
+  });
+  root.querySelector<HTMLButtonElement>("[data-open-cancel-dialog]")?.addEventListener("click", () => {
+    planDialog?.close();
+    setUrlState("manage", null);
+    setUrlState("action", "cancel");
+    clearFeedback(cancelDialogFeedback);
+    cancelDialog?.showModal();
+  });
+  root.querySelector<HTMLButtonElement>("[data-billing-resume]")?.addEventListener("click", () => { void startOperation("resume"); });
+  root.querySelector<HTMLButtonElement>("[data-billing-cancel-scheduled-plan-change]")?.addEventListener("click", () => { void startOperation("cancel_scheduled_plan_change"); });
+  root.querySelector<HTMLButtonElement>("[data-billing-portal]")?.addEventListener("click", () => { void openBillingPortal(); });
+  planBack?.addEventListener("click", () => {
+    previewSequence += 1;
+    previewReady = false;
+    if (selectStage !== null) selectStage.hidden = false;
+    if (reviewStage !== null) reviewStage.hidden = true;
+    if (planConfirm !== null) {
+      planConfirm.disabled = true;
+      planConfirm.removeAttribute("aria-busy");
+      planConfirm.textContent = text("confirmChange");
     }
-    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}`, {
-      body: JSON.stringify({ merchantCountry: value.trim().toUpperCase() }),
-      method: "PATCH",
-    }).then(() => {
-      showCheckoutFeedback(text("checkoutMarketSaved"), "success");
-      window.location.reload();
-    }).catch((error: unknown) => {
-      showCheckoutFeedback(error instanceof Error ? error.message : text("checkoutUnavailable"), "danger");
-      if (button !== null) {
-        button.disabled = false;
-        button.textContent = text("checkoutMarketSave");
-      }
-    }).finally(() => { pending = false; });
+    if (reviewAnnouncement !== null) reviewAnnouncement.textContent = text("selectPlanAnnouncement");
+    root.querySelector<HTMLButtonElement>(`[data-plan-choice="${selectedPlan?.code ?? ""}"]`)?.focus();
   });
-  const billingFailure = (error: unknown): BillingApiFailure => error instanceof BillingApiError
-    ? { code: error.code, requestId: error.requestId }
-    : { code: error instanceof Error ? error.message : "internal_error", requestId: null };
-  const checkoutErrorMessage = (error: unknown): string => {
-    const failure = billingFailure(error);
-    const message = isBillingRecentAuthFailure(failure.code)
-      ? text("checkoutRecentAuthRequired")
-      : ["billing_market_unavailable", "plan_price_unavailable", "provider_not_ready", "billing_provider_unavailable", "billing_checkout_pending", "billing_recovery_plan_mismatch", "checkout_provider_invalid"].includes(failure.code)
-        ? text("checkoutUnavailable")
-        : text("error");
-    const references = [text("checkoutErrorCode").replace("{code}", failure.code)];
-    if (failure.requestId !== null) references.push(text("checkoutRequestId").replace("{requestId}", failure.requestId));
-    return `${message} ${references.join(" · ")}`;
-  };
-  const renderRequests = (requests: readonly ChangeRequest[]): void => {
-    if (ledger === null) return;
-    ledger.replaceChildren();
-    if (requests.length === 0) {
-      const empty = document.createElement("div");
-      empty.setAttribute("role", "listitem");
-      empty.textContent = text("loaded");
-      ledger.appendChild(empty);
-      return;
-    }
-    for (const request of requests) {
-      const row = document.createElement("article");
-      row.className = "billing-request-row";
-      row.setAttribute("role", "listitem");
-      const summary = document.createElement("div");
-      const heading = document.createElement("strong");
-      heading.textContent = request.action === "change_plan" ? `${request.currentPlanCode} → ${request.requestedPlanCode ?? "?"}` : request.action;
-      const details = document.createElement("span");
-      details.textContent = `${request.requestPublicId} · ${request.reasonCode}`;
-      summary.appendChild(heading);
-      summary.appendChild(details);
-      const status = document.createElement("span");
-      status.textContent = statusLabel(request.status);
-      row.appendChild(summary);
-      row.appendChild(status);
-      ledger.appendChild(row);
-    }
-  };
-  const load = async (): Promise<void> => {
-    if (shopPublicId === undefined) return;
-    showFeedback(text("loading"), "info");
-    try {
-      const [plans, requests] = await Promise.all([requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/plans`), requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/requests`)]);
-      const parsedPlans = plansFrom(plans);
-      renderPlans(parsedPlans);
-      renderCheckoutPlans(parsedPlans);
-      const parsedRequests = requestsFrom(requests);
-      renderRequests(parsedRequests);
-      const hasPending = parsedRequests.some((request) => request.status === "requested" || request.status === "provider_pending");
-      const stateBlocksMutation = billingState === "pending_payment" || billingState === "suspended" || billingState === "canceled";
-      if (form !== null) form.querySelector<HTMLButtonElement>("button[type=submit]")?.toggleAttribute("disabled", hasPending || stateBlocksMutation);
-      if (planSelect !== null) planSelect.disabled = stateBlocksMutation;
-      if (actionSelect !== null) actionSelect.disabled = stateBlocksMutation;
-      showFeedback(text("loaded"), "success");
-    } catch (error) {
-      showFeedback(`${text("unavailable")} ${error instanceof Error ? error.message : text("error")}`, "danger");
-    }
-  };
-  actionSelect?.addEventListener("change", () => {
-    const field = root.querySelector<HTMLElement>("[data-billing-plan-field]");
-    if (field !== null) field.hidden = actionSelect.value !== "change_plan";
+  planConfirm?.addEventListener("click", () => {
+    if (selectedPlan === null || !previewReady || pending) return;
+    if (["trialing", "pending_payment", "suspended", "canceled"].includes(billingState)) void startCheckout(selectedPlan);
+    else void startOperation("change_plan", selectedPlan.code);
   });
-  form?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (pending || billingState === "pending_payment" || billingState === "suspended" || billingState === "canceled" || shopPublicId === undefined || !Number.isSafeInteger(subscriptionVersion) || !form.reportValidity()) return;
-    const values = new FormData(form);
-    const action = values.get("action");
-    const reasonCode = values.get("reasonCode");
-    const requestedPlanCode = values.get("requestedPlanCode");
-    if (action !== "cancel" && action !== "change_plan") return;
-    if (action === "cancel" && !window.confirm(text("cancelConfirm"))) return;
-    pending = true;
-    showFeedback(text("requesting"), "info");
-    const submit = form.querySelector<HTMLButtonElement>("button[type=submit]");
-    if (submit !== null) submit.disabled = true;
-    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/requests`, { method: "POST", body: JSON.stringify({ action, expectedSubscriptionVersion: subscriptionVersion, reasonCode, requestedPlanCode: action === "change_plan" ? requestedPlanCode : undefined }) }).then(() => { showFeedback(text("requested"), "success"); return load(); }).catch((error: unknown) => { showFeedback(error instanceof Error ? error.message : text("error"), "danger"); }).finally(() => { pending = false; if (submit !== null) submit.disabled = false; });
-  });
-  checkoutForm?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (pending || shopPublicId === undefined || checkoutPlanSelect === null || checkoutSubmit === null) return;
-    const planCode = checkoutPlanSelect.value;
-    if (planCode !== "starter" && planCode !== "pro") return;
-    const checkoutRecovery = billingState === "suspended" || billingState === "canceled";
-    const checkoutAttempt = checkoutAttempts.begin({ planCode, recovery: checkoutRecovery, shopPublicId });
-    pending = true;
-    checkoutSubmit.disabled = true;
-    checkoutSubmit.setAttribute("aria-busy", "true");
-    if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = true;
-    showCheckoutFeedback(text("checkoutOpening"), "info");
-    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkout`, { method: "POST", body: JSON.stringify({ planCode, recovery: checkoutRecovery }) }, checkoutAttempt.idempotencyKey).then((payload) => {
-      const url = acceptBillingCheckoutResponse(payload, checkoutAttempt, checkoutAttempts);
-      showCheckoutFeedback(text("checkoutOpening"), "success");
-      window.location.assign(url);
-    }).catch((error: unknown) => {
-      checkoutAttempts.fail(checkoutAttempt, isBillingCheckoutTerminalFailure(error));
-      const failure = billingFailure(error);
-      if (checkoutRecentAuthAction !== null) checkoutRecentAuthAction.hidden = !isBillingRecentAuthFailure(failure.code);
-      showCheckoutFeedback(checkoutErrorMessage(error), "danger");
-      checkoutSubmit.disabled = false;
-    }).finally(() => {
-      pending = false;
-      checkoutSubmit.removeAttribute("aria-busy");
-    });
-  });
-  checkoutRecentAuthAction?.addEventListener("click", () => {
-    document.querySelector<HTMLButtonElement>("[data-app-logout]")?.click();
-  });
-  void load();
+  cancelConfirm?.addEventListener("click", () => { void startOperation("cancel"); });
+  planDialog?.addEventListener("close", () => { setUrlState("manage", null); resetDialog(); });
+  cancelDialog?.addEventListener("close", () => { setUrlState("action", null); clearFeedback(cancelDialogFeedback); });
+  for (const action of recentAuthActions) action.addEventListener("click", () => { document.querySelector<HTMLButtonElement>("[data-app-logout]")?.click(); });
+
+  if (shopPublicId !== undefined) {
+    void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/plans`)
+      .then((payload) => { plans = plansFrom(payload); renderPlans(); })
+      .catch(handleFailure);
+  }
+  const urlState = new URL(window.location.href).searchParams;
+  if (urlState.get("manage") === "plan") openPlanDialog();
+  if (urlState.get("action") === "cancel") cancelDialog?.showModal();
+  const hasBillingReturn = urlState.has("billing_return");
+  if (hasBillingReturn) void pollBillingReturn();
+  else void pollOperation(null);
 }

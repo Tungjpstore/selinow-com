@@ -3,9 +3,15 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
+  cancelDodoSubscription,
+  cancelScheduledDodoPlanChange,
+  changeDodoSubscription,
   createDodoCheckout,
+  createDodoCustomerPortalSession,
   getDodoConfig,
   parseDodoEvent,
+  previewDodoSubscriptionChange,
+  resumeDodoSubscription,
   verifyDodoWebhookSignature,
 } from "../../src/lib/billing/dodo";
 import type { AppBindings } from "../../src/lib/platform/bindings";
@@ -122,6 +128,100 @@ describe("Dodo billing adapter hardening", () => {
       idempotencyKey: "checkout-key",
       priceId: "prod_test_123",
     })).rejects.toMatchObject({ code: "billing_provider_invalid", status: 502 });
+  });
+
+  it.each([200, 202, 204])("accepts an empty %i subscription mutation acknowledgement", async (status) => {
+    const config = getDodoConfig(environment("local"));
+    const fetcher: typeof fetch = () => Promise.resolve(new Response(null, { status }));
+
+    await expect(changeDodoSubscription({
+      config,
+      effectiveAt: "immediately",
+      fetcher,
+      idempotencyKey: `change-${String(status)}`,
+      onPaymentFailure: "prevent_change",
+      priceId: "prod_test_123",
+      providerSubscriptionId: "sub_test_123",
+    })).resolves.toEqual({ providerActionRef: "sub_test_123" });
+    await expect(cancelDodoSubscription({
+      config,
+      fetcher,
+      idempotencyKey: `cancel-${String(status)}`,
+      providerSubscriptionId: "sub_test_123",
+    })).resolves.toEqual({ providerActionRef: "sub_test_123" });
+    await expect(resumeDodoSubscription({
+      config,
+      fetcher,
+      idempotencyKey: `resume-${String(status)}`,
+      providerSubscriptionId: "sub_test_123",
+    })).resolves.toEqual({ providerActionRef: "sub_test_123" });
+  });
+
+  it("deletes a scheduled plan change without sending a request body", async () => {
+    const config = getDodoConfig(environment("local"));
+    const fetcher: typeof fetch = (input, init) => {
+      expect(typeof input === "string" ? input : input instanceof URL ? input.href : input.url).toBe("https://test.dodopayments.com/subscriptions/sub_test_123/change-plan/scheduled");
+      expect(init?.method).toBe("DELETE");
+      expect(init?.body).toBeUndefined();
+      expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("cancel-scheduled-key");
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+    await expect(cancelScheduledDodoPlanChange({
+      config,
+      fetcher,
+      idempotencyKey: "cancel-scheduled-key",
+      providerSubscriptionId: "sub_test_123",
+    })).resolves.toEqual({ providerActionRef: "sub_test_123" });
+  });
+
+  it("creates a customer portal session with encoded return context", async () => {
+    const config = getDodoConfig(environment("local"));
+    const fetcher: typeof fetch = (input, init) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      expect(`${url.origin}${url.pathname}`).toBe("https://test.dodopayments.com/customers/cus_test_123/customer-portal/session");
+      expect(url.searchParams.get("return_url")).toBe("https://selinow.com/app/billing?shop=shop_test_123");
+      expect(url.searchParams.get("send_email")).toBe("false");
+      expect(init?.method).toBe("POST");
+      return Promise.resolve(Response.json({ link: "https://customer.dodopayments.com/session/portal_test_123" }));
+    };
+    await expect(createDodoCustomerPortalSession({
+      config,
+      customerId: "cus_test_123",
+      fetcher,
+      returnUrl: "https://selinow.com/app/billing?shop=shop_test_123",
+      sendEmail: false,
+    })).resolves.toEqual({ link: "https://customer.dodopayments.com/session/portal_test_123" });
+  });
+
+  it("rejects customer portal links outside Dodo hosts", async () => {
+    const config = getDodoConfig(environment("local"));
+    await expect(createDodoCustomerPortalSession({
+      config,
+      customerId: "cus_test_123",
+      fetcher: () => Promise.resolve(Response.json({ link: "https://attacker.example/session/portal_test_123" })),
+      returnUrl: "https://selinow.com/app/billing?shop=shop_test_123",
+    })).rejects.toMatchObject({ code: "billing_provider_invalid", status: 502 });
+  });
+
+  it("returns the exact provider-calculated immediate upgrade charge", async () => {
+    const config = getDodoConfig(environment("local"));
+    const fetcher: typeof fetch = (_url, init) => {
+      expect(JSON.parse(init?.body as string)).toMatchObject({
+        effective_at: "immediately",
+        product_id: "prod_test_pro",
+        proration_billing_mode: "prorated_immediately",
+        quantity: 1,
+      });
+      return Promise.resolve(Response.json({ immediate_charge: { summary: { currency: "USD", total_amount: 725 } } }));
+    };
+
+    await expect(previewDodoSubscriptionChange({
+      config,
+      effectiveAt: "immediately",
+      fetcher,
+      priceId: "prod_test_pro",
+      providerSubscriptionId: "sub_test_123",
+    })).resolves.toEqual({ amountMinor: 725, currency: "USD" });
   });
 
   it("rejects a webhook-id outside the durable provider reference grammar", async () => {
