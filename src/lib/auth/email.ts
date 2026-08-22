@@ -1,5 +1,6 @@
 import { AppError } from "../core/errors";
 import { createSystemTranslator } from "../i18n";
+import { safeRelativeRedirect } from "./redirect";
 import type { AppBindings } from "../platform/bindings";
 import type { OtpPurpose } from "./otp";
 
@@ -21,9 +22,12 @@ export async function sendMagicLinkEmail(input: {
   email: string;
   env: EmailBindings;
   locale?: unknown;
+  redirect?: string;
   token: string;
 }): Promise<void> {
   const magicLink = new URL("/login", input.env.DASHBOARD_ORIGIN);
+  const redirect = safeRelativeRedirect(input.redirect ?? "", "");
+  if (redirect !== "") magicLink.searchParams.set("redirect", redirect);
   magicLink.hash = new URLSearchParams({ magic: input.token }).toString();
   const link = magicLink.toString();
   const t = createSystemTranslator(input.locale);

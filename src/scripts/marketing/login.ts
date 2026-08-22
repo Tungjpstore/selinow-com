@@ -143,13 +143,16 @@ function appendLocalDebugLink(value: string): boolean {
     if (linkUrl.origin !== window.location.origin || linkUrl.pathname !== "/login") return false;
     const fragment = new URLSearchParams(linkUrl.hash.slice(1));
     const token = fragment.get("magic");
-    if (linkUrl.search !== "" || token === null || token.length < 32
+    const redirect = linkUrl.searchParams.get("redirect");
+    if ([...linkUrl.searchParams.keys()].some((key) => key !== "redirect")
+      || (redirect !== null && safeRelativeRedirect(redirect, "") !== redirect)
+      || token === null || token.length < 32
       || [...fragment.keys()].some((key) => key !== "magic")) return false;
 
     if (statusElement === null) return false;
     statusElement.replaceChildren(t("auth.login.debug_prefix"));
     const link = document.createElement("a");
-    link.href = `${linkUrl.pathname}${linkUrl.hash}`;
+    link.href = `${linkUrl.pathname}${linkUrl.search}${linkUrl.hash}`;
     link.textContent = t("auth.login.debug_link");
     statusElement.insertAdjacentElement("beforeend", link);
     return true;
@@ -277,12 +280,14 @@ async function submitLogin(event: SubmitEvent): Promise<void> {
   }
   try {
     const localeQuery = new URLSearchParams({ lang: document.documentElement.lang });
+    const redirect = safeRelativeRedirect(new URLSearchParams(window.location.search).get("redirect"), "");
     const response = await fetch(`/api/auth/magic-link/request?${localeQuery.toString()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         email: data.get("email"),
         displayName: data.get("displayName") || undefined,
+        ...(redirect === "" ? {} : { redirect }),
         ...(typeof turnstileToken === "string" && turnstileToken.length > 0 ? { turnstileToken } : {}),
       }),
     });

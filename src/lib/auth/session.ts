@@ -6,6 +6,7 @@ import { clearCookie, parseCookies, serializeCookie } from "../http/cookies";
 import type { AppBindings } from "../platform/bindings";
 import { claimMagicLinkAdmission } from "./admission";
 import { sendMagicLinkEmail, sendPasswordChangedAlertEmail } from "./email";
+import { safeRelativeRedirect } from "./redirect";
 import { recordLoginHistory } from "./login-history";
 import { createAndSendOtp, OTP_TTL_MINUTES, verifyOtp } from "./otp";
 import { assertCsrfRequest, validatePasswordStrength } from "./policy";
@@ -152,10 +153,12 @@ export async function requestMagicLink(input: {
   email: string;
   env: AppBindings;
   locale?: unknown;
+  redirect?: string;
   requesterAddress: string;
   now?: Date;
 }): Promise<MagicLinkRequestResult> {
   const now = input.now ?? new Date();
+  const redirect = safeRelativeRedirect(input.redirect ?? null, "");
   const expiresAt = new Date(now.getTime() + MAGIC_LINK_TTL_MINUTES * 60_000).toISOString();
   const admission = await claimMagicLinkAdmission({
     ...(input.challengePassed === undefined ? {} : { challengePassed: input.challengePassed }),
@@ -197,7 +200,12 @@ export async function requestMagicLink(input: {
     await activateMagicLinkReplacement({ env: input.env, expiresAt, now, tokenId, userId: resolvedUser.id });
     return {
       challengeRequired: false,
-      debugMagicLink: `/login#${new URLSearchParams({ magic: token }).toString()}`,
+      debugMagicLink: (() => {
+        const debugLink = new URL("/login", input.env.DASHBOARD_ORIGIN);
+        if (redirect !== "") debugLink.searchParams.set("redirect", redirect);
+        debugLink.hash = new URLSearchParams({ magic: token }).toString();
+        return `${debugLink.pathname}${debugLink.search}${debugLink.hash}`;
+      })(),
       expiresAt,
       initiationBinding,
     };
@@ -207,6 +215,7 @@ export async function requestMagicLink(input: {
     email: input.email,
     env: input.env,
     locale: input.locale,
+    ...(redirect === "" ? {} : { redirect }),
     token,
   });
   await activateMagicLinkReplacement({ env: input.env, expiresAt, now, tokenId, userId: resolvedUser.id });
