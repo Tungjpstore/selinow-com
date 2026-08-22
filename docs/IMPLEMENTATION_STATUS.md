@@ -42,6 +42,13 @@ Major onboarding slice answering "danh mục → template/preset riêng + tạo 
 - Focused verification: 68 tests across the touched suites pass; ESLint clean on every touched file; `npm run build` and `npm run deploy:dry-run` pass; `astro check` reports zero errors in the files this slice touched.
 - Known repository-wide limitations (unrelated, parallel sessions): `astro check` still fails on `store.astro`, `AppLayout.astro`, StoreHome templates, `auth/google.ts`, `bindings.ts`; full `npm run test` still fails on console-design/i18n-contract/accessibility/store-builder suites and the Google-auth migration 0112 invariant registry (pending that session's registry update). None of these files were touched by OB.
 
+## Release consolidation attempt — 2026-08-22 (later)
+
+- Committed every parallel stream on `wip/onboarding-redesign-20260820`: Google sign-in foundation `3156a61` (46 files incl. migration 0112 with its invariant-registry entries — all release guards pass), refreshed public visual baselines `d0920b5` (54 snapshots). Working tree is clean except ad-hoc debug scratch (`.cap-*.tmp.mjs`, `review-screenshots/`, `dump-headings.mjs`) intentionally left uncommitted.
+- Removed the redundant `getBindings()` cast the Google stream left flagged by ESLint. Full-suite state at this commit: build ✓, local dry-run ✓, release guards ✓ (37/37); 8 pre-existing test failures remain in the console-design/accessibility/i18n/store-builder contract suites from the earlier dashboard WIP, and `astro check` still reports 23 pre-existing errors in those same areas.
+- **Production deploy: blocked, fail-closed by design.** `node scripts/deploy.mjs --env production --confirm-production` stops at `production_release_manifest_required`. Root causes: (1) no Cloudflare API tokens in the environment (`CLOUDFLARE_WORKER_DEPLOY_API_TOKEN`, `CLOUDFLARE_D1_API_TOKEN`, `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`, staging/production audit tokens); (2) the pipeline is staging-first and the newest staging release manifest (`stg_20260812T220654Z_2df45cf59367`) expired 2026-08-13 and predates migration 0112. No remote mutation was performed.
+- To ship once tokens are available: run the staging continuation (`node scripts/staging-release-manifest.mjs` for backup/restore drill + fresh manifest → `npm run deploy:staging` → local browser gates + evidence), then `node scripts/deploy.mjs --env production --confirm-production --release-manifest .wrangler/releases/staging/stg_<new>/release-manifest.json`.
+
 ## Authenticated onboarding handoff — 2026-08-22
 
 - Preserved a paid plan selected on pricing and the landing runtime through password, 2FA, and magic-link login into `/onboarding?plan=...`.
