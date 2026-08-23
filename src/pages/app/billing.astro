@@ -133,6 +133,7 @@ const pageCopy = (isVietnamese ? {
   plansPendingDescription: "Một thay đổi gói đang được xử lý. Các lựa chọn khác sẽ mở lại sau khi trạng thái được xác nhận.",
   plansScheduledDescription: "Thay đổi đã lên lịch được hiển thị trong Tổng quan. Hoàn tác tại đó trước khi chọn thay đổi khác.",
   plansCurrentLabel: "Gói đang dùng",
+  plansCurrentHint: "Đây là gói hiện tại của bạn.",
   plansChangePolicy: "Nâng gói có hiệu lực sau khi Dodo xác nhận. Hạ gói được lên lịch cho kỳ tiếp theo.",
   paymentTitle: "Phương thức thanh toán",
   paymentDescription: "Dodo Payments xử lý thông tin thanh toán; Selinow không lưu dữ liệu thẻ.",
@@ -258,6 +259,7 @@ const pageCopy = (isVietnamese ? {
   plansPendingDescription: "A plan change is processing. Other choices reopen after its status is confirmed.",
   plansScheduledDescription: "The scheduled change appears in Overview. Undo it there before choosing another change.",
   plansCurrentLabel: "Current plan",
+  plansCurrentHint: "This is your current plan.",
   plansChangePolicy: "Upgrades start after Dodo confirms them. Downgrades are scheduled for the next renewal.",
   paymentTitle: "Payment method",
   paymentDescription: "Dodo Payments processes billing details; Selinow does not store card data.",
@@ -622,6 +624,7 @@ const metricLabel = (key: string): string => (pageCopy as Record<string, string>
   .plan-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
   .plan-choice { display:grid; gap:8px; min-height:132px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:16px; background:var(--sln-bg-canvas); text-align:left; cursor:pointer; }
   .plan-choice:hover { border-color:var(--sln-border-strong); }
+  .plan-choice[data-current-plan="true"] { border-color:var(--sln-border-strong); background:var(--sln-bg-subtle); cursor:default; }
   .plan-choice[aria-pressed="true"] { border-color:var(--sln-action-primary); box-shadow:inset 0 0 0 1px var(--sln-action-primary); background:var(--sln-tint-indigo); }
   .plan-choice strong { font:var(--sln-font-h3); }
   .plan-choice span, .plan-choice small { color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }

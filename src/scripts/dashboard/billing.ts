@@ -287,6 +287,7 @@ if (root !== null && root.dataset.canManage === "true") {
   const subscriptionVersion = Number(root.dataset.subscriptionVersion);
   const currentPeriodEnd = root.dataset.currentPeriodEnd ?? "";
   const locale = document.documentElement.lang || "en";
+  const targetPlanCode = new URL(window.location.href).searchParams.get("target");
   const checkoutAttemptStorage = (() => {
     try { return window.sessionStorage; } catch { return null; }
   })();
@@ -377,6 +378,12 @@ if (root !== null && root.dataset.canManage === "true") {
     }
     return plans.filter((plan) => plan.code !== currentPlanCode && plan.prices.length > 0);
   };
+  const visiblePlans = (): Plan[] => {
+    const eligible = eligiblePlans();
+    if (billingState !== "active") return eligible;
+    const current = plans.find((plan) => plan.code === currentPlanCode && plan.prices.length > 0);
+    return current === undefined ? eligible : [current, ...eligible];
+  };
   const resetDialog = (): void => {
     previewSequence += 1;
     previewReady = false;
@@ -401,19 +408,24 @@ if (root !== null && root.dataset.canManage === "true") {
   const renderPlans = (): void => {
     if (planOptions === null) return;
     planOptions.replaceChildren();
-    const eligible = eligiblePlans();
-    if (eligible.length === 0) {
+    const visible = visiblePlans();
+    if (visible.length === 0) {
       const empty = document.createElement("p");
       empty.textContent = billingMarketReady ? text("checkoutUnavailable") : text("marketDescription");
       planOptions.appendChild(empty);
       return;
     }
-    for (const plan of eligible) {
+    for (const plan of visible) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "plan-choice";
       button.dataset.planChoice = plan.code;
       button.setAttribute("aria-pressed", "false");
+      const isCurrent = billingState === "active" && plan.code === currentPlanCode;
+      if (isCurrent) {
+        button.dataset.currentPlan = "true";
+        button.setAttribute("aria-disabled", "true");
+      }
       const name = document.createElement("strong");
       name.textContent = plan.name;
       const price = document.createElement("span");
@@ -421,13 +433,16 @@ if (root !== null && root.dataset.canManage === "true") {
       const effect = document.createElement("small");
       const checkout = ["trialing", "pending_payment", "suspended", "canceled"].includes(billingState);
       const direction = billingPlanChangeDirection(currentPrice, plan.prices[0]);
-      effect.textContent = checkout || direction === "upgrade"
+      effect.textContent = isCurrent
+        ? text("plansCurrentHint")
+        : checkout || direction === "upgrade"
         ? text("effectiveNow")
         : direction === "downgrade" ? text("effectiveRenewal") : text("continue");
       button.appendChild(name);
       button.appendChild(price);
       button.appendChild(effect);
       button.addEventListener("click", () => {
+        if (isCurrent) return;
         selectedPlan = plan;
         for (const choice of root.querySelectorAll<HTMLElement>("[data-plan-choice]")) choice.setAttribute("aria-pressed", String(choice === button));
         void reviewPlan();
@@ -762,7 +777,15 @@ if (root !== null && root.dataset.canManage === "true") {
 
   if (shopPublicId !== undefined) {
     void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/plans`)
-      .then((payload) => { plans = plansFrom(payload); renderPlans(); })
+      .then((payload) => {
+        plans = plansFrom(payload);
+        renderPlans();
+        if (targetPlanCode === "starter" || targetPlanCode === "pro") {
+          const target = root.querySelector<HTMLButtonElement>(`[data-plan-choice="${targetPlanCode}"]`);
+          if (target?.dataset.currentPlan === "true") target.focus();
+          else target?.click();
+        }
+      })
       .catch(handleFailure);
   }
   const urlState = new URL(window.location.href).searchParams;

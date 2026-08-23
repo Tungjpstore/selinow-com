@@ -261,6 +261,16 @@ describe("subscription state presentation", () => {
     expect(controller).not.toContain('|| billingState === "canceled") return;');
   });
 
+  it("shows an active current plan without turning a same-plan pricing target into a downgrade", () => {
+    const page = readFileSync("src/pages/app/billing.astro", "utf8");
+    const controller = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
+    expect(page).toContain("plansCurrentHint");
+    expect(controller).toContain('const visiblePlans = (): Plan[] =>');
+    expect(controller).toContain('button.dataset.currentPlan = "true"');
+    expect(controller).toContain('button.setAttribute("aria-disabled", "true")');
+    expect(controller).toContain('target?.dataset.currentPlan === "true"');
+  });
+
   it("provides a guarded merchant-country recovery form when the billing market is unknown", () => {
     const page = readFileSync("src/pages/app/billing.astro", "utf8");
     const controller = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
@@ -302,6 +312,9 @@ describe("subscription state presentation", () => {
     expect(controller).toContain('effectiveAt === "immediately" ? text("effectiveNow")');
     expect(controller).toContain("pollBillingReturn");
     expect(controller).toContain('const checkoutSessionId = urlState.get("checkout")');
+    expect(controller).toContain('const targetPlanCode = new URL(window.location.href).searchParams.get("target")');
+    expect(controller).toContain('const target = root.querySelector<HTMLButtonElement>(`[data-plan-choice="${targetPlanCode}"]`)');
+    expect(controller).toContain('target?.dataset.currentPlan === "true"');
     expect(controller).toContain('/billing/checkouts/${encodeURIComponent(checkoutSessionId)}');
     expect(controller).toContain("void pollBillingReturn(checkoutSessionId)");
     expect(controller).not.toContain('if (hasBillingReturn) setUrlState("billing_return", null)');

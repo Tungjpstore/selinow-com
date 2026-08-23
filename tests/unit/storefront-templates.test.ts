@@ -253,6 +253,34 @@ describe("seller template selection contract", () => {
     `).get()).toEqual({ templateId: "pulse" });
   });
 
+  it("does not trust the Pro label when the catalog entitlement flag is missing", async () => {
+    const database = createDatabase();
+    seedTenant(database.database);
+    moveTenantToPlan(database.database, "plan_pro_v1");
+    database.database.prepare(`
+      UPDATE plans
+      SET feature_flags_json = json_remove(feature_flags_json, '$.premiumStorefrontTemplates')
+      WHERE id = 'plan_pro_v1'
+    `).run();
+
+    const env = appEnv(database);
+    await expect(updateSellerStorefrontSettings({
+      data: { templateId: "pulse" },
+      env,
+      expectedVersion: 1,
+      shopPublicId: "public-a",
+      userId: "user-a",
+    })).rejects.toMatchObject({
+      code: "authorization_denied",
+      issues: ["storefront_template_premium_required"],
+      status: 403,
+    });
+
+    const settings = await getSellerStorefrontSettings({ env, shopPublicId: "public-a", userId: "user-a" });
+    expect(settings.premiumTemplatesEnabled).toBe(false);
+    expect(settings.templates.map((template) => template.id)).toEqual(["swift", "pulse", "desk"]);
+  });
+
   it("keeps Starter and other tenants locked while Pro access remains tenant-scoped", async () => {
     const database = createDatabase();
     seedTenant(database.database);
@@ -298,6 +326,27 @@ describe("seller template selection contract", () => {
       WHERE id = 'sub-a'
     `).run();
     await expect(request()).rejects.toMatchObject({ code: "subscription_payment_required", status: 402 });
+  });
+
+  it("hides premium templates on read when a Pro paid period is expired", async () => {
+    const database = createDatabase();
+    seedTenant(database.database);
+    moveTenantToPlan(database.database, "plan_pro_v1", "2026-08-15T00:00:00.000Z");
+    database.database.prepare(`
+      UPDATE shop_settings
+      SET storefront_json = ?, version = version + 1
+      WHERE shop_id = 'shop-a'
+    `).run(JSON.stringify({ templateId: "pulse" }));
+
+    const settings = await getSellerStorefrontSettings({
+      env: appEnv(database),
+      shopPublicId: "public-a",
+      userId: "user-a",
+    });
+
+    expect(settings.premiumTemplatesEnabled).toBe(false);
+    expect(settings.template.id).toBe("swift");
+    expect(settings.templates.map((template) => template.id)).toEqual(["swift", "pulse", "desk"]);
   });
 
   it("persists a valid template selection and returns the vertical-scoped gallery", async () => {

@@ -57,6 +57,45 @@ Last updated: 2026-08-24
 - Added the decision-complete implementation, provider UAT, rollout, rollback, monitoring, and acceptance plan at `docs/BILLING_COMMERCIAL_COMPLETION_PLAN_2026-08-23.md`. No production Dodo object, secret, webhook, D1 row, deployment, checkout, or live charge was mutated by this work.
 - Verification: billing-focused contract set 173/173 passed; `npm run check` passed with 0 errors and 4 existing hints; `npm run lint`, `npm run build`, and `npm run deploy:dry-run` passed. Full `npm run test` reached 356/357 files and 2,935/2,939 tests; the only four failures are in the parallel auth stream's `account-two-factor-service.test.ts` OTP fixtures, not billing.
 - Production remains fail-closed pending owner-approved `DODO_STARTER_VN_PRODUCT_ID`, `DODO_PRO_VN_PRODUCT_ID`, `DODO_STARTER_GLOBAL_PRODUCT_ID`, and `DODO_PRO_GLOBAL_PRODUCT_ID`, guarded catalog reconciliation, genuine staging UAT, and one controlled live smoke. These identifiers must come from protected operator channels and must never be invented or committed.
+### Pro entitlement and checkout follow-up (2026-08-23)
+
+- Fixed the staging Pro catalog gap with forward-only migration `0114_pro_storefront_template_entitlement.sql`: the public assignable Pro plan now carries a strict JSON boolean `premiumStorefrontTemplates=true`; Starter and legacy plans are explicitly rejected by the release invariant.
+- Fixed the Pro CTA handoff: `/onboarding?plan=pro` is validated server-side, preserved only for fresh shop creation, and reaches the authoritative `planCode` payload. Existing shops never get silently reprovisioned.
+- Premium template radios now fail closed in SSR and client re-render, including locked persisted selections; expired, suspended, pending-payment, or missing-period Pro subscriptions no longer appear entitled in seller settings.
+- Reworked seller analytics to use paid-period admission, timezone-local calendar boundaries (including DST), dense zero-filled points, tenant-leading keyset pagination, and a bounded overflow failure instead of truncating revenue. Chart tooltips now use the shop locale/currency formatter.
+- Staging read-only diagnosis confirms the P0: the active Pro shop is on Worker candidate `e8c1a9a`, the staging migration ledger stops at `0113`, and its Pro row lacks `premiumStorefrontTemplates`; the browser consequently disables Pulse/Desk. Migration `0114` and the reviewed Worker must ship together.
+- Same-plan pricing targets now focus an explicit current-plan card instead of opening a downgrade-only dialog; canceled/recovery shops remain discoverable for billing handoff.
+- Local verification for this follow-up: focused entitlement/storefront/onboarding/billing/metrics/release suites pass (79 tests); `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm test` (360 files / 2,997 tests), `npm run build`, and both local/staging deploy dry-runs pass. A parallel duplicate build initially raced on `dist`; the required sequential staging dry-run passed. Staging deployment of this follow-up is not claimed until the exact clean candidate is committed and the guarded backup/migration/deployment evidence sequence is repeated.
+- Staging admission remains blocked without a clean committed candidate and the scoped Cloudflare audit/D1/Worker tokens. Existing private manifests stop at `0113` and are not valid evidence for this candidate; no staging mutation has been performed in this follow-up.
+
+- Closed the production Dodo API-key rotation gap: guarded webhook bootstrap now binds the provider-validated live API key and new webhook signing key into the same exact route-neutral candidate through `wrangler versions upload --secrets-file`. Production cannot fall back to raw `wrangler secret put`; private evidence records only both names plus a domain-separated API-key fingerprint, which signed-health rechecks.
+- Built a billing-only candidate from production base `8b132b193c52`; parallel auth migrations and source changes are intentionally excluded.
+- Unified landing, pricing, onboarding, seller plan listing, preview, and checkout behind one sellable Dodo catalog contract.
+- Added response-loss-safe checkout idempotency, exact return polling, signed-webhook state transitions, scheduled reconciliation, and forward-only migration `0113_dodo_checkout_reconciliation.sql`.
+- Added a guarded remote catalog inspector/reconciler that clears `dodo_catalog_reconciliation_required` only when all four environment-specific offers match exactly.
+- Catalog inspect and dry-run no longer require protected product IDs. Published
+  rows inspected without IDs are explicitly labeled unverified rather than being
+  mistaken for an exact catalog match.
+- Before any catalog D1 mutation, reconciliation now GETs all four products from
+  the fixed environment-specific Dodo API origin and verifies exact product ID,
+  nested recurring amount/currency/monthly cadence, tax inclusion, zero provider
+  trial/discount, SaaS tax category, and null pricing mode. Provider/API/schema
+  failures stop before writes and do not expose the API key or response body.
+- Provider-schema limitation: Dodo documents `pricing_mode`, `tax_inclusive`,
+  and `trial_period_days` as omittable/nullable. The release guard intentionally
+  requires explicit `null`/`true`/`0` and therefore fails closed if Dodo returns
+  only defaults; an owner must verify and approve any future relaxation.
+- Verification for catalog hardening: 49/49 focused catalog/webhook tests pass;
+  focused ESLint passes; `npm run check` completes with zero errors/warnings and
+  four unrelated existing TypeScript conversion hints.
+- Dodo provider trials are disabled. Selinow retains the existing seven-day local D1 evaluation trial; checkout requires the full paid catalog amount before activating a subscription.
+- Redesigned `/app/billing` into a low-cognitive-load SaaS billing workspace with overview, plans, usage, payment, and invoices sections.
+- Fixed the P0 Pro entitlement projection gap: an active paid subscription with a missing period/customer projection is repaired only from validated Dodo subscription truth; entitlement guards remain fail-closed when period or customer evidence is absent. Initial payment projection now falls back to Dodo `previous_billing_date`/`next_billing_date`, and completed checkout reconciliation is tenant-, product-, provider-subscription-, and version-guarded.
+- Deterministic pricing/billing UI fixes are in `c25800f`: landing/pricing render one server-selected published market price without a hydration flash, while Usage and Invoices use progressive disclosure and the current-plan summary keeps one primary action.
+- Full source gates at candidate `e8c1a9a`: `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm run test` (358 files / 2,973 tests), `npm run build`, and `npm run deploy:staging:dry-run` passed. A concurrent duplicate build once produced `ENOTEMPTY` in `dist`; the sequential dry-run passed.
+- Staging release `stg_20260823T012637Z_e8c1a9ae6f05` completed backup `bkp_20260823012459_820004f46b46`, restore drill `rdr_20260823012533_371714437860`, migration/preflight/status, post-migration backup `bkp_20260823012801_d5ec7225e111`, restore drill `rdr_20260823012835_79d6875dca37`, `db:complete-release`, and Worker deployment `77272e1e-30bf-4948-a0e9-78629c358be0` at 100%; deployment evidence is bound to the exact commit/tree.
+- Staging live read-only smoke passed: platform health, marketing, catalog, storefront, and safety boundaries. The genuine completed Pro checkout `bchk_6b293b3c-1b00-4bc3-a0de-90526f565cba` now has `state=active`, `current_period_start=2026-08-23T00:14:13.799833Z`, `current_period_end=2026-09-23T00:15:57.457058Z`, `provider_customer_ref=cus_0Nlymi1BEp3So4kD8aewv`, and the original provider subscription reference; the Pro plan feature flags/limits are present and the Dodo customer portal session endpoint returned a provider-hosted test URL.
+- Production remains NO-GO: no live charge was attempted, and fresh production candidate/rollback, owner approvals, production backup/restore continuation, missing operator/provider trust variables, and final live UAT evidence are still required. The required action-time confirmation before any live charge remains outstanding.
 
 ## Release execution — staging shipped through 0112; production awaits the owner ceremony (2026-08-22, later same day)
 
