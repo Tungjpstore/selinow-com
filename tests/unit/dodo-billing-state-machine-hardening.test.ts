@@ -134,8 +134,12 @@ function bodyFor(input: { eventType: string; metadata?: Record<string, string> |
       ...(input.amount === undefined ? {} : { total_amount: input.amount }),
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       ...(input.paymentId === undefined ? {} : { payment_id: input.paymentId }),
-      ...(input.periodEnd === undefined ? {} : { period_end: input.periodEnd }),
-      ...(input.periodStart === undefined ? {} : { period_start: input.periodStart }),
+      ...(input.periodEnd === undefined
+        ? input.eventType === "payment.succeeded" ? { period_end: "2026-09-08T00:00:00.000Z" } : {}
+        : { period_end: input.periodEnd }),
+      ...(input.periodStart === undefined
+        ? input.eventType === "payment.succeeded" ? { period_start: NOW_ISO } : {}
+        : { period_start: input.periodStart }),
       product_id: input.productId ?? "dodo_pri_pro_global_v1",
       ...(input.scheduledPriceId === undefined ? {} : { scheduled_change: { product_id: input.scheduledPriceId } }),
       ...(input.cancelAtNextBillingDate === undefined ? {} : { cancel_at_next_billing_date: input.cancelAtNextBillingDate }),

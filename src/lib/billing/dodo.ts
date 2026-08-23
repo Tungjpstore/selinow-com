@@ -59,6 +59,7 @@ export type DodoSubscription = {
   cancelAtNextBillingDate: boolean | null;
   createdAt: string | null;
   customerId: string | null;
+  previousBillingDate: string | null;
   nextBillingDate: string | null;
   priceId: string | null;
   providerSubscriptionId: string;
@@ -557,6 +558,7 @@ export async function retrieveDodoSubscription(input: {
     cancelAtNextBillingDate: typeof data.cancel_at_next_billing_date === "boolean" ? data.cancel_at_next_billing_date : null,
     createdAt: readDate(data.created_at),
     customerId: readProviderReference(data.customer_id) ?? readProviderReference(customer.customer_id) ?? readProviderReference(customer.id),
+    previousBillingDate: readDate(data.previous_billing_date),
     nextBillingDate: readDate(data.next_billing_date),
     priceId: findPriceId(data),
     providerSubscriptionId,

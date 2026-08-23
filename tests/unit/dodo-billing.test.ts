@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { createBillingCheckout, createBillingRecoveryCheckout, createTenantBillingPortalSession, executeDodoSubscriptionChangeRequest, processDodoWebhook, processDueDodoSubscriptionChanges, reconcileDodoBillingCheckouts, reconcileDodoSubscriptionChanges } from "../../src/lib/billing/service";
 import { cancelDodoSubscription, changeDodoSubscription, createDodoCheckout, getDodoConfig, parseDodoEvent, retrieveDodoSubscription, resumeDodoSubscription, verifyDodoWebhookSignature } from "../../src/lib/billing/dodo";
+import { subscriptionAllows } from "../../src/lib/billing/entitlements";
 import { sha256Json } from "../../src/lib/core/crypto";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
@@ -204,13 +205,20 @@ describe("Dodo billing adapter", () => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       expect(url).toBe("https://test.dodopayments.com/subscriptions/sub_dodo_test");
       expect(init?.method).toBe("GET");
-      return Promise.resolve(new Response(JSON.stringify({ id: "sub_dodo_test", product_id: "dodo_pri_pro_global_v1", status: "active" }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({
+        id: "sub_dodo_test",
+        next_billing_date: "2026-09-03T00:00:00.000Z",
+        previous_billing_date: NOW_ISO,
+        product_id: "dodo_pri_pro_global_v1",
+        status: "active",
+      }), { status: 200 }));
     };
     await expect(retrieveDodoSubscription({ config, fetcher, providerSubscriptionId: "sub_dodo_test" })).resolves.toEqual({
       cancelAtNextBillingDate: null,
       createdAt: null,
       customerId: null,
-      nextBillingDate: null,
+      previousBillingDate: NOW_ISO,
+      nextBillingDate: "2026-09-03T00:00:00.000Z",
       priceId: "dodo_pri_pro_global_v1",
       providerSubscriptionId: "sub_dodo_test",
       scheduledPriceId: null,
@@ -574,6 +582,8 @@ describe("Dodo billing adapter", () => {
         customer: { customer_id: "cus_legacy_starter_vn" },
         metadata: checkoutMetadata,
         payment_id: "pay_legacy_starter_vn",
+        period_end: "2026-09-03T00:00:00.000Z",
+        period_start: NOW_ISO,
         product_id: checkoutMetadata.providerPriceRef,
         subscription_id: "sub_legacy_starter_vn",
         total_amount: 99_000,
@@ -644,6 +654,8 @@ describe("Dodo billing adapter", () => {
         return Promise.resolve(Response.json({
           customer: { customer_id: "cus_payment_refs" },
           id: "sub_payment_refs",
+          next_billing_date: "2026-09-03T00:00:00.000Z",
+          previous_billing_date: NOW_ISO,
           product_id: "dodo_pri_pro_global_v1",
           status: "active",
         }));
@@ -1001,7 +1013,14 @@ describe("Dodo billing adapter", () => {
         }));
       }
       if (url.pathname === "/subscriptions/sub_dodo_test") {
-        return Promise.resolve(Response.json({ id: "sub_dodo_test", product_id: "dodo_pri_pro_global_v1", status: "active" }));
+        return Promise.resolve(Response.json({
+          customer: { customer_id: "cus_reconcile_paid" },
+          id: "sub_dodo_test",
+          next_billing_date: "2026-09-03T00:00:00.000Z",
+          previous_billing_date: NOW_ISO,
+          product_id: "dodo_pri_pro_global_v1",
+          status: "active",
+        }));
       }
       throw new Error(`unexpected_provider_path:${url.pathname}`);
     };
@@ -1011,6 +1030,78 @@ describe("Dodo billing adapter", () => {
     expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM billing_invoices WHERE provider_transaction_ref = 'pay_reconcile_paid'").get()).toEqual({ count: 1 });
     await expect(reconcileDodoBillingCheckouts({ env: fixture.env, fetcher, now: new Date(NOW_ISO), sessionId: checkout.sessionId, shopId: "billing-shop-a" })).resolves.toMatchObject({ completed: 1 });
     expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM billing_invoices WHERE provider_transaction_ref = 'pay_reconcile_paid'").get()).toEqual({ count: 1 });
+    fixture.database.close();
+  });
+
+  it("repairs a completed Pro checkout projection when provider period and customer fields were omitted", async () => {
+    const fixture = billingFixture("active");
+    insertCompletedCheckout(fixture.database, "bchk-repair-projection");
+    fixture.database.prepare(`
+      UPDATE shop_subscriptions
+      SET current_period_start = NULL, current_period_end = NULL, provider_customer_ref = NULL
+      WHERE id = 'billing-sub-a'
+    `).run();
+    const fetcher: typeof fetch = (input) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      expect(url.pathname).toBe("/subscriptions/sub_dodo_test");
+      return Promise.resolve(Response.json({
+        customer: { customer_id: "cus_repair_pro" },
+        id: "sub_dodo_test",
+        next_billing_date: "2026-09-03T00:00:00.000Z",
+        previous_billing_date: "2026-08-03T00:00:00.000Z",
+        product_id: "dodo_pri_pro_global_v1",
+        status: "active",
+      }));
+    };
+    await expect(reconcileDodoBillingCheckouts({ env: fixture.env, fetcher, now: new Date(NOW_ISO) }))
+      .resolves.toMatchObject({ candidates: 1, completed: 1 });
+    const row = fixture.database.prepare(`
+      SELECT current_period_start AS periodStart, current_period_end AS periodEnd,
+        provider_customer_ref AS customerRef
+      FROM shop_subscriptions WHERE id = 'billing-sub-a'
+    `).get() as { customerRef: string; periodEnd: string; periodStart: string };
+    expect(row).toEqual({
+      customerRef: "cus_repair_pro",
+      periodEnd: "2026-09-03T00:00:00.000Z",
+      periodStart: "2026-08-03T00:00:00.000Z",
+    });
+    expect(subscriptionAllows({
+      currentPeriodEnd: row.periodEnd,
+      now: NOW_ISO,
+      subscriptionState: "active",
+    })).toBe(true);
+    fixture.database.close();
+  });
+
+  it("keeps a completed checkout quarantined when provider truth still lacks a portal customer", async () => {
+    const fixture = billingFixture("active");
+    insertCompletedCheckout(fixture.database, "bchk-repair-no-customer");
+    fixture.database.prepare(`
+      UPDATE shop_subscriptions
+      SET current_period_start = NULL, current_period_end = NULL, provider_customer_ref = NULL
+      WHERE id = 'billing-sub-a'
+    `).run();
+    const fetcher: typeof fetch = () => Promise.resolve(Response.json({
+      id: "sub_dodo_test",
+      next_billing_date: "2026-09-03T00:00:00.000Z",
+      previous_billing_date: NOW_ISO,
+      product_id: "dodo_pri_pro_global_v1",
+      status: "active",
+    }));
+    await expect(reconcileDodoBillingCheckouts({ env: fixture.env, fetcher, now: new Date(NOW_ISO) }))
+      .resolves.toMatchObject({ completed: 0, failed: 1 });
+    expect(fixture.database.prepare(`
+      SELECT current_period_end AS periodEnd, provider_customer_ref AS customerRef,
+        reconciliation_attempts AS attempts, reconciliation_failure_code AS failureCode
+      FROM billing_checkout_sessions AS sessions
+      INNER JOIN shop_subscriptions AS subscriptions ON subscriptions.id = sessions.subscription_id
+      WHERE sessions.id = 'bchk-repair-no-customer'
+    `).get()).toEqual({
+      attempts: 1,
+      customerRef: null,
+      failureCode: "billing_webhook_identity_mismatch",
+      periodEnd: null,
+    });
     fixture.database.close();
   });
 
@@ -1163,6 +1254,8 @@ describe("Dodo billing adapter", () => {
         customer: { customer_id: "cus_quarantine" },
         metadata: checkoutMetadata,
         payment_id: "pay_quarantine_late",
+        period_end: "2026-09-04T00:01:00.000Z",
+        period_start: "2026-08-04T00:01:00.000Z",
         product_id: "dodo_pri_pro_global_v1",
         status: "succeeded",
         subscription_id: "sub_dodo_test",
