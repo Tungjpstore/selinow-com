@@ -27,7 +27,7 @@ Generated-license provider credentials reuse the credential keyring, while gener
 
 ## Privacy and operations controls
 
-Buyer privacy mutations are authenticated, CSRF-protected, idempotent and tenant-bound through the resolved shop membership. Export uses an explicit projection rather than a table dump. Anonymization refuses active operational records, removes direct customer profile fields and provider identities, redacts customer notes, and retains only the financial, fulfillment and audit references required by the recorded lifecycle. This internal seller workflow does not publish a platform privacy policy or a public data-subject intake channel.
+Buyer privacy mutations are authenticated, CSRF-protected, idempotent and tenant-bound through the resolved shop membership; they do not impose an additional authentication-age window. Export uses an explicit projection rather than a table dump. Anonymization refuses active operational records, removes direct customer profile fields and provider identities, redacts customer notes, and retains only the financial, fulfillment and audit references required by the recorded lifecycle. This internal seller workflow does not publish a platform privacy policy or a public data-subject intake channel.
 
 The first platform owner is never seeded by a migration. The bootstrap command requires an exact active platform user, explicit execution confirmation, empty `platform_admins` state and an empty one-time receipt table. A durable `first_platform_admin` receipt prevents the ceremony from being reused; later platform-admin management requires a separately reviewed authenticated workflow.
 
