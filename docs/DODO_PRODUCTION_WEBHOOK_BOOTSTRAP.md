@@ -6,8 +6,10 @@ canonical route and rejects an old-runtime `404` before any provider mutation.
 
 The bootstrap path is narrower. It may register only the configured canonical
 live endpoint and create one new, route-neutral Worker version containing the
-`DODO_PAYMENTS_WEBHOOK_KEY` secret. It does not deploy a Worker, change routes,
-enable checkout, change products, or authorize replay.
+provider-validated `DODO_PAYMENTS_API_KEY` together with the new
+`DODO_PAYMENTS_WEBHOOK_KEY`. It does not deploy a Worker, change routes, enable
+checkout, change products, or authorize replay. Normal production registration
+is rejected so the command cannot fall back to `wrangler secret put`.
 
 ## Preconditions
 
@@ -54,8 +56,8 @@ then:
 
 1. rejects a conflicting canonical Dodo endpoint;
 2. creates or reuses the exact endpoint and retrieves its signing key;
-3. performs a credential-free production build, writes the signing key to a
-   mode-`0600` temporary file, and uses route-neutral
+3. performs a credential-free production build, writes the validated API key
+   and signing key to one mode-`0600` temporary file, and uses route-neutral
    `wrangler versions upload --secrets-file` to create a new candidate without
    deploying it; the temporary file is removed in a `finally` block;
 4. proves the new version is a resource-for-resource clone of the reviewed
@@ -145,10 +147,12 @@ The bootstrap artifact always records:
 - `deploymentAuthorized: false`;
 - `signedWebhookHealthProven: false`;
 - `routeMutationPerformed: false`; and
-- `secretNames: ["DODO_PAYMENTS_WEBHOOK_KEY"]`.
+- `secretNames: ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_WEBHOOK_KEY"]`.
 
-It never stores the signing key, provider webhook ID, API key, payload, or
-authorization header.
+It stores only a domain-separated SHA-256 fingerprint of the validated API key;
+it never stores either secret value, provider webhook ID, payload, or
+authorization header. Signed-health verification requires the same API-key
+fingerprint before contacting Dodo.
 
 ## Candidate-bound signed health
 

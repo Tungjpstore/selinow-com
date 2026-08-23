@@ -17,6 +17,8 @@ import {
   buildDodoBootstrapRollbackArtifact,
   buildDodoSignedHealthProbe,
   DODO_BOOTSTRAP_ARTIFACT_FILES,
+  DODO_BOOTSTRAP_SECRET_NAMES,
+  fingerprintDodoBootstrapApiKey,
   readCanonicalPrivateJson,
   readPrivateDodoArtifact,
   releaseDodoBootstrapResumeClaim,
@@ -91,6 +93,7 @@ function bootstrap() {
   });
   return buildDodoBootstrapArtifact({
     admission,
+    apiKeyFingerprintSha256: fingerprintDodoBootstrapApiKey("dodo_live_approved_key_material"),
     candidateWorkerVersion,
     created: true,
     endpointFingerprintSha256: "f".repeat(64),
@@ -125,22 +128,32 @@ describe("Dodo production webhook bootstrap", () => {
 
   it("creates a route-neutral clone containing only the new secret binding", () => {
     const commonBindings = [{ name: "PLATFORM_DB", namespace_id: "db", type: "d1" }];
+    const apiKeyBinding = { name: "DODO_PAYMENTS_API_KEY", type: "secret_text" };
+    expect(() => { assertDodoSecretVersionClone({
+      candidateVersion: {
+        id: candidateWorkerVersion,
+        resources: { bindings: [...commonBindings, apiKeyBinding, { name: "DODO_PAYMENTS_WEBHOOK_KEY", type: "secret_text" }], script: { etag: "same-code" } },
+      },
+      candidateWorkerVersion,
+      sourceVersion: { id: sourceWorkerVersion, resources: { bindings: [...commonBindings, apiKeyBinding], script: { etag: "same-code" } } },
+      sourceWorkerVersion,
+    }); }).not.toThrow();
     expect(() => { assertDodoSecretVersionClone({
       candidateVersion: {
         id: candidateWorkerVersion,
         resources: { bindings: [...commonBindings, { name: "DODO_PAYMENTS_WEBHOOK_KEY", type: "secret_text" }], script: { etag: "same-code" } },
       },
       candidateWorkerVersion,
-      sourceVersion: { id: sourceWorkerVersion, resources: { bindings: commonBindings, script: { etag: "same-code" } } },
+      sourceVersion: { id: sourceWorkerVersion, resources: { bindings: [...commonBindings, apiKeyBinding], script: { etag: "same-code" } } },
       sourceWorkerVersion,
-    }); }).not.toThrow();
+    }); }).toThrow("dodo_webhook_bootstrap_secret_binding_invalid");
     expect(() => { assertDodoSecretVersionClone({
       candidateVersion: {
         id: candidateWorkerVersion,
-        resources: { bindings: [...commonBindings, { name: "DODO_PAYMENTS_WEBHOOK_KEY", type: "secret_text" }], script: { etag: "different-code" } },
+        resources: { bindings: [...commonBindings, apiKeyBinding, { name: "DODO_PAYMENTS_WEBHOOK_KEY", type: "secret_text" }], script: { etag: "different-code" } },
       },
       candidateWorkerVersion,
-      sourceVersion: { id: sourceWorkerVersion, resources: { bindings: commonBindings, script: { etag: "same-code" } } },
+      sourceVersion: { id: sourceWorkerVersion, resources: { bindings: [...commonBindings, apiKeyBinding], script: { etag: "same-code" } } },
       sourceWorkerVersion,
     }); }).toThrow("dodo_webhook_bootstrap_version_clone_mismatch");
   });
@@ -156,6 +169,8 @@ describe("Dodo production webhook bootstrap", () => {
     expect((await stat(path)).mode & 0o077).toBe(0);
     const text = await readFile(path, "utf8");
     expect(text).toContain('"secretNames": [');
+    expect(artifact.worker.secretNames).toEqual(DODO_BOOTSTRAP_SECRET_NAMES);
+    expect(artifact.provider.apiKeyFingerprintSha256).toBe(fingerprintDodoBootstrapApiKey("dodo_live_approved_key_material"));
     expect(text).not.toMatch(/whsec_|Bearer |webhook_secret/iu);
   });
 
@@ -720,6 +735,9 @@ describe("Dodo production webhook bootstrap", () => {
     expect(source).toContain('productionWorkerAdmission(wrangler, "pre_candidate")');
     expect(source).toContain("const worker = await productionWorkerAdmission(wrangler);");
     expect(source).not.toContain('boundBootstrapInput(options, wrangler, "pre_candidate",');
+    expect(source).toContain("[DODO_BOOTSTRAP_API_KEY_SECRET_NAME]: apiKey");
+    expect(source).toContain("[DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME]: webhookSecret");
+    expect(source).toContain("dodo_webhook_production_bootstrap_required");
   });
 
   it("uploads route-neutral production Worker versions under pre-candidate admission", async () => {

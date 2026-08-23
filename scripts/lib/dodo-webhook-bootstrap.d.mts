@@ -1,11 +1,32 @@
 export const DODO_BOOTSTRAP_ARTIFACT_FILES: Readonly<{ bootstrap: string; health: string; reservation: string; resumeClaim: string; rollback: string }>;
 export const DODO_BOOTSTRAP_SECRET_NAME: "DODO_PAYMENTS_WEBHOOK_KEY";
+export const DODO_BOOTSTRAP_API_KEY_SECRET_NAME: "DODO_PAYMENTS_API_KEY";
+export const DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME: "DODO_PAYMENTS_WEBHOOK_KEY";
+export const DODO_BOOTSTRAP_SECRET_NAMES: readonly ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_WEBHOOK_KEY"];
+export function fingerprintDodoBootstrapApiKey(value: string): string;
 export function assertDodoBootstrapCandidateAdmission(input: Record<string, any>): Record<string, any>;
 export function assertDodoSecretVersionClone(input: Record<string, any>): void;
 export function assertDodoWebhookEndpointInventory(payload: unknown, endpointUrl: string): string | null;
 export function inspectDodoWebhookEndpoint(input: { apiBaseUrl: string; apiKey: string; endpointUrl: string; fetcher: typeof fetch }): Promise<string | null>;
 export function readDodoWebhookSigningSecret(input: { apiBaseUrl: string; apiKey: string; endpointUrl: string; fetcher: typeof fetch }): Promise<string>;
-export function buildDodoBootstrapArtifact(input: Record<string, any>): Record<string, any>;
+export interface DodoBootstrapArtifact {
+  provider: {
+    apiKeyFingerprintSha256: string;
+    created: boolean;
+    endpointFingerprintSha256: string;
+    environment: "live_mode";
+    providerWebhookFingerprintSha256: string;
+  };
+  worker: {
+    accountId: string;
+    activeWorkerVersionUnchanged: true;
+    routeMutationPerformed: false;
+    secretNames: readonly ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_WEBHOOK_KEY"];
+    workerName: string;
+  };
+  [key: string]: unknown;
+}
+export function buildDodoBootstrapArtifact(input: Record<string, any>): DodoBootstrapArtifact;
 export function assertDodoBootstrapArtifact(artifact: Record<string, any>): Record<string, any>;
 export function assertDodoBootstrapReleaseBinding(input: Record<string, any>): Record<string, any>;
 export function buildDodoSignedHealthProbe(input: { requestId: string; secret: string; timestamp: number }): { body: string; headers: Record<string, string> };

@@ -15,7 +15,9 @@ const SHA = /^[a-f0-9]{40}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const RELEASE_ID = /^[a-z0-9][a-z0-9._-]{7,80}$/u;
 const WEBHOOK_SECRET = /^(?:whsec_)?[A-Za-z0-9_+/=-]{16,512}$/u;
-const SECRET_NAME = "DODO_PAYMENTS_WEBHOOK_KEY";
+const API_KEY_SECRET_NAME = "DODO_PAYMENTS_API_KEY";
+const WEBHOOK_SECRET_NAME = "DODO_PAYMENTS_WEBHOOK_KEY";
+const SECRET_NAMES = Object.freeze([API_KEY_SECRET_NAME, WEBHOOK_SECRET_NAME]);
 const BOOTSTRAP_FILE = "dodo-webhook-bootstrap.json";
 const HEALTH_FILE = "dodo-webhook-bootstrap-health.json";
 const ROLLBACK_FILE = "dodo-webhook-bootstrap-rollback.json";
@@ -343,7 +345,7 @@ function normalizedVersionResources(version, omitBootstrapSecret) {
   const resources = JSON.parse(JSON.stringify(object(value.resources)));
   if (!Array.isArray(resources.bindings)) throw new Error("dodo_webhook_bootstrap_version_view_invalid");
   resources.bindings = resources.bindings
-    .filter((binding) => !(omitBootstrapSecret && object(binding).type === "secret_text" && object(binding).name === SECRET_NAME))
+    .filter((binding) => !(omitBootstrapSecret && object(binding).type === "secret_text" && object(binding).name === WEBHOOK_SECRET_NAME))
     .map((binding) => object(binding))
     .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
   return resources;
@@ -405,7 +407,8 @@ export function assertDodoSecretVersionClone(input) {
     throw new Error("dodo_webhook_bootstrap_version_identity_invalid");
   }
   const bindings = object(input.candidateVersion).resources?.bindings;
-  if (!Array.isArray(bindings) || bindings.filter((binding) => object(binding).type === "secret_text" && object(binding).name === SECRET_NAME).length !== 1) {
+  if (!Array.isArray(bindings)
+    || SECRET_NAMES.some((name) => bindings.filter((binding) => object(binding).type === "secret_text" && object(binding).name === name).length !== 1)) {
     throw new Error("dodo_webhook_bootstrap_secret_binding_invalid");
   }
   const source = normalizedVersionResources(input.sourceVersion, true);
@@ -462,7 +465,7 @@ export async function readDodoWebhookSigningSecret(input) {
 export function buildDodoBootstrapArtifact(input) {
   const admission = object(input.admission);
   if (!UUID.test(input.candidateWorkerVersion ?? "") || input.candidateWorkerVersion === admission.candidateSourceWorkerVersion
-    || !SHA256.test(input.endpointFingerprintSha256 ?? "") || !SHA256.test(input.providerWebhookFingerprintSha256 ?? "")
+    || !SHA256.test(input.apiKeyFingerprintSha256 ?? "") || !SHA256.test(input.endpointFingerprintSha256 ?? "") || !SHA256.test(input.providerWebhookFingerprintSha256 ?? "")
     || typeof input.observedAt !== "string" || !Number.isFinite(Date.parse(input.observedAt))) {
     throw new Error("dodo_webhook_bootstrap_artifact_input_invalid");
   }
@@ -478,6 +481,7 @@ export function buildDodoBootstrapArtifact(input) {
     mode: "route_neutral_candidate_secret_bootstrap",
     observedAt: input.observedAt,
     provider: {
+      apiKeyFingerprintSha256: input.apiKeyFingerprintSha256,
       created: input.created === true,
       endpointFingerprintSha256: input.endpointFingerprintSha256,
       environment: "live_mode",
@@ -498,7 +502,7 @@ export function buildDodoBootstrapArtifact(input) {
       accountId: admission.accountId,
       activeWorkerVersionUnchanged: true,
       routeMutationPerformed: false,
-      secretNames: [SECRET_NAME],
+      secretNames: [...SECRET_NAMES],
       workerName: admission.workerName,
     },
   };
@@ -507,21 +511,21 @@ export function buildDodoBootstrapArtifact(input) {
 export function assertDodoBootstrapArtifact(artifact) {
   exactKeys(artifact, ["environment", "gates", "mode", "observedAt", "provider", "release", "schemaVersion", "worker"], "dodo_webhook_bootstrap_artifact_invalid");
   exactKeys(artifact.gates, ["canonicalRouteHealth", "checkoutActivationAuthorized", "deploymentAuthorized", "providerMutationReplayAuthorized", "signedWebhookHealthProven"], "dodo_webhook_bootstrap_artifact_invalid");
-  exactKeys(artifact.provider, ["created", "endpointFingerprintSha256", "environment", "providerWebhookFingerprintSha256"], "dodo_webhook_bootstrap_artifact_invalid");
+  exactKeys(artifact.provider, ["apiKeyFingerprintSha256", "created", "endpointFingerprintSha256", "environment", "providerWebhookFingerprintSha256"], "dodo_webhook_bootstrap_artifact_invalid");
   exactKeys(artifact.release, ["candidateSourceWorkerVersion", "candidateWorkerVersion", "commitSha", "manifestRef", "previousWorkerVersion", "releaseId", "rollbackWorkerVersion", "treeSha"], "dodo_webhook_bootstrap_artifact_invalid");
   exactKeys(artifact.worker, ["accountId", "activeWorkerVersionUnchanged", "routeMutationPerformed", "secretNames", "workerName"], "dodo_webhook_bootstrap_artifact_invalid");
   if (artifact.schemaVersion !== 1 || artifact.environment !== "production" || artifact.mode !== "route_neutral_candidate_secret_bootstrap"
     || artifact.gates.canonicalRouteHealth !== "pending" || artifact.gates.checkoutActivationAuthorized !== false
     || artifact.gates.deploymentAuthorized !== false || artifact.gates.providerMutationReplayAuthorized !== false
     || artifact.gates.signedWebhookHealthProven !== false || artifact.provider.environment !== "live_mode"
-    || !SHA256.test(artifact.provider.endpointFingerprintSha256 ?? "") || !SHA256.test(artifact.provider.providerWebhookFingerprintSha256 ?? "")
+    || !SHA256.test(artifact.provider.apiKeyFingerprintSha256 ?? "") || !SHA256.test(artifact.provider.endpointFingerprintSha256 ?? "") || !SHA256.test(artifact.provider.providerWebhookFingerprintSha256 ?? "")
     || !RELEASE_ID.test(artifact.release.releaseId ?? "") || !SHA.test(artifact.release.commitSha ?? "") || !SHA.test(artifact.release.treeSha ?? "")
     || artifact.release.manifestRef !== releaseManifestRef(artifact.release.releaseId)
     || !UUID.test(artifact.release.candidateSourceWorkerVersion ?? "") || !UUID.test(artifact.release.candidateWorkerVersion ?? "")
     || !UUID.test(artifact.release.previousWorkerVersion ?? "") || !UUID.test(artifact.release.rollbackWorkerVersion ?? "")
     || artifact.release.candidateSourceWorkerVersion === artifact.release.candidateWorkerVersion
     || artifact.worker.activeWorkerVersionUnchanged !== true || artifact.worker.routeMutationPerformed !== false
-    || !isDeepStrictEqual(artifact.worker.secretNames, [SECRET_NAME]) || !/^[a-f0-9]{32}$/u.test(artifact.worker.accountId ?? "")
+    || !isDeepStrictEqual(artifact.worker.secretNames, SECRET_NAMES) || !/^[a-f0-9]{32}$/u.test(artifact.worker.accountId ?? "")
     || typeof artifact.worker.workerName !== "string" || !Number.isFinite(Date.parse(artifact.observedAt ?? ""))) {
     throw new Error("dodo_webhook_bootstrap_artifact_invalid");
   }
@@ -620,6 +624,7 @@ export function buildDodoBootstrapHealthArtifact(input) {
     mode: "candidate_bound_signed_webhook_health",
     observedAt: input.observedAt,
     provider: {
+      apiKeyFingerprintSha256: bootstrap.provider.apiKeyFingerprintSha256,
       endpointFingerprintSha256: bootstrap.provider.endpointFingerprintSha256,
       providerWebhookFingerprintSha256: bootstrap.provider.providerWebhookFingerprintSha256,
     },
@@ -630,7 +635,7 @@ export function buildDodoBootstrapHealthArtifact(input) {
       releaseManifestSha256: input.releaseManifestSha256,
     },
     worker: {
-      secretNames: [SECRET_NAME],
+      secretNames: [...SECRET_NAMES],
       workerName: bootstrap.worker.workerName,
     },
   };
@@ -715,7 +720,7 @@ export function buildDodoBootstrapReservation(input) {
     worker: {
       accountId: admission.accountId,
       beforeWorkerVersionIds,
-      secretNames: [SECRET_NAME],
+      secretNames: [...SECRET_NAMES],
       workerName: admission.workerName,
     },
   };
@@ -754,7 +759,7 @@ export function assertDodoBootstrapReservation(reservation) {
     || new Set(worker.beforeWorkerVersionIds).size !== worker.beforeWorkerVersionIds.length
     || worker.beforeWorkerVersionIds.some((version) => !UUID.test(version))
     || !isDeepStrictEqual(worker.beforeWorkerVersionIds, [...worker.beforeWorkerVersionIds].sort())
-    || !isDeepStrictEqual(worker.secretNames, [SECRET_NAME]) || typeof worker.workerName !== "string") {
+    || !isDeepStrictEqual(worker.secretNames, SECRET_NAMES) || typeof worker.workerName !== "string") {
     throw new Error("dodo_webhook_bootstrap_reservation_invalid");
   }
   return reservation;
@@ -1106,5 +1111,13 @@ async function readDodoBootstrapResumeAttemptState(root, claim) {
   return { expiresAt, heartbeatAt, released };
 }
 
+export function fingerprintDodoBootstrapApiKey(value) {
+  if (typeof value !== "string" || value.length < 16 || value.length > 4096) throw new Error("dodo_webhook_api_key_required");
+  return createHash("sha256").update(`dodo-webhook-bootstrap:api-key:v1:${value}`).digest("hex");
+}
+
 export const DODO_BOOTSTRAP_ARTIFACT_FILES = Object.freeze({ bootstrap: BOOTSTRAP_FILE, health: HEALTH_FILE, reservation: RESERVATION_FILE, resumeClaim: RESUME_CLAIM_FILE, rollback: ROLLBACK_FILE });
-export const DODO_BOOTSTRAP_SECRET_NAME = SECRET_NAME;
+export const DODO_BOOTSTRAP_API_KEY_SECRET_NAME = API_KEY_SECRET_NAME;
+export const DODO_BOOTSTRAP_SECRET_NAME = WEBHOOK_SECRET_NAME;
+export const DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME = WEBHOOK_SECRET_NAME;
+export const DODO_BOOTSTRAP_SECRET_NAMES = SECRET_NAMES;

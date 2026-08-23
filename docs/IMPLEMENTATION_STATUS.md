@@ -4,6 +4,7 @@ Last updated: 2026-08-23
 
 ## Commercial billing checkout release candidate (2026-08-23)
 
+- Closed the production Dodo API-key rotation gap: guarded webhook bootstrap now binds the provider-validated live API key and new webhook signing key into the same exact route-neutral candidate through `wrangler versions upload --secrets-file`. Production cannot fall back to raw `wrangler secret put`; private evidence records only both names plus a domain-separated API-key fingerprint, which signed-health rechecks.
 - Built a billing-only candidate from production base `8b132b193c52`; parallel auth migrations and source changes are intentionally excluded.
 - Unified landing, pricing, onboarding, seller plan listing, preview, and checkout behind one sellable Dodo catalog contract.
 - Added response-loss-safe checkout idempotency, exact return polling, signed-webhook state transitions, scheduled reconciliation, and forward-only migration `0113_dodo_checkout_reconciliation.sql`.

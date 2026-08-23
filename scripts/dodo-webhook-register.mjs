@@ -19,7 +19,9 @@ import {
   buildDodoBootstrapRollbackArtifact,
   buildDodoSignedHealthProbe,
   DODO_BOOTSTRAP_ARTIFACT_FILES,
-  DODO_BOOTSTRAP_SECRET_NAME,
+  DODO_BOOTSTRAP_API_KEY_SECRET_NAME,
+  DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME,
+  fingerprintDodoBootstrapApiKey,
   inspectDodoWebhookEndpoint,
   readCanonicalPrivateJson,
   readDodoWebhookSigningSecret,
@@ -140,11 +142,17 @@ function safeError(error) {
     : "dodo_webhook_registration_failed";
 }
 
-async function uploadRouteNeutralWorkerSecretVersion(secret, childEnvironment, message, tag) {
+async function uploadRouteNeutralWorkerSecretVersion(apiKey, webhookSecret, childEnvironment, message, tag) {
+  if (typeof apiKey !== "string" || apiKey.length < 16 || typeof webhookSecret !== "string" || webhookSecret.length < 16) {
+    throw new Error("dodo_webhook_bootstrap_secret_input_invalid");
+  }
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "selinow-dodo-webhook-"));
   const secretFile = join(temporaryDirectory, "worker-secrets.json");
   try {
-    await writeFile(secretFile, `${JSON.stringify({ [DODO_BOOTSTRAP_SECRET_NAME]: secret })}\n`, { flag: "wx", mode: 0o600 });
+    await writeFile(secretFile, `${JSON.stringify({
+      [DODO_BOOTSTRAP_API_KEY_SECRET_NAME]: apiKey,
+      [DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME]: webhookSecret,
+    })}\n`, { flag: "wx", mode: 0o600 });
     await chmod(secretFile, 0o600);
     runWranglerBounded([
       "versions", "upload", "--env", "production", "--strict", "--secrets-file", secretFile,
@@ -162,7 +170,8 @@ async function uploadRouteNeutralWorkerSecretVersion(secret, childEnvironment, m
 }
 
 function putWorkerSecret(environment, secret, childEnvironment) {
-  const result = spawnSync("npx", ["--no-install", "wrangler", "secret", "put", DODO_BOOTSTRAP_SECRET_NAME, "--env", environment], {
+  if (environment === "production") throw new Error("dodo_webhook_production_bootstrap_required");
+  const result = spawnSync("npx", ["--no-install", "wrangler", "secret", "put", DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME, "--env", environment], {
     encoding: "utf8",
     input: `${secret}\n`,
     env: childEnvironment,
@@ -224,6 +233,7 @@ async function endpointContract(wrangler, environment) {
 }
 
 async function executeNormal(options, contract) {
+  if (options.environment === "production") throw new Error("dodo_webhook_production_bootstrap_required");
   const admission = await assertPaymentProviderMutationAdmission({ environment: options.environment, manifestPath: options.manifestPath });
   const apiKey = process.env.DODO_PAYMENTS_API_KEY;
   if (typeof apiKey !== "string" || apiKey.length < 16) throw new Error("dodo_webhook_api_key_required");
@@ -235,7 +245,7 @@ async function executeNormal(options, contract) {
   assertDodoCanonicalRouteProbe(probe, probePayload, requestId);
   const result = await ensureDodoWebhook({ ...contract, apiKey, fetcher: providerFetch });
   putWorkerSecret(options.environment, result.secret, admission.childEnvironment);
-  return { created: result.created, endpointFingerprintSha256: result.endpointFingerprintSha256, environment: options.environment, providerWebhookFingerprintSha256: result.providerWebhookFingerprintSha256, workerSecretName: DODO_BOOTSTRAP_SECRET_NAME };
+  return { created: result.created, endpointFingerprintSha256: result.endpointFingerprintSha256, environment: options.environment, providerWebhookFingerprintSha256: result.providerWebhookFingerprintSha256, workerSecretName: DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME };
 }
 
 async function executeBootstrap(options, contract, wrangler) {
@@ -347,7 +357,7 @@ async function executeBootstrap(options, contract, wrangler) {
       reservationArtifactSha256 = updatedReservation.artifactSha256;
       const tag = `dodo-secret-${admission.releaseId}`.slice(0, 80);
       resumeClaim = await heartbeatResumeClaim(resumeClaim);
-      await uploadRouteNeutralWorkerSecretVersion(registered.secret, childEnvironment, buildProductionWorkerVersionMessage(admission.binding), tag);
+      await uploadRouteNeutralWorkerSecretVersion(apiKey, registered.secret, childEnvironment, buildProductionWorkerVersionMessage(admission.binding), tag);
       await assertResumeClaim(resumeClaim);
       resumeClaim = await heartbeatResumeClaim(resumeClaim);
       current = await productionWorkerAdmission(wrangler, "pre_candidate");
@@ -379,6 +389,7 @@ async function executeBootstrap(options, contract, wrangler) {
     reservationArtifactSha256 = updatedReservation.artifactSha256;
     const artifact = buildDodoBootstrapArtifact({
       admission,
+      apiKeyFingerprintSha256: fingerprintDodoBootstrapApiKey(apiKey),
       candidateWorkerVersion: uploaded.workerVersion,
       created: registered.created,
       endpointFingerprintSha256: registered.endpointFingerprintSha256,
@@ -429,7 +440,7 @@ async function executeBootstrap(options, contract, wrangler) {
       reservationEvidenceRef: reservationWritten.evidenceRef,
       reservationSha256: reservationWritten.artifactSha256,
       routeMutationPerformed: false,
-      workerSecretNames: [DODO_BOOTSTRAP_SECRET_NAME],
+      workerSecretNames: [DODO_BOOTSTRAP_API_KEY_SECRET_NAME, DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME],
     };
   } catch (error) {
     if (resumeClaim !== null) {
@@ -489,6 +500,9 @@ async function executeVerify(options, contract, wrangler) {
   const { bootstrap, bootstrapArtifactSha256, manifestSha256 } = await boundBootstrapInput(options, wrangler, "candidate_active");
   const apiKey = process.env.DODO_PAYMENTS_API_KEY;
   if (typeof apiKey !== "string" || apiKey.length < 16) throw new Error("dodo_webhook_api_key_required");
+  if (fingerprintDodoBootstrapApiKey(apiKey) !== bootstrap.provider.apiKeyFingerprintSha256) {
+    throw new Error("dodo_webhook_bootstrap_api_key_binding_mismatch");
+  }
   const providerFetch = boundedFetch();
   const secret = await readDodoWebhookSigningSecret({ ...contract, apiKey, fetcher: providerFetch });
   const requestId = `dodo-signed-health-${bootstrap.release.releaseId}`.slice(0, 120);
@@ -511,7 +525,7 @@ async function executeVerify(options, contract, wrangler) {
     evidenceRef: written.evidenceRef,
     separateReleaseAcceptanceRequired: true,
     signedWebhookHealthProven: true,
-    workerSecretNames: [DODO_BOOTSTRAP_SECRET_NAME],
+    workerSecretNames: [DODO_BOOTSTRAP_API_KEY_SECRET_NAME, DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME],
   };
 }
 
@@ -551,7 +565,9 @@ try {
       environment: options.environment,
       providerEnvironment: contract.providerEnvironment,
       routeMutationPerformed: false,
-      workerSecretNames: [DODO_BOOTSTRAP_SECRET_NAME],
+      workerSecretNames: options.mode === "normal"
+        ? [DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME]
+        : [DODO_BOOTSTRAP_API_KEY_SECRET_NAME, DODO_BOOTSTRAP_WEBHOOK_SECRET_NAME],
     }, null, 2)}\n`);
   } else {
     const result = options.mode === "normal" ? await executeNormal(options, contract)
