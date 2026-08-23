@@ -115,6 +115,12 @@ export function getDefaultMarketingMarket(plans: readonly MarketingPlan[], local
   return available.includes(preferred) ? preferred : available[0] ?? preferred;
 }
 
+/** Returns the single public offer for a market, failing closed on ambiguity. */
+export function getMarketingPlanPriceForMarket(plan: MarketingPlan, market: BillingMarketCode): MarketingPrice | null {
+  const matches = (plan.prices ?? []).filter((price) => price.marketCode === market && isRenderableMarketingPrice(price));
+  return matches.length === 1 ? matches[0] ?? null : null;
+}
+
 /** Pricing is ready only when both public plans share at least one active market. */
 export function isMarketingPricingReady(plans: readonly MarketingPlan[]): boolean {
   return plans.length === PUBLIC_PLAN_CODES.length

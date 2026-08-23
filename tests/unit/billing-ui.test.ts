@@ -348,6 +348,10 @@ describe("subscription state presentation", () => {
     expect(controller).not.toContain('currentPlanCode === "starter" && plan.code === "pro"');
     expect(controller).toContain('failure.code === "billing_provider_request_rejected"');
     expect(page).toContain("invoicesDescription");
+    expect(page).not.toContain('class="billing-section-nav"');
+    expect(page).toContain('data-billing-disclosure="usage"');
+    expect(page).toContain('data-billing-disclosure="invoices"');
+    expect(page).toContain('class="billing-disclosure-summary"');
     expect(page).toContain("metric_orders_created");
     expect(page).toContain("billing.scheduledPlanName");
     expect(page).toContain("type BillingPrimaryAction =");

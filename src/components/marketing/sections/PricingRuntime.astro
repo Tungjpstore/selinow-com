@@ -13,11 +13,12 @@ interface Props {
 
 import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
 import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
-import { getMarketingPlans, formatMarketingPrice, planFeatureList } from "../../../lib/storefront/marketing";
+import { getDefaultMarketingMarket, getMarketingPlanPriceForMarket, getMarketingPlans, formatMarketingPrice, planFeatureList } from "../../../lib/storefront/marketing";
 
 const { dashboardOrigin, locale: propLocale, plans, pricingState } = Astro.props;
 const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
 const t = createMarketingTranslator(locale);
+const defaultMarket = getDefaultMarketingMarket(plans, locale);
 const loginHrefForPlan = (planCode: string): string => {
   const login = new URL("/login", dashboardOrigin);
   login.searchParams.set("redirect", `/onboarding?plan=${encodeURIComponent(planCode)}`);
@@ -35,7 +36,10 @@ const loginHrefForPlan = (planCode: string): string => {
 
     {pricingState === "ready" ? (
       <div class="ed-plan-grid">
-        {plans.map((plan) => (
+        {plans.map((plan) => {
+          const price = getMarketingPlanPriceForMarket(plan, defaultMarket);
+          const amount = price === null ? null : formatMarketingPrice(price, locale);
+          return (
           <article class:list={["ed-plan-card", plan.recommended === true && "ed-plan-card-featured"]}>
             {plan.recommended === true ? (
               <p class="ed-plan-pill">💎 {t("marketing.home.pricing.recommended")}</p>
@@ -47,15 +51,10 @@ const loginHrefForPlan = (planCode: string): string => {
               <h3>{plan.name}</h3>
             </div>
             <div class="ed-plan-prices">
-              {(plan.prices ?? []).map((price) => {
-                const amount = formatMarketingPrice(price, locale);
-                return amount === null ? null : (
-                  <p data-market={price.marketCode}>
-                    <strong>{amount}</strong>
-                    <span> / {price.interval === "month" ? t("marketing.pricing.price_period.month").replace("per ", "") : price.interval}</span>
-                  </p>
-                );
-              })}
+              {price !== null && amount !== null && <p data-market={price.marketCode}>
+                <strong>{amount}</strong>
+                <span> / {price.interval === "month" ? t("marketing.pricing.price_period.month").replace("per ", "") : price.interval}</span>
+              </p>}
               <p class="ed-plan-trial">✨ {t("marketing.home.pricing.trial_badge")}</p>
             </div>
             <ul>
@@ -68,7 +67,8 @@ const loginHrefForPlan = (planCode: string): string => {
               <span aria-hidden="true">→</span>
             </a>
           </article>
-        ))}
+          );
+        })}
       </div>
     ) : (
       <div class="ed-plan-unavailable">

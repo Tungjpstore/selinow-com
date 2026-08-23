@@ -30,6 +30,8 @@ describe("PromptOS marketing surfaces", () => {
     expect(landing).toContain('mt("marketing.home.flow.payment_detail")');
     expect(landing).toContain('mt("marketing.home.flow.delivery_detail")');
     expect(pricingRuntime).toContain('data-pricing-state={pricingState}');
+    expect(pricingRuntime).toContain("getMarketingPlanPriceForMarket(plan, defaultMarket)");
+    expect(pricingRuntime).not.toContain("(plan.prices ?? []).map");
     expect(pricingRuntime).toContain('t("marketing.pricing.unavailable.title")');
     expect(pricingRuntime).not.toContain('plan.code === "store"');
     expect(header).toContain('class="platform-nav-mobile-login"');
@@ -209,6 +211,7 @@ describe("PromptOS marketing surfaces", () => {
     expect(pricing).toContain("data-market={price.marketCode}");
     expect(pricing).toContain("data-pricing-market-root");
     expect(pricing).toContain("data-pricing-offer");
+    expect(pricing).toContain("hidden={price.marketCode !== defaultMarket}");
     expect(pricingRuntime).toContain("formatMarketingPrice(price, locale)");
     expect(billing).toContain("priceFrom");
   });
