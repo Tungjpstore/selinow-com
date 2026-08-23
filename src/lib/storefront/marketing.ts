@@ -42,6 +42,7 @@ export function getMarketingPreviewPlans(): MarketingPlan[] {
         inventory: snapshot.features.inventory,
         manualFulfillment: snapshot.features.manualFulfillment,
         privateDownloads: snapshot.features.privateDownloads,
+        premiumStorefrontTemplates: snapshot.features.premiumStorefrontTemplates,
         sellerPayments: snapshot.features.sellerPayments,
         storefront: snapshot.features.storefront,
         telegram: snapshot.features.telegram,
@@ -225,6 +226,7 @@ export function planFeatureList(plan: MarketingPlan, locale: unknown = "en"): st
   if (plan.features.customDomain === "addon") features.push(t("marketing.plan.feature.custom_domain_addon"));
   if (plan.features.automation === true) features.push(t("marketing.plan.feature.automation"));
   if (plan.features.privateDownloads === true) features.push(t("marketing.plan.feature.private_downloads"));
+  if (plan.features.premiumStorefrontTemplates === true) features.push(t("marketing.plan.feature.premium_storefront_templates"));
   if (plan.features.apiRead === true) features.push(t("marketing.plan.feature.api_read"));
 
   const products = runtimeLimit(plan.limits.products, t, locale, "marketing.pricing.limit.products");

@@ -682,6 +682,12 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_billing_checkout_sessions_shop_reconciliation: "cbec4665173db5f6502f1412673ac06f22f17d9b9dab86f6b6519a5a78630bda",
     }),
   }),
+  // 0114 is a data-only repair of the published Pro feature catalog.
+  // It introduces no schema objects or columns and is safe to replay.
+  "0114_pro_storefront_template_entitlement.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
 });
 
 
@@ -2542,7 +2548,22 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
       WHERE history.integration_generation <= 0
         OR integration.id IS NULL
         OR history.integration_generation > integration.integration_generation
-      ) AS integrity_0097_telegram_action_history;`;
+      ) AS integrity_0097_telegram_action_history,
+    ((SELECT CASE
+        WHEN COUNT(*) = 1
+          AND MIN(CASE
+            WHEN json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true' THEN 1
+            ELSE 0
+          END) = 1
+        THEN 0 ELSE 1
+      END
+      FROM plans
+      WHERE code = 'pro' AND is_active = 1 AND is_public = 1 AND is_assignable = 1)
+      + (SELECT COUNT(*)
+        FROM plans
+        WHERE code = 'starter'
+          AND json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true'))
+      AS integrity_0114_pro_premium_flag;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {
@@ -2620,6 +2641,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0097_telegram_action_history",
     "integrity_0112_google_identity",
     "integrity_0112_google_oauth_state",
+    "integrity_0114_pro_premium_flag",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

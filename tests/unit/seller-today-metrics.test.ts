@@ -152,6 +152,19 @@ describe("seller metrics read model (EX3.1)", () => {
     expect(metrics.points).toEqual([]);
     expect(metrics.totalMinor).toBe(0);
   });
+
+  it("keeps the advanced 90-day window Pro-only", async () => {
+    const database = createDatabase();
+    seedTenant(database.database);
+    expect(parseMetricsDays("90")).toBe(90);
+    await expect(getSellerMetricsRange({ days: 90, env: appEnv(database), shopPublicId: "public-a", userId: "user-a" }))
+      .rejects.toMatchObject({ code: "plan_feature_unavailable", status: 402 });
+
+    database.database.prepare("UPDATE shop_subscriptions SET plan_id = 'plan_pro_v1', version = version + 1 WHERE id = 'sub-a'").run();
+    const metrics = await getSellerMetricsRange({ days: 90, env: appEnv(database), shopPublicId: "public-a", userId: "user-a" });
+    expect(metrics.points).toEqual([]);
+    expect(metrics.totalMinor).toBe(0);
+  });
 });
 
 describe("seller today snapshot read model (EX3.2)", () => {

@@ -28,6 +28,7 @@ export const PLAN_FEATURES = [
   "sellerPayments",
   "manualFulfillment",
   "privateDownloads",
+  "premiumStorefrontTemplates",
   "automation",
   "dataExport",
   "customDomain",
@@ -56,6 +57,7 @@ export type PlanFeatures = {
   inventory: boolean;
   manualFulfillment: boolean;
   privateDownloads: boolean;
+  premiumStorefrontTemplates: boolean;
   sellerPayments: boolean;
   storefront: boolean;
   telegram: boolean;
@@ -128,6 +130,7 @@ const FEATURE_DEFAULTS: PlanFeatures = {
   inventory: false,
   manualFulfillment: false,
   privateDownloads: false,
+  premiumStorefrontTemplates: false,
   sellerPayments: false,
   storefront: false,
   telegram: false,
@@ -192,6 +195,7 @@ const BOOLEAN_FEATURES = new Set<Exclude<PlanFeatureName, "analytics">>([
   "inventory",
   "manualFulfillment",
   "privateDownloads",
+  "premiumStorefrontTemplates",
   "sellerPayments",
   "storefront",
   "telegram",
@@ -350,6 +354,7 @@ export const STARTER_PLAN: PlanSnapshot = {
     inventory: true,
     manualFulfillment: true,
     privateDownloads: true,
+    premiumStorefrontTemplates: false,
     sellerPayments: true,
     storefront: true,
     telegram: true,
@@ -388,6 +393,7 @@ export const PRO_PLAN: PlanSnapshot = {
     inventory: true,
     manualFulfillment: true,
     privateDownloads: true,
+    premiumStorefrontTemplates: true,
     sellerPayments: true,
     storefront: true,
     telegram: true,
@@ -410,7 +416,7 @@ export const PRO_PLAN: PlanSnapshot = {
     storage_bytes: 10_737_418_240,
   },
   name: "Pro",
-  version: 1,
+  version: 2,
 };
 
 export const PUBLIC_PLAN_CATALOG: Readonly<Record<PublicPlanCode, PlanSnapshot>> = {

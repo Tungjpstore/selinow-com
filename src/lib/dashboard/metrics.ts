@@ -1,4 +1,5 @@
 import { AppError } from "../core/errors";
+import { parsePlanFeatures } from "../billing/plan-catalog";
 import { getShopForMember } from "../tenants/store";
 import type { AppBindings } from "../platform/bindings";
 
@@ -22,9 +23,12 @@ export type SellerMetricsRange = {
 };
 
 
-export function parseMetricsDays(value: string | null): 7 | 30 {
+export type SellerMetricsDays = 7 | 30 | 90;
+
+export function parseMetricsDays(value: string | null): SellerMetricsDays {
   if (value === null || value === "7") return 7;
   if (value === "30") return 30;
+  if (value === "90") return 90;
   throw new AppError("validation_failed", 400, ["metrics_days_invalid"]);
 }
 
@@ -45,7 +49,7 @@ function localMidnightUtc(timeZone: string, reference: Date): Date {
 }
 
 export async function getSellerMetricsRange(input: {
-  days?: number;
+  days?: SellerMetricsDays;
   env: AppBindings;
   shopPublicId: string;
   userId: string;
@@ -55,7 +59,13 @@ export async function getSellerMetricsRange(input: {
   const shopCurrency = member.row.currency;
   const timeZone = member.row.timezone;
 
-  const windowDays = input.days === 30 ? 30 : 7;
+  const windowDays = input.days === 90 ? 90 : input.days === 30 ? 30 : 7;
+  if (windowDays === 90) {
+    const features = parsePlanFeatures(member.row.feature_flags_json);
+    if (!features.ok || features.value.analytics !== "advanced") {
+      throw new AppError("plan_feature_unavailable", 402, ["analytics"]);
+    }
+  }
   const windowStart = new Date(localMidnightUtc(timeZone, new Date()).getTime() - (windowDays - 1) * 86_400_000);
 
   const result = await input.env.PLATFORM_DB.prepare(`

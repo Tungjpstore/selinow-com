@@ -122,6 +122,44 @@ function grantPremiumTemplates(database: DatabaseSync): void {
     .run(JSON.stringify({ [PREMIUM_STOREFRONT_TEMPLATES_FEATURE]: true }));
 }
 
+function moveTenantToPlan(database: DatabaseSync, planId: "plan_pro_v1" | "plan_starter_v1", periodEnd = "2099-01-01T00:00:00.000Z"): void {
+  database.prepare(`
+    UPDATE shop_subscriptions
+    SET plan_id = ?, state = 'active', current_period_start = '2026-08-01T00:00:00.000Z',
+      current_period_end = ?, version = version + 1, updated_at = '2026-08-16T00:00:00.000Z'
+    WHERE id = 'sub-a'
+  `).run(planId, periodEnd);
+}
+
+function seedSecondStarterTenant(database: DatabaseSync): void {
+  const now = "2026-08-16T00:00:00.000Z";
+  database.exec(`
+    INSERT INTO platform_users (
+      id, email_normalized, display_name, status, created_at, updated_at
+    ) VALUES ('user-b', 'b@example.test', 'Owner B', 'active', '${now}', '${now}');
+    INSERT INTO shops (
+      id, public_id, slug, name, status, default_locale, currency, timezone,
+      readiness_version, vertical, created_at, updated_at
+    ) VALUES (
+      'shop-b', 'public-b', 'seller-b', 'Shop B', 'active', 'vi', 'VND',
+      'Asia/Ho_Chi_Minh', 1, 'digital', '${now}', '${now}'
+    );
+    INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
+    VALUES ('shop-b', 'user-b', 'owner', 'active', '${now}', '${now}');
+    INSERT INTO shop_subscriptions (
+      id, shop_id, plan_id, state, current_period_start, current_period_end,
+      created_at, updated_at
+    ) VALUES (
+      'sub-b', 'shop-b', 'plan_starter_v1', 'active',
+      '2026-08-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', '${now}', '${now}'
+    );
+    INSERT INTO shop_settings (
+      shop_id, branding_json, storefront_json, version, updated_at,
+      published_branding_json, published_storefront_json, published_version, published_at
+    ) VALUES ('shop-b', '{}', '{}', 1, '${now}', '{}', '{}', 1, '${now}');
+  `);
+}
+
 describe("storefront template registry", () => {
   it("keeps ids unique with one available non-premium default per vertical", () => {
     const ids = STOREFRONT_TEMPLATES.map((template) => template.id);
@@ -161,6 +199,76 @@ describe("storefront template registry", () => {
 });
 
 describe("seller template selection contract", () => {
+  it("lets an active Pro tenant persist a premium template from the published plan catalog", async () => {
+    const database = createDatabase();
+    seedTenant(database.database);
+    moveTenantToPlan(database.database, "plan_pro_v1");
+    const env = appEnv(database);
+
+    const settings = await updateSellerStorefrontSettings({
+      data: { templateId: "pulse" },
+      env,
+      expectedVersion: 1,
+      shopPublicId: "public-a",
+      userId: "user-a",
+    });
+
+    expect(settings.premiumTemplatesEnabled).toBe(true);
+    expect(settings.template.id).toBe("pulse");
+    expect(database.database.prepare(`
+      SELECT json_extract(storefront_json, '$.templateId') AS templateId
+      FROM shop_settings
+      WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ templateId: "pulse" });
+  });
+
+  it("keeps Starter and other tenants locked while Pro access remains tenant-scoped", async () => {
+    const database = createDatabase();
+    seedTenant(database.database);
+    moveTenantToPlan(database.database, "plan_pro_v1");
+    seedSecondStarterTenant(database.database);
+    const env = appEnv(database);
+
+    await expect(updateSellerStorefrontSettings({
+      data: { templateId: "pulse" },
+      env,
+      expectedVersion: 1,
+      shopPublicId: "public-b",
+      userId: "user-b",
+    })).rejects.toMatchObject({ code: "authorization_denied", issues: ["storefront_template_premium_required"], status: 403 });
+    await expect(updateSellerStorefrontSettings({
+      data: { templateId: "pulse" },
+      env,
+      expectedVersion: 1,
+      shopPublicId: "public-b",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "authorization_denied", status: 403 });
+    expect(database.database.prepare("SELECT storefront_json AS storefrontJson FROM shop_settings WHERE shop_id = 'shop-b'").get())
+      .toEqual({ storefrontJson: "{}" });
+  });
+
+  it("fails closed for Pro when the paid period is missing or expired", async () => {
+    const database = createDatabase();
+    seedTenant(database.database);
+    moveTenantToPlan(database.database, "plan_pro_v1", "2026-08-15T00:00:00.000Z");
+    const env = appEnv(database);
+    const request = () => updateSellerStorefrontSettings({
+      data: { templateId: "pulse" },
+      env,
+      expectedVersion: 1,
+      shopPublicId: "public-a",
+      userId: "user-a",
+    });
+
+    await expect(request()).rejects.toMatchObject({ code: "subscription_payment_required", status: 402 });
+    database.database.prepare(`
+      UPDATE shop_subscriptions
+      SET current_period_end = NULL, version = version + 1
+      WHERE id = 'sub-a'
+    `).run();
+    await expect(request()).rejects.toMatchObject({ code: "subscription_payment_required", status: 402 });
+  });
+
   it("persists a valid template selection and returns the vertical-scoped gallery", async () => {
     const database = createDatabase();
     seedTenant(database.database);

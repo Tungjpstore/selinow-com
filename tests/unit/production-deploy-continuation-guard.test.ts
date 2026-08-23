@@ -339,6 +339,16 @@ describe("production Worker continuation deploy admission", () => {
       runWranglerImplementation: invalidGoogleState,
     })).toThrow("production_database_invariant_data_violation:integrity_0112_google_oauth_state");
 
+    const invalidProPremiumEntitlement = runner((rows, sql) => {
+      if (sql.includes("integrity_0114_pro_premium_flag") && rows[0] !== undefined) {
+        rows[0].integrity_0114_pro_premium_flag = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidProPremiumEntitlement,
+    })).toThrow("production_database_invariant_data_violation:integrity_0114_pro_premium_flag");
+
     const invalidTelegramGeneration = runner((rows, sql) => {
       if (sql.includes("integrity_0095_telegram_update_generation") && rows[0] !== undefined) {
         rows[0].integrity_0095_telegram_update_generation = 1;
