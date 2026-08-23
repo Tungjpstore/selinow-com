@@ -952,10 +952,9 @@ export async function authenticateRequest(request: Request, env: AppBindings): P
   };
 }
 
-export function requireRecentAuth(auth: AuthContext, maximumAgeMinutes = 15): void {
-  // Seller mutations no longer need a 15-minute step-up, but platform-risk
-  // operations keep their explicitly tighter authentication-age policy.
-  if (maximumAgeMinutes >= 15) return;
+export function requireRecentAuth(auth: AuthContext, maximumAgeMinutes?: number): void {
+  // Authentication-age checks are opt-in for explicitly high-risk operations.
+  if (maximumAgeMinutes === undefined) return;
   const authenticatedAt = Date.parse(auth.authenticatedAt);
   if (!Number.isFinite(authenticatedAt) || Date.now() - authenticatedAt > maximumAgeMinutes * 60_000) {
     throw new AppError("recent_auth_required", 403);

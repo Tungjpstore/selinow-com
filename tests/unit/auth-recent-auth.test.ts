@@ -16,7 +16,8 @@ describe("recent authentication policy", () => {
     expect(() => { requireRecentAuth(auth); }).not.toThrow();
   });
 
-  it("keeps tighter platform-risk step-up windows enforced", () => {
+  it("enforces an explicitly requested platform-risk step-up window", () => {
     expect(() => { requireRecentAuth(auth, 5); }).toThrow("recent_auth_required");
+    expect(() => { requireRecentAuth(auth, 60); }).toThrow("recent_auth_required");
   });
 });
