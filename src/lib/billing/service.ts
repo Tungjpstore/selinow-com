@@ -2052,11 +2052,11 @@ async function processDodoBillingPayload(input: {
     let target = targetStateForEvent(event);
     let providerPriceRef = event.priceId;
     let providerSubscription: DodoSubscription | null = null;
-    const needsProviderSubscriptionTruth = target === "active"
+    const needsProviderPriceTruth = target === "active"
       && event.providerSubscriptionId !== null
-      && (providerPriceRef === null && (initialPayment || pendingChange?.action === "change_plan" || subscription.scheduledPriceId !== null)
-        || (initialPayment && event.providerCustomerId === null));
-    if (needsProviderSubscriptionTruth) {
+      && providerPriceRef === null
+      && (initialPayment || pendingChange?.action === "change_plan" || subscription.scheduledPriceId !== null);
+    if (needsProviderPriceTruth) {
       if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
       providerSubscription = await retrieveDodoSubscription({
         config,
@@ -2064,12 +2064,8 @@ async function processDodoBillingPayload(input: {
         ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
       });
       if (providerSubscription.status !== null && providerSubscription.status !== "active") throw new AppError("billing_webhook_price_mismatch", 409);
-      if (providerPriceRef === null) {
-        providerPriceRef = providerSubscription.priceId;
-        if (providerPriceRef === null) throw new AppError("billing_webhook_price_mismatch", 409);
-      } else if (providerSubscription.priceId !== null && providerSubscription.priceId !== providerPriceRef) {
-        throw new AppError("billing_webhook_price_mismatch", 409);
-      }
+      providerPriceRef = providerSubscription.priceId;
+      if (providerPriceRef === null) throw new AppError("billing_webhook_price_mismatch", 409);
     }
     const checkoutPrice = await loadBillingPriceById(input.env, session.priceId);
     const currentPrice = subscription.priceId === null
@@ -2113,6 +2109,16 @@ async function processDodoBillingPayload(input: {
       || session.status === "completed";
     if (requiresProviderSubscriptionIdentity && event.providerSubscriptionId === null) {
       throw new AppError("billing_webhook_subscription_missing", 409);
+    }
+    if (target === "active" && initialPayment && event.providerCustomerId === null && providerSubscription === null) {
+      if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
+      providerSubscription = await retrieveDodoSubscription({
+        config,
+        providerSubscriptionId: event.providerSubscriptionId,
+        ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+      });
+      if (providerSubscription.status !== null && providerSubscription.status !== "active") throw new AppError("billing_webhook_price_mismatch", 409);
+      if (providerSubscription.priceId !== null && providerSubscription.priceId !== verifiedPrice.providerPriceRef) throw new AppError("billing_webhook_price_mismatch", 409);
     }
     // A failed initial mandate/payment cannot receive the paid grace window.
     // Preserve an existing Selinow-managed trial; only a pending paid recovery

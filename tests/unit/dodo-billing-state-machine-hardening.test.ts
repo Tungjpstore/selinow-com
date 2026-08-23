@@ -125,11 +125,12 @@ function addCheckout(database: DatabaseSync, input: { status: "completed" | "exp
   `).run(id, id, providerCheckoutRef, input.status, `checkout-key-${id}`, `request-hash-${id}`, input.status === "completed" ? NOW_ISO : null, NOW_ISO, NOW_ISO);
 }
 
-function bodyFor(input: { eventType: string; metadata?: Record<string, string> | undefined; occurredAt?: string; status?: string; paymentId?: string; subscriptionId?: string; amount?: number; periodStart?: string; periodEnd?: string; checkoutSessionId?: string; productId?: string; scheduledPriceId?: string; cancelAtNextBillingDate?: boolean }): string {
+function bodyFor(input: { eventType: string; metadata?: Record<string, string> | undefined; occurredAt?: string; status?: string; paymentId?: string; subscriptionId?: string; amount?: number; periodStart?: string; periodEnd?: string; checkoutSessionId?: string; productId?: string; scheduledPriceId?: string; cancelAtNextBillingDate?: boolean; customerId?: string | null }): string {
   return JSON.stringify({
     data: {
       ...(input.checkoutSessionId === undefined ? { checkout_session_id: "chk_test_hardening" } : input.checkoutSessionId === "" ? {} : { checkout_session_id: input.checkoutSessionId }),
       currency: "USD",
+      ...(input.customerId === null || !input.eventType.startsWith("payment.") ? {} : { customer_id: input.customerId ?? "cus_test_hardening" }),
       ...(input.amount === undefined ? {} : { total_amount: input.amount }),
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       ...(input.paymentId === undefined ? {} : { payment_id: input.paymentId }),
@@ -249,12 +250,18 @@ describe("Dodo billing state-machine hardening", () => {
     addCheckout(testFixture.database, { status: "open" });
     const body = bodyFor({
       amount: 0,
+      customerId: null,
       eventType: "payment.succeeded",
       metadata: exactMetadata,
       paymentId: "pay_test_zero_amount",
       subscriptionId: "sub_test_zero_amount",
     });
-    await expect(webhook(testFixture, body, "msg_zero_amount")).rejects.toMatchObject({ code: "billing_webhook_amount_mismatch", status: 409 });
+    let providerCalls = 0;
+    await expect(webhook(testFixture, body, "msg_zero_amount", NOW_ISO, () => {
+      providerCalls += 1;
+      return Promise.reject(new Error("provider_must_not_be_called"));
+    })).rejects.toMatchObject({ code: "billing_webhook_amount_mismatch", status: 409 });
+    expect(providerCalls).toBe(0);
     expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: null, state: "pending_payment" });
     expect(testFixture.database.prepare("SELECT status FROM billing_checkout_sessions WHERE id = 'bchk-hardening'").get()).toEqual({ status: "open" });
     expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM billing_invoices").get()).toEqual({ count: 0 });
