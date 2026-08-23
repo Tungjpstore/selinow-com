@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-23
 
+## Authentication re-entry policy follow-up (2026-08-23)
+
+- Disabled the default seller 15-minute recent-authentication age gate. An active, unexpired and non-revoked D1 session can now continue seller workflows such as billing checkout, plan management, API credentials, storefront settings and integrations without being forced through login again every 15 minutes.
+- Preserved the explicit five-minute step-up for the four platform-risk operations that opt into it: payment-appeal decisions, dead-letter replay, deletion legal-hold changes and live key-rotation processing.
+- Session validity, CSRF, role/capability checks, tenant isolation, idempotency, optimistic version checks, typed confirmations and provider verification remain unchanged. This change does not make return URLs or browser payment state authoritative.
+- Regression coverage proves the default 15-minute call no longer rejects an older active session while an explicit five-minute call still fails with `recent_auth_required`. Focused auth and rollback suites (16 tests), TypeScript, lint and `git diff --check` pass on candidate `ab92eac`.
+- Production is unchanged. This candidate still requires fresh commit-bound staging evidence and the guarded production admission ceremony; evidence from earlier candidates must not be reused.
+
 ## Commercial billing checkout release candidate (2026-08-23)
 
 ### Pro entitlement and checkout follow-up (2026-08-23)
