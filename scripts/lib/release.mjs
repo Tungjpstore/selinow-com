@@ -684,8 +684,8 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_billing_checkout_sessions_shop_reconciliation: "cbec4665173db5f6502f1412673ac06f22f17d9b9dab86f6b6519a5a78630bda",
     }),
   }),
-  // These two migrations were already applied to staging under their
-  // original names; preserve their forward-only ledger identity.
+  // These migrations retain their original identities because staging has
+  // already applied them under these exact names.
   "0114_pro_storefront_template_entitlement.sql": Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
@@ -2590,7 +2590,22 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
       WHERE history.integration_generation <= 0
         OR integration.id IS NULL
         OR history.integration_generation > integration.integration_generation
-      ) AS integrity_0097_telegram_action_history;`;
+      ) AS integrity_0097_telegram_action_history,
+    ((SELECT CASE
+        WHEN COUNT(*) = 1
+          AND MIN(CASE
+            WHEN json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true' THEN 1
+            ELSE 0
+          END) = 1
+        THEN 0 ELSE 1
+      END
+      FROM plans
+      WHERE code = 'pro' AND is_active = 1 AND is_public = 1 AND is_assignable = 1)
+      + (SELECT COUNT(*)
+        FROM plans
+        WHERE code = 'starter'
+          AND json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true'))
+      AS integrity_0114_pro_premium_flag;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {

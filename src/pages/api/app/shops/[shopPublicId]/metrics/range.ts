@@ -6,7 +6,7 @@ import { getSellerMetricsRange, parseMetricsDays } from "../../../../../../lib/d
 import { createCaughtErrorResponse } from "../../../../../../lib/http/security";
 import { getBindings } from "../../../../../../lib/platform/bindings";
 
-/** EX3.1 — real revenue series for the cockpit sparkline (7/30 days). */
+/** EX3.1 — real revenue series for the cockpit sparkline (7/30/90 days; 90 is Pro-only). */
 export const GET: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();

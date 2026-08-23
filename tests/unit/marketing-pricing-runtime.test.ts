@@ -69,6 +69,8 @@ describe("marketing pricing runtime truthfulness", () => {
     expect(plans.every((entry) => (entry.prices ?? []).length === 0)).toBe(true);
     expect(isMarketingPricingReady(plans)).toBe(false);
     expect(getMarketingStructuredOffers(plans)).toEqual([]);
+    expect(plans.find((entry) => entry.code === "starter")?.features.premiumStorefrontTemplates).toBe(false);
+    expect(plans.find((entry) => entry.code === "pro")?.features.premiumStorefrontTemplates).toBe(true);
   });
 
   it("rejects an in-memory pending provider reference before structured-data generation", () => {
