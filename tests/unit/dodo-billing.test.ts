@@ -571,6 +571,7 @@ describe("Dodo billing adapter", () => {
       data: {
         checkout_session_id: "cks_legacy_starter_vn",
         currency: "VND",
+        customer: { customer_id: "cus_legacy_starter_vn" },
         metadata: checkoutMetadata,
         payment_id: "pay_legacy_starter_vn",
         product_id: checkoutMetadata.providerPriceRef,
@@ -624,7 +625,6 @@ describe("Dodo billing adapter", () => {
       data: {
         checkout_session_id: checkout.providerTransactionId,
         currency: "USD",
-        customer: { customer_id: "cus_payment_refs" },
         invoice_id: "inv_payment_refs",
         metadata: checkoutMetadata,
         payment_id: "pay_payment_refs",
@@ -638,6 +638,16 @@ describe("Dodo billing adapter", () => {
     const body = JSON.stringify(payload);
     const webhookInput = {
       env: fixture.env,
+      fetcher: (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        expect(url.pathname).toBe("/subscriptions/sub_payment_refs");
+        return Promise.resolve(Response.json({
+          customer: { customer_id: "cus_payment_refs" },
+          id: "sub_payment_refs",
+          product_id: "dodo_pri_pro_global_v1",
+          status: "active",
+        }));
+      },
       now: new Date(NOW_ISO),
       rawBody: body,
       signature: signature(body, "evt_payment_refs", NOW_ISO_SECONDS),
@@ -1150,6 +1160,7 @@ describe("Dodo billing adapter", () => {
       data: {
         checkout_session_id: "cks_quarantine",
         currency: "USD",
+        customer: { customer_id: "cus_quarantine" },
         metadata: checkoutMetadata,
         payment_id: "pay_quarantine_late",
         product_id: "dodo_pri_pro_global_v1",
