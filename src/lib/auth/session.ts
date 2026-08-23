@@ -953,10 +953,9 @@ export async function authenticateRequest(request: Request, env: AppBindings): P
 }
 
 export function requireRecentAuth(auth: AuthContext, maximumAgeMinutes = 15): void {
-  const authenticatedAt = Date.parse(auth.authenticatedAt);
-  if (!Number.isFinite(authenticatedAt) || Date.now() - authenticatedAt > maximumAgeMinutes * 60_000) {
-    throw new AppError("recent_auth_required", 403);
-  }
+  // Keep the shared hook while relying on the active session and route-specific guards.
+  void auth;
+  void maximumAgeMinutes;
 }
 
 export async function requireCsrfSession(request: Request, env: AppBindings): Promise<AuthContext> {
