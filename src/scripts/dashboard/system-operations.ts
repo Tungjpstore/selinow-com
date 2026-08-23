@@ -22,7 +22,7 @@ const ENGLISH_COPY = {
   "error.operations_incident_conflict": "The incident changed in another session. Reload before continuing.",
   "error.operations_state_conflict": "The record changed in another session. Reload to get the latest version.",
   "error.operations_validation_failed": "The deletion reference is invalid. Reload the safe projection.",
-  "error.recent_auth_required": "Your authentication is too old. Sign in again before this sensitive action.",
+  "error.recent_auth_required": "Sign in again before this sensitive action.",
   "error.reference_code": " Code {code}.",
   "error.reference_request": " Code {code} - Request {requestId}.",
   "error.resource_not_found": "The public store reference is no longer valid. Reload the page.",
