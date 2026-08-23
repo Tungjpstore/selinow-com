@@ -295,25 +295,35 @@ function defaultOperations({
   runWranglerImplementation = runWrangler,
   smokeStorefrontUrl,
 } = {}) {
-  const deployEnvironment = () => buildWorkerDeployEnvironment(
-    operatorEnvironment,
-    productionAccountId,
-  );
-  const auditEnvironment = () => buildProductionPromotionAuditEnvironment(
-    operatorEnvironment,
-    productionAccountId,
-    requirePromotionAuditToken(operatorEnvironment),
-  );
+  const credentialEnvironments = () => {
+    const deployToken = operatorEnvironment.CLOUDFLARE_WORKER_DEPLOY_API_TOKEN?.trim() ?? "";
+    const promotionToken = requirePromotionAuditToken(operatorEnvironment);
+    if (deployToken.length === 0 || deployToken === promotionToken) {
+      throw new Error("production_rollback_rehearsal_credentials_not_separated");
+    }
+    return {
+      audit: buildProductionPromotionAuditEnvironment(
+        operatorEnvironment,
+        productionAccountId,
+        promotionToken,
+      ),
+      deploy: buildWorkerDeployEnvironment(operatorEnvironment, productionAccountId),
+    };
+  };
   const deploy = async (version, role) => {
+    const { deploy: deployEnvironment } = credentialEnvironments();
     runWranglerImplementation([
       "versions", "deploy", `${version}@100%`, "--env", "production", "--yes",
       "--message", `rollback rehearsal ${role} ${version}`,
-    ], { cwd: root, env: deployEnvironment() });
+    ], { cwd: root, env: deployEnvironment });
   };
-  const active = async () => activeVersionFromDeployments(parseJsonOutput(runWranglerImplementation(
-    ["deployments", "list", "--env", "production", "--json"],
-    { cwd: root, env: auditEnvironment() },
-  ).stdout));
+  const active = async () => {
+    const { audit: auditEnvironment } = credentialEnvironments();
+    return activeVersionFromDeployments(parseJsonOutput(runWranglerImplementation(
+      ["deployments", "list", "--env", "production", "--json"],
+      { cwd: root, env: auditEnvironment },
+    ).stdout));
+  };
   return {
     deployWorkerVersion: deploy,
     getActiveWorkerVersion: active,

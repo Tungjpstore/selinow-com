@@ -14,6 +14,9 @@ const auth: AuthContext = {
 describe("recent authentication policy", () => {
   it("does not reject an active authenticated session based on its age", () => {
     expect(() => { requireRecentAuth(auth); }).not.toThrow();
-    expect(() => { requireRecentAuth(auth, 5); }).not.toThrow();
+  });
+
+  it("keeps tighter platform-risk step-up windows enforced", () => {
+    expect(() => { requireRecentAuth(auth, 5); }).toThrow("recent_auth_required");
   });
 });

@@ -214,6 +214,23 @@ describe("production rollback rehearsal execution", () => {
     }
   });
 
+  it("rejects a shared token for audit and deployment roles", async () => {
+    const sharedToken = "shared-token";
+    await expect(executeProductionRollbackRehearsal({
+      evidence: evidence(),
+      migrationNames: MIGRATIONS,
+      operatorEnvironment: {
+        CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: sharedToken,
+        CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: sharedToken,
+      },
+      operations: {
+        verifyMaintenanceDrain: vi.fn(async () => ({ observedAt: "2026-08-11T03:59:00.000Z" })),
+      },
+      productionAccountId: "a".repeat(32),
+      assertSourceBindingImplementation: sourceAdmission(),
+    })).rejects.toThrow("production_rollback_rehearsal_credentials_not_separated");
+  });
+
   it("fails before version discovery or deployment when maintenance drain evidence is rejected", async () => {
     const events: string[] = [];
     const operations = successfulOperations(events);
