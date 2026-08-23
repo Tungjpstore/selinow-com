@@ -1,4 +1,5 @@
 import { AppError } from "../core/errors";
+import { evaluateSubscription } from "../billing/entitlements";
 import { parseHomeSections } from "../storefront/sections/registry";
 import type { AppBindings } from "../platform/bindings";
 import { hasFeature } from "../tenants/policy";
@@ -128,12 +129,19 @@ async function readSettings(env: AppBindings, shopId: string, shopName: string, 
 
 export async function getSellerStorefrontSettings(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerStorefrontSettings> {
   const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const paidFeaturesAvailable = evaluateSubscription({
+    action: "mutation",
+    currentPeriodEnd: member.row.current_period_end,
+    graceEndsAt: member.row.grace_ends_at,
+    subscriptionState: member.row.subscription_state,
+    trialEndsAt: member.row.trial_ends_at,
+  }).allowed;
   return readSettings(
     input.env,
     member.row.shop_id,
     member.shop.name,
     member.shop.defaultLocale,
-    hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+    paidFeaturesAvailable && hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
     member.shop.vertical,
   );
 }

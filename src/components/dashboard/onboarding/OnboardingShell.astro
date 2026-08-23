@@ -6,6 +6,7 @@ import OnboardingStepLaunch from "./OnboardingStepLaunch.astro";
 import OnboardingStepProduct from "./OnboardingStepProduct.astro";
 import OnboardingStepStore from "./OnboardingStepStore.astro";
 import type { OnboardingResumeState } from "../../../lib/onboarding/resume";
+import type { PublicPlanCode } from "../../../lib/billing/plan-catalog";
 
 type ShopView = {
   name: string;
@@ -23,6 +24,7 @@ type Props = {
   email: string;
   platformBaseDomain: string;
   premiumTemplatesEntitled?: boolean;
+  requestedPlanCode?: PublicPlanCode | null;
   resume?: OnboardingResumeState | null;
   shops: ShopView[];
 };
@@ -36,6 +38,7 @@ const {
   email,
   platformBaseDomain,
   premiumTemplatesEntitled = false,
+  requestedPlanCode = null,
   resume = null,
   shops,
 } = Astro.props;
@@ -66,6 +69,7 @@ const steps = [
   data-active-shop-public-id={initialShop?.publicId ?? ""}
   data-creation-allowed={creationAllowed ? "true" : "false"}
   data-premium-templates-entitled={premiumTemplatesEntitled ? "true" : "false"}
+  data-requested-plan-code={requestedPlanCode ?? ""}
   data-resume-state={resume === null ? "" : JSON.stringify(resume)}
 >
   <!-- Top navigation bar -->
@@ -101,6 +105,7 @@ const steps = [
         initialTemplateId={initialTemplateId}
         initialVertical={initialVertical}
         platformBaseDomain={platformBaseDomain}
+        premiumTemplatesEntitled={premiumTemplatesEntitled}
         shopsCount={shops.length}
       />
       <OnboardingStepProduct defaultCurrency={defaultCurrency} initialVertical={initialVertical} />

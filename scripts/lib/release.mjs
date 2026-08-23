@@ -688,6 +688,14 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
   }),
+  // Offset-aware seller metrics query the normalized julianday expression.
+  // Keep the index tenant-leading and aligned with the paid-row predicate.
+  "0115_seller_metrics_timestamp_index.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_orders_shop_paid_julianday_id: "c33ebdbb993f08dc65c8530b97070198ae43c0851bdeaf169e85bd7df49e8dec",
+    }),
+  }),
 });
 
 
@@ -2561,7 +2569,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
       WHERE code = 'pro' AND is_active = 1 AND is_public = 1 AND is_assignable = 1)
       + (SELECT COUNT(*)
         FROM plans
-        WHERE code = 'starter'
+        WHERE code != 'pro'
           AND json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true'))
       AS integrity_0114_pro_premium_flag;`;
   const runner = input.runWranglerImplementation ?? runWrangler;

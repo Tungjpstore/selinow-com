@@ -309,6 +309,7 @@ const chartDateFormatter = new Intl.DateTimeFormat(typeof locale === "string" ? 
   timeZone: "UTC",
 });
 const realChartPoints = (metrics?.points ?? []).map((point) => ({
+  formattedValue: formatMoney(point.totalMinor, metrics?.currency ?? shopCurrency, typeof locale === "string" ? locale : "en"),
   label: chartDateFormatter.format(new Date(`${point.date}T00:00:00.000Z`)),
   value: point.totalMinor,
 }));

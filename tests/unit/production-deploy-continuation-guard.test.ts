@@ -234,6 +234,7 @@ describe("production Worker continuation deploy admission", () => {
     expect(emittedSql).toContain("next_reconciliation_at");
     expect(emittedSql).toContain("last_reconciliation_at");
     expect(emittedSql).toContain("reconciliation_failure_code");
+    expect(emittedSql).toContain("WHERE code != 'pro'");
   });
 
   it("pins staging invariant queries to the staging D1 environment", () => {

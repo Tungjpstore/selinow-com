@@ -11,6 +11,7 @@ type Props = {
   initialTemplateId?: string | null;
   initialVertical?: string;
   platformBaseDomain: string;
+  premiumTemplatesEntitled?: boolean;
   shopsCount?: number;
 };
 
@@ -20,6 +21,7 @@ const {
   initialTemplateId = null,
   initialVertical = "digital",
   platformBaseDomain,
+  premiumTemplatesEntitled = false,
   shopsCount = 0,
 } = Astro.props;
 
@@ -56,8 +58,11 @@ const templatesMap = Object.fromEntries(
 
 const initialTemplates = templatesMap[activeVertical];
 const fallbackTemplateId = defaultTemplateForCategory(activeVertical === "digital" ? "software" : activeVertical === "physical" ? "physical" : "service").id;
-const selectedTemplateId = initialTemplateId !== null && initialTemplates.some((template) => template.id === initialTemplateId)
-  ? initialTemplateId
+const persistedTemplate = initialTemplateId === null
+  ? undefined
+  : initialTemplates.find((template) => template.id === initialTemplateId);
+const selectedTemplateId = persistedTemplate !== undefined && (!persistedTemplate.premium || premiumTemplatesEntitled)
+  ? persistedTemplate.id
   : fallbackTemplateId;
 ---
 
@@ -166,9 +171,23 @@ const selectedTemplateId = initialTemplateId !== null && initialTemplates.some((
       </div>
 
       <div class="templates-grid" data-templates-grid data-templates-map={JSON.stringify(templatesMap)}>
-        {initialTemplates.map((tpl) => (
-          <label class={`template-preset-card ${tpl.id === selectedTemplateId ? "is-selected" : ""}`} data-template-id={tpl.id}>
-            <input type="radio" name="storefrontTemplate" value={tpl.id} checked={tpl.id === selectedTemplateId} data-template-radio />
+        {initialTemplates.map((tpl) => {
+          const locked = tpl.premium && !premiumTemplatesEntitled;
+          return (
+          <label
+            aria-disabled={locked ? "true" : undefined}
+            class={`template-preset-card ${tpl.id === selectedTemplateId ? "is-selected" : ""} ${locked ? "is-locked" : ""}`}
+            data-template-id={tpl.id}
+            data-template-locked={locked ? "true" : "false"}
+          >
+            <input
+              type="radio"
+              name="storefrontTemplate"
+              value={tpl.id}
+              checked={tpl.id === selectedTemplateId}
+              disabled={locked}
+              data-template-radio
+            />
             <div class="tpl-swatch" data-scheme={tpl.scheme}>
               <div class="tpl-swatch-bar"></div>
               <div class="tpl-swatch-hero"><i></i><i></i></div>
@@ -184,7 +203,8 @@ const selectedTemplateId = initialTemplateId !== null && initialTemplates.some((
             {tpl.premium ? <span class="tpl-pro-badge">PRO</span> : ""}
             <span class="card-check">✓</span>
           </label>
-        ))}
+          );
+        })}
       </div>
     </div>
 

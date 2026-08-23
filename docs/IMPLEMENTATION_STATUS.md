@@ -4,6 +4,17 @@ Last updated: 2026-08-23
 
 ## Commercial billing checkout release candidate (2026-08-23)
 
+### Pro entitlement and checkout follow-up (2026-08-23)
+
+- Fixed the staging Pro catalog gap with forward-only migration `0114_pro_storefront_template_entitlement.sql`: the public assignable Pro plan now carries a strict JSON boolean `premiumStorefrontTemplates=true`; Starter and legacy plans are explicitly rejected by the release invariant.
+- Fixed the Pro CTA handoff: `/onboarding?plan=pro` is validated server-side, preserved only for fresh shop creation, and reaches the authoritative `planCode` payload. Existing shops never get silently reprovisioned.
+- Premium template radios now fail closed in SSR and client re-render, including locked persisted selections; expired, suspended, pending-payment, or missing-period Pro subscriptions no longer appear entitled in seller settings.
+- Reworked seller analytics to use paid-period admission, timezone-local calendar boundaries (including DST), dense zero-filled points, tenant-leading keyset pagination, and a bounded overflow failure instead of truncating revenue. Chart tooltips now use the shop locale/currency formatter.
+- Staging read-only diagnosis confirms the P0: the active Pro shop is on Worker candidate `e8c1a9a`, the staging migration ledger stops at `0113`, and its Pro row lacks `premiumStorefrontTemplates`; the browser consequently disables Pulse/Desk. Migration `0114` and the reviewed Worker must ship together.
+- Same-plan pricing targets now focus an explicit current-plan card instead of opening a downgrade-only dialog; canceled/recovery shops remain discoverable for billing handoff.
+- Local verification for this follow-up: focused entitlement/storefront/onboarding/billing/metrics/release suites pass (79 tests); `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm test` (360 files / 2,997 tests), `npm run build`, and both local/staging deploy dry-runs pass. A parallel duplicate build initially raced on `dist`; the required sequential staging dry-run passed. Staging deployment of this follow-up is not claimed until the exact clean candidate is committed and the guarded backup/migration/deployment evidence sequence is repeated.
+- Staging admission remains blocked without a clean committed candidate and the scoped Cloudflare audit/D1/Worker tokens. Existing private manifests stop at `0113` and are not valid evidence for this candidate; no staging mutation has been performed in this follow-up.
+
 - Closed the production Dodo API-key rotation gap: guarded webhook bootstrap now binds the provider-validated live API key and new webhook signing key into the same exact route-neutral candidate through `wrangler versions upload --secrets-file`. Production cannot fall back to raw `wrangler secret put`; private evidence records only both names plus a domain-separated API-key fingerprint, which signed-health rechecks.
 - Built a billing-only candidate from production base `8b132b193c52`; parallel auth migrations and source changes are intentionally excluded.
 - Unified landing, pricing, onboarding, seller plan listing, preview, and checkout behind one sellable Dodo catalog contract.

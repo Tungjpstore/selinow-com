@@ -230,6 +230,7 @@ function initQuickstart(): void {
   const defaultCurrency = root.dataset.defaultCurrency || "VND";
   const toastEl = root.querySelector<HTMLElement>("[data-onboarding-toast]");
   const premiumTemplatesEntitled = root.dataset.premiumTemplatesEntitled === "true";
+  const requestedPlanCode = root.dataset.requestedPlanCode === "pro" ? "pro" : "starter";
   const creationAllowed = root.dataset.creationAllowed !== "false";
 
   let activeShopPublicId = root.dataset.activeShopPublicId || "";
@@ -482,6 +483,8 @@ function initQuickstart(): void {
     const card = document.createElement("label");
     card.className = `template-preset-card${selected ? " is-selected" : ""}${locked ? " is-locked" : ""}`;
     card.dataset.templateId = tpl.id;
+    card.dataset.templateLocked = locked ? "true" : "false";
+    if (locked) card.setAttribute("aria-disabled", "true");
 
     const radio = document.createElement("input");
     radio.type = "radio";
@@ -563,12 +566,20 @@ function initQuickstart(): void {
     }
   });
 
-  // Initial premium lock pass for the server-rendered cards (no re-render yet).
+  // Keep the server-rendered state fail-closed if stale markup is ever cached.
   if (!premiumTemplatesEntitled) {
     const initialTemplates = templatesMap[currentVertical] ?? [];
     for (const tpl of initialTemplates) {
       if (!tpl.premium) continue;
-      templatesGrid?.querySelector<HTMLElement>(`[data-template-id="${tpl.id}"]`)?.classList.add("is-locked");
+      const card = templatesGrid?.querySelector<HTMLElement>(`[data-template-id="${tpl.id}"]`);
+      card?.classList.add("is-locked");
+      card?.setAttribute("aria-disabled", "true");
+      if (card !== undefined && card !== null) card.dataset.templateLocked = "true";
+      const radio = card?.querySelector<HTMLInputElement>("input[data-template-radio]");
+      if (radio !== undefined && radio !== null) {
+        radio.disabled = true;
+        radio.checked = false;
+      }
     }
   }
 
@@ -839,7 +850,7 @@ function initQuickstart(): void {
               currency: defaultCurrency,
               defaultLocale: "vi-VN",
               name,
-              planCode: "starter",
+              planCode: requestedPlanCode,
               slug,
               templateId: selectedTemplateValue() ?? undefined,
               vertical: currentVertical,
