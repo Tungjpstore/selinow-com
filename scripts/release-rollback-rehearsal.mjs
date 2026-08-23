@@ -14,7 +14,11 @@ import {
   writeProductionRollbackRehearsalArtifact,
 } from "./lib/release.mjs";
 import { run, runWrangler } from "./lib/cli.mjs";
-import { repositoryRoot } from "./lib/platform.mjs";
+import { buildWorkerDeployEnvironment, repositoryRoot } from "./lib/platform.mjs";
+import {
+  buildProductionPromotionAuditEnvironment,
+  requirePromotionAuditToken,
+} from "./lib/production-promotion.mjs";
 
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const WEBHOOK_PUBLIC_ID_PATTERN = /^(?:ddowh|dodow)_[0-9a-f-]{36}$/u;
@@ -280,24 +284,35 @@ function activeVersionFromDeployments(payload) {
 
 function defaultOperations({
   apiBaseUrl = "https://api.selinow.com/",
-  commandEnvironment = process.env,
   dashboardUrl = "https://app.selinow.com/login",
   evidence,
   maintenanceDrainEvidencePath,
   marketingUrl = "https://selinow.com/solutions",
   now,
+  operatorEnvironment = process.env,
+  productionAccountId,
   repositoryRoot: root = repositoryRoot,
+  runWranglerImplementation = runWrangler,
   smokeStorefrontUrl,
 } = {}) {
+  const deployEnvironment = () => buildWorkerDeployEnvironment(
+    operatorEnvironment,
+    productionAccountId,
+  );
+  const auditEnvironment = () => buildProductionPromotionAuditEnvironment(
+    operatorEnvironment,
+    productionAccountId,
+    requirePromotionAuditToken(operatorEnvironment),
+  );
   const deploy = async (version, role) => {
-    runWrangler([
+    runWranglerImplementation([
       "versions", "deploy", `${version}@100%`, "--env", "production", "--yes",
       "--message", `rollback rehearsal ${role} ${version}`,
-    ], { cwd: root, env: commandEnvironment });
+    ], { cwd: root, env: deployEnvironment() });
   };
-  const active = async () => activeVersionFromDeployments(parseJsonOutput(runWrangler(
+  const active = async () => activeVersionFromDeployments(parseJsonOutput(runWranglerImplementation(
     ["deployments", "list", "--env", "production", "--json"],
-    { cwd: root, env: commandEnvironment },
+    { cwd: root, env: auditEnvironment() },
   ).stdout));
   return {
     deployWorkerVersion: deploy,
@@ -468,14 +483,20 @@ export async function executeProductionRollbackRehearsal(input) {
 }
 
 export async function runProductionRollbackRehearsal(options, dependencies = {}) {
-  const evidence = await readOptionalJson(options.evidencePath);
+  const [evidence, productionSpec] = await Promise.all([
+    readOptionalJson(options.evidencePath),
+    readOptionalJson(resolve(repositoryRoot, "infra/environments/production.json")),
+  ]);
   if (evidence === null) throw new Error("production_evidence_missing");
+  if (productionSpec === null) throw new Error("production_spec_missing");
   const migrationNames = await listMigrationNames();
   const input = {
     evidence,
     maintenanceDrainEvidencePath: options.maintenanceDrainEvidencePath,
     migrationNames,
     now: new Date(),
+    operatorEnvironment: process.env,
+    productionAccountId: productionSpec.accountId,
     repositoryRoot,
     smokeStorefrontUrl: options.smokeStorefrontUrl,
     ...dependencies,

@@ -153,6 +153,67 @@ describe("production rollback rehearsal execution", () => {
     expect(writer).toHaveBeenCalledOnce();
   });
 
+  it("isolates deployment reads and version mutations behind their dedicated credentials", async () => {
+    let active = PREVIOUS;
+    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const runWranglerImplementation = vi.fn((args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      const env = options?.env ?? {};
+      calls.push({ args, env });
+      if (args[0] === "deployments") {
+        return {
+          stderr: "",
+          stdout: JSON.stringify([{
+            created_on: "2026-08-11T04:00:00.000Z",
+            versions: [{ percentage: 100, version_id: active }],
+          }]),
+        };
+      }
+      if (args[0] === "versions" && args[1] === "deploy") {
+        active = String(args[2]).split("@")[0] ?? "";
+        return { stderr: "", stdout: "" };
+      }
+      throw new Error(`unexpected_wrangler_command:${args.join(":")}`);
+    });
+
+    await expect(executeProductionRollbackRehearsal({
+      evidence: evidence(),
+      migrationNames: MIGRATIONS,
+      now: new Date("2026-08-11T04:00:00.000Z"),
+      operatorEnvironment: {
+        CLOUDFLARE_API_TOKEN: "forbidden-general-token",
+        CLOUDFLARE_D1_API_TOKEN: "forbidden-d1-token",
+        CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN: "promotion-audit-token",
+        CLOUDFLARE_WORKER_DEPLOY_API_TOKEN: "worker-deploy-token",
+        PATH: process.env.PATH,
+      },
+      operations: {
+        smokeCanary: vi.fn(async () => ({ status: 200 })),
+        verifyMaintenanceDrain: vi.fn(async () => ({ observedAt: "2026-08-11T03:59:00.000Z" })),
+      },
+      productionAccountId: "a".repeat(32),
+      runWranglerImplementation,
+      assertSourceBindingImplementation: sourceAdmission(),
+      writeAuthorizingArtifact: vi.fn(async ({ artifact }: { artifact: Record<string, any> }) => ({
+        artifact,
+        artifactSha256: "f".repeat(64),
+        evidenceRef: "private/rehearsal.json",
+      })),
+    })).resolves.toMatchObject({ artifactSha256: "f".repeat(64) });
+
+    expect(calls.filter(({ args }) => args[0] === "deployments")).toHaveLength(3);
+    expect(calls.filter(({ args }) => args[0] === "versions")).toHaveLength(2);
+    for (const { args, env } of calls) {
+      expect(env.CLOUDFLARE_ACCOUNT_ID).toBe("a".repeat(32));
+      expect(env.CLOUDFLARE_D1_API_TOKEN).toBeUndefined();
+      expect(env.CLOUDFLARE_WORKER_DEPLOY_API_TOKEN).toBeUndefined();
+      expect(env.CLOUDFLARE_PRODUCTION_PROMOTION_AUDIT_API_TOKEN).toBeUndefined();
+      expect(env.CLOUDFLARE_API_TOKEN).toBe(
+        args[0] === "deployments" ? "promotion-audit-token" : "worker-deploy-token",
+      );
+      expect(env.CLOUDFLARE_API_TOKEN).not.toBe("forbidden-general-token");
+    }
+  });
+
   it("fails before version discovery or deployment when maintenance drain evidence is rejected", async () => {
     const events: string[] = [];
     const operations = successfulOperations(events);
