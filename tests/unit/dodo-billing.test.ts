@@ -600,6 +600,68 @@ describe("Dodo billing adapter", () => {
     fixture.database.close();
   });
 
+  it("persists Dodo customer and invoice references on the initial payment and replay", async () => {
+    const fixture = billingFixture("trialing");
+    fixture.database.prepare("UPDATE shop_subscriptions SET provider_subscription_ref = NULL WHERE id = 'billing-sub-a'").run();
+    let checkoutMetadata: Record<string, string> = {};
+    const checkout = await createBillingCheckout({
+      env: fixture.env,
+      fetcher: (_input, init) => {
+        checkoutMetadata = (JSON.parse(init?.body as string) as { metadata: Record<string, string> }).metadata;
+        return Promise.resolve(Response.json({
+          checkout_url: "https://test.checkout.dodopayments.com/session/cks_refs",
+          session_id: "cks_refs",
+        }));
+      },
+      idempotencyKey: "checkout-provider-refs-1",
+      planCode: "pro",
+      requestId: "request-provider-refs-1",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+      now: new Date(NOW_ISO),
+    });
+    const payload = {
+      data: {
+        checkout_session_id: checkout.providerTransactionId,
+        currency: "USD",
+        customer: { customer_id: "cus_payment_refs" },
+        invoice_id: "inv_payment_refs",
+        metadata: checkoutMetadata,
+        payment_id: "pay_payment_refs",
+        product_id: checkoutMetadata.providerPriceRef,
+        subscription_id: "sub_payment_refs",
+        total_amount: 1500,
+      },
+      timestamp: NOW_ISO,
+      type: "payment.succeeded",
+    };
+    const body = JSON.stringify(payload);
+    const webhookInput = {
+      env: fixture.env,
+      now: new Date(NOW_ISO),
+      rawBody: body,
+      signature: signature(body, "evt_payment_refs", NOW_ISO_SECONDS),
+      webhookId: "evt_payment_refs",
+      webhookTimestamp: String(NOW_ISO_SECONDS),
+      webhookPublicId: WEBHOOK_PUBLIC_ID,
+    } as const;
+    await expect(processDodoWebhook(webhookInput)).resolves.toMatchObject({ processed: true, state: "active" });
+    expect(fixture.database.prepare("SELECT provider_customer_ref AS providerCustomerRef FROM shop_subscriptions WHERE id = 'billing-sub-a'").get()).toEqual({ providerCustomerRef: "cus_payment_refs" });
+    expect(fixture.database.prepare("SELECT provider_customer_ref AS providerCustomerRef FROM billing_accounts WHERE shop_id = 'billing-shop-a' AND provider_code = 'dodo'").get()).toEqual({ providerCustomerRef: "cus_payment_refs" });
+    expect(fixture.database.prepare("SELECT provider_invoice_ref AS providerInvoiceRef, provider_transaction_ref AS providerTransactionRef, status FROM billing_invoices WHERE provider_transaction_ref = 'pay_payment_refs'").get()).toEqual({ providerInvoiceRef: "inv_payment_refs", providerTransactionRef: "pay_payment_refs", status: "paid" });
+    await expect(createTenantBillingPortalSession({
+      env: fixture.env,
+      fetcher: () => Promise.resolve(Response.json({ link: "https://customer.dodopayments.com/session/portal_refs" })),
+      returnUrl: "https://app.selinow.test/app/billing?shop=shop_00000000-0000-4000-8000-0000000000a1",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+    })).resolves.toMatchObject({ portalUrl: "https://customer.dodopayments.com/session/portal_refs" });
+    await expect(processDodoWebhook(webhookInput)).resolves.toMatchObject({ duplicate: true });
+    expect(fixture.database.prepare("SELECT provider_customer_ref AS providerCustomerRef FROM shop_subscriptions WHERE id = 'billing-sub-a'").get()).toEqual({ providerCustomerRef: "cus_payment_refs" });
+    expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM billing_invoices WHERE provider_transaction_ref = 'pay_payment_refs'").get()).toEqual({ count: 1 });
+    fixture.database.close();
+  });
+
   it("selects the newest currently effective price revision", async () => {
     const fixture = billingFixture("trialing");
     fixture.database.prepare("UPDATE plan_prices SET effective_to = '2999-01-01T00:00:00.000Z' WHERE id = 'price_pro_global_v1'").run();

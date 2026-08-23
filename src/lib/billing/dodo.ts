@@ -34,6 +34,8 @@ export type DodoPayment = {
   checkoutSessionId: string | null;
   currency: string | null;
   customData: Record<string, unknown>;
+  customerId: string | null;
+  invoiceId: string | null;
   paymentId: string;
   priceId: string | null;
   status: string | null;
@@ -73,6 +75,8 @@ export type DodoBillingEvent = {
   status: string | null;
   providerSubscriptionId: string | null;
   providerCheckoutId: string | null;
+  providerCustomerId: string | null;
+  providerInvoiceId: string | null;
   providerPaymentId: string | null;
   providerTransactionId: string | null;
   customData: Record<string, unknown>;
@@ -288,6 +292,14 @@ export function parseDodoEvent(payload: unknown, webhookId?: string | null): Dod
   if (eventId === null || eventType === null || occurredAt === null) throw new AppError("billing_webhook_invalid", 400, ["event_identity"]);
   const customData = readMetadata(data.metadata ?? data.custom_data ?? envelope.metadata);
   const providerCheckoutId = readProviderReference(data.checkout_session_id) ?? readProviderReference(data.checkout_id) ?? readProviderReference(data.session_id);
+  const customer = asObject(data.customer);
+  const invoice = asObject(data.invoice);
+  const providerCustomerId = readProviderReference(data.customer_id)
+    ?? readProviderReference(customer.customer_id)
+    ?? readProviderReference(customer.id);
+  const providerInvoiceId = readProviderReference(data.invoice_id)
+    ?? readProviderReference(invoice.invoice_id)
+    ?? readProviderReference(invoice.id);
   const isSubscriptionEvent = eventType.startsWith("subscription.");
   const providerPaymentId = readProviderReference(data.payment_id)
     ?? readProviderReference(data.transaction_id)
@@ -310,6 +322,8 @@ export function parseDodoEvent(payload: unknown, webhookId?: string | null): Dod
     priceId: findPriceId(data),
     periodEnd,
     periodStart,
+    providerCustomerId,
+    providerInvoiceId,
     providerCheckoutId,
     providerPaymentId,
     providerSubscriptionId,
@@ -493,11 +507,19 @@ export async function retrieveDodoPayment(input: {
   const paymentId = readProviderReference(data.payment_id) ?? readProviderReference(data.id) ?? requestedPaymentId;
   if (paymentId !== requestedPaymentId) throw new AppError("billing_provider_invalid", 502, ["payment_identity"]);
   const currency = readString(data.currency)?.toUpperCase() ?? null;
+  const customer = asObject(data.customer);
+  const invoice = asObject(data.invoice);
   return {
     amountMinor: minorAmount(data.total_amount ?? data.amount ?? data.amount_minor ?? data.total, currency),
     checkoutSessionId: readProviderReference(data.checkout_session_id) ?? readProviderReference(data.checkout_id),
     currency,
     customData: readMetadata(data.metadata),
+    customerId: readProviderReference(data.customer_id)
+      ?? readProviderReference(customer.customer_id)
+      ?? readProviderReference(customer.id),
+    invoiceId: readProviderReference(data.invoice_id)
+      ?? readProviderReference(invoice.invoice_id)
+      ?? readProviderReference(invoice.id),
     paymentId,
     priceId: findPriceId(data),
     status: readString(data.status)?.trim().toLowerCase() ?? null,

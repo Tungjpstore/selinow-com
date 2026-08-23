@@ -844,6 +844,8 @@ async function reconcileDodoCheckoutRow(input: {
       data: {
         checkout_session_id: input.row.providerCheckoutRef,
         currency: input.row.currency,
+        customer_id: payment.customerId,
+        invoice_id: payment.invoiceId,
         metadata,
         payment_id: payment.paymentId,
         product_id: input.row.providerPriceRef,
@@ -2168,6 +2170,7 @@ async function processDodoBillingPayload(input: {
     const providerSubscriptionRefForBinding = session.status === "completed" || event.eventType === "payment.succeeded"
       ? event.providerSubscriptionId
       : null;
+    const providerCustomerRefForBinding = event.providerCustomerId ?? providerSubscription?.customerId ?? null;
     const providerRefChanged = providerSubscriptionRefForBinding !== subscription.providerSubscriptionRef;
     const appliesPriceSnapshot = target === "active";
     const priceChanged = appliesPriceSnapshot && (subscription.planId !== verifiedPrice.planId || subscription.priceId !== verifiedPrice.id);
@@ -2213,6 +2216,7 @@ async function processDodoBillingPayload(input: {
             WHEN ? = 1 THEN NULL
             ELSE scheduled_change_request_id
           END,
+          provider_customer_ref = COALESCE(provider_customer_ref, ?),
           provider_subscription_ref = COALESCE(provider_subscription_ref, ?),
           version = version + 1, updated_at = ?
         WHERE id = ? AND version = ?
@@ -2237,7 +2241,7 @@ async function processDodoBillingPayload(input: {
         isApplyingPlanChange || isCancelingScheduledPlanChange ? 1 : 0,
         isScheduledPlanChange ? 1 : 0, isScheduledPlanChange ? pendingChange.id : null,
         isApplyingPlanChange || isCancelingScheduledPlanChange ? 1 : 0,
-        providerSubscriptionRefForBinding, nowIso, subscription.id, subscription.version, event.providerSubscriptionId,
+        providerCustomerRefForBinding, providerSubscriptionRefForBinding, nowIso, subscription.id, subscription.version, event.providerSubscriptionId,
       ));
       // A zero-row identity/version guard must abort the whole D1 batch before
       // this event can insert transition evidence or mark itself processed.
@@ -2314,7 +2318,22 @@ async function processDodoBillingPayload(input: {
           completed_at = ?, failure_code = NULL, next_reconciliation_at = NULL,
           reconciliation_failure_code = NULL, updated_at = ?, version = version + 1
         WHERE id = ?
-        `).bind(event.providerCheckoutId, nowIso, nowIso, session.id));
+      `).bind(event.providerCheckoutId, nowIso, nowIso, session.id));
+    }
+    if (providerCustomerRefForBinding !== null && session.marketCode !== null) {
+      statements.push(input.env.PLATFORM_DB.prepare(`
+        INSERT INTO billing_accounts (
+          id, shop_id, provider_code, market_code, currency,
+          provider_customer_ref, status, created_at, updated_at
+        ) VALUES (?, ?, 'dodo', ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(shop_id, provider_code) DO UPDATE SET
+          provider_customer_ref = COALESCE(billing_accounts.provider_customer_ref, excluded.provider_customer_ref),
+          status = excluded.status, updated_at = excluded.updated_at,
+          version = billing_accounts.version + 1
+      `).bind(
+        createId("bacc"), session.shopId, session.marketCode, session.currency,
+        providerCustomerRefForBinding, target === "canceled" ? "closed" : "active", nowIso, nowIso,
+      ));
     }
     if (invoiceEligible) {
       const invoiceStatus = event.eventType === "payment.succeeded" ? "paid" : "failed";
@@ -2326,8 +2345,9 @@ async function processDodoBillingPayload(input: {
           version, created_at, updated_at
         ) VALUES (?, ?, ?, (
           SELECT id FROM billing_accounts WHERE shop_id = ? AND provider_code = 'dodo' LIMIT 1
-        ), 'dodo', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        ), 'dodo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
         ON CONFLICT(provider_code, provider_transaction_ref) DO UPDATE SET
+          provider_invoice_ref = COALESCE(billing_invoices.provider_invoice_ref, excluded.provider_invoice_ref),
           status = CASE WHEN billing_invoices.status = 'paid' THEN 'paid' ELSE excluded.status END,
           period_start = COALESCE(excluded.period_start, billing_invoices.period_start),
           period_end = COALESCE(excluded.period_end, billing_invoices.period_end),
@@ -2340,7 +2360,7 @@ async function processDodoBillingPayload(input: {
           version = billing_invoices.version + 1
       `).bind(
         createId("binv"), session.shopId, session.subscriptionId, session.shopId,
-        event.providerPaymentId, invoiceStatus, event.amountMinor, invoiceCurrency,
+        event.providerInvoiceId, event.providerPaymentId, invoiceStatus, event.amountMinor, invoiceCurrency,
         event.periodStart, event.periodEnd,
         invoiceStatus === "paid" ? event.occurredAt : null,
         invoiceStatus === "failed" ? "payment_failed" : null,

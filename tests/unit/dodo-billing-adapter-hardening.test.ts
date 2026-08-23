@@ -85,6 +85,22 @@ describe("Dodo billing adapter hardening", () => {
     expect(event.customData.checkoutSessionId).toBe("bchk_local_123");
   });
 
+  it("retains customer and invoice references from a Dodo payment payload", () => {
+    const event = parseDodoEvent({
+      data: {
+        customer: { customer_id: "cus_test_123" },
+        invoice_id: "inv_test_123",
+        payment_id: "pay_test_123",
+        subscription_id: "sub_test_123",
+      },
+      timestamp: "2026-08-08T00:00:00.000Z",
+      type: "payment.succeeded",
+    }, "msg_refs_123");
+
+    expect(event.providerCustomerId).toBe("cus_test_123");
+    expect(event.providerInvoiceId).toBe("inv_test_123");
+  });
+
   it("rejects provider references that cannot be stored durably", async () => {
     const config = getDodoConfig(environment("local"));
     await expect(createDodoCheckout({
