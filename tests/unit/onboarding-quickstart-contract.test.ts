@@ -39,10 +39,17 @@ describe("onboarding quickstart API contracts", () => {
   });
 
   it("preserves an allow-listed pricing plan through new-shop creation", async () => {
-    const script = await readFile("src/scripts/dashboard/onboarding-quickstart.ts", "utf8");
+    const [page, shell, script] = await Promise.all([
+      readFile("src/pages/onboarding.astro", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8"),
+      readFile("src/scripts/dashboard/onboarding-quickstart.ts", "utf8"),
+    ]);
 
-    expect(script).toContain('new URLSearchParams(window.location.search).get("plan")');
-    expect(script).toContain('const requestedPlanCode = requestedPlan === "pro" ? "pro" : "starter";');
+    expect(page).toContain('Astro.url.searchParams.get("plan")');
+    expect(page).toContain("PUBLIC_PLAN_CODES");
+    expect(shell).toContain('data-requested-plan-code={requestedPlanCode ?? ""}');
+    expect(script).toContain('root.dataset.requestedPlanCode === "pro" ? "pro" : "starter"');
+    expect(script).not.toContain('new URLSearchParams(window.location.search).get("plan")');
     expect(script).toContain("planCode: requestedPlanCode");
     expect(script).not.toContain('planCode: "starter"');
   });
