@@ -212,7 +212,7 @@ const icons: Record<string, string> = {
           <div class="app-shop-context" aria-label={t("dashboard.shell.current_shop_aria", { shop: selectedShopName })}>
             <span aria-hidden="true">{selectedShopName.slice(0, 1).toUpperCase()}</span>
             <span><small>{selectedRoleLabel === null ? t("dashboard.shell.current_shop") : t("dashboard.shell.current_shop_role", { role: selectedRoleLabel })}</small><strong>{selectedShopName}</strong></span>
-            {shops.length > 1 && (
+            {(shops.length > 1 || canOpenShopSetup) && (
               <details class="app-shop-selector">
                 <summary aria-label={t("dashboard.shell.switch_shop")} title={t("dashboard.shell.switch_shop")}>⌄</summary>
                 <nav aria-label={t("dashboard.shell.select_shop")}>
@@ -221,6 +221,7 @@ const icons: Record<string, string> = {
                       <strong>{shop.name}</strong><small>{shop.slug}</small>
                     </a>
                   ))}
+                  {canOpenShopSetup && <a href="/onboarding?new=1#shop" class="app-shop-create-link"><strong>{t("dashboard.shell.create_shop")}</strong><small>{t("dashboard.shell.create_shop_hint")}</small></a>}
                 </nav>
               </details>
             )}
@@ -366,6 +367,7 @@ const icons: Record<string, string> = {
           ) : (
             <p>{t("dashboard.shell.mobile.only_shop")}</p>
           )}
+          {canOpenShopSetup && <a class="app-menu-primary" href="/onboarding?new=1#shop">{t("dashboard.shell.create_shop")}</a>}
           {canOpenShopSetup ? <a class="app-menu-primary" href={withSelectedShop("/onboarding#shop")}>{t("dashboard.shell.mobile.setup")}</a> : <p class="app-menu-permission-note">{t("dashboard.shell.mobile.permission")}</p>}
         </section>
 

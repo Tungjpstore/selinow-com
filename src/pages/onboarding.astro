@@ -26,8 +26,9 @@ const [shops, creationAdmission] = await Promise.all([
   listShopsForMember({ env, includeCanceledForBillingRecovery: true, userId: auth.userId }).catch(() => []),
   getShopCreationAdmission({ env, userId: auth.userId }).catch(() => null),
 ]);
+const createNewShop = Astro.url.searchParams.get("new") === "1";
 const requestedShopPublicId = Astro.url.searchParams.get("shop");
-const selectedShop = selectShopForMember(shops, requestedShopPublicId);
+const selectedShop = createNewShop ? undefined : selectShopForMember(shops, requestedShopPublicId);
 const requestedPlanValue = Astro.url.searchParams.get("plan");
 const validRequestedPlanCode = (PUBLIC_PLAN_CODES as readonly string[]).includes(requestedPlanValue ?? "")
   ? requestedPlanValue as PublicPlanCode
@@ -51,6 +52,7 @@ const creationPremiumTemplatesEntitled = requestedPlanCode === null
 const orderedShops = selectedShop === undefined
   ? requestedShopPublicId === null ? shops : []
   : [selectedShop, ...shops.filter((shop) => shop.publicId !== selectedShop.publicId)];
+const onboardingShops = createNewShop ? [] : orderedShops;
 
 // OB-B4: hydrate the wizard from server truth for the selected shop so a
 // refresh or a returning seller resumes at the first unfinished step.
@@ -85,6 +87,6 @@ const creationAllowed = creationAdmission?.allowed !== false;
     premiumTemplatesEntitled={premiumTemplatesEntitled}
     requestedPlanCode={requestedPlanCode}
     resume={resume}
-    shops={orderedShops}
+    shops={onboardingShops}
   />
 </AppLayout>

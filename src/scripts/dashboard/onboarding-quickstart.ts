@@ -85,6 +85,7 @@ type ShopResponse = {
     name?: string;
     publicId?: string;
     slug?: string;
+    subscriptionState?: string;
   };
 };
 
@@ -997,6 +998,10 @@ function initQuickstart(): void {
           activeShopName = shopData.shop?.name ?? name;
           activeShopSlug = shopData.shop?.slug ?? slug;
           clearStableIntent("shop");
+          if (shopData.shop?.subscriptionState === "pending_payment" && activeShopPublicId) {
+            window.location.assign(`/app/billing?shop=${encodeURIComponent(activeShopPublicId)}&manage=plan`);
+            return;
+          }
         } else {
           // Existing shop: persist the profile before changing the wizard step.
           const profilePayload = JSON.stringify({ name, slug });

@@ -46,6 +46,21 @@ describe("onboarding plan and premium-template propagation", () => {
     expect(page).toContain('new URL("/app/billing", Astro.url.origin)');
   });
 
+  it("creates later shops through an explicit UI path and hands payment-pending shops to billing", () => {
+    const page = readFileSync("src/pages/onboarding.astro", "utf8");
+    const appShell = readFileSync("src/layouts/AppLayout.astro", "utf8");
+    const quickstart = readFileSync("src/scripts/dashboard/onboarding-quickstart.ts", "utf8");
+
+    expect(page).toContain('const createNewShop = Astro.url.searchParams.get("new") === "1"');
+    expect(page).toContain("const selectedShop = createNewShop ? undefined : selectShopForMember");
+    expect(page).toContain("const onboardingShops = createNewShop ? [] : orderedShops");
+    expect(page).toContain("shops={onboardingShops}");
+    expect(appShell).toContain('href="/onboarding?new=1#shop"');
+    expect(appShell).toContain("dashboard.shell.create_shop");
+    expect(quickstart).toContain('shopData.shop?.subscriptionState === "pending_payment"');
+    expect(quickstart).toContain('window.location.assign(`/app/billing?shop=${encodeURIComponent(activeShopPublicId)}&manage=plan`)');
+  });
+
   it("locks premium radios in initial HTML and safely falls back from a locked persisted selection", () => {
     const shell = readFileSync("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8");
     const storeStep = readFileSync("src/components/dashboard/onboarding/OnboardingStepStore.astro", "utf8");

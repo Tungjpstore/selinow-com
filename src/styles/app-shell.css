@@ -194,6 +194,7 @@
   }
   .app-shop-selector nav a:hover,
   .app-shop-selector nav a[aria-current="true"] { background: var(--sln-console-raised); }
+  .app-shop-selector nav a.app-shop-create-link { border-top: 1px solid var(--sln-console-line); margin-top: 4px; padding-top: 10px; }
   .app-shop-selector nav small { color: var(--sln-console-ink-3); font-size: 11px; }
   .app-nav { display: grid; gap: 18px; }
   .app-nav section { display: grid; gap: 2px; }
