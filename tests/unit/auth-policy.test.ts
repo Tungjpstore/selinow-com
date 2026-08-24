@@ -58,4 +58,54 @@ describe("seller session and CSRF policy", () => {
       sessionSecret: secret,
     })).rejects.toMatchObject({ code: "csrf_invalid", status: 403 });
   });
+
+  it("accepts a same-origin GET without an Origin header", async () => {
+    const secret = "test-session-secret-with-sufficient-entropy";
+    const token = "csrf-token-with-more-than-twenty-characters";
+    const request = new Request("https://app-staging.selinow.com/api/auth/sessions", {
+      headers: {
+        Cookie: `selinow_staging_session_csrf=${token}`,
+        "X-CSRF-Token": token,
+      },
+      method: "GET",
+    });
+
+    await expect(assertCsrfRequest({
+      csrfCookieName: "selinow_staging_session_csrf",
+      csrfTokenHash: await hmacToken(secret, "csrf", token),
+      dashboardOrigin: "https://app-staging.selinow.com",
+      request,
+      sessionSecret: secret,
+    })).resolves.toBeUndefined();
+  });
+
+  it("still rejects Origin-less mutations and cross-origin reads", async () => {
+    const secret = "test-session-secret-with-sufficient-entropy";
+    const token = "csrf-token-with-more-than-twenty-characters";
+
+    for (const request of [
+      new Request("https://app-staging.selinow.com/api/auth/sessions", {
+        headers: {
+          Cookie: `selinow_staging_session_csrf=${token}`,
+          "X-CSRF-Token": token,
+        },
+        method: "DELETE",
+      }),
+      new Request("https://evil.example/api/auth/sessions", {
+        headers: {
+          Cookie: `selinow_staging_session_csrf=${token}`,
+          "X-CSRF-Token": token,
+        },
+        method: "GET",
+      }),
+    ]) {
+      await expect(assertCsrfRequest({
+        csrfCookieName: "selinow_staging_session_csrf",
+        csrfTokenHash: await hmacToken(secret, "csrf", token),
+        dashboardOrigin: "https://app-staging.selinow.com",
+        request,
+        sessionSecret: secret,
+      })).rejects.toMatchObject({ code: "csrf_invalid", issues: ["origin_mismatch"], status: 403 });
+    }
+  });
 });

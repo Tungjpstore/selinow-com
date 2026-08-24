@@ -13,7 +13,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
     await guardAdminMutationRate({ env, family: "abuse_reports", request });
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const reportPublicId = params.reportPublicId;
     if (reportPublicId === undefined || !/^abr_[A-Za-z0-9_-]{20,64}$/u.test(reportPublicId)) {
       throw new AppError("abuse_report_not_found", 404);

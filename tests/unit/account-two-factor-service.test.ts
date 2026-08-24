@@ -145,9 +145,15 @@ describe("account two-factor service", () => {
           return Promise.resolve({ meta: { changes: 1 } });
         }
         if (query.includes("SET expires_at = ?")) {
-          const [expiresAt, email, purpose] = boundArgs as [string, string, string];
+          const [expiresAt, email, purpose, activeAfter, excludedId] = boundArgs as [string, string, string, string, string];
           for (const row of otpDatabase.values()) {
-            if (row.email_normalized === email && row.purpose === purpose && !row.consumed_at) {
+            if (
+              row.email_normalized === email &&
+              row.purpose === purpose &&
+              row.consumed_at === null &&
+              row.expires_at > activeAfter &&
+              row.id !== excludedId
+            ) {
               row.expires_at = expiresAt;
             }
           }

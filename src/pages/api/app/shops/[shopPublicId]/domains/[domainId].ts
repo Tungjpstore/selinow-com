@@ -15,7 +15,7 @@ export const DELETE: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     rejectUnknownFields(await readJsonObject(request), []);
     await deleteCustomDomain({
       domainId: requireDeleteTargetId(params.domainId),

@@ -123,6 +123,37 @@ function grantPremiumTemplates(database: DatabaseSync): void {
 }
 
 describe("storefront template registry", () => {
+  it("grants premium storefront templates to the authoritative Pro plan", () => {
+    const database = createDatabase();
+    const plan = database.database.prepare(`
+      SELECT json_extract(feature_flags_json, '$.premiumStorefrontTemplates') AS premium,
+        version
+      FROM plans WHERE id = 'plan_pro_v1' AND code = 'pro'
+    `).get();
+
+    expect(plan).toMatchObject({ premium: 1 });
+  });
+
+  it("fails migration 0116 when the canonical active Pro plan is absent", () => {
+    const database = new DatabaseSync(":memory:");
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE plans (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        feature_flags_json TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        is_active INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO plans (id, code, feature_flags_json, version, is_active, updated_at)
+      VALUES ('plan_pro_v1', 'pro', '{}', 1, 0, '2026-08-24T00:00:00.000Z');
+    `);
+
+    expect(() => { database.exec(readFileSync("migrations/0116_pro_premium_storefront_entitlement.sql", "utf8")); })
+      .toThrow(/migration_assert_0116_pro_entitlement|CHECK constraint failed/u);
+  });
+
   it("keeps ids unique with one available non-premium default per vertical", () => {
     const ids = STOREFRONT_TEMPLATES.map((template) => template.id);
     expect(new Set(ids).size).toBe(ids.length);

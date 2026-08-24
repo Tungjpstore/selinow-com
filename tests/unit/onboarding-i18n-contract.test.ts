@@ -76,7 +76,7 @@ describe("onboarding localization contract", () => {
     expect(route).toContain(".bind(...PUBLIC_PLAN_CODES)");
     expect(route).toContain(".bind(...PUBLIC_PLAN_CODES, nowIso, nowIso)");
     expect(route).not.toContain("code IN ('starter', 'pro')");
-    expect(route).toContain("is_public = 1 AND is_assignable = 1");
+    expect(route).toContain("SELLABLE_PUBLIC_PLAN_SQL_PREDICATE");
     expect(client).toContain('requestApi(root, "/api/app/shops", { method: "GET" })');
     expect(client).toContain("formatMoney(offer.amountMinor, offer.currency, activeLocale)");
     expect(client).toContain('new URLSearchParams(window.location.search).get("plan")');

@@ -1,6 +1,62 @@
 # Implementation Status
 
-Last updated: 2026-08-22
+Last updated: 2026-08-24
+
+## Commercial checkout, onboarding and entitlement correction (2026-08-24)
+
+- Dodo reconciliation remains fail-closed: exact checkout metadata is required and a mismatched captured payment leaves the original subscription state unchanged. The incorrect fixture expectation was corrected to preserve `trialing` plus its provider reference.
+- Dodo hosted sessions with no payment status now expire after the documented 24-hour lifetime plus the local five-minute grace and release the one-checkout lock; provider-processing sessions remain open. Direct reconciliation uses a provider-derived timestamp so a failed synthetic event can retry with the same event ID and payload hash.
+- Catalog reconciliation now retrieves and validates all four Dodo products before any D1 read/write: exact ID, amount, currency, monthly recurring cadence, tax-inclusive pricing, provider trial disabled, and adaptive pricing disabled. The completion marker cannot be cleared from syntactically valid but unverified product IDs. Webhook registration now also requires `subscription.unpaused` and `subscription.update_payment_method`.
+- The Dodo catalog CLI now keeps `--inspect` read-only without provider credentials and passes the validated provider base URL/key into `--apply`; the declaration contract exposes the outer transport override for deterministic tests.
+- Checkout creation reconciles at most one expired hosted session for the current shop and subscription before the guarded insert; the worker remains responsible for the global backlog, preventing another tenant's stale sessions from delaying or starving a seller checkout.
+- Onboarding seed retries now derive deterministic product slug/SKU suffixes from the request idempotency key. Inventory child keys stay within the 128-character server contract, custom-product retries no longer depend on `Date.now()`, and an in-memory intent ledger preserves response-loss retries when browser storage is unavailable.
+- Bundled plaintext sample license keys were removed from presets, rendered attributes, and seed responses. License-key presets now route sellers to the real encrypted inventory-entry step and report zero imported keys.
+- Existing-shop slug changes are covered by tenant-isolation and transactional domain regression tests: reserved/unavailable slugs do not mutate, old platform domains are tombstoned, the new hostname becomes active/primary/canonical, and hostname conflicts roll back the complete batch.
+- Forward-only migration `migrations/0116_pro_premium_storefront_entitlement.sql` grants `premiumStorefrontTemplates=true` to the authoritative Pro plan row and aborts if exactly one active canonical Pro row cannot be proven, fixing Pro subscriptions that were active but still blocked from premium storefront templates.
+- Routine seller actions no longer expire at the default 15-minute boundary; security-, credential-, payment-, deletion-, and admin-sensitive routes explicitly retain a five-minute step-up gate. CSRF rotation/recovery is exact-origin, matches the remaining session lifetime, and retries once on either `token_invalid` or `token_mismatch`.
+- Verification: focused final regression set 173/173, release/admin follow-up 51/51, and full repository 362 files / 2,974 tests pass. `npm run check` passes with 0 errors and 4 existing hints; `npm run lint`, `npm run build`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, `npx tsc --noEmit`, and `git diff --check` pass.
+- No staging or production deployment, migration, provider secret mutation, checkout, QR transfer, or live charge was performed. Production remains NO-GO until policy attestation, owner-approved live Dodo IDs, provider-backed staging Dodo/PayOS UAT, fresh release manifest/backup/restore/rollback evidence, and the controlled production ceremony are complete.
+
+## Auth abuse and recovery hardening (2026-08-23)
+
+- Registration now rejects suspended accounts before password/OTP mutation; OTP completion activates and creates the session in one guarded D1 batch, so suspension races cannot issue a session.
+- OTP purpose values are allowlisted at the HTTP boundary. Login-2FA resend now requires the signed challenge token (or the Google HTTP-only challenge cookie), and never trusts a caller-supplied email.
+- OTP consumption checks affected rows, issuance uses an atomic cooldown guard, and public register/reset OTP issuance is bounded by a forward-only `auth_otp_admissions` ledger (`migrations/0114_auth_otp_admission.sql`).
+- Password-reset tokens now use random opaque values stored only as HMAC hashes in the existing `password_reset_tokens` table and are consumed atomically during reset, preventing replay.
+- Password assignment for active passwordless Google/magic-link accounts is staged in `pending_password_hash` (`migrations/0115_auth_pending_password.sql`) and is promoted only after registration OTP verification, closing the email-only password takeover path.
+- Failed-password and OTP-attempt counters use compare-and-set guards; magic-link session creation requires the user activation update to succeed, and outward password-login errors no longer reveal suspended/passwordless account state.
+- Remember-me session TTL now matches the 30-day cookie lifetime.
+- Verification: focused auth/recovery suites pass (81 tests), touched-file ESLint passes, `astro check` reports 0 errors (4 existing hints). Production migration/deployment remains unexecuted; do not point local tooling at production resources.
+
+## Google login auto-provisioning (2026-08-23)
+
+- Fixed the OAuth callback so both `/login` and `/register` Google flows use
+  the same verified-profile provisioning path. A first-time Google sign-in now
+  creates an active `platform_users` row and a hashed `auth_google_identities`
+  row, then issues the normal Selinow session.
+- Existing users with the same verified Gmail are attached atomically instead
+  of being told to pre-link Google. Pending email registrations are activated
+  by the verified Google claim; suspended users remain blocked.
+- Explicit account-security linking remains fenced to the authenticated user
+  and is unchanged. No Google access/refresh token or raw provider subject is
+  persisted.
+- Hardened retries for same-millisecond callbacks, concurrent email claims,
+  suspended-account races, and partial pending-account recovery.
+- Verification: 4 auth/release suites, 66 tests passed; `astro check`, build,
+  lint, and local deploy dry-run passed. Full repository verification remains
+  subject to the existing unrelated billing/dashboard changes.
+
+## Commercial billing checkout hardening and completion plan (2026-08-23)
+
+- Production diagnosis remains unchanged: D1 is migrated through `0112`, all four active Dodo Starter/Pro VN/global monthly offers are intentionally `pending:dodo:*`, and `dodo_catalog_reconciliation_required` remains true. The affected VN Pro shop is suspended with no provider customer/subscription reference or checkout/change-request row, so the observed failure is `provider_not_ready` before Dodo is called.
+- Added one shared sellable catalog contract in `src/lib/billing/catalog.ts`. Landing, `/pricing`, onboarding shop creation, seller plan listing, previews, and checkout now use the same active/public/assignable, effective-date, monthly interval, market/currency, Dodo-provider, and published-reference rules. A newer pending revision never falls back to an older published price.
+- Hardened Dodo checkout creation and replay with an exact dashboard return URL, provider 4xx classification, the original provider idempotency key after response loss, safe hosted-URL validation, and terminal release only when provider truth is explicitly `failed` or `cancelled`. Network errors, malformed responses, missing status, processing states, and identity/amount/currency/price mismatches cannot release the active checkout lock.
+- Added forward-only migration `migrations/0113_dodo_checkout_reconciliation.sql`, a tenant-bound checkout-status API, scheduled provider reconciliation, bounded exponential retry evidence, quarantine at 12 actual retrieval/identity failures, and late signed-success recovery through the same idempotent provider-event transition. Valid `null`/processing provider states stay open without consuming the failure budget; each accepted payment creates at most one invoice.
+- Redesigned `/app/billing` around Overview, Plans, Usage, Payment, and Invoices with one contextual primary action, a two-step select/review flow, authoritative effective timing, responsive dialogs, 44px targets, live-region feedback, reduced-motion handling, and no fabricated card details. The implementation follows the low-cognitive-load management patterns used by mature SaaS billing surfaces while retaining Selinow's design system.
+- Registered migration `0113` table/column/index fingerprints in the production invariant registry. The parallel auth migrations `0114` and `0115` remain preserved; the `0115` column metadata now matches SQLite's literal `DEFAULT NULL` pragma representation without changing the auth migration or auth logic.
+- Added the decision-complete implementation, provider UAT, rollout, rollback, monitoring, and acceptance plan at `docs/BILLING_COMMERCIAL_COMPLETION_PLAN_2026-08-23.md`. No production Dodo object, secret, webhook, D1 row, deployment, checkout, or live charge was mutated by this work.
+- Verification: billing-focused contract set 173/173 passed; `npm run check` passed with 0 errors and 4 existing hints; `npm run lint`, `npm run build`, and `npm run deploy:dry-run` passed. Full `npm run test` reached 356/357 files and 2,935/2,939 tests; the only four failures are in the parallel auth stream's `account-two-factor-service.test.ts` OTP fixtures, not billing.
+- Production remains fail-closed pending owner-approved `DODO_STARTER_VN_PRODUCT_ID`, `DODO_PRO_VN_PRODUCT_ID`, `DODO_STARTER_GLOBAL_PRODUCT_ID`, and `DODO_PRO_GLOBAL_PRODUCT_ID`, guarded catalog reconciliation, genuine staging UAT, and one controlled live smoke. These identifiers must come from protected operator channels and must never be invented or committed.
 
 ## Release execution — staging shipped through 0112; production awaits the owner ceremony (2026-08-22, later same day)
 

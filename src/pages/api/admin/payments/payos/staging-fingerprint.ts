@@ -18,7 +18,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const auth = await requireCsrfSession(request, env);
     await guardAdminMutationRate({ env, family: "payments_payos", request });
     await requirePlatformAdminApiAccess({ env, userId: auth.userId });
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 8 * 1024);
     rejectUnknownFields(body, ["clientId"]);
     if (typeof body.clientId !== "string" || !CLIENT_ID.test(body.clientId.trim())) throw new AppError("validation_failed", 400, ["client_id_invalid"]);

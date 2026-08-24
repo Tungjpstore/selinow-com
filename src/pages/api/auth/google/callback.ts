@@ -85,7 +85,7 @@ export const GET: APIRoute = async ({ request, url }) => {
     const claims = await exchangeAndVerifyGoogleCode({ ...env, code, nonce: consumed.nonce, verifier: consumed.verifier });
     if (consumed.flow === "link") {
       const auth = await authenticateRequest(request, env);
-      requireRecentAuth(auth);
+      requireRecentAuth(auth, 5);
       if (auth.userId !== consumed.initiatedUserId) throw new AppError("authentication_required", 401);
       await resolveGoogleIdentity({ ...env, claims, initiatedUserId: auth.userId });
       const target = new URL(safeRelativeRedirect(consumed.returnTo, "/app/security?tab=sessions"), env.DASHBOARD_ORIGIN);

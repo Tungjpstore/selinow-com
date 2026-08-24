@@ -12,6 +12,8 @@ import { createAndSendOtp, OTP_TTL_MINUTES, verifyOtp } from "./otp";
 import { assertCsrfRequest, validatePasswordStrength } from "./policy";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
+const REMEMBER_ME_TTL_SECONDS = 60 * 60 * 24 * 30;
+const CSRF_COOKIE_MAX_AGE_SECONDS = REMEMBER_ME_TTL_SECONDS;
 const SESSION_LAST_SEEN_WRITE_INTERVAL_MS = 5 * 60_000;
 const MAGIC_LINK_TTL_MINUTES = 15;
 const MAGIC_LINK_INITIATION_TTL_SECONDS = MAGIC_LINK_TTL_MINUTES * 60;
@@ -58,6 +60,7 @@ export type AuthContext = {
   displayName: string;
   email: string;
   sessionId: string;
+  sessionExpiresAt?: string;
   userId: string;
 };
 
@@ -424,11 +427,11 @@ async function issueSessionForUser(input: {
   user: UserAccountRow;
 }): Promise<PasswordLoginResult> {
   const nowIso = input.now.toISOString();
-  const credentials = createSessionCredentials(input.rememberMe ? 30 * 24 * 60 * 60 : SESSION_TTL_SECONDS);
+  const credentials = createSessionCredentials(input.rememberMe ? REMEMBER_ME_TTL_SECONDS : SESSION_TTL_SECONDS);
   const sessionId = createId("ses");
   const sessionTokenHash = await hmacToken(input.env.SESSION_SECRET, "session", credentials.sessionToken);
   const csrfTokenHash = await hmacToken(input.env.SESSION_SECRET, "csrf", credentials.csrfToken);
-  const ttlSeconds = input.rememberMe ? 30 * 24 * 60 * 60 : SESSION_TTL_SECONDS;
+  const ttlSeconds = input.rememberMe ? REMEMBER_ME_TTL_SECONDS : SESSION_TTL_SECONDS;
   const expiresAt = new Date(input.now.getTime() + ttlSeconds * 1000).toISOString();
 
   const result = await input.env.PLATFORM_DB.prepare(`
@@ -1043,11 +1046,15 @@ export async function authenticateRequest(request: Request, env: AppBindings): P
     displayName: session.display_name,
     email: session.email_normalized,
     sessionId: session.session_id,
+    sessionExpiresAt: session.expires_at,
     userId: session.user_id,
   };
 }
 
 export function requireRecentAuth(auth: AuthContext, maximumAgeMinutes = 15): void {
+  // Routine seller workflows keep the active session usable. Security- and
+  // payment-sensitive routes opt into an explicit five-minute step-up window.
+  if (maximumAgeMinutes >= 15) return;
   const authenticatedAt = Date.parse(auth.authenticatedAt);
   if (!Number.isFinite(authenticatedAt) || Date.now() - authenticatedAt > maximumAgeMinutes * 60_000) {
     throw new AppError("recent_auth_required", 403);
@@ -1064,6 +1071,30 @@ export async function requireCsrfSession(request: Request, env: AppBindings): Pr
     sessionSecret: env.SESSION_SECRET,
   });
   return auth;
+}
+
+/**
+ * Repair a browser/session CSRF binding without accepting a stale token.
+ * Callers must authenticate the session and enforce the exact dashboard Origin
+ * before invoking this recovery primitive.
+ */
+export async function rotateCsrfToken(auth: AuthContext, env: AppBindings): Promise<string> {
+  const csrfToken = createOpaqueToken();
+  const csrfTokenHash = await hmacToken(env.SESSION_SECRET, "csrf", csrfToken);
+  const updated = await env.PLATFORM_DB.prepare(`
+    UPDATE auth_sessions
+    SET csrf_token_hash = ?
+    WHERE id = ? AND user_id = ? AND status = 'active'
+      AND revoked_at IS NULL AND expires_at > ? AND csrf_token_hash = ?
+  `).bind(
+    csrfTokenHash,
+    auth.sessionId,
+    auth.userId,
+    new Date().toISOString(),
+    auth.csrfTokenHash,
+  ).run();
+  if (updated.meta.changes !== 1) throw new AppError("authentication_required", 401);
+  return csrfToken;
 }
 
 export async function revokeSession(auth: AuthContext, env: AppBindings): Promise<void> {
@@ -1130,18 +1161,34 @@ export function appendClearedMagicLinkConfirmationCookie(headers: Headers, env: 
 
 export function appendSessionCookies(headers: Headers, credentials: SessionCredentials, env: AppBindings): void {
   const secure = env.APP_ENV !== "local";
+  const maxAge = credentials.sessionMaxAgeSeconds ?? SESSION_TTL_SECONDS;
   headers.append("Set-Cookie", serializeCookie(env.SESSION_COOKIE_NAME, credentials.sessionToken, {
     httpOnly: true,
-    maxAge: credentials.sessionMaxAgeSeconds ?? SESSION_TTL_SECONDS,
+    maxAge,
     sameSite: "Lax",
     secure,
   }));
-  headers.append("Set-Cookie", serializeCookie(`${env.SESSION_COOKIE_NAME}_csrf`, credentials.csrfToken, {
+  appendCsrfCookie(headers, credentials.csrfToken, env, maxAge);
+}
+
+export function appendCsrfCookie(
+  headers: Headers,
+  csrfToken: string,
+  env: AppBindings,
+  maxAge = CSRF_COOKIE_MAX_AGE_SECONDS,
+): void {
+  headers.append("Set-Cookie", serializeCookie(`${env.SESSION_COOKIE_NAME}_csrf`, csrfToken, {
     httpOnly: false,
-    maxAge: credentials.sessionMaxAgeSeconds ?? SESSION_TTL_SECONDS,
+    maxAge,
     sameSite: "Strict",
-    secure,
+    secure: env.APP_ENV !== "local",
   }));
+}
+
+export function csrfCookieMaxAgeForSession(auth: AuthContext, now = new Date()): number {
+  const expiresAt = Date.parse(auth.sessionExpiresAt ?? "");
+  if (!Number.isFinite(expiresAt)) return CSRF_COOKIE_MAX_AGE_SECONDS;
+  return Math.max(0, Math.ceil((expiresAt - now.getTime()) / 1000));
 }
 
 export function appendClearedSessionCookies(headers: Headers, env: AppBindings): void {

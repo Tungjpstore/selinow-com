@@ -162,6 +162,11 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "idx_auth_google_oauth_states_retention",
   "auth_google_oauth_states_pending_insert_guard",
   "auth_google_oauth_states_transition_guard",
+  "auth_otp_admissions",
+  "idx_auth_otp_admissions_window",
+  "idx_auth_otp_admissions_requester_window",
+  "idx_auth_otp_admissions_subject_window",
+  "idx_auth_otp_admissions_expiry",
   "telegram_updates",
   "telegram_actions",
   "telegram_action_history",
@@ -665,6 +670,47 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       auth_google_oauth_states_pending_insert_guard: "aaeb73462e3baa97e5fdbef4595b0f28311a3a970cc6155371f85083ee503d9c",
       auth_google_oauth_states_transition_guard: "89d1f14766dce98d5b5c129a3d53f240a3b71eda0e6f89a7816d97c167de4d0e",
     }),
+  }),
+  "0113_dodo_checkout_reconciliation.sql": Object.freeze({
+    columns: Object.freeze({
+      "billing_checkout_sessions.reconciliation_attempts": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "billing_checkout_sessions.next_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "billing_checkout_sessions.last_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "billing_checkout_sessions.reconciliation_failure_code": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      billing_checkout_sessions: "3f49e55a14b8ba4c9303d4089f9797426796667bf532ea21930da75435544f1a",
+      idx_billing_checkout_sessions_reconciliation: "cc74f5b4aea8f96ba558affeecc8ec93421bd16afa6725b9d0230fa6d1432edf",
+      idx_billing_checkout_sessions_shop_reconciliation: "cbec4665173db5f6502f1412673ac06f22f17d9b9dab86f6b6519a5a78630bda",
+    }),
+  }),
+  "0114_auth_otp_admission.sql": Object.freeze({
+    columns: Object.freeze({
+      "auth_otp_admissions.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "auth_otp_admissions.purpose": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.requester_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.subject_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.window_started_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.window_ends_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      auth_otp_admissions: "641ef25c9df25637686dcf96be2c224ad620946ac1f75d0090c53ff4962752f0",
+      idx_auth_otp_admissions_window: "1f84a424b74d92b823ced2a253a582e259ed254e355b914909473330aa2a2afd",
+      idx_auth_otp_admissions_requester_window: "7149a4e43d9a773ca9b64a9ce6324aaab0dcddf17bf1285098740797379f8b57",
+      idx_auth_otp_admissions_subject_window: "f08531fca74d42a585a1de8c7b440101e1908fff7fc6280ea3c6142fee00fbec",
+      idx_auth_otp_admissions_expiry: "81affac85433d3a3412ca07060b8c164c56f6d9d9259488a836b5a3a3c202e0b",
+    }),
+  }),
+  "0115_auth_pending_password.sql": Object.freeze({
+    columns: Object.freeze({
+      "platform_users.pending_password_hash": Object.freeze({ defaultValue: "NULL", notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({}),
+  }),
+  "0116_pro_premium_storefront_entitlement.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
   }),
 });
 
@@ -2494,6 +2540,12 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
         OR (state_row.status = 'consumed' AND (state_row.nonce_hash IS NOT NULL OR state_row.browser_binding_hash IS NOT NULL OR state_row.code_verifier_ciphertext_b64 IS NOT NULL OR state_row.code_verifier_iv_b64 IS NOT NULL OR state_row.consumed_at IS NULL OR state_row.revoked_at IS NOT NULL))
         OR (state_row.status = 'revoked' AND (state_row.nonce_hash IS NOT NULL OR state_row.browser_binding_hash IS NOT NULL OR state_row.code_verifier_ciphertext_b64 IS NOT NULL OR state_row.code_verifier_iv_b64 IS NOT NULL OR state_row.consumed_at IS NOT NULL OR state_row.revoked_at IS NULL))
       ) AS integrity_0112_google_oauth_state,
+    (SELECT CASE WHEN COUNT(*) = 1 THEN 0 ELSE 1 END FROM plans AS plan
+      WHERE plan.id = 'plan_pro_v1'
+        AND plan.code = 'pro'
+        AND plan.is_active = 1
+        AND json_extract(plan.feature_flags_json, '$.premiumStorefrontTemplates') = 1
+      ) AS integrity_0116_pro_entitlement,
     (SELECT COUNT(*) FROM outbox_jobs AS job
       WHERE job.kind = 'order_paid' AND job.status != 'completed'
       ) AS integrity_0095_legacy_order_paid_outbox,
@@ -2547,7 +2599,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_google_identities", "auth_google_oauth_states", "auth_request_admissions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
+    if (["auth_google_identities", "auth_google_oauth_states", "auth_otp_admissions", "auth_request_admissions", "billing_checkout_sessions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
@@ -2604,6 +2656,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0097_telegram_action_history",
     "integrity_0112_google_identity",
     "integrity_0112_google_oauth_state",
+    "integrity_0116_pro_entitlement",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

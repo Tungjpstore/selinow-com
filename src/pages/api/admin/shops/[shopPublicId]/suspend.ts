@@ -13,7 +13,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
     await guardAdminMutationRate({ env, family: "shops", request });
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request);
     rejectUnknownFields(body, ["abuseReportPublicId", "reasonCode"]);
     const shopPublicId = params.shopPublicId;

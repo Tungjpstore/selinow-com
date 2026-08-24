@@ -7,6 +7,10 @@ import { runWrangler } from "./cli.mjs";
 
 const PROVIDER_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/u;
 const ENVIRONMENTS = new Set(["staging", "production"]);
+const DODO_API_BASE_URLS = Object.freeze({
+  live_mode: "https://live.dodopayments.com",
+  test_mode: "https://test.dodopayments.com",
+});
 
 export const DODO_CATALOG_OFFERS = Object.freeze([
   Object.freeze({
@@ -71,12 +75,14 @@ export function parseDodoCatalogArguments(argv) {
     confirmStagingTestCatalog: false,
     explicitDryRun: false,
     environment: null,
+    inspect: false,
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--apply") options.apply = true;
     else if (argument === "--dry-run") options.explicitDryRun = true;
+    else if (argument === "--inspect") options.inspect = true;
     else if (argument === "--confirm-catalog-update") options.confirmCatalogUpdate = true;
     else if (argument === "--confirm-production") options.confirmProduction = true;
     else if (argument === "--confirm-production-live-catalog") options.confirmProductionLiveCatalog = true;
@@ -89,6 +95,7 @@ export function parseDodoCatalogArguments(argv) {
     else throw new Error("unknown_argument");
   }
   if (options.apply && options.explicitDryRun) throw new Error("dodo_catalog_mode_conflict");
+  if (options.inspect && (options.apply || options.explicitDryRun)) throw new Error("dodo_catalog_mode_conflict");
   if (!ENVIRONMENTS.has(options.environment)) throw new Error("dodo_catalog_environment_required");
   if (options.environment === "production" && options.apply && !options.confirmProduction) {
     throw new Error("production_confirmation_required");
@@ -119,16 +126,81 @@ export function readDodoCatalogProviderMode(environment = process.env) {
   return value;
 }
 
-export function validateDodoCatalogTarget(input) {
+export function readDodoCatalogProviderConfig(environment = process.env) {
+  const providerMode = readDodoCatalogProviderMode(environment);
+  const apiKey = environment.DODO_PAYMENTS_API_KEY ?? environment.DODO_API_KEY;
+  if (typeof apiKey !== "string" || apiKey.length < 16) throw new Error("dodo_catalog_provider_credentials_required");
+  return { apiBaseUrl: DODO_API_BASE_URLS[providerMode], apiKey, providerMode };
+}
+
+function providerObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+}
+
+export function validateDodoCatalogProviderProduct(product, offer, reference) {
+  const row = providerObject(product);
+  const price = providerObject(row.price);
+  if (row.product_id !== reference) throw new Error(`dodo_catalog_provider_identity_mismatch:${offer.id}`);
+  if (row.is_recurring !== true || price.type !== "recurring_price") {
+    throw new Error(`dodo_catalog_provider_recurring_mismatch:${offer.id}`);
+  }
+  if (price.currency !== offer.currency || price.price !== offer.amountMinor) {
+    throw new Error(`dodo_catalog_provider_price_mismatch:${offer.id}`);
+  }
+  if (price.payment_frequency_count !== 1 || price.payment_frequency_interval !== "month"
+    || price.subscription_period_count !== 1 || price.subscription_period_interval !== "month") {
+    throw new Error(`dodo_catalog_provider_interval_mismatch:${offer.id}`);
+  }
+  if (price.tax_inclusive !== true) throw new Error(`dodo_catalog_provider_tax_mismatch:${offer.id}`);
+  if (price.trial_period_days !== 0 || (price.trial_amount !== null && price.trial_amount !== undefined)) {
+    throw new Error(`dodo_catalog_provider_trial_mismatch:${offer.id}`);
+  }
+  if (price.purchasing_power_parity === true) {
+    throw new Error(`dodo_catalog_provider_adaptive_pricing_mismatch:${offer.id}`);
+  }
+  return true;
+}
+
+export async function attestDodoCatalogProducts(input) {
+  const fetcher = input.fetcher ?? globalThis.fetch;
+  if (typeof fetcher !== "function") throw new Error("dodo_catalog_provider_fetch_unavailable");
+  for (const offer of DODO_CATALOG_OFFERS) {
+    const reference = safeReference(input.references?.[offer.id], `${offer.id}_target`);
+    let response;
+    try {
+      response = await fetcher(`${input.apiBaseUrl.replace(/\/+$/u, "")}/products/${encodeURIComponent(reference)}`, {
+        headers: { Authorization: `Bearer ${input.apiKey}` },
+        method: "GET",
+      });
+    } catch {
+      throw new Error("dodo_catalog_provider_unavailable");
+    }
+    if (!response.ok) throw new Error(`dodo_catalog_provider_http_${response.status}`);
+    let product;
+    try { product = await response.json(); } catch { throw new Error("dodo_catalog_provider_response_invalid"); }
+    validateDodoCatalogProviderProduct(product, offer, reference);
+  }
+  return { verifiedCount: DODO_CATALOG_OFFERS.length };
+}
+
+export function validateDodoCatalogProviderEnvironment(input) {
   if (input.environment === "staging") {
-    if (input.confirmStagingTestCatalog !== true) throw new Error("staging_test_catalog_confirmation_required");
     if (input.providerMode !== "test_mode") throw new Error("dodo_catalog_staging_live_mode_forbidden");
     return;
   }
   if (input.environment !== "production") throw new Error("dodo_catalog_environment_required");
-  if (input.confirmProduction !== true) throw new Error("production_confirmation_required");
-  if (input.confirmProductionLiveCatalog !== true) throw new Error("production_live_catalog_confirmation_required");
   if (input.providerMode !== "live_mode") throw new Error("dodo_catalog_production_test_mode_forbidden");
+}
+
+export function validateDodoCatalogTarget(input) {
+  if (input.environment === "staging") {
+    if (input.confirmStagingTestCatalog !== true) throw new Error("staging_test_catalog_confirmation_required");
+  } else {
+    if (input.environment !== "production") throw new Error("dodo_catalog_environment_required");
+    if (input.confirmProduction !== true) throw new Error("production_confirmation_required");
+    if (input.confirmProductionLiveCatalog !== true) throw new Error("production_live_catalog_confirmation_required");
+  }
+  validateDodoCatalogProviderEnvironment(input);
 }
 
 function readPublishedSourceReferences(rows) {
@@ -149,6 +221,18 @@ FROM plan_prices AS prices
 INNER JOIN plans ON plans.id = prices.plan_id
 WHERE prices.id IN (${ids})
 ORDER BY prices.id;
+`;
+}
+
+export function dodoCatalogCompletionReadSql() {
+  return `
+SELECT CASE json_extract(value_json, '$.value')
+    WHEN 1 THEN 1
+    WHEN 0 THEN 0
+    ELSE NULL
+  END AS reconciliation_required
+FROM platform_settings
+WHERE key = 'dodo_catalog_reconciliation_required';
 `;
 }
 
@@ -296,6 +380,69 @@ function exactPendingPredicate(alias = "p", planCode = `${alias}.plan_code`) {
   }).join(" OR ");
 }
 
+function exactPublishedPredicate(offer, reference, input = {}) {
+  const alias = input.alias ?? "p";
+  const planCode = input.planCode ?? "plans.code";
+  const id = input.id ?? offer.id;
+  const version = input.version ?? 1;
+  const lifecycle = input.closed === true
+    ? `${alias}.is_active = 0 AND ${alias}.effective_to IS NOT NULL AND ${alias}.effective_to = ${alias}.updated_at`
+    : `${alias}.is_active = 1 AND ${alias}.effective_to IS NULL`;
+  const timestampContract = input.rotated === true
+    ? `${alias}.effective_from = ${alias}.created_at AND ${alias}.created_at = ${alias}.updated_at
+      AND ${alias}.effective_from = (SELECT source.effective_to FROM plan_prices AS source WHERE source.id = ${sqlString(offer.id)})`
+    : `${alias}.effective_from = ${alias}.created_at
+      AND julianday(${alias}.updated_at) >= julianday(${alias}.created_at)`;
+  return `(${alias}.id = ${sqlString(id)} AND ${planCode} = ${sqlString(offer.planCode)}
+    AND ${alias}.market_code = ${sqlString(offer.marketCode)} AND ${alias}.currency = ${sqlString(offer.currency)}
+    AND ${alias}.amount_minor = ${offer.amountMinor} AND ${alias}.interval = 'month'
+    AND ${alias}.tax_behavior = 'inclusive' AND ${alias}.provider_code = 'dodo'
+    AND ${alias}.provider_price_ref = ${sqlString(reference)}
+    AND datetime(${alias}.effective_from) IS NOT NULL AND ${timestampContract}
+    AND ${alias}.version = ${version} AND ${lifecycle})`;
+}
+
+export function dodoCatalogCompletionSql(references, mode, sourceReferences = null) {
+  const targetValues = DODO_CATALOG_OFFERS.map((offer) => safeReference(references?.[offer.id], `${offer.id}_target`));
+  if (new Set(targetValues).size !== DODO_CATALOG_OFFERS.length) throw new Error("dodo_catalog_references_not_unique");
+  const targetPredicate = DODO_CATALOG_OFFERS.map((offer, index) => exactPublishedPredicate(
+    offer,
+    targetValues[index],
+    mode === "rotated" ? { id: offer.rotatedId, rotated: true, version: 2 } : undefined,
+  )).join(" OR ");
+  const targetCount = `(SELECT COUNT(*) FROM plan_prices AS p INNER JOIN plans ON plans.id = p.plan_id WHERE ${targetPredicate})`;
+  let completionPredicate;
+  if (mode === "already_configured") {
+    const v2Ids = DODO_CATALOG_OFFERS.map((offer) => sqlString(offer.rotatedId)).join(", ");
+    completionPredicate = `${targetCount} = ${DODO_CATALOG_OFFERS.length}
+      AND (SELECT COUNT(*) FROM plan_prices WHERE id IN (${v2Ids})) = 0`;
+  } else if (mode === "rotated") {
+    const sourceValues = DODO_CATALOG_OFFERS.map((offer) => safeReference(sourceReferences?.[offer.id], `${offer.id}_source`));
+    if (new Set(sourceValues).size !== DODO_CATALOG_OFFERS.length
+      || new Set([...sourceValues, ...targetValues]).size !== DODO_CATALOG_OFFERS.length * 2) {
+      throw new Error("dodo_catalog_rotation_reference_overlap");
+    }
+    const sourcePredicate = DODO_CATALOG_OFFERS.map((offer, index) => exactPublishedPredicate(
+      offer,
+      sourceValues[index],
+      { closed: true },
+    )).join(" OR ");
+    const sourceCount = `(SELECT COUNT(*) FROM plan_prices AS p INNER JOIN plans ON plans.id = p.plan_id WHERE ${sourcePredicate})`;
+    completionPredicate = `${sourceCount} = ${DODO_CATALOG_OFFERS.length}
+      AND ${targetCount} = ${DODO_CATALOG_OFFERS.length}`;
+  } else {
+    throw new Error("dodo_catalog_completion_mode_invalid");
+  }
+  return `
+UPDATE platform_settings
+SET value_json = '{"value":false}', version = version + 1, updated_at = CURRENT_TIMESTAMP
+WHERE key = 'dodo_catalog_reconciliation_required'
+  AND json_extract(value_json, '$.value') = 1
+  AND ${completionPredicate};
+SELECT changes() AS reconciliation_marker_updated;
+`;
+}
+
 export function dodoCatalogUpdateSql(references) {
   for (const offer of DODO_CATALOG_OFFERS) safeReference(references?.[offer.id], `${offer.id}_target`);
   if (new Set(DODO_CATALOG_OFFERS.map((offer) => references[offer.id])).size !== DODO_CATALOG_OFFERS.length) {
@@ -320,6 +467,7 @@ SET provider_price_ref = CASE id ${cases} ELSE provider_price_ref END,
 WHERE id IN (SELECT id FROM exact_pending)
   AND (SELECT matched_count FROM ready) = ${DODO_CATALOG_OFFERS.length};
 SELECT changes() AS updated_count;
+${dodoCatalogCompletionSql(references, "already_configured")}
 `;
 }
 
@@ -403,6 +551,7 @@ SELECT changes() AS inserted_count;
 WITH state AS (SELECT 1 AS valid_state)
 INSERT INTO plan_prices (id)
 SELECT NULL FROM state WHERE NOT (${closedCount} = ${DODO_CATALOG_OFFERS.length} AND ${targetCount} = ${DODO_CATALOG_OFFERS.length} AND ${v2Count} = ${DODO_CATALOG_OFFERS.length});
+${dodoCatalogCompletionSql(targetReferences, "rotated", sourceReferences)}
 `;
 }
 
@@ -453,13 +602,69 @@ function runRemote(environment, args, issue) {
   }
 }
 
+function readRemoteDodoCatalog(input) {
+  validateDodoCatalogProviderEnvironment(input);
+  const runRemoteImplementation = input.runRemoteImplementation ?? runRemote;
+  const rows = parseWranglerRows(
+    runRemoteImplementation(input.environment, ["--command", dodoCatalogReadSql(), "--json"], "dodo_catalog_read_failed"),
+    "dodo_catalog_read",
+  );
+  const completionRows = parseWranglerRows(
+    runRemoteImplementation(input.environment, ["--command", dodoCatalogCompletionReadSql(), "--json"], "dodo_catalog_completion_read_failed"),
+    "dodo_catalog_completion_read",
+  );
+  if (completionRows.length !== 1 || (completionRows[0]?.reconciliation_required !== 0 && completionRows[0]?.reconciliation_required !== 1)) {
+    throw new Error("dodo_catalog_completion_state_invalid");
+  }
+  return {
+    ...classifyDodoCatalogRows(rows, input.references),
+    reconciliationRequired: completionRows[0].reconciliation_required === 1,
+    rows,
+  };
+}
+
+export function inspectDodoCatalog(input) {
+  const result = readRemoteDodoCatalog(input);
+  return {
+    environment: input.environment,
+    mode: result.mode,
+    pendingCount: result.pendingCount,
+    publishedCount: result.publishedCount,
+    reconciliationRequired: result.reconciliationRequired,
+  };
+}
+
 export async function reconcileDodoCatalog(input) {
   validateDodoCatalogTarget(input);
   const references = input.references;
-  const rows = parseWranglerRows(runRemote(input.environment, ["--command", dodoCatalogReadSql(), "--json"], "dodo_catalog_read_failed"), "dodo_catalog_read");
-  const before = classifyDodoCatalogRows(rows, references);
+  const providerAttestation = input.attestProviderImplementation ?? attestDodoCatalogProducts;
+  const attested = await providerAttestation({
+    apiBaseUrl: input.apiBaseUrl,
+    apiKey: input.apiKey,
+    references,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+  });
+  if (attested?.verifiedCount !== DODO_CATALOG_OFFERS.length) {
+    throw new Error("dodo_catalog_provider_attestation_incomplete");
+  }
+  const runRemoteImplementation = input.runRemoteImplementation ?? runRemote;
+  const { rows, ...before } = readRemoteDodoCatalog({ ...input, runRemoteImplementation });
   if (before.mode === "already_configured" || before.mode === "rotated") {
-    return { ...before, environment: input.environment, updatedCount: 0, closedCount: 0, insertedCount: 0 };
+    if (before.reconciliationRequired) {
+      const privateSql = await writePrivateSqlFile(dodoCatalogCompletionSql(
+        references,
+        before.mode,
+        before.mode === "rotated" ? readPublishedSourceReferences(rows) : null,
+      ));
+      try {
+        runRemoteImplementation(input.environment, ["--file", privateSql.file, "--yes", "--json"], "dodo_catalog_completion_update_failed");
+      } finally {
+        await rm(privateSql.directory, { force: true, recursive: true });
+      }
+    }
+    const verified = inspectDodoCatalog({ ...input, runRemoteImplementation });
+    if (verified.mode !== before.mode || verified.reconciliationRequired) throw new Error("dodo_catalog_completion_pending");
+    return { ...verified, updatedCount: 0, closedCount: 0, insertedCount: 0 };
   }
 
   const rotation = before.mode === "rotation_required";
@@ -467,12 +672,12 @@ export async function reconcileDodoCatalog(input) {
     ? dodoCatalogRotationSql(readPublishedSourceReferences(rows), references)
     : dodoCatalogUpdateSql(references));
   try {
-    const output = runRemote(input.environment, ["--file", privateSql.file, "--yes", "--json"], "dodo_catalog_update_failed");
+    const output = runRemoteImplementation(input.environment, ["--file", privateSql.file, "--yes", "--json"], "dodo_catalog_update_failed");
     const update = rotation ? parseDodoCatalogRotationCommandOutput(output) : parseDodoCatalogCommandOutput(output);
-    const afterRows = parseWranglerRows(runRemote(input.environment, ["--command", dodoCatalogReadSql(), "--json"], "dodo_catalog_verify_failed"), "dodo_catalog_verify");
-    const after = classifyDodoCatalogRows(afterRows, references);
+    const after = inspectDodoCatalog({ ...input, runRemoteImplementation });
     if (rotation && after.mode !== "rotated") throw new Error("dodo_catalog_rotation_pending");
     if (!rotation && after.mode !== "already_configured") throw new Error("dodo_catalog_pending_reference_remains");
+    if (after.reconciliationRequired) throw new Error("dodo_catalog_completion_pending");
     return {
       ...after,
       environment: input.environment,

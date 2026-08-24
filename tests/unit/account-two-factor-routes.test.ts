@@ -74,7 +74,7 @@ describe("account two-factor routes", () => {
 
     const response = await EnableRequestPOST(context("/api/app/account/enable-2fa-request"));
 
-    expect(dependencies.recent).toHaveBeenCalledWith(auth);
+    expect(dependencies.recent).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.requestOtp).toHaveBeenCalledWith(expect.objectContaining({ auth, locale: "en-US" }));
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store, max-age=0");

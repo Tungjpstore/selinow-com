@@ -234,7 +234,7 @@ export async function listSellerProductsPage(input: {
     WITH product_stock AS (
       SELECT product_variants.product_id AS productId,
         COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS stock,
-        COUNT(product_variants.id) AS variantCount,
+        COUNT(DISTINCT product_variants.id) AS variantCount,
         MIN(product_variants.price_minor) AS lowestPriceMinor
       FROM product_variants
       LEFT JOIN inventory_keys

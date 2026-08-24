@@ -21,7 +21,7 @@ export const PUT: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const integration = await connectPayOS({ credentials: parsePayOSCredentials(await readJsonObject(request)), env, requestId: locals.requestId, shopPublicId: requireResourceId(params.shopPublicId, "shop"), userId: auth.userId });
     return Response.json({ integration, ok: true, requestId: locals.requestId }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
   } catch (error) { return createCaughtErrorResponse(error, locals.requestId); }
@@ -31,7 +31,7 @@ export const DELETE: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     await disconnectPayOS({ env, requestId: locals.requestId, shopPublicId: requireResourceId(params.shopPublicId, "shop"), userId: auth.userId });
     return new Response(null, { status: 204 });
   } catch (error) { return createCaughtErrorResponse(error, locals.requestId); }

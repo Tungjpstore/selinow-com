@@ -11,7 +11,7 @@ export const PATCH: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 4 * 1024);
     rejectUnknownFields(body, ["expectedVersion", "role"]);
     const result = await updateMemberRole({
@@ -34,7 +34,7 @@ export const DELETE: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 4 * 1024);
     rejectUnknownFields(body, ["expectedVersion"]);
     const result = await suspendMember({

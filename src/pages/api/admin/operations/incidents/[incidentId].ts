@@ -30,7 +30,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
     await guardAdminMutationRate({ env, family: "operations_incidents", request });
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     await requirePlatformAdminApiAccess({ env, userId: auth.userId });
     const body = await readJsonObject(request, 2 * 1_024);
     rejectUnknownFields(body, ["action", "expectedVersion", "resolutionCode", "shopId"]);

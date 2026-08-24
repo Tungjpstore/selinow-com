@@ -10,7 +10,7 @@ import { resendMemberInvitation, revokeMemberInvitation } from "../../../../../.
 async function mutationInput(locals: App.Locals, params: Record<string, string | undefined>, request: Request, action: "resend" | "revoke") {
   const env = getBindings();
   const auth = await requireCsrfSession(request, env);
-  requireRecentAuth(auth);
+  requireRecentAuth(auth, 5);
   const body = await readJsonObject(request, 4 * 1024);
   rejectUnknownFields(body, ["expectedVersion"]);
   const common = {
