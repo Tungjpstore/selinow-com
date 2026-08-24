@@ -525,7 +525,7 @@ const chartPoints = realChartPoints.length === 1
 
   .console-grid-2col {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
     gap: 16px;
     align-items: stretch;
   }
@@ -602,7 +602,7 @@ const chartPoints = realChartPoints.length === 1
 
   .console-block__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .console-block__head h2 { margin: 0; color: var(--sln-console-ink); font-size: 15px; font-weight: 600; }
-  .console-block__meta { color: var(--sln-console-accent); font: var(--sln-console-label); font-weight: 600; background: var(--sln-console-accent-soft); padding: 2px 8px; border-radius: var(--sln-console-radius-pill); }
+  .console-block__meta { color: var(--sln-console-accent-text); font: var(--sln-console-label); font-weight: 600; background: var(--sln-console-accent-soft); padding: 2px 8px; border-radius: var(--sln-console-radius-pill); }
   .console-block__empty { margin: 0; padding: 20px 0; color: var(--sln-console-ink-3); font: var(--sln-console-text-sm); }
   .console-block__emptyRow { display: flex; align-items: center; gap: 12px; padding: 16px 0; flex-wrap: wrap; }
 
@@ -634,7 +634,7 @@ const chartPoints = realChartPoints.length === 1
   .console-queue__body { display: grid; gap: 1px; min-width: 0; flex: 1; }
   .console-queue__title { color: var(--sln-console-ink); font: var(--sln-console-text-sm); font-weight: 500; }
   .console-queue__impact { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
-  .console-queue__evidence { color: var(--sln-console-ink-3); font: var(--sln-console-label); opacity: .8; }
+  .console-queue__evidence { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
   .console-queue__count {
     display: inline-flex;
     align-items: center;

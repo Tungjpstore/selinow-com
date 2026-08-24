@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { requireRecentAuth, type AuthContext } from "../../src/lib/auth/session";
+import { createDashboardTranslator, createSystemTranslator } from "../../src/lib/i18n";
 
 const auth = (ageMinutes: number): AuthContext => ({
   authenticatedAt: new Date(Date.now() - ageMinutes * 60_000).toISOString(),
@@ -28,6 +29,15 @@ describe("recent authentication policy", () => {
     }
     expect(failure).toMatchObject({ code: "recent_auth_required", status: 403 });
     expect(() => { requireRecentAuth(auth(4), 5); }).not.toThrow();
+  });
+
+  it("describes the enforced five-minute window accurately", () => {
+    for (const locale of ["en", "vi-VN"] as const) {
+      expect(createSystemTranslator(locale)("error.recent_auth_required")).toContain("5");
+      expect(createSystemTranslator(locale)("integration.error.recent_auth_required")).toContain("5");
+      expect(createDashboardTranslator(locale)("dashboard.billing.checkout.recent_auth_required")).toContain("5");
+      expect(createDashboardTranslator(locale)("dashboard.security.client.error.recent_auth_required")).toContain("5");
+    }
   });
 
   it("keeps financial, identity, access-control, domain, and export mutations on explicit step-up", () => {

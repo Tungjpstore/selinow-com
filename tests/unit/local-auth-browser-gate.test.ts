@@ -340,6 +340,13 @@ describe("authenticated browser gate isolation", () => {
     expect(() => resolveLocalBrowserPort("443")).toThrow("local_auth_browser_gate_port_invalid");
     expect(validatePlaywrightArguments([])).toEqual([]);
     expect(validatePlaywrightArguments(["--update-snapshots"])).toEqual(["--update-snapshots"]);
+    expect(validatePlaywrightArguments([
+      "--update-snapshots",
+      "--grep=local magic link opens deterministic authenticated seller surfaces",
+    ])).toEqual([
+      "--update-snapshots",
+      "--grep=local magic link opens deterministic authenticated seller surfaces",
+    ]);
     expect(validatePlaywrightArguments(["--project=kit-auth-desktop-1440", "--project=kit-auth-minimum-320"]))
       .toEqual(["--project=kit-auth-desktop-1440", "--project=kit-auth-minimum-320"]);
     expect(validatePlaywrightArguments(["--project=kit-auth-zoom-200"]))
@@ -347,6 +354,8 @@ describe("authenticated browser gate isolation", () => {
     expect(() => validatePlaywrightArguments(["--config", "playwright.config.ts"]))
       .toThrow("local_auth_browser_gate_arguments_invalid");
     expect(() => validatePlaywrightArguments(["--project=desktop"]))
+      .toThrow("local_auth_browser_gate_arguments_invalid");
+    expect(() => validatePlaywrightArguments(["--update-snapshots", "--grep=unsafe override"]))
       .toThrow("local_auth_browser_gate_arguments_invalid");
   });
 

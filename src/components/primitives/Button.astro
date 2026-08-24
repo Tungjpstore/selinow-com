@@ -1,5 +1,11 @@
 ---
-interface Props {
+import type { HTMLAttributes } from "astro/types";
+
+type NativeButtonProps = Omit<HTMLAttributes<"button">,
+  "aria-label" | "class" | "disabled" | "form" | "id" | "name" | "size" | "type" | "value"
+>;
+
+interface Props extends NativeButtonProps {
   ariaLabel?: string;
   className?: string;
   disabled?: boolean;
@@ -27,11 +33,13 @@ const {
   type = "button",
   value,
   variant = "primary",
+  ...attributes
 } = Astro.props;
 const classes = ["sln-button", className].filter(Boolean).join(" ");
 ---
 
 <button
+  {...attributes}
   aria-busy={loading ? "true" : undefined}
   aria-label={ariaLabel}
   class={classes}

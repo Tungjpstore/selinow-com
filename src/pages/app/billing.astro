@@ -539,7 +539,7 @@ const metricLabel = (key: string): string => (pageCopy as Record<string, string>
   .billing-workspace :where(button, a, summary) { touch-action:manipulation; }
   .billing-section-nav { position:sticky; top:var(--billing-sticky-offset); z-index:2; display:flex; gap:4px; overflow-x:auto; border-bottom:1px solid var(--sln-border-default); padding:0 2px; background:color-mix(in srgb,var(--sln-bg-canvas) 94%,transparent); backdrop-filter:blur(12px); scrollbar-width:none; }
   .billing-section-nav::-webkit-scrollbar { display:none; }
-  .billing-section-nav a { min-height:44px; display:inline-flex; flex:0 0 auto; align-items:center; border-bottom:1px solid transparent; padding:0 14px; color:var(--sln-text-muted); font:var(--sln-font-label); text-decoration:none; }
+  .billing-section-nav a { min-height:44px; display:inline-flex; flex:0 0 auto; align-items:center; border-bottom:1px solid transparent; padding:0 14px; color:var(--sln-text-secondary); font:var(--sln-font-label); text-decoration:none; }
   .billing-section-nav a:hover, .billing-section-nav a:focus-visible { border-bottom-color:var(--sln-border-strong); color:var(--sln-text-primary); }
   .subscription-overview { display:grid; grid-template-columns:minmax(0,1.8fr) minmax(220px,.8fr); gap:var(--sln-space-6); border:1px solid var(--sln-border-default); border-inline-start:3px solid var(--sln-action-primary); border-radius:var(--sln-radius-lg); padding:var(--sln-space-8); background:var(--sln-bg-surface); }
   #billing-overview, #billing-plans, #billing-usage, #billing-payment, #billing-invoices { scroll-margin-top:calc(var(--billing-sticky-offset) + 60px); }
@@ -582,7 +582,7 @@ const metricLabel = (key: string): string => (pageCopy as Record<string, string>
   .panel-description { max-width:70ch; margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .plan-summary-row { display:grid; grid-template-columns:minmax(180px,.6fr) minmax(0,1.4fr); gap:20px; align-items:center; }
   .plan-summary-row > div { display:grid; gap:5px; }
-  .plan-summary-row span, .payment-facts dt { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .plan-summary-row span, .payment-facts dt { color:var(--sln-text-secondary); font:var(--sln-font-caption); }
   .plan-summary-row strong, .payment-facts dd { color:var(--sln-text-primary); font:var(--sln-font-label); }
   .plan-summary-row p { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .payment-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; margin:0; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); overflow:hidden; }

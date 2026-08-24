@@ -2,6 +2,17 @@
 
 Last updated: 2026-08-25
 
+## PayOS admission, Pro access and authenticated UI release candidate (2026-08-25)
+
+- Restored native, ARIA and `data-*` forwarding in the shared `Button` primitive. The affected two-factor enrollment, password, export and inventory controls now retain their client action hooks; authenticated browser acceptance clicks the real two-factor button and proves the enrollment form opens.
+- The seller payment page now evaluates the authoritative `provider_setup` subscription entitlement before rendering PayOS configuration. `subscription_payment_required`, `subscription_grace_expired` and `provider_not_ready` fail closed with localized billing recovery guidance, and the browser controller cannot reopen or submit the credential form after server admission is denied.
+- Pro access remains derived from authoritative subscription state and the canonical Pro feature flags. The existing forward-only `0118_pro_premium_storefront_entitlement.sql` migration remains the required schema correction for environments where an active Pro shop is still missing premium storefront access.
+- Routine seller navigation is not subject to the historical default 15-minute reauthentication boundary. Financial, credential, identity, deletion and administrator mutations retain the explicit five-minute step-up boundary, and all user-facing messages now describe that enforced window accurately.
+- Accessibility and responsive fixes cover dashboard/onboarding/billing/products/shared headers, semantic progress labeling, WCAG-safe status colors, 320px grids, the mobile topbar collision and deterministic RTL geometry. The refreshed authenticated Payments and two-factor desktop/mobile baselines were visually reviewed.
+- Verification on the exact uncommitted candidate: authenticated browser gate `9/9`; full Vitest `366` files / `3,029` tests; Astro check `0` errors / `0` warnings / `4` existing hints; ESLint, TypeScript, build, local deploy dry-run, staging deploy dry-run and `git diff --check` pass; `npm audit --audit-level=high` reports `0` vulnerabilities.
+- No remote staging/production mutation or PayOS transfer is claimed by this checkpoint. The next admitted ceremony must commit this exact tree, create fresh protected staging backup/restore evidence and a candidate-bound manifest, deploy and verify staging, then complete one controlled `5,000 VND` PayOS QR payment with signed webhook/reconciliation and idempotent fulfillment evidence.
+- Production remains NO-GO until the current policy attestation is approved and recorded, staging provider UAT is complete, monitoring/pilot/rollback evidence exists, and the production backup/restore ceremony passes. `CURRENT_POLICY_ATTESTATION_VERSION = null` is intentionally not fabricated or bypassed.
+
 ## Release-candidate verification follow-up (2026-08-25)
 
 - Corrected Dodo catalog validation to match the provider's recurring-subscription model: monthly billing frequency with a long-lived `20 Year` subscription period, case-insensitive provider interval values, tax-inclusive pricing, no provider trial, and no adaptive pricing. A one-month total period is now rejected because it expires after the first cycle.

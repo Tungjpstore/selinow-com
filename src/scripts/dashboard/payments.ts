@@ -44,6 +44,7 @@ if (root !== null) {
   })();
   const text = (key: string): string => copy[key] ?? "";
   const canManageProviders = root.dataset.canManageProviders === "true";
+  const canConfigurePayos = root.dataset.canConfigurePayos === "true";
   const canReadProviders = root.dataset.canReadProviders === "true";
   const canRefreshPayos = root.dataset.canRefreshPayos === "true";
   const feedback = root.querySelector<HTMLElement>("[data-workspace-feedback]");
@@ -182,7 +183,7 @@ if (root !== null) {
       item.querySelector<HTMLElement>(".provider-actions")?.appendChild(disconnect);
     }
     if (disconnect !== null) disconnect.hidden = !canManageProviders || !connected;
-    if (configure !== null) configure.hidden = !canManageProviders;
+    if (configure !== null) configure.hidden = !canConfigurePayos;
   };
 
   const integrationFrom = (payload: JsonObject | null): JsonObject | null => {
@@ -220,7 +221,7 @@ if (root !== null) {
   };
 
   const openConfig = (): void => {
-    if (!canManageProviders || configPanel === null || credentialForm === null || sensitiveActionPending) return;
+    if (!canConfigurePayos || configPanel === null || credentialForm === null || sensitiveActionPending) return;
     credentialForm.hidden = false;
     if (disconnectPanel !== null) disconnectPanel.hidden = true;
     setFeedback(configFeedback, "");
@@ -240,7 +241,7 @@ if (root !== null) {
   };
 
   const submitCredential = async (): Promise<void> => {
-    if (shopPublicId === undefined || credentialForm === null || sensitiveActionPending || !credentialForm.reportValidity()) return;
+    if (!canConfigurePayos || shopPublicId === undefined || credentialForm === null || sensitiveActionPending || !credentialForm.reportValidity()) return;
     const formData = new FormData(credentialForm);
     const body: JsonObject = {};
     for (const [key, value] of formData.entries()) {

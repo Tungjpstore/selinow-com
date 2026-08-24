@@ -282,7 +282,7 @@
   a.app-nav-item[aria-current="page"] {
     background: linear-gradient(135deg, rgba(101, 82, 232, 0.12) 0%, rgba(59, 130, 246, 0.06) 100%);
     border: 1px solid rgba(101, 82, 232, 0.20);
-    color: var(--sln-console-accent);
+    color: var(--sln-console-accent-text);
     font-weight: 600;
     box-shadow: 0 1px 3px rgba(124, 106, 240, 0.08);
   }
@@ -392,7 +392,7 @@
     border-radius: var(--sln-console-radius);
     border: 1px solid var(--sln-console-line);
     background: var(--sln-console-raised);
-    color: var(--sln-console-ink-3);
+    color: var(--sln-console-ink-2);
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
@@ -429,7 +429,7 @@
     border-radius: var(--sln-console-radius);
     border: 1px solid var(--sln-console-line);
     background: var(--sln-console-surface);
-    color: var(--sln-console-accent);
+    color: var(--sln-console-accent-text);
     font-size: 12px;
     font-weight: 600;
     text-decoration: none;
@@ -512,7 +512,7 @@
     .app-layout { display: block; }
     .app-sidebar { display: none; }
     .app-topbar { min-height: 64px; padding-inline: 16px; }
-    .app-topbar-context, .app-account { display: none; }
+    .app-topbar-context, .app-topbar-right, .app-account { display: none; }
 
     .app-mobile-topbar {
       display: flex;
@@ -614,13 +614,13 @@
 
     .app-mobile-nav :where(a, button)[aria-current="page"] {
       background: var(--sln-console-accent-subtle);
-      color: var(--sln-console-accent);
+      color: var(--sln-console-accent-text);
       font-weight: 600;
     }
     .app-mobile-nav button[data-mobile-menu-trigger="channels"] { color: inherit; }
     .app-mobile-nav button[data-mobile-menu-trigger="channels"][aria-current="page"] {
       background: var(--sln-console-accent-subtle);
-      color: var(--sln-console-accent);
+      color: var(--sln-console-accent-text);
     }
     .app-mobile-nav svg { width: 18px; height: 18px; flex-shrink: 0; }
 

@@ -63,6 +63,25 @@ beforeEach(() => {
 });
 
 describe("PayOS connection route", () => {
+  it.each([
+    ["subscription_payment_required", 402],
+    ["subscription_grace_expired", 402],
+    ["provider_not_ready", 402],
+  ])("preserves the safe entitlement failure %s", async (code, status) => {
+    dependencies.connect.mockRejectedValue(new AppError(code, status));
+
+    const response = await PUT(context());
+    expect(response).toBeInstanceOf(Response);
+    if (!(response instanceof Response)) throw new Error("response_missing");
+
+    const body = await response.text();
+    expect(response.status).toBe(status);
+    expect(JSON.parse(body)).toEqual({ code, ok: false, requestId: REQUEST_ID });
+    expect(body).not.toContain(credentials.clientId);
+    expect(body).not.toContain(credentials.apiKey);
+    expect(body).not.toContain(credentials.checksumKey);
+  });
+
   it("returns the safe staging admission code and request ID without reflecting credentials", async () => {
     dependencies.connect.mockRejectedValue(new AppError("payment_provider_environment_not_admitted", 409));
 
