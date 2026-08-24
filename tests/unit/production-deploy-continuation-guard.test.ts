@@ -337,14 +337,14 @@ describe("production Worker continuation deploy admission", () => {
     })).toThrow("production_database_invariant_data_violation:integrity_0112_google_oauth_state");
 
     const invalidProEntitlement = runner((rows, sql) => {
-      if (sql.includes("integrity_0116_pro_entitlement") && rows[0] !== undefined) {
-        rows[0].integrity_0116_pro_entitlement = 1;
+      if (sql.includes("integrity_0118_pro_entitlement") && rows[0] !== undefined) {
+        rows[0].integrity_0118_pro_entitlement = 1;
       }
     });
     expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
       migrationNames,
       runWranglerImplementation: invalidProEntitlement,
-    })).toThrow("production_database_invariant_data_violation:integrity_0116_pro_entitlement");
+    })).toThrow("production_database_invariant_data_violation:integrity_0118_pro_entitlement");
 
     const invalidTelegramGeneration = runner((rows, sql) => {
       if (sql.includes("integrity_0095_telegram_update_generation") && rows[0] !== undefined) {

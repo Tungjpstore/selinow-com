@@ -2557,7 +2557,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
         AND plan.code = 'pro'
         AND plan.is_active = 1
         AND json_extract(plan.feature_flags_json, '$.premiumStorefrontTemplates') = 1
-      ) AS integrity_0116_pro_entitlement,
+      ) AS integrity_0118_pro_entitlement,
     (SELECT COUNT(*) FROM outbox_jobs AS job
       WHERE job.kind = 'order_paid' AND job.status != 'completed'
       ) AS integrity_0095_legacy_order_paid_outbox,
@@ -2668,7 +2668,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0097_telegram_action_history",
     "integrity_0112_google_identity",
     "integrity_0112_google_oauth_state",
-    "integrity_0116_pro_entitlement",
+    "integrity_0118_pro_entitlement",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)
