@@ -44,7 +44,7 @@ const badge: "best" | "hot" | "new" | null = product.soldCount >= 5
         <strong>{purchasableVariant ? formatMoney(purchasableVariant.priceMinor, purchasableVariant.currency, locale) : t("storefront.product.contact")}</strong>
       </div>
       <div class="card-actions">
-        {purchasableVariant && <button type="button" data-cart-add data-variant-id={purchasableVariant.id} data-max-quantity={purchasableVariant.maxPerOrder} disabled={soldOut} aria-label={`${soldOut ? t("storefront.product.sold_out") : t("storefront.product.add")}: ${product.title}`} title={soldOut ? t("storefront.product.sold_out") : t("storefront.product.add")}>＋</button>}
+        {purchasableVariant && <button type="button" data-cart-add data-variant-id={purchasableVariant.id} data-max-quantity={purchasableVariant.maxPerOrder} disabled={soldOut} aria-label={`${soldOut ? t("storefront.product.sold_out") : t("storefront.product.quick_add")}: ${product.title}`} title={soldOut ? t("storefront.product.sold_out") : t("storefront.product.quick_add")}>＋</button>}
         <a href={`/products/${product.slug}`} aria-label={product.title} title={product.title}>→</a>
       </div>
     </div>

@@ -271,6 +271,12 @@ describe("TM4 merchandising contracts", () => {
     expect(pulse).toContain('aria-label={product.title}');
   });
 
+  it("gives quick-add and full add-to-cart controls distinct accessible names", () => {
+    const card = readFileSync("src/components/storefront/ProductCard.astro", "utf8");
+    expect(card).toContain('t("storefront.product.quick_add")');
+    expect(card).toContain('t("storefront.product.add")');
+  });
+
   it("ships recently viewed + cart cross-sell + detail tracking wired to localStorage", () => {
     const script = readFileSync("src/scripts/storefront/tm4-merchandising.ts", "utf8");
     expect(script).toContain("selinow-viewed:v1:");
