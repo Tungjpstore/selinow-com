@@ -18,11 +18,11 @@ WHERE id = 'plan_pro_v1'
 
 -- Fail the migration instead of silently reporting success if the canonical
 -- active Pro row is missing, duplicated, or still lacks the entitlement.
-CREATE TABLE migration_assert_0116_pro_entitlement (
+CREATE TABLE migration_assert_0118_pro_entitlement (
   verified INTEGER NOT NULL CHECK (verified = 1)
 );
 
-INSERT INTO migration_assert_0116_pro_entitlement (verified)
+INSERT INTO migration_assert_0118_pro_entitlement (verified)
 SELECT CASE WHEN COUNT(*) = 1 THEN 1 ELSE 0 END
 FROM plans
 WHERE id = 'plan_pro_v1'
@@ -30,4 +30,4 @@ WHERE id = 'plan_pro_v1'
   AND is_active = 1
   AND json_extract(feature_flags_json, '$.premiumStorefrontTemplates') = 1;
 
-DROP TABLE migration_assert_0116_pro_entitlement;
+DROP TABLE migration_assert_0118_pro_entitlement;

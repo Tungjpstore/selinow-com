@@ -684,7 +684,19 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_billing_checkout_sessions_shop_reconciliation: "cbec4665173db5f6502f1412673ac06f22f17d9b9dab86f6b6519a5a78630bda",
     }),
   }),
-  "0114_auth_otp_admission.sql": Object.freeze({
+  // These two migrations were already applied to staging under their
+  // original names; preserve their forward-only ledger identity.
+  "0114_pro_storefront_template_entitlement.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  "0115_seller_metrics_timestamp_index.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_orders_shop_paid_julianday_id: "c33ebdbb993f08dc65c8530b97070198ae43c0851bdeaf169e85bd7df49e8dec",
+    }),
+  }),
+  "0116_auth_otp_admission.sql": Object.freeze({
     columns: Object.freeze({
       "auth_otp_admissions.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
       "auth_otp_admissions.purpose": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
@@ -702,13 +714,13 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_auth_otp_admissions_expiry: "81affac85433d3a3412ca07060b8c164c56f6d9d9259488a836b5a3a3c202e0b",
     }),
   }),
-  "0115_auth_pending_password.sql": Object.freeze({
+  "0117_auth_pending_password.sql": Object.freeze({
     columns: Object.freeze({
       "platform_users.pending_password_hash": Object.freeze({ defaultValue: "NULL", notNull: 0, primaryKey: 0, type: "TEXT" }),
     }),
     objects: Object.freeze({}),
   }),
-  "0116_pro_premium_storefront_entitlement.sql": Object.freeze({
+  "0118_pro_premium_storefront_entitlement.sql": Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
   }),

@@ -134,7 +134,7 @@ describe("storefront template registry", () => {
     expect(plan).toMatchObject({ premium: 1 });
   });
 
-  it("fails migration 0116 when the canonical active Pro plan is absent", () => {
+  it("fails migration 0118 when the canonical active Pro plan is absent", () => {
     const database = new DatabaseSync(":memory:");
     databases.push(database);
     database.exec(`
@@ -150,8 +150,8 @@ describe("storefront template registry", () => {
       VALUES ('plan_pro_v1', 'pro', '{}', 1, 0, '2026-08-24T00:00:00.000Z');
     `);
 
-    expect(() => { database.exec(readFileSync("migrations/0116_pro_premium_storefront_entitlement.sql", "utf8")); })
-      .toThrow(/migration_assert_0116_pro_entitlement|CHECK constraint failed/u);
+    expect(() => { database.exec(readFileSync("migrations/0118_pro_premium_storefront_entitlement.sql", "utf8")); })
+      .toThrow(/migration_assert_0118_pro_entitlement|CHECK constraint failed/u);
   });
 
   it("keeps ids unique with one available non-premium default per vertical", () => {
