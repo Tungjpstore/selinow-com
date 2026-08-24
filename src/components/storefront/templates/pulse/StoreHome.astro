@@ -58,8 +58,8 @@ const promoWindow = promotions.find((candidate) => candidate.endsAt !== null) ??
       {products.slice(0, 6).map((product, index) => {
         const promotion = promotions.find((candidate) => candidate.endsAt !== null);
         return <article class="pulse-flash-card" data-flash-card={promotion?.endsAt ?? undefined}>
-          <a class="pulse-flash-visual" href={`/products/${product.slug}`} aria-hidden="true" tabindex="-1" data-visual={product.imageUrl !== null ? "image" : "mark"}>
-            {product.imageUrl !== null ? <img src={product.imageUrl} alt="" loading="lazy" decoding="async" /> : <strong>{product.title.slice(0, 1).toUpperCase()}</strong>}
+          <a class="pulse-flash-visual" href={`/products/${product.slug}`} aria-label={product.title} data-visual={product.imageUrl !== null ? "image" : "mark"}>
+            {product.imageUrl !== null ? <img src={product.imageUrl} alt="" loading="lazy" decoding="async" /> : <strong aria-hidden="true">{product.title.slice(0, 1).toUpperCase()}</strong>}
           </a>
           <div class="pulse-flash-copy">
             <strong>{product.title}</strong>

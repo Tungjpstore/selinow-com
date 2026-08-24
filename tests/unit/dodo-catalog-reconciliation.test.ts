@@ -308,11 +308,11 @@ describe("Dodo catalog reconciliation", () => {
         price: {
           currency: offer.currency,
           payment_frequency_count: 1,
-          payment_frequency_interval: "month",
+          payment_frequency_interval: "Month",
           price: offer.amountMinor,
           purchasing_power_parity: false,
-          subscription_period_count: 1,
-          subscription_period_interval: "month",
+          subscription_period_count: 20,
+          subscription_period_interval: "Year",
           tax_inclusive: true,
           trial_amount: null,
           trial_period_days: 0,
@@ -342,6 +342,14 @@ describe("Dodo catalog reconciliation", () => {
       ...byReference.get(REFERENCES.price_pro_vn_v1),
       price: { ...byReference.get(REFERENCES.price_pro_vn_v1)?.price, trial_period_days: 7 },
     }, proOffer, REFERENCES.price_pro_vn_v1)).toThrow("dodo_catalog_provider_trial_mismatch:price_pro_vn_v1");
+    expect(() => validateDodoCatalogProviderProduct({
+      ...byReference.get(REFERENCES.price_pro_vn_v1),
+      price: {
+        ...byReference.get(REFERENCES.price_pro_vn_v1)?.price,
+        subscription_period_count: 1,
+        subscription_period_interval: "Month",
+      },
+    }, proOffer, REFERENCES.price_pro_vn_v1)).toThrow("dodo_catalog_provider_interval_mismatch:price_pro_vn_v1");
   });
 
   it("never reads or mutates D1 when provider catalog attestation fails", async () => {

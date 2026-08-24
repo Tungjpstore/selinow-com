@@ -1,6 +1,13 @@
 # Implementation Status
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
+
+## Release-candidate verification follow-up (2026-08-25)
+
+- Corrected Dodo catalog validation to match the provider's recurring-subscription model: monthly billing frequency with a long-lived `20 Year` subscription period, case-insensitive provider interval values, tax-inclusive pricing, no provider trial, and no adaptive pricing. A one-month total period is now rejected because it expires after the first cycle.
+- Fixed storefront accessibility regressions by removing focusable descendants from `aria-hidden` visual wrappers and keeping the Pulse flash visual link accessible with an explicit product label.
+- Verification: focused Dodo/storefront regression set `2` files / `32` tests passed; full repository `364` files / `3,000` tests passed; `npm run check` reports 0 errors and 4 existing hints; lint, TypeScript, build, deploy dry-run, and `git diff --check` pass.
+- These changes are not yet represented by a fresh staging manifest or deployment evidence. Staging and production provider UAT, PayOS controlled transfer, production backup/restore/rollback ceremony, legal attestation, and production deploy remain pending and must be completed against the new committed candidate only.
 
 ## Commercial checkout, onboarding and entitlement correction (2026-08-24)
 

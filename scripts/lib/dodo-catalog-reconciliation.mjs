@@ -12,6 +12,12 @@ const DODO_API_BASE_URLS = Object.freeze({
   test_mode: "https://test.dodopayments.com",
 });
 
+// Dodo keeps the subscription alive for a long period while charging at the
+// configured frequency. A one-month payment frequency with a one-month
+// subscription period expires after the first cycle instead of renewing.
+const DODO_SUBSCRIPTION_PERIOD_COUNT = 20;
+const DODO_SUBSCRIPTION_PERIOD_INTERVAL = "year";
+
 export const DODO_CATALOG_OFFERS = Object.freeze([
   Object.freeze({
     amountMinor: 99_000,
@@ -140,6 +146,12 @@ function providerObject(value) {
 export function validateDodoCatalogProviderProduct(product, offer, reference) {
   const row = providerObject(product);
   const price = providerObject(row.price);
+  const paymentFrequencyInterval = typeof price.payment_frequency_interval === "string"
+    ? price.payment_frequency_interval.toLowerCase()
+    : null;
+  const subscriptionPeriodInterval = typeof price.subscription_period_interval === "string"
+    ? price.subscription_period_interval.toLowerCase()
+    : null;
   if (row.product_id !== reference) throw new Error(`dodo_catalog_provider_identity_mismatch:${offer.id}`);
   if (row.is_recurring !== true || price.type !== "recurring_price") {
     throw new Error(`dodo_catalog_provider_recurring_mismatch:${offer.id}`);
@@ -147,8 +159,9 @@ export function validateDodoCatalogProviderProduct(product, offer, reference) {
   if (price.currency !== offer.currency || price.price !== offer.amountMinor) {
     throw new Error(`dodo_catalog_provider_price_mismatch:${offer.id}`);
   }
-  if (price.payment_frequency_count !== 1 || price.payment_frequency_interval !== "month"
-    || price.subscription_period_count !== 1 || price.subscription_period_interval !== "month") {
+  if (price.payment_frequency_count !== 1 || paymentFrequencyInterval !== "month"
+    || price.subscription_period_count !== DODO_SUBSCRIPTION_PERIOD_COUNT
+    || subscriptionPeriodInterval !== DODO_SUBSCRIPTION_PERIOD_INTERVAL) {
     throw new Error(`dodo_catalog_provider_interval_mismatch:${offer.id}`);
   }
   if (price.tax_inclusive !== true) throw new Error(`dodo_catalog_provider_tax_mismatch:${offer.id}`);
