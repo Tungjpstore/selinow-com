@@ -2685,6 +2685,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0097_telegram_action_history",
     "integrity_0112_google_identity",
     "integrity_0112_google_oauth_state",
+    "integrity_0114_pro_premium_flag",
     "integrity_0118_pro_entitlement",
   ];
   if (dataRows.length !== 1

@@ -322,8 +322,6 @@ function initQuickstart(): void {
   const premiumTemplatesEntitled = root.dataset.premiumTemplatesEntitled === "true";
   const requestedPlanCode = root.dataset.requestedPlanCode === "pro" ? "pro" : "starter";
   const creationAllowed = root.dataset.creationAllowed !== "false";
-  const requestedPlan = new URLSearchParams(window.location.search).get("plan");
-  const requestedPlanCode = requestedPlan === "pro" ? "pro" : "starter";
 
   let activeShopPublicId = root.dataset.activeShopPublicId || "";
   let activeShopSlug = "";
