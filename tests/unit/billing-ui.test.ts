@@ -17,6 +17,8 @@ type AttemptTracker = {
   begin: (input: { planCode: string; recovery: boolean; shopPublicId: string }) => Attempt;
   fail: (attempt: Pick<Attempt, "idempotencyKey">, terminalResponse: boolean) => void;
   finish: (attempt: Pick<Attempt, "idempotencyKey">) => void;
+  finishSession: (checkoutSessionId: string) => void;
+  opened: (attempt: Pick<Attempt, "idempotencyKey">, checkoutSessionId: string) => void;
 };
 type OperationAttempt = { action: "cancel" | "cancel_scheduled_plan_change" | "change_plan" | "resume"; expectedSubscriptionVersion: number; idempotencyKey: string; requestedPlanCode: string | null; shopPublicId: string };
 type OperationAttemptTracker = {
@@ -133,6 +135,7 @@ describe("subscription state presentation", () => {
     const persisted = storage.value("selinow.billing.checkout-attempt.v1");
     expect(persisted).not.toBeNull();
     expect(JSON.parse(persisted ?? "null")).toEqual({
+      checkoutSessionId: null,
       expiresAt: 86_701_000,
       idempotencyKey: "checkout-key-1",
       planCode: "starter",
@@ -167,7 +170,7 @@ describe("subscription state presentation", () => {
     expect(billingModule.billingPlanChangeDirection(null, { ...current })).toBe("unknown");
   });
 
-  it("retains the persisted key until a successful checkout response is fully validated", async () => {
+  it("retains the persisted key until the bound checkout reaches a terminal state", async () => {
     const billingModule = await loadBillingScript();
     const storage = memoryStorage();
     const tracker = new billingModule.BillingCheckoutAttemptTracker({ createKey: () => "checkout-key-malformed", now: () => 1_000, storage });
@@ -179,7 +182,19 @@ describe("subscription state presentation", () => {
     const reloadedAttempt = reloadedTracker.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" });
     expect(reloadedAttempt.idempotencyKey).toBe("checkout-key-malformed");
 
-    expect(billingModule.acceptBillingCheckoutResponse({ checkout: { checkoutUrl: "https://checkout.example.test/session/ok", provider: "dodo" } }, reloadedAttempt, reloadedTracker)).toBe("https://checkout.example.test/session/ok");
+    const checkoutSessionId = "bchk_00000000-0000-4000-8000-000000000001";
+    expect(() => billingModule.acceptBillingCheckoutResponse({ checkout: { checkoutUrl: "https://checkout.example.test/session/missing-id", provider: "dodo" } }, reloadedAttempt, reloadedTracker)).toThrow();
+    expect(billingModule.acceptBillingCheckoutResponse({ checkout: { checkoutUrl: "https://checkout.example.test/session/ok", provider: "dodo", sessionId: checkoutSessionId } }, reloadedAttempt, reloadedTracker)).toBe("https://checkout.example.test/session/ok");
+    expect(JSON.parse(storage.value("selinow.billing.checkout-attempt.v1") ?? "null")).toMatchObject({
+      checkoutSessionId,
+      idempotencyKey: "checkout-key-malformed",
+    });
+
+    const afterHostedCheckout = new billingModule.BillingCheckoutAttemptTracker({ createKey: () => "checkout-key-unexpected", now: () => 3_000, storage });
+    expect(afterHostedCheckout.begin({ planCode: "pro", recovery: false, shopPublicId: "shop-a" }).idempotencyKey).toBe("checkout-key-malformed");
+    afterHostedCheckout.finishSession("bchk_00000000-0000-4000-8000-000000000002");
+    expect(storage.value("selinow.billing.checkout-attempt.v1")).not.toBeNull();
+    afterHostedCheckout.finishSession(checkoutSessionId);
     expect(storage.value("selinow.billing.checkout-attempt.v1")).toBeNull();
   });
 
@@ -346,6 +361,10 @@ describe("subscription state presentation", () => {
     expect(controller).not.toContain('currentPlanCode === "starter" && plan.code === "pro"');
     expect(controller).toContain('failure.code === "billing_provider_request_rejected"');
     expect(page).toContain("invoicesDescription");
+    expect(page).toContain('class="billing-section-nav"');
+    expect(page).toContain('data-billing-disclosure="usage"');
+    expect(page).toContain('data-billing-disclosure="invoices"');
+    expect(page).toContain('class="billing-disclosure-summary"');
     expect(page).toContain("metric_orders_created");
     expect(page).toContain("billing.scheduledPlanName");
     expect(page).toContain("type BillingPrimaryAction =");

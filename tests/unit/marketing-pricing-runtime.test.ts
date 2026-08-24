@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
   getDefaultMarketingMarket,
   getMarketingAvailableMarkets,
   getMarketingPlans,
+  getMarketingPlanPriceForMarket,
   getMarketingPreviewPlans,
   getMarketingStructuredOffers,
   isMarketingPricingReady,
@@ -93,6 +96,21 @@ describe("marketing pricing runtime truthfulness", () => {
     expect(getDefaultMarketingMarket(plans, "vi-VN")).toBe("global");
     expect(isMarketingPricingReady(plans)).toBe(true);
     expect(getMarketingStructuredOffers(plans)).toHaveLength(2);
+  });
+
+  it("selects exactly one published offer for the server-rendered market", () => {
+    const starter = plan("starter", [
+      price("vn", "price_starter_vn"),
+      price("global", "price_starter_global"),
+    ]);
+
+    expect(getMarketingPlanPriceForMarket(starter, "vn")).toMatchObject({ currency: "VND", marketCode: "vn" });
+    expect(getMarketingPlanPriceForMarket(starter, "global")).toMatchObject({ currency: "USD", marketCode: "global" });
+    expect(getMarketingPlanPriceForMarket(plan("starter", [price("vn", "pending:dodo:starter:vn")]), "vn")).toBeNull();
+    expect(getMarketingPlanPriceForMarket(plan("starter", [price("vn", "price-a"), price("vn", "price-b")]), "vn")).toBeNull();
+
+    const pricingPage = readFileSync("src/pages/pricing.astro", "utf8");
+    expect(pricingPage).toContain("hidden={price.marketCode !== defaultMarket}");
   });
 
   it("blocks structured offers when plans do not share a complete market", () => {
