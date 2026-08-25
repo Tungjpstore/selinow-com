@@ -1941,12 +1941,25 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
     if (protectedBackup !== null && artifactChecksumSha256 !== protectedBackup.checksumSha256) {
       throw new Error("staging_backup_artifact_invalid");
     }
-    if (protectedBackup !== null) {
-      safeRunner(runner, [
-        "d1", "execute", targetName, "--remote", "--env", environment,
-        "--file", sourceArtifact, "--yes",
-      ], "restore_import_failed", runnerOptions);
-    }
+    const importSplitArtifact = async () => {
+      const dump = await readFile(sourceArtifact, "utf8");
+      const { dataSql, indexSql, schemaSql, triggerSql } = splitDumpForImport(dump);
+      const schemaFile = resolve(tempDirectory, "import-schema.sql");
+      const indexFile = resolve(tempDirectory, "import-indexes.sql");
+      const dataFile = resolve(tempDirectory, "import-data.sql");
+      const triggerFile = resolve(tempDirectory, "import-triggers.sql");
+      await writeFile(schemaFile, schemaSql, { encoding: "utf8", mode: 0o600 });
+      await writeFile(indexFile, indexSql, { encoding: "utf8", mode: 0o600 });
+      await writeFile(dataFile, dataSql, { encoding: "utf8", mode: 0o600 });
+      await writeFile(triggerFile, triggerSql, { encoding: "utf8", mode: 0o600 });
+      for (const importFile of [schemaFile, indexFile, dataFile, triggerFile]) {
+        safeRunner(runner, [
+          "d1", "execute", targetName, "--remote", "--env", environment,
+          "--file", importFile, "--yes",
+        ], "restore_import_failed", runnerOptions);
+      }
+    };
+    if (protectedBackup !== null) await importSplitArtifact();
     const sourceQueryTarget = protectedBackup === null ? target.databaseName : targetName;
     const sourceTableRows = parseWranglerRows(remoteExecute(
       runner,
@@ -1973,26 +1986,7 @@ async function runRemoteRestoreDrill(options, target, identifiers) {
       runnerOptions,
     ), sourceCountTables);
     if (protectedBackup === null) {
-      // D1 executes --file payloads in independent batches, so a raw dump that
-      // interleaves CREATE and INSERT statements fails mid-import on populated
-      // databases whenever a CREATE's foreign-key target appears later in the
-      // dump. Import the schema first, then the rows.
-      const dump = await readFile(sourceArtifact, "utf8");
-      const { dataSql, indexSql, schemaSql, triggerSql } = splitDumpForImport(dump);
-      const schemaFile = resolve(tempDirectory, "import-schema.sql");
-      const indexFile = resolve(tempDirectory, "import-indexes.sql");
-      const dataFile = resolve(tempDirectory, "import-data.sql");
-      const triggerFile = resolve(tempDirectory, "import-triggers.sql");
-      await writeFile(schemaFile, schemaSql, { encoding: "utf8", mode: 0o600 });
-      await writeFile(indexFile, indexSql, { encoding: "utf8", mode: 0o600 });
-      await writeFile(dataFile, dataSql, { encoding: "utf8", mode: 0o600 });
-      await writeFile(triggerFile, triggerSql, { encoding: "utf8", mode: 0o600 });
-      for (const importFile of [schemaFile, indexFile, dataFile, triggerFile]) {
-        safeRunner(runner, [
-          "d1", "execute", targetName, "--remote", "--env", environment,
-          "--file", importFile, "--yes",
-        ], "restore_import_failed", runnerOptions);
-      }
+      await importSplitArtifact();
     }
     const repositoryMigrationNames = await expectedMigrationNames();
     const initialMigrationRows = parseWranglerRows(remoteExecute(
