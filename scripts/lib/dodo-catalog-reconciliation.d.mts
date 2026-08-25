@@ -35,6 +35,7 @@ export function parseDodoCatalogArguments(argv: readonly string[]): {
   explicitDryRun: boolean;
   inspect: boolean;
   json: boolean;
+  manifestPath: string | null;
 };
 export function readDodoCatalogReferences(environment?: NodeJS.ProcessEnv): DodoCatalogReferences;
 export function readDodoCatalogProviderMode(environment?: NodeJS.ProcessEnv): "test_mode" | "live_mode";
@@ -43,6 +44,10 @@ export function readDodoCatalogProviderConfig(environment?: NodeJS.ProcessEnv): 
   apiKey: string;
   providerMode: "test_mode" | "live_mode";
 };
+export function buildDodoCatalogCloudflareEnvironment(
+  environment: NodeJS.ProcessEnv,
+  accountId: string,
+): NodeJS.ProcessEnv;
 export function validateDodoCatalogTarget(input: {
   environment: "staging" | "production";
   providerMode: "test_mode" | "live_mode";
@@ -74,6 +79,7 @@ export function dodoCatalogUpdateSql(references: DodoCatalogReferences): string;
 export function parseDodoCatalogCommandOutput(output: string): { updatedCount: number };
 export function parseDodoCatalogRotationCommandOutput(output: string): { mode: "already_rotated" | "rotated"; closedCount: number; insertedCount: number };
 export function inspectDodoCatalog(input: {
+  commandEnvironment?: NodeJS.ProcessEnv;
   environment: "staging" | "production";
   references: DodoCatalogReferences;
   providerMode: "test_mode" | "live_mode";
@@ -82,6 +88,7 @@ export function inspectDodoCatalog(input: {
 export function reconcileDodoCatalog(input: {
   apiBaseUrl: string;
   apiKey: string;
+  commandEnvironment?: NodeJS.ProcessEnv;
   environment: "staging" | "production";
   fetcher?: typeof fetch;
   references: DodoCatalogReferences;

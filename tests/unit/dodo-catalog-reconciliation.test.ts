@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   attestDodoCatalogProducts,
+  buildDodoCatalogCloudflareEnvironment,
   classifyDodoCatalogRows,
   DODO_CATALOG_OFFERS,
   dodoCatalogCompletionSql,
@@ -278,14 +279,28 @@ describe("Dodo catalog reconciliation", () => {
       .toThrow("staging_test_catalog_confirmation_required");
     expect(parseDodoCatalogArguments([
       "--env", "staging", "--apply", "--confirm-catalog-update", "--confirm-staging-test-catalog",
-    ])).toMatchObject({ confirmStagingTestCatalog: true });
+      "--release-manifest", ".wrangler/releases/staging/stg_test/release-manifest.json",
+    ])).toMatchObject({
+      confirmStagingTestCatalog: true,
+      manifestPath: ".wrangler/releases/staging/stg_test/release-manifest.json",
+    });
+    expect(() => parseDodoCatalogArguments([
+      "--env", "staging", "--apply", "--confirm-catalog-update", "--confirm-staging-test-catalog",
+    ])).toThrow("dodo_catalog_release_manifest_required");
     expect(() => parseDodoCatalogArguments([
       "--env", "production", "--apply", "--confirm-catalog-update", "--confirm-production",
     ])).toThrow("production_live_catalog_confirmation_required");
     expect(parseDodoCatalogArguments([
       "--env", "production", "--apply", "--confirm-catalog-update", "--confirm-production",
+      "--confirm-production-live-catalog", "--release-manifest=.wrangler/releases/release_test/release-manifest.json",
+    ])).toMatchObject({
+      confirmProductionLiveCatalog: true,
+      manifestPath: ".wrangler/releases/release_test/release-manifest.json",
+    });
+    expect(() => parseDodoCatalogArguments([
+      "--env", "production", "--apply", "--confirm-catalog-update", "--confirm-production",
       "--confirm-production-live-catalog",
-    ])).toMatchObject({ confirmProductionLiveCatalog: true });
+    ])).toThrow("dodo_catalog_release_manifest_required");
     expect(() => {
       validateDodoCatalogTarget({
         environment: "staging", providerMode: "live_mode", confirmStagingTestCatalog: true,
@@ -430,5 +445,35 @@ describe("Dodo catalog reconciliation", () => {
     const script = readFileSync("scripts/dodo-catalog-reconcile.mjs", "utf8");
     expect(script).toContain("apiBaseUrl: providerConfig.apiBaseUrl");
     expect(script).toContain("apiKey: providerConfig.apiKey");
+    expect(script).toContain("assertPaymentProviderMutationAdmission");
+    expect(script).toContain("buildDodoCatalogCloudflareEnvironment");
+    expect(script).toContain("manifestPath: options.manifestPath");
+    expect(script.indexOf("assertPaymentProviderMutationAdmission({"))
+      .toBeLessThan(script.indexOf("readDodoCatalogProviderConfig(process.env)"));
+  });
+
+  it("refuses the default remote sink without an explicitly scoped Cloudflare environment", () => {
+    expect(() => inspectDodoCatalog({
+      environment: "staging",
+      providerMode: "test_mode",
+      references: REFERENCES,
+    })).toThrow("dodo_catalog_cloudflare_environment_required");
+  });
+
+  it("pins D1 credentials and strips ambient Cloudflare OAuth and provider secrets", () => {
+    const commandEnvironment = buildDodoCatalogCloudflareEnvironment({
+      CLOUDFLARE_API_TOKEN: "ambient-token-must-not-win",
+      CLOUDFLARE_D1_API_TOKEN: "scoped-d1-token",
+      CLOUDFLARE_OAUTH_TOKEN: "ambient-oauth-must-not-pass",
+      DODO_PAYMENTS_API_KEY: "provider-secret-must-not-pass",
+      PATH: process.env.PATH,
+    }, "a".repeat(32));
+    expect(commandEnvironment).toMatchObject({
+      CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
+      CLOUDFLARE_API_TOKEN: "scoped-d1-token",
+    });
+    expect(commandEnvironment).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
+    expect(commandEnvironment).not.toHaveProperty("CLOUDFLARE_OAUTH_TOKEN");
+    expect(commandEnvironment).not.toHaveProperty("DODO_PAYMENTS_API_KEY");
   });
 });

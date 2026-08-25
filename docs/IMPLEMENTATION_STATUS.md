@@ -1,6 +1,13 @@
 # Implementation Status
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
+
+## Dodo catalog mutation admission (2026-08-26)
+
+- Closed the catalog-reconciliation credential/admission gap: `--apply` now requires the exact staging/production release manifest and runs the same payment-provider mutation admission used by guarded Dodo webhook and PayOS operations before reading the Dodo API key or issuing any provider/D1 request.
+- Remote D1 inspection and mutation now run only with an account-pinned child environment derived from the short-lived `CLOUDFLARE_D1_API_TOKEN`. Ambient `CLOUDFLARE_API_TOKEN`, Wrangler OAuth, provider keys and unrelated operator credentials are not forwarded; the default remote sink rejects unbranded environments.
+- Dry-run remains side-effect free and no longer reads product references. Successful apply output records the admitted release ID and commit; missing/stale/candidate-mismatched manifests and configured/live D1 account mismatches fail closed.
+- Verification: focused Dodo/payment operational coverage passed `2` files / `21` tests; touched-file ESLint, `git diff --check`, and Astro check pass with 0 errors and 4 existing hints. No external provider or Cloudflare mutation was executed.
 
 ## Production release gate audit (2026-08-25)
 

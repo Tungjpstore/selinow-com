@@ -4,6 +4,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import { runWrangler } from "./cli.mjs";
+import { buildPinnedCloudflareEnvironment } from "./platform.mjs";
 
 const PROVIDER_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/u;
 const ENVIRONMENTS = new Set(["staging", "production"]);
@@ -11,6 +12,7 @@ const DODO_API_BASE_URLS = Object.freeze({
   live_mode: "https://live.dodopayments.com",
   test_mode: "https://test.dodopayments.com",
 });
+const scopedCloudflareEnvironments = new WeakSet();
 
 // Dodo keeps the subscription alive for a long period while charging at the
 // configured frequency. A one-month payment frequency with a one-month
@@ -83,6 +85,7 @@ export function parseDodoCatalogArguments(argv) {
     environment: null,
     inspect: false,
     json: false,
+    manifestPath: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -94,6 +97,12 @@ export function parseDodoCatalogArguments(argv) {
     else if (argument === "--confirm-production-live-catalog") options.confirmProductionLiveCatalog = true;
     else if (argument === "--confirm-staging-test-catalog") options.confirmStagingTestCatalog = true;
     else if (argument === "--json") options.json = true;
+    else if (argument === "--release-manifest") {
+      options.manifestPath = argv[index + 1] ?? "";
+      index += 1;
+    } else if (argument.startsWith("--release-manifest=")) {
+      options.manifestPath = argument.slice("--release-manifest=".length);
+    }
     else if (argument === "--env") {
       options.environment = argv[index + 1] ?? null;
       index += 1;
@@ -112,6 +121,9 @@ export function parseDodoCatalogArguments(argv) {
   }
   if (options.environment === "production" && options.apply && !options.confirmProductionLiveCatalog) {
     throw new Error("production_live_catalog_confirmation_required");
+  }
+  if (options.apply && (typeof options.manifestPath !== "string" || options.manifestPath.length === 0)) {
+    throw new Error("dodo_catalog_release_manifest_required");
   }
   return options;
 }
@@ -137,6 +149,12 @@ export function readDodoCatalogProviderConfig(environment = process.env) {
   const apiKey = environment.DODO_PAYMENTS_API_KEY ?? environment.DODO_API_KEY;
   if (typeof apiKey !== "string" || apiKey.length < 16) throw new Error("dodo_catalog_provider_credentials_required");
   return { apiBaseUrl: DODO_API_BASE_URLS[providerMode], apiKey, providerMode };
+}
+
+export function buildDodoCatalogCloudflareEnvironment(environment, accountId) {
+  const childEnvironment = buildPinnedCloudflareEnvironment(environment, accountId);
+  scopedCloudflareEnvironments.add(childEnvironment);
+  return childEnvironment;
 }
 
 function providerObject(value) {
@@ -607,17 +625,30 @@ async function writePrivateSqlFile(sql) {
   return { directory, file };
 }
 
-function runRemote(environment, args, issue) {
+function runRemote(environment, args, issue, commandEnvironment) {
   try {
-    return runWrangler(["d1", "execute", "PLATFORM_DB", "--env", environment, "--remote", ...args], { capture: true }).stdout;
+    return runWrangler(["d1", "execute", "PLATFORM_DB", "--env", environment, "--remote", ...args], {
+      capture: true,
+      env: commandEnvironment,
+    }).stdout;
   } catch {
     throw new Error(issue);
   }
 }
 
+function resolveRemoteRunner(input) {
+  if (input.runRemoteImplementation !== undefined) return input.runRemoteImplementation;
+  if (typeof input.commandEnvironment !== "object"
+    || input.commandEnvironment === null
+    || !scopedCloudflareEnvironments.has(input.commandEnvironment)) {
+    throw new Error("dodo_catalog_cloudflare_environment_required");
+  }
+  return (environment, args, issue) => runRemote(environment, args, issue, input.commandEnvironment);
+}
+
 function readRemoteDodoCatalog(input) {
   validateDodoCatalogProviderEnvironment(input);
-  const runRemoteImplementation = input.runRemoteImplementation ?? runRemote;
+  const runRemoteImplementation = resolveRemoteRunner(input);
   const rows = parseWranglerRows(
     runRemoteImplementation(input.environment, ["--command", dodoCatalogReadSql(), "--json"], "dodo_catalog_read_failed"),
     "dodo_catalog_read",
@@ -660,7 +691,7 @@ export async function reconcileDodoCatalog(input) {
   if (attested?.verifiedCount !== DODO_CATALOG_OFFERS.length) {
     throw new Error("dodo_catalog_provider_attestation_incomplete");
   }
-  const runRemoteImplementation = input.runRemoteImplementation ?? runRemote;
+  const runRemoteImplementation = resolveRemoteRunner(input);
   const { rows, ...before } = readRemoteDodoCatalog({ ...input, runRemoteImplementation });
   if (before.mode === "already_configured" || before.mode === "rotated") {
     if (before.reconciliationRequired) {
