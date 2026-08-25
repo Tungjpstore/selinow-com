@@ -26,6 +26,11 @@ const GIT_SHA = /^[a-f0-9]{40}$/u;
 const WORKER_VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/u;
 const CONTROL_PATH = "/api/internal/uat/providers/dodo";
 const PROVIDER_ORIGIN = "https://test.dodopayments.com";
+const STAGING_RUNTIME_HOSTS = new Set([
+  "staging.selinow.com",
+  "app-staging.selinow.com",
+  "api-staging.selinow.com",
+]);
 const MAX_CONTEXT_BYTES = 256 * 1024;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const REQUIRED_CLAIMS = Object.freeze([
@@ -146,7 +151,7 @@ function validateAuthContext(value) {
   let origin;
   try { origin = new URL(value.runtimeOrigin); } catch { fail("dodo_uat_executor_auth_context_invalid"); }
   if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash
-    || origin.hostname === "localhost" || origin.hostname.endsWith(".localhost")) fail("dodo_uat_executor_auth_context_invalid");
+    || !STAGING_RUNTIME_HOSTS.has(origin.hostname.toLowerCase())) fail("dodo_uat_executor_auth_context_invalid");
   return { ...value, runtimeOrigin: origin.origin };
 }
 
@@ -351,11 +356,11 @@ async function control(fetcher, auth, input, phase, runId = null) {
 }
 
 function signatureKey(secret) {
-  const stripped = secret.startsWith("whsec_") ? secret.slice(6) : secret;
-  try {
+  if (secret.startsWith("whsec_")) {
+    const stripped = secret.slice(6);
     const decoded = Buffer.from(stripped, "base64");
-    if (decoded.length >= 16) return decoded;
-  } catch { /* fall through */ }
+    if (decoded.length > 0) return decoded;
+  }
   return Buffer.from(secret, "utf8");
 }
 
@@ -374,9 +379,9 @@ function verifyWebhookEvent(event, secret, expectedAuthority) {
   const expected = createHmac("sha256", signatureKey(secret)).update(signed).digest();
   const verified = signatureHeader.split(/\s+/u).some((entry) => {
     const raw = entry.startsWith("v1,") ? entry.slice(3) : entry;
-    let candidate;
-    try { candidate = Buffer.from(raw, "base64"); } catch { return false; }
-    return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+    const candidates = [Buffer.from(raw, "base64")];
+    if (/^[a-f0-9]{64}$/iu.test(raw)) candidates.push(Buffer.from(raw, "hex"));
+    return candidates.some((candidate) => candidate.length === expected.length && timingSafeEqual(candidate, expected));
   });
   if (!verified) fail("dodo_uat_executor_provider_signature_invalid");
   return {
