@@ -108,8 +108,9 @@ function d1Rows() {
 
 function fetchFixture({ unsupported = false } = {}) {
   const rows = d1Rows();
-  return (input: string | URL, init?: RequestInit) => {
-    const url = String(input);
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    await Promise.resolve();
+    const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
     if (url.endsWith("/api/internal/uat/providers/dodo")) {
       if (unsupported) return new Response(JSON.stringify({ error: "unsupported" }), { status: 501 });
       const rawBody = init?.body;

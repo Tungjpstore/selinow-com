@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({
-  env: {},
+const state = vi.hoisted(() => {
+  const env: Record<string, unknown> = {};
+  return {
+    env,
   dodoConfig: { apiBaseUrl: "https://test.dodopayments.com", apiKey: "dodo-test-key-value", environment: "test_mode", webhookSecret: "webhook-test-secret" },
-}));
+  };
+});
 
 vi.mock("../../src/lib/platform/bindings", () => ({ getBindings: () => state.env }));
 vi.mock("../../src/lib/billing/dodo", () => ({ getDodoConfig: () => state.dodoConfig }));
