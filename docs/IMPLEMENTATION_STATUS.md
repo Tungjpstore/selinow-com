@@ -7,7 +7,7 @@ Last updated: 2026-08-26
 - Added the staging-only `/api/internal/uat/providers/dodo` control route. It authenticates with a dedicated secret, binds every request to the exact release commit/tree/manifest and active Worker version metadata, and rejects production or unsupported scenarios fail-closed.
 - The first executable provider observation is `plan_catalog_offers`: it verifies the four Dodo test-mode catalog rows against the live Dodo API without writing acceptance evidence. Checkout/webhook scenarios remain blocked until the controlled runner can produce genuine provider events and redacted signed proofs.
 - Added `version_metadata` bindings and release deployment variables so the route cannot execute against an unbound Worker. The UAT executor now sends the full release binding to the control plane.
-- Verification: focused provider/billing suites passed 49 tests; `npm run check` passes with 0 errors and 4 existing hints; focused ESLint passes. Staging deployment was not executed because `platform:doctor` still fails the Cloudflare fallback-origin permission check (`403/10000`).
+- Verification: the provider control/executor regression set now passes 3 files / 11 tests; `npm run check` passes with 0 errors and 4 existing hints; full ESLint, build, staging deploy dry-run, route preflight, migration status and database preflight pass. With the scoped D1/resource/route audit tokens, Cloudflare resources and all staging routes pass; `platform:doctor` still fails only the SaaS fallback-origin API check (`403/10000`) because the current operator tokens lack `Account SSL & Certificates: Write`. Staging deployment and live provider UAT were not executed.
 
 ## Dodo catalog mutation admission (2026-08-26)
 
