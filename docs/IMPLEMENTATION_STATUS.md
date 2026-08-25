@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-25
 
+## Onboarding publication-gate truthfulness follow-up (2026-08-25)
+
+- Confirmed the staging storefront is unpublished because `CURRENT_POLICY_ATTESTATION_VERSION` remains intentionally `null`; PayOS connectivity and the active Pro entitlement are not the cause of `policy_unpublished`.
+- The quickstart launch UI now receives the server-owned policy version, labels seller support/Terms/Privacy/refund information as required before publication, collects attestation only against an actual positive platform policy version, and disables the publish action while the platform policy is unpublished. It no longer presents an optional-policy path that can only fail at the backend.
+- Backend publication remains fail-closed and unchanged: no return URL, QR render, client celebration state, or seller-entered URL can publish the catalog, create payment truth, or substitute for an approved platform policy.
+- Verification: focused policy/readiness/publication coverage passed `4` files / `36` tests; the final quickstart contract passed `9/9`; full repository coverage passed `366` files / `3,030` tests; `npm run check` reports 0 errors and 4 existing hints; lint, build, local deploy dry-run, staging deploy dry-run, and `git diff --check` pass.
+- Any staging deployment of this change must be bound to a fresh clean-commit release manifest and exact 100% Worker deployment evidence under `.wrangler/releases/staging/<release-id>/`. Production remains NO-GO until owner-approved and formally reviewed platform legal/support policy content has an effective version, controlled PayOS UAT is complete, and monitoring/pilot/rollback plus production backup/restore evidence is accepted.
+
 ## PayOS admission, Pro access and authenticated UI release candidate (2026-08-25)
 
 - Restored native, ARIA and `data-*` forwarding in the shared `Button` primitive. The affected two-factor enrollment, password, export and inventory controls now retain their client action hooks; authenticated browser acceptance clicks the real two-factor button and proves the enrollment form opens.

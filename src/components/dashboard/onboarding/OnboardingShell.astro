@@ -23,6 +23,7 @@ type Props = {
   displayName: string;
   email: string;
   platformBaseDomain: string;
+  policyAttestationVersion: number | null;
   premiumTemplatesEntitled?: boolean;
   requestedPlanCode?: PublicPlanCode | null;
   resume?: OnboardingResumeState | null;
@@ -37,6 +38,7 @@ const {
   displayName,
   email,
   platformBaseDomain,
+  policyAttestationVersion,
   premiumTemplatesEntitled = false,
   requestedPlanCode = null,
   resume = null,
@@ -63,6 +65,8 @@ const steps = [
   data-quickstart-root
   data-csrf-cookie-name={csrfCookieName}
   data-platform-base-domain={platformBaseDomain}
+  data-policy-attestation-published={policyAttestationVersion !== null ? "true" : "false"}
+  data-policy-attestation-version={policyAttestationVersion ?? ""}
   data-default-currency={defaultCurrency}
   data-default-locale={defaultLocale}
   data-shops={JSON.stringify(shops)}
@@ -111,7 +115,10 @@ const steps = [
       <OnboardingStepProduct defaultCurrency={defaultCurrency} initialVertical={initialVertical} />
       <OnboardingStepInventory initialVertical={initialVertical} />
       <OnboardingStepConnect />
-      <OnboardingStepLaunch platformBaseDomain={platformBaseDomain} />
+      <OnboardingStepLaunch
+        platformBaseDomain={platformBaseDomain}
+        policyAttestationVersion={policyAttestationVersion}
+      />
     </div>
   </main>
 

@@ -8,6 +8,7 @@ import { getBindings } from "../lib/platform/bindings";
 import { PUBLIC_PLAN_CODES, type PublicPlanCode } from "../lib/billing/plan-catalog";
 import { sellablePublicPlanHasFeature } from "../lib/billing/catalog";
 import { getOnboardingResume } from "../lib/onboarding/resume";
+import { CURRENT_POLICY_ATTESTATION_VERSION } from "../lib/onboarding/policy";
 import { getShopCreationAdmission, listShopsForMember, selectShopForMember } from "../lib/tenants/store";
 import { PREMIUM_STOREFRONT_TEMPLATES_FEATURE } from "../lib/storefront/templates";
 import { getSellerStorefrontSettings } from "../lib/tenants/storefront-settings";
@@ -84,6 +85,7 @@ const creationAllowed = creationAdmission?.allowed !== false;
     displayName={auth.displayName.trim() || t("onboarding.user_fallback")}
     email={auth.email}
     platformBaseDomain={env.PLATFORM_BASE_DOMAIN}
+    policyAttestationVersion={CURRENT_POLICY_ATTESTATION_VERSION}
     premiumTemplatesEntitled={premiumTemplatesEntitled}
     requestedPlanCode={requestedPlanCode}
     resume={resume}

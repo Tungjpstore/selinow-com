@@ -318,6 +318,12 @@ function initQuickstart(): void {
 
   const csrfCookieName = root.dataset.csrfCookieName || "selinow_session_csrf";
   const platformBaseDomain = root.dataset.platformBaseDomain || "selinow.com";
+  const policyAttestationVersionValue = Number(root.dataset.policyAttestationVersion);
+  const policyAttestationVersion = root.dataset.policyAttestationPublished === "true"
+    && Number.isSafeInteger(policyAttestationVersionValue)
+    && policyAttestationVersionValue > 0
+    ? policyAttestationVersionValue
+    : null;
   const defaultCurrency = root.dataset.defaultCurrency || "VND";
   const toastEl = root.querySelector<HTMLElement>("[data-onboarding-toast]");
   const premiumTemplatesEntitled = root.dataset.premiumTemplatesEntitled === "true";
@@ -1422,6 +1428,7 @@ function initQuickstart(): void {
   const launchSettingsForm = root.querySelector<HTMLFormElement>("[data-launch-settings-form]");
   const saveSettingsBtn = root.querySelector<HTMLButtonElement>("[data-btn-save-settings]");
   const publishBtn = root.querySelector<HTMLButtonElement>("[data-step-submit='launch']");
+  const policyAttestationInput = root.querySelector<HTMLInputElement>("[data-input-launch-attestation]");
   const launchReview = root.querySelector<HTMLElement>("[data-launch-review]");
   const launchCelebration = root.querySelector<HTMLElement>("[data-launch-celebration]");
 
@@ -1470,6 +1477,13 @@ function initQuickstart(): void {
         showToast("Vui lòng hoàn thành bước tạo cửa hàng trước.", "error");
         return;
       }
+      if (!launchSettingsForm.reportValidity()) return;
+      const attestationAccepted = policyAttestationVersion !== null && policyAttestationInput?.checked === true;
+      if (policyAttestationVersion !== null && !attestationAccepted) {
+        showToast("Hãy xác nhận chính sách hiện hành trước khi lưu.", "error");
+        policyAttestationInput?.focus();
+        return;
+      }
 
       const support = (root.querySelector<HTMLInputElement>("[data-input-launch-support]")?.value || "").trim();
       const terms = (root.querySelector<HTMLInputElement>("[data-input-launch-terms]")?.value || "").trim();
@@ -1483,8 +1497,8 @@ function initQuickstart(): void {
           `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/onboarding/settings`,
           {
             body: JSON.stringify({
-              attestationAccepted: false,
-              attestationVersion: null,
+              attestationAccepted,
+              attestationVersion: attestationAccepted ? policyAttestationVersion : null,
               privacyUrl: privacy || null,
               refundPolicyUrl: refund || null,
               supportContact: support || null,
@@ -1539,6 +1553,10 @@ function initQuickstart(): void {
 
   publishBtn?.addEventListener("click", () => {
     void (async () => {
+      if (policyAttestationVersion === null) {
+        showToast("Chưa thể mở bán vì Selinow chưa phát hành chính sách nền tảng.", "error");
+        return;
+      }
       publishBtn.disabled = true;
       let published = false;
       try {
@@ -1564,6 +1582,8 @@ function initQuickstart(): void {
       if (published) completeAndCelebrate();
     })();
   });
+
+  if (publishBtn !== null) publishBtn.disabled = policyAttestationVersion === null;
 
   // --- Back navigation buttons ---
   root.querySelectorAll<HTMLButtonElement>("[data-step-back]").forEach((btn) => {

@@ -22,6 +22,24 @@ describe("onboarding quickstart API contracts", () => {
 
     expect(script).toContain("/onboarding/settings`");
     expect(script).toMatch(/\/onboarding\/settings`,[\s\S]{0,600}method: "PUT"/u);
+    expect(script).toContain("policyAttestationVersion !== null && policyAttestationInput?.checked === true");
+    expect(script).toContain("attestationVersion: attestationAccepted ? policyAttestationVersion : null");
+  });
+
+  it("fails the quickstart publish UI closed while platform policy is unpublished", async () => {
+    const [page, shell, step, script] = await Promise.all([
+      readFile("src/pages/onboarding.astro", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingStepLaunch.astro", "utf8"),
+      readFile("src/scripts/dashboard/onboarding-quickstart.ts", "utf8"),
+    ]);
+
+    expect(page).toContain("CURRENT_POLICY_ATTESTATION_VERSION");
+    expect(shell).toContain("data-policy-attestation-published");
+    expect(step).toContain("Mở bán đang chờ chính sách nền tảng");
+    expect(step).toContain("bắt buộc trước khi mở bán");
+    expect(step).not.toContain("(không bắt buộc)");
+    expect(script).toContain("publishBtn.disabled = policyAttestationVersion === null");
   });
 
   it("keeps existing-shop mutations on their canonical route methods and persists the profile", async () => {
