@@ -2,30 +2,42 @@
 import PlatformLayout from "../layouts/PlatformLayout.astro";
 import MarketingHeader from "../components/marketing/MarketingHeader.astro";
 import MarketingFooter from "../components/marketing/MarketingFooter.astro";
-import PublicationGate from "../components/marketing/PublicationGate.astro";
+import PolicyDocument from "../components/marketing/PolicyDocument.astro";
 import { getBindings } from "../lib/platform/bindings";
 import { normalizeSupportedLocale } from "../lib/i18n/locale";
 
 const env = getBindings();
 const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
 Astro.response.headers.set("Cache-Control", "public, max-age=300");
+const isVi = locale.toLowerCase().startsWith("vi");
+const sections = isVi ? [
+  { title: "Dữ liệu được xử lý", paragraphs: ["Selinow có thể xử lý thông tin tài khoản, thành viên cửa hàng, catalog, đơn hàng, mã định danh giao dịch/provider, nhật ký bảo mật, request ID, thông tin hỗ trợ và dữ liệu cần thiết để giao sản phẩm."] },
+  { title: "Mục đích và bên cung cấp", paragraphs: ["Dữ liệu được dùng để xác thực, cung cấp và bảo vệ dịch vụ, xử lý thanh toán, giao sản phẩm, chống gian lận, hỗ trợ, khắc phục lỗi và tuân thủ nghĩa vụ pháp lý. Selinow có thể chia sẻ dữ liệu tối thiểu với hạ tầng, email, lưu trữ, thanh toán hoặc chống gian lận khi cần thực hiện dịch vụ; Selinow không bán dữ liệu cá nhân cho quảng cáo."] },
+  { title: "Vai trò và quyền của bạn", paragraphs: ["Đối với dữ liệu do người bán đưa vào để phục vụ khách hàng, người bán quyết định mục đích kinh doanh và Selinow xử lý theo chỉ dẫn hợp lệ. Đối với dữ liệu tài khoản, bảo mật, subscription và vận hành, Selinow quyết định mục đích cần thiết cho dịch vụ.", "Bạn có thể yêu cầu truy cập, sửa, hạn chế hoặc xóa dữ liệu trong phạm vi pháp luật cho phép. Yêu cầu cần đủ thông tin xác minh và không được gửi mật khẩu, token, secret hoặc license key."] },
+  { title: "Lưu giữ và bảo mật", paragraphs: ["Orders, payment evidence, audit và abuse records được giữ tối đa 10 năm khi cần cho nghĩa vụ pháp lý hoặc đối soát; dữ liệu khác được xóa hoặc ẩn danh khi không còn cần. Legal hold, điều tra gian lận và yêu cầu hợp pháp có thể kéo dài thời hạn giữ. Dữ liệu nhạy cảm được bảo vệ bằng các kiểm soát truy cập, mã hóa và nhật ký an toàn phù hợp."] },
+] : [
+  { title: "Data we process", paragraphs: ["Selinow may process account, store-member, catalog, order, provider transaction identifiers, security-log, request-ID, support, and digital-delivery data."] },
+  { title: "Purposes and providers", paragraphs: ["Data is used for authentication, service delivery and protection, payment processing, digital delivery, fraud prevention, support, troubleshooting, and legal compliance. Selinow may share the minimum data needed with infrastructure, email, storage, payment, or fraud-prevention providers; Selinow does not sell personal data for advertising."] },
+  { title: "Roles and your rights", paragraphs: ["For seller-entered data used to serve seller customers, the seller determines the business purpose and Selinow processes it under valid instructions. For account, security, subscription, and platform operations data, Selinow determines the necessary processing purpose.", "You may request access, correction, restriction, or deletion where permitted by law. Requests require enough information to verify identity and must not include passwords, tokens, secrets, or license keys."] },
+  { title: "Retention and security", paragraphs: ["Orders, payment evidence, audit, and abuse records are retained for up to 10 years where needed for legal or reconciliation purposes; other data is deleted or anonymized when no longer needed. Legal holds, fraud investigations, and lawful requests may extend retention. Sensitive data is protected with appropriate access, encryption, and audit controls."] },
+];
 ---
 
 <PlatformLayout
-  title="Privacy status | Selinow"
-  description="Publication status of Selinow privacy policy and data governance terms."
+  title={isVi ? "Quyền riêng tư — Selinow" : "Privacy Policy — Selinow"}
+  description={isVi ? "Cách Selinow xử lý dữ liệu tài khoản, cửa hàng, đơn hàng và thanh toán." : "How Selinow processes account, store, order, and payment data."}
   locale={locale}
   canonical="https://selinow.com/privacy"
 >
   <div class="landing-page">
-  <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-  <PublicationGate
-    eyebrow="PRIVACY STATUS"
-    title="Policy publication is blocked."
-    detail="Selinow has not published owner-approved privacy terms, retention periods, contact details, or data-subject instructions on this surface."
-    aside="Owner approval and legal review are required before this page can state policy or accept privacy requests."
-    locale={locale}
-  />
-  <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-</div>
+    <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+    <PolicyDocument
+      eyebrow={isVi ? "QUYỀN RIÊNG TƯ" : "PRIVACY"}
+      title={isVi ? "Quyền riêng tư Selinow" : "Selinow Privacy Policy"}
+      intro={isVi ? "Thông tin rõ ràng về dữ liệu được xử lý, mục đích, quyền của bạn và thời hạn lưu giữ." : "Clear information about data processing, purposes, your rights, and retention."}
+      sections={sections}
+      locale={locale}
+    />
+    <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  </div>
 </PlatformLayout>

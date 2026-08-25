@@ -1,0 +1,159 @@
+---
+
+interface PolicySection {
+  title: string;
+  paragraphs?: string[];
+  bullets?: string[];
+}
+
+interface Props {
+  eyebrow: string;
+  title: string;
+  intro: string;
+  sections: PolicySection[];
+  locale?: unknown;
+}
+
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+const { eyebrow, title, intro, sections, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const isVi = locale.toLowerCase().startsWith("vi");
+const policyMeta = isVi
+  ? "Phiên bản 1 · Có hiệu lực từ 25/08/2026"
+  : "Version 1 · Effective 25 August 2026";
+const ownerLabel = isVi ? "Chủ thể công bố" : "Published by";
+const ownerValue = "Nguyễn Công Tùng · Selinow";
+const contactLabel = isVi ? "Liên hệ chính sách" : "Policy contact";
+
+---
+
+<main id="main-content" class="public-doc-page">
+  <section class="public-doc-hero">
+    <div class="platform-shell readable">
+      <p class="kit-kicker">{eyebrow}</p>
+      <h1 class="hero-headline">{title}</h1>
+      <p class="hero-lead">{intro}</p>
+      <div class="public-doc-meta" aria-label={isVi ? "Thông tin phiên bản" : "Policy metadata"}>
+        <span>{policyMeta}</span>
+        <span>{ownerLabel}: {ownerValue}</span>
+      </div>
+    </div>
+  </section>
+
+  <article class="platform-shell readable public-doc-content">
+    {sections.map((section, index) => (
+      <section class="public-doc-section" id={`policy-section-${index + 1}`}>
+        <h2>{section.title}</h2>
+        {section.paragraphs?.map((paragraph) => <p>{paragraph}</p>)}
+        {section.bullets && section.bullets.length > 0 && (
+          <ul>
+            {section.bullets.map((bullet) => <li>{bullet}</li>)}
+          </ul>
+        )}
+      </section>
+    ))}
+
+    <aside class="public-doc-contact">
+      <strong>{contactLabel}</strong>
+      <a href="mailto:tungbipdz@gmail.com">tungbipdz@gmail.com</a>
+      <p>{isVi
+        ? "Không gửi mật khẩu, OTP, token, API key, payment secret hoặc license key plaintext."
+        : "Never send passwords, OTPs, tokens, API keys, payment secrets, or plaintext license keys."}</p>
+    </aside>
+  </article>
+</main>
+
+<style>
+  .public-doc-hero {
+    padding-block: clamp(52px, 8vw, 104px) clamp(36px, 5vw, 64px);
+    background:
+      radial-gradient(720px 320px at 50% -12%, rgba(101, 82, 232, 0.11), transparent 68%),
+      linear-gradient(180deg, var(--mk-canvas-deep) 0%, var(--mk-canvas) 100%);
+    border-bottom: 1px solid var(--mk-hairline);
+  }
+
+  .public-doc-hero .hero-headline {
+    max-width: 760px;
+  }
+
+  .public-doc-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-6);
+    margin-top: var(--space-6);
+    color: var(--text-tertiary);
+    font: 12px/1.5 var(--font-mono);
+  }
+
+  .public-doc-content {
+    padding-block: clamp(40px, 6vw, 80px);
+  }
+
+  .public-doc-section {
+    padding-block: var(--space-6);
+    border-bottom: 1px solid var(--mk-hairline-soft);
+  }
+
+  .public-doc-section:first-child {
+    padding-top: 0;
+  }
+
+  .public-doc-section h2 {
+    margin: 0 0 var(--space-3);
+    color: var(--text-primary);
+    font-size: clamp(20px, 3vw, 28px);
+    letter-spacing: -0.02em;
+  }
+
+  .public-doc-section p,
+  .public-doc-section li {
+    max-width: 72ch;
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  .public-doc-section p {
+    margin: 0 0 var(--space-3);
+  }
+
+  .public-doc-section p:last-child {
+    margin-bottom: 0;
+  }
+
+  .public-doc-section ul {
+    margin: var(--space-3) 0 0;
+    padding-inline-start: 1.35rem;
+  }
+
+  .public-doc-section li + li {
+    margin-top: var(--space-2);
+  }
+
+  .public-doc-contact {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-8);
+    padding: var(--space-5);
+    background: var(--brand-50);
+    border: 1px solid var(--brand-200);
+    border-radius: var(--radius-md);
+  }
+
+  .public-doc-contact strong {
+    color: var(--brand-900);
+  }
+
+  .public-doc-contact a {
+    color: var(--brand-700);
+    font-weight: 700;
+  }
+
+  .public-doc-contact p {
+    margin: 0;
+    color: var(--brand-800);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+</style>

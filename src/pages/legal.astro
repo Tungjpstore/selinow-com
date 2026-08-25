@@ -2,46 +2,44 @@
 import PlatformLayout from "../layouts/PlatformLayout.astro";
 import MarketingHeader from "../components/marketing/MarketingHeader.astro";
 import MarketingFooter from "../components/marketing/MarketingFooter.astro";
-import PublicationGate from "../components/marketing/PublicationGate.astro";
+import PolicyDocument from "../components/marketing/PolicyDocument.astro";
 import { getBindings } from "../lib/platform/bindings";
 import { normalizeSupportedLocale } from "../lib/i18n/locale";
 
 const env = getBindings();
 const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
 Astro.response.headers.set("Cache-Control", "public, max-age=300");
-
-const items = [
-  {
-    title: "Terms",
-    detail: "Blocked pending owner approval and legal review.",
-  },
-  {
-    title: "Refunds",
-    detail: "Blocked. No refund eligibility, window, or process is stated here.",
-  },
-  {
-    title: "Tax",
-    detail: "Blocked. No tax treatment or seller obligation is stated here.",
-  },
+const isVi = locale.toLowerCase().startsWith("vi");
+const sections = isVi ? [
+  { title: "Chủ thể và phạm vi", paragraphs: ["Selinow được công bố bởi Nguyễn Công Tùng, Xóm Tân Mỹ, Vân Tụ, Nghệ An, Việt Nam, mã số thuế 040099014422. Selinow cung cấp phần mềm cho người bán quản lý catalog, đơn hàng, thanh toán, tồn kho và giao sản phẩm số. Kênh hỗ trợ nền tảng: tungbipdz@gmail.com."] },
+  { title: "Tài khoản và trách nhiệm người bán", paragraphs: ["Người dùng phải giữ an toàn mật khẩu, OTP, token, API key và license key. Người bán chịu trách nhiệm về quyền phân phối, mô tả, giá, thuế/phí, nội dung giao, hỗ trợ sau bán và chính sách riêng của sản phẩm.", "Không được phân phối mã độc, hàng hóa bất hợp pháp, nội dung xâm phạm quyền hoặc né tránh kiểm soát thanh toán. Selinow có thể tạm ngừng tài khoản, cửa hàng hoặc giao dịch để bảo vệ hệ thống, điều tra gian lận hoặc tuân thủ yêu cầu hợp pháp."] },
+  { title: "Thanh toán và giao hàng", paragraphs: ["PayOS xử lý thanh toán theo tài khoản provider của cửa hàng. Dodo Payments xử lý subscription Selinow. Redirect, QR hoặc ảnh chụp không phải bằng chứng thanh toán; chỉ event có chữ ký hợp lệ hoặc reconciliation đúng tenant mới xác nhận thanh toán.", "Dodo là merchant of record cho subscription khi checkout hoặc invoice của Dodo thể hiện vai trò đó. Provider terms và chứng từ giao dịch được ưu tiên khi có quy định cụ thể."] },
+  { title: "Hoàn tiền và hủy gói", paragraphs: ["Sản phẩm số hoặc license key đã giao thường không hoàn tiền chỉ vì đổi ý. Có thể hoàn hoặc giao lại khi sản phẩm sai mô tả, giao trùng, lỗi không thể khắc phục hoặc giao nhầm do lỗi hệ thống. Yêu cầu gửi trong 7 ngày, kèm order code/request ID. Hủy subscription có hiệu lực cho kỳ tiếp theo."] },
+  { title: "Luật áp dụng và tranh chấp", paragraphs: ["Áp dụng pháp luật Việt Nam. Tranh chấp được ưu tiên thương lượng; nếu không giải quyết được, tranh chấp thuộc cơ quan có thẩm quyền tại Việt Nam theo quy định bắt buộc. Điều khoản này không loại trừ quyền không thể từ bỏ của người tiêu dùng."] },
+] : [
+  { title: "Entity and scope", paragraphs: ["Selinow is published by Nguyễn Công Tùng, Xóm Tân Mỹ, Vân Tụ, Nghệ An, Vietnam, tax identifier 040099014422. Selinow provides software for sellers to manage catalogs, orders, payments, inventory, and digital delivery. Platform support: tungbipdz@gmail.com."] },
+  { title: "Accounts and seller responsibility", paragraphs: ["Users must protect passwords, OTPs, tokens, API keys, and license keys. Sellers are responsible for distribution rights, descriptions, prices, taxes and fees, delivered content, after-sales support, and product-specific policies.", "Malware, unlawful goods, rights-infringing content, and payment-control evasion are prohibited. Selinow may suspend an account, store, or transaction to protect the system, investigate fraud, or comply with a lawful request."] },
+  { title: "Payments and delivery", paragraphs: ["PayOS processes payments under the store's provider account. Dodo Payments processes Selinow subscriptions. A redirect, QR image, or screenshot is not payment evidence; only a valid signed event or tenant-correct reconciliation confirms payment.", "Dodo is merchant of record for a subscription when the Dodo checkout or invoice states that role. Provider terms and transaction documents control where they contain specific terms."] },
+  { title: "Refunds and cancellation", paragraphs: ["A delivered digital product or license key is generally non-refundable solely because a buyer changed their mind. Refund or redelivery may apply for a materially incorrect, duplicate, irreparably faulty, or system-misdelivered product. Submit a request within 7 days with an order code/request ID. Subscription cancellation applies to the next renewal."] },
+  { title: "Governing law and disputes", paragraphs: ["Vietnamese law applies. Disputes should first be negotiated; unresolved disputes belong to a competent authority in Vietnam under mandatory procedure. This does not remove non-waivable consumer rights."] },
 ];
 ---
 
 <PlatformLayout
-  title="Legal status | Selinow"
-  description="Publication status of Selinow legal terms and seller policies."
+  title={isVi ? "Điều khoản sử dụng — Selinow" : "Terms of Use — Selinow"}
+  description={isVi ? "Điều khoản sử dụng nền tảng Selinow, thanh toán và trách nhiệm người bán." : "Selinow platform terms, payments, and seller responsibilities."}
   locale={locale}
   canonical="https://selinow.com/legal"
 >
   <div class="landing-page">
-  <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-  <PublicationGate
-    eyebrow="LEGAL PUBLICATION GATE"
-    title="No policy values are published yet."
-    detail="Selinow legal and commercial policy documents are currently under governance review. No unapproved commitments are published on this surface."
-    items={items}
-    aside="Owner approval and formal legal review are required before policy terms can take effect."
-    locale={locale}
-  />
-  <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-</div>
+    <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+    <PolicyDocument
+      eyebrow={isVi ? "ĐIỀU KHOẢN NỀN TẢNG" : "PLATFORM TERMS"}
+      title={isVi ? "Điều khoản sử dụng Selinow" : "Selinow Terms of Use"}
+      intro={isVi ? "Các quy tắc áp dụng cho nền tảng, người bán, người mua và các giao dịch provider." : "Rules for the platform, sellers, buyers, and provider-backed transactions."}
+      sections={sections}
+      locale={locale}
+    />
+    <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  </div>
 </PlatformLayout>

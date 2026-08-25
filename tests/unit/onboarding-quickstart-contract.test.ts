@@ -26,7 +26,7 @@ describe("onboarding quickstart API contracts", () => {
     expect(script).toContain("attestationVersion: attestationAccepted ? policyAttestationVersion : null");
   });
 
-  it("fails the quickstart publish UI closed while platform policy is unpublished", async () => {
+  it("keeps quickstart publish bound to the server-owned policy version", async () => {
     const [page, shell, step, script] = await Promise.all([
       readFile("src/pages/onboarding.astro", "utf8"),
       readFile("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8"),

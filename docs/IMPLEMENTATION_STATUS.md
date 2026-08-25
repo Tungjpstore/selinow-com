@@ -2,6 +2,24 @@
 
 Last updated: 2026-08-25
 
+## Production release gate audit (2026-08-25)
+
+- Performed a read-only Cloudflare audit as `tungbipdz@gmail.com` for account `ef250a88911fd24073cb73d1c07e0218`; no production/staging database, Worker, route, secret, queue, DNS, Dodo, or PayOS mutation was executed by this audit.
+- Production D1 `selinow-production` is currently applied through `0112_google_auth_foundation.sql`; candidate migrations `0113` through `0119` remain pending in production. Staging is applied through `0119_payos_provider_projection_lifecycle.sql`.
+- Production Worker inventory confirms the currently active historical version `4cbab0cc-ac81-41fc-b79f-7695596c3071`; historical route-neutral candidate/rollback uploads exist, but they are not accepted evidence for this dirty, unmanifested candidate.
+- Backup and isolated-restore plans pass in dry-run mode. A real protected production backup/restore report is not present for this candidate because the required scoped D1 operator token, release manifest, and clean source identity are absent.
+- Dodo test catalog inspection remains non-UAT evidence (four test offers configured; no accepted signed execution proof). PayOS remains unaccepted because no controlled signed webhook/reconciliation artifact exists for this candidate. No synthetic provider evidence is permitted.
+- Monitoring, two-store pilot, manual acceptance, owner approvals, exact candidate Worker version, and rollback rehearsal artifacts are not present in the candidate evidence path. `release:doctor --json` therefore remains fail-closed and production status is **NO-GO**.
+- Local Astro type checking passes with 0 errors, 0 warnings, and 4 existing hints. Production dry-run planners pass; these results do not authorize remote mutation.
+
+## Legal/support policy V1 publication (2026-08-25)
+
+- Published the owner-approved policy bundle at `docs/LEGAL_SUPPORT_POLICY_V1.md` using Nguyễn Công Tùng, Xóm Tân Mỹ, Vân Tụ, Nghệ An, Việt Nam, tax identifier `040099014422`.
+- Policy SHA-256: `73f1f57c8e99d72feb86cbd035831816b8613f9f3b3f9c158b2a2510abf70543`; public platform support is `tungbipdz@gmail.com`.
+- Replaced the public `/legal`, `/privacy`, and `/support` gates with responsive bilingual policy surfaces and version metadata effective `2026-08-25`.
+- Set `CURRENT_POLICY_ATTESTATION_VERSION = 1`; onboarding/readiness can now record a seller attestation against the published platform policy.
+- Production remains NO-GO for the separate provider UAT, release manifest, backup/restore, monitoring, pilot and rollback gates. No production mutation or live charge was performed by this change.
+
 ## PayOS provider projection lifecycle repair (2026-08-25)
 
 - Confirmed the staging checkout readiness failure was a data-lifecycle defect, not an invalid Pro entitlement or seller credential: a PayOS integration created after migration `0035` had no provider-neutral `payment_provider_connections` projection, so provider readiness failed closed even though the legacy integration was active and webhook-verified.
@@ -10,12 +28,12 @@ Last updated: 2026-08-25
 - The staging migration gate permits this single known failing check only when `0119` is the sole pending migration and the live ledger exactly matches the manifest baseline; every other preflight check must pass, and the same PayOS check is immediately re-run in strict mode after migration. This closes the bootstrap deadlock without creating a general preflight bypass.
 - The protected-backup restore drill now always re-emits D1 dumps as tables, unique indexes, dependency-ordered data and finally triggers. This prevents D1 from rejecting the new composite PayOS foreign key during raw batched import while preserving checksum validation against the original protected artifact.
 - Verification: focused migration/payment/release coverage passed `6` files / `37` tests and the staging admission regression set passed `4` files / `46` tests; the complete repository passed `367` files / `3,033` tests; `npm run check` reports 0 errors and 4 existing hints; lint, TypeScript, build, local deploy dry-run, staging deploy dry-run and `git diff --check` pass.
-- The controlled staging ceremony still requires a fresh exact-commit manifest, protected pre/post backups, isolated restore drills, migration `0119`, zero post-migration PayOS projection defects, an exact Worker deployment binding and live checkout verification. Production remains NO-GO while `CURRENT_POLICY_ATTESTATION_VERSION` is unpublished; that legal/support approval cannot be fabricated or bypassed, and the public storefront plus controlled `5,000 VND` PayOS transfer remain blocked by that legitimate publication gate.
+- The controlled staging ceremony still requires a fresh exact-commit manifest, protected pre/post backups, isolated restore drills, migration `0119`, zero post-migration PayOS projection defects, an exact Worker deployment binding and live checkout verification. The policy gate is now satisfied by V1; provider and operational gates remain separate.
 
 ## Onboarding publication-gate truthfulness follow-up (2026-08-25)
 
-- Confirmed the staging storefront is unpublished because `CURRENT_POLICY_ATTESTATION_VERSION` remains intentionally `null`; PayOS connectivity and the active Pro entitlement are not the cause of `policy_unpublished`.
-- The quickstart launch UI now receives the server-owned policy version, labels seller support/Terms/Privacy/refund information as required before publication, collects attestation only against an actual positive platform policy version, and disables the publish action while the platform policy is unpublished. It no longer presents an optional-policy path that can only fail at the backend.
+- The former `policy_unpublished` staging blocker is resolved by the owner-approved V1 policy and attestation version `1`; PayOS connectivity and Pro entitlement continue to be evaluated independently.
+- The quickstart launch UI receives the server-owned policy version, labels seller support/Terms/Privacy/refund information as required before publication, and collects attestation only against the positive published policy version. The explicit null-version fail-closed branch remains for future rollback or unpublished versions.
 - Backend publication remains fail-closed and unchanged: no return URL, QR render, client celebration state, or seller-entered URL can publish the catalog, create payment truth, or substitute for an approved platform policy.
 - Verification: focused policy/readiness/publication coverage passed `4` files / `36` tests; the final quickstart contract passed `9/9`; full repository coverage passed `366` files / `3,030` tests; `npm run check` reports 0 errors and 4 existing hints; lint, build, local deploy dry-run, staging deploy dry-run, and `git diff --check` pass.
 - Any staging deployment of this change must be bound to a fresh clean-commit release manifest and exact 100% Worker deployment evidence under `.wrangler/releases/staging/<release-id>/`. Production remains NO-GO until owner-approved and formally reviewed platform legal/support policy content has an effective version, controlled PayOS UAT is complete, and monitoring/pilot/rollback plus production backup/restore evidence is accepted.
@@ -31,7 +49,7 @@ Last updated: 2026-08-25
 - Staging release `stg_20260825T102833Z_09dc4de74952` deployed Worker version `1d8129a7-f725-4ac2-933d-157181f79219` after route/platform/database admission, two protected backups, two isolated restore drills, no-op migration confirmation, post-migration evidence and exact deployment binding. Post-deploy D1, PayOS link integrity, routes, resources, queues, cron and phase-A smoke all pass.
 - The first staging visual run passed `19/20`; the only failure captured the product-detail button during its legitimate `Đang kiểm tra…` hydration state. The test now waits for the authoritative enabled `Thêm vào giỏ` state before visual capture; the focused mobile rerun passes and the full staging visual gate passes `20/20` without changing a baseline or runtime source.
 - No PayOS transfer or production mutation is claimed by this checkpoint. The test-only follow-up must be committed and rebound to a fresh exact staging manifest/deployment before one controlled `5,000 VND` PayOS QR payment records signed webhook/reconciliation and idempotent fulfillment evidence.
-- Production remains NO-GO until the current policy attestation is approved and recorded, staging provider UAT is complete, monitoring/pilot/rollback evidence exists, and the production backup/restore ceremony passes. `CURRENT_POLICY_ATTESTATION_VERSION = null` is intentionally not fabricated or bypassed.
+- Production remains NO-GO until staging provider UAT is complete, monitoring/pilot/rollback evidence exists, and the production backup/restore ceremony passes. The policy attestation is now version `1`.
 
 ## Release-candidate verification follow-up (2026-08-25)
 

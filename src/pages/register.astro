@@ -231,6 +231,10 @@ const t = createSystemTranslator(locale);
           </div>
           <div class="privacy-note">
             <span>{t("auth.login.privacy")}</span>
+            <span> · </span>
+            <a href="/legal">{locale === "vi-VN" ? "Điều khoản" : "Terms"}</a>
+            <span> · </span>
+            <a href="/privacy">{locale === "vi-VN" ? "Quyền riêng tư" : "Privacy"}</a>
           </div>
         </div>
       </div>
