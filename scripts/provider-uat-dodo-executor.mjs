@@ -121,7 +121,7 @@ async function readPrivateJson(path, issue) {
   }
 }
 
-/** @param {any} stream */
+/** @param {AsyncIterable<Uint8Array | string>} stream */
 async function readInput(stream = process.stdin) {
   let input = "";
   for await (const chunk of stream) {
@@ -334,12 +334,16 @@ async function control(fetcher, auth, input, phase, runId = null) {
     method: "POST",
     headers: { Authorization: `Bearer ${auth.accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
+      commitSha: input.release.commitSha,
+      manifestRef: input.release.manifestRef,
+      manifestSha256: input.release.manifestSha256,
       phase,
       provider: "dodo",
       releaseId: input.release.releaseId,
       runId,
       scenarioId: input.scenarioId,
       schemaVersion: 1,
+      treeSha: input.release.treeSha,
       workerVersion: input.release.workerVersion,
     }),
   }, "dodo_uat_executor_control");
@@ -492,7 +496,25 @@ async function writeArtifact(root, input, dodo, execution, fingerprints, referen
 }
 
 /**
- * @param {{ environment?: Record<string, string | undefined>, fetcher?: any, inputStream?: any, now?: () => Date, repositoryRoot?: string }} options
+ * @typedef {object} DodoUatReceipt
+ * @property {number} schemaVersion
+ * @property {string} artifactRef
+ * @property {string} artifactSha256
+ * @property {string} authority
+ * @property {string} d1AfterSha256
+ * @property {string} d1BeforeSha256
+ * @property {string} d1TransitionSha256
+ * @property {string} executionTranscriptSha256
+ * @property {string} observedAt
+ * @property {string} provider
+ * @property {string | null} providerEventSha256
+ * @property {string | null} providerSignatureSha256
+ * @property {object} release
+ * @property {string} scenarioId
+ */
+/**
+ * @param {{ environment?: Record<string, string | undefined>, fetcher?: (input: string | URL, init?: RequestInit) => Promise<Response>, inputStream?: AsyncIterable<Uint8Array | string>, now?: () => Date, repositoryRoot?: string }} options
+ * @returns {Promise<DodoUatReceipt>}
  */
 export async function runDodoUatExecutor({
   environment = process.env,
