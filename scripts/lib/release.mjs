@@ -1199,6 +1199,67 @@ export function validateCandidateBoundReleaseEvidence({ evidence, now = new Date
   };
 }
 
+/**
+ * Prove that the candidate UUID used by operational evidence is an immutable
+ * deployable Worker version carrying the reviewed release provenance.
+ */
+export function validateCandidateWorkerVersionEvidence({ evidence, workerVersionInventory } = {}) {
+  const inventory = Array.isArray(workerVersionInventory) ? workerVersionInventory : [];
+  const workerVersionPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+  const inventoryShapeValid = inventory.length > 0 && inventory.every((entry) => (
+    entry !== null
+    && typeof entry === "object"
+    && typeof entry.id === "string"
+    && workerVersionPattern.test(entry.id)
+    && Object.hasOwn(entry, "binding")
+  ));
+  const inventoryIds = inventoryShapeValid ? inventory.map((entry) => entry.id) : [];
+  const matchingEntries = inventoryShapeValid
+    ? inventory.filter((entry) => entry.id === evidence?.candidateWorkerVersion)
+    : [];
+  const candidate = matchingEntries.length === 1 ? matchingEntries[0] : null;
+  const binding = candidate?.binding;
+  const expectedManifestRef = `.wrangler/releases/${evidence?.releaseId ?? ""}/release-manifest.json`;
+  const checks = [
+    makeCheck("evidence.candidateWorkerVersion.liveInventory", inventoryShapeValid),
+    makeCheck(
+      "evidence.candidateWorkerVersion.liveInventoryUnique",
+      inventoryShapeValid && new Set(inventoryIds).size === inventoryIds.length,
+    ),
+    makeCheck("evidence.candidateWorkerVersion.liveCandidate", matchingEntries.length === 1),
+    makeCheck("evidence.candidateWorkerVersion.liveBinding", binding !== null
+      && typeof binding === "object"
+      && binding.commitSha === evidence?.commitSha
+      && binding.treeSha === evidence?.treeSha
+      && binding.releaseId === evidence?.releaseId
+      && binding.manifestRef === expectedManifestRef
+      && binding.role === "candidate"),
+  ];
+  return {
+    checks,
+    missing: checks.filter((check) => !check.ok).map((check) => check.name),
+    ok: checks.every((check) => check.ok),
+  };
+}
+
+export async function inspectLiveCandidateWorkerVersionEvidence(input) {
+  const observation = await (
+    input.workerIdentityImplementation ?? assertProductionWorkerIdentityAdmission
+  )({
+    environment: input.environment,
+    infrastructureAdmissionMode: "pre_candidate",
+    productionSpec: input.productionSpec,
+    repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+    requireCurrentWorkerVersion: true,
+    stagingSpec: input.stagingSpec,
+    wranglerConfig: input.wranglerConfig,
+  });
+  return validateCandidateWorkerVersionEvidence({
+    evidence: input.evidence,
+    workerVersionInventory: observation.deployableWorkerVersionInventory,
+  });
+}
+
 function projectCandidateBoundReleaseEvidence(evidence) {
   return Object.fromEntries(Object.keys(CANDIDATE_BOUND_EVIDENCE_DEFINITIONS).map((section) => {
     const entry = evidence?.[section] ?? {};
@@ -1207,6 +1268,7 @@ function projectCandidateBoundReleaseEvidence(evidence) {
       artifactSha256: entry.artifactSha256,
       evidenceRef: entry.evidenceRef,
       observedAt: entry[CANDIDATE_BOUND_EVIDENCE_DEFINITIONS[section].timestampField],
+      workerVersion: candidateBoundEvidenceWorkerVersion(evidence, section),
     }];
   }));
 }
