@@ -21,9 +21,23 @@ const RELEASE = {
 
 const roots: string[] = [];
 
+type DodoUatReceipt = {
+  provider: string;
+  providerEventSha256: string | null;
+};
+
+type DodoUatExecutor = (args: {
+  environment: Record<string, string>;
+  fetcher: typeof fetch;
+  inputStream: Readable;
+  repositoryRoot: string;
+}) => Promise<DodoUatReceipt>;
+
+const runDodoUatExecutorTyped = runDodoUatExecutor as unknown as DodoUatExecutor;
+
 function contextFixture(root: string) {
   const keys = generateKeyPairSync("ed25519");
-  const privateKeyPem = keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  const privateKeyPem = keys.privateKey.export({ format: "pem", type: "pkcs8" });
   const paths = {
     auth: join(root, "auth.json"),
     d1: join(root, "d1.json"),
@@ -94,11 +108,13 @@ function d1Rows() {
 
 function fetchFixture({ unsupported = false } = {}) {
   const rows = d1Rows();
-  return async (input: string | URL, init?: RequestInit) => {
+  return (input: string | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/api/internal/uat/providers/dodo")) {
       if (unsupported) return new Response(JSON.stringify({ error: "unsupported" }), { status: 501 });
-      const body = JSON.parse(String(init?.body));
+      const rawBody = init?.body;
+      if (typeof rawBody !== "string") throw new Error("fixture_request_body_invalid");
+      const body = JSON.parse(rawBody) as { phase?: string; scenarioId?: string };
       if (body.phase === "prepare") return Response.json({
         phase: "prepared", provider: "dodo", releaseId: RELEASE_ID, runId: "run_fixture_catalog", scenarioId: body.scenarioId, schemaVersion: 1, workerVersion: WORKER_VERSION,
       });
@@ -109,13 +125,16 @@ function fetchFixture({ unsupported = false } = {}) {
       });
     }
     if (url.includes("api.cloudflare.com")) {
-      const body = JSON.parse(String(init?.body));
-      const sql = String(body.sql);
-      const name = sql.includes("plan_prices") && sql.includes("provider_code") ? "catalog"
+      const rawBody = init?.body;
+      if (typeof rawBody !== "string") throw new Error("fixture_request_body_invalid");
+      const body = JSON.parse(rawBody) as { sql?: string };
+      if (typeof body.sql !== "string") throw new Error("fixture_sql_invalid");
+      const sql = body.sql;
+      const name: keyof ReturnType<typeof d1Rows> = sql.includes("plan_prices") && sql.includes("provider_code") ? "catalog"
         : sql.includes("billing_checkout_sessions") ? "checkouts"
           : sql.includes("billing_invoices") ? "invoices"
             : sql.includes("billing_provider_events") ? "events" : "subscription";
-      return Response.json({ result: [{ results: rows[name as keyof typeof rows], success: true }], success: true });
+      return Response.json({ result: [{ results: rows[name], success: true }], success: true });
     }
     if (url.includes("/products/")) {
       const productId = url.slice(url.lastIndexOf("/") + 1);
@@ -140,7 +159,7 @@ describe("Dodo provider UAT executor", () => {
     const root = mkdtempSync(join(tmpdir(), "selinow-dodo-executor-"));
     roots.push(root);
     const contexts = contextFixture(root);
-    const result = await runDodoUatExecutor({
+    const result = await runDodoUatExecutorTyped({
       environment: {
         SELINOW_UAT_AUTH_CONTEXT_PATH: contexts.auth,
         SELINOW_UAT_D1_CONTEXT_PATH: contexts.d1,
@@ -165,7 +184,7 @@ describe("Dodo provider UAT executor", () => {
     const root = mkdtempSync(join(tmpdir(), "selinow-dodo-executor-"));
     roots.push(root);
     const contexts = contextFixture(root);
-    await expect(runDodoUatExecutor({
+    await expect(runDodoUatExecutorTyped({
       environment: {
         SELINOW_UAT_AUTH_CONTEXT_PATH: contexts.auth,
         SELINOW_UAT_D1_CONTEXT_PATH: contexts.d1,
@@ -187,7 +206,7 @@ describe("Dodo provider UAT executor", () => {
     roots.push(root);
     const contexts = contextFixture(root);
     chmodSync(contexts.dodo, 0o644);
-    await expect(runDodoUatExecutor({
+    await expect(runDodoUatExecutorTyped({
       environment: {
         SELINOW_UAT_AUTH_CONTEXT_PATH: contexts.auth,
         SELINOW_UAT_D1_CONTEXT_PATH: contexts.d1,

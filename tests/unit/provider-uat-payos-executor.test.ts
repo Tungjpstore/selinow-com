@@ -13,6 +13,16 @@ const RELEASE_ID = "stg_20260826T100000Z_aaaaaaaaaaaa";
 const WORKER_VERSION = "11111111-1111-4111-8111-111111111111";
 const roots: string[] = [];
 
+type PayosArtifact = {
+  authority: {
+    requestReference: string;
+    providerAuthority: string;
+  };
+  runnerAttestation: {
+    signatureBase64: string;
+  };
+};
+
 function response(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" }, status });
 }
@@ -124,13 +134,13 @@ describe("PayOS provider UAT executor", () => {
   it("waits for a genuine signed webhook transition and emits a signed canonical artifact", async () => {
     const test = fixture("signed_exact_payment");
     let d1Calls = 0;
-    const fetcher = async () => {
+    const fetcher = () => Promise.resolve((() => {
       d1Calls += 1;
       return d1Response(snapshot({ attemptPublicId: test.attemptPublicId, paid: d1Calls > 1 }));
-    };
+    })());
     const receipt = await executePayosProviderUat({
       environment: test.environment,
-      fetcher: fetcher as typeof fetch,
+      fetcher,
       input: test.input,
       now: () => new Date("2026-08-26T10:00:02.000Z"),
       randomId: () => "00000000-0000-4000-8000-000000000099",
@@ -143,7 +153,7 @@ describe("PayOS provider UAT executor", () => {
     expect(receipt.providerEventSha256).toMatch(/^[a-f0-9]{64}$/u);
     const artifactPath = join(test.root, receipt.artifactRef.slice("artifact:".length));
     expect(statSync(artifactPath).mode & 0o777).toBe(0o600);
-    const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+    const artifact = JSON.parse(readFileSync(artifactPath, "utf8")) as unknown as PayosArtifact;
     const unsigned = { ...artifact, runnerAttestation: null };
     expect(() => assertPayosUnsignedProviderExecutionArtifact(unsigned)).not.toThrow();
     expect(verify(null, Buffer.from(serializePayosRunnerAttestationPayload(artifact)), test.publicKey, Buffer.from(artifact.runnerAttestation.signatureBase64, "base64"))).toBe(true);
@@ -153,15 +163,15 @@ describe("PayOS provider UAT executor", () => {
     const test = fixture("direct_reconciliation");
     let d1Calls = 0;
     let runtimeCalls = 0;
-    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+    const fetcher = (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
       if (url.includes("api.cloudflare.com")) {
         d1Calls += 1;
-        return d1Response(snapshot({ attemptPublicId: test.attemptPublicId, paid: d1Calls > 1, reconciled: d1Calls > 1 }));
+        return Promise.resolve(d1Response(snapshot({ attemptPublicId: test.attemptPublicId, paid: d1Calls > 1, reconciled: d1Calls > 1 })));
       }
       runtimeCalls += 1;
       expect(init?.headers).toMatchObject({ Origin: "https://staging.selinow.com" });
-      return response({
+      return Promise.resolve(response({
         evidence: {
           attemptPublicId: test.attemptPublicId,
           duplicate: false,
@@ -176,11 +186,11 @@ describe("PayOS provider UAT executor", () => {
         },
         ok: true,
         requestId: "request-payos-uat-0001",
-      }, 201);
+      }, 201));
     };
     const receipt = await executePayosProviderUat({
       environment: test.environment,
-      fetcher: fetcher as typeof fetch,
+      fetcher,
       input: test.input,
       now: () => new Date("2026-08-26T10:00:02.000Z"),
       randomId: () => "00000000-0000-4000-8000-000000000098",
@@ -190,7 +200,7 @@ describe("PayOS provider UAT executor", () => {
     expect(runtimeCalls).toBe(1);
     expect(d1Calls).toBe(2);
     expect(receipt.scenarioId).toBe("direct_reconciliation");
-    const artifact = JSON.parse(readFileSync(join(test.root, receipt.artifactRef.slice("artifact:".length)), "utf8"));
+    const artifact = JSON.parse(readFileSync(join(test.root, receipt.artifactRef.slice("artifact:".length)), "utf8")) as unknown as PayosArtifact;
     expect(artifact.authority.requestReference).toBe("request:request-payos-uat-0001");
     expect(artifact.authority.providerAuthority).toBe("provider_signed_response");
   });
@@ -202,7 +212,7 @@ describe("PayOS provider UAT executor", () => {
     chmodSync(contextPath, 0o644);
     await expect(executePayosProviderUat({
       environment: test.environment,
-      fetcher: (() => Promise.reject(new Error("must not fetch"))) as typeof fetch,
+      fetcher: () => Promise.reject(new Error("must not fetch")),
       input: test.input,
       repositoryRoot: test.root,
     })).rejects.toThrow("payos_executor_payos_context_missing_permissions_invalid");
@@ -212,7 +222,7 @@ describe("PayOS provider UAT executor", () => {
     const test = fixture("signed_exact_payment");
     await expect(executePayosProviderUat({
       environment: test.environment,
-      fetcher: (() => Promise.resolve(d1Response(snapshot({ attemptPublicId: test.attemptPublicId, paid: true })))) as typeof fetch,
+      fetcher: () => Promise.resolve(d1Response(snapshot({ attemptPublicId: test.attemptPublicId, paid: true }))),
       input: test.input,
       repositoryRoot: test.root,
     })).rejects.toThrow("payos_executor_d1_before_invalid");
