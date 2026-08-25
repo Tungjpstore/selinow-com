@@ -121,6 +121,7 @@ async function readPrivateJson(path, issue) {
   }
 }
 
+/** @param {any} stream */
 async function readInput(stream = process.stdin) {
   let input = "";
   for await (const chunk of stream) {
@@ -490,6 +491,9 @@ async function writeArtifact(root, input, dodo, execution, fingerprints, referen
   return { artifactRef, artifactSha256: sha256(artifactBytes) };
 }
 
+/**
+ * @param {{ environment?: Record<string, string | undefined>, fetcher?: any, inputStream?: any, now?: () => Date, repositoryRoot?: string }} options
+ */
 export async function runDodoUatExecutor({
   environment = process.env,
   fetcher = globalThis.fetch,
