@@ -163,6 +163,19 @@ describe("PayOS provider identity ownership", () => {
     expect(database.prepare("SELECT COUNT(*) AS count FROM payment_credentials").get()).toEqual({ count: 1 });
     expect(database.prepare("SELECT COUNT(*) AS count FROM payment_integrations WHERE provider_identity_fingerprint IS NOT NULL").get())
       .toEqual({ count: 1 });
+    expect(database.prepare(`
+      SELECT status, webhook_status AS webhookStatus,
+        provider_account_fingerprint IS NOT NULL AS accountVerified
+      FROM payment_provider_connections
+      WHERE shop_id = 'shop-a' AND legacy_payos_integration_id = (
+        SELECT id FROM payment_integrations WHERE shop_id = 'shop-a'
+      )
+    `).get()).toEqual({ accountVerified: 1, status: "active", webhookStatus: "verified" });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM payment_provider_connection_capabilities
+      WHERE shop_id = 'shop-a' AND effective_enabled = 1
+    `).get()).toEqual({ count: 4 });
   });
 
   it("rejects rotated cross-shop credentials before redirecting the verified channel webhook", async () => {

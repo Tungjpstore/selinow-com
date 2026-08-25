@@ -726,6 +726,15 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
   }),
+  "0119_payos_provider_projection_lifecycle.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      payment_integrations_payos_projection_insert: "99269608011f3555c68d412bd4029e2fcb8d9f1a9ea59f616106e5e5fbe2aa0a",
+      payment_integrations_payos_projection_update: "12d497fe20fa4c45150dafb4d200c51ebba1035a1aae753adebecfad9b8cb3a6",
+      payment_provider_connections_status_transition_guard: "4e4e491a896800528b22c32888dc88f25860ebc62a986eb436265920f2e5f31b",
+      payment_provider_connections_webhook_transition_guard: "2e9ce16640b0502b97ee766eea323b68de5becf2de5a7faa6e789d07d71fcf27",
+    }),
+  }),
 });
 
 
@@ -2560,6 +2569,15 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
         AND plan.is_active = 1
         AND json_extract(plan.feature_flags_json, '$.premiumStorefrontTemplates') = 1
       ) AS integrity_0118_pro_entitlement,
+    (SELECT COUNT(*) FROM payment_integrations AS integration
+      WHERE integration.provider = 'payos'
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_provider_connections AS connection
+          WHERE connection.shop_id = integration.shop_id
+            AND connection.legacy_payos_integration_id = integration.id
+            AND connection.provider_code = integration.provider
+        )
+      ) AS integrity_0119_payos_projection,
     (SELECT COUNT(*) FROM outbox_jobs AS job
       WHERE job.kind = 'order_paid' AND job.status != 'completed'
       ) AS integrity_0095_legacy_order_paid_outbox,
@@ -2687,6 +2705,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0112_google_oauth_state",
     "integrity_0114_pro_premium_flag",
     "integrity_0118_pro_entitlement",
+    "integrity_0119_payos_projection",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

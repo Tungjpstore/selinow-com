@@ -347,6 +347,16 @@ describe("production Worker continuation deploy admission", () => {
       runWranglerImplementation: invalidProEntitlement,
     })).toThrow("production_database_invariant_data_violation:integrity_0118_pro_entitlement");
 
+    const invalidPayOSProjection = runner((rows, sql) => {
+      if (sql.includes("integrity_0119_payos_projection") && rows[0] !== undefined) {
+        rows[0].integrity_0119_payos_projection = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidPayOSProjection,
+    })).toThrow("production_database_invariant_data_violation:integrity_0119_payos_projection");
+
     const invalidTelegramGeneration = runner((rows, sql) => {
       if (sql.includes("integrity_0095_telegram_update_generation") && rows[0] !== undefined) {
         rows[0].integrity_0095_telegram_update_generation = 1;

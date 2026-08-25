@@ -206,9 +206,17 @@ SELECT
         OR connection.settlement_mode <> 'direct'
         OR connection.credential_ownership <> 'seller'
         OR connection.status <> CASE integration.status WHEN 'error' THEN 'degraded' ELSE integration.status END
-        OR connection.webhook_status <> integration.webhook_status
+        OR connection.webhook_status <> CASE
+          WHEN integration.status = 'error'
+            AND connection.provider_account_fingerprint IS NOT NULL
+          THEN 'verified'
+          ELSE integration.webhook_status
+        END
         OR connection.provider_account_fingerprint IS NOT CASE
           WHEN integration.status = 'active' AND integration.webhook_status = 'verified'
+          THEN integration.provider_identity_fingerprint
+          WHEN integration.status IN ('error', 'disconnected')
+            AND connection.provider_account_fingerprint IS NOT NULL
           THEN integration.provider_identity_fingerprint
           ELSE NULL
         END

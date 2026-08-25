@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-25
 
+## PayOS provider projection lifecycle repair (2026-08-25)
+
+- Confirmed the staging checkout readiness failure was a data-lifecycle defect, not an invalid Pro entitlement or seller credential: a PayOS integration created after migration `0035` had no provider-neutral `payment_provider_connections` projection, so provider readiness failed closed even though the legacy integration was active and webhook-verified.
+- Added forward-only migration `migrations/0119_payos_provider_projection_lifecycle.sql`. It backfills missing PayOS connection/capability/currency/method projections and installs atomic insert/update projection triggers for verification, degraded health, disconnect and reconnect transitions. Return URLs and QR rendering remain non-authoritative; only signed PayOS evidence or tenant-correct reconciliation can confirm payment.
+- Database preflight and production continuation admission now reject any missing legacy PayOS projection. The release invariant registry pins all four replacement trigger definitions so migration drift cannot be accepted silently.
+- Verification: focused migration/payment/release coverage passed `6` files / `37` tests; the complete repository passed `367` files / `3,032` tests; `npm run check` reports 0 errors and 4 existing hints; lint, build, local deploy dry-run, staging deploy dry-run and `git diff --check` pass.
+- The controlled staging ceremony still requires a fresh exact-commit manifest, protected pre/post backups, isolated restore drills, migration `0119`, zero post-migration PayOS projection defects, an exact Worker deployment binding and live checkout verification. Production remains NO-GO while `CURRENT_POLICY_ATTESTATION_VERSION` is unpublished; that legal/support approval cannot be fabricated or bypassed, and the public storefront plus controlled `5,000 VND` PayOS transfer remain blocked by that legitimate publication gate.
+
 ## Onboarding publication-gate truthfulness follow-up (2026-08-25)
 
 - Confirmed the staging storefront is unpublished because `CURRENT_POLICY_ATTESTATION_VERSION` remains intentionally `null`; PayOS connectivity and the active Pro entitlement are not the cause of `policy_unpublished`.
