@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-26
 
+## PayOS stale-claim recovery hardening (2026-08-26)
+
+- Fixed active PayOS health refresh so it no longer converts a provider verification/claim persistence failure into a false successful `201` response with stale timestamps.
+- A same-tenant active credential may safely reclaim an `in_flight`/`ambiguous` claim, including a stale webhook-target fingerprint; cross-tenant and quarantined ownership remain fail-closed.
+- Cleanup paths now verify that both credential and integration rows were actually updated before reporting a provider failure, preventing silent claim leaks.
+- Added regression coverage for stale active claim recovery. Focused PayOS/resumability/concurrency tests pass `42/42`; `npm run check` reports 0 errors and `npm run lint` passes.
+- This code is committed as `709e757` but not yet deployed. Staging and production remain NO-GO until a fresh release manifest/deployment, live PayOS confirmation, signed 5,000 VND transfer/reconciliation, complete Dodo UAT, and operational gates are accepted.
+
 ## Staging continuation — Cloudflare SaaS gate closed, candidate deployed, provider checkout still NO-GO (2026-08-26)
 
 ### Additional provider/runtime observation (2026-08-26)
