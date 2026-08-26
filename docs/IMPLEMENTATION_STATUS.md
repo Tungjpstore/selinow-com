@@ -2,6 +2,13 @@
 
 Last updated: 2026-08-26
 
+## Release candidate verification (2026-08-27)
+
+- Candidate `codex/release-candidate-20260824` now passes `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm run test` (371 files / 3,052 tests), `npm run build`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, `npx tsc --noEmit`, `npm audit --audit-level=high` (0 vulnerabilities), and `git diff --check`.
+- Added the missing TypeScript declaration for the Dodo UAT executor (`937a2c2`); no runtime behavior changed.
+- Read-only staging checks confirm the expected account/D1 identity, complete migration ledger through `0119`, PayOS projection integrity, and exact route inventory. Staging still serves the previous Worker; the candidate has not been deployed.
+- Staging release admission remains blocked until the SaaS DNS/fallback-origin read permission is available to the operator token. No staging migration, Worker deployment, provider UAT, QR transfer, or production mutation was performed in this verification pass.
+
 ## PayOS stale-claim recovery hardening (2026-08-26)
 
 - Fixed active PayOS health refresh so it no longer converts a provider verification/claim persistence failure into a false successful `201` response with stale timestamps.
