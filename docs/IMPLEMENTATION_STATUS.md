@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-26
 
+## Staging continuation — Cloudflare SaaS gate closed, candidate deployed, provider checkout still NO-GO (2026-08-26)
+
+- Cloudflare zone-scoped audit token was created with only `selinow.com` DNS read and SSL read/write permissions; SaaS DNS, fallback origin, account/resource inventory, Worker secret binding, and staging route checks all pass.
+- Fresh staging backup `bkp_20260826085057_1020863e4a64` and isolated restore drill `rdr_20260826085144_76b2ac966556` pass with 129 restored items, integrity OK, and zero foreign-key violations. Release manifest `stg_20260826T083834Z_3ed9f606a1bb` is bound to exact commit/tree.
+- Migration completion and post-migration evidence were written; staging Worker deployed at 100% as version `6cee5723-33a0-4d4b-a5c2-2c7c3e1dc9ce`, with immutable deployment evidence `029a3bdb-3f2d-444e-ade5-f7ba539114c6`. Platform doctor, route preflight, DB preflight, and Phase-A smoke all pass.
+- Read-only Dodo catalog inspection against the real test API verifies all four offers and `reconciliationRequired=false`. The real `plan_catalog_offers` UAT scenario passes and writes a receipt; checkout/webhook scenarios remain blocked because the staging control route intentionally returns `501` for every scenario except `plan_catalog_offers`.
+- PayOS remains unaccepted: no real controlled 5,000 VND transfer, provider-signed webhook, or direct-reconciliation evidence has been produced. Production remains **NO-GO** pending complete Dodo UAT, PayOS evidence, monitoring/pilot/rollback, production backup/restore, and the guarded production ceremony.
+
 ## Candidate-bound Dodo UAT control route (2026-08-26)
 
 - Added the staging-only `/api/internal/uat/providers/dodo` control route. It authenticates with a dedicated secret, binds every request to the exact release commit/tree/manifest and active Worker version metadata, and rejects production or unsupported scenarios fail-closed.
