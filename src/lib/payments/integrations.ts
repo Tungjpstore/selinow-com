@@ -258,7 +258,8 @@ async function claimPaymentProviderOwnership(input: {
                     AND active_claim.integration_id = payment_integrations.id
                     AND active_claim.shop_id = payment_integrations.shop_id
                     AND active_claim.provider = payment_integrations.provider
-                    AND active_claim.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                    AND (active_claim.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                      OR active_claim.provider_claim_nonce IS NULL)
                     AND active_claim.status = 'active'
                 )
               ) THEN 'quarantined'
@@ -283,7 +284,8 @@ async function claimPaymentProviderOwnership(input: {
                   AND active_claim.integration_id = payment_integrations.id
                   AND active_claim.shop_id = payment_integrations.shop_id
                   AND active_claim.provider = payment_integrations.provider
-                  AND active_claim.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                  AND (active_claim.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                    OR active_claim.provider_claim_nonce IS NULL)
                   AND active_claim.status = 'active'
               )
             )
