@@ -4,6 +4,13 @@ Last updated: 2026-08-26
 
 ## Staging continuation — Cloudflare SaaS gate closed, candidate deployed, provider checkout still NO-GO (2026-08-26)
 
+### Additional provider/runtime observation (2026-08-26)
+
+- Dodo test-mode webhook inventory contains one enabled endpoint bound to the canonical staging callback; no webhook secret or provider credential is recorded here.
+- A real Dodo test-mode checkout request returned a provider session for the published Starter VN offer. The session was not paid and no subscription/invoice entitlement was activated.
+- The staging Pro catalog projection was re-read from D1: `api`, `apiRead`, `customDomain`, `premiumStorefrontTemplates`, and advanced analytics are enabled on the public Pro plan; the active staging Pro shop projection resolves to `299,000 VND/month`.
+- These observations confirm provider/catalog configuration only. They do not replace the required 32-scenario signed UAT set, PayOS transfer/reconciliation evidence, or production release gates.
+
 - Cloudflare zone-scoped audit token was created with only `selinow.com` DNS read and SSL read/write permissions; SaaS DNS, fallback origin, account/resource inventory, Worker secret binding, and staging route checks all pass.
 - Fresh staging backup `bkp_20260826085057_1020863e4a64` and isolated restore drill `rdr_20260826085144_76b2ac966556` pass with 129 restored items, integrity OK, and zero foreign-key violations. Release manifest `stg_20260826T083834Z_3ed9f606a1bb` is bound to exact commit/tree.
 - Migration completion and post-migration evidence were written; staging Worker deployed at 100% as version `6cee5723-33a0-4d4b-a5c2-2c7c3e1dc9ce`, with immutable deployment evidence `029a3bdb-3f2d-444e-ade5-f7ba539114c6`. Platform doctor, route preflight, DB preflight, and Phase-A smoke all pass.
