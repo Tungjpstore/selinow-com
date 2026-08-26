@@ -244,8 +244,24 @@ async function claimPaymentProviderOwnership(input: {
           provider_claim_generation = provider_claim_generation + 1,
           provider_claim_nonce = ?,
           provider_claim_state = CASE
-            WHEN provider_claim_state = 'quarantined' OR provider_claim_nonce IS NOT NULL
-              THEN 'quarantined'
+            WHEN provider_claim_state = 'quarantined' THEN 'quarantined'
+            WHEN provider_claim_nonce IS NOT NULL
+              AND NOT (
+                provider_claim_state IN ('in_flight', 'ambiguous')
+                AND active_credential_id = ?
+                AND status = 'active'
+                AND webhook_status = 'verified'
+                AND EXISTS (
+                  SELECT 1
+                  FROM payment_credentials AS active_claim
+                  WHERE active_claim.id = ?
+                    AND active_claim.integration_id = payment_integrations.id
+                    AND active_claim.shop_id = payment_integrations.shop_id
+                    AND active_claim.provider = payment_integrations.provider
+                    AND active_claim.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                    AND active_claim.status = 'active'
+                )
+              ) THEN 'quarantined'
             ELSE 'in_flight'
           END,
           provider_claim_target_fingerprint = ?,
@@ -255,6 +271,22 @@ async function claimPaymentProviderOwnership(input: {
           AND (
             provider_claim_nonce IS NULL
             OR provider_claim_target_fingerprint = ?
+            OR (
+              provider_claim_state IN ('in_flight', 'ambiguous')
+              AND active_credential_id = ?
+              AND status = 'active'
+              AND webhook_status = 'verified'
+              AND EXISTS (
+                SELECT 1
+                FROM payment_credentials AS active_claim
+                WHERE active_claim.id = ?
+                  AND active_claim.integration_id = payment_integrations.id
+                  AND active_claim.shop_id = payment_integrations.shop_id
+                  AND active_claim.provider = payment_integrations.provider
+                  AND active_claim.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                  AND active_claim.status = 'active'
+              )
+            )
             OR (
               provider_claim_state = 'quarantined'
               AND provider_claim_target_fingerprint IS NULL
@@ -277,7 +309,7 @@ async function claimPaymentProviderOwnership(input: {
               )
             )
           )
-      `).bind(providerIdentityFingerprint, nonce, targetFingerprint, now, input.integration.id, input.shopId, providerIdentityFingerprint, targetFingerprint, input.credentialId, credentialFingerprint, providerCredentialFingerprint),
+      `).bind(providerIdentityFingerprint, nonce, input.credentialId, input.credentialId, targetFingerprint, now, input.integration.id, input.shopId, providerIdentityFingerprint, targetFingerprint, input.credentialId, input.credentialId, input.credentialId, credentialFingerprint, providerCredentialFingerprint),
       input.env.PLATFORM_DB.prepare(`
         UPDATE payment_credentials
         SET status = CASE
@@ -348,9 +380,9 @@ async function markAmbiguousPaymentProviderOwnership(input: {
   env: AppBindings;
   integrationId: string;
   shopId: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const now = new Date().toISOString();
-  await input.env.PLATFORM_DB.batch([
+  const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
       UPDATE payment_credentials
       SET status = CASE WHEN activated_at IS NULL THEN 'error' ELSE status END
@@ -377,6 +409,7 @@ async function markAmbiguousPaymentProviderOwnership(input: {
         AND provider_claim_target_fingerprint = ?
     `).bind(input.degradeVerifiedIntegration === true ? 1 : 0, input.degradeVerifiedIntegration === true ? 1 : 0, now, now, input.integrationId, input.shopId, input.claim.generation, input.claim.nonce, input.claim.targetFingerprint),
   ]);
+  return (results[0]?.meta.changes ?? 0) === 1 && (results[1]?.meta.changes ?? 0) === 1;
 }
 
 async function finalizeDefinitivePaymentProviderRejection(input: {
@@ -389,7 +422,7 @@ async function finalizeDefinitivePaymentProviderRejection(input: {
 }): Promise<boolean> {
   const now = new Date().toISOString();
   try {
-    await input.env.PLATFORM_DB.batch([
+    const results = await input.env.PLATFORM_DB.batch([
       input.env.PLATFORM_DB.prepare(`
         UPDATE payment_credentials
         SET status = CASE WHEN activated_at IS NULL THEN 'error' ELSE status END,
@@ -440,7 +473,7 @@ async function finalizeDefinitivePaymentProviderRejection(input: {
           AND provider_claim_target_fingerprint = ?
       `).bind(input.degradeVerifiedIntegration === true ? 1 : 0, input.degradeVerifiedIntegration === true ? 1 : 0, now, now, input.integrationId, input.shopId, input.claim.generation, input.claim.nonce, input.claim.targetFingerprint),
     ]);
-    return true;
+    return (results[0]?.meta.changes ?? 0) === 1 && (results[1]?.meta.changes ?? 0) === 1;
   } catch {
     return false;
   }
@@ -817,28 +850,26 @@ export async function refreshPayOSHealth(input: { env: AppBindings; fetcher?: ty
   await assertPayOSProviderSetupAllowed(input.env, shopId);
   const credential = await loadCredentialById(input.env, integration.activeCredentialId, shopId);
   const webhookUrl = `${input.env.API_ORIGIN}/webhooks/payos/${integration.webhookPublicId}`;
+  const claim = await claimPaymentProviderOwnership({
+    credentialId: credential.row.credentialId,
+    credentials: credential.credentials,
+    env: input.env,
+    integration,
+    shopId,
+    webhookUrl,
+  });
+  let providerFailure = false;
   try {
-    const claim = await claimPaymentProviderOwnership({
-      credentialId: credential.row.credentialId,
-      credentials: credential.credentials,
-      env: input.env,
-      integration,
-      shopId,
-      webhookUrl,
-    });
-    try {
-      await new PayOSClient(credential.credentials, input.fetcher).confirmWebhook(webhookUrl);
-    } catch (error) {
-      if (isDefinitivePayOSWebhookRejection(error)) {
-        await finalizeDefinitivePaymentProviderRejection({ claim, credentialId: credential.row.credentialId, degradeVerifiedIntegration: true, env: input.env, integrationId: integration.id, shopId });
-      } else {
-        await markAmbiguousPaymentProviderOwnership({ claim, credentialId: credential.row.credentialId, degradeVerifiedIntegration: true, env: input.env, integrationId: integration.id, shopId });
-      }
-      throw error;
-    }
-    await verifyActivePaymentProviderOwnership({ claim, credentialId: credential.row.credentialId, env: input.env, integrationId: integration.id, shopId });
+    await new PayOSClient(credential.credentials, input.fetcher).confirmWebhook(webhookUrl);
   } catch (error) {
-    if (!(error instanceof AppError)) throw error;
+    const persisted = isDefinitivePayOSWebhookRejection(error)
+      ? await finalizeDefinitivePaymentProviderRejection({ claim, credentialId: credential.row.credentialId, degradeVerifiedIntegration: true, env: input.env, integrationId: integration.id, shopId })
+      : await markAmbiguousPaymentProviderOwnership({ claim, credentialId: credential.row.credentialId, degradeVerifiedIntegration: true, env: input.env, integrationId: integration.id, shopId });
+    if (!persisted) throw new AppError("payment_integration_conflict", 409);
+    providerFailure = true;
+  }
+  if (!providerFailure) {
+    await verifyActivePaymentProviderOwnership({ claim, credentialId: credential.row.credentialId, env: input.env, integrationId: integration.id, shopId });
   }
   const refreshed = await findIntegration(input.env, shopId);
   if (refreshed === null) throw new AppError("internal_error", 500);

@@ -433,6 +433,7 @@ async function payOSRuntime(input: {
 
   return {
     credential,
+    database,
     env: binding(d1Database),
     fetcher,
     getCredentialInsertCount: () => credentialInsertCount,
@@ -885,6 +886,43 @@ describe("PayOS health refresh", () => {
     expect(Date.parse(result.lastCheckedAt ?? "")).not.toBeNaN();
     expect(result.lastCheckedAt).not.toBe(previousCheckedAt);
     expect(result.lastWebhookVerifiedAt).toBe(result.lastCheckedAt);
+  });
+
+  it("reclaims a stale active claim before rechecking the current webhook target", async () => {
+    const runtime = await payOSRuntime({ active: true });
+    const staleNonce = "pcl_stale_active_claim_012345678901234567";
+    runtime.database.prepare(`
+      UPDATE payment_integrations
+      SET provider_claim_generation = 9,
+        provider_claim_nonce = ?,
+        provider_claim_state = 'in_flight',
+        provider_claim_target_fingerprint = ?
+      WHERE id = 'payos-integration-a' AND shop_id = 'shop-a'
+    `).run(staleNonce, "T".repeat(43));
+    runtime.database.prepare(`
+      UPDATE payment_credentials
+      SET provider_claim_nonce = ?
+      WHERE id = 'payos-credential-a' AND shop_id = 'shop-a'
+    `).run(staleNonce);
+
+    const result = await refreshPayOSHealth({
+      env: runtime.env,
+      fetcher: runtime.fetcher,
+      requestId: "request-payos-stale-claim",
+      shopPublicId: "shop-public-a",
+      userId: "owner-a",
+    });
+
+    expect(runtime.getProviderCalls()).toBe(1);
+    expect(result).toMatchObject({ status: "active", webhookStatus: "verified" });
+    expect(result.lastCheckedAt).not.toBe("2026-07-25T00:00:00.000Z");
+    expect(runtime.database.prepare(`
+      SELECT provider_claim_nonce AS nonce, provider_claim_state AS claimState
+      FROM payment_integrations WHERE id = 'payos-integration-a'
+    `).get()).toEqual({ claimState: "idle", nonce: null });
+    expect(runtime.database.prepare(`
+      SELECT provider_claim_nonce AS nonce FROM payment_credentials WHERE id = 'payos-credential-a'
+    `).get()).toEqual({ nonce: null });
   });
 
   it("blocks provider-mutating health refresh for a suspended subscription", async () => {
