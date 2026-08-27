@@ -200,6 +200,23 @@ UAT blocked and do not run the collector.
    The guarded apply marks `dodo_catalog_reconciliation_required=false` only in
    the same SQL execution that proves all four exact offers are published; the
    command then re-inspects D1 and fails closed if the marker or catalog disagrees.
+
+   Catalog apply is a release-bound mutation. It must receive the exact fresh
+   staging/production release manifest and uses only the short-lived
+   `CLOUDFLARE_D1_API_TOKEN` inside a pinned Wrangler child process. Ambient
+   `CLOUDFLARE_API_TOKEN`, Wrangler OAuth and provider credentials are never
+   forwarded to that process:
+
+   ```bash
+   DODO_PAYMENTS_ENVIRONMENT=test_mode npm run dodo:catalog:reconcile -- \
+     --env=staging --apply --confirm-catalog-update \
+     --confirm-staging-test-catalog \
+     --release-manifest .wrangler/releases/staging/<release-id>/release-manifest.json
+   ```
+
+   The command performs payment-provider mutation admission before reading the
+   Dodo API key or sending any provider/D1 request. A missing, stale or
+   candidate-mismatched manifest fails closed.
 7. Execute test-mode checkout -> signed webhook -> subscription UAT. Provider
    checkout must bill the first paid period; it must not create a second trial.
 8. Revoke temporary audit credentials and preserve only reference-only evidence.

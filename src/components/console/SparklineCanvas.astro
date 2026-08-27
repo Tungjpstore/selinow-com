@@ -6,7 +6,7 @@
  * thay vì một đường thẳng phẳng trông như lỗi render.
  */
 interface Props {
-  data: readonly { label: string; value: number }[];
+  data: readonly { formattedValue?: string; label: string; value: number }[];
   height?: number;
   title?: string;
   emptyTitle?: string;
@@ -28,7 +28,6 @@ const hasData = data.some((point) => point.value > 0);
   {title && (
     <div class="sparkline-header">
       <h3>{title}</h3>
-      {hasData && <span class="sparkline-badge">60fps Live</span>}
     </div>
   )}
   {hasData ? (
@@ -79,17 +78,6 @@ const hasData = data.some((point) => point.value > 0);
     font-size: 14px;
     font-weight: 600;
     color: var(--sln-console-ink);
-  }
-
-  .sparkline-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    border-radius: var(--sln-console-radius-pill);
-    background: var(--sln-console-accent-soft);
-    color: var(--sln-console-accent);
-    font-size: 11px;
-    font-weight: 600;
   }
 
   .sparkline-canvas-wrap {

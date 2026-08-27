@@ -4,6 +4,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import { runWrangler } from "./cli.mjs";
+import { buildPinnedCloudflareEnvironment } from "./platform.mjs";
 
 const PROVIDER_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/u;
 const ENVIRONMENTS = new Set(["staging", "production"]);
@@ -11,6 +12,13 @@ const DODO_API_BASE_URLS = Object.freeze({
   live_mode: "https://live.dodopayments.com",
   test_mode: "https://test.dodopayments.com",
 });
+const scopedCloudflareEnvironments = new WeakSet();
+
+// Dodo keeps the subscription alive for a long period while charging at the
+// configured frequency. A one-month payment frequency with a one-month
+// subscription period expires after the first cycle instead of renewing.
+const DODO_SUBSCRIPTION_PERIOD_COUNT = 20;
+const DODO_SUBSCRIPTION_PERIOD_INTERVAL = "year";
 
 export const DODO_CATALOG_OFFERS = Object.freeze([
   Object.freeze({
@@ -77,6 +85,7 @@ export function parseDodoCatalogArguments(argv) {
     environment: null,
     inspect: false,
     json: false,
+    manifestPath: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -88,6 +97,12 @@ export function parseDodoCatalogArguments(argv) {
     else if (argument === "--confirm-production-live-catalog") options.confirmProductionLiveCatalog = true;
     else if (argument === "--confirm-staging-test-catalog") options.confirmStagingTestCatalog = true;
     else if (argument === "--json") options.json = true;
+    else if (argument === "--release-manifest") {
+      options.manifestPath = argv[index + 1] ?? "";
+      index += 1;
+    } else if (argument.startsWith("--release-manifest=")) {
+      options.manifestPath = argument.slice("--release-manifest=".length);
+    }
     else if (argument === "--env") {
       options.environment = argv[index + 1] ?? null;
       index += 1;
@@ -106,6 +121,9 @@ export function parseDodoCatalogArguments(argv) {
   }
   if (options.environment === "production" && options.apply && !options.confirmProductionLiveCatalog) {
     throw new Error("production_live_catalog_confirmation_required");
+  }
+  if (options.apply && (typeof options.manifestPath !== "string" || options.manifestPath.length === 0)) {
+    throw new Error("dodo_catalog_release_manifest_required");
   }
   return options;
 }
@@ -133,6 +151,12 @@ export function readDodoCatalogProviderConfig(environment = process.env) {
   return { apiBaseUrl: DODO_API_BASE_URLS[providerMode], apiKey, providerMode };
 }
 
+export function buildDodoCatalogCloudflareEnvironment(environment, accountId) {
+  const childEnvironment = buildPinnedCloudflareEnvironment(environment, accountId);
+  scopedCloudflareEnvironments.add(childEnvironment);
+  return childEnvironment;
+}
+
 function providerObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
 }
@@ -140,6 +164,12 @@ function providerObject(value) {
 export function validateDodoCatalogProviderProduct(product, offer, reference) {
   const row = providerObject(product);
   const price = providerObject(row.price);
+  const paymentFrequencyInterval = typeof price.payment_frequency_interval === "string"
+    ? price.payment_frequency_interval.toLowerCase()
+    : null;
+  const subscriptionPeriodInterval = typeof price.subscription_period_interval === "string"
+    ? price.subscription_period_interval.toLowerCase()
+    : null;
   if (row.product_id !== reference) throw new Error(`dodo_catalog_provider_identity_mismatch:${offer.id}`);
   if (row.is_recurring !== true || price.type !== "recurring_price") {
     throw new Error(`dodo_catalog_provider_recurring_mismatch:${offer.id}`);
@@ -147,8 +177,9 @@ export function validateDodoCatalogProviderProduct(product, offer, reference) {
   if (price.currency !== offer.currency || price.price !== offer.amountMinor) {
     throw new Error(`dodo_catalog_provider_price_mismatch:${offer.id}`);
   }
-  if (price.payment_frequency_count !== 1 || price.payment_frequency_interval !== "month"
-    || price.subscription_period_count !== 1 || price.subscription_period_interval !== "month") {
+  if (price.payment_frequency_count !== 1 || paymentFrequencyInterval !== "month"
+    || price.subscription_period_count !== DODO_SUBSCRIPTION_PERIOD_COUNT
+    || subscriptionPeriodInterval !== DODO_SUBSCRIPTION_PERIOD_INTERVAL) {
     throw new Error(`dodo_catalog_provider_interval_mismatch:${offer.id}`);
   }
   if (price.tax_inclusive !== true) throw new Error(`dodo_catalog_provider_tax_mismatch:${offer.id}`);
@@ -594,17 +625,30 @@ async function writePrivateSqlFile(sql) {
   return { directory, file };
 }
 
-function runRemote(environment, args, issue) {
+function runRemote(environment, args, issue, commandEnvironment) {
   try {
-    return runWrangler(["d1", "execute", "PLATFORM_DB", "--env", environment, "--remote", ...args], { capture: true }).stdout;
+    return runWrangler(["d1", "execute", "PLATFORM_DB", "--env", environment, "--remote", ...args], {
+      capture: true,
+      env: commandEnvironment,
+    }).stdout;
   } catch {
     throw new Error(issue);
   }
 }
 
+function resolveRemoteRunner(input) {
+  if (input.runRemoteImplementation !== undefined) return input.runRemoteImplementation;
+  if (typeof input.commandEnvironment !== "object"
+    || input.commandEnvironment === null
+    || !scopedCloudflareEnvironments.has(input.commandEnvironment)) {
+    throw new Error("dodo_catalog_cloudflare_environment_required");
+  }
+  return (environment, args, issue) => runRemote(environment, args, issue, input.commandEnvironment);
+}
+
 function readRemoteDodoCatalog(input) {
   validateDodoCatalogProviderEnvironment(input);
-  const runRemoteImplementation = input.runRemoteImplementation ?? runRemote;
+  const runRemoteImplementation = resolveRemoteRunner(input);
   const rows = parseWranglerRows(
     runRemoteImplementation(input.environment, ["--command", dodoCatalogReadSql(), "--json"], "dodo_catalog_read_failed"),
     "dodo_catalog_read",
@@ -647,7 +691,7 @@ export async function reconcileDodoCatalog(input) {
   if (attested?.verifiedCount !== DODO_CATALOG_OFFERS.length) {
     throw new Error("dodo_catalog_provider_attestation_incomplete");
   }
-  const runRemoteImplementation = input.runRemoteImplementation ?? runRemote;
+  const runRemoteImplementation = resolveRemoteRunner(input);
   const { rows, ...before } = readRemoteDodoCatalog({ ...input, runRemoteImplementation });
   if (before.mode === "already_configured" || before.mode === "rotated") {
     if (before.reconciliationRequired) {

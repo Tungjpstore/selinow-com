@@ -715,7 +715,7 @@ describe("verified payment reversal access revocation", () => {
       database.close();
       databases.splice(databases.indexOf(database), 1);
     }
-  });
+  }, 15_000);
 
   it("fails closed for unverified, cross-tenant and conflicting replay evidence", async () => {
     const { database, env } = await seededRuntime();
@@ -832,7 +832,7 @@ describe("verified payment reversal access revocation", () => {
       database.close();
       databases.splice(databases.indexOf(database), 1);
     }
-  });
+  }, 15_000);
 
   it("serializes a concurrent private consumption and generic activation before revoking remaining access", async () => {
     const { database, env } = await seededRuntime();

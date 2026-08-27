@@ -176,6 +176,7 @@ export const marketingCatalogs = {
     "marketing.pricing.group.automation": "Automation",
     "marketing.pricing.group.audit": "Audit & data",
     "marketing.pricing.row.storefront": "Website storefront",
+    "marketing.pricing.row.premium_storefront_templates": "Premium storefront templates",
     "marketing.pricing.row.products": "Products per store",
     "marketing.pricing.row.customers": "Customers per store",
     "marketing.pricing.row.orders": "Orders per month",
@@ -229,6 +230,7 @@ export const marketingCatalogs = {
     "marketing.plan.feature.analytics_advanced": "Advanced analytics",
     "marketing.plan.feature.automation": "Automation workflows",
     "marketing.plan.feature.private_downloads": "Private digital downloads",
+    "marketing.plan.feature.premium_storefront_templates": "Premium storefront templates",
     "marketing.plan.feature.api_read": "Read API access",
   },
   "vi-VN": {
@@ -406,6 +408,7 @@ export const marketingCatalogs = {
     "marketing.pricing.group.automation": "Tự động hóa",
     "marketing.pricing.group.audit": "Audit & dữ liệu",
     "marketing.pricing.row.storefront": "Website storefront",
+    "marketing.pricing.row.premium_storefront_templates": "Mẫu storefront cao cấp",
     "marketing.pricing.row.products": "Sản phẩm mỗi cửa hàng",
     "marketing.pricing.row.customers": "Khách hàng mỗi cửa hàng",
     "marketing.pricing.row.orders": "Đơn hàng mỗi tháng",
@@ -459,6 +462,7 @@ export const marketingCatalogs = {
     "marketing.plan.feature.analytics_advanced": "Analytics nâng cao",
     "marketing.plan.feature.automation": "Luồng tự động hóa",
     "marketing.plan.feature.private_downloads": "Tải sản phẩm số riêng tư",
+    "marketing.plan.feature.premium_storefront_templates": "Mẫu storefront cao cấp",
     "marketing.plan.feature.api_read": "Quyền đọc API",
   },
 } as const satisfies TranslationCatalogs;

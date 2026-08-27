@@ -4,6 +4,7 @@ import PageHeader from "../../components/workspace/PageHeader.astro";
 import StatusBadge from "../../components/primitives/StatusBadge.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
 import { authenticateRequest } from "../../lib/auth/session";
+import { evaluateSubscription, type EntitlementReasonCode } from "../../lib/billing/entitlements";
 import { loadErrorState, unavailableState, paymentState } from "../../lib/dashboard/integrations-view";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { getBindings } from "../../lib/platform/bindings";
@@ -31,9 +32,22 @@ if (shop !== undefined && canReadProviders) {
 
 let paymentExceptions: PaymentExceptionView[] = [];
 let paymentExceptionsAvailable = false;
+let providerSetupReadable = !canManageProviders;
+let providerSetupReasonCode: EntitlementReasonCode | null = null;
 if (shop !== undefined && canReadProviders) {
   try {
     const member = await getShopForMember({ capability: "payments:read", env, shopPublicId: shop.publicId, userId: auth.userId });
+    if (canManageProviders) {
+      const providerSetup = evaluateSubscription({
+        action: "provider_setup",
+        currentPeriodEnd: member.row.current_period_end,
+        graceEndsAt: member.row.grace_ends_at,
+        subscriptionState: member.row.subscription_state,
+        trialEndsAt: member.row.trial_ends_at,
+      });
+      providerSetupReadable = true;
+      providerSetupReasonCode = providerSetup.allowed ? null : providerSetup.reasonCode;
+    }
     paymentExceptions = await listPaymentExceptions({ env, shopId: member.row.shop_id });
     paymentExceptionsAvailable = true;
   } catch {
@@ -49,6 +63,12 @@ const payosView = payosError === null
   : loadErrorState("PayOS", payosError, locale);
 const unavailablePayos = unavailableState("PayOS", locale);
 const payosConnected = payos !== null && payos.status !== "disabled" && payos.status !== "disconnected";
+const canConfigurePayos = canManageProviders && providerSetupReadable && providerSetupReasonCode === null && payosError === null;
+const providerSetupMessage = providerSetupReasonCode === "subscription_grace_expired"
+  ? t("dashboard.integrations.payos.subscription_grace_expired")
+  : providerSetupReasonCode === "provider_not_ready"
+    ? t("dashboard.integrations.payos.provider_not_ready")
+    : t("dashboard.integrations.payos.subscription_payment_required");
 const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
 const exceptionTypeLabel = (value: string): string => t(
   `dashboard.orders.exception.type.${["identity_mismatch", "inconsistent", "late", "manual_review", "overpaid", "partial", "failed"].includes(value) ? value : "default"}`,
@@ -106,6 +126,7 @@ const integrationClientCopy = {
     data-locale={locale ?? "en"}
     data-copy={JSON.stringify(integrationClientCopy)}
     data-can-manage-providers={canManageProviders ? "true" : "false"}
+    data-can-configure-payos={canConfigurePayos ? "true" : "false"}
     data-can-read-providers={canReadProviders ? "true" : "false"}
     data-can-refresh-payos={canRefreshPayos ? "true" : "false"}
   >
@@ -160,15 +181,26 @@ const integrationClientCopy = {
             <div class="provider-copy"><h3>PayOS (VietQR)</h3><p class="provider-summary" data-summary>{canReadProviders ? payosView.summary : unavailablePayos.summary}</p><p class="provider-check" data-last-check>{canReadProviders ? payosView.checked : unavailablePayos.checked}</p></div>
             <StatusBadge label={canReadProviders ? payosView.label : unavailablePayos.label} tone={canReadProviders ? payosView.tone : unavailablePayos.tone} />
             <div class="provider-actions">
-              {canManageProviders ? <button class="app-button app-button-secondary" type="button" data-action="configure">{payos === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button> : <span class="provider-note" data-reason-code={canReadProviders ? "owner_required" : "permission_unavailable"}>{canReadProviders ? t("dashboard.integrations.channel_expansion.read_only") : t("dashboard.integrations.provider.unavailable")}</span>}
-              {canRefreshPayos && payos !== null && payosError === null && <button class="text-action" type="button" data-action="health">{t("dashboard.integrations.provider.health")}</button>}
+              {canConfigurePayos ? (
+                <button class="app-button app-button-secondary" type="button" data-action="configure">{payos === null ? t("dashboard.integrations.provider.connect") : t("dashboard.integrations.provider.update")}</button>
+              ) : canManageProviders && providerSetupReadable && providerSetupReasonCode !== null ? (
+                <div class="provider-gate" data-provider-setup-gate data-reason-code={providerSetupReasonCode}>
+                  <p>{providerSetupMessage}</p>
+                  <a class="app-button app-button-primary" href={workspaceHref("/app/billing")}>{t("dashboard.integrations.payos.billing_action")}</a>
+                </div>
+              ) : canManageProviders ? (
+                <span class="provider-note" data-reason-code="provider_setup_unavailable">{t("dashboard.integrations.payos.setup_unavailable")}</span>
+              ) : (
+                <span class="provider-note" data-reason-code={canReadProviders ? "owner_required" : "permission_unavailable"}>{canReadProviders ? t("dashboard.integrations.channel_expansion.read_only") : t("dashboard.integrations.provider.unavailable")}</span>
+              )}
+              {canRefreshPayos && canConfigurePayos && payos !== null && <button class="text-action" type="button" data-action="health">{t("dashboard.integrations.provider.health")}</button>}
               {canManageProviders && payosConnected && payosError === null && <button class="text-action danger-text" type="button" data-action="disconnect">{t("dashboard.integrations.provider.disconnect")}</button>}
             </div>
             <p class="provider-error" data-error hidden={!canReadProviders || payosView.error === null}>{canReadProviders ? payosView.error : ""}</p>
           </article>
         </section>
 
-        {canManageProviders && (
+        {canConfigurePayos && (
           <section class="secure-panel" data-config-panel hidden aria-labelledby="payments-config-title">
             <div class="secure-panel-head"><div><p class="secure-kicker">{t("dashboard.integrations.config.eyebrow")}</p><h2 id="payments-config-title">{t("dashboard.integrations.config.title")}</h2><p>{t("dashboard.integrations.config.description")}</p></div><button class="text-action" type="button" data-action="close-config">{t("dashboard.integrations.config.close")}</button></div>
             <div class="workspace-feedback" data-config-feedback role="status" aria-live="polite" hidden></div>
@@ -213,6 +245,9 @@ const integrationClientCopy = {
   .provider-actions .app-button { min-height: 40px; padding: 9px 13px; }
   .provider-actions .text-action { white-space: nowrap; }
   .provider-note { color: var(--sln-text-secondary); font: var(--sln-font-caption); text-align: right; }
+  .provider-gate { display: grid; justify-items: end; gap: 8px; max-width: 320px; }
+  .provider-gate p { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); line-height: 1.45; text-align: right; }
+  .provider-gate .app-button { min-height: 40px; padding: 9px 13px; text-decoration: none; }
   .provider-error { grid-column: 2 / -1; margin: 0; color: var(--sln-state-danger); font: var(--sln-font-body-sm); }
   .text-action { min-height: 36px; padding: 6px 0; border: 0; background: transparent; color: var(--sln-action-primary); font: var(--sln-font-label); cursor: pointer; text-decoration: none; }
   .text-action:hover { color: var(--sln-action-primary-hover); text-decoration: underline; text-underline-offset: 3px; }
@@ -237,7 +272,7 @@ const integrationClientCopy = {
   .disconnect-panel { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--sln-state-danger) 22%, var(--sln-border-default)); }
   .disconnect-panel .app-button { margin-top: 14px; }
   @media (max-width: 900px) { .integration-row { grid-template-columns: 44px minmax(0, 1fr) auto; } .integration-row > .sln-status { grid-column: 3; grid-row: 1; } .provider-actions { grid-column: 2 / -1; justify-content: start; } .provider-error { grid-column: 1 / -1; } }
-  @media (max-width: 560px) { .header-actions, .header-actions .app-button { width: 100%; } .integration-row { gap: 12px; padding: 18px 0; } .provider-copy h3 { font-size: 18px; } .provider-summary { white-space: normal; } .provider-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; } .provider-actions .app-button { width: 100%; } .provider-actions .text-action { justify-self: start; } .provider-note { text-align: left; } .secure-panel-head, .form-heading { flex-direction: column; } .form-heading a { min-height: 40px; } }
+  @media (max-width: 560px) { .header-actions, .header-actions .app-button { width: 100%; } .integration-row { gap: 12px; padding: 18px 0; } .provider-copy h3 { font-size: 18px; } .provider-summary { white-space: normal; } .provider-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; } .provider-actions .app-button { width: 100%; } .provider-actions .text-action { justify-self: start; } .provider-note { text-align: left; } .provider-gate { justify-items: start; max-width: none; } .provider-gate p { text-align: left; } .secure-panel-head, .form-heading { flex-direction: column; } .form-heading a { min-height: 40px; } }
   .reconciliation-panel { display: grid; gap: 16px; padding: clamp(20px, 4vw, 28px); border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); box-shadow: var(--sln-shadow-sm); }
   .reconciliation-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
   .reconciliation-head h2 { margin: 0; font: var(--sln-font-h3); letter-spacing: -.035em; }

@@ -208,7 +208,7 @@ describe("tenant storefront draft contract", () => {
       requestId: "request-readiness-failed-publish",
       shopPublicId: "public-a",
       userId: "user-a",
-    })).rejects.toMatchObject({ code: "policy_unpublished", status: 409 });
+    })).rejects.toMatchObject({ code: "onboarding_not_initialized", status: 409 });
     const afterFailedPublish = await getSellerStorefrontSettings({ env, shopPublicId: "public-a", userId: "user-a" });
     expect(afterFailedPublish).toMatchObject({
       publicationState: "unpublished_changes",

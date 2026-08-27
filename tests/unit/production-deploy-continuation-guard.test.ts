@@ -231,6 +231,7 @@ describe("production Worker continuation deploy admission", () => {
     expect(emittedSql).toContain("next_reconciliation_at");
     expect(emittedSql).toContain("last_reconciliation_at");
     expect(emittedSql).toContain("reconciliation_failure_code");
+    expect(emittedSql).toContain("WHERE code != 'pro'");
   });
 
   it("pins staging invariant queries to the staging D1 environment", () => {
@@ -337,14 +338,24 @@ describe("production Worker continuation deploy admission", () => {
     })).toThrow("production_database_invariant_data_violation:integrity_0112_google_oauth_state");
 
     const invalidProEntitlement = runner((rows, sql) => {
-      if (sql.includes("integrity_0116_pro_entitlement") && rows[0] !== undefined) {
-        rows[0].integrity_0116_pro_entitlement = 1;
+      if (sql.includes("integrity_0118_pro_entitlement") && rows[0] !== undefined) {
+        rows[0].integrity_0118_pro_entitlement = 1;
       }
     });
     expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
       migrationNames,
       runWranglerImplementation: invalidProEntitlement,
-    })).toThrow("production_database_invariant_data_violation:integrity_0116_pro_entitlement");
+    })).toThrow("production_database_invariant_data_violation:integrity_0118_pro_entitlement");
+
+    const invalidPayOSProjection = runner((rows, sql) => {
+      if (sql.includes("integrity_0119_payos_projection") && rows[0] !== undefined) {
+        rows[0].integrity_0119_payos_projection = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidPayOSProjection,
+    })).toThrow("production_database_invariant_data_violation:integrity_0119_payos_projection");
 
     const invalidTelegramGeneration = runner((rows, sql) => {
       if (sql.includes("integrity_0095_telegram_update_generation") && rows[0] !== undefined) {

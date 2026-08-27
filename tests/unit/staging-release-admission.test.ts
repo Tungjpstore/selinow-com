@@ -362,6 +362,39 @@ describe("staging release admission", () => {
         ok: false,
       }));
     }).toThrow("staging_database_preflight_failed");
+    const repairableOutput = JSON.stringify({
+      checks: [
+        { code: "tenant_relationships", detail: "0", ok: true },
+        { code: "missing_payos_connections", detail: "1", ok: false },
+      ],
+      environment: "staging",
+      ok: false,
+    });
+    expect(parseStagingDatabasePreflightOutput(repairableOutput, {
+      allowMissingPayosConnections: true,
+    })).toEqual({
+      checks: [
+        { code: "tenant_relationships", detail: "0", ok: true },
+        { code: "missing_payos_connections", detail: "1", ok: false },
+      ],
+    });
+    expect(() => parseStagingDatabasePreflightOutput(repairableOutput))
+      .toThrow("staging_database_preflight_failed");
+    expect(() => parseStagingDatabasePreflightOutput(JSON.stringify({
+      checks: [{ code: "missing_payos_connections", detail: "1", ok: false }],
+      environment: "staging",
+      ok: true,
+    }), { allowMissingPayosConnections: true }))
+      .toThrow("staging_database_preflight_failed");
+    expect(() => parseStagingDatabasePreflightOutput(JSON.stringify({
+      checks: [
+        { code: "missing_payos_connections", detail: "1", ok: false },
+        { code: "invalid_payos_connection_links", detail: "1", ok: false },
+      ],
+      environment: "staging",
+      ok: false,
+    }), { allowMissingPayosConnections: true }))
+      .toThrow("staging_database_preflight_failed");
     expect(() => assertStagingDatabasePreflight({
       runImplementation: () => {
         throw new Error("provider output");
@@ -406,7 +439,7 @@ describe("staging release admission", () => {
       migrationNames: MIGRATIONS,
       runMigrationImplementation: sink,
     })).rejects.toThrow("staging_database_preflight_failed");
-    expect(prefix).not.toHaveBeenCalled();
+    expect(prefix).toHaveBeenCalledOnce();
     expect(sink).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
   });
@@ -414,8 +447,8 @@ describe("staging release admission", () => {
   it("rechecks the complete ledger and database preflight after staging migration", async () => {
     const events: string[] = [];
     await expect(runStagingMigrationWithVerification({
-      assertDatabasePreflightImplementation: () => {
-        events.push("preflight");
+      assertDatabasePreflightImplementation: (input) => {
+        events.push(`preflight:${String(input?.allowMissingPayosConnections)}`);
       },
       assertMigrationLedgerImplementation: () => {
         events.push("complete");
@@ -435,12 +468,39 @@ describe("staging release admission", () => {
       },
     })).resolves.toBeUndefined();
     expect(events).toEqual([
-      "preflight",
       `prefix:${MIGRATION_LEDGER_PREFIX.join(",")}`,
+      "preflight:false",
       "migrate",
       "complete",
-      "preflight",
+      "preflight:false",
       "post-contract",
+    ]);
+  });
+
+  it("allows only the known PayOS projection defect while migration 0119 is pending", async () => {
+    const migrationNames = [
+      FIRST_MIGRATION,
+      "0119_payos_provider_projection_lifecycle.sql",
+    ];
+    const events: string[] = [];
+    await runStagingMigrationWithVerification({
+      assertDatabasePreflightImplementation: (input) => {
+        events.push(`preflight:${String(input?.allowMissingPayosConnections)}`);
+      },
+      assertMigrationLedgerImplementation: () => Promise.resolve({ migrationNames }),
+      assertMigrationLedgerPrefixImplementation: () => Promise.resolve({
+        migrationNames: [FIRST_MIGRATION],
+      }),
+      expectedPrefix: [FIRST_MIGRATION],
+      migrationNames,
+      runMigrationImplementation: () => {
+        events.push("migrate");
+      },
+    });
+    expect(events).toEqual([
+      "preflight:true",
+      "migrate",
+      "preflight:false",
     ]);
   });
 

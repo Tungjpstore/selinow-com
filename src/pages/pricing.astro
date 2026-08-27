@@ -86,6 +86,7 @@ const priceLabel = (price: MarketingPrice): string | null => {
 const comparisonGroups = [
   { label: t("marketing.pricing.group.store"), rows: [
     { label: t("marketing.pricing.row.storefront"), value: (plan: MarketingPlan) => capability(plan.features.storefront) },
+    { label: t("marketing.pricing.row.premium_storefront_templates"), value: (plan: MarketingPlan) => capability(plan.features.premiumStorefrontTemplates) },
     { label: t("marketing.pricing.row.products"), value: (plan: MarketingPlan) => limit(plan, "products", "marketing.pricing.limit.products") },
     { label: t("marketing.pricing.row.customers"), value: (plan: MarketingPlan) => limit(plan, "customers", "marketing.pricing.limit.customers") },
   ] },
@@ -244,7 +245,7 @@ const pricingStructuredData = {
                           ? t("marketing.pricing.price_market.global")
                           : t("marketing.pricing.capability.unpublished");
                       return label === null ? null : (
-                        <p data-pricing-offer data-market={price.marketCode} data-currency={price.currency} data-interval={price.interval}>
+                        <p data-pricing-offer data-market={price.marketCode} data-currency={price.currency} data-interval={price.interval} hidden={price.marketCode !== defaultMarket}>
                           <strong>{formatMarketingPrice(price, locale)}</strong>
                           <span>/ {price.interval === "month" ? t("marketing.pricing.price_period.month") : price.interval}</span>
                           <small>{marketLabel}</small>

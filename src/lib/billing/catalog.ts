@@ -1,4 +1,5 @@
-import type { BillingCurrency, BillingInterval, BillingMarketCode } from "./plan-catalog";
+import type { AppBindings } from "../platform/bindings";
+import { parsePlanSnapshot, type BillingCurrency, type BillingInterval, type BillingMarketCode, type PlanFeatureName, type PublicPlanCode } from "./plan-catalog";
 
 export type SellablePlanOffer = {
   amountMinor: number;
@@ -69,6 +70,42 @@ export const SELLABLE_PLAN_OFFER_SQL_PREDICATE = `
   AND plan_prices.provider_code = 'dodo'
   AND plan_prices.provider_price_ref NOT LIKE 'pending:%'
 `;
+
+type SellablePlanFeatureRow = {
+  code: string;
+  featureFlagsJson: string;
+  limitsJson: string;
+  name: string;
+  version: number;
+};
+
+/** Reads a boolean entitlement from the assignable D1 catalog and fails closed. */
+export async function sellablePublicPlanHasFeature(
+  env: AppBindings,
+  planCode: PublicPlanCode,
+  feature: Exclude<PlanFeatureName, "analytics">,
+): Promise<boolean> {
+  const row = await env.PLATFORM_DB.prepare(`
+    SELECT plans.code, plans.name, plans.feature_flags_json AS featureFlagsJson,
+      plans.limits_json AS limitsJson, plans.version
+    FROM plans
+    WHERE ${SELLABLE_PUBLIC_PLAN_SQL_PREDICATE}
+      AND plans.code = ?
+    LIMIT 1
+  `).bind(planCode).first<SellablePlanFeatureRow>();
+  if (row === null) return false;
+  const plan = parsePlanSnapshot({
+    code: row.code,
+    featureFlagsJson: row.featureFlagsJson,
+    isActive: true,
+    isAssignable: true,
+    isPublic: true,
+    limitsJson: row.limitsJson,
+    name: row.name,
+    version: row.version,
+  });
+  return plan.ok && plan.value.features[feature];
+}
 
 export function isPublishedProviderPriceReference(value: unknown): value is string {
   return typeof value === "string"

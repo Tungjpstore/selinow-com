@@ -13,6 +13,7 @@ import { listSellerCatalog } from "../../lib/catalog/store";
 import { listSellerOrders, type SellerOrderSummary } from "../../lib/commerce/seller-orders";
 import { isAppError } from "../../lib/core/errors";
 import { getBindings } from "../../lib/platform/bindings";
+import { getSellerMetricsRange, type SellerMetricsRange } from "../../lib/dashboard/metrics";
 import { deriveSellerSellability } from "../../lib/dashboard/overview-ui";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { createDashboardTranslator } from "../../lib/i18n";
@@ -73,8 +74,10 @@ const noCatalog: LoadResult<{ products: CatalogRecord[]; variants: CatalogRecord
   state: canReadCatalog ? "ready" : "forbidden",
   value: emptyCatalog(),
 };
+const noMetrics: LoadResult<SellerMetricsRange | null> = { state: "ready", value: null };
+const metricsDays = shop?.featureFlags.analytics === "advanced" ? 90 : 30;
 
-const [ordersLoad, readinessLoad, catalogLoad] = shop !== undefined && workspaceState === "ready"
+const [ordersLoad, readinessLoad, catalogLoad, metricsLoad] = shop !== undefined && workspaceState === "ready"
   ? await Promise.all([
       loadTenantData(
         () => listSellerOrders({ env, shopPublicId: shop.publicId, userId: auth.userId }),
@@ -98,8 +101,12 @@ const [ordersLoad, readinessLoad, catalogLoad] = shop !== undefined && workspace
             emptyCatalog(),
           )
         : Promise.resolve(noCatalog),
+      loadTenantData(
+        () => getSellerMetricsRange({ days: metricsDays, env, shopPublicId: shop.publicId, userId: auth.userId }),
+        null,
+      ),
     ])
-  : [noOrders, noReadiness, noCatalog];
+  : [noOrders, noReadiness, noCatalog, noMetrics];
 
 const orders = ordersLoad.value;
 const ordersState = ordersLoad.state;
@@ -107,6 +114,8 @@ const readiness = readinessLoad.value;
 const readinessState = readinessLoad.state;
 const catalog = catalogLoad.value;
 const catalogState = catalogLoad.state;
+const metrics = metricsLoad.value;
+const metricsState = metricsLoad.state;
 
 const displayName = auth.displayName.trim() || t("dashboard.commerce.you");
 const storefrontUrl = shop === undefined ? null : `https://${shop.slug}.${env.PLATFORM_BASE_DOMAIN}`;
@@ -260,11 +269,11 @@ const dayFormatter = new Intl.DateTimeFormat(typeof locale === "string" ? locale
 const todayLabel = dayFormatter.format(new Date());
 
 const shopCurrency = shop?.currency ?? "VND";
-const revenueLabel = formatMoney(verifiedValue, shopCurrency, typeof locale === "string" ? locale : "en");
+const revenueLabel = formatMoney(metrics?.totalMinor ?? verifiedValue, shopCurrency, typeof locale === "string" ? locale : "en");
 const fulfillmentLabel = fulfillmentRate === null ? "—" : percentFormatter.format(fulfillmentRate);
 const unavailableMetricValue = t("dashboard.overview.cockpit.unavailable_value");
 const ordersMetricValue = ordersState === "ready" ? String(paidOrders.length) : unavailableMetricValue;
-const revenueMetricValue = ordersState === "ready" ? revenueLabel : unavailableMetricValue;
+const revenueMetricValue = metricsState === "ready" && metrics !== null ? revenueLabel : unavailableMetricValue;
 const fulfillmentMetricValue = ordersState === "ready" ? fulfillmentLabel : unavailableMetricValue;
 const productsMetricValue = catalogState === "ready" ? String(catalog.products.length) : unavailableMetricValue;
 const healthCards: HealthCard[] = [
@@ -294,16 +303,19 @@ const healthCards: HealthCard[] = [
   },
 ];
 
-// Generate 7-day velocity points for 60fps HTML5 Canvas chart
-const chartPoints = [
-  { label: "T2", value: Math.round(verifiedValue * 0.12) },
-  { label: "T3", value: Math.round(verifiedValue * 0.18) },
-  { label: "T4", value: Math.round(verifiedValue * 0.14) },
-  { label: "T5", value: Math.round(verifiedValue * 0.25) },
-  { label: "T6", value: Math.round(verifiedValue * 0.32) },
-  { label: "T7", value: Math.round(verifiedValue * 0.28) },
-  { label: "CN", value: Math.max(verifiedValue, paidOrders.length * 50000) },
-];
+const chartDateFormatter = new Intl.DateTimeFormat(typeof locale === "string" ? locale : "en", {
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+const realChartPoints = (metrics?.points ?? []).map((point) => ({
+  formattedValue: formatMoney(point.totalMinor, metrics?.currency ?? shopCurrency, typeof locale === "string" ? locale : "en"),
+  label: chartDateFormatter.format(new Date(`${point.date}T00:00:00.000Z`)),
+  value: point.totalMinor,
+}));
+const chartPoints = realChartPoints.length === 1
+  ? [{ label: "", value: 0 }, realChartPoints[0]!]
+  : realChartPoints;
 ---
 
 <AppLayout activePath="/app" displayName={displayName} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.overview.title")}>
@@ -372,9 +384,11 @@ const chartPoints = [
 
       <div class="console-grid-2col">
         <SparklineCanvas
-          title="Tốc độ tăng trưởng Doanh thu (7 ngày gần nhất)"
+          title={t("dashboard.overview.analytics.title", { days: metricsDays })}
           data={chartPoints}
           height={160}
+          emptyTitle={metricsState === "ready" ? t("dashboard.overview.analytics.empty_title") : t("dashboard.overview.analytics.unavailable_title")}
+          emptyHint={metricsState === "ready" ? t("dashboard.overview.analytics.empty_hint") : t("dashboard.overview.analytics.unavailable_hint")}
         />
         <section class="console-hero-card">
           <div class="console-hero-content">
@@ -511,7 +525,7 @@ const chartPoints = [
 
   .console-grid-2col {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
     gap: 16px;
     align-items: stretch;
   }
@@ -588,7 +602,7 @@ const chartPoints = [
 
   .console-block__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .console-block__head h2 { margin: 0; color: var(--sln-console-ink); font-size: 15px; font-weight: 600; }
-  .console-block__meta { color: var(--sln-console-accent); font: var(--sln-console-label); font-weight: 600; background: var(--sln-console-accent-soft); padding: 2px 8px; border-radius: var(--sln-console-radius-pill); }
+  .console-block__meta { color: var(--sln-console-accent-text); font: var(--sln-console-label); font-weight: 600; background: var(--sln-console-accent-soft); padding: 2px 8px; border-radius: var(--sln-console-radius-pill); }
   .console-block__empty { margin: 0; padding: 20px 0; color: var(--sln-console-ink-3); font: var(--sln-console-text-sm); }
   .console-block__emptyRow { display: flex; align-items: center; gap: 12px; padding: 16px 0; flex-wrap: wrap; }
 
@@ -620,7 +634,7 @@ const chartPoints = [
   .console-queue__body { display: grid; gap: 1px; min-width: 0; flex: 1; }
   .console-queue__title { color: var(--sln-console-ink); font: var(--sln-console-text-sm); font-weight: 500; }
   .console-queue__impact { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
-  .console-queue__evidence { color: var(--sln-console-ink-3); font: var(--sln-console-label); opacity: .8; }
+  .console-queue__evidence { color: var(--sln-console-ink-3); font: var(--sln-console-label); }
   .console-queue__count {
     display: inline-flex;
     align-items: center;

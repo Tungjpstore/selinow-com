@@ -19,6 +19,28 @@ export function validateCandidateBoundReleaseEvidence(input?: {
   now?: Date;
   repositoryRoot?: string;
 }): { checks: ReleaseCheck[]; missing: string[]; ok: boolean };
+export function validateCandidateWorkerVersionEvidence(input?: {
+  evidence?: Record<string, unknown> | null;
+  workerVersionInventory?: Array<{
+    binding: Record<string, unknown> | null;
+    id: string;
+  }>;
+}): { checks: ReleaseCheck[]; missing: string[]; ok: boolean };
+export function inspectLiveCandidateWorkerVersionEvidence(input: {
+  environment?: NodeJS.ProcessEnv;
+  evidence: Record<string, unknown>;
+  productionSpec: Record<string, unknown>;
+  repositoryRoot?: string;
+  stagingSpec: Record<string, unknown> | null;
+  workerIdentityImplementation?: (input: Record<string, unknown>) => Promise<{
+    currentWorkerVersion?: string;
+    deployableWorkerVersionInventory?: Array<{
+      binding: Record<string, unknown> | null;
+      id: string;
+    }>;
+  }>;
+  wranglerConfig: Record<string, unknown>;
+}): Promise<{ checks: ReleaseCheck[]; missing: string[]; ok: boolean }>;
 export function validateLegalSupportDecisionEvidence(input?: {
   evidence?: Record<string, unknown> | null;
   now?: Date;

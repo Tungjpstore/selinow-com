@@ -28,6 +28,7 @@
   --sln-console-accent: #7C6AF0;
   --sln-console-accent-hover: #6957DE;
   --sln-console-accent-active: #5644C4;
+  --sln-console-accent-text: #5644C4;
   --sln-console-accent-soft: #EDE8FB;
   --sln-console-accent-subtle: #EDE8FB;
   --sln-console-accent-ink: #FFFFFF;
@@ -48,12 +49,16 @@
 
   /* Semantic states (Protected ADR 0011) */
   --sln-console-danger: #E02424;
+  --sln-console-danger-text: #B42318;
   --sln-console-danger-tint: #FEF2F2;
   --sln-console-warning: #D97706;
+  --sln-console-warning-text: #9A3412;
   --sln-console-warning-tint: #FFFBEB;
   --sln-console-success: #0E9F6E;
+  --sln-console-success-text: #067647;
   --sln-console-success-tint: #ECFDF5;
   --sln-console-info: #3F83F8;
+  --sln-console-info-text: #175CD3;
   --sln-console-info-tint: #EFF6FF;
 
   /* Focus ring */
@@ -108,12 +113,17 @@
   --sln-console-ink: #f4f4f5;
   --sln-console-ink-2: #a1a1aa;
   --sln-console-ink-3: #71717a;
+  --sln-console-accent-text: #c4b5fd;
   --sln-console-danger: #f87171;
+  --sln-console-danger-text: #fca5a5;
   --sln-console-danger-tint: #2a1517;
   --sln-console-warning: #fbbf24;
+  --sln-console-warning-text: #fcd34d;
   --sln-console-warning-tint: #2a2214;
   --sln-console-success: #4ade80;
+  --sln-console-success-text: #86efac;
   --sln-console-success-tint: #122a1b;
   --sln-console-info: #93c5fd;
+  --sln-console-info-text: #bfdbfe;
   --sln-console-info-tint: #14213a;
 }

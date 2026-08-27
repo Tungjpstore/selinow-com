@@ -153,6 +153,14 @@ describe("EX5 marketing/onboarding/auth wiring", () => {
     expect(landing).toContain("var(--sln-duration-marketing) var(--sln-ease-standard) both");
   });
 
+  it("passes locale-aware money labels into the dashboard chart tooltip", () => {
+    const overview = readFileSync("src/pages/app/index.astro", "utf8");
+    const chart = readFileSync("src/scripts/dashboard/overview-charts.ts", "utf8");
+    expect(overview).toContain("formattedValue: formatMoney(point.totalMinor");
+    expect(chart).toContain("item.formattedValue ?? item.value.toLocaleString()");
+    expect(chart).not.toContain('toLocaleString("vi-VN")');
+  });
+
   it("starts count-ups on reveal and gives login the register enter motion", () => {
     const boot = readFileSync("src/scripts/marketing/reveal-boot.ts", "utf8");
     expect(boot).toContain("[data-count-to]");

@@ -139,6 +139,24 @@ async function paymentProviderWebhookTargetFingerprint(env: AppBindings, webhook
   return hmacToken(env.IDENTIFIER_HMAC_SECRET, "payos-provider-webhook-target:v1", webhookUrl);
 }
 
+async function findHistoricalPaymentIdentityOwner(
+  env: AppBindings,
+  fingerprint: string,
+): Promise<{ shopId: string } | null> {
+  const table = await env.PLATFORM_DB.prepare(`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'payos_provider_identity_history'
+    LIMIT 1
+  `).first<{ name: string }>();
+  if (table === null) return null;
+  return env.PLATFORM_DB.prepare(`
+    SELECT shop_id AS shopId
+    FROM payos_provider_identity_history
+    WHERE provider = 'payos' AND provider_identity_fingerprint = ?
+    LIMIT 1
+  `).bind(fingerprint).first<{ shopId: string }>();
+}
+
 async function assertPaymentProviderIdentityOwnership(
   env: AppBindings,
   shopId: string,
@@ -146,7 +164,12 @@ async function assertPaymentProviderIdentityOwnership(
   integration: IntegrationRow | null,
 ): Promise<void> {
   const fingerprint = await payOSProviderIdentityFingerprint(env, credentials);
-  const existingFingerprint = integration?.providerIdentityFingerprint ?? null;
+  // An explicit disconnect opens a controlled replacement window. Keep the
+  // old fingerprint for pending webhook verification, but let the owner
+  // prove and bind a new PayOS channel before reactivation.
+  const existingFingerprint = integration?.status === "disconnected"
+    ? null
+    : integration?.providerIdentityFingerprint ?? null;
   if (existingFingerprint !== null && existingFingerprint !== fingerprint) {
     throw new AppError("credential_channel_mismatch", 409);
   }
@@ -157,6 +180,10 @@ async function assertPaymentProviderIdentityOwnership(
     LIMIT 1
   `).bind(fingerprint).first<{ shopId: string }>();
   if (owner !== null && owner.shopId !== shopId) {
+    throw new AppError("credential_already_connected", 409);
+  }
+  const historicalOwner = await findHistoricalPaymentIdentityOwner(env, fingerprint);
+  if (historicalOwner !== null && historicalOwner.shopId !== shopId) {
     throw new AppError("credential_already_connected", 409);
   }
 }
@@ -213,6 +240,10 @@ async function paymentProviderOwnershipConflict(input: {
   if (identityOwner !== null && identityOwner.shopId !== input.shopId) {
     return new AppError("credential_already_connected", 409);
   }
+  const historicalOwner = await findHistoricalPaymentIdentityOwner(input.env, input.providerIdentityFingerprint);
+  if (historicalOwner !== null && historicalOwner.shopId !== input.shopId) {
+    return new AppError("credential_already_connected", 409);
+  }
   const credentialOwner = await findPaymentCredentialByProviderFingerprint(input.env, input.providerCredentialFingerprint);
   if (credentialOwner !== null && credentialOwner.credentialId !== input.credentialId) {
     return new AppError("credential_already_connected", 409);
@@ -229,7 +260,9 @@ async function claimPaymentProviderOwnership(input: {
   webhookUrl: string;
 }): Promise<PaymentProviderOwnershipClaim> {
   const providerIdentityFingerprint = await payOSProviderIdentityFingerprint(input.env, input.credentials);
-  const existing = input.integration.providerIdentityFingerprint ?? null;
+  const existing = input.integration.status === "disconnected"
+    ? null
+    : input.integration.providerIdentityFingerprint ?? null;
   if (existing !== null && existing !== providerIdentityFingerprint) throw new AppError("credential_channel_mismatch", 409);
   const credentialFingerprint = await paymentCredentialFingerprint(input.env, input.shopId, input.credentials);
   const providerCredentialFingerprint = await paymentProviderCredentialFingerprint(input.env, input.credentials);
@@ -244,17 +277,61 @@ async function claimPaymentProviderOwnership(input: {
           provider_claim_generation = provider_claim_generation + 1,
           provider_claim_nonce = ?,
           provider_claim_state = CASE
-            WHEN provider_claim_state = 'quarantined' OR provider_claim_nonce IS NOT NULL
-              THEN 'quarantined'
+            WHEN provider_claim_state = 'quarantined' THEN 'quarantined'
+            WHEN provider_claim_nonce IS NOT NULL
+              AND NOT (
+                provider_claim_state IN ('in_flight', 'ambiguous')
+                AND active_credential_id = ?
+                AND status = 'active'
+                AND webhook_status = 'verified'
+                AND EXISTS (
+                  SELECT 1
+                  FROM payment_credentials AS active_claim
+                  WHERE active_claim.id = ?
+                    AND active_claim.integration_id = payment_integrations.id
+                    AND active_claim.shop_id = payment_integrations.shop_id
+                    AND active_claim.provider = payment_integrations.provider
+                    AND (active_claim.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                      OR active_claim.provider_claim_nonce IS NULL)
+                    AND active_claim.status = 'active'
+                )
+              ) THEN 'quarantined'
             ELSE 'in_flight'
           END,
           provider_claim_target_fingerprint = ?,
           updated_at = ?
         WHERE id = ? AND shop_id = ? AND provider = 'payos'
-          AND (provider_identity_fingerprint IS NULL OR provider_identity_fingerprint = ?)
+          AND (
+            provider_identity_fingerprint IS NULL
+            OR provider_identity_fingerprint = ?
+            OR (
+              status = 'disconnected'
+              AND active_credential_id IS NULL
+              AND provider_claim_nonce IS NULL
+              AND provider_claim_state = 'idle'
+              AND provider_claim_target_fingerprint IS NULL
+            )
+          )
           AND (
             provider_claim_nonce IS NULL
             OR provider_claim_target_fingerprint = ?
+            OR (
+              provider_claim_state IN ('in_flight', 'ambiguous')
+              AND active_credential_id = ?
+              AND status = 'active'
+              AND webhook_status = 'verified'
+              AND EXISTS (
+                SELECT 1
+                FROM payment_credentials AS active_claim
+                WHERE active_claim.id = ?
+                  AND active_claim.integration_id = payment_integrations.id
+                  AND active_claim.shop_id = payment_integrations.shop_id
+                  AND active_claim.provider = payment_integrations.provider
+                  AND (active_claim.provider_claim_nonce = payment_integrations.provider_claim_nonce
+                    OR active_claim.provider_claim_nonce IS NULL)
+                  AND active_claim.status = 'active'
+              )
+            )
             OR (
               provider_claim_state = 'quarantined'
               AND provider_claim_target_fingerprint IS NULL
@@ -277,7 +354,7 @@ async function claimPaymentProviderOwnership(input: {
               )
             )
           )
-      `).bind(providerIdentityFingerprint, nonce, targetFingerprint, now, input.integration.id, input.shopId, providerIdentityFingerprint, targetFingerprint, input.credentialId, credentialFingerprint, providerCredentialFingerprint),
+      `).bind(providerIdentityFingerprint, nonce, input.credentialId, input.credentialId, targetFingerprint, now, input.integration.id, input.shopId, providerIdentityFingerprint, targetFingerprint, input.credentialId, input.credentialId, input.credentialId, credentialFingerprint, providerCredentialFingerprint),
       input.env.PLATFORM_DB.prepare(`
         UPDATE payment_credentials
         SET status = CASE
@@ -348,9 +425,9 @@ async function markAmbiguousPaymentProviderOwnership(input: {
   env: AppBindings;
   integrationId: string;
   shopId: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const now = new Date().toISOString();
-  await input.env.PLATFORM_DB.batch([
+  const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
       UPDATE payment_credentials
       SET status = CASE WHEN activated_at IS NULL THEN 'error' ELSE status END
@@ -377,6 +454,7 @@ async function markAmbiguousPaymentProviderOwnership(input: {
         AND provider_claim_target_fingerprint = ?
     `).bind(input.degradeVerifiedIntegration === true ? 1 : 0, input.degradeVerifiedIntegration === true ? 1 : 0, now, now, input.integrationId, input.shopId, input.claim.generation, input.claim.nonce, input.claim.targetFingerprint),
   ]);
+  return (results[0]?.meta.changes ?? 0) === 1 && (results[1]?.meta.changes ?? 0) === 1;
 }
 
 async function finalizeDefinitivePaymentProviderRejection(input: {
@@ -389,7 +467,7 @@ async function finalizeDefinitivePaymentProviderRejection(input: {
 }): Promise<boolean> {
   const now = new Date().toISOString();
   try {
-    await input.env.PLATFORM_DB.batch([
+    const results = await input.env.PLATFORM_DB.batch([
       input.env.PLATFORM_DB.prepare(`
         UPDATE payment_credentials
         SET status = CASE WHEN activated_at IS NULL THEN 'error' ELSE status END,
@@ -440,7 +518,7 @@ async function finalizeDefinitivePaymentProviderRejection(input: {
           AND provider_claim_target_fingerprint = ?
       `).bind(input.degradeVerifiedIntegration === true ? 1 : 0, input.degradeVerifiedIntegration === true ? 1 : 0, now, now, input.integrationId, input.shopId, input.claim.generation, input.claim.nonce, input.claim.targetFingerprint),
     ]);
-    return true;
+    return (results[0]?.meta.changes ?? 0) === 1 && (results[1]?.meta.changes ?? 0) === 1;
   } catch {
     return false;
   }
@@ -817,28 +895,26 @@ export async function refreshPayOSHealth(input: { env: AppBindings; fetcher?: ty
   await assertPayOSProviderSetupAllowed(input.env, shopId);
   const credential = await loadCredentialById(input.env, integration.activeCredentialId, shopId);
   const webhookUrl = `${input.env.API_ORIGIN}/webhooks/payos/${integration.webhookPublicId}`;
+  const claim = await claimPaymentProviderOwnership({
+    credentialId: credential.row.credentialId,
+    credentials: credential.credentials,
+    env: input.env,
+    integration,
+    shopId,
+    webhookUrl,
+  });
+  let providerFailure = false;
   try {
-    const claim = await claimPaymentProviderOwnership({
-      credentialId: credential.row.credentialId,
-      credentials: credential.credentials,
-      env: input.env,
-      integration,
-      shopId,
-      webhookUrl,
-    });
-    try {
-      await new PayOSClient(credential.credentials, input.fetcher).confirmWebhook(webhookUrl);
-    } catch (error) {
-      if (isDefinitivePayOSWebhookRejection(error)) {
-        await finalizeDefinitivePaymentProviderRejection({ claim, credentialId: credential.row.credentialId, degradeVerifiedIntegration: true, env: input.env, integrationId: integration.id, shopId });
-      } else {
-        await markAmbiguousPaymentProviderOwnership({ claim, credentialId: credential.row.credentialId, degradeVerifiedIntegration: true, env: input.env, integrationId: integration.id, shopId });
-      }
-      throw error;
-    }
-    await verifyActivePaymentProviderOwnership({ claim, credentialId: credential.row.credentialId, env: input.env, integrationId: integration.id, shopId });
+    await new PayOSClient(credential.credentials, input.fetcher).confirmWebhook(webhookUrl);
   } catch (error) {
-    if (!(error instanceof AppError)) throw error;
+    const persisted = isDefinitivePayOSWebhookRejection(error)
+      ? await finalizeDefinitivePaymentProviderRejection({ claim, credentialId: credential.row.credentialId, degradeVerifiedIntegration: true, env: input.env, integrationId: integration.id, shopId })
+      : await markAmbiguousPaymentProviderOwnership({ claim, credentialId: credential.row.credentialId, degradeVerifiedIntegration: true, env: input.env, integrationId: integration.id, shopId });
+    if (!persisted) throw new AppError("payment_integration_conflict", 409);
+    providerFailure = true;
+  }
+  if (!providerFailure) {
+    await verifyActivePaymentProviderOwnership({ claim, credentialId: credential.row.credentialId, env: input.env, integrationId: integration.id, shopId });
   }
   const refreshed = await findIntegration(input.env, shopId);
   if (refreshed === null) throw new AppError("internal_error", 500);
@@ -870,6 +946,7 @@ export async function disconnectPayOS(input: { env: AppBindings; requestId: stri
   const now = new Date().toISOString();
   await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare("UPDATE payment_integrations SET status = 'disconnected', webhook_status = 'disconnected', active_credential_id = NULL, provider_claim_generation = provider_claim_generation + 1, provider_claim_nonce = NULL, provider_claim_state = 'idle', provider_claim_target_fingerprint = NULL, updated_at = ? WHERE id = ? AND shop_id = ?").bind(now, integration.id, shopId),
+    input.env.PLATFORM_DB.prepare("UPDATE payment_provider_connections SET provider_account_fingerprint = NULL, provider_account_verified_at = NULL, updated_at = ?, version = version + 1 WHERE id = ? AND shop_id = ? AND legacy_payos_integration_id = ? AND status = 'disconnected' AND webhook_status = 'disconnected'").bind(now, integration.id, shopId, integration.id),
     input.env.PLATFORM_DB.prepare("UPDATE payment_credentials SET status = 'grace', grace_ends_at = ?, provider_claim_nonce = NULL WHERE integration_id = ? AND shop_id = ? AND status = 'active'").bind(new Date(Date.now() + 24 * 60 * 60_000).toISOString(), integration.id, shopId),
     input.env.PLATFORM_DB.prepare("UPDATE payment_credentials SET status = 'revoked', revoked_at = ?, provider_claim_nonce = NULL WHERE integration_id = ? AND shop_id = ? AND status IN ('pending', 'error')").bind(now, integration.id, shopId),
     input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'user', ?, 'payos.disconnected', 'payment_integration', ?, '{}', ?, ?)`).bind(createId("aud"), shopId, input.userId, integration.id, input.requestId, now),

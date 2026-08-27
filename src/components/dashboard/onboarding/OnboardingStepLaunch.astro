@@ -4,9 +4,11 @@ import ProviderLogo from "../../console/ProviderLogo.astro";
 
 type Props = {
   platformBaseDomain: string;
+  policyAttestationVersion: number | null;
 };
 
-const { platformBaseDomain } = Astro.props;
+const { platformBaseDomain, policyAttestationVersion } = Astro.props;
+const platformPolicyPublished = policyAttestationVersion !== null;
 ---
 
 <div class="onboarding-step-pane" data-step-pane="launch">
@@ -58,20 +60,39 @@ const { platformBaseDomain } = Astro.props;
       </div>
     </div>
 
-    <!-- Optional settings -->
-    <details class="optional-settings">
+    <div
+      class="publication-gate"
+      data-state={platformPolicyPublished ? "ready" : "blocked"}
+      role="status"
+      aria-live="polite"
+    >
+      <div class="publication-gate-mark" aria-hidden="true">{platformPolicyPublished ? "✓" : "!"}</div>
+      <div>
+        <strong>{platformPolicyPublished ? "Chính sách nền tảng đã sẵn sàng" : "Mở bán đang chờ chính sách nền tảng"}</strong>
+        <p id="platform-policy-gate-copy">
+          {platformPolicyPublished
+            ? `Bạn cần hoàn tất thông tin người bán và xác nhận chính sách phiên bản ${policyAttestationVersion}.`
+            : "Selinow chưa phát hành phiên bản chính sách để người bán xác nhận. Bạn vẫn có thể lưu thông tin cửa hàng, nhưng catalog, đơn hàng và QR thanh toán sẽ chưa được mở công khai."}
+        </p>
+      </div>
+    </div>
+
+    <!-- Required publication settings -->
+    <details class="optional-settings" open={!platformPolicyPublished}>
       <summary>
-        <span>Thông tin liên hệ & chính sách <em>(không bắt buộc)</em></span>
+        <span>Thông tin liên hệ & chính sách <em>(bắt buộc trước khi mở bán)</em></span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
       </summary>
-      <form class="settings-form" data-launch-settings-form novalidate>
+      <form class="settings-form" data-launch-settings-form>
         <div class="form-group">
           <label for="launch-support-input">Liên hệ hỗ trợ</label>
           <input
             id="launch-support-input"
             type="text"
             maxlength="180"
+            minlength="3"
             placeholder="support@example.com hoặc @shop_support"
+            required
             data-input-launch-support
           />
           <small class="field-hint">Để người mua biết cách liên hệ khi cần hỗ trợ.</small>
@@ -79,17 +100,30 @@ const { platformBaseDomain } = Astro.props;
         <div class="form-row">
           <div class="form-group">
             <label for="launch-terms-input">Điều khoản bán hàng (HTTPS)</label>
-            <input id="launch-terms-input" type="url" placeholder="https://..." data-input-launch-terms />
+            <input id="launch-terms-input" type="url" placeholder="https://..." data-input-launch-terms required />
           </div>
           <div class="form-group">
             <label for="launch-privacy-input">Chính sách riêng tư (HTTPS)</label>
-            <input id="launch-privacy-input" type="url" placeholder="https://..." data-input-launch-privacy />
+            <input id="launch-privacy-input" type="url" placeholder="https://..." data-input-launch-privacy required />
           </div>
         </div>
         <div class="form-group">
           <label for="launch-refund-input">Chính sách hoàn tiền (HTTPS)</label>
-          <input id="launch-refund-input" type="url" placeholder="https://..." data-input-launch-refund />
+          <input id="launch-refund-input" type="url" placeholder="https://..." data-input-launch-refund required />
         </div>
+        <label class="policy-attestation" data-policy-attestation-row>
+          <input
+            type="checkbox"
+            data-input-launch-attestation
+            disabled={!platformPolicyPublished}
+            required={platformPolicyPublished}
+          />
+          <span>
+            {platformPolicyPublished
+              ? "Tôi xác nhận có quyền bán các sản phẩm đã đăng và đồng ý tuân thủ chính sách sử dụng hiện hành của Selinow."
+              : "Chưa thể xác nhận vì Selinow chưa phát hành chính sách sử dụng hiện hành."}
+          </span>
+        </label>
         <button type="submit" class="btn-save-settings" data-btn-save-settings>
           Lưu thông tin
         </button>
@@ -124,8 +158,14 @@ const { platformBaseDomain } = Astro.props;
       <button type="button" class="btn-secondary-back" data-step-back="connect">
         ← Quay lại
       </button>
-      <button type="button" class="btn-primary-launch" data-step-submit="launch">
-        <span data-btn-label>🚀 Xác Nhận & Mở Bán Cửa Hàng</span>
+      <button
+        type="button"
+        class="btn-primary-launch"
+        data-step-submit="launch"
+        disabled={!platformPolicyPublished}
+        aria-describedby={!platformPolicyPublished ? "platform-policy-gate-copy" : undefined}
+      >
+        <span data-btn-label>{platformPolicyPublished ? "Xác nhận & mở bán" : "Đang chờ chính sách nền tảng"}</span>
       </button>
     </div>
   </div>
@@ -206,7 +246,7 @@ const { platformBaseDomain } = Astro.props;
     align-self: flex-start;
     padding: 3px 10px;
     border-radius: var(--sln-console-radius-pill, 999px);
-    background: var(--sln-soft-accent);
+    background: var(--sln-soft-accent-strong);
     color: #FFFFFF;
     font-size: 11px;
     font-weight: 700;
@@ -300,6 +340,54 @@ const { platformBaseDomain } = Astro.props;
     font-weight: 500;
   }
 
+  .publication-gate {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    border: 1px solid #F4C97A;
+    border-radius: 12px;
+    background: #FFF9ED;
+    color: #69410A;
+  }
+
+  .publication-gate[data-state="ready"] {
+    border-color: #A7DCC8;
+    background: #F0FBF7;
+    color: #175C45;
+  }
+
+  .publication-gate-mark {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
+    border-radius: 50%;
+    background: #B54708;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .publication-gate[data-state="ready"] .publication-gate-mark {
+    background: #1F7A5C;
+  }
+
+  .publication-gate strong {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 13.5px;
+  }
+
+  .publication-gate p {
+    margin: 0;
+    max-width: 72ch;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
   /* Optional Settings */
   .optional-settings {
     border: 2px solid var(--sln-soft-border);
@@ -360,6 +448,29 @@ const { platformBaseDomain } = Astro.props;
     padding: 8px 12px;
     font-size: 13px;
     color: #101828;
+  }
+
+  .policy-attestation {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--sln-soft-border);
+    border-radius: 8px;
+    background: #F8FAFC;
+    line-height: 1.45;
+  }
+
+  .policy-attestation input {
+    width: 18px;
+    height: 18px;
+    margin: 1px 0 0;
+    flex: 0 0 auto;
+  }
+
+  .policy-attestation:has(input:disabled) {
+    color: #667085;
+    background: #F2F4F7;
   }
 
   .btn-save-settings {
@@ -463,6 +574,14 @@ const { platformBaseDomain } = Astro.props;
   .btn-primary-launch:hover {
     transform: translateY(-1px);
     box-shadow: 0 8px 24px rgba(124, 106, 240, 0.5);
+  }
+
+  .btn-primary-launch:disabled {
+    cursor: not-allowed;
+    background: #E4E7EC;
+    color: #667085;
+    box-shadow: none;
+    transform: none;
   }
 
   /* Celebration Pane */

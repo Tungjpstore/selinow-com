@@ -5,8 +5,13 @@ import { authenticateRequest } from "../lib/auth/session";
 import { createOnboardingTranslator } from "../lib/i18n/catalogs/onboarding";
 import { resolvePresentationLocale, DEFAULT_LOCALE } from "../lib/i18n";
 import { getBindings } from "../lib/platform/bindings";
+import { PUBLIC_PLAN_CODES, type PublicPlanCode } from "../lib/billing/plan-catalog";
+import { sellablePublicPlanHasFeature } from "../lib/billing/catalog";
 import { getOnboardingResume } from "../lib/onboarding/resume";
+import { CURRENT_POLICY_ATTESTATION_VERSION } from "../lib/onboarding/policy";
 import { getShopCreationAdmission, listShopsForMember, selectShopForMember } from "../lib/tenants/store";
+import { PREMIUM_STOREFRONT_TEMPLATES_FEATURE } from "../lib/storefront/templates";
+import { getSellerStorefrontSettings } from "../lib/tenants/storefront-settings";
 
 const env = getBindings();
 const locale = resolvePresentationLocale(Astro.locals.locale ?? DEFAULT_LOCALE);
@@ -17,21 +22,49 @@ if (auth === null) {
 }
 
 const [shops, creationAdmission] = await Promise.all([
-  listShopsForMember({ env, userId: auth.userId }).catch(() => []),
+  // Keep owner recovery shops visible so pricing CTAs can hand off to billing
+  // even when the latest subscription is canceled.
+  listShopsForMember({ env, includeCanceledForBillingRecovery: true, userId: auth.userId }).catch(() => []),
   getShopCreationAdmission({ env, userId: auth.userId }).catch(() => null),
 ]);
+const createNewShop = Astro.url.searchParams.get("new") === "1";
 const requestedShopPublicId = Astro.url.searchParams.get("shop");
-const selectedShop = selectShopForMember(shops, requestedShopPublicId);
+const selectedShop = createNewShop ? undefined : selectShopForMember(shops, requestedShopPublicId);
+const requestedPlanValue = Astro.url.searchParams.get("plan");
+const validRequestedPlanCode = (PUBLIC_PLAN_CODES as readonly string[]).includes(requestedPlanValue ?? "")
+  ? requestedPlanValue as PublicPlanCode
+  : null;
+if (selectedShop !== undefined && validRequestedPlanCode !== null) {
+  const billingUrl = new URL("/app/billing", Astro.url.origin);
+  billingUrl.searchParams.set("shop", selectedShop.publicId);
+  billingUrl.searchParams.set("manage", "plan");
+  billingUrl.searchParams.set("target", validRequestedPlanCode);
+  return Astro.redirect(`${billingUrl.pathname}${billingUrl.search}`);
+}
+const requestedPlanCode = selectedShop === undefined ? validRequestedPlanCode : null;
+const creationPlanCode: PublicPlanCode = requestedPlanCode ?? "starter";
+// Keep the initial gallery in lockstep with the same D1 catalog that validates
+// the eventual create request. A hard-coded `pro` check would show premium
+// templates before migration 0114, then the POST would reject the selection.
+const creationPremiumTemplatesEntitled = requestedPlanCode === null
+  ? false
+  : await sellablePublicPlanHasFeature(env, creationPlanCode, PREMIUM_STOREFRONT_TEMPLATES_FEATURE)
+    .catch(() => false);
 const orderedShops = selectedShop === undefined
   ? requestedShopPublicId === null ? shops : []
   : [selectedShop, ...shops.filter((shop) => shop.publicId !== selectedShop.publicId)];
+const onboardingShops = createNewShop ? [] : orderedShops;
 
 // OB-B4: hydrate the wizard from server truth for the selected shop so a
 // refresh or a returning seller resumes at the first unfinished step.
 const resume = selectedShop === undefined
   ? null
   : await getOnboardingResume({ env, shopPublicId: selectedShop.publicId, userId: auth.userId }).catch(() => null);
-const premiumTemplatesEntitled = selectedShop?.featureFlags.premiumStorefrontTemplates === true;
+const premiumTemplatesEntitled = selectedShop === undefined
+  ? creationPremiumTemplatesEntitled
+  : await getSellerStorefrontSettings({ env, shopPublicId: selectedShop.publicId, userId: auth.userId })
+    .then((settings) => settings.premiumTemplatesEnabled)
+    .catch(() => false);
 const creationAllowed = creationAdmission?.allowed !== false;
 ---
 
@@ -52,8 +85,10 @@ const creationAllowed = creationAdmission?.allowed !== false;
     displayName={auth.displayName.trim() || t("onboarding.user_fallback")}
     email={auth.email}
     platformBaseDomain={env.PLATFORM_BASE_DOMAIN}
+    policyAttestationVersion={CURRENT_POLICY_ATTESTATION_VERSION}
     premiumTemplatesEntitled={premiumTemplatesEntitled}
+    requestedPlanCode={requestedPlanCode}
     resume={resume}
-    shops={orderedShops}
+    shops={onboardingShops}
   />
 </AppLayout>

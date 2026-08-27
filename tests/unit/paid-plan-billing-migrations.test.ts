@@ -76,6 +76,51 @@ describe("paid pricing and billing migrations", () => {
       .toEqual({ value_json: '{"value":3}' });
   });
 
+  it("preserves the historical Pro template repair and keeps it idempotent", () => {
+    const plans = database.prepare(`
+      SELECT code,
+        json_extract(feature_flags_json, '$.premiumStorefrontTemplates') AS premiumStorefrontTemplates,
+        json_type(feature_flags_json, '$.premiumStorefrontTemplates') AS premiumStorefrontTemplatesType,
+        version
+      FROM plans
+      WHERE code IN ('starter', 'pro')
+      ORDER BY code
+    `).all();
+    expect(plans).toEqual([
+      { code: "pro", premiumStorefrontTemplates: 1, premiumStorefrontTemplatesType: "true", version: 2 },
+      { code: "starter", premiumStorefrontTemplates: null, premiumStorefrontTemplatesType: null, version: 1 },
+    ]);
+
+    const historicalRepair = readFileSync(
+      join(process.cwd(), "migrations/0114_pro_storefront_template_entitlement.sql"),
+      "utf8",
+    );
+    database.exec(historicalRepair);
+    expect(database.prepare(`
+      SELECT version,
+        json_extract(feature_flags_json, '$.premiumStorefrontTemplates') AS premiumStorefrontTemplates,
+        json_type(feature_flags_json, '$.premiumStorefrontTemplates') AS premiumStorefrontTemplatesType
+      FROM plans
+      WHERE code = 'pro'
+    `).get()).toEqual({ premiumStorefrontTemplates: 1, premiumStorefrontTemplatesType: "true", version: 2 });
+
+    database.prepare(`
+      UPDATE plans
+      SET feature_flags_json = json_set(feature_flags_json, '$.premiumStorefrontTemplates', 1)
+      WHERE code = 'pro'
+    `).run();
+    database.exec(historicalRepair);
+    const repaired = database.prepare(`
+      SELECT feature_flags_json AS featureFlagsJson, version,
+        json_type(feature_flags_json, '$.premiumStorefrontTemplates') AS premiumStorefrontTemplatesType
+      FROM plans
+      WHERE code = 'pro'
+    `).get() as { featureFlagsJson: string; premiumStorefrontTemplatesType: string; version: number };
+    expect(repaired.premiumStorefrontTemplatesType).toBe("true");
+    expect(repaired.version).toBe(3);
+    expect((JSON.parse(repaired.featureFlagsJson) as Record<string, unknown>).premiumStorefrontTemplates).toBe(true);
+  });
+
   it("rebinds every billing provider constraint to Dodo without legacy Paddle markers", () => {
     for (const table of [
       "plan_prices",

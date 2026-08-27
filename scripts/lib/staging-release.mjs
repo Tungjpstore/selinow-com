@@ -17,6 +17,7 @@ const RELEASE_ID_PATTERN = /^stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}$/u;
 const ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/u;
 const DATABASE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/iu;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const PAYOS_PROJECTION_REPAIR_MIGRATION = "0119_payos_provider_projection_lifecycle.sql";
 
 function exactKeys(value, expected, issue) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(issue);
@@ -600,7 +601,7 @@ export async function captureStagingReleaseDatabaseBaseline(input) {
   };
 }
 
-export function parseStagingDatabasePreflightOutput(output) {
+export function parseStagingDatabasePreflightOutput(output, options = {}) {
   let result;
   try {
     result = JSON.parse(output);
@@ -608,10 +609,27 @@ export function parseStagingDatabasePreflightOutput(output) {
     throw new Error("staging_database_preflight_invalid_json");
   }
   if (result?.environment !== "staging"
-    || result?.ok !== true
+    || typeof result?.ok !== "boolean"
     || !Array.isArray(result?.checks)
     || result.checks.length === 0
-    || result.checks.some((check) => check?.ok !== true)) {
+    || result.checks.some((check) => (
+      typeof check?.code !== "string"
+      || typeof check?.detail !== "string"
+      || typeof check?.ok !== "boolean"
+    ))
+    || new Set(result.checks.map((check) => check.code)).size !== result.checks.length) {
+    throw new Error("staging_database_preflight_failed");
+  }
+
+  const failedChecks = result.checks.filter((check) => check.ok !== true);
+  if (result.ok !== (failedChecks.length === 0)) {
+    throw new Error("staging_database_preflight_failed");
+  }
+  const allowsPayosProjectionRepair = options.allowMissingPayosConnections === true
+    && failedChecks.length === 1
+    && failedChecks[0]?.code === "missing_payos_connections"
+    && /^[1-9][0-9]*$/u.test(failedChecks[0]?.detail ?? "");
+  if ((result.ok !== true || failedChecks.length > 0) && !allowsPayosProjectionRepair) {
     throw new Error("staging_database_preflight_failed");
   }
   return { checks: result.checks };
@@ -619,7 +637,6 @@ export function parseStagingDatabasePreflightOutput(output) {
 
 export function assertStagingDatabasePreflight(input = {}) {
   const root = input.repositoryRoot ?? repositoryRoot;
-  const runner = input.runImplementation ?? run;
   const childEnvironment = input.environment?.CLOUDFLARE_D1_API_TOKEN === undefined
     && /^[a-f0-9]{32}$/u.test(input.environment?.CLOUDFLARE_ACCOUNT_ID ?? "")
     && typeof input.environment?.CLOUDFLARE_API_TOKEN === "string"
@@ -629,34 +646,69 @@ export function assertStagingDatabasePreflight(input = {}) {
       }
     : input.environment;
   let output;
+  let childExitCode = 0;
   try {
-    output = runner(process.execPath, [
-      "scripts/db.mjs", "preflight", "--env", "staging", "--json",
-    ], {
-      cwd: root,
-      env: childEnvironment,
-    }).stdout;
+    const args = ["scripts/db.mjs", "preflight", "--env", "staging", "--json"];
+    if (input.runImplementation !== undefined) {
+      output = input.runImplementation(process.execPath, args, {
+        cwd: root,
+        env: childEnvironment,
+      }).stdout;
+    } else if (input.allowMissingPayosConnections === true) {
+      const result = spawnSync(process.execPath, args, {
+        cwd: root,
+        encoding: "utf8",
+        env: childEnvironment,
+        stdio: "pipe",
+      });
+      if (result.error || (result.status !== 0 && result.status !== 1)) {
+        throw new Error("staging_database_preflight_failed");
+      }
+      childExitCode = result.status;
+      output = result.stdout;
+    } else {
+      output = run(process.execPath, args, {
+        cwd: root,
+        env: childEnvironment,
+      }).stdout;
+    }
   } catch {
     throw new Error("staging_database_preflight_failed");
   }
-  return parseStagingDatabasePreflightOutput(output);
+  const parsed = parseStagingDatabasePreflightOutput(output, {
+    allowMissingPayosConnections: input.allowMissingPayosConnections,
+  });
+  if (childExitCode !== 0 && !parsed.checks.some((check) => (
+    check.code === "missing_payos_connections" && check.ok === false
+  ))) {
+    throw new Error("staging_database_preflight_failed");
+  }
+  return parsed;
 }
 
 export async function runStagingMigrationWithVerification(input) {
   const preflight = input.assertDatabasePreflightImplementation ?? assertStagingDatabasePreflight;
   const prefix = input.assertMigrationLedgerPrefixImplementation ?? assertStagingMigrationLedgerPrefix;
   const complete = input.assertMigrationLedgerImplementation ?? assertStagingMigrationLedger;
+  const migrationNames = input.migrationNames
+    ?? await listMigrationNames(input.repositoryRoot ?? repositoryRoot);
   const shared = {
     environment: input.environment,
-    migrationNames: input.migrationNames,
+    migrationNames,
     repositoryRoot: input.repositoryRoot,
   };
 
-  preflight(shared);
   await prefix({ ...shared, expectedPrefix: input.expectedPrefix });
+  const pendingMigrations = migrationNames.slice(input.expectedPrefix.length);
+  const payosProjectionRepairPending = pendingMigrations.length === 1
+    && pendingMigrations[0] === PAYOS_PROJECTION_REPAIR_MIGRATION;
+  preflight({
+    ...shared,
+    allowMissingPayosConnections: payosProjectionRepairPending,
+  });
   await input.runMigrationImplementation();
   await complete(shared);
-  preflight(shared);
+  preflight({ ...shared, allowMissingPayosConnections: false });
   if (input.assertPostMigrationContractImplementation !== undefined) {
     await input.assertPostMigrationContractImplementation(shared);
   }

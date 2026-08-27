@@ -684,7 +684,21 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_billing_checkout_sessions_shop_reconciliation: "cbec4665173db5f6502f1412673ac06f22f17d9b9dab86f6b6519a5a78630bda",
     }),
   }),
-  "0114_auth_otp_admission.sql": Object.freeze({
+  // These migrations retain their original identities because staging has
+  // already applied them under these exact names.
+  "0114_pro_storefront_template_entitlement.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  // Offset-aware seller metrics query the normalized julianday expression.
+  // Keep the index tenant-leading and aligned with the paid-row predicate.
+  "0115_seller_metrics_timestamp_index.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_orders_shop_paid_julianday_id: "c33ebdbb993f08dc65c8530b97070198ae43c0851bdeaf169e85bd7df49e8dec",
+    }),
+  }),
+  "0116_auth_otp_admission.sql": Object.freeze({
     columns: Object.freeze({
       "auth_otp_admissions.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
       "auth_otp_admissions.purpose": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
@@ -702,15 +716,34 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       idx_auth_otp_admissions_expiry: "81affac85433d3a3412ca07060b8c164c56f6d9d9259488a836b5a3a3c202e0b",
     }),
   }),
-  "0115_auth_pending_password.sql": Object.freeze({
+  "0117_auth_pending_password.sql": Object.freeze({
     columns: Object.freeze({
       "platform_users.pending_password_hash": Object.freeze({ defaultValue: "NULL", notNull: 0, primaryKey: 0, type: "TEXT" }),
     }),
     objects: Object.freeze({}),
   }),
-  "0116_pro_premium_storefront_entitlement.sql": Object.freeze({
+  "0118_pro_premium_storefront_entitlement.sql": Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
+  }),
+  "0119_payos_provider_projection_lifecycle.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      payment_integrations_payos_projection_insert: "99269608011f3555c68d412bd4029e2fcb8d9f1a9ea59f616106e5e5fbe2aa0a",
+      payment_integrations_payos_projection_update: "12d497fe20fa4c45150dafb4d200c51ebba1035a1aae753adebecfad9b8cb3a6",
+      payment_provider_connections_status_transition_guard: "4e4e491a896800528b22c32888dc88f25860ebc62a986eb436265920f2e5f31b",
+      payment_provider_connections_webhook_transition_guard: "2e9ce16640b0502b97ee766eea323b68de5becf2de5a7faa6e789d07d71fcf27",
+    }),
+  }),
+  "0120_payos_disconnect_reconnect_identity.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_payos_provider_identity_history_shop: "06a98567215c073f293e22b1e9d378e529c1941854992138d50718517b1d17b4",
+      payos_provider_identity_history: "e98fa2f85d34b9abbf14db68e4d1dabb54f2f2efc5c0a723b8338831339448cb",
+      payment_integrations_payos_identity_history_insert: "cfddc54d16c8affb22fbfff561b65f0cbd627fa3d3fe5e5f9eb83bf93e6366f1",
+      payment_integrations_payos_identity_history_update: "aeaf27cfe1a41a95a720bcaef059dd8cd7117f80b14651ebfd74ceedc7150634",
+      payment_provider_connections_identity_immutable: "56d4a84fc7a5825162e67e9c439f8701e8fbe8442f4f33c136cb4949bbd14ca9",
+    }),
   }),
 });
 
@@ -1176,6 +1209,67 @@ export function validateCandidateBoundReleaseEvidence({ evidence, now = new Date
   };
 }
 
+/**
+ * Prove that the candidate UUID used by operational evidence is an immutable
+ * deployable Worker version carrying the reviewed release provenance.
+ */
+export function validateCandidateWorkerVersionEvidence({ evidence, workerVersionInventory } = {}) {
+  const inventory = Array.isArray(workerVersionInventory) ? workerVersionInventory : [];
+  const workerVersionPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+  const inventoryShapeValid = inventory.length > 0 && inventory.every((entry) => (
+    entry !== null
+    && typeof entry === "object"
+    && typeof entry.id === "string"
+    && workerVersionPattern.test(entry.id)
+    && Object.hasOwn(entry, "binding")
+  ));
+  const inventoryIds = inventoryShapeValid ? inventory.map((entry) => entry.id) : [];
+  const matchingEntries = inventoryShapeValid
+    ? inventory.filter((entry) => entry.id === evidence?.candidateWorkerVersion)
+    : [];
+  const candidate = matchingEntries.length === 1 ? matchingEntries[0] : null;
+  const binding = candidate?.binding;
+  const expectedManifestRef = `.wrangler/releases/${evidence?.releaseId ?? ""}/release-manifest.json`;
+  const checks = [
+    makeCheck("evidence.candidateWorkerVersion.liveInventory", inventoryShapeValid),
+    makeCheck(
+      "evidence.candidateWorkerVersion.liveInventoryUnique",
+      inventoryShapeValid && new Set(inventoryIds).size === inventoryIds.length,
+    ),
+    makeCheck("evidence.candidateWorkerVersion.liveCandidate", matchingEntries.length === 1),
+    makeCheck("evidence.candidateWorkerVersion.liveBinding", binding !== null
+      && typeof binding === "object"
+      && binding.commitSha === evidence?.commitSha
+      && binding.treeSha === evidence?.treeSha
+      && binding.releaseId === evidence?.releaseId
+      && binding.manifestRef === expectedManifestRef
+      && binding.role === "candidate"),
+  ];
+  return {
+    checks,
+    missing: checks.filter((check) => !check.ok).map((check) => check.name),
+    ok: checks.every((check) => check.ok),
+  };
+}
+
+export async function inspectLiveCandidateWorkerVersionEvidence(input) {
+  const observation = await (
+    input.workerIdentityImplementation ?? assertProductionWorkerIdentityAdmission
+  )({
+    environment: input.environment,
+    infrastructureAdmissionMode: "pre_candidate",
+    productionSpec: input.productionSpec,
+    repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+    requireCurrentWorkerVersion: true,
+    stagingSpec: input.stagingSpec,
+    wranglerConfig: input.wranglerConfig,
+  });
+  return validateCandidateWorkerVersionEvidence({
+    evidence: input.evidence,
+    workerVersionInventory: observation.deployableWorkerVersionInventory,
+  });
+}
+
 function projectCandidateBoundReleaseEvidence(evidence) {
   return Object.fromEntries(Object.keys(CANDIDATE_BOUND_EVIDENCE_DEFINITIONS).map((section) => {
     const entry = evidence?.[section] ?? {};
@@ -1184,6 +1278,7 @@ function projectCandidateBoundReleaseEvidence(evidence) {
       artifactSha256: entry.artifactSha256,
       evidenceRef: entry.evidenceRef,
       observedAt: entry[CANDIDATE_BOUND_EVIDENCE_DEFINITIONS[section].timestampField],
+      workerVersion: candidateBoundEvidenceWorkerVersion(evidence, section),
     }];
   }));
 }
@@ -2545,7 +2640,16 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
         AND plan.code = 'pro'
         AND plan.is_active = 1
         AND json_extract(plan.feature_flags_json, '$.premiumStorefrontTemplates') = 1
-      ) AS integrity_0116_pro_entitlement,
+      ) AS integrity_0118_pro_entitlement,
+    (SELECT COUNT(*) FROM payment_integrations AS integration
+      WHERE integration.provider = 'payos'
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_provider_connections AS connection
+          WHERE connection.shop_id = integration.shop_id
+            AND connection.legacy_payos_integration_id = integration.id
+            AND connection.provider_code = integration.provider
+        )
+      ) AS integrity_0119_payos_projection,
     (SELECT COUNT(*) FROM outbox_jobs AS job
       WHERE job.kind = 'order_paid' AND job.status != 'completed'
       ) AS integrity_0095_legacy_order_paid_outbox,
@@ -2578,7 +2682,22 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
       WHERE history.integration_generation <= 0
         OR integration.id IS NULL
         OR history.integration_generation > integration.integration_generation
-      ) AS integrity_0097_telegram_action_history;`;
+      ) AS integrity_0097_telegram_action_history,
+    ((SELECT CASE
+        WHEN COUNT(*) = 1
+          AND MIN(CASE
+            WHEN json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true' THEN 1
+            ELSE 0
+          END) = 1
+        THEN 0 ELSE 1
+      END
+      FROM plans
+      WHERE code = 'pro' AND is_active = 1 AND is_public = 1 AND is_assignable = 1)
+      + (SELECT COUNT(*)
+        FROM plans
+        WHERE code != 'pro'
+          AND json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true'))
+      AS integrity_0114_pro_premium_flag;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {
@@ -2599,7 +2718,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_google_identities", "auth_google_oauth_states", "auth_otp_admissions", "auth_request_admissions", "billing_checkout_sessions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
+    if (["auth_google_identities", "auth_google_oauth_states", "auth_otp_admissions", "auth_request_admissions", "billing_checkout_sessions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "payos_provider_identity_history", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
@@ -2656,7 +2775,9 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0097_telegram_action_history",
     "integrity_0112_google_identity",
     "integrity_0112_google_oauth_state",
-    "integrity_0116_pro_entitlement",
+    "integrity_0114_pro_premium_flag",
+    "integrity_0118_pro_entitlement",
+    "integrity_0119_payos_projection",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

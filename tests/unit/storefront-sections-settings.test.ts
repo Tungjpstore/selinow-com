@@ -262,6 +262,21 @@ describe("TM4 merchandising contracts", () => {
     expect(card).toContain('badge === "best" ? t("storefront.tm4.badge.best"');
   });
 
+  it("keeps decorative storefront visuals out of hidden interactive containers", () => {
+    const card = readFileSync("src/components/storefront/ProductCard.astro", "utf8");
+    const pulse = readFileSync("src/components/storefront/templates/pulse/StoreHome.astro", "utf8");
+    expect(card).toContain('<div class="product-visual"');
+    expect(card).not.toMatch(/<a[^>]*aria-hidden="true"/u);
+    expect(pulse).not.toMatch(/<a[^>]*aria-hidden="true"/u);
+    expect(pulse).toContain('aria-label={product.title}');
+  });
+
+  it("gives quick-add and full add-to-cart controls distinct accessible names", () => {
+    const card = readFileSync("src/components/storefront/ProductCard.astro", "utf8");
+    expect(card).toContain('t("storefront.product.quick_add")');
+    expect(card).toContain('t("storefront.product.add")');
+  });
+
   it("ships recently viewed + cart cross-sell + detail tracking wired to localStorage", () => {
     const script = readFileSync("src/scripts/storefront/tm4-merchandising.ts", "utf8");
     expect(script).toContain("selinow-viewed:v1:");

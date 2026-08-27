@@ -42,6 +42,7 @@ export function getMarketingPreviewPlans(): MarketingPlan[] {
         inventory: snapshot.features.inventory,
         manualFulfillment: snapshot.features.manualFulfillment,
         privateDownloads: snapshot.features.privateDownloads,
+        premiumStorefrontTemplates: snapshot.features.premiumStorefrontTemplates,
         sellerPayments: snapshot.features.sellerPayments,
         storefront: snapshot.features.storefront,
         telegram: snapshot.features.telegram,
@@ -113,6 +114,12 @@ export function getDefaultMarketingMarket(plans: readonly MarketingPlan[], local
   const preferred: BillingMarketCode = normalizeSupportedLocale(locale).toLowerCase().startsWith("vi") ? "vn" : "global";
   const available = getMarketingAvailableMarkets(plans);
   return available.includes(preferred) ? preferred : available[0] ?? preferred;
+}
+
+/** Returns the single public offer for a market, failing closed on ambiguity. */
+export function getMarketingPlanPriceForMarket(plan: MarketingPlan, market: BillingMarketCode): MarketingPrice | null {
+  const matches = (plan.prices ?? []).filter((price) => price.marketCode === market && isRenderableMarketingPrice(price));
+  return matches.length === 1 ? matches[0] ?? null : null;
 }
 
 /** Pricing is ready only when both public plans share at least one active market. */
@@ -219,6 +226,7 @@ export function planFeatureList(plan: MarketingPlan, locale: unknown = "en"): st
   if (plan.features.customDomain === "addon") features.push(t("marketing.plan.feature.custom_domain_addon"));
   if (plan.features.automation === true) features.push(t("marketing.plan.feature.automation"));
   if (plan.features.privateDownloads === true) features.push(t("marketing.plan.feature.private_downloads"));
+  if (plan.features.premiumStorefrontTemplates === true) features.push(t("marketing.plan.feature.premium_storefront_templates"));
   if (plan.features.apiRead === true) features.push(t("marketing.plan.feature.api_read"));
 
   const products = runtimeLimit(plan.limits.products, t, locale, "marketing.pricing.limit.products");

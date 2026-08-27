@@ -133,6 +133,7 @@ const pageCopy = (isVietnamese ? {
   plansPendingDescription: "Một thay đổi gói đang được xử lý. Các lựa chọn khác sẽ mở lại sau khi trạng thái được xác nhận.",
   plansScheduledDescription: "Thay đổi đã lên lịch được hiển thị trong Tổng quan. Hoàn tác tại đó trước khi chọn thay đổi khác.",
   plansCurrentLabel: "Gói đang dùng",
+  plansCurrentHint: "Đây là gói hiện tại của bạn.",
   plansChangePolicy: "Nâng gói có hiệu lực sau khi Dodo xác nhận. Hạ gói được lên lịch cho kỳ tiếp theo.",
   paymentTitle: "Phương thức thanh toán",
   paymentDescription: "Dodo Payments xử lý thông tin thanh toán; Selinow không lưu dữ liệu thẻ.",
@@ -258,6 +259,7 @@ const pageCopy = (isVietnamese ? {
   plansPendingDescription: "A plan change is processing. Other choices reopen after its status is confirmed.",
   plansScheduledDescription: "The scheduled change appears in Overview. Undo it there before choosing another change.",
   plansCurrentLabel: "Current plan",
+  plansCurrentHint: "This is your current plan.",
   plansChangePolicy: "Upgrades start after Dodo confirms them. Downgrades are scheduled for the next renewal.",
   paymentTitle: "Payment method",
   paymentDescription: "Dodo Payments processes billing details; Selinow does not store card data.",
@@ -483,19 +485,19 @@ const metricLabel = (key: string): string => (pageCopy as Record<string, string>
         <div class="plan-summary-row"><div><span>{pageCopy.plansCurrentLabel}</span><strong>{billing.planName}</strong></div><p>{pageCopy.plansChangePolicy}</p></div>
       </section>
 
-      <section class="billing-panel" id="billing-usage" aria-labelledby="usage-title"><header><div><p class="eyebrow">{t("dashboard.billing.usage.eyebrow")}</p><h2 id="usage-title">{pageCopy.usageTitle}</h2><p class="panel-description">{pageCopy.usageDescription}</p></div></header>{billing.usage.length === 0 ? <p class="empty-note">{pageCopy.emptyUsage}</p> : <div class="usage-ledger">{billing.usage.map((item) => {
+      <details class="billing-disclosure" id="billing-usage" data-billing-disclosure="usage"><summary class="billing-disclosure-summary"><span><span class="eyebrow">{t("dashboard.billing.usage.eyebrow")}</span><strong id="usage-title">{pageCopy.usageTitle}</strong><small>{pageCopy.usageDescription}</small></span><span class="billing-disclosure-chevron" aria-hidden="true">⌄</span></summary><div class="billing-disclosure-content">{billing.usage.length === 0 ? <p class="empty-note">{pageCopy.emptyUsage}</p> : <div class="usage-ledger">{billing.usage.map((item) => {
         const limit = usageLimit(billing.limits, item.metric);
         const percent = limit === null ? null : limit === 0 ? (item.value > 0 ? 100 : 0) : Math.round((item.value / limit) * 100);
         const tone = percent === null ? "neutral" : percent >= 100 ? "danger" : percent >= 80 ? "warning" : "success";
         return <div class="usage-meter-row" data-tone={tone}><span class="usage-metric">{metricLabel(item.metric)}</span>{limit !== null && percent !== null ? <><div class="usage-meter" role="progressbar" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(item.value, limit)} aria-label={metricLabel(item.metric)}><span class="usage-meter-fill" style={`width:${String(Math.min(percent, 100))}%`} data-tone={tone}></span></div><strong>{t("dashboard.billing.usage.of_limit", { value: item.value, limit })}</strong><small>{t("dashboard.billing.usage.percent_used", { percent })}</small></> : <><strong>{item.value}</strong><small>{t("dashboard.billing.usage.no_numeric_limit")}</small></>}</div>;
-      })}</div>}</section>
+      })}</div>}</div></details>
 
       <section class="billing-panel payment-panel" id="billing-payment" aria-labelledby="payment-title">
         <header class="billing-panel-heading"><div><p class="eyebrow">{pageCopy.paymentTab}</p><h2 id="payment-title">{pageCopy.paymentTitle}</h2><p class="panel-description">{pageCopy.paymentDescription}</p></div>{shop.role === "owner" && canManagePayment && !canOpenPortal && <button class="sln-button sln-button-secondary" type="button" data-billing-portal>{pageCopy.updatePaymentMethod}</button>}</header>
         <dl class="payment-facts"><div><dt>{pageCopy.paymentProvider}</dt><dd>{billing.billingProviderCode === "dodo" ? "Dodo Payments" : pageCopy.paymentNotConfigured}</dd></div><div><dt>{pageCopy.paymentCountry}</dt><dd>{shop.merchantCountry ?? pageCopy.paymentNotConfigured}</dd></div><div><dt>{pageCopy.paymentCurrency}</dt><dd>{billingCurrency ?? pageCopy.paymentNotConfigured}</dd></div></dl>
       </section>
 
-      <section class="billing-panel" id="billing-invoices" aria-labelledby="invoices-title" data-billing-invoices><header><div><p class="eyebrow">{pageCopy.invoicesEyebrow}</p><h2 id="invoices-title">{pageCopy.invoicesTitle}</h2><p class="panel-description">{pageCopy.invoicesDescription}</p></div></header>{invoices.length === 0 ? <WorkspaceState title={t("dashboard.billing.invoices.empty_title")} description={t("dashboard.billing.invoices.empty_description")} tone="neutral" /> : <div class="invoice-ledger" role="list" aria-label={pageCopy.invoicesTitle}>{invoices.map((invoice) => <div class="invoice-row" role="listitem"><div class="invoice-copy"><strong>{date(invoice.paidAt ?? invoice.createdAt)}</strong><span>{money(invoice.amountMinor, invoice.currency)}</span></div><StatusBadge label={t(`dashboard.billing.invoices.status.${invoice.status}`)} tone={invoiceTones[invoice.status]} /></div>)}</div>}</section>
+      <details class="billing-disclosure" id="billing-invoices" data-billing-disclosure="invoices" data-billing-invoices><summary class="billing-disclosure-summary"><span><span class="eyebrow">{pageCopy.invoicesEyebrow}</span><strong id="invoices-title">{pageCopy.invoicesTitle}</strong><small>{pageCopy.invoicesDescription}</small></span><span class="billing-disclosure-chevron" aria-hidden="true">⌄</span></summary><div class="billing-disclosure-content">{invoices.length === 0 ? <WorkspaceState title={t("dashboard.billing.invoices.empty_title")} description={t("dashboard.billing.invoices.empty_description")} tone="neutral" /> : <div class="invoice-ledger" role="list" aria-label={pageCopy.invoicesTitle}>{invoices.map((invoice) => <div class="invoice-row" role="listitem"><div class="invoice-copy"><strong>{date(invoice.paidAt ?? invoice.createdAt)}</strong><span>{money(invoice.amountMinor, invoice.currency)}</span></div><StatusBadge label={t(`dashboard.billing.invoices.status.${invoice.status}`)} tone={invoiceTones[invoice.status]} /></div>)}</div>}</div></details>
 
       <details class="support-details"><summary>{pageCopy.supportDetails}</summary><p>{pageCopy.paymentSecurityDescription}</p><p data-billing-support-reference hidden></p></details>
 
@@ -537,7 +539,7 @@ const metricLabel = (key: string): string => (pageCopy as Record<string, string>
   .billing-workspace :where(button, a, summary) { touch-action:manipulation; }
   .billing-section-nav { position:sticky; top:var(--billing-sticky-offset); z-index:2; display:flex; gap:4px; overflow-x:auto; border-bottom:1px solid var(--sln-border-default); padding:0 2px; background:color-mix(in srgb,var(--sln-bg-canvas) 94%,transparent); backdrop-filter:blur(12px); scrollbar-width:none; }
   .billing-section-nav::-webkit-scrollbar { display:none; }
-  .billing-section-nav a { min-height:44px; display:inline-flex; flex:0 0 auto; align-items:center; border-bottom:1px solid transparent; padding:0 14px; color:var(--sln-text-muted); font:var(--sln-font-label); text-decoration:none; }
+  .billing-section-nav a { min-height:44px; display:inline-flex; flex:0 0 auto; align-items:center; border-bottom:1px solid transparent; padding:0 14px; color:var(--sln-text-secondary); font:var(--sln-font-label); text-decoration:none; }
   .billing-section-nav a:hover, .billing-section-nav a:focus-visible { border-bottom-color:var(--sln-border-strong); color:var(--sln-text-primary); }
   .subscription-overview { display:grid; grid-template-columns:minmax(0,1.8fr) minmax(220px,.8fr); gap:var(--sln-space-6); border:1px solid var(--sln-border-default); border-inline-start:3px solid var(--sln-action-primary); border-radius:var(--sln-radius-lg); padding:var(--sln-space-8); background:var(--sln-bg-surface); }
   #billing-overview, #billing-plans, #billing-usage, #billing-payment, #billing-invoices { scroll-margin-top:calc(var(--billing-sticky-offset) + 60px); }
@@ -565,12 +567,22 @@ const metricLabel = (key: string): string => (pageCopy as Record<string, string>
   .operation-banner p { margin:5px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .operation-spinner { width:20px; height:20px; flex:0 0 auto; border:1px solid color-mix(in srgb,var(--sln-state-info) 30%,transparent); border-top-color:var(--sln-state-info); border-radius:50%; animation:billing-spin .8s linear infinite; }
   .billing-panel { display:grid; gap:18px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); padding:var(--sln-space-6); background:var(--sln-bg-surface); }
+  .billing-disclosure { border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); background:var(--sln-bg-surface); }
+  .billing-disclosure-summary { display:flex; min-height:76px; align-items:center; justify-content:space-between; gap:18px; padding:18px 24px; color:var(--sln-text-primary); cursor:pointer; list-style:none; }
+  .billing-disclosure-summary::-webkit-details-marker { display:none; }
+  .billing-disclosure-summary > span:first-child { display:grid; gap:4px; }
+  .billing-disclosure-summary .eyebrow { margin:0; }
+  .billing-disclosure-summary strong { font:var(--sln-font-h3); letter-spacing:-.035em; }
+  .billing-disclosure-summary small { color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .billing-disclosure-chevron { color:var(--sln-text-muted); font-size:22px; transition:transform .18s ease; }
+  .billing-disclosure[open] .billing-disclosure-chevron { transform:rotate(180deg); }
+  .billing-disclosure-content { display:grid; gap:18px; border-top:1px solid var(--sln-border-default); padding:20px 24px 24px; }
   .billing-panel header { padding-bottom:14px; border-bottom:1px solid var(--sln-border-default); }
   .billing-panel-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
   .panel-description { max-width:70ch; margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .plan-summary-row { display:grid; grid-template-columns:minmax(180px,.6fr) minmax(0,1.4fr); gap:20px; align-items:center; }
   .plan-summary-row > div { display:grid; gap:5px; }
-  .plan-summary-row span, .payment-facts dt { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .plan-summary-row span, .payment-facts dt { color:var(--sln-text-secondary); font:var(--sln-font-caption); }
   .plan-summary-row strong, .payment-facts dd { color:var(--sln-text-primary); font:var(--sln-font-label); }
   .plan-summary-row p { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .payment-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; margin:0; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); overflow:hidden; }
@@ -622,6 +634,7 @@ const metricLabel = (key: string): string => (pageCopy as Record<string, string>
   .plan-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
   .plan-choice { display:grid; gap:8px; min-height:132px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:16px; background:var(--sln-bg-canvas); text-align:left; cursor:pointer; }
   .plan-choice:hover { border-color:var(--sln-border-strong); }
+  .plan-choice[data-current-plan="true"] { border-color:var(--sln-border-strong); background:var(--sln-bg-subtle); cursor:default; }
   .plan-choice[aria-pressed="true"] { border-color:var(--sln-action-primary); box-shadow:inset 0 0 0 1px var(--sln-action-primary); background:var(--sln-tint-indigo); }
   .plan-choice strong { font:var(--sln-font-h3); }
   .plan-choice span, .plan-choice small { color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
@@ -654,6 +667,7 @@ const metricLabel = (key: string): string => (pageCopy as Record<string, string>
   @media (max-width:560px) {
     .billing-workspace { --billing-sticky-offset:60px; }
     .billing-market-form, .plan-options { grid-template-columns:1fr; }
+    .billing-disclosure-summary, .billing-disclosure-content { padding-inline:20px; }
     .billing-market-form .sln-button { width:100%; }
     .invoice-row { align-items:flex-start; flex-direction:column; }
     .usage-meter-row { grid-template-columns:1fr; align-items:start; }

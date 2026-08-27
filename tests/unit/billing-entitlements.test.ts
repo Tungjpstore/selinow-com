@@ -28,6 +28,7 @@ describe("paid plan entitlement evaluator", () => {
       expect(parsed.value.limits.orders_created).toBe(500);
       expect(parsed.value.limits.active_member_seats).toBe(1);
       expect(parsed.value.features.storefront).toBe(true);
+      expect(parsed.value.features.premiumStorefrontTemplates).toBe(false);
     }
     const migrationShape = parsePlanSnapshot({
       code: "pro",
@@ -61,6 +62,8 @@ describe("paid plan entitlement evaluator", () => {
     expect(evaluateFeature({ feature: "premiumStorefrontTemplates", plan: PRO_PLAN }).allowed).toBe(true);
     expect(evaluateFeature({ feature: "analytics", plan: STARTER_PLAN, requiredAnalyticsTier: "advanced" }).reasonCode).toBe("plan_feature_unavailable");
     expect(evaluateFeature({ feature: "analytics", plan: PRO_PLAN, requiredAnalyticsTier: "advanced" }).allowed).toBe(true);
+    expect(evaluateFeature({ feature: "premiumStorefrontTemplates", plan: PRO_PLAN }).allowed).toBe(true);
+    expect(evaluateFeature({ feature: "premiumStorefrontTemplates", plan: STARTER_PLAN }).allowed).toBe(false);
     expect(evaluateFeature({ feature: "made_up", plan: PRO_PLAN }).reasonCode).toBe("plan_feature_unavailable");
   });
 

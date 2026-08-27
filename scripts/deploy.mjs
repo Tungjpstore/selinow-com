@@ -570,6 +570,14 @@ try {
       if (requiresStagingAdmission) {
         if (stagingVersionMessage === null) throw new Error("staging_deployment_version_message_missing");
         deployArgs.push("--message", stagingVersionMessage);
+        if (stagingReleaseAdmission === null) throw new Error("staging_release_admission_missing");
+        const stagingManifestBytes = await readFile(resolve(repositoryRoot, flags.releaseManifestPath));
+        deployArgs.push(
+          "--var", `DODO_UAT_COMMIT_SHA:${stagingReleaseAdmission.commitSha}`,
+          "--var", `DODO_UAT_MANIFEST_SHA256:${createHash("sha256").update(stagingManifestBytes).digest("hex")}`,
+          "--var", `DODO_UAT_RELEASE_ID:${stagingReleaseAdmission.releaseId}`,
+          "--var", `DODO_UAT_TREE_SHA:${stagingReleaseAdmission.treeSha}`,
+        );
       }
       if (flags.dryRun) {
         deployArgs.push("--dry-run", "--outdir", `.wrangler/dry-run-${flags.environment}`);

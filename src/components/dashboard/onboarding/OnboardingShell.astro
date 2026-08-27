@@ -6,6 +6,7 @@ import OnboardingStepLaunch from "./OnboardingStepLaunch.astro";
 import OnboardingStepProduct from "./OnboardingStepProduct.astro";
 import OnboardingStepStore from "./OnboardingStepStore.astro";
 import type { OnboardingResumeState } from "../../../lib/onboarding/resume";
+import type { PublicPlanCode } from "../../../lib/billing/plan-catalog";
 
 type ShopView = {
   name: string;
@@ -22,7 +23,9 @@ type Props = {
   displayName: string;
   email: string;
   platformBaseDomain: string;
+  policyAttestationVersion: number | null;
   premiumTemplatesEntitled?: boolean;
+  requestedPlanCode?: PublicPlanCode | null;
   resume?: OnboardingResumeState | null;
   shops: ShopView[];
 };
@@ -35,7 +38,9 @@ const {
   displayName,
   email,
   platformBaseDomain,
+  policyAttestationVersion,
   premiumTemplatesEntitled = false,
+  requestedPlanCode = null,
   resume = null,
   shops,
 } = Astro.props;
@@ -60,20 +65,23 @@ const steps = [
   data-quickstart-root
   data-csrf-cookie-name={csrfCookieName}
   data-platform-base-domain={platformBaseDomain}
+  data-policy-attestation-published={policyAttestationVersion !== null ? "true" : "false"}
+  data-policy-attestation-version={policyAttestationVersion ?? ""}
   data-default-currency={defaultCurrency}
   data-default-locale={defaultLocale}
   data-shops={JSON.stringify(shops)}
   data-active-shop-public-id={initialShop?.publicId ?? ""}
   data-creation-allowed={creationAllowed ? "true" : "false"}
   data-premium-templates-entitled={premiumTemplatesEntitled ? "true" : "false"}
+  data-requested-plan-code={requestedPlanCode ?? ""}
   data-resume-state={resume === null ? "" : JSON.stringify(resume)}
 >
   <!-- Top navigation bar -->
   <header class="v2-topbar">
     <div class="v2-topbar-inner">
       <!-- Progress bar -->
-      <div class="topbar-progress-section" aria-label="Tiến trình thiết lập">
-        <div class="progress-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+      <div class="topbar-progress-section">
+        <div class="progress-track" role="progressbar" aria-label="Tiến trình thiết lập" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
           <div class="progress-fill" data-progress-fill></div>
         </div>
         <div class="progress-step-labels" aria-hidden="true">
@@ -101,12 +109,16 @@ const steps = [
         initialTemplateId={initialTemplateId}
         initialVertical={initialVertical}
         platformBaseDomain={platformBaseDomain}
+        premiumTemplatesEntitled={premiumTemplatesEntitled}
         shopsCount={shops.length}
       />
       <OnboardingStepProduct defaultCurrency={defaultCurrency} initialVertical={initialVertical} />
       <OnboardingStepInventory initialVertical={initialVertical} />
       <OnboardingStepConnect />
-      <OnboardingStepLaunch platformBaseDomain={platformBaseDomain} />
+      <OnboardingStepLaunch
+        platformBaseDomain={platformBaseDomain}
+        policyAttestationVersion={policyAttestationVersion}
+      />
     </div>
   </main>
 
@@ -181,18 +193,18 @@ const steps = [
   .progress-label-item {
     font-size: 12px;
     font-weight: 500;
-    color: var(--sln-console-ink-3);
+    color: var(--sln-console-ink-2);
     transition: color 0.2s ease;
     white-space: nowrap;
   }
 
   .progress-label-item.active {
-    color: var(--sln-console-accent);
+    color: var(--sln-console-accent-text);
     font-weight: 600;
   }
 
   .progress-label-item.done {
-    color: var(--sln-console-success);
+    color: var(--sln-console-success-text);
   }
 
   /* ---- Toast ---- */

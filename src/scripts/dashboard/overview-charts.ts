@@ -4,6 +4,7 @@
  */
 
 export type ChartDataPoint = {
+  formattedValue?: string;
   label: string;
   value: number;
 };
@@ -195,7 +196,7 @@ export class VelocityChartRenderer {
         this.ctx.stroke();
 
         // Tooltip pill
-        const tooltipText = `${item.label}: ${item.value.toLocaleString("vi-VN")}`;
+        const tooltipText = `${item.label}: ${item.formattedValue ?? item.value.toLocaleString()}`;
         this.ctx.font = "600 11px Inter, sans-serif";
         const textMetrics = this.ctx.measureText(tooltipText);
         const pillW = textMetrics.width + 16;

@@ -1,6 +1,116 @@
 # Implementation Status
 
-Last updated: 2026-08-24
+Last updated: 2026-08-26
+
+## PayOS channel replacement fix (2026-08-27)
+
+- Reproduced the staging failure after an owner-confirmed disconnect: the legacy integration kept its provider identity fingerprint, so a verified credential from the new PayOS channel was rejected as `credential_channel_mismatch` before the provider call.
+- Added forward-only migration `migrations/0120_payos_disconnect_reconnect_identity.sql`. An explicit disconnected state now permits the owning shop to attest a replacement channel; verified identities are retained in a tenant-bound history table, projection account identity is cleared on disconnect, and the new identity is synchronized only after verified activation.
+- Added regression coverage for same-shop channel replacement, cross-shop identity fencing and projection identity refresh. Focused PayOS ownership/projection/concurrency coverage passes `30/30`; full suite passed `369/371` before release-registry updates and is being rerun after the registry update.
+- Staging deployment and remote migration are still pending for this exact candidate. Payment remains non-authoritative until a signed PayOS event or tenant-correct direct reconciliation confirms the 5,000 VND transfer.
+
+## Release candidate verification (2026-08-27)
+
+- Candidate `codex/release-candidate-20260824` now passes `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm run test` (371 files / 3,052 tests), `npm run build`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, `npx tsc --noEmit`, `npm audit --audit-level=high` (0 vulnerabilities), and `git diff --check`.
+- Added the missing TypeScript declaration for the Dodo UAT executor (`937a2c2`); no runtime behavior changed.
+- Read-only staging checks confirm the expected account/D1 identity, complete migration ledger through `0119`, PayOS projection integrity, and exact route inventory. Staging still serves the previous Worker; the candidate has not been deployed.
+- Staging release admission remains blocked until the SaaS DNS/fallback-origin read permission is available to the operator token. No staging migration, Worker deployment, provider UAT, QR transfer, or production mutation was performed in this verification pass.
+
+## PayOS stale-claim recovery hardening (2026-08-26)
+
+- Fixed active PayOS health refresh so it no longer converts a provider verification/claim persistence failure into a false successful `201` response with stale timestamps.
+- A same-tenant active credential may safely reclaim an `in_flight`/`ambiguous` claim, including a stale webhook-target fingerprint; cross-tenant and quarantined ownership remain fail-closed.
+- Cleanup paths now verify that both credential and integration rows were actually updated before reporting a provider failure, preventing silent claim leaks.
+- Added regression coverage for stale active claim recovery. Focused PayOS/resumability/concurrency tests pass `42/42`; `npm run check` reports 0 errors and `npm run lint` passes.
+- This code is committed as `709e757` but not yet deployed. Staging and production remain NO-GO until a fresh release manifest/deployment, live PayOS confirmation, signed 5,000 VND transfer/reconciliation, complete Dodo UAT, and operational gates are accepted.
+
+## Staging continuation — Cloudflare SaaS gate closed, candidate deployed, provider checkout still NO-GO (2026-08-26)
+
+### Additional provider/runtime observation (2026-08-26)
+
+- Dodo test-mode webhook inventory contains one enabled endpoint bound to the canonical staging callback; no webhook secret or provider credential is recorded here.
+- A real Dodo test-mode checkout request returned a provider session for the published Starter VN offer. The session was not paid and no subscription/invoice entitlement was activated.
+- The staging Pro catalog projection was re-read from D1: `api`, `apiRead`, `customDomain`, `premiumStorefrontTemplates`, and advanced analytics are enabled on the public Pro plan; the active staging Pro shop projection resolves to `299,000 VND/month`.
+- These observations confirm provider/catalog configuration only. They do not replace the required 32-scenario signed UAT set, PayOS transfer/reconciliation evidence, or production release gates.
+
+- Cloudflare zone-scoped audit token was created with only `selinow.com` DNS read and SSL read/write permissions; SaaS DNS, fallback origin, account/resource inventory, Worker secret binding, and staging route checks all pass.
+- Fresh staging backup `bkp_20260826085057_1020863e4a64` and isolated restore drill `rdr_20260826085144_76b2ac966556` pass with 129 restored items, integrity OK, and zero foreign-key violations. Release manifest `stg_20260826T083834Z_3ed9f606a1bb` is bound to exact commit/tree.
+- Migration completion and post-migration evidence were written; staging Worker deployed at 100% as version `6cee5723-33a0-4d4b-a5c2-2c7c3e1dc9ce`, with immutable deployment evidence `029a3bdb-3f2d-444e-ade5-f7ba539114c6`. Platform doctor, route preflight, DB preflight, and Phase-A smoke all pass.
+- Read-only Dodo catalog inspection against the real test API verifies all four offers and `reconciliationRequired=false`. The real `plan_catalog_offers` UAT scenario passes and writes a receipt; checkout/webhook scenarios remain blocked because the staging control route intentionally returns `501` for every scenario except `plan_catalog_offers`.
+- PayOS remains unaccepted: no real controlled 5,000 VND transfer, provider-signed webhook, or direct-reconciliation evidence has been produced. Production remains **NO-GO** pending complete Dodo UAT, PayOS evidence, monitoring/pilot/rollback, production backup/restore, and the guarded production ceremony.
+
+## Candidate-bound Dodo UAT control route (2026-08-26)
+
+- Added the staging-only `/api/internal/uat/providers/dodo` control route. It authenticates with a dedicated secret, binds every request to the exact release commit/tree/manifest and active Worker version metadata, and rejects production or unsupported scenarios fail-closed.
+- The first executable provider observation is `plan_catalog_offers`: it verifies the four Dodo test-mode catalog rows against the live Dodo API without writing acceptance evidence. Checkout/webhook scenarios remain blocked until the controlled runner can produce genuine provider events and redacted signed proofs.
+- Added `version_metadata` bindings and release deployment variables so the route cannot execute against an unbound Worker. The UAT executor now sends the full release binding to the control plane.
+- Verification: the provider control/executor regression set now passes 3 files / 11 tests; `npm run check` passes with 0 errors and 4 existing hints; full ESLint, build, staging deploy dry-run, route preflight, migration status and database preflight pass. With the scoped D1/resource/route audit tokens, Cloudflare resources and all staging routes pass; `platform:doctor` still fails only the SaaS fallback-origin API check (`403/10000`) because the current operator tokens lack `Account SSL & Certificates: Write`. Staging deployment and live provider UAT were not executed.
+
+## Dodo catalog mutation admission (2026-08-26)
+
+- Closed the catalog-reconciliation credential/admission gap: `--apply` now requires the exact staging/production release manifest and runs the same payment-provider mutation admission used by guarded Dodo webhook and PayOS operations before reading the Dodo API key or issuing any provider/D1 request.
+- Remote D1 inspection and mutation now run only with an account-pinned child environment derived from the short-lived `CLOUDFLARE_D1_API_TOKEN`. Ambient `CLOUDFLARE_API_TOKEN`, Wrangler OAuth, provider keys and unrelated operator credentials are not forwarded; the default remote sink rejects unbranded environments.
+- Dry-run remains side-effect free and no longer reads product references. Successful apply output records the admitted release ID and commit; missing/stale/candidate-mismatched manifests and configured/live D1 account mismatches fail closed.
+- Verification: focused Dodo/payment operational coverage passed `2` files / `21` tests; touched-file ESLint, `git diff --check`, and Astro check pass with 0 errors and 4 existing hints. No external provider or Cloudflare mutation was executed.
+
+## Production release gate audit (2026-08-25)
+
+- Performed a read-only Cloudflare audit as `tungbipdz@gmail.com` for account `ef250a88911fd24073cb73d1c07e0218`; no production/staging database, Worker, route, secret, queue, DNS, Dodo, or PayOS mutation was executed by this audit.
+- Production D1 `selinow-production` is currently applied through `0112_google_auth_foundation.sql`; candidate migrations `0113` through `0119` remain pending in production. Staging is applied through `0119_payos_provider_projection_lifecycle.sql`.
+- Production Worker inventory confirms the currently active historical version `4cbab0cc-ac81-41fc-b79f-7695596c3071`; historical route-neutral candidate/rollback uploads exist, but they are not accepted evidence for this dirty, unmanifested candidate.
+- Backup and isolated-restore plans pass in dry-run mode. A real protected production backup/restore report is not present for this candidate because the required scoped D1 operator token, release manifest, and clean source identity are absent.
+- Dodo test catalog inspection remains non-UAT evidence (four test offers configured; no accepted signed execution proof). PayOS remains unaccepted because no controlled signed webhook/reconciliation artifact exists for this candidate. No synthetic provider evidence is permitted.
+- Monitoring, two-store pilot, manual acceptance, owner approvals, exact candidate Worker version, and rollback rehearsal artifacts are not present in the candidate evidence path. `release:doctor --json` therefore remains fail-closed and production status is **NO-GO**.
+- Local Astro type checking passes with 0 errors, 0 warnings, and 4 existing hints. Production dry-run planners pass; these results do not authorize remote mutation.
+
+## Legal/support policy V1 publication (2026-08-25)
+
+- Published the owner-approved policy bundle at `docs/LEGAL_SUPPORT_POLICY_V1.md` using Nguyễn Công Tùng, Xóm Tân Mỹ, Vân Tụ, Nghệ An, Việt Nam, tax identifier `040099014422`.
+- Policy SHA-256: `73f1f57c8e99d72feb86cbd035831816b8613f9f3b3f9c158b2a2510abf70543`; public platform support is `tungbipdz@gmail.com`.
+- Replaced the public `/legal`, `/privacy`, and `/support` gates with responsive bilingual policy surfaces and version metadata effective `2026-08-25`.
+- Set `CURRENT_POLICY_ATTESTATION_VERSION = 1`; onboarding/readiness can now record a seller attestation against the published platform policy.
+- Production remains NO-GO for the separate provider UAT, release manifest, backup/restore, monitoring, pilot and rollback gates. No production mutation or live charge was performed by this change.
+
+## PayOS provider projection lifecycle repair (2026-08-25)
+
+- Confirmed the staging checkout readiness failure was a data-lifecycle defect, not an invalid Pro entitlement or seller credential: a PayOS integration created after migration `0035` had no provider-neutral `payment_provider_connections` projection, so provider readiness failed closed even though the legacy integration was active and webhook-verified.
+- Added forward-only migration `migrations/0119_payos_provider_projection_lifecycle.sql`. It backfills missing PayOS connection/capability/currency/method projections and installs atomic insert/update projection triggers for verification, degraded health, disconnect and reconnect transitions. Return URLs and QR rendering remain non-authoritative; only signed PayOS evidence or tenant-correct reconciliation can confirm payment.
+- Database preflight and production continuation admission now reject any missing legacy PayOS projection. The release invariant registry pins all four replacement trigger definitions so migration drift cannot be accepted silently.
+- The staging migration gate permits this single known failing check only when `0119` is the sole pending migration and the live ledger exactly matches the manifest baseline; every other preflight check must pass, and the same PayOS check is immediately re-run in strict mode after migration. This closes the bootstrap deadlock without creating a general preflight bypass.
+- The protected-backup restore drill now always re-emits D1 dumps as tables, unique indexes, dependency-ordered data and finally triggers. This prevents D1 from rejecting the new composite PayOS foreign key during raw batched import while preserving checksum validation against the original protected artifact.
+- Verification: focused migration/payment/release coverage passed `6` files / `37` tests and the staging admission regression set passed `4` files / `46` tests; the complete repository passed `367` files / `3,033` tests; `npm run check` reports 0 errors and 4 existing hints; lint, TypeScript, build, local deploy dry-run, staging deploy dry-run and `git diff --check` pass.
+- The controlled staging ceremony still requires a fresh exact-commit manifest, protected pre/post backups, isolated restore drills, migration `0119`, zero post-migration PayOS projection defects, an exact Worker deployment binding and live checkout verification. The policy gate is now satisfied by V1; provider and operational gates remain separate.
+
+## Onboarding publication-gate truthfulness follow-up (2026-08-25)
+
+- The former `policy_unpublished` staging blocker is resolved by the owner-approved V1 policy and attestation version `1`; PayOS connectivity and Pro entitlement continue to be evaluated independently.
+- The quickstart launch UI receives the server-owned policy version, labels seller support/Terms/Privacy/refund information as required before publication, and collects attestation only against the positive published policy version. The explicit null-version fail-closed branch remains for future rollback or unpublished versions.
+- Backend publication remains fail-closed and unchanged: no return URL, QR render, client celebration state, or seller-entered URL can publish the catalog, create payment truth, or substitute for an approved platform policy.
+- Verification: focused policy/readiness/publication coverage passed `4` files / `36` tests; the final quickstart contract passed `9/9`; full repository coverage passed `366` files / `3,030` tests; `npm run check` reports 0 errors and 4 existing hints; lint, build, local deploy dry-run, staging deploy dry-run, and `git diff --check` pass.
+- Any staging deployment of this change must be bound to a fresh clean-commit release manifest and exact 100% Worker deployment evidence under `.wrangler/releases/staging/<release-id>/`. Production remains NO-GO until owner-approved and formally reviewed platform legal/support policy content has an effective version, controlled PayOS UAT is complete, and monitoring/pilot/rollback plus production backup/restore evidence is accepted.
+
+## PayOS admission, Pro access and authenticated UI release candidate (2026-08-25)
+
+- Restored native, ARIA and `data-*` forwarding in the shared `Button` primitive. The affected two-factor enrollment, password, export and inventory controls now retain their client action hooks; authenticated browser acceptance clicks the real two-factor button and proves the enrollment form opens.
+- The seller payment page now evaluates the authoritative `provider_setup` subscription entitlement before rendering PayOS configuration. `subscription_payment_required`, `subscription_grace_expired` and `provider_not_ready` fail closed with localized billing recovery guidance, and the browser controller cannot reopen or submit the credential form after server admission is denied.
+- Pro access remains derived from authoritative subscription state and the canonical Pro feature flags. The existing forward-only `0118_pro_premium_storefront_entitlement.sql` migration remains the required schema correction for environments where an active Pro shop is still missing premium storefront access.
+- Routine seller navigation is not subject to the historical default 15-minute reauthentication boundary. Financial, credential, identity, deletion and administrator mutations retain the explicit five-minute step-up boundary, and all user-facing messages now describe that enforced window accurately.
+- Accessibility and responsive fixes cover dashboard/onboarding/billing/products/shared headers, semantic progress labeling, WCAG-safe status colors, 320px grids, the mobile topbar collision and deterministic RTL geometry. The refreshed authenticated Payments and two-factor desktop/mobile baselines were visually reviewed.
+- Verification on committed candidate `09dc4de`: authenticated browser gate `9/9`; full Vitest `366` files / `3,029` tests; Astro check `0` errors / `0` warnings / `4` existing hints; ESLint, TypeScript, build, local deploy dry-run, staging deploy dry-run and `git diff --check` pass; `npm audit --audit-level=high` reports `0` vulnerabilities.
+- Staging release `stg_20260825T102833Z_09dc4de74952` deployed Worker version `1d8129a7-f725-4ac2-933d-157181f79219` after route/platform/database admission, two protected backups, two isolated restore drills, no-op migration confirmation, post-migration evidence and exact deployment binding. Post-deploy D1, PayOS link integrity, routes, resources, queues, cron and phase-A smoke all pass.
+- The first staging visual run passed `19/20`; the only failure captured the product-detail button during its legitimate `Đang kiểm tra…` hydration state. The test now waits for the authoritative enabled `Thêm vào giỏ` state before visual capture; the focused mobile rerun passes and the full staging visual gate passes `20/20` without changing a baseline or runtime source.
+- No PayOS transfer or production mutation is claimed by this checkpoint. The test-only follow-up must be committed and rebound to a fresh exact staging manifest/deployment before one controlled `5,000 VND` PayOS QR payment records signed webhook/reconciliation and idempotent fulfillment evidence.
+- Production remains NO-GO until staging provider UAT is complete, monitoring/pilot/rollback evidence exists, and the production backup/restore ceremony passes. The policy attestation is now version `1`.
+
+## Release-candidate verification follow-up (2026-08-25)
+
+- Corrected Dodo catalog validation to match the provider's recurring-subscription model: monthly billing frequency with a long-lived `20 Year` subscription period, case-insensitive provider interval values, tax-inclusive pricing, no provider trial, and no adaptive pricing. A one-month total period is now rejected because it expires after the first cycle.
+- Fixed storefront accessibility regressions by removing focusable descendants from `aria-hidden` visual wrappers and keeping the Pulse flash visual link accessible with an explicit product label.
+- The first exact-candidate staging visual run exposed a duplicate accessible name on each product card: the compact `+` action and the full add-to-cart button were both announced as “Add to cart: product”. The compact action now uses a distinct localized “Quick add” label so automated and keyboard/screen-reader flows can target the intended control unambiguously.
+- Verification: focused Dodo/storefront regression set `2` files / `32` tests passed; full repository `364` files / `3,001` tests passed; `npm run check` reports 0 errors and 4 existing hints; lint, TypeScript, build, deploy dry-run, and `git diff --check` pass.
+- Staging release `stg_20260824T200557Z_22e62c94cef2` deployed Worker `5f7358be-ca7c-46b4-96bb-866fa9360cd7` after protected pre/post backups, two isolated restore drills, database/status/preflight, platform/route/trigger admission, immutable deployment binding `ee103044-ec3c-46b3-b711-1c4913c7563e`, phase-A smoke, and the full visual gate passed. The current commit adds only the reviewed visual baselines/status record; provider UAT is admitted only by the fresh exact-commit manifest and deployment evidence created after this document.
+- The final staging visual gate is `20/20`: WCAG accessibility and cart flows pass on desktop/mobile, all public storefront/product/cart/checkout/login checks pass against reviewed refreshed baselines, and all four 1440/768/390/320 viewport-matrix checks pass. The refreshed PNGs are committed as intentional redesign baselines.
+- Staging and production provider UAT, PayOS controlled transfer, production backup/restore/rollback ceremony, legal attestation, and production deploy remain pending and must be completed against the final committed candidate only.
 
 ## Commercial checkout, onboarding and entitlement correction (2026-08-24)
 
@@ -12,7 +122,7 @@ Last updated: 2026-08-24
 - Onboarding seed retries now derive deterministic product slug/SKU suffixes from the request idempotency key. Inventory child keys stay within the 128-character server contract, custom-product retries no longer depend on `Date.now()`, and an in-memory intent ledger preserves response-loss retries when browser storage is unavailable.
 - Bundled plaintext sample license keys were removed from presets, rendered attributes, and seed responses. License-key presets now route sellers to the real encrypted inventory-entry step and report zero imported keys.
 - Existing-shop slug changes are covered by tenant-isolation and transactional domain regression tests: reserved/unavailable slugs do not mutate, old platform domains are tombstoned, the new hostname becomes active/primary/canonical, and hostname conflicts roll back the complete batch.
-- Forward-only migration `migrations/0116_pro_premium_storefront_entitlement.sql` grants `premiumStorefrontTemplates=true` to the authoritative Pro plan row and aborts if exactly one active canonical Pro row cannot be proven, fixing Pro subscriptions that were active but still blocked from premium storefront templates.
+- Forward-only migration `migrations/0118_pro_premium_storefront_entitlement.sql` grants `premiumStorefrontTemplates=true` to the authoritative Pro plan row and aborts if exactly one active canonical Pro row cannot be proven, fixing Pro subscriptions that were active but still blocked from premium storefront templates.
 - Routine seller actions no longer expire at the default 15-minute boundary; security-, credential-, payment-, deletion-, and admin-sensitive routes explicitly retain a five-minute step-up gate. CSRF rotation/recovery is exact-origin, matches the remaining session lifetime, and retries once on either `token_invalid` or `token_mismatch`.
 - Verification: focused final regression set 173/173, release/admin follow-up 51/51, and full repository 362 files / 2,974 tests pass. `npm run check` passes with 0 errors and 4 existing hints; `npm run lint`, `npm run build`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, `npx tsc --noEmit`, and `git diff --check` pass.
 - No staging or production deployment, migration, provider secret mutation, checkout, QR transfer, or live charge was performed. Production remains NO-GO until policy attestation, owner-approved live Dodo IDs, provider-backed staging Dodo/PayOS UAT, fresh release manifest/backup/restore/rollback evidence, and the controlled production ceremony are complete.
@@ -21,9 +131,9 @@ Last updated: 2026-08-24
 
 - Registration now rejects suspended accounts before password/OTP mutation; OTP completion activates and creates the session in one guarded D1 batch, so suspension races cannot issue a session.
 - OTP purpose values are allowlisted at the HTTP boundary. Login-2FA resend now requires the signed challenge token (or the Google HTTP-only challenge cookie), and never trusts a caller-supplied email.
-- OTP consumption checks affected rows, issuance uses an atomic cooldown guard, and public register/reset OTP issuance is bounded by a forward-only `auth_otp_admissions` ledger (`migrations/0114_auth_otp_admission.sql`).
+- OTP consumption checks affected rows, issuance uses an atomic cooldown guard, and public register/reset OTP issuance is bounded by a forward-only `auth_otp_admissions` ledger (`migrations/0116_auth_otp_admission.sql`).
 - Password-reset tokens now use random opaque values stored only as HMAC hashes in the existing `password_reset_tokens` table and are consumed atomically during reset, preventing replay.
-- Password assignment for active passwordless Google/magic-link accounts is staged in `pending_password_hash` (`migrations/0115_auth_pending_password.sql`) and is promoted only after registration OTP verification, closing the email-only password takeover path.
+- Password assignment for active passwordless Google/magic-link accounts is staged in `pending_password_hash` (`migrations/0117_auth_pending_password.sql`) and is promoted only after registration OTP verification, closing the email-only password takeover path.
 - Failed-password and OTP-attempt counters use compare-and-set guards; magic-link session creation requires the user activation update to succeed, and outward password-login errors no longer reveal suspended/passwordless account state.
 - Remember-me session TTL now matches the 30-day cookie lifetime.
 - Verification: focused auth/recovery suites pass (81 tests), touched-file ESLint passes, `astro check` reports 0 errors (4 existing hints). Production migration/deployment remains unexecuted; do not point local tooling at production resources.
@@ -53,10 +163,49 @@ Last updated: 2026-08-24
 - Hardened Dodo checkout creation and replay with an exact dashboard return URL, provider 4xx classification, the original provider idempotency key after response loss, safe hosted-URL validation, and terminal release only when provider truth is explicitly `failed` or `cancelled`. Network errors, malformed responses, missing status, processing states, and identity/amount/currency/price mismatches cannot release the active checkout lock.
 - Added forward-only migration `migrations/0113_dodo_checkout_reconciliation.sql`, a tenant-bound checkout-status API, scheduled provider reconciliation, bounded exponential retry evidence, quarantine at 12 actual retrieval/identity failures, and late signed-success recovery through the same idempotent provider-event transition. Valid `null`/processing provider states stay open without consuming the failure budget; each accepted payment creates at most one invoice.
 - Redesigned `/app/billing` around Overview, Plans, Usage, Payment, and Invoices with one contextual primary action, a two-step select/review flow, authoritative effective timing, responsive dialogs, 44px targets, live-region feedback, reduced-motion handling, and no fabricated card details. The implementation follows the low-cognitive-load management patterns used by mature SaaS billing surfaces while retaining Selinow's design system.
-- Registered migration `0113` table/column/index fingerprints in the production invariant registry. The parallel auth migrations `0114` and `0115` remain preserved; the `0115` column metadata now matches SQLite's literal `DEFAULT NULL` pragma representation without changing the auth migration or auth logic.
+- Registered migration `0113` table/column/index fingerprints in the production invariant registry. Historical migrations `0114` and `0115` retain their already-applied Pro-entitlement and seller-metrics identities; the parallel auth migrations continue forward-only as `0116` and `0117`, with SQLite's literal `DEFAULT NULL` pragma representation preserved for the pending-password column.
 - Added the decision-complete implementation, provider UAT, rollout, rollback, monitoring, and acceptance plan at `docs/BILLING_COMMERCIAL_COMPLETION_PLAN_2026-08-23.md`. No production Dodo object, secret, webhook, D1 row, deployment, checkout, or live charge was mutated by this work.
 - Verification: billing-focused contract set 173/173 passed; `npm run check` passed with 0 errors and 4 existing hints; `npm run lint`, `npm run build`, and `npm run deploy:dry-run` passed. Full `npm run test` reached 356/357 files and 2,935/2,939 tests; the only four failures are in the parallel auth stream's `account-two-factor-service.test.ts` OTP fixtures, not billing.
 - Production remains fail-closed pending owner-approved `DODO_STARTER_VN_PRODUCT_ID`, `DODO_PRO_VN_PRODUCT_ID`, `DODO_STARTER_GLOBAL_PRODUCT_ID`, and `DODO_PRO_GLOBAL_PRODUCT_ID`, guarded catalog reconciliation, genuine staging UAT, and one controlled live smoke. These identifiers must come from protected operator channels and must never be invented or committed.
+### Pro entitlement and checkout follow-up (2026-08-23)
+
+- Fixed the staging Pro catalog gap with forward-only migration `0114_pro_storefront_template_entitlement.sql`: the public assignable Pro plan now carries a strict JSON boolean `premiumStorefrontTemplates=true`; Starter and legacy plans are explicitly rejected by the release invariant.
+- Fixed the Pro CTA handoff: `/onboarding?plan=pro` is validated server-side, preserved only for fresh shop creation, and reaches the authoritative `planCode` payload. Existing shops never get silently reprovisioned.
+- Premium template radios now fail closed in SSR and client re-render, including locked persisted selections; expired, suspended, pending-payment, or missing-period Pro subscriptions no longer appear entitled in seller settings.
+- Reworked seller analytics to use paid-period admission, timezone-local calendar boundaries (including DST), dense zero-filled points, tenant-leading keyset pagination, and a bounded overflow failure instead of truncating revenue. Chart tooltips now use the shop locale/currency formatter.
+- Staging read-only diagnosis confirms the P0: the active Pro shop is on Worker candidate `e8c1a9a`, the staging migration ledger stops at `0113`, and its Pro row lacks `premiumStorefrontTemplates`; the browser consequently disables Pulse/Desk. Migration `0114` and the reviewed Worker must ship together.
+- Same-plan pricing targets now focus an explicit current-plan card instead of opening a downgrade-only dialog; canceled/recovery shops remain discoverable for billing handoff.
+- Local verification for this follow-up: focused entitlement/storefront/onboarding/billing/metrics/release suites pass (79 tests); `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm test` (360 files / 2,997 tests), `npm run build`, and both local/staging deploy dry-runs pass. A parallel duplicate build initially raced on `dist`; the required sequential staging dry-run passed. Staging deployment of this follow-up is not claimed until the exact clean candidate is committed and the guarded backup/migration/deployment evidence sequence is repeated.
+- Staging admission remains blocked without a clean committed candidate and the scoped Cloudflare audit/D1/Worker tokens. Existing private manifests stop at `0113` and are not valid evidence for this candidate; no staging mutation has been performed in this follow-up.
+
+- Closed the production Dodo API-key rotation gap: guarded webhook bootstrap now binds the provider-validated live API key and new webhook signing key into the same exact route-neutral candidate through `wrangler versions upload --secrets-file`. Production cannot fall back to raw `wrangler secret put`; private evidence records only both names plus a domain-separated API-key fingerprint, which signed-health rechecks.
+- Built a billing-only candidate from production base `8b132b193c52`; parallel auth migrations and source changes are intentionally excluded.
+- Unified landing, pricing, onboarding, seller plan listing, preview, and checkout behind one sellable Dodo catalog contract.
+- Added response-loss-safe checkout idempotency, exact return polling, signed-webhook state transitions, scheduled reconciliation, and forward-only migration `0113_dodo_checkout_reconciliation.sql`.
+- Added a guarded remote catalog inspector/reconciler that clears `dodo_catalog_reconciliation_required` only when all four environment-specific offers match exactly.
+- Catalog inspect and dry-run no longer require protected product IDs. Published
+  rows inspected without IDs are explicitly labeled unverified rather than being
+  mistaken for an exact catalog match.
+- Before any catalog D1 mutation, reconciliation now GETs all four products from
+  the fixed environment-specific Dodo API origin and verifies exact product ID,
+  nested recurring amount/currency/monthly cadence, tax inclusion, zero provider
+  trial/discount, SaaS tax category, and null pricing mode. Provider/API/schema
+  failures stop before writes and do not expose the API key or response body.
+- Provider-schema limitation: Dodo documents `pricing_mode`, `tax_inclusive`,
+  and `trial_period_days` as omittable/nullable. The release guard intentionally
+  requires explicit `null`/`true`/`0` and therefore fails closed if Dodo returns
+  only defaults; an owner must verify and approve any future relaxation.
+- Verification for catalog hardening: 49/49 focused catalog/webhook tests pass;
+  focused ESLint passes; `npm run check` completes with zero errors/warnings and
+  four unrelated existing TypeScript conversion hints.
+- Dodo provider trials are disabled. Selinow retains the existing seven-day local D1 evaluation trial; checkout requires the full paid catalog amount before activating a subscription.
+- Redesigned `/app/billing` into a low-cognitive-load SaaS billing workspace with overview, plans, usage, payment, and invoices sections.
+- Fixed the P0 Pro entitlement projection gap: an active paid subscription with a missing period/customer projection is repaired only from validated Dodo subscription truth; entitlement guards remain fail-closed when period or customer evidence is absent. Initial payment projection now falls back to Dodo `previous_billing_date`/`next_billing_date`, and completed checkout reconciliation is tenant-, product-, provider-subscription-, and version-guarded.
+- Deterministic pricing/billing UI fixes are in `c25800f`: landing/pricing render one server-selected published market price without a hydration flash, while Usage and Invoices use progressive disclosure and the current-plan summary keeps one primary action.
+- Full source gates at candidate `e8c1a9a`: `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm run test` (358 files / 2,973 tests), `npm run build`, and `npm run deploy:staging:dry-run` passed. A concurrent duplicate build once produced `ENOTEMPTY` in `dist`; the sequential dry-run passed.
+- Staging release `stg_20260823T012637Z_e8c1a9ae6f05` completed backup `bkp_20260823012459_820004f46b46`, restore drill `rdr_20260823012533_371714437860`, migration/preflight/status, post-migration backup `bkp_20260823012801_d5ec7225e111`, restore drill `rdr_20260823012835_79d6875dca37`, `db:complete-release`, and Worker deployment `77272e1e-30bf-4948-a0e9-78629c358be0` at 100%; deployment evidence is bound to the exact commit/tree.
+- Staging live read-only smoke passed: platform health, marketing, catalog, storefront, and safety boundaries. The genuine completed Pro checkout `bchk_6b293b3c-1b00-4bc3-a0de-90526f565cba` now has `state=active`, `current_period_start=2026-08-23T00:14:13.799833Z`, `current_period_end=2026-09-23T00:15:57.457058Z`, `provider_customer_ref=cus_0Nlymi1BEp3So4kD8aewv`, and the original provider subscription reference; the Pro plan feature flags/limits are present and the Dodo customer portal session endpoint returned a provider-hosted test URL.
+- Production remains NO-GO: no live charge was attempted, and fresh production candidate/rollback, owner approvals, production backup/restore continuation, missing operator/provider trust variables, and final live UAT evidence are still required. The required action-time confirmation before any live charge remains outstanding.
 
 ## Release execution — staging shipped through 0112; production awaits the owner ceremony (2026-08-22, later same day)
 

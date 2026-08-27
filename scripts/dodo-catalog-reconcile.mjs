@@ -1,6 +1,7 @@
 import process from "node:process";
 
 import {
+  buildDodoCatalogCloudflareEnvironment,
   parseDodoCatalogArguments,
   inspectDodoCatalog,
   readDodoCatalogReferences,
@@ -9,6 +10,8 @@ import {
   reconcileDodoCatalog,
   validateDodoCatalogTarget,
 } from "./lib/dodo-catalog-reconciliation.mjs";
+import { assertPaymentProviderMutationAdmission } from "./lib/payment-provider-mutation-admission.mjs";
+import { loadRemoteDatabaseTarget } from "./lib/platform.mjs";
 
 function output(value, json) {
   if (json) {
@@ -27,10 +30,13 @@ function output(value, json) {
 
 try {
   const options = parseDodoCatalogArguments(process.argv.slice(2));
-  const references = readDodoCatalogReferences(process.env);
   if (options.inspect) {
+    const databaseTarget = await loadRemoteDatabaseTarget(options.environment);
+    const commandEnvironment = buildDodoCatalogCloudflareEnvironment(process.env, databaseTarget.accountId);
+    const references = readDodoCatalogReferences(process.env);
     const providerMode = readDodoCatalogProviderMode(process.env);
     const result = inspectDodoCatalog({
+      commandEnvironment,
       environment: options.environment,
       providerMode,
       references,
@@ -54,6 +60,14 @@ try {
       updatedCount: 0,
     }, options.json);
   } else {
+    const admission = await assertPaymentProviderMutationAdmission({
+      environment: options.environment,
+      manifestPath: options.manifestPath,
+    });
+    const databaseTarget = await loadRemoteDatabaseTarget(options.environment);
+    if (admission.accountId !== databaseTarget.accountId) throw new Error("dodo_catalog_database_target_mismatch");
+    const commandEnvironment = buildDodoCatalogCloudflareEnvironment(process.env, admission.accountId);
+    const references = readDodoCatalogReferences(process.env);
     const providerMode = readDodoCatalogProviderMode(process.env);
     const providerConfig = readDodoCatalogProviderConfig(process.env);
     validateDodoCatalogTarget({
@@ -66,6 +80,7 @@ try {
     const result = await reconcileDodoCatalog({
       apiBaseUrl: providerConfig.apiBaseUrl,
       apiKey: providerConfig.apiKey,
+      commandEnvironment,
       confirmProduction: options.confirmProduction,
       confirmProductionLiveCatalog: options.confirmProductionLiveCatalog,
       confirmStagingTestCatalog: options.confirmStagingTestCatalog,
@@ -77,6 +92,10 @@ try {
       action: result.insertedCount === 4
         ? "catalog_rotated"
         : (result.updatedCount === 0 ? "catalog_already_configured" : "catalog_reconciled"),
+      release: {
+        commitSha: admission.commitSha,
+        releaseId: admission.releaseId,
+      },
       ...result,
     }, options.json);
   }

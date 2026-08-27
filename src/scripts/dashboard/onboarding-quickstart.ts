@@ -85,6 +85,7 @@ type ShopResponse = {
     name?: string;
     publicId?: string;
     slug?: string;
+    subscriptionState?: string;
   };
 };
 
@@ -317,12 +318,17 @@ function initQuickstart(): void {
 
   const csrfCookieName = root.dataset.csrfCookieName || "selinow_session_csrf";
   const platformBaseDomain = root.dataset.platformBaseDomain || "selinow.com";
+  const policyAttestationVersionValue = Number(root.dataset.policyAttestationVersion);
+  const policyAttestationVersion = root.dataset.policyAttestationPublished === "true"
+    && Number.isSafeInteger(policyAttestationVersionValue)
+    && policyAttestationVersionValue > 0
+    ? policyAttestationVersionValue
+    : null;
   const defaultCurrency = root.dataset.defaultCurrency || "VND";
   const toastEl = root.querySelector<HTMLElement>("[data-onboarding-toast]");
   const premiumTemplatesEntitled = root.dataset.premiumTemplatesEntitled === "true";
+  const requestedPlanCode = root.dataset.requestedPlanCode === "pro" ? "pro" : "starter";
   const creationAllowed = root.dataset.creationAllowed !== "false";
-  const requestedPlan = new URLSearchParams(window.location.search).get("plan");
-  const requestedPlanCode = requestedPlan === "pro" ? "pro" : "starter";
 
   let activeShopPublicId = root.dataset.activeShopPublicId || "";
   let activeShopSlug = "";
@@ -585,6 +591,8 @@ function initQuickstart(): void {
     const card = document.createElement("label");
     card.className = `template-preset-card${selected ? " is-selected" : ""}${locked ? " is-locked" : ""}`;
     card.dataset.templateId = tpl.id;
+    card.dataset.templateLocked = locked ? "true" : "false";
+    if (locked) card.setAttribute("aria-disabled", "true");
 
     const radio = document.createElement("input");
     radio.type = "radio";
@@ -666,12 +674,20 @@ function initQuickstart(): void {
     }
   });
 
-  // Initial premium lock pass for the server-rendered cards (no re-render yet).
+  // Keep the server-rendered state fail-closed if stale markup is ever cached.
   if (!premiumTemplatesEntitled) {
     const initialTemplates = templatesMap[currentVertical] ?? [];
     for (const tpl of initialTemplates) {
       if (!tpl.premium) continue;
-      templatesGrid?.querySelector<HTMLElement>(`[data-template-id="${tpl.id}"]`)?.classList.add("is-locked");
+      const card = templatesGrid?.querySelector<HTMLElement>(`[data-template-id="${tpl.id}"]`);
+      card?.classList.add("is-locked");
+      card?.setAttribute("aria-disabled", "true");
+      if (card !== undefined && card !== null) card.dataset.templateLocked = "true";
+      const radio = card?.querySelector<HTMLInputElement>("input[data-template-radio]");
+      if (radio !== undefined && radio !== null) {
+        radio.disabled = true;
+        radio.checked = false;
+      }
     }
   }
 
@@ -988,6 +1004,10 @@ function initQuickstart(): void {
           activeShopName = shopData.shop?.name ?? name;
           activeShopSlug = shopData.shop?.slug ?? slug;
           clearStableIntent("shop");
+          if (shopData.shop?.subscriptionState === "pending_payment" && activeShopPublicId) {
+            window.location.assign(`/app/billing?shop=${encodeURIComponent(activeShopPublicId)}&manage=plan`);
+            return;
+          }
         } else {
           // Existing shop: persist the profile before changing the wizard step.
           const profilePayload = JSON.stringify({ name, slug });
@@ -1408,6 +1428,7 @@ function initQuickstart(): void {
   const launchSettingsForm = root.querySelector<HTMLFormElement>("[data-launch-settings-form]");
   const saveSettingsBtn = root.querySelector<HTMLButtonElement>("[data-btn-save-settings]");
   const publishBtn = root.querySelector<HTMLButtonElement>("[data-step-submit='launch']");
+  const policyAttestationInput = root.querySelector<HTMLInputElement>("[data-input-launch-attestation]");
   const launchReview = root.querySelector<HTMLElement>("[data-launch-review]");
   const launchCelebration = root.querySelector<HTMLElement>("[data-launch-celebration]");
 
@@ -1456,6 +1477,13 @@ function initQuickstart(): void {
         showToast("Vui lòng hoàn thành bước tạo cửa hàng trước.", "error");
         return;
       }
+      if (!launchSettingsForm.reportValidity()) return;
+      const attestationAccepted = policyAttestationVersion !== null && policyAttestationInput?.checked === true;
+      if (policyAttestationVersion !== null && !attestationAccepted) {
+        showToast("Hãy xác nhận chính sách hiện hành trước khi lưu.", "error");
+        policyAttestationInput?.focus();
+        return;
+      }
 
       const support = (root.querySelector<HTMLInputElement>("[data-input-launch-support]")?.value || "").trim();
       const terms = (root.querySelector<HTMLInputElement>("[data-input-launch-terms]")?.value || "").trim();
@@ -1469,8 +1497,8 @@ function initQuickstart(): void {
           `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/onboarding/settings`,
           {
             body: JSON.stringify({
-              attestationAccepted: false,
-              attestationVersion: null,
+              attestationAccepted,
+              attestationVersion: attestationAccepted ? policyAttestationVersion : null,
               privacyUrl: privacy || null,
               refundPolicyUrl: refund || null,
               supportContact: support || null,
@@ -1525,6 +1553,10 @@ function initQuickstart(): void {
 
   publishBtn?.addEventListener("click", () => {
     void (async () => {
+      if (policyAttestationVersion === null) {
+        showToast("Chưa thể mở bán vì Selinow chưa phát hành chính sách nền tảng.", "error");
+        return;
+      }
       publishBtn.disabled = true;
       let published = false;
       try {
@@ -1550,6 +1582,8 @@ function initQuickstart(): void {
       if (published) completeAndCelebrate();
     })();
   });
+
+  if (publishBtn !== null) publishBtn.disabled = policyAttestationVersion === null;
 
   // --- Back navigation buttons ---
   root.querySelectorAll<HTMLButtonElement>("[data-step-back]").forEach((btn) => {

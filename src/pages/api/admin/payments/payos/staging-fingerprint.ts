@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 
-import { requireCsrfSession, requireRecentAuth } from "../../../../../lib/auth/session";
+import { requireCsrfSession } from "../../../../../lib/auth/session";
 import { AppError } from "../../../../../lib/core/errors";
 import { hmacToken } from "../../../../../lib/core/crypto";
 import { guardAdminMutationRate } from "../../../../../lib/http/admin-rate-limit";
@@ -18,7 +18,6 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const auth = await requireCsrfSession(request, env);
     await guardAdminMutationRate({ env, family: "payments_payos", request });
     await requirePlatformAdminApiAccess({ env, userId: auth.userId });
-    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 8 * 1024);
     rejectUnknownFields(body, ["clientId"]);
     if (typeof body.clientId !== "string" || !CLIENT_ID.test(body.clientId.trim())) throw new AppError("validation_failed", 400, ["client_id_invalid"]);

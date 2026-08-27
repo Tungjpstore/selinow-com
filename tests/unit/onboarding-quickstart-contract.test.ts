@@ -22,6 +22,24 @@ describe("onboarding quickstart API contracts", () => {
 
     expect(script).toContain("/onboarding/settings`");
     expect(script).toMatch(/\/onboarding\/settings`,[\s\S]{0,600}method: "PUT"/u);
+    expect(script).toContain("policyAttestationVersion !== null && policyAttestationInput?.checked === true");
+    expect(script).toContain("attestationVersion: attestationAccepted ? policyAttestationVersion : null");
+  });
+
+  it("keeps quickstart publish bound to the server-owned policy version", async () => {
+    const [page, shell, step, script] = await Promise.all([
+      readFile("src/pages/onboarding.astro", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingStepLaunch.astro", "utf8"),
+      readFile("src/scripts/dashboard/onboarding-quickstart.ts", "utf8"),
+    ]);
+
+    expect(page).toContain("CURRENT_POLICY_ATTESTATION_VERSION");
+    expect(shell).toContain("data-policy-attestation-published");
+    expect(step).toContain("Mở bán đang chờ chính sách nền tảng");
+    expect(step).toContain("bắt buộc trước khi mở bán");
+    expect(step).not.toContain("(không bắt buộc)");
+    expect(script).toContain("publishBtn.disabled = policyAttestationVersion === null");
   });
 
   it("keeps existing-shop mutations on their canonical route methods and persists the profile", async () => {
@@ -39,10 +57,17 @@ describe("onboarding quickstart API contracts", () => {
   });
 
   it("preserves an allow-listed pricing plan through new-shop creation", async () => {
-    const script = await readFile("src/scripts/dashboard/onboarding-quickstart.ts", "utf8");
+    const [page, shell, script] = await Promise.all([
+      readFile("src/pages/onboarding.astro", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8"),
+      readFile("src/scripts/dashboard/onboarding-quickstart.ts", "utf8"),
+    ]);
 
-    expect(script).toContain('new URLSearchParams(window.location.search).get("plan")');
-    expect(script).toContain('const requestedPlanCode = requestedPlan === "pro" ? "pro" : "starter";');
+    expect(page).toContain('Astro.url.searchParams.get("plan")');
+    expect(page).toContain("PUBLIC_PLAN_CODES");
+    expect(shell).toContain('data-requested-plan-code={requestedPlanCode ?? ""}');
+    expect(script).toContain('root.dataset.requestedPlanCode === "pro" ? "pro" : "starter"');
+    expect(script).not.toContain('new URLSearchParams(window.location.search).get("plan")');
     expect(script).toContain("planCode: requestedPlanCode");
     expect(script).not.toContain('planCode: "starter"');
   });

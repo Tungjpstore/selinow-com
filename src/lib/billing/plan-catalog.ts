@@ -29,6 +29,7 @@ export const PLAN_FEATURES = [
   "sellerPayments",
   "manualFulfillment",
   "privateDownloads",
+  "premiumStorefrontTemplates",
   "automation",
   "dataExport",
   "customDomain",
@@ -416,7 +417,7 @@ export const PRO_PLAN: PlanSnapshot = {
     storage_bytes: 10_737_418_240,
   },
   name: "Pro",
-  version: 1,
+  version: 2,
 };
 
 export const PUBLIC_PLAN_CATALOG: Readonly<Record<PublicPlanCode, PlanSnapshot>> = {

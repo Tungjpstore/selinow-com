@@ -15,7 +15,7 @@ type BillingOperationAttempt = BillingOperationAttemptInput & { idempotencyKey: 
 type BillingOperationAttemptRecord = BillingOperationAttempt & { expiresAt: number; version: 1 };
 type BillingCheckoutAttemptInput = { planCode: string; recovery: boolean; shopPublicId: string };
 type BillingCheckoutAttempt = BillingCheckoutAttemptInput & { idempotencyKey: string };
-type BillingCheckoutAttemptRecord = BillingCheckoutAttempt & { expiresAt: number; version: 1 };
+type BillingCheckoutAttemptRecord = BillingCheckoutAttempt & { checkoutSessionId: string | null; expiresAt: number; version: 1 };
 type BillingCheckoutAttemptStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
 type BillingPlanChangeDirection = "downgrade" | "unknown" | "upgrade";
 
@@ -56,9 +56,19 @@ export class BillingCheckoutAttemptTracker {
       && this.current.recovery === input.recovery
       && this.current.shopPublicId === input.shopPublicId) return this.current;
     this.clear();
-    this.current = { ...input, expiresAt: this.now() + this.ttlMs, idempotencyKey: this.createKey(), version: 1 };
+    this.current = { ...input, checkoutSessionId: null, expiresAt: this.now() + this.ttlMs, idempotencyKey: this.createKey(), version: 1 };
     this.persist();
     return this.current;
+  }
+
+  opened(attempt: Pick<BillingCheckoutAttempt, "idempotencyKey">, checkoutSessionId: string): void {
+    if (this.current?.idempotencyKey !== attempt.idempotencyKey) return;
+    this.current = { ...this.current, checkoutSessionId };
+    this.persist();
+  }
+
+  finishSession(checkoutSessionId: string): void {
+    if (this.current?.checkoutSessionId === checkoutSessionId) this.clear();
   }
 
   finish(attempt: Pick<BillingCheckoutAttempt, "idempotencyKey">): void {
@@ -90,7 +100,9 @@ export class BillingCheckoutAttemptTracker {
         || typeof record.idempotencyKey !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/u.test(record.idempotencyKey)
         || typeof record.expiresAt !== "number" || !Number.isSafeInteger(record.expiresAt)
         || record.expiresAt <= now || record.expiresAt > now + this.ttlMs) throw new Error("invalid");
-      return record as BillingCheckoutAttemptRecord;
+      if (record.checkoutSessionId !== undefined && record.checkoutSessionId !== null
+        && !/^bchk_[0-9a-f-]{36}$/u.test(record.checkoutSessionId)) throw new Error("invalid");
+      return { ...record, checkoutSessionId: record.checkoutSessionId ?? null } as BillingCheckoutAttemptRecord;
     } catch {
       try { this.storage?.removeItem(BILLING_CHECKOUT_ATTEMPT_STORAGE_KEY); } catch { /* Ignore unavailable storage cleanup. */ }
       return null;
@@ -211,12 +223,14 @@ export function acceptBillingCheckoutResponse(payload: JsonObject | null, attemp
   const checkout = payload?.checkout;
   const provider = typeof checkout === "object" && checkout !== null && typeof (checkout as { provider?: unknown }).provider === "string" ? (checkout as { provider: string }).provider : "";
   const rawUrl = typeof checkout === "object" && checkout !== null && typeof (checkout as { checkoutUrl?: unknown }).checkoutUrl === "string" ? (checkout as { checkoutUrl: string }).checkoutUrl : "";
+  const checkoutSessionId = typeof checkout === "object" && checkout !== null && typeof (checkout as { sessionId?: unknown }).sessionId === "string" ? (checkout as { sessionId: string }).sessionId : "";
   const requestId = typeof payload?.requestId === "string" && /^[A-Za-z0-9._-]{8,128}$/u.test(payload.requestId) ? payload.requestId : null;
   if (provider !== "dodo") throw new BillingApiError({ code: "checkout_provider_invalid", requestId });
   let checkoutUrl: URL;
   try { checkoutUrl = new URL(rawUrl); } catch { throw new BillingApiError({ code: "checkout_url_invalid", requestId }); }
   if (checkoutUrl.protocol !== "https:" || checkoutUrl.username.length > 0 || checkoutUrl.password.length > 0) throw new BillingApiError({ code: "checkout_url_invalid", requestId });
-  tracker.finish(attempt);
+  if (!/^bchk_[0-9a-f-]{36}$/u.test(checkoutSessionId)) throw new BillingApiError({ code: "checkout_session_invalid", requestId });
+  tracker.opened(attempt, checkoutSessionId);
   return checkoutUrl.toString();
 }
 
@@ -287,6 +301,7 @@ if (root !== null && root.dataset.canManage === "true") {
   const subscriptionVersion = Number(root.dataset.subscriptionVersion);
   const currentPeriodEnd = root.dataset.currentPeriodEnd ?? "";
   const locale = document.documentElement.lang || "en";
+  const targetPlanCode = new URL(window.location.href).searchParams.get("target");
   const checkoutAttemptStorage = (() => {
     try { return window.sessionStorage; } catch { return null; }
   })();
@@ -377,6 +392,12 @@ if (root !== null && root.dataset.canManage === "true") {
     }
     return plans.filter((plan) => plan.code !== currentPlanCode && plan.prices.length > 0);
   };
+  const visiblePlans = (): Plan[] => {
+    const eligible = eligiblePlans();
+    if (billingState !== "active") return eligible;
+    const current = plans.find((plan) => plan.code === currentPlanCode && plan.prices.length > 0);
+    return current === undefined ? eligible : [current, ...eligible];
+  };
   const resetDialog = (): void => {
     previewSequence += 1;
     previewReady = false;
@@ -401,19 +422,24 @@ if (root !== null && root.dataset.canManage === "true") {
   const renderPlans = (): void => {
     if (planOptions === null) return;
     planOptions.replaceChildren();
-    const eligible = eligiblePlans();
-    if (eligible.length === 0) {
+    const visible = visiblePlans();
+    if (visible.length === 0) {
       const empty = document.createElement("p");
       empty.textContent = billingMarketReady ? text("checkoutUnavailable") : text("marketDescription");
       planOptions.appendChild(empty);
       return;
     }
-    for (const plan of eligible) {
+    for (const plan of visible) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "plan-choice";
       button.dataset.planChoice = plan.code;
       button.setAttribute("aria-pressed", "false");
+      const isCurrent = billingState === "active" && plan.code === currentPlanCode;
+      if (isCurrent) {
+        button.dataset.currentPlan = "true";
+        button.setAttribute("aria-disabled", "true");
+      }
       const name = document.createElement("strong");
       name.textContent = plan.name;
       const price = document.createElement("span");
@@ -421,13 +447,16 @@ if (root !== null && root.dataset.canManage === "true") {
       const effect = document.createElement("small");
       const checkout = ["trialing", "pending_payment", "suspended", "canceled"].includes(billingState);
       const direction = billingPlanChangeDirection(currentPrice, plan.prices[0]);
-      effect.textContent = checkout || direction === "upgrade"
+      effect.textContent = isCurrent
+        ? text("plansCurrentHint")
+        : checkout || direction === "upgrade"
         ? text("effectiveNow")
         : direction === "downgrade" ? text("effectiveRenewal") : text("continue");
       button.appendChild(name);
       button.appendChild(price);
       button.appendChild(effect);
       button.addEventListener("click", () => {
+        if (isCurrent) return;
         selectedPlan = plan;
         for (const choice of root.querySelectorAll<HTMLElement>("[data-plan-choice]")) choice.setAttribute("aria-pressed", String(choice === button));
         void reviewPlan();
@@ -603,6 +632,7 @@ if (root !== null && root.dataset.canManage === "true") {
         const checkout = typeof payload?.checkout === "object" && payload.checkout !== null ? payload.checkout as JsonObject : null;
         const status = typeof checkout?.status === "string" ? checkout.status : null;
         if (status === "completed") {
+          checkoutAttempts.finishSession(checkoutSessionId);
           setUrlState("billing_return", null);
           const url = new URL(window.location.href);
           url.searchParams.delete("checkout");
@@ -611,6 +641,7 @@ if (root !== null && root.dataset.canManage === "true") {
           return;
         }
         if (status === "failed" || status === "expired" || status === "canceled") {
+          checkoutAttempts.finishSession(checkoutSessionId);
           setUrlState("billing_return", null);
           const url = new URL(window.location.href);
           url.searchParams.delete("checkout");
@@ -762,7 +793,15 @@ if (root !== null && root.dataset.canManage === "true") {
 
   if (shopPublicId !== undefined) {
     void requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/plans`)
-      .then((payload) => { plans = plansFrom(payload); renderPlans(); })
+      .then((payload) => {
+        plans = plansFrom(payload);
+        renderPlans();
+        if (targetPlanCode === "starter" || targetPlanCode === "pro") {
+          const target = root.querySelector<HTMLButtonElement>(`[data-plan-choice="${targetPlanCode}"]`);
+          if (target?.dataset.currentPlan === "true") target.focus();
+          else target?.click();
+        }
+      })
       .catch(handleFailure);
   }
   const urlState = new URL(window.location.href).searchParams;
