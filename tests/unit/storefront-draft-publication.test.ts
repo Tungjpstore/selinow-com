@@ -202,6 +202,19 @@ describe("tenant storefront draft contract", () => {
       shopPublicId: "public-a",
       userId: "user-a",
     })).rejects.toMatchObject({ code: "resource_conflict", issues: ["storefront_draft_stale"], status: 409 });
+    await expect(publishSellerStorefrontSettings({
+      env,
+      expectedVersion: 2,
+      requestId: "request-readiness-failed-publish",
+      shopPublicId: "public-a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "policy_unpublished", status: 409 });
+    const afterFailedPublish = await getSellerStorefrontSettings({ env, shopPublicId: "public-a", userId: "user-a" });
+    expect(afterFailedPublish).toMatchObject({
+      publicationState: "unpublished_changes",
+      publishedVersion: 1,
+      version: 2,
+    });
     await expect(getSellerStorefrontSettings({ env, shopPublicId: "public-b", userId: "user-a" }))
       .rejects.toMatchObject({ code: "authorization_denied", status: 403 });
 

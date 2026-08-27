@@ -15,7 +15,7 @@ export const GET: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await authenticateRequest(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const credentials = await listChannelCredentialProjections({
       env,
       shopPublicId: requireResourceId(params.shopPublicId, "shop"),
@@ -33,7 +33,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 40 * 1_024);
     rejectUnknownFields(body, ["ciphertextB64", "connectionPublicId", "fingerprint", "ivB64", "keyVersion"]);
     const result = await createChannelCredentialEnvelope({

@@ -231,7 +231,7 @@ describe("POST /api/app/account/change-password route", () => {
 
     const response = await ChangePasswordPOST(context({ currentPassword: CURRENT_PASSWORD, newPassword: NEW_PASSWORD }));
 
-    expect(dependencies.recent).toHaveBeenCalledWith(auth);
+    expect(dependencies.recent).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.passwordService).toHaveBeenCalledWith(expect.objectContaining({
       auth,
       currentPassword: CURRENT_PASSWORD,

@@ -18,7 +18,6 @@ type PresetCardData = {
   icon: string;
   id: string;
   priceMinor: number;
-  sampleKeys: string[];
   sku: string;
   slug: string;
   title: string;
@@ -83,6 +82,7 @@ type ResumeState = {
 
 type ShopResponse = {
   shop?: {
+    name?: string;
     publicId?: string;
     slug?: string;
   };
@@ -90,6 +90,9 @@ type ShopResponse = {
 
 type SeedResponse = {
   importedKeysCount?: number;
+  product?: {
+    fulfillmentType?: string;
+  };
   variant?: {
     id?: string;
   };
@@ -98,6 +101,15 @@ type SeedResponse = {
 type ProductCreateResponse = {
   variant?: {
     id?: string;
+  };
+};
+
+type StorefrontSettingsResponse = {
+  settings?: {
+    publicationState?: string;
+    publishedAt?: string | null;
+    publishedVersion?: number;
+    version?: number;
   };
 };
 
@@ -110,8 +122,10 @@ type InventoryImportResponse = {
 };
 
 type TelegramResponse = {
-  bot?: {
-    username?: string;
+  integration?: {
+    bot?: {
+      username?: string;
+    };
   };
 };
 
@@ -211,6 +225,82 @@ function readCookie(name: string): string | null {
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
+const inMemoryIntentKeys = new Map<string, { key: string; payload: string }>();
+
+function fallbackIntentDigest(payload: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < payload.length; index += 1) {
+    hash ^= payload.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+async function stableIntentKey(namespace: string, payload: string): Promise<string> {
+  const storageKey = `selinow:onboarding:intent:${namespace}`;
+  const inMemory = inMemoryIntentKeys.get(storageKey);
+  if (inMemory?.payload === payload) return inMemory.key;
+  let payloadDigest: string;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+    payloadDigest = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+  } catch {
+    payloadDigest = fallbackIntentDigest(payload);
+  }
+  try {
+    const existing = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as { key?: unknown; payloadDigest?: unknown } | null;
+    if (existing?.payloadDigest === payloadDigest
+      && typeof existing.key === "string"
+      && /^[A-Za-z0-9._:-]{16,128}$/u.test(existing.key)) {
+      inMemoryIntentKeys.set(storageKey, { key: existing.key, payload });
+      return existing.key;
+    }
+  } catch {
+    // The in-memory ledger below preserves response-loss retries when storage
+    // is unavailable in hardened or private browsing contexts.
+  }
+  // Keep every client key within the server's 128-character contract even
+  // for tenant + variant namespaces used by inventory imports.
+  const randomSuffix = typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10).padEnd(8, "0");
+  const key = `${namespace.slice(0, 40)}-${payloadDigest.slice(0, 24)}-${randomSuffix}`;
+  inMemoryIntentKeys.set(storageKey, { key, payload });
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify({ key, payloadDigest }));
+  } catch {
+    // The in-memory ledger remains authoritative for this page lifetime.
+  }
+  return key;
+}
+
+async function stableDigestSuffix(payload: string, length = 8): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("").slice(0, length);
+}
+
+function clearStableIntent(namespace: string): void {
+  inMemoryIntentKeys.delete(`selinow:onboarding:intent:${namespace}`);
+  try {
+    sessionStorage.removeItem(`selinow:onboarding:intent:${namespace}`);
+  } catch {
+    // Storage can be unavailable in hardened browser contexts.
+  }
+}
+
+function publishedProjection(data: Record<string, unknown>): boolean {
+  const candidate = data.settings;
+  if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) return false;
+  const settings = candidate as Record<string, unknown>;
+  return settings.publicationState === "published"
+    && typeof settings.version === "number"
+    && Number.isSafeInteger(settings.version)
+    && typeof settings.publishedVersion === "number"
+    && settings.publishedVersion === settings.version
+    && typeof settings.publishedAt === "string"
+    && settings.publishedAt.length > 0;
+}
+
 function parseJsonAttribute<T>(value: string | undefined, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -231,6 +321,8 @@ function initQuickstart(): void {
   const toastEl = root.querySelector<HTMLElement>("[data-onboarding-toast]");
   const premiumTemplatesEntitled = root.dataset.premiumTemplatesEntitled === "true";
   const creationAllowed = root.dataset.creationAllowed !== "false";
+  const requestedPlan = new URLSearchParams(window.location.search).get("plan");
+  const requestedPlanCode = requestedPlan === "pro" ? "pro" : "starter";
 
   let activeShopPublicId = root.dataset.activeShopPublicId || "";
   let activeShopSlug = "";
@@ -250,6 +342,7 @@ function initQuickstart(): void {
 
   // OB-B4: server-computed resume state for the selected shop.
   const resume = parseJsonAttribute<ResumeState | null>(root.dataset.resumeState, null);
+  let storefrontVersion = resume?.storefrontVersion ?? 1;
 
   function showToast(message: string, tone: "error" | "success" = "success"): void {
     if (!toastEl) return;
@@ -422,12 +515,20 @@ function initQuickstart(): void {
 
   // --- Step 1: Store & Channels ---
   const storeForm = root.querySelector<HTMLFormElement>("[data-store-form]");
-  const nameInput = root.querySelector<HTMLInputElement>("[data-input-shop-name]");
-  const slugInput = root.querySelector<HTMLInputElement>("[data-input-shop-slug]");
+  const storeNameControl = storeForm?.elements.namedItem("name");
+  const storeSlugControl = storeForm?.elements.namedItem("slug");
+  const nameInput = storeNameControl instanceof HTMLInputElement
+    ? storeNameControl
+    : root.querySelector<HTMLInputElement>("[data-input-shop-name]");
+  const slugInput = storeSlugControl instanceof HTMLInputElement
+    ? storeSlugControl
+    : root.querySelector<HTMLInputElement>("[data-input-shop-slug]");
   const channelRadios = root.querySelectorAll<HTMLInputElement>("[data-channel-radio]");
   const channelCards = root.querySelectorAll<HTMLElement>("[data-channel-opt]");
 
   nameInput?.addEventListener("input", () => {
+    nameInput.setCustomValidity("");
+    nameInput.removeAttribute("aria-invalid");
     const val = nameInput.value.trim();
     const generatedSlug = slugify(val || "cua-hang");
     if (slugInput && (!slugInput.dataset.manual || !slugInput.value)) {
@@ -442,6 +543,8 @@ function initQuickstart(): void {
   });
 
   slugInput?.addEventListener("input", () => {
+    slugInput.setCustomValidity("");
+    slugInput.removeAttribute("aria-invalid");
     slugInput.dataset.manual = "true";
     const cleaned = slugify(slugInput.value);
     previewSlugEls.forEach((el) => {
@@ -812,9 +915,24 @@ function initQuickstart(): void {
       const slug = slugInput?.value.trim() || slugify(name);
 
       if (!name || !slug) {
+        if (nameInput && !name) {
+          nameInput.setCustomValidity("Tên cửa hàng là bắt buộc.");
+          nameInput.setAttribute("aria-invalid", "true");
+          nameInput.focus();
+          nameInput.reportValidity();
+        }
+        if (slugInput && !slug) {
+          slugInput.setCustomValidity("Đường dẫn cửa hàng là bắt buộc.");
+          slugInput.setAttribute("aria-invalid", "true");
+          if (name) slugInput.focus();
+        }
         showToast("Vui lòng nhập tên cửa hàng hợp lệ.", "error");
         return;
       }
+      nameInput?.setCustomValidity("");
+      nameInput?.removeAttribute("aria-invalid");
+      slugInput?.setCustomValidity("");
+      slugInput?.removeAttribute("aria-invalid");
 
       if (!creationAllowed && !activeShopPublicId) {
         showToast("Tài khoản cần hoàn tất thanh toán gói hiện tại trước khi tạo thêm cửa hàng.", "error");
@@ -829,8 +947,7 @@ function initQuickstart(): void {
           // Single round-trip: shop + channels + storefront template land in
           // one transaction on the server.
           const selectedChannel = Array.from(channelRadios).find((r) => r.checked)?.value || "both";
-          const res = await apiRequest("/api/app/shops", {
-            body: JSON.stringify({
+          const shopPayload = JSON.stringify({
               channels: {
                 customDomainPreference: "later",
                 telegramEnabled: selectedChannel !== "website",
@@ -839,13 +956,16 @@ function initQuickstart(): void {
               currency: defaultCurrency,
               defaultLocale: "vi-VN",
               name,
-              planCode: "starter",
+              planCode: requestedPlanCode,
               slug,
               templateId: selectedTemplateValue() ?? undefined,
               vertical: currentVertical,
-            }),
+            });
+          const shopIntentKey = await stableIntentKey("shop", shopPayload);
+          const res = await apiRequest("/api/app/shops", {
+            body: shopPayload,
             headers: {
-              "Idempotency-Key": `shop-create-${slug}-${String(Date.now())}`,
+              "Idempotency-Key": shopIntentKey,
             },
             method: "POST",
           });
@@ -865,30 +985,64 @@ function initQuickstart(): void {
 
           const shopData = res.data as ShopResponse;
           activeShopPublicId = shopData.shop?.publicId ?? "";
+          activeShopName = shopData.shop?.name ?? name;
+          activeShopSlug = shopData.shop?.slug ?? slug;
+          clearStableIntent("shop");
         } else {
+          // Existing shop: persist the profile before changing the wizard step.
+          const profilePayload = JSON.stringify({ name, slug });
+          const profileRes = await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}`, {
+            body: profilePayload,
+            headers: { "Idempotency-Key": await stableIntentKey(`profile:${activeShopPublicId}`, profilePayload) },
+            method: "PATCH",
+          });
+          if (!profileRes.ok) {
+            showToast("Không thể lưu tên hoặc đường dẫn cửa hàng.", "error");
+            return;
+          }
+          const profileShop = (profileRes.data as ShopResponse).shop;
+          activeShopName = profileShop?.name ?? name;
+          activeShopSlug = profileShop?.slug ?? slug;
+          clearStableIntent(`profile:${activeShopPublicId}`);
+
           // Existing shop: update channels + template through their endpoints.
           const selectedChannel = Array.from(channelRadios).find((r) => r.checked)?.value || "both";
-          await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/onboarding/channels`, {
-            body: JSON.stringify({
+          const channelsPayload = JSON.stringify({
               customDomainPreference: "later",
               telegramEnabled: selectedChannel !== "website",
               websiteEnabled: selectedChannel !== "telegram",
-            }),
-            method: "POST",
+            });
+          const channelsRes = await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/onboarding/channels`, {
+            body: channelsPayload,
+            headers: { "Idempotency-Key": await stableIntentKey(`channels:${activeShopPublicId}`, channelsPayload) },
+            method: "PUT",
           });
+          if (!channelsRes.ok) {
+            showToast("Không thể lưu kênh bán hàng. Vui lòng thử lại.", "error");
+            return;
+          }
+          clearStableIntent(`channels:${activeShopPublicId}`);
           const chosenTemplate = selectedTemplateValue();
           if (chosenTemplate !== null) {
             // Use the server-known draft version from the resume projection;
             // fall back to 1 for fresh drafts created outside this wizard.
-            await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/settings`, {
-              body: JSON.stringify({ expectedVersion: resume?.storefrontVersion ?? 1, templateId: chosenTemplate }),
+            const settingsRes = await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/settings`, {
+              body: JSON.stringify({ expectedVersion: storefrontVersion, templateId: chosenTemplate }),
               method: "PATCH",
-            }).catch(() => undefined);
+            });
+            if (!settingsRes.ok) {
+              showToast("Không thể lưu giao diện cửa hàng. Vui lòng thử lại.", "error");
+              return;
+            }
+            const settingsVersion = (settingsRes.data as StorefrontSettingsResponse).settings?.version;
+            if (typeof settingsVersion === "number" && Number.isSafeInteger(settingsVersion) && settingsVersion >= 1) {
+              storefrontVersion = settingsVersion;
+            }
           }
         }
 
-        activeShopSlug = slug;
-        activeShopName = name;
+        activeShopSlug = activeShopSlug || slug;
+        activeShopName = activeShopName || name;
 
         showToast("Đã lưu thông tin cửa hàng thành công!");
         setStep("product");
@@ -914,10 +1068,13 @@ function initQuickstart(): void {
 
       try {
         if (currentProductMode === "preset") {
+          const presetPayload = JSON.stringify({ presetId: selectedPresetId });
+          const presetIntentNamespace = `preset:${activeShopPublicId}`;
           const res = await apiRequest(
             `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/onboarding/seed-preset`,
             {
-              body: JSON.stringify({ presetId: selectedPresetId }),
+              body: presetPayload,
+              headers: { "Idempotency-Key": await stableIntentKey(presetIntentNamespace, presetPayload) },
               method: "POST",
             },
           );
@@ -936,13 +1093,14 @@ function initQuickstart(): void {
           const seedData = res.data as SeedResponse;
           createdVariantId = seedData.variant?.id ?? "";
           importedKeysCount = seedData.importedKeysCount ?? 0;
-          productIsManual = false;
-          // Express path (OB-B3): the preset already seeded samples/needs no
-          // vault, so jump straight to connections.
+          productIsManual = seedData.product?.fulfillmentType === "manual";
+          clearStableIntent(presetIntentNamespace);
+          // Manual presets need no vault. License-key presets must collect real
+          // encrypted inventory unless a private deployment seeded it server-side.
           showToast(importedKeysCount > 0
             ? `Đã tạo sản phẩm và nạp ${String(importedKeysCount)} key mẫu — nhập thêm key sau trong Dashboard!`
             : "Đã tạo sản phẩm mẫu thành công!");
-          setStep("connect");
+          setStep(productIsManual || importedKeysCount > 0 ? "connect" : "inventory");
         } else {
           const title = customTitleInput?.value.trim() || "Sản phẩm mới";
           const price = Number(customPriceInput?.value || 0);
@@ -950,30 +1108,36 @@ function initQuickstart(): void {
           const description = customDescTextarea?.value.trim() || "";
           productTitle = title;
 
+          const productIntentNamespace = `product:${activeShopPublicId}`;
+          const productIdentityPayload = JSON.stringify({ description, fulfillmentType, price, title });
+          const productSuffix = await stableDigestSuffix(productIdentityPayload, 8);
+          const productSlugBase = slugify(title) || "san-pham";
+
+          const productPayload = JSON.stringify({
+            data: {
+              categoryId: null,
+              description,
+              fulfillmentType,
+              slug: `${productSlugBase}-${productSuffix}`,
+              status: "active",
+              title,
+            },
+            initialVariant: {
+              currency: defaultCurrency,
+              maxPerOrder: 10,
+              minPerOrder: 1,
+              priceMinor: price,
+              sku: `SKU-${productSuffix.toUpperCase()}`,
+              status: "active",
+              title: "Mặc định",
+            },
+          });
           const res = await apiRequest(
-            `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/catalog/products`,
+            `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/products`,
             {
-              body: JSON.stringify({
-                data: {
-                  categoryId: null,
-                  description,
-                  fulfillmentType,
-                  slug: `${slugify(title)}-${String(Date.now()).slice(-4)}`,
-                  status: "active",
-                  title,
-                },
-                initialVariant: {
-                  currency: defaultCurrency,
-                  maxPerOrder: 10,
-                  minPerOrder: 1,
-                  priceMinor: price,
-                  sku: `SKU-${String(Date.now()).slice(-6)}`,
-                  status: "active",
-                  title: "Mặc định",
-                },
-              }),
+              body: productPayload,
               headers: {
-                "Idempotency-Key": `custom-prod-${String(Date.now())}`,
+                "Idempotency-Key": await stableIntentKey(productIntentNamespace, productPayload),
               },
               method: "POST",
             },
@@ -988,6 +1152,7 @@ function initQuickstart(): void {
           const prodData = res.data as ProductCreateResponse;
           createdVariantId = prodData.variant?.id ?? "";
           productIsManual = fulfillmentType === "manual";
+          clearStableIntent(productIntentNamespace);
           showToast("Đã tạo sản phẩm thành công!");
           // Digital license products still need keys; everything else skips
           // the vault and moves to connections.
@@ -1079,6 +1244,8 @@ function initQuickstart(): void {
         const previewToken = previewData.previewToken ?? "";
 
         // Confirm Import
+        const inventoryIntentNamespace = `inventory:${activeShopPublicId}:${createdVariantId}`;
+        const inventoryIntentPayload = JSON.stringify({ data: keysData, filename: null, source: "paste" });
         const importRes = await apiRequest(
           `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/variants/${encodeURIComponent(createdVariantId)}/inventory/import`,
           {
@@ -1089,7 +1256,7 @@ function initQuickstart(): void {
               source: "paste",
             }),
             headers: {
-              "Idempotency-Key": `import-keys-${String(Date.now())}`,
+              "Idempotency-Key": await stableIntentKey(inventoryIntentNamespace, inventoryIntentPayload),
             },
             method: "POST",
           },
@@ -1099,6 +1266,7 @@ function initQuickstart(): void {
           const importData = importRes.data as InventoryImportResponse;
           const accepted = importData.acceptedCount ?? 0;
           importedKeysCount += accepted;
+          clearStableIntent(inventoryIntentNamespace);
           showToast(`Đã mã hóa và nạp ${String(accepted)} mã vào kho an toàn!`);
           setStep("connect");
         } else {
@@ -1154,9 +1322,9 @@ function initQuickstart(): void {
       if (verifyBtn) verifyBtn.disabled = true;
 
       try {
-        const res = await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/integrations/payos`, {
+        const res = await apiRequest(`/api/app/shops/${encodeURIComponent(activeShopPublicId)}/payments/payos`, {
           body: JSON.stringify({ apiKey, checksumKey, clientId }),
-          method: "POST",
+          method: "PUT",
         });
 
         if (res.ok) {
@@ -1198,12 +1366,12 @@ function initQuickstart(): void {
           `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/integrations/telegram`,
           {
             body: JSON.stringify({ botToken }),
-            method: "POST",
+            method: "PUT",
           },
         );
 
         const tgData = res.data as TelegramResponse;
-        const botUser = tgData.bot?.username ?? "";
+        const botUser = tgData.integration?.bot?.username ?? "";
 
         if (res.ok && botUser) {
           telegramConnected = true;
@@ -1308,11 +1476,15 @@ function initQuickstart(): void {
               supportContact: support || null,
               termsUrl: terms || null,
             }),
-            method: "POST",
+            method: "PUT",
           },
         );
 
         if (res.ok) {
+          const settingsVersion = (res.data as StorefrontSettingsResponse).settings?.version;
+          if (typeof settingsVersion === "number" && Number.isSafeInteger(settingsVersion) && settingsVersion >= 1) {
+            storefrontVersion = settingsVersion;
+          }
           showToast("Đã lưu thông tin liên hệ & chính sách.");
         } else {
           showToast("Không lưu được thông tin. Kiểm tra lại các đường dẫn HTTPS.", "error");
@@ -1354,24 +1526,28 @@ function initQuickstart(): void {
   publishBtn?.addEventListener("click", () => {
     void (async () => {
       publishBtn.disabled = true;
+      let published = false;
       try {
         if (activeShopPublicId) {
           const res = await apiRequest(
             `/api/app/shops/${encodeURIComponent(activeShopPublicId)}/storefront/publish`,
-            { body: JSON.stringify({}), method: "POST" },
+            { body: JSON.stringify({ expectedVersion: storefrontVersion }), method: "POST" },
           );
-          if (res.ok) {
+          if (res.ok && publishedProjection(res.data)) {
+            published = true;
             showToast("Chúc mừng! Cửa hàng của bạn đã chính thức mở bán!");
           } else {
             showToast("Cửa hàng đã lưu nhưng chưa publish được — bạn có thể kích hoạt lại từ Dashboard.", "error");
           }
+        } else {
+          showToast("Chưa có cửa hàng để publish.", "error");
         }
       } catch {
         showToast("Không kết nối được máy chủ — tiến trình vẫn được lưu.", "error");
       } finally {
         publishBtn.disabled = false;
-        completeAndCelebrate();
       }
+      if (published) completeAndCelebrate();
     })();
   });
 

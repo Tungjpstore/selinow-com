@@ -95,7 +95,7 @@ describe("rotation operator routes", () => {
       method: "POST",
     })));
 
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
       actorUserId: "admin-owner",
       globalConfirmation: "ROTATE_GLOBAL",

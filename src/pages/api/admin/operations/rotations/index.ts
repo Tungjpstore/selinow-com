@@ -47,7 +47,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
     await guardAdminMutationRate({ env, family: "operations_rotations", request });
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 4 * 1_024);
     rejectUnknownFields(body, [
       "dryRun",

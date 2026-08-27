@@ -4,6 +4,7 @@ import { createId } from "../core/ids";
 import { readBoundedBytes } from "../http/request";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
+import { isSellablePlanOffer, isSellablePlanOfferProjection } from "./catalog";
 import {
   createDodoCheckout,
   cancelDodoSubscription,
@@ -14,6 +15,7 @@ import {
   parseDodoEvent,
   previewDodoSubscriptionChange,
   retrieveDodoCheckout,
+  retrieveDodoPayment,
   retrieveDodoSubscription,
   resumeDodoSubscription,
   verifyDodoWebhookSignature,
@@ -78,6 +80,8 @@ type PlanPriceRow = {
   version: number;
 };
 
+type CatalogPlanPriceRow = PlanPriceRow & { interval: string };
+
 type BillingEventRow = {
   id: string;
   payloadHash: string;
@@ -89,8 +93,9 @@ type BillingEventRow = {
 // be reclaimed after this interval; the final guarded update prevents the old
 // worker from committing after its lease has been taken over.
 const DODO_EVENT_LEASE_MS = 2 * 60_000;
-const DODO_PROVIDER_TRIAL_DAYS = 7;
-const DODO_PROVIDER_TRIAL_TOLERANCE_MS = 60 * 60_000;
+const DODO_CHECKOUT_PROVIDER_TTL_MS = 24 * 60 * 60_000;
+const DODO_CHECKOUT_EXPIRY_GRACE_MS = 5 * 60_000;
+const MAX_BILLING_CHECKOUT_RECONCILIATION_ATTEMPTS = 12;
 
 export type CheckoutResult = {
   amountMinor: number;
@@ -114,6 +119,29 @@ export type BillingPortalSession = {
   portalUrl: string;
   provider: "dodo";
 };
+
+function billingDashboardOrigin(env: AppBindings): URL {
+  try {
+    const origin = new URL(env.DASHBOARD_ORIGIN);
+    if ((origin.protocol !== "https:" && !(env.APP_ENV === "local" && origin.protocol === "http:"))
+      || origin.username.length > 0
+      || origin.password.length > 0
+      || origin.pathname !== "/"
+      || origin.search.length > 0
+      || origin.hash.length > 0) throw new Error("invalid_dashboard_origin");
+    return origin;
+  } catch {
+    throw new AppError("billing_return_url_invalid", 500);
+  }
+}
+
+function billingCheckoutReturnUrl(env: AppBindings, shopPublicId: string, checkoutSessionId: string): string {
+  const returnUrl = new URL("/app/billing", billingDashboardOrigin(env));
+  returnUrl.searchParams.set("shop", shopPublicId);
+  returnUrl.searchParams.set("billing_return", "1");
+  returnUrl.searchParams.set("checkout", checkoutSessionId);
+  return returnUrl.toString();
+}
 
 function requireIdempotencyKey(value: string | null): string {
   if (value === null || !/^[A-Za-z0-9._:-]{8,128}$/u.test(value)) throw new AppError("validation_failed", 400, ["idempotency_key_required"]);
@@ -163,6 +191,7 @@ async function loadPlanPrice(env: AppBindings, input: { currency: string; market
     SELECT prices.id, prices.plan_id AS planId,
       prices.currency, prices.amount_minor AS amountMinor,
       prices.market_code AS marketCode,
+      prices.interval,
       prices.provider_code AS providerCode,
       prices.provider_price_ref AS providerPriceRef,
       prices.version
@@ -180,9 +209,9 @@ async function loadPlanPrice(env: AppBindings, input: { currency: string; market
       AND (prices.effective_to IS NULL OR prices.effective_to > ?)
     ORDER BY prices.effective_from DESC, prices.version DESC, prices.id DESC
     LIMIT 1
-  `).bind(input.planCode, input.market, input.currency.toUpperCase(), input.nowIso, input.nowIso).first<PlanPriceRow>();
-  if (row === null || !Number.isSafeInteger(row.amountMinor) || row.amountMinor < 0 || row.providerPriceRef.length === 0) throw new AppError("plan_price_unavailable", 409);
-  if (row.providerCode !== "dodo" || row.providerPriceRef.startsWith("pending:")) throw new AppError("provider_not_ready", 503);
+  `).bind(input.planCode, input.market, input.currency.toUpperCase(), input.nowIso, input.nowIso).first<CatalogPlanPriceRow>();
+  if (row === null || row.providerPriceRef.length === 0 || !isSellablePlanOfferProjection(row)) throw new AppError("plan_price_unavailable", 409);
+  if (!isSellablePlanOffer(row)) throw new AppError("provider_not_ready", 503);
   return row;
 }
 
@@ -221,15 +250,15 @@ export async function createTenantBillingPortalSession(input: {
 }): Promise<BillingPortalSession> {
   const actor = await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   let returnUrl: URL;
-  let platformOrigin: URL;
+  let dashboardOrigin: URL;
   try {
     returnUrl = new URL(input.returnUrl);
-    platformOrigin = new URL(input.env.PLATFORM_ORIGIN);
+    dashboardOrigin = billingDashboardOrigin(input.env);
   } catch {
     throw new AppError("billing_portal_return_url_invalid", 400);
   }
   const expectedQuery = new URLSearchParams({ shop: input.shopPublicId }).toString();
-  if (returnUrl.origin !== platformOrigin.origin
+  if (returnUrl.origin !== dashboardOrigin.origin
     || returnUrl.username.length > 0
     || returnUrl.password.length > 0
     || returnUrl.pathname !== "/app/billing"
@@ -282,9 +311,10 @@ async function saveCheckoutProviderReference(input: {
   const updated = await input.env.PLATFORM_DB.prepare(`
     UPDATE billing_checkout_sessions
     SET provider_checkout_ref = ?, status = 'open', failure_code = NULL,
+      next_reconciliation_at = ?, reconciliation_failure_code = NULL,
       updated_at = ?, version = version + 1
     WHERE id = ? AND status = 'pending' AND provider_checkout_ref IS NULL
-  `).bind(input.providerCheckoutRef, input.nowIso, input.sessionId).run();
+  `).bind(input.providerCheckoutRef, input.nowIso, input.nowIso, input.sessionId).run();
   if (updated.meta.changes === 1) return;
   const current = await input.env.PLATFORM_DB.prepare(`
     SELECT provider_checkout_ref AS providerCheckoutRef, status
@@ -296,11 +326,40 @@ async function saveCheckoutProviderReference(input: {
   throw new AppError("billing_checkout_persistence_conflict", 409);
 }
 
+/** Releases a checkout only when the provider has given a deterministic rejection. */
+async function failBillingCheckoutSession(input: {
+  env: AppBindings;
+  failureCode: string;
+  nowIso: string;
+  sessionId: string;
+  shopId: string;
+  subscriptionId: string;
+}): Promise<void> {
+  await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE billing_checkout_sessions
+      SET status = 'failed', failure_code = ?, next_reconciliation_at = NULL,
+        reconciliation_failure_code = NULL, updated_at = ?, version = version + 1
+      WHERE id = ? AND shop_id = ? AND status IN ('pending', 'open')
+    `).bind(input.failureCode, input.nowIso, input.sessionId, input.shopId),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE shop_subscriptions
+      SET state = 'suspended', grace_ends_at = NULL, updated_at = ?, version = version + 1
+      WHERE id = ? AND shop_id = ? AND state = 'pending_payment'
+        AND NOT EXISTS (
+          SELECT 1 FROM billing_checkout_sessions
+          WHERE shop_id = ? AND subscription_id = ? AND status IN ('pending', 'open')
+        )
+    `).bind(input.nowIso, input.subscriptionId, input.shopId, input.shopId, input.subscriptionId),
+  ]);
+}
+
 async function loadReplay(input: {
   env: AppBindings;
   fetcher?: typeof fetch;
   config: ReturnType<typeof getDodoConfig>;
   shopId: string;
+  shopPublicId: string;
   idempotencyKey: string;
   keyHash: string;
   nowIso: string;
@@ -326,9 +385,11 @@ async function loadReplay(input: {
   if (row === null) return null;
   if (row.requestHash !== input.requestHash) throw new AppError("idempotency_conflict", 409);
   if (row.status === "expired" || row.status === "failed" || row.status === "canceled") throw new AppError("billing_checkout_replay_unavailable", 409);
-  let provider: Awaited<ReturnType<typeof retrieveDodoCheckout>>;
-  if (row.status === "pending" && row.providerCheckoutRef === null) {
-    const providerIdempotencyKey = await hmacToken(input.env.SESSION_SECRET, "dodo-provider-idempotency:v1", `${input.shopId}:${input.idempotencyKey}`);
+  if (row.status === "completed") throw new AppError("billing_checkout_replay_unavailable", 409);
+  if (row.status !== "pending" && row.status !== "open") throw new AppError("billing_checkout_replay_unavailable", 409);
+  const providerIdempotencyKey = await hmacToken(input.env.SESSION_SECRET, "dodo-provider-idempotency:v1", `${input.shopId}:${input.idempotencyKey}`);
+  let provider: Awaited<ReturnType<typeof createDodoCheckout>>;
+  try {
     provider = await createDodoCheckout({
       config: input.config,
       currency: row.currency,
@@ -344,22 +405,19 @@ async function loadReplay(input: {
       },
       idempotencyKey: providerIdempotencyKey,
       priceId: row.providerPriceRef,
+      returnUrl: billingCheckoutReturnUrl(input.env, input.shopPublicId, row.id),
       ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
     });
-    await saveCheckoutProviderReference({ env: input.env, nowIso: input.nowIso, providerCheckoutRef: provider.providerTransactionId, sessionId: row.id });
-  } else {
-    if (row.providerCheckoutRef === null) throw new AppError("billing_checkout_replay_unavailable", 409);
-    try {
-      provider = await retrieveDodoCheckout({
-        config: input.config,
-        providerTransactionId: row.providerCheckoutRef,
-        ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
-      });
-    } catch (error) {
-      if (error instanceof AppError && error.code === "billing_provider_unavailable") throw error;
-      throw new AppError("billing_checkout_replay_requires_new_session", 409);
+  } catch (error) {
+    if (row.providerCheckoutRef === null && error instanceof AppError && error.code === "billing_provider_request_rejected") {
+      await failBillingCheckoutSession({ env: input.env, failureCode: error.code, nowIso: input.nowIso, sessionId: row.id, shopId: input.shopId, subscriptionId: row.subscriptionId });
     }
+    throw error;
   }
+  if (row.providerCheckoutRef !== null && provider.providerTransactionId !== row.providerCheckoutRef) {
+    throw new AppError("billing_checkout_persistence_conflict", 409);
+  }
+  await saveCheckoutProviderReference({ env: input.env, nowIso: input.nowIso, providerCheckoutRef: provider.providerTransactionId, sessionId: row.id });
   return {
     amountMinor: row.amountMinor,
     checkoutUrl: provider.checkoutUrl,
@@ -391,6 +449,7 @@ export async function createBillingCheckout(input: {
   if (planCode !== "starter" && planCode !== "pro") throw new AppError("plan_not_found", 404);
   const actor = await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   if (actor.row.shop_status === "archived") throw new AppError("tenant_suspended", 403);
+  billingDashboardOrigin(input.env);
   if (input.currency !== undefined || input.market !== undefined) throw new AppError("validation_failed", 400, ["market_server_selected"]);
   const merchantCountry = actor.row.merchant_country_code?.trim().toUpperCase();
   if (merchantCountry === undefined || merchantCountry.length !== 2) throw new AppError("billing_market_unavailable", 409);
@@ -404,8 +463,27 @@ export async function createBillingCheckout(input: {
   await suspendExpiredTrials({ env: input.env, now });
   await expireBillingCheckoutSessions({ env: input.env, now, limit: 100 });
   const dodoConfig = getDodoConfig(input.env);
-  const replay = await loadReplay({ config: dodoConfig, env: input.env, idempotencyKey, keyHash, nowIso, requestHash, shopId: actor.row.shop_id, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }) });
+  const checkoutScopeSubscription = await loadSubscription(input.env, actor.row.shop_id);
+  // Reconcile stale hosted sessions against provider truth before enforcing
+  // the one-active-checkout lock. An unpaid expired link is released; a
+  // provider-processing payment remains locked until it reaches a terminal
+  // state, preventing a duplicate charge.
+  await reconcileDodoBillingCheckouts({
+    env: input.env,
+    expiredOnly: true,
+    now,
+    // Keep checkout creation tenant-scoped and bounded. Full reconciliation
+    // is handled by the worker; a seller request only needs to release this
+    // shop's stale lock before the guarded insert below.
+    limit: 1,
+    shopId: actor.row.shop_id,
+    subscriptionId: checkoutScopeSubscription.id,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+  });
+  const replay = await loadReplay({ config: dodoConfig, env: input.env, idempotencyKey, keyHash, nowIso, requestHash, shopId: actor.row.shop_id, shopPublicId: input.shopPublicId, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }) });
   if (replay !== null) return replay;
+  // Reconciliation may have moved a pending subscription to a terminal state.
+  // Reload before validating recovery and writing the new checkout.
   const subscription = await loadSubscription(input.env, actor.row.shop_id);
   if (subscription.state !== "trialing" && subscription.state !== "pending_payment" && subscription.state !== "suspended" && subscription.state !== "canceled") {
     throw new AppError("billing_change_requires_request", 409);
@@ -488,7 +566,7 @@ export async function createBillingCheckout(input: {
       )
       `).bind(
         sessionId, sessionId, actor.row.shop_id, subscriptionId, price.planId, price.id, keyHash, requestHash,
-        new Date(now.getTime() + 30 * 60_000).toISOString(), nowIso, nowIso,
+        new Date(now.getTime() + DODO_CHECKOUT_PROVIDER_TTL_MS + DODO_CHECKOUT_EXPIRY_GRACE_MS).toISOString(), nowIso, nowIso,
         subscriptionId, actor.row.shop_id, expectedSubscriptionVersion,
         actor.row.shop_id, subscriptionId,
       ),
@@ -514,23 +592,32 @@ export async function createBillingCheckout(input: {
   // response was lost. Keep the local session pending on any thrown response
   // so the same key can safely repeat the exact provider call.
   const providerIdempotencyKey = await hmacToken(input.env.SESSION_SECRET, "dodo-provider-idempotency:v1", `${actor.row.shop_id}:${idempotencyKey}`);
-  const provider = await createDodoCheckout({
-    config: dodoConfig,
-    currency,
-    customData: {
-      amountMinor: String(price.amountMinor),
-      checkoutSessionId: sessionId,
+  let provider: Awaited<ReturnType<typeof createDodoCheckout>>;
+  try {
+    provider = await createDodoCheckout({
+      config: dodoConfig,
       currency,
-      marketCode: market,
-      planCode,
-      providerPriceRef: price.providerPriceRef,
-      shopId: actor.row.shop_id,
-      subscriptionId,
-    },
-    idempotencyKey: providerIdempotencyKey,
-    priceId: price.providerPriceRef,
-    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
-  });
+      customData: {
+        amountMinor: String(price.amountMinor),
+        checkoutSessionId: sessionId,
+        currency,
+        marketCode: market,
+        planCode,
+        providerPriceRef: price.providerPriceRef,
+        shopId: actor.row.shop_id,
+        subscriptionId,
+      },
+      idempotencyKey: providerIdempotencyKey,
+      priceId: price.providerPriceRef,
+      returnUrl: billingCheckoutReturnUrl(input.env, input.shopPublicId, sessionId),
+      ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+    });
+  } catch (error) {
+    if (error instanceof AppError && error.code === "billing_provider_request_rejected") {
+      await failBillingCheckoutSession({ env: input.env, failureCode: error.code, nowIso, sessionId, shopId: actor.row.shop_id, subscriptionId });
+    }
+    throw error;
+  }
   await saveCheckoutProviderReference({ env: input.env, nowIso, providerCheckoutRef: provider.providerTransactionId, sessionId });
   return {
     amountMinor: price.amountMinor,
@@ -558,7 +645,8 @@ export async function expireBillingCheckoutSessions(input: { env: AppBindings; n
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT id, shop_id AS shopId, subscription_id AS subscriptionId
     FROM billing_checkout_sessions
-    WHERE status IN ('pending', 'open') AND expires_at IS NOT NULL AND expires_at <= ?
+    WHERE status = 'pending' AND provider_checkout_ref IS NULL
+      AND expires_at IS NOT NULL AND expires_at <= ?
     ORDER BY expires_at, id
     LIMIT ?
   `).bind(nowIso, limit).all<{ id: string; shopId: string; subscriptionId: string }>();
@@ -568,7 +656,8 @@ export async function expireBillingCheckoutSessions(input: { env: AppBindings; n
       input.env.PLATFORM_DB.prepare(`
         UPDATE billing_checkout_sessions
         SET status = 'expired', expired_at = ?, updated_at = ?, version = version + 1
-        WHERE id = ? AND shop_id = ? AND status IN ('pending', 'open') AND expires_at <= ?
+        WHERE id = ? AND shop_id = ? AND status = 'pending'
+          AND provider_checkout_ref IS NULL AND expires_at <= ?
       `).bind(nowIso, nowIso, row.id, row.shopId, nowIso),
       input.env.PLATFORM_DB.prepare(`
         UPDATE shop_subscriptions
@@ -596,6 +685,380 @@ export async function expireBillingCheckoutSessions(input: { env: AppBindings; n
     if ((results[0]?.meta.changes ?? 0) === 1) expired += 1;
   }
   return expired;
+}
+
+type CheckoutReconciliationRow = {
+  amountMinor: number;
+  currency: string;
+  expiresAt: string | null;
+  id: string;
+  marketCode: "global" | "vn";
+  nextReconciliationAt: string | null;
+  planCode: string;
+  providerCheckoutRef: string;
+  providerPriceRef: string;
+  reconciliationAttempts: number;
+  reconciliationFailureCode: string | null;
+  shopId: string;
+  status: string;
+  subscriptionId: string;
+  version: number;
+};
+
+export type BillingCheckoutReconciliationMetrics = {
+  candidates: number;
+  completed: number;
+  expired: number;
+  failed: number;
+  pending: number;
+  quarantined: number;
+};
+
+async function loadCheckoutReconciliationRow(env: AppBindings, input: { sessionId: string; shopId?: string }): Promise<CheckoutReconciliationRow | null> {
+  return env.PLATFORM_DB.prepare(`
+    SELECT sessions.id, sessions.shop_id AS shopId,
+      sessions.subscription_id AS subscriptionId,
+      sessions.provider_checkout_ref AS providerCheckoutRef,
+      sessions.status, sessions.expires_at AS expiresAt, sessions.version,
+      sessions.reconciliation_attempts AS reconciliationAttempts,
+      sessions.reconciliation_failure_code AS reconciliationFailureCode,
+      sessions.next_reconciliation_at AS nextReconciliationAt,
+      plans.code AS planCode,
+      prices.market_code AS marketCode, prices.currency,
+      prices.amount_minor AS amountMinor,
+      prices.provider_price_ref AS providerPriceRef
+    FROM billing_checkout_sessions AS sessions
+    INNER JOIN plans ON plans.id = sessions.plan_id
+    INNER JOIN plan_prices AS prices ON prices.id = sessions.price_id
+    WHERE sessions.id = ?
+      AND (? IS NULL OR sessions.shop_id = ?)
+      AND sessions.provider_code = 'dodo'
+    LIMIT 1
+  `).bind(input.sessionId, input.shopId ?? null, input.shopId ?? null).first<CheckoutReconciliationRow>();
+}
+
+async function expireOpenDodoCheckout(input: {
+  env: AppBindings;
+  nowIso: string;
+  row: CheckoutReconciliationRow;
+}): Promise<boolean> {
+  const results = await input.env.PLATFORM_DB.batch([
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE billing_checkout_sessions
+      SET status = 'expired', expired_at = ?, next_reconciliation_at = NULL,
+        reconciliation_failure_code = NULL, updated_at = ?, version = version + 1
+      WHERE id = ? AND shop_id = ? AND status = 'open'
+        AND expires_at IS NOT NULL AND expires_at <= ?
+    `).bind(input.nowIso, input.nowIso, input.row.id, input.row.shopId, input.nowIso),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE shop_subscriptions
+      SET state = 'suspended', grace_ends_at = NULL, updated_at = ?, version = version + 1
+      WHERE id = ? AND shop_id = ? AND state = 'pending_payment'
+        AND EXISTS (
+          SELECT 1 FROM billing_checkout_sessions
+          WHERE id = ? AND shop_id = ? AND subscription_id = ?
+            AND status = 'expired' AND expired_at = ?
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM billing_checkout_sessions
+          WHERE shop_id = ? AND subscription_id = ? AND status IN ('pending', 'open')
+        )
+    `).bind(
+      input.nowIso, input.row.subscriptionId, input.row.shopId,
+      input.row.id, input.row.shopId, input.row.subscriptionId, input.nowIso,
+      input.row.shopId, input.row.subscriptionId,
+    ),
+  ]);
+  return (results[0]?.meta.changes ?? 0) === 1;
+}
+
+function exactCheckoutMetadata(row: CheckoutReconciliationRow): Record<string, string> {
+  return {
+    amountMinor: String(row.amountMinor),
+    checkoutSessionId: row.id,
+    currency: row.currency.toUpperCase(),
+    marketCode: row.marketCode,
+    planCode: row.planCode,
+    providerPriceRef: row.providerPriceRef,
+    shopId: row.shopId,
+    subscriptionId: row.subscriptionId,
+  };
+}
+
+function hasCompatibleCheckoutMetadata(actual: Record<string, unknown>, expected: Record<string, string>): boolean {
+  // Reconciliation must prove the immutable local checkout identity. Extra
+  // provider metadata is harmless, but omitting any expected binding must fail
+  // closed rather than attributing an unrelated captured payment.
+  return Object.entries(expected).every(([key, value]) => (
+    Object.prototype.hasOwnProperty.call(actual, key) && String(actual[key]) === value
+  ));
+}
+
+function checkoutReconciliationDelayMs(reconciliationAttempts: number): number {
+  const exponent = Math.min(reconciliationAttempts, 9);
+  return Math.min(2_000 * (2 ** exponent), 15 * 60_000);
+}
+
+async function scheduleCheckoutReconciliationPending(input: {
+  env: AppBindings;
+  now: Date;
+  row: CheckoutReconciliationRow;
+}): Promise<void> {
+  const nowIso = input.now.toISOString();
+  await input.env.PLATFORM_DB.prepare(`
+    UPDATE billing_checkout_sessions
+    SET last_reconciliation_at = ?, next_reconciliation_at = ?,
+      reconciliation_failure_code = NULL, updated_at = ?, version = version + 1
+    WHERE id = ? AND shop_id = ? AND status = 'open' AND version = ?
+  `).bind(
+    nowIso,
+    new Date(input.now.getTime() + checkoutReconciliationDelayMs(input.row.reconciliationAttempts)).toISOString(),
+    nowIso, input.row.id, input.row.shopId, input.row.version,
+  ).run();
+}
+
+async function recordCheckoutReconciliationFailure(input: {
+  env: AppBindings;
+  failureCode: string;
+  now: Date;
+  row: CheckoutReconciliationRow;
+}): Promise<"scheduled" | "exhausted"> {
+  const attempts = input.row.reconciliationAttempts + 1;
+  const exhausted = attempts >= MAX_BILLING_CHECKOUT_RECONCILIATION_ATTEMPTS;
+  const nowIso = input.now.toISOString();
+  await input.env.PLATFORM_DB.prepare(`
+    UPDATE billing_checkout_sessions
+    SET reconciliation_attempts = reconciliation_attempts + 1,
+      last_reconciliation_at = ?, next_reconciliation_at = ?,
+      reconciliation_failure_code = ?, updated_at = ?, version = version + 1
+    WHERE id = ? AND shop_id = ? AND status = 'open' AND version = ?
+  `).bind(
+    nowIso,
+    exhausted ? null : new Date(input.now.getTime() + checkoutReconciliationDelayMs(input.row.reconciliationAttempts)).toISOString(),
+    exhausted ? "billing_reconciliation_exhausted" : input.failureCode,
+    nowIso, input.row.id, input.row.shopId, input.row.version,
+  ).run();
+  return exhausted ? "exhausted" : "scheduled";
+}
+
+async function reconcileDodoCheckoutRow(input: {
+  env: AppBindings;
+  fetcher?: typeof fetch;
+  now: Date;
+  row: CheckoutReconciliationRow;
+}): Promise<"completed" | "expired" | "failed" | "pending"> {
+  if (input.row.status === "completed") return "completed";
+  if (["failed", "canceled", "expired"].includes(input.row.status)) return "failed";
+  const config = getDodoConfig(input.env);
+  const checkout = await retrieveDodoCheckout({
+    config,
+    providerTransactionId: input.row.providerCheckoutRef,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+  });
+  if (checkout.providerCheckoutId !== input.row.providerCheckoutRef) throw new AppError("billing_webhook_identity_mismatch", 409);
+  const checkoutStatus = checkout.paymentStatus;
+  if (checkoutStatus === null) {
+    if (input.row.expiresAt !== null && input.row.expiresAt <= input.now.toISOString()) {
+      return await expireOpenDodoCheckout({ env: input.env, nowIso: input.now.toISOString(), row: input.row })
+        ? "expired"
+        : "pending";
+    }
+    return "pending";
+  }
+  if ([
+    "processing", "requires_customer_action", "requires_merchant_action",
+    "requires_payment_method", "requires_confirmation", "requires_capture",
+    "partially_captured", "partially_captured_and_capturable",
+  ].includes(checkoutStatus)) return "pending";
+  if (checkoutStatus === "failed" || checkoutStatus === "cancelled" || checkoutStatus === "canceled") {
+    await failBillingCheckoutSession({
+      env: input.env,
+      failureCode: `payment_${checkoutStatus === "failed" ? "failed" : "cancelled"}`,
+      nowIso: input.now.toISOString(),
+      sessionId: input.row.id,
+      shopId: input.row.shopId,
+      subscriptionId: input.row.subscriptionId,
+    });
+    return "failed";
+  }
+  if (checkoutStatus !== "succeeded" || checkout.paymentId === null) return "pending";
+  const payment = await retrieveDodoPayment({
+    config,
+    paymentId: checkout.paymentId,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+  });
+  const metadata = exactCheckoutMetadata(input.row);
+  if (payment.status !== "succeeded"
+    || (payment.checkoutSessionId !== null && payment.checkoutSessionId !== input.row.providerCheckoutRef)
+    || payment.amountMinor !== input.row.amountMinor
+    || payment.currency !== input.row.currency.toUpperCase()
+    || (payment.priceId !== null && payment.priceId !== input.row.providerPriceRef)
+    || payment.subscriptionId === null
+    || !hasCompatibleCheckoutMetadata(payment.customData, metadata)) {
+    throw new AppError("billing_webhook_identity_mismatch", 409);
+  }
+  const subscription = await retrieveDodoSubscription({
+    config,
+    providerSubscriptionId: payment.subscriptionId,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+  });
+  if (subscription.status !== "active" || subscription.priceId !== input.row.providerPriceRef) return "pending";
+  const occurredAt = payment.createdAt ?? checkout.createdAt;
+  const reconciliationId = await hmacToken(input.env.SESSION_SECRET, "dodo-checkout-reconciliation:v1", `${input.row.id}:${payment.paymentId}`);
+  await processDodoBillingPayload({
+    env: input.env,
+    rawBody: JSON.stringify({
+      data: {
+        checkout_session_id: input.row.providerCheckoutRef,
+        currency: input.row.currency,
+        metadata,
+        payment_id: payment.paymentId,
+        product_id: input.row.providerPriceRef,
+        status: "succeeded",
+        subscription_id: payment.subscriptionId,
+        total_amount: input.row.amountMinor,
+      },
+      timestamp: occurredAt,
+      type: "payment.succeeded",
+    }),
+    webhookId: `reconcile:${reconciliationId}`,
+    now: input.now,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+  });
+  return "completed";
+}
+
+/** Poll provider truth for durable, non-terminal initial checkout sessions. */
+export async function reconcileDodoBillingCheckouts(input: {
+  env: AppBindings;
+  expiredOnly?: boolean;
+  fetcher?: typeof fetch;
+  limit?: number;
+  now?: Date;
+  sessionId?: string;
+  shopId?: string;
+  subscriptionId?: string;
+}): Promise<BillingCheckoutReconciliationMetrics> {
+  const now = input.now ?? new Date();
+  const limit = Number.isSafeInteger(input.limit) && (input.limit ?? 0) > 0 ? Math.min(input.limit ?? 25, 100) : 25;
+  let rows: { results: { id: string }[] };
+  if (input.sessionId !== undefined) {
+    rows = { results: [{ id: input.sessionId }] };
+  } else if (input.expiredOnly === true) {
+    const shopFilter = input.shopId === undefined ? "" : " AND sessions.shop_id = ?";
+    const subscriptionFilter = input.subscriptionId === undefined ? "" : " AND sessions.subscription_id = ?";
+    const bindings = [
+      now.toISOString(),
+      ...(input.shopId === undefined ? [] : [input.shopId]),
+      ...(input.subscriptionId === undefined ? [] : [input.subscriptionId]),
+      limit,
+    ];
+    rows = await input.env.PLATFORM_DB.prepare(`
+      SELECT sessions.id
+      FROM billing_checkout_sessions AS sessions
+      WHERE sessions.provider_code = 'dodo'
+        AND sessions.provider_checkout_ref IS NOT NULL
+        AND sessions.status = 'open'
+        AND sessions.expires_at IS NOT NULL AND sessions.expires_at <= ?
+        AND (sessions.reconciliation_failure_code IS NULL OR sessions.reconciliation_failure_code != 'billing_reconciliation_exhausted')
+        ${shopFilter}
+        ${subscriptionFilter}
+      ORDER BY sessions.expires_at, sessions.id
+      LIMIT ?
+    `).bind(...bindings).all<{ id: string }>();
+  } else {
+    const shopFilter = input.shopId === undefined ? "" : " AND sessions.shop_id = ?";
+    const subscriptionFilter = input.subscriptionId === undefined ? "" : " AND sessions.subscription_id = ?";
+    const bindings = [
+      now.toISOString(),
+      now.toISOString(),
+      ...(input.shopId === undefined ? [] : [input.shopId]),
+      ...(input.subscriptionId === undefined ? [] : [input.subscriptionId]),
+      limit,
+    ];
+    rows = await input.env.PLATFORM_DB.prepare(`
+      SELECT sessions.id
+      FROM billing_checkout_sessions AS sessions
+      WHERE sessions.provider_code = 'dodo'
+        AND sessions.provider_checkout_ref IS NOT NULL
+        AND sessions.status = 'open'
+        AND (sessions.reconciliation_failure_code IS NULL OR sessions.reconciliation_failure_code != 'billing_reconciliation_exhausted')
+        AND (sessions.next_reconciliation_at IS NULL OR sessions.next_reconciliation_at <= ? OR sessions.expires_at <= ?)
+        ${shopFilter}
+        ${subscriptionFilter}
+      ORDER BY COALESCE(sessions.next_reconciliation_at, sessions.updated_at), sessions.id
+      LIMIT ?
+    `).bind(...bindings).all<{ id: string }>();
+  }
+  const metrics: BillingCheckoutReconciliationMetrics = { candidates: rows.results.length, completed: 0, expired: 0, failed: 0, pending: 0, quarantined: 0 };
+  for (const candidate of rows.results) {
+    const row = await loadCheckoutReconciliationRow(input.env, { sessionId: candidate.id, ...(input.shopId === undefined ? {} : { shopId: input.shopId }) });
+    if (row === null) continue;
+    if (row.status === "open" && row.reconciliationFailureCode === "billing_reconciliation_exhausted") {
+      metrics.quarantined += 1;
+      continue;
+    }
+    if (row.status === "open" && row.nextReconciliationAt !== null && row.nextReconciliationAt > now.toISOString()
+      && (row.expiresAt === null || row.expiresAt > now.toISOString())) {
+      metrics.pending += 1;
+      continue;
+    }
+    try {
+      const result = await reconcileDodoCheckoutRow({ env: input.env, now, row, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }) });
+      metrics[result] += 1;
+      if (result === "pending") {
+        await scheduleCheckoutReconciliationPending({ env: input.env, now, row });
+      }
+    } catch (error) {
+      const outcome = await recordCheckoutReconciliationFailure({
+        env: input.env,
+        failureCode: error instanceof AppError ? error.code : "billing_provider_unavailable",
+        now,
+        row,
+      });
+      metrics.failed += 1;
+      if (outcome === "exhausted") metrics.quarantined += 1;
+    }
+  }
+  return metrics;
+}
+
+export type SellerBillingCheckoutStatus = {
+  planCode: string;
+  sessionId: string;
+  status: string;
+  subscriptionState: BillingState;
+};
+
+export async function getSellerBillingCheckoutStatus(input: {
+  checkoutSessionId: string;
+  env: AppBindings;
+  fetcher?: typeof fetch;
+  now?: Date;
+  shopPublicId: string;
+  userId: string;
+}): Promise<SellerBillingCheckoutStatus> {
+  if (!/^bchk_[0-9a-f-]{36}$/u.test(input.checkoutSessionId)) throw new AppError("resource_not_found", 404);
+  const actor = await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  await reconcileDodoBillingCheckouts({
+    env: input.env,
+    sessionId: input.checkoutSessionId,
+    shopId: actor.row.shop_id,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+    ...(input.now === undefined ? {} : { now: input.now }),
+  });
+  const row = await input.env.PLATFORM_DB.prepare(`
+    SELECT sessions.id AS sessionId, sessions.status,
+      plans.code AS planCode, subscriptions.state AS subscriptionState
+    FROM billing_checkout_sessions AS sessions
+    INNER JOIN plans ON plans.id = sessions.plan_id
+    INNER JOIN shop_subscriptions AS subscriptions
+      ON subscriptions.shop_id = sessions.shop_id AND subscriptions.id = sessions.subscription_id
+    WHERE sessions.id = ? AND sessions.shop_id = ?
+    LIMIT 1
+  `).bind(input.checkoutSessionId, actor.row.shop_id).first<SellerBillingCheckoutStatus>();
+  if (row === null || !BILLING_STATES.includes(row.subscriptionState)) throw new AppError("resource_not_found", 404);
+  return row;
 }
 
 type SubscriptionChangeExecutionRow = {
@@ -1364,8 +1827,14 @@ async function loadCheckoutForEvent(env: AppBindings, event: DodoBillingEvent): 
   // The first payment carries a new subscription/payment reference before
   // D1 has stored either ref; the signed checkout-session identity is the
   // authoritative bridge for that one event.
-  const initialPaymentWithLocalSession = sessionId !== null && event.eventType === "payment.succeeded";
-  if (initialPaymentWithLocalSession && providerCheckoutId === null) throw new AppError("billing_webhook_identity_mismatch", 409);
+  const initialPaymentWithLocalSession = sessionId !== null && [
+    "payment.cancelled",
+    "payment.failed",
+    "payment.processing",
+    "payment.succeeded",
+  ].includes(event.eventType);
+  const requiresProviderCheckoutIdentity = sessionId !== null && event.eventType === "payment.succeeded";
+  if (requiresProviderCheckoutIdentity && providerCheckoutId === null) throw new AppError("billing_webhook_identity_mismatch", 409);
   // Dodo's subscription events carry the original checkout metadata, but the
   // first `subscription.active` delivery can arrive before the payment event
   // has bound `shop_subscriptions.provider_subscription_ref`. In that narrow
@@ -1375,7 +1844,7 @@ async function loadCheckoutForEvent(env: AppBindings, event: DodoBillingEvent): 
   let subscriptionLookupFound = event.providerSubscriptionId === null
     || initialPaymentWithLocalSession
     || (isSubscriptionLifecycleEvent && sessionId !== null);
-  let transactionLookupFound = providerCheckoutId === null && !initialPaymentWithLocalSession;
+  let transactionLookupFound = providerCheckoutId === null && !requiresProviderCheckoutIdentity;
   if (sessionId !== null) {
     const row = await env.PLATFORM_DB.prepare(`${select} WHERE ${shopPredicate}(sessions.id = ? OR sessions.public_id = ?) LIMIT 1`).bind(...shopValue, sessionId, sessionId).first<BillingCheckoutSession>();
     if (row !== null) {
@@ -1410,7 +1879,9 @@ function requiresPaidAmount(eventType: string): boolean {
 }
 
 const ACTIONABLE_DODO_BILLING_EVENTS = new Set([
+  "payment.cancelled",
   "payment.failed",
+  "payment.processing",
   "payment.succeeded",
   "subscription.active",
   "subscription.cancelled",
@@ -1420,6 +1891,8 @@ const ACTIONABLE_DODO_BILLING_EVENTS = new Set([
   "subscription.paused",
   "subscription.plan_changed",
   "subscription.renewed",
+  "subscription.unpaused",
+  "subscription.update_payment_method",
   "subscription.updated",
 ]);
 
@@ -1435,41 +1908,13 @@ function targetStateForEvent(event: DodoBillingEvent): BillingState | null {
   if ((event.eventType === "subscription.plan_changed" || event.eventType === "subscription.updated") && event.scheduledPriceId !== null) return "downgrade_scheduled";
   if (event.eventType === "subscription.plan_changed") return "active";
   if (event.eventType === "subscription.renewed") return "active";
+  if (event.eventType === "subscription.unpaused") return "active";
   if (event.eventType === "subscription.active") return "active";
   if (event.eventType === "subscription.updated" && (event.status === "on_hold" || event.status === "past_due")) return "grace_period";
   if (event.eventType === "subscription.updated" && (event.status === "canceled" || event.status === "cancelled" || event.status === "expired")) return "canceled";
   if (event.eventType === "subscription.updated" && event.status === "failed") return "suspended";
   if (event.eventType === "subscription.updated" && event.status === "active") return "active";
   return null;
-}
-
-function requireProviderManagedTrial(input: {
-  event: DodoBillingEvent;
-  nowIso: string;
-  providerPriceRef: string;
-  providerSubscription: DodoSubscription;
-}): string {
-  const provider = input.providerSubscription;
-  if (provider.status !== "active"
-    || provider.priceId !== input.providerPriceRef
-    || provider.trialPeriodDays !== DODO_PROVIDER_TRIAL_DAYS
-    || (provider.trialAmountMinor !== null && provider.trialAmountMinor !== 0)
-    || provider.nextBillingDate === null) {
-    throw new AppError("billing_webhook_trial_invalid", 409);
-  }
-  const trialEnd = new Date(provider.nextBillingDate);
-  const now = new Date(input.nowIso);
-  if (!Number.isFinite(trialEnd.getTime()) || trialEnd.getTime() <= now.getTime()) throw new AppError("billing_webhook_trial_invalid", 409);
-  const trialStart = new Date(provider.createdAt ?? input.event.periodStart ?? input.event.occurredAt);
-  if (!Number.isFinite(trialStart.getTime())) throw new AppError("billing_webhook_trial_invalid", 409);
-  const expectedDuration = DODO_PROVIDER_TRIAL_DAYS * 24 * 60 * 60_000;
-  const duration = trialEnd.getTime() - trialStart.getTime();
-  if (Math.abs(duration - expectedDuration) > DODO_PROVIDER_TRIAL_TOLERANCE_MS) throw new AppError("billing_webhook_trial_invalid", 409);
-  if (input.event.periodEnd !== null) {
-    const eventTrialEnd = new Date(input.event.periodEnd);
-    if (!Number.isFinite(eventTrialEnd.getTime()) || eventTrialEnd.getTime() !== trialEnd.getTime()) throw new AppError("billing_webhook_trial_invalid", 409);
-  }
-  return trialEnd.toISOString();
 }
 
 async function loadEvent(env: AppBindings, providerEventId: string): Promise<BillingEventRow | null> {
@@ -1611,26 +2056,14 @@ async function markRejectedWebhookEvent(input: {
   ]);
 }
 
-export async function processDodoWebhook(input: {
+async function processDodoBillingPayload(input: {
   env: AppBindings;
   fetcher?: typeof fetch;
   rawBody: string;
-  signature: string | null;
   webhookId: string | null;
-  webhookTimestamp: string | null;
-  webhookPublicId: string;
   now?: Date;
 }): Promise<WebhookResult> {
-  if (!/^(?:ddowh|dodow)_[0-9a-f-]{36}$/u.test(input.webhookPublicId)) throw new AppError("webhook_not_found", 404);
   const config = getDodoConfig(input.env);
-  if (!await verifyDodoWebhookSignature({
-    body: input.rawBody,
-    header: input.signature,
-    secret: config.webhookSecret,
-    webhookId: input.webhookId,
-    timestamp: input.webhookTimestamp,
-    now: Math.floor((input.now ?? new Date()).getTime() / 1000),
-  })) throw new AppError("webhook_signature_invalid", 401);
   let payload: unknown;
   try { payload = JSON.parse(input.rawBody) as unknown; } catch { throw new AppError("billing_webhook_invalid", 400, ["json_invalid"]); }
   const event = parseDodoEvent(payload, input.webhookId);
@@ -1690,12 +2123,13 @@ export async function processDodoWebhook(input: {
     const customCurrency = customValue(event.customData, "currency")?.toUpperCase() ?? null;
     const customAmountMinor = customValue(event.customData, "amountMinor", "amount_minor");
     const customProviderPriceRef = customValue(event.customData, "providerPriceRef", "provider_price_ref");
+    const initialPaymentEvent = event.eventType.startsWith("payment.") && session.status !== "completed";
     const initialPayment = event.eventType === "payment.succeeded" && session.status !== "completed";
     // A signed, identity-matched payment can arrive after the local checkout
     // TTL (for example while a provider retry is in flight). Reconcile it
     // instead of rejecting a potentially captured charge; the authoritative
     // payment event still has to pass every tenant/amount/price check below.
-    if (initialPayment && (customShopId === null || customPlanCode === null || customMarketCode === null
+    if (initialPaymentEvent && (customShopId === null || customPlanCode === null || customMarketCode === null
       || customCheckoutSessionId === null || customSubscriptionId === null || customCurrency === null
       || customAmountMinor === null || customProviderPriceRef === null)) {
       throw new AppError("billing_webhook_identity_mismatch", 409);
@@ -1721,9 +2155,8 @@ export async function processDodoWebhook(input: {
     if (event.providerSubscriptionId !== null && subscription.providerSubscriptionRef !== null && event.providerSubscriptionId !== subscription.providerSubscriptionRef) throw new AppError("billing_webhook_identity_mismatch", 409);
     let target = targetStateForEvent(event);
     let providerPriceRef = event.priceId;
-    const zeroAmountTrialMandate = initialPayment && event.amountMinor === 0;
     let providerSubscription: DodoSubscription | null = null;
-    if (target === "active" && (providerPriceRef === null && (initialPayment || pendingChange?.action === "change_plan" || subscription.scheduledPriceId !== null) || zeroAmountTrialMandate)) {
+    if (target === "active" && providerPriceRef === null && (initialPayment || pendingChange?.action === "change_plan" || subscription.scheduledPriceId !== null)) {
       if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
       providerSubscription = await retrieveDodoSubscription({
         config,
@@ -1755,18 +2188,10 @@ export async function processDodoWebhook(input: {
     } else if (eventPrice !== null && eventPrice.id !== verifiedPrice.id) {
       throw new AppError("billing_webhook_price_mismatch", 409);
     }
-    let providerTrialEndsAt: string | null = null;
-    if (zeroAmountTrialMandate) {
-      if (event.currency !== verifiedPrice.currency.toUpperCase() || providerPriceRef !== verifiedPrice.providerPriceRef || providerSubscription === null) {
-        throw new AppError("billing_webhook_amount_mismatch", 409);
-      }
-      providerTrialEndsAt = requireProviderManagedTrial({ event, nowIso, providerPriceRef, providerSubscription });
-      target = "trialing";
-    }
     if (requiresPaidAmount(event.eventType)) {
       if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
     }
-    if (requiresPaidAmount(event.eventType) && !zeroAmountTrialMandate) {
+    if (requiresPaidAmount(event.eventType)) {
       if (event.amountMinor === null || event.currency === null || providerPriceRef === null || event.amountMinor !== verifiedPrice.amountMinor || event.currency !== verifiedPrice.currency.toUpperCase() || providerPriceRef !== verifiedPrice.providerPriceRef) throw new AppError("billing_webhook_amount_mismatch", 409);
     }
     if (initialPayment && (customCurrency !== verifiedPrice.currency.toUpperCase()
@@ -1779,7 +2204,12 @@ export async function processDodoWebhook(input: {
     } else if (event.eventType === "payment.failed") {
       if (event.currency !== null && event.currency !== verifiedPrice.currency.toUpperCase()) throw new AppError("billing_webhook_price_mismatch", 409);
     }
-    if (event.providerSubscriptionId === null) throw new AppError("billing_webhook_subscription_missing", 409);
+    const requiresProviderSubscriptionIdentity = event.eventType.startsWith("subscription.")
+      || target === "active"
+      || session.status === "completed";
+    if (requiresProviderSubscriptionIdentity && event.providerSubscriptionId === null) {
+      throw new AppError("billing_webhook_subscription_missing", 409);
+    }
     // A failed initial mandate/payment cannot receive the paid grace window;
     // leave it suspended until the customer starts a new checkout.
     if ((event.eventType === "payment.failed" || event.eventType === "subscription.failed") && session.status !== "completed") target = "suspended";
@@ -1839,7 +2269,7 @@ export async function processDodoWebhook(input: {
       ? event.providerSubscriptionId
       : null;
     const providerRefChanged = providerSubscriptionRefForBinding !== subscription.providerSubscriptionRef;
-    const appliesPriceSnapshot = target === "active" || target === "trialing";
+    const appliesPriceSnapshot = target === "active";
     const priceChanged = appliesPriceSnapshot && (subscription.planId !== verifiedPrice.planId || subscription.priceId !== verifiedPrice.id);
     const transitionNeeded = target !== null && (subscription.state !== target || periodChanged || providerRefChanged || priceChanged);
     const statements: D1PreparedStatement[] = [];
@@ -1860,7 +2290,7 @@ export async function processDodoWebhook(input: {
           price_version = CASE WHEN ? IN ('active', 'trialing') THEN ? ELSE price_version END,
           price_id = CASE WHEN ? IN ('active', 'trialing') THEN ? ELSE price_id END,
           grace_ends_at = ?, canceled_at = CASE WHEN ? = 'canceled' THEN ? ELSE canceled_at END,
-          trial_ends_at = CASE WHEN ? = 'trialing' THEN ? WHEN ? = 'active' THEN NULL ELSE trial_ends_at END,
+          trial_ends_at = CASE WHEN ? = 'active' THEN NULL ELSE trial_ends_at END,
           current_period_start = CASE WHEN ? = 'active' THEN COALESCE(?, current_period_start) ELSE current_period_start END,
           current_period_end = CASE WHEN ? = 'active' THEN COALESCE(?, current_period_end) ELSE current_period_end END,
           scheduled_plan_id = CASE
@@ -1897,7 +2327,7 @@ export async function processDodoWebhook(input: {
         target, verifiedPrice.version,
         target, verifiedPrice.id,
         graceEndsAt, target, target === "canceled" ? nowIso : null,
-        target, providerTrialEndsAt, target,
+        target,
         target, event.periodStart, target, event.periodEnd,
         isScheduledPlanChange ? 1 : 0, isScheduledPlanChange ? scheduledPrice.planId : null,
         isApplyingPlanChange || isCancelingScheduledPlanChange ? 1 : 0,
@@ -1945,15 +2375,44 @@ export async function processDodoWebhook(input: {
     if ((event.eventType === "payment.failed" || event.eventType === "subscription.failed") && session.status !== "completed") {
       statements.push(input.env.PLATFORM_DB.prepare(`
         UPDATE billing_checkout_sessions
-        SET status = 'failed', failure_code = ?, updated_at = ?, version = version + 1
+        SET status = 'failed', failure_code = ?, next_reconciliation_at = NULL,
+          reconciliation_failure_code = NULL, updated_at = ?, version = version + 1
         WHERE id = ? AND status IN ('pending', 'open')
       `).bind(event.eventType.replaceAll(".", "_"), nowIso, session.id));
+    }
+    if (event.eventType === "payment.processing" && session.status !== "completed") {
+      statements.push(input.env.PLATFORM_DB.prepare(`
+        UPDATE billing_checkout_sessions
+        SET status = 'open', failure_code = NULL, next_reconciliation_at = ?,
+          reconciliation_failure_code = NULL, updated_at = ?, version = version + 1
+        WHERE id = ? AND status IN ('pending', 'open')
+      `).bind(nowIso, nowIso, session.id));
+    }
+    if (event.eventType === "payment.cancelled" && session.status !== "completed") {
+      statements.push(
+        input.env.PLATFORM_DB.prepare(`
+          UPDATE billing_checkout_sessions
+          SET status = 'canceled', failure_code = NULL, next_reconciliation_at = NULL,
+            reconciliation_failure_code = NULL, updated_at = ?, version = version + 1
+          WHERE id = ? AND status IN ('pending', 'open')
+        `).bind(nowIso, session.id),
+        input.env.PLATFORM_DB.prepare(`
+          UPDATE shop_subscriptions
+          SET state = 'suspended', grace_ends_at = NULL, updated_at = ?, version = version + 1
+          WHERE id = ? AND shop_id = ? AND state = 'pending_payment'
+            AND NOT EXISTS (
+              SELECT 1 FROM billing_checkout_sessions
+              WHERE shop_id = ? AND subscription_id = ? AND status IN ('pending', 'open')
+            )
+        `).bind(nowIso, session.subscriptionId, session.shopId, session.shopId, session.subscriptionId),
+      );
     }
     if (event.eventType === "payment.succeeded") {
       statements.push(input.env.PLATFORM_DB.prepare(`
         UPDATE billing_checkout_sessions
         SET status = 'completed', provider_checkout_ref = COALESCE(provider_checkout_ref, ?),
-          completed_at = ?, updated_at = ?, version = version + 1
+          completed_at = ?, failure_code = NULL, next_reconciliation_at = NULL,
+          reconciliation_failure_code = NULL, updated_at = ?, version = version + 1
         WHERE id = ?
         `).bind(event.providerCheckoutId, nowIso, nowIso, session.id));
     }
@@ -2008,7 +2467,7 @@ export async function processDodoWebhook(input: {
       UPDATE billing_provider_events
       SET status = ?, processed_at = ?
       WHERE id = ? AND status = 'received' AND processed_at = ?
-    `).bind(target === null ? "ignored" : "processed", nowIso, recorded.event.id, recorded.leaseToken));
+    `).bind(ACTIONABLE_DODO_BILLING_EVENTS.has(event.eventType) ? "processed" : "ignored", nowIso, recorded.event.id, recorded.leaseToken));
     try {
       const results = await input.env.PLATFORM_DB.batch(statements);
       const eventResult = results.at(-1);
@@ -2030,7 +2489,7 @@ export async function processDodoWebhook(input: {
       }
       throw error;
     }
-    return { duplicate: false, processed: target !== null, state: target ?? "ignored" };
+    return { duplicate: false, processed: true, state: target ?? "processed" };
   } catch (error) {
     const result = error instanceof AppError && error.code.startsWith("billing_webhook_") ? "conflict" : "failed";
     if (error instanceof AppError && error.code.startsWith("billing_webhook_") && session !== null) {
@@ -2040,6 +2499,35 @@ export async function processDodoWebhook(input: {
     }
     throw error;
   }
+}
+
+export async function processDodoWebhook(input: {
+  env: AppBindings;
+  fetcher?: typeof fetch;
+  rawBody: string;
+  signature: string | null;
+  webhookId: string | null;
+  webhookTimestamp: string | null;
+  webhookPublicId: string;
+  now?: Date;
+}): Promise<WebhookResult> {
+  if (!/^(?:ddowh|dodow)_[0-9a-f-]{36}$/u.test(input.webhookPublicId)) throw new AppError("webhook_not_found", 404);
+  const config = getDodoConfig(input.env);
+  if (!await verifyDodoWebhookSignature({
+    body: input.rawBody,
+    header: input.signature,
+    secret: config.webhookSecret,
+    webhookId: input.webhookId,
+    timestamp: input.webhookTimestamp,
+    now: Math.floor((input.now ?? new Date()).getTime() / 1000),
+  })) throw new AppError("webhook_signature_invalid", 401);
+  return processDodoBillingPayload({
+    env: input.env,
+    rawBody: input.rawBody,
+    webhookId: input.webhookId,
+    ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
+    ...(input.now === undefined ? {} : { now: input.now }),
+  });
 }
 
 export async function processDodoWebhookRequest(input: {

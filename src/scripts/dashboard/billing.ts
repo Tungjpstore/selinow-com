@@ -20,7 +20,7 @@ type BillingCheckoutAttemptStorage = Pick<Storage, "getItem" | "removeItem" | "s
 type BillingPlanChangeDirection = "downgrade" | "unknown" | "upgrade";
 
 const BILLING_CHECKOUT_ATTEMPT_STORAGE_KEY = "selinow.billing.checkout-attempt.v1";
-const BILLING_CHECKOUT_ATTEMPT_TTL_MS = 30 * 60_000;
+const BILLING_CHECKOUT_ATTEMPT_TTL_MS = 24 * 60 * 60_000 + 5 * 60_000;
 const BILLING_OPERATION_ATTEMPT_STORAGE_KEY = "selinow.billing.operation-attempt.v1";
 const BILLING_OPERATION_ATTEMPT_TTL_MS = 30 * 60_000;
 
@@ -184,7 +184,13 @@ export function isBillingCheckoutTerminalFailure(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   const failure = error as { code?: unknown; terminalResponse?: unknown };
   if (failure.terminalResponse !== true) return false;
-  return failure.code !== "billing_provider_unavailable" && failure.code !== "billing_checkout_pending";
+  if (typeof failure.code !== "string") return false;
+  return ![
+    "billing_checkout_pending",
+    "billing_checkout_persistence_conflict",
+    "billing_provider_invalid",
+    "billing_provider_unavailable",
+  ].includes(failure.code) && !/^http_5\d\d$/u.test(failure.code);
 }
 
 class BillingApiError extends Error {
@@ -513,8 +519,14 @@ if (root !== null && root.dataset.canManage === "true") {
     showSupportReference(failure);
     const message = isBillingRecentAuthFailure(failure.code)
       ? text("checkoutRecentAuthRequired")
-      : ["billing_market_unavailable", "plan_price_unavailable", "provider_not_ready"].includes(failure.code)
+      : failure.code === "billing_market_unavailable"
         ? text("marketUnavailable")
+        : failure.code === "plan_price_unavailable"
+          ? text("planUnavailable")
+          : failure.code === "provider_not_ready"
+            ? text("providerNotReady")
+            : failure.code === "billing_provider_request_rejected"
+              ? text("providerRequestRejected")
         : ["billing_change_pending", "billing_provider_unavailable", "billing_provider_operation_unavailable", "billing_operation_response_invalid"].includes(failure.code)
           ? text("operationUnavailable")
           : text("errorRetry");
@@ -532,14 +544,13 @@ if (root !== null && root.dataset.canManage === "true") {
     if ((operation.action !== "cancel" && operation.action !== "cancel_scheduled_plan_change" && operation.action !== "change_plan" && operation.action !== "resume") || typeof operation.operationId !== "string" || typeof operation.status !== "string") return null;
     return { action: operation.action, operationId: operation.operationId, requestedPlanCode: typeof operation.requestedPlanCode === "string" ? operation.requestedPlanCode : null, status: operation.status };
   };
-  const pollOperation = async (operationId: string | null, attempts = 15): Promise<void> => {
+  const pollOperation = async (operationId: string, attempts = 15): Promise<void> => {
     if (shopPublicId === undefined) return;
     activeOperationId = operationId;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 2_000));
-      const query = operationId === null ? "" : `?operation=${encodeURIComponent(operationId)}`;
       try {
-        const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/operations${query}`);
+        const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/operations?operation=${encodeURIComponent(operationId)}`);
         if (activeOperationId !== operationId) return;
         const operation = parseOperation(payload);
         const subscription = typeof payload?.subscription === "object" && payload.subscription !== null ? payload.subscription as JsonObject : null;
@@ -549,11 +560,11 @@ if (root !== null && root.dataset.canManage === "true") {
           return;
         }
         if (operation === null) {
-          if (operationId !== null && attempt < attempts - 1) {
+          if (attempt < attempts - 1) {
             operationBanner?.removeAttribute("hidden");
             continue;
           }
-          if (operationId !== null) showFeedback(text("operationUnavailable"), "danger");
+          showFeedback(text("operationUnavailable"), "danger");
           operationBanner?.setAttribute("hidden", "");
           return;
         }
@@ -563,11 +574,7 @@ if (root !== null && root.dataset.canManage === "true") {
             || (typeof subscription.planCode === "string" && subscription.planCode !== currentPlanCode)
             || (Number.isSafeInteger(subscription.version) && subscription.version !== subscriptionVersion)
           );
-          if (operationId !== null || subscriptionChanged) {
-            window.location.reload();
-            return;
-          }
-          operationBanner?.setAttribute("hidden", "");
+          if (subscriptionChanged || operation.operationId === operationId) window.location.reload();
           return;
         }
         if (operation.status !== "requested" && operation.status !== "provider_pending") {
@@ -585,23 +592,31 @@ if (root !== null && root.dataset.canManage === "true") {
     }
     showFeedback(text("operationDescription"), "info");
   };
-  const pollBillingReturn = async (attempts = 15): Promise<void> => {
+  const pollBillingReturn = async (checkoutSessionId: string, attempts = 15): Promise<void> => {
     if (shopPublicId === undefined) return;
     if (operationTitle !== null) operationTitle.textContent = text("returnOperationTitle");
     operationBanner?.removeAttribute("hidden");
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 2_000));
       try {
-        const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/operations`);
-        const subscription = typeof payload?.subscription === "object" && payload.subscription !== null ? payload.subscription as JsonObject : null;
-        const subscriptionChanged = subscription !== null && (
-          (typeof subscription.state === "string" && subscription.state !== billingState)
-          || (typeof subscription.planCode === "string" && subscription.planCode !== currentPlanCode)
-          || (Number.isSafeInteger(subscription.version) && subscription.version !== subscriptionVersion)
-        );
-        if (subscriptionChanged) {
+        const payload = await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/billing/checkouts/${encodeURIComponent(checkoutSessionId)}`);
+        const checkout = typeof payload?.checkout === "object" && payload.checkout !== null ? payload.checkout as JsonObject : null;
+        const status = typeof checkout?.status === "string" ? checkout.status : null;
+        if (status === "completed") {
           setUrlState("billing_return", null);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("checkout");
+          window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
           window.location.reload();
+          return;
+        }
+        if (status === "failed" || status === "expired" || status === "canceled") {
+          setUrlState("billing_return", null);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("checkout");
+          window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+          operationBanner?.setAttribute("hidden", "");
+          showFeedback(text("checkoutUnavailable"), "danger");
           return;
         }
       } catch (error) {
@@ -674,9 +689,8 @@ if (root !== null && root.dataset.canManage === "true") {
       pending = false;
     }
   };
-  const openBillingPortal = async (): Promise<void> => {
+  const openBillingPortal = async (button: HTMLButtonElement | null): Promise<void> => {
     if (pending || shopPublicId === undefined) return;
-    const button = root.querySelector<HTMLButtonElement>("[data-billing-portal]");
     pending = true;
     setBusy(button, true);
     showFeedback(text("portalOpening"), "info");
@@ -722,7 +736,7 @@ if (root !== null && root.dataset.canManage === "true") {
   });
   root.querySelector<HTMLButtonElement>("[data-billing-resume]")?.addEventListener("click", () => { void startOperation("resume"); });
   root.querySelector<HTMLButtonElement>("[data-billing-cancel-scheduled-plan-change]")?.addEventListener("click", () => { void startOperation("cancel_scheduled_plan_change"); });
-  root.querySelector<HTMLButtonElement>("[data-billing-portal]")?.addEventListener("click", () => { void openBillingPortal(); });
+  for (const trigger of root.querySelectorAll<HTMLButtonElement>("[data-billing-portal]")) trigger.addEventListener("click", () => { void openBillingPortal(trigger); });
   planBack?.addEventListener("click", () => {
     previewSequence += 1;
     previewReady = false;
@@ -755,6 +769,16 @@ if (root !== null && root.dataset.canManage === "true") {
   if (urlState.get("manage") === "plan") openPlanDialog();
   if (urlState.get("action") === "cancel") cancelDialog?.showModal();
   const hasBillingReturn = urlState.has("billing_return");
-  if (hasBillingReturn) void pollBillingReturn();
-  else void pollOperation(null);
+  const checkoutSessionId = urlState.get("checkout");
+  if (hasBillingReturn && checkoutSessionId !== null && /^bchk_[0-9a-f-]{36}$/u.test(checkoutSessionId)) void pollBillingReturn(checkoutSessionId);
+  else if (hasBillingReturn) {
+    setUrlState("billing_return", null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("checkout");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+  else {
+    const operationId = urlState.get("operation");
+    if (operationId !== null && /^[A-Za-z0-9._:-]{3,160}$/u.test(operationId)) void pollOperation(operationId);
+  }
 }

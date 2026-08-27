@@ -9,15 +9,20 @@ import { ensureDodoWebhook, fingerprintDodoWebhookReference } from "../../script
 const API_BASE_URL = "https://test.dodopayments.com";
 const ENDPOINT_URL = "https://api-staging.selinow.com/api/webhooks/billing/dodo/ddowh_00000000-0000-4000-8000-000000000081";
 const REQUIRED_EVENTS = [
+  "payment.cancelled",
   "payment.failed",
+  "payment.processing",
   "payment.succeeded",
   "subscription.active",
   "subscription.cancelled",
   "subscription.expired",
   "subscription.failed",
   "subscription.on_hold",
+  "subscription.paused",
   "subscription.plan_changed",
   "subscription.renewed",
+  "subscription.unpaused",
+  "subscription.update_payment_method",
   "subscription.updated",
 ];
 const temporaryDirectories: string[] = [];
@@ -213,12 +218,18 @@ describe("Dodo webhook registration", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("fails closed when an existing endpoint declares an incomplete event list", async () => {
+  it.each([
+    "payment.cancelled",
+    "payment.processing",
+    "subscription.paused",
+    "subscription.unpaused",
+    "subscription.update_payment_method",
+  ])("fails closed when an existing endpoint omits required event %s", async (missingEvent) => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json({ items: [{
         id: "wh_test_missing_events",
         url: ENDPOINT_URL,
-        filter_types: REQUIRED_EVENTS.filter((eventType) => eventType !== "subscription.expired"),
+        filter_types: REQUIRED_EVENTS.filter((eventType) => eventType !== missingEvent),
       }] }))
       .mockResolvedValueOnce(Response.json({ secret: "whsec_dGVzdC13ZWJob29rLXNlY3JldA==" }));
 

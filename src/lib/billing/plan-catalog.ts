@@ -22,6 +22,7 @@ export type BillingProviderCode = "payos" | "dodo";
 
 export const PLAN_FEATURES = [
   "storefront",
+  "premiumStorefrontTemplates",
   "telegram",
   "catalog",
   "inventory",
@@ -56,6 +57,7 @@ export type PlanFeatures = {
   inventory: boolean;
   manualFulfillment: boolean;
   privateDownloads: boolean;
+  premiumStorefrontTemplates: boolean;
   sellerPayments: boolean;
   storefront: boolean;
   telegram: boolean;
@@ -128,6 +130,7 @@ const FEATURE_DEFAULTS: PlanFeatures = {
   inventory: false,
   manualFulfillment: false,
   privateDownloads: false,
+  premiumStorefrontTemplates: false,
   sellerPayments: false,
   storefront: false,
   telegram: false,
@@ -192,6 +195,7 @@ const BOOLEAN_FEATURES = new Set<Exclude<PlanFeatureName, "analytics">>([
   "inventory",
   "manualFulfillment",
   "privateDownloads",
+  "premiumStorefrontTemplates",
   "sellerPayments",
   "storefront",
   "telegram",
@@ -350,6 +354,7 @@ export const STARTER_PLAN: PlanSnapshot = {
     inventory: true,
     manualFulfillment: true,
     privateDownloads: true,
+    premiumStorefrontTemplates: false,
     sellerPayments: true,
     storefront: true,
     telegram: true,
@@ -388,6 +393,7 @@ export const PRO_PLAN: PlanSnapshot = {
     inventory: true,
     manualFulfillment: true,
     privateDownloads: true,
+    premiumStorefrontTemplates: true,
     sellerPayments: true,
     storefront: true,
     telegram: true,

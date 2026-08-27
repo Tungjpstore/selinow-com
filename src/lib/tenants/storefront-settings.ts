@@ -253,27 +253,16 @@ export async function publishSellerStorefrontSettings(input: {
   const version = input.expectedVersion === undefined ? current.version : expectedVersion(input.expectedVersion);
   if (current.version !== version) throw new AppError("resource_conflict", 409, ["storefront_draft_stale"]);
 
-  const now = new Date().toISOString();
-  await input.env.PLATFORM_DB.prepare(`
-    UPDATE shop_settings
-    SET published_branding_json = branding_json,
-        published_storefront_json = storefront_json,
-        published_version = version,
-        published_at = ?
-    WHERE shop_id = ? AND version = ?
-  `).bind(now, member.row.shop_id, version).run();
-
-  try {
-    await publishReadyStorefront({
-      env: input.env,
-      expectedStorefrontVersion: version,
-      requestId: input.requestId,
-      shopPublicId: input.shopPublicId,
-      userId: input.userId,
-    });
-  } catch {
-    // Non-fatal if shop still has onboarding prerequisites pending (e.g. PayOS/Telegram connection)
-  }
+  // Readiness owns the publication transaction. Do not write a published
+  // snapshot before it passes: otherwise a failed publish can be reported as
+  // "published" even though the shop remains a draft or lacks prerequisites.
+  await publishReadyStorefront({
+    env: input.env,
+    expectedStorefrontVersion: version,
+    requestId: input.requestId,
+    shopPublicId: input.shopPublicId,
+    userId: input.userId,
+  });
 
   return readSettings(
     input.env,

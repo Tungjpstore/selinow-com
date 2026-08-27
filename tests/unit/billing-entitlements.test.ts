@@ -57,6 +57,8 @@ describe("paid plan entitlement evaluator", () => {
     expect(evaluateFeature({ feature: "api", plan: STARTER_PLAN }).allowed).toBe(false);
     expect(evaluateFeature({ feature: "payments", plan: STARTER_PLAN }).allowed).toBe(true);
     expect(evaluateFeature({ feature: "fulfillment", plan: PRO_PLAN }).allowed).toBe(true);
+    expect(evaluateFeature({ feature: "premiumStorefrontTemplates", plan: STARTER_PLAN }).allowed).toBe(false);
+    expect(evaluateFeature({ feature: "premiumStorefrontTemplates", plan: PRO_PLAN }).allowed).toBe(true);
     expect(evaluateFeature({ feature: "analytics", plan: STARTER_PLAN, requiredAnalyticsTier: "advanced" }).reasonCode).toBe("plan_feature_unavailable");
     expect(evaluateFeature({ feature: "analytics", plan: PRO_PLAN, requiredAnalyticsTier: "advanced" }).allowed).toBe(true);
     expect(evaluateFeature({ feature: "made_up", plan: PRO_PLAN }).reasonCode).toBe("plan_feature_unavailable");

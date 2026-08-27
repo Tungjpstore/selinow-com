@@ -11,7 +11,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const shopPublicId = requireResourceId(params.shopPublicId, "shop");
     const returnUrl = new URL("/app/billing", request.url);
     returnUrl.searchParams.set("shop", shopPublicId);

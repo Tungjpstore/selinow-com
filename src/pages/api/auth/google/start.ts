@@ -87,7 +87,7 @@ export const POST: APIRoute = async ({ locals, request, url }) => {
     rejectUnknownSearchParams(url, ["flow"]);
     if (singleSearchParam(url, "flow") !== "link") throw new AppError("validation_failed", 400, ["flow_invalid"]);
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request);
     rejectUnknownFields(body, ["returnTo"]);
     const returnTo = typeof body.returnTo === "string" ? body.returnTo : undefined;

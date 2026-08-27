@@ -84,7 +84,7 @@ describe("deletion control route security", () => {
       url: `https://app.example.test/api/app/shops/${SHOP_PUBLIC_ID}/deletion/cancel`,
     }) as never);
     expect(dependencies.requireCsrf).toHaveBeenCalledOnce();
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.cancel).toHaveBeenCalledWith(expect.objectContaining({
       deletionRequestId: DELETION_REQUEST_ID,
       expectedVersion: 3,

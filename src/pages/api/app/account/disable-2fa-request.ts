@@ -9,7 +9,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const result = await requestTwoFactorDisableOtp({ auth, env, locale: locals.locale });
     return Response.json({
       ok: true,

@@ -11,7 +11,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const shopPublicId = params.shopPublicId;
     if (shopPublicId === undefined) throw new AppError("tenant_not_found", 404);
     const body = await readJsonObject(request, 4 * 1_024);

@@ -103,7 +103,7 @@ describe("channel credential persistence routes", () => {
       path: `/api/app/shops/${SHOP_PUBLIC_ID}/channels/credentials`,
     }) as never);
     expect(dependencies.authenticateSession).toHaveBeenCalledWith(expect.any(Request), dependencies.env);
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.list).toHaveBeenCalledWith({
       env: dependencies.env,
       shopPublicId: SHOP_PUBLIC_ID,
@@ -121,7 +121,7 @@ describe("channel credential persistence routes", () => {
       path: `/api/app/shops/${SHOP_PUBLIC_ID}/channels/credentials`,
     }) as never);
     expect(dependencies.requireCsrf).toHaveBeenCalledWith(expect.any(Request), dependencies.env);
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.parse).toHaveBeenCalledWith(envelope);
     expect(dependencies.create).toHaveBeenCalledWith({
       env: dependencies.env,

@@ -6,7 +6,7 @@ import { readJsonObject, rejectUnknownFields } from "../../../../lib/http/reques
 import { createCaughtErrorResponse } from "../../../../lib/http/security";
 import { getBindings } from "../../../../lib/platform/bindings";
 import { normalizeOptionalCountryCode } from "../../../../lib/tenants/country";
-import { normalizeShopName } from "../../../../lib/tenants/policy";
+import { normalizeShopName, normalizeSlug } from "../../../../lib/tenants/policy";
 import { getShopForMember, updateShopProfile } from "../../../../lib/tenants/store";
 
 function requireShopPublicId(value: string | undefined): string {
@@ -39,7 +39,7 @@ export const PATCH: APIRoute = async ({ locals, params, request }) => {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
     const body = await readJsonObject(request);
-    rejectUnknownFields(body, ["businessCountry", "currency", "defaultLocale", "merchantCountry", "name"]);
+    rejectUnknownFields(body, ["businessCountry", "currency", "defaultLocale", "merchantCountry", "name", "slug"]);
     const businessCountry = normalizeOptionalCountryCode(body.businessCountry, "business_country_invalid");
     const merchantCountry = normalizeOptionalCountryCode(body.merchantCountry, "merchant_country_invalid");
     const shop = await updateShopProfile({
@@ -49,6 +49,7 @@ export const PATCH: APIRoute = async ({ locals, params, request }) => {
       env,
       ...(merchantCountry === undefined ? {} : { merchantCountry }),
       ...(body.name === undefined ? {} : { name: normalizeShopName(body.name) }),
+      ...(body.slug === undefined ? {} : { slug: normalizeSlug(body.slug) }),
       requestId: locals.requestId,
       shopPublicId: requireShopPublicId(params.shopPublicId),
       userId: auth.userId,

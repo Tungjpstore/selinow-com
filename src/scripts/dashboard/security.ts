@@ -21,6 +21,11 @@ type ApiPayload = {
   sessions?: unknown;
 };
 
+type AccountRequestOptions = {
+  body?: Record<string, unknown>;
+  method: "DELETE" | "GET" | "POST";
+};
+
 type HistoryEntry = {
   id: string;
   occurredAt: string;
@@ -62,6 +67,52 @@ if (root !== null) {
     } catch {
       return "";
     }
+  };
+
+  let csrfRecoveryPromise: Promise<void> | null = null;
+
+  const isCsrfTokenInvalid = (payload: ApiPayload): boolean => payload.code === "csrf_invalid"
+    && Array.isArray(payload.issues)
+    && (payload.issues[0] === "token_invalid" || payload.issues[0] === "token_mismatch");
+
+  const recoverCsrf = async (): Promise<void> => {
+    if (csrfRecoveryPromise !== null) return csrfRecoveryPromise;
+    csrfRecoveryPromise = (async () => {
+      const response = await fetch("/api/auth/csrf/refresh", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        method: "POST",
+      });
+      const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload;
+      if (!response.ok) throw new SecurityApiError(payload);
+    })().finally(() => { csrfRecoveryPromise = null; });
+    return csrfRecoveryPromise;
+  };
+
+  const requestAccountApi = async (
+    path: string,
+    options: AccountRequestOptions,
+    allowCsrfRecovery = true,
+  ): Promise<ApiPayload> => {
+    const response = await fetch(path, {
+      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+      credentials: "same-origin",
+      headers: {
+        ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
+        Accept: "application/json",
+        "X-CSRF-Token": csrfToken(),
+      },
+      method: options.method,
+    });
+    const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload;
+    if (!response.ok) {
+      if (allowCsrfRecovery && isCsrfTokenInvalid(payload)) {
+        await recoverCsrf();
+        return requestAccountApi(path, options, false);
+      }
+      throw new SecurityApiError(payload);
+    }
+    return payload;
   };
 
   const safeRequestId = (value: unknown): string | null => typeof value === "string" && requestIdPattern.test(value)
@@ -127,17 +178,7 @@ if (root !== null) {
   };
 
   const requestSessions = async (method: "DELETE" | "GET"): Promise<ApiPayload> => {
-    const response = await fetch("/api/auth/sessions", {
-      credentials: "same-origin",
-      headers: {
-        Accept: "application/json",
-        "X-CSRF-Token": csrfToken(),
-      },
-      method,
-    });
-    const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload;
-    if (!response.ok) throw new SecurityApiError(payload);
-    return payload;
+    return requestAccountApi("/api/auth/sessions", { method });
   };
 
   const formatDate = (value: string): string => {
@@ -294,19 +335,7 @@ if (root !== null) {
   }
 
   const postAccount = async (path: string, body: Record<string, unknown>): Promise<ApiPayload> => {
-    const response = await fetch(path, {
-      body: JSON.stringify(body),
-      credentials: "same-origin",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "X-CSRF-Token": csrfToken(),
-      },
-      method: "POST",
-    });
-    const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload;
-    if (!response.ok) throw new SecurityApiError(payload);
-    return payload;
+    return requestAccountApi(path, { body, method: "POST" });
   };
 
   googleLinkButton?.addEventListener("click", () => {
@@ -314,18 +343,11 @@ if (root !== null) {
       googleLinkButton.disabled = true;
       setFeedback(t("dashboard.security.google.linking"));
       try {
-        const response = await fetch("/api/auth/google/start?flow=link", {
-          body: JSON.stringify({ returnTo: "/app/security?tab=sessions" }),
-          credentials: "same-origin",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "X-CSRF-Token": csrfToken(),
-          },
+        const payload = await requestAccountApi("/api/auth/google/start?flow=link", {
+          body: { returnTo: "/app/security?tab=sessions" },
           method: "POST",
-        });
-        const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload & { authorizationUrl?: unknown };
-        if (!response.ok || typeof payload.authorizationUrl !== "string"
+        }) as ApiPayload & { authorizationUrl?: unknown };
+        if (typeof payload.authorizationUrl !== "string"
           || payload.authorizationUrl.length > 2048) throw new SecurityApiError(payload);
         const authorizationUrl = new URL(payload.authorizationUrl);
         if (authorizationUrl.protocol !== "https:" || authorizationUrl.hostname !== "accounts.google.com"
@@ -342,17 +364,7 @@ if (root !== null) {
   });
 
   const getAccount = async (path: string): Promise<ApiPayload> => {
-    const response = await fetch(path, {
-      credentials: "same-origin",
-      headers: {
-        Accept: "application/json",
-        "X-CSRF-Token": csrfToken(),
-      },
-      method: "GET",
-    });
-    const payload = await response.json().catch(() => ({ code: "invalid_response" })) as ApiPayload;
-    if (!response.ok) throw new SecurityApiError(payload);
-    return payload;
+    return requestAccountApi(path, { method: "GET" });
   };
 
   const startCooldown = (button: HTMLButtonElement | null, seconds: unknown, restingLabel: string): void => {

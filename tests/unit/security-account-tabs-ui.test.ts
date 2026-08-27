@@ -106,6 +106,16 @@ describe("account security tabs UI", () => {
     expect(client).not.toMatch(/console\.log\(\s*otp/iu);
   });
 
+  it("recovers a session/CSRF binding mismatch once without weakening normal mutations", () => {
+    expect(client).toContain('"/api/auth/csrf/refresh"');
+    expect(client).toContain('payload.code === "csrf_invalid"');
+    expect(client).toContain('payload.issues[0] === "token_invalid"');
+    expect(client).toContain("allowCsrfRecovery");
+    expect(client).toContain("csrfRecoveryPromise");
+    expect(client).toContain("return requestAccountApi(path, options, false)");
+    expect(client).toContain('"X-CSRF-Token": csrfToken()');
+  });
+
   it("renders invoice history with status tones and an accessible usage meter", () => {
     expect(billing).toContain("data-billing-invoices");
     expect(billing).toContain('import { listShopInvoices, type InvoiceStatus, type ShopInvoice } from "../../lib/billing/invoices";');

@@ -16,7 +16,7 @@ import {
   type StorefrontVertical,
 } from "../storefront/templates";
 import { normalizeOptionalCountryCode } from "./country";
-import { assertRoleCapability, hasFeature, type ShopCapability, type ShopRole } from "./policy";
+import { assertRoleCapability, hasFeature, normalizeSlug, type ShopCapability, type ShopRole } from "./policy";
 
 type ExistingIdempotency = {
   request_hash: string;
@@ -938,6 +938,7 @@ export async function updateShopProfile(input: {
   env: AppBindings;
   merchantCountry?: string | null;
   name?: string;
+  slug?: unknown;
   requestId: string;
   shopPublicId: string;
   userId: string;
@@ -947,7 +948,8 @@ export async function updateShopProfile(input: {
   const hasCurrency = input.currency !== undefined;
   const hasDefaultLocale = input.defaultLocale !== undefined;
   const hasMerchantCountry = input.merchantCountry !== undefined;
-  if (!hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale && !hasMerchantCountry) {
+  const hasSlug = input.slug !== undefined;
+  if (!hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale && !hasMerchantCountry && !hasSlug) {
     throw new AppError("validation_failed", 400, ["shop_profile_update_empty"]);
   }
   const name = hasName ? input.name : null;
@@ -957,6 +959,7 @@ export async function updateShopProfile(input: {
   const defaultLocale = hasDefaultLocale ? matchSupportedLocale(input.defaultLocale) : null;
   if (hasDefaultLocale && defaultLocale === null) throw new AppError("validation_failed", 400, ["locale_invalid"]);
   const merchantCountry = normalizeOptionalCountryCode(input.merchantCountry, "merchant_country_invalid");
+  const slug = hasSlug ? normalizeSlug(input.slug) : null;
   const billingMarketOnly = hasMerchantCountry && !hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale;
   const current = await getShopForMember({
     capability: billingMarketOnly ? "billing:manage" : "shop:update",
@@ -966,6 +969,19 @@ export async function updateShopProfile(input: {
     userId: input.userId,
   });
   if (current.row.shop_status === "archived") throw new AppError("tenant_suspended", 403);
+  let currentPlatformDomain: { id: string } | null = null;
+  if (slug !== null) {
+    const reserved = await input.env.PLATFORM_DB.prepare("SELECT slug FROM reserved_slugs WHERE slug = ? LIMIT 1").bind(slug).first<{ slug: string }>();
+    if (reserved !== null) throw new AppError("validation_failed", 409, ["slug_reserved"]);
+    const conflict = await input.env.PLATFORM_DB.prepare("SELECT id FROM shops WHERE slug = ? AND id != ? LIMIT 1").bind(slug, current.row.shop_id).first<{ id: string }>();
+    if (conflict !== null) throw new AppError("validation_failed", 409, ["slug_unavailable"]);
+    currentPlatformDomain = await input.env.PLATFORM_DB.prepare(`
+      SELECT id FROM shop_domains
+      WHERE shop_id = ? AND type = 'platform_subdomain' AND deleted_at IS NULL
+      ORDER BY is_primary DESC, created_at ASC, id ASC
+      LIMIT 1
+    `).bind(current.row.shop_id).first<{ id: string }>();
+  }
   if (hasCurrency && currency !== null) {
     const mismatch = await input.env.PLATFORM_DB.prepare(`
       SELECT COUNT(*) AS count
@@ -979,36 +995,59 @@ export async function updateShopProfile(input: {
   const now = new Date().toISOString();
   let result: { meta: { changes: number } };
   try {
-    result = hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale && !hasMerchantCountry
-      ? await input.env.PLATFORM_DB.prepare(`
-          UPDATE shops SET name = ?, updated_at = ? WHERE id = ? AND public_id = ?
-        `).bind(name, now, current.row.shop_id, input.shopPublicId).run()
-      : await input.env.PLATFORM_DB.prepare(`
-          UPDATE shops
-          SET name = CASE WHEN ? = 1 THEN ? ELSE name END,
-              business_country_code = CASE WHEN ? = 1 THEN ? ELSE business_country_code END,
-              currency = CASE WHEN ? = 1 THEN ? ELSE currency END,
-              default_locale = CASE WHEN ? = 1 THEN ? ELSE default_locale END,
-              merchant_country_code = CASE WHEN ? = 1 THEN ? ELSE merchant_country_code END,
-              readiness_version = readiness_version + 1,
-              updated_at = ?
-          WHERE id = ? AND public_id = ?
-            AND (
-              ? = 0 OR NOT EXISTS (
-                SELECT 1 FROM product_variants
-                WHERE product_variants.shop_id = shops.id
-                  AND product_variants.currency <> ?
-              )
-            )
-        `).bind(
-          hasName ? 1 : 0, name,
-          hasBusinessCountry ? 1 : 0, businessCountry ?? null,
-          hasCurrency ? 1 : 0, currency,
-          hasDefaultLocale ? 1 : 0, defaultLocale,
-          hasMerchantCountry ? 1 : 0, merchantCountry ?? null,
-          now, current.row.shop_id, input.shopPublicId,
-          hasCurrency ? 1 : 0, currency,
-        ).run();
+    const statements: D1PreparedStatement[] = [];
+    if (slug !== null) {
+      if (currentPlatformDomain !== null) {
+        statements.push(input.env.PLATFORM_DB.prepare(`
+          UPDATE shop_domains
+          SET status = 'deleted', is_primary = 0, deleted_at = ?, delete_requested_at = NULL,
+              next_check_at = NULL, updated_at = ?, version = version + 1
+          WHERE id = ? AND shop_id = ? AND type = 'platform_subdomain' AND deleted_at IS NULL
+        `).bind(now, now, currentPlatformDomain.id, current.row.shop_id));
+      }
+      statements.push(input.env.PLATFORM_DB.prepare(`
+        INSERT INTO shop_domains (
+          id, shop_id, hostname_normalized, type, status, is_primary,
+          validation_metadata_json, activated_at, created_at, updated_at
+        ) VALUES (?, ?, ?, 'platform_subdomain', 'active', 1, '{}', ?, ?, ?)
+      `).bind(createId("dom"), current.row.shop_id, `${slug}.${input.env.PLATFORM_BASE_DOMAIN}`, now, now, now));
+    }
+    statements.push(input.env.PLATFORM_DB.prepare(`
+      UPDATE shops
+      SET name = CASE WHEN ? = 1 THEN ? ELSE name END,
+          slug = CASE WHEN ? = 1 THEN ? ELSE slug END,
+          canonical_domain_id = CASE WHEN ? = 1 THEN (
+            SELECT id FROM shop_domains
+            WHERE shop_id = shops.id AND type = 'platform_subdomain'
+              AND status = 'active' AND is_primary = 1 AND deleted_at IS NULL
+            ORDER BY created_at DESC, id DESC LIMIT 1
+          ) ELSE canonical_domain_id END,
+          business_country_code = CASE WHEN ? = 1 THEN ? ELSE business_country_code END,
+          currency = CASE WHEN ? = 1 THEN ? ELSE currency END,
+          default_locale = CASE WHEN ? = 1 THEN ? ELSE default_locale END,
+          merchant_country_code = CASE WHEN ? = 1 THEN ? ELSE merchant_country_code END,
+          readiness_version = readiness_version + 1,
+          updated_at = ?
+      WHERE id = ? AND public_id = ?
+        AND (
+          ? = 0 OR NOT EXISTS (
+            SELECT 1 FROM product_variants
+            WHERE product_variants.shop_id = shops.id
+              AND product_variants.currency <> ?
+          )
+        )
+    `).bind(
+      hasName ? 1 : 0, name,
+      hasSlug ? 1 : 0, slug,
+      hasSlug ? 1 : 0,
+      hasBusinessCountry ? 1 : 0, businessCountry ?? null,
+      hasCurrency ? 1 : 0, currency,
+      hasDefaultLocale ? 1 : 0, defaultLocale,
+      hasMerchantCountry ? 1 : 0, merchantCountry ?? null,
+      now, current.row.shop_id, input.shopPublicId,
+      hasCurrency ? 1 : 0, currency,
+    ));
+    result = (await input.env.PLATFORM_DB.batch(statements))[statements.length - 1] ?? { meta: { changes: 0 } };
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message.includes("shop_currency_variant_mismatch")) {
@@ -1023,6 +1062,7 @@ export async function updateShopProfile(input: {
 
   const changedFields = [
     ...(hasName ? ["name"] : []),
+    ...(hasSlug ? ["slug"] : []),
     ...(hasBusinessCountry ? ["businessCountry"] : []),
     ...(hasCurrency ? ["currency"] : []),
     ...(hasDefaultLocale ? ["defaultLocale"] : []),
@@ -1045,6 +1085,7 @@ export async function updateShopProfile(input: {
     defaultLocale: hasDefaultLocale ? defaultLocale ?? current.shop.defaultLocale : current.shop.defaultLocale,
     merchantCountry: hasMerchantCountry ? merchantCountry ?? null : current.shop.merchantCountry,
     name: hasName ? name as string : current.shop.name,
+    slug: hasSlug ? slug as string : current.shop.slug,
   };
 }
 

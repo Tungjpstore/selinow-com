@@ -23,7 +23,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 8 * 1024);
     rejectUnknownFields(body, ["amountMinor", "currency", "exceptionPublicId", "kind", "reasonCode"]);
     if (typeof body.exceptionPublicId !== "string" || typeof body.kind !== "string" || typeof body.currency !== "string") {

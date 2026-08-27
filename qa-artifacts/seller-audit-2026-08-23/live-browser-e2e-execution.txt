@@ -1,0 +1,340 @@
+SELINOW SELLER PLATFORM - LIVE CHROME E2E EXECUTION LEDGER
+Execution date: 2026-08-23 (Asia/Tokyo)
+Environment: Production, existing authenticated Chrome session
+Seller host: https://app.selinow.com
+Public storefront: https://a-tung.selinow.com
+
+EVIDENCE BOUNDARY
+
+This ledger contains only actions and results recorded from the real Chrome
+session. It does not treat source review, Vitest, Playwright staging/local runs,
+curl/HTTP probes, API contract inspection, or static route discovery as live
+browser evidence. A route is listed as BLOCKED when the retained Chrome record
+is not sufficient to assert a result. No logout, payment, subscription, domain,
+credential, destructive, fulfillment, or production-data cleanup action was
+performed.
+
+Result labels:
+- PASS: the recorded browser result matched the limited expectation stated.
+- FAIL: Chrome directly displayed an incorrect result or an operation failed.
+- BLOCKED: the action was deliberately not performed, could not safely proceed,
+  or the retained live evidence is insufficient to claim PASS/FAIL.
+
+SESSION AND STORE SNAPSHOT
+
+- PASS | Keep the existing Chrome session signed in -> Seller shell remained
+  authenticated; no logout was performed.
+- PASS | Inspect the signed-in identity -> Account display name was
+  "Chua Mot Lan Yeu Tung"; role was "Chu shop" (owner).
+- PASS | Inspect selected shop -> Shop "A Tung" was selected; shop ID was
+  shop_401025f6-8d6f-4757-8f51-3b3dcf4ddea0.
+- PASS | Inspect subscription projection -> Current account state was Pro with
+  status suspended. This line records account state, not a defect by itself.
+- PASS | Inspect visible shop state -> 1 product, inventory 5 available with
+  threshold 5, 0 orders, and 0 customers were observed. Telegram was active;
+  PayOS was not connected; the default domain was ready; one custom domain was
+  expired/in error.
+- BLOCKED | Determine currency, timezone, tax, provider credentials, and every
+  integration detail -> These values were not all safely or conclusively
+  established in the retained live run.
+
+SELLER SCREEN EXECUTION - 17 FUNCTIONAL SCREENS
+
+01. /app - Overview
+- PASS | Open https://app.selinow.com/app -> Authenticated Seller overview
+  rendered for account "Chua Mot Lan Yeu Tung", shop "A Tung", role owner.
+- PASS | Read non-mutating summary state -> 1 product, inventory 5 available at
+  threshold 5, 0 orders, 0 customers, and Pro/suspended were visible.
+- BLOCKED | Trigger every dashboard CTA and reconcile every metric -> Financial,
+  fulfillment, and destructive paths were intentionally not executed.
+
+02. /app/products - Products
+- FAIL | Open the Products screen and compare its projections -> The summary
+  reported 1 product and 1 variant, while the product ledger row reported 5
+  variants. The same page also displayed low-stock count 1.
+- FAIL | Click Add product, complete the draft form, use price 0, and click
+  "Tao nhap" -> The UI displayed
+  "Khong the luu (subscription_payment_required)." The draft mutation did not
+  complete successfully.
+- FAIL | Open the existing product editor and click "Luu thay doi" -> The UI
+  displayed "Khong the luu (subscription_payment_required)."
+- FAIL | Inspect the suspended-plan product controls -> Draft/save controls were
+  enabled and only disclosed entitlement failure after submit through the
+  low-level subscription_payment_required message; no upfront explanation or
+  disabled-state guidance was provided.
+- PASS | Enter a negative product price and submit -> Native minimum-value
+  validation blocked the invalid value before mutation.
+- PASS | Enter a product search, reload/navigate back to Products -> The recorded
+  search state persisted.
+- FAIL (P3) | Open a fake/nonexistent product deep link -> The UI silently showed
+  the product list instead of a clear product-not-found state.
+- BLOCKED | Publish, unpublish, archive, restore, delete, duplicate-SKU, image,
+  category, and multi-variant lifecycle -> Not executed because the account was
+  suspended and production data had to be preserved.
+
+03. /app/inventory - Inventory
+- PASS | Open the Inventory route during the authenticated read-only crawl ->
+  The route remained within the Seller workspace session.
+- BLOCKED | Import keys, change low-stock threshold, allocate/release stock, or
+  test concurrent inventory writes -> No safe production mutation was made and
+  no retained browser evidence supports a deeper result.
+
+04. /app/orders - Orders
+- PASS | Open the Orders area and inspect current non-mutating state -> The
+  Seller snapshot reported 0 orders.
+- BLOCKED | Export, filter exhaustively, change payment state, fulfill, cancel,
+  refund, or edit shipping -> These actions could affect real order/payment or
+  fulfillment state and were not performed.
+
+05. /app/orders/:id - Order detail
+- PASS | Open a fake/nonexistent order ID directly -> The route returned a clear
+  404/not-found result rather than showing another order or silently falling
+  back to the order list.
+- BLOCKED | Exercise a real order-detail mutation -> No real order fixture was
+  available; payment, timeline, note, shipping, and fulfillment were not changed.
+
+06. /app/customers - Customers
+- PASS | Inspect the Seller customer projection -> The recorded account snapshot
+  showed 0 customers.
+- BLOCKED | Edit notes, export PII, anonymize, or redact a customer -> No customer
+  fixture existed and privacy/destructive mutations were not authorized.
+
+07. /app/store - Store Builder
+- PASS | Open the Store/Website workspace and the store setup flow -> The
+  authenticated UI rendered for "A Tung" with subdomain "a-tung".
+- FAIL | Clear the required store-name input and advance -> The onboarding flow
+  advanced instead of blocking the empty required value.
+- PASS | Refresh after the onboarding negative interaction -> The flow returned
+  to Step 1 and restored the server-backed shop name rather than persisting the
+  blank transient value.
+- FAIL | Compare Seller state with the public storefront -> Seller-side state
+  did not produce a sellable public catalog; the public site displayed
+  "Cua hang dang duoc hoan thien."
+- BLOCKED | Save/publish/revert template and settings -> No production publish or
+  theme mutation was performed.
+
+08. /app/billing - Subscription and Billing
+- FAIL | Open Billing -> Chrome displayed Pro with status "Da tam ngung" while
+  a separate operation card remained at "Dang cap nhat goi" with progress text.
+  This is a contradictory/stale operation presentation.
+- BLOCKED | Click restore payment, start checkout, upgrade, downgrade, cancel,
+  reactivate, open portal, or alter payment method -> Financial actions were
+  intentionally not executed.
+
+09. /app/payments - Payment Provider
+- PASS | Open the Payment Provider route during the authenticated read-only
+  crawl -> The route showed PayOS not connected.
+- BLOCKED | Connect/update/disconnect PayOS or submit credentials -> Provider
+  secrets and payment configuration were outside the safe mutation scope.
+
+10. /app/domains - Domains
+- PASS | Open the Domains route during the authenticated read-only crawl -> The
+  default domain was ready and one custom domain was expired/in error.
+- BLOCKED | Add, verify, make primary, remove, or disconnect a domain -> DNS,
+  custom-hostname, and SSL production mutations were intentionally not made.
+
+11. /app/integrations - Integrations
+- PASS | Open the Integrations route during the authenticated read-only crawl ->
+  Telegram was active while PayOS was not connected.
+- BLOCKED | Authenticate, configure, disconnect, or reconnect Telegram, Zalo,
+  payment, webhook, and other providers -> No credential or external-provider
+  mutation was performed.
+
+12. /app/bookings - Bookings
+- PASS | Open the Bookings route during the authenticated read-only crawl -> The
+  route remained inside the Seller workspace.
+- BLOCKED | Complete, cancel, mark no-show, or test booking concurrency -> No
+  production booking state was mutated and no retained live fixture supported
+  these actions.
+
+13. /app/automation - Automation
+- PASS | Open Automation and click to create a rule -> The rule modal opened and
+  accepted a name, paid-order trigger, and Telegram action selection.
+- FAIL | Attempt to complete the recorded rule-creation flow -> The operation did
+  not reach a success state. Chrome displayed the toast
+  "Server trả dữ liệu không đúng định dạng"; the Telegram action still required
+  a hidden actionUrl that the visible form did not let the user provide.
+- BLOCKED | Toggle/delete rules or retry/cancel automation tasks -> Destructive
+  or provider-dependent actions were not executed.
+
+14. /app/members - Team and Permissions
+- FAIL | Open Members -> The page displayed "Chua the tai thanh vien" and
+  "Membership query that bai; khong hien thi ban sao cu."
+- BLOCKED | Invite, resend, revoke, suspend, or change role -> Membership data
+  failed to load and no real-team mutation was attempted.
+
+15. /app/security - Account Security
+- FAIL | Open/reload Security -> The page displayed
+  "Token bao mat khong con hop le. Tai lai trang va thu lai" while the active
+  sessions section remained loading.
+- FAIL | Click "Lam moi phien" -> The same token-invalid behavior reproduced;
+  the refresh action did not recover the sessions view.
+- FAIL | Reload the browser again -> The token-invalid state reproduced, showing
+  that normal page reload did not recover the account-security projection.
+- BLOCKED | Link Google, enable/disable 2FA, change password, revoke sessions, or
+  sign out all sessions -> Authentication-changing actions were not performed.
+
+16. /app/data - Data and Privacy
+- PASS | Open the Data and Privacy route during the authenticated read-only
+  crawl -> The route remained inside the Seller workspace.
+- BLOCKED | Request/export private data, inspect sensitive payloads, initiate
+  deletion, restore moderated content, or exercise abuse actions -> Destructive
+  and privacy-sensitive operations were intentionally not performed.
+
+17. /app/developer - Developer/API Credentials
+- PASS | Open the Developer route during the authenticated read-only crawl -> The
+  route remained inside the Seller workspace.
+- BLOCKED | Issue/reveal/revoke an API credential or create webhook access -> No
+  production secret or credential mutation was performed.
+
+SELLER ALIASES - 2 ROUTES
+
+18. /app/store/settings
+- FAIL | Open the alias directly -> It redirected to the Store screen, but the
+  intended settings focus/target was not opened or focused.
+
+19. /app/telegram
+- FAIL | Open the alias directly -> It redirected to Integrations, but the
+  intended Telegram focus/target was not opened or focused.
+
+PUBLIC STOREFRONT EXECUTION - 5 ROUTES
+
+01. / - Storefront home
+- FAIL | Open https://a-tung.selinow.com/ as public/guest -> The page rendered
+  "Cua hang dang duoc hoan thien" and stated that no administrative or draft
+  product data was displayed. No public catalog was available.
+- PASS | Verify fail-closed exposure -> The recorded page did not expose the
+  Seller draft/admin catalog in the public content.
+
+02. Product detail
+- BLOCKED | Navigate from storefront home to a public product detail -> No
+  product card/catalog was exposed, so a real customer product-detail journey
+  could not start.
+
+03. /cart
+- BLOCKED | Exercise add/update/remove/quantity on the cart route -> The live
+  storefront had no purchasable catalog. A cart badge with value 1 was visible,
+  but the run did not prove the item, persistence, stock, or edit behavior.
+
+04. /checkout
+- BLOCKED | Continue from cart through checkout -> No valid product journey was
+  available and no checkout/payment submission was attempted. This is not a
+  checkout PASS.
+
+05. /orders
+- BLOCKED | Open/recover a customer order from the guest journey -> The run did
+  not create an order or obtain a customer recovery token; no existing order was
+  accessed or modified.
+
+NEGATIVE AND FAILED-OPERATION MATRIX
+
+- FAIL | Required store name empty -> Next-step navigation advanced instead of
+  enforcing the required field.
+- FAIL | Create product draft with valid-looking metadata and price 0 -> Save
+  returned subscription_payment_required.
+- FAIL | Save existing product -> Save returned
+  subscription_payment_required.
+- FAIL | Complete the populated automation-rule creation interaction -> No
+  success state was reached; the toast said
+  "Server trả dữ liệu không đúng định dạng" and the required actionUrl remained
+  hidden from the visible form.
+- FAIL | Load Members -> Membership query failure replaced the list.
+- FAIL | Load/reload Security -> token invalid.
+- FAIL | Click Security "Lam moi phien" -> token invalid reproduced.
+- FAIL | Load Billing -> suspended plan and phantom in-progress plan update were
+  displayed concurrently.
+- PASS | Submit a negative product price -> Native min validation blocked it.
+- PASS | Open a fake order ID -> Clear 404/not-found state.
+- FAIL (P3) | Open a fake product deep link -> Product list silently replaced a
+  product-not-found state.
+- FAIL (P3) | Open a Seller route with a fake shop selector -> The shell silently
+  fell back to the real selected shop instead of explaining the invalid shop.
+- BLOCKED | Double submit, multi-tab lost update, expired session, 400/401/403/
+  409/429/500 injection, offline/timeout simulation, duplicate SKU, negative
+  inventory, and cross-account ownership tests -> These cases were not safely
+  executed in this production Chrome session.
+
+PERSISTENCE AND RECOVERY OBSERVATIONS
+
+- FAIL | Reload /app/security after token invalid -> The same error reproduced;
+  reload did not restore active sessions.
+- FAIL | Use the in-page "Lam moi phien" recovery action -> The same token error
+  reproduced; recovery CTA did not resolve the state.
+- PASS | Refresh after clearing the onboarding store name -> Step 1 reloaded with
+  the server-backed store name.
+- PASS | Reload/navigate back after product search -> Search state persisted.
+- BLOCKED | Refresh/navigation persistence after onboarding edits, store/theme
+  changes, product writes, domain changes, integration changes, subscription
+  operations, checkout, and order creation -> The corresponding mutations were
+  blocked or deliberately not executed, so persistence is not claimed.
+
+RESPONSIVE OBSERVATIONS
+
+- FAIL | Render authenticated Products at 320px -> Document-level horizontal
+  overflow was present.
+- FAIL (minor UX) | Inspect the 320px Products header/navigation -> Shop/account
+  and bottom-navigation labels were visibly truncated (for example "A ..." and
+  shortened navigation labels), reducing clarity at the minimum width.
+- FAIL | Render authenticated Seller at 390px -> The main workspace had internal
+  horizontal overflow.
+- FAIL | Render public storefront at 320px -> Document-level horizontal overflow
+  was present.
+- BLOCKED | Full-page scroll, tablet width, landscape, zoom, soft keyboard,
+  modal viewport limits, and all 17 Seller screens at mobile width -> Not all
+  were exercised in the retained real-Chrome session.
+
+ACCESSIBILITY OBSERVATIONS
+
+- PASS (limited visual) | Inspect recorded errors -> Product, Members, Billing,
+  and Security failures were presented as visible text rather than color alone.
+- PASS (limited visual) | Inspect key actions -> Primary actions such as add
+  product, save, retry, refresh sessions, and billing recovery had visible text
+  labels in the captured UI.
+- PASS | Start keyboard navigation with Tab -> The skip link was the first focus
+  target and the focused element had a visible focus indicator.
+- PASS | Open a dialog and press Escape -> The dialog closed.
+- BLOCKED | Complete full-page keyboard order, focus trapping, screen-reader
+  announcements, accessible names, ARIA state, contrast measurement, and an axe
+  scan -> These checks were not completed in live Chrome.
+
+SECURITY AND AUTHORIZATION OBSERVATIONS
+
+- PASS | Preserve current Seller session and avoid logout -> Existing account
+  state was not intentionally invalidated.
+- FAIL | Account Security session query/recovery -> Both browser reload and the
+  "Lam moi phien" action reproduced token invalid, preventing session review.
+- PASS | Open /admin with the current Seller owner account -> Access was denied;
+  the Seller role did not enter the admin console.
+- PASS | Open a fake order ID -> The route returned 404/not found and did not
+  reveal another order.
+- FAIL (P3) | Select a fake shop identifier in a direct Seller URL -> The shell
+  silently fell back to the real shop, creating ambiguous deep-link behavior.
+- BLOCKED | Guest direct access to every Seller route, customer-to-Seller route
+  bypass, cross-tenant resource reads, and User A/User B access -> A safe second
+  account/tenant fixture was unavailable. No broad authorization PASS is claimed.
+
+LIVE EVIDENCE INDEX
+
+- qa-artifacts/seller-audit-2026-08-23/live-onboarding-empty-name-advanced.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-product-create-blocked.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-product-editor-save-blocked.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-members-load-failure.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-automation-rule-invalid-contract.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-billing-suspended-phantom-operation.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-products-authenticated-320.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-products-mobile-320.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-storefront-blocked-journey.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-storefront-mobile-320.jpg
+- qa-artifacts/seller-audit-2026-08-23/live-security-token-invalid.jpg
+
+LIVE EXECUTION CONCLUSION
+
+FAIL / NOT RELEASE-READY from the limited real-Chrome execution. The current
+production Seller session exposes failed product mutations with poor entitlement
+guidance, inconsistent product variant counts, required-field validation failure,
+Members load failure, unrecoverable Security token-invalid state, contradictory
+Billing operation state, broken alias focus, 320/390px overflow, and a public
+storefront without a sellable catalog. Checkout/order creation,
+subscription/payment mutation, domain changes, credentials, destructive actions,
+cross-tenant authorization, and full accessibility remain BLOCKED rather than
+PASS.
