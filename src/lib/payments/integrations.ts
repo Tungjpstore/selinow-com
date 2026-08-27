@@ -139,6 +139,24 @@ async function paymentProviderWebhookTargetFingerprint(env: AppBindings, webhook
   return hmacToken(env.IDENTIFIER_HMAC_SECRET, "payos-provider-webhook-target:v1", webhookUrl);
 }
 
+async function findHistoricalPaymentIdentityOwner(
+  env: AppBindings,
+  fingerprint: string,
+): Promise<{ shopId: string } | null> {
+  const table = await env.PLATFORM_DB.prepare(`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'payos_provider_identity_history'
+    LIMIT 1
+  `).first<{ name: string }>();
+  if (table === null) return null;
+  return env.PLATFORM_DB.prepare(`
+    SELECT shop_id AS shopId
+    FROM payos_provider_identity_history
+    WHERE provider = 'payos' AND provider_identity_fingerprint = ?
+    LIMIT 1
+  `).bind(fingerprint).first<{ shopId: string }>();
+}
+
 async function assertPaymentProviderIdentityOwnership(
   env: AppBindings,
   shopId: string,
@@ -146,7 +164,12 @@ async function assertPaymentProviderIdentityOwnership(
   integration: IntegrationRow | null,
 ): Promise<void> {
   const fingerprint = await payOSProviderIdentityFingerprint(env, credentials);
-  const existingFingerprint = integration?.providerIdentityFingerprint ?? null;
+  // An explicit disconnect opens a controlled replacement window. Keep the
+  // old fingerprint for pending webhook verification, but let the owner
+  // prove and bind a new PayOS channel before reactivation.
+  const existingFingerprint = integration?.status === "disconnected"
+    ? null
+    : integration?.providerIdentityFingerprint ?? null;
   if (existingFingerprint !== null && existingFingerprint !== fingerprint) {
     throw new AppError("credential_channel_mismatch", 409);
   }
@@ -157,6 +180,10 @@ async function assertPaymentProviderIdentityOwnership(
     LIMIT 1
   `).bind(fingerprint).first<{ shopId: string }>();
   if (owner !== null && owner.shopId !== shopId) {
+    throw new AppError("credential_already_connected", 409);
+  }
+  const historicalOwner = await findHistoricalPaymentIdentityOwner(env, fingerprint);
+  if (historicalOwner !== null && historicalOwner.shopId !== shopId) {
     throw new AppError("credential_already_connected", 409);
   }
 }
@@ -213,6 +240,10 @@ async function paymentProviderOwnershipConflict(input: {
   if (identityOwner !== null && identityOwner.shopId !== input.shopId) {
     return new AppError("credential_already_connected", 409);
   }
+  const historicalOwner = await findHistoricalPaymentIdentityOwner(input.env, input.providerIdentityFingerprint);
+  if (historicalOwner !== null && historicalOwner.shopId !== input.shopId) {
+    return new AppError("credential_already_connected", 409);
+  }
   const credentialOwner = await findPaymentCredentialByProviderFingerprint(input.env, input.providerCredentialFingerprint);
   if (credentialOwner !== null && credentialOwner.credentialId !== input.credentialId) {
     return new AppError("credential_already_connected", 409);
@@ -229,7 +260,9 @@ async function claimPaymentProviderOwnership(input: {
   webhookUrl: string;
 }): Promise<PaymentProviderOwnershipClaim> {
   const providerIdentityFingerprint = await payOSProviderIdentityFingerprint(input.env, input.credentials);
-  const existing = input.integration.providerIdentityFingerprint ?? null;
+  const existing = input.integration.status === "disconnected"
+    ? null
+    : input.integration.providerIdentityFingerprint ?? null;
   if (existing !== null && existing !== providerIdentityFingerprint) throw new AppError("credential_channel_mismatch", 409);
   const credentialFingerprint = await paymentCredentialFingerprint(input.env, input.shopId, input.credentials);
   const providerCredentialFingerprint = await paymentProviderCredentialFingerprint(input.env, input.credentials);
@@ -268,7 +301,17 @@ async function claimPaymentProviderOwnership(input: {
           provider_claim_target_fingerprint = ?,
           updated_at = ?
         WHERE id = ? AND shop_id = ? AND provider = 'payos'
-          AND (provider_identity_fingerprint IS NULL OR provider_identity_fingerprint = ?)
+          AND (
+            provider_identity_fingerprint IS NULL
+            OR provider_identity_fingerprint = ?
+            OR (
+              status = 'disconnected'
+              AND active_credential_id IS NULL
+              AND provider_claim_nonce IS NULL
+              AND provider_claim_state = 'idle'
+              AND provider_claim_target_fingerprint IS NULL
+            )
+          )
           AND (
             provider_claim_nonce IS NULL
             OR provider_claim_target_fingerprint = ?
@@ -903,6 +946,7 @@ export async function disconnectPayOS(input: { env: AppBindings; requestId: stri
   const now = new Date().toISOString();
   await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare("UPDATE payment_integrations SET status = 'disconnected', webhook_status = 'disconnected', active_credential_id = NULL, provider_claim_generation = provider_claim_generation + 1, provider_claim_nonce = NULL, provider_claim_state = 'idle', provider_claim_target_fingerprint = NULL, updated_at = ? WHERE id = ? AND shop_id = ?").bind(now, integration.id, shopId),
+    input.env.PLATFORM_DB.prepare("UPDATE payment_provider_connections SET provider_account_fingerprint = NULL, provider_account_verified_at = NULL, updated_at = ?, version = version + 1 WHERE id = ? AND shop_id = ? AND legacy_payos_integration_id = ? AND status = 'disconnected' AND webhook_status = 'disconnected'").bind(now, integration.id, shopId, integration.id),
     input.env.PLATFORM_DB.prepare("UPDATE payment_credentials SET status = 'grace', grace_ends_at = ?, provider_claim_nonce = NULL WHERE integration_id = ? AND shop_id = ? AND status = 'active'").bind(new Date(Date.now() + 24 * 60 * 60_000).toISOString(), integration.id, shopId),
     input.env.PLATFORM_DB.prepare("UPDATE payment_credentials SET status = 'revoked', revoked_at = ?, provider_claim_nonce = NULL WHERE integration_id = ? AND shop_id = ? AND status IN ('pending', 'error')").bind(now, integration.id, shopId),
     input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'user', ?, 'payos.disconnected', 'payment_integration', ?, '{}', ?, ?)`).bind(createId("aud"), shopId, input.userId, integration.id, input.requestId, now),

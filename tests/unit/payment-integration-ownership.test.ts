@@ -290,6 +290,47 @@ describe("PayOS provider identity ownership", () => {
       .toEqual({ count: 0 });
   });
 
+  it("allows an owner to replace the PayOS channel after an explicit disconnect", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    const replacementChannel: PayOSCredentials = {
+      apiKey: "replacement-api-key",
+      checksumKey: "replacement-checksum-key",
+      clientId: "replacement-client-id",
+    };
+
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-original", shopPublicId: SHOP_A, userId: "owner-a" });
+    await disconnectPayOS({ env, requestId: "request-explicit-disconnect", shopPublicId: SHOP_A, userId: "owner-a" });
+    await expect(connectPayOS({
+      credentials: replacementChannel,
+      env,
+      fetcher,
+      requestId: "request-replacement",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+
+    expect(fetchCount.value).toBe(2);
+    const replacementIdentity = await payOSProviderIdentityFingerprint(env, replacementChannel);
+    expect(database.prepare(`
+      SELECT status, provider_identity_fingerprint IS NOT NULL AS identityOwned
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ identityOwned: 1, status: "active" });
+    expect(database.prepare(`
+      SELECT provider_account_fingerprint AS accountFingerprint, status
+      FROM payment_provider_connections WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ accountFingerprint: replacementIdentity, status: "active" });
+
+    await expect(connectPayOS({
+      credentials: replacementChannel,
+      env,
+      fetcher,
+      requestId: "request-replacement-cross-shop",
+      shopPublicId: SHOP_B,
+      userId: "owner-b",
+    })).rejects.toMatchObject({ code: "credential_already_connected", status: 409 });
+  });
+
   it("makes a settled disconnect retry a no-op without advancing the provider generation", async () => {
     const fetchCount = { value: 0 };
     const fetcher = provider(fetchCount);

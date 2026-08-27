@@ -2,6 +2,13 @@
 
 Last updated: 2026-08-26
 
+## PayOS channel replacement fix (2026-08-27)
+
+- Reproduced the staging failure after an owner-confirmed disconnect: the legacy integration kept its provider identity fingerprint, so a verified credential from the new PayOS channel was rejected as `credential_channel_mismatch` before the provider call.
+- Added forward-only migration `migrations/0120_payos_disconnect_reconnect_identity.sql`. An explicit disconnected state now permits the owning shop to attest a replacement channel; verified identities are retained in a tenant-bound history table, projection account identity is cleared on disconnect, and the new identity is synchronized only after verified activation.
+- Added regression coverage for same-shop channel replacement, cross-shop identity fencing and projection identity refresh. Focused PayOS ownership/projection/concurrency coverage passes `30/30`; full suite passed `369/371` before release-registry updates and is being rerun after the registry update.
+- Staging deployment and remote migration are still pending for this exact candidate. Payment remains non-authoritative until a signed PayOS event or tenant-correct direct reconciliation confirms the 5,000 VND transfer.
+
 ## Release candidate verification (2026-08-27)
 
 - Candidate `codex/release-candidate-20260824` now passes `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm run test` (371 files / 3,052 tests), `npm run build`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, `npx tsc --noEmit`, `npm audit --audit-level=high` (0 vulnerabilities), and `git diff --check`.

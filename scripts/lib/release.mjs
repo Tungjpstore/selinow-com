@@ -735,6 +735,16 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       payment_provider_connections_webhook_transition_guard: "2e9ce16640b0502b97ee766eea323b68de5becf2de5a7faa6e789d07d71fcf27",
     }),
   }),
+  "0120_payos_disconnect_reconnect_identity.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_payos_provider_identity_history_shop: "06a98567215c073f293e22b1e9d378e529c1941854992138d50718517b1d17b4",
+      payos_provider_identity_history: "e98fa2f85d34b9abbf14db68e4d1dabb54f2f2efc5c0a723b8338831339448cb",
+      payment_integrations_payos_identity_history_insert: "cfddc54d16c8affb22fbfff561b65f0cbd627fa3d3fe5e5f9eb83bf93e6366f1",
+      payment_integrations_payos_identity_history_update: "aeaf27cfe1a41a95a720bcaef059dd8cd7117f80b14651ebfd74ceedc7150634",
+      payment_provider_connections_identity_immutable: "56d4a84fc7a5825162e67e9c439f8701e8fbe8442f4f33c136cb4949bbd14ca9",
+    }),
+  }),
 });
 
 
@@ -2708,7 +2718,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_google_identities", "auth_google_oauth_states", "auth_otp_admissions", "auth_request_admissions", "billing_checkout_sessions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
+    if (["auth_google_identities", "auth_google_oauth_states", "auth_otp_admissions", "auth_request_admissions", "billing_checkout_sessions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "payos_provider_identity_history", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
