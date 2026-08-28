@@ -111,6 +111,7 @@ function queueItem(item: QueueItemInput): TodayQueueItem {
 
 export async function getSellerTodaySnapshot(input: {
   env: AppBindings;
+  now?: Date;
   shopPublicId: string;
   userId: string;
 }): Promise<TodaySnapshot> {
@@ -124,7 +125,13 @@ export async function getSellerTodaySnapshot(input: {
   const catalogSection = await section(async () =>
     catalogView(await listSellerCatalog({ env: input.env, shopPublicId: input.shopPublicId, userId: input.userId })));
   const metricsSection = await section(() =>
-    getSellerMetricsRange({ days: 7, env: input.env, shopPublicId: input.shopPublicId, userId: input.userId }));
+    getSellerMetricsRange({
+      days: 7,
+      env: input.env,
+      ...(input.now === undefined ? {} : { now: input.now }),
+      shopPublicId: input.shopPublicId,
+      userId: input.userId,
+    }));
   const activitySection = await section(() =>
     listSellerAuditEntries({ env: input.env, limit: 10, shopPublicId: input.shopPublicId, userId: input.userId }));
   const automationSection = await section(() =>

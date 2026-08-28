@@ -335,7 +335,7 @@ describe("seller today snapshot read model (EX3.2)", () => {
     seedOrder(database.database, { orderNumber: "B1", paidAt: "2026-08-22T02:00:00.000Z", paymentStatus: "paid", publicId: "order_21111111-1111-4111-8111-111111111111", totalMinor: 120_000 });
     seedOrder(database.database, { orderNumber: "B2", paidAt: "2026-08-21T02:00:00.000Z", paymentStatus: "partial", publicId: "order_21212121-1212-4121-8121-121212121212", totalMinor: 30_000 });
 
-    const snapshot = await getSellerTodaySnapshot({ env: appEnv(database), shopPublicId: "public-a", userId: "user-a" });
+    const snapshot = await getSellerTodaySnapshot({ env: appEnv(database), now: METRICS_NOW, shopPublicId: "public-a", userId: "user-a" });
     expect(snapshot.role).toBe("owner");
     expect(snapshot.metrics.state).toBe("ready");
     expect(snapshot.metrics.data?.totalMinor).toBe(120_000);
@@ -354,7 +354,7 @@ describe("seller today snapshot read model (EX3.2)", () => {
       .run("usr_51111111-1111-4111-8111-111111111111", "s@example.test", "Support S", NOW, NOW);
     database.database.prepare("INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at) VALUES ('shop-a', 'usr_51111111-1111-4111-8111-111111111111', 'support', 'active', ?, ?)").run(NOW, NOW);
 
-    const snapshot = await getSellerTodaySnapshot({ env: appEnv(database), shopPublicId: "public-a", userId: "usr_51111111-1111-4111-8111-111111111111" });
+    const snapshot = await getSellerTodaySnapshot({ env: appEnv(database), now: METRICS_NOW, shopPublicId: "public-a", userId: "usr_51111111-1111-4111-8111-111111111111" });
     expect(snapshot.role).toBe("support");
     expect(snapshot.activity.state).toBe("forbidden");
     expect(snapshot.activity.data).toBeUndefined();
