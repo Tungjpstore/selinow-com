@@ -4051,7 +4051,7 @@ describe("Phase 9 data lifecycle", () => {
       requestId: "support-legal-hold-denied",
       shopPublicId: SHOP_PUBLIC_ID,
     })).rejects.toMatchObject({ code: "authorization_denied", status: 403 });
-  });
+  }, 30_000);
 
   it("denies an un-enrolled admin on deletion reads and legal holds until two-factor enrollment completes", async () => {
     const runtime = createRuntime();

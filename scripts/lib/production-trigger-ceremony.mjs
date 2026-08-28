@@ -103,13 +103,22 @@ function normalizeConsumer(raw) {
   if (rawSettings === null || typeof rawSettings !== "object") {
     throw new Error("production_trigger_consumer_settings_invalid");
   }
+  const rawBatchTimeout = normalizeSetting(rawSettings, ["batchTimeout", "batch_timeout", "max_batch_timeout"]);
+  const rawMaxWaitMs = normalizeSetting(rawSettings, ["maxWaitTimeMs", "max_wait_time_ms"]);
+  const batchTimeout = rawBatchTimeout !== undefined
+    ? rawBatchTimeout
+    : Number.isInteger(rawMaxWaitMs) && rawMaxWaitMs > 0 && rawMaxWaitMs % 1000 === 0
+      ? rawMaxWaitMs / 1000
+      : undefined;
+  const rawRetryDelay = normalizeSetting(rawSettings, ["retryDelaySecs", "retry_delay_secs", "retry_delay"]);
   const settings = {
-    batchSize: normalizeSetting(rawSettings, ["batchSize", "batch_size"]),
-    batchTimeout: normalizeSetting(rawSettings, ["batchTimeout", "batch_timeout"]),
-    deadLetterQueue: normalizeSetting(rawSettings, ["deadLetterQueue", "dead_letter_queue"]),
+    batchSize: normalizeSetting(rawSettings, ["batchSize", "batch_size", "max_batch_size"]),
+    batchTimeout,
+    deadLetterQueue: normalizeSetting(rawSettings, ["deadLetterQueue", "dead_letter_queue"])
+      ?? normalizeSetting(raw, ["deadLetterQueue", "dead_letter_queue"]),
     maxRetries: normalizeSetting(rawSettings, ["maxRetries", "max_retries", "messageRetries"]),
     maxConcurrency: normalizeSetting(rawSettings, ["maxConcurrency", "max_concurrency"]),
-    retryDelaySecs: normalizeSetting(rawSettings, ["retryDelaySecs", "retry_delay_secs", "retry_delay"]),
+    retryDelaySecs: rawRetryDelay === 0 ? undefined : rawRetryDelay,
   };
   for (const key of Object.keys(settings)) {
     if (settings[key] === undefined) delete settings[key];

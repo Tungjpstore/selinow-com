@@ -940,6 +940,46 @@ describe("Dodo billing adapter", () => {
     fixture.database.close();
   });
 
+  it("rejects a captured payment whose provider payload omits the checkout identity (BUG-005)", async () => {
+    const fixture = billingFixture("trialing");
+    const checkout = await createBillingCheckout({
+      env: fixture.env,
+      fetcher: () => Promise.resolve(Response.json({ checkout_url: "https://test.checkout.dodopayments.com/session/cks_reconcile_no_id", session_id: "cks_reconcile_no_id" })),
+      idempotencyKey: "checkout-reconcile-no-id-1",
+      planCode: "pro",
+      requestId: "request-reconcile-no-id-1",
+      shopPublicId: "shop_00000000-0000-4000-8000-0000000000a1",
+      userId: "billing-user-a",
+      now: new Date(NOW_ISO),
+    });
+    const fetcher: typeof fetch = (input) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      if (url.pathname === "/checkouts/cks_reconcile_no_id") {
+        return Promise.resolve(Response.json({ created_at: NOW_ISO, id: "cks_reconcile_no_id", payment_id: "pay_reconcile_no_id", payment_status: "succeeded" }));
+      }
+      if (url.pathname === "/payments/pay_reconcile_no_id") {
+        // Amount, currency, price and subscription all match, but the payment
+        // payload carries no checkout_session_id/checkout_id at all.
+        return Promise.resolve(Response.json({
+          currency: "USD",
+          metadata: {},
+          payment_id: "pay_reconcile_no_id",
+          status: "succeeded",
+          subscription_id: "sub_dodo_test",
+          total_amount: 1500,
+        }));
+      }
+      if (url.pathname === "/subscriptions/sub_dodo_test") {
+        return Promise.resolve(Response.json({ id: "sub_dodo_test", product_id: "dodo_pri_pro_global_v1", status: "active" }));
+      }
+      throw new Error(`unexpected_provider_path:${url.pathname}`);
+    };
+    await expect(reconcileDodoBillingCheckouts({ env: fixture.env, fetcher, now: new Date(NOW_ISO) })).resolves.toMatchObject({ failed: 1, completed: 0 });
+    expect(fixture.database.prepare("SELECT status, reconciliation_failure_code AS failureCode FROM billing_checkout_sessions WHERE id = ?").get(checkout.sessionId)).toEqual({ failureCode: "billing_webhook_identity_mismatch", status: "open" });
+    expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM billing_invoices WHERE provider_transaction_ref = 'pay_reconcile_no_id'").get()).toEqual({ count: 0 });
+    fixture.database.close();
+  });
+
   it("expires an abandoned provider checkout and permits a fresh replacement", async () => {
     const fixture = billingFixture("trialing");
     let postCount = 0;

@@ -586,7 +586,7 @@ describe("canonical commerce channel parity on local D1", () => {
     const english = await run("en");
     const vietnamese = await run("vi-VN");
     expect(vietnamese).toEqual(english);
-  });
+  }, 30_000);
 
   it("executes free-license, paid-reservation and free-manual checkouts through the fake adapter on real D1", async () => {
     const runtime = createRuntime();

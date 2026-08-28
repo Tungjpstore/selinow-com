@@ -888,8 +888,11 @@ async function reconcileDodoCheckoutRow(input: {
     ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }),
   });
   const metadata = exactCheckoutMetadata(input.row);
+  // BUG-005: the provider payment must carry the exact immutable checkout
+  // identity. A missing checkout_session_id can no longer be attributed to
+  // this local session on amount/currency/price signals alone.
   if (payment.status !== "succeeded"
-    || (payment.checkoutSessionId !== null && payment.checkoutSessionId !== input.row.providerCheckoutRef)
+    || payment.checkoutSessionId !== input.row.providerCheckoutRef
     || payment.amountMinor !== input.row.amountMinor
     || payment.currency !== input.row.currency.toUpperCase()
     || (payment.priceId !== null && payment.priceId !== input.row.providerPriceRef)

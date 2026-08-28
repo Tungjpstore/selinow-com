@@ -1,6 +1,13 @@
 # Implementation Status
 
-Last updated: 2026-08-26
+Last updated: 2026-08-28
+
+## Current release audit (2026-08-28)
+
+- Fixed BUG-005 in `src/lib/billing/service.ts`: Dodo reconciliation now requires the provider payment payload to carry the exact immutable checkout session identity; matching amount/currency/price/subscription fields without that identity remains an open exception. Added a regression test for the missing-identity payload in `tests/unit/dodo-billing.test.ts`.
+- Local verification for the current worktree passes: `npm run check` (0 errors, 4 hints), `npm run lint`, `npx tsc --noEmit`, `npm run test` (372 files / 3,061 tests), `npm run build`, `npm run deploy:dry-run`, `npm audit --audit-level=high` (0 vulnerabilities), and `git diff --check`. Isolated application of all 120 source migrations also succeeds through `0120_payos_disconnect_reconnect_identity.sql`.
+- Production release remains **NO-GO**. The checked-in production evidence is stale and does not bind the current candidate; current source migrations `0113`-`0120` are pending in production. Fresh protected backup/restore, candidate-bound staging deployment, monitoring acknowledgement, rollback evidence, Dodo signed UAT, PayOS controlled payment/reconciliation, and the required scoped Cloudflare operator credentials are still absent.
+- Chrome dashboard inspection confirms authenticated Dodo Payments, PayOS and Cloudflare tabs are available. Dashboard screenshots are not release evidence. Creating/revealing provider or Cloudflare secrets and executing the controlled 5,000 VND PayOS transfer require action-time confirmation and were not performed.
 
 ## PayOS channel replacement fix (2026-08-27)
 

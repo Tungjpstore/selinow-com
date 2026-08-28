@@ -1,6 +1,6 @@
 # Data Model
 
-The authoritative numbered source chain is contiguous through `0119_payos_provider_projection_lifecycle.sql`. Staging D1 is applied through the complete `0001`-`0119` ledger, but retained deployment evidence is bound to an earlier candidate and cannot authorize this release. Production D1 remains admitted through `0112_google_auth_foundation.sql`; continuation migrations `0113` through `0119` require fresh production backup/restore and mutation-window gates. The reviewed production resource identity and platform deployment are provisioned; provider activation and commerce traffic remain separately fail-closed. The full future schema contract remains in `02_ARCHITECTURE_AND_DATA.md`.
+The authoritative numbered source chain is contiguous through `0120_payos_disconnect_reconnect_identity.sql`. Staging D1 is observed through `0119`, while retained deployment evidence is bound to an earlier candidate and cannot authorize this release. Production D1 remains admitted through `0112_google_auth_foundation.sql`; continuation migrations `0113` through `0120` require fresh production backup/restore and mutation-window gates. The reviewed production resource identity and platform deployment are provisioned; provider activation and commerce traffic remain separately fail-closed. The full future schema contract remains in `02_ARCHITECTURE_AND_DATA.md`.
 
 All shop-owned access must resolve active membership first and retain the internal `shop_id` predicate for reads and writes. Public IDs are routing identifiers, not authorization authority.
 
@@ -153,7 +153,7 @@ claims require a subject hash and permitted delivery marker; raw requester and
 user identifiers remain outside D1. This migration is source-only relative to
 the retained remote evidence.
 
-Current operational ledger note: source migrations `0001`-`0119` are contiguous;
+Current operational ledger note: source migrations `0001`-`0120` are contiguous;
 staging D1 is observed through `0119`, and production remains admitted only
 through `0112`. All later migration descriptions in this document are schema
 contracts or checkpoint history until a protected, exact-target admission and
