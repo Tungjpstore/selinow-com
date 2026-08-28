@@ -183,6 +183,7 @@ significant.
   "previousWorkerVersion": "<uuid>",
   "observedAt": "<fresh-iso-time>",
   "states": {
+    "billingCheckoutsDrained": true,
     "inFlightJobsDrained": true,
     "queueProducersPaused": true,
     "scheduledWorkPaused": true,
@@ -190,6 +191,12 @@ significant.
   }
 }
 ```
+
+`billingCheckoutsDrained` asserts zero `pending`/`open` provider-backed
+`billing_checkout_sessions` rows remain (BUG-004): a rollback Worker predating
+the provider-backed checkout state machine cannot reconcile or expire those
+sessions, so the rehearsal must prove the checkout lane is empty before any
+version mutation.
 
 Set the completed file to mode `0600` before invoking the rehearsal.
 

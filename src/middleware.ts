@@ -6,6 +6,7 @@ import {
   isPrivatePagePath,
   resolveRequestId,
 } from "./lib/http/security";
+import { shouldEnforceHttps, toHttpsRedirect } from "./lib/http/https";
 import { loggerFor } from "./lib/operations/logger";
 import { getBindings } from "./lib/platform/bindings";
 import { parseCookies, serializeCookie } from "./lib/http/cookies";
@@ -23,6 +24,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
   let responseStatus = 500;
   try {
     const requestUrl = new URL(context.request.url);
+    // BUG-001: universal HTTP→HTTPS canonicalization before any other work so
+    // no platform, API, dashboard or tenant route is ever served over
+    // plaintext. Local/loopback hosts are exempt for `wrangler dev`.
+    if (shouldEnforceHttps(context.request, env.APP_ENV)) {
+      const redirect = toHttpsRedirect(context.request);
+      if (redirect !== null) {
+        responseStatus = redirect.status;
+        return redirect;
+      }
+    }
     const hostKind = classifyPlatformHost(requestUrl.hostname, env);
     const localeResolution = resolveLocaleWithSource({
       acceptLanguage: context.request.headers.get("Accept-Language"),

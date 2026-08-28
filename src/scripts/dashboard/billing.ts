@@ -657,7 +657,11 @@ if (root !== null && root.dataset.canManage === "true") {
         }
       }
     }
-    showFeedback(text("operationDescription"), "info");
+    // BUG-002: the hosted session is still open after the poll window. Keep
+    // the persisted attempt (retry/reload stays possible) and explain the
+    // pending state instead of the generic processing banner.
+    operationBanner?.setAttribute("hidden", "");
+    showFeedback(text("checkoutReturnPending"), "info");
   };
   const startOperation = async (action: BillingOperation["action"], requestedPlanCode?: string): Promise<void> => {
     if (pending || shopPublicId === undefined || !Number.isSafeInteger(subscriptionVersion)) return;

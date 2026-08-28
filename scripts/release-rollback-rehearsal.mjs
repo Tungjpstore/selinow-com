@@ -247,7 +247,7 @@ export async function verifyMaintenanceDrainEvidence({
     || artifact.previousWorkerVersion !== evidence?.previousWorkerVersion
     || !Number.isFinite(observedAt) || age < 0 || age > MAX_DRAIN_EVIDENCE_AGE_MS
     || JSON.stringify(stateKeys) !== JSON.stringify([
-      "inFlightJobsDrained", "queueProducersPaused", "scheduledWorkPaused", "writeAdmissionClosed",
+      "billingCheckoutsDrained", "inFlightJobsDrained", "queueProducersPaused", "scheduledWorkPaused", "writeAdmissionClosed",
     ])
     || stateKeys.some((key) => states[key] !== true)) {
     throw new Error("maintenance_drain_evidence_invalid");

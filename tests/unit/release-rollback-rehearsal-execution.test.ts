@@ -260,6 +260,7 @@ describe("production rollback rehearsal execution", () => {
       releaseId: boundEvidence.releaseId,
       schemaVersion: 1,
       states: {
+        billingCheckoutsDrained: true,
         inFlightJobsDrained: true,
         queueProducersPaused: true,
         scheduledWorkPaused: true,
@@ -302,6 +303,7 @@ describe("production rollback rehearsal execution", () => {
       releaseId: boundEvidence.releaseId,
       schemaVersion: 1,
       states: {
+        billingCheckoutsDrained: true,
         writeAdmissionClosed: true,
         scheduledWorkPaused: true,
         queueProducersPaused: true,

@@ -386,6 +386,22 @@ describe("subscription state presentation", () => {
     expect(portalRoute).toContain('returnUrl.searchParams.set("shop", shopPublicId)');
   });
 
+  it("keeps the checkout return lifecycle pending instead of a generic processing banner (BUG-002/BUG-003)", () => {
+    const page = readFileSync("src/pages/app/billing.astro", "utf8");
+    const controller = readFileSync("src/scripts/dashboard/billing.ts", "utf8");
+    // BUG-002: pending return copy exists in both locales and is wired to the
+    // poll-exhaustion path instead of the generic processing description.
+    expect(page).toContain("checkoutReturnPending:");
+    expect(page).toContain("Thanh toán chưa được xác nhận. Trang tự tải lại khi Dodo Payments phản hồi; bạn cũng có thể tải lại trang sau ít phút.");
+    expect(page).toContain("Payment is not confirmed yet. This page reloads when Dodo Payments responds; you can also reload in a few minutes.");
+    expect(controller).toContain('showFeedback(text("checkoutReturnPending"), "info")');
+    expect(controller).toContain("operationBanner?.setAttribute(\"hidden\", \"\")");
+    // BUG-003: the attempt survives the poll window so retry/reload works.
+    expect(controller).toContain("void pollBillingReturn(checkoutSessionId)");
+    expect(controller).not.toContain("removeItem(BILLING_ATTEMPT_STORAGE_KEY)");
+    expect(controller).not.toContain("tracker.finishSession");
+  });
+
   it("retains safe API error codes and request IDs for checkout support", () => {
     expect(readBillingApiFailure({ code: "recent_auth_required", requestId: "request-checkout-001" }, 403)).toEqual({
       code: "recent_auth_required",
