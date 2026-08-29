@@ -4,6 +4,9 @@ Last updated: 2026-08-29
 
 ## Release continuation audit (2026-08-29)
 
+- Refreshed the four staging public visual snapshots after the approved legal/support footer and login surface changed. `npm run test:visual:staging:update` followed by `npm run test:visual:staging` now passes all 20 desktop/mobile/accessibility/viewport checks; no runtime code change was made for this snapshot-only update.
+- The current staging release remains bound to `fd25767053dfa81d285d427022f5248fb61a232f` and Worker `217330c2-78fc-4d0b-928c-e0f9ee4ec02d`. Production is still fail-closed until fresh candidate-bound Dodo/PayOS UAT, production backup/restore, monitoring, rollback metadata/rehearsal, secret inventory binding, and production secrets are present.
+
 - Committed `de3a06e` to make the seller Today snapshot accept an optional clock and to pass the fixed test clock through the metrics section. This removes the date-dependent unit failure without changing production defaults.
 - Current source verification rerun passes: `npm run check` (0 errors, 4 hints), `npm run lint`, `npx tsc --noEmit`, focused 0121 staging/PayOS/preflight/ownership/documentation suites, full Vitest (373 files / 3,067 tests), `npm run build`, `npm run build:staging`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, the isolated 121-migration SQLite replay, and `git diff --check`.
 - The authoritative source chain is now contiguous through `0121_payos_disconnect_projection_repair.sql`; an isolated SQLite replay of all 121 migrations passes integrity and foreign-key checks. Migration `0121` clears stale PayOS projection fingerprint/verification fields only for a fully disconnected same-tenant legacy integration with no active credential, preserves the `0120` identity fence, and does not establish payment authority or activate fulfillment.
