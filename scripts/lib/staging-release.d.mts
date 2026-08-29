@@ -178,11 +178,13 @@ export function captureStagingReleaseDatabaseBaseline(input: {
   migrationLedgerPrefix: string[];
 }>;
 export function parseStagingDatabasePreflightOutput(output: string, options?: {
+  allowInvalidPayosConnectionLinks?: boolean;
   allowMissingPayosConnections?: boolean;
 }): {
   checks: Array<{ code: string; detail: string; ok: boolean }>;
 };
 export function assertStagingDatabasePreflight(input?: {
+  allowInvalidPayosConnectionLinks?: boolean;
   allowMissingPayosConnections?: boolean;
   environment?: NodeJS.ProcessEnv;
   repositoryRoot?: string;
@@ -194,6 +196,7 @@ export function assertStagingDatabasePreflight(input?: {
 }): { checks: Array<{ code: string; detail: string; ok: boolean }> };
 export function runStagingMigrationWithVerification(input: {
   assertDatabasePreflightImplementation?: (input?: {
+    allowInvalidPayosConnectionLinks?: boolean;
     allowMissingPayosConnections?: boolean;
     environment?: NodeJS.ProcessEnv;
     migrationNames?: string[];

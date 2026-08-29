@@ -745,6 +745,10 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
       payment_provider_connections_identity_immutable: "56d4a84fc7a5825162e67e9c439f8701e8fbe8442f4f33c136cb4949bbd14ca9",
     }),
   }),
+  "0121_payos_disconnect_projection_repair.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
 });
 
 

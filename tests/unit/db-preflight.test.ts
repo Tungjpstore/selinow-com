@@ -128,6 +128,7 @@ describe("payment provider D1 preflight", () => {
         invalid_payos_reference_codes: 0,
         missing_payos_connections: 0,
         stale_effective_authorizations: 2,
+        stale_payos_disconnect_projection_state: 0,
       }],
     }]));
     const result = evaluatePaymentProviderPreflight(counts);
@@ -155,6 +156,7 @@ describe("payment provider D1 preflight", () => {
         invalid_payos_reference_codes: 0,
         missing_payos_connections: 0,
         stale_effective_authorizations: 0,
+        stale_payos_disconnect_projection_state: 0,
       });
     } finally {
       database.close();

@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 const MIGRATION = "0119_payos_provider_projection_lifecycle.sql";
+const DISCONNECT_REPAIR_MIGRATION = "0121_payos_disconnect_projection_repair.sql";
 const NOW = "2026-08-25T10:00:00.000Z";
 const databases: DatabaseSync[] = [];
 
@@ -205,5 +206,57 @@ describe("PayOS provider projection lifecycle repair", () => {
       FROM payment_provider_connection_capabilities
       WHERE connection_id = 'integration-lifecycle' AND effective_enabled = 1
     `).get()).toEqual({ count: 4 });
+  });
+
+  it("repairs stale identity fields left on a disconnected PayOS projection", () => {
+    const database = databaseThrough(120);
+    seedShop(database);
+    insertLegacyIntegration(
+      database,
+      "integration-stale-disconnect",
+      "active",
+      "verified",
+      "provider-fingerprint-stale",
+    );
+
+    const disconnectedAt = "2026-08-25T10:04:00.000Z";
+    database.prepare(`
+      UPDATE payment_integrations
+      SET status = 'disconnected', webhook_status = 'disconnected',
+        updated_at = ?
+      WHERE id = 'integration-stale-disconnect'
+    `).run(disconnectedAt);
+    expect(projection(database, "integration-stale-disconnect")).toMatchObject({
+      disconnectedAt,
+      fingerprint: "provider-fingerprint-stale",
+      status: "disconnected",
+      verifiedAt: NOW,
+      webhookStatus: "disconnected",
+    });
+
+    const before = database.prepare(`
+      SELECT version FROM payment_provider_connections
+      WHERE id = 'integration-stale-disconnect'
+    `).get() as { version: number };
+    database.exec(readFileSync(join(process.cwd(), "migrations", DISCONNECT_REPAIR_MIGRATION), "utf8"));
+
+    expect(projection(database, "integration-stale-disconnect")).toEqual({
+      disconnectedAt,
+      fingerprint: null,
+      status: "disconnected",
+      verifiedAt: null,
+      webhookStatus: "disconnected",
+    });
+    expect(database.prepare(`
+      SELECT version FROM payment_provider_connections
+      WHERE id = 'integration-stale-disconnect'
+    `).get()).toEqual({ version: before.version + 1 });
+
+    // Reapplying the repair is a no-op once the projection is clean.
+    database.exec(readFileSync(join(process.cwd(), "migrations", DISCONNECT_REPAIR_MIGRATION), "utf8"));
+    expect(database.prepare(`
+      SELECT version FROM payment_provider_connections
+      WHERE id = 'integration-stale-disconnect'
+    `).get()).toEqual({ version: before.version + 1 });
   });
 });

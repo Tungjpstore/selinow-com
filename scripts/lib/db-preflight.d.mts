@@ -26,6 +26,7 @@ export type PaymentProviderPreflightCounts = {
   invalidPayosMethodGrants: number;
   invalidPayosReferenceCodes: number;
   missingPayosConnections: number;
+  stalePayosDisconnectProjectionState: number;
   staleEffectiveAuthorizations: number;
 };
 

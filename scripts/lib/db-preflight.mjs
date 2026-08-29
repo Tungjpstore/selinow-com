@@ -221,7 +221,48 @@ SELECT
           ELSE NULL
         END
       )
+      AND NOT (
+          integration.id IS NOT NULL
+          AND integration.provider = 'payos'
+          AND connection.public_id = integration.public_id
+          AND connection.provider_environment = 'unknown'
+          AND connection.connection_mode = 'bring_your_own'
+          AND connection.settlement_mode = 'direct'
+          AND connection.credential_ownership = 'seller'
+          AND connection.status = 'disconnected'
+          AND connection.webhook_status = 'disconnected'
+          AND connection.provider_attested_country_code IS NULL
+          AND connection.provider_country_attested_at IS NULL
+          AND integration.status = 'disconnected'
+          AND integration.webhook_status = 'disconnected'
+          AND integration.active_credential_id IS NULL
+          AND (connection.provider_account_fingerprint IS NOT NULL
+            OR connection.provider_account_verified_at IS NOT NULL)
+      )
   ) AS invalid_payos_connection_links,
+  (
+    SELECT COUNT(*)
+    FROM payment_provider_connections AS connection
+    INNER JOIN payment_integrations AS integration
+      ON integration.id = connection.legacy_payos_integration_id
+      AND integration.shop_id = connection.shop_id
+      AND integration.provider = 'payos'
+    WHERE connection.provider_code = 'payos'
+      AND connection.status = 'disconnected'
+      AND connection.webhook_status = 'disconnected'
+      AND connection.public_id = integration.public_id
+      AND connection.provider_environment = 'unknown'
+      AND connection.connection_mode = 'bring_your_own'
+      AND connection.settlement_mode = 'direct'
+      AND connection.credential_ownership = 'seller'
+      AND connection.provider_attested_country_code IS NULL
+      AND connection.provider_country_attested_at IS NULL
+      AND (connection.provider_account_fingerprint IS NOT NULL
+        OR connection.provider_account_verified_at IS NOT NULL)
+      AND integration.status = 'disconnected'
+      AND integration.webhook_status = 'disconnected'
+      AND integration.active_credential_id IS NULL
+  ) AS stale_payos_disconnect_projection_state,
   (
     SELECT COUNT(*)
     FROM payment_provider_connections AS connection
@@ -433,6 +474,7 @@ export function parsePaymentProviderPreflightOutput(output) {
     invalidPayosMethodGrants: safeCount(row, "invalid_payos_method_grants"),
     invalidPayosReferenceCodes: safeCount(row, "invalid_payos_reference_codes"),
     missingPayosConnections: safeCount(row, "missing_payos_connections"),
+    stalePayosDisconnectProjectionState: safeCount(row, "stale_payos_disconnect_projection_state"),
     staleEffectiveAuthorizations: safeCount(row, "stale_effective_authorizations"),
   };
 }
@@ -468,6 +510,7 @@ export function evaluatePaymentProviderPreflight(counts) {
   const checks = [
     { code: "missing_payos_connections", detail: String(counts.missingPayosConnections), ok: counts.missingPayosConnections === 0 },
     { code: "invalid_payos_connection_links", detail: String(counts.invalidPayosConnectionLinks), ok: counts.invalidPayosConnectionLinks === 0 },
+    { code: "stale_payos_disconnect_projection_state", detail: String(counts.stalePayosDisconnectProjectionState), ok: counts.stalePayosDisconnectProjectionState === 0 },
     { code: "invalid_payos_capability_grants", detail: String(counts.invalidPayosCapabilityGrants), ok: counts.invalidPayosCapabilityGrants === 0 },
     { code: "invalid_payos_currency_grants", detail: String(counts.invalidPayosCurrencyGrants), ok: counts.invalidPayosCurrencyGrants === 0 },
     { code: "invalid_payos_method_grants", detail: String(counts.invalidPayosMethodGrants), ok: counts.invalidPayosMethodGrants === 0 },

@@ -14,12 +14,12 @@ changes.
 
 - Clean reviewed commit/tree: `TBD after this batch is committed and final review`
 - Release manifest/checksum: `TBD`
-- Current source migration ledger: contiguous `0001`-`0120`
+- Current source migration ledger: contiguous `0001`-`0121`
 - Current Worker/version: read-only dashboard observation shows prefix
   `e2a4bc53`; the historical `6ca9c890...` bootstrap version is not current,
   and fresh exact inventory is required
 - Current D1 ledger: `0001`-`0112` must be rechecked live
-- Exact pending migrations: `0113`-`0120`, subject to live ledger
+- Exact pending migrations: `0113`-`0121`, subject to live ledger
 
 ## Production scope
 

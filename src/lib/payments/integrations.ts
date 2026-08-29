@@ -935,12 +935,48 @@ export async function disconnectPayOS(input: { env: AppBindings; requestId: stri
   const shopId = await requirePaymentManager(input.env, input.shopPublicId, input.userId);
   const integration = await findIntegration(input.env, shopId);
   if (integration === null) throw new AppError("payment_not_configured", 409);
-  if (integration.status === "disconnected"
+  const settled = integration.status === "disconnected"
     && integration.webhookStatus === "disconnected"
     && integration.activeCredentialId === null
     && integration.providerClaimNonce === null
     && integration.providerClaimState === "idle"
-    && integration.providerClaimTargetFingerprint === null) {
+    && integration.providerClaimTargetFingerprint === null;
+  if (settled) {
+    const projection = await input.env.PLATFORM_DB.prepare(`
+      SELECT provider_account_fingerprint AS providerAccountFingerprint,
+        provider_account_verified_at AS providerAccountVerifiedAt
+      FROM payment_provider_connections
+      WHERE id = ? AND shop_id = ? AND provider_code = 'payos'
+        AND legacy_payos_integration_id = ?
+      LIMIT 1
+    `).bind(integration.id, shopId, integration.id).first<{
+      providerAccountFingerprint: string | null;
+      providerAccountVerifiedAt: string | null;
+    }>();
+    if (projection === null
+      || (projection.providerAccountFingerprint === null && projection.providerAccountVerifiedAt === null)) {
+      return;
+    }
+
+    // Older disconnects could leave the provider projection's identity behind.
+    // Repair only that projection so a retry remains otherwise idempotent.
+    await input.env.PLATFORM_DB.prepare(`
+      UPDATE payment_provider_connections
+      SET provider_account_fingerprint = NULL,
+        provider_account_verified_at = NULL,
+        updated_at = (
+          SELECT updated_at FROM payment_integrations
+          WHERE id = ? AND shop_id = ? AND provider = 'payos'
+        ),
+        version = version + 1
+      WHERE id = ? AND shop_id = ? AND provider_code = 'payos'
+        AND legacy_payos_integration_id = ?
+        AND status = 'disconnected' AND webhook_status = 'disconnected'
+        AND provider_attested_country_code IS NULL
+        AND provider_country_attested_at IS NULL
+        AND (provider_account_fingerprint IS NOT NULL
+          OR provider_account_verified_at IS NOT NULL)
+    `).bind(integration.id, shopId, integration.id, shopId, integration.id).run();
     return;
   }
   const now = new Date().toISOString();

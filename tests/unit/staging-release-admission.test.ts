@@ -395,6 +395,24 @@ describe("staging release admission", () => {
       ok: false,
     }), { allowMissingPayosConnections: true }))
       .toThrow("staging_database_preflight_failed");
+    const disconnectRepairOutput = JSON.stringify({
+      checks: [
+        { code: "tenant_relationships", detail: "0", ok: true },
+        { code: "stale_payos_disconnect_projection_state", detail: "1", ok: false },
+      ],
+      environment: "staging",
+      ok: false,
+    });
+    expect(parseStagingDatabasePreflightOutput(disconnectRepairOutput, {
+      allowInvalidPayosConnectionLinks: true,
+    })).toEqual({
+      checks: [
+        { code: "tenant_relationships", detail: "0", ok: true },
+        { code: "stale_payos_disconnect_projection_state", detail: "1", ok: false },
+      ],
+    });
+    expect(() => parseStagingDatabasePreflightOutput(disconnectRepairOutput))
+      .toThrow("staging_database_preflight_failed");
     expect(() => assertStagingDatabasePreflight({
       runImplementation: () => {
         throw new Error("provider output");
@@ -501,6 +519,33 @@ describe("staging release admission", () => {
       "preflight:true",
       "migrate",
       "preflight:false",
+    ]);
+  });
+
+  it("allows only stale disconnect projection state while migration 0121 is pending", async () => {
+    const migrationNames = [
+      FIRST_MIGRATION,
+      "0121_payos_disconnect_projection_repair.sql",
+    ];
+    const events: string[] = [];
+    await runStagingMigrationWithVerification({
+      assertDatabasePreflightImplementation: (input) => {
+        events.push(`preflight:${String(input?.allowInvalidPayosConnectionLinks)}:${String(input?.allowMissingPayosConnections)}`);
+      },
+      assertMigrationLedgerImplementation: () => Promise.resolve({ migrationNames }),
+      assertMigrationLedgerPrefixImplementation: () => Promise.resolve({
+        migrationNames: [FIRST_MIGRATION],
+      }),
+      expectedPrefix: [FIRST_MIGRATION],
+      migrationNames,
+      runMigrationImplementation: () => {
+        events.push("migrate");
+      },
+    });
+    expect(events).toEqual([
+      "preflight:true:false",
+      "migrate",
+      "preflight:false:false",
     ]);
   });
 

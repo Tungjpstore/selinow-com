@@ -17,7 +17,8 @@ const RELEASE_ID_PATTERN = /^stg_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}$/u;
 const ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/u;
 const DATABASE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/iu;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
-const PAYOS_PROJECTION_REPAIR_MIGRATION = "0119_payos_provider_projection_lifecycle.sql";
+const PAYOS_PROJECTION_BACKFILL_MIGRATION = "0119_payos_provider_projection_lifecycle.sql";
+const PAYOS_DISCONNECT_PROJECTION_REPAIR_MIGRATION = "0121_payos_disconnect_projection_repair.sql";
 
 function exactKeys(value, expected, issue) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(issue);
@@ -625,11 +626,18 @@ export function parseStagingDatabasePreflightOutput(output, options = {}) {
   if (result.ok !== (failedChecks.length === 0)) {
     throw new Error("staging_database_preflight_failed");
   }
-  const allowsPayosProjectionRepair = options.allowMissingPayosConnections === true
+  const repairablePayosCheck = (
+    options.allowMissingPayosConnections === true
     && failedChecks.length === 1
     && failedChecks[0]?.code === "missing_payos_connections"
-    && /^[1-9][0-9]*$/u.test(failedChecks[0]?.detail ?? "");
-  if ((result.ok !== true || failedChecks.length > 0) && !allowsPayosProjectionRepair) {
+    && /^[1-9][0-9]*$/u.test(failedChecks[0]?.detail ?? "")
+  ) || (
+    options.allowInvalidPayosConnectionLinks === true
+    && failedChecks.length === 1
+    && failedChecks[0]?.code === "stale_payos_disconnect_projection_state"
+    && failedChecks[0]?.detail === "1"
+  );
+  if ((result.ok !== true || failedChecks.length > 0) && !repairablePayosCheck) {
     throw new Error("staging_database_preflight_failed");
   }
   return { checks: result.checks };
@@ -654,7 +662,8 @@ export function assertStagingDatabasePreflight(input = {}) {
         cwd: root,
         env: childEnvironment,
       }).stdout;
-    } else if (input.allowMissingPayosConnections === true) {
+    } else if (input.allowMissingPayosConnections === true
+      || input.allowInvalidPayosConnectionLinks === true) {
       const result = spawnSync(process.execPath, args, {
         cwd: root,
         encoding: "utf8",
@@ -676,10 +685,14 @@ export function assertStagingDatabasePreflight(input = {}) {
     throw new Error("staging_database_preflight_failed");
   }
   const parsed = parseStagingDatabasePreflightOutput(output, {
+    allowInvalidPayosConnectionLinks: input.allowInvalidPayosConnectionLinks,
     allowMissingPayosConnections: input.allowMissingPayosConnections,
   });
   if (childExitCode !== 0 && !parsed.checks.some((check) => (
-    check.code === "missing_payos_connections" && check.ok === false
+    check.ok === false && (
+      (input.allowMissingPayosConnections === true && check.code === "missing_payos_connections")
+      || (input.allowInvalidPayosConnectionLinks === true && check.code === "stale_payos_disconnect_projection_state")
+    )
   ))) {
     throw new Error("staging_database_preflight_failed");
   }
@@ -700,15 +713,22 @@ export async function runStagingMigrationWithVerification(input) {
 
   await prefix({ ...shared, expectedPrefix: input.expectedPrefix });
   const pendingMigrations = migrationNames.slice(input.expectedPrefix.length);
-  const payosProjectionRepairPending = pendingMigrations.length === 1
-    && pendingMigrations[0] === PAYOS_PROJECTION_REPAIR_MIGRATION;
+  const payosProjectionBackfillPending = pendingMigrations.length === 1
+    && pendingMigrations[0] === PAYOS_PROJECTION_BACKFILL_MIGRATION;
+  const payosDisconnectProjectionRepairPending = pendingMigrations.length === 1
+    && pendingMigrations[0] === PAYOS_DISCONNECT_PROJECTION_REPAIR_MIGRATION;
   preflight({
     ...shared,
-    allowMissingPayosConnections: payosProjectionRepairPending,
+    allowInvalidPayosConnectionLinks: payosDisconnectProjectionRepairPending,
+    allowMissingPayosConnections: payosProjectionBackfillPending,
   });
   await input.runMigrationImplementation();
   await complete(shared);
-  preflight({ ...shared, allowMissingPayosConnections: false });
+  preflight({
+    ...shared,
+    allowInvalidPayosConnectionLinks: false,
+    allowMissingPayosConnections: false,
+  });
   if (input.assertPostMigrationContractImplementation !== undefined) {
     await input.assertPostMigrationContractImplementation(shared);
   }

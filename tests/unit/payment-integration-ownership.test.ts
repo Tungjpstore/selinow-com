@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import type { PayOSCredentials } from "../../src/lib/payments/crypto";
 import { payOSProviderIdentityFingerprint } from "../../src/lib/payments/payos-admission";
+import { PAYMENT_PROVIDER_PREFLIGHT_SQL } from "../../scripts/lib/db-preflight.mjs";
 
 vi.mock("../../src/lib/tenants/store", () => ({
   getShopForMember: vi.fn((input: { shopPublicId: string; userId: string }) => {
@@ -363,6 +364,123 @@ describe("PayOS provider identity ownership", () => {
       FROM payment_integrations WHERE shop_id = 'shop-a'
     `).get()).toEqual(settled);
     expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE shop_id = 'shop-a' AND action = 'payos.disconnected'").get()).toEqual({ count: 1 });
+  });
+
+  it("repairs a stale provider projection on a settled disconnect retry", async () => {
+    const staleDatabase = new DatabaseSync(":memory:");
+    applyMigrations(staleDatabase, 119);
+    seed(staleDatabase);
+    const staleEnv = bindings(staleDatabase);
+    try {
+      const fetchCount = { value: 0 };
+      await connectPayOS({
+        credentials: CHANNEL_A,
+        env: staleEnv,
+        fetcher: provider(fetchCount),
+        requestId: "request-connect",
+        shopPublicId: SHOP_A,
+        userId: "owner-a",
+      });
+      const disconnectedAt = "2026-08-25T10:04:00.000Z";
+      staleDatabase.prepare(`
+        UPDATE payment_integrations
+        SET status = 'disconnected', webhook_status = 'disconnected',
+          active_credential_id = NULL, provider_claim_nonce = NULL,
+          provider_claim_state = 'idle', provider_claim_target_fingerprint = NULL,
+          updated_at = ?
+        WHERE shop_id = 'shop-a' AND provider = 'payos'
+      `).run(disconnectedAt);
+      staleDatabase.exec(readFileSync(join(process.cwd(), "migrations/0120_payos_disconnect_reconnect_identity.sql"), "utf8"));
+
+      const settled = staleDatabase.prepare(`
+        SELECT provider_claim_generation AS generation
+        FROM payment_integrations WHERE shop_id = 'shop-a'
+      `).get();
+      const projectionBefore = staleDatabase.prepare(`
+        SELECT version FROM payment_provider_connections
+        WHERE shop_id = 'shop-a' AND legacy_payos_integration_id = (
+          SELECT id FROM payment_integrations WHERE shop_id = 'shop-a'
+        )
+      `).get() as { version: number };
+      const projectionState = staleDatabase.prepare(`
+        SELECT provider_account_fingerprint AS fingerprint,
+          provider_account_verified_at AS verifiedAt
+        FROM payment_provider_connections
+        WHERE shop_id = 'shop-a'
+      `).get() as { fingerprint: string | null; verifiedAt: string | null };
+      expect(projectionState.fingerprint).toEqual(expect.any(String));
+      expect(projectionState.verifiedAt).toEqual(expect.any(String));
+
+      await expect(disconnectPayOS({
+        env: staleEnv,
+        requestId: "request-disconnect-retry",
+        shopPublicId: SHOP_A,
+        userId: "owner-a",
+      })).resolves.toBeUndefined();
+
+      expect(staleDatabase.prepare(`
+      SELECT provider_account_fingerprint AS fingerprint,
+        provider_account_verified_at AS verifiedAt,
+        version
+      FROM payment_provider_connections
+      WHERE shop_id = 'shop-a' AND legacy_payos_integration_id = (
+        SELECT id FROM payment_integrations WHERE shop_id = 'shop-a'
+      )
+    `).get()).toEqual({
+      fingerprint: null,
+      verifiedAt: null,
+      version: projectionBefore.version + 1,
+    });
+      expect(staleDatabase.prepare(`
+      SELECT provider_claim_generation AS generation
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+      `).get()).toEqual(settled);
+    } finally {
+      staleDatabase.close();
+    }
+  });
+
+  it("admits only the exact stale disconnect projection repaired by migration 0121", async () => {
+    const staleDatabase = new DatabaseSync(":memory:");
+    applyMigrations(staleDatabase, 119);
+    seed(staleDatabase);
+    try {
+      await connectPayOS({
+        credentials: CHANNEL_A,
+        env: bindings(staleDatabase),
+        fetcher: provider({ value: 0 }),
+        requestId: "request-connect-migration",
+        shopPublicId: SHOP_A,
+        userId: "owner-a",
+      });
+      staleDatabase.prepare(`
+        UPDATE payment_integrations
+        SET status = 'disconnected', webhook_status = 'disconnected',
+          active_credential_id = NULL, provider_claim_nonce = NULL,
+          provider_claim_state = 'idle', provider_claim_target_fingerprint = NULL,
+          updated_at = '2026-08-25T10:05:00.000Z'
+        WHERE shop_id = 'shop-a' AND provider = 'payos'
+      `).run();
+      staleDatabase.exec(readFileSync(join(
+        process.cwd(),
+        "migrations/0120_payos_disconnect_reconnect_identity.sql",
+      ), "utf8"));
+
+      expect(staleDatabase.prepare(PAYMENT_PROVIDER_PREFLIGHT_SQL).get()).toMatchObject({
+        invalid_payos_connection_links: 0,
+        stale_payos_disconnect_projection_state: 1,
+      });
+      staleDatabase.exec(readFileSync(join(
+        process.cwd(),
+        "migrations/0121_payos_disconnect_projection_repair.sql",
+      ), "utf8"));
+      expect(staleDatabase.prepare(PAYMENT_PROVIDER_PREFLIGHT_SQL).get()).toMatchObject({
+        invalid_payos_connection_links: 0,
+        stale_payos_disconnect_projection_state: 0,
+      });
+    } finally {
+      staleDatabase.close();
+    }
   });
 
   it("does not let an unverified client-id claim block legitimate credentials", async () => {
