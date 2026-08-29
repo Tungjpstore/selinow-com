@@ -1,6 +1,13 @@
 # Implementation Status
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
+
+## Release continuation audit (2026-08-29)
+
+- Committed `de3a06e` to make the seller Today snapshot accept an optional clock and to pass the fixed test clock through the metrics section. This removes the date-dependent unit failure without changing production defaults.
+- Current source verification passes: `npm run check` (0 errors, 4 hints), `npm run lint`, `npx tsc --noEmit`, full Vitest (373 files / 3,063 tests), `npm run build`, `npm run build:staging`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, `npm audit --audit-level=high` (0 vulnerabilities), and `git diff --check`.
+- Production remains **NO-GO**. `release:doctor --json` still fails closed on stale backup/monitoring evidence, Dodo and PayOS artifacts not bound to the current staging candidate, incomplete rollback metadata, and missing fresh secret-name/credential admissions. No production migration, Worker deploy, route change, trigger change, or PayOS transfer was executed.
+- Wrangler is logged in through a broad OAuth session, but the guarded release scripts require short-lived scoped operator credentials and candidate-bound evidence. Chrome extension diagnostics pass, while direct tab control timed out; no cookies, local storage, passwords, or secret values were inspected.
 
 ## Current release audit (2026-08-28)
 
