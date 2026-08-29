@@ -277,7 +277,7 @@ async function claimPaymentProviderOwnership(input: {
           provider_claim_generation = provider_claim_generation + 1,
           provider_claim_nonce = ?,
           provider_claim_state = CASE
-            WHEN provider_claim_state = 'quarantined'
+            WHEN provider_claim_state IN ('quarantined', 'in_flight')
               AND status = 'disconnected'
               AND webhook_status = 'disconnected'
               AND active_credential_id IS NULL THEN 'in_flight'
@@ -338,6 +338,13 @@ async function claimPaymentProviderOwnership(input: {
             )
             OR (
               provider_claim_state = 'quarantined'
+              AND status = 'disconnected'
+              AND webhook_status = 'disconnected'
+              AND active_credential_id IS NULL
+              AND provider_claim_nonce IS NOT NULL
+            )
+            OR (
+              provider_claim_state = 'in_flight'
               AND status = 'disconnected'
               AND webhook_status = 'disconnected'
               AND active_credential_id IS NULL

@@ -402,6 +402,42 @@ describe("PayOS provider identity ownership", () => {
     `).get()).toEqual({ claimState: "idle", nonce: null, target: null });
   });
 
+  it("recovers a disconnected channel after a stale in-flight claim", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-connect-in-flight", shopPublicId: SHOP_A, userId: "owner-a" });
+    await disconnectPayOS({ env, requestId: "request-disconnect-in-flight", shopPublicId: SHOP_A, userId: "owner-a" });
+
+    const staleNonce = "pcl_stale_in_flight_claim_012345678901";
+    database.prepare(`
+      UPDATE payment_integrations
+      SET provider_claim_nonce = ?, provider_claim_state = 'in_flight',
+        provider_claim_target_fingerprint = ?
+      WHERE shop_id = 'shop-a' AND provider = 'payos'
+    `).run(staleNonce, "T".repeat(43));
+    database.prepare(`
+      UPDATE payment_credentials
+      SET provider_claim_nonce = ?
+      WHERE shop_id = 'shop-a' AND provider = 'payos' AND status = 'grace'
+    `).run(staleNonce);
+
+    await expect(connectPayOS({
+      credentials: CHANNEL_A,
+      env,
+      fetcher,
+      requestId: "request-reconnect-in-flight",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+
+    expect(fetchCount.value).toBe(2);
+    expect(database.prepare(`
+      SELECT provider_claim_nonce AS nonce, provider_claim_state AS claimState,
+        provider_claim_target_fingerprint AS target
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ claimState: "idle", nonce: null, target: null });
+  });
+
   it("repairs a stale provider projection on a settled disconnect retry", async () => {
     const staleDatabase = new DatabaseSync(":memory:");
     applyMigrations(staleDatabase, 119);
@@ -554,6 +590,57 @@ describe("PayOS provider identity ownership", () => {
       staleDatabase.exec(readFileSync(join(
         process.cwd(),
         "migrations/0122_payos_quarantine_recovery.sql",
+      ), "utf8"));
+
+      expect(staleDatabase.prepare(`
+        SELECT provider_claim_nonce AS nonce, provider_claim_state AS claimState,
+          provider_claim_target_fingerprint AS target
+        FROM payment_integrations WHERE shop_id = 'shop-a'
+      `).get()).toEqual({ claimState: "idle", nonce: null, target: null });
+      expect(staleDatabase.prepare(`
+        SELECT provider_claim_nonce AS nonce
+        FROM payment_credentials WHERE shop_id = 'shop-a'
+      `).get()).toEqual({ nonce: null });
+    } finally {
+      staleDatabase.close();
+    }
+  });
+
+  it("releases disconnected in-flight claims in migration 0123", async () => {
+    const staleDatabase = new DatabaseSync(":memory:");
+    applyMigrations(staleDatabase, 122);
+    seed(staleDatabase);
+    try {
+      await connectPayOS({
+        credentials: CHANNEL_A,
+        env: bindings(staleDatabase),
+        fetcher: provider({ value: 0 }),
+        requestId: "request-connect-in-flight-migration",
+        shopPublicId: SHOP_A,
+        userId: "owner-a",
+      });
+      await disconnectPayOS({
+        env: bindings(staleDatabase),
+        requestId: "request-disconnect-in-flight-migration",
+        shopPublicId: SHOP_A,
+        userId: "owner-a",
+      });
+      const staleNonce = "pcl_stale_in_flight_claim_012345678901";
+      staleDatabase.prepare(`
+        UPDATE payment_integrations
+        SET provider_claim_nonce = ?, provider_claim_state = 'in_flight',
+          provider_claim_target_fingerprint = ?
+        WHERE shop_id = 'shop-a' AND provider = 'payos'
+      `).run(staleNonce, "T".repeat(43));
+      staleDatabase.prepare(`
+        UPDATE payment_credentials
+        SET status = 'error', provider_claim_nonce = ?
+        WHERE shop_id = 'shop-a' AND provider = 'payos'
+      `).run(staleNonce);
+
+      staleDatabase.exec(readFileSync(join(
+        process.cwd(),
+        "migrations/0123_payos_in_flight_recovery.sql",
       ), "utf8"));
 
       expect(staleDatabase.prepare(`
