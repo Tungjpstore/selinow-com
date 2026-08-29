@@ -6,6 +6,7 @@ Last updated: 2026-08-30
 
 - Fixed reconnects blocked by a stale quarantined claim left on a fully disconnected PayOS integration. The claim fence now permits only a disconnected integration with no active credential to establish a fresh claim, and migration `0122_payos_quarantine_recovery.sql` clears matching stale claim state forward-only.
 - Added regression coverage for same-shop reconnect and migration cleanup. Staging backup/restore, migration completion, and the candidate deployment were refreshed before retrying PayOS verification.
+- Fixed the remaining interrupted-request case where a disconnected integration retained an `in_flight` claim and its pending credential nonce. Migration `0123_payos_in_flight_recovery.sql` releases only that non-active disconnected claim, and reconnect fencing now safely replaces it. Focused PayOS ownership and migration tests pass `19/19`; staging still needs the guarded migration/deploy ceremony for this new candidate.
 
 ## Release continuation audit (2026-08-29)
 
