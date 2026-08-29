@@ -749,6 +749,10 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
   }),
+  "0122_payos_quarantine_recovery.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
 });
 
 

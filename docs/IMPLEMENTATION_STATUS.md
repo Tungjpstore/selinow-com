@@ -1,6 +1,11 @@
 # Implementation Status
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
+
+## PayOS quarantine recovery (2026-08-30)
+
+- Fixed reconnects blocked by a stale quarantined claim left on a fully disconnected PayOS integration. The claim fence now permits only a disconnected integration with no active credential to establish a fresh claim, and migration `0122_payos_quarantine_recovery.sql` clears matching stale claim state forward-only.
+- Added regression coverage for same-shop reconnect and migration cleanup. Staging backup/restore, migration completion, and the candidate deployment were refreshed before retrying PayOS verification.
 
 ## Release continuation audit (2026-08-29)
 

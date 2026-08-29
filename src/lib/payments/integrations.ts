@@ -334,6 +334,13 @@ async function claimPaymentProviderOwnership(input: {
             )
             OR (
               provider_claim_state = 'quarantined'
+              AND status = 'disconnected'
+              AND webhook_status = 'disconnected'
+              AND active_credential_id IS NULL
+              AND provider_claim_nonce IS NOT NULL
+            )
+            OR (
+              provider_claim_state = 'quarantined'
               AND provider_claim_target_fingerprint IS NULL
               AND active_credential_id IS NULL
               AND status IN ('pending', 'error')

@@ -366,6 +366,42 @@ describe("PayOS provider identity ownership", () => {
     expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE shop_id = 'shop-a' AND action = 'payos.disconnected'").get()).toEqual({ count: 1 });
   });
 
+  it("reconnects a disconnected channel after a stale quarantined claim", async () => {
+    const fetchCount = { value: 0 };
+    const fetcher = provider(fetchCount);
+    await connectPayOS({ credentials: CHANNEL_A, env, fetcher, requestId: "request-connect", shopPublicId: SHOP_A, userId: "owner-a" });
+    await disconnectPayOS({ env, requestId: "request-disconnect", shopPublicId: SHOP_A, userId: "owner-a" });
+
+    const staleNonce = "pcl_stale_disconnected_claim_0123456789012";
+    database.prepare(`
+      UPDATE payment_integrations
+      SET provider_claim_nonce = ?, provider_claim_state = 'quarantined',
+        provider_claim_target_fingerprint = ?
+      WHERE shop_id = 'shop-a' AND provider = 'payos'
+    `).run(staleNonce, "T".repeat(43));
+    database.prepare(`
+      UPDATE payment_credentials
+      SET provider_claim_nonce = ?
+      WHERE shop_id = 'shop-a' AND provider = 'payos' AND status = 'grace'
+    `).run(staleNonce);
+
+    await expect(connectPayOS({
+      credentials: CHANNEL_A,
+      env,
+      fetcher,
+      requestId: "request-reconnect",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+
+    expect(fetchCount.value).toBe(2);
+    expect(database.prepare(`
+      SELECT provider_claim_nonce AS nonce, provider_claim_state AS claimState,
+        provider_claim_target_fingerprint AS target
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ claimState: "idle", nonce: null, target: null });
+  });
+
   it("repairs a stale provider projection on a settled disconnect retry", async () => {
     const staleDatabase = new DatabaseSync(":memory:");
     applyMigrations(staleDatabase, 119);
@@ -478,6 +514,57 @@ describe("PayOS provider identity ownership", () => {
         invalid_payos_connection_links: 0,
         stale_payos_disconnect_projection_state: 0,
       });
+    } finally {
+      staleDatabase.close();
+    }
+  });
+
+  it("releases only disconnected non-active quarantined claims in migration 0122", async () => {
+    const staleDatabase = new DatabaseSync(":memory:");
+    applyMigrations(staleDatabase, 121);
+    seed(staleDatabase);
+    try {
+      await connectPayOS({
+        credentials: CHANNEL_A,
+        env: bindings(staleDatabase),
+        fetcher: provider({ value: 0 }),
+        requestId: "request-connect-quarantine-migration",
+        shopPublicId: SHOP_A,
+        userId: "owner-a",
+      });
+      await disconnectPayOS({
+        env: bindings(staleDatabase),
+        requestId: "request-disconnect-quarantine-migration",
+        shopPublicId: SHOP_A,
+        userId: "owner-a",
+      });
+      const staleNonce = "pcl_stale_disconnected_claim_0123456789012";
+      staleDatabase.prepare(`
+        UPDATE payment_integrations
+        SET provider_claim_nonce = ?, provider_claim_state = 'quarantined',
+          provider_claim_target_fingerprint = ?
+        WHERE shop_id = 'shop-a' AND provider = 'payos'
+      `).run(staleNonce, "T".repeat(43));
+      staleDatabase.prepare(`
+        UPDATE payment_credentials
+        SET status = 'error', provider_claim_nonce = ?
+        WHERE shop_id = 'shop-a' AND provider = 'payos'
+      `).run(staleNonce);
+
+      staleDatabase.exec(readFileSync(join(
+        process.cwd(),
+        "migrations/0122_payos_quarantine_recovery.sql",
+      ), "utf8"));
+
+      expect(staleDatabase.prepare(`
+        SELECT provider_claim_nonce AS nonce, provider_claim_state AS claimState,
+          provider_claim_target_fingerprint AS target
+        FROM payment_integrations WHERE shop_id = 'shop-a'
+      `).get()).toEqual({ claimState: "idle", nonce: null, target: null });
+      expect(staleDatabase.prepare(`
+        SELECT provider_claim_nonce AS nonce
+        FROM payment_credentials WHERE shop_id = 'shop-a'
+      `).get()).toEqual({ nonce: null });
     } finally {
       staleDatabase.close();
     }
