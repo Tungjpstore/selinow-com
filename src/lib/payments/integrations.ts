@@ -406,7 +406,10 @@ async function claimPaymentProviderOwnership(input: {
           )
       `).bind(providerCredentialFingerprint, nonce, input.credentialId, input.integration.id, input.shopId, providerCredentialFingerprint, input.integration.id, input.shopId, nonce, targetFingerprint),
     ]);
-    if ((claimed[0]?.meta.changes ?? 0) === 1 && (claimed[2]?.meta.changes ?? 0) === 1) {
+    // D1 includes AFTER-trigger writes in meta.changes. The integration row
+    // projection therefore may report more than one change for one primary
+    // row; only require that the guarded row matched.
+    if ((claimed[0]?.meta.changes ?? 0) >= 1 && (claimed[2]?.meta.changes ?? 0) >= 1) {
       const row = await input.env.PLATFORM_DB.prepare(`
         SELECT provider_claim_generation AS generation
         FROM payment_integrations
@@ -472,7 +475,7 @@ async function markAmbiguousPaymentProviderOwnership(input: {
         AND provider_claim_target_fingerprint = ?
     `).bind(input.degradeVerifiedIntegration === true ? 1 : 0, input.degradeVerifiedIntegration === true ? 1 : 0, now, now, input.integrationId, input.shopId, input.claim.generation, input.claim.nonce, input.claim.targetFingerprint),
   ]);
-  return (results[0]?.meta.changes ?? 0) === 1 && (results[1]?.meta.changes ?? 0) === 1;
+  return (results[0]?.meta.changes ?? 0) >= 1 && (results[1]?.meta.changes ?? 0) >= 1;
 }
 
 async function finalizeDefinitivePaymentProviderRejection(input: {
@@ -536,7 +539,7 @@ async function finalizeDefinitivePaymentProviderRejection(input: {
           AND provider_claim_target_fingerprint = ?
       `).bind(input.degradeVerifiedIntegration === true ? 1 : 0, input.degradeVerifiedIntegration === true ? 1 : 0, now, now, input.integrationId, input.shopId, input.claim.generation, input.claim.nonce, input.claim.targetFingerprint),
     ]);
-    return (results[0]?.meta.changes ?? 0) === 1 && (results[1]?.meta.changes ?? 0) === 1;
+    return (results[0]?.meta.changes ?? 0) >= 1 && (results[1]?.meta.changes ?? 0) >= 1;
   } catch {
     return false;
   }
@@ -731,7 +734,7 @@ async function activatePaymentProviderOwnership(input: {
       )
     `).bind(createId("aud"), input.shopId, input.userId, input.integration.id, JSON.stringify({ credentialVersion: input.credentialVersion, rotated: input.rotated }), input.requestId, activatedAt, input.integration.id, input.shopId, input.claim.generation, activatedAt, activatedAt, input.credentialId),
   ]);
-  if ((results[2]?.meta.changes ?? 0) !== 1 || (results[3]?.meta.changes ?? 0) !== 1) {
+  if ((results[2]?.meta.changes ?? 0) < 1 || (results[3]?.meta.changes ?? 0) < 1) {
     throw new AppError("payment_integration_conflict", 409);
   }
 }
@@ -895,7 +898,7 @@ async function verifyActivePaymentProviderOwnership(input: {
         )
     `).bind(verifiedAt, verifiedAt, verifiedAt, input.integrationId, input.shopId, input.credentialId, input.claim.generation, input.claim.nonce, input.claim.targetFingerprint, input.credentialId, input.integrationId, input.shopId),
   ]);
-  if ((results[0]?.meta.changes ?? 0) !== 1 || (results[1]?.meta.changes ?? 0) !== 1) {
+  if ((results[0]?.meta.changes ?? 0) < 1 || (results[1]?.meta.changes ?? 0) < 1) {
     throw new AppError("payment_integration_conflict", 409);
   }
 }

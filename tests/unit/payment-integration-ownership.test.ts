@@ -63,7 +63,7 @@ function applyMigrations(database: DatabaseSync, maximumMigration = Number.POSIT
 
 type PayOSTestBindings = AppBindings & { PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT?: string };
 
-function bindings(database: DatabaseSync): PayOSTestBindings {
+function bindings(database: DatabaseSync, options: { inflateIntegrationTriggerChanges?: boolean } = {}): PayOSTestBindings {
   return {
     ACTIVE_CREDENTIAL_KEY_VERSION: "v1",
     API_ORIGIN: "https://api.example.test",
@@ -75,7 +75,14 @@ function bindings(database: DatabaseSync): PayOSTestBindings {
         database.exec("BEGIN IMMEDIATE");
         try {
           const results = [];
-          for (const statement of statements) results.push(await statement.run());
+          for (const statement of statements) {
+            const result = await statement.run();
+            if (options.inflateIntegrationTriggerChanges && statement.sql.includes("UPDATE payment_integrations")) {
+              results.push({ ...result, meta: { ...result.meta, changes: Math.max(result.meta.changes, 8) } });
+            } else {
+              results.push(result);
+            }
+          }
           database.exec("COMMIT");
           return results;
         } catch (error) {
@@ -177,6 +184,25 @@ describe("PayOS provider identity ownership", () => {
       FROM payment_provider_connection_capabilities
       WHERE shop_id = 'shop-a' AND effective_enabled = 1
     `).get()).toEqual({ count: 4 });
+  });
+
+  it("accepts D1 trigger side effects when claiming and activating an integration", async () => {
+    env = bindings(database, { inflateIntegrationTriggerChanges: true });
+
+    await expect(connectPayOS({
+      credentials: CHANNEL_A,
+      env,
+      fetcher: provider({ value: 0 }),
+      requestId: "request-triggered-integration",
+      shopPublicId: SHOP_A,
+      userId: "owner-a",
+    })).resolves.toMatchObject({ status: "active", webhookStatus: "verified" });
+
+    expect(database.prepare(`
+      SELECT status, webhook_status AS webhookStatus,
+        active_credential_id IS NOT NULL AS hasActiveCredential
+      FROM payment_integrations WHERE shop_id = 'shop-a'
+    `).get()).toEqual({ hasActiveCredential: 1, status: "active", webhookStatus: "verified" });
   });
 
   it("rejects rotated cross-shop credentials before redirecting the verified channel webhook", async () => {
