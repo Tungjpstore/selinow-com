@@ -3374,11 +3374,11 @@ aurora).
   `npm run lint`, `npm run test` (373 files / 3,072 tests), `npm run build`,
   `npm run deploy:dry-run`, and focused PayOS suites (35/35).
 - Fresh staging continuation completed for release
-  `stg_20260830T031902Z_d7e13f8fb3d2`: protected backup
-  `bkp_20260830031724_494e67c76d8e`, isolated restore
-  `rdr_20260830031755_bdb54b4bf0df`, post-migration evidence, Worker deployment
-  evidence `31677a2a-205b-41e8-a9a6-acb805f48af1`, and staging Worker version
-  `6669dec2-d798-4c80-b16a-cf31a39b85d9`. Staging D1 preflight is clean and the
+  `stg_20260830T040041Z_e268f8ed7987`: protected backup
+  `bkp_20260830040546_37ea13746f89`, isolated restore
+  `rdr_20260830040636_a512f01558f6`, post-migration evidence, Worker deployment
+  evidence `1b5e4d63-6c74-4c60-a8fe-05febd95b468`, and staging Worker version
+  `cf246e08-0a79-4803-bfa9-546383475e4d`. Staging D1 preflight is clean and the
   source ledger is applied through migration `0123`.
 - Production backup `bkp_20260830034750_8a889090d76a` and isolated restore
   `rdr_20260830034815_e60081cedf24` were captured for this exact commit, but no
