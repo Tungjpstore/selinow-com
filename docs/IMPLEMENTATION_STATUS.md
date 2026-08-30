@@ -3360,3 +3360,38 @@ aurora).
 - Cloudflare account tokens in `/tmp/cfenv.sh` (release ceremony roles) should
   be revoked from the dashboard now that the release has shipped; local files
   can then be deleted.
+
+## PayOS trigger-accounting fix and staging continuation (2026-08-30)
+
+- Fixed the PayOS ownership path's D1 `meta.changes === 1` assumptions. Cloudflare
+  D1 includes projection-trigger side effects, so a guarded one-row update may
+  legitimately report more than one change. Claim, ambiguous/rejection cleanup,
+  activation, and health verification now require at least one primary-row change
+  and still validate the final fenced state. Regression coverage inflates the
+  integration update result to `changes = 8` and exercises the real migration
+  triggers. Commits: `80ab358`, `d7e13f8`.
+- Source verification is clean: `npm run check` (0 errors, 4 existing hints),
+  `npm run lint`, `npm run test` (373 files / 3,072 tests), `npm run build`,
+  `npm run deploy:dry-run`, and focused PayOS suites (35/35).
+- Fresh staging continuation completed for release
+  `stg_20260830T031902Z_d7e13f8fb3d2`: protected backup
+  `bkp_20260830031724_494e67c76d8e`, isolated restore
+  `rdr_20260830031755_bdb54b4bf0df`, post-migration evidence, Worker deployment
+  evidence `31677a2a-205b-41e8-a9a6-acb805f48af1`, and staging Worker version
+  `6669dec2-d798-4c80-b16a-cf31a39b85d9`. Staging D1 preflight is clean and the
+  source ledger is applied through migration `0123`.
+- Production backup `bkp_20260830034750_8a889090d76a` and isolated restore
+  `rdr_20260830034815_e60081cedf24` were captured for this exact commit, but no
+  production migration, Worker deploy, route promotion, or secret mutation was
+  performed.
+- PayOS staging reconnect remains pending: the existing integration is still
+  `disconnected` with a recoverable stale `in_flight` claim until the signed-in
+  dashboard calls the owner reconnect flow. Chrome extension tab claiming timed
+  out repeatedly on the user's existing PayOS/staging tabs, so credentials were
+  not re-entered and no new tab was opened. The 5,000 VND transfer alone is not
+  sufficient provider UAT evidence.
+- Production release remains fail-closed. `npm run release:doctor -- --json`
+  still blocks on candidate-bound PayOS/Dodo UAT artifacts, fresh monitoring,
+  rollback metadata for the 123-migration ledger, and production secret-inventory
+  binding. Do not deploy production until those genuine artifacts are created
+  and the doctor returns `ok: true`.
