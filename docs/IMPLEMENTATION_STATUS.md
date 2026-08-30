@@ -3400,7 +3400,7 @@ aurora).
 
 - Re-ran `node scripts/release-doctor.mjs --json` for the clean HEAD
   `64dbede90db6b45dac663be12d16950c74a06aa3`: 254/282 checks pass and 28
-  checks remain blocking. The current staging candidate is
+  checks remain blocking. The last deployed staging candidate is
   `stg_20260830T041801Z_64dbede90db6`, Worker
   `8b4e7610-b915-42a8-8c85-2a1024c7b956`, with migration ledger through
   `0123_payos_in_flight_recovery.sql`.
