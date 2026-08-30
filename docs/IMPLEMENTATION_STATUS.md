@@ -2,6 +2,12 @@
 
 Last updated: 2026-08-30
 
+## Exact-HEAD production backup/restore verification (2026-08-30)
+
+- Created protected production backup `bkp_20260830054126_8273c4fa907e` and ran an isolated restore drill `rdr_20260830054151_545ff4246080` against commit `22f9dd1f24ffe4fa6321f26d8752b96fc95aa3c4`; integrity is `ok`, foreign-key violations are `0`, all 123 migrations replay, and the temporary D1 target was removed.
+- Re-ran the complete local test suite after one transient 5-second timeout: 373 files and 3,072 tests pass. `npm run check`, `npm run lint`, `npm run build`, `npm run deploy:dry-run`, and `npm run deploy:staging:dry-run` also pass.
+- Production remains **NO-GO** because genuine candidate-bound Dodo/PayOS provider UAT, fresh monitoring acknowledgement, rollback rehearsal metadata, and the required production release ceremony are still missing. No production migration, Worker promotion, route/trigger mutation, or provider-secret mutation was performed.
+
 ## PayOS quarantine recovery (2026-08-30)
 
 - Fixed reconnects blocked by a stale quarantined claim left on a fully disconnected PayOS integration. The claim fence now permits only a disconnected integration with no active credential to establish a fresh claim, and migration `0122_payos_quarantine_recovery.sql` clears matching stale claim state forward-only.
