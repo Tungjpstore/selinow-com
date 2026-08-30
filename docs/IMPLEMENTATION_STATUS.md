@@ -3395,3 +3395,24 @@ aurora).
   rollback metadata for the 123-migration ledger, and production secret-inventory
   binding. Do not deploy production until those genuine artifacts are created
   and the doctor returns `ok: true`.
+
+## Release gate audit (2026-08-30)
+
+- Re-ran `node scripts/release-doctor.mjs --json` for the clean HEAD
+  `64dbede90db6b45dac663be12d16950c74a06aa3`: 254/282 checks pass and 28
+  checks remain blocking. The current staging candidate is
+  `stg_20260830T041801Z_64dbede90db6`, Worker
+  `8b4e7610-b915-42a8-8c85-2a1024c7b956`, with migration ledger through
+  `0123_payos_in_flight_recovery.sql`.
+- A read-only `wrangler secret list --env production` check confirms all 12
+  required production secret names are present; no secret values were read or
+  changed. Fresh production backup/restore evidence exists for this commit but
+  is not yet referenced by the checked-in production evidence.
+- Remaining external requirements are genuine candidate-bound Dodo (32
+  scenarios) and PayOS (14 scenarios) UAT artifacts, fresh monitoring,
+  complete 123-migration rollback metadata, refreshed candidate-bound secret
+  inventory/evidence, and owner-approved production evidence. The existing
+  signed-in Chrome tabs remain the required PayOS reconnect surface; no new tab
+  was opened and no PayOS credential was transmitted.
+- Production remains **NO-GO**. No production migration, Worker deployment,
+  route promotion, trigger mutation, or secret mutation was performed.
