@@ -2,6 +2,15 @@
 
 Last updated: 2026-08-30
 
+## Current staging deployment and production gate (2026-08-30)
+
+- Completed the guarded staging ceremony for commit `ed4e1736d738c350092b4fabd5f570159a03014b`: 123 migrations are applied, post-migration backup `bkp_20260830114042_57599909c05b` and isolated restore `rdr_20260830114115_171a0d79c8d4` passed integrity with `0` foreign-key violations, and post-migration evidence is recorded under `.wrangler/releases/staging/stg_20260830T113728Z_ed4e1736d738/`.
+- Deployed staging Worker version `e71c7c40-3bbc-46d6-ac4a-18535fcd282a` to the configured staging routes, queues, consumers, cron, and custom domains.
+- Post-deploy staging route preflight and D1 preflight pass; PayOS projection/claim invariants are clean (`0` invalid links, `0` stale disconnect projection states).
+- Created exact-HEAD production backup `bkp_20260830114543_fd6bc4e0ed1a` and isolated restore `rdr_20260830114604_7a4a27b3d750`; both passed integrity and foreign-key checks (`0` violations, `50` restored items).
+- Production remains **NO-GO**. With the read-only observed 12-name inventory supplied, `release:doctor --json` reports 13 blockers: candidate-bound Dodo/PayOS UAT artifacts, fresh monitoring and rollback metadata, and candidate-bound production evidence are not all present. A bare doctor run without that inventory also reports the expected missing operator-context names; no production migration, Worker promotion, route/trigger mutation, provider credential mutation, or payment confirmation was executed.
+- Chrome control could not reconnect to the existing PayOS and staging tabs (`Transport closed`); no new tab was opened and no PayOS credential or token value was read. The 5,000 VND transfer is not accepted as signed provider evidence without a valid PayOS webhook or direct reconciliation artifact.
+
 ## Exact-HEAD production backup/restore verification (2026-08-30)
 
 - Created protected production backup `bkp_20260830054126_8273c4fa907e` and ran an isolated restore drill `rdr_20260830054151_545ff4246080` against commit `22f9dd1f24ffe4fa6321f26d8752b96fc95aa3c4`; integrity is `ok`, foreign-key violations are `0`, all 123 migrations replay, and the temporary D1 target was removed.
