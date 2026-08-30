@@ -77,7 +77,8 @@ function bindings(database: DatabaseSync, options: { inflateIntegrationTriggerCh
           const results = [];
           for (const statement of statements) {
             const result = await statement.run();
-            if (options.inflateIntegrationTriggerChanges && statement.sql.includes("UPDATE payment_integrations")) {
+            const sql = (statement as unknown as { sql?: string }).sql ?? "";
+            if (options.inflateIntegrationTriggerChanges && sql.includes("UPDATE payment_integrations")) {
               results.push({ ...result, meta: { ...result.meta, changes: Math.max(result.meta.changes, 8) } });
             } else {
               results.push(result);
