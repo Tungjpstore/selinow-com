@@ -3431,3 +3431,24 @@ aurora).
   was opened and no PayOS credential was transmitted.
 - Production remains **NO-GO**. No production migration, Worker deployment,
   route promotion, trigger mutation, or secret mutation was performed.
+
+## Release gate audit (2026-08-31)
+
+- Baseline rerun on HEAD `52f548689e929462f1b2abbf56b0b83ddcecf791` (tree
+  `9eaaa8a2a90a12c5d88e54c2d591eb38ba233705`) passed `npm run check`,
+  `npm run lint`, `npm run test` (373 files / 3,072 tests), `npm run build`,
+  `npm audit --audit-level=high` (0 vulnerabilities), and `npm run deploy:dry-run`.
+- Fixed the tracked executable bit on `scripts/provider-uat-payos-executor.mjs`;
+  the provider runner rejects non-executable candidate-bound executors. The
+  mode change requires a fresh staging manifest and deployment before PayOS UAT.
+- `release:doctor` remains **NO-GO** with 14 current failures: stale production
+  backup metadata, missing candidate-bound Dodo/PayOS artifacts and shared
+  staging binding, stale monitoring evidence, and rollback metadata that stops
+  at migration `0112` with 83 rather than 88 required invariants.
+- The latest staging deployment evidence is older than the two-hour admission
+  window. Required Dodo/PayOS context files and runner bindings are not present
+  in the operator environment, and Chrome currently exposes only the PayOS tab;
+  no credentials were read or transmitted and no provider transaction occurred.
+- Production remains **NO-GO**. No production backup export, migration, Worker
+  upload/deploy, route/trigger mutation, rollback rehearsal, or secret mutation
+  was performed in this session.
