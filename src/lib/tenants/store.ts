@@ -7,6 +7,7 @@ import { normalizeCurrencyCode } from "../i18n/currency";
 import { DEFAULT_LOCALE, matchSupportedLocale } from "../i18n/locale";
 import { CURRENT_POLICY_ATTESTATION_VERSION, ONBOARDING_STEP_CODES, type CustomDomainPreference } from "../onboarding/policy";
 import type { AppBindings } from "../platform/bindings";
+import { purgeStorefrontResolverCacheForShop } from "../storefront/cache";
 import { evaluateSubscription, type EntitlementAction } from "../billing/entitlements";
 import { PUBLIC_PLAN_CODES, PUBLIC_TRIAL_DAYS } from "../billing/plan-catalog";
 import {
@@ -1146,4 +1147,6 @@ export async function suspendShop(input: {
       JSON.stringify({ reason: input.reason }), input.requestId, now,
     ),
   ]);
+  // A suspended shop must stop resolving from the storefront cache immediately.
+  await purgeStorefrontResolverCacheForShop(input.env, shop.id);
 }

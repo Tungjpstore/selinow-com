@@ -5,6 +5,7 @@ import { tryRecordActivationMilestone } from "../analytics/activation";
 import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import { CURRENT_POLICY_ATTESTATION_VERSION } from "../onboarding/policy";
 import type { AppBindings } from "../platform/bindings";
+import { purgeStorefrontResolverCacheForShop } from "../storefront/cache";
 import { getShopForMember } from "./store";
 
 const PAYOS_HEALTH_TTL_MS = 24 * 60 * 60_000;
@@ -885,6 +886,9 @@ export async function publishReadyStorefront(input: {
     throw new AppError("readiness_changed", 409, ["rerun_readiness_required"]);
   }
   if ((results[1]?.meta.changes ?? 0) !== 1) throw new AppError("resource_conflict", 409, ["storefront_publish_conflict"]);
+  // The published snapshot version changed: drop cached hostname resolutions so
+  // the next storefront request rebuilds the resolver from D1 immediately.
+  await purgeStorefrontResolverCacheForShop(input.env, actor.shopId);
   await tryRecordActivationMilestone({
     env: input.env,
     idempotencyKey: "storefront_published",

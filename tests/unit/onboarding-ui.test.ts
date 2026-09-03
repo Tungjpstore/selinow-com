@@ -9,7 +9,7 @@ import {
   parseOnboardingSnapshot,
   parseReadinessChecks,
   progressPercent,
-  readableError,
+  readableErrorKey,
   settingsDraftReady,
   slugifyDraft,
   summarizeInventoryDraft,
@@ -219,10 +219,9 @@ describe("onboarding draft validation", () => {
     })).toBe(true);
   });
 
-  it("maps provider and validation failures to safe Vietnamese guidance", () => {
-    expect(readableError("validation_failed", ["bot_token_invalid"])).toContain("BotFather");
-    expect(readableError("recent_auth_required")).toContain("dang nhap lai");
-    expect(readableError("payment_not_configured")).toContain("PayOS");
-    expect(readableError("unknown_error")).not.toContain("unknown_error");
+  it("maps provider and validation failures to stable i18n issue keys", () => {
+    expect(readableErrorKey("validation_failed", ["bot_token_invalid"])).toBe("onboarding.error.issue.bot_token_invalid");
+    expect(readableErrorKey("recent_auth_required")).toBe("onboarding.error.code.recent_auth_required");
+    expect(readableErrorKey("unknown_error")).toBe("onboarding.error.generic");
   });
 });

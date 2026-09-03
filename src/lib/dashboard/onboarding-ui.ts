@@ -370,43 +370,6 @@ export function settingsDraftReady(input: OnboardingSettingsView): boolean {
     && [input.termsUrl, input.privacyUrl, input.refundPolicyUrl].every(isSafeHttpsUrl);
 }
 
-export function readableError(code: string, issues: readonly string[] = []): string {
-  const issueMessages: Record<string, string> = {
-    active_variant_required: "Hay tao it nhat mot phien ban san pham dang hoat dong.",
-    bot_token_invalid: "Token Telegram chua dung dinh dang BotFather.",
-    custom_domain_not_in_plan: "Goi hien tai chua bat ten mien rieng.",
-    idempotency_key_invalid: "Phien tao shop da het han. Tai lai trang va thu lai.",
-    inventory_count_invalid: "Nhap tu 1 den 1.000 key moi lan.",
-    inventory_key_invalid: "Mot hoac nhieu key vuot gioi han cho phep.",
-    plan_invalid: "Goi dich vu khong hop le.",
-    publishable_product_required: "Can it nhat mot san pham co the ban truoc khi publish.",
-    slug_reserved: "Slug nay duoc danh rieng cho he thong.",
-  };
-  for (const issue of issues) {
-    const issueMessage = issueMessages[issue];
-    if (issueMessage !== undefined) return issueMessage;
-  }
-  const messages: Record<string, string> = {
-    authentication_required: "Phien dang nhap da het han. Hay dang nhap lai.",
-    authorization_denied: "Tai khoan nay khong co quyen thuc hien buoc nay.",
-    catalog_conflict: "Slug hoac SKU da ton tai. Wizard se tai lai du lieu de ban tiep tuc.",
-    credential_duplicate: "Thong tin ket noi nay da duoc gui truoc do. Hay lam moi trang thai.",
-    csrf_invalid: "Phien bao mat khong con hop le. Tai lai trang roi thu lai.",
-    idempotency_conflict: "Yeu cau cu da duoc dung cho noi dung khac. Hay thu lai.",
-    inventory_duplicate: "Danh sach co key trung voi kho hoac trung trong chinh tep.",
-    inventory_preview_expired: "Preview da het han. Hay tao preview moi truoc khi import.",
-    inventory_preview_invalid: "Preview khong hop le. Hay tao preview moi truoc khi import.",
-    inventory_preview_mismatch: "Noi dung hoac variant da thay doi. Hay tao preview moi.",
-    provider_unavailable: "Nha cung cap dang ban. Du lieu da nhap khong duoc hien thi lai; hay thu lai sau.",
-    payment_not_configured: "Hay ket noi PayOS truoc khi kiem tra lai webhook.",
-    recent_auth_required: "Hay dang nhap lai truoc khi ket noi credential.",
-    request_failed: "Yeu cau chua hoan tat. Kiem tra mang va thu lai.",
-    subscription_required: "Goi hien tai khong cho phep thao tac nay.",
-    validation_failed: "Kiem tra lai cac truong vua nhap.",
-  };
-  return messages[code] ?? "Yeu cau chua hoan tat. Hay thu lai.";
-}
-
 /** Select a catalog key without exposing provider text or internal error data. */
 export function readableErrorKey(code: string, issues: readonly string[] = []): string {
   const knownIssues = new Set([

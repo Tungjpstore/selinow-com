@@ -24,6 +24,8 @@ type StorefrontSettingsResponse = {
   };
 };
 
+type JsonObject = Record<string, unknown>;
+
 const builder = document.querySelector<HTMLElement>("[data-store-builder]");
 
 if (builder !== null) {
@@ -175,6 +177,40 @@ if (builder !== null) {
 
     const setFeedback = (message: string): void => {
       if (feedback !== null) feedback.textContent = message;
+    };
+
+    // Reads the owner-scoped readiness projection and lists every failed
+    // required check so the seller sees WHY publishing is blocked.
+    const renderPublishBlockers = async (): Promise<void> => {
+      if (feedback === null || !shopPublicId) return;
+      try {
+        const response = await fetch(`/api/app/shops/${encodeURIComponent(shopPublicId)}/readiness`, { credentials: "same-origin" });
+        const payload: unknown = await response.json().catch(() => null);
+        if (!response.ok || typeof payload !== "object" || payload === null) return;
+        const run: unknown = (payload as JsonObject).run;
+        const checks: unknown = typeof run === "object" && run !== null ? (run as JsonObject).checks : null;
+        if (!Array.isArray(checks)) return;
+        const blockers = checks.filter((item): item is JsonObject => typeof item === "object" && item !== null
+          && (item as JsonObject).status === "fail"
+          && (item as JsonObject).required === true
+          && typeof (item as JsonObject).code === "string");
+        if (blockers.length === 0) return;
+        const labels: unknown = copy.readinessCheckLabels;
+        const list = document.createElement("ul");
+        list.className = "publish-blockers";
+        for (const check of blockers) {
+          const item = document.createElement("li");
+          const code = String(check.code);
+          const label = typeof labels === "object" && labels !== null && typeof (labels as JsonObject)[code] === "string"
+            ? (labels as JsonObject)[code] as string
+            : code;
+          item.textContent = label;
+          list.appendChild(item);
+        }
+        feedback.appendChild(list);
+      } catch {
+        // Blocker detail is best-effort; the readiness_failed notice stands.
+      }
     };
 
     const updatePublicationBadge = (): void => {
@@ -403,9 +439,16 @@ if (builder !== null) {
         setFeedback(text("publishSuccess"));
       } catch (error) {
         setState("failed");
-        setFeedback(error instanceof Error && error.message === "resource_conflict"
-          ? text("publishConflict")
-          : error instanceof Error ? text("publishError", { error: error.message }) : text("publishFailed"));
+        const errorCode = error instanceof Error ? error.message : "";
+        if (errorCode === "readiness_failed") {
+          // Surface each failed required readiness check instead of the raw 409.
+          setFeedback(text("publishBlockers"));
+          await renderPublishBlockers();
+        } else {
+          setFeedback(error instanceof Error && errorCode === "resource_conflict"
+            ? text("publishConflict")
+            : error instanceof Error ? text("publishError", { error: errorCode }) : text("publishFailed"));
+        }
         publishButton.disabled = false;
       }
       })();

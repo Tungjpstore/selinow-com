@@ -3,6 +3,7 @@ import { constantTimeEqual, hmacToken } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
 import { subscriptionAllows } from "../billing/entitlements";
 import type { AppBindings } from "../platform/bindings";
+import { purgeStorefrontResolverCacheForShop } from "../storefront/cache";
 import { getShopForMember } from "../tenants/store";
 import { getPlanLimit, hasFeature } from "../tenants/policy";
 import {
@@ -1241,6 +1242,7 @@ export async function setPrimaryDomain(input: {
   if (results[2]?.meta.changes !== 1 || results[3]?.meta.changes !== 1) {
     throw new AppError("domain_primary_conflict", 409);
   }
+  await purgeStorefrontResolverCacheForShop(input.env, shopId);
   return mapDomain(requireDomain(await findDomainById(input.env, shopId, row.id)), getSaasTarget(input.env));
 }
 
@@ -1554,6 +1556,7 @@ export async function deleteCustomDomain(input: {
         resource_id, safe_metadata_json, request_id, created_at
       ) VALUES (?, ?, 'user', ?, 'domain.deleted', 'shop_domain', ?, '{}', ?, ?)
     `).bind(createId("aud"), shopId, input.userId, row.id, input.requestId, nowIso).run();
+    await purgeStorefrontResolverCacheForShop(input.env, shopId);
   } catch (error) {
     await persistDeleteFailure({ env: input.env, error, leaseToken: ownedLeaseToken, now, row });
     throw error instanceof AppError ? error : new AppError("provider_unavailable", 503);
@@ -1821,5 +1824,6 @@ export async function refreshCustomDomainTurnstileAdmission(input: {
   }
 
   await persistTurnstileAdmissionRefresh({ admission, env: input.env, leaseToken: input.leaseToken, now: input.now, row });
+  await purgeStorefrontResolverCacheForShop(input.env, input.row.shopId);
   return "checked";
 }
