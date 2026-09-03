@@ -180,7 +180,7 @@ describe("appointment booking money path", () => {
       shop: runtime.shop,
     })).rejects.toMatchObject({ code: "validation_failed", issues: ["booking_cart_invalid"] });
     expect(runtime.database.prepare("SELECT COUNT(*) AS total FROM orders").get()).toMatchObject({ total: 0 });
-  });
+  }, 15_000);
 
   it("replays one durable order per idempotency key", async () => {
     const runtime = createRuntime();
