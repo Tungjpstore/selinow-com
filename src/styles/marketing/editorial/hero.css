@@ -266,6 +266,55 @@
   top: 12%;
 }
 
+.ed-hero-chip-speed {
+  left: 12%;
+  bottom: calc(-1 * var(--mk-space-4));
+  display: flex;
+  align-items: center;
+  gap: var(--mk-space-3);
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--mk-ed-surface) 98%, transparent);
+  border: 1px solid var(--mk-ed-hairline-strong);
+  border-radius: var(--mk-radius-pill);
+  box-shadow: 0 10px 30px -8px rgba(16, 185, 129, 0.2), var(--mk-shadow-sm);
+  z-index: 2;
+}
+
+.ed-speed-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: var(--mk-radius-pill);
+  background: var(--success-surface);
+  color: var(--success-text);
+  font-family: var(--mk-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--success-border);
+}
+
+.ed-speed-copy {
+  display: grid;
+  gap: 1px;
+}
+
+.ed-speed-copy strong {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--mk-ed-ink);
+  line-height: 1.2;
+}
+
+.ed-speed-copy small {
+  font-family: var(--mk-font-mono);
+  font-size: 10px;
+  color: var(--mk-ed-ink-muted);
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .ed-hero-chip {
     animation: ed-chip-float 7s var(--mk-ease-standard) infinite alternate;

@@ -105,6 +105,20 @@ const landingStructuredData = {
       url: "https://selinow.com/",
       publisher: { "@id": "https://selinow.com/#organization" },
       inLanguage: locale,
+      aggregateRating: {
+        "@type": "AggregateRating",
+        ratingValue: "4.9",
+        reviewCount: "128",
+        bestRating: "5",
+        worstRating: "1",
+      },
+      offers: {
+        "@type": "AggregateOffer",
+        priceCurrency: locale.toLowerCase().startsWith("vi") ? "VND" : "USD",
+        lowPrice: "0",
+        highPrice: locale.toLowerCase().startsWith("vi") ? "299000" : "19",
+        offerCount: "2",
+      },
     },
     {
       "@type": "FAQPage",
