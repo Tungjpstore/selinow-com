@@ -205,6 +205,121 @@ const integrationClientCopy = {
               </div>
               <p class="provider-error" data-error hidden={!canReadProviders || telegramView.error === null}>{canReadProviders ? telegramView.error : ""}</p>
             </article>
+
+            {canManageProviders && telegramConnected && telegram !== null && (
+              <div class="telegram-template-panel" data-telegram-template-panel>
+                <div class="template-panel-header">
+                  <div>
+                    <span class="template-badge">Giao diện và Kịch bản Bot theo ngành hàng</span>
+                    <h3>Chọn Preset ngành hàng & Tùy biến Menu</h3>
+                    <p>Tự động tối ưu hoá kịch bản phản hồi, nút tương tác và cách hiển thị phù hợp nhất với mô hình kinh doanh của bạn.</p>
+                  </div>
+                  <button class="app-button app-button-primary" type="button" data-action="save-template">Lưu thay đổi</button>
+                </div>
+
+                <div class="template-panel-body">
+                  <div class="template-options-column">
+                    <span class="template-section-label">Ngành hàng sản phẩm số:</span>
+                    <div class="preset-cards-grid">
+                      <label class={`preset-card ${telegram.templatePreset === 'license_vault' ? 'active' : ''}`} data-preset-card="license_vault">
+                        <input type="radio" name="templatePreset" value="license_vault" checked={telegram.templatePreset === 'license_vault'} />
+                        <div class="preset-card-content">
+                          <span class="preset-tag">KEY</span>
+                          <div>
+                            <strong>Kho Bản Quyền & Phần Mềm</strong>
+                            <p>Software, SaaS, Dev Tools. Giao License Key dạng code 1-chạm copy, hướng dẫn kích hoạt.</p>
+                          </div>
+                        </div>
+                      </label>
+
+                      <label class={`preset-card ${telegram.templatePreset === 'gaming_topup' ? 'active' : ''}`} data-preset-card="gaming_topup">
+                        <input type="radio" name="templatePreset" value="gaming_topup" checked={telegram.templatePreset === 'gaming_topup'} />
+                        <div class="preset-card-content">
+                          <span class="preset-tag">GAME</span>
+                          <div>
+                            <strong>Nạp Game & Thẻ Cào</strong>
+                            <p>Game Card, Giftcard, Xu/Kim Cương. Menu mệnh giá nhanh, trả Mã PIN + Serial tự động.</p>
+                          </div>
+                        </div>
+                      </label>
+
+                      <label class={`preset-card ${telegram.templatePreset === 'subscription_slots' ? 'active' : ''}`} data-preset-card="subscription_slots">
+                        <input type="radio" name="templatePreset" value="subscription_slots" checked={telegram.templatePreset === 'subscription_slots'} />
+                        <div class="preset-card-content">
+                          <span class="preset-tag">SLOT</span>
+                          <div>
+                            <strong>Tài Khoản Dùng Chung & AI</strong>
+                            <p>Netflix, Spotify, ChatGPT Plus, Claude Pro. Cấp Profile + PIN riêng, nút báo lỗi 1-chạm.</p>
+                          </div>
+                        </div>
+                      </label>
+
+                      <label class={`preset-card ${telegram.templatePreset === 'mini_app_hybrid' ? 'active' : ''}`} data-preset-card="mini_app_hybrid">
+                        <input type="radio" name="templatePreset" value="mini_app_hybrid" checked={telegram.templatePreset === 'mini_app_hybrid'} />
+                        <div class="preset-card-content">
+                          <span class="preset-tag">APP</span>
+                          <div>
+                            <strong>Cửa Hàng Mini App (Storefront)</strong>
+                            <p>Nhiều danh mục, combo, khoá học. Menu Button tự động mở Webview Mini App toàn màn hình.</p>
+                          </div>
+                        </div>
+                      </label>
+
+                      <label class={`preset-card ${telegram.templatePreset === 'vip_community' ? 'active' : ''}`} data-preset-card="vip_community">
+                        <input type="radio" name="templatePreset" value="vip_community" checked={telegram.templatePreset === 'vip_community'} />
+                        <div class="preset-card-content">
+                          <span class="preset-tag">VIP</span>
+                          <div>
+                            <strong>Cộng Đồng Kín & Kênh VIP</strong>
+                            <p>Nhóm tín hiệu, phân tích thị trường, kho tài liệu. Tự động cấp Single-Use Invite Link.</p>
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div class="template-fields-group">
+                      <div class="field-item">
+                        <label for="welcome-message-input">Lời chào tùy chỉnh (Welcome Message):</label>
+                        <textarea id="welcome-message-input" name="welcomeMessage" rows="2" placeholder="Ví dụ: Chào mừng bạn đến với {shop}! Chọn sản phẩm bên dưới để nhận hàng tự động:">{telegram.welcomeMessageCustom ?? ""}</textarea>
+                        <small>Dùng <code>{`{shop}`}</code> để chèn tên cửa hàng tự động.</small>
+                      </div>
+
+                      <div class="field-item">
+                        <label for="support-handle-input">Telegram Admin Hỗ trợ (Support Handle):</label>
+                        <input id="support-handle-input" name="supportHandle" type="text" placeholder="@admin_support" value={telegram.supportHandle ?? ""} />
+                        <small>Hiển thị nút liên hệ trực tiếp cho khách hàng trên menu bot.</small>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="template-preview-column">
+                    <span class="preview-label">Mô phỏng tin nhắn Telegram trực quan</span>
+                    <div class="telegram-preview-phone">
+                      <div class="telegram-preview-speaker"></div>
+                      <div class="telegram-preview-header">
+                        <div class="telegram-preview-avatar">BOT</div>
+                        <div class="telegram-preview-bot-info">
+                          <strong data-sim-bot-name>{telegram.bot?.displayName ?? "Selinow Bot"}</strong>
+                          <span>bot · trực tuyến</span>
+                        </div>
+                      </div>
+                      <div class="telegram-preview-chat-window">
+                        <div class="telegram-preview-bubble">
+                          <p data-sim-text></p>
+                        </div>
+                        <div class="telegram-preview-keyboard" data-sim-keyboard>
+                          <!-- Dynamic buttons -->
+                        </div>
+                      </div>
+                      <div class="telegram-preview-footer">
+                        <span class="telegram-preview-menu-btn" data-sim-menu-btn>Menu</span>
+                        <div class="telegram-preview-input-box">Nhập tin nhắn...</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           <section class="integration-group channel-expansion-group" aria-labelledby="channel-expansion-title" data-channel-expansion-section>
@@ -392,6 +507,306 @@ const integrationClientCopy = {
   .field-help code { padding: 2px 5px; border-radius: 5px; background: var(--sln-bg-subtle); font: 12px/1.4 var(--sln-font-mono); }
   .disconnect-panel { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--sln-state-danger) 22%, var(--sln-border-default)); }
   .disconnect-panel .app-button { margin-top: 14px; }
-  @media (max-width: 900px) { .group-heading { align-items: start; flex-direction: column; gap: 8px; } .group-heading > span { max-width: 560px; text-align: left; } .integration-row { grid-template-columns: 44px minmax(0, 1fr) auto; } .integration-row > .sln-status { grid-column: 3; grid-row: 1; } .provider-actions { grid-column: 2 / -1; justify-content: start; } .provider-error { grid-column: 1 / -1; } .channel-expansion-grid { grid-template-columns: 1fr; } }
+
+  /* Telegram Bot Industry Template Customizer */
+  .telegram-template-panel {
+    margin-top: 24px;
+    padding: 24px;
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    box-shadow: var(--sln-shadow-xs, none);
+    display: grid;
+    gap: 20px;
+  }
+  .template-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--sln-border-default);
+  }
+  .template-badge {
+    display: inline-block;
+    font: var(--sln-font-caption);
+    font-weight: 600;
+    color: var(--sln-action-primary);
+    background: var(--sln-tint-info);
+    padding: 3px 8px;
+    border-radius: var(--sln-radius-pill);
+    margin-bottom: 6px;
+  }
+  .template-panel-header h3 {
+    margin: 0;
+    font: var(--sln-font-h3);
+    color: var(--sln-text-primary);
+  }
+  .template-panel-header p {
+    margin: 4px 0 0;
+    font: var(--sln-font-body-sm);
+    color: var(--sln-text-secondary);
+    max-width: 640px;
+  }
+  .template-panel-body {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 24px;
+    align-items: flex-start;
+  }
+  .template-options-column {
+    display: grid;
+    gap: 16px;
+  }
+  .template-section-label {
+    font: var(--sln-font-label);
+    font-weight: 600;
+    color: var(--sln-text-primary);
+  }
+  .preset-cards-grid {
+    display: grid;
+    gap: 10px;
+  }
+  .preset-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-md);
+    background: var(--sln-bg-surface);
+    cursor: pointer;
+    transition: border-color 160ms ease, background 160ms ease;
+  }
+  .preset-card input[type="radio"] {
+    margin-top: 3px;
+    accent-color: var(--sln-action-primary);
+  }
+  .preset-card:hover {
+    border-color: var(--sln-border-strong);
+    background: var(--sln-bg-subtle);
+  }
+  .preset-card.active, .preset-card:has(input:checked) {
+    border-color: var(--sln-action-primary);
+    background: var(--sln-tint-info);
+    box-shadow: 0 0 0 1px var(--sln-action-primary);
+  }
+  .preset-card-content {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .preset-tag {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: var(--sln-radius-sm, 4px);
+    background: var(--sln-bg-subtle);
+    color: var(--sln-text-secondary);
+    font: 700 10px/1 var(--sln-font-mono);
+    letter-spacing: 0.04em;
+  }
+  .preset-card-content strong {
+    display: block;
+    font: var(--sln-font-body-sm);
+    font-weight: 600;
+    color: var(--sln-text-primary);
+  }
+  .preset-card-content p {
+    margin: 3px 0 0;
+    font: var(--sln-font-caption);
+    color: var(--sln-text-secondary);
+    line-height: 1.4;
+  }
+  .template-fields-group {
+    display: grid;
+    gap: 12px;
+    padding-top: 14px;
+    border-top: 1px solid var(--sln-border-default);
+  }
+  .field-item {
+    display: grid;
+    gap: 4px;
+  }
+  .field-item label {
+    font: var(--sln-font-caption);
+    font-weight: 600;
+    color: var(--sln-text-primary);
+  }
+  .field-item textarea, .field-item input[type="text"] {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--sln-border-strong);
+    border-radius: var(--sln-radius-md);
+    background: var(--sln-bg-surface);
+    font: var(--sln-font-body-sm);
+    color: var(--sln-text-primary);
+  }
+  .field-item textarea:focus, .field-item input[type="text"]:focus {
+    border-color: var(--sln-focus-ring);
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(59 130 246 / 15%);
+  }
+  .field-item small {
+    font: var(--sln-font-caption);
+    color: var(--sln-text-muted);
+  }
+
+  /* Telegram phone preview mock */
+  .template-preview-column {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+  }
+  .preview-label {
+    font: var(--sln-font-caption);
+    font-weight: 600;
+    color: var(--sln-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .telegram-preview-phone {
+    --telegram-phone-border: #1e293b; /* telegram mock */
+    --telegram-phone-bg: #0e1621; /* telegram mock */
+    --telegram-phone-speaker: #334155; /* telegram mock */
+    --telegram-phone-header-bg: #17212b; /* telegram mock */
+    --telegram-phone-border-inner: #242f3d; /* telegram mock */
+    --telegram-phone-avatar-bg: #2b5278; /* telegram mock */
+    --telegram-phone-name-text: #f5f5f5; /* telegram mock */
+    --telegram-phone-muted-text: #6c7883; /* telegram mock */
+    --telegram-phone-bubble-bg: #182533; /* telegram mock */
+    --telegram-phone-bubble-text: #e4ecf2; /* telegram mock */
+    --telegram-phone-accent-text: #5288c1; /* telegram mock */
+    --telegram-phone-italic-text: #8da2b5; /* telegram mock */
+    --telegram-phone-button-bg: #2b5278; /* telegram mock */
+    --telegram-phone-button-text: #ffffff; /* telegram mock */
+    --telegram-phone-menu-btn-bg: #242f3d; /* telegram mock */
+
+    width: 280px;
+    border: 10px solid var(--telegram-phone-border);
+    border-radius: 36px;
+    background: var(--telegram-phone-bg);
+    overflow: hidden;
+    box-shadow: 0 16px 36px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.08);
+    display: flex;
+    flex-direction: column;
+    height: 480px;
+    position: relative;
+  }
+  .telegram-preview-speaker {
+    width: 60px;
+    height: 4px;
+    background: var(--telegram-phone-speaker);
+    border-radius: 2px;
+    margin: 8px auto 6px;
+  }
+  .telegram-preview-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--telegram-phone-header-bg);
+    border-bottom: 1px solid var(--telegram-phone-border-inner);
+  }
+  .telegram-preview-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--telegram-phone-avatar-bg);
+    color: var(--telegram-phone-name-text);
+    display: grid;
+    place-items: center;
+    font: 700 10px/1 var(--sln-font-mono);
+  }
+  .telegram-preview-bot-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .telegram-preview-bot-info strong {
+    font-size: 12px;
+    color: var(--telegram-phone-name-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .telegram-preview-bot-info span {
+    font-size: 10px;
+    color: var(--telegram-phone-muted-text);
+  }
+  .telegram-preview-chat-window {
+    flex: 1;
+    padding: 12px 10px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--telegram-phone-bg);
+  }
+  .telegram-preview-bubble {
+    background: var(--telegram-phone-bubble-bg);
+    padding: 10px 12px;
+    border-radius: 12px 12px 12px 2px;
+    max-width: 90%;
+    color: var(--telegram-phone-bubble-text);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .telegram-preview-bubble b {
+    color: var(--telegram-phone-accent-text);
+  }
+  .telegram-preview-bubble i {
+    color: var(--telegram-phone-italic-text);
+    font-size: 10px;
+  }
+  .telegram-preview-keyboard {
+    display: grid;
+    gap: 5px;
+    width: 90%;
+  }
+  .sim-keyboard-row {
+    display: flex;
+    gap: 5px;
+  }
+  .sim-button {
+    flex: 1;
+    background: var(--telegram-phone-button-bg);
+    color: var(--telegram-phone-button-text);
+    font-size: 10px;
+    font-weight: 500;
+    text-align: center;
+    padding: 6px 4px;
+    border-radius: 6px;
+    cursor: default;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .telegram-preview-footer {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: var(--telegram-phone-header-bg);
+    border-top: 1px solid var(--telegram-phone-border-inner);
+  }
+  .telegram-preview-menu-btn {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--telegram-phone-accent-text);
+    background: var(--telegram-phone-menu-btn-bg);
+    padding: 4px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .telegram-preview-input-box {
+    flex: 1;
+    font-size: 10px;
+    color: var(--telegram-phone-muted-text);
+    border-radius: 12px;
+  }
+
+  @media (max-width: 900px) {
+    .template-panel-body { grid-template-columns: 1fr; }
+    .group-heading { align-items: start; flex-direction: column; gap: 8px; } .group-heading > span { max-width: 560px; text-align: left; } .integration-row { grid-template-columns: 44px minmax(0, 1fr) auto; } .integration-row > .sln-status { grid-column: 3; grid-row: 1; } .provider-actions { grid-column: 2 / -1; justify-content: start; } .provider-error { grid-column: 1 / -1; } .channel-expansion-grid { grid-template-columns: 1fr; } }
   @media (max-width: 560px) { .header-actions, .header-actions .app-button { width: 100%; } .integration-row { gap: 12px; padding: 18px 0; } .provider-copy h3 { font-size: 18px; } .provider-summary { white-space: normal; } .provider-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; } .provider-actions .app-button { width: 100%; } .provider-actions .text-action { justify-self: start; } .provider-note { text-align: left; } .secure-panel-head, .form-heading { flex-direction: column; } .form-heading a { min-height: 40px; } .channel-expansion-card-actions { align-items: start; flex-direction: column; } .channel-expansion-card-actions .app-button { width: 100%; } }
 </style>

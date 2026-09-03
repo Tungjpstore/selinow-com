@@ -781,5 +781,141 @@ if (root !== null) {
   refreshAll?.addEventListener("click", () => void refreshStates());
   window.addEventListener("popstate", () => { ensureTenantContext(); });
   window.addEventListener("pageshow", () => { ensureTenantContext(); });
+
+  const initTelegramTemplateManager = (): void => {
+    const panel = root.querySelector<HTMLElement>("[data-telegram-template-panel]");
+    if (panel === null || shopPublicId === undefined) return;
+
+    const presetCards = [...panel.querySelectorAll<HTMLElement>("[data-preset-card]")];
+    const welcomeInput = panel.querySelector<HTMLTextAreaElement>("#welcome-message-input");
+    const supportInput = panel.querySelector<HTMLInputElement>("#support-handle-input");
+    const saveBtn = panel.querySelector<HTMLButtonElement>("[data-action='save-template']");
+    const simText = panel.querySelector<HTMLElement>("[data-sim-text]");
+    const simKeyboard = panel.querySelector<HTMLElement>("[data-sim-keyboard]");
+    const simMenuBtn = panel.querySelector<HTMLElement>("[data-sim-menu-btn]");
+
+    let currentPreset = panel.querySelector<HTMLInputElement>("input[name='templatePreset']:checked")?.value ?? "license_vault";
+
+    const renderSimulator = (): void => {
+      const welcome = welcomeInput?.value.trim() || "Chào mừng bạn đến với Cửa Hàng! Chọn danh mục bên dưới để bắt đầu:";
+      const support = supportInput?.value.trim() || "";
+
+      if (simText !== null) {
+        switch (currentPreset) {
+          case "gaming_topup":
+            simText.innerHTML = `🎮 <b>Game & Thẻ Cào Tự Động</b><br/><br/>${welcome}<br/><br/><i>⚡ Trả mã PIN & Serial tức thì qua bot.</i>`;
+            break;
+          case "subscription_slots":
+            simText.innerHTML = `🎬 <b>Tài Khoản & Gói Dịch Vụ</b><br/><br/>${welcome}<br/><br/><i>⚡ Cấp Profile & PIN bảo mật sau khi thanh toán.</i>`;
+            break;
+          case "mini_app_hybrid":
+            simText.innerHTML = `🛍️ <b>Storefront Trực Tuyến</b><br/><br/>${welcome}<br/><br/><i>Bấm Menu góc dưới để mở Cửa hàng toàn màn hình.</i>`;
+            break;
+          case "vip_community":
+            simText.innerHTML = `👑 <b>Cộng Đồng VIP / Hội Viên</b><br/><br/>${welcome}<br/><br/><i>Hệ thống tự động cấp link mời 1-lần vào nhóm kín sau thanh toán.</i>`;
+            break;
+          case "license_vault":
+          default:
+            simText.innerHTML = `🔑 <b>Kho Bản Quyền Số</b><br/><br/>${welcome}<br/><br/><i>⚡ Giao key bản quyền tức thì, copy 1-chạm.</i>`;
+            break;
+        }
+      }
+
+      if (simKeyboard !== null) {
+        simKeyboard.replaceChildren();
+        const row1 = document.createElement("div");
+        row1.className = "sim-keyboard-row";
+
+        const btnMenu = document.createElement("div");
+        btnMenu.className = "sim-button";
+        btnMenu.textContent = currentPreset === "gaming_topup" ? "🎮 Danh mục" : currentPreset === "subscription_slots" ? "🎬 Dịch vụ" : currentPreset === "vip_community" ? "👑 Tham gia" : "📦 Danh mục";
+
+        const btnCart = document.createElement("div");
+        btnCart.className = "sim-button";
+        btnCart.textContent = currentPreset === "vip_community" ? "💎 Gói VIP" : "🛒 Giỏ hàng";
+
+        row1.appendChild(btnMenu);
+        row1.appendChild(btnCart);
+        simKeyboard.appendChild(row1);
+
+        if (support.length > 0) {
+          const row2 = document.createElement("div");
+          row2.className = "sim-keyboard-row";
+          const btnSupport = document.createElement("div");
+          btnSupport.className = "sim-button";
+          btnSupport.textContent = `💬 Hỗ trợ: ${support}`;
+          row2.appendChild(btnSupport);
+          simKeyboard.appendChild(row2);
+        }
+      }
+
+      if (simMenuBtn !== null) {
+        simMenuBtn.textContent = currentPreset === "mini_app_hybrid" ? "🛍️ Cửa hàng" : "≡ Menu";
+      }
+    };
+
+    presetCards.forEach((card) => {
+      card.addEventListener("click", () => {
+        const radio = card.querySelector<HTMLInputElement>("input[type='radio']");
+        if (radio !== null) {
+          radio.checked = true;
+          currentPreset = radio.value;
+          presetCards.forEach((c) => {
+            c.classList.remove("active");
+          });
+          card.classList.add("active");
+          renderSimulator();
+        }
+      });
+    });
+
+    welcomeInput?.addEventListener("input", renderSimulator);
+    supportInput?.addEventListener("input", renderSimulator);
+
+    saveBtn?.addEventListener("click", () => {
+      void (async () => {
+        const origText = saveBtn.textContent;
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Đang lưu...";
+
+        try {
+          const csrfCookie = root.dataset.csrfCookieName;
+          const csrfToken = csrfCookie !== undefined ? readCookie(csrfCookie) : null;
+          const response = await fetch(`/api/app/shops/${encodeURIComponent(shopPublicId)}/integrations/telegram/menu`, {
+            body: JSON.stringify({
+              supportHandle: supportInput?.value.trim() || null,
+              templatePreset: currentPreset,
+              welcomeMessageCustom: welcomeInput?.value.trim() || null,
+            }),
+            headers: {
+              "Content-Type": "application/json",
+              ...(csrfToken !== null ? { "X-CSRF-Token": csrfToken } : {}),
+            },
+            method: "POST",
+          });
+
+          if (!response.ok) {
+            throw new Error("Cập nhật template thất bại");
+          }
+
+          saveBtn.textContent = "Đã lưu thành công!";
+          saveBtn.style.backgroundColor = "var(--sln-state-success)";
+          setTimeout(() => {
+            saveBtn.disabled = false;
+            saveBtn.textContent = origText;
+            saveBtn.style.backgroundColor = "";
+          }, 2500);
+        } catch (err) {
+          alert("Lỗi khi cập nhật template: " + (err instanceof Error ? err.message : "Vui lòng thử lại"));
+          saveBtn.disabled = false;
+          saveBtn.textContent = origText;
+        }
+      })();
+    });
+
+    renderSimulator();
+  };
+
+  initTelegramTemplateManager();
   void loadChannelExpansions();
 }

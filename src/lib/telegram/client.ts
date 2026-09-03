@@ -98,8 +98,8 @@ export class TelegramClient {
     await this.request("setMyCommands", { commands, ...(languageCode === undefined ? {} : { language_code: languageCode }) });
   }
 
-  async setChatMenuButton(): Promise<void> {
-    await this.request("setChatMenuButton", { menu_button: { type: "commands" } });
+  async setChatMenuButton(menuButton?: { type: "commands" } | { type: "web_app"; text: string; web_app: { url: string } }): Promise<void> {
+    await this.request("setChatMenuButton", { menu_button: menuButton ?? { type: "commands" } });
   }
 
   async setWebhook(input: { allowedUpdates: string[]; dropPendingUpdates?: boolean; maxConnections: number; secretToken: string; url: string }): Promise<void> {

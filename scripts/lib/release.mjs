@@ -757,6 +757,10 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
   }),
+  "0124_telegram_menu_templates.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
 });
 
 

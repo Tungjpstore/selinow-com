@@ -1,6 +1,29 @@
 # Implementation Status
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
+
+## Telegram Bot Industry Menu Templates & Interactive Simulator (2026-09-04)
+
+- **Database Migration 0124 (`migrations/0124_telegram_menu_templates.sql`)**:
+  - Extended `telegram_integrations` with `template_preset`, `welcome_message_custom`, `support_handle`, and `menu_config_json`.
+  - Added strict check constraint `CHECK (template_preset IN ('license_vault', 'gaming_topup', 'subscription_slots', 'mini_app_hybrid', 'vip_community'))`.
+  - Registered migration invariants in `scripts/lib/release.mjs` and updated pinned chain assertions.
+- **Telegram Commerce & Client Engine**:
+  - `src/lib/telegram/types.ts`: Exported `TelegramTemplatePreset` and `TelegramMenuConfig`.
+  - `src/lib/telegram/client.ts`: Extended `setChatMenuButton` to accept optional `menuButton` payload (`web_app` / `default`).
+  - `src/lib/telegram/integrations.ts`: Added `updateTelegramMenuConfig` ensuring strict tenant isolation (`shop_id`), role-based access control, and remote Telegram Bot Menu button synchronization.
+  - `src/lib/telegram/commerce.ts`: Adapted `menuReply` to format industry-specific greetings, keyboard layouts, and admin support handles for each of the 5 digital commerce verticals (`license_vault`, `gaming_topup`, `subscription_slots`, `mini_app_hybrid`, `vip_community`).
+- **Dashboard UI & Live Phone Simulator**:
+  - `src/pages/app/integrations.astro`: Added `.telegram-template-panel` with 5 industry preset selection cards, custom greeting textarea (`{shop}` interpolation), and Telegram support handle input.
+  - Added `.telegram-preview-phone` interactive simulator reflecting live bot messages, inline buttons, and menu footer.
+  - `src/scripts/dashboard/integrations.ts`: Connected interactive simulator event bindings and REST API communication with toast feedback.
+  - Added API endpoint `GET`/`POST` `/api/app/shops/[shopPublicId]/integrations/telegram/menu` with CSRF validation and registered in `docs/frontend-rebuild-handoff/API_ENDPOINT_INDEX.csv`.
+- **Verification Gates**:
+  - `npm run check`: 1018 files, 0 errors, 0 warnings.
+  - `npm run lint`: 0 errors, 0 warnings.
+  - `npm run test`: 374 test files, 3,075 tests passed (100%).
+  - `npm run build`: successfully built server and client assets.
+  - `npm run deploy:dry-run`: 0 errors, Cloudflare Worker configuration and bindings verified.
 
 ## Production Full Platform Release & GitHub Source Synchronization (2026-09-03)
 

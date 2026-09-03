@@ -9,7 +9,7 @@ import { TelegramClient } from "./client";
 import { loadActiveTelegramCredential } from "./credentials";
 import { decryptTelegramCredential, encryptTelegramCredential, type EncryptedTelegramCredential } from "./crypto";
 import { telegramCommands } from "./localization";
-import type { TelegramBotIdentity, TelegramWebhookInfo } from "./types";
+import type { TelegramBotIdentity, TelegramTemplatePreset, TelegramWebhookInfo } from "./types";
 
 type IntegrationRow = {
   activeCredentialId: string | null;
@@ -26,12 +26,16 @@ type IntegrationRow = {
   lastOutboundAt: string | null;
   lastSafeErrorCode: string | null;
   lastUpdateAt: string | null;
+  menuConfigJson: string | null;
   pendingUpdateCount: number;
   publicId: string;
   shopId: string;
   status: string;
+  supportHandle: string | null;
+  templatePreset: string | null;
   webhookPublicId: string;
   webhookStatus: string;
+  welcomeMessageCustom: string | null;
 };
 
 type ActivationAuthority = {
@@ -54,7 +58,11 @@ export type TelegramIntegrationView = {
   provider: "telegram";
   publicId: string;
   status: string;
+  supportHandle: string | null;
+  templatePreset: TelegramTemplatePreset;
   webhookStatus: string;
+  welcomeMessageCustom: string | null;
+  menuConfigJson: string | null;
 };
 
 const INTEGRATION_SELECT = `
@@ -71,6 +79,10 @@ const INTEGRATION_SELECT = `
   bot_id AS botId,
   bot_username_sanitized AS botUsername,
   bot_display_name_sanitized AS botDisplayName,
+  template_preset AS templatePreset,
+  welcome_message_custom AS welcomeMessageCustom,
+  support_handle AS supportHandle,
+  menu_config_json AS menuConfigJson,
   pending_update_count AS pendingUpdateCount,
   last_safe_error_code AS lastSafeErrorCode,
   last_checked_at AS lastCheckedAt,
@@ -161,11 +173,15 @@ function mapIntegration(row: IntegrationRow): TelegramIntegrationView {
     lastOutboundAt: row.lastOutboundAt,
     lastSafeErrorCode: row.lastSafeErrorCode,
     lastUpdateAt: row.lastUpdateAt,
+    menuConfigJson: row.menuConfigJson ?? null,
     pendingUpdateCount: row.pendingUpdateCount,
     provider: "telegram",
     publicId: row.publicId,
     status: row.status,
+    supportHandle: row.supportHandle ?? null,
+    templatePreset: row.templatePreset === null ? "license_vault" : (row.templatePreset as TelegramTemplatePreset),
     webhookStatus: row.webhookStatus,
+    welcomeMessageCustom: row.welcomeMessageCustom ?? null,
   };
 }
 
@@ -711,4 +727,74 @@ export async function disconnectTelegram(input: { env: AppBindings; fetcher?: ty
     input.env.PLATFORM_DB.prepare("INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'system', NULL, 'telegram.update_generation_fenced', 'telegram_integration', ?, '{\"reason\":\"disconnect\"}', ?, ?)").bind(createId("aud"), shopId, integration.id, input.requestId, now),
     input.env.PLATFORM_DB.prepare(`INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'user', ?, 'telegram.disconnected', 'telegram_integration', ?, '{}', ?, ?)`).bind(createId("aud"), shopId, input.userId, integration.id, input.requestId, now),
   ]);
+}
+
+export async function updateTelegramMenuConfig(input: {
+  env: AppBindings;
+  fetcher?: typeof fetch;
+  menuConfigJson?: string | null;
+  shopPublicId: string;
+  supportHandle?: string | null;
+  templatePreset: TelegramTemplatePreset;
+  userId: string;
+  welcomeMessageCustom?: string | null;
+}): Promise<TelegramIntegrationView> {
+  const actor = await requireIntegrationCredential(input.env, input.shopPublicId, input.userId);
+  const { shopId } = actor;
+  const integration = await findIntegration(input.env, shopId);
+  if (integration === null) throw new AppError("telegram_not_configured", 404);
+
+  const allowedPresets: TelegramTemplatePreset[] = [
+    "license_vault",
+    "gaming_topup",
+    "subscription_slots",
+    "mini_app_hybrid",
+    "vip_community",
+  ];
+  if (!allowedPresets.includes(input.templatePreset)) {
+    throw new AppError("telegram_template_preset_invalid", 400);
+  }
+
+  const nowIso = new Date().toISOString();
+  await input.env.PLATFORM_DB.prepare(`
+    UPDATE telegram_integrations
+    SET template_preset = ?,
+        welcome_message_custom = ?,
+        support_handle = ?,
+        menu_config_json = ?,
+        updated_at = ?
+    WHERE id = ? AND shop_id = ?
+  `).bind(
+    input.templatePreset,
+    input.welcomeMessageCustom ?? null,
+    input.supportHandle ?? null,
+    input.menuConfigJson ?? null,
+    nowIso,
+    integration.id,
+    shopId
+  ).run();
+
+  // If the integration is active, update commands/menu button with Telegram API
+  if (integration.activeCredentialId !== null && integration.status === "active") {
+    try {
+      const credential = await loadActiveTelegramCredential(input.env, integration.id, shopId);
+      const client = new TelegramClient(credential.credentials.botToken, input.fetcher);
+      if (input.templatePreset === "mini_app_hybrid") {
+        const miniAppUrl = `https://${actor.defaultLocale === "vi-VN" || actor.defaultLocale === "vi" ? "selinow.com" : "selinow.com"}/api/channels/telegram-mini-app/launch`;
+        await client.setChatMenuButton({
+          text: actor.defaultLocale === "vi-VN" || actor.defaultLocale === "vi" ? "Cửa hàng" : "Store",
+          type: "web_app",
+          web_app: { url: miniAppUrl },
+        }).catch(() => undefined);
+      } else {
+        await client.setChatMenuButton().catch(() => undefined);
+      }
+    } catch {
+      // Best-effort remote menu update; local DB update is authoritative
+    }
+  }
+
+  const updated = await findIntegration(input.env, shopId);
+  if (updated === null) throw new AppError("internal_error", 500);
+  return mapIntegration(updated);
 }

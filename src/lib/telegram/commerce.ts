@@ -28,7 +28,7 @@ import type { AppBindings } from "../platform/bindings";
 import { assertCheckoutAllowed, hasFeature } from "../tenants/policy";
 import { encryptTelegramChatId } from "./crypto";
 import { normalizeDiscountCode } from "./policy";
-import type { TelegramInlineKeyboard, TelegramUpdate, TelegramUser } from "./types";
+import type { TelegramInlineKeyboard, TelegramTemplatePreset, TelegramUpdate, TelegramUser } from "./types";
 import { formatTelegramMoney, formatTelegramTimestamp, resolveTelegramLocale, telegramStatus, telegramText, TELEGRAM_CATALOG } from "./localization";
 
 export type TelegramShop = {
@@ -36,12 +36,16 @@ export type TelegramShop = {
   currentPeriodEnd?: string | null;
   defaultLocale: string;
   id: string;
+  menuConfigJson?: string | null;
   name: string;
   orderExpiryMinutes: number;
   origin: string;
   status: string;
   subscriptionState: string;
+  supportHandle?: string | null;
+  templatePreset?: TelegramTemplatePreset;
   trialEndsAt?: string | null;
+  welcomeMessageCustom?: string | null;
   graceEndsAt?: string | null;
 };
 
@@ -492,16 +496,133 @@ export async function renderTelegramCheckoutResult(input: {
     : orderReply(input.orderApplication, input.context, input.order.orderId, false);
 }
 
-function menuReply(shop: TelegramShop, locale: SupportedLocale): TelegramReply {
-  return {
-    keyboard: [[{ callback_data: "menu", text: telegramText(locale, "button.menu") }, { callback_data: "cart", text: telegramText(locale, "button.cart") }]],
-    text: [
-      telegramText(locale, "menu.welcome", { shop: shop.name }),
-      telegramText(locale, "menu.help"),
-      telegramText(locale, "menu.privateOnly"),
-      telegramText(locale, "menu.prompt"),
-    ].join("\n"),
-  };
+async function menuReply(env: AppBindings, shop: TelegramShop, locale: SupportedLocale): Promise<TelegramReply> {
+  let preset: TelegramTemplatePreset = shop.templatePreset ?? "license_vault";
+  let welcomeMessageCustom = shop.welcomeMessageCustom ?? null;
+  let supportHandle = shop.supportHandle ?? null;
+
+  try {
+    const configRow = await env.PLATFORM_DB.prepare(`
+      SELECT template_preset AS templatePreset, welcome_message_custom AS welcomeMessageCustom, support_handle AS supportHandle
+      FROM telegram_integrations
+      WHERE shop_id = ?
+      LIMIT 1
+    `).bind(shop.id).first<{
+      supportHandle: string | null;
+      templatePreset: TelegramTemplatePreset;
+      welcomeMessageCustom: string | null;
+    }>();
+    if (configRow !== null) {
+      preset = configRow.templatePreset;
+      if (configRow.welcomeMessageCustom !== null) welcomeMessageCustom = configRow.welcomeMessageCustom;
+      if (configRow.supportHandle !== null) supportHandle = configRow.supportHandle;
+    }
+  } catch {
+    // Graceful fallback if database schema is from an earlier migration fixture
+  }
+
+  const welcome = welcomeMessageCustom
+    ? welcomeMessageCustom.replace(/\{shop\}/gu, shop.name)
+    : telegramText(locale, "menu.welcome", { shop: shop.name });
+
+  const keyboard: TelegramInlineKeyboard = [];
+
+  switch (preset) {
+    case "gaming_topup": {
+      keyboard.push([
+        { callback_data: "menu", text: "🎮 " + telegramText(locale, "button.menu") },
+        { callback_data: "cart", text: "🛒 " + telegramText(locale, "button.cart") },
+      ]);
+      if (supportHandle) {
+        keyboard.push([
+          { callback_data: "menu", text: `💬 Admin: ${supportHandle}` },
+        ]);
+      }
+      return {
+        keyboard,
+        text: [
+          `🎮 ${shop.name}`,
+          welcome,
+          telegramText(locale, "menu.help"),
+          telegramText(locale, "menu.privateOnly"),
+          telegramText(locale, "menu.prompt"),
+        ].join("\n"),
+      };
+    }
+    case "subscription_slots": {
+      keyboard.push([
+        { callback_data: "menu", text: "🎬 " + telegramText(locale, "button.menu") },
+        { callback_data: "cart", text: "🛒 " + telegramText(locale, "button.cart") },
+      ]);
+      if (supportHandle) {
+        keyboard.push([
+          { callback_data: "menu", text: `🛠️ ${supportHandle}` },
+        ]);
+      }
+      return {
+        keyboard,
+        text: [
+          `🎬 ${shop.name}`,
+          welcome,
+          locale.startsWith("vi") ? "⚡ Cấp Profile & PIN sau thanh toán." : "⚡ Profile & PIN issued after payment.",
+          telegramText(locale, "menu.privateOnly"),
+          telegramText(locale, "menu.prompt"),
+        ].join("\n"),
+      };
+    }
+    case "mini_app_hybrid": {
+      keyboard.push([
+        { callback_data: "menu", text: "🛍️ " + telegramText(locale, "button.menu") },
+        { callback_data: "cart", text: "🛒 " + telegramText(locale, "button.cart") },
+      ]);
+      return {
+        keyboard,
+        text: [
+          `🛍️ ${shop.name}`,
+          welcome,
+          telegramText(locale, "menu.help"),
+          telegramText(locale, "menu.privateOnly"),
+          telegramText(locale, "menu.prompt"),
+        ].join("\n"),
+      };
+    }
+    case "vip_community": {
+      keyboard.push([
+        { callback_data: "menu", text: "👑 " + telegramText(locale, "button.menu") },
+        { callback_data: "cart", text: "💎 " + telegramText(locale, "button.cart") },
+      ]);
+      return {
+        keyboard,
+        text: [
+          `👑 ${shop.name}`,
+          welcome,
+          locale.startsWith("vi") ? "Sau khi thanh toán, hệ thống tự động cấp link mời nhóm VIP." : "Single-use VIP invite link issued automatically after payment.",
+          telegramText(locale, "menu.prompt"),
+        ].join("\n"),
+      };
+    }
+    case "license_vault":
+    default: {
+      keyboard.push([
+        { callback_data: "menu", text: telegramText(locale, "button.menu") },
+        { callback_data: "cart", text: telegramText(locale, "button.cart") },
+      ]);
+      if (supportHandle) {
+        keyboard.push([
+          { callback_data: "menu", text: `💬 ${supportHandle}` },
+        ]);
+      }
+      return {
+        keyboard,
+        text: [
+          welcome,
+          telegramText(locale, "menu.help"),
+          telegramText(locale, "menu.privateOnly"),
+          telegramText(locale, "menu.prompt"),
+        ].join("\n"),
+      };
+    }
+  }
 }
 
 function safeErrorReply(error: AppError, locale: SupportedLocale): TelegramReply {
@@ -630,7 +751,7 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
       if (input.update.data.startsWith("pay:")) return { identity, reply: await paymentReply({ application: orderApplication, context: cartApplication.context, orderPublicId: input.update.data.slice(4), origin: localizedShop.origin }), resultCode: "payment_rendered" };
       if (input.update.data.startsWith("ord:")) return { identity, reply: await orderReply(orderApplication, cartApplication.context, input.update.data.slice(4)), resultCode: "order_rendered" };
       if (input.update.data.startsWith("key:")) return { identity, reply: await keyReply({ application: orderApplication, context: cartApplication.context, orderApplication, orderPublicId: input.update.data.slice(4) }), resultCode: "keys_rendered" };
-      return { identity, reply: menuReply(localizedShop, locale), resultCode: "menu_rendered" };
+      return { identity, reply: await menuReply(input.env, localizedShop, locale), resultCode: "menu_rendered" };
     }
 
     const { argumentsList, command } = messageCommand ?? { argumentsList: [], command: "" };
@@ -661,7 +782,7 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
         ? { identity, reply: { keyboard: [[{ callback_data: "menu", text: telegramText(locale, "button.menu") }]], text: telegramText(locale, "keys.empty") }, resultCode: "keys_empty" }
         : { identity, reply: await keyReply({ application: orderApplication, context: cartApplication.context, orderApplication, orderPublicId: eligibleOrder.orderId }), resultCode: "keys_rendered" };
     }
-    return { identity, reply: menuReply(localizedShop, locale), resultCode: command === "/start" ? "started" : "help_rendered" };
+    return { identity, reply: await menuReply(input.env, localizedShop, locale), resultCode: command === "/start" ? "started" : "help_rendered" };
   } catch (error) {
     if (error instanceof AppError && error.status < 500) return { identity, reply: safeErrorReply(error, locale), resultCode: error.code };
     throw error;

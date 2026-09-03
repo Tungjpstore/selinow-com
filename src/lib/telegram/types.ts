@@ -57,3 +57,19 @@ export type TelegramBotIdentity = {
   id: string;
   username: string;
 };
+
+export type TelegramTemplatePreset =
+  | "license_vault"
+  | "gaming_topup"
+  | "subscription_slots"
+  | "mini_app_hybrid"
+  | "vip_community";
+
+export type TelegramMenuConfig = {
+  preset: TelegramTemplatePreset;
+  welcomeMessageCustom?: string | null;
+  supportHandle?: string | null;
+  quickAmounts?: number[];
+  miniAppUrl?: string | null;
+};
+
