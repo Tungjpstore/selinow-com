@@ -1178,7 +1178,7 @@ describe("custom domain store", () => {
     const env = environment(database);
     const claimed = await createCustomDomainClaim({ env, hostname: "shop.customer.com", requestId: "request-claim", runtime: { now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
     let ownershipChecks = 0;
-    const expiredAt = new Date(NOW.getTime() + 31 * 60_000);
+    const expiredAt = new Date(NOW.getTime() + 25 * 60 * 60_000);
 
     const checked = await checkCustomDomain({
       domainId: claimed.domain.id,
@@ -1207,7 +1207,7 @@ describe("custom domain store", () => {
     const provider = new Provider();
     const env = environment(database);
     const claimed = await createCustomDomainClaim({ env, hostname: "shop.customer.com", requestId: "request-claim", runtime: { now: NOW, provider }, shopPublicId: "shop_public_a", userId: "user-a" });
-    const expiredAt = new Date(NOW.getTime() + 31 * 60_000);
+    const expiredAt = new Date(NOW.getTime() + 25 * 60 * 60_000);
     database.beforeClaimExpiryUpdate = () => {
       const claim = database.claims.get(claimed.domain.id);
       if (claim === undefined) throw new Error("missing claim");
@@ -1279,7 +1279,7 @@ describe("custom domain store", () => {
         requestId: "request-cross-expiry",
         runtime: {
           ownershipVerifier: ({ expectedValue }) => {
-            vi.setSystemTime(new Date(NOW.getTime() + 31 * 60_000));
+            vi.setSystemTime(new Date(NOW.getTime() + 25 * 60 * 60_000));
             return Promise.resolve({ observedValues: [expectedValue], status: "active" });
           },
           provider,

@@ -1,0 +1,26 @@
+{
+	"version": 1,
+	"ports": {
+		"preview": 4321,
+		"additional": {}
+	},
+	"scripts": {
+		"setup": {
+			"enabled": true,
+			"command": "npm ci --no-audit --no-fund && npx wrangler d1 migrations apply PLATFORM_DB --local && npx wrangler d1 execute PLATFORM_DB --local --file ./seeds/0001_platform_defaults.sql && npx wrangler d1 execute PLATFORM_DB --local --file ./seeds/0004_local_authenticated_browser.sql"
+		},
+		"run": {
+			"enabled": true,
+			"command": "npx astro dev --host 0.0.0.0 --port 4321 --allowed-hosts true"
+		},
+		"archive": {
+			"enabled": true,
+			"command": null
+		},
+		"check": {
+			"enabled": true,
+			"command": null
+		}
+	},
+	"mcpServers": []
+}
