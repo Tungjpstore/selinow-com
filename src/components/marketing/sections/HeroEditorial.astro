@@ -61,56 +61,118 @@ const channels = [
     </div>
 
     <figure class="ed-hero-art" data-reveal data-hero-art>
-      <div class="ed-hero-art-frame">
-        <picture>
-          <source
-            type="image/avif"
-            media="(max-width: 767px)"
-            srcset="/brand/landing/v1/hero-editorial-mobile-832.avif 832w, /brand/landing/v1/hero-editorial-mobile-640.avif 640w, /brand/landing/v1/hero-editorial-mobile-480.avif 480w"
-            sizes="100vw"
-          />
-          <source
-            type="image/webp"
-            media="(max-width: 767px)"
-            srcset="/brand/landing/v1/hero-editorial-mobile-832.webp 832w, /brand/landing/v1/hero-editorial-mobile-640.webp 640w, /brand/landing/v1/hero-editorial-mobile-480.webp 480w"
-            sizes="100vw"
-          />
-          <source
-            type="image/avif"
-            srcset="/brand/landing/v1/hero-editorial-desktop-1248.avif 1248w, /brand/landing/v1/hero-editorial-desktop-960.avif 960w, /brand/landing/v1/hero-editorial-desktop-720.avif 720w"
-            sizes="(min-width: 1024px) 46vw, 92vw"
-          />
-          <source
-            type="image/webp"
-            srcset="/brand/landing/v1/hero-editorial-desktop-1248.webp 1248w, /brand/landing/v1/hero-editorial-desktop-960.webp 960w, /brand/landing/v1/hero-editorial-desktop-720.webp 720w"
-            sizes="(min-width: 1024px) 46vw, 92vw"
-          />
-          <img
-            src="/brand/landing/v1/hero-editorial-desktop-960.webp"
-            alt={t("marketing.home.hero.art_alt")}
-            width="1248"
-            height="832"
-            fetchpriority="high"
-            decoding="async"
-          />
-        </picture>
-      </div>
-      <span class="ed-hero-chip ed-hero-chip-order" aria-hidden="true">
-        <strong>{t("marketing.home.sim.message")}</strong>
-        <small>{t("marketing.home.sim.created")}</small>
-        <em>{t("marketing.home.sim.amount")}</em>
-      </span>
-      <span class="ed-hero-chip ed-hero-chip-verified" aria-hidden="true">
-        <strong>{t("marketing.home.sim.product")}</strong>
-        <small>{t("marketing.home.sim.verified")} · {t("marketing.home.sim.delivered")}</small>
-      </span>
-      <span class="ed-hero-chip ed-hero-chip-speed" aria-hidden="true">
-        <span class="ed-speed-badge">⚡ 1.2s</span>
-        <span class="ed-speed-copy">
-          <strong>PayOS · VietQR</strong>
-          <small>Instant Key Delivery</small>
+      <div class="ed-showcase-container">
+        <div class="ed-showcase-glow" aria-hidden="true"></div>
+
+        <!-- Background Edge Architecture Card -->
+        <div class="ed-tech-card" aria-hidden="true">
+          <div class="ed-tech-card-header">
+            <span class="ed-tech-pill">Cloudflare Edge · D1</span>
+            <span class="ed-tech-status"><span class="ed-tech-dot"></span> 99.99% Uptime</span>
+          </div>
+          <div class="ed-tech-metrics">
+            <div class="ed-metric">
+              <small>Latency</small>
+              <strong>24ms</strong>
+            </div>
+            <div class="ed-metric">
+              <small>Delivery</small>
+              <strong>1.2s</strong>
+            </div>
+            <div class="ed-metric">
+              <small>Security</small>
+              <strong>AES-256</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modern Telegram Bot Smartphone Mockup -->
+        <div class="ed-phone-mockup">
+          <div class="ed-phone-notch" aria-hidden="true">
+            <span class="ed-phone-speaker"></span>
+            <span class="ed-phone-camera"></span>
+          </div>
+
+          <div class="ed-phone-screen">
+            <div class="ed-tg-header">
+              <div class="ed-tg-avatar">S</div>
+              <div class="ed-tg-info">
+                <strong>Selinow Bot · Store</strong>
+                <small>bot tự động hóa · 24/7</small>
+              </div>
+              <span class="ed-tg-badge">PRO</span>
+            </div>
+
+            <div class="ed-tg-chat">
+              <div class="ed-tg-bubble">
+                <p>Chào bạn! Chọn sản phẩm số để nhận mã ngay lập tức:</p>
+                <div class="ed-tg-product">
+                  <div class="ed-tg-product-info">
+                    <strong>🔑 License Pro (1 Năm)</strong>
+                    <span>Kho sẵn có: 142 keys</span>
+                  </div>
+                  <span class="ed-tg-price">299.000 đ</span>
+                </div>
+              </div>
+
+              <div class="ed-tg-bubble ed-tg-qr-box">
+                <div class="ed-tg-qr-title">
+                  <span>VietQR · PayOS Instant</span>
+                  <span class="ed-qr-live-badge">LIVE QR</span>
+                </div>
+                <div class="ed-tg-qr-code">
+                  <svg viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <rect x="2" y="2" width="7" height="7" rx="1" fill="#0F172A" />
+                    <rect x="15" y="2" width="7" height="7" rx="1" fill="#0F172A" />
+                    <rect x="2" y="15" width="7" height="7" rx="1" fill="#0F172A" />
+                    <rect x="15" y="15" width="3" height="3" fill="#0F172A" />
+                    <rect x="19" y="15" width="3" height="3" fill="#0F172A" />
+                    <rect x="15" y="19" width="3" height="3" fill="#0F172A" />
+                    <rect x="19" y="19" width="3" height="3" fill="#0F172A" />
+                    <circle cx="5.5" cy="5.5" r="1.5" fill="#FFFFFF" />
+                    <circle cx="18.5" cy="5.5" r="1.5" fill="#FFFFFF" />
+                    <circle cx="5.5" cy="18.5" r="1.5" fill="#FFFFFF" />
+                  </svg>
+                </div>
+                <div class="ed-tg-qr-status">
+                  <span class="ed-qr-pulse"></span>
+                  <span>Tự động kiểm tra giao dịch...</span>
+                </div>
+              </div>
+
+              <div class="ed-tg-bubble ed-tg-success">
+                <div class="ed-success-head">
+                  <span class="ed-success-icon">✓</span>
+                  <strong>Đã nhận thanh toán thành công!</strong>
+                </div>
+                <div class="ed-key-box">
+                  <small>LICENSE KEY CỦA BẠN:</small>
+                  <code>SEL-PRO-8823-991A-LIVE</code>
+                </div>
+                <p class="ed-key-note">Đã gửi kèm hóa đơn VAT & hướng dẫn kích hoạt.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Floating Commerce Chips -->
+        <span class="ed-hero-chip ed-hero-chip-order" aria-hidden="true">
+          <strong>{t("marketing.home.sim.message")}</strong>
+          <small>{t("marketing.home.sim.created")}</small>
+          <em>{t("marketing.home.sim.amount")}</em>
         </span>
-      </span>
+        <span class="ed-hero-chip ed-hero-chip-verified" aria-hidden="true">
+          <strong>{t("marketing.home.sim.product")}</strong>
+          <small>{t("marketing.home.sim.verified")} · {t("marketing.home.sim.delivered")}</small>
+        </span>
+        <span class="ed-hero-chip ed-hero-chip-speed" aria-hidden="true">
+          <span class="ed-speed-badge">⚡ 1.2s</span>
+          <span class="ed-speed-copy">
+            <strong>PayOS · VietQR</strong>
+            <small>Instant Key Delivery</small>
+          </span>
+        </span>
+      </div>
       <span class="ed-hero-art-tag" aria-hidden="true">{t("marketing.home.hero.mag_issue")}</span>
     </figure>
   </div>
