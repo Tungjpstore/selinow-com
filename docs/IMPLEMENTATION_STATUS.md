@@ -6,8 +6,8 @@ Last updated: 2026-09-03
 
 - **Worker Production Deployment**:
   - Deployed candidate from `main` (commit `e9340fa`, merging `chore/post-release-status-20260822` with fast-uri 3.1.7 fix).
-  - Promoted Light Mode Premium polish (commit `b278551`): added instant delivery speed chip (`.ed-hero-chip-speed`), Schema.org `AggregateRating` (4.9/5) & `AggregateOffer` rich snippets to `SoftwareApplication` for enhanced Google Search presence.
-  - Worker `selinow-com-production` promoted to version `779b1ba0-67b8-4ce0-bb6e-ee9efa8e9abd` at 100% traffic allocation.
+  - Promoted Modern Light Showcase (commit `95bcc6b`): replaced static portrait photo with high-tech interactive Telegram Bot & PayOS QR smartphone mockup, latency/AES-256 edge card, and Schema.org AggregateRating rich snippets.
+  - Worker `selinow-com-production` promoted to version `ed5ff5d4-9b42-476e-8916-de758df2f055` at 100% traffic allocation.
   - Active triggers verified: 7 zone routes (`selinow.com/*`, `*.selinow.com/*`, `*/*`), custom domains (`app.selinow.com`, `api.selinow.com`), cron schedule (`*/15 * * * *`), 2 producers, and 3 consumers (`selinow-integration-production`, `selinow-notification-production`, `selinow-dlq-production`).
 - **D1 Production Migrations (0113 - 0123 Applied)**:
   - Exported pre-migration backup `.wrangler/backups/production/backup_pre_migration_0113_0123.sql` (SHA256: `2e8def942d4e5fef7ac0c450875169d7df8de5c323a3a107e66fb45158145211`, 500KB).
