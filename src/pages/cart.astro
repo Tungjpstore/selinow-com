@@ -40,7 +40,12 @@ Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
       </aside>
     </div>
     <CatalogData products={products} />
+    <section class="cross-sell-section" hidden>
+      <h2>{t("storefront.tm4.cross_sell.heading")}</h2>
+      <div class="cross-sell-grid" data-cross-sell-grid></div>
+    </section>
     <script src="../scripts/storefront/cart.ts"></script>
+    <script src="../scripts/storefront/tm4-merchandising.ts"></script>
   </section> : <section class="safe-state"><div class="state-number">—</div><div><h1>{t("storefront.orders_paused.title")}</h1><p>{t("storefront.orders_paused.detail")}</p></div></section>}
 </StorefrontLayout>}
 

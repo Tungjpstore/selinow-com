@@ -4,8 +4,10 @@ import process from "node:process";
 
 import {
   assertProductionContinuationDeployAdmission,
+  inspectLiveCandidateWorkerVersionEvidence,
   inspectProductionReadiness,
   readOptionalJson,
+  validateCandidateWorkerVersionEvidence,
 } from "./lib/release.mjs";
 import { resolveDatabaseTarget } from "./lib/backup.mjs";
 import { validateCommerceUatArtifacts } from "./lib/commerce-uat-evidence.mjs";
@@ -17,16 +19,48 @@ function parseArguments(argv) {
     json: false,
     secretNamesPath: null,
     specPath: resolve(repositoryRoot, "infra/environments/production.json"),
+    stagingSpecPath: resolve(repositoryRoot, "infra/environments/staging.json"),
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--json") options.json = true;
     else if (argument === "--evidence") options.evidencePath = resolve(repositoryRoot, argv[++index] ?? "");
     else if (argument === "--spec") options.specPath = resolve(repositoryRoot, argv[++index] ?? "");
+    else if (argument === "--staging-spec") options.stagingSpecPath = resolve(repositoryRoot, argv[++index] ?? "");
     else if (argument === "--secret-names") options.secretNamesPath = resolve(repositoryRoot, argv[++index] ?? "");
     else throw new Error(`unknown_argument:${argument}`);
   }
   return options;
+}
+
+function mergeChecks(result, additional) {
+  const checks = [...new Map([...result.checks, ...additional.checks]
+    .map((check) => [check.name, check])).values()]
+    .sort((left, right) => left.name.localeCompare(right.name));
+  return {
+    checks,
+    missing: checks.filter((check) => !check.ok).map((check) => check.name),
+    ok: checks.every((check) => check.ok),
+  };
+}
+
+async function enforceCandidateWorkerVersionEvidence(result, input) {
+  if (!result.ok) return result;
+  try {
+    const validation = await inspectLiveCandidateWorkerVersionEvidence({
+      environment: process.env,
+      evidence: input.evidence,
+      productionSpec: input.productionSpec,
+      repositoryRoot,
+      stagingSpec: input.stagingSpec,
+      wranglerConfig: input.wranglerConfig,
+    });
+    return mergeChecks(result, validation);
+  } catch {
+    return mergeChecks(result, validateCandidateWorkerVersionEvidence({
+      evidence: input.evidence,
+    }));
+  }
 }
 
 async function loadSecretNames(path) {
@@ -82,6 +116,7 @@ try {
   const options = parseArguments(process.argv.slice(2));
   const wranglerConfig = JSON.parse(await readFile(resolve(repositoryRoot, "wrangler.jsonc"), "utf8"));
   const productionSpec = await readOptionalJson(options.specPath);
+  const stagingSpec = await readOptionalJson(options.stagingSpecPath);
   const evidence = await readOptionalJson(options.evidencePath);
   const now = new Date();
   const commerceEvidenceValidation = evidence === null
@@ -101,9 +136,17 @@ try {
     workerSecretNames: await loadSecretNames(options.secretNamesPath),
     wranglerConfig,
   });
-  const finalResult = productionSpec === null || evidence === null
+  const candidateBoundResult = productionSpec === null || evidence === null
     ? result
-    : await enforceContinuationEvidence(result, { evidence, productionSpec, wranglerConfig });
+    : await enforceCandidateWorkerVersionEvidence(result, {
+        evidence,
+        productionSpec,
+        stagingSpec,
+        wranglerConfig,
+      });
+  const finalResult = productionSpec === null || evidence === null
+    ? candidateBoundResult
+    : await enforceContinuationEvidence(candidateBoundResult, { evidence, productionSpec, wranglerConfig });
   writeResult(finalResult, options.json);
   process.exitCode = finalResult.ok ? 0 : 1;
 } catch (error) {

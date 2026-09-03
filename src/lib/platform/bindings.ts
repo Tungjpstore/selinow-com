@@ -4,13 +4,23 @@ export type AppBindings = Omit<Env, "APP_ENV" | "CANARY_HOSTNAME" | "CLOUDFLARE_
   ACTIVE_CREDENTIAL_KEY_VERSION: string;
   ACTIVE_INVENTORY_KEY_VERSION: string;
   APP_ENV: "local" | "staging" | "production";
+  CF_VERSION_METADATA?: WorkerVersionMetadata;
   CANARY_HOSTNAME?: string;
   CLOUDFLARE_ZONE_ID?: string;
   CREDENTIAL_KEK_V1: string;
   CREDENTIAL_KEK_V2?: string;
   DODO_PAYMENTS_WEBHOOK_PUBLIC_ID?: string;
+  DODO_UAT_COMMIT_SHA?: string;
+  DODO_UAT_CONTROL_TOKEN?: string;
+  DODO_UAT_MANIFEST_SHA256?: string;
+  DODO_UAT_RELEASE_ID?: string;
+  DODO_UAT_TREE_SHA?: string;
+  DODO_UAT_WORKER_VERSION?: string;
   EXPORT_KEK_V1?: string;
   EXPORT_KEY_VERSION?: string;
+  GOOGLE_OAUTH_CLIENT_ID: string;
+  GOOGLE_OAUTH_CLIENT_SECRET: string;
+  GOOGLE_OAUTH_REDIRECT_URI: string;
   IDENTIFIER_HMAC_SECRET: string;
   INTEGRATION_QUEUE: Queue;
   INVENTORY_KEK_V1: string;
@@ -35,11 +45,18 @@ export type AppBindings = Omit<Env, "APP_ENV" | "CANARY_HOSTNAME" | "CLOUDFLARE_
   SHOP_CREATE_SUBJECT_RATE_LIMIT?: string;
   STOREFRONT_CART_RATE_LIMIT: string;
   STOREFRONT_CHECKOUT_RATE_LIMIT: string;
+  STOREFRONT_ORDER_LOOKUP_RATE_LIMIT?: string;
   STOREFRONT_RATE_LIMIT_WINDOW_SECONDS: string;
   STOREFRONT_TURNSTILE_THRESHOLD: string;
   TELEGRAM_WEBHOOK_MAX_CONNECTIONS: string;
   TURNSTILE_SECRET_KEY?: string;
   TURNSTILE_SITE_KEY?: string;
+};
+
+type WorkerVersionMetadata = {
+  id: string;
+  tag: string;
+  timestamp: string;
 };
 
 export function getBindings(): AppBindings {

@@ -1,0 +1,66 @@
+/*
+ * Store Builder per-template preview skins (CD4).
+ * These palettes are storefront template theme data: they mirror the --tmpl-*
+ * feel-token layers of the real storefront sheets (pulse/craft dark, aurora
+ * warm serif, desk invoice, serenity pill, craft zero-radius, clinic mono) so
+ * the builder preview speaks each template's visual language. Raw hex here is
+ * intentional and scoped to preview swatch surfaces only — the workspace
+ * itself stays on semantic --sln-* tokens (frontend-route-ux contract).
+ */
+
+.storefront-preview[data-template-preview="pulse"] {
+  --preview-canvas: #0b1020;
+  --preview-surface: #111830;
+  --preview-border: #252c43;
+  --preview-border-subtle: #1c2438;
+  --preview-border-strong: #303a58;
+  --preview-text-primary: #f1f5f9;
+  --preview-text-secondary: #cbd5e1;
+  --preview-text-muted: #94a3b8;
+}
+.storefront-preview[data-template-preview="pulse"] .store-logo { box-shadow: 0 0 24px color-mix(in srgb, var(--preview-brand) 45%, transparent); }
+.storefront-preview[data-template-preview="pulse"] .preview-cart-link span { background: var(--preview-accent); }
+.storefront-preview[data-template-preview="desk"] .store-main h2 { max-width: 22ch; font-size: clamp(24px, 3.4vw, 34px); font-weight: 600; letter-spacing: -.02em; }
+.storefront-preview[data-template-preview="desk"] .preview-products { grid-template-columns: 1fr; }
+.storefront-preview[data-template-preview="desk"] .preview-products article { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; }
+.storefront-preview[data-template-preview="aurora"] {
+  --preview-canvas: #fafafa;
+  --preview-border: #e6e4e0;
+  --preview-border-subtle: #efece8;
+  --preview-border-strong: #d6d3cd;
+  --preview-text-primary: #141414;
+  --preview-text-secondary: #4a4a4a;
+  --preview-text-muted: #6f6f6f;
+}
+.storefront-preview[data-template-preview="aurora"] .store-main h2 { font-family: Georgia, "Times New Roman", "Noto Serif", serif; font-weight: 500; letter-spacing: -.01em; }
+.storefront-preview[data-template-preview="aurora"] .store-search { display: none; }
+.storefront-preview[data-template-preview="aurora"] .preview-products article { border: 0; border-radius: 0 0 14px 14px; overflow: hidden; }
+.storefront-preview[data-template-preview="metro"] .store-main h2 { font-size: clamp(24px, 3.4vw, 34px); letter-spacing: -.03em; }
+.storefront-preview[data-template-preview="metro"] .preview-products { gap: 8px; }
+.storefront-preview[data-template-preview="metro"] .preview-products article { border-radius: 6px; }
+.storefront-preview[data-template-preview="metro"] .store-search { border-radius: 6px; }
+.storefront-preview[data-template-preview="bustle"] .preview-products article:first-child { border: 1px dashed color-mix(in srgb, var(--sln-state-danger) 55%, var(--preview-border)); }
+.storefront-preview[data-template-preview="bustle"] .store-main h2 { font-weight: 700; letter-spacing: -.035em; }
+.storefront-preview[data-template-preview="serenity"] .store-search,
+.storefront-preview[data-template-preview="serenity"] .preview-products article,
+.storefront-preview[data-template-preview="serenity"] .store-logo { border-radius: var(--sln-radius-pill); }
+.storefront-preview[data-template-preview="serenity"] .store-main h2 { font-weight: 600; letter-spacing: -.02em; }
+.storefront-preview[data-template-preview="craft"] {
+  --preview-canvas: #12100d;
+  --preview-surface: #1a1713;
+  --preview-border: #2e2a24;
+  --preview-border-subtle: #26221c;
+  --preview-border-strong: #3d372e;
+  --preview-text-primary: #f5f1ea;
+  --preview-text-secondary: #d6d0c4;
+  --preview-text-muted: #b3ab9c;
+}
+.storefront-preview[data-template-preview="craft"] .store-main h2 { text-transform: uppercase; letter-spacing: -.02em; }
+.storefront-preview[data-template-preview="craft"] .store-search,
+.storefront-preview[data-template-preview="craft"] .preview-products article,
+.storefront-preview[data-template-preview="craft"] .store-logo { border-radius: 0; }
+.storefront-preview[data-template-preview="craft"] .store-support { border-left: 0; border-top: 1px solid var(--preview-border); padding: 12px 0 0; }
+.storefront-preview[data-template-preview="clinic"] .store-kicker { font-family: var(--sln-font-mono); }
+.storefront-preview[data-template-preview="clinic"] .preview-products { grid-template-columns: 1fr; }
+.storefront-preview[data-template-preview="clinic"] .preview-products article { border-inline-start: 3px solid var(--preview-brand); border-radius: 6px; }
+.storefront-preview[data-template-preview="clinic"] .store-main h2 { font-size: clamp(24px, 3.4vw, 34px); letter-spacing: -.02em; }

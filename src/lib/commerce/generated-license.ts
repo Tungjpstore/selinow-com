@@ -1,4 +1,5 @@
 import { tryRecordFirstPaidFulfilled } from "../analytics/activation";
+import { fireAutomationTriggers } from "../automation/rules/dispatcher";
 import { constantTimeEqual, hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
@@ -847,6 +848,7 @@ async function settleGeneratedLicenseSuccess(input: {
   ]);
   if (results[0]?.meta.changes !== 1) throw new AppError("generated_license_settlement_conflict", 409);
   await tryRecordFirstPaidFulfilled({ env: input.env, orderId: input.claim.orderId, shopId: input.claim.shopId });
+  if ((results[3]?.meta.changes ?? 0) === 1) void fireAutomationTriggers(input.env, { aggregateReference: `order:${input.claim.orderId}`, refs: { orderId: input.claim.orderId }, shopId: input.claim.shopId, triggerType: "order.fulfilled" }).catch(() => {});
 }
 
 export async function processGeneratedLicenseRequestReference(input: {

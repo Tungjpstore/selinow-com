@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AppError } from "../../src/lib/core/errors";
+
 const dependencies = vi.hoisted(() => ({
   acknowledge: vi.fn(),
   env: {},
   generatedRetry: vi.fn(),
-  isAdmin: vi.fn(),
-  role: vi.fn(),
+  rateGuard: vi.fn(),
   replay: vi.fn(),
   requestRetry: vi.fn(),
+  requireAccess: vi.fn(),
   requireCsrf: vi.fn(),
   requireRecentAuth: vi.fn(),
   resolve: vi.fn(),
@@ -18,13 +20,16 @@ vi.mock("../../src/lib/auth/session", () => ({
   requireRecentAuth: dependencies.requireRecentAuth,
 }));
 
+vi.mock("../../src/lib/http/admin-rate-limit", () => ({
+  guardAdminMutationRate: dependencies.rateGuard,
+}));
+
 vi.mock("../../src/lib/platform/bindings", () => ({
   getBindings: () => dependencies.env,
 }));
 
 vi.mock("../../src/lib/tenants/store", () => ({
-  getPlatformAdminRole: dependencies.role,
-  isPlatformAdmin: dependencies.isAdmin,
+  requirePlatformAdminApiAccess: dependencies.requireAccess,
 }));
 
 vi.mock("../../src/lib/operations/dead-letters", () => ({
@@ -58,16 +63,16 @@ beforeEach(() => {
   for (const dependency of [
     dependencies.acknowledge,
     dependencies.generatedRetry,
-    dependencies.isAdmin,
-    dependencies.role,
+    dependencies.rateGuard,
     dependencies.replay,
     dependencies.requestRetry,
+    dependencies.requireAccess,
     dependencies.requireCsrf,
     dependencies.requireRecentAuth,
     dependencies.resolve,
   ]) dependency.mockReset();
-  dependencies.isAdmin.mockResolvedValue(true);
-  dependencies.role.mockResolvedValue("risk");
+  dependencies.rateGuard.mockResolvedValue(undefined);
+  dependencies.requireAccess.mockResolvedValue("risk");
   dependencies.requireCsrf.mockResolvedValue(auth);
   dependencies.replay.mockResolvedValue({
     deadLetter: { id: "dlq_route_test", status: "retry_requested" },
@@ -130,7 +135,7 @@ describe("dead-letter replay route", () => {
     expect(missingScope.status).toBe(400);
     expect(dependencies.generatedRetry).not.toHaveBeenCalled();
 
-    dependencies.role.mockResolvedValue("support");
+    dependencies.requireAccess.mockResolvedValue("support");
     const denied = await POST(context(new Request(
       "https://app.test/api/admin/operations/dead-letters/gld_route_test",
       {
@@ -163,7 +168,7 @@ describe("dead-letter replay route", () => {
       },
     )));
 
-    expect(dependencies.requireRecentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.requireRecentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.replay).toHaveBeenCalledWith({
       actorUserId: "admin-risk",
       env: dependencies.env,
@@ -217,7 +222,7 @@ describe("dead-letter replay route", () => {
   });
 
   it("denies replay to support admins while preserving acknowledgement access", async () => {
-    dependencies.role.mockResolvedValue("support");
+    dependencies.requireAccess.mockResolvedValue("support");
     dependencies.acknowledge.mockResolvedValueOnce({ id: "dlq_route_test", status: "acknowledged" });
 
     const replay = await POST(context(new Request(
@@ -249,5 +254,25 @@ describe("dead-letter replay route", () => {
     if (!(acknowledge instanceof Response)) throw new Error("response_missing");
     expect(acknowledge.status).toBe(200);
     expect(dependencies.acknowledge).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces admin_two_factor_required when the 2FA-aware guard rejects an un-enrolled admin", async () => {
+    dependencies.requireAccess.mockRejectedValueOnce(new AppError("admin_two_factor_required", 403));
+    const response = await POST(context(new Request(
+      "https://app.test/api/admin/operations/dead-letters/dlq_route_test",
+      {
+        body: JSON.stringify({ action: "acknowledge", expectedVersion: 3, shopId: "shop-route-test" }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    )));
+    expect(response).toBeInstanceOf(Response);
+    if (!(response instanceof Response)) throw new Error("response_missing");
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "admin_two_factor_required",
+      requestId: "request-dead-letter-route",
+    });
+    expect(dependencies.acknowledge).not.toHaveBeenCalled();
   });
 });

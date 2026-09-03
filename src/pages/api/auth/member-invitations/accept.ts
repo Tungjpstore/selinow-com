@@ -11,7 +11,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 4 * 1024);
     rejectUnknownFields(body, ["token"]);
     if (typeof body.token !== "string") throw new AppError("validation_failed", 400, ["invitation_token_required"]);

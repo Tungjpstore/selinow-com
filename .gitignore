@@ -17,3 +17,12 @@ infra/generated/*.tmp
 # Local source archive backups (never commit large binary artifacts)
 selinow-frontend-source.zip
 *.zip
+
+# AI art raw renders (re-derivable via scripts/art — only processed output is committed)
+art-raw/
+
+# Local agent tooling plans/artifacts
+.zcode/
+
+# IDE config (IntelliJ/WebStorm)
+.idea/

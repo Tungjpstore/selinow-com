@@ -70,7 +70,7 @@ async function assertTurnstileHostnameAdmission(input: { env: AppBindings; reque
   return hostname;
 }
 
-async function verifyTurnstile(input: { configuration: TurnstileConfiguration; env: AppBindings; request: Request; shop: StorefrontShop; token: string }): Promise<void> {
+async function verifyTurnstile(input: { action: string; configuration: TurnstileConfiguration; env: AppBindings; request: Request; shop: StorefrontShop; token: string }): Promise<void> {
   const hostname = await assertTurnstileHostnameAdmission(input);
   const body = new FormData();
   body.set("secret", input.configuration.secretKey);
@@ -93,7 +93,7 @@ async function verifyTurnstile(input: { configuration: TurnstileConfiguration; e
   } catch {
     throw new AppError("turnstile_unavailable", 503);
   }
-  if (!response.ok || result.success !== true || result.action !== "storefront_checkout" || result.hostname?.toLowerCase() !== hostname) {
+  if (!response.ok || result.success !== true || result.action !== input.action || result.hostname?.toLowerCase() !== hostname) {
     throw new AppError("turnstile_invalid", 403);
   }
 }
@@ -116,7 +116,25 @@ export async function guardAnonymousCheckout(input: { env: AppBindings; request:
     return;
   }
   if (typeof input.turnstileToken !== "string" || input.turnstileToken.length < 10 || input.turnstileToken.length > 2_048) throw new AppError("turnstile_required", 403);
-  await verifyTurnstile({ ...input, configuration, token: input.turnstileToken });
+  await verifyTurnstile({ action: "storefront_checkout", ...input, configuration, token: input.turnstileToken });
+}
+
+/**
+ * Anonymous order-history lookup guard: tighter than checkout because it
+ * enumerates order metadata by email. Turnstile is mandatory from the first
+ * request when configured; a tight fixed window caps enumeration attempts.
+ */
+export async function guardAnonymousOrderLookup(input: { env: AppBindings; request: Request; shop: StorefrontShop; turnstileToken: unknown }): Promise<void> {
+  const windowSeconds = positiveInteger(input.env.STOREFRONT_RATE_LIMIT_WINDOW_SECONDS, 600);
+  const requestCount = await incrementLimit({ action: "order-lookup", shopId: input.shop.id, ...input, windowSeconds });
+  if (requestCount > positiveInteger(input.env.STOREFRONT_ORDER_LOOKUP_RATE_LIMIT, 5)) throw new AppError("rate_limited", 429);
+  const configuration = resolveTurnstileConfiguration(input.env);
+  if (configuration === null) {
+    if (input.env.APP_ENV === "production") throw new AppError("turnstile_unavailable", 503);
+    return;
+  }
+  if (typeof input.turnstileToken !== "string" || input.turnstileToken.length < 10 || input.turnstileToken.length > 2_048) throw new AppError("turnstile_required", 403);
+  await verifyTurnstile({ action: "storefront_order_lookup", ...input, configuration, token: input.turnstileToken });
 }
 
 export async function purgeAnonymousLimits(env: AppBindings, now = new Date()): Promise<number> {

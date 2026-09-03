@@ -15,6 +15,10 @@ const release = releaseModule as unknown as {
     artifactValidation: Record<string, Record<string, unknown>> | undefined,
     requireArtifactHash?: boolean,
   ) => Array<{ name: string; ok: boolean }>;
+  inspectLiveCandidateWorkerVersionEvidence: (input: Record<string, unknown>) => Promise<{
+    missing: string[];
+    ok: boolean;
+  }>;
   validateLegalSupportDecisionEvidence: (input: Record<string, unknown>) => {
     missing: string[];
     ok: boolean;
@@ -24,6 +28,10 @@ const release = releaseModule as unknown as {
     ok: boolean;
   };
   validateCandidateBoundReleaseEvidence: (input: Record<string, unknown>) => {
+    missing: string[];
+    ok: boolean;
+  };
+  validateCandidateWorkerVersionEvidence: (input: Record<string, unknown>) => {
     missing: string[];
     ok: boolean;
   };
@@ -302,6 +310,66 @@ describe("release evidence hardening", () => {
 
       const valid = release.validateCandidateBoundReleaseEvidence({ evidence, now: NOW, repositoryRoot: root });
       expect(valid.ok, JSON.stringify(valid.missing)).toBe(true);
+
+      const unobserved = release.validateCandidateWorkerVersionEvidence({ evidence });
+      expect(unobserved.ok).toBe(false);
+      expect(unobserved.missing).toEqual(expect.arrayContaining([
+        "evidence.candidateWorkerVersion.liveInventory",
+        "evidence.candidateWorkerVersion.liveCandidate",
+        "evidence.candidateWorkerVersion.liveBinding",
+      ]));
+
+      const workerBinding = {
+        commitSha: COMMIT_SHA,
+        manifestRef: `.wrangler/releases/${RELEASE_ID}/release-manifest.json`,
+        releaseId: RELEASE_ID,
+        role: "candidate",
+        treeSha: TREE_SHA,
+      };
+      const liveBound = release.validateCandidateWorkerVersionEvidence({
+        evidence: {
+          ...evidence,
+          previousWorkerVersion: "11111111-1111-4111-8111-111111111111",
+        },
+        workerVersionInventory: [{ binding: workerBinding, id: candidateWorkerVersion }],
+      });
+      expect(liveBound.ok, JSON.stringify(liveBound.missing)).toBe(true);
+
+      const forgedRole = release.validateCandidateWorkerVersionEvidence({
+        evidence: {
+          ...evidence,
+          previousWorkerVersion: "11111111-1111-4111-8111-111111111111",
+        },
+        workerVersionInventory: [{
+          binding: { ...workerBinding, role: "rollback" },
+          id: candidateWorkerVersion,
+        }],
+      });
+      expect(forgedRole.ok).toBe(false);
+      expect(forgedRole.missing).toContain("evidence.candidateWorkerVersion.liveBinding");
+
+      const liveInspection = await release.inspectLiveCandidateWorkerVersionEvidence({
+        environment: {},
+        evidence: {
+          ...evidence,
+          previousWorkerVersion: "11111111-1111-4111-8111-111111111111",
+        },
+        productionSpec: {},
+        repositoryRoot: root,
+        stagingSpec: {},
+        workerIdentityImplementation: (input: Record<string, unknown>) => {
+          expect(input).toMatchObject({
+            infrastructureAdmissionMode: "pre_candidate",
+            requireCurrentWorkerVersion: true,
+          });
+          return Promise.resolve({
+            currentWorkerVersion: "11111111-1111-4111-8111-111111111111",
+            deployableWorkerVersionInventory: [{ binding: workerBinding, id: candidateWorkerVersion }],
+          });
+        },
+        wranglerConfig: {},
+      });
+      expect(liveInspection.ok, JSON.stringify(liveInspection.missing)).toBe(true);
 
       const tamperedArtifact = {
         commitSha: COMMIT_SHA,

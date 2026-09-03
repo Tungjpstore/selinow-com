@@ -1,0 +1,133 @@
+---
+interface Props {
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { icons } from "./icons";
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const sim = {
+  aria: t("marketing.home.sim.aria"),
+  panelLabel: t("marketing.home.sim.panel_label"),
+  operational: t("marketing.home.sim.operational"),
+  channelName: t("marketing.home.channels.name.telegram"),
+  message: t("marketing.home.sim.message"),
+  created: t("marketing.home.sim.created"),
+  product: t("marketing.home.sim.product"),
+  amount: t("marketing.home.sim.amount"),
+  payment: t("marketing.home.flow.payment"),
+  paymentDetail: t("marketing.home.flow.payment_detail"),
+  verified: t("marketing.home.sim.verified"),
+  inventory: t("marketing.home.flow.inventory"),
+  keyMask: t("marketing.home.sim.key_mask"),
+  allocated: t("marketing.home.sim.allocated"),
+  delivery: t("marketing.home.flow.delivery"),
+  deliveryDetail: t("marketing.home.flow.delivery_detail"),
+  delivered: t("marketing.home.sim.delivered"),
+  notified: t("marketing.home.sim.notified"),
+  caption: t("marketing.home.sim.caption"),
+};
+---
+
+<div class="flow-sim-scene">
+  <span class="flow-sim-ghost" aria-hidden="true"></span>
+
+  <span class="flow-sim-chip flow-sim-chip-verified" aria-hidden="true">
+    <span set:html={icons.check(12)}></span>
+    {sim.verified}
+  </span>
+  <span class="flow-sim-chip flow-sim-chip-allocated" aria-hidden="true">
+    <span set:html={icons.key(12)}></span>
+    {sim.allocated}
+  </span>
+  <span class="flow-sim-chip flow-sim-chip-delivered" aria-hidden="true">
+    <span set:html={icons.package(12)}></span>
+    {sim.delivered}
+  </span>
+
+  <div class="flow-sim" role="img" aria-label={sim.aria}>
+    <div class="flow-sim-bar">
+      <span class="flow-sim-panel">
+        <span class="flow-sim-dot" aria-hidden="true"></span>
+        {sim.panelLabel}
+      </span>
+      <span class="status-chip" data-status="verified">
+        <span class="status-chip-dot" aria-hidden="true"></span>
+        {sim.operational}
+      </span>
+    </div>
+
+    <div class="flow-sim-body">
+      <div class="flow-sim-msg">
+        <span class="flow-sim-msg-icon" set:html={icons.send(16)} aria-hidden="true"></span>
+        <div class="flow-sim-msg-copy">
+          <strong>{sim.channelName}</strong>
+          <p>{sim.message}</p>
+        </div>
+        <span class="flow-sim-time">14:02:45</span>
+      </div>
+
+      <div class="flow-sim-link" aria-hidden="true"><span class="flow-sim-link-line"></span></div>
+
+      <article class="flow-sim-order">
+        <header class="flow-sim-order-head">
+          <div>
+            <span class="flow-sim-order-id">#SLN-2084</span>
+            <span class="status-chip" data-status="processing">
+              <span class="status-chip-dot" aria-hidden="true"></span>
+              {sim.created}
+            </span>
+          </div>
+          <strong class="flow-sim-amount">{sim.amount}</strong>
+        </header>
+        <p class="flow-sim-product">{sim.product}</p>
+
+        <ul class="flow-sim-rows">
+          <li>
+            <span class="flow-sim-row-icon" set:html={icons.shieldCheck(14)} aria-hidden="true"></span>
+            <div>
+              <strong>{sim.payment}</strong>
+              <small>{sim.paymentDetail}</small>
+            </div>
+            <span class="status-chip" data-status="verified">
+              <span class="status-chip-dot" aria-hidden="true"></span>
+              {sim.verified}
+            </span>
+          </li>
+          <li>
+            <span class="flow-sim-row-icon" set:html={icons.key(14)} aria-hidden="true"></span>
+            <div>
+              <strong>{sim.inventory}</strong>
+              <small><code>{sim.keyMask}</code></small>
+            </div>
+            <span class="status-chip" data-status="processing">
+              <span class="status-chip-dot" aria-hidden="true"></span>
+              {sim.allocated}
+            </span>
+          </li>
+        </ul>
+      </article>
+
+      <div class="flow-sim-link" aria-hidden="true"><span class="flow-sim-link-line"></span></div>
+
+      <div class="flow-sim-outcome">
+        <span class="flow-sim-row-icon flow-sim-row-icon-success" set:html={icons.package(14)} aria-hidden="true"></span>
+        <div>
+          <strong>{sim.delivery} · {sim.notified}</strong>
+          <small>{sim.deliveryDetail}</small>
+        </div>
+        <span class="status-chip" data-status="delivered">
+          <span class="status-chip-dot" aria-hidden="true"></span>
+          {sim.delivered}
+        </span>
+      </div>
+    </div>
+
+    <p class="flow-sim-caption">{sim.caption}</p>
+  </div>
+</div>

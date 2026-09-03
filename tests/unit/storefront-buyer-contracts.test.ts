@@ -100,12 +100,17 @@ describe("authoritative cart quote projection", () => {
   });
 
   it("keeps product quantity controls within the server-projected variant bounds", async () => {
-    const [page, source] = await Promise.all([
+    const [page, variantList, buyBox, source] = await Promise.all([
       readFile("src/pages/products/[slug].astro", "utf8"),
+      readFile("src/components/storefront/sections/VariantList.astro", "utf8"),
+      readFile("src/components/storefront/sections/BuyBox.astro", "utf8"),
       readFile("src/scripts/storefront/product-detail.ts", "utf8"),
     ]);
-    expect(page).toContain('data-min={variant.minPerOrder}');
-    expect(page).toContain('aria-describedby="detail-quantity-help"');
+    // The radio contract moved into the shared sections (CD detail program);
+    // the page mounts them through the per-template Detail dispatcher.
+    expect(variantList).toContain('data-min={variant.minPerOrder}');
+    expect(page).toContain("<Detail");
+    expect(buyBox).toContain('aria-describedby="detail-quantity-help"');
     expect(source).toContain("quantityBounds(selected)");
     expect(source).toContain("snapshotFresh = false");
     expect(source).toContain("button.disabled = !snapshotFresh");

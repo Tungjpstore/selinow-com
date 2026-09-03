@@ -4,12 +4,23 @@ import { describe, expect, it } from "vitest";
 
 import { getCatalogParity } from "../../src/lib/i18n/catalog";
 import { createMarketingTranslator, marketingCatalogs } from "../../src/lib/i18n/catalogs/marketing";
+import { safeRelativeRedirect } from "../../src/lib/auth/redirect";
 import { formatMarketingPrice, planFeatureList, type MarketingPlan } from "../../src/lib/storefront/marketing";
 
 describe("PromptOS marketing surfaces", () => {
+  it("keeps post-auth redirects relative to the dashboard origin", () => {
+    expect(safeRelativeRedirect("/onboarding?plan=pro")).toBe("/onboarding?plan=pro");
+    expect(safeRelativeRedirect("//evil.example/login")).toBe("/app");
+    expect(safeRelativeRedirect("/\\\\evil.example/login")).toBe("/app");
+    expect(safeRelativeRedirect("/%5C%5Cevil.example/login")).toBe("/app");
+    expect(safeRelativeRedirect("https://evil.example/login")).toBe("/app");
+    expect(safeRelativeRedirect(null)).toBe("/app");
+  });
+
   it("keeps the landing hierarchy, runtime pricing fallback and product-owned recommendation", async () => {
-    const [landing, header] = await Promise.all([
+    const [landing, pricingRuntime, header] = await Promise.all([
       readFile("src/pages/index.astro", "utf8"),
+      readFile("src/components/marketing/sections/PricingRuntime.astro", "utf8"),
       readFile("src/components/marketing/MarketingHeader.astro", "utf8"),
     ]);
 
@@ -18,9 +29,9 @@ describe("PromptOS marketing surfaces", () => {
     expect(landing).toContain('mt("marketing.home.flow.payment")');
     expect(landing).toContain('mt("marketing.home.flow.payment_detail")');
     expect(landing).toContain('mt("marketing.home.flow.delivery_detail")');
-    expect(landing).toContain('data-pricing-state={pricingState}');
-    expect(landing).toContain("marketing.pricing_unavailable");
-    expect(landing).not.toContain('plan.code === "store"');
+    expect(pricingRuntime).toContain('data-pricing-state={pricingState}');
+    expect(pricingRuntime).toContain('t("marketing.pricing.unavailable.title")');
+    expect(pricingRuntime).not.toContain('plan.code === "store"');
     expect(header).toContain('class="platform-nav-mobile-login"');
     expect(header).toContain('data-marketing-menu-trigger');
     expect(header).toContain('aria-expanded="false"');
@@ -28,8 +39,10 @@ describe("PromptOS marketing surfaces", () => {
   });
 
   it("keeps public positioning inside the Phase 1 product boundary", async () => {
-    const [landing, solutions] = await Promise.all([
+    const [landing, hero, commerce, solutions] = await Promise.all([
       readFile("src/pages/index.astro", "utf8"),
+      readFile("src/components/marketing/sections/HeroEditorial.astro", "utf8"),
+      readFile("src/components/marketing/sections/CommerceCore.astro", "utf8"),
       readFile("src/lib/content/solutions.ts", "utf8"),
     ]);
     const bannedActiveClaims = [
@@ -48,10 +61,12 @@ describe("PromptOS marketing surfaces", () => {
       expect(landing).not.toMatch(pattern);
       expect(solutions).not.toMatch(pattern);
     }
-    expect(landing).toContain('state: "live"');
-    expect(landing).toContain('state: "next"');
-    expect(landing).toContain('mt("marketing.home.channels.status.next")');
-    expect(landing).toContain('<small>{channel[1]}</small>');
+    expect(hero).toContain('state: "live"');
+    expect(hero).toContain('state: "next"');
+    expect(hero).toContain('t(`marketing.home.channels.status.${channel.state}`)');
+    expect(commerce).toContain('state: "live"');
+    expect(commerce).toContain('state: "next"');
+    expect(commerce).toContain('t("marketing.home.channels.status.next")');
     expect(solutions).toContain("future providers remain separately gated until accepted");
   });
 
@@ -94,6 +109,28 @@ describe("PromptOS marketing surfaces", () => {
     expect(pricing).toContain("configured.port = requestUrl.port;");
     expect(pricing).not.toContain("<MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN}");
     expect(pricing).not.toContain('href={`${env.DASHBOARD_ORIGIN}/login`} data-pricing-cta');
+  });
+
+  it("preserves the selected paid plan through every login method", async () => {
+    const [pricing, landingPricing, loginPage, passwordLogin, magicLogin] = await Promise.all([
+      readFile("src/pages/pricing.astro", "utf8"),
+      readFile("src/components/marketing/sections/PricingRuntime.astro", "utf8"),
+      readFile("src/pages/login.astro", "utf8"),
+      readFile("src/scripts/marketing/auth.ts", "utf8"),
+      readFile("src/scripts/marketing/login.ts", "utf8"),
+    ]);
+
+    expect(pricing).toContain('login.searchParams.set("redirect", `/onboarding?plan=${encodeURIComponent(planCode)}`)');
+    expect(pricing).toContain("data-plan-code={plan.code}");
+    expect(landingPricing).toContain("login.searchParams.set(\"redirect\", `/onboarding?plan=${encodeURIComponent(planCode)}`)");
+    expect(landingPricing).toContain("data-plan-code={plan.code}");
+    expect(loginPage).toContain("safeRelativeRedirect(Astro.url.searchParams.get(\"redirect\"))");
+    expect(passwordLogin).toContain("safeRelativeRedirect(");
+    expect(magicLogin).toContain("safeRelativeRedirect(");
+    expect(passwordLogin).toContain("new URLSearchParams(window.location.search).get(\"redirect\")");
+    expect(magicLogin).toContain("new URLSearchParams(window.location.search).get(\"redirect\")");
+    expect(magicLogin).toContain("redirect === \"\" ? {} : { redirect }");
+    expect(magicLogin).toContain("linkUrl.searchParams.get(\"redirect\")");
   });
 
   it("covers password-based login feedback and security controls", async () => {
@@ -154,14 +191,15 @@ describe("PromptOS marketing surfaces", () => {
   });
 
   it("projects server-owned market prices without embedding commercial amounts in the UI", async () => {
-    const [pricing, landing, billing] = await Promise.all([
+    const [pricing, landing, pricingRuntime, billing] = await Promise.all([
       readFile("src/pages/pricing.astro", "utf8"),
       readFile("src/pages/index.astro", "utf8"),
+      readFile("src/components/marketing/sections/PricingRuntime.astro", "utf8"),
       readFile("src/scripts/dashboard/billing.ts", "utf8"),
     ]);
     expect(formatMarketingPrice({ amountMinor: 99_000, currency: "VND", interval: "month", marketCode: "vn" }, "vi-VN")).toContain("99.000");
     expect(formatMarketingPrice({ amountMinor: 500, currency: "USD", interval: "month", marketCode: "global" }, "en")).toContain("5.00");
-    for (const source of [pricing, landing, billing]) {
+    for (const source of [pricing, landing, pricingRuntime, billing]) {
       expect(source).not.toContain("99.000");
       expect(source).not.toContain("299.000");
       expect(source).not.toContain("$5");
@@ -171,7 +209,7 @@ describe("PromptOS marketing surfaces", () => {
     expect(pricing).toContain("data-market={price.marketCode}");
     expect(pricing).toContain("data-pricing-market-root");
     expect(pricing).toContain("data-pricing-offer");
-    expect(landing).toContain("formatMarketingPrice(price, locale)");
+    expect(pricingRuntime).toContain("formatMarketingPrice(price, locale)");
     expect(billing).toContain("priceFrom");
   });
 
@@ -183,14 +221,16 @@ describe("PromptOS marketing surfaces", () => {
     expect(page).toContain('data-billing-state={billing.state}');
     expect(page).toContain('billing.state === "trialing"');
     expect(page).toContain('billing.state === "pending_payment"');
+    expect(page).toContain('billing.state === "grace_period"');
     expect(page).toContain('billing.state === "suspended"');
-    expect(page).toContain("dashboard.billing.trial_conversion_cta");
+    expect(page).toContain("trialEnds: ");
+    expect(page).toContain("graceEnds: ");
     expect(page).toContain("data-billing-checkout");
     expect(controller).toContain("/billing/checkout");
     expect(controller).toContain("checkoutUrl");
-    expect(controller).toContain('billingState === "pending_payment"');
-    expect(controller).toContain('billingState === "suspended"');
-    expect(controller).toContain('const checkoutRecovery = billingState === "suspended" || billingState === "canceled"');
-    expect(controller).toContain("recovery: checkoutRecovery");
+    expect(controller).toContain('["trialing", "pending_payment", "suspended", "canceled"].includes(billingState)');
+    expect(controller).toContain('const recovery = billingState === "suspended" || billingState === "canceled"');
+    expect(controller).toContain("recovery, shopPublicId");
+    expect(controller).toContain("/billing/operations");
   });
 });

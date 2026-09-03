@@ -7,6 +7,7 @@ import { POST as OtpVerifyPOST } from "../../src/pages/api/auth/otp/verify";
 import { AppError } from "../../src/lib/core/errors";
 
 const dependencies = vi.hoisted(() => ({
+  claimOtpAdmission: vi.fn(),
   completeRegistrationWithOtp: vi.fn(),
   createAndSendOtp: vi.fn(),
   env: {
@@ -21,6 +22,11 @@ const dependencies = vi.hoisted(() => ({
 
 vi.mock("../../src/lib/platform/bindings", () => ({
   getBindings: () => dependencies.env,
+}));
+
+vi.mock("../../src/lib/auth/admission", async (importOriginal) => ({
+  ...(await importOriginal()),
+  claimOtpAdmission: dependencies.claimOtpAdmission,
 }));
 
 vi.mock("../../src/lib/auth/session", async (importOriginal) => ({
@@ -49,6 +55,8 @@ function createRequestContext(path: string, body: unknown) {
 }
 
 beforeEach(() => {
+  dependencies.claimOtpAdmission.mockReset();
+  dependencies.claimOtpAdmission.mockResolvedValue(undefined);
   dependencies.loginWithPassword.mockReset();
   dependencies.requestPasswordResetOtp.mockReset();
   dependencies.resetPasswordWithOtp.mockReset();
@@ -167,6 +175,19 @@ describe("auth routes: login, forgot-password, reset-password, otp-verify", () =
       ok: true,
       user: { email: "new@selinow.com" },
     });
+  });
+
+  it("rejects unknown OTP purposes before touching the OTP service", async () => {
+    const response = await OtpVerifyPOST(
+      createRequestContext("/api/auth/otp/verify", {
+        email: "user@example.com",
+        otp: "123456",
+        purpose: "login_2fa_without_challenge",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(dependencies.verifyOtp).not.toHaveBeenCalled();
   });
 
 

@@ -179,10 +179,12 @@ function createDatabase(): { database: DatabaseSync; d1: SqliteD1 } {
 
 function seedShops(database: DatabaseSync): void {
   database.exec(`
-    INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+    INSERT INTO platform_users (
+      id, email_normalized, display_name, status, two_factor_enabled, two_factor_enabled_at, created_at, updated_at
+    )
     VALUES
-      ('user-gl-a', 'generated-a@example.test', 'Generated A', 'active', '${NOW_ISO}', '${NOW_ISO}'),
-      ('user-gl-b', 'generated-b@example.test', 'Generated B', 'active', '${NOW_ISO}', '${NOW_ISO}');
+      ('user-gl-a', 'generated-a@example.test', 'Generated A', 'active', 1, '${NOW_ISO}', '${NOW_ISO}', '${NOW_ISO}'),
+      ('user-gl-b', 'generated-b@example.test', 'Generated B', 'active', 1, '${NOW_ISO}', '${NOW_ISO}', '${NOW_ISO}');
     INSERT INTO shops (
       id, public_id, slug, name, status, default_locale, currency, timezone,
       readiness_version, created_at, updated_at

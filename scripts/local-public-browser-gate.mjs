@@ -118,6 +118,7 @@ try {
   run("npx", ["--no-install", "wrangler", "d1", "migrations", "apply", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory], { quiet: true });
   run("npx", ["--no-install", "wrangler", "d1", "execute", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory, "--file", "./seeds/0001_platform_defaults.sql"], { quiet: true });
   run("npx", ["--no-install", "wrangler", "d1", "execute", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory, "--file", "./seeds/0003_phase6_demo.sql"], { quiet: true });
+  run("npx", ["--no-install", "wrangler", "d1", "execute", "PLATFORM_DB", "--config", wranglerConfigPath, "--local", "--persist-to", stateDirectory, "--file", "./seeds/0005_storefront_template_fixtures.sql"], { quiet: true });
   const startOutput = run("npx", [
     "--no-install",
     "astro",
@@ -128,7 +129,7 @@ try {
     "--port",
     port,
     "--allowed-hosts",
-    "localhost,app.localhost,signal.localhost,api.localhost,127.0.0.1",
+    "localhost,app.localhost,signal.localhost,api.localhost,pulse.localhost,desk.localhost,aurora.localhost,metro.localhost,bustle.localhost,serenity.localhost,craft.localhost,clinic.localhost,127.0.0.1",
   ], { capture: true });
   assertOwnedDevServerStart(startOutput, port);
   devServerOwned = true;

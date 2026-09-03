@@ -61,6 +61,9 @@ describe("auth OTP lifecycle service", () => {
             number,
             string,
             string,
+            string,
+            string,
+            string,
           ];
           mockDatabase.set(id, {
             attempts_count: 0,
@@ -77,21 +80,21 @@ describe("auth OTP lifecycle service", () => {
           return Promise.resolve({ meta: { changes: 1 } });
         }
         if (query.includes("SET attempts_count = ?, consumed_at = ?")) {
-          const [attempts, consumedAt, id] = boundArgs as [number, string, string];
+          const [attempts, consumedAt, id, expectedAttempts] = boundArgs as [number, string, string, number];
           const existing = mockDatabase.get(id);
-          if (existing) {
+          if (existing && existing.attempts_count === expectedAttempts && existing.consumed_at === null) {
             existing.attempts_count = attempts;
             existing.consumed_at = consumedAt;
           }
-          return Promise.resolve({ meta: { changes: 1 } });
+          return Promise.resolve({ meta: { changes: existing && existing.attempts_count === attempts ? 1 : 0 } });
         }
         if (query.includes("SET attempts_count = ?")) {
-          const [attempts, id] = boundArgs as [number, string];
+          const [attempts, id, expectedAttempts] = boundArgs as [number, string, number];
           const existing = mockDatabase.get(id);
-          if (existing) {
+          if (existing && existing.attempts_count === expectedAttempts && existing.consumed_at === null) {
             existing.attempts_count = attempts;
           }
-          return Promise.resolve({ meta: { changes: 1 } });
+          return Promise.resolve({ meta: { changes: existing && existing.attempts_count === attempts ? 1 : 0 } });
         }
         if (query.includes("SET consumed_at = ?")) {
           const [consumedAt, id] = boundArgs as [string, string];
@@ -102,9 +105,9 @@ describe("auth OTP lifecycle service", () => {
           return Promise.resolve({ meta: { changes: 1 } });
         }
         if (query.includes("SET expires_at = ?")) {
-          const [expiresAt, email, purpose] = boundArgs as [string, string, string];
+          const [expiresAt, email, purpose, , excludedId] = boundArgs as [string, string, string, string, string];
           for (const row of mockDatabase.values()) {
-            if (row.email_normalized === email && row.purpose === purpose && !row.consumed_at) {
+            if (row.id !== excludedId && row.email_normalized === email && row.purpose === purpose && !row.consumed_at) {
               row.expires_at = expiresAt;
             }
           }

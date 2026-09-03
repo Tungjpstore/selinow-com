@@ -1,4 +1,6 @@
 import { createDashboardTranslator } from "../../lib/i18n/catalogs/dashboard";
+import { mutate } from "../lib/mutation";
+import { showToast } from "../lib/toast";
 
 type ApiPayload = Record<string, unknown> & {
   action?: { newStatus?: unknown };
@@ -47,13 +49,6 @@ if (root !== null) {
 
   const idempotencyKey = (scope: string): string => `${scope}-${crypto.randomUUID()}`;
 
-  const moderationIdempotencyKey = (button: HTMLButtonElement, actionKind: string): string => {
-    const existing = button.dataset.idempotencyKey;
-    if (existing !== undefined && existing !== "") return existing;
-    const created = idempotencyKey(`moderation-${actionKind}`);
-    button.dataset.idempotencyKey = created;
-    return created;
-  };
 
   const setFeedback = (message: string, tone: "danger" | "info" = "info"): void => {
     if (feedback === null) return;
@@ -208,6 +203,9 @@ if (root !== null) {
 
   const deletionStatus = root.querySelector<HTMLElement>("[data-deletion-id]");
 
+  const moderationIdempotencyKey = (button: HTMLButtonElement, actionKind: string): string =>
+    `${button.dataset.moderationReport ?? ""}:${actionKind}:${button.dataset.targetId ?? ""}`;
+
   for (const button of root.querySelectorAll<HTMLButtonElement>("[data-moderation-action]")) {
     button.addEventListener("click", () => {
       void (async () => {
@@ -221,33 +219,53 @@ if (root !== null) {
           ? t("dashboard.data.client.moderation.confirm_restore")
           : t("dashboard.data.client.moderation.confirm_suspend"));
         if (!confirmed) return;
+        // EX0 mutate() scheme: optimistic lock, rollback on failure, in-place
+        // action swap on success, localized toast — no page reload.
+        const originalLabel = button.textContent;
+        const originalAction = button.dataset.moderationAction;
         button.disabled = true;
         setFeedback(isRestore
           ? t("dashboard.data.client.moderation.restoring")
           : t("dashboard.data.client.moderation.suspending"));
-        try {
-          const payload = await requestJson(
-            `/api/app/shops/${encodeURIComponent(shopPublicId)}/moderation/actions`,
-            { abuseReportPublicId: reportPublicId, actionKind, reasonCode: "reported_abuse", targetId },
-            moderationIdempotencyKey(button, actionKind),
-          );
-          const newStatus = typeof payload.action?.newStatus === "string" ? payload.action.newStatus : null;
-          const statusLabel = newStatus === "active"
-            ? t("dashboard.data.abuse.target_status.active")
-            : newStatus === "draft"
-              ? t("dashboard.data.abuse.target_status.draft")
-              : newStatus;
-          setFeedback(isRestore
-            ? newStatus === null
-              ? t("dashboard.data.client.moderation.restore_confirmed")
-              : t("dashboard.data.client.moderation.restore_confirmed_state", { status: statusLabel ?? "" })
-            : t("dashboard.data.client.moderation.suspended"));
-          window.setTimeout(() => { window.location.reload(); }, 900);
-        } catch (error) {
-          const payload = error instanceof ClientApiError ? error.payload : {};
-          setFeedback(safeMessage(payload), "danger");
-          button.disabled = false;
+        const outcome = await mutate<{ action?: { newStatus?: string } }>({
+          body: { abuseReportPublicId: reportPublicId, actionKind, reasonCode: "reported_abuse", targetId },
+          errorMessage: t("dashboard.data.client.error.generic"),
+          idempotencyKey: moderationIdempotencyKey(button, actionKind),
+          rollback: () => {
+            button.disabled = false;
+            button.textContent = originalLabel;
+            button.dataset.moderationAction = originalAction;
+          },
+          url: `/api/app/shops/${encodeURIComponent(shopPublicId)}/moderation/actions`,
+        });
+        if (!outcome.ok) {
+          setFeedback(t("dashboard.data.client.error.generic")
+            + (outcome.requestId === undefined ? "" : t("dashboard.data.client.request_code", { requestId: outcome.requestId })), "danger");
+          return;
         }
+        const newStatus = typeof outcome.data.action?.newStatus === "string" ? outcome.data.action.newStatus : null;
+        const statusLabel = newStatus === "active"
+          ? t("dashboard.data.abuse.target_status.active")
+          : newStatus === "draft"
+            ? t("dashboard.data.abuse.target_status.draft")
+            : newStatus;
+        setFeedback(isRestore
+          ? newStatus === null
+            ? t("dashboard.data.client.moderation.restore_confirmed")
+            : t("dashboard.data.client.moderation.restore_confirmed_state", { status: statusLabel ?? "" })
+          : t("dashboard.data.client.moderation.suspended"));
+        showToast(isRestore
+          ? t("dashboard.data.client.moderation.restore_confirmed")
+          : t("dashboard.data.client.moderation.suspended"), "success");
+        // In-place swap: suspended products offer restore and vice versa.
+        const nextRestore = newStatus === "draft";
+        button.dataset.moderationAction = nextRestore ? "product_restore" : "product_suspend";
+        button.classList.toggle("sln-button-secondary", nextRestore);
+        button.classList.toggle("sln-button-danger", !nextRestore);
+        button.textContent = nextRestore
+          ? t("dashboard.data.abuse.moderation.restore_action")
+          : t("dashboard.data.abuse.moderation.suspend_action");
+        button.disabled = false;
       })();
     });
   }

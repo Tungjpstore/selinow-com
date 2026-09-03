@@ -1,16 +1,19 @@
 ---
 import AppLayout from "../../layouts/AppLayout.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
+import StatusBadge from "../../components/primitives/StatusBadge.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
 import { authenticateRequest } from "../../lib/auth/session";
+import { listShopInvoices, type InvoiceStatus, type ShopInvoice } from "../../lib/billing/invoices";
 import { isAppError } from "../../lib/core/errors";
 import { subscriptionStatePresentation } from "../../lib/dashboard/billing-ui";
 import { createDashboardTranslator } from "../../lib/i18n";
 import { getBindings } from "../../lib/platform/bindings";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { getSellerBilling, type SellerBillingView } from "../../lib/tenants/seller-management";
+import { isSellablePlanOfferProjection } from "../../lib/billing/catalog";
 import { formatMarketingPrice, type MarketingPrice } from "../../lib/storefront/marketing";
-import { listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
+import { getShopForMember, listShopsForMember, selectShopForMember, type ShopView } from "../../lib/tenants/store";
 
 const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
@@ -35,6 +38,34 @@ if (state === "forbidden") Astro.response.status = 403;
 if (state === "unavailable") Astro.response.status = 503;
 const locale = Astro.locals.locale;
 const t = createDashboardTranslator(locale);
+let invoices: ShopInvoice[] = [];
+if (billing !== null && shop !== undefined) {
+  try {
+    const member = await getShopForMember({ capability: "billing:manage", env, shopPublicId: shop.publicId, userId: auth.userId });
+    invoices = await listShopInvoices({ env, shopId: member.row.shop_id });
+  } catch {
+    // Invoice history is supplemental; the billing page keeps rendering.
+  }
+}
+const invoiceTones: Record<InvoiceStatus, "danger" | "info" | "neutral" | "success" | "warning"> = {
+  draft: "neutral", failed: "danger", open: "info", paid: "success", past_due: "warning", refunded: "danger", void: "neutral",
+};
+const money = (amountMinor: number, currency: string): string => {
+  if (!/^[A-Z]{3}$/u.test(currency)) return `${String(amountMinor)} ${currency}`;
+  try {
+    const formatter = new Intl.NumberFormat(locale ?? "en", { currency, currencyDisplay: "code", style: "currency" });
+    const fractionDigits = formatter.resolvedOptions().maximumFractionDigits ?? 2;
+    return formatter.format(amountMinor / 10 ** fractionDigits);
+  } catch {
+    return `${String(amountMinor)} ${currency}`;
+  }
+};
+const usageLimit = (limits: Record<string, unknown>, metric: string): number | null => {
+  const value = limits[metric];
+  // A configured limit of 0 is real: the dispatcher fail-closes and blocks all
+  // runs for that metric, so the UI must show "0", not "no numeric limit".
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+};
 const formatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeZone: shop?.timezone ?? "Asia/Ho_Chi_Minh" });
 const date = (value: string | null): string => value === null ? t("dashboard.billing.not_configured") : formatter.format(new Date(value));
 const subscriptionState = billing === null ? null : subscriptionStatePresentation(billing.state, locale);
@@ -47,126 +78,609 @@ type BillingProjection = SellerBillingView & {
 const projectedPrice = (value: unknown): MarketingPrice | null => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  const amountMinor = row.amountMinor;
-  const currency = row.currency;
-  const interval = row.interval;
-  const marketCode = row.marketCode;
-  if (!Number.isSafeInteger(amountMinor) || typeof currency !== "string" || typeof interval !== "string" || typeof marketCode !== "string") return null;
-  return { amountMinor: amountMinor as number, currency, interval, marketCode };
+  if (!isSellablePlanOfferProjection(row)) return null;
+  return { amountMinor: row.amountMinor, currency: row.currency, interval: row.interval, marketCode: row.marketCode };
 };
 const billingProjection = billing as BillingProjection | null;
 const currentPrice = billingProjection === null ? null : projectedPrice(billingProjection.currentPrice) ?? projectedPrice(billingProjection.price);
 const currentPriceLabel = currentPrice === null ? null : formatMarketingPrice(currentPrice, locale);
-const conversionHref = workspaceHref("/app/billing");
+const isVietnamese = (locale ?? "").toLowerCase().startsWith("vi");
+const pageCopy = (isVietnamese ? {
+  eyebrow: "Tài khoản / Gói dịch vụ",
+  title: "Gói dịch vụ & thanh toán",
+  description: "Xem gói hiện tại, đổi gói và theo dõi thanh toán.",
+  currentPlan: "Gói hiện tại",
+  nextEvent: "Mốc tiếp theo",
+  noUpcomingEvent: "Không có mốc thanh toán sắp tới",
+  trialEnds: "Dùng thử kết thúc",
+  renews: "Gia hạn vào",
+  graceEnds: "Ân hạn kết thúc",
+  accessEnds: "Quyền truy cập kết thúc",
+  planChanges: "Gói mới có hiệu lực",
+  managePlan: "Quản lý gói",
+  choosePlan: "Chọn gói trả phí",
+  restorePayment: "Khôi phục thanh toán",
+  continuePayment: "Tiếp tục thanh toán",
+  resolvePayment: "Xử lý thanh toán",
+  setupPayment: "Thiết lập thanh toán",
+  resumePlan: "Tiếp tục gói",
+  cancelPlan: "Hủy gói",
+  cancelScheduledPlanChange: "Giữ gói hiện tại",
+  cancelScheduledPlanChangePending: "Đang hủy lịch hạ gói…",
+  updatePaymentMethod: "Cập nhật phương thức thanh toán",
+  portalOpening: "Đang mở cổng thanh toán bảo mật…",
+  portalUnavailable: "Chưa thể mở trang cập nhật thanh toán. Hãy thử lại sau ít phút.",
+  operationTitle: "Đang cập nhật gói",
+  returnOperationTitle: "Đang xác nhận thanh toán",
+  operationDescription: "Selinow đang xử lý với Dodo Payments. Bạn có thể rời trang; tiến trình vẫn tiếp tục.",
+  marketTitle: "Chọn quốc gia thanh toán",
+  marketDescription: "Thông tin này xác định thị trường và tiền tệ của gói. Bạn chỉ cần thiết lập một lần.",
+  merchantCountry: "Quốc gia của doanh nghiệp",
+  merchantCountryPlaceholder: "VN",
+  merchantCountryHint: "Nhập mã quốc gia gồm 2 chữ cái, ví dụ VN hoặc JP.",
+  saveCountry: "Lưu quốc gia",
+  paymentSecurity: "Thanh toán an toàn",
+  paymentSecurityDescription: "Thông tin thanh toán được nhập trên trang bảo mật của Dodo Payments. Selinow chỉ kích hoạt gói sau khi Dodo xác nhận.",
+  billingNavigation: "Điều hướng thanh toán",
+  overviewTab: "Tổng quan",
+  plansTab: "Gói dịch vụ",
+  usageTab: "Mức sử dụng",
+  paymentTab: "Thanh toán",
+  invoicesTab: "Hoá đơn",
+  plansTitle: "Gói và thay đổi",
+  plansDescription: "Mọi thay đổi giữa Starter và Pro đều có bước xem lại giá và thời điểm hiệu lực trước khi xác nhận.",
+  plansRecoveryDescription: "Để khôi phục thanh toán an toàn, bạn chỉ có thể chọn lại đúng gói hiện tại.",
+  plansPendingDescription: "Một thay đổi gói đang được xử lý. Các lựa chọn khác sẽ mở lại sau khi trạng thái được xác nhận.",
+  plansScheduledDescription: "Thay đổi đã lên lịch được hiển thị trong Tổng quan. Hoàn tác tại đó trước khi chọn thay đổi khác.",
+  plansCurrentLabel: "Gói đang dùng",
+  plansCurrentHint: "Đây là gói hiện tại của bạn.",
+  plansChangePolicy: "Nâng gói có hiệu lực sau khi Dodo xác nhận. Hạ gói được lên lịch cho kỳ tiếp theo.",
+  paymentTitle: "Phương thức thanh toán",
+  paymentDescription: "Dodo Payments xử lý thông tin thanh toán; Selinow không lưu dữ liệu thẻ.",
+  paymentProvider: "Nhà cung cấp",
+  paymentCountry: "Quốc gia thanh toán",
+  paymentCurrency: "Tiền tệ",
+  paymentNotConfigured: "Chưa thiết lập",
+  usageTitle: "Mức sử dụng",
+  usageDescription: "Theo dõi các giới hạn quan trọng trong kỳ hiện tại.",
+  invoicesTitle: "Lịch sử thanh toán",
+  invoicesDescription: "Các khoản thanh toán gần đây của cửa hàng, mới nhất trước.",
+  invoicesEyebrow: "Thanh toán",
+  metric_orders_created: "Đơn hàng đã tạo",
+  metric_products_non_archived: "Sản phẩm đang bán",
+  metric_customers_total: "Khách hàng",
+  metric_active_member_seats: "Thành viên đang hoạt động",
+  metric_active_custom_domains: "Tên miền đang hoạt động",
+  metric_automation_rules: "Quy tắc tự động hóa",
+  metric_automation_runs: "Lần chạy tự động hóa",
+  metric_api_requests: "Yêu cầu API",
+  metric_exports_created: "Lần xuất dữ liệu",
+  metric_downloads_served: "Lượt tải xuống",
+  metric_storage_bytes: "Dung lượng lưu trữ",
+  metric_audit_retention_days: "Thời gian lưu nhật ký kiểm tra",
+  planDialogTitle: "Chọn gói",
+  planDialogDescription: "Chọn một gói để xem giá và thời điểm có hiệu lực.",
+  close: "Đóng",
+  continue: "Xem lại thay đổi",
+  back: "Quay lại",
+  confirmUpgrade: "Xác nhận nâng cấp",
+  confirmDowngrade: "Lên lịch hạ gói",
+  continueToDodo: "Tiếp tục tới Dodo Payments",
+  reviewTitle: "Xem lại thay đổi",
+  reviewLoading: "Đang lấy số tiền và thời điểm hiệu lực…",
+  reviewFailed: "Không thể hoàn tất bản xem trước. Chưa có thay đổi nào được gửi.",
+  reviewReady: "Bản xem trước đã sẵn sàng.",
+  selectPlanAnnouncement: "Đã quay lại danh sách gói.",
+  previewLoading: "Đang tính…",
+  previewUnavailable: "Chưa thể tính số tiền. Hãy thử lại.",
+  confirmChange: "Xác nhận thay đổi",
+  nothingDueToday: "Không thu thêm hôm nay",
+  upgradeProviderNote: "Số tiền này là bản xem trước từ Dodo Payments. Xác nhận để áp dụng thay đổi.",
+  downgradeProviderNote: "Không thu thêm hôm nay. Gói mới có hiệu lực vào kỳ gia hạn tiếp theo.",
+  checkoutProviderNote: "Dodo Payments sẽ hiển thị số tiền cuối cùng trước khi bạn xác nhận.",
+  paymentAtCheckout: "Thanh toán",
+  operationUnavailable: "Chưa thể cập nhật gói lúc này. Hãy thử lại sau ít phút.",
+  operationRejected: "Dodo Payments không thể áp dụng thay đổi. Gói hiện tại được giữ nguyên.",
+  providerRequestRejected: "Dodo Payments từ chối tạo phiên thanh toán. Gói hiện tại không thay đổi; hãy thử lại hoặc gửi mã hỗ trợ cho Selinow.",
+  marketUnavailable: "Thanh toán chưa hỗ trợ cho thị trường này. Gói hiện tại không thay đổi.",
+  planUnavailable: "Gói này chưa có mức giá khả dụng cho thị trường của bạn. Gói hiện tại không thay đổi.",
+  providerNotReady: "Danh mục thanh toán Dodo Payments chưa sẵn sàng. Gói hiện tại không thay đổi.",
+  errorRetry: "Đã xảy ra lỗi. Hãy thử lại.",
+  checkoutOpening: "Đang mở trang thanh toán bảo mật…",
+  checkoutUnavailable: "Chưa thể mở trang thanh toán. Hãy thử lại sau ít phút.",
+  checkoutReturnPending: "Thanh toán chưa được xác nhận. Trang tự tải lại khi Dodo Payments phản hồi; bạn cũng có thể tải lại trang sau ít phút.",
+  checkoutMarketSaved: "Đã lưu quốc gia thanh toán. Đang tải lại…",
+  checkoutRecentAuthRequired: "Phiên xác nhận đã hết hạn. Hãy đăng xuất rồi đăng nhập lại để tiếp tục.",
+  checkoutRecentAuthAction: "Đăng xuất để xác thực lại",
+  perMonth: "mỗi tháng",
+  plan_starter: "Starter",
+  plan_pro: "Pro",
+  current: "Hiện tại",
+  newPlan: "Gói mới",
+  effective: "Có hiệu lực",
+  effectiveNow: "Ngay sau khi Dodo xác nhận thanh toán",
+  effectiveRenewal: "Vào kỳ gia hạn tiếp theo",
+  today: "Hôm nay",
+  cancelGraceEffective: "Quyền truy cập ân hạn kết thúc",
+  providerConfirms: "Dodo Payments sẽ hiển thị số tiền cuối cùng trước khi bạn xác nhận.",
+  cancelDialogTitle: "Hủy vào cuối kỳ?",
+  cancelDialogDescription: "Gói vẫn hoạt động đến hết kỳ hiện tại. Sau thời điểm đó, các quyền lợi trả phí sẽ dừng nhưng dữ liệu cửa hàng không bị xóa.",
+  cancelGraceDialogDescription: "Khoản thanh toán đang quá hạn. Quyền truy cập có thể kết thúc khi hết thời gian ân hạn; dữ liệu cửa hàng không bị xóa.",
+  keepPlan: "Giữ gói hiện tại",
+  confirmCancel: "Hủy vào cuối kỳ",
+  cancelEffective: "Quyền lợi tiếp tục đến",
+  supportDetails: "Thông tin hỗ trợ",
+  loadingPlans: "Đang tải các gói…",
+  emptyUsage: "Chưa có dữ liệu sử dụng trong kỳ này.",
+} : {
+  eyebrow: "Account / Plans",
+  title: "Plans & billing",
+  description: "Review your current plan, switch plans, and track payments.",
+  currentPlan: "Current plan",
+  nextEvent: "Next event",
+  noUpcomingEvent: "No upcoming billing event",
+  trialEnds: "Trial ends",
+  renews: "Renews",
+  graceEnds: "Grace ends",
+  accessEnds: "Access ends",
+  planChanges: "New plan starts",
+  managePlan: "Manage plan",
+  choosePlan: "Choose a paid plan",
+  restorePayment: "Restore payment",
+  continuePayment: "Continue payment",
+  resolvePayment: "Resolve payment",
+  setupPayment: "Set up billing",
+  resumePlan: "Resume plan",
+  cancelPlan: "Cancel plan",
+  cancelScheduledPlanChange: "Keep current plan",
+  cancelScheduledPlanChangePending: "Removing scheduled downgrade…",
+  updatePaymentMethod: "Update payment method",
+  portalOpening: "Opening the secure billing portal…",
+  portalUnavailable: "The payment update page could not be opened. Try again in a few minutes.",
+  operationTitle: "Updating your plan",
+  returnOperationTitle: "Confirming payment",
+  operationDescription: "Selinow is syncing the change with Dodo Payments. You may leave this page; processing continues safely.",
+  marketTitle: "Choose a billing country",
+  marketDescription: "This determines the plan market and currency. You only need to set it once.",
+  merchantCountry: "Business country",
+  merchantCountryPlaceholder: "US",
+  merchantCountryHint: "Enter a 2-letter country code, such as US or JP.",
+  saveCountry: "Save country",
+  paymentSecurity: "Secure payment",
+  paymentSecurityDescription: "Payment details are entered directly on Dodo Payments' secure page. Selinow activates the plan only after a verified provider event.",
+  billingNavigation: "Billing navigation",
+  overviewTab: "Overview",
+  plansTab: "Plans",
+  usageTab: "Usage",
+  paymentTab: "Payment",
+  invoicesTab: "Invoices",
+  plansTitle: "Plan changes",
+  plansDescription: "Every Starter or Pro change includes a review of price and timing before confirmation.",
+  plansRecoveryDescription: "To restore billing safely, you can only select the current plan again.",
+  plansPendingDescription: "A plan change is processing. Other choices reopen after its status is confirmed.",
+  plansScheduledDescription: "The scheduled change appears in Overview. Undo it there before choosing another change.",
+  plansCurrentLabel: "Current plan",
+  plansCurrentHint: "This is your current plan.",
+  plansChangePolicy: "Upgrades start after Dodo confirms them. Downgrades are scheduled for the next renewal.",
+  paymentTitle: "Payment method",
+  paymentDescription: "Dodo Payments processes billing details; Selinow does not store card data.",
+  paymentProvider: "Provider",
+  paymentCountry: "Billing country",
+  paymentCurrency: "Currency",
+  paymentNotConfigured: "Not configured",
+  usageTitle: "Usage",
+  usageDescription: "Track the important limits for the current period.",
+  invoicesTitle: "Payment history",
+  invoicesDescription: "Recent payments for this store, newest first.",
+  invoicesEyebrow: "Payments",
+  metric_orders_created: "Orders created",
+  metric_products_non_archived: "Active products",
+  metric_customers_total: "Customers",
+  metric_active_member_seats: "Active members",
+  metric_active_custom_domains: "Active domains",
+  metric_automation_rules: "Automation rules",
+  metric_automation_runs: "Automation runs",
+  metric_api_requests: "API requests",
+  metric_exports_created: "Data exports",
+  metric_downloads_served: "Downloads",
+  metric_storage_bytes: "Storage",
+  metric_audit_retention_days: "Audit retention",
+  planDialogTitle: "Choose the right plan",
+  planDialogDescription: "Compare prices and review exactly when the change takes effect before confirming.",
+  close: "Close",
+  continue: "Review change",
+  back: "Back",
+  confirmUpgrade: "Confirm upgrade",
+  confirmDowngrade: "Schedule downgrade",
+  continueToDodo: "Continue to Dodo Payments",
+  reviewTitle: "Review change",
+  reviewLoading: "Loading the amount and effective date…",
+  reviewFailed: "The preview could not be completed. No change was submitted.",
+  reviewReady: "The preview is ready.",
+  selectPlanAnnouncement: "Returned to the plan list.",
+  previewLoading: "Calculating…",
+  previewUnavailable: "The amount is not available yet. Try again.",
+  confirmChange: "Confirm change",
+  nothingDueToday: "Nothing due today",
+  upgradeProviderNote: "This amount is a Dodo Payments preview. Confirm to apply the change.",
+  downgradeProviderNote: "Nothing is due today. The new plan starts at the next renewal.",
+  checkoutProviderNote: "Dodo Payments shows the final amount before you confirm.",
+  paymentAtCheckout: "Payment",
+  operationUnavailable: "The plan could not be updated right now. Try again in a few minutes.",
+  operationRejected: "Dodo Payments could not apply the change. Your current plan remains unchanged.",
+  providerRequestRejected: "Dodo Payments rejected the checkout session. Your plan remains unchanged; try again or send the support reference to Selinow.",
+  marketUnavailable: "Checkout is not available for this market. No subscription state was changed.",
+  planUnavailable: "This plan has no available price for your market. No subscription state was changed.",
+  providerNotReady: "The Dodo Payments catalog is not ready yet. No subscription state was changed.",
+  errorRetry: "Something went wrong. Try again.",
+  checkoutOpening: "Opening secure checkout…",
+  checkoutUnavailable: "Checkout could not be opened. Try again in a few minutes.",
+  checkoutReturnPending: "Payment is not confirmed yet. This page reloads when Dodo Payments responds; you can also reload in a few minutes.",
+  checkoutMarketSaved: "Billing country saved. Reloading…",
+  checkoutRecentAuthRequired: "Your confirmation session has expired. Sign out, then sign in again to continue.",
+  checkoutRecentAuthAction: "Sign out to authenticate again",
+  perMonth: "per month",
+  plan_starter: "Starter",
+  plan_pro: "Pro",
+  current: "Current",
+  newPlan: "New plan",
+  effective: "Effective",
+  effectiveNow: "After Dodo confirms payment",
+  effectiveRenewal: "On the next renewal date",
+  today: "Today",
+  cancelGraceEffective: "Grace access ends",
+  providerConfirms: "Dodo Payments shows the final amount before you confirm.",
+  cancelDialogTitle: "Cancel at period end?",
+  cancelDialogDescription: "Your plan remains active through the current period. Paid entitlements stop afterward, but store data is not deleted.",
+  cancelGraceDialogDescription: "Your payment is overdue. Access may end when the grace period expires; your store data is not deleted.",
+  keepPlan: "Keep current plan",
+  confirmCancel: "Cancel at period end",
+  cancelEffective: "Entitlements continue until",
+  supportDetails: "Support details",
+  loadingPlans: "Loading plans…",
+  emptyUsage: "No usage has been recorded for this period.",
+}) satisfies Record<string, string>;
+const nextEvent = billing === null ? null
+  : billing.state === "trialing" && billing.trialEndsAt !== null ? { label: pageCopy.trialEnds, value: billing.trialEndsAt }
+    : (billing.state === "grace_period" || billing.state === "past_due") && billing.graceEndsAt !== null ? { label: pageCopy.graceEnds, value: billing.graceEndsAt }
+      : billing.state === "cancel_scheduled" && billing.currentPeriodEnd !== null ? { label: pageCopy.accessEnds, value: billing.currentPeriodEnd }
+        : billing.state === "downgrade_scheduled" && (billing.scheduledEffectiveAt ?? billing.currentPeriodEnd) !== null ? { label: billing.scheduledPlanName === null ? pageCopy.planChanges : `${billing.scheduledPlanName} · ${pageCopy.planChanges}`, value: (billing.scheduledEffectiveAt ?? billing.currentPeriodEnd) as string }
+          : billing.state === "active" && billing.currentPeriodEnd !== null ? { label: pageCopy.renews, value: billing.currentPeriodEnd }
+          : null;
+const isPendingPayment = billing !== null && billing.state === "pending_payment";
+const canOpenPortal = billing !== null && billing.billingProviderCode === "dodo" && billing.hasProviderSubscription && ["past_due", "grace_period", "suspended"].includes(billing.state);
+const canStartCheckout = billing !== null && (["trialing", "canceled"].includes(billing.state) || isPendingPayment || (billing.state === "suspended" && !canOpenPortal));
+const canChangePlan = billing !== null && billing.state === "active";
+const canManagePayment = billing !== null
+  && billing.billingProviderCode === "dodo"
+  && billing.hasProviderSubscription
+  && ["active", "cancel_scheduled", "downgrade_scheduled"].includes(billing.state);
+const billingCurrency = currentPrice?.currency ?? null;
+const operationPending = billing !== null && billing.state === "upgrade_pending";
+const plansSectionDescription = billing === null
+  ? pageCopy.plansDescription
+  : ["suspended", "canceled"].includes(billing.state)
+    ? pageCopy.plansRecoveryDescription
+    : billing.state === "upgrade_pending"
+      ? pageCopy.plansPendingDescription
+      : ["cancel_scheduled", "downgrade_scheduled"].includes(billing.state)
+        ? pageCopy.plansScheduledDescription
+        : pageCopy.plansDescription;
+type BillingPrimaryAction = "setup_market" | "choose_plan" | "continue_payment" | "restore_payment" | "update_payment" | "manage_plan" | "resume_plan" | "keep_plan" | null;
+const primaryAction: BillingPrimaryAction = billing === null || shop === undefined || shop.role !== "owner"
+  ? null
+  : canStartCheckout && shop.merchantCountry === null
+    ? "setup_market"
+    : canOpenPortal
+      ? "update_payment"
+      : canStartCheckout
+        ? billing.state === "suspended" || billing.state === "canceled"
+          ? "restore_payment"
+          : billing.state === "pending_payment" ? "continue_payment" : "choose_plan"
+        : canChangePlan
+          ? "manage_plan"
+          : billing.state === "cancel_scheduled"
+            ? "resume_plan"
+            : billing.state === "downgrade_scheduled" ? "keep_plan" : null;
+const primaryActionOpensPlan = primaryAction === "choose_plan" || primaryAction === "continue_payment" || primaryAction === "restore_payment" || primaryAction === "manage_plan";
+const primaryPlanActionLabel = primaryAction === "restore_payment"
+  ? pageCopy.restorePayment
+  : primaryAction === "continue_payment"
+    ? pageCopy.continuePayment
+    : primaryAction === "manage_plan" ? pageCopy.managePlan : pageCopy.choosePlan;
+const cancelEffectiveAt = billing !== null && ["past_due", "grace_period"].includes(billing.state)
+  ? billing.graceEndsAt ?? billing.currentPeriodEnd
+  : billing?.currentPeriodEnd ?? null;
+const billingStateDescription = billing === null ? "" : isVietnamese ? ({
+  active: "Gói đang hoạt động bình thường.",
+  canceled: "Gói đã kết thúc. Dữ liệu cửa hàng vẫn được giữ.",
+  cancel_scheduled: "Gói sẽ dừng vào cuối kỳ. Bạn có thể tiếp tục gói trước thời điểm đó.",
+  downgrade_scheduled: billing.scheduledPlanName === null ? "Hạ gói đã được lên lịch cho kỳ gia hạn tiếp theo." : `Gói sẽ chuyển xuống ${billing.scheduledPlanName} vào kỳ gia hạn tiếp theo.`,
+  grace_period: "Thanh toán đang quá hạn. Quyền truy cập sẽ dừng khi hết thời gian ân hạn.",
+  pending_payment: "Gói chỉ được kích hoạt sau khi Dodo Payments xác nhận thanh toán.",
+  past_due: "Thanh toán đang quá hạn. Hãy xử lý trước khi hết thời gian ân hạn.",
+  suspended: "Quyền truy cập trả phí đang tạm dừng. Thanh toán lại để khôi phục.",
+  trialing: "Bạn đang dùng thử. Chọn gói trả phí trước ngày kết thúc để tiếp tục sử dụng.",
+  upgrade_pending: "Nâng gói đang chờ Dodo Payments xác nhận. Gói hiện tại vẫn hoạt động.",
+} as Record<string, string>)[billing.state] ?? "Chưa xác định trạng thái gói. Vui lòng liên hệ hỗ trợ." : ({
+  active: "Your plan is active.",
+  canceled: "Your plan has ended. Your store data is retained.",
+  cancel_scheduled: "Your plan ends after the current period. You can resume it before then.",
+  downgrade_scheduled: billing.scheduledPlanName === null ? "The downgrade is scheduled for the next renewal." : `Your plan changes to ${billing.scheduledPlanName} at the next renewal.`,
+  grace_period: "Payment is overdue. Access ends when the grace period expires.",
+  pending_payment: "The plan activates only after Dodo Payments confirms payment.",
+  past_due: "Payment is overdue. Resolve it before the grace period expires.",
+  suspended: "Paid access is paused. Complete payment to restore it.",
+  trialing: "You are on a trial. Choose a paid plan before it ends to keep access.",
+  upgrade_pending: "The upgrade is awaiting Dodo Payments confirmation. Your current plan remains active.",
+} as Record<string, string>)[billing.state] ?? "The plan status is unknown. Contact support.";
+const metricLabel = (key: string): string => (pageCopy as Record<string, string>)[`metric_${key}`] ?? key
+  .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+  .replace(/[._-]+/gu, " ")
+  .replace(/^./u, (letter) => letter.toUpperCase());
 ---
 
-<AppLayout activePath="/app/billing" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.billing.title")}>
-  <PageHeader eyebrow={t("dashboard.billing.eyebrow")} title={t("dashboard.billing.title")} description={t("dashboard.billing.description")}>
-    <span slot="actions" class="sln-badge">{t("dashboard.billing.read_only")}</span>
-  </PageHeader>
+<AppLayout activePath="/app/billing" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={pageCopy.title}>
+  <PageHeader eyebrow={pageCopy.eyebrow} title={pageCopy.title} description={pageCopy.description} />
   {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.unavailable.title")} description={t("dashboard.billing.unavailable.description")} actionHref={workspaceHref("/app/billing")} actionLabel={t("dashboard.billing.retry")} tone="danger" /></div>
     : shop === undefined ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.no_store.title")} description={t("dashboard.billing.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.billing.no_store.action")} tone="info" /></div>
     : state === "forbidden" || billing === null ? <div class="state-space"><WorkspaceState title={t("dashboard.billing.forbidden.title")} description={t("dashboard.billing.forbidden.description")} tone="warning" /></div>
-    : <div class="billing-workspace" data-billing-root data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-billing-state={billing.state} data-billing-market-ready={shop.merchantCountry !== null ? "true" : "false"} data-copy={JSON.stringify({
-      loading: t("dashboard.billing.requests.loading"), loaded: t("dashboard.billing.requests.loaded"), unavailable: t("dashboard.billing.requests.unavailable"),
-      changePlan: t("dashboard.billing.requests.change_plan"), cancel: t("dashboard.billing.requests.cancel"), request: t("dashboard.billing.requests.submit"), requesting: t("dashboard.billing.requests.requesting"), requested: t("dashboard.billing.requests.requested"),
-      reason: t("dashboard.billing.requests.reason"), reasonPlaceholder: t("dashboard.billing.requests.reason_placeholder"), plan: t("dashboard.billing.requests.plan"), cancelConfirm: t("dashboard.billing.requests.cancel_confirm"), error: t("dashboard.billing.requests.error"), pending: t("dashboard.billing.requests.pending"), statusRequested: t("dashboard.billing.requests.status_requested"), statusProviderPending: t("dashboard.billing.requests.status_provider_pending"), statusRejected: t("dashboard.billing.requests.status_rejected"), statusCompleted: t("dashboard.billing.requests.status_completed"), statusCanceled: t("dashboard.billing.requests.status_canceled"),
-      statePendingPayment: t("dashboard.billing.state.pending_payment"), stateTrialing: t("dashboard.billing.state.trialing"), stateGrace: t("dashboard.billing.state.grace"), stateSuspended: t("dashboard.billing.state.suspended"),
-      checkoutEyebrow: t("dashboard.billing.checkout.eyebrow"), checkoutTitle: t("dashboard.billing.checkout.title"), checkoutDescription: t("dashboard.billing.checkout.description"), checkoutPlan: t("dashboard.billing.checkout.plan"), checkoutSubmit: t("dashboard.billing.checkout.submit"), checkoutRecoverSubmit: t("dashboard.billing.checkout.recover_submit"), checkoutOpening: t("dashboard.billing.checkout.opening"), checkoutUnavailable: t("dashboard.billing.checkout.unavailable"), checkoutMarketRequired: t("dashboard.billing.checkout.market_required"), checkoutMarketCountry: t("dashboard.billing.checkout.market_country"), checkoutMarketSave: t("dashboard.billing.checkout.market_save"), checkoutMarketSaving: t("dashboard.billing.checkout.market_saving"), checkoutMarketSaved: t("dashboard.billing.checkout.market_saved"), checkoutRecentAuthRequired: t("dashboard.billing.checkout.recent_auth_required"), checkoutErrorCode: t("dashboard.billing.checkout.error_code"), checkoutRequestId: t("dashboard.billing.checkout.request_id"), checkoutProvider: t("dashboard.billing.checkout.provider"), checkoutTrial: t("dashboard.billing.checkout.trial"), checkoutPending: t("dashboard.billing.checkout.pending"), checkoutRecovery: t("dashboard.billing.checkout.recovery"),
+     : <div class="billing-workspace" data-billing-root data-billing-checkout data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-billing-state={billing.state} data-billing-market-ready={shop.merchantCountry !== null ? "true" : "false"} data-current-price={JSON.stringify(currentPrice)} data-current-period-end={billing.currentPeriodEnd ?? ""} data-copy={JSON.stringify({
+       ...pageCopy,
+      error: t("dashboard.billing.requests.error"),
+      checkoutErrorCode: t("dashboard.billing.checkout.error_code"),
+      checkoutRequestId: t("dashboard.billing.checkout.request_id"),
+      statusRequested: t("dashboard.billing.requests.status_requested"),
+      statusProviderPending: t("dashboard.billing.requests.status_provider_pending"),
+      statusRejected: t("dashboard.billing.requests.status_rejected"),
+      statusCompleted: t("dashboard.billing.requests.status_completed"),
     })} data-can-manage={shop.role === "owner" ? "true" : "false"} data-subscription-version={billing.subscriptionVersion} data-current-plan-code={billing.planCode}>
-      <section class="plan-hero" aria-labelledby="plan-title" data-tone={subscriptionState?.tone ?? "neutral"}><div><p class="eyebrow">{t("dashboard.billing.current_subscription")}</p><h2 id="plan-title">{billing.planName}</h2><p>{t("dashboard.billing.plan_metadata", { code: billing.planCode, version: billing.planVersion })}</p>{currentPriceLabel !== null && currentPrice !== null && <p class="plan-price"><strong>{currentPriceLabel}</strong> <span>{currentPrice.interval === "month" ? t("dashboard.billing.price_per_month") : currentPrice.interval}</span><small>{currentPrice.marketCode} · {currentPrice.currency}</small></p>}<p class="subscription-impact">{subscriptionState?.impact}</p>{(billing.state === "grace_period" || billing.state === "past_due") && <p class="state-guidance">{t("dashboard.billing.state.grace")}</p>}{billing.state === "suspended" && <p class="state-guidance">{t("dashboard.billing.state.suspended")}</p>}{billing.state === "trialing" && <p class="trial-conversion"><span>{t("dashboard.billing.trial_conversion")}</span> <a class="sln-button sln-button-secondary" href={conversionHref}>{t("dashboard.billing.trial_conversion_cta")}</a></p>}{billing.state === "pending_payment" && <p class="trial-conversion"><span>{t("dashboard.billing.pending_payment_cta")}</span> <a class="sln-button sln-button-secondary" href={conversionHref}>{t("dashboard.billing.choose_paid_plan")}</a></p>}</div><span class="subscription-state">{subscriptionState?.label}</span></section>
-      <section class="billing-grid"><article><span>{t("dashboard.billing.trial_ends")}</span><strong>{date(billing.trialEndsAt)}</strong></article><article><span>{t("dashboard.billing.current_period")}</span><strong>{date(billing.currentPeriodEnd)}</strong></article><article><span>{t("dashboard.billing.grace_ends")}</span><strong>{date(billing.graceEndsAt)}</strong></article><article><span>{t("dashboard.billing.canceled_at")}</span><strong>{date(billing.canceledAt)}</strong></article></section>
-      {shop.role === "owner" && (billing.state === "trialing" || billing.state === "pending_payment" || billing.state === "suspended" || billing.state === "canceled") && <section class="billing-panel billing-checkout-panel" aria-labelledby="billing-checkout-title" data-billing-checkout>
-        <header><div><p class="eyebrow">{t("dashboard.billing.checkout.eyebrow")}</p><h2 id="billing-checkout-title">{t("dashboard.billing.checkout.title")}</h2><p class="billing-request-description">{t("dashboard.billing.checkout.description")}</p></div></header>
-        <p class="checkout-state-note">{billing.state === "trialing" ? t("dashboard.billing.checkout.trial") : billing.state === "suspended" || billing.state === "canceled" ? t("dashboard.billing.checkout.recovery") : t("dashboard.billing.checkout.pending")}</p>
-        {shop.merchantCountry === null && <><p class="checkout-market-note">{t("dashboard.billing.checkout.market_required")}</p><form class="billing-market-form" data-billing-market-form novalidate><label>{t("dashboard.billing.checkout.market_country")}<input name="merchantCountry" type="text" inputmode="text" autocapitalize="characters" maxlength="2" pattern="[A-Za-z]{2}" required /></label><button class="sln-button sln-button-secondary" type="submit">{t("dashboard.billing.checkout.market_save")}</button></form></>}
-        <form class="billing-checkout-form" data-billing-checkout-form novalidate>
-          <label>{t("dashboard.billing.checkout.plan")}<select name="planCode" data-billing-checkout-plan required></select></label>
-          <button class="sln-button sln-button-primary" type="submit" data-billing-checkout-submit>{billing.state === "suspended" || billing.state === "canceled" ? t("dashboard.billing.checkout.recover_submit") : t("dashboard.billing.checkout.submit")}</button>
+      <nav class="billing-section-nav" aria-label={pageCopy.billingNavigation}>
+        <a href="#billing-overview">{pageCopy.overviewTab}</a>
+        <a href="#billing-plans">{pageCopy.plansTab}</a>
+        <a href="#billing-usage">{pageCopy.usageTab}</a>
+        <a href="#billing-payment">{pageCopy.paymentTab}</a>
+        <a href="#billing-invoices">{pageCopy.invoicesTab}</a>
+      </nav>
+
+      <section class="subscription-overview" id="billing-overview" aria-labelledby="plan-title" data-tone={subscriptionState?.tone ?? "neutral"}>
+        <div class="subscription-main">
+          <div class="subscription-heading"><p class="eyebrow">{pageCopy.currentPlan}</p><span class="subscription-state">{subscriptionState?.label}</span></div>
+          <h2 id="plan-title">{billing.planName}</h2>
+          {currentPriceLabel !== null && currentPrice !== null && <p class="plan-price"><strong>{currentPriceLabel}</strong><span>/ {currentPrice.interval === "month" ? t("dashboard.billing.price_per_month") : currentPrice.interval}</span></p>}
+          <p class="subscription-impact">{billingStateDescription}</p>
+        </div>
+        <div class="subscription-next">
+          <span>{pageCopy.nextEvent}</span>
+          <strong>{nextEvent === null ? pageCopy.noUpcomingEvent : nextEvent.label}</strong>
+          {nextEvent !== null && <time datetime={nextEvent.value}>{date(nextEvent.value)}</time>}
+        </div>
+        {shop.role === "owner" && (primaryAction !== null || canChangePlan) && <div class="subscription-actions">
+          {primaryAction === "setup_market" && <button class="sln-button sln-button-primary" type="button" data-focus-billing-market>{pageCopy.setupPayment}</button>}
+          {primaryActionOpensPlan && <button class="sln-button sln-button-primary" type="button" data-open-plan-dialog>{primaryPlanActionLabel}</button>}
+          {primaryAction === "update_payment" && <button class="sln-button sln-button-primary" type="button" data-billing-portal>{pageCopy.resolvePayment}</button>}
+          {primaryAction === "resume_plan" && <button class="sln-button sln-button-primary" type="button" data-billing-resume>{pageCopy.resumePlan}</button>}
+          {primaryAction === "keep_plan" && <button class="sln-button sln-button-primary" type="button" data-billing-cancel-scheduled-plan-change>{pageCopy.cancelScheduledPlanChange}</button>}
+          {canChangePlan && <button class="billing-text-action" type="button" data-open-cancel-dialog>{pageCopy.cancelPlan}</button>}
+        </div>}
+      </section>
+
+      <section class="operation-banner" data-billing-operation aria-labelledby="operation-title" role="status" aria-live="polite" hidden={!operationPending && !Astro.url.searchParams.has("billing_return")}>
+        <span class="operation-spinner" aria-hidden="true"></span>
+        <div><h2 id="operation-title" data-operation-title>{pageCopy.operationTitle}</h2><p>{pageCopy.operationDescription}</p></div>
+      </section>
+
+      {shop.role === "owner" && shop.merchantCountry === null && <section class="billing-panel market-panel" aria-labelledby="market-title">
+        <header><div><p class="eyebrow">{pageCopy.paymentSecurity}</p><h2 id="market-title">{pageCopy.marketTitle}</h2><p class="panel-description">{pageCopy.marketDescription}</p></div></header>
+        <form class="billing-market-form" data-billing-market-form novalidate>
+          <label for="billing-merchant-country">{pageCopy.merchantCountry}<input id="billing-merchant-country" name="merchantCountry" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" aria-describedby="billing-merchant-country-hint" list="billing-country-list" maxlength="2" pattern="[A-Za-z]{2}" placeholder={pageCopy.merchantCountryPlaceholder} required /><small id="billing-merchant-country-hint">{pageCopy.merchantCountryHint}</small></label>
+          <datalist id="billing-country-list"><option value="VN">Việt Nam</option><option value="JP">Japan</option><option value="SG">Singapore</option><option value="US">United States</option><option value="GB">United Kingdom</option><option value="AU">Australia</option><option value="CA">Canada</option><option value="DE">Germany</option><option value="FR">France</option></datalist>
+          <button class="sln-button sln-button-secondary" type="submit">{pageCopy.saveCountry}</button>
         </form>
-        <p class="checkout-provider-note">{t("dashboard.billing.checkout.provider")}</p>
-        <p class="workspace-feedback" data-billing-checkout-feedback role="status" aria-live="polite" hidden></p>
-        <button class="sln-button sln-button-secondary billing-recent-auth-action" type="button" data-billing-recent-auth-action hidden>{t("dashboard.billing.checkout.recent_auth_action")}</button>
       </section>}
-      <section class="billing-panel" aria-labelledby="limits-title"><header><div><p class="eyebrow">{t("dashboard.billing.entitlements.eyebrow")}</p><h2 id="limits-title">{t("dashboard.billing.entitlements.title")}</h2></div></header><div class="kv-ledger">{Object.entries(billing.limits).length === 0 ? <WorkspaceState title={t("dashboard.billing.entitlements.empty_title")} description={t("dashboard.billing.entitlements.empty_description")} tone="neutral" /> : Object.entries(billing.limits).map(([key, value]) => <div><span>{key}</span><strong>{typeof value === "string" || typeof value === "number" ? value : value === true ? t("dashboard.billing.value.yes") : value === false ? t("dashboard.billing.value.no") : t("dashboard.billing.value.configured")}</strong></div>)}</div></section>
-      <section class="billing-panel" aria-labelledby="usage-title"><header><div><p class="eyebrow">{t("dashboard.billing.usage.eyebrow")}</p><h2 id="usage-title">{t("dashboard.billing.usage.title")}</h2></div></header>{billing.usage.length === 0 ? <WorkspaceState title={t("dashboard.billing.usage.empty_title")} description={t("dashboard.billing.usage.empty_description")} tone="neutral" /> : <div class="kv-ledger">{billing.usage.map((item) => <div><span>{item.metric} · {item.periodKey}</span><strong>{item.value}</strong><small>{date(item.updatedAt)}</small></div>)}</div>}</section>
-      {shop.role === "owner" && <section class="billing-panel" aria-labelledby="billing-request-title" data-billing-requests>
-        <header><div><p class="eyebrow">{t("dashboard.billing.requests.eyebrow")}</p><h2 id="billing-request-title">{t("dashboard.billing.requests.title")}</h2><p class="billing-request-description">{t("dashboard.billing.requests.description")}</p></div></header>
-        <div class="workspace-feedback" data-billing-feedback role="status" aria-live="polite">{t("dashboard.billing.requests.loading")}</div>
-        <form class="billing-request-form" data-billing-request-form novalidate>
-          <label>{t("dashboard.billing.requests.action")}<select name="action" data-billing-action><option value="change_plan">{t("dashboard.billing.requests.change_plan")}</option><option value="cancel">{t("dashboard.billing.requests.cancel")}</option><option value="resume" disabled>{t("dashboard.billing.requests.resume")}</option></select></label>
-          <label data-billing-plan-field>{t("dashboard.billing.requests.plan")}<select name="requestedPlanCode" data-billing-plan></select></label>
-          <label>{t("dashboard.billing.requests.reason")}<input name="reasonCode" value="seller_requested" maxlength="64" pattern="[a-z][a-z0-9._:-]{2,63}" placeholder={t("dashboard.billing.requests.reason_placeholder")} required /></label>
-          <button class="sln-button sln-button-primary" type="submit">{t("dashboard.billing.requests.submit")}</button>
+
+      <p class="workspace-feedback" data-billing-feedback role="status" aria-live="polite" hidden></p>
+      <button class="sln-button sln-button-secondary billing-recent-auth-action" type="button" data-billing-recent-auth-action hidden>{pageCopy.checkoutRecentAuthAction}</button>
+
+      <section class="billing-panel plans-panel" id="billing-plans" aria-labelledby="plans-title">
+        <header class="billing-panel-heading"><div><p class="eyebrow">{pageCopy.plansTab}</p><h2 id="plans-title">{pageCopy.plansTitle}</h2><p class="panel-description">{plansSectionDescription}</p></div></header>
+        <div class="plan-summary-row"><div><span>{pageCopy.plansCurrentLabel}</span><strong>{billing.planName}</strong></div><p>{pageCopy.plansChangePolicy}</p></div>
+      </section>
+
+      <details class="billing-disclosure" id="billing-usage" data-billing-disclosure="usage"><summary class="billing-disclosure-summary"><span><span class="eyebrow">{t("dashboard.billing.usage.eyebrow")}</span><strong id="usage-title">{pageCopy.usageTitle}</strong><small>{pageCopy.usageDescription}</small></span><span class="billing-disclosure-chevron" aria-hidden="true">⌄</span></summary><div class="billing-disclosure-content">{billing.usage.length === 0 ? <p class="empty-note">{pageCopy.emptyUsage}</p> : <div class="usage-ledger">{billing.usage.map((item) => {
+        const limit = usageLimit(billing.limits, item.metric);
+        const percent = limit === null ? null : limit === 0 ? (item.value > 0 ? 100 : 0) : Math.round((item.value / limit) * 100);
+        const tone = percent === null ? "neutral" : percent >= 100 ? "danger" : percent >= 80 ? "warning" : "success";
+        return <div class="usage-meter-row" data-tone={tone}><span class="usage-metric">{metricLabel(item.metric)}</span>{limit !== null && percent !== null ? <><div class="usage-meter" role="progressbar" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(item.value, limit)} aria-label={metricLabel(item.metric)}><span class="usage-meter-fill" style={`width:${String(Math.min(percent, 100))}%`} data-tone={tone}></span></div><strong>{t("dashboard.billing.usage.of_limit", { value: item.value, limit })}</strong><small>{t("dashboard.billing.usage.percent_used", { percent })}</small></> : <><strong>{item.value}</strong><small>{t("dashboard.billing.usage.no_numeric_limit")}</small></>}</div>;
+      })}</div>}</div></details>
+
+      <section class="billing-panel payment-panel" id="billing-payment" aria-labelledby="payment-title">
+        <header class="billing-panel-heading"><div><p class="eyebrow">{pageCopy.paymentTab}</p><h2 id="payment-title">{pageCopy.paymentTitle}</h2><p class="panel-description">{pageCopy.paymentDescription}</p></div>{shop.role === "owner" && canManagePayment && !canOpenPortal && <button class="sln-button sln-button-secondary" type="button" data-billing-portal>{pageCopy.updatePaymentMethod}</button>}</header>
+        <dl class="payment-facts"><div><dt>{pageCopy.paymentProvider}</dt><dd>{billing.billingProviderCode === "dodo" ? "Dodo Payments" : pageCopy.paymentNotConfigured}</dd></div><div><dt>{pageCopy.paymentCountry}</dt><dd>{shop.merchantCountry ?? pageCopy.paymentNotConfigured}</dd></div><div><dt>{pageCopy.paymentCurrency}</dt><dd>{billingCurrency ?? pageCopy.paymentNotConfigured}</dd></div></dl>
+      </section>
+
+      <details class="billing-disclosure" id="billing-invoices" data-billing-disclosure="invoices" data-billing-invoices><summary class="billing-disclosure-summary"><span><span class="eyebrow">{pageCopy.invoicesEyebrow}</span><strong id="invoices-title">{pageCopy.invoicesTitle}</strong><small>{pageCopy.invoicesDescription}</small></span><span class="billing-disclosure-chevron" aria-hidden="true">⌄</span></summary><div class="billing-disclosure-content">{invoices.length === 0 ? <WorkspaceState title={t("dashboard.billing.invoices.empty_title")} description={t("dashboard.billing.invoices.empty_description")} tone="neutral" /> : <div class="invoice-ledger" role="list" aria-label={pageCopy.invoicesTitle}>{invoices.map((invoice) => <div class="invoice-row" role="listitem"><div class="invoice-copy"><strong>{date(invoice.paidAt ?? invoice.createdAt)}</strong><span>{money(invoice.amountMinor, invoice.currency)}</span></div><StatusBadge label={t(`dashboard.billing.invoices.status.${invoice.status}`)} tone={invoiceTones[invoice.status]} /></div>)}</div>}</div></details>
+
+      <details class="support-details"><summary>{pageCopy.supportDetails}</summary><p>{pageCopy.paymentSecurityDescription}</p><p data-billing-support-reference hidden></p></details>
+
+      <dialog class="billing-dialog" data-plan-dialog aria-labelledby="plan-dialog-title">
+        <form method="dialog" class="dialog-shell">
+          <header><div><p class="eyebrow">{pageCopy.currentPlan}: {billing.planName}</p><h2 id="plan-dialog-title">{pageCopy.planDialogTitle}</h2><p>{pageCopy.planDialogDescription}</p></div><button class="dialog-close" type="submit" value="close" aria-label={pageCopy.close}>×</button></header>
+          <p class="dialog-feedback" data-dialog-feedback role="alert" hidden></p>
+          <button class="sln-button sln-button-secondary billing-recent-auth-action dialog-auth-action" type="button" data-billing-recent-auth-action hidden>{pageCopy.checkoutRecentAuthAction}</button>
+          <div class="dialog-stage" data-plan-stage="select">
+            <div class="plan-options" data-plan-options aria-live="polite"><p>{pageCopy.loadingPlans}</p></div>
+          </div>
+          <div class="dialog-stage" data-plan-stage="review" hidden>
+            <h3 data-review-title tabindex="-1">{pageCopy.reviewTitle}</h3>
+            <p class="sr-only" data-review-announcement role="status" aria-live="polite"></p>
+            <dl class="change-review"><div><dt>{pageCopy.current}</dt><dd data-review-current></dd></div><div><dt>{pageCopy.newPlan}</dt><dd data-review-target></dd></div><div><dt>{pageCopy.effective}</dt><dd data-review-effective></dd></div><div><dt data-review-today-label>{pageCopy.today}</dt><dd data-review-today></dd></div></dl>
+            <p class="provider-note" data-review-provider-note></p>
+            <div class="dialog-actions"><button class="sln-button sln-button-secondary" type="button" data-plan-back>{pageCopy.back}</button><button class="sln-button sln-button-primary" type="button" data-plan-confirm disabled>{pageCopy.confirmChange}</button></div>
+          </div>
         </form>
-        <div class="billing-request-ledger" data-billing-request-ledger role="list" aria-live="polite"></div>
-      </section>}
-      <p class="scope-note">{t("dashboard.billing.scope")}</p>
+      </dialog>
+
+      <dialog class="billing-dialog cancel-dialog" data-cancel-dialog aria-labelledby="cancel-dialog-title">
+        <form method="dialog" class="dialog-shell">
+          <header><div><p class="eyebrow">{billing.planName}</p><h2 id="cancel-dialog-title">{pageCopy.cancelDialogTitle}</h2><p>{["past_due", "grace_period"].includes(billing.state) ? pageCopy.cancelGraceDialogDescription : pageCopy.cancelDialogDescription}</p></div><button class="dialog-close" type="submit" value="close" aria-label={pageCopy.close}>×</button></header>
+          <div class="cancel-impact"><span>{["past_due", "grace_period"].includes(billing.state) ? pageCopy.cancelGraceEffective : pageCopy.cancelEffective}</span><strong>{date(cancelEffectiveAt)}</strong></div>
+          <p class="dialog-feedback" data-cancel-feedback role="alert" hidden></p>
+          <button class="sln-button sln-button-secondary billing-recent-auth-action dialog-auth-action" type="button" data-billing-recent-auth-action hidden>{pageCopy.checkoutRecentAuthAction}</button>
+          <div class="dialog-actions"><button class="sln-button sln-button-secondary" type="submit" value="close">{pageCopy.keepPlan}</button><button class="sln-button sln-button-danger" type="button" data-cancel-confirm>{pageCopy.confirmCancel}</button></div>
+        </form>
+      </dialog>
     </div>}
 </AppLayout>
 
 <script src="../../scripts/dashboard/billing.ts"></script>
 
 <style>
-  .sln-badge { display:inline-flex; align-items:center; min-height:36px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-pill); padding:7px 12px; color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .state-space { margin-top:var(--sln-space-8); }
-  .billing-workspace { display:grid; gap:var(--sln-space-6); margin-top:var(--sln-space-8); }
-  .plan-hero { display:flex; align-items:center; justify-content:space-between; gap:20px; border:1px solid color-mix(in srgb,var(--sln-action-primary) 25%,var(--sln-border-default)); border-radius:var(--sln-radius-lg); padding:var(--sln-space-8); background:linear-gradient(135deg,var(--sln-tint-indigo),var(--sln-bg-surface)); }
-  .plan-hero h2, .billing-panel h2 { margin:0; font:var(--sln-font-h3); letter-spacing:-.035em; }
-  .plan-hero p { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
-  .plan-price { display:grid; grid-template-columns:auto auto; align-items:baseline; column-gap:8px; }
-  .plan-price strong { color:var(--sln-text-primary); font:var(--sln-font-h3); }
-  .plan-price small { grid-column:1 / -1; color:var(--sln-text-muted); font:var(--sln-font-caption); }
-  .state-guidance { color:var(--sln-text-primary) !important; }
-  .trial-conversion { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
-  .trial-conversion .sln-button { text-decoration:none; }
-  .plan-hero code { font-family:var(--sln-font-mono); font-size:11px; }
-  .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
-  .subscription-impact { max-width:70ch; }
+  .billing-workspace { --billing-sticky-offset:var(--sln-console-topbar-h); display:grid; gap:var(--sln-space-6); margin-top:var(--sln-space-8); }
+  .billing-workspace :where(button, a, summary) { touch-action:manipulation; }
+  .billing-section-nav { position:sticky; top:var(--billing-sticky-offset); z-index:2; display:flex; gap:4px; overflow-x:auto; border-bottom:1px solid var(--sln-border-default); padding:0 2px; background:color-mix(in srgb,var(--sln-bg-canvas) 94%,transparent); backdrop-filter:blur(12px); scrollbar-width:none; }
+  .billing-section-nav::-webkit-scrollbar { display:none; }
+  .billing-section-nav a { min-height:44px; display:inline-flex; flex:0 0 auto; align-items:center; border-bottom:1px solid transparent; padding:0 14px; color:var(--sln-text-secondary); font:var(--sln-font-label); text-decoration:none; }
+  .billing-section-nav a:hover, .billing-section-nav a:focus-visible { border-bottom-color:var(--sln-border-strong); color:var(--sln-text-primary); }
+  .subscription-overview { display:grid; grid-template-columns:minmax(0,1.8fr) minmax(220px,.8fr); gap:var(--sln-space-6); border:1px solid var(--sln-border-default); border-inline-start:3px solid var(--sln-action-primary); border-radius:var(--sln-radius-lg); padding:var(--sln-space-8); background:var(--sln-bg-surface); }
+  #billing-overview, #billing-plans, #billing-usage, #billing-payment, #billing-invoices { scroll-margin-top:calc(var(--billing-sticky-offset) + 60px); }
+  .subscription-main h2, .billing-panel h2, .billing-dialog h2 { margin:0; font:var(--sln-font-h3); letter-spacing:-.035em; }
+  .subscription-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .subscription-impact { max-width:64ch; margin:10px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .plan-price { display:flex; align-items:baseline; gap:7px; margin:10px 0 0; }
+  .plan-price strong { color:var(--sln-text-primary); font:var(--sln-font-h3); font-variant-numeric:tabular-nums; }
+  .plan-price span { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight: 600; letter-spacing:.1em; text-transform:uppercase; }
   .subscription-state { border-radius:var(--sln-radius-pill); padding:8px 12px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-label); white-space:nowrap; }
-  .plan-hero[data-tone="success"] .subscription-state { background:var(--sln-tint-success); color:var(--selinow-success-text); }
-  .plan-hero[data-tone="info"] .subscription-state { background:var(--sln-tint-info); color:var(--sln-state-info); }
-  .plan-hero[data-tone="warning"] .subscription-state { background:var(--sln-tint-warning); color:#9a5004; }
-  .plan-hero[data-tone="danger"] .subscription-state { background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
-  .billing-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border-block:1px solid var(--sln-border-default); }
-  .billing-grid article { display:grid; gap:5px; padding:16px; border-right:1px solid var(--sln-border-default); }
-  .billing-grid article:last-child { border-right:0; }
-  .billing-grid span, .billing-grid strong, .scope-note { color:var(--sln-text-muted); font:var(--sln-font-caption); }
-  .billing-grid strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .subscription-overview[data-tone="success"] .subscription-state { background:var(--sln-tint-success); color:var(--sln-success-text); }
+  .subscription-overview[data-tone="info"] .subscription-state { background:var(--sln-tint-info); color:var(--sln-state-info); }
+  .subscription-overview[data-tone="warning"] .subscription-state { background:var(--sln-tint-warning); color:var(--sln-warning-text); }
+  .subscription-overview[data-tone="danger"] .subscription-state { background:var(--sln-tint-danger); color:var(--sln-danger-text); }
+  .subscription-next { display:grid; align-content:center; gap:6px; border-left:1px solid var(--sln-border-default); padding-left:var(--sln-space-6); }
+  .subscription-next span, .subscription-next time { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .subscription-next strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .subscription-actions { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:12px; border-top:1px solid var(--sln-border-default); padding-top:var(--sln-space-5); }
+  .billing-text-action { min-height:44px; border:0; padding:8px 10px; background:transparent; color:var(--sln-danger-text); font:var(--sln-font-label); cursor:pointer; }
+  .billing-text-action:hover { text-decoration:underline; }
+  .operation-banner { display:flex; align-items:flex-start; gap:14px; border:1px solid var(--sln-state-info); border-radius:var(--sln-radius-lg); padding:18px 20px; background:var(--sln-tint-info); }
+  .operation-banner[hidden] { display:none; }
+  .operation-banner h2 { margin:0; color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .operation-banner p { margin:5px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .operation-spinner { width:20px; height:20px; flex:0 0 auto; border:1px solid color-mix(in srgb,var(--sln-state-info) 30%,transparent); border-top-color:var(--sln-state-info); border-radius:50%; animation:billing-spin .8s linear infinite; }
   .billing-panel { display:grid; gap:18px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); padding:var(--sln-space-6); background:var(--sln-bg-surface); }
+  .billing-disclosure { border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); background:var(--sln-bg-surface); }
+  .billing-disclosure-summary { display:flex; min-height:76px; align-items:center; justify-content:space-between; gap:18px; padding:18px 24px; color:var(--sln-text-primary); cursor:pointer; list-style:none; }
+  .billing-disclosure-summary::-webkit-details-marker { display:none; }
+  .billing-disclosure-summary > span:first-child { display:grid; gap:4px; }
+  .billing-disclosure-summary .eyebrow { margin:0; }
+  .billing-disclosure-summary strong { font:var(--sln-font-h3); letter-spacing:-.035em; }
+  .billing-disclosure-summary small { color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .billing-disclosure-chevron { color:var(--sln-text-muted); font-size:22px; transition:transform .18s ease; }
+  .billing-disclosure[open] .billing-disclosure-chevron { transform:rotate(180deg); }
+  .billing-disclosure-content { display:grid; gap:18px; border-top:1px solid var(--sln-border-default); padding:20px 24px 24px; }
   .billing-panel header { padding-bottom:14px; border-bottom:1px solid var(--sln-border-default); }
+  .billing-panel-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+  .panel-description { max-width:70ch; margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .plan-summary-row { display:grid; grid-template-columns:minmax(180px,.6fr) minmax(0,1.4fr); gap:20px; align-items:center; }
+  .plan-summary-row > div { display:grid; gap:5px; }
+  .plan-summary-row span, .payment-facts dt { color:var(--sln-text-secondary); font:var(--sln-font-caption); }
+  .plan-summary-row strong, .payment-facts dd { color:var(--sln-text-primary); font:var(--sln-font-label); }
+  .plan-summary-row p { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .payment-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; margin:0; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); overflow:hidden; }
+  .payment-facts > div { display:grid; gap:6px; padding:16px; background:var(--sln-bg-canvas); }
+  .payment-facts > div + div { border-left:1px solid var(--sln-border-default); }
+  .payment-facts dd { margin:0; }
+  .market-panel { border-color:color-mix(in srgb,var(--sln-action-primary) 24%,var(--sln-border-default)); }
   .kv-ledger { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
   .kv-ledger > div { display:grid; gap:5px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:14px; background:var(--sln-bg-canvas); }
   .kv-ledger span, .kv-ledger small { color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .kv-ledger strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
-  .scope-note { margin:0; }
-  .billing-request-description { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
-  .billing-checkout-panel { border-color:color-mix(in srgb,var(--sln-action-primary) 30%,var(--sln-border-default)); background:linear-gradient(135deg,var(--sln-bg-surface),var(--sln-tint-indigo)); }
-  .checkout-state-note, .checkout-provider-note { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
-  .checkout-market-note { margin:0; border:1px solid var(--sln-state-danger); border-radius:var(--sln-radius-md); padding:12px 14px; background:var(--sln-tint-danger); color:var(--selinow-danger-text); font:var(--sln-font-body-sm); }
-  .checkout-market-note a { color:inherit; font-weight:750; }
   .billing-market-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:end; }
   .billing-market-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
-  .billing-market-form input { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
-  .checkout-provider-note { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .billing-market-form input { min-height:44px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
   .billing-recent-auth-action { justify-self:start; }
   .billing-recent-auth-action[hidden] { display:none; }
-  .billing-checkout-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:end; }
-  .billing-checkout-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
-  .billing-checkout-form select { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
-  .billing-request-form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) auto; gap:12px; align-items:end; }
-  .billing-request-form label { display:grid; gap:6px; color:var(--sln-text-secondary); font:var(--sln-font-caption); }
-  .billing-request-form input, .billing-request-form select { min-height:42px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:9px 11px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
-  .billing-request-ledger { display:grid; gap:10px; }
-  .billing-request-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; border-top:1px solid var(--sln-border-default); padding-top:12px; }
-  .billing-request-row strong { display:block; color:var(--sln-text-primary); font:var(--sln-font-label); }
-  .billing-request-row span { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .dialog-auth-action { margin:0 24px; }
   .workspace-feedback { padding:12px 14px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
-  .workspace-feedback[data-tone="danger"] { border-color:var(--sln-state-danger); color:var(--selinow-danger-text); }
-  .workspace-feedback[data-tone="success"] { border-color:var(--sln-state-success); color:var(--selinow-success-text); }
-  .sln-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:9px 14px; font:var(--sln-font-label); cursor:pointer; }
-  .sln-button-primary { background:var(--sln-action-primary); color:var(--sln-white); }
-  @media (max-width:900px) { .billing-request-form { grid-template-columns:repeat(2,minmax(0,1fr)); } .billing-request-form .sln-button { width:100%; } }
-  @media (max-width:560px) { .billing-request-form, .billing-checkout-form, .billing-market-form { grid-template-columns:1fr; } .billing-request-row { grid-template-columns:1fr; } .billing-checkout-form .sln-button, .billing-market-form .sln-button { width:100%; } }
-  @media (max-width:760px) { .plan-hero { align-items:start; flex-direction:column; padding:24px; } .billing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .billing-grid article:nth-child(2) { border-right:0; } .billing-grid article:nth-child(n+3) { border-top:1px solid var(--sln-border-default); } .kv-ledger { grid-template-columns:1fr; } }
+  .workspace-feedback[data-tone="danger"] { border-color:var(--sln-state-danger); color:var(--sln-danger-text); }
+  .workspace-feedback[data-tone="success"] { border-color:var(--sln-state-success); color:var(--sln-success-text); }
+  .invoice-ledger { display:grid; gap:10px; }
+  .invoice-row { display:flex; justify-content:space-between; align-items:center; gap:14px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:14px; background:var(--sln-bg-canvas); }
+  .invoice-copy { display:grid; gap:5px; min-width:0; }
+  .invoice-copy strong { color:var(--sln-text-primary); font:var(--sln-font-label); font-variant-numeric:tabular-nums; }
+  .invoice-copy span { overflow:hidden; color:var(--sln-text-muted); font:var(--sln-font-caption); text-overflow:ellipsis; white-space:nowrap; }
+  .usage-ledger { display:grid; gap:10px; }
+  .usage-meter-row { display:grid; grid-template-columns:minmax(140px,1.1fr) minmax(0,2fr) auto auto; gap:12px; align-items:center; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:14px; background:var(--sln-bg-canvas); }
+  .usage-metric { overflow:hidden; color:var(--sln-text-muted); font:var(--sln-font-caption); text-overflow:ellipsis; white-space:nowrap; }
+  .usage-meter { overflow:hidden; height:10px; border-radius:var(--sln-radius-pill); background:var(--sln-bg-subtle); }
+  .usage-meter-fill { display:block; height:100%; border-radius:inherit; background:var(--sln-state-success); }
+  .usage-meter-fill[data-tone="warning"] { background:var(--sln-state-warning); }
+  .usage-meter-fill[data-tone="danger"] { background:var(--sln-state-danger); }
+  .usage-meter-row strong { color:var(--sln-text-primary); font:var(--sln-font-label); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .usage-meter-row small { color:var(--sln-text-muted); font:var(--sln-font-caption); white-space:nowrap; }
+  .usage-meter-row[data-tone="warning"] strong { color:var(--sln-warning-text); }
+  .usage-meter-row[data-tone="danger"] strong { color:var(--sln-danger-text); }
+  .empty-note { margin:0; color:var(--sln-text-muted); font:var(--sln-font-body-sm); }
+  .support-details { border-top:1px solid var(--sln-border-default); padding-top:14px; color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .support-details summary { display:flex; min-height:44px; width:max-content; align-items:center; color:var(--sln-text-secondary); cursor:pointer; touch-action:manipulation; }
+  .support-details p { max-width:76ch; }
+  .billing-dialog { width:min(680px,calc(100% - 32px)); max-width:none; max-height:min(780px,calc(100dvh - 32px)); border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); padding:0; background:var(--sln-bg-surface); color:var(--sln-text-primary); box-shadow:var(--sln-shadow-xl); overscroll-behavior:contain; }
+  .billing-dialog::backdrop { background:rgb(15 23 42 / 48%); backdrop-filter:blur(3px); }
+  .dialog-shell { display:grid; max-height:inherit; overflow-y:auto; }
+  .dialog-shell > header { display:flex; justify-content:space-between; gap:20px; border-bottom:1px solid var(--sln-border-default); padding:24px; }
+  .dialog-shell > header p:not(.eyebrow) { max-width:58ch; margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .dialog-close { display:grid; place-items:center; width:44px; height:44px; flex:0 0 auto; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); background:var(--sln-bg-canvas); color:var(--sln-text-secondary); font-size:24px; cursor:pointer; }
+  .dialog-stage { display:grid; gap:20px; padding:24px; }
+  .dialog-stage h3 { margin:0; font:var(--sln-font-h3); }
+  .plan-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .plan-choice { display:grid; gap:8px; min-height:132px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:16px; background:var(--sln-bg-canvas); text-align:left; cursor:pointer; }
+  .plan-choice:hover { border-color:var(--sln-border-strong); }
+  .plan-choice[data-current-plan="true"] { border-color:var(--sln-border-strong); background:var(--sln-bg-subtle); cursor:default; }
+  .plan-choice[aria-pressed="true"] { border-color:var(--sln-action-primary); box-shadow:inset 0 0 0 1px var(--sln-action-primary); background:var(--sln-tint-indigo); }
+  .plan-choice strong { font:var(--sln-font-h3); }
+  .plan-choice span, .plan-choice small { color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .plan-choice small { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .dialog-actions { display:flex; justify-content:flex-end; gap:10px; }
+  .change-review { display:grid; gap:0; margin:0; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); overflow:hidden; }
+  .change-review > div { display:grid; grid-template-columns:minmax(110px,.45fr) minmax(0,1fr); gap:16px; padding:14px 16px; background:var(--sln-bg-canvas); }
+  .change-review > div + div { border-top:1px solid var(--sln-border-default); }
+  .change-review dt { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .change-review dd { margin:0; color:var(--sln-text-primary); font:var(--sln-font-label); text-align:right; }
+  .provider-note { margin:0; color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .cancel-dialog .dialog-actions, .cancel-impact { margin:0 24px 24px; }
+  .cancel-impact { display:flex; justify-content:space-between; gap:16px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:16px; background:var(--sln-bg-canvas); }
+  .cancel-impact span { color:var(--sln-text-muted); font:var(--sln-font-caption); }
+  .cancel-impact strong { font:var(--sln-font-label); }
+  @keyframes billing-spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion:reduce) { .operation-spinner { animation:none; } }
+  @media (max-width:760px) {
+    .billing-section-nav { margin-inline:calc(var(--sln-space-4) * -1); padding-inline:var(--sln-space-4); }
+    .subscription-overview { grid-template-columns:1fr; padding:24px; }
+    .subscription-next { border-top:1px solid var(--sln-border-default); border-left:0; padding-top:18px; padding-left:0; }
+    .subscription-actions { align-items:stretch; flex-direction:column; }
+    .subscription-actions .sln-button { flex:1; }
+    .kv-ledger { grid-template-columns:1fr; }
+    .billing-panel-heading, .plan-summary-row { grid-template-columns:1fr; flex-direction:column; align-items:stretch; }
+    .billing-panel-heading .sln-button { width:100%; }
+    .payment-facts { grid-template-columns:1fr; }
+    .payment-facts > div + div { border-top:1px solid var(--sln-border-default); border-left:0; }
+  }
+  @media (max-width:560px) {
+    .billing-workspace { --billing-sticky-offset:60px; }
+    .billing-market-form, .plan-options { grid-template-columns:1fr; }
+    .billing-disclosure-summary, .billing-disclosure-content { padding-inline:20px; }
+    .billing-market-form .sln-button { width:100%; }
+    .invoice-row { align-items:flex-start; flex-direction:column; }
+    .usage-meter-row { grid-template-columns:1fr; align-items:start; }
+    .usage-meter { width:100%; }
+    .billing-dialog { width:100%; max-height:calc(100dvh - 80px - env(safe-area-inset-bottom)); margin:auto 0 0; border-radius:var(--sln-radius-lg) var(--sln-radius-lg) 0 0; }
+    .dialog-shell > header, .dialog-stage { padding:20px; }
+    .dialog-actions { position:sticky; bottom:0; margin-inline:-20px; padding:12px 20px calc(12px + env(safe-area-inset-bottom)); background:var(--sln-bg-surface); box-shadow:0 -8px 24px rgb(15 23 42 / 8%); }
+    .dialog-actions .sln-button { flex:1; }
+    .change-review > div { grid-template-columns:1fr; gap:4px; }
+    .change-review dd { text-align:left; }
+    .cancel-dialog .dialog-actions { margin:0; padding-inline:20px; }
+    .cancel-impact { margin:0 20px 20px; }
+  }
 </style>

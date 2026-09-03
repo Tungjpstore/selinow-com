@@ -2,6 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "selinow-com",
   "main": "./src/worker.ts",
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  },
   "compatibility_date": "2026-07-25",
   "compatibility_flags": [
     "nodejs_compat"
@@ -93,6 +96,7 @@
     "PLATFORM_ORIGIN": "http://localhost:4321",
     "DASHBOARD_ORIGIN": "http://app.localhost:4321",
     "API_ORIGIN": "http://api.localhost:4321",
+    "GOOGLE_OAUTH_REDIRECT_URI": "http://localhost:4321/api/auth/google/callback",
     "DEFAULT_LOCALE": "en",
     "DEFAULT_CURRENCY": "VND",
     "DEFAULT_TIMEZONE": "Asia/Ho_Chi_Minh",
@@ -116,6 +120,9 @@
   },
   "env": {
     "production": {
+      "version_metadata": {
+        "binding": "CF_VERSION_METADATA"
+      },
       "name": "selinow-com-production",
       "workers_dev": false,
       "preview_urls": false,
@@ -238,6 +245,7 @@
         "PLATFORM_ORIGIN": "https://selinow.com",
         "DASHBOARD_ORIGIN": "https://app.selinow.com",
         "API_ORIGIN": "https://api.selinow.com",
+        "GOOGLE_OAUTH_REDIRECT_URI": "https://app.selinow.com/api/auth/google/callback",
         "MEDIA_PUBLIC_BASE_URL": "https://media.selinow.com",
         "CLOUDFLARE_ZONE_ID": "ce1536fca500680c544662e361ed869b",
         "SAAS_CNAME_TARGET": "customers.selinow.com",
@@ -266,6 +274,9 @@
       }
     },
     "staging": {
+      "version_metadata": {
+        "binding": "CF_VERSION_METADATA"
+      },
       "name": "selinow-com-staging",
       "workers_dev": true,
       "routes": [
@@ -422,6 +433,7 @@
         "PLATFORM_BASE_DOMAIN": "staging.selinow.com",
         "PLATFORM_NAME": "Selinow Staging",
         "PLATFORM_ORIGIN": "https://staging.selinow.com",
+        "GOOGLE_OAUTH_REDIRECT_URI": "https://app-staging.selinow.com/api/auth/google/callback",
         "RESOURCE_MANIFEST_VERSION": "d979abe2b8dad825",
         "SAAS_CNAME_TARGET": "customers.selinow.com",
         "SESSION_COOKIE_NAME": "selinow_staging_session",

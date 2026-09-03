@@ -35,6 +35,42 @@ describe("bounded frontend route UX", () => {
     expect(page).not.toContain("customer.lastOrderAt ?? customer.createdAt");
   });
 
+  it("keeps booking mutations behind the fulfillment role boundary", async () => {
+    const [page, client] = await Promise.all([
+      readFile("src/pages/app/bookings.astro", "utf8"),
+      readFile("src/scripts/dashboard/bookings.ts", "utf8"),
+    ]);
+
+    expect(page).toContain('data-can-manage={shop.role === "owner" || shop.role === "manager" ? "true" : "false"}');
+    expect(client).toContain('const canManage = panel.dataset.canManage === "true";');
+    expect(client).toContain("if (canManage) {");
+  });
+
+  it("does not turn catalog read failures into empty seller workspaces", async () => {
+    const [products, inventory] = await Promise.all([
+      readFile("src/pages/app/products.astro", "utf8"),
+      readFile("src/pages/app/inventory.astro", "utf8"),
+    ]);
+
+    expect(products).toContain("let catalogLoadFailed = false;");
+    expect(products).toContain('t("dashboard.products.unavailable.title")');
+    expect(inventory).toContain("let catalogLoadFailed = false;");
+    expect(inventory).toContain('t("dashboard.inventory.unavailable.title")');
+  });
+
+  it("makes the seller overview an honest today cockpit", async () => {
+    const page = await readFile("src/pages/app/index.astro", "utf8");
+
+    expect(page).toContain('aria-labelledby="console-cockpit-title"');
+    expect(page).toContain('t("dashboard.overview.cockpit.title")');
+    expect(page).toContain('ordersState === "unavailable"');
+    expect(page).toContain('catalogState === "unavailable"');
+    expect(page).toContain('readinessState === "unavailable"');
+    expect(page).toContain("actionItems.sort");
+    expect(page).toContain('t("dashboard.overview.cockpit.unavailable_value")');
+    expect(page).toContain("prefers-reduced-motion: reduce");
+  });
+
   it("uses the tenant-safe catalog projection in the store builder preview", async () => {
     const [page, preview, card] = await Promise.all([
       readFile("src/pages/app/store.astro", "utf8"),

@@ -21,7 +21,43 @@ export type SellerOrderSummary = {
   updatedAt: string;
 };
 
-export type SellerOrderPage = { nextCursor: string | null; orders: SellerOrderSummary[] };
+export type SellerOrderPage = { nextCursor: string | null; orders: SellerOrderSummary[]; page?: number; pageSize?: number; totalCount?: number; totalPages?: number };
+
+export type SellerOrderStatusFilter = "all" | "exception" | "fulfillment-processing" | "fulfilled" | "payment-paid" | "payment-pending";
+export type SellerOrderSort = "created_asc" | "created_desc" | "order_number_asc" | "order_number_desc" | "total_asc" | "total_desc";
+
+const SELLER_ORDER_SORTS: readonly SellerOrderSort[] = ["created_asc", "created_desc", "order_number_asc", "order_number_desc", "total_asc", "total_desc"];
+const SELLER_ORDER_STATUS_FILTERS: readonly SellerOrderStatusFilter[] = ["all", "exception", "fulfillment-processing", "fulfilled", "payment-paid", "payment-pending"];
+
+export function parseSellerOrderSort(value: string | null): SellerOrderSort {
+  return value !== null && (SELLER_ORDER_SORTS as readonly string[]).includes(value) ? value as SellerOrderSort : "created_desc";
+}
+
+export function parseSellerOrderStatusFilter(value: string | null): SellerOrderStatusFilter {
+  return value !== null && (SELLER_ORDER_STATUS_FILTERS as readonly string[]).includes(value) ? value as SellerOrderStatusFilter : "all";
+}
+
+function sellerOrderStatusFilterSql(filter: SellerOrderStatusFilter): string {
+  switch (filter) {
+    case "payment-pending": return "orders.payment_status IN ('unpaid', 'pending')";
+    case "payment-paid": return "orders.payment_status = 'paid'";
+    case "fulfillment-processing": return "orders.payment_status = 'paid' AND orders.fulfillment_status IN ('reserved', 'unfulfilled')";
+    case "fulfilled": return "orders.payment_status = 'paid' AND orders.fulfillment_status = 'fulfilled'";
+    case "exception": return "(orders.status = 'exception' OR orders.payment_status IN ('partial', 'overpaid', 'failed') OR orders.fulfillment_status IN ('failed', 'manual_review'))";
+    default: return "1 = 1";
+  }
+}
+
+function sellerOrderSortSql(sort: SellerOrderSort): string {
+  switch (sort) {
+    case "created_asc": return "orders.created_at ASC, orders.public_id ASC";
+    case "total_desc": return "orders.total_minor DESC, orders.public_id DESC";
+    case "total_asc": return "orders.total_minor ASC, orders.public_id ASC";
+    case "order_number_asc": return "orders.order_number ASC, orders.public_id ASC";
+    case "order_number_desc": return "orders.order_number DESC, orders.public_id DESC";
+    default: return "orders.created_at DESC, orders.public_id DESC";
+  }
+}
 
 type SellerManualFulfillmentView = {
   completedAt: string | null;
@@ -38,6 +74,12 @@ function sellerPage(input: { cursor?: string | null; limit?: number }): PublicAp
 
 export type SellerOrderDetail = SellerOrderSummary & {
   audit: Array<{ action: string; createdAt: string }>;
+  shipping: {
+    address: { addressLine: string; district: string; fullName: string; notes: string | null; phone: string; province: string; ward: string };
+    feeMinor: number;
+    methodName: string | null;
+    shipments: Array<{ carrier: string | null; createdAt: string; shippingState: string; trackingCode: string | null }>;
+  } | null;
   expiresAt: string;
   fulfilledAt: string | null;
   fulfillment: Array<{ createdAt: string; failedAt: string | null; fulfilledAt: string | null; state: string; type: string }>;
@@ -159,9 +201,116 @@ async function listSellerPrivateDownloads(input: { env: AppBindings; orderId: st
   return rows.results;
 }
 
-export async function listSellerOrdersPage(input: { cursor?: string | null; env: AppBindings; limit?: number; shopPublicId: string; userId: string }): Promise<SellerOrderPage> {
+function maskSummaryFields(visibility: OrderVisibility, rows: SellerOrderSummary[]): SellerOrderSummary[] {
+  return visibility !== "summary" ? rows : rows.map((row) => ({ ...row, customerEmail: null, primaryItem: null }));
+}
+
+const SELLER_ORDER_SEARCH_MAX = 64;
+
+function normalizeSellerOrderSearch(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed.slice(0, SELLER_ORDER_SEARCH_MAX);
+}
+
+export async function listSellerOrdersPage(input: {
+  cursor?: string | null;
+  env: AppBindings;
+  limit?: number;
+  page?: number;
+  pageSize?: number;
+  search?: string | null;
+  shopPublicId: string;
+  sort?: SellerOrderSort;
+  statusFilter?: SellerOrderStatusFilter;
+  userId: string;
+}): Promise<SellerOrderPage> {
   const { shopId, visibility } = await requireOrderActor(input.env, input.shopPublicId, input.userId);
-  const page = sellerPage(input);
+
+  if (input.page === undefined) {
+    const page = sellerPage(input);
+    const rows = await input.env.PLATFORM_DB.prepare(`
+      SELECT
+        orders.public_id AS orderId,
+        orders.order_number AS orderNumber,
+        orders.customer_email_masked AS customerEmail,
+        orders.status,
+        orders.payment_status AS paymentStatus,
+        orders.fulfillment_status AS fulfillmentStatus,
+        orders.source_channel AS sourceChannel,
+        orders.total_minor AS totalMinor,
+        orders.currency,
+        orders.created_at AS createdAt,
+        orders.updated_at AS updatedAt,
+        COUNT(order_items.id) AS itemCount,
+        MIN(order_items.product_title) AS primaryItem
+      FROM orders
+      LEFT JOIN order_items
+        ON order_items.order_id = orders.id
+        AND order_items.shop_id = orders.shop_id
+      WHERE orders.shop_id = ?
+        AND (? IS NULL OR orders.created_at < ?
+          OR (orders.created_at = ? AND orders.public_id < ?))
+      GROUP BY orders.id
+      ORDER BY orders.created_at DESC, orders.public_id DESC
+      LIMIT ?
+    `).bind(
+      shopId,
+      page.cursor?.createdAt ?? null,
+      page.cursor?.createdAt ?? null,
+      page.cursor?.createdAt ?? null,
+      page.cursor?.id ?? null,
+      page.limit + 1,
+    ).all<SellerOrderSummary>();
+    const hasNext = rows.results.length > page.limit;
+    const visibleRows = rows.results.slice(0, page.limit);
+    const orders = maskSummaryFields(visibility, visibleRows);
+    const last = visibleRows.at(-1);
+    return {
+      nextCursor: hasNext && last !== undefined
+        ? encodePublicApiCursor({ createdAt: last.createdAt, id: last.orderId })
+        : null,
+      orders,
+    };
+  }
+
+  // Search/sort require correctness across the whole tenant-scoped result
+  // set, not just the currently loaded keyset page, so this branch uses
+  // bounded offset pagination instead of a forward-only cursor.
+  const rawPage = input.page;
+  const rawPageSize = input.pageSize;
+  const pageNumber = typeof rawPage === "number" && Number.isSafeInteger(rawPage) && rawPage >= 1 ? rawPage : 1;
+  const pageSize = typeof rawPageSize === "number" && Number.isSafeInteger(rawPageSize) && rawPageSize >= 1 && rawPageSize <= 100 ? rawPageSize : 25;
+  const search = normalizeSellerOrderSearch(input.search);
+  const statusFilter = input.statusFilter ?? "all";
+  const sort = input.sort ?? "created_desc";
+  const likeTerm = search === null ? null : `%${search}%`;
+  const offset = (pageNumber - 1) * pageSize;
+
+  const whereSql = `
+    orders.shop_id = ?
+    AND (${sellerOrderStatusFilterSql(statusFilter)})
+    AND (
+      ? IS NULL
+      OR orders.order_number LIKE ?
+      OR orders.public_id LIKE ?
+      OR orders.customer_email_masked LIKE ?
+      OR EXISTS (
+        SELECT 1 FROM order_items
+        WHERE order_items.order_id = orders.id
+          AND order_items.shop_id = orders.shop_id
+          AND order_items.product_title LIKE ?
+      )
+    )
+  `;
+  const whereValues = [shopId, likeTerm, likeTerm, likeTerm, likeTerm, likeTerm];
+
+  const countRow = await input.env.PLATFORM_DB.prepare(`
+    SELECT COUNT(*) AS total FROM orders WHERE ${whereSql}
+  `).bind(...whereValues).first<{ total: number }>();
+  const totalCount = countRow !== null && Number.isSafeInteger(countRow.total) ? countRow.total : 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT
       orders.public_id AS orderId,
@@ -181,33 +330,19 @@ export async function listSellerOrdersPage(input: { cursor?: string | null; env:
     LEFT JOIN order_items
       ON order_items.order_id = orders.id
       AND order_items.shop_id = orders.shop_id
-    WHERE orders.shop_id = ?
-      AND (? IS NULL OR orders.created_at < ?
-        OR (orders.created_at = ? AND orders.public_id < ?))
+    WHERE ${whereSql}
     GROUP BY orders.id
-    ORDER BY orders.created_at DESC, orders.public_id DESC
-    LIMIT ?
-  `).bind(
-    shopId,
-    page.cursor?.createdAt ?? null,
-    page.cursor?.createdAt ?? null,
-    page.cursor?.createdAt ?? null,
-    page.cursor?.id ?? null,
-    page.limit + 1,
-  ).all<SellerOrderSummary>();
-  const hasNext = rows.results.length > page.limit;
-  const visibleRows = rows.results.slice(0, page.limit);
-  const orders = visibility !== "summary" ? visibleRows : visibleRows.map((row) => ({
-    ...row,
-    customerEmail: null,
-    primaryItem: null,
-  }));
-  const last = visibleRows.at(-1);
+    ORDER BY ${sellerOrderSortSql(sort)}
+    LIMIT ? OFFSET ?
+  `).bind(...whereValues, pageSize, offset).all<SellerOrderSummary>();
+
   return {
-    nextCursor: hasNext && last !== undefined
-      ? encodePublicApiCursor({ createdAt: last.createdAt, id: last.orderId })
-      : null,
-    orders,
+    nextCursor: null,
+    orders: maskSummaryFields(visibility, rows.results),
+    page: pageNumber,
+    pageSize,
+    totalCount,
+    totalPages,
   };
 }
 
@@ -233,6 +368,7 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
       orders.expires_at AS expiresAt,
       orders.paid_at AS paidAt,
       orders.fulfilled_at AS fulfilledAt,
+      orders.shipping_fee_minor AS shippingFeeMinor, orders.shipping_method_name AS shippingMethodName,
       orders.created_at AS createdAt,
       orders.updated_at AS updatedAt,
       COUNT(order_items.id) AS itemCount,
@@ -244,7 +380,7 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
     WHERE orders.shop_id = ? AND orders.public_id = ?
     GROUP BY orders.id
     LIMIT 1
-  `).bind(shopId, input.orderPublicId).first<SellerOrderSummary & { expiresAt: string; fulfilledAt: string | null; internalId: string; paidAt: string | null }>();
+  `).bind(shopId, input.orderPublicId).first<SellerOrderSummary & { expiresAt: string; fulfilledAt: string | null; internalId: string; paidAt: string | null; shippingFeeMinor: number; shippingMethodName: string | null }>();
   if (row === null) throw new AppError("order_not_found", 404);
 
   const [items, payments, paymentExceptions, remediationRequests, fulfillment, audit, notes, privateDownloads, manualFulfillments] = await Promise.all([
@@ -345,7 +481,25 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
     `).bind(shopId, row.internalId).all<SellerManualFulfillmentRow>(),
   ]);
 
-  const { internalId, ...safe } = row;
+  const [shippingAddressRow, shipmentRows] = await Promise.all([
+    input.env.PLATFORM_DB.prepare(`
+      SELECT full_name AS fullName, phone, address_line AS addressLine,
+        ward, district, province, notes
+      FROM order_shipping_addresses
+      WHERE shop_id = ? AND order_id = ?
+      LIMIT 1
+    `).bind(shopId, row.internalId).first<NonNullable<SellerOrderDetail["shipping"]>["address"]>(),
+    input.env.PLATFORM_DB.prepare(`
+      SELECT shipping_state AS shippingState, carrier, tracking_code AS trackingCode, created_at AS createdAt
+      FROM fulfillments
+      WHERE shop_id = ? AND order_id = ? AND shipping_state IS NOT NULL
+      ORDER BY created_at, id
+    `).bind(shopId, row.internalId).all<NonNullable<SellerOrderDetail["shipping"]>["shipments"][number]>(),
+  ]);
+
+  const { internalId, shippingFeeMinor, shippingMethodName, ...safe } = row;
+  void shippingFeeMinor;
+  void shippingMethodName;
   void internalId;
   const privateDownloadByItem = new Map(privateDownloads.map((download) => [download.orderItemId, {
     downloadCount: download.downloadCount,
@@ -372,6 +526,14 @@ export async function getSellerOrder(input: { env: AppBindings; orderPublicId: s
   return {
     ...safe,
     audit: audit.results,
+    shipping: shippingAddressRow === null
+      ? null
+      : {
+        address: shippingAddressRow,
+        feeMinor: shippingFeeMinor,
+        methodName: shippingMethodName,
+        shipments: shipmentRows.results,
+      },
     fulfillment: fulfillment.results,
     items: items.results.map((item) => ({
       ...item,

@@ -16,6 +16,7 @@ import {
 import { getPaymentFulfillmentEligibility } from "../../src/lib/payments/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import type { StorefrontShop } from "../../src/lib/storefront/store";
+import { FALLBACK_STOREFRONT_TEMPLATE } from "../../src/lib/storefront/templates";
 
 const order: CommerceOrderReference = {
   access: { kind: "opaque_token", token: "order-access-token-1234567890" },
@@ -46,7 +47,7 @@ const principalContext: CommerceContext = {
 const shop: StorefrontShop = {
   access: "live",
   canonicalHostname: "signal.example.test",
-  content: { announcement: null, deliveryText: "", description: "", footerText: "", headline: "", seoDescription: "", seoTitle: "", showExactStock: false, supportText: "" },
+  content: { announcement: null, deliveryText: "", description: "", footerText: "", headline: "", seoDescription: "", seoTitle: "", showExactStock: false, supportText: "", templateId: null },
   currency: "VND",
   currentHostname: "signal.example.test",
   defaultLocale: "vi",
@@ -60,6 +61,8 @@ const shop: StorefrontShop = {
   slug: "signal",
   status: "active",
   subscriptionState: "active",
+  timezone: "Asia/Ho_Chi_Minh",
+  template: FALLBACK_STOREFRONT_TEMPLATE,
   theme: { accent: "#E9A62F", accentInk: "#102824", brand: "#176B5B", brandInk: "#FFF9EA", logoUrl: null },
 };
 

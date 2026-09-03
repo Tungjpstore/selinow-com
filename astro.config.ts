@@ -1,7 +1,13 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+
 import cloudflare from "@astrojs/cloudflare";
 import { defineConfig } from "astro/config";
 
 const authenticatedBrowserWranglerConfig = process.env.SELINOW_AUTH_BROWSER_WRANGLER_CONFIG;
+const authenticatedBrowserFileSystemAllow = authenticatedBrowserWranglerConfig
+  ? [resolve("."), realpathSync(resolve("node_modules"))]
+  : undefined;
 
 export default defineConfig({
   adapter: cloudflare({
@@ -24,5 +30,14 @@ export default defineConfig({
     build: {
       assetsInlineLimit: 0,
     },
+    ...(authenticatedBrowserFileSystemAllow
+      ? {
+          server: {
+            fs: {
+              allow: authenticatedBrowserFileSystemAllow,
+            },
+          },
+        }
+      : {}),
   },
 });

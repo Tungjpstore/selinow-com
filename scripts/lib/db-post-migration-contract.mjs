@@ -10,6 +10,8 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "activation_backfill_checkpoints",
     "activation_milestones",
     "api_credentials",
+    "auth_google_identities",
+    "auth_google_oauth_states",
     "billing_accounts",
     "billing_checkout_sessions",
     "billing_invoices",
@@ -49,6 +51,11 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "idx_auth_request_admissions_requester_window",
     "idx_auth_request_admissions_subject_window",
     "idx_auth_request_admissions_window",
+    "idx_auth_google_identities_subject",
+    "idx_auth_google_identities_user",
+    "idx_auth_google_oauth_states_expiry",
+    "idx_auth_google_oauth_states_lookup",
+    "idx_auth_google_oauth_states_retention",
     "idx_billing_accounts_shop_status",
     "idx_billing_checkout_sessions_active_subscription",
     "idx_billing_checkout_sessions_pending",
@@ -129,6 +136,9 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
     "api_credentials_no_delete",
     "api_credentials_require_active_member_insert",
     "api_credentials_transition_guard",
+    "auth_google_identities_identity_immutable",
+    "auth_google_oauth_states_pending_insert_guard",
+    "auth_google_oauth_states_transition_guard",
     "billing_checkout_sessions_scope_guard",
     "billing_checkout_sessions_scope_update_guard",
     "billing_invoice_account_scope_guard",
@@ -237,6 +247,16 @@ export const REQUIRED_POST_MIGRATION_OBJECTS = Object.freeze({
 
 export const REQUIRED_POST_MIGRATION_COLUMNS = Object.freeze({
   account_trial_claims: Object.freeze(["claimed_at", "shop_id", "user_id"]),
+  auth_google_identities: Object.freeze([
+    "id", "user_id", "subject_hash", "subject_key_version", "created_at",
+    "last_authenticated_at", "updated_at", "version",
+  ]),
+  auth_google_oauth_states: Object.freeze([
+    "id", "flow", "initiated_user_id", "state_lookup_hash", "nonce_hash", "browser_binding_hash",
+    "redirect_uri", "return_to", "code_verifier_ciphertext_b64",
+    "code_verifier_iv_b64", "key_version", "status", "expires_at",
+    "consumed_at", "revoked_at", "created_at", "updated_at", "version",
+  ]),
   auth_request_admissions: Object.freeze([
     "id", "action", "requester_hash", "window_started_at", "window_ends_at", "created_at",
     "subject_hash", "delivery_permitted",
@@ -512,13 +532,13 @@ SELECT COUNT(*) AS mismatch_count FROM (
   UNION ALL
   SELECT admission.id
   FROM auth_request_admissions AS admission
-  WHERE admission.action NOT IN ('magic_link_request', 'shop_create')
+  WHERE admission.action NOT IN ('google_oauth_start', 'magic_link_request', 'shop_create')
     OR length(admission.requester_hash) NOT BETWEEN 16 AND 128
     OR admission.window_ends_at <= admission.window_started_at
     OR (admission.subject_hash IS NOT NULL
       AND length(admission.subject_hash) NOT BETWEEN 16 AND 128)
     OR admission.delivery_permitted NOT IN (0, 1)
-    OR (admission.action = 'shop_create'
+    OR (admission.action IN ('google_oauth_start', 'shop_create')
       AND (admission.subject_hash IS NULL OR admission.delivery_permitted != 1))
 ) AS prior_ledgers
   UNION ALL
@@ -610,6 +630,7 @@ export function parsePostMigrationObjectOutput(output) {
     row.type === "table" && (
       row.name === "api_credentials_v0068"
       || row.name === "auth_request_admissions_legacy_0094"
+      || row.name === "auth_request_admissions_legacy_0112"
       || row.name === "telegram_updates_pre_generation"
       || row.name === "telegram_updates_pre_rollback"
       || /_legacy_00(?:70|76)$/u.test(row.name)

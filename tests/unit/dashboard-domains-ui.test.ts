@@ -9,10 +9,11 @@ const readSource = (path: string): Promise<string> => readFile(new URL(`../../${
 
 describe("dashboard domain UI localization", () => {
   it("keeps the page, manager, and lifecycle labels on the dashboard catalog", async () => {
-    const [page, manager, lifecycle] = await Promise.all([
+    const [page, manager, lifecycle, domainList] = await Promise.all([
       readSource("src/pages/app/domains.astro"),
       readSource("src/components/dashboard/DomainManager.astro"),
       readSource("src/components/dashboard/DomainLifecycle.astro"),
+      readSource("src/components/dashboard/domains/DomainList.astro"),
     ]);
     const english = createDashboardTranslator("en");
     const vietnamese = createDashboardTranslator("vi-VN");
@@ -28,12 +29,12 @@ describe("dashboard domain UI localization", () => {
     expect(page).toContain('title={t("dashboard.domains.title")}');
     expect(manager).toContain("createDashboardTranslator");
     expect(manager).toContain('data-locale={locale ?? "en"}');
-    expect(manager).toContain("domain.turnstileStatus");
-    expect(manager).toContain("data-turnstile-note");
+    expect(domainList).toContain("domain.turnstileStatus");
+    expect(domainList).toContain("data-turnstile-note");
     expect(lifecycle).toContain('t("dashboard.domains.lifecycle.aria")');
     expect(lifecycle).toContain('t("dashboard.domains.lifecycle.turnstile")');
     expect(english("dashboard.domains.connect.privacy")).toContain("TXT and CNAME remain manual");
     expect(vietnamese("dashboard.domains.card.turnstile_pending")).toContain("Operator Selinow");
-    for (const source of [page, manager, lifecycle]) expect(source).not.toMatch(/[À-ỹ]/u);
+    for (const source of [page, manager, lifecycle, domainList]) expect(source).not.toMatch(/[À-ỹ]/u);
   });
 });

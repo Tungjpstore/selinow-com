@@ -11,6 +11,10 @@ import { getSellerStorefrontPreviewCatalog, type SellerPreviewCatalog } from "..
 import { listShopsForMember, selectShopForMember } from "../../lib/tenants/store";
 import { getSellerStorefrontSettings, type SellerStorefrontSettings } from "../../lib/tenants/storefront-settings";
 import { createDashboardTranslator } from "../../lib/i18n";
+import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+import "../../styles/dashboard/store-builder-preview-skins.css";
+import { getConsoleClientCopy } from "../../lib/i18n/catalogs/console";
+import { defaultHomeStack, parseSectionItems, resolveHomeSections, universalSectionSettings } from "../../lib/storefront/sections/registry";
 
 const env = getBindings();
 const auth = await authenticateRequest(Astro.request, env).catch(() => null);
@@ -22,6 +26,7 @@ const canManage = shop !== undefined && (shop.role === "owner" || shop.role === 
 const canPublish = shop?.role === "owner";
 const locale = Astro.locals.locale ?? shop?.defaultLocale;
 const t = createDashboardTranslator(locale);
+const ts = createStorefrontTranslator(locale);
 let settings: SellerStorefrontSettings | null = null;
 let settingsError: string | null = null;
 let previewCatalog: SellerPreviewCatalog = { products: [], truncated: false };
@@ -49,9 +54,57 @@ const initialDraft = settings === null ? null : {
   primaryColor: settings.theme.brand,
   seoDescription: settings.content.seoDescription,
   seoTitle: settings.content.seoTitle,
+  sections: settings.content.sections ?? [],
   showExactStock: settings.content.showExactStock,
   supportText: settings.content.supportText,
+  templateId: settings.template.id,
 };
+// Gallery copy is built server-side so the client script only handles the
+// templateId draft value; entitlement comes from the settings payload.
+const templateGallery = settings === null ? [] : settings.templates.map((template) => ({
+  available: template.available,
+  description: t(`dashboard.store_builder.template.${template.id}.description`),
+  id: template.id,
+  name: t(`dashboard.store_builder.template.${template.id}.name`),
+  premium: template.premium,
+  scheme: template.scheme,
+  selectable: template.available && (!template.premium || settings.premiumTemplatesEnabled),
+  verticalLabel: t(`dashboard.store_builder.template.vertical.${template.vertical}`),
+}));
+// TM1: home layout rows — native blocks render locked; universal blocks are
+// toggle/reorderable and persist into storefront_json.sections. All derived
+// rows collapse to empty defaults while settings failed to load; the render
+// below swaps in the unavailable state instead of the builder.
+const sectionCopy = getConsoleClientCopy(locale ?? "en");
+const UNIVERSAL_SECTION_TYPES = new Set(["usp", "faq"]);
+const resolvedStack = settings === null ? [] : resolveHomeSections(settings.template.id, settings.content.sections ?? []);
+const sectionRows = resolvedStack.map((type, index) => ({
+  editable: UNIVERSAL_SECTION_TYPES.has(type),
+  label: sectionCopy[`console.builder.sections.type.${type}`] ?? type,
+  lockedNote: sectionCopy["console.builder.sections.locked_note"],
+  moveDown: sectionCopy["console.builder.sections.move_down"],
+  moveUp: sectionCopy["console.builder.sections.move_up"],
+  toggle: sectionCopy["console.builder.sections.toggle"],
+  type,
+  variants: String(index),
+}));
+const persistedSectionsJson = JSON.stringify(settings?.content.sections ?? []);
+const uspSettings = settings === null ? { items: "[]" } : universalSectionSettings(settings.content.sections ?? [], "usp");
+const faqSettings = settings === null ? { items: "[]" } : universalSectionSettings(settings.content.sections ?? [], "faq");
+const builderVertical = settings?.template.vertical ?? "digital";
+const uspDefaults = [1, 2, 3].map((index) => ({
+  body: ts(`storefront.section.usp.${builderVertical}.${index}.body`),
+  title: ts(`storefront.section.usp.${builderVertical}.${index}.title`),
+}));
+const faqDefaults = [1, 2, 3].map((index) => ({
+  a: ts(`storefront.section.faq.${builderVertical}.${index}.a`),
+  q: ts(`storefront.section.faq.${builderVertical}.${index}.q`),
+}));
+const uspItems = parseSectionItems(uspSettings.items);
+const faqItems = parseSectionItems(faqSettings.items);
+const uspItemDefaults = [0, 1, 2].map((index) => uspItems[index] ?? uspDefaults[index] ?? { body: "", title: "" });
+const faqItemDefaults = [0, 1, 2].map((index) => faqItems[index] ?? faqDefaults[index] ?? { a: "", q: "" });
+
 const storeBuilderClientCopy = {
   failed: t("dashboard.store_builder.runtime.failed"),
   forbidden: t("dashboard.store_builder.runtime.forbidden"),
@@ -89,6 +142,13 @@ const storeBuilderClientCopy = {
   publishConflict: t("dashboard.store_builder.runtime.publish_conflict"),
   publishError: t("dashboard.store_builder.runtime.publish_error", { error: "__ERROR__" }),
   publishFailed: t("dashboard.store_builder.runtime.publish_failed"),
+  shippingArchive: t("dashboard.store_builder.shipping.archive"),
+  shippingCreated: t("dashboard.store_builder.shipping.created"),
+  shippingEmpty: t("dashboard.store_builder.shipping.empty"),
+  shippingError: t("dashboard.store_builder.shipping.error"),
+  shippingFeeLabel: t("dashboard.store_builder.shipping.fee_label"),
+  shippingFreeOverLabel: t("dashboard.store_builder.shipping.free_over_label"),
+  shippingInvalid: t("dashboard.store_builder.shipping.invalid"),
 };
 ---
 
@@ -115,6 +175,9 @@ const storeBuilderClientCopy = {
         <div class="builder-tabs" role="tablist" aria-label={t("dashboard.store_builder.tabs.aria")}>
           <button class="builder-tab is-active" id="tab-content" type="button" role="tab" aria-selected="true" aria-controls="panel-content" data-tab="content">{t("dashboard.store_builder.tab.content")}</button>
           <button class="builder-tab" id="tab-brand" type="button" role="tab" aria-selected="false" aria-controls="panel-brand" data-tab="brand">{t("dashboard.store_builder.tab.brand")}</button>
+          <button class="builder-tab" id="tab-template" type="button" role="tab" aria-selected="false" aria-controls="panel-template" data-tab="template">{t("dashboard.store_builder.tab.template")}</button>
+          <button class="builder-tab" id="tab-sections" type="button" role="tab" aria-selected="false" aria-controls="panel-sections" data-tab="sections">{sectionCopy["console.builder.sections.tab"]}</button>
+          <button class="builder-tab" id="tab-shipping" type="button" role="tab" aria-selected="false" aria-controls="panel-shipping" data-tab="shipping">{t("dashboard.store_builder.tab.shipping")}</button>
           <button class="builder-tab" id="tab-layout" type="button" role="tab" aria-selected="false" aria-controls="panel-layout" data-tab="layout">{t("dashboard.store_builder.tab.layout")}</button>
           <button class="builder-tab" id="tab-seo" type="button" role="tab" aria-selected="false" aria-controls="panel-seo" data-tab="seo">{t("dashboard.store_builder.tab.seo")}</button>
           <button class="builder-tab" id="tab-support" type="button" role="tab" aria-selected="false" aria-controls="panel-support" data-tab="support">{t("dashboard.store_builder.tab.support")}</button>
@@ -158,6 +221,87 @@ const storeBuilderClientCopy = {
             </fieldset>
           </div>
 
+          <div class="tab-panel" id="panel-template" role="tabpanel" aria-labelledby="tab-template" data-panel="template" hidden>
+            <div class="panel-heading"><p class="eyebrow">{t("dashboard.store_builder.panel.template.eyebrow")}</p><h2>{t("dashboard.store_builder.panel.template.title")}</h2><p>{t("dashboard.store_builder.panel.template.description")}</p></div>
+            <fieldset disabled={!canManage}>
+              <div class="template-gallery" role="radiogroup" aria-label={t("dashboard.store_builder.panel.template.title")} data-template-gallery>
+                {templateGallery.map((option) => (
+                  <label class:list={["template-option", option.selectable ? "is-selectable" : "is-locked"]} data-template-option={option.id}>
+                    <input type="radio" name="templateId" data-field="templateId" value={option.id} checked={settings.template.id === option.id} disabled={!option.selectable} />
+                    <span class="template-thumb" data-template={option.id} data-scheme={option.scheme} aria-hidden="true">
+                      <span class="thumb-bar"></span>
+                      <span class="thumb-body"><span class="thumb-hero"><i></i><i></i><i></i></span><span class="thumb-grid"><i></i><i></i><i></i><i></i></span></span>
+                    </span>
+                    <span class="template-copy">
+                      <span class="template-name-row">
+                        <strong>{option.name}</strong>
+                        {option.premium && <span class="template-badge" data-badge="pro">{t("dashboard.store_builder.template.premium_badge")}</span>}
+                        {!option.available && <span class="template-badge" data-badge="soon">{t("dashboard.store_builder.template.coming_soon")}</span>}
+                      </span>
+                      <small>{option.verticalLabel} · {option.description}</small>
+                      {option.premium && !settings.premiumTemplatesEnabled && <small class="template-locked-note">{t("dashboard.store_builder.template.premium_note")}</small>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p class="template-preview-note">{t("dashboard.store_builder.template.preview_note")}</p>
+            </fieldset>
+          </div>
+
+          <div class="tab-panel" id="panel-sections" role="tabpanel" aria-labelledby="tab-sections" data-panel="sections" hidden>
+            <div class="panel-heading"><p class="eyebrow">{sectionCopy["console.builder.sections.tab"]}</p><h2>{sectionCopy["console.builder.sections.title"]}</h2><p>{sectionCopy["console.builder.sections.description"]}</p></div>
+            <fieldset disabled={!canManage}>
+              <input type="hidden" data-field="sections" value={persistedSectionsJson} aria-label="sections" />
+              <ul class="section-stack-list" data-section-stack data-default-stack={JSON.stringify(defaultHomeStack(settings.template.id).map((type) => ({ enabled: true, id: `cfg-${type}`, settings: {}, type })))}>
+                {sectionRows.map((row) => (
+                  <li class:list={["section-stack-row", !row.editable && "is-locked"]} data-section-row={row.type}>
+                    <span class="section-row-index" aria-hidden="true">{String(row.variants + 1).padStart(2, "0")}</span>
+                    <span class="section-row-label">{row.label}{!row.editable && <small>{row.lockedNote}</small>}</span>
+                    {row.editable && (
+                      <span class="section-row-actions">
+                        <button class="sln-button sln-button-secondary" type="button" data-section-move="up" aria-label={row.moveUp} disabled>↑</button>
+                        <button class="sln-button sln-button-secondary" type="button" data-section-move="down" aria-label={row.moveDown} disabled>↓</button>
+                        <input type="checkbox" data-section-toggle checked aria-label={row.toggle} />
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <div class="section-items-editor" data-section-items-editor>
+                <h3>{sectionCopy["console.builder.items.usp_heading"]}</h3>
+                {[0, 1, 2].map((index) => (
+                  <div class="section-item-fields">
+                    <label>{sectionCopy["console.builder.items.title"]}<input data-section-item="usp" data-section-item-field="title" data-section-item-index={String(index)} maxlength="80" value={uspItemDefaults[index]?.title ?? ""} /></label>
+                    <label>{sectionCopy["console.builder.items.body"]}<textarea data-section-item="usp" data-section-item-field="body" data-section-item-index={String(index)} rows="2" maxlength="240">{uspItemDefaults[index]?.body ?? ""}</textarea></label>
+                  </div>
+                ))}
+                <h3>{sectionCopy["console.builder.items.faq_heading"]}</h3>
+                {[0, 1, 2].map((index) => (
+                  <div class="section-item-fields">
+                    <label>{sectionCopy["console.builder.items.q"]}<input data-section-item="faq" data-section-item-field="q" data-section-item-index={String(index)} maxlength="160" value={faqItemDefaults[index]?.q ?? ""} /></label>
+                    <label>{sectionCopy["console.builder.items.a"]}<textarea data-section-item="faq" data-section-item-field="a" data-section-item-index={String(index)} rows="2" maxlength="400">{faqItemDefaults[index]?.a ?? ""}</textarea></label>
+                  </div>
+                ))}
+                <p class="template-preview-note">{sectionCopy["console.builder.items.blank_note"]}</p>
+              </div>
+              <button class="sln-button sln-button-secondary" type="button" data-section-restore>{sectionCopy["console.builder.sections.restore"]}</button>
+              <p class="template-preview-note" data-section-note role="status"></p>
+            </fieldset>
+          </div>
+          <div class="tab-panel" id="panel-shipping" role="tabpanel" aria-labelledby="tab-shipping" data-panel="shipping" hidden>
+            <div class="panel-heading"><p class="eyebrow">{t("dashboard.store_builder.shipping.eyebrow")}</p><h2>{t("dashboard.store_builder.shipping.title")}</h2><p>{t("dashboard.store_builder.shipping.description")}</p></div>
+            <fieldset disabled={!canManage}>
+              <div class="shipping-method-form">
+                <label>{t("dashboard.store_builder.shipping.field.name")}<input data-shipping-name maxlength="80" placeholder={t("dashboard.store_builder.shipping.field.name_placeholder")} /></label>
+                <label>{t("dashboard.store_builder.shipping.field.fee", { currency: shop.currency })}<input data-shipping-fee type="number" min="0" step="1000" inputmode="numeric" placeholder="30000" /></label>
+                <label>{t("dashboard.store_builder.shipping.field.free_over", { currency: shop.currency })}<input data-shipping-free-over type="number" min="0" step="1000" inputmode="numeric" placeholder={t("dashboard.store_builder.shipping.field.free_over_placeholder")} /></label>
+                <button class="sln-button sln-button-secondary" type="button" data-shipping-create>{t("dashboard.store_builder.shipping.create")}</button>
+              </div>
+              <ul class="shipping-method-list" data-shipping-list aria-label={t("dashboard.store_builder.shipping.list_aria")}></ul>
+              <p class="form-feedback" data-shipping-feedback role="status" aria-live="polite"></p>
+            </fieldset>
+          </div>
+
           <div class="tab-panel" id="panel-layout" role="tabpanel" aria-labelledby="tab-layout" data-panel="layout" hidden>
             <div class="panel-heading"><p class="eyebrow">{t("dashboard.store_builder.panel.layout.eyebrow")}</p><h2>{t("dashboard.store_builder.panel.layout.title")}</h2><p>{t("dashboard.store_builder.panel.layout.description")}</p></div>
             <fieldset disabled={!canManage}>
@@ -191,10 +335,12 @@ const storeBuilderClientCopy = {
         <section id="store-preview" class="preview-pane" aria-label={t("dashboard.store_builder.preview.aria")} aria-labelledby="builder-view-preview">
           <div class="preview-frame" data-preview-frame data-device="desktop">
             <div class="preview-browser-bar"><span></span><span></span><span></span><code>{shop.slug}.{env.PLATFORM_BASE_DOMAIN}</code></div>
-            <div class="storefront-preview" data-preview-surface>
+            <div class="storefront-preview" data-preview-surface data-template-preview={settings.template.id}>
               <header class="store-header"><div class="store-logo" data-preview-logo>{settings.theme.logoUrl ? <img src={settings.theme.logoUrl} alt="" /> : <span>{shop.name.slice(0, 1).toUpperCase()}</span>}</div><strong>{shop.name}</strong><span class="preview-cart-link" aria-label={t("dashboard.store_builder.preview.cart")}>{t("dashboard.store_builder.preview.cart")} <span aria-hidden="true">0</span></span></header>
               <div class="store-announcement" data-preview-announcement hidden={!settings.content.announcement}>{settings.content.announcement}</div>
-              <section class="store-main" aria-label={t("dashboard.store_builder.preview.content")}><p class="store-kicker">{t("dashboard.store_builder.preview.kicker")}</p><h2 data-preview-headline>{settings.content.headline}</h2><p class="store-description" data-preview-description>{settings.content.description}</p><div class="store-search" aria-hidden="true"><span>⌕</span> {t("dashboard.store_builder.preview.search")}</div><section class="preview-products" aria-label={t("dashboard.store_builder.preview.catalog")} data-preview-products>{previewCatalogError !== null ? <div class="preview-catalog-state" data-tone="danger"><strong>{t("dashboard.store_builder.preview.catalog_error.title")}</strong><p>{t("dashboard.store_builder.preview.catalog_error.description")}</p></div> : previewCatalog.products.length === 0 ? <div class="preview-catalog-state"><strong>{t("dashboard.store_builder.preview.catalog_empty.title")}</strong><p>{t("dashboard.store_builder.preview.catalog_empty.description")}</p></div> : previewCatalog.products.slice(0, 4).map((product, index) => <StorefrontPreviewCard index={index} locale={locale ?? shop.defaultLocale} product={product} showExactStock={settings.content.showExactStock} />)}</section>{previewCatalog.truncated && <p class="preview-catalog-note">{t("dashboard.store_builder.preview.catalog_truncated")}</p>}<aside class="store-support"><strong>{t("dashboard.store_builder.preview.delivery")}</strong><p data-preview-delivery>{settings.content.deliveryText}</p><strong>{t("dashboard.store_builder.preview.support")}</strong><p data-preview-support>{settings.content.supportText}</p></aside></section>
+              <section class="store-main" aria-label={t("dashboard.store_builder.preview.content")}><p class="store-kicker">{t("dashboard.store_builder.preview.kicker")}</p><h2 data-preview-headline>{settings.content.headline}</h2><p class="store-description" data-preview-description>{settings.content.description}</p><div class="store-search" aria-hidden="true"><span aria-hidden="true">⌕</span> {t("dashboard.store_builder.preview.search")}</div><section class="preview-products" aria-label={t("dashboard.store_builder.preview.catalog")} data-preview-products>{previewCatalogError !== null ? <div class="preview-catalog-state" data-tone="danger"><strong>{t("dashboard.store_builder.preview.catalog_error.title")}</strong><p>{t("dashboard.store_builder.preview.catalog_error.description")}</p></div> : previewCatalog.products.length === 0 ? <div class="preview-catalog-state"><strong>{t("dashboard.store_builder.preview.catalog_empty.title")}</strong><p>{t("dashboard.store_builder.preview.catalog_empty.description")}</p></div> : previewCatalog.products.slice(0, 4).map((product, index) => <StorefrontPreviewCard index={index} locale={locale ?? shop.defaultLocale} product={product} showExactStock={settings.content.showExactStock} />)}</section>{previewCatalog.truncated && <p class="preview-catalog-note">{t("dashboard.store_builder.preview.catalog_truncated")}</p>}<div class="preview-usp" data-preview-usp><strong aria-hidden="true">•</strong> <span>3 trust cards render here</span></div>
+              <div class="preview-faq" data-preview-faq><span></span><span></span><span></span></div>
+              <aside class="store-support"><strong>{t("dashboard.store_builder.preview.delivery")}</strong><p data-preview-delivery>{settings.content.deliveryText}</p><strong>{t("dashboard.store_builder.preview.support")}</strong><p data-preview-support>{settings.content.supportText}</p></aside></section>
               <footer data-preview-footer>{settings.content.footerText}</footer>
             </div>
           </div>
@@ -210,14 +356,11 @@ const storeBuilderClientCopy = {
 <style>
   [hidden] { display: none !important; }
   .header-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: end; gap: 10px; }
-  .sln-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid transparent; border-radius: var(--sln-radius-md); padding: 10px 15px; font: var(--sln-font-label); text-decoration: none; cursor: pointer; }
   .sln-button:disabled { cursor: not-allowed; opacity: .55; }
-  .sln-button-primary { background: var(--sln-action-primary); color: var(--sln-white); }
   .sln-button-primary:hover:not(:disabled) { background: var(--sln-action-primary-hover); }
-  .sln-button-secondary { border-color: var(--sln-border-strong); background: var(--sln-bg-surface); color: var(--sln-text-primary); }
-  .save-state { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-tint-success); color: var(--selinow-success-text); font: var(--sln-font-caption); font-weight: 700; }
+  .save-state { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-tint-success); color: var(--sln-success-text); font: var(--sln-font-caption); font-weight: 600; }
   .save-state[data-state="never_published"], .save-state[data-state="publishing"], .save-state[data-state="saving"], .save-state[data-state="unpublished_changes"], .save-state[data-state="unsaved"] { background: var(--sln-tint-warning); color: var(--sln-warning-text-strong); }
-  .save-state[data-state="failed"], .save-state[data-state="forbidden"], .save-state[data-state="invalid_contrast"] { background: var(--sln-tint-danger); color: var(--selinow-danger-text); }
+  .save-state[data-state="failed"], .save-state[data-state="forbidden"], .save-state[data-state="invalid_contrast"] { background: var(--sln-tint-danger); color: var(--sln-danger-text); }
   .builder { margin-top: var(--sln-space-8); }
   .mobile-view-tabs { display: none; }
   .builder-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: var(--sln-space-5); }
@@ -239,7 +382,7 @@ const storeBuilderClientCopy = {
   .draft-notice span { overflow: hidden; color: var(--sln-text-muted); font: var(--sln-font-caption); text-overflow: ellipsis; white-space: nowrap; }
   .tab-panel { display: grid; gap: 18px; }
   .panel-heading { display: grid; gap: 6px; }
-  .eyebrow { margin: 0; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+  .eyebrow { margin: 0; color: var(--sln-action-primary); font: var(--sln-font-caption); font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
   .panel-heading h2 { margin: 0; font: var(--sln-font-h4); letter-spacing: -.025em; }
   .panel-heading p:last-child { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
   fieldset { display: grid; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
@@ -255,17 +398,69 @@ const storeBuilderClientCopy = {
   .toggle-row span { display: grid; gap: 4px; }
   .toggle-row strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
   .toggle-row small { color: var(--sln-text-secondary); font: var(--sln-font-caption); line-height: 1.5; }
-  .contrast-check { display: flex; align-items: start; gap: 10px; padding: 11px 12px; border-radius: var(--sln-radius-sm); background: var(--sln-tint-info); color: var(--selinow-info-text); }
+  .contrast-check { display: flex; align-items: start; gap: 10px; padding: 11px 12px; border-radius: var(--sln-radius-sm); background: var(--sln-tint-info); color: var(--sln-info-text); }
   .contrast-check > span { flex: 0 0 auto; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: currentcolor; }
   .contrast-check p { margin: 0; font: var(--sln-font-caption); }
-  .contrast-check[data-tone="success"] { background: var(--sln-tint-success); color: var(--selinow-success-text); }
+  .contrast-check[data-tone="success"] { background: var(--sln-tint-success); color: var(--sln-success-text); }
   .contrast-check[data-tone="warning"] { background: var(--sln-tint-warning); color: var(--sln-warning-text-strong); }
-  .contrast-check[data-tone="danger"] { background: var(--sln-tint-danger); color: var(--selinow-danger-text); }
+  .contrast-check[data-tone="danger"] { background: var(--sln-tint-danger); color: var(--sln-danger-text); }
+  .template-gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .template-option { position: relative; display: grid; gap: 8px; padding: 12px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); cursor: pointer; }
+  .template-option input { position: absolute; top: 10px; right: 10px; width: 16px; height: 16px; margin: 0; accent-color: var(--sln-action-primary); }
+  .template-option:has(input:checked) { border-color: var(--sln-action-primary); box-shadow: 0 0 0 1px var(--sln-action-primary); }
+  .template-option:has(input:focus-visible) { outline: 2px solid var(--sln-action-primary); outline-offset: 2px; }
+  .template-option.is-locked { cursor: not-allowed; }
+  .template-option.is-locked .template-thumb { opacity: .55; }
+  .template-thumb { display: grid; gap: 4px; padding: 9px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-sm); background: var(--sln-white); }
+  .thumb-bar { height: 8px; border-radius: 4px; background: var(--sln-brand-indigo); }
+  .thumb-body { display: grid; gap: 4px; }
+  .thumb-hero { display: grid; gap: 3px; }
+  .thumb-hero i { height: 5px; border-radius: 3px; background: var(--sln-slate-200); }
+  .thumb-hero i:first-child { width: 55%; height: 9px; background: var(--sln-slate-300); }
+  .thumb-hero i:last-child { width: 75%; }
+  .thumb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+  .thumb-grid i { height: 15px; border: 1px solid var(--sln-border-default); border-radius: 4px; background: var(--sln-slate-100); }
+  .template-thumb[data-scheme="dark"] { border-color: var(--sln-ink-700); background: var(--sln-ink-900); }
+  .template-thumb[data-scheme="dark"] .thumb-bar { background: var(--sln-slate-500); }
+  .template-thumb[data-scheme="dark"] .thumb-hero i { background: var(--sln-ink-700); }
+  .template-thumb[data-scheme="dark"] .thumb-hero i:first-child { background: var(--sln-slate-600); }
+  .template-thumb[data-scheme="dark"] .thumb-grid i { border-color: var(--sln-ink-700); background: var(--sln-ink-800); }
+  .template-thumb[data-template="aurora"] .thumb-hero i:first-child { width: 100%; height: 24px; background: var(--sln-slate-200); }
+  .template-thumb[data-template="aurora"] .thumb-grid i { height: 22px; }
+  .template-thumb[data-template="metro"] .thumb-grid { grid-template-columns: 1fr; }
+  .template-thumb[data-template="metro"] .thumb-grid i { height: 6px; background: var(--sln-slate-200); }
+  .template-thumb[data-template="bustle"] .thumb-grid { grid-template-columns: 1fr 1fr 1fr; }
+  .template-thumb[data-template="bustle"] .thumb-grid i:first-child { background: var(--sln-tint-indigo); }
+  .template-thumb[data-template="desk"] .thumb-grid { grid-template-columns: 1fr; }
+  .template-thumb[data-template="desk"] .thumb-grid i { height: 7px; background: var(--sln-slate-100); }
+  .template-thumb[data-template="pulse"] .thumb-hero i:first-child { background: var(--sln-tint-indigo); }
+  .template-thumb[data-template="serenity"] .thumb-bar, .template-thumb[data-template="serenity"] .thumb-hero i, .template-thumb[data-template="serenity"] .thumb-grid i { border-radius: var(--sln-radius-pill); }
+  .template-thumb[data-template="craft"] .thumb-hero i:first-child { height: 12px; }
+  .template-thumb[data-template="clinic"] .thumb-grid { grid-template-columns: 1fr; }
+  .template-thumb[data-template="clinic"] .thumb-grid i { height: 7px; background: var(--sln-slate-200); }
+  .template-copy { display: grid; gap: 4px; }
+  .template-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .template-name-row strong { color: var(--sln-text-primary); font: var(--sln-font-label); }
+  .template-badge { padding: 2px 8px; border-radius: var(--sln-radius-pill); font: var(--sln-font-caption); font-weight: 600; }
+  .template-badge[data-badge="pro"] { background: var(--sln-tint-indigo); color: var(--sln-action-primary-strong); }
+  .template-badge[data-badge="soon"] { background: var(--sln-slate-100); color: var(--sln-text-muted); }
+  .template-copy small { color: var(--sln-text-secondary); font: var(--sln-font-caption); line-height: 1.5; }
+  .template-locked-note { color: var(--sln-warning-text-strong); }
+  .template-preview-note { margin: 0; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  @media (max-width: 560px) { .template-gallery { grid-template-columns: 1fr; } }
+  .shipping-method-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+  .shipping-method-form .sln-button { min-height: 42px; }
+  .shipping-method-list { display: grid; margin: 6px 0 0; padding: 0; list-style: none; }
+  .shipping-method-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--sln-border-default); }
+  .shipping-method-list li strong { font: var(--sln-font-label); }
+  .shipping-method-list li small { color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .shipping-method-list .sln-button { min-height: 34px; padding: 6px 12px; font: var(--sln-font-caption); }
+  @media (max-width: 720px) { .shipping-method-form { grid-template-columns: 1fr; } }
   .read-only-list { display: grid; border-top: 1px solid var(--sln-border-default); }
   .read-only-list > div { display: grid; gap: 4px; padding: 14px 0; border-bottom: 1px solid var(--sln-border-default); }
   .read-only-list strong { font: var(--sln-font-label); }
   .read-only-list span { color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
-  .read-only-list a { color: var(--sln-action-primary); font-weight: 700; }
+  .read-only-list a { color: var(--sln-action-primary); font-weight: 600; }
   .settings-footer { display: grid; gap: 10px; padding-top: 17px; border-top: 1px solid var(--sln-border-default); }
   .permission-note, .form-feedback { min-height: 22px; margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
   .permission-note strong { color: var(--sln-text-primary); }
@@ -282,11 +477,11 @@ const storeBuilderClientCopy = {
   .store-header strong { overflow: hidden; flex: 1; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
   .preview-cart-link { color: var(--preview-text-secondary); font-size: 12px; }
   .preview-cart-link span { display: inline-grid; place-items: center; min-width: 18px; min-height: 18px; margin-left: 4px; border-radius: 50%; background: var(--preview-brand); color: var(--preview-brand-ink); font-size: 10px; }
-  .store-logo { display: grid; place-items: center; width: 30px; height: 30px; overflow: hidden; border-radius: 9px; background: var(--preview-brand); color: var(--preview-brand-ink); font-size: 13px; font-weight: 800; }
+  .store-logo { display: grid; place-items: center; width: 30px; height: 30px; overflow: hidden; border-radius: 9px; background: var(--preview-brand); color: var(--preview-brand-ink); font-size: 13px; font-weight: 600; }
   .store-logo img { width: 100%; height: 100%; object-fit: cover; }
   .store-announcement { padding: 9px 20px; background: var(--preview-accent); color: var(--preview-accent-ink); font-size: 11px; text-align: center; }
   .store-main { max-width: 650px; margin-inline: auto; padding: 52px 30px 34px; }
-  .store-kicker { margin: 0; color: var(--preview-brand); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .store-kicker { margin: 0; color: var(--preview-brand); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
   .store-main h2 { max-width: 15ch; margin: 12px 0 14px; color: var(--preview-text-primary); font-size: clamp(30px, 4vw, 46px); line-height: 1.03; letter-spacing: -.055em; }
   .store-description { max-width: 540px; margin: 0; color: var(--preview-text-secondary); font-size: 14px; line-height: 1.6; }
   .store-search { display: flex; align-items: center; gap: 8px; min-height: 42px; margin-top: 24px; border: 1px solid var(--preview-border); border-radius: 10px; padding: 0 12px; color: var(--preview-text-muted); font-size: 12px; }
@@ -298,7 +493,7 @@ const storeBuilderClientCopy = {
   .preview-catalog-state strong { display: block; color: var(--preview-text-primary); font-size: 13px; }
   .preview-catalog-state p, .preview-catalog-note { margin: 6px 0 0; color: var(--preview-text-muted); font-size: 10px; line-height: 1.5; }
   .preview-catalog-note { grid-column: 1 / -1; }
-  .store-support { margin-top: 26px; border-left: 3px solid var(--preview-accent); padding: 2px 0 2px 13px; }
+  .store-support { margin-top: 26px; border-left: 1px solid var(--preview-accent); padding: 2px 0 2px 13px; }
   .store-support strong { display: block; color: var(--preview-text-primary); font-size: 12px; }
   .store-support strong:not(:first-child) { margin-top: 12px; }
   .store-support p { margin: 5px 0 0; color: var(--preview-text-muted); font-size: 11px; line-height: 1.5; }
@@ -308,4 +503,45 @@ const storeBuilderClientCopy = {
   @media (max-width: 820px) { .builder-toolbar { align-items: start; flex-direction: column; } .device-controls { width: 100%; } .builder-grid { grid-template-columns: 1fr; } .settings-pane { position: static; } .preview-pane { order: -1; } }
   @media (max-width: 560px) { .header-actions { justify-content: start; width: 100%; } .header-actions .sln-button { flex: 1; } .mobile-view-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 14px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); padding: 4px; background: var(--sln-bg-subtle); } .mobile-view-tab { min-height: 42px; border: 0; border-radius: calc(var(--sln-radius-md) - 4px); background: transparent; color: var(--sln-text-secondary); font: var(--sln-font-label); cursor: pointer; } .mobile-view-tab.is-active { background: var(--sln-bg-surface); color: var(--sln-text-primary); box-shadow: var(--sln-shadow-xs); } .builder[data-mobile-view="settings"] .preview-pane, .builder[data-mobile-view="preview"] .settings-pane { display: none; } .builder[data-mobile-view="settings"] .device-controls, .builder[data-mobile-view="preview"] .builder-tabs { display: none; } .builder-toolbar { margin-bottom: 14px; } .builder-tabs { overflow-x: auto; flex-wrap: nowrap; width: 100%; } .builder-tab { flex: 0 0 auto; } .device-controls { justify-content: space-between; } .device-controls > span { margin-right: auto; } .preview-pane { order: initial; margin-inline: -2px; padding: 10px; } .preview-frame { border-radius: 14px; } .store-main { padding: 38px 20px 28px; } .preview-products { grid-template-columns: 1fr; } .storefront-preview footer { padding-inline: 20px; } }
   @media (prefers-reduced-motion: reduce) { .preview-frame { transition: none; } }
+  /* TM1 layout panel */
+  .section-stack-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .section-stack-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-md);
+    background: var(--sln-bg-surface);
+  }
+  .section-stack-row.is-locked { background: var(--sln-bg-subtle); }
+  .section-stack-row.is-locked .section-row-label { color: var(--sln-text-muted); }
+  .section-row-index { color: var(--sln-text-muted); font: var(--sln-font-caption); font-family: var(--sln-font-mono); }
+  .section-row-label { font: var(--sln-font-label); }
+  .section-row-label small { display: block; color: var(--sln-text-muted); font: var(--sln-font-caption); }
+  .section-row-actions { display: flex; align-items: center; gap: 6px; }
+  .section-row-actions .sln-button { min-width: 36px; min-height: 34px; padding: 4px 8px; }
+  .section-row-actions input { width: 18px; height: 18px; accent-color: var(--sln-action-primary); }
+  .preview-usp {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 22px;
+    padding: 12px;
+    border: 1px solid var(--preview-border);
+    border-radius: 10px;
+    background: var(--preview-surface);
+    color: var(--preview-text-secondary);
+    font-size: 11px;
+  }
+  .section-items-editor { display: grid; gap: 10px; padding-top: 6px; }
+  .section-items-editor h3 { margin: 8px 0 0; font: var(--sln-font-label); color: var(--sln-text-primary); }
+  .section-item-fields { display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--sln-border-default); border-radius: var(--sln-radius-sm); }
+  .section-item-fields label { display: grid; gap: 4px; color: var(--sln-text-secondary); font: var(--sln-font-caption); }
+  .section-item-fields input, .section-item-fields textarea { width: 100%; border: 1px solid var(--sln-border-strong); border-radius: var(--sln-radius-sm); padding: 8px 10px; background: var(--sln-bg-canvas); color: var(--sln-text-primary); font: var(--sln-font-body-sm); }
+  .section-item-fields textarea { resize: vertical; }
+  .preview-usp strong { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--preview-success-text); color: var(--sln-bg-canvas); font-size: 10px; }
+  .preview-faq { display: grid; gap: 6px; margin-top: 10px; }
+  .preview-faq span { height: 10px; border: 1px solid var(--preview-border); border-radius: 5px; background: var(--preview-surface); }
 </style>

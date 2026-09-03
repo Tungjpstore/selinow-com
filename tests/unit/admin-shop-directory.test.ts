@@ -81,6 +81,10 @@ function seed(database: DatabaseSync): void {
     INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
     VALUES ('admin-support', 'support', 'active', ?, ?)
   `).run(now, now);
+  database.prepare(`
+    UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+    WHERE id = 'admin-support'
+  `).run(now);
 
   const shops: Array<{
     id: string;
@@ -207,6 +211,39 @@ describe("admin Sellers & Shops directory", () => {
       userId: "admin-support",
     });
     expect(suspended.shops.map((shop) => shop.publicId)).toEqual(["shop_public_b"]);
+  });
+
+  it("accepts and filters the pending_payment subscription state", async () => {
+    // Regression: the directory used to reject this real DB state with 400
+    // subscription_state_invalid, and the page crashed rendering such rows.
+    const later = new Date("2099-07-29T01:00:00.000Z").toISOString();
+    database.prepare(`
+      INSERT INTO shops (
+        id, public_id, slug, name, status, default_locale, currency, timezone,
+        readiness_version, created_at, updated_at
+      ) VALUES ('internal-shop-pending', 'shop_public_pending', 'pending-shop', 'Pending Shop', 'active', 'vi', 'VND', 'Asia/Ho_Chi_Minh', 1, ?, ?)
+    `).run(later, later);
+    database.prepare(`
+      INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, trial_ends_at, created_at, updated_at)
+      VALUES ('subscription-pending', 'internal-shop-pending', 'plan-safe', 'pending_payment', NULL, ?, ?)
+    `).run(later, later);
+
+    expect(parseAdminSubscriptionState("pending_payment")).toBe("pending_payment");
+
+    const filtered = await listAdminShopDirectory({
+      env,
+      filters: { cursor: null, query: null, shopStatus: null, subscriptionState: "pending_payment" },
+      userId: "admin-support",
+    });
+    expect(filtered.shops.map((shop) => shop.publicId)).toEqual(["shop_public_pending"]);
+    expect(filtered.shops[0]?.subscriptionState).toBe("pending_payment");
+
+    const unfiltered = await listAdminShopDirectory({
+      env,
+      filters: { cursor: null, query: "Pending Shop", shopStatus: null, subscriptionState: null },
+      userId: "admin-support",
+    });
+    expect(unfiltered.shops[0]?.subscriptionState).toBe("pending_payment");
   });
 
   it("fails closed on invalid filters, cursor and limit", async () => {

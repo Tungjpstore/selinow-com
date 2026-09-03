@@ -34,6 +34,7 @@ export async function createAndSendOtp(input: {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60_000).toISOString();
+  const cooldownCutoffIso = new Date(now.getTime() - OTP_COOLDOWN_SECONDS * 1_000).toISOString();
   const secret = input.env.SESSION_SECRET;
 
   // Check recent OTP to enforce cooldown (anti-spam)
@@ -56,18 +57,18 @@ export async function createAndSendOtp(input: {
   const otpHash = await hashOtp(secret, input.purpose, input.email, otp);
   const otpId = createId("otp");
 
-  // Invalidate any existing unused OTPs for this email + purpose and insert new one
-  await input.env.PLATFORM_DB.batch([
-    input.env.PLATFORM_DB.prepare(`
-      UPDATE auth_email_otps
-      SET expires_at = ?
-      WHERE email_normalized = ? AND purpose = ? AND consumed_at IS NULL AND expires_at > ?
-    `).bind(nowIso, input.email, input.purpose, nowIso),
+  // The insert guard makes the cooldown atomic with issuance under concurrent requests.
+  const results = await input.env.PLATFORM_DB.batch([
     input.env.PLATFORM_DB.prepare(`
       INSERT INTO auth_email_otps (
         id, user_id, email_normalized, purpose, otp_hash,
         attempts_count, max_attempts, expires_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+      )
+      SELECT ?, ?, ?, ?, ?, 0, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM auth_email_otps
+        WHERE email_normalized = ? AND purpose = ? AND created_at > ?
+      )
     `).bind(
       otpId,
       input.userId ?? null,
@@ -77,8 +78,19 @@ export async function createAndSendOtp(input: {
       OTP_MAX_ATTEMPTS,
       expiresAt,
       nowIso,
+      input.email,
+      input.purpose,
+      cooldownCutoffIso,
     ),
+    input.env.PLATFORM_DB.prepare(`
+      UPDATE auth_email_otps
+      SET expires_at = ?
+      WHERE email_normalized = ? AND purpose = ? AND consumed_at IS NULL AND expires_at > ? AND id != ?
+    `).bind(nowIso, input.email, input.purpose, nowIso, otpId),
   ]);
+  if ((results[0]?.meta.changes ?? 0) !== 1) {
+    throw new AppError("rate_limited", 429, [`cooldown_${String(OTP_COOLDOWN_SECONDS)}s`]);
+  }
 
   if (input.env.APP_ENV === "local") {
     return {
@@ -134,19 +146,21 @@ export async function verifyOtp(input: {
     const nextAttempts = otpRow.attempts_count + 1;
     if (nextAttempts >= otpRow.max_attempts) {
       // Burn this OTP after max attempts reached
-      await input.env.PLATFORM_DB.prepare(`
+      const burned = await input.env.PLATFORM_DB.prepare(`
         UPDATE auth_email_otps
         SET attempts_count = ?, consumed_at = ?
-        WHERE id = ?
-      `).bind(nextAttempts, nowIso, otpRow.id).run();
+        WHERE id = ? AND attempts_count = ? AND consumed_at IS NULL
+      `).bind(nextAttempts, nowIso, otpRow.id, otpRow.attempts_count).run();
+      if (burned.meta.changes !== 1) throw new AppError("validation_failed", 400, ["otp_expired_or_invalid"]);
       throw new AppError("validation_failed", 400, ["otp_max_attempts_exceeded"]);
     }
 
-    await input.env.PLATFORM_DB.prepare(`
+    const incremented = await input.env.PLATFORM_DB.prepare(`
       UPDATE auth_email_otps
       SET attempts_count = ?
-      WHERE id = ?
-    `).bind(nextAttempts, otpRow.id).run();
+      WHERE id = ? AND attempts_count = ? AND consumed_at IS NULL
+    `).bind(nextAttempts, otpRow.id, otpRow.attempts_count).run();
+    if (incremented.meta.changes !== 1) throw new AppError("validation_failed", 400, ["otp_expired_or_invalid"]);
 
     const remaining = otpRow.max_attempts - nextAttempts;
     throw new AppError("validation_failed", 400, [`otp_incorrect_${String(remaining)}_left`]);
@@ -154,11 +168,14 @@ export async function verifyOtp(input: {
   }
 
   // Correct OTP - mark consumed
-  await input.env.PLATFORM_DB.prepare(`
+  const consumed = await input.env.PLATFORM_DB.prepare(`
     UPDATE auth_email_otps
     SET consumed_at = ?
     WHERE id = ? AND consumed_at IS NULL
   `).bind(nowIso, otpRow.id).run();
+  if (consumed.meta.changes !== 1) {
+    throw new AppError("validation_failed", 400, ["otp_expired_or_invalid"]);
+  }
 
   return {
     email: input.email,

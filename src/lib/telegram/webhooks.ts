@@ -330,7 +330,20 @@ export async function processTelegramWebhook(input: { env: AppBindings; fetcher?
     if (await rejectIfStale()) return { duplicate: registered.duplicate, processed: false, state: "stale_generation" };
     await claimReplyAttempt(input.env, updateLedger, result.resultCode);
     replyAttemptClaimed = true;
-    await client.sendMessage({ chatId: result.identity.chatId, ...(result.reply.keyboard === undefined ? {} : { keyboard: result.reply.keyboard }), ...(result.reply.protectContent === undefined ? {} : { protectContent: result.reply.protectContent }), text: result.reply.text });
+
+    // Triệt để: retry sendMessage với exponential backoff + max 3 lần
+    let sendSuccess = false;
+    for (let attempt = 1; attempt <= 3 && !sendSuccess; attempt++) {
+      try {
+        await client.sendMessage({ chatId: result.identity.chatId, ...(result.reply.keyboard === undefined ? {} : { keyboard: result.reply.keyboard }), ...(result.reply.protectContent === undefined ? {} : { protectContent: result.reply.protectContent }), text: result.reply.text });
+        sendSuccess = true;
+      } catch (sendErr) {
+        if (attempt === 3) throw sendErr;
+        const delay = Math.min(1000 * 2 ** attempt, 30000);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+
     if (await isCurrentGeneration(generation)) await answerCallback(client, update);
     const now = new Date().toISOString();
     const healthAt = isDraftTelegramHealthStart(update) ? now : null;

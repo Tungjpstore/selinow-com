@@ -21,6 +21,9 @@ if (root !== null && root.dataset.canManage === "true") {
   const form = root.querySelector<HTMLFormElement>("[data-customer-form]");
   const noteForm = root.querySelector<HTMLFormElement>("[data-customer-note-form]");
   const notes = root.querySelector<HTMLElement>("[data-customer-notes]");
+  const redactDialog = root.querySelector<HTMLDialogElement>("[data-note-redact-dialog]");
+  const redactForm = root.querySelector<HTMLFormElement>("[data-note-redact-form]");
+  let redactTarget: { notePublicId: string; version: number } | null = null;
   const privacyStatus = root.querySelector<HTMLElement>("[data-customer-privacy-status]");
   const anonymizeForm = root.querySelector<HTMLFormElement>("[data-customer-anonymize-form]");
   const copy = (() => {
@@ -213,8 +216,19 @@ if (root !== null && root.dataset.canManage === "true") {
     if (redact === null || current === null || pending || loading) return;
     const note = redact.closest<HTMLElement>("[data-note-public-id]");
     const notePublicId = note?.dataset.notePublicId; const version = Number(note?.dataset.noteVersion);
-    if (notePublicId === undefined || !Number.isSafeInteger(version) || !window.confirm(text("redactConfirm"))) return;
+    if (notePublicId === undefined || !Number.isSafeInteger(version) || redactDialog === null) return;
+    redactTarget = { notePublicId, version };
+    redactDialog.showModal();
+  });
+  redactForm?.addEventListener("submit", (event) => {
+    const submitter = event.submitter;
+    if (!(submitter instanceof HTMLButtonElement) || submitter.value !== "confirm") return;
+    event.preventDefault();
+    if (redactTarget === null || current === null || pending || loading) return;
+    const { notePublicId, version } = redactTarget;
     const customerPublicId = current.publicId;
+    redactTarget = null;
+    redactDialog?.close();
     pending = true; showFeedback(text("redacting"), "info");
     void request(`/api/app/shops/${encodeURIComponent(shopPublicId ?? "")}/customers/${encodeURIComponent(customerPublicId)}/notes/${encodeURIComponent(notePublicId)}`, { method: "DELETE", body: JSON.stringify({ expectedVersion: version }) }, true).then(() => { void load(customerPublicId); }).catch((error: unknown) => { showFeedback(errorMessage(error), "danger"); }).finally(() => { pending = false; });
   });

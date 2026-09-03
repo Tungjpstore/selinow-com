@@ -75,9 +75,21 @@ export function normalizeOtp(value: unknown): string {
 
 
 export function assertDashboardOrigin(request: Request, dashboardOrigin: string): void {
-  if (request.headers.get("Origin") !== dashboardOrigin) {
-    throw new AppError("csrf_invalid", 403, ["origin_mismatch"]);
+  const origin = request.headers.get("Origin");
+  if (origin !== null) {
+    if (origin !== dashboardOrigin) {
+      throw new AppError("csrf_invalid", 403, ["origin_mismatch"]);
+    }
+    return;
   }
+
+  // Same-origin GET/HEAD fetches may omit Origin. Require the request URL to
+  // match the dashboard before accepting that browser-specific shape.
+  const method = request.method.toUpperCase();
+  if ((method === "GET" || method === "HEAD") && new URL(request.url).origin === dashboardOrigin) {
+    return;
+  }
+  throw new AppError("csrf_invalid", 403, ["origin_mismatch"]);
 }
 
 export async function assertCsrfRequest(input: {

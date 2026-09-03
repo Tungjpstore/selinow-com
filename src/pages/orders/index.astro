@@ -1,0 +1,44 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import StorefrontLayout from "../../layouts/StorefrontLayout.astro";
+import { isAppError } from "../../lib/core/errors";
+import { getBindings } from "../../lib/platform/bindings";
+import { resolveStorefrontShop, type StorefrontShop } from "../../lib/storefront/store";
+import { resolveTurnstileConfiguration } from "../../lib/storefront/turnstile";
+import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+
+const env = getBindings();
+const turnstileSiteKey = resolveTurnstileConfiguration(env)?.siteKey ?? null;
+let shop: StorefrontShop | null = null;
+try { shop = await resolveStorefrontShop(Astro.request, env); } catch (error) { if (!isAppError(error)) throw error; }
+if (shop === null) Astro.response.status = 404;
+const locale = Astro.locals.locale ?? normalizeSupportedLocale(shop?.defaultLocale ?? env.DEFAULT_LOCALE);
+const t = createStorefrontTranslator(locale);
+Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
+Astro.response.headers.set("Referrer-Policy", "no-referrer");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
+---
+
+{shop && <StorefrontLayout shop={shop} title={t("storefront.orders_history.title", { shop: shop.name })} noindex>
+  {shop.access === "live" ? <section class="orders-history" data-orders-history>
+    <div class="checkout-heading">
+      <p>{t("storefront.nav.orders")}</p>
+      <h1>{t("storefront.orders_history.heading")}</h1>
+    </div>
+    <form class="orders-history-form" data-orders-history-form>
+      <p class="orders-history-lead">{t("storefront.orders_history.lead")}</p>
+      <label>
+        {t("storefront.orders_history.email")}
+        <input type="email" name="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required maxlength="254" data-orders-history-email />
+      </label>
+      {turnstileSiteKey && <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-action="storefront_order_lookup" data-theme={shop.template.scheme === "dark" ? "dark" : "light"} data-size="flexible"></div>}
+      <p class="orders-history-status form-status" role="status" aria-live="polite" data-orders-history-status></p>
+      <button class="store-button" type="submit" data-orders-history-submit>{t("storefront.orders_history.submit")}</button>
+    </form>
+    <div class="orders-history-list" data-orders-history-list></div>
+  </section> : <section class="safe-state"><div class="state-number">—</div><div><h1>{t("storefront.orders_paused.title")}</h1><p>{t("storefront.orders_paused.detail")}</p></div></section>}
+  <script src="../../scripts/storefront/orders-history.ts"></script>
+</StorefrontLayout>}
+
+{shop === null && <PlatformLayout title={t("storefront.error.not_found.title")} noindex><main class="platform-shell error-page"><div><h1>404</h1><p>{t("storefront.error.not_found.detail")}</p></div></main></PlatformLayout>}

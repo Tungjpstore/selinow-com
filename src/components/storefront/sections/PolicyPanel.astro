@@ -1,0 +1,33 @@
+---
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+import type { StorefrontShop } from "../../../lib/storefront/store";
+
+/** Delivery/support policy panel shared by every template detail page. */
+interface Props {
+  locale: string;
+  shop: StorefrontShop;
+}
+
+const { locale, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const policyLinks = [
+  shop.publicDetails.refundPolicyUrl === null ? null : { href: shop.publicDetails.refundPolicyUrl, label: t("storefront.policy.refund") },
+  shop.publicDetails.termsUrl === null ? null : { href: shop.publicDetails.termsUrl, label: t("storefront.policy.terms") },
+  shop.publicDetails.privacyUrl === null ? null : { href: shop.publicDetails.privacyUrl, label: t("storefront.policy.privacy") },
+].filter((link): link is { href: string; label: string } => link !== null);
+---
+<section class="storefront-policy-panel" aria-labelledby="delivery-heading">
+  <div>
+    <p class="storefront-policy-kicker">{t("storefront.product.delivery_kicker")}</p>
+    <h2 id="delivery-heading">{t("storefront.product.delivery_heading")}</h2>
+    <p>{shop.publicDetails.deliveryText}</p>
+  </div>
+  <div>
+    <p class="storefront-policy-kicker">{t("storefront.product.support_kicker")}</p>
+    <p>{shop.publicDetails.support.label}</p>
+    <nav class="store-policy-links" aria-label={t("storefront.product.policy_aria")}>
+      <a href={shop.publicDetails.support.href ?? "#store-support"} rel={shop.publicDetails.support.href?.startsWith("https://") ? "noreferrer" : undefined}>{t("storefront.contact")}</a>
+      {policyLinks.map((link) => <a href={link.href} rel="noreferrer">{link.label}</a>)}
+    </nav>
+  </div>
+</section>

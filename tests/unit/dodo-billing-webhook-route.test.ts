@@ -139,4 +139,21 @@ describe("Dodo Payments billing webhook route", () => {
     expect(prepare).not.toHaveBeenCalled();
     expect(dependencies.backfill).not.toHaveBeenCalled();
   });
+
+  it("logs only a safe error code, request id and delivery id on failure", async () => {
+    const logging = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    dependencies.process.mockRejectedValue(new Error("provider response with secret material"));
+
+    const response = await POST(context(WEBHOOK_PUBLIC_ID, "msg_safe_log"));
+
+    expect(response.status).toBe(500);
+    expect(logging).toHaveBeenCalledWith(JSON.stringify({
+      code: "internal_error",
+      event: "dodo_billing_webhook_failed",
+      requestId: "request-dodo-route",
+      webhookId: "msg_safe_log",
+    }));
+    expect(logging.mock.calls.flat().join(" ")).not.toContain("secret material");
+    logging.mockRestore();
+  });
 });

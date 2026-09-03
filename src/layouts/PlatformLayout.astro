@@ -33,7 +33,7 @@ const {
 const locale = normalizeSupportedLocale(requestedLocale);
 const t = createMarketingTranslator(locale);
 const resolvedDescription = description === undefined ? t("marketing.layout.default_description") : description;
-const socialImage = "https://selinow.com/brand/selinow-og-cover-global.png";
+const socialImage = "https://selinow.com/brand/landing/v1/og-editorial.jpg";
 const pathname = Astro.url.pathname;
 const explicitLocale = Astro.url.searchParams.get("lang");
 const canonicalBase = canonical ?? `${SITE_ORIGIN}${pathname}`;
@@ -81,5 +81,6 @@ Astro.response.headers.set("Vary", "Accept-Language, Cookie");
   <body>
     <a class="skip-link" href="#main-content">{t("marketing.layout.skip_link")}</a>
     <slot />
+  <script src="../scripts/marketing/reveal-boot.ts"></script>
   </body>
 </html>

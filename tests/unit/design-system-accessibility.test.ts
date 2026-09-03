@@ -29,22 +29,24 @@ function contrast(first: string, second: string): number {
 describe("accessible design-system gate", () => {
   it("keeps semantic text and focus tokens above WCAG AA thresholds", async () => {
     const css = await readFile("src/styles/selinow-tokens.css", "utf8");
-    const white = token(css, "selinow-white");
-    const ink = token(css, "selinow-ink-950");
+    const white = token(css, "sln-white");
+    const ink = token(css, "sln-ink-950");
 
-    for (const name of ["selinow-action-primary", "selinow-success-text", "selinow-warning-text", "selinow-danger-text", "selinow-info-text"]) {
+    for (const name of ["sln-action-primary", "sln-success-text", "sln-warning-text", "sln-danger-text", "sln-info-text"]) {
       expect(contrast(token(css, name), white), name).toBeGreaterThanOrEqual(4.5);
     }
-    expect(contrast(token(css, "selinow-focus-ring"), white)).toBeGreaterThanOrEqual(3);
-    expect(contrast(token(css, "selinow-focus-ring"), ink)).toBeGreaterThanOrEqual(3);
+    expect(contrast(token(css, "sln-focus-ring"), white)).toBeGreaterThanOrEqual(3);
+    expect(contrast(token(css, "sln-focus-ring"), ink)).toBeGreaterThanOrEqual(3);
   });
 
   it("provides shared skip links, focus targets, labeled step regions and atomic status updates", async () => {
-    const [layout, onboardingPage, wizard, domainManager, controller, shellCss, tokens] = await Promise.all([
+    const [layout, onboardingPage, onboardingShell, domainManager, domainList, domainsScript, controller, shellCss, tokens] = await Promise.all([
       readFile("src/layouts/AppLayout.astro", "utf8"),
       readFile("src/pages/onboarding.astro", "utf8"),
-      readFile("src/components/dashboard/OnboardingWizard.astro", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8"),
       readFile("src/components/dashboard/DomainManager.astro", "utf8"),
+      readFile("src/components/dashboard/domains/DomainList.astro", "utf8"),
+      readFile("src/scripts/dashboard/domains.ts", "utf8"),
       readFile("src/scripts/dashboard/onboarding.ts", "utf8"),
       readFile("src/styles/app-shell.css", "utf8"),
       readFile("src/styles/selinow-tokens.css", "utf8"),
@@ -53,17 +55,20 @@ describe("accessible design-system gate", () => {
     expect(layout).toContain('class="app-main selinow-focus-target" tabindex="-1"');
     expect(layout).toContain('class="app-skip-link selinow-skip-link"');
     expect(onboardingPage).toContain("<OnboardingShell");
-    expect(wizard).toContain('class="onboarding-shell"');
-    expect(wizard).toContain('id="onboarding-global-feedback"');
-    expect(wizard).toContain("--selinow-onboarding-accent: var(--sln-action-primary);");
-    expect(contrast(token(tokens, "selinow-action-primary"), token(tokens, "selinow-white"))).toBeGreaterThanOrEqual(4.5);
-    expect(wizard).toContain('role="region" aria-labelledby="onboarding-step-trigger-');
-    expect(wizard).toContain('aria-atomic="true"');
-    expect(domainManager).toContain('role="alert" aria-atomic="true"');
-    expect(domainManager).toContain("2_500");
-    expect(domainManager).toContain('setFeedback(message, "success")');
-    expect(domainManager).toContain('addEventListener("cancel"');
-    expect(domainManager).toContain("event.preventDefault()");
+    expect(onboardingShell).toContain('class="onboarding-v2-shell"');
+    expect(onboardingShell).toContain('class="progress-track" role="progressbar"');
+    expect(onboardingShell).toContain('aria-label="Tiến trình thiết lập"');
+    expect(onboardingShell).toContain('aria-valuenow="0"');
+    expect(onboardingShell).toContain('aria-valuemin="0"');
+    expect(onboardingShell).toContain('aria-valuemax="100"');
+    expect(onboardingShell).toContain('data-onboarding-toast role="status" aria-live="polite"');
+    expect(contrast(token(tokens, "sln-action-primary"), token(tokens, "sln-white"))).toBeGreaterThanOrEqual(4.5);
+    expect(domainList).toContain('role="alert" aria-atomic="true"');
+    expect(domainManager).toContain('role="status" aria-live="polite" aria-atomic="true"');
+    expect(domainsScript).toContain("2_500");
+    expect(domainsScript).toContain('setFeedback(message, "success")');
+    expect(domainsScript).toContain('addEventListener("cancel"');
+    expect(domainsScript).toContain("event.preventDefault()");
     expect(domainManager).toContain("overflow-wrap: anywhere");
     expect(controller).toContain('window.matchMedia("(prefers-reduced-motion: reduce)")');
     expect(controller).toContain('tone === "error" ? "alert" : "status"');
@@ -71,7 +76,7 @@ describe("accessible design-system gate", () => {
     expect(controller).toContain('field.setAttribute("aria-invalid", "true")');
     expect(controller).toContain('field.setAttribute("aria-describedby", Array.from(describedBy).join(" "))');
     expect(controller).toContain('field.focus();');
-    expect(shellCss).toContain("color: var(--selinow-warning-text);");
+    expect(shellCss).toContain("color: var(--sln-warning-text);");
   });
 
   it("keeps dark surfaces semantic and storefront status text AA-safe", async () => {
@@ -90,17 +95,17 @@ describe("accessible design-system gate", () => {
     expect(login).not.toContain('data-theme="dark"');
     expect(login).toContain("background: var(--sln-bg-canvas);");
     expect(login).toContain("color: var(--sln-text-primary);");
-    expect(login).not.toContain("background: var(--selinow-bg-inverse);");
+    expect(login).not.toContain("background: var(--sln-bg-inverse);");
     expect(admin).toContain('import AdminLayout from "../../layouts/AdminLayout.astro"');
     expect(operations).toContain('import AdminLayout from "../../layouts/AdminLayout.astro"');
     expect(adminLayout).toContain('<html lang={locale} dir={directionForLocale(locale)} data-theme="dark">');
-    expect(adminCss).toContain("background: var(--selinow-bg-canvas);");
-    expect(adminCss).toContain("color: var(--selinow-text-primary);");
-    expect(adminCss).not.toContain("background: var(--selinow-bg-inverse);");
-    expect(storefront).toContain("color: var(--selinow-success-text);");
-    expect(storefront).toContain("color: var(--selinow-warning-text);");
-    expect(tokens).toContain("--selinow-disabled-ink:");
-    expect(tokens).toContain("--selinow-disabled-bg:");
+    expect(adminCss).toContain("background: var(--sln-bg-canvas);");
+    expect(adminCss).toContain("color: var(--sln-text-primary);");
+    expect(adminCss).not.toContain("background: var(--sln-bg-inverse);");
+    expect(storefront).toContain("color: var(--sln-success-text);");
+    expect(storefront).toContain("color: var(--sln-warning-text);");
+    expect(tokens).toContain("--sln-disabled-ink:");
+    expect(tokens).toContain("--sln-disabled-bg:");
     expect(tokens).toContain("linear-gradient(135deg, #7c3aed 0%, #5b5ceb 48%, #3b82f6 100%)");
   });
 
@@ -115,11 +120,11 @@ describe("accessible design-system gate", () => {
       readFile("src/pages/admin/operations.astro", "utf8"),
       readFile("src/styles/admin.css", "utf8"),
     ]);
-    const canvas = token(tokens, "selinow-cloud-50");
-    const controlBorder = token(tokens, "selinow-border-control");
-    const focusRing = token(tokens, "selinow-focus-ring");
-    const disabledInk = token(tokens, "selinow-disabled-ink");
-    const disabledBackground = token(tokens, "selinow-disabled-bg");
+    const canvas = token(tokens, "sln-cloud-50");
+    const controlBorder = token(tokens, "sln-slate-500");
+    const focusRing = token(tokens, "sln-focus-ring");
+    const disabledInk = token(tokens, "sln-disabled-ink");
+    const disabledBackground = token(tokens, "sln-disabled-bg");
 
     expect(contrast(controlBorder, canvas)).toBeGreaterThanOrEqual(3);
     expect(contrast(focusRing, canvas)).toBeGreaterThanOrEqual(3);
@@ -127,15 +132,15 @@ describe("accessible design-system gate", () => {
     expect(contrast("#5b5ceb", "#ffffff")).toBeGreaterThanOrEqual(4.5);
     expect(shell).toContain(":focus-visible");
     expect(shell).toContain("button:disabled, [aria-disabled=\"true\"]");
-    expect(shell).toContain("border-color: var(--selinow-border-control);");
-    expect(storefront).toContain("border: 1px solid var(--selinow-border-control);");
-    expect(storefront).toContain("background: var(--selinow-disabled-bg);");
-    expect(login).toContain("border: 1px solid var(--selinow-border-control);");
+    expect(shell).toContain("border-color: var(--sln-slate-500);");
+    expect(storefront).toContain("border: 1px solid var(--sln-slate-500);");
+    expect(storefront).toContain("background: var(--sln-disabled-bg);");
+    expect(login).toContain("border: 1px solid var(--sln-slate-500);");
     expect(admin).toContain('import AdminLayout from "../../layouts/AdminLayout.astro"');
     expect(operations).toContain('import AdminLayout from "../../layouts/AdminLayout.astro"');
     expect(adminCss).toContain("min-height: 44px;");
-    expect(adminCss).toContain("border: 1px solid var(--selinow-border-control);");
-    expect(adminCss).toContain("background: var(--selinow-disabled-bg);");
+    expect(adminCss).toContain("border: 1px solid var(--sln-slate-500);");
+    expect(adminCss).toContain("background: var(--sln-disabled-bg);");
     expect(platform).not.toContain("rgb(255 255 255 / 82%)");
   });
 });

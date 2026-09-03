@@ -10,7 +10,7 @@ describe("seller account security UI", () => {
   const client = readFileSync("src/scripts/dashboard/security.ts", "utf8");
 
   it("exposes account security navigation independently of shop ownership", () => {
-    expect(layout).toContain('label: t("dashboard.nav.security")');
+    expect(layout).toContain('label: t("dashboard.console.nav.security")');
     expect(layout).toContain('path: "/app/security"');
     expect(layout).not.toContain('path: "/app/security", roles:');
     expect(page).toContain('activePath="/app/security"');
@@ -29,7 +29,7 @@ describe("seller account security UI", () => {
     for (const field of ["authenticatedAt", "createdAt", "expiresAt", "isCurrent", "lastSeenAt"]) {
       expect(client).toContain(field);
     }
-    expect(client).toContain('fetch("/api/auth/sessions"');
+    expect(client).toContain('requestAccountApi("/api/auth/sessions", { method })');
     expect(client).toContain('requestSessions("GET")');
     expect(client).toContain('t("dashboard.security.sessions.current")');
     expect(client).toContain("document.createElement");
@@ -45,6 +45,16 @@ describe("seller account security UI", () => {
     expect(client).toContain("data-security-reauth");
     expect(client).toContain('t("dashboard.security.client.request_id", { requestId })');
     expect(client).toContain('window.location.assign("/login")');
+  });
+
+  it("links Google through a CSRF-protected request and validates the provider URL", () => {
+    expect(page).toContain("data-google-link");
+    expect(page).toContain("data-google-link-status");
+    expect(client).toContain('requestAccountApi("/api/auth/google/start?flow=link"');
+    expect(client).toContain('returnTo: "/app/security?tab=sessions"');
+    expect(client).toContain('authorizationUrl.hostname !== "accounts.google.com"');
+    expect(client).toContain('"X-CSRF-Token": csrfToken()');
+    expect(client).toContain('next.searchParams.delete("google_error")');
   });
 
   it("provides complete English and Vietnamese copy", () => {

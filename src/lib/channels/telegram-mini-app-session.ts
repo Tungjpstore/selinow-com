@@ -3,6 +3,7 @@ import { subscriptionAllows } from "../billing/entitlements";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
 import { requireResourceId } from "../catalog/policy";
+import { fireAutomationTriggers } from "../automation/rules/dispatcher";
 import { matchSupportedLocale } from "../i18n/locale";
 import type { AppBindings } from "../platform/bindings";
 import {
@@ -213,6 +214,7 @@ async function ensureMiniAppIdentity(input: {
         VALUES (?, ?, ?, 'telegram', ?, ?, ?, ?, ?, ?)
       `).bind(identityId, input.context.shopId, customerId, input.subjectHash, displayHandle(input.user), input.user.languageCode, input.now, input.now, input.now),
     ]);
+    if (legacy === null) void fireAutomationTriggers(input.env, { aggregateReference: `customer:${customerId}`, customerId, refs: { channel: "mini_app" }, shopId: input.context.shopId, triggerType: "customer.created" }).catch(() => {});
     return { customerId, identityId };
   } catch {
     const replay = await input.env.PLATFORM_DB.prepare(`

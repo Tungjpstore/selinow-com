@@ -11,7 +11,7 @@ export const GET: APIRoute = async ({ locals, params, request }) => {
     if (slug === undefined || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(slug)) throw new AppError("product_not_found", 404);
     const env = getBindings();
     const shop = await resolveStorefrontShop(request, env);
-    const product = await getStorefrontProduct(env, shop, slug);
+    const { product } = await getStorefrontProduct(env, shop, slug);
     return Response.json({ ok: true, product, publicDetails: shop.publicDetails, requestId: locals.requestId }, { headers: { "Cache-Control": "public, max-age=30, stale-while-revalidate=60", "Vary": "Accept-Language, Host" } });
   } catch (error) { return createCaughtErrorResponse(error, locals.requestId); }
 };

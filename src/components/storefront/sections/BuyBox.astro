@@ -1,0 +1,37 @@
+---
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct } from "../../../lib/storefront/store";
+import Swatches from "./Swatches.astro";
+import VariantList from "./VariantList.astro";
+
+/**
+ * Shared purchase block rendering the full purchase contract in one place:
+ * snapshot refresh status, variant selection (swatches or list), quantity +
+ * add-to-cart, and the trust list. Template detail pages wrap this with their
+ * own presentation; the DOM ids/classes below are load-bearing for
+ * product-detail.ts and must not be renamed.
+ */
+interface Props {
+  locale: string;
+  product: StorefrontProduct;
+  variantDisplay?: "list" | "swatches";
+}
+
+const { locale, product, variantDisplay = "list" } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const defaultVariant = product.variants.find((variant) => variant.stockState !== "out_of_stock") ?? product.variants[0];
+const hasPurchasableVariant = product.variants.some((variant) => variant.stockState !== "out_of_stock");
+---
+<div id="product-refresh-status" class="product-refresh-status" data-product-slug={product.slug} data-product-version={product.version} role="status" aria-live="polite" hidden></div>
+{variantDisplay === "swatches" ? <Swatches locale={locale} product={product} /> : <VariantList locale={locale} product={product} />}
+<p id="variant-selection-status" class="selinow-sr-only" role="status" aria-live="polite"></p>
+<div class="detail-actions">
+  <label class="selinow-sr-only" for="detail-quantity">{t("storefront.product.quantity")}</label>
+  <input id="detail-quantity" type="number" min={defaultVariant?.minPerOrder ?? 1} max={defaultVariant?.maxPerOrder ?? 1} value={defaultVariant?.minPerOrder ?? 1} inputmode="numeric" aria-label={t("storefront.product.quantity")} aria-describedby="detail-quantity-help" />
+  <button id="detail-add" class="store-button" type="button" disabled={!hasPurchasableVariant}>{hasPurchasableVariant ? t("storefront.product.add") : t("storefront.product.sold_out")}</button>
+</div>
+<p id="detail-quantity-help" class="field-help">{t("storefront.product.quantity_help")}</p>
+<ul class="product-trust-list" aria-label={t("storefront.product.order_info_aria")}>
+  <li>{t("storefront.product.trust_price")}</li>
+  <li>{t("storefront.product.trust_states")}</li>
+</ul>

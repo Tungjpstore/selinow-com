@@ -98,6 +98,48 @@ describe("production trigger ceremony", () => {
     });
   });
 
+  it("normalizes the current Cloudflare consumer response without weakening exact settings", () => {
+    const desired = desiredProductionTriggerSpec(spec);
+    const inventory = normalizeProductionTriggerInventory({
+      ...emptyInventory(),
+      queueConsumers: desired.consumers.map((consumer) => ({
+        consumers: [{
+          dead_letter_queue: consumer.settings.deadLetterQueue,
+          script: consumer.script,
+          settings: {
+            batch_size: consumer.settings.batchSize,
+            max_retries: consumer.settings.maxRetries,
+            retry_delay: consumer.settings.retryDelaySecs ?? 0,
+            ...(consumer.settings.batchTimeout === undefined
+              ? {}
+              : { max_wait_time_ms: consumer.settings.batchTimeout * 1000 }),
+          },
+        }],
+        queueName: consumer.queue,
+      })),
+      schedules: [CRON],
+    });
+
+    const plan = buildProductionTriggerPlan({
+      configFingerprintSha256: "a".repeat(64),
+      inventory,
+      releaseBinding,
+      spec,
+    });
+    expect(plan.actions.every((action) => action.action === "reuse")).toBe(true);
+
+    const drifted = structuredClone(inventory);
+    const firstConsumer = drifted.queueConsumers[0]?.consumers[0];
+    if (!firstConsumer) throw new Error("missing_consumer_fixture");
+    firstConsumer.settings.retryDelaySecs = 61;
+    expect(() => buildProductionTriggerPlan({
+      configFingerprintSha256: "a".repeat(64),
+      inventory: drifted,
+      releaseBinding,
+      spec,
+    })).toThrow("production_trigger_conflict");
+  });
+
   it("produces an exact create-only diff from an idle production inventory", () => {
     const plan = buildProductionTriggerPlan({
       configFingerprintSha256: "a".repeat(64),

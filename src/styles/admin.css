@@ -5,7 +5,7 @@
 html {
   min-width: 320px;
   overflow-x: clip;
-  background: var(--selinow-ink-950);
+  background: var(--sln-ink-950);
   scroll-behavior: smooth;
 }
 
@@ -13,9 +13,9 @@ body {
   margin: 0;
   min-width: 320px;
   overflow-x: clip;
-  background: var(--selinow-bg-canvas);
-  color: var(--selinow-text-primary);
-  font-family: var(--selinow-font-sans);
+  background: var(--sln-bg-canvas);
+  color: var(--sln-text-primary);
+  font-family: var(--sln-font-sans);
 }
 
 button,
@@ -50,8 +50,8 @@ select {
   height: 100vh;
   min-width: 0;
   padding: 24px 16px 16px;
-  border-inline-end: 1px solid var(--selinow-ink-700);
-  background: var(--selinow-ink-950);
+  border-inline-end: 1px solid var(--sln-ink-700);
+  background: var(--sln-ink-950);
 }
 
 .admin-brand {
@@ -60,8 +60,8 @@ select {
   gap: 12px;
   min-height: 48px;
   padding: 0 10px 20px;
-  border-bottom: 1px solid var(--selinow-ink-700);
-  color: var(--selinow-white);
+  border-bottom: 1px solid var(--sln-ink-700);
+  color: var(--sln-white);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .12em;
@@ -76,7 +76,7 @@ select {
 
 .admin-brand span {
   padding-inline-start: 12px;
-  border-inline-start: 1px solid var(--selinow-ink-700);
+  border-inline-start: 1px solid var(--sln-ink-700);
 }
 
 .admin-nav {
@@ -93,8 +93,8 @@ select {
   min-height: 48px;
   padding: 8px 10px;
   border: 1px solid transparent;
-  border-radius: var(--selinow-radius-md);
-  color: var(--selinow-slate-300);
+  border-radius: var(--sln-radius-md);
+  color: var(--sln-slate-300);
   text-decoration: none;
 }
 
@@ -121,7 +121,7 @@ select {
 
 .admin-nav-item small {
   overflow: hidden;
-  color: var(--selinow-slate-300);
+  color: var(--sln-slate-300);
   font-size: 9px;
   line-height: 1.3;
   text-overflow: ellipsis;
@@ -130,9 +130,9 @@ select {
 
 .admin-nav-item:hover,
 .admin-nav-item[aria-current="page"] {
-  border-color: var(--selinow-ink-700);
-  background: var(--selinow-ink-800);
-  color: var(--selinow-white);
+  border-color: var(--sln-ink-700);
+  background: var(--sln-ink-800);
+  color: var(--sln-white);
 }
 
 .admin-nav-item[aria-current="page"] {
@@ -144,14 +144,14 @@ select {
   inset-block: 8px;
   inset-inline-start: 0;
   width: 3px;
-  border-start-end-radius: var(--selinow-radius-sm);
-  border-end-end-radius: var(--selinow-radius-sm);
-  background: var(--selinow-action-primary-hover);
+  border-start-end-radius: var(--sln-radius-sm);
+  border-end-end-radius: var(--sln-radius-sm);
+  background: var(--sln-action-primary-hover);
   content: "";
 }
 
 .admin-nav-unavailable {
-  color: var(--selinow-slate-500);
+  color: var(--sln-slate-500);
   cursor: not-allowed;
 }
 
@@ -162,7 +162,7 @@ select {
   align-items: center;
   margin-top: auto;
   padding: 16px 10px 4px;
-  border-top: 1px solid var(--selinow-ink-700);
+  border-top: 1px solid var(--sln-ink-700);
 }
 
 .admin-identity-mark {
@@ -170,10 +170,10 @@ select {
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid var(--selinow-ink-700);
+  border: 1px solid var(--sln-ink-700);
   border-radius: 50%;
-  background: var(--selinow-ink-800);
-  color: var(--selinow-action-primary-hover);
+  background: var(--sln-ink-800);
+  color: var(--sln-action-primary-hover);
   font-weight: 800;
 }
 
@@ -184,7 +184,7 @@ select {
 }
 
 .admin-identity small {
-  color: var(--selinow-slate-300);
+  color: var(--sln-slate-300);
   font-size: 9px;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -192,7 +192,7 @@ select {
 
 .admin-identity strong {
   overflow: hidden;
-  color: var(--selinow-slate-200);
+  color: var(--sln-slate-200);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -203,7 +203,7 @@ select {
   background:
     linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
     linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px),
-    var(--selinow-bg-canvas);
+    var(--sln-bg-canvas);
   background-size: 48px 48px;
 }
 
@@ -217,7 +217,7 @@ select {
   align-items: center;
   min-height: 64px;
   padding: 0 32px;
-  border-bottom: 1px solid var(--selinow-ink-700);
+  border-bottom: 1px solid var(--sln-ink-700);
   background: rgb(8 11 20 / 94%);
   backdrop-filter: blur(12px);
 }
@@ -229,7 +229,7 @@ select {
 
 .admin-topbar small,
 .admin-session-state {
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 10px;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -249,7 +249,7 @@ select {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--selinow-success);
+  background: var(--sln-state-success);
   box-shadow: 0 0 0 4px rgb(52 211 153 / 10%);
 }
 
@@ -270,13 +270,13 @@ select {
   gap: 32px;
   align-items: end;
   padding-bottom: 28px;
-  border-bottom: 1px solid var(--selinow-ink-700);
+  border-bottom: 1px solid var(--sln-ink-700);
 }
 
 .admin-eyebrow {
   margin: 0 0 10px;
-  color: var(--selinow-action-primary-hover);
-  font: 700 10px/1.4 var(--selinow-font-mono);
+  color: var(--sln-action-primary-hover);
+  font: 700 10px/1.4 var(--sln-font-mono);
   letter-spacing: .12em;
   text-transform: uppercase;
 }
@@ -293,7 +293,7 @@ select {
 .admin-page-header p:last-child {
   max-width: 760px;
   margin: 14px 0 0;
-  color: var(--selinow-slate-300);
+  color: var(--sln-slate-300);
   font-size: 14px;
   line-height: 1.7;
 }
@@ -302,9 +302,9 @@ select {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(112px, 1fr);
-  border: 1px solid var(--selinow-ink-700);
-  border-radius: var(--selinow-radius-lg);
-  background: var(--selinow-ink-900);
+  border: 1px solid var(--sln-ink-700);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-ink-900);
 }
 
 .admin-summary > div {
@@ -312,7 +312,7 @@ select {
   gap: 6px;
   min-width: 112px;
   padding: 16px;
-  border-inline-end: 1px solid var(--selinow-ink-700);
+  border-inline-end: 1px solid var(--sln-ink-700);
 }
 
 .admin-summary > div:last-child {
@@ -320,7 +320,7 @@ select {
 }
 
 .admin-summary span {
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 9px;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -335,22 +335,22 @@ select {
   min-height: 52px;
   margin: 20px 0 0;
   padding: 14px 16px;
-  border: 1px solid var(--selinow-ink-700);
-  border-radius: var(--selinow-radius-md);
-  background: var(--selinow-ink-900);
-  color: var(--selinow-slate-200);
+  border: 1px solid var(--sln-ink-700);
+  border-radius: var(--sln-radius-md);
+  background: var(--sln-ink-900);
+  color: var(--sln-slate-200);
   font-size: 13px;
   line-height: 1.6;
 }
 
 .admin-feedback[data-tone="success"] {
-  border-color: var(--selinow-success);
-  color: var(--selinow-success-text);
+  border-color: var(--sln-state-success);
+  color: var(--sln-success-text);
 }
 
 .admin-feedback[data-tone="error"] {
-  border-color: var(--selinow-danger);
-  color: var(--selinow-danger-text);
+  border-color: var(--sln-state-danger);
+  color: var(--sln-danger-text);
 }
 
 .admin-section {
@@ -375,24 +375,24 @@ select {
 .admin-section-heading p {
   max-width: 720px;
   margin: 6px 0 0;
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .admin-section-heading > span {
   flex: 0 0 auto;
-  color: var(--selinow-slate-400);
-  font: 600 10px/1.4 var(--selinow-font-mono);
+  color: var(--sln-slate-400);
+  font: 600 10px/1.4 var(--sln-font-mono);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
 
 .admin-records {
   overflow: hidden;
-  border: 1px solid var(--selinow-ink-700);
-  border-radius: var(--selinow-radius-lg);
-  background: var(--selinow-ink-900);
+  border: 1px solid var(--sln-ink-700);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-ink-900);
 }
 
 .admin-record-header,
@@ -406,9 +406,9 @@ select {
 .admin-record-header {
   min-height: 44px;
   padding: 0 16px;
-  border-bottom: 1px solid var(--selinow-ink-700);
-  background: var(--selinow-ink-950);
-  color: var(--selinow-slate-400);
+  border-bottom: 1px solid var(--sln-ink-700);
+  background: var(--sln-ink-950);
+  color: var(--sln-slate-400);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: .08em;
@@ -416,7 +416,7 @@ select {
 }
 
 .admin-record {
-  border-bottom: 1px solid var(--selinow-ink-700);
+  border-bottom: 1px solid var(--sln-ink-700);
 }
 
 .admin-record:last-child {
@@ -443,15 +443,15 @@ select {
 }
 
 .admin-record-summary span {
-  color: var(--selinow-slate-300);
+  color: var(--sln-slate-300);
   font-size: 11px;
 }
 
 .admin-record-summary code,
 .admin-record-detail code,
 .admin-state code {
-  color: var(--selinow-action-primary-hover);
-  font: 600 10px/1.5 var(--selinow-font-mono);
+  color: var(--sln-action-primary-hover);
+  font: 600 10px/1.5 var(--sln-font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -466,8 +466,8 @@ select {
   min-height: 24px;
   padding: 3px 8px;
   border: 1px solid currentColor;
-  border-radius: var(--selinow-radius-pill);
-  color: var(--selinow-slate-300);
+  border-radius: var(--sln-radius-pill);
+  color: var(--sln-slate-300);
   font-size: 9px;
   font-weight: 750;
   letter-spacing: .05em;
@@ -475,23 +475,23 @@ select {
 }
 
 .admin-badge[data-tone="danger"] {
-  color: var(--selinow-danger-text);
+  color: var(--sln-danger-text);
 }
 
 .admin-badge[data-tone="success"] {
-  color: var(--selinow-success-text);
+  color: var(--sln-success-text);
 }
 
 .admin-badge[data-tone="warning"] {
-  color: var(--selinow-warning-text);
+  color: var(--sln-warning-text);
 }
 
 .admin-badge[data-tone="info"] {
-  color: var(--selinow-info-text);
+  color: var(--sln-info-text);
 }
 
 .admin-record details {
-  border-top: 1px solid var(--selinow-ink-700);
+  border-top: 1px solid var(--sln-ink-700);
 }
 
 .admin-record details > summary {
@@ -501,7 +501,7 @@ select {
   align-items: center;
   margin-inline-start: auto;
   padding: 8px 16px;
-  color: var(--selinow-action-primary-hover);
+  color: var(--sln-action-primary-hover);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
@@ -516,7 +516,7 @@ select {
 
 .admin-record-detail p {
   margin: 0;
-  color: var(--selinow-slate-300);
+  color: var(--sln-slate-300);
   font-size: 13px;
   line-height: 1.65;
   white-space: pre-line;
@@ -535,7 +535,7 @@ select {
 }
 
 .admin-safe-facts dt {
-  color: var(--selinow-slate-500);
+  color: var(--sln-slate-500);
   font-size: 9px;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -544,7 +544,7 @@ select {
 .admin-safe-facts dd {
   min-width: 0;
   margin: 0;
-  color: var(--selinow-slate-300);
+  color: var(--sln-slate-300);
   font-size: 11px;
   overflow-wrap: anywhere;
 }
@@ -569,10 +569,10 @@ select {
   align-items: center;
   min-height: 44px;
   padding: 9px 13px;
-  border: 1px solid var(--selinow-border-control);
-  border-radius: var(--selinow-radius-md);
+  border: 1px solid var(--sln-slate-500);
+  border-radius: var(--sln-radius-md);
   background: transparent;
-  color: var(--selinow-slate-200);
+  color: var(--sln-slate-200);
   font-size: 11px;
   font-weight: 750;
   text-decoration: none;
@@ -582,49 +582,49 @@ select {
 .admin-button:hover,
 .admin-actions button:hover,
 .admin-form button:hover {
-  border-color: var(--selinow-action-primary-hover);
-  background: var(--selinow-ink-800);
-  color: var(--selinow-white);
+  border-color: var(--sln-action-primary-hover);
+  background: var(--sln-ink-800);
+  color: var(--sln-white);
 }
 
 .admin-button-primary,
 .admin-form button[type="submit"] {
-  border-color: var(--selinow-action-primary);
-  background: var(--selinow-action-primary);
-  color: var(--selinow-action-primary-ink);
+  border-color: var(--sln-action-primary);
+  background: var(--sln-action-primary);
+  color: var(--sln-action-primary-ink);
 }
 
 .admin-actions .danger,
 .admin-form .danger {
-  border-color: var(--selinow-danger);
+  border-color: var(--sln-state-danger);
   background: rgb(248 113 113 / 8%);
-  color: var(--selinow-danger-text);
+  color: var(--sln-danger-text);
 }
 
 .admin-actions button:disabled,
 .admin-form button:disabled,
 .admin-form [aria-disabled="true"] {
-  border-color: var(--selinow-border-control);
-  background: var(--selinow-disabled-bg);
-  color: var(--selinow-disabled-ink);
+  border-color: var(--sln-slate-500);
+  background: var(--sln-disabled-bg);
+  color: var(--sln-disabled-ink);
   cursor: not-allowed;
   opacity: 1;
 }
 
 .admin-form-panel {
   padding: 20px;
-  border: 1px solid var(--selinow-ink-700);
-  border-radius: var(--selinow-radius-lg);
-  background: var(--selinow-ink-900);
+  border: 1px solid var(--sln-ink-700);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-ink-900);
 }
 
 .admin-form-panel[data-risk="high"] {
-  border-inline-start: 3px solid var(--selinow-danger);
+  border-inline-start: 3px solid var(--sln-state-danger);
 }
 
 .admin-form-panel > p {
   margin: 0 0 18px;
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -638,7 +638,7 @@ select {
 .admin-form label {
   display: grid;
   gap: 7px;
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: .05em;
@@ -646,7 +646,7 @@ select {
 }
 
 .admin-form label small {
-  color: var(--selinow-slate-300);
+  color: var(--sln-slate-300);
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0;
@@ -660,10 +660,10 @@ select {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  border: 1px solid var(--selinow-border-control);
-  border-radius: var(--selinow-radius-md);
-  background: var(--selinow-ink-950);
-  color: var(--selinow-white);
+  border: 1px solid var(--sln-slate-500);
+  border-radius: var(--sln-radius-md);
+  background: var(--sln-ink-950);
+  color: var(--sln-white);
 }
 
 .admin-form-actions {
@@ -689,10 +689,10 @@ select {
   display: grid;
   gap: 8px;
   padding: 16px;
-  border: 1px solid var(--selinow-ink-700);
-  border-inline-start: 3px solid var(--selinow-info);
-  border-radius: var(--selinow-radius-md);
-  background: var(--selinow-ink-950);
+  border: 1px solid var(--sln-ink-700);
+  border-inline-start: 3px solid var(--sln-state-info);
+  border-radius: var(--sln-radius-md);
+  background: var(--sln-ink-950);
 }
 
 .admin-readonly-note strong {
@@ -700,7 +700,7 @@ select {
 }
 
 .admin-readonly-note span {
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 11px;
   line-height: 1.6;
 }
@@ -715,7 +715,7 @@ select {
 
 .admin-pagination > span {
   max-width: 680px;
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 11px;
   line-height: 1.6;
 }
@@ -733,9 +733,9 @@ select {
   min-height: 120px;
   align-content: center;
   padding: 24px;
-  border: 1px solid var(--selinow-ink-700);
-  border-radius: var(--selinow-radius-lg);
-  background: var(--selinow-ink-900);
+  border: 1px solid var(--sln-ink-700);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-ink-900);
 }
 
 .admin-empty strong {
@@ -744,7 +744,7 @@ select {
 
 .admin-empty span {
   max-width: 680px;
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -758,9 +758,9 @@ select {
 .admin-ledger {
   margin: 0;
   padding: 0;
-  border: 1px solid var(--selinow-ink-700);
-  border-radius: var(--selinow-radius-lg);
-  background: var(--selinow-ink-900);
+  border: 1px solid var(--sln-ink-700);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-ink-900);
   list-style: none;
 }
 
@@ -771,7 +771,7 @@ select {
   align-items: center;
   min-height: 52px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--selinow-ink-700);
+  border-bottom: 1px solid var(--sln-ink-700);
 }
 
 .admin-ledger li:last-child {
@@ -780,8 +780,8 @@ select {
 
 .admin-ledger code,
 .admin-ledger time {
-  color: var(--selinow-slate-400);
-  font: 600 10px/1.4 var(--selinow-font-mono);
+  color: var(--sln-slate-400);
+  font: 600 10px/1.4 var(--sln-font-mono);
 }
 
 .admin-ledger strong {
@@ -792,7 +792,7 @@ select {
 
 .admin-ledger small {
   grid-column: 2;
-  color: var(--selinow-slate-500);
+  color: var(--sln-slate-500);
   font-size: 10px;
 }
 
@@ -811,7 +811,7 @@ select {
   min-height: 52px;
   align-items: center;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--selinow-ink-700);
+  border-bottom: 1px solid var(--sln-ink-700);
 }
 
 .admin-contract-list li:last-child {
@@ -819,7 +819,7 @@ select {
 }
 
 .admin-contract-list span {
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 11px;
 }
 
@@ -830,9 +830,9 @@ select {
   max-width: 760px;
   margin: 12vh auto 0;
   padding: 28px;
-  border: 1px solid var(--selinow-ink-700);
-  border-radius: var(--selinow-radius-lg);
-  background: var(--selinow-ink-900);
+  border: 1px solid var(--sln-ink-700);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-ink-900);
 }
 
 .admin-state-icon {
@@ -841,24 +841,24 @@ select {
   margin-top: 5px;
   border: 2px solid currentColor;
   border-radius: 50%;
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
 }
 
 .admin-state[data-tone="danger"] .admin-state-icon {
-  color: var(--selinow-danger);
+  color: var(--sln-state-danger);
 }
 
 .admin-state[data-tone="warning"] .admin-state-icon {
-  color: var(--selinow-warning);
+  color: var(--sln-state-warning);
 }
 
 .admin-state[data-tone="info"] .admin-state-icon {
-  color: var(--selinow-info);
+  color: var(--sln-state-info);
 }
 
 .admin-state p {
   margin: 0 0 8px;
-  color: var(--selinow-slate-400);
+  color: var(--sln-slate-400);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: .1em;
@@ -878,7 +878,7 @@ select {
 .admin-state div > span {
   display: block;
   margin-top: 10px;
-  color: var(--selinow-slate-300);
+  color: var(--sln-slate-300);
   font-size: 13px;
   line-height: 1.65;
 }
@@ -891,13 +891,13 @@ select {
 }
 
 .admin-state a {
-  color: var(--selinow-action-primary-hover);
+  color: var(--sln-action-primary-hover);
   font-size: 12px;
   font-weight: 750;
 }
 
 :focus-visible {
-  outline: 3px solid var(--selinow-focus-ring);
+  outline: 3px solid var(--sln-focus-ring);
   outline-offset: 3px;
 }
 
@@ -919,7 +919,7 @@ select {
 
   .admin-cell-label {
     display: block;
-    color: var(--selinow-slate-400);
+    color: var(--sln-slate-400);
     font-size: 8px;
     font-weight: 700;
     letter-spacing: .08em;
@@ -947,7 +947,7 @@ select {
     height: auto;
     padding: 12px;
     border-inline-end: 0;
-    border-bottom: 1px solid var(--selinow-ink-700);
+    border-bottom: 1px solid var(--sln-ink-700);
   }
 
   .admin-brand {
@@ -1006,7 +1006,7 @@ select {
   }
 
   .admin-summary > div {
-    border-inline-end: 1px solid var(--selinow-ink-700);
+    border-inline-end: 1px solid var(--sln-ink-700);
   }
 
   .admin-actions {
@@ -1045,7 +1045,7 @@ select {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     border-inline-end: 0;
-    border-bottom: 1px solid var(--selinow-ink-700);
+    border-bottom: 1px solid var(--sln-ink-700);
   }
 
   .admin-summary > div:last-child {

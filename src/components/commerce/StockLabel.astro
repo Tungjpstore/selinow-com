@@ -10,8 +10,8 @@ const copy = createSystemTranslator(locale)(`status.stock.${state}`);
 <style>
   .sln-stock-label { display: inline-flex; align-items: center; gap: var(--sln-space-2); color: var(--sln-text-secondary); font: var(--sln-font-caption); }
   .sln-stock-label > span { width: 8px; height: 8px; border-radius: 50%; background: var(--sln-state-success); }
-  .sln-stock-label[data-stock="low_stock"] { color: var(--selinow-warning-text); }
+  .sln-stock-label[data-stock="low_stock"] { color: var(--sln-warning-text); }
   .sln-stock-label[data-stock="low_stock"] > span { background: var(--sln-state-warning); }
-  .sln-stock-label[data-stock="out_of_stock"] { color: var(--selinow-danger-text); }
+  .sln-stock-label[data-stock="out_of_stock"] { color: var(--sln-danger-text); }
   .sln-stock-label[data-stock="out_of_stock"] > span { background: var(--sln-state-danger); }
 </style>

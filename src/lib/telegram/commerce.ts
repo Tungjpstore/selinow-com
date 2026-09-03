@@ -1,5 +1,6 @@
 import { hmacToken } from "../core/crypto";
 import { subscriptionAllows } from "../billing/entitlements";
+import { fireAutomationTriggers } from "../automation/rules/dispatcher";
 import { CommerceApplicationService } from "../commerce/application";
 import { createTelegramCartProjectionPort, type CommerceCartProjection } from "../commerce/cart-projection";
 import type { CommerceContext, CommercePaymentFulfillmentApplication } from "../commerce/contracts";
@@ -267,6 +268,7 @@ async function ensureIdentity(input: {
         input.env.PLATFORM_DB.prepare(`INSERT INTO shop_customers (id, shop_id, email_normalized, display_name, locale, status, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, 'active', ?, ?)`).bind(customerId, input.shop.id, displayHandle(input.user), input.locale, now, now),
         input.env.PLATFORM_DB.prepare(`INSERT INTO customer_identities (id, shop_id, customer_id, provider, external_subject, display_handle_sanitized, language_code, verified_at, created_at, updated_at) VALUES (?, ?, ?, 'telegram', ?, ?, ?, ?, ?, ?)`).bind(identityId, input.shop.id, customerId, input.subjectHash, displayHandle(input.user), input.observedLanguage, now, now, now),
       ]);
+      void fireAutomationTriggers(input.env, { aggregateReference: `customer:${customerId}`, customerId, refs: { channel: "telegram" }, shopId: input.shop.id, triggerType: "customer.created" }).catch(() => {});
       identity = { customerId, identityId, languageCode: input.observedLanguage, preferredLocale: null, verifiedAt: now };
     } catch {
       identity = await findStoredIdentity({ env: input.env, shopId: input.shop.id, subjectHash: input.subjectHash });
@@ -437,9 +439,7 @@ async function orderReply(application: CommerceApplicationService, context: Comm
     text: [
       telegramText(locale, "order.heading", { order: order.orderNumber }),
       telegramText(locale, "order.total", { total: formatTelegramMoney(order.totalMinor, order.currency, locale) }),
-      telegramText(locale, "order.payment", { status: telegramStatus(locale, "payment", order.paymentStatus) }),
-      telegramText(locale, "order.status", { status: telegramStatus(locale, "order", order.status) }),
-      telegramText(locale, "order.fulfillment", { status: telegramStatus(locale, "fulfillment", order.fulfillmentStatus) }),
+      formatOrderStatus(order, locale),
     ].join("\n"),
   };
 }
@@ -511,41 +511,58 @@ function safeErrorReply(error: AppError, locale: SupportedLocale): TelegramReply
   return { keyboard: [[{ callback_data: "menu", text: telegramText(locale, "button.menu") }]], text: message };
 }
 
+// The Telegram Mini App surface is served by the dedicated session-bound HTTP
+// API (migrations/0057_telegram_mini_app_sessions.sql and
+// docs/TELEGRAM_MINI_APP_SESSION.md). Bot webhook updates are processed in the
+// Worker, where no browser global exists, so detection must stay server-side
+// and only accepts an explicit marker carried in the update payload itself.
+const TELEGRAM_MINI_APP_CALLBACK_PREFIX = "wma:";
+
+export function isTelegramMiniApp(update: TelegramUpdate): boolean {
+  return update.kind === "callback_query" && update.data.startsWith(TELEGRAM_MINI_APP_CALLBACK_PREFIX);
+}
+
+function formatOrderStatus(order: { fulfillmentStatus: string; paymentStatus: string; status: string }, locale: SupportedLocale): string {
+  return [
+    telegramText(locale, "order.payment", { status: telegramStatus(locale, "payment", order.paymentStatus) }),
+    telegramText(locale, "order.status", { status: telegramStatus(locale, "order", order.status) }),
+    telegramText(locale, "order.fulfillment", { status: telegramStatus(locale, "fulfillment", order.fulfillmentStatus) }),
+  ].join("\n");
+}
+
 export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?: typeof fetch; integrationId: string; shopId: string; update: TelegramUpdate }): Promise<{ identity: TelegramIdentity; reply: TelegramReply; resultCode: string }> {
   if (input.update.kind === "unsupported_callback_query") throw new AppError("telegram_update_unsupported", 400);
   const shop = await loadTelegramShop(input.env, input.shopId);
-  // Resolve the normalized projection before creating buyer, recipient or
-  // commerce state. Missing, expired, unentitled or policy-disabled grants
-  // therefore fail closed without changing replay or tenant binding rules.
   const connectionId = await resolveTelegramConnectionId(input.env, input.integrationId, shop.id);
   const effectiveCapabilities = await loadTelegramEffectiveCapabilities({ connectionId, env: input.env, shopId: shop.id });
   requireTelegramCapabilities(effectiveCapabilities, requiredTelegramCapabilities(input.update));
+
   const messageCommand = input.update.kind === "message"
     ? (() => {
         const [rawCommand = "", ...argumentsList] = input.update.text.trim().split(/\s+/u);
         return { argumentsList, command: rawCommand.toLowerCase().replace(/@[a-z0-9_]+$/u, "") };
       })()
     : null;
+
   const requestedLocalePreference = messageCommand?.command === "/language" && messageCommand.argumentsList.length === 1
     ? matchSupportedLocale(messageCommand.argumentsList[0])
     : null;
+
   const stored = await loadStoredIdentity({ env: input.env, shopId: shop.id, userId: input.update.user.id });
   const observedLanguage = matchSupportedLocale(input.update.user.languageCode);
   const identityPreference = stored.identity !== null && stored.identity.verifiedAt !== null
     ? matchSupportedLocale(stored.identity.languageCode)
     : null;
+
   const locale = resolveTelegramLocale({
     explicitPreference: requestedLocalePreference ?? stored.identity?.preferredLocale,
     identityPreference,
     requestLanguage: input.update.user.languageCode,
     shopDefaultLocale: shop.defaultLocale,
   });
-  // Carry the resolved buyer locale through the canonical commerce context and
-  // cart/order snapshot so rendering and persisted order locale stay aligned.
+
   const localizedShop = { ...shop, defaultLocale: locale };
-  // Bind the provider integration to the tenant before creating any buyer
-  // identity or recipient rows. The webhook path normally supplies a matching
-  // pair, but this boundary must fail closed for direct callers too.
+
   const identity = await ensureIdentity({
     chatId: input.update.chat.id,
     env: input.env,
@@ -557,6 +574,7 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
     subjectHash: stored.subjectHash,
     user: input.update.user,
   });
+
   if (messageCommand?.command === "/language") {
     if (messageCommand.argumentsList.length === 0) {
       return { identity, reply: { text: telegramText(locale, "language.usage") }, resultCode: "language_usage" };
@@ -567,6 +585,7 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
     await persistTelegramLocalePreference({ customerId: identity.customerId, env: input.env, locale: requestedLocalePreference, shopId: shop.id });
     return { identity, reply: { text: telegramText(requestedLocalePreference, "language.updated") }, resultCode: "language_updated" };
   }
+
   const cartApplication = await createTelegramCartApplication({ connectionId, env: input.env, identity, integrationId: input.integrationId, shop: localizedShop, updateId: input.update.updateId });
   const checkoutKey = await createTelegramCheckoutApplicationKey(input.env, shop.id, input.integrationId, input.update.updateId);
   const paymentApplication = createTelegramPaymentApplication({ env: input.env, ...(input.fetcher === undefined ? {} : { fetcher: input.fetcher }), shopId: shop.id });
@@ -580,6 +599,7 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
     shop: localizedShop,
     updateId: input.update.updateId,
   });
+
   try {
     if (input.update.kind === "callback_query") {
       if (input.update.data.startsWith("add:")) {
@@ -591,7 +611,11 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
       if (input.update.data === "buy") {
         return { identity, reply: await cartReply(cartApplication.application, cartApplication.context, input.env, localizedShop, identity, input.integrationId, input.update.updateId, locale), resultCode: "cart_rendered" };
       }
+
       if (input.update.data.startsWith("buy:")) {
+        // The quote reference must be the exact persisted update id. Anything
+        // else fails closed back to the quoted cart instead of checking out
+        // at the current price.
         const quoteUpdateText = input.update.data.slice(4);
         if (!/^(0|[1-9][0-9]*)$/u.test(quoteUpdateText)) {
           return { identity, reply: await cartReply(cartApplication.application, cartApplication.context, input.env, localizedShop, identity, input.integrationId, input.update.updateId, locale), resultCode: "cart_rendered" };
@@ -602,6 +626,7 @@ export async function handleTelegramCommerce(input: { env: AppBindings; fetcher?
         const reply = await renderTelegramCheckoutResult({ context: cartApplication.context, order, orderApplication, origin: localizedShop.origin, paymentApplication: orderApplication });
         return { identity, reply, resultCode: "checkout_completed" };
       }
+
       if (input.update.data.startsWith("pay:")) return { identity, reply: await paymentReply({ application: orderApplication, context: cartApplication.context, orderPublicId: input.update.data.slice(4), origin: localizedShop.origin }), resultCode: "payment_rendered" };
       if (input.update.data.startsWith("ord:")) return { identity, reply: await orderReply(orderApplication, cartApplication.context, input.update.data.slice(4)), resultCode: "order_rendered" };
       if (input.update.data.startsWith("key:")) return { identity, reply: await keyReply({ application: orderApplication, context: cartApplication.context, orderApplication, orderPublicId: input.update.data.slice(4) }), resultCode: "keys_rendered" };

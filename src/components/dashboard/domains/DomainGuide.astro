@@ -1,0 +1,43 @@
+---
+import { createDashboardTranslator } from "../../../lib/i18n/catalogs/dashboard";
+
+interface Props {
+  hidden?: boolean;
+}
+
+const { hidden = false } = Astro.props;
+const t = createDashboardTranslator(Astro.locals.locale);
+---
+
+<div class="dns-guide" id="domain-guide" data-domain-content hidden={hidden}>
+  <div>
+    <p class="step">{t("dashboard.domains.guide.step")}</p>
+    <h4>{t("dashboard.domains.guide.title")}</h4>
+  </div>
+  <ol>
+    <li><span>1</span><p>{t("dashboard.domains.guide.1")}</p></li>
+    <li><span>2</span><p>{t("dashboard.domains.guide.2")}</p></li>
+    <li><span>3</span><p>{t("dashboard.domains.guide.3")}</p></li>
+  </ol>
+  <p class="guide-note">{t("dashboard.domains.guide.note")}</p>
+</div>
+
+<style>
+  [hidden] { display: none !important; }
+  .dns-guide { display: grid; grid-template-columns: .6fr 1.4fr; gap: 32px; padding: 32px 28px; border-top: 1px solid var(--sln-border-default); }
+  .dns-guide h4 { margin: 0; font-size: 24px; line-height: 1.2; letter-spacing: -.02em; }
+  .step { margin: 0 0 7px; color: var(--sln-action-primary-hover); font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  .dns-guide ol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 0; padding: 0; list-style: none; }
+  .dns-guide li { padding: 16px; border-top: 1px solid var(--sln-border-default); }
+  .dns-guide li span { color: var(--sln-action-primary-hover); font-family: var(--sln-font-mono); font-size: 18px; }
+  .dns-guide li p { margin: 20px 0 0; color: var(--sln-text-secondary); font-size: 13px; line-height: 1.55; }
+  .guide-note { grid-column: 2; margin: 0; color: var(--sln-text-muted); font-size: 12px; line-height: 1.55; }
+  @media (max-width: 900px) {
+    .dns-guide { grid-template-columns: 1fr; }
+    .guide-note { grid-column: 1; }
+  }
+  @media (max-width: 650px) {
+    .dns-guide { padding: 1.1rem; }
+    .dns-guide ol { grid-template-columns: 1fr; }
+  }
+</style>

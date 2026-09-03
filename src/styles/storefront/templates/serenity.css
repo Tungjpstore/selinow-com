@@ -1,0 +1,115 @@
+/* Serenity — calm spa & beauty storefront. Soft pastels, pill geometry. */
+
+html[data-storefront-template="serenity"] .serenity-hero {
+  display: grid;
+  align-items: center;
+  min-height: 340px;
+  border-radius: var(--sln-radius-xl);
+  background:
+    radial-gradient(circle at 90% 10%, color-mix(in srgb, var(--merchant-accent) 26%, transparent), transparent 46%),
+    radial-gradient(circle at 5% 95%, color-mix(in srgb, var(--merchant-brand) 22%, transparent), transparent 42%),
+    var(--sln-bg-subtle);
+}
+
+html[data-storefront-template="serenity"] .serenity-hero-copy {
+  display: grid;
+  gap: 14px;
+  max-width: 560px;
+  padding: clamp(28px, 5vw, 56px);
+}
+
+html[data-storefront-template="serenity"] .serenity-hero h1 {
+  max-width: 17ch;
+  margin: 0;
+  font-size: clamp(2rem, 4.4vw, 3.2rem);
+  font-weight: 680;
+  letter-spacing: -.025em;
+  line-height: 1.12;
+}
+
+html[data-storefront-template="serenity"] .serenity-hero p { margin: 0; color: var(--sln-text-secondary); font-size: 1rem; line-height: 1.7; }
+
+html[data-storefront-template="serenity"] .serenity-cta {
+  justify-self: start;
+  margin-top: 8px;
+  padding: 13px 30px;
+  border-radius: var(--sln-radius-pill);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+  font-size: .9375rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+html[data-storefront-template="serenity"] .serenity-services {
+  width: min(calc(100% - 32px), var(--store-page-width));
+  margin: clamp(28px, 4vw, 44px) auto 0;
+}
+
+html[data-storefront-template="serenity"] .serenity-services h2 { margin: 0 0 16px; font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; }
+
+html[data-storefront-template="serenity"] .serenity-service-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+
+html[data-storefront-template="serenity"] .serenity-service-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--sln-border-default);
+  border-radius: var(--sln-radius-lg);
+  background: var(--sln-bg-surface);
+}
+
+html[data-storefront-template="serenity"] .serenity-service-list li > div:first-child { display: grid; gap: 2px; min-width: 0; }
+html[data-storefront-template="serenity"] .serenity-service-list strong { font-size: .9375rem; }
+html[data-storefront-template="serenity"] .serenity-service-list small { color: var(--sln-text-muted); font-size: .8125rem; }
+
+html[data-storefront-template="serenity"] .serenity-service-buy { display: flex; align-items: center; gap: 14px; }
+html[data-storefront-template="serenity"] .serenity-service-buy > span { font-weight: 750; font-variant-numeric: tabular-nums; }
+
+html[data-storefront-template="serenity"] .serenity-book-button {
+  padding: 10px 20px;
+  border-radius: var(--sln-radius-pill);
+  background: var(--merchant-brand);
+  color: var(--merchant-brand-ink);
+  font-size: .8125rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+html[data-storefront-template="serenity"] .serenity-book-button.is-disabled { background: var(--sln-disabled-bg); color: var(--sln-disabled-ink); }
+
+html[data-storefront-template="serenity"] .serenity-categories { display: flex; flex-wrap: wrap; gap: 10px; width: min(calc(100% - 32px), var(--store-page-width)); margin: 20px auto 0; }
+html[data-storefront-template="serenity"] .serenity-categories a {
+  padding: 8px 18px;
+  border-radius: var(--sln-radius-pill);
+  background: var(--sln-bg-surface);
+  color: var(--sln-text-primary);
+  font-size: .8125rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  html[data-storefront-template="serenity"] .serenity-service-list li { align-items: flex-start; flex-direction: column; }
+  html[data-storefront-template="serenity"] .serenity-service-buy { width: 100%; justify-content: space-between; }
+}
+
+/* ── CD token layer: calm ritual, pill everything ── */
+html[data-storefront-template="serenity"] {
+  --tmpl-line: #e8e6e1;
+  --tmpl-line-strong: #d9d6cf;
+  --tmpl-radius-s: 12px;
+  --tmpl-radius-m: 18px;
+  --tmpl-radius-l: 24px;
+  --tmpl-slot-radius: 999px;
+  --tmpl-panel-shadow: none;
+  --tmpl-panel-shadow-soft: none;
+  --tmpl-heading-weight: 680;
+  --tmpl-heading-track: -.025em;
+}
+
+html[data-storefront-template="serenity"] .variant-option { border-radius: 18px; }
+html[data-storefront-template="serenity"] .product-detail .description { line-height: 1.85; }

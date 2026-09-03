@@ -1,4 +1,5 @@
 import { createStorefrontTranslator } from "../i18n/catalogs/storefront";
+import { parseHomeSections, type StorefrontSectionConfig } from "./sections/registry";
 
 type JsonObject = Record<string, unknown>;
 
@@ -13,6 +14,8 @@ export type StorefrontTheme = {
 export type StorefrontContent = {
   announcement: string | null;
   deliveryText: string;
+  /** TM1: persisted home-section stack (empty/absent = template default tail). */
+  sections?: StorefrontSectionConfig[];
   description: string;
   footerText: string;
   headline: string;
@@ -20,6 +23,7 @@ export type StorefrontContent = {
   seoTitle: string;
   showExactStock: boolean;
   supportText: string;
+  templateId: string | null;
 };
 
 function parseJsonObject(value: string): JsonObject {
@@ -92,15 +96,28 @@ export function parseStorefrontContent(storefrontJson: string, shopName: string,
   const description = readText(storefront.description, t("storefront.defaults.description"), 240);
   const seoDescriptionFallback = truncateText(description, 160);
   const seoTitleFallback = truncateText(t("storefront.defaults.seo_title", { shop: shopName }), 60);
+  // Raw persisted selection; the template registry resolves or safely falls
+  // it back at render time, so parsing only needs to surface a plain string.
+  const templateId = typeof storefront.templateId === "string" && storefront.templateId.trim().length > 0
+    ? storefront.templateId.trim().slice(0, 32)
+    : null;
   return {
     announcement,
     deliveryText: readText(storefront.deliveryText, t("storefront.defaults.delivery"), 240),
     description,
+    sections: parseHomeSections(storefront.sections),
     footerText: readText(storefront.footerText, t("storefront.defaults.footer", { shop: shopName }), 160),
     headline: readText(storefront.headline, t("storefront.defaults.headline"), 120),
     seoDescription: readText(storefront.seoDescription, seoDescriptionFallback, 160),
     seoTitle: readText(storefront.seoTitle, seoTitleFallback, 60),
     showExactStock: storefront.showExactStock === true,
     supportText: readText(storefront.supportText, t("storefront.defaults.support"), 180),
+    templateId,
   };
+}
+
+/** TM0: persisted home-section stack (empty = template default). */
+export function parseStorefrontSections(storefrontJson: string): StorefrontSectionConfig[] {
+  const storefront = parseJsonObject(storefrontJson);
+  return parseHomeSections(storefront.sections);
 }

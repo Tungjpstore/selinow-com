@@ -126,7 +126,7 @@ describe("tenant readiness policy", () => {
     expect(result.checks.find((item) => item.code === "integration_health")?.status).toBe("fail");
   });
 
-  it("blocks readiness while the platform policy is unpublished", () => {
+  it("blocks readiness when a shop has no current platform attestation", () => {
     const result = evaluateReadinessSnapshot(readySnapshot(), CHECKED_AT);
     expect(result.ready).toBe(false);
     expect(result.checks.find((item) => item.code === "policies_ready")).toMatchObject({ required: true, status: "fail" });
@@ -279,10 +279,11 @@ describe("guarded publish transition", () => {
     expect(database.readinessRuns).toBe(1);
   });
 
-  it("rejects publish before persisting readiness when the platform policy is unpublished", async () => {
+  it("rejects publish before persisting readiness when the platform policy is explicitly unpublished", async () => {
     const database = new PublishDatabase();
     await expect(publishReadyStorefront({
       env: testEnv(database),
+      platformPolicyVersion: null,
       requestId: "request-policy-unpublished",
       shopPublicId: "shop_public_a",
       userId: "user-a",

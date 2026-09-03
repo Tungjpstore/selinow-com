@@ -1,4 +1,12 @@
 export const CUSTOM_DOMAIN_TURNSTILE_ADMISSION_MAX_AGE_MS = 12 * 60 * 60 * 1_000;
+// Admissions older than this are proactively refreshed by the reconciliation
+// pass, leaving buffer before the 12-hour serve-gate expiry. It sits above the
+// 6-hour active-domain polling cadence so healthy domains are not re-checked
+// twice, and below the expiry by enough margin to survive failed refresh retries.
+export const CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS = 7 * 60 * 60 * 1_000;
+// Minimum spacing between proactive refresh attempts for one domain, so a
+// failing Cloudflare lookup is retried without hammering the API each tick.
+export const CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS = 30 * 60 * 1_000;
 
 type JsonObject = Record<string, unknown>;
 
@@ -43,6 +51,35 @@ export function hasFreshExactTurnstileAdmission(input: {
     && Number.isFinite(checkedAtMs)
     && checkedAtMs >= Date.parse(window.earliest)
     && checkedAtMs <= Date.parse(window.latest);
+}
+
+export function turnstileAdmissionRefreshWindow(now = new Date()): { dueBefore: string; retryBefore: string } | null {
+  const latestMs = now.getTime();
+  if (!Number.isFinite(latestMs)) return null;
+  return {
+    dueBefore: new Date(latestMs - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS).toISOString(),
+    retryBefore: new Date(latestMs - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_RETRY_MS).toISOString(),
+  };
+}
+
+export function isExactTurnstileAdmissionRefreshDue(input: {
+  hostname: string;
+  now?: Date;
+  validationMetadataJson: string | JsonObject;
+}): boolean {
+  const metadata = parseMetadata(input.validationMetadataJson);
+  const admission = jsonObject(metadata?.turnstile);
+  const nowMs = (input.now ?? new Date()).getTime();
+  if (admission === null || !Number.isFinite(nowMs) || typeof admission.checkedAt !== "string") return false;
+
+  const checkedAtMs = Date.parse(admission.checkedAt);
+  return admission.hostname === input.hostname
+    && admission.mode === "operator_managed"
+    && admission.source === "cloudflare_widget_domains"
+    && admission.status === "active"
+    && Number.isFinite(checkedAtMs)
+    && checkedAtMs <= nowMs
+    && checkedAtMs <= nowMs - CUSTOM_DOMAIN_TURNSTILE_ADMISSION_REFRESH_AGE_MS;
 }
 
 export function customDomainTurnstileAdmissionSql(alias?: string, nowExpression = "'now'"): string {

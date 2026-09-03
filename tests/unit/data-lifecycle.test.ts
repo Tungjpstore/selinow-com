@@ -170,6 +170,8 @@ function seedPlatformAdmin(database: DatabaseSync, role: "owner" | "risk" | "sup
   database.exec(`
     INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
     VALUES ('admin-a', 'admin@example.test', 'Admin', 'active', '${nowIso}', '${nowIso}');
+    UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = '${nowIso}'
+    WHERE id = 'admin-a';
     INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
     VALUES ('admin-a', '${role}', 'active', '${nowIso}', '${nowIso}');
   `);
@@ -4049,6 +4051,81 @@ describe("Phase 9 data lifecycle", () => {
       requestId: "support-legal-hold-denied",
       shopPublicId: SHOP_PUBLIC_ID,
     })).rejects.toMatchObject({ code: "authorization_denied", status: 403 });
+  }, 30_000);
+
+  it("denies an un-enrolled admin on deletion reads and legal holds until two-factor enrollment completes", async () => {
+    const runtime = createRuntime();
+    const nowIso = NOW.toISOString();
+    runtime.database.exec(`
+      INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+      VALUES ('admin-unenrolled', 'unenrolled-deletion@example.test', 'Unenrolled Admin', 'active', '${nowIso}', '${nowIso}');
+      INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
+      VALUES ('admin-unenrolled', 'risk', 'active', '${nowIso}', '${nowIso}');
+    `);
+    const requested = await requestShopDeletion({
+      env: runtime.env,
+      reasonCode: "seller_request",
+      requestId: "request-unenrolled-deletion",
+      runtime: { now: NOW },
+      shopPublicId: SHOP_PUBLIC_ID,
+      userId: USER_ID,
+    });
+    const before = runtime.database.prepare(`
+      SELECT status, legal_hold_until AS legalHoldUntil, version
+      FROM shop_deletion_requests WHERE id = ? AND shop_id = ?
+    `).get(requested.id, SHOP_ID);
+
+    // Deletion-reader path: the queue projection is denied before any read.
+    await expect(listActiveDeletionRequests({
+      env: runtime.env,
+      userId: "admin-unenrolled",
+    })).rejects.toMatchObject({ code: "admin_two_factor_required", status: 403 });
+    // Operator path: the legal-hold mutation is denied through the real guard.
+    const holdInput = {
+      action: "set" as const,
+      actorUserId: "admin-unenrolled",
+      deletionRequestId: requested.id,
+      env: runtime.env,
+      expectedVersion: requested.version,
+      holdUntil: "2027-01-01T00:00:00.000Z",
+      idempotencyKey: "unenrolled-legal-hold-001",
+      now: NOW,
+      reasonCode: "legal_preservation",
+      requestId: "request-unenrolled-hold",
+      shopPublicId: SHOP_PUBLIC_ID,
+    };
+    await expect(applyDeletionLegalHold(holdInput))
+      .rejects.toMatchObject({ code: "admin_two_factor_required", status: 403 });
+
+    // No side effects: the request row is untouched and nothing was audited.
+    expect(runtime.database.prepare(`
+      SELECT status, legal_hold_until AS legalHoldUntil, version
+      FROM shop_deletion_requests WHERE id = ? AND shop_id = ?
+    `).get(requested.id, SHOP_ID)).toEqual(before);
+    expect(runtime.database.prepare(`
+      SELECT COUNT(*) AS count FROM audit_logs WHERE actor_id = 'admin-unenrolled'
+    `).get()).toEqual({ count: 0 });
+
+    runtime.database.prepare(`
+      UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+      WHERE id = 'admin-unenrolled'
+    `).run(nowIso);
+    const overview = await listActiveDeletionRequests({
+      env: runtime.env,
+      userId: "admin-unenrolled",
+    });
+    expect(overview.canOperate).toBe(true);
+    expect(overview.requests).toHaveLength(1);
+    const held = await applyDeletionLegalHold(holdInput);
+    expect(held).toMatchObject({ action: "set", status: "applied", version: requested.version + 1 });
+    expect(runtime.database.prepare(`
+      SELECT status, legal_hold_until AS legalHoldUntil, version
+      FROM shop_deletion_requests WHERE id = ? AND shop_id = ?
+    `).get(requested.id, SHOP_ID)).toMatchObject({
+      legalHoldUntil: "2027-01-01T00:00:00.000Z",
+      status: "retention_hold",
+      version: held.version,
+    });
   });
 
   it("disconnects generic channels, shreds their envelopes, and terminalizes queued work idempotently", async () => {

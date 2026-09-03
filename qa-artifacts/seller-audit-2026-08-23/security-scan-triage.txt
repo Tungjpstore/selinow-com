@@ -1,0 +1,21 @@
+Seller Platform heuristic security scan triage
+Date: 2026-08-23 Asia/Tokyo
+
+Dependency result
+- package-lock.json exists and is repository-pinned.
+- npm audit --audit-level=high: 0 high/critical vulnerabilities.
+- Scanner warnings about missing yarn.lock and pnpm-lock.yaml are false positives because this is
+  an npm project; multiple package-manager lockfiles are neither required nor desirable.
+
+Secret-pattern result
+- Reported samples inspected were generated Cloudflare type declarations and explicit test fixtures
+  such as "api-key-test-value", "remote-token" and redaction-test strings.
+- No production credential value was read or printed during this audit.
+- Heuristic finding count is not treated as a confirmed secret leak without entropy/history/provider
+  validation; no confirmed repository secret was established by this scan.
+
+Code-pattern result
+- Most "exec" hits are RegExp.exec(), generated platform type declarations, or SQLite test execution
+  of repository-owned migrations; they are not dynamic shell execution.
+- Confirmed security/business findings are documented separately as BUG-001, BUG-005, BUG-019,
+  BUG-022, BUG-031, BUG-032 and BUG-033.

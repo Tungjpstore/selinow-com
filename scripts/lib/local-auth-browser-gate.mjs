@@ -183,6 +183,9 @@ export function buildLocalCommandEnvironment({
 export function validatePlaywrightArguments(args) {
   if (args.length === 0) return [];
   if (args.length === 1 && args[0] === "--update-snapshots") return [...args];
+  if (args.length === 2
+    && args[0] === "--update-snapshots"
+    && args[1] === "--grep=local magic link opens deterministic authenticated seller surfaces") return [...args];
   const allowedProjects = new Set([
     "kit-auth-desktop-1440",
     "kit-auth-tablet-768",

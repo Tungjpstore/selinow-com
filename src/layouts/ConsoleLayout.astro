@@ -1,0 +1,40 @@
+---
+/**
+ * ConsoleLayout — delegates directly to AppLayout for unified workspace shell.
+ */
+import AppLayout from "./AppLayout.astro";
+import type { ShopRole } from "../lib/tenants/policy";
+
+type ShopOption = { name: string; publicId: string; role?: ShopRole; slug?: string };
+type Props = {
+  activePath: string;
+  displayName: string;
+  email: string;
+  selectedShopName?: string | undefined;
+  selectedShopPublicId?: string | undefined;
+  shops?: readonly ShopOption[] | undefined;
+  title: string;
+  storefrontTemplate?: string | undefined;
+  storefrontScheme?: string | undefined;
+};
+
+const props = Astro.props;
+const adaptedShops = (props.shops ?? []).map((s) => ({
+  name: s.name,
+  publicId: s.publicId,
+  role: (s.role ?? "owner") as ShopRole,
+  slug: s.slug ?? s.publicId,
+}));
+---
+
+<AppLayout
+  activePath={props.activePath}
+  displayName={props.displayName}
+  email={props.email}
+  selectedShopName={props.selectedShopName}
+  selectedShopPublicId={props.selectedShopPublicId}
+  shops={adaptedShops}
+  title={props.title}
+>
+  <slot />
+</AppLayout>

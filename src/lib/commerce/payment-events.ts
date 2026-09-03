@@ -2,6 +2,7 @@ import { sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
 import { tryRecordFirstPaidFulfilled } from "../analytics/activation";
+import { fireAutomationTriggers } from "../automation/rules/dispatcher";
 import { sha256Hex } from "../events/append";
 import type { AppBindings } from "../platform/bindings";
 import { prepareGenericPaidActivationStatements } from "./entitlements";
@@ -293,6 +294,7 @@ export async function applyCommercePaymentEvent(input: ApplyCommercePaymentEvent
   if (decision === "paid_exact") {
     const result = await fulfillExactPayment(env, attempt, eventId, claimToken, evidence);
     if (result.state === "paid_exact") await tryRecordFirstPaidFulfilled({ env, orderId: attempt.orderId, shopId: attempt.shopId });
+    if (result.processed && result.state === "paid_exact") void fireAutomationTriggers(env, { aggregateReference: `order:${attempt.orderId}`, refs: { orderId: attempt.orderId }, shopId: attempt.shopId, triggerType: "order.paid" }).catch(() => {});
     return result;
   }
   if (decision === "pending" || decision === "terminal_unpaid") {
@@ -304,6 +306,7 @@ export async function applyCommercePaymentEvent(input: ApplyCommercePaymentEvent
       env.PLATFORM_DB.prepare(`UPDATE payment_attempts SET state = ?, provider_status = ?, updated_at = ? WHERE id = ? AND shop_id = ? AND (state IN ('creating', 'pending', 'error') OR (state = 'terminal_unpaid' AND ? = 'terminal_unpaid')) AND ${claimedEventGuard()}`).bind(decision, decision === "terminal_unpaid" ? "FAILED" : "PENDING", now, attempt.id, attempt.shopId, decision, ...claimedEventBindings(attempt, eventId, claimToken)),
       env.PLATFORM_DB.prepare(`UPDATE payment_events SET normalized_state = ?, process_result = 'no_fulfillment', processing_token = NULL, processing_started_at = NULL, processed_at = ? WHERE id = ? AND integration_id = ? AND processing_token = ? AND processed_at IS NULL AND EXISTS (SELECT 1 FROM payment_attempts WHERE id = ? AND shop_id = ? AND state = ?) AND ${claimedEventGuard()}`).bind(decision, now, eventId, attempt.integrationId, claimToken, attempt.id, attempt.shopId, decision, ...claimedEventBindings(attempt, eventId, claimToken)),
     ]);
+    if (decision === "terminal_unpaid" && (results[0]?.meta.changes ?? 0) === 1) void fireAutomationTriggers(env, { aggregateReference: `order:${attempt.orderId}`, refs: { orderId: attempt.orderId, reason: "terminal_unpaid" }, shopId: attempt.shopId, triggerType: "payment.failed" }).catch(() => {});
     if ((results[0]?.meta.changes ?? 0) === 1 && (results[1]?.meta.changes ?? 0) === 1) return { processed: true, state: decision };
     if (await hasClaimedReferenceConflict(env, attempt, eventId, claimToken)) {
       const state = await markException(env, attempt, "inconsistent", eventId, claimToken, { ...evidence, referenceConflict: true });
@@ -315,5 +318,6 @@ export async function applyCommercePaymentEvent(input: ApplyCommercePaymentEvent
     return { processed: false, state };
   }
   const state = await markException(env, attempt, decision, eventId, claimToken, evidence);
+  if (state === decision) void fireAutomationTriggers(env, { aggregateReference: `order:${attempt.orderId}`, refs: { orderId: attempt.orderId, reason: decision }, shopId: attempt.shopId, triggerType: "payment.failed" }).catch(() => {});
   return { processed: state === decision, state };
 }

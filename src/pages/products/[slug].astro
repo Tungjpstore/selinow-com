@@ -1,10 +1,10 @@
 ---
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
 import StorefrontLayout from "../../layouts/StorefrontLayout.astro";
+import Detail from "../../components/storefront/templates/Detail.astro";
 import { isAppError } from "../../lib/core/errors";
 import { getBindings } from "../../lib/platform/bindings";
 import { canonicalRedirectFor, getStorefrontProduct, resolveStorefrontShop, type StorefrontProduct, type StorefrontShop } from "../../lib/storefront/store";
-import { formatMoney, stockLabel } from "../../lib/storefront/view";
 import { createStorefrontTranslator } from "../../lib/i18n/catalogs/storefront";
 import { normalizeSupportedLocale } from "../../lib/i18n/locale";
 import { schemaPrice } from "../../lib/seo";
@@ -12,24 +12,24 @@ import { schemaPrice } from "../../lib/seo";
 const env = getBindings();
 let shop: StorefrontShop | null = null;
 let product: StorefrontProduct | null = null;
+let related: StorefrontProduct[] = [];
+let promotions: Awaited<ReturnType<typeof getStorefrontProduct>>["promotions"] = [];
 try {
   shop = await resolveStorefrontShop(Astro.request, env);
   const canonical = canonicalRedirectFor(Astro.request, shop);
   if (canonical !== null) return Astro.redirect(canonical.toString(), 308);
-  if (shop.access === "live" && Astro.params.slug) product = await getStorefrontProduct(env, shop, Astro.params.slug);
+  if (shop.access === "live" && Astro.params.slug) {
+    const detail = await getStorefrontProduct(env, shop, Astro.params.slug);
+    product = detail.product;
+    related = detail.related;
+    promotions = detail.promotions;
+  }
 } catch (error) { if (!isAppError(error)) throw error; }
 if (shop === null || (shop.access === "live" && product === null)) Astro.response.status = 404;
 if (shop?.access === "live" && product) Astro.response.headers.set("X-Storefront-Cacheable", "1");
 else Astro.response.headers.set("Cache-Control", "private, no-store, max-age=0");
 const locale = Astro.locals.locale ?? normalizeSupportedLocale(shop?.defaultLocale ?? env.DEFAULT_LOCALE);
 const t = createStorefrontTranslator(locale);
-const policyLinks = shop === null ? [] : [
-  shop.publicDetails.refundPolicyUrl === null ? null : { href: shop.publicDetails.refundPolicyUrl, label: t("storefront.policy.refund") },
-  shop.publicDetails.termsUrl === null ? null : { href: shop.publicDetails.termsUrl, label: t("storefront.policy.terms") },
-  shop.publicDetails.privacyUrl === null ? null : { href: shop.publicDetails.privacyUrl, label: t("storefront.policy.privacy") },
-].filter((link): link is { href: string; label: string } => link !== null);
-const defaultVariant = product?.variants.find((variant) => variant.stockState !== "out_of_stock") ?? product?.variants[0];
-const hasPurchasableVariant = product?.variants.some((variant) => variant.stockState !== "out_of_stock") ?? false;
 const productUnavailable = shop?.access === "live" && product === null;
 const pageTitle = product
   ? `${product.title} — ${shop?.name ?? "Selinow"}`
@@ -56,52 +56,19 @@ const productStructuredData = product && shop
     })),
   }
   : undefined;
+const isBookingProduct = product?.variants.some((variant) => variant.durationMinutes !== undefined) ?? false;
+const hasPromoClock = promotions.some((promotion) => promotion.endsAt !== null);
+const wantsVoucherChips = shop?.template.id === "bustle" && promotions.length > 0;
 ---
 
 {shop && <StorefrontLayout shop={shop} title={pageTitle} noindex={!product} abuseReportProductSlug={product?.slug} structuredData={productStructuredData}>
-  {product ? <section class="product-detail">
-    <div class="product-detail-visual" aria-hidden="true">{product.title.slice(0, 1).toUpperCase()}</div>
-    <div class="product-detail-copy">
-      <a class="back-link" href="/">{t("storefront.product.back")}</a>
-      <h1>{product.title}</h1>
-      <p class="description">{product.description || t("storefront.product.description_fallback")}</p>
-      <div id="product-refresh-status" class="product-refresh-status" data-product-slug={product.slug} data-product-version={product.version} role="status" aria-live="polite" hidden></div>
-      <div class="variant-list" role="radiogroup" aria-label={t("storefront.product.variant_aria")}>
-        {product.variants.map((variant) => <label class="variant-option">
-          <input type="radio" name="variant" value={variant.id} checked={variant.id === defaultVariant?.id} disabled={variant.stockState === "out_of_stock"} data-min={variant.minPerOrder} data-max={variant.maxPerOrder} data-price-minor={variant.priceMinor} data-stock-state={variant.stockState} data-version={variant.version} />
-          <span><strong>{variant.title}</strong><small>{stockLabel(variant.stockState, variant.availableStock, locale)}</small></span>
-          <strong>{formatMoney(variant.priceMinor, variant.currency, locale)}</strong>
-        </label>)}
-      </div>
-      <p id="variant-selection-status" class="selinow-sr-only" role="status" aria-live="polite"></p>
-      <div class="detail-actions">
-        <label class="selinow-sr-only" for="detail-quantity">{t("storefront.product.quantity")}</label>
-        <input id="detail-quantity" type="number" min={defaultVariant?.minPerOrder ?? 1} max={defaultVariant?.maxPerOrder ?? 1} value={defaultVariant?.minPerOrder ?? 1} inputmode="numeric" aria-label={t("storefront.product.quantity")} aria-describedby="detail-quantity-help" />
-        <button id="detail-add" class="store-button" type="button" disabled={!hasPurchasableVariant}>{hasPurchasableVariant ? t("storefront.product.add") : t("storefront.product.sold_out")}</button>
-      </div>
-      <p id="detail-quantity-help" class="field-help">{t("storefront.product.quantity_help")}</p>
-      <ul class="product-trust-list" aria-label={t("storefront.product.order_info_aria")}>
-        <li>{t("storefront.product.trust_price")}</li>
-        <li>{t("storefront.product.trust_states")}</li>
-      </ul>
-      <section class="storefront-policy-panel" aria-labelledby="delivery-heading">
-        <div>
-          <p class="storefront-policy-kicker">{t("storefront.product.delivery_kicker")}</p>
-          <h2 id="delivery-heading">{t("storefront.product.delivery_heading")}</h2>
-          <p>{shop.publicDetails.deliveryText}</p>
-        </div>
-        <div>
-          <p class="storefront-policy-kicker">{t("storefront.product.support_kicker")}</p>
-          <p>{shop.publicDetails.support.label}</p>
-          <nav class="store-policy-links" aria-label={t("storefront.product.policy_aria")}>
-            <a href={shop.publicDetails.support.href ?? "#store-support"} rel={shop.publicDetails.support.href?.startsWith("https://") ? "noreferrer" : undefined}>{t("storefront.contact")}</a>
-            {policyLinks.map((link) => <a href={link.href} rel="noreferrer">{link.label}</a>)}
-          </nav>
-        </div>
-      </section>
-    </div>
-  </section> : productUnavailable ? <section class="safe-state"><div class="state-number">404</div><div><h1>{t("storefront.product.missing_title")}</h1><p>{t("storefront.product.missing_detail", { shop: shop.name })}</p><a class="store-button safe-state-action" href="/">{t("storefront.product.missing_action")}</a></div></section> : <section class="safe-state"><div class="state-number">—</div><div><h1>{shop.access === "coming_soon" ? t("storefront.state.coming_soon.title") : t("storefront.state.suspended.title")}</h1><p>{shop.access === "coming_soon" ? t("storefront.state.coming_soon.detail") : t("storefront.product.paused_detail")}</p></div></section>}
+  {product ? <div data-detail-track={product.slug} data-detail-title={product.title}><Detail locale={locale} product={product} promotions={promotions} related={related} shop={shop} /></div> : productUnavailable ? <section class="safe-state"><div class="state-number">404</div><div><h1>{t("storefront.product.missing_title")}</h1><p>{t("storefront.product.missing_detail", { shop: shop.name })}</p><a class="store-button safe-state-action" href="/">{t("storefront.product.missing_action")}</a></div></section> : <section class="safe-state"><div class="state-number">—</div><div><h1>{shop.access === "coming_soon" ? t("storefront.state.coming_soon.title") : t("storefront.state.suspended.title")}</h1><p>{shop.access === "coming_soon" ? t("storefront.state.coming_soon.detail") : t("storefront.product.paused_detail")}</p></div></section>}
   {product && <script src="../../scripts/storefront/product-detail.ts"></script>}
+  {product && product.images.length > 1 && <script src="../../scripts/storefront/gallery.ts"></script>}
+  {product && hasPromoClock && <script src="../../scripts/storefront/promo-countdown.ts"></script>}
+  {product && wantsVoucherChips && <script src="../../scripts/storefront/voucher-copy.ts"></script>}
+  {product && isBookingProduct && <script src="../../scripts/storefront/slot-picker-inline.ts"></script>}
 </StorefrontLayout>}
 
 {shop === null && <PlatformLayout title={t("storefront.product.not_found_title")} noindex><main class="platform-shell error-page"><div><h1>404</h1><p>{t("storefront.product.not_found_detail")}</p></div></main></PlatformLayout>}
+<script src="../../scripts/storefront/tm4-merchandising.ts"></script>

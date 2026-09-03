@@ -1,35 +1,120 @@
 ---
 import { ONBOARDING_PRODUCT_PRESETS } from "../../../lib/onboarding/presets";
+import type { StorefrontVertical } from "../../../lib/storefront/templates";
+import Icon from "../../console/Icon.astro";
 
 type Props = {
   defaultCurrency?: string;
+  initialVertical?: string;
 };
 
-const { defaultCurrency = "VND" } = Astro.props;
+const { defaultCurrency = "VND", initialVertical = "digital" } = Astro.props;
+
+const activeVertical: StorefrontVertical = initialVertical === "physical" || initialVertical === "booking" ? initialVertical : "digital";
+
+// Presets are vertical-scoped (OB-A2): each selling category only offers its
+// own samples. One map powers the client swap when the seller changes
+// category in step 1.
+const presetsMap: Record<StorefrontVertical, typeof ONBOARDING_PRODUCT_PRESETS> = {
+  booking: ONBOARDING_PRODUCT_PRESETS.filter((preset) => preset.vertical === "booking"),
+  digital: ONBOARDING_PRODUCT_PRESETS.filter((preset) => preset.vertical === "digital"),
+  physical: ONBOARDING_PRODUCT_PRESETS.filter((preset) => preset.vertical === "physical"),
+};
+const initialPresets = presetsMap[activeVertical];
+
+// Per-vertical copy + form defaults; applied server-side for the initial
+// vertical and re-applied by the client on category change (OB-A3).
+const productConfig: Record<StorefrontVertical, {
+  customDescDefault: string;
+  customDescPlaceholder: string;
+  customTitleDefault: string;
+  customTitlePlaceholder: string;
+  fulfillmentLabel: string;
+  fulfillmentOptions: Array<{ label: string; value: string }>;
+  heroDesc: string;
+  heroTitle: string;
+  presetsSublabel: string;
+  priceDefault: number;
+  submitLabel: string;
+}> = {
+  booking: {
+    customDescDefault: "Buổi tư vấn 1-1 kéo dài 60 phút qua video call về chiến lược bán hàng số, đặt lịch theo khung giờ bạn chọn.",
+    customDescPlaceholder: "Thời lượng, phạm vi công việc, kết quả nhận được...",
+    customTitleDefault: "Tư Vấn 1-1 Trực Tuyến (60 phút)",
+    customTitlePlaceholder: "Ví dụ: Buổi tư vấn 1-1, Khóa học trực tuyến...",
+    fulfillmentLabel: "Hình thức xác nhận & hoàn thành",
+    fulfillmentOptions: [{ label: "📅 Khách đặt lịch — xác nhận và hoàn thành thủ công", value: "manual" }],
+    heroDesc: "Chọn mẫu dịch vụ có sẵn hoặc tự tạo với giá và mô tả; khách đặt lịch trực tiếp trên trang của bạn.",
+    heroTitle: "Thêm Dịch vụ Đầu tiên",
+    presetsSublabel: "Chọn một mẫu dưới đây để tự động điền giá và mô tả dịch vụ:",
+    priceDefault: 500000,
+    submitLabel: "Tiếp Tục: Kết Nối Thanh Toán",
+  },
+  digital: {
+    customDescDefault: "Khóa kích hoạt bản quyền Windows 11 Pro Retail vĩnh viễn, nhận key và kích hoạt ngay.",
+    customDescPlaceholder: "Thời hạn, quyền lợi và bảo hành...",
+    customTitleDefault: "Windows 11 Pro Retail Bản Quyền",
+    customTitlePlaceholder: "Ví dụ: Windows 11 Pro Bản Quyền, Netflix 1 Tháng...",
+    fulfillmentLabel: "Hình thức giao hàng",
+    fulfillmentOptions: [
+      { label: "⚡ Giao License Key / Mã thẻ tự động 24/7", value: "license_key" },
+      { label: "📁 Giao thủ công (Tài khoản / Link tải / Liên hệ)", value: "manual" },
+    ],
+    heroDesc: "Chọn nhanh một mẫu sản phẩm bán chạy có sẵn (được cấu hình sẵn giá, mô tả và kho key) hoặc tự tạo sản phẩm của riêng bạn.",
+    heroTitle: "Thêm Sản phẩm Đầu tiên",
+    presetsSublabel: "Chọn một mẫu dưới đây để tự động điền giá, mô tả & nạp key thử nghiệm:",
+    priceDefault: 199000,
+    submitLabel: "Tiếp Tục: Quản Lý Kho Key",
+  },
+  physical: {
+    customDescDefault: "Áo thun cotton 100% form regular unisex, in ấn theo thiết kế riêng, giao toàn quốc.",
+    customDescPlaceholder: "Chất liệu, kích cỡ, chính sách đổi trả...",
+    customTitleDefault: "Áo Thun Local Brand Unisex",
+    customTitlePlaceholder: "Ví dụ: Áo thun local brand, Ốp lưng điện thoại...",
+    fulfillmentLabel: "Hình thức giao hàng",
+    fulfillmentOptions: [{ label: "🚚 Giao hàng vận chuyển — xử lý từng đơn thủ công", value: "manual" }],
+    heroDesc: "Chọn mẫu sản phẩm vật lý có sẵn hoặc tự tạo với giá, mô tả và hình thức giao hàng.",
+    heroTitle: "Thêm Sản phẩm Đầu tiên",
+    presetsSublabel: "Chọn một mẫu dưới đây để tự động điền giá và mô tả sản phẩm:",
+    priceDefault: 250000,
+    submitLabel: "Tiếp Tục: Kết Nối Thanh Toán",
+  },
+};
+const config = productConfig[activeVertical];
 ---
 
-<div class="onboarding-step-pane" data-step-pane="product" hidden>
-  <div class="step-intro-header">
-    <span class="step-num-badge">BƯỚC 02/04</span>
-    <h2>Thêm Sản phẩm Đầu tiên</h2>
-    <p>Chọn nhanh một mẫu sản phẩm phổ biến hoặc tự tạo sản phẩm theo ý bạn trong 30 giây.</p>
+<div class="onboarding-step-pane" data-step-pane="product" data-product-config={JSON.stringify(productConfig)} data-presets-map={JSON.stringify(presetsMap)} data-active-vertical={activeVertical}>
+  <!-- 3D Hero Banner -->
+  <div class="step-hero-card">
+    <div class="hero-content">
+      <span class="hero-step-pill">BƯỚC 2 / 5</span>
+      <h2 data-product-hero-title>{config.heroTitle}</h2>
+      <p data-product-hero-desc>{config.heroDesc}</p>
+    </div>
+    <div class="hero-image-wrap">
+      <img src="/illustrations/onboarding-product.jpg" alt="" class="hero-illustration" width="130" height="130" />
+    </div>
   </div>
 
   <!-- Mode Switcher -->
-  <div class="product-mode-tabs" role="tablist">
+  <div class="product-mode-tabs" role="tablist" aria-label="Chế độ tạo sản phẩm">
     <button type="button" class="mode-tab active" data-product-mode="preset" role="tab" aria-selected="true">
-      <span>✨ Chọn Mẫu Có Sẵn (1-Click)</span>
+      <Icon name="zap" size={16} />
+      <span>Chọn Mẫu Có Sẵn (Khuyên Dùng)</span>
     </button>
     <button type="button" class="mode-tab" data-product-mode="custom" role="tab" aria-selected="false">
-      <span>✏️ Tự Nhập Sản Phẩm Mới</span>
+      <Icon name="plus" size={16} />
+      <span>Tự Nhập Sản Phẩm Mới</span>
     </button>
   </div>
 
-  <!-- Presets Grid -->
+  <!-- Presets Grid — renders only the active category's samples -->
   <div class="presets-section" data-presets-container>
-    <p class="section-sublabel">Chọn một mẫu dưới đây để tự động điền giá, mô tả & key mẫu:</p>
-    <div class="presets-grid">
-      {ONBOARDING_PRODUCT_PRESETS.map((preset, index) => (
+    <div class="presets-header-row">
+      <p class="section-sublabel" data-presets-sublabel>{config.presetsSublabel}</p>
+    </div>
+    <div class="presets-grid" data-presets-grid>
+      {initialPresets.map((preset, index) => (
         <button
           type="button"
           class={`preset-card ${index === 0 ? "selected" : ""}`}
@@ -40,15 +125,14 @@ const { defaultCurrency = "VND" } = Astro.props;
           data-preset-icon={preset.icon}
           data-preset-fulfillment={preset.fulfillmentType}
           data-preset-desc={preset.description}
-          data-preset-sample-keys={JSON.stringify(preset.sampleKeys)}
         >
-          <span class="preset-icon">{preset.icon}</span>
+          <span class="preset-icon"><Icon name={preset.icon} size={22} /></span>
           <div class="preset-details">
             <strong class="preset-title">{preset.title}</strong>
             <span class="preset-price">{preset.priceMinor.toLocaleString("vi-VN")} {preset.currency}</span>
-            <small class="preset-type">
-              {preset.fulfillmentType === "license_key" ? "🔑 Tự động giao key" : "📁 Giao thủ công"}
-            </small>
+            <span class="preset-type-badge">
+              {preset.fulfillmentType === "license_key" ? "⚡ Giao key tự động" : preset.vertical === "booking" ? "📅 Dịch vụ đặt lịch" : "🚚 Giao hàng thủ công"}
+            </span>
           </div>
           <span class="preset-badge-check">✓</span>
         </button>
@@ -66,8 +150,8 @@ const { defaultCurrency = "VND" } = Astro.props;
         type="text"
         minlength="2"
         maxlength="120"
-        placeholder="Ví dụ: Windows 11 Pro Bản Quyền, Netflix 1 Tháng..."
-        value="Windows 11 Pro Retail Bản Quyền"
+        placeholder={config.customTitlePlaceholder}
+        value={config.customTitleDefault}
         required
         data-input-product-title
       />
@@ -82,17 +166,18 @@ const { defaultCurrency = "VND" } = Astro.props;
         min="0"
         step="1000"
         placeholder="199000"
-        value="199000"
+        value={config.priceDefault}
         required
         data-input-product-price
       />
     </div>
 
     <div class="form-group">
-      <label for="product-fulfillment-select">Hình thức giao hàng <span class="required-star">*</span></label>
+      <label for="product-fulfillment-select" data-fulfillment-label>{config.fulfillmentLabel}</label>
       <select id="product-fulfillment-select" name="fulfillmentType" data-input-product-fulfillment>
-        <option value="license_key" selected>🔑 Giao License Key / Mã thẻ tự động</option>
-        <option value="manual">📁 Giao thủ công (Tài khoản / Link tải / Liên hệ)</option>
+        {config.fulfillmentOptions.map((option) => (
+          <option value={option.value} selected={option.value === config.fulfillmentOptions[0]?.value}>{option.label}</option>
+        ))}
       </select>
     </div>
 
@@ -103,18 +188,18 @@ const { defaultCurrency = "VND" } = Astro.props;
         name="description"
         rows="2"
         maxlength="500"
-        placeholder="Thời hạn, quyền lợi và bảo hành..."
+        placeholder={config.customDescPlaceholder}
         data-input-product-desc
-      >Khóa kích hoạt bản quyền Windows 11 Pro Retail vĩnh viễn, nhận key và kích hoạt ngay.</textarea>
+      >{config.customDescDefault}</textarea>
     </div>
   </form>
 
-  <div class="step-actions split-actions">
+  <div class="step-actions split-actions full-width">
     <button type="button" class="btn-secondary-back" data-step-back="store">
       ← Quay lại
     </button>
     <button type="button" class="btn-primary-next" data-step-submit="product">
-      <span data-btn-label>Tiếp Tục: Nhập Kho Key</span>
+      <span data-btn-label data-product-submit-label>{config.submitLabel}</span>
       <span class="btn-arrow" aria-hidden="true">→</span>
     </button>
   </div>
@@ -122,168 +207,229 @@ const { defaultCurrency = "VND" } = Astro.props;
 
 <style>
   .onboarding-step-pane {
-    display: flex;
+    display: none;
     flex-direction: column;
-    gap: 20px;
-    animation: fadeInSlide 0.3s ease;
+    gap: 24px;
   }
 
-  .step-intro-header {
+  .onboarding-step-pane.is-active {
+    display: flex;
+  }
+
+  /* 3D Hero Card */
+  .step-hero-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 24px 28px;
+    border-radius: var(--sln-console-radius-container, 16px);
+    background: linear-gradient(135deg, #FFFFFF 0%, #F5F3FF 100%);
+    border: 2px solid var(--sln-soft-border);
+    box-shadow: 0 4px 20px rgba(124, 106, 240, 0.06);
+  }
+
+  .hero-content {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
 
-  .step-num-badge {
+  .hero-step-pill {
     align-self: flex-start;
     padding: 3px 10px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-primary);
-    color: var(--sln-action-primary);
+    border-radius: var(--sln-console-radius-pill, 999px);
+    background: var(--sln-soft-accent-strong);
+    color: #FFFFFF;
     font-size: 11px;
-    font-weight: 750;
-    letter-spacing: 0.08em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
   }
 
-  .step-intro-header h2 {
+  .hero-content h2 {
     margin: 0;
-    font-size: clamp(22px, 3.5vw, 28px);
-    font-weight: 750;
-    color: var(--sln-text-primary);
-    letter-spacing: -0.03em;
+    font-size: clamp(20px, 3vw, 24px);
+    font-weight: 700;
+    color: #101828;
+    letter-spacing: -0.02em;
   }
 
-  .step-intro-header p {
+  .hero-content p {
     margin: 0;
-    font-size: 14px;
-    color: var(--sln-text-secondary);
+    font-size: 13.5px;
     line-height: 1.5;
+    color: #475467;
   }
 
-  /* Mode Switcher */
+  .hero-image-wrap {
+    flex-shrink: 0;
+  }
+
+  .hero-illustration {
+    border-radius: 12px;
+    object-fit: cover;
+    box-shadow: 0 4px 12px rgba(124, 106, 240, 0.12);
+  }
+
+  /* Mode Tabs */
   .product-mode-tabs {
     display: flex;
-    background: var(--sln-bg-subtle);
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-pill);
-    padding: 3px;
-    align-self: flex-start;
+    gap: 8px;
+    background: #F2F4F7;
+    padding: 4px;
+    border-radius: 12px;
+    border: 2px solid var(--sln-soft-border);
   }
 
   .mode-tab {
-    padding: 8px 16px;
-    border-radius: var(--sln-radius-pill);
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
     border: none;
+    border-radius: 9px;
     background: transparent;
-    color: var(--sln-text-secondary);
-    font-size: 13px;
-    font-weight: 650;
+    color: #475467;
+    font-size: 13.5px;
+    font-weight: 600;
     cursor: pointer;
     transition: all 0.15s ease;
   }
 
+  .mode-tab:hover {
+    color: #101828;
+  }
+
   .mode-tab.active {
-    background: var(--sln-bg-surface);
-    color: var(--sln-action-primary);
-    box-shadow: var(--sln-shadow-xs);
+    background: #FFFFFF;
+    color: var(--sln-soft-accent);
+    box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+  }
+
+  /* Presets Section */
+  .presets-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 
   .section-sublabel {
-    margin: 0 0 12px;
+    margin: 0;
     font-size: 13px;
-    color: var(--sln-text-muted);
+    color: #475467;
+    font-weight: 500;
   }
 
-  /* Presets Grid */
   .presets-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 12px;
   }
 
   .preset-card {
     position: relative;
     display: flex;
+    flex-direction: column;
     align-items: flex-start;
     gap: 12px;
-    padding: 14px;
-    border: 1.5px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-lg);
-    background: var(--sln-bg-surface);
-    text-align: left;
+    padding: 16px;
+    border: 2px solid var(--sln-soft-border);
+    border-radius: 14px;
+    background: #FFFFFF;
+    text-align: start;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.18s ease;
   }
 
   .preset-card:hover {
-    border-color: var(--sln-border-strong);
-    background: var(--sln-bg-subtle);
+    border-color: var(--sln-soft-border-strong);
+    background: var(--sln-soft-surface);
     transform: translateY(-1px);
   }
 
   .preset-card.selected {
-    border-color: var(--sln-action-primary);
-    background: color-mix(in srgb, var(--sln-action-primary) 4%, var(--sln-bg-surface));
-    box-shadow: 0 0 0 1px var(--sln-action-primary);
+    border-color: var(--sln-soft-accent);
+    background: var(--sln-soft-tint);
+    box-shadow: 0 0 0 1px var(--sln-soft-accent), 0 4px 12px rgba(124, 106, 240, 0.1);
   }
 
   .preset-icon {
-    font-size: 24px;
-    line-height: 1;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: var(--sln-soft-tint);
+    color: var(--sln-soft-accent);
   }
 
   .preset-details {
-    flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    min-width: 0;
+    gap: 4px;
+    width: 100%;
   }
 
   .preset-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
-    color: var(--sln-text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    color: #101828;
+    line-height: 1.35;
   }
 
   .preset-price {
-    font-size: 13px;
-    font-weight: 750;
-    color: var(--sln-state-success);
+    font-size: 13.5px;
+    font-weight: 800;
+    color: var(--sln-soft-accent);
+    font-variant-numeric: tabular-nums;
   }
 
-  .preset-type {
+  .preset-type-badge {
+    align-self: flex-start;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #F2F4F7;
+    color: #475467;
     font-size: 11px;
-    color: var(--sln-text-muted);
+    font-weight: 600;
+  }
+
+  .preset-card.selected .preset-type-badge {
+    background: var(--sln-soft-tint);
+    color: var(--sln-soft-accent);
   }
 
   .preset-badge-check {
+    position: absolute;
+    top: 12px;
+    inset-inline-end: 12px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--sln-soft-accent);
+    color: #FFFFFF;
     display: grid;
     place-items: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    border: 1.5px solid var(--sln-border-strong);
-    color: transparent;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 800;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: all 0.18s ease;
   }
 
   .preset-card.selected .preset-badge-check {
-    background: var(--sln-action-primary);
-    border-color: var(--sln-action-primary);
-    color: var(--sln-white);
+    opacity: 1;
+    transform: scale(1);
   }
 
-  /* Form */
+  /* Form Elements */
   .step-form-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 16px;
-    margin-top: 4px;
+    gap: 20px;
   }
 
   .form-group {
@@ -298,84 +444,99 @@ const { defaultCurrency = "VND" } = Astro.props;
 
   label {
     font-size: 13px;
-    font-weight: 650;
-    color: var(--sln-text-primary);
+    font-weight: 600;
+    color: #344054;
   }
 
   .required-star {
-    color: var(--sln-state-danger);
+    color: #E02424;
   }
 
-  input[type="text"], input[type="number"], select, textarea {
+  input, select, textarea {
     width: 100%;
-    min-height: 46px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-md);
+    border: 2px solid var(--sln-soft-border);
+    border-radius: var(--sln-console-radius, 8px);
+    background: #FFFFFF;
     padding: 10px 14px;
-    background: var(--sln-bg-surface);
-    color: var(--sln-text-primary);
     font-size: 14px;
-    outline: none;
-  }
-
-  textarea {
-    min-height: 72px;
-    resize: vertical;
-    line-height: 1.45;
+    color: #101828;
+    transition: all 0.15s ease;
   }
 
   input:focus, select:focus, textarea:focus {
-    border-color: var(--sln-focus-ring);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-focus-ring) 20%, transparent);
+    outline: none;
+    border-color: var(--sln-soft-accent);
+    box-shadow: 0 0 0 3px rgba(124, 106, 240, 0.15);
   }
 
-  /* Actions */
+  /* Action Buttons */
   .step-actions {
     display: flex;
     align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+
+  .split-actions {
     justify-content: space-between;
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid var(--sln-border-default);
   }
 
   .btn-secondary-back {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 18px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-bg-surface);
-    color: var(--sln-text-secondary);
-    font-size: 13px;
+    padding: 12px 22px;
+    border-radius: 999px;
+    background: #FFFFFF;
+    border: 2px solid var(--sln-soft-border);
+    color: #344054;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
+    transition: all 0.15s ease;
   }
 
   .btn-secondary-back:hover {
-    background: var(--sln-bg-subtle);
-    color: var(--sln-text-primary);
+    background: #F9FAFB;
+    border-color: #98A2B3;
   }
 
   .btn-primary-next {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-height: 48px;
-    padding: 12px 24px;
+    padding: 12px 28px;
+    border-radius: 999px;
+    background: var(--sln-soft-accent);
+    color: #FFFFFF;
     border: none;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-action-primary);
-    color: var(--sln-white);
-    font-size: 14px;
+    font-size: 14.5px;
     font-weight: 700;
     cursor: pointer;
-    transition: background 0.15s, transform 0.1s;
+    box-shadow: 0 4px 16px rgba(124, 106, 240, 0.35);
+    transition: all 0.18s ease;
   }
 
   .btn-primary-next:hover {
-    background: var(--sln-action-primary-hover);
-    transform: translateX(2px);
+    background: var(--sln-soft-accent-strong);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(124, 106, 240, 0.45);
+  }
+
+  @media (max-width: 768px) {
+    .step-hero-card {
+      flex-direction: column-reverse;
+      text-align: center;
+      padding: 20px 16px;
+    }
+
+    .hero-step-pill {
+      align-self: center;
+    }
+
+    .presets-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .step-form-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

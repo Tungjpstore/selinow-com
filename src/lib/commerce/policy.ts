@@ -4,9 +4,13 @@ import { matchSupportedLocale, type SupportedLocale } from "../i18n/locale";
 export type CartItemInput = { quantity: number; variantId: string };
 
 /** Mixed automatic/manual carts have no provider-neutral fulfillment state. */
-export function assertSupportedFulfillmentComposition(lines: readonly { fulfillmentType: "license_key" | "manual" }[]): void {
+export function assertSupportedFulfillmentComposition(lines: readonly { deliveryMode?: "digital" | "shipping"; fulfillmentType: "license_key" | "manual" }[]): void {
   const modes = new Set(lines.map((line) => line.fulfillmentType));
   if (modes.size > 1) throw new AppError("mixed_fulfillment_unsupported", 409, ["split_cart_by_fulfillment"]);
+  // Physical (shipping) and digital lines ship and settle differently; one
+  // cart stays in one delivery mode.
+  const deliveryModes = new Set(lines.map((line) => line.deliveryMode ?? "digital"));
+  if (deliveryModes.size > 1) throw new AppError("mixed_fulfillment_unsupported", 409, ["split_cart_by_fulfillment"]);
 }
 
 export function parseCartItems(value: unknown): CartItemInput[] {

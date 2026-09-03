@@ -2,9 +2,14 @@ import { expect, test, type ConsoleMessage, type Page } from "@playwright/test";
 
 const routes = [
   { heading: "Browser Gate", headingLevel: 1, path: "/app" },
-  { heading: "Mở cửa hàng,", headingLevel: 1, path: "/onboarding" },
+  { heading: "Thêm Sản phẩm Đầu tiên", headingLevel: 2, path: "/onboarding" },
   { heading: "Sản phẩm", headingLevel: 1, path: "/app/products" },
-  { heading: "Lỗi luôn được nhìn thấy.", headingLevel: 1, path: "/admin/operations" },
+  {
+    expectedStatus: 403,
+    heading: "Quản trị viên nền tảng bắt buộc phải bật xác thực hai yếu tố",
+    headingLevel: 1,
+    path: "/admin/operations",
+  },
 ] as const;
 
 function redactRuntimeMessage(value: string): string {
@@ -26,6 +31,7 @@ async function authenticateThroughVisibleMagicLink(page: Page, projectName: stri
   await page.goto("/login");
   await expect(page).toHaveTitle("Đăng nhập — Selinow");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Đăng nhập để tiếp tục");
+  await page.getByRole("tab", { name: "Không cần mật khẩu" }).click();
   await page
     .getByRole("textbox", { name: "Email", exact: true })
     .fill(`browser-gate-${projectName}@selinow.invalid`);
@@ -111,13 +117,28 @@ async function expectStablePage(page: Page, expectedWidth: number): Promise<void
     bodyScrollWidth: document.body.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
     innerWidth: window.innerWidth,
+    offenders: [...document.querySelectorAll<HTMLElement>("body *")]
+      .map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          className: typeof element.className === "string" ? element.className.slice(0, 120) : "",
+          left: Math.round(bounds.left),
+          right: Math.round(bounds.right),
+          tagName: element.tagName,
+          width: Math.round(bounds.width),
+        };
+      })
+      .filter((element) => element.left < -1 || element.right > window.innerWidth + 1)
+      .slice(0, 12),
     scrollWidth: document.documentElement.scrollWidth,
   }));
 
   expect(geometry.innerWidth).toBe(expectedWidth);
   expect(geometry.clientWidth).toBeLessThanOrEqual(geometry.innerWidth);
-  expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth);
-  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.innerWidth);
+  expect(geometry.bodyScrollWidth, JSON.stringify(geometry.offenders, null, 2))
+    .toBeLessThanOrEqual(geometry.innerWidth);
+  expect(geometry.scrollWidth, JSON.stringify(geometry.offenders, null, 2))
+    .toBeLessThanOrEqual(geometry.innerWidth);
 }
 
 async function expectSyntheticRtlRender(page: Page, expectedWidth: number): Promise<void> {
@@ -155,7 +176,7 @@ async function expectSyntheticRtlRender(page: Page, expectedWidth: number): Prom
   expect(state.alertBorderInlineStart).toBe("3px");
   expect(state.alertBorderInlineEnd).toBe("1px");
   expect(state.toastInlineEnd).toBe("16px");
-  expect(state.indicatorInlineStart).toBe("-14px");
+  expect(state.indicatorInlineStart).toBe("0px");
 }
 
 test("authenticated representative surfaces remain stable across the PromptOS viewport matrix", async ({ page }, testInfo) => {
@@ -163,7 +184,14 @@ test("authenticated representative surfaces remain stable across the PromptOS vi
   if (typeof expectedWidth !== "number") throw new Error("authenticated_viewport_matrix_width_missing");
 
   const runtimeIssues: string[] = [];
+  let expectedErrorStatus: number | null = null;
   page.on("console", (message) => {
+    if (
+      expectedErrorStatus !== null
+      && message.type() === "error"
+      && message.text().includes("Failed to load resource")
+      && message.text().includes(String(expectedErrorStatus))
+    ) return;
     recordConsoleIssue(runtimeIssues, message);
   });
   page.on("pageerror", (error) => {
@@ -184,20 +212,24 @@ test("authenticated representative surfaces remain stable across the PromptOS vi
   });
 
   for (const route of routes) {
+    expectedErrorStatus = "expectedStatus" in route ? route.expectedStatus : null;
     const response = await page.goto(route.path);
     expect(response).not.toBeNull();
+    expect(response?.status()).toBe("expectedStatus" in route ? route.expectedStatus : 200);
     expectPrivateHeaders(response?.headers() ?? {});
     expect(await page.evaluate(() => location.pathname)).toBe(route.path);
-    await expect(page.getByRole("heading", { level: route.headingLevel })).toContainText(route.heading);
+    await expect(page.getByRole("heading", { level: route.headingLevel }).filter({ hasText: route.heading }).first())
+      .toContainText(route.heading);
     if (route.path === "/onboarding" && expectedWidth <= 390) {
-      await expect(page.locator("[data-mobile-progress-completed]")).toHaveText("1");
-      await expect(page.locator("[data-mobile-step-status]")).toBeVisible();
-      await expect(page.locator(".mobile-step-selector summary")).toContainText("Các bước thiết lập cửa hàng");
-      await expect(page.locator(".step-rail")).toBeHidden();
+      await expect(page.locator(".progress-track")).toHaveAttribute("aria-valuenow", "25");
+      await expect(page.locator('[data-step-pane="product"]')).toBeVisible();
+      await expect(page.locator('[data-step-pane="store"]')).toBeHidden();
     }
     await expectStablePage(page, expectedWidth);
     expect(runtimeIssues, runtimeIssues.join("\n")).toEqual([]);
   }
+
+  expectedErrorStatus = null;
 
   await expectSyntheticRtlRender(page, expectedWidth);
 

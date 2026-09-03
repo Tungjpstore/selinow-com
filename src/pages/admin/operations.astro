@@ -8,7 +8,7 @@ import { listActiveIncidents } from "../../lib/operations/incidents";
 import { listEncryptionRotationRuns } from "../../lib/operations/rotation-operator";
 import { listAdminAuditEntries, listAdminOrderInvestigations } from "../../lib/operations/admin-investigations";
 import { getBindings } from "../../lib/platform/bindings";
-import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { describePlatformAdminAccess, type PlatformAdminAccess } from "../../lib/tenants/store";
 import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
 import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
 
@@ -23,16 +23,22 @@ Astro.response.headers.set("Pragma", "no-cache");
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
 Astro.response.headers.set("Referrer-Policy", "no-referrer");
 
-let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let adminAccess: PlatformAdminAccess = { kind: "not_admin" };
 let roleLookupFailed = false;
 try {
-  adminRole = await getPlatformAdminRole({ env, userId: auth.userId });
+  adminAccess = await describePlatformAdminAccess({ env, userId: auth.userId });
 } catch {
   roleLookupFailed = true;
 }
+const adminRole = adminAccess.kind === "authorized" ? adminAccess.role : null;
+const twoFactorRequired = adminAccess.kind === "two_factor_required";
 
 if (roleLookupFailed) Astro.response.status = 503;
 else if (adminRole === null) Astro.response.status = 403;
+
+const deadLettersCursorValue = Astro.url.searchParams.get("deadLettersCursor");
+const deletionsCursorValue = Astro.url.searchParams.get("deletionsCursor");
+const incidentsCursorValue = Astro.url.searchParams.get("incidentsCursor");
 
 let deadLetterOverview: Awaited<ReturnType<typeof listActiveDeadLetters>> = { hasMore: false, items: [], limit: 100 };
 let deletionOverview: Awaited<ReturnType<typeof listActiveDeletionRequests>> = { canOperate: false, requests: [] };
@@ -45,9 +51,9 @@ let investigationUnavailable = false;
 if (adminRole !== null) {
   try {
     [deadLetterOverview, deletionOverview, incidentOverview, rotationOverview] = await Promise.all([
-      listActiveDeadLetters({ env }),
-      listActiveDeletionRequests({ env, userId: auth.userId }),
-      listActiveIncidents({ env }),
+      listActiveDeadLetters({ cursor: deadLettersCursorValue, env }),
+      listActiveDeletionRequests({ cursor: deletionsCursorValue, env, userId: auth.userId }),
+      listActiveIncidents({ cursor: incidentsCursorValue, env }),
       listEncryptionRotationRuns({ env, userId: auth.userId }),
     ]);
   } catch {
@@ -73,8 +79,23 @@ if (adminRole !== null) {
   }
 }
 
-const deadLetters = deadLetterOverview.items;
-const incidents = incidentOverview.items;
+// Triage ordering: re-sort only the fetched page so critical/high and
+// open/failed records surface first without changing the keyset query.
+const severityTriageRank: Readonly<Record<string, number>> = { critical: 0, high: 1, medium: 2, low: 3 };
+const incidentTriageRank = (item: { severity: string; status: string }): number =>
+  (severityTriageRank[item.severity] ?? 4) * 10 + (item.status === "open" ? 0 : item.status === "acknowledged" ? 1 : 2);
+const deadLetterTriageRank: Readonly<Record<string, number>> = { open: 0, retry_requested: 1, acknowledged: 2 };
+const deletionTriageRank: Readonly<Record<string, number>> = { failed: 0, blocked: 1, retention_hold: 2, processing: 3 };
+
+const deadLetters = [...deadLetterOverview.items].sort(
+  (a, b) => (deadLetterTriageRank[a.status] ?? 3) - (deadLetterTriageRank[b.status] ?? 3),
+);
+const incidents = [...incidentOverview.items].sort(
+  (a, b) => incidentTriageRank(a) - incidentTriageRank(b),
+);
+const deletionRequests = [...deletionOverview.requests].sort(
+  (a, b) => (deletionTriageRank[a.status] ?? 4) - (deletionTriageRank[b.status] ?? 4),
+);
 const canReplayDeadLetters = adminRole === "owner" || adminRole === "risk";
 const providerIncidents = incidents.filter((item) => ["provider_degraded", "outbox_failure"].includes(item.category));
 const safeDate = (value: string): Date | null => {
@@ -98,6 +119,17 @@ const age = (value: string): string => {
 const visibilityCount = (hasMore: boolean, count: number): string => hasMore
   ? t("admin.operations.visibility.truncated_count", { count })
   : t("admin.operations.visibility.complete_count", { count });
+
+// Builds pagination links that keep every other query parameter intact.
+const operationsHref = (overrides: Record<string, string | null>): string => {
+  const params = new URLSearchParams(Astro.url.searchParams);
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === null || value === "") params.delete(key);
+    else params.set(key, value);
+  }
+  const query = params.toString();
+  return query === "" ? "/admin/operations" : `/admin/operations?${query}`;
+};
 
 const incidentCategoryLabels: Record<string, string> = {
   backup_failure: t("admin.operations.incident.category.backup_failure"),
@@ -202,6 +234,12 @@ const operationsClientCopy = {
   "payos.fingerprint_copy_failed": t("admin.operations.client.payos.fingerprint_copy_failed"),
   "payos.fingerprint_creating": t("admin.operations.client.payos.fingerprint_creating"),
 };
+// Security failure copy travels through a dedicated channel so the island can
+// map rate-limit and two-factor codes without growing its fixed copy contract.
+const operationsSecurityCopy = {
+  admin_two_factor_required: t("admin.operations.client.error.admin_two_factor_required"),
+  rate_limited: t("admin.security.rate_limited"),
+};
 ---
 
 <AdminLayout activePath="/admin/operations" email={auth.email} role={adminRole} title={t("admin.operations.title")}>
@@ -214,6 +252,16 @@ const operationsClientCopy = {
       code={t("admin.common.request", { requestId: Astro.locals.requestId })}
       actionHref="/admin/operations"
       actionLabel={t("admin.common.reload")}
+    />
+  ) : twoFactorRequired ? (
+    <AdminState
+      tone="warning"
+      eyebrow={t("admin.operations.forbidden.eyebrow")}
+      title={t("admin.security.two_factor_required")}
+      description={t("admin.security.two_factor_required_hint")}
+      code="admin_two_factor_required"
+      actionHref="/app/security"
+      actionLabel={t("admin.ops.client.error.two_factor_link")}
     />
   ) : adminRole === null ? (
     <AdminState
@@ -236,7 +284,7 @@ const operationsClientCopy = {
       actionLabel={t("admin.common.reload")}
     />
   ) : (
-    <div data-operations-root data-copy={JSON.stringify(operationsClientCopy)} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-busy="false">
+    <div data-operations-root data-copy={JSON.stringify(operationsClientCopy)} data-security-copy={JSON.stringify(operationsSecurityCopy)} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} aria-busy="false">
       <header class="admin-page-header">
         <div>
           <p class="admin-eyebrow">{t("admin.operations.header.eyebrow")}</p>
@@ -246,7 +294,7 @@ const operationsClientCopy = {
         <div class="admin-summary" aria-label={t("admin.operations.header.summary_aria")}>
           <div><span>{t("admin.operations.summary.dead_letter")}</span><strong>{visibilityCount(deadLetterOverview.hasMore, deadLetters.length)}</strong></div>
           <div><span>{t("admin.operations.summary.incident")}</span><strong>{visibilityCount(incidentOverview.hasMore, incidents.length)}</strong></div>
-          <div><span>{t("admin.operations.summary.deletion_active")}</span><strong>{deletionOverview.requests.length}</strong></div>
+          <div><span>{t("admin.operations.summary.deletion_active")}</span><strong>{deletionRequests.length}</strong></div>
         </div>
       </header>
 
@@ -260,7 +308,7 @@ const operationsClientCopy = {
       <section class="admin-section" aria-labelledby="integration-title">
         <div class="admin-section-heading">
           <div><h2 id="integration-title">{t("admin.operations.title")}</h2><p>{t("admin.operations.contract.description")}</p></div>
-          <span>{t("admin.operations.records", { count: incidents.length + deadLetters.length + deletionOverview.requests.length })}</span>
+          <span>{t("admin.operations.records", { count: incidents.length + deadLetters.length + deletionRequests.length })}</span>
         </div>
         <div class="admin-records">
           <ul class="admin-contract-list">
@@ -348,14 +396,14 @@ const operationsClientCopy = {
       <section class="admin-section" aria-labelledby="deletion-title">
         <div class="admin-section-heading">
           <div><h2 id="deletion-title">{t("admin.operations.deletion.title")}</h2><p>{t("admin.operations.deletion.description")}</p></div>
-          <span>{t("admin.operations.deletion.count", { count: deletionOverview.requests.length })}</span>
+          <span>{t("admin.operations.deletion.count", { count: deletionRequests.length })}</span>
         </div>
-        {deletionOverview.requests.length === 0 ? (
+        {deletionRequests.length === 0 ? (
           <div class="admin-empty"><strong>{t("admin.operations.deletion.empty_title")}</strong><span>{t("admin.operations.deletion.empty_description")}</span></div>
         ) : (
           <div class="admin-records" role="list" aria-label={t("admin.operations.deletion.list_aria")}>
             <div class="admin-record-header" aria-hidden="true"><span>{t("admin.operations.column.impact")}</span><span>{t("admin.operations.column.shop")}</span><span>{t("admin.operations.column.safe_code")}</span><span>{t("admin.operations.column.evidence")}</span><span>{t("admin.operations.column.age")}</span><span>{t("admin.operations.column.control")}</span><span>{t("admin.operations.column.state")}</span></div>
-            {deletionOverview.requests.map((item) => {
+            {deletionRequests.map((item) => {
               const state = deletionStatusLabels[item.status] ?? { label: t("admin.common.safe_state"), tone: "neutral" as const };
               const hasLegalHold = item.legalHoldUntil !== null;
               const action = hasLegalHold ? "release" : "set";
@@ -409,6 +457,15 @@ const operationsClientCopy = {
               );
             })}
           </div>
+        )}
+        {(deletionOverview.hasMore === true || deletionsCursorValue !== null) && (
+          <nav class="admin-pagination" aria-label={t("admin.operations.pagination.aria")}>
+            <span>{visibilityCount(deletionOverview.hasMore === true, deletionRequests.length)}</span>
+            <div>
+              {deletionsCursorValue !== null && <a class="admin-button" href={operationsHref({ deletionsCursor: null })}>{t("admin.investigations.first")}</a>}
+              {deletionOverview.nextCursor != null && <a class="admin-button admin-button-primary" href={operationsHref({ deletionsCursor: deletionOverview.nextCursor })}>{t("admin.investigations.next")}</a>}
+            </div>
+          </nav>
         )}
       </section>
 
@@ -483,7 +540,7 @@ const operationsClientCopy = {
           <div><h2 id="dead-letter-title">{t("admin.operations.dead_letter.title")}</h2><p>{t("admin.operations.dead_letter.description")}</p></div>
           <span>{visibilityCount(deadLetterOverview.hasMore, deadLetters.length)}</span>
         </div>
-        {deadLetterOverview.hasMore && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: deadLetterOverview.limit })}</div>}
+        {deadLetterOverview.hasMore && deadLetterOverview.nextCursor === null && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: deadLetterOverview.limit })}</div>}
         {deadLetters.length === 0 ? (
           <div class="admin-empty"><strong>{t("admin.operations.dead_letter.empty_title")}</strong><span>{t("admin.operations.dead_letter.empty_description")}</span></div>
         ) : (
@@ -531,6 +588,15 @@ const operationsClientCopy = {
             })}
           </div>
         )}
+        {(deadLetterOverview.nextCursor !== null || deadLettersCursorValue !== null) && (
+          <nav class="admin-pagination" aria-label={t("admin.operations.pagination.aria")}>
+            <span>{visibilityCount(deadLetterOverview.hasMore, deadLetters.length)}</span>
+            <div>
+              {deadLettersCursorValue !== null && <a class="admin-button" href={operationsHref({ deadLettersCursor: null })}>{t("admin.investigations.first")}</a>}
+              {deadLetterOverview.nextCursor !== null && <a class="admin-button admin-button-primary" href={operationsHref({ deadLettersCursor: deadLetterOverview.nextCursor ?? null })}>{t("admin.investigations.next")}</a>}
+            </div>
+          </nav>
+        )}
       </section>
 
       <section class="admin-section" aria-labelledby="incident-title">
@@ -538,7 +604,7 @@ const operationsClientCopy = {
           <div><h2 id="incident-title">{t("admin.operations.incident.title")}</h2><p>{t("admin.operations.incident.description")}</p></div>
           <span>{visibilityCount(incidentOverview.hasMore, incidents.length)}</span>
         </div>
-        {incidentOverview.hasMore && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: incidentOverview.limit })}</div>}
+        {incidentOverview.hasMore && incidentOverview.nextCursor === null && <div class="admin-feedback" data-tone="warning" role="status">{t("admin.operations.visibility.truncated_warning", { limit: incidentOverview.limit })}</div>}
         {incidents.length === 0 ? (
           <div class="admin-empty"><strong>{t("admin.operations.incident.empty_title")}</strong><span>{t("admin.operations.incident.empty_description")}</span></div>
         ) : (
@@ -582,6 +648,15 @@ const operationsClientCopy = {
               );
             })}
           </div>
+        )}
+        {(incidentOverview.nextCursor !== null || incidentsCursorValue !== null) && (
+          <nav class="admin-pagination" aria-label={t("admin.operations.pagination.aria")}>
+            <span>{visibilityCount(incidentOverview.hasMore, incidents.length)}</span>
+            <div>
+              {incidentsCursorValue !== null && <a class="admin-button" href={operationsHref({ incidentsCursor: null })}>{t("admin.investigations.first")}</a>}
+              {incidentOverview.nextCursor !== null && <a class="admin-button admin-button-primary" href={operationsHref({ incidentsCursor: incidentOverview.nextCursor ?? null })}>{t("admin.investigations.next")}</a>}
+            </div>
+          </nav>
         )}
       </section>
     </div>

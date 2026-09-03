@@ -9,15 +9,20 @@ import { URL } from "node:url";
 const PROVIDER_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/u;
 const WEBHOOK_SECRET = /^(?:whsec_)?[A-Za-z0-9_+/=-]{16,512}$/u;
 const REQUIRED_DODO_WEBHOOK_EVENTS = Object.freeze([
+  "payment.cancelled",
   "payment.failed",
+  "payment.processing",
   "payment.succeeded",
   "subscription.active",
   "subscription.cancelled",
   "subscription.expired",
   "subscription.failed",
   "subscription.on_hold",
+  "subscription.paused",
   "subscription.plan_changed",
   "subscription.renewed",
+  "subscription.unpaused",
+  "subscription.update_payment_method",
   "subscription.updated",
 ]);
 const WEBHOOK_EVENT_FIELDS = Object.freeze(["events", "event_types", "eventTypes", "filter_types", "filterTypes"]);
@@ -122,11 +127,13 @@ function assertExistingWebhookUsable(row) {
   for (const field of WEBHOOK_EVENT_FIELDS) {
     if (!Object.prototype.hasOwnProperty.call(webhook, field)) continue;
     const declaredEvents = webhook[field];
-    // Providers may represent an unrestricted event contract as null.
+    // Dodo represents an unrestricted "all events" contract as null or an
+    // empty list, depending on the endpoint API version.
     if (declaredEvents === null) continue;
     if (!Array.isArray(declaredEvents) || declaredEvents.some((eventType) => typeof eventType !== "string")) {
       throw new Error("dodo_webhook_provider_response_invalid");
     }
+    if (declaredEvents.length === 0) continue;
     const eventTypes = new Set(declaredEvents);
     if (REQUIRED_DODO_WEBHOOK_EVENTS.some((eventType) => !eventTypes.has(eventType))) {
       throw new Error("dodo_webhook_event_contract_incomplete");

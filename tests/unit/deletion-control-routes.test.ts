@@ -6,6 +6,7 @@ const dependencies = vi.hoisted(() => ({
   cancel: vi.fn(),
   env: {},
   legalHold: vi.fn(),
+  rateGuard: vi.fn(),
   recentAuth: vi.fn(),
   requireCsrf: vi.fn(),
 }));
@@ -13,6 +14,9 @@ const dependencies = vi.hoisted(() => ({
 vi.mock("../../src/lib/auth/session", () => ({
   requireCsrfSession: dependencies.requireCsrf,
   requireRecentAuth: dependencies.recentAuth,
+}));
+vi.mock("../../src/lib/http/admin-rate-limit", () => ({
+  guardAdminMutationRate: dependencies.rateGuard,
 }));
 vi.mock("../../src/lib/platform/bindings", () => ({ getBindings: () => dependencies.env }));
 vi.mock("../../src/lib/operations/deletion", () => ({
@@ -52,8 +56,10 @@ function context(input: { body: Record<string, unknown>; params: Record<string, 
 beforeEach(() => {
   dependencies.cancel.mockReset();
   dependencies.legalHold.mockReset();
+  dependencies.rateGuard.mockReset();
   dependencies.recentAuth.mockReset();
   dependencies.requireCsrf.mockReset();
+  dependencies.rateGuard.mockResolvedValue(undefined);
   dependencies.requireCsrf.mockResolvedValue(auth);
   dependencies.cancel.mockResolvedValue({ id: DELETION_REQUEST_ID, status: "canceled", version: 4 });
   dependencies.legalHold.mockResolvedValue({
@@ -78,7 +84,7 @@ describe("deletion control route security", () => {
       url: `https://app.example.test/api/app/shops/${SHOP_PUBLIC_ID}/deletion/cancel`,
     }) as never);
     expect(dependencies.requireCsrf).toHaveBeenCalledOnce();
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.cancel).toHaveBeenCalledWith(expect.objectContaining({
       deletionRequestId: DELETION_REQUEST_ID,
       expectedVersion: 3,
@@ -102,7 +108,7 @@ describe("deletion control route security", () => {
       url: `https://app.example.test/api/admin/operations/deletions/${DELETION_REQUEST_ID}/legal-hold`,
     }) as never);
     expect(dependencies.requireCsrf).toHaveBeenCalledOnce();
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.legalHold).toHaveBeenCalledWith(expect.objectContaining({
       action: "set",
       actorUserId: "user-a",

@@ -1,13 +1,17 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
   getDefaultMarketingMarket,
   getMarketingAvailableMarkets,
   getMarketingPlans,
+  getMarketingPlanPriceForMarket,
   getMarketingPreviewPlans,
   getMarketingStructuredOffers,
   isMarketingPricingReady,
   type MarketingPlan,
+  type MarketingPrice,
 } from "../../src/lib/storefront/marketing";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 
@@ -15,7 +19,7 @@ function plan(code: string, prices: MarketingPlan["prices"] = []): MarketingPlan
   return { code, features: {}, limits: {}, name: code, prices };
 }
 
-function price(marketCode: "vn" | "global", providerPriceRef: string) {
+function price(marketCode: "vn" | "global", providerPriceRef: string): MarketingPrice {
   return {
     amountMinor: marketCode === "vn" ? 99_000 : 500,
     currency: marketCode === "vn" ? "VND" : "USD",
@@ -36,10 +40,10 @@ describe("marketing pricing runtime truthfulness", () => {
             bind() { return this; },
             all: () => Promise.resolve(sql.includes("plan_prices")
               ? { results: [
-                { code: "starter", marketCode: "vn", currency: "VND", amountMinor: 99_000, interval: "month", providerCode: "dodo", providerPriceRef: "pending:dodo:starter:vn:month:v1" },
-                { code: "starter", marketCode: "global", currency: "USD", amountMinor: 500, interval: "month", providerCode: "dodo", providerPriceRef: "price_starter_global" },
-                { code: "pro", marketCode: "vn", currency: "VND", amountMinor: 299_000, interval: "month", providerCode: "dodo", providerPriceRef: "pending:dodo:pro:vn:month:v1" },
-                { code: "pro", marketCode: "global", currency: "USD", amountMinor: 1_500, interval: "month", providerCode: "dodo", providerPriceRef: "price_pro_global" },
+                { id: "starter-vn", planCode: "starter", effectiveFrom: "2026-08-01T00:00:00.000Z", version: 1, marketCode: "vn", currency: "VND", amountMinor: 99_000, interval: "month", providerCode: "dodo", providerPriceRef: "pending:dodo:starter:vn:month:v1" },
+                { id: "starter-global", planCode: "starter", effectiveFrom: "2026-08-01T00:00:00.000Z", version: 1, marketCode: "global", currency: "USD", amountMinor: 500, interval: "month", providerCode: "dodo", providerPriceRef: "price_starter_global" },
+                { id: "pro-vn", planCode: "pro", effectiveFrom: "2026-08-01T00:00:00.000Z", version: 1, marketCode: "vn", currency: "VND", amountMinor: 299_000, interval: "month", providerCode: "dodo", providerPriceRef: "pending:dodo:pro:vn:month:v1" },
+                { id: "pro-global", planCode: "pro", effectiveFrom: "2026-08-01T00:00:00.000Z", version: 1, marketCode: "global", currency: "USD", amountMinor: 1_500, interval: "month", providerCode: "dodo", providerPriceRef: "price_pro_global" },
               ] }
               : { results: [
                 { code: "starter", name: "Starter", featureFlagsJson: "{}", limitsJson: "{}" },
@@ -53,7 +57,7 @@ describe("marketing pricing runtime truthfulness", () => {
 
     const plans = await getMarketingPlans(env);
 
-    expect(calls[1]).toContain("provider_code = 'dodo'");
+    expect(calls[1]).toContain("plan_prices.effective_from <= ?");
     expect(plans.flatMap((entry) => entry.prices ?? [])).toEqual([
       expect.objectContaining({ marketCode: "global", currency: "USD" }),
       expect.objectContaining({ marketCode: "global", currency: "USD" }),
@@ -68,6 +72,8 @@ describe("marketing pricing runtime truthfulness", () => {
     expect(plans.every((entry) => (entry.prices ?? []).length === 0)).toBe(true);
     expect(isMarketingPricingReady(plans)).toBe(false);
     expect(getMarketingStructuredOffers(plans)).toEqual([]);
+    expect(plans.find((entry) => entry.code === "starter")?.features.premiumStorefrontTemplates).toBe(false);
+    expect(plans.find((entry) => entry.code === "pro")?.features.premiumStorefrontTemplates).toBe(true);
   });
 
   it("rejects an in-memory pending provider reference before structured-data generation", () => {
@@ -90,6 +96,21 @@ describe("marketing pricing runtime truthfulness", () => {
     expect(getDefaultMarketingMarket(plans, "vi-VN")).toBe("global");
     expect(isMarketingPricingReady(plans)).toBe(true);
     expect(getMarketingStructuredOffers(plans)).toHaveLength(2);
+  });
+
+  it("selects exactly one published offer for the server-rendered market", () => {
+    const starter = plan("starter", [
+      price("vn", "price_starter_vn"),
+      price("global", "price_starter_global"),
+    ]);
+
+    expect(getMarketingPlanPriceForMarket(starter, "vn")).toMatchObject({ currency: "VND", marketCode: "vn" });
+    expect(getMarketingPlanPriceForMarket(starter, "global")).toMatchObject({ currency: "USD", marketCode: "global" });
+    expect(getMarketingPlanPriceForMarket(plan("starter", [price("vn", "pending:dodo:starter:vn")]), "vn")).toBeNull();
+    expect(getMarketingPlanPriceForMarket(plan("starter", [price("vn", "price-a"), price("vn", "price-b")]), "vn")).toBeNull();
+
+    const pricingPage = readFileSync("src/pages/pricing.astro", "utf8");
+    expect(pricingPage).toContain("hidden={price.marketCode !== defaultMarket}");
   });
 
   it("blocks structured offers when plans do not share a complete market", () => {

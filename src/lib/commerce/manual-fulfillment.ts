@@ -1,4 +1,5 @@
 import { tryRecordFirstPaidFulfilled } from "../analytics/activation";
+import { fireAutomationTriggers } from "../automation/rules/dispatcher";
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import type { AppBindings } from "../platform/bindings";
@@ -574,6 +575,7 @@ export async function completeManualFulfillment(input: {
       const created = await findByIdempotency({ env: input.env, idempotencyKeyHash, requestHash, shopId });
       if (created === null) throw new AppError("manual_fulfillment_execution_failed", 500);
       await tryRecordFirstPaidFulfilled({ env: input.env, orderId: target.orderId, shopId });
+      void fireAutomationTriggers(input.env, { aggregateReference: `order:${target.orderId}`, refs: { orderId: target.orderId }, shopId, triggerType: "order.fulfilled" }).catch(() => {});
       return { ...created, replayed: false };
     }
   } catch (error) {

@@ -11,8 +11,10 @@ type StorefrontDraft = {
   primaryColor: string;
   seoDescription: string;
   seoTitle: string;
+  sections?: unknown;
   showExactStock: boolean;
   supportText: string;
+  templateId: string;
 };
 
 type StorefrontSettingsResponse = {
@@ -53,7 +55,8 @@ if (builder !== null) {
         || typeof draft.seoDescription !== "string"
         || typeof draft.seoTitle !== "string"
         || typeof draft.showExactStock !== "boolean"
-        || typeof draft.supportText !== "string") return null;
+        || typeof draft.supportText !== "string"
+        || typeof draft.templateId !== "string") return null;
       return {
         accentColor: draft.accentColor,
         announcement: typeof draft.announcement === "string" ? draft.announcement : "",
@@ -65,8 +68,10 @@ if (builder !== null) {
         primaryColor: draft.primaryColor,
         seoDescription: draft.seoDescription,
         seoTitle: draft.seoTitle,
+        sections: draft.sections,
         showExactStock: draft.showExactStock,
         supportText: draft.supportText,
+        templateId: draft.templateId,
       };
     } catch {
       return null;
@@ -114,8 +119,19 @@ if (builder !== null) {
       }
     };
 
+    const readSectionsField = (fallback: unknown): unknown => {
+      try {
+        const raw = field("sections")?.value ?? "";
+        if (raw.trim() === "") return fallback;
+        return JSON.parse(raw) as unknown;
+      } catch {
+        return fallback;
+      }
+    };
+
     const readDraft = (): StorefrontDraft => {
       const stockField = field("showExactStock");
+      const templateField = builder.querySelector<HTMLInputElement>('[data-field="templateId"]:checked');
       return {
         accentColor: field("accentColor")?.value.toUpperCase() ?? saved.accentColor,
         announcement: field("announcement")?.value.trim() ?? "",
@@ -127,9 +143,17 @@ if (builder !== null) {
         primaryColor: field("primaryColor")?.value.toUpperCase() ?? saved.primaryColor,
         seoDescription: field("seoDescription")?.value.trim() ?? "",
         seoTitle: field("seoTitle")?.value.trim() ?? "",
+        sections: readSectionsField(saved.sections),
         showExactStock: stockField instanceof HTMLInputElement ? stockField.checked : saved.showExactStock,
         supportText: field("supportText")?.value.trim() ?? "",
+        templateId: templateField?.value ?? saved.templateId,
       };
+    };
+
+    const setTemplateSelection = (templateId: string): void => {
+      builder.querySelectorAll<HTMLInputElement>('[data-field="templateId"]').forEach((radio) => {
+        radio.checked = radio.value === templateId;
+      });
     };
 
     const setState = (state: string): void => {
@@ -205,6 +229,9 @@ if (builder !== null) {
         root.style.setProperty("--preview-accent", next.accentColor);
         root.style.setProperty("--preview-brand-ink", validation.brand.ink);
         root.style.setProperty("--preview-accent-ink", validation.accent.ink);
+        // Per-template preview skin (CD4): the draft templateId re-skins the
+        // live preview without a round-trip; swift is the unscoped default.
+        root.dataset.templatePreview = next.templateId;
       }
       if (headline !== null) headline.textContent = next.headline || text("headlineFallback");
       if (description !== null) description.textContent = next.description || text("descriptionFallback");
@@ -293,11 +320,13 @@ if (builder !== null) {
 
     undoButton?.addEventListener("click", () => {
       (Object.entries(saved) as Array<[keyof StorefrontDraft, string | boolean]>).forEach(([key, value]) => {
+        if (key === "templateId") return;
         const input = field(key);
         if (input === null) return;
         if (typeof value === "boolean" && input instanceof HTMLInputElement) input.checked = value;
         else if (typeof value === "string") input.value = value;
       });
+      setTemplateSelection(saved.templateId);
       const validation = updateControls(saved);
       contrastWasValid = validation.valid;
       setFeedback(validation.valid ? text("undone") : contrastMessage(validation));
@@ -324,6 +353,7 @@ if (builder !== null) {
           announcement: next.announcement || null,
           expectedVersion: draftVersion,
           logoUrl: next.logoUrl || null,
+          ...(next.sections === undefined || next.sections === null ? {} : { sections: next.sections }),
         });
         saved = next;
         draftVersion = response.settings.version;
@@ -426,6 +456,247 @@ if (builder !== null) {
       });
     });
 
+    // TM1: home layout panel — toggle/reorder universal sections, persist the
+    // full config through the same draft save (hidden input carries the JSON).
+    const sectionStack: HTMLElement | null = builder.querySelector("[data-section-stack]");
+    const sectionNote = builder.querySelector<HTMLElement>("[data-section-note]");
+    const sectionsField = builder.querySelector<HTMLInputElement>('[data-field="sections"]');
+
+    type SectionRowState = { enabled: boolean; type: string };
+
+    const readSectionRows = (): SectionRowState[] => [...(sectionStack?.querySelectorAll<HTMLElement>("[data-section-row]") ?? [])].map((row) => ({
+      enabled: row.dataset.sectionDisabled !== "true",
+      type: row.dataset.sectionRow ?? "",
+    }));
+
+    const readSectionItems = (sectionType: string): Array<Record<string, string>> => {
+      const inputs = [...builder.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(`[data-section-item="${sectionType}"]`)];
+      const byIndex = new Map<number, Record<string, string>>();
+      for (const input of inputs) {
+        const index = Number.parseInt(input.dataset.sectionItemIndex ?? "0", 10);
+        const field = input.dataset.sectionItemField ?? "";
+        const value = input.value.trim();
+        if (!Number.isSafeInteger(index) || field.length === 0) continue;
+        const record = byIndex.get(index) ?? {};
+        if (value.length > 0) record[field] = value;
+        byIndex.set(index, record);
+      }
+      return [...byIndex.entries()]
+        .filter(([, record]) => Object.keys(record).length > 0)
+        .map(([index, record]) => ({ _index: index, ...record }))
+        .sort((left, right) => left._index - right._index)
+        .map(({ _index, ...record }) => {
+          void _index;
+          return record;
+        });
+    };
+
+    const writeSectionsField = (): void => {
+      if (sectionsField === null) return;
+      const rows = readSectionRows();
+      // Persist the FULL stack (native locked rows included) so the config is
+      // self-describing; the server parser bounds and cleans it. Universal
+      // sections carry their merchant-edited item lists in settings.
+      const config = rows
+        .filter((row) => row.enabled)
+        .map((row) => {
+          if (row.type !== "usp" && row.type !== "faq") return { enabled: true, id: `cfg-${row.type}`, settings: {}, type: row.type };
+          const items = readSectionItems(row.type);
+          return { enabled: true, id: `cfg-${row.type}`, settings: items.length > 0 ? { items } : {}, type: row.type };
+        });
+      sectionsField.value = JSON.stringify(config);
+      if (sectionNote !== null) {
+        const anyUniversalEnabled = rows.some((row) => (row.type === "usp" || row.type === "faq") && row.enabled);
+        sectionNote.textContent = anyUniversalEnabled ? "" : text("console.builder.sections.empty_warning");
+      }
+      syncSectionPreview(rows);
+      updateControls(readDraft());
+    };
+
+    const syncSectionPreview = (rows: SectionRowState[]): void => {
+      const usp: HTMLElement | null = builder.querySelector("[data-preview-usp]");
+      const faq: HTMLElement | null = builder.querySelector("[data-preview-faq]");
+      const uspEnabled = rows.some((row) => row.type === "usp" && row.enabled);
+      const faqEnabled = rows.some((row) => row.type === "faq" && row.enabled);
+      if (usp !== null) usp.hidden = !uspEnabled;
+      if (faq !== null) faq.hidden = !faqEnabled;
+    };
+
+    const refreshSectionRowChrome = (): void => {
+      const rows = [...(sectionStack?.querySelectorAll<HTMLElement>("[data-section-row]") ?? [])];
+      const editableRows = rows.filter((row) => row.dataset.sectionRow === "usp" || row.dataset.sectionRow === "faq");
+      for (const [index, row] of editableRows.entries()) {
+        const up = row.querySelector<HTMLButtonElement>('[data-section-move="up"]');
+        const down = row.querySelector<HTMLButtonElement>('[data-section-move="down"]');
+        if (up !== null) up.disabled = index === 0;
+        if (down !== null) down.disabled = index === editableRows.length - 1;
+      }
+    };
+
+    sectionStack?.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const move = target.closest<HTMLButtonElement>("[data-section-move]");
+      if (move !== null) {
+        const direction = move.dataset.sectionMove === "up" ? -1 : 1;
+        const row = move.closest<HTMLElement>("[data-section-row]");
+        if (row !== null) {
+          const editable = [...sectionStack.querySelectorAll<HTMLElement>("[data-section-row]")].filter((candidate) => candidate.dataset.sectionRow === "usp" || candidate.dataset.sectionRow === "faq");
+          const index = editable.indexOf(row);
+          const swapWith: HTMLElement | undefined = editable[index + direction];
+          if (index >= 0 && swapWith !== undefined) {
+            const anchor: Node | null = direction === -1 ? swapWith : swapWith.nextSibling;
+            sectionStack.insertBefore(row, anchor);
+            refreshSectionRowChrome();
+            writeSectionsField();
+          }
+        }
+        return;
+      }
+      const restore = target.closest<HTMLButtonElement>("[data-section-restore]");
+      if (restore !== null) {
+        try {
+          const defaults = JSON.parse(sectionStack.dataset.defaultStack ?? "[]") as Array<{ type: string }>;
+          sectionStack.replaceChildren(...defaults.map((entry) => buildSectionRow(entry.type)));
+        } catch {
+          // Default stack markup is server-rendered; a parse failure here means
+          // the dataset was tampered with — rebuilding from locked rows is fine.
+        }
+        refreshSectionRowChrome();
+        writeSectionsField();
+        if (sectionNote !== null) sectionNote.textContent = text("console.builder.sections.restored");
+        return;
+      }
+    });
+
+    const itemsEditor = builder.querySelector<HTMLElement>("[data-section-items-editor]");
+    itemsEditor?.addEventListener("input", () => {
+      writeSectionsField();
+    });
+
+    sectionStack?.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.hasAttribute("data-section-toggle")) return;
+      const row = target.closest<HTMLElement>("[data-section-row]");
+      if (row !== null) row.dataset.sectionDisabled = target.checked ? "true" : "false";
+      row?.classList.toggle("is-off", !target.checked);
+      writeSectionsField();
+    });
+
+    const buildSectionRow = (type: string): HTMLElement => {
+      // Reuse the server-rendered locked row as the clone source so restored
+      // rows keep exact markup and styles.
+      const source = sectionStack === null ? null : sectionStack.querySelector<HTMLElement>(`[data-section-row="${CSS.escape(type)}"]`);
+      if (source !== null) return source.cloneNode(true) as HTMLElement;
+      const fallback = document.createElement("li");
+      fallback.dataset.sectionRow = type;
+      return fallback;
+    };
+
+    refreshSectionRowChrome();
+    syncSectionPreview(readSectionRows());
+
+    // Shipping methods management (physical vertical, TV5).
+    const shippingList = builder.querySelector<HTMLElement>("[data-shipping-list]");
+    const shippingFeedback = builder.querySelector<HTMLElement>("[data-shipping-feedback]");
+    const shippingCreateButton = builder.querySelector<HTMLButtonElement>("[data-shipping-create]");
+    const shippingNameInput = builder.querySelector<HTMLInputElement>("[data-shipping-name]");
+    const shippingFeeInput = builder.querySelector<HTMLInputElement>("[data-shipping-fee]");
+    const shippingFreeOverInput = builder.querySelector<HTMLInputElement>("[data-shipping-free-over]");
+    type ShippingMethodRow = { feeMinor: number; freeOverMinor: number | null; id: string; name: string; status: string };
+    const shippingCsrf = (): string | null => readCookie(csrfCookieName);
+    const renderShippingMethods = (rows: ShippingMethodRow[]): void => {
+      if (shippingList === null) return;
+      shippingList.replaceChildren();
+      const active = rows.filter((method) => method.status === "active");
+      for (const row of active) {
+        const item = document.createElement("li");
+        const copy = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = row.name;
+        const detail = document.createElement("small");
+        const feeLabel = text("shippingFeeLabel") + ": " + row.feeMinor.toLocaleString("vi-VN");
+        detail.textContent = row.freeOverMinor === null
+          ? feeLabel
+          : feeLabel + " · " + text("shippingFreeOverLabel") + ": " + row.freeOverMinor.toLocaleString("vi-VN");
+        copy.appendChild(name);
+        copy.appendChild(detail);
+        const archive = document.createElement("button");
+        archive.type = "button";
+        archive.className = "sln-button";
+        archive.dataset.variant = "danger";
+        archive.textContent = text("shippingArchive");
+        archive.addEventListener("click", () => { void archiveShippingMethod(row.id); });
+        item.appendChild(copy);
+        item.appendChild(archive);
+        shippingList.appendChild(item);
+      }
+      if (active.length === 0) {
+        const empty = document.createElement("li");
+        const emptyText = document.createElement("small");
+        emptyText.textContent = text("shippingEmpty");
+        empty.appendChild(emptyText);
+        shippingList.appendChild(empty);
+      }
+    };
+    const loadShippingMethods = async (): Promise<void> => {
+      try {
+        const response = await fetch("/api/app/shops/" + shopPublicId + "/shipping-methods", { credentials: "same-origin" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (typeof payload !== "object" || payload === null || !Array.isArray((payload as { methods?: unknown }).methods)) return;
+        renderShippingMethods((payload as { methods: ShippingMethodRow[] }).methods);
+      } catch {
+        // Best-effort panel; the API remains the source of truth.
+      }
+    };
+    const createShippingMethod = async (): Promise<void> => {
+      if (shippingCreateButton === null || shippingNameInput === null || shippingFeeInput === null) return;
+      const name = shippingNameInput.value.trim();
+      const feeMinor = Number(shippingFeeInput.value);
+      const freeOverRaw = shippingFreeOverInput === null ? "" : shippingFreeOverInput.value.trim();
+      if (name === "" || !Number.isSafeInteger(feeMinor) || feeMinor < 0) {
+        if (shippingFeedback !== null) shippingFeedback.textContent = text("shippingInvalid");
+        return;
+      }
+      shippingCreateButton.disabled = true;
+      try {
+        const csrf = shippingCsrf();
+        const response = await fetch("/api/app/shops/" + shopPublicId + "/shipping-methods", {
+          body: JSON.stringify({ feeMinor, freeOverMinor: freeOverRaw === "" ? null : Number(freeOverRaw), name }),
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", ...(csrf === null ? {} : { "X-CSRF-Token": decodeURIComponent(csrf) }) },
+          method: "POST",
+        });
+        if (!response.ok) throw new Error("shipping_create_failed");
+        shippingNameInput.value = "";
+        shippingFeeInput.value = "";
+        if (shippingFreeOverInput !== null) shippingFreeOverInput.value = "";
+        if (shippingFeedback !== null) shippingFeedback.textContent = text("shippingCreated");
+        await loadShippingMethods();
+      } catch {
+        if (shippingFeedback !== null) shippingFeedback.textContent = text("shippingError");
+      } finally {
+        shippingCreateButton.disabled = false;
+      }
+    };
+    const archiveShippingMethod = async (methodId: string): Promise<void> => {
+      try {
+        const csrf = shippingCsrf();
+        const response = await fetch("/api/app/shops/" + shopPublicId + "/shipping-methods/" + methodId, {
+          body: JSON.stringify({ status: "archived" }),
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", ...(csrf === null ? {} : { "X-CSRF-Token": decodeURIComponent(csrf) }) },
+          method: "PATCH",
+        });
+        if (!response.ok) throw new Error("shipping_archive_failed");
+        await loadShippingMethods();
+      } catch {
+        if (shippingFeedback !== null) shippingFeedback.textContent = text("shippingError");
+      }
+    };
+    shippingCreateButton?.addEventListener("click", () => { void createShippingMethod(); });
+    void loadShippingMethods();
     updatePublicationBadge();
     setMobileView("settings");
     const initialValidation = updateControls(saved);

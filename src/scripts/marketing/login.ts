@@ -1,18 +1,19 @@
 import { createSystemTranslator } from "../../lib/i18n";
+import { safeRelativeRedirect } from "../../lib/auth/redirect";
 
-const form = document.querySelector<HTMLFormElement>("[data-login-form]");
-const email = document.querySelector<HTMLInputElement>("[data-login-email]");
-const statusElement = document.querySelector<HTMLElement>("[data-login-status]");
-const submit = document.querySelector<HTMLButtonElement>("[data-login-submit]");
-const submitLabel = document.querySelector<HTMLElement>("[data-login-submit-label]");
-const recovery = document.querySelector<HTMLElement>("[data-login-recovery]");
-const resend = document.querySelector<HTMLButtonElement>("[data-login-resend]");
-const restart = document.querySelector<HTMLButtonElement>("[data-login-restart]");
-const challenge = document.querySelector<HTMLElement>("[data-login-challenge]");
-const turnstileContainer = document.querySelector<HTMLElement>("[data-login-turnstile]");
-const confirmation = document.querySelector<HTMLElement>("[data-login-confirmation]");
-const confirmationDestination = document.querySelector<HTMLElement>("[data-login-confirm-destination]");
-const confirmMagicLink = document.querySelector<HTMLButtonElement>("[data-login-confirm]");
+const form = document.querySelector<HTMLFormElement>("[data-magic-form]");
+const email = document.querySelector<HTMLInputElement>("[data-magic-email]");
+const statusElement = document.querySelector<HTMLElement>("[data-magic-status]");
+const submit = document.querySelector<HTMLButtonElement>("[data-magic-submit]");
+const submitLabel = document.querySelector<HTMLElement>("[data-magic-submit-label]");
+const recovery = document.querySelector<HTMLElement>("[data-magic-recovery]");
+const resend = document.querySelector<HTMLButtonElement>("[data-magic-resend]");
+const restart = document.querySelector<HTMLButtonElement>("[data-magic-restart]");
+const challenge = document.querySelector<HTMLElement>("[data-magic-challenge]");
+const turnstileContainer = document.querySelector<HTMLElement>("[data-magic-turnstile]");
+const confirmation = document.querySelector<HTMLElement>("[data-magic-confirmation]");
+const confirmationDestination = document.querySelector<HTMLElement>("[data-magic-confirm-destination]");
+const confirmMagicLink = document.querySelector<HTMLButtonElement>("[data-magic-confirm]");
 const t = createSystemTranslator(document.documentElement.lang);
 
 const messageKeys: Readonly<Record<string, string>> = {
@@ -142,13 +143,16 @@ function appendLocalDebugLink(value: string): boolean {
     if (linkUrl.origin !== window.location.origin || linkUrl.pathname !== "/login") return false;
     const fragment = new URLSearchParams(linkUrl.hash.slice(1));
     const token = fragment.get("magic");
-    if (linkUrl.search !== "" || token === null || token.length < 32
+    const redirect = linkUrl.searchParams.get("redirect");
+    if ([...linkUrl.searchParams.keys()].some((key) => key !== "redirect")
+      || (redirect !== null && safeRelativeRedirect(redirect, "") !== redirect)
+      || token === null || token.length < 32
       || [...fragment.keys()].some((key) => key !== "magic")) return false;
 
     if (statusElement === null) return false;
     statusElement.replaceChildren(t("auth.login.debug_prefix"));
     const link = document.createElement("a");
-    link.href = `${linkUrl.pathname}${linkUrl.hash}`;
+    link.href = `${linkUrl.pathname}${linkUrl.search}${linkUrl.hash}`;
     link.textContent = t("auth.login.debug_link");
     statusElement.insertAdjacentElement("beforeend", link);
     return true;
@@ -157,7 +161,29 @@ function appendLocalDebugLink(value: string): boolean {
   }
 }
 
+function setAuthMode(mode: string): void {
+  document.querySelectorAll<HTMLElement>("[data-mode-tab]").forEach((tab) => {
+    const active = tab.dataset.modeTab === mode;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll<HTMLElement>("[data-mode-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.modePanel !== mode;
+  });
+}
+
+function setupModeToggle(): void {
+  document.querySelectorAll<HTMLElement>("[data-mode-tab]").forEach((tab) => {
+    tab.addEventListener("click", () => { setAuthMode(tab.dataset.modeTab ?? "password"); });
+  });
+}
+
+function activateMagicMode(): void {
+  setAuthMode("magic");
+}
+
 function showMagicLinkConfirmation(maskedDestination: string): void {
+  activateMagicMode();
   if (form !== null) form.hidden = true;
   if (recovery !== null) recovery.hidden = true;
   if (confirmationDestination !== null) confirmationDestination.textContent = maskedDestination;
@@ -200,7 +226,7 @@ async function consumePendingMagicLink(confirm: boolean): Promise<void> {
     }
     if (body.authenticated === true && body.redirectTo === "/app") {
       pendingMagicToken = null;
-      window.location.assign("/app");
+      window.location.assign(safeRelativeRedirect(new URLSearchParams(window.location.search).get("redirect")));
       return;
     }
     throw new Error("magic_link_response_invalid");
@@ -254,12 +280,14 @@ async function submitLogin(event: SubmitEvent): Promise<void> {
   }
   try {
     const localeQuery = new URLSearchParams({ lang: document.documentElement.lang });
+    const redirect = safeRelativeRedirect(new URLSearchParams(window.location.search).get("redirect"), "");
     const response = await fetch(`/api/auth/magic-link/request?${localeQuery.toString()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         email: data.get("email"),
         displayName: data.get("displayName") || undefined,
+        ...(redirect === "" ? {} : { redirect }),
         ...(typeof turnstileToken === "string" && turnstileToken.length > 0 ? { turnstileToken } : {}),
       }),
     });
@@ -315,9 +343,10 @@ resend?.addEventListener("click", () => { form?.requestSubmit(); });
 restart?.addEventListener("click", restartLogin);
 confirmMagicLink?.addEventListener("click", () => { void consumePendingMagicLink(true); });
 window.addEventListener("hashchange", () => { consumeMagicTokenFromFragment(); });
+setupModeToggle();
 
 if (!consumeMagicTokenFromFragment() && form?.dataset.authenticatedSession === "true") {
-  window.location.replace("/app");
+  window.location.replace(safeRelativeRedirect(new URLSearchParams(window.location.search).get("redirect")));
 }
 
 export {};

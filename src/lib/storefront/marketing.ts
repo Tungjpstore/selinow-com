@@ -1,5 +1,15 @@
 import type { AppBindings } from "../platform/bindings";
 import { BILLING_MARKETS, PUBLIC_PLAN_CATALOG, PUBLIC_PLAN_CODES, type BillingMarketCode, type PublicPlanCode } from "../billing/plan-catalog";
+import {
+  EFFECTIVE_PLAN_OFFER_SQL_PREDICATE,
+  isPublishedProviderPriceReference,
+  isSellablePlanOffer,
+  isSellablePlanOfferProjection,
+  projectLatestSellablePlanOffers,
+  SELLABLE_PUBLIC_PLAN_SQL_PREDICATE,
+  type PlanOfferRevision,
+  type SellablePlanOffer,
+} from "../billing/catalog";
 import { createMarketingTranslator } from "../i18n/catalogs/marketing";
 import { normalizeSupportedLocale } from "../i18n/locale";
 
@@ -32,6 +42,7 @@ export function getMarketingPreviewPlans(): MarketingPlan[] {
         inventory: snapshot.features.inventory,
         manualFulfillment: snapshot.features.manualFulfillment,
         privateDownloads: snapshot.features.privateDownloads,
+        premiumStorefrontTemplates: snapshot.features.premiumStorefrontTemplates,
         sellerPayments: snapshot.features.sellerPayments,
         storefront: snapshot.features.storefront,
         telegram: snapshot.features.telegram,
@@ -63,11 +74,7 @@ export function getMarketingPreviewPlans(): MarketingPlan[] {
   });
 }
 
-export type MarketingPrice = {
-  amountMinor: number;
-  currency: string;
-  interval: string;
-  marketCode: string;
+export type MarketingPrice = SellablePlanOffer & {
   providerCode?: string;
   providerPriceRef?: string;
 };
@@ -89,24 +96,10 @@ function jsonObject(value: string): Record<string, unknown> {
   }
 }
 
-function isPublishedProviderReference(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length >= 3
-    && value.length <= 160
-    && !/^pending:/iu.test(value)
-    && !/\s/u.test(value);
-}
-
 function isRenderableMarketingPrice(price: MarketingPrice): boolean {
-  if (typeof price.marketCode !== "string" || typeof price.currency !== "string" || typeof price.interval !== "string") return false;
-  if (price.providerCode !== undefined && price.providerCode !== "dodo") return false;
-  if (price.providerPriceRef !== undefined && !isPublishedProviderReference(price.providerPriceRef)) return false;
-  const expectedCurrency = price.marketCode === "vn" ? "VND" : price.marketCode === "global" ? "USD" : null;
-  return expectedCurrency !== null
-    && price.currency.toUpperCase() === expectedCurrency
-    && price.interval === "month"
-    && Number.isSafeInteger(price.amountMinor)
-    && price.amountMinor > 0;
+  if (!isSellablePlanOfferProjection(price)) return false;
+  if (price.providerCode === undefined) return price.providerPriceRef === undefined || isPublishedProviderPriceReference(price.providerPriceRef);
+  return isSellablePlanOffer(price);
 }
 
 /** Markets with a complete offer for every public plan. */
@@ -123,6 +116,12 @@ export function getDefaultMarketingMarket(plans: readonly MarketingPlan[], local
   return available.includes(preferred) ? preferred : available[0] ?? preferred;
 }
 
+/** Returns the single public offer for a market, failing closed on ambiguity. */
+export function getMarketingPlanPriceForMarket(plan: MarketingPlan, market: BillingMarketCode): MarketingPrice | null {
+  const matches = (plan.prices ?? []).filter((price) => price.marketCode === market && isRenderableMarketingPrice(price));
+  return matches.length === 1 ? matches[0] ?? null : null;
+}
+
 /** Pricing is ready only when both public plans share at least one active market. */
 export function isMarketingPricingReady(plans: readonly MarketingPlan[]): boolean {
   return plans.length === PUBLIC_PLAN_CODES.length
@@ -135,7 +134,7 @@ export function getMarketingStructuredOffers(plans: readonly MarketingPlan[]): M
   if (!isMarketingPricingReady(plans)) return [];
   const available = new Set(getMarketingAvailableMarkets(plans));
   return plans.flatMap((plan) => (plan.prices ?? [])
-    .filter((price) => available.has(price.marketCode as BillingMarketCode) && isRenderableMarketingPrice(price))
+    .filter((price) => available.has(price.marketCode) && isRenderableMarketingPrice(price))
     .map((price) => ({
       "@type": "Offer" as const,
       category: price.interval,
@@ -148,7 +147,13 @@ export function getMarketingStructuredOffers(plans: readonly MarketingPlan[]): M
 export async function getMarketingPlans(env: AppBindings): Promise<MarketingPlan[]> {
   // The public catalog is intentionally limited to the paid plans. Legacy
   // plan rows remain readable for existing subscriptions but are not offers.
-  const result = await env.PLATFORM_DB.prepare("SELECT code, name, feature_flags_json AS featureFlagsJson, limits_json AS limitsJson FROM plans WHERE is_active = 1 AND is_public = 1 AND code IN ('starter', 'pro') ORDER BY CASE code WHEN 'starter' THEN 1 WHEN 'pro' THEN 2 ELSE 3 END, code").all<{ code: string; featureFlagsJson: string; limitsJson: string; name: string }>();
+  const result = await env.PLATFORM_DB.prepare(`
+    SELECT code, name, feature_flags_json AS featureFlagsJson, limits_json AS limitsJson
+    FROM plans
+    WHERE ${SELLABLE_PUBLIC_PLAN_SQL_PREDICATE}
+      AND code IN ('starter', 'pro')
+    ORDER BY CASE code WHEN 'starter' THEN 1 WHEN 'pro' THEN 2 ELSE 3 END, code
+  `).all<{ code: string; featureFlagsJson: string; limitsJson: string; name: string }>();
   const plans = result.results.map((row) => ({
     code: row.code,
     features: jsonObject(row.featureFlagsJson),
@@ -167,39 +172,25 @@ export async function getMarketingPlans(env: AppBindings): Promise<MarketingPlan
   try {
     const nowIso = new Date().toISOString();
     const prices = await env.PLATFORM_DB.prepare(`
-      SELECT plans.code, plan_prices.market_code AS marketCode,
+      SELECT plan_prices.id, plans.code AS planCode,
+        plan_prices.effective_from AS effectiveFrom, plan_prices.version,
+        plan_prices.market_code AS marketCode,
         plan_prices.currency, plan_prices.amount_minor AS amountMinor,
         plan_prices.interval, plan_prices.provider_code AS providerCode,
         plan_prices.provider_price_ref AS providerPriceRef
       FROM plan_prices
       INNER JOIN plans ON plans.id = plan_prices.plan_id
-      WHERE plans.is_active = 1 AND plans.is_public = 1 AND plans.code IN ('starter', 'pro')
-        AND plan_prices.is_active = 1
-        AND plan_prices.provider_code = 'dodo'
-        AND plan_prices.provider_price_ref NOT LIKE 'pending:%'
-        AND plan_prices.effective_from <= ?
-        AND (plan_prices.effective_to IS NULL OR plan_prices.effective_to > ?)
+      WHERE ${SELLABLE_PUBLIC_PLAN_SQL_PREDICATE}
+        AND plans.code IN ('starter', 'pro')
+        AND plan_prices.market_code IN ('vn', 'global')
+        AND plan_prices.currency IN ('VND', 'USD')
+        AND ${EFFECTIVE_PLAN_OFFER_SQL_PREDICATE}
       ORDER BY plans.code, plan_prices.market_code, plan_prices.currency,
-        plan_prices.effective_from DESC, plan_prices.version DESC
-    `).bind(nowIso, nowIso).all<{ amountMinor: number; code: string; currency: string; interval: string; marketCode: string; providerCode?: string; providerPriceRef?: string }>();
-    const byCode = new Map(prices.results.map((row) => [row.code, [] as MarketingPrice[]]));
-    const seenOffers = new Set<string>();
-    for (const row of prices.results) {
-      const offerKey = `${row.code}:${row.marketCode}:${row.currency}:${row.interval}`;
-      if (seenOffers.has(offerKey)
-        || !byCode.has(row.code)
-        || row.providerCode !== "dodo"
-        || !isPublishedProviderReference(row.providerPriceRef)
-        || !Number.isSafeInteger(row.amountMinor)
-        || row.amountMinor <= 0
-        || typeof row.marketCode !== "string"
-        || typeof row.currency !== "string"
-        || typeof row.interval !== "string"
-        || row.marketCode.length === 0
-        || row.currency.length === 0
-        || row.interval.length === 0) continue;
-      seenOffers.add(offerKey);
-      byCode.get(row.code)?.push({ amountMinor: row.amountMinor, currency: row.currency, interval: row.interval, marketCode: row.marketCode });
+        plan_prices.effective_from DESC, plan_prices.version DESC, plan_prices.id DESC
+    `).bind(nowIso, nowIso).all<PlanOfferRevision>();
+    const byCode = new Map(plans.map((plan) => [plan.code, [] as MarketingPrice[]]));
+    for (const { planCode, ...offer } of projectLatestSellablePlanOffers(prices.results)) {
+      byCode.get(planCode)?.push(offer);
     }
     return plans.map((plan) => ({ ...plan, prices: byCode.get(plan.code) ?? [] }));
   } catch {
@@ -235,6 +226,7 @@ export function planFeatureList(plan: MarketingPlan, locale: unknown = "en"): st
   if (plan.features.customDomain === "addon") features.push(t("marketing.plan.feature.custom_domain_addon"));
   if (plan.features.automation === true) features.push(t("marketing.plan.feature.automation"));
   if (plan.features.privateDownloads === true) features.push(t("marketing.plan.feature.private_downloads"));
+  if (plan.features.premiumStorefrontTemplates === true) features.push(t("marketing.plan.feature.premium_storefront_templates"));
   if (plan.features.apiRead === true) features.push(t("marketing.plan.feature.api_read"));
 
   const products = runtimeLimit(plan.limits.products, t, locale, "marketing.pricing.limit.products");

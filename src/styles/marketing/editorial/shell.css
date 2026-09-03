@@ -1,0 +1,317 @@
+/* ==========================================================================
+   LP Editorial Commerce — shell (LP1, v3 light premium)
+   Cool-white canvas, deep-navy ink, vivid Soft gradient CTAs, crisp bordered
+   cards. All values route through marketing tokens (`--mk-*`, `--sln-*`) —
+   the EX0 spine contract forbids raw Soft hex outside the token files.
+   ========================================================================== */
+
+.landing-page {
+  background:
+    radial-gradient(1100px 520px at 88% -12%, var(--mk-ed-glow), transparent 62%),
+    radial-gradient(900px 460px at -8% 6%, color-mix(in srgb, var(--sln-brand-blue) 12%, transparent), transparent 64%),
+    var(--mk-ed-canvas);
+  color: var(--mk-ed-ink);
+  font-family: var(--mk-font-sans);
+  overflow-x: clip;
+}
+
+.landing-page ::selection {
+  background: var(--mk-ed-accent-strong);
+  color: var(--mk-text-inverse);
+}
+
+/* ── Header restyle (keeps the navigation.ts hooks and markup contract) ── */
+.landing-page .platform-nav {
+  position: sticky;
+  top: 0;
+  z-index: var(--sln-z-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mk-space-6);
+  min-height: var(--mk-header-h);
+  padding-block: var(--mk-space-3);
+  background: color-mix(in srgb, var(--mk-ed-canvas) 82%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--mk-ed-hairline);
+}
+
+.landing-page .platform-nav-desktop {
+  display: flex;
+  align-items: center;
+  gap: var(--mk-space-6);
+  font-size: 14px;
+}
+
+.landing-page .platform-nav-desktop a:not(.nav-cta) {
+  color: var(--mk-ed-ink-soft);
+  text-decoration: none;
+  font-weight: 550;
+  transition: color var(--mk-duration-fast) var(--mk-ease-standard);
+}
+
+.landing-page .platform-nav-desktop a:not(.nav-cta):hover,
+.landing-page .platform-nav-desktop a:not(.nav-cta):focus-visible {
+  color: var(--mk-ed-accent-ink);
+}
+
+.landing-page .platform-language-switcher {
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--mk-ed-ink-muted);
+}
+
+.landing-page .platform-language-switcher a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.landing-page .platform-language-switcher a[aria-current="page"] {
+  color: var(--mk-ed-accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.ed-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-2);
+  padding: 14px 26px;
+  border-radius: var(--mk-radius-pill);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1;
+  text-decoration: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    transform var(--mk-duration-default) var(--mk-ease-spring),
+    box-shadow var(--mk-duration-default) var(--mk-ease-standard),
+    border-color var(--mk-duration-default) var(--mk-ease-standard),
+    color var(--mk-duration-default) var(--mk-ease-standard),
+    filter var(--mk-duration-default) var(--mk-ease-standard);
+}
+
+.ed-button:focus-visible {
+  outline: 3px solid var(--mk-focus);
+  outline-offset: var(--mk-focus-offset);
+}
+
+.ed-button-primary {
+  background: var(--mk-ed-gradient-cta);
+  color: var(--mk-text-inverse);
+  box-shadow:
+    0 1px 0 0 color-mix(in srgb, var(--mk-text-inverse) 24%, transparent) inset,
+    0 14px 34px -14px var(--mk-ed-glow-strong);
+}
+
+.ed-button-primary:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow:
+    0 1px 0 0 color-mix(in srgb, var(--mk-text-inverse) 26%, transparent) inset,
+    0 20px 44px -14px var(--mk-ed-glow-strong);
+}
+
+.ed-button-ghost {
+  background: var(--mk-ed-surface);
+  color: var(--mk-ed-accent-ink);
+  border-color: var(--mk-ed-hairline-strong);
+  box-shadow: var(--mk-shadow-xs);
+}
+
+.ed-button-ghost:hover {
+  border-color: var(--mk-ed-accent-strong);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px -14px var(--mk-ed-glow);
+}
+
+.ed-button-outline {
+  background: color-mix(in srgb, var(--mk-text-inverse) 10%, transparent);
+  color: var(--mk-text-inverse);
+  border-color: color-mix(in srgb, var(--mk-text-inverse) 42%, transparent);
+}
+
+.ed-button-outline:hover {
+  border-color: var(--mk-text-inverse);
+  transform: translateY(-2px);
+}
+
+.landing-page .platform-nav .nav-cta {
+  padding: 10px 20px;
+  background: var(--mk-ed-gradient-cta);
+  border-radius: var(--mk-radius-pill);
+  color: var(--mk-text-inverse);
+  text-decoration: none;
+  font-weight: 600;
+  box-shadow: 0 10px 26px -12px var(--mk-ed-glow-strong);
+  transition: transform var(--mk-duration-default) var(--mk-ease-spring), filter var(--mk-duration-default) var(--mk-ease-standard);
+}
+
+.landing-page .platform-nav .nav-cta:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+/* ── Section scaffolding ────────────────────────────────────────────────── */
+.ed-section-heading {
+  max-width: 720px;
+  margin-block: 0 var(--mk-space-12);
+  display: grid;
+  gap: var(--mk-space-4);
+}
+
+.ed-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-2);
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mk-ed-accent-ink);
+  margin: 0;
+}
+
+.ed-kicker::before {
+  content: "";
+  width: 22px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--mk-ed-accent-strong));
+}
+
+.ed-kicker-inverse {
+  color: color-mix(in srgb, var(--mk-text-inverse) 84%, var(--mk-ed-accent));
+}
+
+.ed-title {
+  font-family: var(--mk-font-display);
+  font-size: clamp(30px, 4vw, 46px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--mk-ed-ink);
+  margin: 0;
+  text-wrap: balance;
+}
+
+.ed-title em {
+  font-style: normal;
+  background: linear-gradient(100deg, var(--sln-brand-violet), var(--sln-brand-indigo) 60%, var(--sln-brand-blue));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.ed-lead {
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--mk-ed-ink-soft);
+  max-width: 62ch;
+  margin: 0;
+}
+
+/* ── Reveal choreography (extends the shared data-reveal contract) ─────── */
+.landing-page [data-reveal] {
+  opacity: 1;
+  transform: none;
+}
+
+.landing-page [data-reveal][data-reveal-state="hidden"] {
+  opacity: 0;
+  transform: translateY(26px);
+}
+
+.landing-page [data-reveal][data-reveal-state="visible"] {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity var(--mk-duration-marketing) var(--mk-ease-editorial),
+    transform var(--mk-duration-marketing) var(--mk-ease-editorial);
+  transition-delay: calc(var(--reveal-i, 0) * 70ms);
+}
+
+/* ── Footer restyle ─────────────────────────────────────────────────────── */
+.landing-page .landing-footer {
+  background:
+    radial-gradient(700px 320px at 92% 0%, var(--mk-ed-glow), transparent 66%),
+    var(--mk-ed-canvas-deep);
+  border-top: 1px solid var(--mk-ed-hairline);
+  padding-block: var(--mk-space-16) var(--mk-space-10);
+}
+
+.landing-page .footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+  gap: var(--mk-space-10);
+}
+
+.landing-page .footer-brand p {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--mk-ed-ink-soft);
+  margin-block: var(--mk-space-4) var(--mk-space-3);
+  max-width: 34ch;
+}
+
+.landing-page .footer-brand small {
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  color: var(--mk-ed-ink-muted);
+}
+
+.landing-page .footer-group {
+  display: grid;
+  gap: var(--mk-space-3);
+  align-content: start;
+}
+
+.landing-page .footer-group h2 {
+  font-family: var(--mk-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mk-ed-ink-muted);
+  margin: 0 0 var(--mk-space-2);
+}
+
+.landing-page .footer-group a {
+  color: var(--mk-ed-ink);
+  text-decoration: none;
+  font-size: 14.5px;
+}
+
+.landing-page .footer-group a:hover,
+.landing-page .footer-group a:focus-visible {
+  color: var(--mk-ed-accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  .landing-page .footer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .ed-section-heading {
+    margin-block-end: var(--mk-space-8);
+  }
+
+  .ed-lead {
+    font-size: 15.5px;
+  }
+
+  .landing-page .footer-grid {
+    grid-template-columns: 1fr;
+    gap: var(--mk-space-8);
+  }
+}

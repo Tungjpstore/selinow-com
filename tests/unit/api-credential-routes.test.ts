@@ -154,7 +154,7 @@ describe("API credential management routes", () => {
       path: `/api/app/shops/${SHOP_PUBLIC_ID}/api-credentials`,
     }) as never);
     expect(dependencies.authenticateSession).toHaveBeenCalledWith(expect.any(Request), dependencies.env);
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.list).toHaveBeenCalledWith({
       env: dependencies.env,
       shopPublicId: SHOP_PUBLIC_ID,
@@ -173,7 +173,7 @@ describe("API credential management routes", () => {
       path: `/api/app/shops/${SHOP_PUBLIC_ID}/api-credentials`,
     }) as never);
     expect(dependencies.requireCsrf).toHaveBeenCalledWith(expect.any(Request), dependencies.env);
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.issue).toHaveBeenCalledWith({
       env: dependencies.env,
       expiresAt: null,
@@ -215,7 +215,7 @@ describe("API credential management routes", () => {
       path: `/api/app/shops/${SHOP_PUBLIC_ID}/api-credentials/${CREDENTIAL_PUBLIC_ID}`,
     }) as never);
     expect(dependencies.requireCsrf).toHaveBeenCalledWith(expect.any(Request), dependencies.env);
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.revoke).toHaveBeenCalledWith({
       credentialPublicId: CREDENTIAL_PUBLIC_ID,
       env: dependencies.env,

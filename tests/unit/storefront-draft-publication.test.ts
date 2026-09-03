@@ -202,6 +202,19 @@ describe("tenant storefront draft contract", () => {
       shopPublicId: "public-a",
       userId: "user-a",
     })).rejects.toMatchObject({ code: "resource_conflict", issues: ["storefront_draft_stale"], status: 409 });
+    await expect(publishSellerStorefrontSettings({
+      env,
+      expectedVersion: 2,
+      requestId: "request-readiness-failed-publish",
+      shopPublicId: "public-a",
+      userId: "user-a",
+    })).rejects.toMatchObject({ code: "onboarding_not_initialized", status: 409 });
+    const afterFailedPublish = await getSellerStorefrontSettings({ env, shopPublicId: "public-a", userId: "user-a" });
+    expect(afterFailedPublish).toMatchObject({
+      publicationState: "unpublished_changes",
+      publishedVersion: 1,
+      version: 2,
+    });
     await expect(getSellerStorefrontSettings({ env, shopPublicId: "public-b", userId: "user-a" }))
       .rejects.toMatchObject({ code: "authorization_denied", status: 403 });
 
@@ -225,5 +238,15 @@ describe("tenant storefront draft contract", () => {
     expect(defaultEnglishShop.publicDetails.deliveryText).toBe("Digital products are delivered after payment is verified.");
     expect(database.database.prepare("SELECT storefront_json AS draft, published_storefront_json AS published FROM shop_settings WHERE shop_id = 'shop-b'").get())
       .toEqual({ draft: '{"headline":"Draft B"}', published: '{"headline":"Published B"}' });
+
+    // Verify draft shop with published settings resolves to 'live' access
+    database.database.prepare("UPDATE shops SET status = 'draft' WHERE id = 'shop-a'").run();
+    const draftLiveShop = await resolveStorefrontShop(new Request("https://seller-a.selinow.com/"), env);
+    expect(draftLiveShop.access).toBe("live");
+
+    // Verify draft shop with 0 published versions resolves to 'coming_soon'
+    database.database.prepare("UPDATE shop_settings SET published_version = 0 WHERE shop_id = 'shop-a'").run();
+    const draftUnpublishedShop = await resolveStorefrontShop(new Request("https://seller-a.selinow.com/"), env);
+    expect(draftUnpublishedShop.access).toBe("coming_soon");
   });
 });

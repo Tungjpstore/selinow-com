@@ -108,6 +108,7 @@ const PLAN_FEATURE_ORDER = [
   "sellerPayments",
   "manualFulfillment",
   "privateDownloads",
+  "premiumStorefrontTemplates",
   "automation",
   "dataExport",
   "audit",
@@ -360,6 +361,7 @@ function planFeatureLabel(feature: (typeof PLAN_FEATURE_ORDER)[number], value: u
     inventory: ["onboarding.form.plan_feature.inventory", "Inventory"],
     manualFulfillment: ["onboarding.form.plan_feature.manual_fulfillment", "Manual fulfillment"],
     privateDownloads: ["onboarding.form.plan_feature.private_downloads", "Private downloads"],
+    premiumStorefrontTemplates: ["onboarding.form.plan_feature.premium_storefront_templates", "Premium storefront templates"],
     sellerPayments: ["onboarding.form.plan_feature.seller_payments", "Seller payments"],
     storefront: ["onboarding.form.plan_feature.storefront", "Storefront"],
     telegram: ["onboarding.form.plan_feature.telegram", "Telegram"],
@@ -373,6 +375,7 @@ function renderPlanOptions(root: HTMLElement, plans: readonly PublicPlan[], plan
   const submit = query<HTMLButtonElement>(root, "[data-shop-submit]");
   if (select === null) return false;
   const previous = select.value;
+  const requested = new URLSearchParams(window.location.search).get("plan");
   select.replaceChildren();
   const ready = plans.length === planCodes.length
     && plans.every((plan, index) => plan.code === planCodes[index]);
@@ -383,7 +386,11 @@ function renderPlanOptions(root: HTMLElement, plans: readonly PublicPlan[], plan
     return false;
   }
   for (const plan of plans) select.add(new Option(planLabel(plan.code), plan.code));
-  select.value = plans.some((plan) => plan.code === previous) ? previous : planCodes[0] ?? "";
+  select.value = plans.some((plan) => plan.code === previous)
+    ? previous
+    : plans.some((plan) => plan.code === requested)
+      ? requested ?? ""
+      : planCodes[0] ?? "";
   select.disabled = false;
   if (submit !== null) submit.disabled = false;
   return true;

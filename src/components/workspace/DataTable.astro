@@ -1,26 +1,159 @@
 ---
-interface Props { caption?: string; className?: string; }
-const { caption, className } = Astro.props;
+export interface DataTableColumn {
+  align?: "end" | "start";
+  /** Query-string value this column sorts by. Omit to render a plain (non-sortable) header. */
+  key?: string;
+  label: string;
+}
+
+interface Props {
+  caption?: string;
+  className?: string;
+  /** Column headers. When provided, DataTable renders its own accessible <thead>. */
+  columns?: DataTableColumn[];
+  /** Current URL (including existing query params) used to build sort links. */
+  currentUrl?: URL | string;
+  /** Currently active sort value, matched against each column's `key`. */
+  currentSort?: string | null;
+  /** Direction paired with `currentSort` ("asc" | "desc"). */
+  currentSortDirection?: "asc" | "desc" | null;
+  /** Name of the query-string parameter that carries the sort value. */
+  sortParam?: string;
+  /** Adds a leading "select all" header cell. Row checkboxes are the row markup's responsibility. */
+  selectable?: boolean;
+  selectAllLabel?: string;
+}
+
+const {
+  caption,
+  className,
+  columns,
+  currentUrl,
+  currentSort = null,
+  currentSortDirection = null,
+  sortParam = "sort",
+  selectable = false,
+  selectAllLabel = "Select all rows",
+} = Astro.props;
 const classes = ["sln-data-table", className].filter(Boolean).join(" ");
+
+function sortHref(columnKey: string, direction: "asc" | "desc"): string {
+  if (currentUrl === undefined) return "#";
+  const url = new URL(currentUrl.toString());
+  url.searchParams.set(sortParam, direction === "desc" ? `${columnKey}_desc` : columnKey);
+  url.searchParams.delete("page");
+  return `${url.pathname}?${url.searchParams.toString()}`;
+}
+
+function nextDirectionFor(columnKey: string): "asc" | "desc" {
+  if (currentSort !== columnKey) return "asc";
+  return currentSortDirection === "asc" ? "desc" : "asc";
+}
+
+function ariaSortFor(columnKey: string): "ascending" | "descending" | "none" {
+  if (currentSort !== columnKey) return "none";
+  return currentSortDirection === "desc" ? "descending" : "ascending";
+}
 ---
 
-<div class={classes} data-responsive-table>
+<div class={classes} data-responsive-table data-sln-datatable-root>
   <div class="sln-data-table__scroll">
     <table>
       {caption && <caption>{caption}</caption>}
+      {columns !== undefined && (
+        <thead>
+          <tr>
+            {selectable && (
+              <th class="sln-data-table__select-col" scope="col">
+                <input aria-label={selectAllLabel} data-sln-datatable-select-all type="checkbox" />
+              </th>
+            )}
+            {columns.map((column) => (
+              column.key === undefined ? (
+                <th data-align={column.align} scope="col">{column.label}</th>
+              ) : (
+                <th aria-sort={ariaSortFor(column.key)} data-align={column.align} scope="col">
+                  <a
+                    class="sln-data-table__sort-link"
+                    data-active={currentSort === column.key ? "true" : "false"}
+                    href={sortHref(column.key, nextDirectionFor(column.key))}
+                  >
+                    {column.label}
+                    <span aria-hidden="true" class="sln-data-table__sort-icon">
+                      {currentSort === column.key ? (currentSortDirection === "asc" ? "▲" : "▼") : "↕"}
+                    </span>
+                  </a>
+                </th>
+              )
+            ))}
+          </tr>
+        </thead>
+      )}
       <slot />
     </table>
   </div>
+  <div class="sln-data-table__bulk-bar" data-sln-datatable-bulk-bar hidden>
+    <slot name="bulk-actions" />
+  </div>
+  <slot name="pagination" />
 </div>
 
+{selectable && (
+  <script>
+    for (const root of document.querySelectorAll<HTMLElement>("[data-sln-datatable-root]")) {
+      if (root.dataset.slnDatatableReady === "true") continue;
+      root.dataset.slnDatatableReady = "true";
+      const selectAll = root.querySelector<HTMLInputElement>("[data-sln-datatable-select-all]");
+      const bulkBar = root.querySelector<HTMLElement>("[data-sln-datatable-bulk-bar]");
+      const rowCheckboxes = (): HTMLInputElement[] => [...root.querySelectorAll<HTMLInputElement>("[data-sln-datatable-row-select]")];
+
+      const emitSelectionChange = (): void => {
+        const selected = rowCheckboxes().filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.dataset.slnDatatableRowSelect ?? "");
+        if (bulkBar !== null) bulkBar.hidden = selected.length === 0;
+        root.dispatchEvent(new CustomEvent<{ selectedIds: string[] }>("sln:datatable-selection", { bubbles: true, detail: { selectedIds: selected } }));
+      };
+
+      selectAll?.addEventListener("change", () => {
+        for (const checkbox of rowCheckboxes()) checkbox.checked = selectAll.checked;
+        emitSelectionChange();
+      });
+      root.addEventListener("change", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement) || !target.hasAttribute("data-sln-datatable-row-select")) return;
+        if (selectAll !== null && !target.checked) selectAll.checked = false;
+        emitSelectionChange();
+      });
+    }
+  </script>
+)}
+
 <style>
-  .sln-data-table { min-width: 0; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-lg); background: var(--sln-bg-surface); }
+  .sln-data-table {
+    min-width: 0;
+    border: 1px solid var(--sln-border-default);
+    border-radius: var(--sln-radius-lg);
+    background: var(--sln-bg-surface);
+    box-shadow: var(--sln-console-shadow-card);
+    transition: box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .sln-data-table:hover {
+    box-shadow: var(--sln-console-shadow-glow);
+  }
   .sln-data-table__scroll { overflow-x: auto; }
   .sln-data-table table { width: 100%; border-collapse: collapse; text-align: left; }
   .sln-data-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
-  .sln-data-table th { padding: var(--sln-space-3) var(--sln-space-4); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-  .sln-data-table td { padding: var(--sln-space-4); border-top: 1px solid var(--sln-border-default); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); vertical-align: top; }
+  .sln-data-table th { padding: var(--sln-space-3) var(--sln-space-4); background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font: var(--sln-font-caption); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .sln-data-table th[data-align="end"] { text-align: end; }
+  .sln-data-table td { padding: var(--sln-space-4); border-top: 1px solid var(--sln-border-default); color: var(--sln-text-secondary); font: var(--sln-font-body-sm); vertical-align: middle; transition: background 0.12s ease; }
+  .sln-data-table tbody tr:hover td { background: var(--sln-bg-subtle); }
   .sln-data-table td :where(a, button) { min-height: 44px; }
+  .sln-data-table__select-col { width: 44px; }
+  .sln-data-table__sort-link { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; transition: color 0.12s ease; }
+  .sln-data-table__sort-link:hover { color: var(--sln-text-primary); }
+  .sln-data-table__sort-link[data-active="true"] { color: var(--sln-action-primary-strong); }
+  .sln-data-table__sort-icon { font-size: 10px; opacity: .7; }
+  .sln-data-table__bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sln-space-3); padding: var(--sln-space-3) var(--sln-space-4); border-top: 1px solid var(--sln-border-default); background: var(--sln-tint-indigo); }
+  .sln-data-table__bulk-bar[hidden] { display: none !important; }
   @media (max-width: 720px) {
     .sln-data-table__scroll { overflow: visible; }
     .sln-data-table table, .sln-data-table tbody, .sln-data-table tr, .sln-data-table td { display: block; width: 100%; }
@@ -28,6 +161,6 @@ const classes = ["sln-data-table", className].filter(Boolean).join(" ");
     .sln-data-table tr { padding: var(--sln-space-3) 0; border-top: 1px solid var(--sln-border-default); }
     .sln-data-table tr:first-child { border-top: 0; }
     .sln-data-table td { display: grid; grid-template-columns: minmax(90px, 38%) minmax(0, 1fr); gap: var(--sln-space-3); padding: var(--sln-space-2) var(--sln-space-4); border-top: 0; }
-    .sln-data-table td::before { color: var(--sln-text-secondary); content: attr(data-label); font: var(--sln-font-caption); font-weight: 700; }
+    .sln-data-table td::before { color: var(--sln-text-secondary); content: attr(data-label); font: var(--sln-font-caption); font-weight: 600; }
   }
 </style>

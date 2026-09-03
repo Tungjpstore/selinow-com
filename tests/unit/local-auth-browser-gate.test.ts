@@ -186,7 +186,7 @@ describe("deterministic local authenticated browser gate", () => {
     expect(config).toContain("playwright-safe-failure-reporter.mjs");
     expect(config).toMatch(/name: "desktop",[\s\S]*?local-authenticated\\\.spec\\\.ts\$[\s\S]*?height: 1024, width: 1440/iu);
     expect(config).toMatch(/name: "mobile",[\s\S]*?local-authenticated\\\.spec\\\.ts\$[\s\S]*?height: 844, width: 390/iu);
-    expect(dashboard).toContain('descriptionId={shop === undefined ? undefined : "dashboard-overview-date"}');
+    expect(dashboard).toContain('id={shop === undefined ? undefined : "dashboard-overview-date"}');
     expect(dashboard).toContain("data-visual-dynamic");
     expect(spec).toContain('page.locator("#dashboard-overview-date")');
     expect(spec).toContain('page.locator("[data-visual-dynamic]")');
@@ -340,6 +340,13 @@ describe("authenticated browser gate isolation", () => {
     expect(() => resolveLocalBrowserPort("443")).toThrow("local_auth_browser_gate_port_invalid");
     expect(validatePlaywrightArguments([])).toEqual([]);
     expect(validatePlaywrightArguments(["--update-snapshots"])).toEqual(["--update-snapshots"]);
+    expect(validatePlaywrightArguments([
+      "--update-snapshots",
+      "--grep=local magic link opens deterministic authenticated seller surfaces",
+    ])).toEqual([
+      "--update-snapshots",
+      "--grep=local magic link opens deterministic authenticated seller surfaces",
+    ]);
     expect(validatePlaywrightArguments(["--project=kit-auth-desktop-1440", "--project=kit-auth-minimum-320"]))
       .toEqual(["--project=kit-auth-desktop-1440", "--project=kit-auth-minimum-320"]);
     expect(validatePlaywrightArguments(["--project=kit-auth-zoom-200"]))
@@ -347,6 +354,8 @@ describe("authenticated browser gate isolation", () => {
     expect(() => validatePlaywrightArguments(["--config", "playwright.config.ts"]))
       .toThrow("local_auth_browser_gate_arguments_invalid");
     expect(() => validatePlaywrightArguments(["--project=desktop"]))
+      .toThrow("local_auth_browser_gate_arguments_invalid");
+    expect(() => validatePlaywrightArguments(["--update-snapshots", "--grep=unsafe override"]))
       .toThrow("local_auth_browser_gate_arguments_invalid");
   });
 
@@ -367,13 +376,15 @@ describe("authenticated browser gate isolation", () => {
 
   it("persists only redacted Playwright failure diagnostics", () => {
     const diagnostic = redactPlaywrightFailure(
-      'href="/api/auth/magic-link/consume?token=opaque-token-value-that-is-longer-than-thirty-two-bytes" Cookie: selinow_session=private-value SESSION_SECRET=private-secret DODO_PAYMENTS_API_KEY=short-dodo-key DODO_PAYMENTS_WEBHOOK_KEY=short-webhook-key PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT=short-fingerprint PAYOS_CONTROLLED_STAGING_CLIENT_ID=short-client CLOUDFLARE_PLATFORM_API_TOKEN=short-platform-token CLOUDFLARE_ROUTE_AUDIT_API_TOKEN=short-route-token',
+      'href="/api/auth/magic-link/consume?token=opaque-token-value-that-is-longer-than-thirty-two-bytes" Cookie: selinow_session=private-value SESSION_SECRET=private-secret GOOGLE_OAUTH_CLIENT_ID=google-client GOOGLE_OAUTH_CLIENT_SECRET=google-secret DODO_PAYMENTS_API_KEY=short-dodo-key DODO_PAYMENTS_WEBHOOK_KEY=short-webhook-key PAYOS_STAGING_CHANNEL_IDENTITY_FINGERPRINT=short-fingerprint PAYOS_CONTROLLED_STAGING_CLIENT_ID=short-client CLOUDFLARE_PLATFORM_API_TOKEN=short-platform-token CLOUDFLARE_ROUTE_AUDIT_API_TOKEN=short-route-token',
     );
     expect(diagnostic).toContain("/api/auth/magic-link/consume?[redacted]");
     expect(diagnostic).toContain("Cookie: [redacted]");
     expect(diagnostic).not.toContain("opaque-token-value");
     expect(diagnostic).not.toContain("private-value");
     expect(diagnostic).not.toContain("private-secret");
+    expect(diagnostic).not.toContain("google-client");
+    expect(diagnostic).not.toContain("google-secret");
     expect(diagnostic).not.toContain("short-dodo-key");
     expect(diagnostic).not.toContain("short-webhook-key");
     expect(diagnostic).not.toContain("short-fingerprint");

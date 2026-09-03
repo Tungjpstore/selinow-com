@@ -20,14 +20,7 @@ const primitives = [
 ] as const;
 
 const states = [
-  "LoadingState",
   "EmptyState",
-  "SuccessState",
-  "WarningState",
-  "BlockedState",
-  "WaitingUserState",
-  "WaitingProviderState",
-  "ErrorState",
   "PermissionState",
   "PlanLimitState",
   "SuspendedState",
@@ -42,12 +35,6 @@ describe("PromptOS frontend foundation", () => {
 
     expect(files).toHaveLength(primitives.length + states.length);
     for (const source of files) expect(source).toContain("interface Props");
-  });
-
-  it("lets waiting-provider states expose provider-specific retry actions", async () => {
-    const waitingProvider = await readFile("src/components/states/WaitingProviderState.astro", "utf8");
-
-    expect(waitingProvider).toContain('<slot name="actions" slot="actions" />');
   });
 
   it("keeps fields labelled, secret values unprefilled and async feedback explicit", async () => {
@@ -107,11 +94,12 @@ describe("PromptOS frontend foundation", () => {
     expect(statePanel).toContain('["blocked", "error", "forbidden", "suspended"]');
     expect(workspaceState).toContain("state?: State;");
     expect(workspaceState).toContain('info: "empty"');
-    expect(primitivesCss).toContain('border-color: var(--selinow-border-control)');
+    expect(primitivesCss).toContain('border-color: var(--sln-slate-500)');
     expect(dataTable).toContain("color: var(--sln-text-secondary)");
-    expect(login).toContain("color: var(--selinow-success-text)");
-    expect(login).toContain("color: var(--selinow-danger-text)");
-    expect(tokens).toContain("--selinow-state-danger: var(--sln-state-danger);");
+    expect(login).toContain("color: var(--sln-success-text)");
+    expect(login).toContain("color: var(--sln-danger-text)");
+    expect(tokens).toContain("--sln-state-danger: #dc2626;");
+    expect(tokens).not.toContain("--selinow-");
   });
 
   it("uses localized canonical payment and fulfillment copy", async () => {

@@ -1,0 +1,129 @@
+/*
+ * Selinow Console — design language v2 for the seller/admin workspace.
+ * Proposal: docs/DASHBOARD_REDESIGN_V2_PROPOSAL_2026-08-16.md
+ *
+ * Principles encoded here:
+ * - One hairline: a single --sln-console-line token, 1px, used for every
+ *   divider/border; no strong variant, no chunky accents, no border+shadow.
+ * - Neutral first: background/foreground/muted live on one neutral ramp;
+ *   color appears only for primary action, semantic states, and focus.
+ * - Working typography: body 14px, weights capped at 600; display sizes are
+ *   reserved for the storefront marketing surface, not the console.
+ *
+ * This layer is additive: legacy --sln-* tokens keep serving pages that have
+ * not migrated yet. Console pages opt in via [data-console] on <html>.
+ */
+
+:root {
+  /* Neutral ramp (Selinow Canvas + Surface) */
+  --sln-console-bg: #EBE6F8;
+  --sln-console-surface: #FFFFFF;
+  --sln-console-raised: #F5F2FB;
+  --sln-console-line: #DAD2EE;
+  --sln-console-ink: #101828;
+  --sln-console-ink-2: #344054;
+  --sln-console-ink-3: #667085;
+
+  /* Brand / Primary — Selinow Indigo (Matches Landing Page v5) */
+  --sln-console-accent: #7C6AF0;
+  --sln-console-accent-hover: #6957DE;
+  --sln-console-accent-active: #5644C4;
+  --sln-console-accent-text: #5644C4;
+  --sln-console-accent-soft: #EDE8FB;
+  --sln-console-accent-subtle: #EDE8FB;
+  --sln-console-accent-ink: #FFFFFF;
+
+  /* Official Provider & Integration Brand Colors */
+  --sln-brand-telegram: #229ED9;
+  --sln-brand-telegram-bg: #E8F5FC;
+  --sln-brand-cloudflare: #F38020;
+  --sln-brand-cloudflare-bg: #FFF7ED;
+  --sln-brand-payos: #0066CC;
+  --sln-brand-payos-bg: #F0FDF4;
+  --sln-brand-zalo: #0068FF;
+  --sln-brand-zalo-bg: #EFF6FF;
+  --sln-brand-discord: #5865F2;
+  --sln-brand-discord-bg: #EEF0FF;
+  --sln-brand-whatsapp: #25D366;
+  --sln-brand-whatsapp-bg: #F0FDF4;
+
+  /* Semantic states (Protected ADR 0011) */
+  --sln-console-danger: #E02424;
+  --sln-console-danger-text: #B42318;
+  --sln-console-danger-tint: #FEF2F2;
+  --sln-console-warning: #D97706;
+  --sln-console-warning-text: #9A3412;
+  --sln-console-warning-tint: #FFFBEB;
+  --sln-console-success: #0E9F6E;
+  --sln-console-success-text: #067647;
+  --sln-console-success-tint: #ECFDF5;
+  --sln-console-info: #3F83F8;
+  --sln-console-info-text: #175CD3;
+  --sln-console-info-tint: #EFF6FF;
+
+  /* Focus ring */
+  --sln-console-focus: 0 0 0 2px #FFFFFF, 0 0 0 4px color-mix(in srgb, var(--sln-console-accent) 45%, transparent);
+
+  /* Working type scale (workspace only) */
+  --sln-console-text-2xl: 600 24px/32px var(--sln-font-sans);
+  --sln-console-text-xl: 600 20px/28px var(--sln-font-sans);
+  --sln-console-text-lg: 500 16px/24px var(--sln-font-sans);
+  --sln-console-text: 400 14px/22px var(--sln-font-sans);
+  --sln-console-text-sm: 400 13px/20px var(--sln-font-sans);
+  --sln-console-label: 500 12px/16px var(--sln-font-sans);
+  --sln-console-metric: 600 26px/30px var(--sln-font-sans);
+  --sln-console-metric-font-variant: tabular-nums;
+
+  /* Geometry: soft rounded containers, pill chips */
+  --sln-console-radius: 12px;
+  --sln-console-radius-container: 18px;
+  --sln-console-radius-pill: 999px;
+
+  /* Elevations & Glows */
+  --sln-console-shadow-card: 0 1px 3px rgba(16, 24, 40, 0.04), 0 1px 2px rgba(16, 24, 40, 0.02);
+  --sln-console-shadow-glow: 0 4px 20px rgba(124, 106, 240, 0.08);
+  --sln-console-shadow-overlay: 0 8px 24px rgba(16, 24, 40, 0.12), 0 2px 6px rgba(16, 24, 40, 0.08);
+
+  /* Lumina Glass & Motion Tokens */
+  --sln-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --sln-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --sln-glass-bg: rgba(255, 255, 255, 0.85);
+  --sln-glass-border: rgba(229, 224, 240, 0.8);
+  --sln-glass-blur: blur(16px);
+  --sln-ambient-gradient: radial-gradient(circle at 50% 0%, rgba(124, 106, 240, 0.06) 0%, transparent 70%);
+
+  /* HTML5 Canvas Chart Tokens */
+  --sln-chart-line: #7C6AF0;
+  --sln-chart-grad-top: rgba(124, 106, 240, 0.24);
+  --sln-chart-grad-bottom: rgba(124, 106, 240, 0.01);
+  --sln-chart-point: #6957DE;
+  --sln-chart-grid: rgba(229, 224, 240, 0.5);
+
+  /* Shell metrics */
+  --sln-console-sidebar-w: 240px;
+  --sln-console-topbar-h: 56px;
+  --sln-console-content-max: 1200px;
+}
+
+[data-console-theme="dark"] {
+  --sln-console-bg: #101013;
+  --sln-console-surface: #17171a;
+  --sln-console-raised: #1f1f23;
+  --sln-console-line: #27272a;
+  --sln-console-ink: #f4f4f5;
+  --sln-console-ink-2: #a1a1aa;
+  --sln-console-ink-3: #71717a;
+  --sln-console-accent-text: #c4b5fd;
+  --sln-console-danger: #f87171;
+  --sln-console-danger-text: #fca5a5;
+  --sln-console-danger-tint: #2a1517;
+  --sln-console-warning: #fbbf24;
+  --sln-console-warning-text: #fcd34d;
+  --sln-console-warning-tint: #2a2214;
+  --sln-console-success: #4ade80;
+  --sln-console-success-text: #86efac;
+  --sln-console-success-tint: #122a1b;
+  --sln-console-info: #93c5fd;
+  --sln-console-info-text: #bfdbfe;
+  --sln-console-info-tint: #14213a;
+}

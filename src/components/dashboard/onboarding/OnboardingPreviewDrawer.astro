@@ -1,0 +1,588 @@
+---
+import Icon from "../../console/Icon.astro";
+import ProviderLogo from "../../console/ProviderLogo.astro";
+
+type Props = {
+  defaultCurrency?: string;
+  initialShopName?: string | undefined;
+  initialShopSlug?: string | undefined;
+  platformBaseDomain: string;
+};
+
+const {
+  defaultCurrency = "VND",
+  initialShopName = "Cửa Hàng Của Bạn",
+  initialShopSlug = "cua-hang",
+  platformBaseDomain,
+} = Astro.props;
+---
+
+<!-- Floating trigger button -->
+<button
+  type="button"
+  class="preview-drawer-trigger"
+  data-preview-drawer-trigger
+  aria-label="Xem trước cửa hàng trực tiếp"
+  aria-expanded="false"
+  aria-controls="onboarding-preview-drawer"
+>
+  <span class="pulse-dot"></span>
+  <Icon name="search" size={16} />
+  <span>Xem trước Cửa hàng</span>
+</button>
+
+<!-- Drawer overlay backdrop -->
+<div class="preview-drawer-backdrop" data-preview-drawer-backdrop hidden></div>
+
+<!-- Drawer panel -->
+<aside
+  id="onboarding-preview-drawer"
+  class="preview-drawer-panel"
+  data-preview-drawer-panel
+  role="dialog"
+  aria-label="Xem trước cửa hàng trực tiếp"
+  hidden
+>
+  <!-- Drawer header -->
+  <div class="drawer-header">
+    <div class="drawer-title-group">
+      <span class="drawer-dot"></span>
+      <strong>Xem trước Trực tiếp</strong>
+    </div>
+    <div class="drawer-actions">
+      <div class="drawer-switcher" role="tablist" data-preview-drawer-switcher>
+        <button type="button" class="drawer-tab active" data-preview-mode="web" aria-selected="true" role="tab">
+          <ProviderLogo name="domain" size={16} />
+          <span>Web Storefront</span>
+        </button>
+        <button type="button" class="drawer-tab" data-preview-mode="telegram" aria-selected="false" role="tab">
+          <ProviderLogo name="telegram" size={16} />
+          <span>Bot Telegram</span>
+        </button>
+      </div>
+      <button type="button" class="drawer-close-btn" data-preview-drawer-close aria-label="Đóng xem trước">
+        <Icon name="x" size={18} />
+      </button>
+    </div>
+  </div>
+
+  <!-- Drawer body -->
+  <div class="drawer-body">
+    <!-- Web Storefront Mockup -->
+    <div class="drawer-canvas web-canvas" data-canvas="web" data-preview-surface data-preview-template="swift">
+      <div class="browser-bar">
+        <div class="browser-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="browser-url">
+          <ProviderLogo name="domain" size={13} />
+          <span>https://<strong data-preview-slug>{initialShopSlug}</strong>.{platformBaseDomain}</span>
+        </div>
+      </div>
+      <div class="storefront-mockup-body">
+        <header class="mock-nav">
+          <div class="mock-logo">
+            <span class="mock-logo-icon"><Icon name="store" size={16} /></span>
+            <strong data-preview-shop-name>{initialShopName}</strong>
+          </div>
+          <div class="mock-nav-badge"><span>Giỏ hàng (0)</span></div>
+        </header>
+
+        <div class="mock-hero">
+          <span class="mock-badge">Bản quyền chính hãng 24/7</span>
+          <h4 data-preview-shop-name>{initialShopName}</h4>
+          <p>Tự động giao mã kích hoạt tức thì sau khi quét mã QR PayOS</p>
+        </div>
+
+        <div class="mock-product-grid">
+          <article class="mock-product-card">
+            <div class="mock-product-thumb">
+              <span class="mock-product-emoji" data-preview-product-icon><Icon name="box" size={24} /></span>
+              <span class="mock-tag" data-preview-fulfillment>Tự động giao key</span>
+            </div>
+            <div class="mock-product-info">
+              <h5 data-preview-product-title>Windows 11 Pro Retail Bản Quyền</h5>
+              <p data-preview-product-desc>Khóa kích hoạt bản quyền Windows 11 Pro Retail vĩnh viễn.</p>
+              <div class="mock-product-footer">
+                <strong class="mock-price" data-preview-product-price>199.000 {defaultCurrency}</strong>
+                <button type="button" class="mock-buy-btn" tabindex="-1">Mua ngay</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telegram Bot Mockup -->
+    <div class="drawer-canvas tg-canvas" data-canvas="telegram" hidden>
+      <div class="tg-header">
+        <div class="tg-bot-avatar"><ProviderLogo name="telegram" size={26} /></div>
+        <div class="tg-bot-info">
+          <strong data-preview-bot-name>Selinow Store Bot</strong>
+          <small>bot • trực tuyến 24/7</small>
+        </div>
+      </div>
+      <div class="tg-messages-body">
+        <div class="tg-bot-msg">
+          <div class="tg-msg-bubble">
+            <p>👋 Chào mừng bạn đến với <strong data-preview-shop-name>{initialShopName}</strong>!</p>
+            <p>Hệ thống tự động tạo mã thanh toán VietQR và gửi mã bản quyền ngay trong tin nhắn riêng.</p>
+            <hr class="tg-msg-divider" />
+            <p><strong>Sản phẩm nổi bật:</strong></p>
+            <p>• <span data-preview-product-title>Windows 11 Pro Retail Bản Quyền</span> — <span data-preview-product-price>199.000 {defaultCurrency}</span></p>
+          </div>
+          <div class="tg-inline-keyboard">
+            <button type="button" class="tg-btn" tabindex="-1">
+              <span>⚡ Mua <span data-preview-product-title-short>Windows 11 Pro</span></span>
+            </button>
+            <button type="button" class="tg-btn tg-btn-subtle" tabindex="-1">
+              <span>📋 Danh mục sản phẩm</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<style>
+  /* Floating Trigger Button */
+  .preview-drawer-trigger {
+    position: fixed;
+    bottom: 24px;
+    inset-inline-end: 24px;
+    z-index: 90;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 999px;
+    background: #101828;
+    color: #FFFFFF;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    font-size: 13.5px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(16, 24, 40, 0.25);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .preview-drawer-trigger:hover {
+    background: #1D2939;
+    transform: translateY(-2px);
+    box-shadow: 0 12px 30px rgba(16, 24, 40, 0.35);
+  }
+
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #0E9F6E;
+    box-shadow: 0 0 0 2px rgba(14, 159, 110, 0.3);
+    animation: pulseGlow 2s infinite;
+  }
+
+  @keyframes pulseGlow {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.3); opacity: 0.7; }
+  }
+
+  /* Backdrop */
+  .preview-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 95;
+    background: rgba(16, 24, 40, 0.4);
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease;
+  }
+
+  .preview-drawer-backdrop[hidden] {
+    display: none !important;
+  }
+
+  /* Drawer Panel */
+  .preview-drawer-panel {
+    position: fixed;
+    top: 0;
+    inset-inline-end: 0;
+    bottom: 0;
+    z-index: 96;
+    width: min(460px, 92vw);
+    background: #FFFFFF;
+    box-shadow: -8px 0 32px rgba(16, 24, 40, 0.18);
+    display: flex;
+    flex-direction: column;
+    animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .preview-drawer-panel[hidden] {
+    display: none !important;
+  }
+
+  @keyframes slideInRight {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Drawer Header */
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--sln-soft-border);
+  }
+
+  .drawer-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #101828;
+  }
+
+  .drawer-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #0E9F6E;
+  }
+
+  .drawer-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .drawer-switcher {
+    display: flex;
+    background: #F2F4F7;
+    padding: 3px;
+    border-radius: 8px;
+    gap: 2px;
+  }
+
+  .drawer-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    color: #475467;
+    cursor: pointer;
+  }
+
+  .drawer-tab.active {
+    background: #FFFFFF;
+    color: #101828;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.1);
+  }
+
+  .drawer-close-btn {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: #F2F4F7;
+    color: #475467;
+    cursor: pointer;
+  }
+
+  .drawer-close-btn:hover {
+    background: #E4E7EC;
+    color: #101828;
+  }
+
+  /* Drawer Body */
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    background: #F8FAFC;
+  }
+
+  /* Web Canvas */
+  .web-canvas {
+    border-radius: 12px;
+    border: 2px solid var(--sln-soft-border);
+    background: #FFFFFF;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(16, 24, 40, 0.06);
+  }
+
+  .browser-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: #F2F4F7;
+    border-bottom: 1px solid var(--sln-soft-border);
+  }
+
+  .browser-dots {
+    display: flex;
+    gap: 5px;
+  }
+
+  .browser-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--sln-soft-border);
+  }
+
+  .browser-url {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: #FFFFFF;
+    border-radius: 6px;
+    font-size: 11px;
+    color: #475467;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .storefront-mockup-body {
+    padding: 16px;
+  }
+
+  .mock-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #F2F4F7;
+    margin-bottom: 14px;
+  }
+
+  .mock-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #101828;
+  }
+
+  .mock-logo-icon {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: var(--sln-soft-tint);
+    color: var(--sln-soft-accent);
+  }
+
+  .mock-nav-badge span {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--sln-soft-accent);
+    background: var(--sln-soft-tint);
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+
+  .mock-hero {
+    text-align: center;
+    padding: 12px 8px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--sln-soft-tint) 0%, #EFF6FF 100%);
+  }
+
+  .mock-badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--sln-soft-accent);
+    background: #FFFFFF;
+    padding: 2px 8px;
+    border-radius: 999px;
+    display: inline-block;
+    margin-bottom: 6px;
+  }
+
+  .mock-hero h4 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    font-weight: 800;
+    color: #101828;
+  }
+
+  .mock-hero p {
+    margin: 0;
+    font-size: 11.5px;
+    color: #475467;
+  }
+
+  .mock-product-card {
+    border: 2px solid var(--sln-soft-border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #FFFFFF;
+  }
+
+  .mock-product-thumb {
+    height: 90px;
+    background: #F8FAFC;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .mock-tag {
+    position: absolute;
+    bottom: 6px;
+    inset-inline-start: 6px;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: #0E9F6E;
+    background: #DCFCE7;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .mock-product-info {
+    padding: 12px;
+  }
+
+  .mock-product-info h5 {
+    margin: 0 0 4px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #101828;
+  }
+
+  .mock-product-info p {
+    margin: 0 0 10px;
+    font-size: 11px;
+    color: #667085;
+    line-height: 1.4;
+  }
+
+  .mock-product-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .mock-price {
+    font-size: 13.5px;
+    font-weight: 800;
+    color: var(--sln-soft-accent);
+  }
+
+  .mock-buy-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: var(--sln-soft-accent);
+    color: #FFFFFF;
+    border: none;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  /* Telegram Canvas */
+  .tg-canvas {
+    border-radius: 14px;
+    background: #EFE8DE;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(16, 24, 40, 0.06);
+  }
+
+  .tg-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: #517DA2;
+    color: #FFFFFF;
+  }
+
+  .tg-bot-info {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tg-bot-info strong {
+    font-size: 13.5px;
+    font-weight: 700;
+  }
+
+  .tg-bot-info small {
+    font-size: 11px;
+    opacity: 0.85;
+  }
+
+  .tg-messages-body {
+    padding: 16px;
+  }
+
+  .tg-msg-bubble {
+    background: #FFFFFF;
+    border-radius: 12px 12px 12px 4px;
+    padding: 12px 14px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #101828;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+
+  .tg-msg-bubble p {
+    margin: 0 0 6px;
+  }
+
+  .tg-msg-bubble p:last-child {
+    margin-bottom: 0;
+  }
+
+  .tg-msg-divider {
+    border: none;
+    border-top: 1px dashed var(--sln-soft-border);
+    margin: 8px 0;
+  }
+
+  .tg-inline-keyboard {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .tg-btn {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #2AABEE;
+    color: #FFFFFF;
+    border: none;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .tg-btn-subtle {
+    background: #FFFFFF;
+    color: #2AABEE;
+    border: 1px solid #2AABEE;
+  }
+</style>

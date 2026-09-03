@@ -1,0 +1,355 @@
+[
+  {
+    "id": "hero-editorial-desktop",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "76f42a7a0c7fac41",
+    "files": [
+      {
+        "file": "hero-editorial-desktop-1248.avif",
+        "bytes": 29051,
+        "sha256": "cf39682054d7dbd3"
+      },
+      {
+        "file": "hero-editorial-desktop-1248.webp",
+        "bytes": 26570,
+        "sha256": "da618f17c7c57522"
+      },
+      {
+        "file": "hero-editorial-desktop-960.avif",
+        "bytes": 20631,
+        "sha256": "91a4c2a96852b492"
+      },
+      {
+        "file": "hero-editorial-desktop-960.webp",
+        "bytes": 18736,
+        "sha256": "dceeb375bb2461c6"
+      },
+      {
+        "file": "hero-editorial-desktop-720.avif",
+        "bytes": 14724,
+        "sha256": "2d68d4663143aebe"
+      },
+      {
+        "file": "hero-editorial-desktop-720.webp",
+        "bytes": 13220,
+        "sha256": "67989d397e320108"
+      }
+    ]
+  },
+  {
+    "id": "hero-editorial-mobile",
+    "aspect": "portrait",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "500182039d003b1f",
+    "files": [
+      {
+        "file": "hero-editorial-mobile-832.avif",
+        "bytes": 41798,
+        "sha256": "d93ab11d988d462b"
+      },
+      {
+        "file": "hero-editorial-mobile-832.webp",
+        "bytes": 44644,
+        "sha256": "cb7a5fec1747e397"
+      },
+      {
+        "file": "hero-editorial-mobile-640.avif",
+        "bytes": 29291,
+        "sha256": "4375aa9bb2824609"
+      },
+      {
+        "file": "hero-editorial-mobile-640.webp",
+        "bytes": 32476,
+        "sha256": "ecb17e989c3d6780"
+      },
+      {
+        "file": "hero-editorial-mobile-480.avif",
+        "bytes": 20531,
+        "sha256": "8eea3af946cbad96"
+      },
+      {
+        "file": "hero-editorial-mobile-480.webp",
+        "bytes": 22272,
+        "sha256": "14e3808bb9bdb413"
+      }
+    ]
+  },
+  {
+    "id": "flow-conversation",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "06e3d2403a685d41",
+    "files": [
+      {
+        "file": "flow-conversation-1248.avif",
+        "bytes": 43131,
+        "sha256": "f463e47c77b1b611"
+      },
+      {
+        "file": "flow-conversation-1248.webp",
+        "bytes": 44306,
+        "sha256": "de04ed410979844a"
+      },
+      {
+        "file": "flow-conversation-832.avif",
+        "bytes": 26534,
+        "sha256": "a7fc4a28f716cc69"
+      },
+      {
+        "file": "flow-conversation-832.webp",
+        "bytes": 27472,
+        "sha256": "ee84222bc206e0d9"
+      },
+      {
+        "file": "flow-conversation-640.avif",
+        "bytes": 19236,
+        "sha256": "4bb147ae211a6bfa"
+      },
+      {
+        "file": "flow-conversation-640.webp",
+        "bytes": 19960,
+        "sha256": "52f355c70f358018"
+      }
+    ]
+  },
+  {
+    "id": "flow-verify",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "e37ebd11360996ba",
+    "files": [
+      {
+        "file": "flow-verify-1248.avif",
+        "bytes": 13336,
+        "sha256": "385a5af1c198b72b"
+      },
+      {
+        "file": "flow-verify-1248.webp",
+        "bytes": 15614,
+        "sha256": "83940b32956c222a"
+      },
+      {
+        "file": "flow-verify-832.avif",
+        "bytes": 8625,
+        "sha256": "d188cec9e689d527"
+      },
+      {
+        "file": "flow-verify-832.webp",
+        "bytes": 9646,
+        "sha256": "7471e809c2d4c306"
+      },
+      {
+        "file": "flow-verify-640.avif",
+        "bytes": 6435,
+        "sha256": "d42af5df9f02200c"
+      },
+      {
+        "file": "flow-verify-640.webp",
+        "bytes": 6806,
+        "sha256": "a7b266d44c6cb0f6"
+      }
+    ]
+  },
+  {
+    "id": "flow-delivery",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "3587ee2e23e57063",
+    "files": [
+      {
+        "file": "flow-delivery-1248.avif",
+        "bytes": 54674,
+        "sha256": "1ea754b631978634"
+      },
+      {
+        "file": "flow-delivery-1248.webp",
+        "bytes": 53968,
+        "sha256": "dfe3ff7d46de7fe3"
+      },
+      {
+        "file": "flow-delivery-832.avif",
+        "bytes": 30648,
+        "sha256": "8ed51bf81862c441"
+      },
+      {
+        "file": "flow-delivery-832.webp",
+        "bytes": 31468,
+        "sha256": "46819dbc0fb9da47"
+      },
+      {
+        "file": "flow-delivery-640.avif",
+        "bytes": 22167,
+        "sha256": "cf28710fe7759467"
+      },
+      {
+        "file": "flow-delivery-640.webp",
+        "bytes": 22872,
+        "sha256": "daf3d041b36ad4ef"
+      }
+    ]
+  },
+  {
+    "id": "solutions-telegram",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "46cc3843986bbb58",
+    "files": [
+      {
+        "file": "solutions-telegram-960.avif",
+        "bytes": 27565,
+        "sha256": "5efad3b4db6519da"
+      },
+      {
+        "file": "solutions-telegram-960.webp",
+        "bytes": 26542,
+        "sha256": "3285b955f81b6067"
+      },
+      {
+        "file": "solutions-telegram-640.avif",
+        "bytes": 16758,
+        "sha256": "814d63be184a94fa"
+      },
+      {
+        "file": "solutions-telegram-640.webp",
+        "bytes": 16528,
+        "sha256": "b01577abc3befb88"
+      }
+    ]
+  },
+  {
+    "id": "solutions-delivery",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "80330594e680a4f5",
+    "files": [
+      {
+        "file": "solutions-delivery-960.avif",
+        "bytes": 13278,
+        "sha256": "e5e33f4b6312c1d3"
+      },
+      {
+        "file": "solutions-delivery-960.webp",
+        "bytes": 14376,
+        "sha256": "869a0e9d02755861"
+      },
+      {
+        "file": "solutions-delivery-640.avif",
+        "bytes": 8227,
+        "sha256": "d6590ff93d9944d2"
+      },
+      {
+        "file": "solutions-delivery-640.webp",
+        "bytes": 8398,
+        "sha256": "30d9c28455efa43f"
+      }
+    ]
+  },
+  {
+    "id": "solutions-license",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "a493a5fc02ae52c5",
+    "files": [
+      {
+        "file": "solutions-license-960.avif",
+        "bytes": 73760,
+        "sha256": "0f29871bbc02469f"
+      },
+      {
+        "file": "solutions-license-960.webp",
+        "bytes": 94296,
+        "sha256": "730c48e6e20630a7"
+      },
+      {
+        "file": "solutions-license-640.avif",
+        "bytes": 40514,
+        "sha256": "3b77f12fb9b620fb"
+      },
+      {
+        "file": "solutions-license-640.webp",
+        "bytes": 52654,
+        "sha256": "c313ae30f9bde0f3"
+      }
+    ]
+  },
+  {
+    "id": "final-cta-wide",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "38a5e86f4a8e208a",
+    "files": [
+      {
+        "file": "final-cta-wide-1248.avif",
+        "bytes": 45567,
+        "sha256": "d2b1eab94f3a01db"
+      },
+      {
+        "file": "final-cta-wide-1248.webp",
+        "bytes": 45048,
+        "sha256": "e9936a7c6e8cd39e"
+      },
+      {
+        "file": "final-cta-wide-960.avif",
+        "bytes": 28878,
+        "sha256": "9a300fcd57d361ea"
+      },
+      {
+        "file": "final-cta-wide-960.webp",
+        "bytes": 30136,
+        "sha256": "52218acc44476252"
+      },
+      {
+        "file": "final-cta-wide-720.avif",
+        "bytes": 18252,
+        "sha256": "4ace9598b35578ec"
+      },
+      {
+        "file": "final-cta-wide-720.webp",
+        "bytes": 18934,
+        "sha256": "ddb99b4cb389d4e5"
+      }
+    ]
+  },
+  {
+    "id": "auth-panel",
+    "aspect": "portrait",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "6a6a5a8ea6a28bd7",
+    "files": [
+      {
+        "file": "auth-panel-832.avif",
+        "bytes": 29732,
+        "sha256": "e529f29d4d98eb67"
+      },
+      {
+        "file": "auth-panel-832.webp",
+        "bytes": 29642,
+        "sha256": "2bfb7d772604caa0"
+      },
+      {
+        "file": "auth-panel-640.avif",
+        "bytes": 18973,
+        "sha256": "2223f5b4a96d967e"
+      },
+      {
+        "file": "auth-panel-640.webp",
+        "bytes": 21716,
+        "sha256": "4756a407afde6c66"
+      }
+    ]
+  },
+  {
+    "id": "og-editorial",
+    "aspect": "landscape",
+    "gatewayModel": "nb/nanobanana-pro",
+    "promptSha256": "933a6a6c98f2a6c5",
+    "files": [
+      {
+        "file": "og-editorial.jpg",
+        "bytes": 84351,
+        "sha256": "99e5ce6eb444324e"
+      }
+    ]
+  }
+]

@@ -5,6 +5,7 @@ import { normalizeEmail } from "../auth/policy";
 import type { AppBindings } from "../platform/bindings";
 import type { StorefrontShop } from "../storefront/store";
 import { resolveTurnstileConfiguration } from "../storefront/turnstile";
+import { describePlatformAdminAccess } from "../tenants/store";
 import {
   createOperationsAuditEvent,
   prepareOperationsAuditForAppliedModeration,
@@ -463,15 +464,16 @@ async function requirePlatformAdmin(input: {
   env: AppBindings;
   userId: string;
 }): Promise<PlatformAdminRole> {
-  const row = await input.env.PLATFORM_DB.prepare(`
-    SELECT role FROM platform_admins
-    WHERE user_id = ? AND status = 'active'
-    LIMIT 1
-  `).bind(input.userId).first<{ role: PlatformAdminRole }>();
-  if (row === null || (input.allowedRoles !== undefined && !input.allowedRoles.includes(row.role))) {
+  // 2FA-aware lookup: an active admin without confirmed two-factor enrollment
+  // is denied with the dedicated enrollment code instead of resolving a role.
+  const access = await describePlatformAdminAccess({ env: input.env, userId: input.userId });
+  if (access.kind === "two_factor_required") {
+    throw new AppError("admin_two_factor_required", 403);
+  }
+  if (access.kind !== "authorized" || (input.allowedRoles !== undefined && !input.allowedRoles.includes(access.role))) {
     throw new AppError("authorization_denied", 403);
   }
-  return row.role;
+  return access.role;
 }
 
 async function requireOwnerShop(input: {

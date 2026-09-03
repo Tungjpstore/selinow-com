@@ -1,0 +1,91 @@
+Seller Platform release/migration quality gate evidence
+Date: 2026-08-23 Asia/Tokyo
+Scope: source-only and read-only release audit
+Classification: NOT browser E2E evidence
+
+Safety boundary
+- No production/staging migration, deploy, provider mutation, checkout charge, or database write was performed.
+- No code, migration, or docs/IMPLEMENTATION_STATUS.md file was changed by this audit.
+- Remote state references below come from existing repository documentation, not a new remote probe.
+
+Reviewed surface
+- Branch: chore/post-release-status-20260822
+- HEAD: 22bfd88
+- Migrations: 0113_dodo_checkout_reconciliation.sql, 0114_auth_otp_admission.sql,
+  0115_auth_pending_password.sql
+- Release tooling: scripts/lib/release.mjs, scripts/lib/db-admission.mjs,
+  scripts/deploy.mjs, scripts/lib/cli.mjs
+- Runtime compatibility: src/lib/billing/service.ts, src/lib/auth/admission.ts,
+  src/lib/auth/session.ts, src/pages/api/auth/register.ts, src/worker.ts
+
+Gate result: BLOCKED
+
+P1 - Clean HEAD migration ledger is invalid
+- migrations/0113_dodo_checkout_reconciliation.sql exists in the worktree but is untracked.
+- Migrations 0114 and 0115 are tracked in HEAD.
+- scripts/lib/release.mjs requires sorted migration number N to equal array index N.
+- Clean-HEAD probe result:
+    trackedMigrationCount: 114
+    expectedAtPosition113: 0113
+    observedAtPosition113: 0114_auth_otp_admission.sql
+    validatorOutcome: source_migration_ledger_invalid
+- Dirty-worktree comparison: 115 migrations, contiguous through 0115. This does not make
+  HEAD deployable because release evidence must bind to a clean reviewed commit.
+
+P1 - Current rollback Worker is not checkout-state compatible
+- New runtime creates checkout sessions with a 24-hour provider TTL plus five-minute grace,
+  preserves provider-backed open sessions, and relies on 0113 reconciliation.
+- The current committed rollback runtime expires both pending and open sessions after their
+  stored expires_at and may suspend the pending-payment subscription.
+- The rollback runtime has no initial-checkout reconciliation cron.
+- Risk: rollback while an open provider checkout is processing, or after payment with a lost
+  webhook, can incorrectly expire the checkout and suspend the subscription.
+- Required gate: use a state-compatible rollback candidate, or stop new billing checkout and
+  prove there are zero open provider sessions before rollback.
+
+P2 - deploy:dry-run is build evidence, not release admission evidence
+- scripts/deploy.mjs runs production/staging admission only when dryRun=false and buildOnly=false.
+- npm run deploy:dry-run builds and invokes Wrangler --dry-run, but skips remote migration
+  ledger, backup/restore, D1 invariant, secret, route, and release-manifest admission.
+- A green deploy:dry-run therefore does not override either P1 blocker.
+
+P2 - OTP admission retention is missing
+- Migration 0114 creates auth_otp_admissions and an expiry index.
+- The worker purges auth_request_admissions but no source path deletes expired
+  auth_otp_admissions rows.
+- At the configured global cap, the table can grow by about 19,200 rows/day.
+- Required gate: add a bounded scheduled purge, retention metric, alert, and regression test.
+
+P2 - Auth migrations lack real-D1 regression coverage
+- Existing auth route tests mock claimOtpAdmission and completeRegistrationWithOtp.
+- Existing OTP lifecycle coverage uses an in-memory Map for auth_email_otps.
+- No test directly exercises auth_otp_admissions or pending_password_hash against the full
+  migration chain.
+- Required coverage: concurrent admission caps, suspended-account race, OTP failure retaining
+  the old credential, and atomic OTP success promoting pending_password_hash plus session.
+
+Compatibility conclusion
+- Migrations 0113-0115 are additive; the old Worker can tolerate the added schema structurally.
+- The new Worker cannot run on schema through 0112 because it reads/writes 0113 columns, the
+  0114 table, and the 0115 pending_password_hash column.
+- Required order: clean reviewed commit -> backup/restore evidence -> apply 0113-0115 ->
+  post-migration invariants -> deploy Worker -> staging UAT -> production ceremony.
+- Migrations are forward-only and must not be rolled back.
+
+Existing documented environment boundary
+- Repository documentation records staging and production D1 through migration 0112 before
+  this candidate. If any environment has 0114/0115 without 0113, stop and reconcile the ledger
+  before using the admitted migration pipeline.
+- Commercial activation remains blocked on owner-approved Dodo product identities, genuine
+  provider-backed staging UAT, fresh release evidence, and a controlled live smoke.
+
+Verification performed
+- Clean-HEAD Git-tree migration simulation: FAILED as expected at missing 0113.
+- Dirty-worktree release listMigrationNames(): PASS, 115 migrations, tip 0115.
+- Focused Vitest: 5 files, 55 tests passed.
+- git diff --check before artifact creation: PASS.
+
+Final disposition
+- Do not migrate or deploy the current dirty worktree.
+- Do not treat browser screenshots, deploy:dry-run, or focused unit success as proof that the
+  release admission and rollback gates are closed.

@@ -48,6 +48,9 @@ function createDatabase(): SqliteD1 {
     .sort()) {
     database.exec(readFileSync(join(process.cwd(), "migrations", filename), "utf8"));
   }
+  // Migration 0102 (shops.vertical) sits past this suite's cutoff; the member
+  // queries read the column, so add it manually.
+  database.exec("ALTER TABLE shops ADD COLUMN vertical TEXT NOT NULL DEFAULT 'digital'");
   database.exec(readFileSync("seeds/0001_platform_defaults.sql", "utf8"));
   return new SqliteD1(database);
 }

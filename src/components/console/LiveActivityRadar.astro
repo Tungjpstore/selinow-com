@@ -1,0 +1,81 @@
+---
+/**
+ * LiveActivityRadar.astro
+ * Subtle pulsating radar beacon indicating real-time system status & health.
+ */
+interface Props {
+  label?: string;
+  tone?: "success" | "warning" | "danger" | "accent";
+}
+
+const { label = "Trực tuyến", tone = "success" } = Astro.props;
+---
+
+<div class:list={["radar-beacon", `is-${tone}`]}>
+  <span class="radar-circle">
+    <span class="radar-wave"></span>
+    <span class="radar-dot"></span>
+  </span>
+  <span class="radar-label">{label}</span>
+</div>
+
+<style>
+  .radar-beacon {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 9px;
+    border-radius: var(--sln-console-radius-pill);
+    border: 1px solid var(--sln-console-line);
+    background: var(--sln-console-surface);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--sln-console-ink-2);
+  }
+
+  .radar-circle {
+    position: relative;
+    width: 8px;
+    height: 8px;
+    display: grid;
+    place-items: center;
+  }
+
+  .radar-dot {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--sln-console-success);
+  }
+
+  .radar-wave {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--sln-console-success);
+    opacity: 0.4;
+    animation: radarPulse 2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  }
+
+  .radar-beacon.is-accent .radar-dot { background: var(--sln-console-accent); }
+  .radar-beacon.is-accent .radar-wave { background: var(--sln-console-accent); }
+
+  .radar-beacon.is-warning .radar-dot { background: var(--sln-console-warning); }
+  .radar-beacon.is-warning .radar-wave { background: var(--sln-console-warning); }
+
+  .radar-beacon.is-danger .radar-dot { background: var(--sln-console-danger); }
+  .radar-beacon.is-danger .radar-wave { background: var(--sln-console-danger); }
+
+  @keyframes radarPulse {
+    0% {
+      transform: scale(0.6);
+      opacity: 0.8;
+    }
+    100% {
+      transform: scale(2.2);
+      opacity: 0;
+    }
+  }
+</style>

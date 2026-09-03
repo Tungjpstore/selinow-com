@@ -6,6 +6,7 @@ import {
   isPrivatePagePath,
   resolveRequestId,
 } from "./lib/http/security";
+import { shouldEnforceHttps, toHttpsRedirect } from "./lib/http/https";
 import { loggerFor } from "./lib/operations/logger";
 import { getBindings } from "./lib/platform/bindings";
 import { parseCookies, serializeCookie } from "./lib/http/cookies";
@@ -23,6 +24,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
   let responseStatus = 500;
   try {
     const requestUrl = new URL(context.request.url);
+    // BUG-001: universal HTTP→HTTPS canonicalization before any other work so
+    // no platform, API, dashboard or tenant route is ever served over
+    // plaintext. Local/loopback hosts are exempt for `wrangler dev`.
+    if (shouldEnforceHttps(context.request, env.APP_ENV)) {
+      const redirect = toHttpsRedirect(context.request);
+      if (redirect !== null) {
+        responseStatus = redirect.status;
+        return redirect;
+      }
+    }
     const hostKind = classifyPlatformHost(requestUrl.hostname, env);
     const localeResolution = resolveLocaleWithSource({
       acceptLanguage: context.request.headers.get("Accept-Language"),
@@ -30,12 +41,22 @@ export const onRequest = defineMiddleware(async (context, next) => {
       explicit: requestUrl.searchParams.get("lang"),
     });
     const locale = localeResolution.source === "default" ? undefined : localeResolution.locale;
-    const localePreferenceCookie = localeResolution.source === "explicit"
+    // Locale persistence (project-wide): an explicit `?lang=` switch and the
+    // first-touch Accept-Language detection both persist a one-year cookie so
+    // navigation is stable without `?lang` spam in internal links. On the
+    // platform domain the cookie is shared across app./storefront subdomains;
+    // dev localhost keeps host-only cookies.
+    const persistsLocale = localeResolution.source === "explicit" || localeResolution.source === "accept-language";
+    const localeCookieDomain = requestUrl.hostname.endsWith(`.${env.PLATFORM_BASE_DOMAIN}`)
+      ? `.${env.PLATFORM_BASE_DOMAIN}`
+      : undefined;
+    const localePreferenceCookie = persistsLocale
       ? serializeCookie(LOCALE_COOKIE_NAME, localeResolution.locale, {
         httpOnly: false,
         maxAge: 31_536_000,
         sameSite: "Lax",
         secure: requestUrl.protocol === "https:",
+        ...(localeCookieDomain === undefined ? {} : { domain: localeCookieDomain }),
       })
       : null;
     // Leave locale unset when the request has no supported browser hint. Tenant

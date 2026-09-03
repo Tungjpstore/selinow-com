@@ -1,0 +1,121 @@
+---
+/**
+ * LP Editorial Commerce — scrollytelling flow chapter (LP1).
+ *
+ * Five stages scroll on the left while the sticky scene pane on the right
+ * cross-fades between three editorial photos and two composed cards.
+ * `flow-scene.ts` mirrors scroll progress onto data attributes; without JS
+ * (or under reduced motion) the scene degrades to a static photo collage
+ * and every stage stays readable.
+ */
+interface Props {
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+import { icons } from "../icons";
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+type SceneKind = { photo: string; alt: string } | { card: [string, string] };
+
+const stages: Array<{ icon: string; label: string; detail: string; scene: SceneKind }> = [
+  {
+    icon: icons.send(18),
+    label: t("marketing.home.flow.channel"),
+    detail: t("marketing.home.flow.channel_detail"),
+    scene: { photo: "/brand/landing/v1/flow-conversation-1248", alt: t("marketing.home.flow.art.channel") },
+  },
+  {
+    icon: icons.receipt(18),
+    label: t("marketing.home.flow.order"),
+    detail: t("marketing.home.flow.order_detail"),
+    scene: { card: [t("marketing.home.flow.order"), t("marketing.home.flow.order_detail")] },
+  },
+  {
+    icon: icons.shieldCheck(18),
+    label: t("marketing.home.flow.payment"),
+    detail: t("marketing.home.flow.payment_detail"),
+    scene: { photo: "/brand/landing/v1/flow-verify-1248", alt: t("marketing.home.flow.art.payment") },
+  },
+  {
+    icon: icons.package(18),
+    label: t("marketing.home.flow.delivery"),
+    detail: t("marketing.home.flow.delivery_detail"),
+    scene: { photo: "/brand/landing/v1/flow-delivery-1248", alt: t("marketing.home.flow.art.delivery") },
+  },
+  {
+    icon: icons.user(18),
+    label: t("marketing.home.flow.customer"),
+    detail: t("marketing.home.flow.customer_detail"),
+    scene: { card: [t("marketing.home.flow.customer"), t("marketing.home.flow.customer_detail")] },
+  },
+];
+---
+
+<section class="ed-flow" id="flow" aria-labelledby="ed-flow-title" data-flow-chapter>
+  <div class="platform-shell">
+    <header class="ed-section-heading">
+      <p class="ed-kicker">{t("marketing.home.flow_section.eyebrow")}</p>
+      <h2 class="ed-title" id="ed-flow-title">{t("marketing.home.flow_section.title")}</h2>
+      <p class="ed-lead">{t("marketing.home.flow_section.description")}</p>
+    </header>
+
+    <div class="ed-flow-body">
+      <ol class="ed-flow-stages">
+        {stages.map((stage, index) => (
+          <li class="ed-flow-stage" data-flow-stage>
+            <span class="ed-flow-num" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+            <div class="ed-flow-copy">
+              <h3><span class="ed-flow-icon" set:html={stage.icon} aria-hidden="true"></span>{stage.label}</h3>
+              <p>{stage.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <div class="ed-flow-scene" data-flow-scene aria-hidden="true">
+        <div class="ed-flow-photo" data-flow-photo="0">
+          <picture>
+            <source type="image/avif" srcset={`/brand/landing/v1/flow-conversation-1248.avif 1248w, /brand/landing/v1/flow-conversation-832.avif 832w, /brand/landing/v1/flow-conversation-640.avif 640w`} sizes="(min-width: 1024px) 40vw, 92vw" />
+            <source type="image/webp" srcset={`/brand/landing/v1/flow-conversation-1248.webp 1248w, /brand/landing/v1/flow-conversation-832.webp 832w, /brand/landing/v1/flow-conversation-640.webp 640w`} sizes="(min-width: 1024px) 40vw, 92vw" />
+            <img src="/brand/landing/v1/flow-conversation-832.webp" alt="" width="1248" height="832" loading="lazy" decoding="async" />
+          </picture>
+        </div>
+        <div class="ed-flow-card" data-flow-card="1">
+          <span class="ed-flow-card-icon" set:html={icons.receipt(20)} aria-hidden="true"></span>
+          <strong>{t("marketing.home.flow.order")}</strong>
+          <p>{t("marketing.home.flow.order_detail")}</p>
+          <span class="ed-flow-card-seal" aria-hidden="true">{t("marketing.home.rail.order")}</span>
+        </div>
+        <div class="ed-flow-photo" data-flow-photo="2">
+          <picture>
+            <source type="image/avif" srcset={`/brand/landing/v1/flow-verify-1248.avif 1248w, /brand/landing/v1/flow-verify-832.avif 832w, /brand/landing/v1/flow-verify-640.avif 640w`} sizes="(min-width: 1024px) 40vw, 92vw" />
+            <source type="image/webp" srcset={`/brand/landing/v1/flow-verify-1248.webp 1248w, /brand/landing/v1/flow-verify-832.webp 832w, /brand/landing/v1/flow-verify-640.webp 640w`} sizes="(min-width: 1024px) 40vw, 92vw" />
+            <img src="/brand/landing/v1/flow-verify-832.webp" alt="" width="1248" height="832" loading="lazy" decoding="async" />
+          </picture>
+        </div>
+        <div class="ed-flow-photo" data-flow-photo="3">
+          <picture>
+            <source type="image/avif" srcset={`/brand/landing/v1/flow-delivery-1248.avif 1248w, /brand/landing/v1/flow-delivery-832.avif 832w, /brand/landing/v1/flow-delivery-640.avif 640w`} sizes="(min-width: 1024px) 40vw, 92vw" />
+            <source type="image/webp" srcset={`/brand/landing/v1/flow-delivery-1248.webp 1248w, /brand/landing/v1/flow-delivery-832.webp 832w, /brand/landing/v1/flow-delivery-640.webp 640w`} sizes="(min-width: 1024px) 40vw, 92vw" />
+            <img src="/brand/landing/v1/flow-delivery-832.webp" alt="" width="1248" height="832" loading="lazy" decoding="async" />
+          </picture>
+        </div>
+        <div class="ed-flow-card" data-flow-card="4">
+          <span class="ed-flow-card-icon" set:html={icons.user(20)} aria-hidden="true"></span>
+          <strong>{t("marketing.home.flow.customer")}</strong>
+          <p>{t("marketing.home.flow.customer_detail")}</p>
+          <span class="ed-flow-card-seal" aria-hidden="true">{t("marketing.home.rail.delivery")}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  import "../../../scripts/marketing/flow-scene";
+</script>

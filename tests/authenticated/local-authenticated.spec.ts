@@ -33,14 +33,27 @@ const routes: readonly AuthenticatedRoute[] = [
     screenshot: "authenticated-dashboard.png",
   },
   {
-    heading: "Mở cửa hàng,",
+    heading: "Chỉ ghi nhận thanh toán đã xác minh",
     headingLevel: 1,
+    path: "/app/payments",
+    screenshot: "authenticated-payments.png",
+  },
+  {
+    heading: "Bảo mật tài khoản",
+    headingLevel: 1,
+    path: "/app/security",
+    query: "?tab=two_factor",
+    screenshot: "authenticated-security-two-factor.png",
+  },
+  {
+    heading: "Kết nối Cổng Thanh toán & Kênh Phân phối",
+    headingLevel: 2,
     path: "/onboarding",
     screenshot: "authenticated-onboarding.png",
   },
   {
-    heading: "Tên miền riêng",
-    headingLevel: 2,
+    heading: "Tên miền",
+    headingLevel: 1,
     path: "/app/domains",
     screenshot: "authenticated-domains.png",
   },
@@ -141,22 +154,25 @@ const routes: readonly AuthenticatedRoute[] = [
     screenshot: "authenticated-billing.png",
   },
   {
-    heading: "Điều tra nhanh.",
+    heading: "Quản trị viên nền tảng bắt buộc phải bật xác thực hai yếu tố",
     headingLevel: 1,
     path: "/admin",
     screenshot: "authenticated-admin-operations.png",
+    expectedStatus: 403,
   },
   {
-    heading: "Lỗi luôn được nhìn thấy.",
+    heading: "Quản trị viên nền tảng bắt buộc phải bật xác thực hai yếu tố",
     headingLevel: 1,
     path: "/admin/operations",
     screenshot: "authenticated-admin-systems.png",
+    expectedStatus: 403,
   },
   {
-    heading: "Sellers & Shops",
+    heading: "Quản trị viên nền tảng bắt buộc phải bật xác thực hai yếu tố",
     headingLevel: 1,
     path: "/admin/shops",
     screenshot: "authenticated-admin-shops.png",
+    expectedStatus: 403,
   },
 ];
 
@@ -210,6 +226,7 @@ async function authenticateThroughVisibleMagicLink(
   await page.goto("/login");
   await expect(page).toHaveTitle("Đăng nhập — Selinow");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Đăng nhập để tiếp tục");
+  await page.getByRole("tab", { name: "Không cần mật khẩu" }).click();
   await page
     .getByRole("textbox", { name: "Email", exact: true })
     .fill(`${options.emailPrefix ?? "browser-gate"}-${projectName}@selinow.invalid`);
@@ -289,32 +306,22 @@ async function authenticateThroughVisibleMagicLink(
     link.click();
   });
   const consumeResponse = await consumeResponsePromise;
-  const consumeState = await consumeResponse.json().then((body: unknown) => {
-    const record = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
-    return {
-      authenticated: record.authenticated === true,
-      code: typeof record.code === "string" ? record.code : "none",
-      confirmationRequired: record.confirmationRequired === true,
-      requestId: typeof record.requestId === "string" ? record.requestId : "none",
-      status: consumeResponse.status(),
-    };
-  }).catch(() => ({
-    authenticated: false,
-    code: "response_unreadable",
-    confirmationRequired: false,
-    requestId: "none",
-    status: consumeResponse.status(),
-  }));
+  const consumeState = { status: consumeResponse.status() };
 
   if (options.confirmationRequired === true) {
-    expect(consumeState).toMatchObject({ confirmationRequired: true, status: 202 });
-    await expect(page.locator("[data-login-confirmation]")).toBeVisible();
-    await expect(page.locator("[data-login-confirm-destination]")).not.toBeEmpty();
+    expect(consumeState).toMatchObject({ status: 202 });
+    await expect(page.locator("[data-magic-confirmation]")).toBeVisible();
+    await expect(page.locator("[data-magic-confirm-destination]")).not.toBeEmpty();
     await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
-    await page.locator("[data-login-confirm]").click();
+    await page.locator("[data-magic-confirm]").click();
   } else {
-    expect(consumeState).toMatchObject({ authenticated: true, status: 200 });
+    expect(consumeState).toMatchObject({ status: 200 });
   }
+
+  await expect.poll(async () => (await page.context().cookies())
+    .some((cookie) => cookie.name === "selinow_session")).toBe(true);
+  const appResponse = await page.goto("/app");
+  expect(appResponse?.status()).toBe(200);
 
   // Read only the final path so a failed assertion cannot print a magic-link token.
   await expect.poll(async () => {
@@ -324,7 +331,7 @@ async function authenticateThroughVisibleMagicLink(
       return "navigation_in_progress";
     }
   }, { message: "local magic-link navigation did not reach the dashboard" }).toBe("/app");
-  await expect(page.locator("[data-app-shell] .app-topbar-context > strong")).toHaveText("Browser Gate");
+  await expect(page.locator("[data-app-shell] .app-account strong")).toHaveText("Browser Gate");
 }
 
 test.describe.configure({ mode: "serial" });
@@ -385,27 +392,34 @@ test("local magic link opens deterministic authenticated seller surfaces", async
     expectPrivateHeaders(response?.headers() ?? {});
     const pathname = await page.evaluate(() => location.pathname);
     expect(pathname).toBe(path);
-    await expect(page.getByRole("heading", { level: route.headingLevel })).toContainText(heading);
+    await expect(page.getByRole("heading", { level: route.headingLevel }).filter({ hasText: heading }).first())
+      .toContainText(heading);
     if (route.expectedSummary !== undefined) {
       const summary = page.locator(".order-status-rail");
       for (const text of route.expectedSummary) await expect(summary).toContainText(text);
     }
     if (path === "/onboarding") {
-      await expect(page.locator("[data-global-feedback]")).toBeHidden();
-      await expect(page.locator("[data-progress-percent]")).toHaveText("13%");
-      await expect(page.locator("[data-progress-copy]")).toHaveText("1/8 nhóm bước đã hoàn tất hoặc được bỏ qua an toàn.");
-      if (testInfo.project.name === "mobile") {
-        await expect(page.locator("[data-mobile-progress-completed]")).toHaveText("1");
-        await expect(page.locator("[data-mobile-step-status]")).toBeVisible();
-        await expect(page.locator(".mobile-step-selector summary")).toContainText("Các bước thiết lập cửa hàng");
-        await expect(page.locator(".step-rail")).toBeHidden();
-      }
+      await expect(page.locator("[data-onboarding-toast]")).toBeHidden();
+      await expect(page.locator(".progress-track")).toHaveAttribute("aria-valuenow", "75");
+      await expect(page.locator('[data-step-pane="connect"]')).toBeVisible();
+      await expect(page.locator('[data-step-pane="store"]')).toBeHidden();
     }
     if (path === "/app/domains") {
       await expect(page.locator("[data-domain-panel]")).toHaveAttribute("aria-busy", "false");
       await expect(page.locator("[data-domain-hostname]")).toHaveText(
         `browser-gate-${testInfo.project.name}.localhost`,
       );
+    }
+    if (path === "/app/payments") {
+      await expect(page.locator("[data-action=configure]")).toBeVisible();
+      await expect(page.locator("[data-provider-setup-gate]")).toHaveCount(0);
+    }
+    if (path === "/app/security") {
+      const enableTwoFactor = page.locator("[data-two-factor-enable]");
+      await expect(enableTwoFactor).toBeVisible();
+      await enableTwoFactor.click();
+      await expect(page.locator("[data-two-factor-enroll-form]")).toBeVisible();
+      await expect(page.locator("[data-security-feedback]")).toContainText("Mã dùng một lần");
     }
     await expectStablePage(page);
     expect(runtimeIssues, runtimeIssues.join("\n")).toEqual([]);
@@ -417,6 +431,12 @@ test("local magic link opens deterministic authenticated seller surfaces", async
           page.locator("#dashboard-overview-date"),
           page.locator("[data-visual-dynamic]"),
         ],
+        maskColor: "#E2E8F0",
+      });
+    } else if (path === "/app/security") {
+      await expect(page).toHaveScreenshot(route.screenshot, {
+        fullPage: false,
+        mask: [page.locator("[data-security-feedback]")],
         maskColor: "#E2E8F0",
       });
     } else {

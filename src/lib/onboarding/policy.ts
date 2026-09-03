@@ -13,7 +13,9 @@ export const ONBOARDING_STEP_CODES = [
   "published",
 ] as const;
 
-export const CURRENT_POLICY_ATTESTATION_VERSION: number | null = null;
+// Owner-approved platform policy release. Increment only with a new published
+// policy bundle and a matching release evidence record.
+export const CURRENT_POLICY_ATTESTATION_VERSION: number | null = 1;
 
 export type OnboardingStepCode = typeof ONBOARDING_STEP_CODES[number];
 export type CustomDomainPreference = "connect" | "later" | "skip";

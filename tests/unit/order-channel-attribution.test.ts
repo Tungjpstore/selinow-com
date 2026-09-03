@@ -24,6 +24,7 @@ import {
 } from "../../src/lib/commerce/telegram-port";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import type { StorefrontShop } from "../../src/lib/storefront/store";
+import { FALLBACK_STOREFRONT_TEMPLATE } from "../../src/lib/storefront/templates";
 import {
   checkoutTelegramCart,
   type TelegramIdentity,
@@ -191,6 +192,7 @@ function storefrontShop(): StorefrontShop {
       seoTitle: "Attribution A — Cửa hàng sản phẩm số",
       showExactStock: false,
       supportText: "Support",
+      templateId: null,
     },
     currency: "VND",
     currentHostname: "attribution-a.selinow.com",
@@ -212,6 +214,8 @@ function storefrontShop(): StorefrontShop {
     status: "active",
     currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
+    timezone: "Asia/Ho_Chi_Minh",
+    template: FALLBACK_STOREFRONT_TEMPLATE,
     theme: {
       accent: "#7C3AED",
       accentInk: "#FFFFFF",

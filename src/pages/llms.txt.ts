@@ -6,7 +6,7 @@ import { classifyPlatformHost } from "../lib/storefront/routing";
 
 const BODY = [
   "# Selinow",
-  "> Selinow is a bilingual commerce operating layer for digital products, starting with Website and Telegram and designed for additional customer channels.",
+  "> Selinow is a bilingual commerce operating layer for selling digital products — automatic delivery of digital files and license keys after verified payment — starting with Website and Telegram and designed for additional customer channels.",
   "",
   "## Product facts",
   "- One catalog, order, payment, inventory, and fulfillment core for Website and Telegram.",

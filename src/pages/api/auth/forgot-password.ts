@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 
 import { isAppError } from "../../../lib/core/errors";
+import { claimOtpAdmission, cloudflareRequesterAddress } from "../../../lib/auth/admission";
 import { normalizeEmail } from "../../../lib/auth/policy";
 import { requestPasswordResetOtp } from "../../../lib/auth/session";
 import { createCaughtErrorResponse } from "../../../lib/http/security";
@@ -15,6 +16,13 @@ export const POST: APIRoute = async ({ locals, request }) => {
     rejectUnknownFields(body, ["email"]);
 
     const email = normalizeEmail(body.email);
+    await claimOtpAdmission({
+      email,
+      env,
+      now: new Date(),
+      purpose: "password_reset",
+      requesterAddress: cloudflareRequesterAddress(request),
+    });
     const result = await requestPasswordResetOtp({
       email,
       env,

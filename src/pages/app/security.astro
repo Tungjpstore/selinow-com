@@ -1,6 +1,13 @@
 ---
+import Icon from "../../components/console/Icon.astro";
+import Button from "../../components/primitives/Button.astro";
+import Input from "../../components/primitives/Input.astro";
+import SecretField from "../../components/primitives/SecretField.astro";
+import StatusBadge from "../../components/primitives/StatusBadge.astro";
+import WorkspaceState from "../../components/states/WorkspaceState.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
 import { authenticateRequest } from "../../lib/auth/session";
+import { getTwoFactorStatus } from "../../lib/auth/two-factor";
 import { withSelectedShop } from "../../lib/dashboard/shop-navigation";
 import { createDashboardTranslator } from "../../lib/i18n/catalogs/dashboard";
 import { getBindings } from "../../lib/platform/bindings";
@@ -21,6 +28,25 @@ try {
 }
 const shop = selectShopForMember(shops, Astro.url.searchParams.get("shop"));
 const workspaceHref = (href: string): string => withSelectedShop(href, shop?.publicId, Astro.url.origin);
+
+const tabKeys = ["sessions", "two_factor", "password", "history"] as const;
+type SecurityTab = typeof tabKeys[number];
+const requestedTab = Astro.url.searchParams.get("tab");
+const activeTab: SecurityTab = (tabKeys as readonly string[]).includes(requestedTab ?? "")
+  ? (requestedTab as SecurityTab)
+  : "sessions";
+const tabHref = (tab: SecurityTab): string => workspaceHref(`/app/security?tab=${tab}`);
+
+let twoFactor = { enabled: false, enabledAt: null as string | null };
+try {
+  twoFactor = await getTwoFactorStatus({ env, userId: auth.userId });
+} catch {
+  // Status degrades to "not shown as enabled"; enrollment never changes here.
+}
+const twoFactorFormatter = new Intl.DateTimeFormat(locale ?? "en", { dateStyle: "medium", timeStyle: "short" });
+const twoFactorEnabledLabel = twoFactor.enabledAt !== null && Number.isFinite(Date.parse(twoFactor.enabledAt))
+  ? twoFactorFormatter.format(new Date(twoFactor.enabledAt))
+  : null;
 ---
 
 <AppLayout activePath="/app/security" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.security.title")}>
@@ -33,47 +59,218 @@ const workspaceHref = (href: string): string => withSelectedShop(href, shop?.pub
     data-account-security-root
     data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`}
     data-locale={locale ?? "en"}
+    data-active-tab={activeTab}
+    data-two-factor-enabled={twoFactor.enabled ? "true" : "false"}
   >
+    <nav class="security-tabs" role="tablist" aria-label={t("dashboard.security.tabs.aria")} data-security-tab-list>
+      {tabKeys.map((tab) => (
+        <a
+          class="security-tab"
+          role="tab"
+          id={`security-tab-${tab}`}
+          aria-selected={activeTab === tab ? "true" : "false"}
+          aria-controls={`security-tabpanel-${tab}`}
+          href={tabHref(tab)}
+          data-security-tab={tab}
+          data-active={activeTab === tab ? "true" : "false"}
+        >{t(`dashboard.security.tabs.${tab}`)}</a>
+      ))}
+    </nav>
+
     <p class="security-feedback" role="status" aria-live="polite" tabindex="-1" data-security-feedback>
       {t("dashboard.security.client.loading")}
     </p>
 
-    <section class="security-overview" aria-labelledby="security-overview-title">
-      <span class="overview-mark" aria-hidden="true">✓</span>
-      <div>
-        <p class="eyebrow">{t("dashboard.security.overview.eyebrow")}</p>
-        <h2 id="security-overview-title">{t("dashboard.security.overview.title")}</h2>
-        <p>{t("dashboard.security.overview.description")}</p>
-      </div>
-    </section>
-
-    <section class="security-panel" aria-labelledby="active-sessions-title">
-      <header class="panel-heading">
+    <div
+      role="tabpanel"
+      id="security-tabpanel-sessions"
+      aria-labelledby="security-tab-sessions"
+      data-security-tabpanel="sessions"
+      hidden={activeTab !== "sessions"}
+      class="security-tabpanel"
+    >
+      <section class="security-overview" aria-labelledby="security-overview-title">
+        <span class="overview-mark" aria-hidden="true"><Icon name="check" size={14} /></span>
         <div>
-          <h2 id="active-sessions-title">{t("dashboard.security.sessions.title")}</h2>
-          <p>{t("dashboard.security.sessions.description")}</p>
+          <p class="eyebrow">{t("dashboard.security.overview.eyebrow")}</p>
+          <h2 id="security-overview-title">{t("dashboard.security.overview.title")}</h2>
+          <p>{t("dashboard.security.overview.description")}</p>
         </div>
-        <button class="sln-button sln-button-secondary" type="button" data-security-refresh>{t("dashboard.security.refresh")}</button>
-      </header>
-      <div class="session-ledger" role="list" aria-label={t("dashboard.security.sessions.aria")} data-security-session-list>
-        <article class="session-loading" role="listitem" aria-busy="true">
-          <span class="session-mark" aria-hidden="true"></span>
-          <p>{t("dashboard.security.sessions.loading")}</p>
-        </article>
-      </div>
-    </section>
+      </section>
 
-    <section class="security-panel danger-panel" aria-labelledby="revoke-sessions-title">
-      <div>
-        <p class="eyebrow danger-eyebrow">{t("dashboard.security.revoke.eyebrow")}</p>
-        <h2 id="revoke-sessions-title">{t("dashboard.security.revoke.title")}</h2>
-        <p>{t("dashboard.security.revoke.description")}</p>
-      </div>
-      <div class="danger-actions">
-        <button class="sln-button sln-button-danger" type="button" data-security-revoke-all>{t("dashboard.security.revoke.action")}</button>
-        <button class="sln-button sln-button-secondary" type="button" data-security-reauth hidden>{t("dashboard.security.client.reauth_action")}</button>
-      </div>
-    </section>
+      <section class="security-panel google-link-panel" aria-labelledby="google-link-title">
+        <div>
+          <p class="eyebrow">{t("dashboard.security.google.eyebrow")}</p>
+          <h2 id="google-link-title">{t("dashboard.security.google.title")}</h2>
+          <p>{t("dashboard.security.google.description")}</p>
+          <p class="google-link-status" role="status" aria-live="polite" data-google-link-status hidden></p>
+        </div>
+        <button class="sln-button sln-button-secondary" type="button" data-google-link>{t("dashboard.security.google.action")}</button>
+      </section>
+
+      <section class="security-panel" aria-labelledby="active-sessions-title">
+        <header class="panel-heading">
+          <div>
+            <h2 id="active-sessions-title">{t("dashboard.security.sessions.title")}</h2>
+            <p>{t("dashboard.security.sessions.description")}</p>
+          </div>
+          <button class="sln-button sln-button-secondary" type="button" data-security-refresh>{t("dashboard.security.refresh")}</button>
+        </header>
+        <div class="session-ledger" role="list" aria-label={t("dashboard.security.sessions.aria")} data-security-session-list>
+          <article class="session-loading" role="listitem" aria-busy="true">
+            <span class="session-mark" aria-hidden="true"></span>
+            <p>{t("dashboard.security.sessions.loading")}</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="security-panel danger-panel" aria-labelledby="revoke-sessions-title">
+        <div>
+          <p class="eyebrow danger-eyebrow">{t("dashboard.security.revoke.eyebrow")}</p>
+          <h2 id="revoke-sessions-title">{t("dashboard.security.revoke.title")}</h2>
+          <p>{t("dashboard.security.revoke.description")}</p>
+        </div>
+        <div class="danger-actions">
+          <button class="sln-button sln-button-danger" type="button" data-security-revoke-all>{t("dashboard.security.revoke.action")}</button>
+          <button class="sln-button sln-button-secondary" type="button" data-security-reauth hidden>{t("dashboard.security.client.reauth_action")}</button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      role="tabpanel"
+      id="security-tabpanel-two_factor"
+      aria-labelledby="security-tab-two_factor"
+      data-security-tabpanel="two_factor"
+      hidden={activeTab !== "two_factor"}
+      class="security-tabpanel"
+    >
+      <section class="security-panel" aria-labelledby="two-factor-title">
+        <header class="panel-heading">
+          <div>
+            <h2 id="two-factor-title">{t("dashboard.security.two_factor.title")}</h2>
+            <p>{t("dashboard.security.two_factor.description")}</p>
+          </div>
+          <StatusBadge
+            label={twoFactor.enabled ? t("dashboard.security.two_factor.status_on") : t("dashboard.security.two_factor.status_off")}
+            tone={twoFactor.enabled ? "success" : "neutral"}
+          />
+        </header>
+
+        {twoFactor.enabled ? (
+          <div class="two-factor-block">
+            {twoFactorEnabledLabel !== null && <p class="two-factor-note">{t("dashboard.security.two_factor.enabled_at", { date: twoFactorEnabledLabel })}</p>}
+            <p class="two-factor-note">{t("dashboard.security.two_factor.disable_reauth_note")}</p>
+            <div class="two-factor-disable" data-two-factor-disable>
+              <SecretField
+                id="two-factor-disable-password"
+                name="twoFactorDisablePassword"
+                label={t("dashboard.security.two_factor.disable_password_label")}
+                autocomplete="current-password"
+                maxLength={128}
+              />
+              <Button type="button" variant="danger" className="two-factor-action" data-action="two-factor-disable">{t("dashboard.security.two_factor.disable_action")}</Button>
+              <p class="two-factor-divider">{t("dashboard.security.two_factor.disable_or")}</p>
+              <div class="two-factor-otp-row">
+                <Button type="button" variant="secondary" className="two-factor-action" data-action="two-factor-disable-otp-request" data-two-factor-disable-otp-request>{t("dashboard.security.two_factor.send_otp")}</Button>
+                <Input
+                  id="two-factor-disable-otp"
+                  name="twoFactorDisableOtp"
+                  label={t("dashboard.security.two_factor.verify_label")}
+                  aria-label={t("dashboard.security.two_factor.verify_label")}
+                  inputmode="numeric"
+                  maxLength={6}
+                  placeholder="000000"
+                />
+                <Button type="button" variant="secondary" className="two-factor-action" data-action="two-factor-disable-otp-submit">{t("dashboard.security.two_factor.disable_action")}</Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div class="two-factor-block">
+            <div class="two-factor-actions" data-two-factor-enroll>
+              <Button type="button" className="two-factor-action" data-action="two-factor-enable" data-two-factor-enable>{t("dashboard.security.two_factor.enable_action")}</Button>
+            </div>
+            <div class="two-factor-enroll" data-two-factor-enroll-form hidden>
+              <Input
+                id="two-factor-enroll-otp"
+                name="twoFactorEnrollOtp"
+                label={t("dashboard.security.two_factor.verify_label")}
+                aria-label={t("dashboard.security.two_factor.verify_label")}
+                inputmode="numeric"
+                maxLength={6}
+                placeholder="000000"
+              />
+              <div class="two-factor-otp-row">
+                <Button type="button" className="two-factor-action" data-action="two-factor-verify" data-two-factor-verify>{t("dashboard.security.two_factor.verify_submit")}</Button>
+                <Button type="button" variant="secondary" className="two-factor-action" data-action="two-factor-resend" data-two-factor-resend>{t("dashboard.security.two_factor.resend")}</Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+
+    <div
+      role="tabpanel"
+      id="security-tabpanel-password"
+      aria-labelledby="security-tab-password"
+      data-security-tabpanel="password"
+      hidden={activeTab !== "password"}
+      class="security-tabpanel"
+    >
+      <section class="security-panel" aria-labelledby="password-title">
+        <header class="panel-heading">
+          <div>
+            <h2 id="password-title">{t("dashboard.security.password.title")}</h2>
+            <p>{t("dashboard.security.password.description")}</p>
+          </div>
+        </header>
+        <div class="password-form" data-password-form>
+          <SecretField
+            id="password-current"
+            name="currentPassword"
+            label={t("dashboard.security.password.current_label")}
+            autocomplete="current-password"
+            maxLength={128}
+            required
+          />
+          <SecretField
+            id="password-new"
+            name="newPassword"
+            label={t("dashboard.security.password.new_label")}
+            autocomplete="new-password"
+            maxLength={128}
+            required
+          />
+          <Button type="button" className="two-factor-action" data-action="password-submit" data-password-submit>{t("dashboard.security.password.submit")}</Button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      role="tabpanel"
+      id="security-tabpanel-history"
+      aria-labelledby="security-tab-history"
+      data-security-tabpanel="history"
+      hidden={activeTab !== "history"}
+      class="security-tabpanel"
+    >
+      <section class="security-panel" aria-labelledby="history-title">
+        <header class="panel-heading">
+          <div>
+            <h2 id="history-title">{t("dashboard.security.history.title")}</h2>
+            <p>{t("dashboard.security.history.description")}</p>
+          </div>
+          <button class="sln-button sln-button-secondary" type="button" data-security-history-refresh>{t("dashboard.security.refresh")}</button>
+        </header>
+        <div class="history-ledger" role="list" aria-label={t("dashboard.security.history.title")} data-security-history-list>
+          <div class="history-empty" role="listitem" data-security-history-empty hidden>
+            <WorkspaceState title={t("dashboard.security.history.empty_title")} description={t("dashboard.security.history.empty_description")} tone="neutral" />
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 
   <script>
@@ -83,24 +280,34 @@ const workspaceHref = (href: string): string => withSelectedShop(href, shop?.pub
 
 <style>
   .security-workspace { display:grid; gap:22px; }
+  .security-tabs { display:flex; flex-wrap:wrap; gap:8px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); padding:8px; background:var(--sln-bg-surface); }
+  .security-tab { display:inline-flex; align-items:center; min-height:40px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:8px 14px; color:var(--sln-text-secondary); font:var(--sln-font-label); text-decoration:none; transition:background .15s ease, color .15s ease; }
+  .security-tab:hover { background:var(--sln-bg-subtle); color:var(--sln-text-primary); }
+  .security-tab[data-active="true"] { border-color:color-mix(in srgb, var(--sln-action-primary) 32%, var(--sln-border-default)); background:var(--sln-tint-info); color:var(--sln-action-primary); }
+  .security-tabpanel { display:grid; gap:22px; }
+  .security-tabpanel[hidden] { display:none; }
   .security-feedback { min-height:46px; margin:0; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:12px 14px; background:var(--sln-bg-subtle); color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
-  .security-feedback[data-tone="danger"] { border-color:color-mix(in srgb, var(--sln-state-danger) 42%, var(--sln-border-default)); background:var(--sln-tint-danger); color:var(--selinow-danger-text); }
-  .security-feedback[data-tone="success"] { border-color:color-mix(in srgb, var(--sln-state-success) 42%, var(--sln-border-default)); background:var(--sln-tint-success); color:var(--selinow-success-text); }
+  .security-feedback[data-tone="danger"] { border-color:color-mix(in srgb, var(--sln-state-danger) 42%, var(--sln-border-default)); background:var(--sln-tint-danger); color:var(--sln-danger-text); }
+  .security-feedback[data-tone="success"] { border-color:color-mix(in srgb, var(--sln-state-success) 42%, var(--sln-border-default)); background:var(--sln-tint-success); color:var(--sln-success-text); }
   .security-overview { display:grid; grid-template-columns:auto minmax(0,1fr); gap:18px; align-items:start; border:1px solid color-mix(in srgb, var(--sln-action-primary) 28%, var(--sln-border-default)); border-radius:var(--sln-radius-xl); padding:24px; background:linear-gradient(135deg, var(--sln-bg-surface), color-mix(in srgb, var(--sln-tint-info) 55%, var(--sln-bg-surface))); box-shadow:var(--sln-shadow-sm); }
-  .overview-mark { display:grid; place-items:center; width:46px; height:46px; border-radius:14px; background:var(--sln-action-primary); color:var(--sln-white); font-size:22px; font-weight:800; }
-  .eyebrow { margin:0 0 6px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:800; letter-spacing:.09em; }
+  .overview-mark { display:grid; place-items:center; width:46px; height:46px; border-radius:14px; background:var(--sln-action-primary); color:var(--sln-white); font-size:22px; font-weight: 600; }
+  .eyebrow { margin:0 0 6px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight: 600; letter-spacing:.09em; }
   .security-overview h2, .security-panel h2 { margin:0; color:var(--sln-text-primary); font:var(--sln-font-h3); }
   .security-overview div > p:last-child, .panel-heading p, .danger-panel > div > p:last-child { margin:8px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
   .security-panel { display:grid; gap:18px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-xl); padding:24px; background:var(--sln-bg-surface); box-shadow:var(--sln-shadow-sm); }
+  .google-link-panel { grid-template-columns:minmax(0,1fr) auto; align-items:center; }
+  .google-link-status { margin:10px 0 0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .google-link-status[data-tone="danger"] { color:var(--sln-danger-text); }
+  .google-link-status[data-tone="success"] { color:var(--sln-success-text); }
   .panel-heading { display:flex; justify-content:space-between; gap:20px; align-items:start; }
   .panel-heading .sln-button { flex:0 0 auto; }
   .session-ledger { display:grid; overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-lg); }
   .session-ledger article { display:grid; grid-template-columns:44px minmax(150px,1.3fr) repeat(4,minmax(120px,.8fr)); gap:14px; align-items:center; min-height:88px; padding:16px; border-top:1px solid var(--sln-border-default); }
   .session-ledger article:first-child { border-top:0; }
-  .session-mark { display:grid; place-items:center; width:40px; height:40px; border-radius:12px; background:var(--sln-bg-subtle); color:var(--sln-action-primary); font-weight:850; }
+  .session-mark { display:grid; place-items:center; width:40px; height:40px; border-radius:12px; background:var(--sln-bg-subtle); color:var(--sln-action-primary); font-weight: 600; }
   .session-copy { display:grid; gap:5px; min-width:0; }
   .session-copy strong { color:var(--sln-text-primary); font:var(--sln-font-label); }
-  .session-copy span { width:max-content; border-radius:var(--sln-radius-pill); padding:4px 8px; background:var(--sln-tint-success); color:var(--selinow-success-text); font:var(--sln-font-caption); font-weight:750; }
+  .session-copy span { width:max-content; border-radius:var(--sln-radius-pill); padding:4px 8px; background:var(--sln-tint-success); color:var(--sln-success-text); font:var(--sln-font-caption); font-weight: 600; }
   .session-meta { display:grid; gap:5px; min-width:0; }
   .session-meta span { color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .session-meta time { overflow:hidden; color:var(--sln-text-primary); font:var(--sln-font-body-sm); text-overflow:ellipsis; white-space:nowrap; }
@@ -110,8 +317,22 @@ const workspaceHref = (href: string): string => withSelectedShop(href, shop?.pub
   .danger-panel { grid-template-columns:minmax(0,1fr) auto; align-items:center; border-color:color-mix(in srgb, var(--sln-state-danger) 32%, var(--sln-border-default)); }
   .danger-eyebrow { color:var(--sln-state-danger); }
   .danger-actions { display:grid; gap:10px; min-width:210px; }
+  .two-factor-block { display:grid; gap:14px; }
+  .two-factor-note { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-body-sm); }
+  .two-factor-actions, .two-factor-enroll, .two-factor-disable, .password-form { display:grid; gap:14px; max-width:520px; }
+  .two-factor-otp-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; align-items:end; }
+  .two-factor-divider { margin:0; color:var(--sln-text-muted); font:var(--sln-font-caption); font-weight: 600; letter-spacing:.06em; text-transform:uppercase; }
+  .two-factor-action { justify-self:start; }
+  .history-ledger { display:grid; gap:10px; }
+  .history-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); padding:14px; background:var(--sln-bg-canvas); }
+  .history-row time { color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
+  .history-outcome { display:inline-flex; width:max-content; border-radius:var(--sln-radius-pill); padding:4px 10px; font:var(--sln-font-caption); font-weight: 600; }
+  .history-outcome[data-tone="success"] { background:var(--sln-tint-success); color:var(--sln-success-text); }
+  .history-outcome[data-tone="warning"] { background:var(--sln-tint-warning); color:var(--sln-warning-text); }
+  .history-outcome[data-tone="danger"] { background:var(--sln-tint-danger); color:var(--sln-danger-text); }
+  .history-outcome[data-tone="neutral"] { background:var(--sln-bg-subtle); color:var(--sln-text-secondary); }
   @keyframes security-pulse { to { background-position:-200% 0; } }
   @media (prefers-reduced-motion: reduce) { .session-loading .session-mark { animation:none; } }
   @media (max-width: 980px) { .session-ledger article { grid-template-columns:44px minmax(0,1fr) minmax(130px,.8fr); } .session-meta { grid-column:2 / -1; } }
-  @media (max-width: 680px) { .security-overview, .security-panel { padding:18px; } .security-overview { grid-template-columns:1fr; } .panel-heading, .danger-panel { grid-template-columns:1fr; flex-direction:column; } .panel-heading .sln-button, .danger-actions { width:100%; } .session-ledger article { grid-template-columns:40px minmax(0,1fr); gap:10px; } .session-meta { grid-column:2; } }
+  @media (max-width: 680px) { .security-overview, .security-panel { padding:18px; } .security-overview { grid-template-columns:1fr; } .panel-heading, .danger-panel, .google-link-panel { grid-template-columns:1fr; flex-direction:column; } .panel-heading .sln-button, .danger-actions, .google-link-panel .sln-button { width:100%; } .session-ledger article { grid-template-columns:40px minmax(0,1fr); gap:10px; } .session-meta { grid-column:2; } .two-factor-otp-row { grid-template-columns:1fr; } .two-factor-actions, .two-factor-enroll, .two-factor-disable, .password-form { max-width:none; } }
 </style>

@@ -90,3 +90,45 @@ export function prepareReservedFulfillmentItems(input: {
     input.reservationToken,
   );
 }
+
+export type PhysicalStockPlan = {
+  guardBindings: unknown[];
+  guardSql: string;
+  statements: D1PreparedStatement[];
+};
+
+/**
+ * Reserve physical variant stock for one D1 batch. Each UPDATE marks its row
+ * with the checkout reservation token while raising the reserved counter; the
+ * exact-count guard then proves every line reserved in full (the same
+ * token-proof pattern the license-key plan uses). The token is per-batch
+ * evidence, not durable ownership: expiry releases by order-item quantities.
+ */
+export function preparePhysicalStockPlan(input: {
+  env: AppBindings;
+  items: CheckoutReservationItem[];
+  nowIso: string;
+  reservationToken: string;
+  shopId: string;
+}): PhysicalStockPlan {
+  const statements = input.items.map((item) => input.env.PLATFORM_DB.prepare(`
+    UPDATE variant_stock_levels
+    SET reserved = reserved + ?, active_reservation_token = ?, updated_at = ?
+    WHERE shop_id = ? AND variant_id = ?
+      AND reserved + ? <= on_hand
+  `).bind(
+    item.quantity,
+    input.reservationToken,
+    input.nowIso,
+    input.shopId,
+    item.variantId,
+    item.quantity,
+  ));
+  const guardSql = input.items.length === 0
+    ? "1 = 1"
+    : "(SELECT COUNT(*) FROM variant_stock_levels WHERE shop_id = ? AND active_reservation_token = ?) = ?";
+  const guardBindings = input.items.length === 0
+    ? []
+    : [input.shopId, input.reservationToken, input.items.length];
+  return { guardBindings, guardSql, statements };
+}

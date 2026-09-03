@@ -3,7 +3,7 @@ import type { AppBindings } from "../platform/bindings";
 import { getPlatformAdminRole, type PlatformAdminRole } from "../tenants/store";
 
 export type AdminShopStatus = "draft" | "active" | "suspended" | "archived";
-export type AdminSubscriptionState = "trialing" | "active" | "past_due" | "grace_period" | "suspended" | "canceled";
+export type AdminSubscriptionState = "trialing" | "active" | "past_due" | "grace_period" | "pending_payment" | "suspended" | "canceled";
 
 export type AdminShopDirectoryItem = {
   activeMemberCount: number;
@@ -37,6 +37,7 @@ const SUBSCRIPTION_STATES: readonly AdminSubscriptionState[] = [
   "active",
   "past_due",
   "grace_period",
+  "pending_payment",
   "suspended",
   "canceled",
 ];

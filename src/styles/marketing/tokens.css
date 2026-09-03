@@ -2,6 +2,13 @@
    SELINOW COMMERCE FLOW OS — MARKETING DESIGN TOKENS
    ========================================================================== */
 
+/* Self-hosted variable fonts (LP editorial) — bundled by Vite/Astro, served
+   same-origin so the CSP `font-src 'self'` policy stays untouched. Vietnamese
+   subsets ship in every package. */
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/jetbrains-mono";
+
 :root {
   /* Brand / Primary Palette — Selinow Indigo */
   --brand-50:  #F4F3FF;
@@ -10,17 +17,17 @@
   --brand-300: #C0B7FF;
   --brand-400: #9C8BFF;
   --brand-500: #7965F5;
-  --brand-600: #6552E8;
+  --brand-600: #7C6AF0;
   --brand-700: #5140C9;
   --brand-800: #4436A5;
   --brand-900: #3A3183;
 
   /* Marketing Namespace Aliases */
-  --mk-brand: #6552E8;
-  --mk-brand-hover: #5140C9;
-  --mk-brand-active: #4436A5;
-  --mk-brand-soft: #ECE9FF;
-  --mk-brand-subtle: #F4F3FF;
+  --mk-brand: #6957DE;
+  --mk-brand-hover: #5B49D1;
+  --mk-brand-active: #4E3EBC;
+  --mk-brand-soft: #EDE8FB;
+  --mk-brand-subtle: #F5F2FB;
 
   /* Neutral Surface System */
   --surface-page:    #FCFCFD;
@@ -30,11 +37,20 @@
   --surface-inset:   #EBEFF5;
   --surface-dark:    #0C0E14;
 
-  --mk-canvas:        var(--surface-page);
+  /* Marketing canvas sits one step deeper than pure white so raised cards
+     separate through contrast + hairline instead of blending in. */
+  --mk-canvas:        #F7F8FB;
+  --mk-canvas-deep:   #F2F4F8;
   --mk-canvas-warm:   #FAF9F6;
   --mk-surface:       var(--surface-raised);
   --mk-surface-muted: var(--surface-muted);
   --mk-surface-soft:  var(--surface-soft);
+
+  /* Hairline + pattern atoms for diagram surfaces */
+  --mk-hairline:      #E3E6EF;
+  --mk-hairline-soft: #EBEEF4;
+  --mk-dot:           rgba(101, 82, 232, 0.14);
+  --mk-rule-gradient: linear-gradient(90deg, var(--brand-300), rgba(192, 183, 255, 0.25) 40%, transparent);
 
   /* Typography / Text Palette */
   --text-primary:    #101828;
@@ -105,6 +121,11 @@
   --shadow-floating: 0 18px 50px rgba(27, 32, 63, 0.10);
   --shadow-overlay:  0 24px 80px rgba(27, 32, 63, 0.16);
 
+  /* Layered card depth: crisp contact edge + soft ambient lift */
+  --mk-card-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 28px -14px rgba(16, 24, 40, 0.1);
+  --mk-card-shadow-hover: 0 1px 2px rgba(16, 24, 40, 0.05), 0 18px 40px -16px rgba(101, 82, 232, 0.16);
+  --mk-panel-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 24px 56px -24px rgba(16, 24, 40, 0.14);
+
   --mk-shadow-xs: var(--shadow-xs);
   --mk-shadow-sm: var(--shadow-sm);
   --mk-shadow-md: var(--shadow-md);
@@ -147,13 +168,61 @@
   --mk-prose-max: 72ch;
 
   /* Typography Stack */
-  --font-sans: Inter, "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+  --font-sans: "Inter Variable", Inter, "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Space Grotesk Variable", "Space Grotesk", var(--font-sans);
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
 
   --mk-font-sans: var(--font-sans);
+  --mk-font-display: var(--font-display);
   --mk-font-mono: var(--font-mono);
 
   /* Focus Indicator */
-  --mk-focus: #6552E8;
+  --mk-focus: #7C6AF0;
   --mk-focus-offset: 3px;
+
+  /* ── Editorial Commerce layer (LP program, v3 light premium — owner review
+     2026-08-22). Cool-white canvas, deep navy ink for high contrast, vivid
+     Soft accents; accent roles still reference the Selinow Soft spine so the
+     EX0 contract keeps holding. Contrast pairs (audited):
+     ink #0E1526 on canvas 16.7:1 · ink-soft #46527A on canvas 7.9:1 ·
+     accent-ink #5140C9 on canvas 7.0:1 · white on gradient-cta ≥5.2:1 —
+     all AA/AAA for their text sizes. */
+  --mk-ed-canvas:          #FFFFFF;
+  --mk-ed-canvas-deep:     #F5F7FB;
+  --mk-ed-surface:         #FFFFFF;
+  --mk-ed-surface-raised:  #FFFFFF;
+  --mk-ed-ink:             #0E1526;
+  --mk-ed-ink-soft:        #46527A;
+  --mk-ed-ink-muted:       #5A6485;
+  --mk-ed-hairline:        #E4E9F4;
+  --mk-ed-hairline-strong: #C9D3E8;
+  --mk-ed-accent:          var(--sln-soft-accent);
+  --mk-ed-accent-strong:   var(--sln-soft-accent-strong);
+  --mk-ed-accent-ink:      #5140C9;
+  --mk-ed-tint:            #F1EFFE;
+  --mk-ed-glow:            color-mix(in srgb, var(--sln-soft-accent) 20%, transparent);
+  --mk-ed-glow-strong:     color-mix(in srgb, var(--sln-soft-accent) 36%, transparent);
+  --mk-ed-veil:            color-mix(in srgb, var(--sln-ink-950) 62%, transparent);
+  --mk-ed-gradient-silk:   linear-gradient(120deg, #F2EFFE 0%, #FFFFFF 46%, #EBF3FE 100%);
+  --mk-ed-gradient-cta:    linear-gradient(120deg, var(--sln-soft-accent-strong), var(--sln-brand-indigo) 55%, var(--sln-brand-blue));
+  --mk-ed-glass:           color-mix(in srgb, var(--mk-ed-surface) 94%, transparent);
+
+  --radius-2xl: 28px;
+  --mk-radius-2xl: var(--radius-2xl);
+
+  /* Motion — LP editorial choreography. Everything maps back to the shared
+     SLN timings; only hero/scene/ticker add marketing-only durations. */
+  --mk-duration-fast:      var(--sln-duration-fast);
+  --mk-duration-default:   var(--sln-duration-default);
+  --mk-duration-panel:     var(--sln-duration-panel);
+  --mk-duration-marketing: var(--sln-duration-marketing);
+  --mk-duration-hero:      720ms;
+  --mk-duration-scene:     560ms;
+  --mk-duration-ticker:    28s;
+  --mk-ease-standard:      var(--sln-ease-standard);
+  --mk-ease-spring:        var(--sln-ease-spring);
+  --mk-ease-editorial:     cubic-bezier(.22, .61, .21, 1);
+
+  --mk-shell-wide: 1360px;
+  --mk-header-h: 72px;
 }

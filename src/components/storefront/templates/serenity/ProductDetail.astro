@@ -1,0 +1,36 @@
+---
+import BuyBox from "../../sections/BuyBox.astro";
+import PolicyPanel from "../../sections/PolicyPanel.astro";
+import RelatedGrid from "../../sections/RelatedGrid.astro";
+import SlotPickerInline from "../../sections/SlotPickerInline.astro";
+import { formatMoney } from "../../../../lib/storefront/view";
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  locale: string;
+  product: StorefrontProduct;
+  promotions: StorefrontPromotion[];
+  related: StorefrontProduct[];
+  shop: StorefrontShop;
+}
+
+const { locale, product, related, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const firstVariant = product.variants.find((variant) => variant.stockState !== "out_of_stock") ?? product.variants[0];
+const durationMinutes = firstVariant?.durationMinutes ?? null;
+---
+<section class="product-detail serenity-detail">
+  <div class="serenity-detail-copy">
+    <a class="back-link" href="/">{t("storefront.product.back")}</a>
+    <p class="store-kicker">{shop.name}</p>
+    <h1>{product.title}</h1>
+    {durationMinutes !== null && <p class="serenity-duration">{t("storefront.slot_picker.duration", { minutes: durationMinutes })}</p>}
+    {firstVariant && <p class="serenity-price">{formatMoney(firstVariant.priceMinor, firstVariant.currency, locale)}</p>}
+    <p class="description">{product.description || t("storefront.product.description_fallback")}</p>
+    <BuyBox locale={locale} product={product} />
+  </div>
+  <SlotPickerInline locale={locale} product={product} />
+  <PolicyPanel locale={locale} shop={shop} />
+</section>
+<RelatedGrid locale={locale} related={related} />

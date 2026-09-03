@@ -1,0 +1,415 @@
+/* ==========================================================================
+   LP Editorial Commerce — hero (LP1, v3 light premium)
+   Split hero over a soft light aurora canvas, tight grotesk headline, framed
+   dark campaign art with floating commerce chips, channel marquee strip.
+   ========================================================================== */
+
+.ed-hero {
+  position: relative;
+  overflow: clip;
+  padding-top: var(--mk-space-6);
+  /* Static CSS aurora: always painted under the canvas so the hero looks
+     right without JS and in reduced-motion mode (canvas hidden there). */
+  background:
+    radial-gradient(900px 460px at 82% 8%, var(--mk-ed-glow), transparent 62%),
+    radial-gradient(700px 420px at 12% 78%, color-mix(in srgb, var(--sln-brand-blue) 14%, transparent), transparent 66%),
+    radial-gradient(560px 380px at 55% 55%, color-mix(in srgb, var(--sln-brand-teal) 9%, transparent), transparent 70%),
+    var(--mk-ed-gradient-silk);
+}
+
+.ed-hero-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+.ed-hero-canvas[data-hero-canvas-state="off"] {
+  visibility: hidden;
+}
+
+.ed-hero-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+  gap: var(--mk-space-12);
+  align-items: center;
+  padding-block: var(--mk-space-14) var(--mk-space-20);
+}
+
+/* ── Copy column ────────────────────────────────────────────────────────── */
+.ed-hero-issue {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--mk-space-3);
+  margin: 0 0 var(--mk-space-6);
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mk-ed-ink-muted);
+}
+
+.ed-hero-issue-sep {
+  width: 44px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--mk-ed-accent-strong));
+}
+
+.ed-hero-title {
+  font-family: var(--mk-font-display);
+  font-size: clamp(40px, 4.8vw, 66px);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  color: var(--mk-ed-ink);
+  margin: 0 0 var(--mk-space-6);
+  text-wrap: balance;
+  font-variation-settings: "wght" 700;
+}
+
+.ed-hero-title em {
+  font-style: normal;
+  background: linear-gradient(100deg, var(--sln-brand-violet) 5%, var(--sln-brand-indigo) 55%, var(--sln-brand-blue));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Kinetic settle: the headline gains weight as it rises in. Base state is
+   the final state — the entrance only plays when motion is allowed, so the
+   reduced-motion / gate capture always lands on the settled headline. */
+@media (prefers-reduced-motion: no-preference) {
+  .ed-hero-title {
+    animation: ed-hero-settle var(--mk-duration-hero) var(--mk-ease-editorial) both;
+  }
+
+  @keyframes ed-hero-settle {
+    from {
+      opacity: 0;
+      transform: translateY(22px);
+      font-variation-settings: "wght" 520;
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      font-variation-settings: "wght" 700;
+    }
+  }
+}
+
+.ed-hero-lead {
+  font-size: clamp(16px, 1.4vw, 18.5px);
+  line-height: 1.68;
+  color: var(--mk-ed-ink-soft);
+  max-width: 54ch;
+  margin: 0 0 var(--mk-space-8);
+}
+
+.ed-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mk-space-4);
+  margin-bottom: var(--mk-space-8);
+}
+
+.ed-hero-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mk-space-2) var(--mk-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ed-hero-proof li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-2);
+  font-family: var(--mk-font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: var(--mk-ed-ink-soft);
+  padding: 7px 12px;
+  border: 1px solid var(--mk-ed-hairline);
+  border-radius: var(--mk-radius-pill);
+  background: var(--mk-ed-surface);
+  box-shadow: var(--mk-shadow-xs);
+}
+
+.ed-hero-proof svg {
+  color: var(--mk-success);
+}
+
+/* ── Art column ─────────────────────────────────────────────────────────── */
+.ed-hero-art {
+  position: relative;
+  margin: 0;
+}
+
+.ed-hero-art-frame {
+  position: relative;
+  border-radius: var(--mk-radius-2xl);
+  overflow: hidden;
+  border: 1px solid var(--mk-ed-hairline);
+  aspect-ratio: 5 / 5.4;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--sln-ink-900) 6%, transparent),
+    0 34px 70px -34px color-mix(in srgb, var(--sln-ink-900) 30%, transparent),
+    0 16px 40px -20px var(--mk-ed-glow-strong);
+}
+
+.ed-hero-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 22%;
+}
+
+/* Masked reveal: the frame clips from an editorial page-turn sliver to full.
+   Final state is fully revealed; the animation only decorates the entrance. */
+@media (prefers-reduced-motion: no-preference) {
+  .ed-hero-art[data-reveal-state="hidden"] .ed-hero-art-frame {
+    clip-path: inset(6% 10% 88% 6% round var(--mk-radius-2xl));
+  }
+
+  .ed-hero-art[data-reveal-state="visible"] .ed-hero-art-frame {
+    animation: ed-hero-unveil var(--mk-duration-hero) var(--mk-ease-editorial) both;
+  }
+
+  @keyframes ed-hero-unveil {
+    from { clip-path: inset(6% 10% 88% 6% round var(--mk-radius-2xl)); }
+    to   { clip-path: inset(0 0 0 0 round var(--mk-radius-2xl)); }
+  }
+}
+
+/* Gentle scroll parallax — CSS scroll-driven, progressive enhancement. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .ed-hero-art {
+      animation: ed-hero-parallax linear both;
+      animation-timeline: view();
+      animation-range: exit -20% cover 60%;
+    }
+
+    @keyframes ed-hero-parallax {
+      to { transform: translateY(-34px); }
+    }
+  }
+}
+
+/* Floating commerce chips over the portrait — the banner literally shows the
+   product: a chat order and its verified payment + delivery states. */
+.ed-hero-chip {
+  position: absolute;
+  display: grid;
+  gap: 4px;
+  padding: var(--mk-space-3) var(--mk-space-4);
+  border-radius: var(--mk-radius-md);
+  background: color-mix(in srgb, var(--mk-ed-surface) 96%, transparent);
+  border: 1px solid var(--mk-ed-hairline);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--sln-ink-900) 6%, transparent),
+    0 18px 40px -18px color-mix(in srgb, var(--sln-ink-900) 26%, transparent);
+  z-index: 1;
+}
+
+.ed-hero-chip strong {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--mk-ed-ink);
+  white-space: nowrap;
+}
+
+.ed-hero-chip small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mk-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mk-ed-ink-muted);
+  white-space: nowrap;
+}
+
+.ed-hero-chip small::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mk-success);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--mk-success) 60%, transparent);
+}
+
+.ed-hero-chip em {
+  font-style: normal;
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  color: var(--mk-ed-accent-ink);
+  white-space: nowrap;
+}
+
+.ed-hero-chip-order {
+  left: calc(-1 * var(--mk-space-6));
+  bottom: 15%;
+}
+
+.ed-hero-chip-verified {
+  right: calc(-1 * var(--mk-space-5));
+  top: 12%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ed-hero-chip {
+    animation: ed-chip-float 7s var(--mk-ease-standard) infinite alternate;
+  }
+
+  .ed-hero-chip-verified {
+    animation-delay: -3.5s;
+  }
+
+  @keyframes ed-chip-float {
+    from { transform: translateY(-5px); }
+    to { transform: translateY(6px); }
+  }
+}
+
+.ed-hero-art-tag {
+  position: absolute;
+  left: calc(-1 * var(--mk-space-5));
+  top: var(--mk-space-6);
+  writing-mode: vertical-rl;
+  font-family: var(--mk-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mk-ed-ink-muted);
+  border-left: 1px solid var(--mk-ed-hairline-strong);
+  padding-left: var(--mk-space-3);
+}
+
+/* ── Channel marquee ────────────────────────────────────────────────────── */
+.ed-ticker {
+  position: relative;
+  border-block: 1px solid var(--mk-ed-hairline);
+  background: color-mix(in srgb, var(--mk-ed-canvas-deep) 82%, transparent);
+  overflow: hidden;
+}
+
+.ed-ticker-track {
+  display: flex;
+  width: max-content;
+}
+
+.ed-ticker-list {
+  display: flex;
+  align-items: center;
+  gap: var(--mk-space-12);
+  margin: 0;
+  padding: var(--mk-space-4) var(--mk-space-6);
+  list-style: none;
+}
+
+.ed-ticker-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-3);
+  white-space: nowrap;
+}
+
+.ed-ticker-list strong {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--mk-ed-ink);
+}
+
+.ed-ticker-list small {
+  font-family: var(--mk-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mk-ed-ink-muted);
+}
+
+.ed-ticker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mk-ed-hairline-strong);
+}
+
+.ed-ticker-list li[data-state="live"] .ed-ticker-dot {
+  background: var(--mk-success);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--mk-success) 55%, transparent);
+}
+
+.ed-ticker-list li[data-state="next"] .ed-ticker-dot {
+  background: var(--mk-ed-accent-strong);
+  box-shadow: 0 0 8px var(--mk-ed-glow-strong);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ed-ticker-track {
+    animation: ed-ticker-scroll var(--mk-duration-ticker) linear infinite;
+  }
+
+  @keyframes ed-ticker-scroll {
+    to { transform: translateX(-50%); }
+  }
+
+  .ed-ticker:hover .ed-ticker-track,
+  .ed-ticker:focus-within .ed-ticker-track {
+    animation-play-state: paused;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Static wrap instead of a marquee: every channel stays visible and the
+     strip is not a scrollable region (axe scrollable-region-focusable). */
+  .ed-ticker-track {
+    width: auto;
+    flex-wrap: wrap;
+  }
+
+  .ed-ticker-list {
+    flex-wrap: wrap;
+    row-gap: var(--mk-space-2);
+  }
+
+  .ed-ticker-list[aria-hidden="true"] {
+    display: none;
+  }
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  .ed-hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--mk-space-10);
+    padding-block: var(--mk-space-12) var(--mk-space-12);
+  }
+
+  .ed-hero-chip-order {
+    left: var(--mk-space-2);
+    bottom: 10%;
+  }
+
+  .ed-hero-chip-verified {
+    right: var(--mk-space-2);
+    top: 8%;
+  }
+
+  .ed-hero-art-tag {
+    left: auto;
+    right: var(--mk-space-2);
+    top: calc(-1 * var(--mk-space-6));
+  }
+}

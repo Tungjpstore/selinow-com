@@ -63,6 +63,7 @@ Queue consumer có thể dùng cùng Worker deployment nếu cấu hình hỗ tr
 | `EMAIL_FROM_ADDRESS` | `no-reply@selinow.com` | Platform sender |
 | `EMAIL_FROM_NAME` | `Selinow` | Platform sender name |
 | `LOG_LEVEL` | `info` | No secret debug dumping |
+| `GOOGLE_OAUTH_REDIRECT_URI` | exact environment callback URL | Must exactly match the URI registered in Google Cloud |
 
 ## 4. Global Worker secrets
 
@@ -79,7 +80,8 @@ Queue consumer có thể dùng cùng Worker deployment nếu cấu hình hỗ tr
 | `TURNSTILE_SECRET_KEY` | Server verification |
 | `CLOUDFLARE_API_TOKEN` | Custom hostname provisioning, least privilege |
 | `CLOUDFLARE_ACCOUNT_ID` | Treat as sensitive config if desired |
-| `GOOGLE_OAUTH_CLIENT_SECRET` | Only if OAuth enabled |
+| `GOOGLE_OAUTH_CLIENT_ID` | Google OAuth web client identifier; provision as a Worker secret to keep the tracked configuration credential-free |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth web client secret; Worker secret required when OAuth is enabled |
 | `DODO_PAYMENTS_API_KEY` | Platform subscription checkout/API access |
 | `DODO_PAYMENTS_WEBHOOK_KEY` | Platform subscription webhook signature verification (`DODO_PAYMENTS_WEBHOOK_SECRET` is accepted as a compatibility alias) |
 | `DODO_PAYMENTS_ENVIRONMENT` | `test_mode` or `live_mode`; defaults to `test_mode` outside production and `live_mode` in production |

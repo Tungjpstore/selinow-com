@@ -6,14 +6,21 @@ import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  attestDodoCatalogProducts,
+  buildDodoCatalogCloudflareEnvironment,
   classifyDodoCatalogRows,
+  DODO_CATALOG_OFFERS,
+  dodoCatalogCompletionSql,
   dodoCatalogReadSql,
   dodoCatalogRotationSql,
   dodoCatalogUpdateSql,
+  inspectDodoCatalog,
   parseDodoCatalogRotationCommandOutput,
   parseDodoCatalogArguments,
   parseDodoCatalogCommandOutput,
   readDodoCatalogReferences,
+  reconcileDodoCatalog,
+  validateDodoCatalogProviderProduct,
   validateDodoCatalogTarget,
 } from "../../scripts/lib/dodo-catalog-reconciliation.mjs";
 
@@ -68,12 +75,26 @@ describe("Dodo catalog reconciliation", () => {
       publishedCount: 0,
     });
     database.exec(dodoCatalogUpdateSql(REFERENCES));
-    expect(database.prepare("SELECT changes() AS updated_count").get()).toEqual({ updated_count: 4 });
     expect(classifyDodoCatalogRows(rows(database), REFERENCES)).toEqual({
       mode: "already_configured",
       pendingCount: 0,
       publishedCount: 4,
     });
+    expect(database.prepare("SELECT value_json AS valueJson FROM platform_settings WHERE key = 'dodo_catalog_reconciliation_required'").get())
+      .toEqual({ valueJson: '{"value":false}' });
+  });
+
+  it("keeps the completion marker true until all four exact offers are published", () => {
+    database.exec(dodoCatalogCompletionSql(REFERENCES, "already_configured"));
+    expect(database.prepare("SELECT value_json AS valueJson FROM platform_settings WHERE key = 'dodo_catalog_reconciliation_required'").get())
+      .toEqual({ valueJson: '{"value":true}' });
+
+    database.prepare("UPDATE plan_prices SET provider_price_ref = ? WHERE id = ?")
+      .run(REFERENCES.price_starter_vn_v1, "price_starter_vn_v1");
+    database.exec(dodoCatalogCompletionSql(REFERENCES, "already_configured"));
+
+    expect(database.prepare("SELECT value_json AS valueJson FROM platform_settings WHERE key = 'dodo_catalog_reconciliation_required'").get())
+      .toEqual({ valueJson: '{"value":true}' });
   });
 
   it("rotates published v1 rows into v2 without rebinding existing subscriptions or checkouts", () => {
@@ -103,6 +124,7 @@ describe("Dodo catalog reconciliation", () => {
       pendingCount: 0,
       publishedCount: 4,
     });
+    database.prepare("UPDATE platform_settings SET value_json = '{\"value\":true}' WHERE key = 'dodo_catalog_reconciliation_required'").run();
 
     database.exec(dodoCatalogRotationSql(LIVE_REFERENCES, REFERENCES));
 
@@ -245,20 +267,40 @@ describe("Dodo catalog reconciliation", () => {
     })).toThrow(/dodo_starter_global_product_id_invalid/u);
     expect(() => parseDodoCatalogArguments(["--env", "staging", "--apply"]))
       .toThrow("dodo_catalog_confirmation_required");
+    expect(parseDodoCatalogArguments(["--env", "production", "--inspect"]))
+      .toMatchObject({ apply: false, inspect: true });
+    expect(() => parseDodoCatalogArguments(["--env", "production", "--inspect", "--dry-run"]))
+      .toThrow("dodo_catalog_mode_conflict");
+    expect(() => parseDodoCatalogArguments(["--env", "production", "--inspect", "--apply"]))
+      .toThrow("dodo_catalog_mode_conflict");
     expect(() => parseDodoCatalogArguments(["--env", "production", "--apply", "--confirm-catalog-update"]))
       .toThrow("production_confirmation_required");
     expect(() => parseDodoCatalogArguments(["--env", "staging", "--apply", "--confirm-catalog-update"]))
       .toThrow("staging_test_catalog_confirmation_required");
     expect(parseDodoCatalogArguments([
       "--env", "staging", "--apply", "--confirm-catalog-update", "--confirm-staging-test-catalog",
-    ])).toMatchObject({ confirmStagingTestCatalog: true });
+      "--release-manifest", ".wrangler/releases/staging/stg_test/release-manifest.json",
+    ])).toMatchObject({
+      confirmStagingTestCatalog: true,
+      manifestPath: ".wrangler/releases/staging/stg_test/release-manifest.json",
+    });
+    expect(() => parseDodoCatalogArguments([
+      "--env", "staging", "--apply", "--confirm-catalog-update", "--confirm-staging-test-catalog",
+    ])).toThrow("dodo_catalog_release_manifest_required");
     expect(() => parseDodoCatalogArguments([
       "--env", "production", "--apply", "--confirm-catalog-update", "--confirm-production",
     ])).toThrow("production_live_catalog_confirmation_required");
     expect(parseDodoCatalogArguments([
       "--env", "production", "--apply", "--confirm-catalog-update", "--confirm-production",
+      "--confirm-production-live-catalog", "--release-manifest=.wrangler/releases/release_test/release-manifest.json",
+    ])).toMatchObject({
+      confirmProductionLiveCatalog: true,
+      manifestPath: ".wrangler/releases/release_test/release-manifest.json",
+    });
+    expect(() => parseDodoCatalogArguments([
+      "--env", "production", "--apply", "--confirm-catalog-update", "--confirm-production",
       "--confirm-production-live-catalog",
-    ])).toMatchObject({ confirmProductionLiveCatalog: true });
+    ])).toThrow("dodo_catalog_release_manifest_required");
     expect(() => {
       validateDodoCatalogTarget({
         environment: "staging", providerMode: "live_mode", confirmStagingTestCatalog: true,
@@ -270,6 +312,106 @@ describe("Dodo catalog reconciliation", () => {
         confirmProductionLiveCatalog: true,
       });
     }).toThrow("dodo_catalog_production_test_mode_forbidden");
+  });
+
+  it("attests every provider product before catalog publication", async () => {
+    const byReference = new Map(Object.entries(REFERENCES).map(([offerId, reference]) => {
+      const offer = DODO_CATALOG_OFFERS.find((candidate) => candidate.id === offerId);
+      if (offer === undefined) throw new Error("missing_offer_fixture");
+      return [reference, {
+        is_recurring: true,
+        price: {
+          currency: offer.currency,
+          payment_frequency_count: 1,
+          payment_frequency_interval: "Month",
+          price: offer.amountMinor,
+          purchasing_power_parity: false,
+          subscription_period_count: 20,
+          subscription_period_interval: "Year",
+          tax_inclusive: true,
+          trial_amount: null,
+          trial_period_days: 0,
+          type: "recurring_price",
+        },
+        product_id: reference,
+      }];
+    }));
+    const calls: string[] = [];
+    const result = await attestDodoCatalogProducts({
+      apiBaseUrl: "https://test.dodopayments.com",
+      apiKey: "test-api-key-with-enough-entropy",
+      references: REFERENCES,
+      fetcher: (input, init) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        calls.push(url.pathname);
+        expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer test-api-key-with-enough-entropy");
+        return Promise.resolve(Response.json(byReference.get(decodeURIComponent(url.pathname.split("/").at(-1) ?? ""))));
+      },
+    });
+    expect(result).toEqual({ verifiedCount: 4 });
+    expect(calls).toHaveLength(4);
+
+    const proOffer = DODO_CATALOG_OFFERS.find((offer) => offer.id === "price_pro_vn_v1");
+    if (proOffer === undefined) throw new Error("missing_pro_offer_fixture");
+    expect(() => validateDodoCatalogProviderProduct({
+      ...byReference.get(REFERENCES.price_pro_vn_v1),
+      price: { ...byReference.get(REFERENCES.price_pro_vn_v1)?.price, trial_period_days: 7 },
+    }, proOffer, REFERENCES.price_pro_vn_v1)).toThrow("dodo_catalog_provider_trial_mismatch:price_pro_vn_v1");
+    expect(() => validateDodoCatalogProviderProduct({
+      ...byReference.get(REFERENCES.price_pro_vn_v1),
+      price: {
+        ...byReference.get(REFERENCES.price_pro_vn_v1)?.price,
+        subscription_period_count: 1,
+        subscription_period_interval: "Month",
+      },
+    }, proOffer, REFERENCES.price_pro_vn_v1)).toThrow("dodo_catalog_provider_interval_mismatch:price_pro_vn_v1");
+  });
+
+  it("never reads or mutates D1 when provider catalog attestation fails", async () => {
+    let remoteCalls = 0;
+    await expect(reconcileDodoCatalog({
+      apiBaseUrl: "https://test.dodopayments.com",
+      apiKey: "test-api-key-with-enough-entropy",
+      attestProviderImplementation: () => Promise.reject(new Error("dodo_catalog_provider_trial_mismatch:price_pro_vn_v1")),
+      confirmStagingTestCatalog: true,
+      environment: "staging",
+      providerMode: "test_mode",
+      references: REFERENCES,
+      runRemoteImplementation: () => {
+        remoteCalls += 1;
+        return "";
+      },
+    })).rejects.toThrow("dodo_catalog_provider_trial_mismatch:price_pro_vn_v1");
+    expect(remoteCalls).toBe(0);
+  });
+
+  it("inspects the remote catalog with SELECT-only commands", () => {
+    const catalogRows = rows(database);
+    const calls: string[][] = [];
+    const runRemoteImplementation = (_environment: string, args: string[]): string => {
+      calls.push(args);
+      return JSON.stringify([{
+        success: true,
+        results: calls.length === 1 ? catalogRows : [{ reconciliation_required: 1 }],
+      }]);
+    };
+
+    expect(inspectDodoCatalog({
+      environment: "production",
+      providerMode: "live_mode",
+      references: LIVE_REFERENCES,
+      runRemoteImplementation,
+    })).toEqual({
+      environment: "production",
+      mode: "pending",
+      pendingCount: 4,
+      publishedCount: 0,
+      reconciliationRequired: true,
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls.every((args) => args.includes("--command") && args.includes("--json"))).toBe(true);
+    expect(calls.flat()).not.toContain("--file");
+    expect(calls.flat()).not.toContain("--yes");
   });
 
   it("keeps dry-run output free of product references and parses exact update counts", () => {
@@ -297,5 +439,41 @@ describe("Dodo catalog reconciliation", () => {
       closedCount: 4,
       insertedCount: 4,
     });
+  });
+
+  it("passes the provider configuration into the apply reconciliation path", () => {
+    const script = readFileSync("scripts/dodo-catalog-reconcile.mjs", "utf8");
+    expect(script).toContain("apiBaseUrl: providerConfig.apiBaseUrl");
+    expect(script).toContain("apiKey: providerConfig.apiKey");
+    expect(script).toContain("assertPaymentProviderMutationAdmission");
+    expect(script).toContain("buildDodoCatalogCloudflareEnvironment");
+    expect(script).toContain("manifestPath: options.manifestPath");
+    expect(script.indexOf("assertPaymentProviderMutationAdmission({"))
+      .toBeLessThan(script.indexOf("readDodoCatalogProviderConfig(process.env)"));
+  });
+
+  it("refuses the default remote sink without an explicitly scoped Cloudflare environment", () => {
+    expect(() => inspectDodoCatalog({
+      environment: "staging",
+      providerMode: "test_mode",
+      references: REFERENCES,
+    })).toThrow("dodo_catalog_cloudflare_environment_required");
+  });
+
+  it("pins D1 credentials and strips ambient Cloudflare OAuth and provider secrets", () => {
+    const commandEnvironment = buildDodoCatalogCloudflareEnvironment({
+      CLOUDFLARE_API_TOKEN: "ambient-token-must-not-win",
+      CLOUDFLARE_D1_API_TOKEN: "scoped-d1-token",
+      CLOUDFLARE_OAUTH_TOKEN: "ambient-oauth-must-not-pass",
+      DODO_PAYMENTS_API_KEY: "provider-secret-must-not-pass",
+      PATH: process.env.PATH,
+    }, "a".repeat(32));
+    expect(commandEnvironment).toMatchObject({
+      CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
+      CLOUDFLARE_API_TOKEN: "scoped-d1-token",
+    });
+    expect(commandEnvironment).not.toHaveProperty("CLOUDFLARE_D1_API_TOKEN");
+    expect(commandEnvironment).not.toHaveProperty("CLOUDFLARE_OAUTH_TOKEN");
+    expect(commandEnvironment).not.toHaveProperty("DODO_PAYMENTS_API_KEY");
   });
 });

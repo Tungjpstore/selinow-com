@@ -24,6 +24,7 @@ vi.mock("../../src/lib/analytics/activation", () => ({
   processActivationMilestoneBackfill: vi.fn().mockResolvedValue({ attempted: 0, created: 0, failed: 0, shops: 0 }),
 }));
 vi.mock("../../src/lib/auth/admission", () => ({ purgeAuthRequestAdmissions: vi.fn().mockResolvedValue(0) }));
+vi.mock("../../src/lib/auth/google-state-maintenance", () => ({ purgeGoogleOAuthStates: vi.fn().mockResolvedValue(0) }));
 vi.mock("../../src/lib/automation/scheduler", () => ({
   processScheduledAutomationTasks: vi.fn().mockResolvedValue({
     attempted: 0,
@@ -46,6 +47,7 @@ vi.mock("../../src/lib/billing/service", () => ({
     failed: 0,
     providerPending: 0,
   }),
+  reconcileDodoSubscriptionChanges: vi.fn().mockResolvedValue({ candidates: 0, completed: 0, failed: 0, pending: 0 }),
   suspendExpiredBillingGracePeriods: vi.fn().mockResolvedValue(0),
   suspendExpiredTrials: vi.fn().mockResolvedValue(0),
 }));
