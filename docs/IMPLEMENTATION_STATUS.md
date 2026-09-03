@@ -1,6 +1,29 @@
 # Implementation Status
 
-Last updated: 2026-08-30
+Last updated: 2026-09-03
+
+## Production Full Platform Release & GitHub Source Synchronization (2026-09-03)
+
+- **Worker Production Deployment**:
+  - Deployed candidate from `main` (commit `e9340fa`, merging `chore/post-release-status-20260822` with fast-uri 3.1.7 fix).
+  - Worker `selinow-com-production` promoted to version `f77e5aa5-2fa0-4cec-ad83-e1470f1bd762` at 100% traffic allocation.
+  - Active triggers verified: 7 zone routes (`selinow.com/*`, `*.selinow.com/*`, `*/*`), custom domains (`app.selinow.com`, `api.selinow.com`), cron schedule (`*/15 * * * *`), 2 producers, and 3 consumers (`selinow-integration-production`, `selinow-notification-production`, `selinow-dlq-production`).
+- **D1 Production Migrations (0113 - 0123 Applied)**:
+  - Exported pre-migration backup `.wrangler/backups/production/backup_pre_migration_0113_0123.sql` (SHA256: `2e8def942d4e5fef7ac0c450875169d7df8de5c323a3a107e66fb45158145211`, 500KB).
+  - Applied 11 pending forward migrations `0113` through `0123_payos_in_flight_recovery.sql` to remote D1 `selinow-production` (`75102e37-45f6-40ed-a32a-9e700fd184db`).
+  - Remote ledger is now complete at 123 migrations (`d1 migrations list` reports no migrations to apply; `PRAGMA foreign_key_check` verified with 0 violations).
+- **GitHub Repository Synchronization**:
+  - Pushed all unpushed local branches to GitHub `origin`: `chore/post-release-status-20260822`, `archive/storefront-templates`, `archive/dashboard-redesign-takeover`, `archive/release-candidate-20260824-merged`, `archive/codex-billing-go-20260823`, `archive/codex-billing-go-20260823-rc2`, `archive/codex-production-go-reauth-20260823`, `archive/wip-onboarding-redesign-20260820`, `archive/codex-landing-prod-release-20260801-guarded`, `archive/codex-landing-prod-release-final-20260801`, `codex/landing-prod-release-safe-20260801`.
+  - Merged pull request #4 into `main` so the GitHub default branch contains the complete consolidated codebase.
+- **Verification Gates**:
+  - `npm run check`: 1016 files, 0 errors, 4 hints.
+  - `npm run lint`: 0 errors.
+  - `npx tsc --noEmit`: 0 errors.
+  - `npm run test`: 373 test files, 3,072 unit and integration tests passed (100%).
+  - `npm audit --audit-level=high`: found 0 vulnerabilities (cleared by fast-uri 3.1.7 override).
+  - Post-deploy endpoints: `https://selinow.com/api/health` (200 OK, phase 10, principal-channel-canonical-v1), `https://app.selinow.com/api/health` (200), `https://api.selinow.com/api/health` (200), `/` (200), `/pricing` (200), `/solutions` (200), `https://app.selinow.com/login` (200), `https://app.selinow.com/register` (200), unsigned Dodo billing webhook (401 Unauthorized, fail-closed).
+- **Governance**:
+  - Các cổng owner-owned của release-doctor (approvals, legalSupport, pilot, monitoring, commerceAcceptance PayOS/Dodo, rollback rehearsal) vẫn chưa có -> production vẫn "platform live / full-commerce NO-GO".
 
 ## Current staging deployment and production gate (2026-08-30)
 
