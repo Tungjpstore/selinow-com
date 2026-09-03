@@ -1,0 +1,90 @@
+---
+import ProductCard from "../../../storefront/ProductCard.astro";
+import USPGrid from "../../sections/USPGrid.astro";
+import FAQSection from "../../sections/FAQSection.astro";
+import { resolveUniversalSections, universalSectionSettings } from "../../../../lib/storefront/sections/registry";
+import { formatMoney } from "../../../../lib/storefront/view";
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import type { StorefrontCategory, StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  categories: StorefrontCategory[];
+  locale: string;
+  products: StorefrontProduct[];
+  promotions?: StorefrontPromotion[];
+  shop: StorefrontShop;
+}
+
+const { categories, locale, products, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections ?? []);
+const steps = [t("storefront.template.desk.steps.1"), t("storefront.template.desk.steps.2"), t("storefront.template.desk.steps.3")];
+// Featured plan table: the first product with multiple variants best matches
+// the license "gói" mental model; single-variant products render as one row.
+const featured = products.find((product) => product.variants.length > 1) ?? products[0];
+const featuredVariants = featured?.variants.filter((variant) => variant.stockState !== "out_of_stock") ?? [];
+---
+
+
+{featured !== undefined && featuredVariants.length > 0 && (
+  <section class="desk-plan-section" id="plan-table" aria-labelledby="desk-plan-title">
+    <div class="desk-plan-heading">
+      <h2 id="desk-plan-title">{t("storefront.template.desk.compare.title")}</h2>
+      <p><strong>{featured.title}</strong></p>
+    </div>
+    <div class="desk-plan-table-wrap">
+      <table class="desk-plan-table">
+        <thead>
+          <tr>
+            <th scope="col">{t("storefront.template.desk.compare.plan")}</th>
+            <th scope="col">{t("storefront.template.desk.compare.price")}</th>
+            <th scope="col">{t("storefront.template.desk.compare.choose")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {featuredVariants.map((variant) => (
+            <tr>
+              <th scope="row">{variant.title}</th>
+              <td>{formatMoney(variant.priceMinor, variant.currency, locale)}</td>
+              <td><button type="button" data-cart-add data-variant-id={variant.id} data-max-quantity={variant.maxPerOrder} aria-label={`${t("storefront.template.desk.compare.choose")}: ${featured.title} ${variant.title}`}>{t("storefront.template.desk.compare.choose")}</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+)}
+
+<ol class="desk-steps" aria-label={t("storefront.template.desk.steps.title")}>
+  {steps.map((step, index) => (
+    <li><span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>{step}</li>
+  ))}
+</ol>
+
+<section class="catalog-section" id="products">
+  <div class="catalog-heading">
+    <div><h2>{t("storefront.catalog.heading")}</h2><p>{t("storefront.catalog.count", { count: products.length, shop: shop.name })}</p></div>
+    {categories.length > 0 && <label class="store-filter-control" for="store-category-filter">
+      <span>{t("storefront.catalog.category")}</span>
+      <select id="store-category-filter" data-store-category-filter>
+        <option value="">{t("storefront.catalog.all_categories")}</option>
+        {categories.map((category) => <option value={category.id}>{category.name}</option>)}
+      </select>
+    </label>}
+  </div>
+  <div class="product-list desk-product-list">
+    {products.map((product, index) => <ProductCard locale={locale} product={product} index={index} />)}
+    {products.length === 0 && <p class="empty-cart">{t("storefront.catalog.empty")}</p>}
+  </div>
+  {products.length > 0 && <p class="empty-cart catalog-no-results" data-store-search-empty hidden>{t("storefront.catalog.no_results")} <a href="#products" data-store-search-reset>{t("storefront.catalog.show_all")}</a>.</p>}
+</section>
+<script src="../../../../scripts/storefront/store-search.ts"></script>
+<script src="../../../../scripts/marketing/reveal-boot.ts"></script>
+<section class="recently-viewed-section" aria-label="Recently viewed" hidden>
+  <h2>{t("storefront.tm4.recently_viewed.heading")}</h2>
+  <div class="recently-viewed-scroll" data-recently-viewed-rail></div>
+</section>
+{universalTail.map((type) => type === "usp"
+  ? <USPGrid locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "usp")} vertical={shop.template.vertical} />
+  : <FAQSection locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "faq")} vertical={shop.template.vertical} />)}
+<script src="../../../../scripts/storefront/tm4-merchandising.ts"></script>

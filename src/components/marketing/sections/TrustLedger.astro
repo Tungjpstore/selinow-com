@@ -1,0 +1,43 @@
+---
+/**
+ * LP Editorial Commerce — payment ownership ledger (LP1).
+ * A calm two-column ledger: positioning copy on the left, three verified
+ * guarantees on the right. Teal stays reserved for the "verified" motif.
+ */
+interface Props {
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+import { icons } from "../icons";
+
+const { locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const points = [
+  t("marketing.home.trust.point.provider"),
+  t("marketing.home.trust.point.event"),
+  t("marketing.home.trust.point.state"),
+];
+---
+
+<section class="ed-trust" id="trust" aria-labelledby="ed-trust-title">
+  <div class="platform-shell ed-trust-grid">
+    <div class="ed-trust-copy">
+      <p class="ed-kicker">{t("marketing.home.trust.kicker")}</p>
+      <h2 class="ed-title" id="ed-trust-title">{t("marketing.home.trust.title")}</h2>
+      <p class="ed-lead">{t("marketing.home.trust.description")}</p>
+    </div>
+    <ul class="ed-trust-points">
+      {points.map((point, index) => (
+        <li>
+          <span class="ed-trust-num" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+          <span class="ed-trust-check" set:html={icons.check(14)} aria-hidden="true"></span>
+          <p>{point}</p>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>

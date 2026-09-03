@@ -32,16 +32,23 @@ describe("onboarding policy", () => {
     })).toThrow(expect.objectContaining({ issues: ["unknown_field:ready"] }));
   });
 
-  it("rejects seller attestation while the platform policy is unpublished", () => {
-    expect(CURRENT_POLICY_ATTESTATION_VERSION).toBeNull();
-    expect(() => parseOnboardingSettings({
+  it("accepts seller attestation against the published platform policy version", () => {
+    expect(CURRENT_POLICY_ATTESTATION_VERSION).toBe(1);
+    expect(parseOnboardingSettings({
       attestationAccepted: true,
       attestationVersion: 1,
       privacyUrl: "https://seller.example/privacy",
       refundPolicyUrl: "https://seller.example/refunds",
       supportContact: "  support@example.com  ",
       termsUrl: "https://seller.example/terms",
-    })).toThrow(expect.objectContaining({ code: "policy_unpublished", status: 409 }));
+    })).toEqual({
+      attestationAccepted: true,
+      attestationVersion: 1,
+      privacyUrl: "https://seller.example/privacy",
+      refundPolicyUrl: "https://seller.example/refunds",
+      supportContact: "support@example.com",
+      termsUrl: "https://seller.example/terms",
+    });
   });
 
   it("normalizes seller policy links without inventing an attestation", () => {

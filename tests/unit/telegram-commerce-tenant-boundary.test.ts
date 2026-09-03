@@ -138,6 +138,9 @@ function createRuntime(): { database: SqliteD1; env: AppBindings } {
   sqlite.exec(readFileSync("migrations/0032_shop_globalization_invariants.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0045_telegram_customer_locale_preference.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0069_catalog_channel_visibility.sql", "utf8"));
+  // Cart variant loads join physical stock (products.delivery_mode, TV3).
+  sqlite.exec(readFileSync("migrations/0102_physical_goods_vertical.sql", "utf8"));
+  sqlite.exec(readFileSync("migrations/0107_storefront_template_completion.sql", "utf8"));
   const database = new SqliteD1(sqlite);
   const env = {
     ACTIVE_CREDENTIAL_KEY_VERSION: "v1",

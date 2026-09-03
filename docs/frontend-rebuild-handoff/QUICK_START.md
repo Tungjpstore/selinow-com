@@ -64,7 +64,7 @@ Expected baseline:
 
 - 25 canonical logical frontend routes.
 - 2 redirect aliases.
-- 157 API/webhook method/path rows in `API_ENDPOINT_INDEX.csv`, including buyer order recovery, catalog channel visibility, explicit provider-pending boundaries and the `inventory:read`/`orders:read` public projections.
+- 210 API/webhook method/path rows in `API_ENDPOINT_INDEX.csv`, including buyer order recovery, catalog channel visibility, explicit provider-pending boundaries, Google OAuth, and the `inventory:read`/`orders:read` public projections.
 - 87 acceptance scenarios, including provider-lane and automation-wait cases inside the canonical dashboard routes.
 - 28 traceability records gom canonical screens va aliases.
 - Migrations `0001` den `0069` trong source; production remains at `0052` until approved.

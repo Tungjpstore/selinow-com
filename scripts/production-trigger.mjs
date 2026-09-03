@@ -231,6 +231,7 @@ try {
     const result = await executeProductionTriggerCeremony({
       apply: willApply,
       auditToken,
+      confirmProduction: options.confirmProduction,
       configFingerprintSha256: config.configFingerprintSha256,
       evidencePath: options.evidencePath,
       mutationToken,

@@ -18,6 +18,7 @@ const shop = (publicId: string): ShopView => ({
   status: "active",
   subscriptionState: "active",
   timezone: "Asia/Ho_Chi_Minh",
+  vertical: "digital",
 });
 
 describe("member shop selection", () => {

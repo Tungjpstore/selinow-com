@@ -70,6 +70,7 @@ function readyWranglerConfig(): Record<string, unknown> {
     DASHBOARD_ORIGIN: "https://app.selinow.com",
     EMAIL_FROM_ADDRESS: "no-reply@selinow.com",
     EMAIL_FROM_NAME: "Selinow",
+    GOOGLE_OAUTH_REDIRECT_URI: "https://app.selinow.com/api/auth/google/callback",
     MEDIA_PUBLIC_BASE_URL: "https://media.selinow.com",
     PLATFORM_BASE_DOMAIN: "selinow.com",
     PLATFORM_ORIGIN: "https://selinow.com",
@@ -341,6 +342,25 @@ describe("production release readiness", () => {
     });
 
     expect(result.missing).toContain("wrangler.env.production.triggers");
+  });
+
+  it("requires the exact production Google callback and both OAuth secrets", () => {
+    const config = readyWranglerConfig();
+    const production = (config.env as { production: { vars: Record<string, string> } }).production;
+    production.vars.GOOGLE_OAUTH_REDIRECT_URI = "https://selinow.com/api/auth/google/callback";
+    const secrets = REQUIRED_WORKER_SECRET_NAMES.filter((name) => name !== "GOOGLE_OAUTH_CLIENT_SECRET");
+
+    const result = inspectProductionReadiness({
+      evidence: readyEvidence(),
+      now,
+      productionSpec: readyProductionSpec(),
+      workerSecretNames: secrets,
+      wranglerConfig: config,
+    });
+
+    expect(result.missing).toContain("var.GOOGLE_OAUTH_REDIRECT_URI");
+    expect(result.missing).toContain("secret.GOOGLE_OAUTH_CLIENT_SECRET");
+    expect(REQUIRED_WORKER_SECRET_NAMES).toContain("GOOGLE_OAUTH_CLIENT_ID");
   });
 
   it("requires each configured production queue consumer by name", () => {

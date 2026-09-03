@@ -74,6 +74,34 @@ export function normalizeOptions(value: unknown): string {
   return json;
 }
 
+/**
+ * Seller-authored spec rows rendered on storefront detail pages (SpecTable,
+ * warranty badges). Accepts [{label, value}]; returns the JSON payload for
+ * products.attributes_json or null when the product carries none. Mirrors the
+ * storefront-side parse bounds so writes and renders agree.
+ */
+export function normalizeProductAttributes(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value)) throw new AppError("validation_failed", 400, ["attributes_invalid"]);
+  const rows: Array<{ label: string; value: string }> = [];
+  for (const entry of value.slice(0, 20)) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new AppError("validation_failed", 400, ["attributes_invalid"]);
+    }
+    const label = (entry as Record<string, unknown>).label;
+    const attributeValue = (entry as Record<string, unknown>).value;
+    if (typeof label !== "string" || typeof attributeValue !== "string") {
+      throw new AppError("validation_failed", 400, ["attributes_invalid"]);
+    }
+    const trimmedLabel = label.trim().slice(0, 40);
+    const trimmedValue = attributeValue.trim().slice(0, 120);
+    if (trimmedLabel === "" || trimmedValue === "") continue;
+    rows.push({ label: trimmedLabel, value: trimmedValue });
+  }
+  if (rows.length === 0) return null;
+  return JSON.stringify(rows);
+}
+
 export function requireResourceId(value: string | undefined, prefix: string): string {
   if (value === undefined || !new RegExp(`^${prefix}_[0-9a-f-]{36}$`, "u").test(value)) {
     throw new AppError("resource_not_found", 404);

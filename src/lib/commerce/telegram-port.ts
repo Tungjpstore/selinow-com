@@ -58,6 +58,7 @@ export type TelegramCheckoutIdentity = TelegramCartIdentity & {
 export type TelegramCartLine = {
   availableStock: number;
   currency: string;
+  deliveryMode: "digital" | "shipping";
   fulfillmentType: "license_key" | "manual";
   maxPerOrder: number;
   minPerOrder: number;
@@ -102,7 +103,7 @@ async function loadVariant(env: AppBindings, shopId: string, variantId: string):
 
 export async function readTelegramCartLines(env: AppBindings, shop: TelegramCartShop, cartId: string): Promise<TelegramCartSnapshot> {
   const cart = await env.PLATFORM_DB.prepare("SELECT discount_code_normalized AS discountCode FROM carts WHERE id = ? AND shop_id = ? LIMIT 1").bind(cartId, shop.id).first<{ discountCode: string | null }>();
-  const result = await env.PLATFORM_DB.prepare(`SELECT cart_items.quantity, product_variants.id AS variantId, product_variants.product_id AS productId, product_variants.sku, product_variants.title, product_variants.price_minor AS priceMinor, product_variants.currency, product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder, product_variants.status, product_variants.version, products.title AS productTitle, products.status AS productStatus, products.version AS productVersion, products.fulfillment_type AS fulfillmentType, COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock FROM cart_items INNER JOIN product_variants ON product_variants.id = cart_items.variant_id AND product_variants.shop_id = cart_items.shop_id INNER JOIN products ON products.id = product_variants.product_id AND products.shop_id = product_variants.shop_id LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE cart_items.cart_id = ? AND cart_items.shop_id = ? GROUP BY product_variants.id, cart_items.quantity ORDER BY products.created_at, product_variants.created_at LIMIT 20`).bind(cartId, shop.id).all<TelegramCartLine>();
+  const result = await env.PLATFORM_DB.prepare(`SELECT cart_items.quantity, product_variants.id AS variantId, product_variants.product_id AS productId, product_variants.sku, product_variants.title, product_variants.price_minor AS priceMinor, product_variants.currency, product_variants.min_per_order AS minPerOrder, product_variants.max_per_order AS maxPerOrder, product_variants.status, product_variants.version, products.title AS productTitle, products.status AS productStatus, products.version AS productVersion, products.fulfillment_type AS fulfillmentType, products.delivery_mode AS deliveryMode, CASE WHEN products.delivery_mode = 'shipping' THEN COALESCE((SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved FROM variant_stock_levels WHERE variant_stock_levels.shop_id = product_variants.shop_id AND variant_stock_levels.variant_id = product_variants.id), 0) ELSE COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) END AS availableStock FROM cart_items INNER JOIN product_variants ON product_variants.id = cart_items.variant_id AND product_variants.shop_id = cart_items.shop_id INNER JOIN products ON products.id = product_variants.product_id AND products.shop_id = product_variants.shop_id LEFT JOIN inventory_keys ON inventory_keys.shop_id = product_variants.shop_id AND inventory_keys.variant_id = product_variants.id WHERE cart_items.cart_id = ? AND cart_items.shop_id = ? GROUP BY product_variants.id, cart_items.quantity ORDER BY products.created_at, product_variants.created_at LIMIT 20`).bind(cartId, shop.id).all<TelegramCartLine>();
   return { cartId, discountCode: cart?.discountCode ?? null, lines: result.results };
 }
 
@@ -391,6 +392,9 @@ export class TelegramCartMutationPort implements Required<Pick<CommercePort, "cr
     await assertTelegramIntegrationTenant({ env: this.input.env, integrationId: this.input.integrationId, shopId: this.input.shop.id });
     if (input.command.cart.access.kind !== "principal" || input.command.cart.cartId !== null) throw new AppError("commerce_context_mismatch", 403, ["principal_cart_required"]);
     if (input.command.idempotencyKey !== this.input.expectedIdempotencyKey) throw new AppError("commerce_context_mismatch", 403, ["idempotency_key_mismatch"]);
+    // Telegram only surfaces add-variant and apply-discount flows today; the
+    // website-only remove kind is rejected before reaching the shared port.
+    if (input.command.mutation.kind === "discount.remove") throw new AppError("cart_mutation_invalid", 400, ["discount_remove_unsupported"]);
     const result = input.command.mutation.kind === "item.increment"
       ? await addVariant({ env: this.input.env, identity: this.input.identity, idempotencyKey: input.command.idempotencyKey, integrationId: this.input.integrationId, quantity: input.command.mutation.quantity, shop: this.input.shop, updateId: this.input.updateId, variantId: input.command.mutation.variantId })
       : await applyDiscount({ code: input.command.mutation.code, env: this.input.env, identity: this.input.identity, idempotencyKey: input.command.idempotencyKey, integrationId: this.input.integrationId, shop: this.input.shop, updateId: this.input.updateId });
@@ -636,7 +640,7 @@ export class TelegramCheckoutOrderPort implements CommercePort {
     try {
       for (const line of snapshot.lines) {
         if (line.status !== "active" || line.productStatus !== "active" || line.currency !== this.input.shop.currency || line.quantity < line.minPerOrder || line.quantity > line.maxPerOrder) throw new AppError("catalog_changed", 409);
-        if (line.fulfillmentType === "license_key" && line.availableStock < line.quantity) throw new AppError("inventory_unavailable", 409);
+        if ((line.fulfillmentType === "license_key" || line.deliveryMode === "shipping") && line.availableStock < line.quantity) throw new AppError("inventory_unavailable", 409);
       }
     } catch (error) {
       const replay = await recoverReplay();
@@ -677,6 +681,7 @@ export class TelegramCheckoutOrderPort implements CommercePort {
         expiresAt,
         fulfillmentIdempotencyPrefix: "telegram-free",
         lines: snapshot.lines.map((line) => ({
+          deliveryMode: line.deliveryMode,
           fulfillmentType: line.fulfillmentType,
           priceMinor: line.priceMinor,
           productId: line.productId,
@@ -712,7 +717,7 @@ export class TelegramCheckoutOrderPort implements CommercePort {
             const current = await loadVariant(this.input.env, this.input.shop.id, line.variantId);
             if (current.currency !== this.input.shop.currency || line.quantity < current.minPerOrder || line.quantity > current.maxPerOrder) throw new AppError("catalog_changed", 409);
             if (current.priceMinor !== line.priceMinor || current.productVersion !== line.productVersion || current.version !== line.version) throw new AppError("checkout_changed", 409);
-            if (current.fulfillmentType === "license_key" && current.availableStock < line.quantity) throw new AppError("inventory_unavailable", 409);
+            if ((current.fulfillmentType === "license_key" || current.deliveryMode === "shipping") && current.availableStock < line.quantity) throw new AppError("inventory_unavailable", 409);
           }
         } catch (availabilityError) {
           if (availabilityError instanceof AppError) throw availabilityError;

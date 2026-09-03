@@ -1,0 +1,22 @@
+---
+import ProductCard from "../ProductCard.astro";
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct } from "../../../lib/storefront/store";
+
+/** Same-category neighbors under the detail buy flow (max 4, server-capped). */
+interface Props {
+  locale: string;
+  related: StorefrontProduct[];
+}
+
+const { locale, related } = Astro.props;
+const t = createStorefrontTranslator(locale);
+---
+{related.length > 0 && (
+  <section class="related-section" aria-labelledby="related-title">
+    <h2 id="related-title">{t("storefront.related.title")}</h2>
+    <div class="related-grid">
+      {related.map((product, index) => <ProductCard index={index} locale={locale} product={product} />)}
+    </div>
+  </section>
+)}

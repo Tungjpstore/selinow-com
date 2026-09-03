@@ -1,0 +1,102 @@
+---
+import ProductCard from "../../../storefront/ProductCard.astro";
+import USPGrid from "../../sections/USPGrid.astro";
+import FAQSection from "../../sections/FAQSection.astro";
+import { resolveUniversalSections, universalSectionSettings } from "../../../../lib/storefront/sections/registry";
+import PromoCountdown from "../../sections/PromoCountdown.astro";
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import type { StorefrontCategory, StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  categories: StorefrontCategory[];
+  locale: string;
+  products: StorefrontProduct[];
+  promotions?: StorefrontPromotion[];
+  shop: StorefrontShop;
+}
+
+const { categories, locale, products, promotions = [], shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const universalTail = resolveUniversalSections(shop.template.id, shop.content.sections ?? []);
+const trustItems = [
+  t("storefront.template.pulse.trust.pay"),
+  t("storefront.template.pulse.trust.keys"),
+  t("storefront.template.pulse.trust.support"),
+];
+const promoWindow = promotions.find((candidate) => candidate.endsAt !== null) ?? null;
+---
+<section class="store-hero pulse-hero" data-mark={shop.name.slice(0, 1).toUpperCase()}>
+  <div class="pulse-hero-inner">
+    <p class="store-kicker">{shop.name}</p>
+    <h1>{shop.content.headline}</h1>
+    <p class="pulse-hero-lead">{shop.content.description}</p>
+    <p class="pulse-instant-badge"><span aria-hidden="true">⚡</span> {t("storefront.template.pulse.badge.instant")}</p>
+    <PromoCountdown locale={locale} promotion={promoWindow} />
+    <ul class="hero-stats-bar">
+          <li><strong>{String(products.length)}</strong><small>{t("storefront.ca.stats.products")}</small></li>
+          <li><strong>{String(products.reduce((sum, product) => sum + product.soldCount, 0))}</strong><small>{t("storefront.ca.stats.sold")}</small></li>
+          <li><strong>24/7</strong><small>{t("storefront.ca.stats.support")}</small></li>
+        </ul>
+        <div class="hero-trust-bar">
+          <span>{t("storefront.ca.trust.secure")}</span>
+          <span>{t("storefront.ca.trust.instant")}</span>
+          <span>{t("storefront.ca.trust.support")}</span>
+        </div>
+        <div class="hero-deco-ring" aria-hidden="true"></div>
+        <form class="store-search" role="search" data-store-search-form>
+      <label for="store-search">{t("storefront.search.label")}</label>
+      <div><input id="store-search" type="search" name="q" placeholder={t("storefront.search.placeholder")} autocomplete="off" data-store-search-input /><button type="submit" aria-label={t("storefront.search.aria")}>⌕</button></div>
+    </form>
+  </div>
+</section>
+<ul class="pulse-trust-strip" aria-label={t("storefront.support_aria")}>
+  {trustItems.map((item) => <li><span aria-hidden="true">✓</span>{item}</li>)}
+</ul>
+{(promotions.filter((promotion) => promotion.endsAt !== null).length > 0) && (
+  <section class="pulse-flash-rail" aria-label={t("storefront.template.pulse.badge.instant")}>
+    <div class="pulse-flash-scroll">
+      {products.slice(0, 6).map((product, index) => {
+        const promotion = promotions.find((candidate) => candidate.endsAt !== null);
+        return <article class="pulse-flash-card" data-flash-card={promotion?.endsAt ?? undefined}>
+          <a class="pulse-flash-visual" href={`/products/${product.slug}`} aria-label={product.title} data-visual={product.imageUrl !== null ? "image" : "mark"}>
+            {product.imageUrl !== null ? <img src={product.imageUrl} alt="" loading="lazy" decoding="async" /> : <strong aria-hidden="true">{product.title.slice(0, 1).toUpperCase()}</strong>}
+          </a>
+          <div class="pulse-flash-copy">
+            <strong>{product.title}</strong>
+            <span class="pulse-flash-clock" data-flash-countdown={promotion?.endsAt ?? undefined}>{promotion?.endsAt ?? ""}</span>
+          </div>
+          {index === 0 && <span class="pulse-flash-lead" aria-hidden="true">⚡</span>}
+        </article>;
+      })}
+    </div>
+  </section>
+)}
+<section class="catalog-section" id="products">
+  <div class="catalog-heading">
+    <div><h2>{t("storefront.catalog.heading")}</h2><p>{t("storefront.catalog.count", { count: products.length, shop: shop.name })}</p></div>
+    {categories.length > 0 && <label class="store-filter-control" for="store-category-filter">
+      <span>{t("storefront.catalog.category")}</span>
+      <select id="store-category-filter" data-store-category-filter>
+        <option value="">{t("storefront.catalog.all_categories")}</option>
+        {categories.map((category) => <option value={category.id}>{category.name}</option>)}
+      </select>
+    </label>}
+  </div>
+  <div class="product-list pulse-product-list">
+    {products.map((product, index) => <ProductCard locale={locale} product={product} index={index} />)}
+    {products.length === 0 && <p class="empty-cart">{t("storefront.catalog.empty")}</p>}
+  </div>
+  {products.length > 0 && <p class="empty-cart catalog-no-results" data-store-search-empty hidden>{t("storefront.catalog.no_results")} <a href="#products" data-store-search-reset>{t("storefront.catalog.show_all")}</a>.</p>}
+</section>
+<section class="recently-viewed-section" aria-label="Recently viewed" hidden>
+  <h2>{t("storefront.tm4.recently_viewed.heading")}</h2>
+  <div class="recently-viewed-scroll" data-recently-viewed-rail></div>
+</section>
+{universalTail.map((type) => type === "usp"
+  ? <USPGrid locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "usp")} vertical={shop.template.vertical} />
+  : <FAQSection locale={locale} settings={universalSectionSettings(shop.content.sections ?? [], "faq")} vertical={shop.template.vertical} />)}
+<script src="../../../../scripts/storefront/store-search.ts"></script>
+<script src="../../../../scripts/marketing/reveal-boot.ts"></script>
+{promoWindow !== null && <script src="../../../../scripts/storefront/promo-countdown.ts"></script>}
+<script src="../../../../scripts/storefront/tm3-signatures.ts"></script>
+<script src="../../../../scripts/storefront/tm4-merchandising.ts"></script>

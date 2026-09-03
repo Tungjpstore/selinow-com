@@ -84,7 +84,7 @@ describe("provider surface audit", () => {
       .split(/\r?\n/)
       .slice(1)
       .map(parseCsvRow);
-    expect(rows).toHaveLength(165);
+    expect(rows).toHaveLength(213);
 
 
 
@@ -105,6 +105,23 @@ describe("provider surface audit", () => {
     expect(inventory).toContain("/api/channels/telegram-mini-app/cart/:shopPublicId");
     expect(inventory).toContain("/api/channels/telegram-mini-app/checkout/:shopPublicId");
     expect(inventory).toContain("/api/channels/telegram-mini-app/orders/:shopPublicId/:orderId");
+    expect(inventory).toContain("/api/auth/login-2fa");
+    expect(inventory).toContain("/api/auth/google/start");
+    expect(inventory).toContain("/api/auth/google/callback");
+    expect(inventory).toContain("/api/auth/google/2fa");
+    expect(inventory).toContain("/api/app/account/enable-2fa-request");
+    expect(inventory).toContain("/api/app/account/enable-2fa-verify");
+    expect(inventory).toContain("/api/app/account/disable-2fa");
+    expect(inventory).toContain("/api/app/account/disable-2fa-request");
+    expect(inventory).toContain("/api/app/account/change-password");
+    expect(inventory).toContain("/api/app/account/login-history");
+    expect(inventory).toContain("/api/app/shops/:shopPublicId/billing/checkouts/:checkoutSessionId");
+    expect(inventory).toContain("/api/admin/operations");
+    expect(inventory).toContain("/api/admin/operations/dead-letters/:deadLetterId");
+    expect(inventory).toContain("/api/admin/operations/deletions/:deletionRequestId/legal-hold");
+    expect(inventory).toContain("/api/admin/operations/incidents/:incidentId");
+    expect(inventory).toContain("/api/admin/operations/rotations");
+    expect(inventory).toContain("/api/admin/operations/rotations/:runId/process");
   });
 
   it("does not leave an API or webhook route orphaned from the handoff inventory", () => {

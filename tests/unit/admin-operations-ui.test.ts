@@ -63,7 +63,7 @@ describe("admin operations PromptOS surface", () => {
     expect(operationsApi).toContain("generatedLicenseDeadLettersHasMore");
     expect(operationsApi).toContain("incidentsHasMore");
     expect(operationsApi).toContain("operationsListLimit");
-    expect(operationsApi).toContain("listActiveDeletionRequests({ env, userId: auth.userId })");
+    expect(operationsApi).toContain("listActiveDeletionRequests({ cursor: deletionsCursor, env, userId: auth.userId })");
     expect(moderation).toContain("Idempotency-Key");
     expect(moderation).toContain("recent_auth_required");
     expect(moderation).toContain("window.confirm");

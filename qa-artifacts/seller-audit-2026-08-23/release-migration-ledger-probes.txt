@@ -1,0 +1,28 @@
+Seller Platform release/migration ledger probe
+Date: 2026-08-23 Asia/Tokyo
+Mode: read-only; HEAD 22bfd88
+
+Command model:
+  git ls-tree -r --name-only HEAD migrations
+  validate each sorted SQL filename using scripts/lib/release.mjs:870-880
+
+Result:
+  trackedMigrationCount: 114
+  tail:
+    0109_seller_metrics_index.sql
+    0110_repair_subscription_ledger_foreign_keys.sql
+    0111_allow_scheduled_plan_change_cancel.sql
+    0112_google_auth_foundation.sql
+    0114_auth_otp_admission.sql
+    0115_auth_pending_password.sql
+  first invalid entry: 0114_auth_otp_admission.sql
+  release validator result: source_migration_ledger_invalid
+
+Worktree comparison:
+  migrations/0113_dodo_checkout_reconciliation.sql exists locally but is untracked.
+  The current dirty worktree has 115 SQL files and can pass ordering checks.
+  A clean checkout of HEAD has only 114 tracked SQL files and fails before release admission.
+
+Conclusion:
+  Do not deploy from the dirty worktree. Commit and review migration 0113 together with its
+  dependent billing code, then rerun release admission from a clean checkout.

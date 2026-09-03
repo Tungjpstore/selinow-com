@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { checkoutCart, createCart, quoteCart } from "../../src/lib/commerce/store";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import type { StorefrontShop } from "../../src/lib/storefront/store";
+import { FALLBACK_STOREFRONT_TEMPLATE } from "../../src/lib/storefront/templates";
 
 class SqliteStatement {
   private values: SQLInputValue[] = [];
@@ -124,6 +125,7 @@ function shop(): StorefrontShop {
       seoTitle: "Zero total",
       showExactStock: false,
       supportText: "Support",
+      templateId: null,
     },
     currency: "VND",
     currentHostname: "zero-total.selinow.com",
@@ -145,6 +147,8 @@ function shop(): StorefrontShop {
     status: "active",
     currentPeriodEnd: "2099-01-01T00:00:00.000Z",
     subscriptionState: "active",
+    timezone: "Asia/Ho_Chi_Minh",
+    template: FALLBACK_STOREFRONT_TEMPLATE,
     theme: {
       accent: "#0F766E",
       accentInk: "#FFFFFF",

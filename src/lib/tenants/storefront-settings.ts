@@ -1,5 +1,16 @@
 import { AppError } from "../core/errors";
+import { evaluateSubscription } from "../billing/entitlements";
+import { parseHomeSections } from "../storefront/sections/registry";
 import type { AppBindings } from "../platform/bindings";
+import { hasFeature } from "../tenants/policy";
+import {
+  listTemplatesForVertical,
+  PREMIUM_STOREFRONT_TEMPLATES_FEATURE,
+  resolveStorefrontTemplate,
+  storefrontTemplateSelectionIssue,
+  type StorefrontTemplateDefinition,
+  type StorefrontVertical,
+} from "../storefront/templates";
 import { parseStorefrontContent, parseStorefrontTheme, type StorefrontContent, type StorefrontTheme } from "../storefront/theme";
 import { publishReadyStorefront } from "./readiness";
 import { getShopForMember } from "./store";
@@ -9,10 +20,13 @@ export type StorefrontPublicationState = "never_published" | "published" | "unpu
 export type SellerStorefrontSettings = {
   content: StorefrontContent;
   hasUnpublishedChanges: boolean;
+  premiumTemplatesEnabled: boolean;
   publicationState: StorefrontPublicationState;
   publishedAt: string | null;
   publishedVersion: number;
   shopName: string;
+  template: StorefrontTemplateDefinition;
+  templates: readonly StorefrontTemplateDefinition[];
   theme: StorefrontTheme;
   version: number;
 };
@@ -78,7 +92,7 @@ function publicationState(row: SettingsRow): StorefrontPublicationState {
   return row.publishedVersion === row.version ? "published" : "unpublished_changes";
 }
 
-async function readSettings(env: AppBindings, shopId: string, shopName: string, locale: unknown): Promise<SellerStorefrontSettings> {
+async function readSettings(env: AppBindings, shopId: string, shopName: string, locale: unknown, premiumTemplatesEnabled: boolean, vertical: StorefrontVertical): Promise<SellerStorefrontSettings> {
   const row = await env.PLATFORM_DB.prepare(`
     SELECT branding_json AS brandingJson, storefront_json AS storefrontJson, version,
       published_version AS publishedVersion, published_at AS publishedAt
@@ -88,13 +102,26 @@ async function readSettings(env: AppBindings, shopId: string, shopName: string, 
   `).bind(shopId).first<SettingsRow>();
   if (row === null) throw new AppError("resource_not_found", 404);
   const state = publicationState(row);
+  const content = parseStorefrontContent(row.storefrontJson, shopName, locale);
+  const template = resolveStorefrontTemplate({ premiumEntitled: premiumTemplatesEnabled, templateId: content.templateId });
+  // Vertical-scoped gallery (OB-A1): sellers only browse templates for their
+  // selling category. A persisted template outside the vertical (legacy shops
+  // predating vertical-aware creation) stays visible so the current pick can
+  // still be seen and changed.
+  let templates = listTemplatesForVertical(vertical);
+  if (!templates.some((candidate) => candidate.id === template.id)) {
+    templates = [template, ...templates];
+  }
   return {
-    content: parseStorefrontContent(row.storefrontJson, shopName, locale),
+    content,
     hasUnpublishedChanges: state !== "published",
+    premiumTemplatesEnabled,
     publicationState: state,
     publishedAt: row.publishedAt,
     publishedVersion: row.publishedVersion,
     shopName,
+    template,
+    templates,
     theme: parseStorefrontTheme(row.brandingJson),
     version: row.version,
   };
@@ -102,7 +129,50 @@ async function readSettings(env: AppBindings, shopId: string, shopName: string, 
 
 export async function getSellerStorefrontSettings(input: { env: AppBindings; shopPublicId: string; userId: string }): Promise<SellerStorefrontSettings> {
   const member = await getShopForMember({ capability: "shop:read", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
-  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+  const paidFeaturesAvailable = evaluateSubscription({
+    action: "mutation",
+    currentPeriodEnd: member.row.current_period_end,
+    graceEndsAt: member.row.grace_ends_at,
+    subscriptionState: member.row.subscription_state,
+    trialEndsAt: member.row.trial_ends_at,
+  }).allowed;
+  return readSettings(
+    input.env,
+    member.row.shop_id,
+    member.shop.name,
+    member.shop.defaultLocale,
+    paidFeaturesAvailable && hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+    member.shop.vertical,
+  );
+}
+
+export const LOW_STOCK_THRESHOLD_MAX = 1000;
+
+export async function updateShopLowStockThreshold(input: {
+  env: AppBindings;
+  expectedVersion?: number;
+  shopPublicId: string;
+  threshold: number;
+  userId: string;
+}): Promise<{ lowStockThreshold: number; version: number }> {
+  const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  // Matches the shop_settings CHECK constraint (low_stock_threshold >= 0);
+  // the column already exists in migration 0002, so no schema change is needed.
+  if (!Number.isSafeInteger(input.threshold) || input.threshold < 0 || input.threshold > LOW_STOCK_THRESHOLD_MAX) {
+    throw new AppError("validation_failed", 400, ["low_stock_threshold_invalid"]);
+  }
+  const now = new Date().toISOString();
+  if (input.expectedVersion === undefined) {
+    const updated = await input.env.PLATFORM_DB.prepare(`UPDATE shop_settings SET low_stock_threshold = ?, version = version + 1, updated_at = ? WHERE shop_id = ? RETURNING low_stock_threshold AS lowStockThreshold, version`).bind(input.threshold, now, member.row.shop_id).first<{ lowStockThreshold: number; version: number }>();
+    if (updated === null) throw new AppError("resource_not_found", 404);
+    return updated;
+  }
+  if (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1) {
+    throw new AppError("validation_failed", 400, ["storefront_version_invalid"]);
+  }
+  const updated = await input.env.PLATFORM_DB.prepare(`UPDATE shop_settings SET low_stock_threshold = ?, version = version + 1, updated_at = ? WHERE shop_id = ? AND version = ? RETURNING low_stock_threshold AS lowStockThreshold, version`).bind(input.threshold, now, member.row.shop_id, input.expectedVersion).first<{ lowStockThreshold: number; version: number }>();
+  if (updated === null) throw new AppError("resource_conflict", 409, ["settings_version_stale"]);
+  return updated;
 }
 
 export async function updateSellerStorefrontSettings(input: {
@@ -113,6 +183,7 @@ export async function updateSellerStorefrontSettings(input: {
   userId: string;
 }): Promise<SellerStorefrontSettings> {
   const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const premiumTemplatesEnabled = hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE);
   const version = expectedVersion(input.expectedVersion);
   const existing = await input.env.PLATFORM_DB.prepare(`
     SELECT branding_json AS brandingJson, storefront_json AS storefrontJson, version,
@@ -151,29 +222,48 @@ export async function updateSellerStorefrontSettings(input: {
     if (typeof input.data.showExactStock !== "boolean") throw new AppError("validation_failed", 400, ["show_exact_stock_invalid"]);
     storefront.showExactStock = input.data.showExactStock;
   }
+  if (input.data.sections !== undefined) {
+    // TM1: bounded parse is the validator; the persisted draft only ever
+    // contains the cleaned array.
+    const parsed = parseHomeSections(input.data.sections);
+    if (parsed.length === 0) delete storefront.sections;
+    else storefront.sections = parsed;
+  }
+  if (input.data.templateId !== undefined) {
+    const selection = storefrontTemplateSelectionIssue({ premiumEntitled: premiumTemplatesEnabled, templateId: input.data.templateId });
+    if (selection === "storefront_template_invalid") throw new AppError("validation_failed", 400, [selection]);
+    if (selection === "storefront_template_premium_required") throw new AppError("authorization_denied", 403, [selection]);
+    // OB-A1: template picks must stay inside the shop's selling vertical.
+    if (selection.vertical !== member.shop.vertical) throw new AppError("validation_failed", 400, ["storefront_template_vertical_mismatch"]);
+    storefront.templateId = selection.id;
+  }
   if (primaryColor !== undefined) branding.primaryColor = primaryColor;
   if (accentColor !== undefined) branding.accentColor = accentColor;
   if (logoUrl !== undefined) branding.logoUrl = logoUrl;
   const now = new Date().toISOString();
   const updated = await input.env.PLATFORM_DB.prepare(`UPDATE shop_settings SET branding_json = ?, storefront_json = ?, version = version + 1, updated_at = ? WHERE shop_id = ? AND version = ? RETURNING version`).bind(JSON.stringify(branding), JSON.stringify(storefront), now, member.row.shop_id, version).first<{ version: number }>();
   if (updated === null) throw new AppError("resource_conflict", 409);
-  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale, premiumTemplatesEnabled, member.shop.vertical);
 }
 
 export async function publishSellerStorefrontSettings(input: {
   env: AppBindings;
-  expectedVersion: unknown;
+  expectedVersion?: unknown;
   requestId: string;
   shopPublicId: string;
   userId: string;
 }): Promise<SellerStorefrontSettings> {
   const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   if (member.row.role !== "owner") throw new AppError("authorization_denied", 403);
-  const version = expectedVersion(input.expectedVersion);
   const current = await input.env.PLATFORM_DB.prepare("SELECT version FROM shop_settings WHERE shop_id = ? LIMIT 1")
     .bind(member.row.shop_id).first<{ version: number }>();
   if (current === null) throw new AppError("resource_not_found", 404);
+  const version = input.expectedVersion === undefined ? current.version : expectedVersion(input.expectedVersion);
   if (current.version !== version) throw new AppError("resource_conflict", 409, ["storefront_draft_stale"]);
+
+  // Readiness owns the publication transaction. Do not write a published
+  // snapshot before it passes: otherwise a failed publish can be reported as
+  // "published" even though the shop remains a draft or lacks prerequisites.
   await publishReadyStorefront({
     env: input.env,
     expectedStorefrontVersion: version,
@@ -181,5 +271,13 @@ export async function publishSellerStorefrontSettings(input: {
     shopPublicId: input.shopPublicId,
     userId: input.userId,
   });
-  return readSettings(input.env, member.row.shop_id, member.shop.name, member.shop.defaultLocale);
+
+  return readSettings(
+    input.env,
+    member.row.shop_id,
+    member.shop.name,
+    member.shop.defaultLocale,
+    hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE),
+    member.shop.vertical,
+  );
 }

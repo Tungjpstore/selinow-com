@@ -105,6 +105,40 @@ function safeErrorMessage(copy: OperationsCopy, code: string): string {
     : text(copy, "error.generic");
 }
 
+type SecurityCopyKey = "admin_two_factor_required" | "rate_limited";
+type SecurityCopy = Partial<Record<SecurityCopyKey, string>>;
+
+// Platform security failures (rate limiting, missing two-factor enrollment)
+// travel through a dedicated copy channel so the localized recovery guidance
+// reaches the operator without growing the fixed operations copy contract.
+const SECURITY_FALLBACKS: Readonly<Record<SecurityCopyKey, string>> = {
+  admin_two_factor_required: "Two-factor authentication is required for platform administrators. Enable it in account security (/app/security), then reload this console.",
+  rate_limited: "Too many admin actions were requested. Wait a moment and try again.",
+};
+
+function readSecurityCopy(root: HTMLElement): SecurityCopy {
+  try {
+    const parsed: unknown = JSON.parse(root.dataset.securityCopy ?? "null");
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const source = parsed as Record<string, unknown>;
+    const copy: SecurityCopy = {};
+    for (const key of ["admin_two_factor_required", "rate_limited"] as const) {
+      const value = source[key];
+      if (typeof value === "string" && value.trim() !== "") copy[key] = value;
+    }
+    return copy;
+  } catch {
+    return {};
+  }
+}
+
+function securityErrorMessage(securityCopy: SecurityCopy, code: string): string | null {
+  if (code === "http_429") return securityCopy.rate_limited ?? SECURITY_FALLBACKS.rate_limited;
+  if (code === "rate_limited") return securityCopy.rate_limited ?? SECURITY_FALLBACKS.rate_limited;
+  if (code === "admin_two_factor_required") return securityCopy.admin_two_factor_required ?? SECURITY_FALLBACKS.admin_two_factor_required;
+  return null;
+}
+
 function setFeedback(
   root: HTMLElement,
   copy: OperationsCopy,
@@ -170,6 +204,9 @@ function setBusy(root: HTMLElement, busy: boolean): void {
 const root = document.querySelector<HTMLElement>("[data-operations-root]");
 if (root !== null) {
   const copy = readOperationsCopy(root);
+  const securityCopy = readSecurityCopy(root);
+  const errorMessage = (code: string): string =>
+    securityErrorMessage(securityCopy, code) ?? safeErrorMessage(copy, code);
   const feedback = (
     message: string,
     tone: "error" | "neutral" | "success",
@@ -224,7 +261,7 @@ if (root !== null) {
       })
       .catch((error: unknown) => {
         const safeError = error instanceof OperationsError ? error : new OperationsError("payos_fingerprint_failed", null);
-        feedback(safeErrorMessage(copy, safeError.message), "error", safeError);
+        feedback(errorMessage(safeError.message), "error", safeError);
         submit.disabled = false;
         setBusy(root, false);
       });
@@ -272,7 +309,7 @@ if (root !== null) {
       })
       .catch((error: unknown) => {
         const safeError = error instanceof OperationsError ? error : new OperationsError("rotation_create_failed", null);
-        feedback(safeErrorMessage(copy, safeError.message), "error", safeError);
+        feedback(errorMessage(safeError.message), "error", safeError);
         submit.disabled = false;
         setBusy(root, false);
       });
@@ -346,7 +383,7 @@ if (root !== null) {
       window.location.reload();
     }).catch((error: unknown) => {
       const safeError = error instanceof OperationsError ? error : new OperationsError("legal_hold_update_failed", null);
-      feedback(safeErrorMessage(copy, safeError.message), "error", safeError);
+      feedback(errorMessage(safeError.message), "error", safeError);
       controls.forEach((control) => { control.disabled = false; });
       form.setAttribute("aria-busy", "false");
       setBusy(root, false);
@@ -378,7 +415,7 @@ if (root !== null) {
         window.location.reload();
       }).catch((error: unknown) => {
         const safeError = error instanceof OperationsError ? error : new OperationsError("rotation_process_failed", null);
-        feedback(safeErrorMessage(copy, safeError.message), "error", safeError);
+        feedback(errorMessage(safeError.message), "error", safeError);
         rotationButton.disabled = false;
         setBusy(root, false);
       });
@@ -414,7 +451,7 @@ if (root !== null) {
       window.location.reload();
     }).catch((error: unknown) => {
       const safeError = error instanceof OperationsError ? error : new OperationsError("operations_update_failed", null);
-      feedback(safeErrorMessage(copy, safeError.message), "error", safeError);
+      feedback(errorMessage(safeError.message), "error", safeError);
       groupButtons.forEach((item) => { item.disabled = false; });
       setBusy(root, false);
     });

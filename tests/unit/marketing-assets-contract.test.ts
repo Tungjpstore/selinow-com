@@ -6,12 +6,11 @@ const workspace = resolve(import.meta.dirname, "../..");
 
 describe("marketing asset contracts", () => {
   it("keeps channel labels and readiness states outside raster assets", async () => {
-    const landing = await readFile(resolve(workspace, "src/pages/index.astro"), "utf8");
+    // LP editorial: the channel board lives in the CommerceCore section component.
+    const core = await readFile(resolve(workspace, "src/components/marketing/sections/CommerceCore.astro"), "utf8");
 
-    expect(landing).toContain("channelCards");
-    expect(landing).toContain("data-channel-state={channel.state}");
-    expect(landing).not.toMatch(/\/brand\/selinow-kit\/provider\.[^"]+\.png/u);
-    expect(landing).not.toContain("/brand/selinow-kit/hero.selinow-core.png");
+    expect(core).toContain("data-channel-state={channel.state}");
+    expect(core).toContain("destinations");
   });
 
   it("keeps global channel names localizable", async () => {
@@ -23,7 +22,6 @@ describe("marketing asset contracts", () => {
   });
 
   it("ships the versioned text-free visual kit with complete SVG files", async () => {
-    const landing = await readFile(resolve(workspace, "src/pages/index.astro"), "utf8");
     const assetDir = resolve(workspace, "public/brand/selinow-kit/global/v3");
     const expected = [
       "core-hub.svg",
@@ -34,12 +32,12 @@ describe("marketing asset contracts", () => {
       "flow-delivery.svg",
       "og-cover.svg",
     ];
+    // v5 rebuild: workflow art is HTML/CSS; the core glyph stays the only kit
+    // reference on the landing page. LP editorial keeps that reference in the
+    // CommerceCore section component. The rest of the kit still ships intact.
+    const core = await readFile(resolve(workspace, "src/components/marketing/sections/CommerceCore.astro"), "utf8");
     const referencedOnLanding = new Set([
       "core-hub.svg",
-      "flow-catalog.svg",
-      "flow-channels.svg",
-      "flow-support.svg",
-      "flow-delivery.svg",
     ]);
 
     for (const file of expected) {
@@ -49,18 +47,20 @@ describe("marketing asset contracts", () => {
       expect(source.trimEnd().endsWith("</svg>")).toBe(true);
       expect(source.length).toBeGreaterThan(1_000);
       if (referencedOnLanding.has(file)) {
-        expect(landing).toContain(`global/v3/${file}`);
+        expect(core).toContain(`global/v3/${file}`);
       }
     }
   });
 
-  it("renders a locale-neutral social cover as a valid PNG", async () => {
+  it("renders a locale-neutral social cover as a valid JPEG", async () => {
     const layout = await readFile(resolve(workspace, "src/layouts/PlatformLayout.astro"), "utf8");
-    const cover = await readFile(resolve(workspace, "public/brand/selinow-og-cover-global.png"));
+    const cover = await readFile(resolve(workspace, "public/brand/landing/v1/og-editorial.jpg"));
 
-    expect(layout).toContain("selinow-og-cover-global.png");
-    expect(cover.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
-    expect(cover.subarray(-12).toString("hex")).toBe("0000000049454e44ae426082");
-    expect(cover.length).toBeGreaterThan(100_000);
+    // LP editorial campaign cover (nanobanana render composited with the
+    // white logo) replaces the v5 PNG kit cover.
+    expect(layout).toContain("brand/landing/v1/og-editorial.jpg");
+    expect(cover.subarray(0, 3).toString("hex")).toBe("ffd8ff");
+    expect(cover.subarray(-2).toString("hex")).toBe("ffd9");
+    expect(cover.length).toBeGreaterThan(30_000);
   });
 });

@@ -1,0 +1,27 @@
+---
+import { formatMoney, stockLabel } from "../../../lib/storefront/view";
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct } from "../../../lib/storefront/store";
+
+/**
+ * Variant radio group — the purchase contract `product-detail.ts` verifies
+ * against (input[name=variant] + data-price-minor/stock-state/version).
+ * Every template detail page renders this either directly or through
+ * Swatches; do not fork the markup.
+ */
+interface Props {
+  locale: string;
+  product: StorefrontProduct;
+}
+
+const { locale, product } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const defaultVariant = product.variants.find((variant) => variant.stockState !== "out_of_stock") ?? product.variants[0];
+---
+<div class="variant-list" role="radiogroup" aria-label={t("storefront.product.variant_aria")}>
+  {product.variants.map((variant) => <label class="variant-option">
+    <input type="radio" name="variant" value={variant.id} checked={variant.id === defaultVariant?.id} disabled={variant.stockState === "out_of_stock"} data-min={variant.minPerOrder} data-max={variant.maxPerOrder} data-price-minor={variant.priceMinor} data-stock-state={variant.stockState} data-version={variant.version} />
+    <span><strong>{variant.title}</strong><small>{stockLabel(variant.stockState, variant.availableStock, locale)}</small></span>
+    <strong>{formatMoney(variant.priceMinor, variant.currency, locale)}</strong>
+  </label>)}
+</div>

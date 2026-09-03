@@ -1,13 +1,13 @@
 import type { APIRoute } from "astro";
 
-import { authenticateRequest, requireCsrfSession, requireRecentAuth } from "../../../../../lib/auth/session";
+import { authenticateRequest, requireCsrfSession } from "../../../../../lib/auth/session";
 import { requireResourceId } from "../../../../../lib/catalog/policy";
 import { readJsonObject, rejectUnknownFields } from "../../../../../lib/http/request";
 import { createCaughtErrorResponse } from "../../../../../lib/http/security";
 import { getBindings } from "../../../../../lib/platform/bindings";
 import { getSellerStorefrontSettings, updateSellerStorefrontSettings } from "../../../../../lib/tenants/storefront-settings";
 
-const ALLOWED = ["accentColor", "announcement", "deliveryText", "description", "expectedVersion", "footerText", "headline", "logoUrl", "primaryColor", "seoDescription", "seoTitle", "showExactStock", "supportText"];
+const ALLOWED = ["accentColor", "announcement", "deliveryText", "description", "expectedVersion", "footerText", "headline", "logoUrl", "primaryColor", "seoDescription", "seoTitle", "sections", "showExactStock", "supportText", "templateId"];
 const PRIVATE_HEADERS = { "Cache-Control": "private, no-store, max-age=0" };
 
 export const GET: APIRoute = async ({ locals, params, request }) => {
@@ -23,7 +23,6 @@ export const PATCH: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
     const body = await readJsonObject(request);
     rejectUnknownFields(body, ALLOWED);
     const { expectedVersion, ...data } = body;

@@ -98,7 +98,7 @@ The browser may start only the allowlisted capabilities (`shop.provision`, `doma
 
 ## API and authority map
 
-The dashboard client must use the 157-row `API_ENDPOINT_INDEX.csv` as its only route inventory. Important dashboard seams are:
+The dashboard client must use the `API_ENDPOINT_INDEX.csv` as its only route inventory. The current source index contains 210 method/path rows. Important dashboard seams are:
 
 - `/api/app/shops/:shopPublicId/channels/catalog`, `/channels/requests`, `/channels/requests/:requestPublicId` for safe expansion metadata and durable connector intent.
 - `/api/app/shops/:shopPublicId/integrations/telegram` and `/payments/payos` for legacy Telegram/PayOS controls.

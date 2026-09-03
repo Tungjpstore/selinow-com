@@ -1,0 +1,38 @@
+---
+/**
+ * LP Editorial Commerce — FAQ accordion (LP1).
+ * Keeps the `.faq-kit-list details` markup contract that the public browser
+ * gate interacts with; restyled as an editorial question ledger.
+ */
+interface Props {
+  faq: [string, string][];
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+
+const { faq, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+---
+
+<section class="ed-faq" id="faq" aria-labelledby="ed-faq-title">
+  <div class="platform-shell ed-faq-shell">
+    <header class="ed-section-heading">
+      <p class="ed-kicker">{t("marketing.home.faq.kicker")}</p>
+      <h2 class="ed-title" id="ed-faq-title">{t("marketing.home.faq.title")}</h2>
+    </header>
+    <div class="faq-kit-list ed-faq-list">
+      {faq.map(([question, answer]) => (
+        <details>
+          <summary>
+            <span>{question}</span>
+            <span class="ed-faq-glyph" aria-hidden="true">+</span>
+          </summary>
+          <p>{answer}</p>
+        </details>
+      ))}
+    </div>
+  </div>
+</section>

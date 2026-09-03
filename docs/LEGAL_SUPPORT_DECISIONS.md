@@ -1,37 +1,53 @@
 # Platform Legal and Support Decision Checklist
 
-Status: `legal_review_required` and not customer-facing.
+Status: `owner_approved_for_publication` (V1 effective `2026-08-25`).
 
-This checklist records decisions that must be owned before Selinow publishes
-platform legal pages or claims a public support commitment. It intentionally
-contains no legal entity, address, jurisdiction, tax, refund, support email,
-or service-level placeholders.
+## V1 publication record
+
+The owner supplied and approved the following identity details for the V1 policy package:
+
+- Public name supplied: `Nguyễn Công Tùng`
+- Address supplied: `Xóm Tân Mỹ, Vân Tụ, Nghệ An, Việt Nam`
+- Tax identifier supplied: `040099014422`
+
+These values are recorded as the owner's approved public policy inputs. The
+owner is responsible for correcting them if the registration or tax record
+changes.
+
+The consolidated Vietnamese policy is in
+[`docs/LEGAL_SUPPORT_POLICY_V1.md`](./LEGAL_SUPPORT_POLICY_V1.md). The owner has
+approved the commercial defaults in that document and asked for publication.
+Provider-specific checkout/invoice language remains conditional on what the
+provider displays for the individual transaction.
+
+This checklist records the decisions behind the published V1 policy. Future
+changes must create a new policy version, effective date and release evidence.
 
 ## Required Decisions
 
 | Decision | Required owner | Current state | Evidence required |
 | --- | --- | --- | --- |
-| Contracting legal entity and public business name | Product + legal | `pending` | Approved entity record and public display name |
-| Registered address and tax identity | Legal + finance | `pending` | Approved public disclosure and tax treatment |
-| Governing law and dispute forum | Legal | `pending` | Counsel-approved Terms language |
-| Digital goods, license key, and private-file refund rules | Product + legal | `pending` | Per-product and platform policy decision, including exceptions |
-| Abuse, copyright, malware, and takedown handling | Legal + trust/safety | `pending` | Notice requirements, response authority, evidence retention, and seller notice rules |
-| Seller responsibility for catalog, rights, taxes, and customer support | Product + legal | `pending` | Approved seller responsibility statement |
-| PayOS seller-owned settlement and platform responsibility boundary | Payments + legal | `pending` | Approved settlement and payment-dispute wording |
-| Dodo merchant-of-record, tax, invoice, and subscription responsibility | Billing + legal | `pending` | Provider-verified terms and approved customer copy |
-| Privacy controller/processor roles and data-subject request handling | Legal + security | `pending` | Approved Privacy Policy and request workflow |
-| Data retention periods and deletion exceptions | Legal + security | `pending` | Retention schedule covering orders, payment evidence, audit, abuse, and legal holds |
-| Platform support contact and response guidance | Support owner | `pending` | Owner-approved contact route and safe response guidance |
-| Seller versus buyer support boundary | Support + product | `pending` | Escalation matrix and order/payment request-ID guidance |
+| Contracting legal entity and public business name | Product + legal | `owner_approved` | Owner-approved public policy identity |
+| Registered address and tax identity | Legal + finance | `owner_approved` | Owner-approved public policy identity |
+| Governing law and dispute forum | Legal | `owner_approved` | V1 Terms section |
+| Digital goods, license key, and private-file refund rules | Product + legal | `owner_approved` | V1 refund section |
+| Abuse, copyright, malware, and takedown handling | Legal + trust/safety | `owner_approved` | V1 abuse section |
+| Seller responsibility for catalog, rights, taxes, and customer support | Product + legal | `owner_approved` | V1 Terms section |
+| PayOS seller-owned settlement and platform responsibility boundary | Payments + legal | `owner_approved` | V1 provider boundary section |
+| Dodo merchant-of-record, tax, invoice, and subscription responsibility | Billing + legal | `owner_approved` | V1 provider boundary section; checkout/invoice controls provider-specific facts |
+| Privacy controller/processor roles and data-subject request handling | Legal + security | `owner_approved` | V1 privacy section |
+| Data retention periods and deletion exceptions | Legal + security | `owner_approved` | V1 privacy section |
+| Platform support contact and response guidance | Support owner | `owner_approved` | V1 support section; `tungbipdz@gmail.com` |
+| Seller versus buyer support boundary | Support + product | `owner_approved` | V1 support matrix |
 
 ## Publication Gate
 
-Do not publish platform Terms, Privacy, Acceptable Use, Digital Goods/Refund,
-Abuse/Takedown, or Support pages until every applicable decision has an owner,
-approved evidence, and a recorded effective date. Never render unresolved
-values as customer-facing defaults.
+The V1 policy pages may be published because the owner has approved every
+applicable decision and recorded the effective date. Provider-specific facts are
+rendered conditionally and are never invented when a provider checkout/invoice
+states a different role.
 
-After approval, the implementation should provide:
+The V1 implementation provides:
 
 - Footer links from marketing pages.
 - Terms and Privacy links from login.

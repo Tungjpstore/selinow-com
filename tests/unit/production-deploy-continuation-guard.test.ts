@@ -153,7 +153,7 @@ describe("production Worker continuation deploy admission", () => {
     }
   });
 
-  it("proves the reviewed 0087 through 0096 schema definitions and live data invariants", () => {
+  it("proves every reviewed schema definition and live data invariant through Google auth", () => {
     const assertInvariants = (releaseModule as Record<string, unknown>).assertProductionDatabaseInvariantContract;
     expect(typeof assertInvariants).toBe("function");
     if (typeof assertInvariants !== "function") return;
@@ -200,6 +200,16 @@ describe("production Worker continuation deploy admission", () => {
       "idx_auth_request_admissions_requester_window",
       "idx_auth_request_admissions_expiry",
       "idx_auth_request_admissions_subject_window",
+      "auth_google_identities",
+      "idx_auth_google_identities_subject",
+      "idx_auth_google_identities_user",
+      "auth_google_identities_identity_immutable",
+      "auth_google_oauth_states",
+      "idx_auth_google_oauth_states_lookup",
+      "idx_auth_google_oauth_states_expiry",
+      "idx_auth_google_oauth_states_retention",
+      "auth_google_oauth_states_pending_insert_guard",
+      "auth_google_oauth_states_transition_guard",
       "telegram_updates",
       "idx_telegram_integrations_shop_generation",
       "idx_telegram_updates_generation_processing",
@@ -207,8 +217,21 @@ describe("production Worker continuation deploy admission", () => {
       "telegram_integrations_generation_switch_required",
       "telegram_updates_generation_insert_guard",
     ]));
-    expect(runner).toHaveBeenCalledTimes(3);
+    // object + data inventories run as single queries; the column inventory
+    // runs in batches of 10 tables (D1 caps compound SELECT terms).
+    expect(runner.mock.calls.length).toBeGreaterThanOrEqual(3);
     expect(runner.mock.calls.every(([args]) => args[4] === "production")).toBe(true);
+    const emittedSql = runner.mock.calls
+      .map(([args]) => args[args.indexOf("--command") + 1] ?? "")
+      .join("\n");
+    expect(emittedSql).toContain("billing_checkout_sessions");
+    expect(emittedSql).toContain("idx_billing_checkout_sessions_reconciliation");
+    expect(emittedSql).toContain("idx_billing_checkout_sessions_shop_reconciliation");
+    expect(emittedSql).toContain("reconciliation_attempts");
+    expect(emittedSql).toContain("next_reconciliation_at");
+    expect(emittedSql).toContain("last_reconciliation_at");
+    expect(emittedSql).toContain("reconciliation_failure_code");
+    expect(emittedSql).toContain("WHERE code != 'pro'");
   });
 
   it("pins staging invariant queries to the staging D1 environment", () => {
@@ -294,6 +317,46 @@ describe("production Worker continuation deploy admission", () => {
       runWranglerImplementation: invalidAuthAdmission,
     })).toThrow("production_database_invariant_data_violation:integrity_0094_auth_request_admission");
 
+    const invalidGoogleIdentity = runner((rows, sql) => {
+      if (sql.includes("integrity_0112_google_identity") && rows[0] !== undefined) {
+        rows[0].integrity_0112_google_identity = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidGoogleIdentity,
+    })).toThrow("production_database_invariant_data_violation:integrity_0112_google_identity");
+
+    const invalidGoogleState = runner((rows, sql) => {
+      if (sql.includes("integrity_0112_google_oauth_state") && rows[0] !== undefined) {
+        rows[0].integrity_0112_google_oauth_state = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidGoogleState,
+    })).toThrow("production_database_invariant_data_violation:integrity_0112_google_oauth_state");
+
+    const invalidProEntitlement = runner((rows, sql) => {
+      if (sql.includes("integrity_0118_pro_entitlement") && rows[0] !== undefined) {
+        rows[0].integrity_0118_pro_entitlement = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidProEntitlement,
+    })).toThrow("production_database_invariant_data_violation:integrity_0118_pro_entitlement");
+
+    const invalidPayOSProjection = runner((rows, sql) => {
+      if (sql.includes("integrity_0119_payos_projection") && rows[0] !== undefined) {
+        rows[0].integrity_0119_payos_projection = 1;
+      }
+    });
+    expect(() => (assertInvariants as (input: Record<string, unknown>) => unknown)({
+      migrationNames,
+      runWranglerImplementation: invalidPayOSProjection,
+    })).toThrow("production_database_invariant_data_violation:integrity_0119_payos_projection");
+
     const invalidTelegramGeneration = runner((rows, sql) => {
       if (sql.includes("integrity_0095_telegram_update_generation") && rows[0] !== undefined) {
         rows[0].integrity_0095_telegram_update_generation = 1;
@@ -345,6 +408,9 @@ describe("production Worker continuation deploy admission", () => {
       "shop_domains_turnstile_active_update_guard",
       "shops_turnstile_canonical_insert_guard",
       "shops_turnstile_canonical_update_guard",
+      "auth_google_identities_identity_immutable",
+      "auth_google_oauth_states_pending_insert_guard",
+      "auth_google_oauth_states_transition_guard",
     ];
     for (const triggerName of triggerNames) {
       const runner = vi.fn((args: string[]) => {
@@ -367,6 +433,16 @@ describe("production Worker continuation deploy admission", () => {
       ["index", "idx_auth_request_admissions_requester_window", "CREATE INDEX idx_auth_request_admissions_requester_window ON auth_request_admissions(id)"],
       ["index", "idx_auth_request_admissions_expiry", "CREATE INDEX idx_auth_request_admissions_expiry ON auth_request_admissions(id)"],
       ["index", "idx_auth_request_admissions_subject_window", "CREATE INDEX idx_auth_request_admissions_subject_window ON auth_request_admissions(id)"],
+      ["table", "auth_google_identities", "CREATE TABLE auth_google_identities (id TEXT)"],
+      ["table", "auth_google_oauth_states", "CREATE TABLE auth_google_oauth_states (id TEXT)"],
+      ["index", "idx_auth_google_identities_subject", "CREATE INDEX idx_auth_google_identities_subject ON auth_google_identities(id)"],
+      ["index", "idx_auth_google_identities_user", "CREATE INDEX idx_auth_google_identities_user ON auth_google_identities(id)"],
+      ["index", "idx_auth_google_oauth_states_lookup", "CREATE INDEX idx_auth_google_oauth_states_lookup ON auth_google_oauth_states(id)"],
+      ["index", "idx_auth_google_oauth_states_expiry", "CREATE INDEX idx_auth_google_oauth_states_expiry ON auth_google_oauth_states(id)"],
+      ["index", "idx_auth_google_oauth_states_retention", "CREATE INDEX idx_auth_google_oauth_states_retention ON auth_google_oauth_states(id)"],
+      ["table", "billing_checkout_sessions", "CREATE TABLE billing_checkout_sessions (id TEXT)"],
+      ["index", "idx_billing_checkout_sessions_reconciliation", "CREATE INDEX idx_billing_checkout_sessions_reconciliation ON billing_checkout_sessions(id)"],
+      ["index", "idx_billing_checkout_sessions_shop_reconciliation", "CREATE INDEX idx_billing_checkout_sessions_shop_reconciliation ON billing_checkout_sessions(id)"],
     ] as const;
     for (const [type, name, replacementSql] of admissionObjectReplacements) {
       const runner = vi.fn((args: string[]) => {

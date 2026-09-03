@@ -1,0 +1,43 @@
+Seller audit transport-security evidence
+Captured: 2026-08-23 Asia/Tokyo
+Method: read-only curl header probes; no credentials or cookies supplied
+
+http://selinow.com/
+HTTP/1.1 200 OK
+Content-Type: text/html
+Expected: 301/308 to https://selinow.com/
+
+http://api.selinow.com/api/health
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+Expected: 301/308 to HTTPS
+
+http://api.selinow.com/api/v1/shop
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+Expected: HTTPS redirect before application authentication
+
+http://app.selinow.com/api/auth/session
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+Expected: HTTPS redirect before application authentication
+
+http://a-tung.selinow.com/
+HTTP/1.1 200 OK
+X-Request-Id: 28bf1976-186c-49af-985a-2ab9d578c99d
+
+http://a-tung.selinow.com/cart
+HTTP/1.1 200 OK
+X-Request-Id: 9e461fd3-6c89-47a1-834b-92a774521378
+
+http://a-tung.selinow.com/checkout
+HTTP/1.1 200 OK
+X-Request-Id: b4e622aa-9629-4c56-96c7-e7e809d8ae5b
+
+http://a-tung.selinow.com/orders
+HTTP/1.1 200 OK
+X-Request-Id: 44e3b631-9748-44e8-99e2-27b96be71129
+
+No inspected HTTPS response contained Strict-Transport-Security.
+The CSP upgrade-insecure-requests directive does not upgrade the top-level HTTP navigation.

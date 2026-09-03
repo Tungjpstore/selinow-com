@@ -15,6 +15,10 @@ vi.mock("../../src/lib/auth/session", () => ({
   requireRecentAuth: dependencies.recentAuth,
 }));
 
+vi.mock("../../src/lib/http/admin-rate-limit", () => ({
+  guardAdminMutationRate: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../../src/lib/platform/bindings", () => ({ getBindings: () => dependencies.env }));
 
 vi.mock("../../src/lib/operations/abuse", () => ({
@@ -80,7 +84,7 @@ describe("abuse mutation route security", () => {
     }) as never);
     expect(response).toBeInstanceOf(Response);
     expect(dependencies.requireCsrf).toHaveBeenCalledOnce();
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.apply).toHaveBeenCalledWith(expect.objectContaining({
       actionKind: "product_suspend",
       actorScope: "platform_admin",
@@ -121,7 +125,7 @@ describe("abuse mutation route security", () => {
       shopPublicId: SHOP_PUBLIC_ID,
       targetId: PRODUCT_ID,
     }));
-    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth);
+    expect(dependencies.recentAuth).toHaveBeenCalledWith(auth, 5);
 
     await ownerAction(context({
       body: { actionKind: "product_restore", reasonCode: "reported_abuse", targetId: PRODUCT_ID },

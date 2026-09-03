@@ -1,0 +1,164 @@
+---
+interface Props {
+  slug: string;
+  locale?: unknown;
+}
+
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../lib/i18n/locale";
+import { icons } from "./icons";
+
+const { slug, locale: propLocale } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const labels = {
+  telegram: t("marketing.home.channels.name.telegram"),
+  message: t("marketing.home.sim.message"),
+  created: t("marketing.home.sim.created"),
+  pending: t("marketing.home.sim.pending"),
+  amount: t("marketing.home.sim.amount"),
+  payment: t("marketing.home.flow.payment"),
+  paymentDetail: t("marketing.home.flow.payment_detail"),
+  delivery: t("marketing.home.flow.delivery"),
+  verified: t("marketing.home.sim.verified"),
+  allocated: t("marketing.home.sim.allocated"),
+  delivered: t("marketing.home.sim.delivered"),
+  keyMask: t("marketing.home.sim.key_mask"),
+  checkout: t("marketing.home.rail.checkout"),
+  railVerified: t("marketing.home.rail.verified"),
+  entitlement: t("marketing.home.rail.entitlement"),
+  secureDelivery: t("marketing.home.rail.secure_delivery"),
+  pool: t("marketing.home.rail.pool"),
+  reserve: t("marketing.home.rail.reserve"),
+  allocate: t("marketing.home.rail.allocate"),
+  caption: t("marketing.home.sim.caption"),
+};
+
+const ledger = [
+  { icon: icons.cart(14), label: labels.checkout, status: labels.pending, state: "processing" },
+  { icon: icons.shieldCheck(14), label: labels.railVerified, status: labels.verified, state: "verified" },
+  { icon: icons.key(14), label: labels.entitlement, status: labels.allocated, state: "processing" },
+  { icon: icons.package(14), label: labels.secureDelivery, status: labels.delivered, state: "delivered" },
+];
+
+const pool = [
+  { mask: "XXXXX-7F3A2-••••-•••••", state: "done" },
+  { mask: labels.keyMask, state: "active" },
+  { mask: "XXXXX-B61D4-••••-•••••", state: "todo" },
+];
+---
+
+<aside class="sol-visual" aria-label={t("marketing.home.sim.aria")}>
+  <div class="sol-visual-bar">
+    <span class="sol-visual-title">
+      <span class="flow-sim-dot" aria-hidden="true"></span>
+      Selinow OS
+    </span>
+    <span class="status-chip" data-status="verified">
+      <span class="status-chip-dot" aria-hidden="true"></span>
+      {t("marketing.home.sim.operational")}
+    </span>
+  </div>
+
+  {slug === "telegram-commerce" && (
+    <div class="sol-visual-body">
+      <div class="sol-msg">
+        <span class="sol-msg-icon" set:html={icons.send(16)} aria-hidden="true"></span>
+        <div>
+          <strong>{labels.telegram}</strong>
+          <p>{labels.message}</p>
+        </div>
+      </div>
+      <div class="sol-link" aria-hidden="true"></div>
+      <div class="sol-row sol-row-order">
+        <span class="sol-row-icon" set:html={icons.receipt(14)} aria-hidden="true"></span>
+        <div>
+          <strong>#SLN-2084</strong>
+          <small>{labels.amount}</small>
+        </div>
+        <span class="status-chip" data-status="processing">
+          <span class="status-chip-dot" aria-hidden="true"></span>
+          {labels.created}
+        </span>
+      </div>
+      <div class="sol-row">
+        <span class="sol-row-icon" set:html={icons.shieldCheck(14)} aria-hidden="true"></span>
+        <div>
+          <strong>{labels.payment}</strong>
+          <small>{labels.paymentDetail}</small>
+        </div>
+        <span class="status-chip" data-status="verified">
+          <span class="status-chip-dot" aria-hidden="true"></span>
+          {labels.verified}
+        </span>
+      </div>
+      <div class="sol-row sol-row-success">
+        <span class="sol-row-icon sol-row-icon-success" set:html={icons.send(14)} aria-hidden="true"></span>
+        <div>
+          <strong>{labels.delivery}</strong>
+        </div>
+        <span class="status-chip" data-status="delivered">
+          <span class="status-chip-dot" aria-hidden="true"></span>
+          {labels.delivered}
+        </span>
+      </div>
+    </div>
+  )}
+
+  {slug === "digital-product-delivery" && (
+    <ol class="sol-visual-body sol-ledger">
+      {ledger.map((row) => (
+        <li class="sol-row">
+          <span class="sol-row-icon" set:html={row.icon} aria-hidden="true"></span>
+          <div>
+            <strong>{row.label}</strong>
+          </div>
+          <span class="status-chip" data-status={row.state}>
+            <span class="status-chip-dot" aria-hidden="true"></span>
+            {row.status}
+          </span>
+        </li>
+      ))}
+    </ol>
+  )}
+
+  {slug === "license-key-inventory" && (
+    <div class="sol-visual-body">
+      <p class="sol-pool-label">{labels.pool}</p>
+      <ul class="sol-pool">
+        {pool.map((row) => (
+          <li data-pool-state={row.state}>
+            <span set:html={icons.key(13)} aria-hidden="true"></span>
+            <code>{row.mask}</code>
+            <i aria-hidden="true"></i>
+          </li>
+        ))}
+      </ul>
+      <div class="sol-link" aria-hidden="true"></div>
+      <div class="sol-row">
+        <span class="sol-row-icon" set:html={icons.clock(14)} aria-hidden="true"></span>
+        <div>
+          <strong>{labels.reserve}</strong>
+          <small>#SLN-2084</small>
+        </div>
+        <span class="status-chip" data-status="processing">
+          <span class="status-chip-dot" aria-hidden="true"></span>
+          {labels.pending}
+        </span>
+      </div>
+      <div class="sol-row sol-row-success">
+        <span class="sol-row-icon sol-row-icon-success" set:html={icons.unlock(14)} aria-hidden="true"></span>
+        <div>
+          <strong>{labels.allocate}</strong>
+        </div>
+        <span class="status-chip" data-status="delivered">
+          <span class="status-chip-dot" aria-hidden="true"></span>
+          {labels.allocated}
+        </span>
+      </div>
+    </div>
+  )}
+
+  <p class="sol-visual-caption">{labels.caption}</p>
+</aside>

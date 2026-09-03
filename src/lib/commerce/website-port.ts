@@ -97,7 +97,13 @@ export class WebsiteCommercePort implements CommerceApplicationPort {
 
   async quoteCart(input: { command: CommerceQuoteCommand; context: CommerceContext }): Promise<CommerceQuoteView> {
     assertWebsiteContext(input.context, this.shop);
-    const quote = await quoteCart({ cartId: input.command.cart.cartId, cartToken: opaqueToken(input.command.cart.access), env: this.env, shop: this.shop });
+    const quote = await quoteCart({
+      cartId: input.command.cart.cartId,
+      cartToken: opaqueToken(input.command.cart.access),
+      env: this.env,
+      ...(input.command.shippingMethodId === undefined ? {} : { shippingMethodId: input.command.shippingMethodId }),
+      shop: this.shop,
+    });
     const items = quote.items.map(quoteItem);
     const subtotalMinor = quote.subtotalMinor;
     const discountMinor = "discountMinor" in quote && typeof quote.discountMinor === "number" ? quote.discountMinor : 0;
@@ -107,6 +113,13 @@ export class WebsiteCommercePort implements CommerceApplicationPort {
       expiresAt: quote.expiresAt,
       items,
       quoteEvidence: requiredQuoteEvidence(quote.quoteEvidence),
+      ...(quote.shipping === undefined ? {} : {
+        shipping: {
+          feeMinor: quote.shipping.feeMinor,
+          methodId: quote.shipping.methodId,
+          methods: [...quote.shipping.methods],
+        },
+      }),
       subtotalMinor,
       totalMinor: typeof quote.totalMinor === "number" ? quote.totalMinor : subtotalMinor - discountMinor,
     };
@@ -139,6 +152,7 @@ export class WebsiteCommercePort implements CommerceApplicationPort {
       expected: [...input.command.expected],
       idempotencyKey: input.command.idempotencyKey,
       quoteEvidence: input.command.quoteEvidence,
+      ...(input.command.shipping === undefined ? {} : { shipping: input.command.shipping }),
       shop: this.shop,
     });
     const orderRecord = order as unknown as Record<string, unknown>;

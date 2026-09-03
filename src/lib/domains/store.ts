@@ -13,7 +13,7 @@ import {
 } from "./cloudflare";
 import { verifyCustomDomainOwnership, verifyCustomHostnameDns, type DnsVerificationResult } from "./dns";
 import { isCloudflareHostnameReady, normalizeCustomHostname } from "./policy";
-import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission } from "./readiness";
+import { customDomainTurnstileAdmissionSql, hasFreshExactTurnstileAdmission, isExactTurnstileAdmissionRefreshDue } from "./readiness";
 
 const DOMAIN_SELECT = `
   SELECT
@@ -1584,4 +1584,242 @@ export async function reconcileCustomDomainRecord(input: {
     return "checked";
   }
   return (await runProviderCheck({ env: input.env, leaseToken: input.leaseToken, row, runtime })).outcome;
+}
+
+function withUpdatedTurnstileAdmission(
+  validationMetadataJson: string,
+  turnstile: CloudflareTurnstileHostnameAdmission,
+  checkedAt: string,
+): string {
+  // Reuse the activation write shape: the turnstile block is replaced while the
+  // dns/ownership evidence already stored on the row is preserved untouched.
+  return JSON.stringify({ ...safeJsonObject(validationMetadataJson), turnstile: { ...turnstile, checkedAt } });
+}
+
+function turnstileCheckedAtMs(validationMetadataJson: string): number | null {
+  const value = safeJsonObject(validationMetadataJson).turnstile;
+  const admission = typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  if (admission === null || typeof admission.checkedAt !== "string") return null;
+  const checkedAtMs = Date.parse(admission.checkedAt);
+  return Number.isFinite(checkedAtMs) ? checkedAtMs : null;
+}
+
+async function releaseTurnstileRefreshLease(input: { env: AppBindings; leaseToken: string; now: Date; row: DomainRow }): Promise<void> {
+  await input.env.PLATFORM_DB.prepare(`
+    /* domain:release-turnstile-refresh-lease */
+    UPDATE shop_domains
+    SET lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+    WHERE id = ? AND shop_id = ? AND lease_token = ?
+  `).bind(input.now.toISOString(), input.row.id, input.row.shopId, input.leaseToken).run();
+}
+
+async function recordTurnstileAdmissionExpiredAudit(input: {
+  env: AppBindings;
+  now: Date;
+  previousCheckedAt: string | null;
+  reason: "admission_lookup_failed" | "admission_not_admitted";
+  row: DomainRow;
+}): Promise<void> {
+  const nowIso = input.now.toISOString();
+  await input.env.PLATFORM_DB.prepare(`
+    /* domain:turnstile-admission-expired-audit */
+    INSERT INTO audit_logs (
+      id, shop_id, actor_type, actor_id, action, resource_type,
+      resource_id, safe_metadata_json, request_id, created_at
+    ) SELECT ?, ?, 'system', NULL, 'domain.turnstile_admission_expired', 'shop_domain', ?, ?, ?, ?
+    WHERE EXISTS (
+      SELECT 1 FROM shop_domains
+      WHERE id = ? AND shop_id = ? AND deleted_at IS NULL
+        AND last_safe_error_code IN ('domain_turnstile_admission_pending', 'domain_turnstile_admission_lookup_failed')
+    )
+  `).bind(
+    createId("aud"),
+    input.row.shopId,
+    input.row.id,
+    JSON.stringify({ hostname: input.row.hostname, previousCheckedAt: input.previousCheckedAt, reason: input.reason }),
+    `domain-reconcile:${input.row.id}:${nowIso}`,
+    nowIso,
+    input.row.id,
+    input.row.shopId,
+  ).run();
+}
+
+async function persistTurnstileAdmissionRefresh(input: {
+  admission: CloudflareTurnstileHostnameAdmission;
+  env: AppBindings;
+  leaseToken: string;
+  now: Date;
+  row: DomainRow;
+}): Promise<DomainRow> {
+  const nowIso = input.now.toISOString();
+  // Keep the next scheduled full check, but never let it drift further out than
+  // the normal active cadence after a successful admission refresh.
+  const cappedNextCheckAt = new Date(input.now.getTime() + customDomainBackoffSeconds(input.row.checkAttempts, "active") * 1_000).toISOString();
+  const result = await input.env.PLATFORM_DB.prepare(`
+    /* domain:refresh-turnstile-admission */
+    UPDATE shop_domains
+    SET validation_metadata_json = ?, last_checked_at = ?,
+        next_check_at = min(COALESCE(next_check_at, ?), ?),
+        last_safe_error_code = NULL,
+        lease_token = NULL, lease_expires_at = NULL,
+        version = version + 1, updated_at = ?
+    WHERE id = ? AND shop_id = ? AND type = 'custom' AND deleted_at IS NULL
+      AND delete_requested_at IS NULL AND status = 'active' AND lease_token = ? AND version = ?
+  `).bind(
+    withUpdatedTurnstileAdmission(input.row.validationMetadataJson, input.admission, nowIso),
+    nowIso,
+    cappedNextCheckAt,
+    cappedNextCheckAt,
+    nowIso,
+    input.row.id,
+    input.row.shopId,
+    input.leaseToken,
+    input.row.version,
+  ).run();
+  if (result.meta.changes !== 1) throw new AppError("domain_lease_lost", 409);
+  return requireDomain(await findDomainById(input.env, input.row.shopId, input.row.id));
+}
+
+async function persistTurnstileRefreshFailure(input: {
+  env: AppBindings;
+  expired: boolean;
+  leaseToken: string;
+  now: Date;
+  row: DomainRow;
+}): Promise<void> {
+  // Fail-closed: a transient provider failure never clears existing admission
+  // evidence. Only when the admission has already expired (the serve gate has
+  // stopped the domain) does the seller get a visible status code; the lease is
+  // released and the retry throttling relies on last_checked_at.
+  const result = await input.env.PLATFORM_DB.prepare(`
+    /* domain:persist-turnstile-refresh-failure */
+    UPDATE shop_domains
+    SET last_checked_at = ?,
+        last_safe_error_code = ?,
+        lease_token = NULL, lease_expires_at = NULL,
+        version = version + 1, updated_at = ?
+    WHERE id = ? AND shop_id = ? AND type = 'custom' AND deleted_at IS NULL
+      AND delete_requested_at IS NULL AND lease_token = ? AND version = ?
+  `).bind(
+    input.now.toISOString(),
+    input.expired ? "domain_turnstile_admission_lookup_failed" : input.row.lastSafeErrorCode,
+    input.now.toISOString(),
+    input.row.id,
+    input.row.shopId,
+    input.leaseToken,
+    input.row.version,
+  ).run();
+  if (result.meta.changes !== 1) throw new AppError("domain_lease_lost", 409);
+}
+
+async function persistTurnstileAdmissionRevocation(input: {
+  admission: CloudflareTurnstileHostnameAdmission;
+  env: AppBindings;
+  leaseToken: string;
+  now: Date;
+  row: DomainRow;
+}): Promise<DomainRow> {
+  const attempts = input.row.checkAttempts + 1;
+  const nowIso = input.now.toISOString();
+  return persistCheckTransition({
+    env: input.env,
+    leaseToken: input.leaseToken,
+    now: input.now,
+    prepareTarget: ({ canonicalDomainId, fallbackDomainId, needsFailover, row }) => input.env.PLATFORM_DB.prepare(`
+      /* domain:persist-turnstile-revocation */
+      UPDATE shop_domains
+      SET status = 'validating', is_primary = 0, validation_metadata_json = ?,
+          check_attempts = ?, next_check_at = ?, last_checked_at = ?,
+          last_safe_error_code = 'domain_turnstile_admission_pending',
+          lease_token = NULL, lease_expires_at = NULL,
+          version = version + 1, updated_at = ?
+      WHERE id = ? AND shop_id = ? AND deleted_at IS NULL
+        AND delete_requested_at IS NULL AND lease_token = ? AND version = ? AND is_primary = ?
+        AND EXISTS (SELECT 1 FROM shops WHERE id = ? AND canonical_domain_id IS ?)
+        ${needsFailover && fallbackDomainId !== null ? `AND EXISTS (
+          SELECT 1 FROM shop_domains fallback
+          WHERE fallback.id = ? AND fallback.shop_id = ? AND fallback.type = 'platform_subdomain'
+            AND fallback.status = 'active' AND fallback.delete_requested_at IS NULL AND fallback.deleted_at IS NULL
+        )` : ""}
+    `).bind(
+      withUpdatedTurnstileAdmission(input.row.validationMetadataJson, input.admission, nowIso),
+      attempts,
+      nextCheckAt(input.now, attempts, "validating"),
+      nowIso,
+      nowIso,
+      row.id,
+      row.shopId,
+      input.leaseToken,
+      row.version,
+      row.isPrimary,
+      row.shopId,
+      canonicalDomainId,
+      ...(needsFailover && fallbackDomainId !== null ? [fallbackDomainId, row.shopId] : []),
+    ),
+    reasonCode: "domain_turnstile_admission_pending",
+    row: input.row,
+    status: "validating",
+  });
+}
+
+// Proactively re-verifies a stale-but-still-active Turnstile admission before
+// the 12-hour serve-gate window expires. Provider failures fail closed: the
+// existing admission metadata is left untouched and retried on a later tick.
+export async function refreshCustomDomainTurnstileAdmission(input: {
+  env: AppBindings;
+  leaseToken: string;
+  now: Date;
+  row: { id: string; shopId: string };
+  runtime?: Omit<DomainRuntime, "now">;
+}): Promise<"checked" | "failed"> {
+  const row = requireDomain(await findDomainById(input.env, input.row.shopId, input.row.id));
+  const runtime: DomainRuntime = { ...(input.runtime ?? {}), now: input.now };
+  if (row.leaseToken !== input.leaseToken) throw new AppError("domain_lease_lost", 409);
+  if (
+    row.type !== "custom"
+    || row.status !== "active"
+    || row.deleteRequestedAt !== null
+    || !isExactTurnstileAdmissionRefreshDue({ hostname: row.hostname, now: input.now, validationMetadataJson: row.validationMetadataJson })
+  ) {
+    await releaseTurnstileRefreshLease({ env: input.env, leaseToken: input.leaseToken, now: input.now, row });
+    return "checked";
+  }
+
+  if (!await shopHasCustomDomainEntitlement(input.env, row.shopId, input.now)) {
+    await persistEntitlementSuspension({ env: input.env, leaseToken: input.leaseToken, now: input.now, row });
+    return "checked";
+  }
+
+  // The admission may still be fresh enough to serve; it is expired once it
+  // falls outside the 12-hour serve-gate window. The previous error code is
+  // captured before any transition so audit deduplication never observes the
+  // code written by the transition itself.
+  const expired = !hasFreshExactTurnstileAdmission({ hostname: row.hostname, now: input.now, validationMetadataJson: row.validationMetadataJson });
+  const previousSafeErrorCode = row.lastSafeErrorCode;
+  const previousCheckedAtMs = turnstileCheckedAtMs(row.validationMetadataJson);
+  const previousCheckedAt = previousCheckedAtMs === null ? null : new Date(previousCheckedAtMs).toISOString();
+
+  let admission: CloudflareTurnstileHostnameAdmission;
+  try {
+    admission = await createProvider(input.env, runtime)
+      .verifyTurnstileHostnameAdmission(bindingString(input.env, "TURNSTILE_SITE_KEY"), row.hostname);
+  } catch {
+    await persistTurnstileRefreshFailure({ env: input.env, expired, leaseToken: input.leaseToken, now: input.now, row });
+    if (expired && previousSafeErrorCode !== "domain_turnstile_admission_lookup_failed") {
+      await recordTurnstileAdmissionExpiredAudit({ env: input.env, now: input.now, previousCheckedAt, reason: "admission_lookup_failed", row });
+    }
+    return "failed";
+  }
+
+  if (admission.hostname !== row.hostname) throw new AppError("domain_provider_conflict", 409);
+  if (admission.status !== "active") {
+    await persistTurnstileAdmissionRevocation({ admission, env: input.env, leaseToken: input.leaseToken, now: input.now, row });
+    if (expired && previousSafeErrorCode !== "domain_turnstile_admission_pending") {
+      await recordTurnstileAdmissionExpiredAudit({ env: input.env, now: input.now, previousCheckedAt, reason: "admission_not_admitted", row });
+    }
+    return "checked";
+  }
+
+  await persistTurnstileAdmissionRefresh({ admission, env: input.env, leaseToken: input.leaseToken, now: input.now, row });
+  return "checked";
 }

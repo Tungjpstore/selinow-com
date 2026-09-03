@@ -13,7 +13,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     rejectUnknownFields(await readJsonObject(request), []);
     const deletion = await resumeShopDeletion({
       env,

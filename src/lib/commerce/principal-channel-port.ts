@@ -174,7 +174,16 @@ async function readCartLines(input: PrincipalChannelPortInput, cartId: string): 
       product_variants.version, products.title AS productTitle,
       products.status AS productStatus, products.version AS productVersion,
       products.fulfillment_type AS fulfillmentType,
-      COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END) AS availableStock
+      products.delivery_mode AS deliveryMode,
+      CASE WHEN products.delivery_mode = 'shipping'
+        THEN COALESCE((
+          SELECT variant_stock_levels.on_hand - variant_stock_levels.reserved
+          FROM variant_stock_levels
+          WHERE variant_stock_levels.shop_id = product_variants.shop_id
+            AND variant_stock_levels.variant_id = product_variants.id
+        ), 0)
+        ELSE COUNT(CASE WHEN inventory_keys.status = 'available' THEN 1 END)
+      END AS availableStock
     FROM cart_items
     INNER JOIN product_variants
       ON product_variants.id = cart_items.variant_id
@@ -401,7 +410,7 @@ export class PrincipalChannelCommercePort implements CommerceApplicationPort {
     const fingerprint = await verifySnapshotQuote(snapshot);
     for (const line of snapshot.lines) {
       if (line.status !== "active" || line.productStatus !== "active" || line.currency !== this.input.shop.currency || line.quantity < line.minPerOrder || line.quantity > line.maxPerOrder) throw new AppError("catalog_changed", 409);
-      if (line.fulfillmentType === "license_key" && line.availableStock < line.quantity) throw new AppError("inventory_unavailable", 409);
+      if ((line.fulfillmentType === "license_key" || line.deliveryMode === "shipping") && line.availableStock < line.quantity) throw new AppError("inventory_unavailable", 409);
     }
     if (fingerprint.totalMinor > 0 && this.input.shop.currency !== "VND") throw new AppError("payment_currency_unsupported", 409);
     const orderId = createId("ord");
@@ -426,7 +435,7 @@ export class PrincipalChannelCommercePort implements CommerceApplicationPort {
         eventIdempotencyKey: checkoutSubject,
         expiresAt,
         fulfillmentIdempotencyPrefix: `${this.input.channelCode}-free`,
-        lines: snapshot.lines.map((line) => ({ fulfillmentType: line.fulfillmentType, priceMinor: line.priceMinor, productId: line.productId, productTitle: line.productTitle, productVersion: line.productVersion, quantity: line.quantity, sku: line.sku, title: line.title, variantId: line.variantId, variantVersion: line.version })),
+        lines: snapshot.lines.map((line) => ({ deliveryMode: line.deliveryMode, fulfillmentType: line.fulfillmentType, priceMinor: line.priceMinor, productId: line.productId, productTitle: line.productTitle, productVersion: line.productVersion, quantity: line.quantity, sku: line.sku, title: line.title, variantId: line.variantId, variantVersion: line.version })),
         locale: input.context.locale,
         nowIso,
         orderId,
@@ -453,7 +462,7 @@ export class PrincipalChannelCommercePort implements CommerceApplicationPort {
         for (const line of current.lines) {
           const variant = await loadCanonicalCartVariant(this.input.env, this.input.shop.id, line.variantId);
           if (variant.priceMinor !== line.priceMinor || variant.productVersion !== line.productVersion || variant.version !== line.version) throw new AppError("checkout_changed", 409);
-          if (variant.fulfillmentType === "license_key" && variant.availableStock < line.quantity) throw new AppError("inventory_unavailable", 409);
+          if ((variant.fulfillmentType === "license_key" || variant.deliveryMode === "shipping") && variant.availableStock < line.quantity) throw new AppError("inventory_unavailable", 409);
         }
       }
       throw new AppError("checkout_failed", 409);

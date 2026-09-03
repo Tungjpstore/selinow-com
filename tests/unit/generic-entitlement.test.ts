@@ -319,7 +319,8 @@ describe("generic entitlement migration and service", () => {
         orderTokenHash: BUYER_BINDING_HASH,
         reservationToken: `reservation-${channel.code}`,
         lines: [{
-          fulfillmentType: "manual",
+          deliveryMode: "digital",
+        fulfillmentType: "manual",
           priceMinor: 0,
           productId: PRODUCT_ID,
           productTitle: "Generic product",

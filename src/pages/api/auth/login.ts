@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 
 import { isAppError } from "../../../lib/core/errors";
+import { cloudflareRequesterAddress } from "../../../lib/auth/admission";
 import { normalizeEmail } from "../../../lib/auth/policy";
 import { appendSessionCookies, loginWithPassword } from "../../../lib/auth/session";
 import { createCaughtErrorResponse } from "../../../lib/http/security";
@@ -23,7 +24,26 @@ export const POST: APIRoute = async ({ locals, request }) => {
       env,
       password,
       rememberMe,
+      requesterAddress: cloudflareRequesterAddress(request),
     });
+
+    if ("twoFactorRequired" in result) {
+      return Response.json({
+        challengeToken: result.challengeToken,
+        cooldownSeconds: result.cooldownSeconds,
+        // Local/test aid only (APP_ENV=local); parity with enable-2fa-request.
+        ...(result.debugOtp === undefined ? {} : { debugOtp: result.debugOtp }),
+        expiresAt: result.expiresAt,
+        ok: true,
+        requestId: locals.requestId,
+        twoFactorRequired: true,
+      }, {
+        headers: {
+          "Cache-Control": "private, no-store, max-age=0",
+          "X-Robots-Tag": "noindex, nofollow",
+        },
+      });
+    }
 
     const headers = new Headers({
       "Cache-Control": "private, no-store, max-age=0",

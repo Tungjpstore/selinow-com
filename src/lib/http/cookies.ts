@@ -27,6 +27,8 @@ type CookieOptions = {
   maxAge: number;
   sameSite: "Lax" | "Strict";
   secure: boolean;
+  /** Optional share scope, e.g. `.selinow.com` to span app/storefront subdomains. */
+  domain?: string;
 };
 
 export function serializeCookie(name: string, value: string, options: CookieOptions): string {
@@ -37,6 +39,9 @@ export function serializeCookie(name: string, value: string, options: CookieOpti
     `SameSite=${options.sameSite}`,
   ];
 
+  if (options.domain !== undefined) {
+    attributes.push(`Domain=${options.domain}`);
+  }
   if (options.httpOnly) {
     attributes.push("HttpOnly");
   }

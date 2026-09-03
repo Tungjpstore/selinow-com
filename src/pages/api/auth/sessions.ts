@@ -25,7 +25,7 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     const revokedCount = await revokeAllSessions(auth, env);
     const response = Response.json(
       { ok: true, requestId: locals.requestId, revokedCount },

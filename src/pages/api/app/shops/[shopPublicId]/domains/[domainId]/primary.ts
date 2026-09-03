@@ -11,7 +11,7 @@ export const PUT: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    requireRecentAuth(auth, 5);
     rejectUnknownFields(await readJsonObject(request), []);
     const domain = await setPrimaryDomain({
       domainId: requireResourceId(params.domainId, "dom"),

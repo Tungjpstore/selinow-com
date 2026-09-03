@@ -3,6 +3,7 @@ import type { APIRoute } from "astro";
 import { requireCsrfSession, requireRecentAuth } from "../../../../../../lib/auth/session";
 import { requireResourceId } from "../../../../../../lib/catalog/policy";
 import { AppError } from "../../../../../../lib/core/errors";
+import { guardAdminMutationRate } from "../../../../../../lib/http/admin-rate-limit";
 import { readJsonObject, rejectUnknownFields } from "../../../../../../lib/http/request";
 import { createCaughtErrorResponse } from "../../../../../../lib/http/security";
 import { applyDeletionLegalHold } from "../../../../../../lib/operations/deletion";
@@ -29,7 +30,8 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    await guardAdminMutationRate({ env, family: "operations_deletions", request });
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 2 * 1_024);
     rejectUnknownFields(body, [
       "action",

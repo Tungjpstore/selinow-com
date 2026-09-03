@@ -103,7 +103,7 @@ export function assertCheckoutAllowed(input: {
   if (input.shopStatus === "suspended" || input.shopStatus === "archived") {
     throw new AppError("tenant_suspended", 403);
   }
-  if (input.shopStatus !== "active") {
+  if (input.shopStatus !== "active" && input.shopStatus !== "draft") {
     throw new AppError("tenant_not_ready", 409);
   }
   if (!new Set(["trialing", "active", "past_due"]).has(input.subscriptionState)) {

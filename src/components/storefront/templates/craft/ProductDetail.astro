@@ -1,0 +1,44 @@
+---
+import BuyBox from "../../sections/BuyBox.astro";
+import Gallery from "../../sections/Gallery.astro";
+import PolicyPanel from "../../sections/PolicyPanel.astro";
+import RelatedGrid from "../../sections/RelatedGrid.astro";
+import SlotPickerInline from "../../sections/SlotPickerInline.astro";
+import { formatMoney } from "../../../../lib/storefront/view";
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  locale: string;
+  product: StorefrontProduct;
+  promotions: StorefrontPromotion[];
+  related: StorefrontProduct[];
+  shop: StorefrontShop;
+}
+
+const { locale, product, related, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const firstVariant = product.variants.find((variant) => variant.stockState !== "out_of_stock") ?? product.variants[0];
+const durationMinutes = firstVariant?.durationMinutes ?? null;
+---
+<section class="product-detail craft-detail">
+  <div class="product-detail-media">
+    <Gallery images={product.images} locale={locale} title={product.title} />
+  </div>
+  <div class="product-detail-copy">
+    <a class="back-link" href="/">{t("storefront.product.back")}</a>
+    <div class="craft-board">
+      <p class="craft-board-kicker">{t("storefront.template.craft.menu")}</p>
+      <h1>{product.title}</h1>
+      <p class="craft-board-meta">
+        {durationMinutes !== null && <span>{t("storefront.slot_picker.duration", { minutes: durationMinutes })}</span>}
+        {firstVariant && <span class="craft-board-price">{formatMoney(firstVariant.priceMinor, firstVariant.currency, locale)}</span>}
+      </p>
+    </div>
+    <BuyBox locale={locale} product={product} />
+    <p class="description">{product.description || t("storefront.product.description_fallback")}</p>
+    <SlotPickerInline locale={locale} product={product} />
+    <PolicyPanel locale={locale} shop={shop} />
+  </div>
+</section>
+<RelatedGrid locale={locale} related={related} />

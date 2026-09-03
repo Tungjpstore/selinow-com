@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 
 import { magicLinkRequesterAddress, verifyMagicLinkChallenge } from "../../../../lib/auth/admission";
+import { safeRelativeRedirect } from "../../../../lib/auth/redirect";
 import { assertDashboardOrigin, normalizeDisplayName, normalizeEmail } from "../../../../lib/auth/policy";
 import { appendMagicLinkInitiationCookie, requestMagicLink } from "../../../../lib/auth/session";
 import { isAppError } from "../../../../lib/core/errors";
@@ -14,10 +15,11 @@ export const POST: APIRoute = async ({ locals, request }) => {
   try {
     assertDashboardOrigin(request, env.DASHBOARD_ORIGIN);
     const body = await readJsonObject(request);
-    rejectUnknownFields(body, ["displayName", "email", "turnstileToken"]);
+    rejectUnknownFields(body, ["displayName", "email", "redirect", "turnstileToken"]);
     const email = normalizeEmail(body.email);
     const displayName = normalizeDisplayName(body.displayName, email);
     const challengePassed = body.turnstileToken !== undefined;
+    const redirect = safeRelativeRedirect(typeof body.redirect === "string" ? body.redirect : null, "");
     if (challengePassed) {
       await verifyMagicLinkChallenge({ env, request, token: body.turnstileToken });
     }
@@ -27,6 +29,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       email,
       env,
       locale: locals.locale,
+      ...(redirect === "" ? {} : { redirect }),
       requesterAddress: magicLinkRequesterAddress(request),
     });
     const { initiationBinding, ...publicResult } = result;

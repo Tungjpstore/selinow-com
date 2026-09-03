@@ -92,6 +92,10 @@ function seed(database: DatabaseSync): void {
       INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
       VALUES (?, ?, 'active', ?, ?)
     `).run(id, role, NOW, NOW);
+    database.prepare(`
+      UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+      WHERE id = ?
+    `).run(NOW, id);
   }
   database.prepare(`
     INSERT INTO shops (
@@ -165,6 +169,46 @@ describe("encryption rotation operator surface", () => {
       .rejects.toMatchObject({ code: "rotation_confirmation_required", status: 400 });
     await expect(createOperatorEncryptionRotation({ ...base, liveConfirmation: null }))
       .rejects.toMatchObject({ code: "rotation_confirmation_required", status: 400 });
+  });
+
+  it("denies an un-enrolled owner on rotation creation until two-factor enrollment completes", async () => {
+    // The suite seeders enroll 2FA for the standing admins, so the un-enrolled
+    // active owner fixture must be created explicitly for this guard test.
+    database.prepare(`
+      INSERT INTO platform_users (id, email_normalized, display_name, status, created_at, updated_at)
+      VALUES ('admin-unenrolled-owner', 'unenrolled-owner@example.test', 'admin-unenrolled-owner', 'active', ?, ?)
+    `).run(NOW, NOW);
+    database.prepare(`
+      INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
+      VALUES ('admin-unenrolled-owner', 'owner', 'active', ?, ?)
+    `).run(NOW, NOW);
+    const input = {
+      actorUserId: "admin-unenrolled-owner",
+      dryRun: true,
+      env,
+      globalConfirmation: null,
+      idempotencyKey: "rotation-unenrolled-0001",
+      keyFamily: "inventory" as const,
+      liveConfirmation: null,
+      requestId: "request-rotation-unenrolled",
+      scope: "shop" as const,
+      shopPublicId: "shop_public_a",
+      sourceKeyVersion: "v1",
+      targetKeyVersion: "v2",
+    };
+
+    await expect(createOperatorEncryptionRotation(input))
+      .rejects.toMatchObject({ code: "admin_two_factor_required", status: 403 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM encryption_rotation_runs").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM idempotency_records").get()).toEqual({ count: 0 });
+
+    database.prepare(`
+      UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+      WHERE id = 'admin-unenrolled-owner'
+    `).run(NOW);
+    const created = await createOperatorEncryptionRotation(input);
+    expect(created).toMatchObject({ completed: true, status: "completed" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM encryption_rotation_runs").get()).toEqual({ count: 1 });
   });
 
   it("accepts explicit generated-license rotation families at the operator boundary", () => {

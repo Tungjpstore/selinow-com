@@ -8,7 +8,8 @@ const t = createStorefrontTranslator(locale);
 type ApiError = { code?: string; requestId?: string };
 type CartResponse = { cartId: string; cartToken: string; expiresAt?: string };
 type QuoteItem = { productTitle: string; quantity: number; unitPriceMinor: number; variantId: string; variantTitle: string; variantVersion: number };
-type QuoteResponse = { currency: string; expiresAt: string; items: QuoteItem[]; quoteEvidence: string; totalMinor: number };
+type ShippingMethod = { feeMinor: number; freeOverMinor: number | null; id: string; name: string };
+type QuoteResponse = { currency: string; discountCode?: string | null; discountMinor?: number; expiresAt: string; items: QuoteItem[]; quoteEvidence: string; shipping?: { feeMinor: number; methodId: string | null; methods: ShippingMethod[] }; subtotalMinor?: number; totalMinor: number };
 type CheckoutResponse = { order: { orderId: string; orderToken: string } };
 type RecoveryAction = "cart" | "quote" | "recover" | "submit";
 type CheckoutIntent = {
@@ -65,10 +66,32 @@ if (emptyElement instanceof HTMLElement) emptyElement.hidden = items.length > 0;
 let cart: CartResponse | null = null;
 let quote: QuoteResponse | null = null;
 let quoteExpiryTimer: number | undefined;
+let selectedShippingMethodId: string | null = null;
+let selectedBooking: { resourceId: string; startAt: string } | null = null;
+let bookingVariantId: string | null = null;
 const status = document.querySelector("#checkout-status");
 const retry = document.querySelector("#checkout-retry");
 const submit = document.querySelector("#checkout-submit");
 const total = document.querySelector("#checkout-total");
+const shippingFields = document.querySelector("#shipping-fields");
+const shippingMethodsElement = document.querySelector("#shipping-methods");
+const shippingFeeRow = document.querySelector("#shipping-fee-row");
+const shippingFee = document.querySelector("#shipping-fee");
+const promoField = document.querySelector<HTMLElement>("#promo-field");
+const promoInput = document.querySelector<HTMLInputElement>("[data-promo-input]");
+const promoApplyButton = document.querySelector<HTMLButtonElement>("[data-promo-apply]");
+const promoAppliedRow = document.querySelector<HTMLElement>("#promo-applied");
+const promoCodeChip = document.querySelector<HTMLElement>("[data-promo-code]");
+const promoRemoveButton = document.querySelector<HTMLButtonElement>("[data-promo-remove]");
+const promoStatus = document.querySelector<HTMLElement>("[data-promo-status]");
+const discountRow = document.querySelector<HTMLElement>("#discount-row");
+const discountLabel = document.querySelector<HTMLElement>("[data-discount-label]");
+const discountValue = document.querySelector<HTMLElement>("#discount-value");
+const PROMO_DRAFT_KEY = `selinow-promo-draft:v1:${window.location.host}`;
+const bookingFields = document.querySelector("#booking-fields");
+const bookingDateInput = document.querySelector("#booking-date");
+const bookingSlotsElement = document.querySelector("#booking-slots");
+const bookingSlotStatus = document.querySelector("#booking-slot-status");
 let recoveryAction: RecoveryAction | null = null;
 let pendingIntent: CheckoutIntent | null = null;
 const accessStorage = createBrowserOrderAccessStorage();
@@ -197,6 +220,12 @@ function errorMessage(code: unknown, requestId?: string): string {
     quantity_unavailable: t("storefront.checkout.error.quantity_unavailable"),
     quote_expired: t("storefront.checkout.error.quote_expired"),
     quote_invalid: t("storefront.checkout.error.quote_invalid"),
+    shipping_method_unavailable: t("storefront.checkout.error.shipping_method_unavailable"),
+    shipping_method_not_found: t("storefront.checkout.error.shipping_method_not_found"),
+    shipping_address_invalid: t("storefront.checkout.error.shipping_address_invalid"),
+    shipping_phone_invalid: t("storefront.checkout.error.shipping_phone_invalid"),
+    booking_slot_taken: t("storefront.checkout.error.booking_slot_taken"),
+    booking_slot_required: t("storefront.checkout.error.booking_slot_required"),
     checkout_recovery_expired: t("storefront.checkout.error.checkout_recovery_expired"),
     idempotency_conflict: t("storefront.checkout.error.idempotency_conflict"),
     rate_limited: t("storefront.checkout.error.rate_limited"),
@@ -268,6 +297,240 @@ function renderAuthoritativeQuote(input: QuoteResponse): boolean {
   return changed;
 }
 
+function isPhysicalCart(): boolean {
+  return items.some((item) => catalog.get(item.variantId)?.deliveryMode === "shipping");
+}
+
+function readShippingAddress(): Record<string, string> | null {
+  const value = (id: string): string => {
+    const input = document.querySelector(id);
+    return input instanceof HTMLInputElement ? input.value.trim() : "";
+  };
+  const address = {
+    addressLine: value("#ship-address"),
+    district: value("#ship-district"),
+    fullName: value("#ship-full-name"),
+    notes: value("#ship-notes"),
+    phone: value("#ship-phone"),
+    province: value("#ship-province"),
+    ward: value("#ship-ward"),
+  };
+  return address;
+}
+
+function renderPromo(currentQuote: QuoteResponse): void {
+  const code = typeof currentQuote.discountCode === "string" && currentQuote.discountCode.length > 0
+    ? currentQuote.discountCode
+    : null;
+  if (promoAppliedRow !== null) promoAppliedRow.hidden = code === null;
+  if (promoField !== null) promoField.hidden = code !== null;
+  if (code !== null && promoCodeChip !== null) promoCodeChip.textContent = t("storefront.checkout.promo.applied", { code });
+  const discountMinor = typeof currentQuote.discountMinor === "number" ? currentQuote.discountMinor : 0;
+  if (discountRow !== null) {
+    discountRow.hidden = code === null || discountMinor <= 0;
+    if (discountLabel !== null && code !== null) discountLabel.textContent = t("storefront.checkout.promo.discount_row", { code });
+    if (discountValue !== null && discountMinor > 0) discountValue.textContent = `-${formatClientMoney(discountMinor, currentQuote.currency)}`;
+  }
+}
+
+async function runPromoMutation(mutation: { kind: "discount.apply"; code: string } | { kind: "discount.remove" }): Promise<boolean> {
+  if (cart === null) return false;
+  const response = await fetch("/api/store/cart", {
+    body: JSON.stringify({ cartId: cart.cartId, cartToken: cart.cartToken, mutation }),
+    headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+    method: "POST",
+  });
+  if (response.ok) return true;
+  const body = (await response.json().catch(() => ({}))) as { code?: string };
+  if (promoStatus !== null) {
+    promoStatus.textContent = body.code === "discount_invalid"
+      ? t("storefront.checkout.promo.invalid")
+      : t("storefront.checkout.error.quote_failed");
+  }
+  return false;
+}
+
+function prefillPromoDraft(): void {
+  if (promoInput === null) return;
+  try {
+    const draft = window.sessionStorage.getItem(PROMO_DRAFT_KEY);
+    if (draft !== null && promoInput.value === "") promoInput.value = draft;
+  } catch {
+    // Draft is an enhancement only.
+  }
+}
+
+function clearPromoDraft(): void {
+  try {
+    window.sessionStorage.removeItem(PROMO_DRAFT_KEY);
+  } catch {
+    // Best effort.
+  }
+}
+
+function renderShipping(currentQuote: QuoteResponse): void {
+  if (currentQuote.shipping === undefined) {
+    if (shippingFields instanceof HTMLFieldSetElement) shippingFields.hidden = true;
+    if (shippingFeeRow instanceof HTMLElement) shippingFeeRow.hidden = true;
+    selectedShippingMethodId = null;
+    return;
+  }
+  if (shippingFields instanceof HTMLFieldSetElement) shippingFields.hidden = false;
+  selectedShippingMethodId = currentQuote.shipping.methodId;
+  if (shippingMethodsElement instanceof HTMLElement) {
+    shippingMethodsElement.replaceChildren();
+    for (const method of currentQuote.shipping.methods) {
+      const label = document.createElement("label");
+      label.className = "shipping-method";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "shippingMethodId";
+      input.value = method.id;
+      input.required = true;
+      input.checked = method.id === currentQuote.shipping.methodId;
+      const copy = document.createElement("span");
+      copy.className = "shipping-method-copy";
+      const name = document.createElement("strong");
+      name.textContent = method.name;
+      copy.appendChild(name);
+      if (method.freeOverMinor !== null) {
+        const hint = document.createElement("small");
+        hint.textContent = t("storefront.checkout.shipping.free_over", { amount: formatClientMoney(method.freeOverMinor, currentQuote.currency) });
+        copy.appendChild(hint);
+      }
+      const fee = document.createElement("span");
+      fee.className = "shipping-method-fee";
+      fee.textContent = method.feeMinor === 0 ? t("storefront.checkout.shipping.free") : formatClientMoney(method.feeMinor, currentQuote.currency);
+      label.appendChild(input);
+      label.appendChild(copy);
+      label.appendChild(fee);
+      shippingMethodsElement.appendChild(label);
+    }
+  }
+  if (shippingFeeRow instanceof HTMLElement) shippingFeeRow.hidden = false;
+  if (shippingFee instanceof HTMLElement) {
+    shippingFee.textContent = currentQuote.shipping.feeMinor === 0
+      ? t("storefront.checkout.shipping.free")
+      : formatClientMoney(currentQuote.shipping.feeMinor, currentQuote.currency);
+  }
+}
+
+function isBookingCart(): boolean {
+  const entry = catalog.get(items[0]?.variantId ?? "");
+  return items.length === 1 && entry !== undefined && entry.durationMinutes !== null;
+}
+
+/**
+ * Restore a slot drafted on the service detail page: set the date input and
+ * pre-check the matching radio when it is still offered. The draft only
+ * preselects UI; the guarded checkout still proves the slot atomically.
+ */
+function readBookingDraft(): { resourceId: string; startAt: string; variantId: string } | null {
+  try {
+    const raw = window.sessionStorage.getItem(`selinow-booking-draft:v1:${window.location.host}`);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.variantId !== "string" || typeof record.startAt !== "string" || typeof record.resourceId !== "string") return null;
+    return { resourceId: record.resourceId, startAt: record.startAt, variantId: record.variantId };
+  } catch {
+    return null;
+  }
+}
+
+function applyBookingDraft(): void {
+  if (!(bookingDateInput instanceof HTMLInputElement) || bookingVariantId === null) return;
+  const draft = readBookingDraft();
+  if (draft === null || draft.variantId !== bookingVariantId) return;
+  bookingDateInput.value = draft.startAt.slice(0, 10);
+  const wanted = `${draft.resourceId}|${draft.startAt}`;
+  const match = [...document.querySelectorAll<HTMLInputElement>('input[name="bookingSlot"]')].find((input) => input.value === wanted);
+  if (match === undefined || match.disabled) return;
+  match.checked = true;
+  match.dispatchEvent(new Event("change", { bubbles: true }));
+  try {
+    window.sessionStorage.removeItem(`selinow-booking-draft:v1:${window.location.host}`);
+  } catch {
+    // Leaving the draft behind only means the next visit may preselect again.
+  }
+}
+
+function localDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+async function loadBookingSlots(): Promise<void> {
+  if (!(bookingSlotsElement instanceof HTMLElement) || !(bookingSlotStatus instanceof HTMLElement)) return;
+  if (!(bookingDateInput instanceof HTMLInputElement) || bookingVariantId === null) return;
+  bookingSlotsElement.replaceChildren();
+  bookingSlotStatus.textContent = t("storefront.checkout.booking.loading");
+  const fallbackDate = localDateKey(new Date(Date.now() + 86_400_000));
+  const date = bookingDateInput.value !== "" ? bookingDateInput.value : fallbackDate;
+  bookingDateInput.value = date;
+  const dateStart = date;
+  const dateEnd = localDateKey(new Date(Date.parse(date) + 6 * 86_400_000));
+  try {
+    const params = new URLSearchParams({ dateEnd, dateStart, variantId: bookingVariantId });
+    const response = await fetch(`/api/store/booking/slots?${params.toString()}`);
+    const body = await readJson<{ slots?: Array<{ endAt: string; resourceId: string; resourceName: string; startAt: string }> }>(response);
+    if (!response.ok || !Array.isArray(body.slots)) throw new Error("booking_slots_failed");
+    const slots = body.slots;
+    bookingSlotStatus.textContent = slots.length === 0 ? t("storefront.checkout.booking.empty") : "";
+    let currentDay = "";
+    for (const slot of slots) {
+      const day = slot.startAt.slice(0, 10);
+      if (day !== currentDay) {
+        currentDay = day;
+        const heading = document.createElement("span");
+        heading.className = "booking-slot-day";
+        heading.textContent = new Date(slot.startAt).toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "short" });
+        bookingSlotsElement.appendChild(heading);
+      }
+      const label = document.createElement("label");
+      label.className = "booking-slot";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "bookingSlot";
+      input.value = `${slot.resourceId}|${slot.startAt}`;
+      input.required = true;
+      const text = document.createElement("span");
+      text.textContent = `${new Date(slot.startAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })} · ${slot.resourceName}`;
+      label.appendChild(input);
+      label.appendChild(text);
+      bookingSlotsElement.appendChild(label);
+    }
+    applyBookingDraft();
+  } catch {
+    bookingSlotStatus.textContent = t("storefront.checkout.booking.empty");
+  }
+}
+
+bookingSlotsElement?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.name !== "bookingSlot") return;
+  const separator = target.value.indexOf("|");
+  if (separator <= 0) return;
+  const resourceId = target.value.slice(0, separator);
+  const startAt = target.value.slice(separator + 1);
+  selectedBooking = { resourceId, startAt };
+  if (bookingSlotStatus instanceof HTMLElement) {
+    bookingSlotStatus.textContent = t("storefront.checkout.booking.selected", { time: new Date(startAt).toLocaleString(locale) });
+  }
+});
+
+bookingDateInput?.addEventListener("change", () => {
+  selectedBooking = null;
+  void loadBookingSlots();
+});
+
+shippingMethodsElement?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.name !== "shippingMethodId") return;
+  selectedShippingMethodId = target.value;
+  void prepareWithRecovery(cart ?? undefined);
+});
+
 async function prepare(existingCart?: CartResponse, expectedItems?: QuoteItem[]): Promise<{ cart: CartResponse; quote: QuoteResponse } | null> {
   setRecovery(null);
   cart = existingCart ?? null;
@@ -292,7 +555,11 @@ async function prepare(existingCart?: CartResponse, expectedItems?: QuoteItem[])
     cart = cartBody;
   }
   const quoteResponse = await fetch("/api/store/quote", {
-    body: JSON.stringify({ cartId: cart.cartId, cartToken: cart.cartToken }),
+    body: JSON.stringify({
+      cartId: cart.cartId,
+      cartToken: cart.cartToken,
+      ...(isPhysicalCart() && selectedShippingMethodId !== null ? { shippingMethodId: selectedShippingMethodId } : {}),
+    }),
     headers: { "Content-Type": "application/json" },
     method: "POST",
   });
@@ -310,6 +577,17 @@ async function prepare(existingCart?: CartResponse, expectedItems?: QuoteItem[])
     return null;
   }
   const quoteChanged = renderAuthoritativeQuote(quote);
+  renderShipping(quote);
+  renderPromo(quote);
+  if (isBookingCart()) {
+    if (bookingFields instanceof HTMLFieldSetElement) bookingFields.hidden = false;
+    if (bookingVariantId === null) {
+      bookingVariantId = items[0]?.variantId ?? null;
+      void loadBookingSlots();
+    }
+  } else if (bookingFields instanceof HTMLFieldSetElement) {
+    bookingFields.hidden = true;
+  }
   if (total !== null) total.textContent = formatClientMoney(quote.totalMinor, quote.currency);
   if (status instanceof HTMLElement) {
     const heldUntil = new Date(expiresAtMs).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
@@ -371,6 +649,8 @@ function renderIntent(intent: CheckoutIntent): void {
   const email = document.querySelector("#customer-email");
   if (email instanceof HTMLInputElement) email.value = intent.customerEmail;
   const quoteChanged = renderAuthoritativeQuote(intent.quote);
+  renderShipping(intent.quote);
+  renderPromo(intent.quote);
   if (total !== null) total.textContent = formatClientMoney(intent.quote.totalMinor, intent.quote.currency);
   const expiresAtMs = Date.parse(intent.quote.expiresAt);
   if (Number.isFinite(expiresAtMs) && status instanceof HTMLElement) {
@@ -455,6 +735,7 @@ async function submitCheckout(event: Event): Promise<void> {
   const tokenInput = document.querySelector('input[name="cf-turnstile-response"]');
   try {
     const intent = await createCheckoutIntent();
+    const physical = isPhysicalCart() && selectedShippingMethodId !== null;
     const response = await fetch("/api/store/checkout", {
       body: JSON.stringify({
         cartId: intent.cart.cartId,
@@ -462,6 +743,8 @@ async function submitCheckout(event: Event): Promise<void> {
         customerEmail: intent.customerEmail,
         expected: intent.expected.map(({ quantity, unitPriceMinor, variantId, variantVersion }) => ({ quantity, unitPriceMinor, variantId, variantVersion })),
         quoteEvidence: intent.quote.quoteEvidence,
+        ...(physical ? { shipping: { address: readShippingAddress(), methodId: selectedShippingMethodId } } : {}),
+        ...(isBookingCart() && selectedBooking !== null ? { booking: selectedBooking } : {}),
         turnstileToken: tokenInput instanceof HTMLInputElement ? tokenInput.value : undefined,
       }),
       headers: { "Content-Type": "application/json", "Idempotency-Key": intent.idempotencyKey },
@@ -475,7 +758,7 @@ async function submitCheckout(event: Event): Promise<void> {
     const code = errorCode(error);
     setError(errorMessage(code, errorRequestId(error)), recoveryForCheckout(code));
     submit.textContent = t("storefront.checkout.submit");
-    const turnstileWindow = window as typeof window & { turnstile?: { reset: () => void } };
+    const turnstileWindow = window;
     turnstileWindow.turnstile?.reset();
     if (code === "turnstile_invalid" || code === "turnstile_required") {
       setRecovery(null);
@@ -502,4 +785,42 @@ retry?.addEventListener("click", () => {
     return;
   }
   if (recoveryAction === "submit") document.querySelector<HTMLFormElement>("#checkout-form")?.requestSubmit();
+});
+
+// ── EX4.1 promo code wiring ──────────────────────────────────────────────
+prefillPromoDraft();
+promoApplyButton?.addEventListener("click", () => {
+  const code = promoInput === null ? "" : promoInput.value.trim().toUpperCase();
+  if (code === "" || cart === null) return;
+  void (async () => {
+    promoApplyButton.disabled = true;
+    if (promoStatus !== null) promoStatus.textContent = "";
+    const ok = await runPromoMutation({ code, kind: "discount.apply" });
+    if (ok) {
+      clearPromoDraft();
+      if (promoInput !== null) promoInput.value = "";
+      await prepareWithRecovery(cart);
+    }
+    promoApplyButton.disabled = false;
+  })();
+});
+promoInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    promoApplyButton?.click();
+  }
+});
+promoRemoveButton?.addEventListener("click", () => {
+  if (cart === null) return;
+  void (async () => {
+    promoRemoveButton.disabled = true;
+    if (promoStatus !== null) promoStatus.textContent = t("storefront.checkout.promo.removing");
+    const ok = await runPromoMutation({ kind: "discount.remove" });
+    if (ok) {
+      clearPromoDraft();
+      if (promoStatus !== null) promoStatus.textContent = t("storefront.checkout.promo.removed");
+      await prepareWithRecovery(cart);
+    }
+    promoRemoveButton.disabled = false;
+  })();
 });

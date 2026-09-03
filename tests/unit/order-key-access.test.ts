@@ -5,11 +5,12 @@ import { hmacToken } from "../../src/lib/core/crypto";
 import { encryptInventoryKey } from "../../src/lib/crypto/inventory";
 import type { AppBindings } from "../../src/lib/platform/bindings";
 import type { StorefrontShop } from "../../src/lib/storefront/store";
+import { FALLBACK_STOREFRONT_TEMPLATE } from "../../src/lib/storefront/templates";
 
 const shop: StorefrontShop = {
   access: "live",
   canonicalHostname: "signal.localhost",
-  content: { announcement: null, deliveryText: "Giao sau xác minh", description: "", footerText: "", headline: "", seoDescription: "", seoTitle: "", showExactStock: false, supportText: "" },
+  content: { announcement: null, deliveryText: "Giao sau xác minh", description: "", footerText: "", headline: "", seoDescription: "", seoTitle: "", showExactStock: false, supportText: "", templateId: null },
   currency: "VND",
   currentHostname: "signal.localhost",
   defaultLocale: "vi",
@@ -29,6 +30,8 @@ const shop: StorefrontShop = {
   slug: "signal",
   status: "active",
   subscriptionState: "active",
+  timezone: "Asia/Ho_Chi_Minh",
+  template: FALLBACK_STOREFRONT_TEMPLATE,
   theme: { accent: "#E9A62F", accentInk: "#102824", brand: "#176B5B", brandInk: "#FFF9EA", logoUrl: null },
 };
 

@@ -4,21 +4,25 @@ import { describe, expect, it } from "vitest";
 
 describe("seller app shell foundation", () => {
   it("keeps the dashboard light-first and routes domain management through the shared shell", async () => {
-    const [layout, overview, domains, domainManager] = await Promise.all([
+    const [layout, overview, domains, domainManager, deleteDialog] = await Promise.all([
       readFile("src/layouts/AppLayout.astro", "utf8"),
       readFile("src/pages/app/index.astro", "utf8"),
       readFile("src/pages/app/domains.astro", "utf8"),
       readFile("src/components/dashboard/DomainManager.astro", "utf8"),
+      readFile("src/components/dashboard/domains/DomainDeleteDialog.astro", "utf8"),
     ]);
 
     expect(layout).toContain('content="#F8FAFC"');
     expect(layout).toContain('path: "/app/domains"');
-    expect(overview).toContain("<AppLayout");
+    // The overview page is the Console v2 pilot: it rides the new shared
+    // ConsoleLayout instead of AppLayout, staying light-first as well.
+    expect(overview).toMatch(/<(App|Console)Layout/);
     expect(overview).not.toContain('data-theme="dark"');
     expect(domains).toContain("<DomainManager");
     expect(domains).not.toContain('data-theme="dark"');
-    expect(domainManager).toContain('t("dashboard.domains.section.description")');
-    expect(domainManager).toContain('aria-describedby="delete-dialog-impact"');
+    expect(domains).toContain('t("dashboard.domains.section.description")');
+    expect(domainManager).toContain("data-domain-workspace");
+    expect(deleteDialog).toContain('aria-describedby="delete-dialog-impact"');
   });
 
   it("uses a solid accessible primary action instead of the brand gradient for routine app controls", async () => {
@@ -40,32 +44,17 @@ describe("seller app shell foundation", () => {
   });
 
   it("keeps onboarding understandable and exposes progress to assistive technology", async () => {
-    const [page, wizard, controller] = await Promise.all([
+    const [page, shell] = await Promise.all([
       readFile("src/pages/onboarding.astro", "utf8"),
-      readFile("src/components/dashboard/OnboardingWizard.astro", "utf8"),
-      readFile("src/scripts/dashboard/onboarding.ts", "utf8"),
+      readFile("src/components/dashboard/onboarding/OnboardingShell.astro", "utf8"),
     ]);
+    const controller = await readFile("src/scripts/dashboard/onboarding.ts", "utf8");
 
     expect(page).not.toContain('data-theme="dark"');
     expect(page).toContain("<OnboardingShell");
-    expect(wizard).toContain('role="progressbar"');
-    expect(wizard).toContain('aria-valuenow="0"');
-    expect(wizard).toContain('t("onboarding.rail.note_copy")');
-    expect(wizard).toContain('data-copy={JSON.stringify(clientCopy)}');
-    expect(wizard).toContain("data-mobile-step-status");
-    expect(wizard).toContain("data-mobile-progress-completed");
-    expect(wizard).toContain(".step-rail { display: none; }");
-    expect(wizard.lastIndexOf(".wizard-frame { grid-template-columns: 1fr; }")).toBeGreaterThan(
-      wizard.lastIndexOf(".wizard-frame { grid-template-columns: minmax(248px, 280px) minmax(0, 1fr);")
-    );
-    expect(wizard.lastIndexOf(".onboarding-intro { grid-template-columns: 1fr; }")).toBeGreaterThan(
-      wizard.lastIndexOf(".onboarding-intro { grid-template-columns: minmax(0, 1.45fr) minmax(260px, .55fr);")
-    );
-    expect(wizard).not.toContain(".step-rail ol { display: flex; overflow-x: auto;");
-    expect(wizard).not.toContain("Readiness &amp; publish");
+    expect(shell).toContain('role="progressbar"');
+    expect(shell).toContain('aria-valuenow="0"');
     expect(controller).toContain('poster.setAttribute("aria-valuenow", String(percent))');
-    expect(wizard).toContain('t("onboarding.readiness.automation_title")');
-    expect(wizard).toContain("data-automation-list");
     expect(controller).toContain("/automation?limit=20");
     expect(controller).toContain("automation_provider_evidence_pending");
     expect(controller).toContain("seller_onboarding_cancel");
@@ -82,17 +71,17 @@ describe("seller app shell foundation", () => {
       readFile("src/pages/app/store.astro", "utf8"),
     ]);
 
-    for (const key of ["dashboard.nav.overview", "dashboard.nav.orders", "dashboard.nav.products", "dashboard.nav.sales_channels"]) {
+    for (const key of ["dashboard.console.nav.overview", "dashboard.console.nav.orders", "dashboard.console.nav.products", "dashboard.console.nav.channels"]) {
       expect(layout).toContain(`t("${key}")`);
     }
-    expect(layout).toContain('key: "sales_channels"');
+    expect(layout).toContain('key: "channels"');
     expect(layout).toContain('t("dashboard.shell.mobile.more")');
     expect(layout).toContain('const mobilePrimaryThird = visibleItem("/app/products") ?? visibleItem("/app/customers");');
     expect(layout).toContain("<span>{mobilePrimaryThird.label}</span>");
     expect(layout).toContain("item.roles.includes(selectedShopRole)");
     expect(layout).toContain("const mobileMoreGroups");
     expect(layout).toContain("href={withSelectedShop(mobilePrimaryThird.path)}");
-    for (const availablePath of ["/app/telegram", "/app/store/settings", "/app/customers", "/app/automation", "/app/members", "/app/billing"]) {
+    for (const availablePath of ["/app/integrations", "/app/payments", "/app/store/settings", "/app/customers", "/app/automation", "/app/members", "/app/billing", "/app/developer", "/app/security", "/app/inventory", "/app/domains"]) {
       expect(layout).toContain(`path: "${availablePath}"`);
     }
     expect(telegramAlias).toContain('new URL("/app/integrations?focus=telegram", Astro.url)');
@@ -113,7 +102,7 @@ describe("seller app shell foundation", () => {
     expect(css).toContain("min-height: 52px;");
     expect(css).toContain("scroll-padding-block-end: calc(132px + env(safe-area-inset-bottom));");
     expect(css).toContain("padding-bottom: calc(140px + env(safe-area-inset-bottom));");
-    expect(layout).toContain("data-channel={item.channel}");
+    expect(layout).toContain("data-nav-group={group.key}");
     expect(layout).toContain("app-nav-channel-group");
   });
 
@@ -135,21 +124,23 @@ describe("seller app shell foundation", () => {
     expect(css).not.toContain(".app-live-dot");
   });
 
-  it("gives every supported sales channel a distinct tenant-bound workspace entry", async () => {
+  it("gives the redesigned sales-channel IA distinct tenant-bound workspace entries", async () => {
     const [layout, css] = await Promise.all([
       readFile("src/layouts/AppLayout.astro", "utf8"),
       readFile("src/styles/app-shell.css", "utf8"),
     ]);
 
-    for (const channel of ["telegram-mini-app", "zalo-mini-app", "zalo-oa", "whatsapp-cloud", "discord-bot"]) {
-      expect(layout).toContain(`href: "/app/integrations#channel-${channel}"`);
-      expect(layout).toContain(`channel: "${channel}"`);
-      expect(css).toContain(`data-channel="${channel}"`);
+    for (const navKey of ["dashboard.console.nav.channels", "dashboard.console.nav.website", "dashboard.console.nav.telegram", "dashboard.console.nav.payments", "dashboard.console.nav.developer"]) {
+      expect(layout).toContain(`t("${navKey}")`);
     }
-    expect(layout).toContain("syncChannelFocus");
-    expect(layout).toContain('window.addEventListener("hashchange", syncChannelFocus)');
-    expect(layout).toContain('window.addEventListener("popstate", syncChannelFocus)');
-    expect(layout).toContain('window.addEventListener("pageshow", syncChannelFocus)');
+    for (const entryPath of ["/app/store", "/app/integrations", "/app/payments", "/app/developer"]) {
+      expect(layout).toContain(`path: "${entryPath}"`);
+    }
+    expect(layout).toContain('key: "channels"');
+    expect(layout).toContain('key: "settings"');
+    expect(layout).toContain("data-nav-group={group.key}");
+    expect(layout).toContain("app-nav-channel-group");
+    expect(layout).toContain("withSelectedShop(itemPath(item))");
     expect(css).toContain(".app-nav-channel-group");
     expect(css).toContain(".app-menu-link-channel");
   });
@@ -165,14 +156,11 @@ describe("seller app shell foundation", () => {
   });
 
   it("does not persist inventory secrets and resets tenant-bound drafts when switching shops", async () => {
-    const [wizard, controller, readiness] = await Promise.all([
-      readFile("src/components/dashboard/OnboardingWizard.astro", "utf8"),
+    const [controller, readiness] = await Promise.all([
       readFile("src/scripts/dashboard/onboarding.ts", "utf8"),
       readFile("src/lib/tenants/readiness.ts", "utf8"),
     ]);
 
-    expect(wizard).toContain("data-domain-management-link");
-    expect(wizard).toContain("encodeURIComponent(initialShop.publicId)");
     expect(readiness).toContain('actionUrl: "/app/domains"');
     expect(controller).toContain("payloadDigest");
     expect(controller).toContain("clearLegacyIntentPayloads");

@@ -1,0 +1,656 @@
+/* ==========================================================================
+   LP Editorial Commerce — inner pages (LP2)
+   Applies the v3 light-premium language to /pricing, /solutions, /support
+   and the legal pages without rewriting their markup: shared kit-* and
+   page-specific overrides scoped under .landing-page.
+   ========================================================================== */
+
+/* ── Shared kit primitives → editorial look ────────────────────────────── */
+.landing-page .kit-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-2);
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mk-ed-accent-ink);
+  margin: 0;
+}
+
+.landing-page .kit-kicker::before {
+  content: "";
+  width: 22px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--mk-ed-accent-strong));
+}
+
+.landing-page .hero-headline,
+.landing-page .section-title {
+  font-family: var(--mk-font-display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: var(--mk-ed-ink);
+  text-wrap: balance;
+}
+
+.landing-page .hero-headline {
+  font-size: clamp(34px, 4.4vw, 56px);
+}
+
+.landing-page .section-title {
+  font-size: clamp(28px, 3.4vw, 40px);
+}
+
+.landing-page .hero-lead,
+.landing-page .section-description {
+  color: var(--mk-ed-ink-soft);
+  max-width: 62ch;
+}
+
+.landing-page .hero-lead {
+  font-size: clamp(16px, 1.4vw, 18.5px);
+  line-height: 1.68;
+}
+
+.landing-page .kit-section-heading {
+  display: grid;
+  gap: var(--mk-space-4);
+  margin-block-end: var(--mk-space-12);
+}
+
+.landing-page .kit-section {
+  padding-block: var(--mk-space-24);
+}
+
+.landing-page .kit-section-dense {
+  padding-block: var(--mk-space-16);
+}
+
+/* Buttons */
+.landing-page .kit-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-2);
+  padding: 13px 24px;
+  border-radius: var(--mk-radius-pill);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1;
+  text-decoration: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    transform var(--mk-duration-default) var(--mk-ease-spring),
+    box-shadow var(--mk-duration-default) var(--mk-ease-standard),
+    border-color var(--mk-duration-default) var(--mk-ease-standard),
+    color var(--mk-duration-default) var(--mk-ease-standard),
+    filter var(--mk-duration-default) var(--mk-ease-standard);
+}
+
+.landing-page .kit-button:focus-visible {
+  outline: 3px solid var(--mk-focus);
+  outline-offset: var(--mk-focus-offset);
+}
+
+.landing-page .kit-button-primary {
+  background: var(--mk-ed-gradient-cta);
+  color: var(--mk-text-inverse);
+  box-shadow:
+    0 1px 0 0 color-mix(in srgb, var(--mk-text-inverse) 24%, transparent) inset,
+    0 14px 34px -14px var(--mk-ed-glow-strong);
+}
+
+.landing-page .kit-button-primary:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+}
+
+.landing-page .kit-button-ghost,
+.landing-page .kit-button-secondary {
+  background: var(--mk-ed-surface);
+  color: var(--mk-ed-accent-ink);
+  border-color: var(--mk-ed-hairline-strong);
+  box-shadow: var(--mk-shadow-xs);
+}
+
+.landing-page .kit-button-ghost:hover,
+.landing-page .kit-button-secondary:hover {
+  border-color: var(--mk-ed-accent-strong);
+  transform: translateY(-2px);
+}
+
+.landing-page .landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mk-space-4);
+  margin-top: var(--mk-space-8);
+}
+
+/* Hero proof chips reuse the homepage treatment */
+.landing-page .mk-hero-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mk-space-2) var(--mk-space-4);
+  list-style: none;
+  padding: 0;
+  margin: var(--mk-space-8) 0 0;
+}
+
+.landing-page .mk-hero-proof li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-2);
+  font-family: var(--mk-font-mono);
+  font-size: 12.5px;
+  color: var(--mk-ed-ink-soft);
+  padding: 7px 12px;
+  border: 1px solid var(--mk-ed-hairline);
+  border-radius: var(--mk-radius-pill);
+  background: var(--mk-ed-surface);
+  box-shadow: var(--mk-shadow-xs);
+}
+
+.landing-page .mk-hero-proof svg {
+  color: var(--mk-success);
+}
+
+/* Breadcrumb */
+.landing-page .mk-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-2);
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--mk-ed-ink-muted);
+  margin-block-end: var(--mk-space-8);
+}
+
+.landing-page .mk-breadcrumb a {
+  color: var(--mk-ed-accent-ink);
+  text-decoration: none;
+}
+
+.landing-page .mk-breadcrumb a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* FAQ lists on inner pages (class faq-list here; faq-kit-list on home) */
+.landing-page .faq-list {
+  display: grid;
+  max-width: 820px;
+}
+
+.landing-page .faq-list details {
+  border-top: 1px solid var(--mk-ed-hairline);
+}
+
+.landing-page .faq-list details:last-child {
+  border-bottom: 1px solid var(--mk-ed-hairline);
+}
+
+.landing-page .faq-list summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mk-space-5);
+  padding-block: var(--mk-space-5);
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--mk-font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--mk-ed-ink);
+}
+
+.landing-page .faq-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-page .faq-list summary:hover {
+  color: var(--mk-ed-accent-ink);
+}
+
+.landing-page .faq-list p {
+  margin: 0 0 var(--mk-space-5);
+  max-width: 60ch;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--mk-ed-ink-soft);
+}
+
+/* ── Pricing page ───────────────────────────────────────────────────────── */
+.landing-page .pricing-hero {
+  background:
+    radial-gradient(900px 460px at 82% 8%, var(--mk-ed-glow), transparent 62%),
+    radial-gradient(700px 420px at 12% 78%, color-mix(in srgb, var(--sln-brand-blue) 14%, transparent), transparent 66%),
+    var(--mk-ed-gradient-silk);
+  padding-block: var(--mk-space-14) var(--mk-space-16);
+}
+
+.landing-page .pricing-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+  gap: var(--mk-space-12);
+  align-items: center;
+}
+
+.landing-page .pricing-core-panel {
+  display: grid;
+  gap: var(--mk-space-3);
+  justify-items: start;
+  padding: var(--mk-space-8);
+  background: var(--mk-ed-surface);
+  border: 1px solid var(--mk-ed-hairline);
+  border-radius: var(--mk-radius-2xl);
+  box-shadow:
+    var(--mk-shadow-xs),
+    0 24px 50px -26px var(--mk-ed-glow);
+}
+
+.landing-page .pricing-core-panel img {
+  width: 64px;
+  height: 64px;
+  filter: drop-shadow(0 8px 22px var(--mk-ed-glow-strong));
+}
+
+.landing-page .pricing-core-panel strong {
+  font-family: var(--mk-font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--mk-ed-ink);
+}
+
+.landing-page .pricing-core-panel ul {
+  display: grid;
+  gap: var(--mk-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-page .pricing-core-panel li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mk-space-2);
+  font-size: 14px;
+  color: var(--mk-ed-ink-soft);
+}
+
+.landing-page .pricing-core-panel small {
+  font-family: var(--mk-font-mono);
+  font-size: 11.5px;
+  color: var(--mk-ed-ink-muted);
+}
+
+/* Market switch */
+.landing-page .pricing-market-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--mk-space-4);
+  padding: var(--mk-space-4) var(--mk-space-6);
+  margin-block-end: var(--mk-space-8);
+  background: var(--mk-ed-canvas-deep);
+  border: 1px solid var(--mk-ed-hairline);
+  border-radius: var(--mk-radius-lg);
+}
+
+.landing-page .pricing-market-label {
+  margin: 0;
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mk-ed-ink);
+}
+
+.landing-page .pricing-market-help {
+  margin: 0;
+  font-size: 13px;
+  color: var(--mk-ed-ink-muted);
+}
+
+.landing-page .pricing-market-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--mk-ed-surface);
+  border: 1px solid var(--mk-ed-hairline);
+  border-radius: var(--mk-radius-pill);
+}
+
+.landing-page .pricing-market-button {
+  padding: 8px 18px;
+  font: 600 13px/1 var(--mk-font-sans);
+  color: var(--mk-ed-ink-soft);
+  background: transparent;
+  border: 0;
+  border-radius: var(--mk-radius-pill);
+  cursor: pointer;
+}
+
+.landing-page .pricing-market-button[aria-pressed="true"] {
+  background: var(--mk-ed-gradient-cta);
+  color: var(--mk-text-inverse);
+}
+
+.landing-page .pricing-market-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Plan cards */
+.landing-page .plan-grid-wrap {
+  display: grid;
+  gap: var(--mk-space-6);
+}
+
+.landing-page .plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: var(--mk-space-6);
+  align-items: stretch;
+  max-width: 980px;
+}
+
+.landing-page .runtime-plan-card {
+  position: relative;
+  display: grid;
+  gap: var(--mk-space-4);
+  align-content: start;
+  padding: var(--mk-space-8);
+  background: var(--mk-ed-surface);
+  border: 1px solid var(--mk-ed-hairline);
+  border-radius: var(--mk-radius-2xl);
+  box-shadow: var(--mk-shadow-xs);
+}
+
+.landing-page .plan-recommended {
+  border-color: color-mix(in srgb, var(--mk-ed-accent) 52%, transparent);
+  background:
+    radial-gradient(120% 80% at 50% 0%, var(--mk-ed-tint), transparent 58%),
+    var(--mk-ed-surface);
+  box-shadow:
+    var(--mk-shadow-xs),
+    0 26px 56px -26px var(--mk-ed-glow-strong);
+}
+
+.landing-page .plan-recommended-label,
+.landing-page .plan-starter-pill {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--mk-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border-radius: var(--mk-radius-pill);
+  padding: 6px 12px;
+}
+
+.landing-page .plan-recommended-label {
+  color: var(--mk-text-inverse);
+  background: var(--mk-ed-gradient-cta);
+}
+
+.landing-page .plan-starter-pill {
+  background: var(--mk-ed-canvas-deep);
+  color: var(--mk-ed-ink-soft);
+}
+
+.landing-page .runtime-plan-head {
+  display: grid;
+  gap: 2px;
+}
+
+.landing-page .runtime-plan-head span {
+  font-family: var(--mk-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mk-ed-ink-muted);
+}
+
+.landing-page .runtime-plan-head h3 {
+  margin: 0;
+  font-family: var(--mk-font-display);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--mk-ed-ink);
+}
+
+.landing-page .plan-prices strong {
+  font-family: var(--mk-font-mono);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--mk-ed-ink);
+}
+
+.landing-page .plan-prices span,
+.landing-page .plan-prices small {
+  font-size: 13px;
+  color: var(--mk-ed-ink-soft);
+}
+
+.landing-page .plan-trial-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  margin-top: var(--mk-space-1);
+  font-family: var(--mk-font-mono);
+  font-size: 12px;
+  color: var(--mk-ed-accent-ink);
+  background: var(--mk-ed-tint);
+  border: 1px solid color-mix(in srgb, var(--mk-ed-accent) 30%, transparent);
+  border-radius: var(--mk-radius-pill);
+  padding: 6px 12px;
+}
+
+.landing-page .runtime-plan-card ul {
+  display: grid;
+  gap: var(--mk-space-2);
+  margin: 0;
+  padding: 0 0 var(--mk-space-2);
+  list-style: none;
+}
+
+.landing-page .runtime-plan-card li {
+  position: relative;
+  padding-left: var(--mk-space-5);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--mk-ed-ink-soft);
+}
+
+.landing-page .runtime-plan-card li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--mk-ed-accent-strong);
+}
+
+.landing-page .runtime-plan-card .kit-button {
+  justify-self: stretch;
+  justify-content: center;
+  margin-top: auto;
+}
+
+.landing-page .pricing-note {
+  margin: var(--mk-space-10) auto 0;
+  max-width: 78ch;
+  text-align: center;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--mk-ed-ink-muted);
+}
+
+.landing-page .pricing-unavailable {
+  padding: var(--mk-space-12);
+  border: 1px dashed var(--mk-ed-hairline-strong);
+  border-radius: var(--mk-radius-2xl);
+  text-align: center;
+  background: var(--mk-ed-surface);
+  margin-block-end: var(--mk-space-8);
+}
+
+/* Comparison table */
+.landing-page .comparison-section {
+  padding-block: var(--mk-space-16);
+}
+
+.landing-page .comparison-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--mk-ed-hairline);
+  border-radius: var(--mk-radius-xl);
+  background: var(--mk-ed-surface);
+  box-shadow: var(--mk-shadow-xs);
+}
+
+.landing-page .comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.landing-page .comparison-table th,
+.landing-page .comparison-table td {
+  padding: var(--mk-space-3) var(--mk-space-5);
+  text-align: left;
+  border-bottom: 1px solid var(--mk-ed-hairline);
+}
+
+.landing-page .comparison-table thead th {
+  font-family: var(--mk-font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mk-ed-ink-muted);
+  background: var(--mk-ed-canvas-deep);
+}
+
+.landing-page .comparison-table tbody th[scope="row"] {
+  font-weight: 600;
+  color: var(--mk-ed-ink);
+}
+
+.landing-page .comparison-table td {
+  color: var(--mk-ed-ink-soft);
+}
+
+.landing-page .comparison-group th {
+  font-family: var(--mk-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mk-ed-accent-ink);
+  background: var(--mk-ed-tint);
+}
+
+.landing-page .comparison-mobile-group {
+  border: 1px solid var(--mk-ed-hairline);
+  border-radius: var(--mk-radius-lg);
+  background: var(--mk-ed-surface);
+  padding: var(--mk-space-5);
+  margin-block-end: var(--mk-space-4);
+}
+
+.landing-page .comparison-mobile-group h3 {
+  font-family: var(--mk-font-display);
+  font-size: 17px;
+  margin: 0 0 var(--mk-space-3);
+}
+
+.landing-page .comparison-mobile-row {
+  padding-block: var(--mk-space-3);
+  border-top: 1px solid var(--mk-ed-hairline);
+}
+
+.landing-page .comparison-mobile-label {
+  margin: 0 0 var(--mk-space-2);
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--mk-ed-ink);
+}
+
+.landing-page .comparison-mobile-row dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--mk-space-3);
+  font-size: 13px;
+}
+
+.landing-page .comparison-mobile-row dt {
+  color: var(--mk-ed-ink-muted);
+}
+
+.landing-page .comparison-mobile-row dd {
+  margin: 0;
+  color: var(--mk-ed-ink-soft);
+}
+
+/* Pricing final band: align with the light premium canvas */
+.landing-page .pricing-final.mk-final {
+  background:
+    radial-gradient(700px 320px at 90% 0%, var(--mk-ed-glow), transparent 66%),
+    var(--mk-ed-canvas-deep);
+  border-top: 1px solid var(--mk-ed-hairline);
+  padding-block: var(--mk-space-16);
+}
+
+.landing-page .pricing-final .mk-final-inner {
+  border-color: var(--mk-ed-hairline);
+  box-shadow: var(--mk-card-shadow);
+}
+
+.landing-page .pricing-final .mk-final-inner h2 {
+  font-family: var(--mk-font-display);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--mk-ed-ink);
+}
+
+/* ── Solutions + legal pages ────────────────────────────────────────────── */
+.landing-page .solutions-hero,
+.landing-page .solution-hero {
+  background:
+    radial-gradient(900px 460px at 82% 8%, var(--mk-ed-glow), transparent 62%),
+    var(--mk-ed-gradient-silk);
+  padding-block: var(--mk-space-14) var(--mk-space-16);
+}
+
+.landing-page .legal-body,
+.landing-page .support-body {
+  max-width: 760px;
+  font-size: 15.5px;
+  line-height: 1.7;
+  color: var(--mk-ed-ink-soft);
+}
+
+.landing-page .legal-body h2,
+.landing-page .support-body h2 {
+  font-family: var(--mk-font-display);
+  letter-spacing: -0.02em;
+  color: var(--mk-ed-ink);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  .landing-page .pricing-hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--mk-space-10);
+  }
+}

@@ -1,5 +1,7 @@
 ---
 import AppLayout from "../../layouts/AppLayout.astro";
+import ConfirmDialog from "../../components/primitives/ConfirmDialog.astro";
+import StatusBadge from "../../components/primitives/StatusBadge.astro";
 import WorkspaceState from "../../components/states/WorkspaceState.astro";
 import PageHeader from "../../components/workspace/PageHeader.astro";
 import { authenticateRequest } from "../../lib/auth/session";
@@ -45,7 +47,7 @@ const statusLabel = (status: string): string => status === "active"
 
 <AppLayout activePath="/app/members" displayName={auth.displayName.trim() || t("dashboard.commerce.you")} email={auth.email} selectedShopName={shop?.name} selectedShopPublicId={shop?.publicId} shops={shops} title={t("dashboard.members.title")}>
   <PageHeader eyebrow={t("dashboard.members.eyebrow")} title={t("dashboard.members.title")} description={t("dashboard.members.description")}>
-    {canManageTeam ? <button slot="actions" class="sln-button sln-button-primary" type="button" data-members-open-invite>{t("dashboard.members.invite")}</button> : <span slot="actions" class="sln-badge">{t("dashboard.members.invite_unavailable")}</span>}
+    {canManageTeam ? <button slot="actions" class="sln-button" data-variant="primary" type="button" data-members-open-invite>{t("dashboard.members.invite")}</button> : <span slot="actions" class="sln-badge">{t("dashboard.members.invite_unavailable")}</span>}
   </PageHeader>
   {state === "unavailable" ? <div class="state-space"><WorkspaceState title={t("dashboard.members.unavailable.title")} description={t("dashboard.members.unavailable.description")} actionHref={workspaceHref("/app/members")} actionLabel={t("dashboard.members.retry")} tone="danger" /></div>
     : shop === undefined ? <div class="state-space"><WorkspaceState title={t("dashboard.members.no_store.title")} description={t("dashboard.members.no_store.description")} actionHref={workspaceHref("/onboarding")} actionLabel={t("dashboard.members.no_store.action")} tone="info" /></div>
@@ -78,9 +80,9 @@ const statusLabel = (status: string): string => status === "active"
           {members.map((member) => <article role="listitem" data-member-row data-member-public-id={member.memberPublicId} data-version={member.version}>
             <div class="member-mark" aria-hidden="true">{member.displayName.slice(0,1).toUpperCase()}</div>
             <div><strong>{member.displayName}</strong><span>{member.emailMasked}</span></div>
-            {canManageTeam && member.role !== "owner" ? <label class="member-role-field"><span class="sr-only">{t("dashboard.members.role_label")}</span><select data-member-role><option value="manager" selected={member.role === "manager"}>{t("dashboard.role.manager")}</option><option value="support" selected={member.role === "support"}>{t("dashboard.role.support")}</option><option value="viewer" selected={member.role === "viewer"}>{t("dashboard.role.viewer")}</option></select></label> : <span class="role-badge">{roleLabel(member.role)}</span>}
-            <span class={`status-badge status-${member.status}`}>{statusLabel(member.status)}</span>
-            {canManageTeam && member.role !== "owner" && member.status === "active" && <div class="member-actions"><button class="text-action" type="button" data-member-save>{t("dashboard.members.role_save")}</button><button class="text-action danger-text" type="button" data-member-suspend>{t("dashboard.members.suspend")}</button></div>}
+            {canManageTeam && member.role !== "owner" ? <label class="member-role-field"><span class="sr-only">{t("dashboard.members.role_label")}</span><select data-member-role><option value="manager" selected={member.role === "manager"}>{t("dashboard.role.manager")}</option><option value="support" selected={member.role === "support"}>{t("dashboard.role.support")}</option><option value="viewer" selected={member.role === "viewer"}>{t("dashboard.role.viewer")}</option></select></label> : <StatusBadge label={roleLabel(member.role)} tone="info" />}
+            <StatusBadge label={statusLabel(member.status)} tone={member.status === "active" ? "success" : member.status === "suspended" ? "danger" : "neutral"} />
+            {canManageTeam && member.role !== "owner" && member.status === "active" && <div class="member-actions"><button class="text-action" type="button" data-member-save>{t("dashboard.members.role_save")}</button><div data-member-suspend-dialog data-member-public-id={member.memberPublicId} data-version={member.version}><ConfirmDialog dialogId={`suspend-member-${member.memberPublicId}`} title={t("dashboard.members.suspend")} impact={t("dashboard.members.suspend_confirm")} triggerLabel={t("dashboard.members.suspend")} confirmLabel={t("dashboard.members.suspend")} cancelLabel={t("dashboard.members.dialog.cancel")} pendingLabel={t("dashboard.members.feedback.working")} variant="danger" /></div></div>}
           </article>)}
         </div>}
         <p class="scope-note">{t("dashboard.members.scope")}</p>
@@ -91,13 +93,13 @@ const statusLabel = (status: string): string => status === "active"
         <form class="invitation-form" data-invitation-form novalidate>
           <label>{t("dashboard.members.invite_email")}<input name="email" type="email" autocomplete="email" maxlength="254" required /></label>
           <label>{t("dashboard.members.invite_role")}<select name="role"><option value="manager">{t("dashboard.role.manager")}</option><option value="support">{t("dashboard.role.support")}</option><option value="viewer">{t("dashboard.role.viewer")}</option></select></label>
-          <button class="sln-button sln-button-primary" type="submit">{t("dashboard.members.invite_submit")}</button>
+          <button class="sln-button" data-variant="primary" type="submit">{t("dashboard.members.invite_submit")}</button>
         </form>
         <div class="invitation-ledger" data-invitation-ledger role="list" aria-label={t("dashboard.members.invitation.aria")}>
           {invitations.map((invitation) => <article role="listitem" data-invitation-row data-invitation-public-id={invitation.invitationPublicId} data-version={invitation.version}>
             <div><strong>{invitation.emailMasked}</strong><span>{roleLabel(invitation.role)} · {invitation.expiresAt}</span></div>
-            <span class={`status-badge status-${invitation.status}`}>{invitation.status === "pending" ? t("dashboard.members.invitation.pending") : invitation.status === "accepted" ? t("dashboard.members.invitation.accepted") : invitation.status === "expired" ? t("dashboard.members.invitation.expired") : t("dashboard.members.invitation.revoked")}</span>
-            {(invitation.status === "pending" || invitation.status === "expired") && <div class="member-actions"><button class="text-action" type="button" data-invitation-resend>{t("dashboard.members.invitation_resend")}</button>{invitation.status === "pending" && <button class="text-action danger-text" type="button" data-invitation-revoke>{t("dashboard.members.invitation_revoke")}</button>}</div>}
+            <StatusBadge label={invitation.status === "pending" ? t("dashboard.members.invitation.pending") : invitation.status === "accepted" ? t("dashboard.members.invitation.accepted") : invitation.status === "expired" ? t("dashboard.members.invitation.expired") : t("dashboard.members.invitation.revoked")} tone={invitation.status === "accepted" ? "success" : invitation.status === "pending" ? "warning" : invitation.status === "revoked" ? "danger" : "neutral"} />
+            {(invitation.status === "pending" || invitation.status === "expired") && <div class="member-actions"><button class="text-action" type="button" data-invitation-resend>{t("dashboard.members.invitation_resend")}</button>{invitation.status === "pending" && <div data-invitation-revoke-dialog data-invitation-public-id={invitation.invitationPublicId} data-version={invitation.version}><ConfirmDialog dialogId={`revoke-invitation-${invitation.invitationPublicId}`} title={t("dashboard.members.invitation_revoke")} impact={t("dashboard.members.invitation_confirm")} triggerLabel={t("dashboard.members.invitation_revoke")} confirmLabel={t("dashboard.members.invitation_revoke")} cancelLabel={t("dashboard.members.dialog.cancel")} pendingLabel={t("dashboard.members.feedback.working")} variant="danger" /></div>}</div>}
           </article>)}
         </div>
       </section>}
@@ -107,9 +109,6 @@ const statusLabel = (status: string): string => status === "active"
 <script src="../../scripts/dashboard/members.ts"></script>
 
 <style>
-  .sln-button { display:inline-flex; align-items:center; justify-content:center; min-height:42px; border:1px solid transparent; border-radius:var(--sln-radius-md); padding:9px 14px; font:var(--sln-font-label); cursor:pointer; }
-  .sln-button-primary { background:var(--sln-action-primary); color:var(--sln-white); }
-  .sln-button-primary:hover { background:var(--sln-action-primary-hover); }
   .sln-badge { display:inline-flex; align-items:center; min-height:36px; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-pill); padding:7px 12px; color:var(--sln-text-muted); font:var(--sln-font-caption); }
   .state-space { margin-top:var(--sln-space-8); }
   .members-workspace { display:grid; gap:var(--sln-space-8); }
@@ -117,16 +116,13 @@ const statusLabel = (status: string): string => status === "active"
   .member-panel > header { display:flex; align-items:end; justify-content:space-between; gap:16px; padding-bottom:16px; border-bottom:1px solid var(--sln-border-default); }
   .member-panel h2 { margin:0; font:var(--sln-font-h3); letter-spacing:-.035em; }
   .member-panel header > span, .member-panel span, .scope-note { color:var(--sln-text-muted); font:var(--sln-font-caption); }
-  .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
+  .eyebrow { margin:0 0 7px; color:var(--sln-action-primary); font:var(--sln-font-caption); font-weight: 600; letter-spacing:.1em; text-transform:uppercase; }
   .member-ledger { display:grid; overflow:hidden; border:1px solid var(--sln-border-default); border-radius:var(--sln-radius-md); }
   .member-ledger article { display:grid; grid-template-columns:40px minmax(0,1fr) auto auto auto; gap:14px; align-items:center; min-height:74px; padding:14px 16px; border-top:1px solid var(--sln-border-default); }
   .member-ledger article:first-child { border-top:0; }
-  .member-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:var(--sln-tint-indigo); color:var(--sln-action-primary-strong); font-weight:800; }
+  .member-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:var(--sln-tint-indigo); color:var(--sln-action-primary-strong); font-weight: 600; }
   .member-ledger article > div:not(.member-mark) { display:grid; gap:4px; min-width:0; }
   .member-ledger strong { overflow:hidden; color:var(--sln-text-primary); font:var(--sln-font-label); text-overflow:ellipsis; white-space:nowrap; }
-  .role-badge, .status-badge { border-radius:var(--sln-radius-pill); padding:6px 9px; background:var(--sln-tint-indigo); color:#3730a3 !important; white-space:nowrap; }
-  .status-active { background:var(--sln-tint-success); color:var(--selinow-success-text) !important; }
-  .status-suspended { background:var(--sln-tint-danger); color:var(--selinow-danger-text) !important; }
   .scope-note { margin:0; }
   .member-role-field select, .invitation-form input, .invitation-form select { min-height:40px; border:1px solid var(--sln-border-strong); border-radius:var(--sln-radius-md); padding:8px 10px; background:var(--sln-bg-canvas); color:var(--sln-text-primary); font:var(--sln-font-body-sm); }
   .member-actions { display:flex; align-items:center; gap:10px; justify-content:end; }
@@ -146,5 +142,5 @@ const statusLabel = (status: string): string => status === "active"
   .workspace-feedback[data-tone="success"] { border-color:var(--sln-state-success); color:var(--sln-state-success); }
   .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
   @media (max-width:760px) { .invitation-form { grid-template-columns:1fr; } .invitation-form .sln-button { width:100%; } }
-  @media (max-width:600px) { .member-panel { padding:16px; } .member-panel > header { align-items:start; flex-direction:column; } .member-ledger article { grid-template-columns:40px minmax(0,1fr); gap:10px; } .role-badge, .status-badge { justify-self:start; } .member-ledger article > .member-role-field, .member-ledger article > .status-badge, .member-ledger article > .member-actions { grid-column:2; justify-self:start; } .invitation-ledger article { grid-template-columns:1fr; gap:8px; } .invitation-ledger .member-actions { justify-content:start; } }
+  @media (max-width:600px) { .member-panel { padding:16px; } .member-panel > header { align-items:start; flex-direction:column; } .member-ledger article { grid-template-columns:40px minmax(0,1fr); gap:10px; } :global(.member-ledger .sln-status) { justify-self:start; } .member-ledger article > .member-role-field, .member-ledger article > .member-actions { grid-column:2; justify-self:start; } :global(.member-ledger article > .sln-status), :global(.invitation-ledger .sln-status) { grid-column:2; justify-self:start; } .invitation-ledger article { grid-template-columns:1fr; gap:8px; } .invitation-ledger .member-actions { justify-content:start; } }
 </style>

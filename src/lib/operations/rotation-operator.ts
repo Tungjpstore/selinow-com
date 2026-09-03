@@ -1,6 +1,7 @@
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import type { AppBindings } from "../platform/bindings";
+import { describePlatformAdminAccess } from "../tenants/store";
 import {
   createEncryptionRotation,
   processEncryptionRotation,
@@ -116,15 +117,15 @@ async function requireAdminRole(input: {
   ownerOnly?: boolean;
   userId: string;
 }): Promise<PlatformAdminRole> {
-  const row = await input.env.PLATFORM_DB.prepare(`
-    SELECT role FROM platform_admins
-    WHERE user_id = ? AND status = 'active'
-    LIMIT 1
-  `).bind(input.userId).first<{ role: PlatformAdminRole }>();
-  if (row === null || (input.ownerOnly === true && row.role !== "owner")) {
+  // 2FA-aware lookup: un-enrolled admins never resolve a role on rotation surfaces.
+  const access = await describePlatformAdminAccess({ env: input.env, userId: input.userId });
+  if (access.kind === "two_factor_required") {
+    throw new AppError("admin_two_factor_required", 403);
+  }
+  if (access.kind !== "authorized" || (input.ownerOnly === true && access.role !== "owner")) {
     throw new AppError("authorization_denied", 403);
   }
-  return row.role;
+  return access.role;
 }
 
 function mapRun(row: RotationRunRow): RotationRunView {

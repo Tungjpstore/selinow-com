@@ -5,12 +5,18 @@ import { backfillActivationMilestones, tryRecordActivationMilestone } from "../a
 import { claimShopCreationAdmission } from "../auth/admission";
 import { normalizeCurrencyCode } from "../i18n/currency";
 import { DEFAULT_LOCALE, matchSupportedLocale } from "../i18n/locale";
-import { CURRENT_POLICY_ATTESTATION_VERSION, ONBOARDING_STEP_CODES } from "../onboarding/policy";
+import { CURRENT_POLICY_ATTESTATION_VERSION, ONBOARDING_STEP_CODES, type CustomDomainPreference } from "../onboarding/policy";
 import type { AppBindings } from "../platform/bindings";
 import { evaluateSubscription, type EntitlementAction } from "../billing/entitlements";
 import { PUBLIC_PLAN_CODES, PUBLIC_TRIAL_DAYS } from "../billing/plan-catalog";
+import {
+  defaultStorefrontTemplateFor,
+  PREMIUM_STOREFRONT_TEMPLATES_FEATURE,
+  storefrontTemplateSelectionIssue,
+  type StorefrontVertical,
+} from "../storefront/templates";
 import { normalizeOptionalCountryCode } from "./country";
-import { assertRoleCapability, type ShopCapability, type ShopRole } from "./policy";
+import { assertRoleCapability, hasFeature, normalizeSlug, type ShopCapability, type ShopRole } from "./policy";
 
 type ExistingIdempotency = {
   request_hash: string;
@@ -46,6 +52,14 @@ type MembershipShopRow = {
   subscription_state: string;
   timezone: string;
   trial_ends_at: string | null;
+  /** Null on the pre-0102 schema fallback query; mapShop normalizes. */
+  vertical: StorefrontVertical | null;
+};
+
+export type ShopCreationChannels = {
+  customDomainPreference: CustomDomainPreference;
+  telegramEnabled: boolean;
+  websiteEnabled: boolean;
 };
 
 export type ShopView = {
@@ -63,6 +77,7 @@ export type ShopView = {
   status: string;
   subscriptionState: string;
   timezone: string;
+  vertical: StorefrontVertical;
 };
 
 export type ShopCreationAdmission = {
@@ -99,18 +114,21 @@ function mapShop(row: MembershipShopRow): ShopView {
     status: row.shop_status,
     subscriptionState: row.subscription_state,
     timezone: row.timezone,
+    vertical: row.vertical ?? "digital",
   };
 }
 
 function parseStoredShop(value: string): ShopView {
   const parsed = JSON.parse(value) as Partial<ShopView>;
   // Idempotency records created before migration 0031 do not have country
-  // fields. Normalize those durable responses without invalidating replay.
+  // fields, and records before vertical-aware creation lack the vertical.
+  // Normalize those durable responses without invalidating replay.
   return {
     ...parsed,
     businessCountry: parsed.businessCountry ?? null,
     defaultLocale: matchSupportedLocale(parsed.defaultLocale) ?? DEFAULT_LOCALE,
     merchantCountry: parsed.merchantCountry ?? null,
+    vertical: parsed.vertical ?? "digital",
   } as ShopView;
 }
 
@@ -208,6 +226,12 @@ async function recoverShopActivationMilestones(env: AppBindings, shop: ShopView)
 
 export async function createShop(input: {
   businessCountry?: string | null;
+  /**
+   * One-request provisioning (OB-B1): sales channels and the storefront
+   * template chosen in onboarding step 1 land in the same transaction so the
+   * wizard needs a single round-trip instead of create → channels → template.
+   */
+  channels?: ShopCreationChannels;
   currency?: unknown;
   defaultLocale?: unknown;
   env: AppBindings;
@@ -218,7 +242,10 @@ export async function createShop(input: {
   requesterAddress: string;
   requestId: string;
   slug: string;
+  templateId?: string;
   userId: string;
+  /** EX5.2: advisory selling vertical chosen during onboarding (0102 column). */
+  vertical?: "booking" | "digital" | "physical";
 }): Promise<{ created: boolean; shop: ShopView }> {
   const requestedPlanCode = input.planCode ?? "starter";
   if (!(PUBLIC_PLAN_CODES as readonly string[]).includes(requestedPlanCode)) {
@@ -236,11 +263,23 @@ export async function createShop(input: {
   if (defaultLocale === null) throw new AppError("validation_failed", 400, ["locale_invalid"]);
   const namespace = "shop.create.v1";
   const keyHash = await hmacToken(input.env.SESSION_SECRET, "idempotency", input.idempotencyKey);
+  const hasExtendedInputs = input.vertical !== undefined || input.templateId !== undefined || input.channels !== undefined;
   const requestHash = await sha256Json(
     input.businessCountry === undefined && input.currency === undefined
-      && input.defaultLocale === undefined && input.merchantCountry === undefined
+      && input.defaultLocale === undefined && input.merchantCountry === undefined && !hasExtendedInputs
       ? { name: input.name, planCode: requestedPlanCode, slug: input.slug }
-      : { businessCountry, currency, defaultLocale, merchantCountry, name: input.name, planCode: requestedPlanCode, slug: input.slug },
+      : {
+        businessCountry,
+        channels: input.channels ?? null,
+        currency,
+        defaultLocale,
+        merchantCountry,
+        name: input.name,
+        planCode: requestedPlanCode,
+        slug: input.slug,
+        templateId: input.templateId ?? null,
+        vertical: input.vertical ?? null,
+      },
   );
   const existing = await input.env.PLATFORM_DB.prepare(`
     SELECT request_hash, response_json
@@ -281,6 +320,43 @@ export async function createShop(input: {
   }>();
   if (plan === null) {
     throw new AppError("validation_failed", 400, ["plan_invalid"]);
+  }
+
+  const vertical: StorefrontVertical = input.vertical ?? "digital";
+  const premiumEntitled = hasFeature(plan.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE);
+  // One-request provisioning: the storefront draft starts on the vertical's
+  // safe default unless the seller picked a template in the wizard. The pick
+  // is validated strictly (unknown / cross-vertical / premium-locked) so a
+  // wrong client can never silently seed a mismatched storefront.
+  let templateId: string;
+  if (input.templateId === undefined) {
+    templateId = defaultStorefrontTemplateFor(vertical).id;
+  } else {
+    const selection = storefrontTemplateSelectionIssue({ premiumEntitled, templateId: input.templateId });
+    if (selection === "storefront_template_invalid") throw new AppError("validation_failed", 400, [selection]);
+    if (selection === "storefront_template_premium_required") throw new AppError("authorization_denied", 403, [selection]);
+    if (selection.vertical !== vertical) throw new AppError("validation_failed", 400, ["storefront_template_vertical_mismatch"]);
+    templateId = selection.id;
+  }
+  const channels = input.channels;
+  if (channels !== undefined) {
+    // Mirrors updateOnboardingChannels gating so a single-request create can
+    // never land channel flags the plan does not allow.
+    if (!channels.websiteEnabled && !channels.telegramEnabled) {
+      throw new AppError("validation_failed", 400, ["onboarding_channel_required"]);
+    }
+    if (channels.websiteEnabled && !hasFeature(plan.feature_flags_json, "storefront")) {
+      throw new AppError("feature_not_available", 402, ["storefront_not_in_plan"]);
+    }
+    if (channels.telegramEnabled && !hasFeature(plan.feature_flags_json, "telegram")) {
+      throw new AppError("feature_not_available", 402, ["telegram_not_in_plan"]);
+    }
+    if (channels.customDomainPreference === "connect") {
+      if (!channels.websiteEnabled) throw new AppError("validation_failed", 400, ["custom_domain_requires_website"]);
+      if (!hasFeature(plan.feature_flags_json, "customDomain")) {
+        throw new AppError("feature_not_available", 402, ["custom_domain_not_in_plan"]);
+      }
+    }
   }
 
   const accountLockKeyHash = await hmacToken(input.env.SESSION_SECRET, "idempotency", "shop-creation-account-lock");
@@ -360,6 +436,7 @@ export async function createShop(input: {
       status: "draft",
       subscriptionState,
       timezone: input.env.DEFAULT_TIMEZONE,
+      vertical,
     };
     const responseJson = JSON.stringify(shop);
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60_000).toISOString();
@@ -374,11 +451,12 @@ export async function createShop(input: {
         INSERT INTO shops (
           id, public_id, slug, name, status, default_locale, currency, timezone,
           canonical_domain_id, readiness_version, merchant_country_code, business_country_code,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, 1, ?, ?, ?, ?)
+          vertical, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
       `).bind(
         shopId, shopPublicId, input.slug, input.name, defaultLocale,
-        currency, input.env.DEFAULT_TIMEZONE, domainId, merchantCountry, businessCountry, nowIso, nowIso,
+        currency, input.env.DEFAULT_TIMEZONE, domainId, merchantCountry, businessCountry,
+        vertical, nowIso, nowIso,
       ),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
@@ -390,12 +468,13 @@ export async function createShop(input: {
           low_stock_threshold, support_contact, terms_url, privacy_url, refund_policy_url,
           policy_attestation_version, policy_attested_at, policy_attested_by_user_id, version, updated_at
         ) VALUES (
-          ?, '{}', '{}', 30, 5,
+          ?, '{}', ?, 30, 5,
           NULL, NULL, NULL, NULL,
           ?, ?, ?, 1, ?
         )
       `).bind(
         shopId,
+        JSON.stringify({ templateId }),
         CURRENT_POLICY_ATTESTATION_VERSION,
         CURRENT_POLICY_ATTESTATION_VERSION !== null ? nowIso : null,
         CURRENT_POLICY_ATTESTATION_VERSION !== null ? input.userId : null,
@@ -405,15 +484,27 @@ export async function createShop(input: {
         INSERT INTO shop_onboarding_profiles (
           shop_id, website_enabled, telegram_enabled, custom_domain_preference,
           current_step, version, created_at, updated_at
-        ) VALUES (?, 0, 0, 'later', 'channel_selected', 1, ?, ?)
-      `).bind(shopId, nowIso, nowIso),
+        ) VALUES (?, ?, ?, ?, 'channel_selected', 1, ?, ?)
+      `).bind(
+        shopId,
+        channels?.websiteEnabled === false ? 0 : 1,
+        channels?.telegramEnabled === true ? 1 : 0,
+        channels?.customDomainPreference ?? "later",
+        nowIso,
+        nowIso,
+      ),
       input.env.PLATFORM_DB.prepare(`
         INSERT INTO account_trial_claims (user_id, shop_id, claimed_at)
         SELECT ?, ?, ? WHERE ? = 'trialing'
       `).bind(input.userId, shopId, nowIso, subscriptionState),
       ...ONBOARDING_STEP_CODES.map((stepCode) => {
-        const complete = stepCode === "account_ready" || stepCode === "shop_created";
-        const inProgress = stepCode === "channel_selected";
+        const complete = stepCode === "account_ready" || stepCode === "shop_created"
+          || (channels !== undefined && stepCode === "channel_selected");
+        // When channels arrive in the create request, a disabled Telegram
+        // channel marks its step skipped up front (mirrors updateOnboardingChannels).
+        const skipped = channels !== undefined && stepCode === "telegram_ready" && !channels.telegramEnabled;
+        const inProgress = stepCode === "channel_selected" && channels === undefined;
+        const status = complete ? "complete" : skipped ? "skipped" : inProgress ? "in_progress" : "pending";
         return input.env.PLATFORM_DB.prepare(`
           INSERT INTO shop_onboarding_steps (
             shop_id, step_code, status, version, started_at, completed_at,
@@ -422,9 +513,9 @@ export async function createShop(input: {
         `).bind(
           shopId,
           stepCode,
-          complete ? "complete" : inProgress ? "in_progress" : "pending",
+          status,
           complete || inProgress ? nowIso : null,
-          complete ? nowIso : null,
+          complete || skipped ? nowIso : null,
           nowIso,
           nowIso,
         );
@@ -453,7 +544,14 @@ export async function createShop(input: {
         ) VALUES (?, ?, 'user', ?, 'shop.created', 'shop', ?, ?, ?, ?)
       `).bind(
         createId("aud"), shopId, input.userId, shopId,
-        JSON.stringify({ planCode: plan.code, slug: input.slug }), input.requestId, nowIso,
+        JSON.stringify({
+          channels: channels === undefined ? null
+            : { telegramEnabled: channels.telegramEnabled, websiteEnabled: channels.websiteEnabled },
+          planCode: plan.code,
+          slug: input.slug,
+          templateId,
+          vertical,
+        }), input.requestId, nowIso,
       ),
     ]);
   } catch (error) {
@@ -542,6 +640,7 @@ export async function getShopForMember(input: {
       shops.timezone,
       shops.merchant_country_code,
       shops.business_country_code,
+      shops.vertical,
       shop_members.role,
       shop_subscriptions.state AS subscription_state,
       shop_subscriptions.trial_ends_at,
@@ -581,6 +680,7 @@ export async function getShopForMember(input: {
         shops.timezone,
         NULL AS merchant_country_code,
         NULL AS business_country_code,
+        NULL AS vertical,
         shop_members.role,
         shop_subscriptions.state AS subscription_state,
         shop_subscriptions.trial_ends_at,
@@ -658,6 +758,7 @@ export async function listShopsForMember(input: {
       shops.timezone,
       shops.merchant_country_code,
       shops.business_country_code,
+      shops.vertical,
       shop_members.role,
       shop_subscriptions.state AS subscription_state,
       shop_subscriptions.trial_ends_at,
@@ -695,6 +796,7 @@ export async function listShopsForMember(input: {
         shops.timezone,
         NULL AS merchant_country_code,
         NULL AS business_country_code,
+        NULL AS vertical,
         shop_members.role,
         shop_subscriptions.state AS subscription_state,
         shop_subscriptions.trial_ends_at,
@@ -766,17 +868,60 @@ export function selectShopForMember(shops: readonly ShopView[], requestedPublicI
 
 export type PlatformAdminRole = "owner" | "risk" | "support";
 
+export type PlatformAdminAccess =
+  | { kind: "authorized"; role: PlatformAdminRole }
+  | { kind: "not_admin" }
+  | { kind: "two_factor_required" };
+
+/**
+ * Resolves platform-admin access while distinguishing the fail-closed reasons.
+ * An active admin who has not confirmed two-factor enrollment is surfaced as
+ * `two_factor_required` so API routes can return the dedicated
+ * `admin_two_factor_required` code and the console can show an enrollment hint.
+ */
+export async function describePlatformAdminAccess(input: {
+  env: AppBindings;
+  userId: string;
+}): Promise<PlatformAdminAccess> {
+  const row = await input.env.PLATFORM_DB.prepare(`
+    SELECT admins.role AS role, COALESCE(users.two_factor_enabled, 0) AS twoFactorEnabled
+    FROM platform_admins AS admins
+    INNER JOIN platform_users AS users ON users.id = admins.user_id
+    WHERE admins.user_id = ? AND admins.status = 'active'
+    LIMIT 1
+  `).bind(input.userId).first<{ role: PlatformAdminRole; twoFactorEnabled: number }>();
+  if (row === null) return { kind: "not_admin" };
+  if (row.twoFactorEnabled !== 1) return { kind: "two_factor_required" };
+  return { kind: "authorized", role: row.role };
+}
+
+/**
+ * Fail-closed platform-admin role lookup. Returns the role only for an active
+ * platform admin whose platform_users row has confirmed two-factor enrollment;
+ * admins without 2FA and non-admins both resolve to null so existing
+ * `=== null` callers stay safely denied. Never bypasses the 2FA requirement.
+ */
 export async function getPlatformAdminRole(input: {
   env: AppBindings;
   userId: string;
 }): Promise<PlatformAdminRole | null> {
-  const admin = await input.env.PLATFORM_DB.prepare(`
-    SELECT role
-    FROM platform_admins
-    WHERE user_id = ? AND status = 'active'
-    LIMIT 1
-  `).bind(input.userId).first<{ role: PlatformAdminRole }>();
-  return admin?.role ?? null;
+  const access = await describePlatformAdminAccess(input);
+  return access.kind === "authorized" ? access.role : null;
+}
+
+/**
+ * API-route guard that surfaces the distinct two-factor enrollment state. Throws
+ * `admin_two_factor_required` (403) for admins without confirmed 2FA so the UI
+ * can offer an enrollment hint, and `authorization_denied` (403) for non-admins.
+ */
+export async function requirePlatformAdminApiAccess(input: {
+  env: AppBindings;
+  userId: string;
+}): Promise<PlatformAdminRole> {
+  const access = await describePlatformAdminAccess(input);
+  if (access.kind === "authorized") return access.role;
+  if (access.kind === "two_factor_required") throw new AppError("admin_two_factor_required", 403);
+  throw new AppError("authorization_denied", 403);
 }
 
 export async function isPlatformAdmin(input: {
@@ -793,6 +938,7 @@ export async function updateShopProfile(input: {
   env: AppBindings;
   merchantCountry?: string | null;
   name?: string;
+  slug?: unknown;
   requestId: string;
   shopPublicId: string;
   userId: string;
@@ -802,7 +948,8 @@ export async function updateShopProfile(input: {
   const hasCurrency = input.currency !== undefined;
   const hasDefaultLocale = input.defaultLocale !== undefined;
   const hasMerchantCountry = input.merchantCountry !== undefined;
-  if (!hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale && !hasMerchantCountry) {
+  const hasSlug = input.slug !== undefined;
+  if (!hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale && !hasMerchantCountry && !hasSlug) {
     throw new AppError("validation_failed", 400, ["shop_profile_update_empty"]);
   }
   const name = hasName ? input.name : null;
@@ -812,6 +959,7 @@ export async function updateShopProfile(input: {
   const defaultLocale = hasDefaultLocale ? matchSupportedLocale(input.defaultLocale) : null;
   if (hasDefaultLocale && defaultLocale === null) throw new AppError("validation_failed", 400, ["locale_invalid"]);
   const merchantCountry = normalizeOptionalCountryCode(input.merchantCountry, "merchant_country_invalid");
+  const slug = hasSlug ? normalizeSlug(input.slug) : null;
   const billingMarketOnly = hasMerchantCountry && !hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale;
   const current = await getShopForMember({
     capability: billingMarketOnly ? "billing:manage" : "shop:update",
@@ -821,6 +969,19 @@ export async function updateShopProfile(input: {
     userId: input.userId,
   });
   if (current.row.shop_status === "archived") throw new AppError("tenant_suspended", 403);
+  let currentPlatformDomain: { id: string } | null = null;
+  if (slug !== null) {
+    const reserved = await input.env.PLATFORM_DB.prepare("SELECT slug FROM reserved_slugs WHERE slug = ? LIMIT 1").bind(slug).first<{ slug: string }>();
+    if (reserved !== null) throw new AppError("validation_failed", 409, ["slug_reserved"]);
+    const conflict = await input.env.PLATFORM_DB.prepare("SELECT id FROM shops WHERE slug = ? AND id != ? LIMIT 1").bind(slug, current.row.shop_id).first<{ id: string }>();
+    if (conflict !== null) throw new AppError("validation_failed", 409, ["slug_unavailable"]);
+    currentPlatformDomain = await input.env.PLATFORM_DB.prepare(`
+      SELECT id FROM shop_domains
+      WHERE shop_id = ? AND type = 'platform_subdomain' AND deleted_at IS NULL
+      ORDER BY is_primary DESC, created_at ASC, id ASC
+      LIMIT 1
+    `).bind(current.row.shop_id).first<{ id: string }>();
+  }
   if (hasCurrency && currency !== null) {
     const mismatch = await input.env.PLATFORM_DB.prepare(`
       SELECT COUNT(*) AS count
@@ -834,36 +995,59 @@ export async function updateShopProfile(input: {
   const now = new Date().toISOString();
   let result: { meta: { changes: number } };
   try {
-    result = hasName && !hasBusinessCountry && !hasCurrency && !hasDefaultLocale && !hasMerchantCountry
-      ? await input.env.PLATFORM_DB.prepare(`
-          UPDATE shops SET name = ?, updated_at = ? WHERE id = ? AND public_id = ?
-        `).bind(name, now, current.row.shop_id, input.shopPublicId).run()
-      : await input.env.PLATFORM_DB.prepare(`
-          UPDATE shops
-          SET name = CASE WHEN ? = 1 THEN ? ELSE name END,
-              business_country_code = CASE WHEN ? = 1 THEN ? ELSE business_country_code END,
-              currency = CASE WHEN ? = 1 THEN ? ELSE currency END,
-              default_locale = CASE WHEN ? = 1 THEN ? ELSE default_locale END,
-              merchant_country_code = CASE WHEN ? = 1 THEN ? ELSE merchant_country_code END,
-              readiness_version = readiness_version + 1,
-              updated_at = ?
-          WHERE id = ? AND public_id = ?
-            AND (
-              ? = 0 OR NOT EXISTS (
-                SELECT 1 FROM product_variants
-                WHERE product_variants.shop_id = shops.id
-                  AND product_variants.currency <> ?
-              )
-            )
-        `).bind(
-          hasName ? 1 : 0, name,
-          hasBusinessCountry ? 1 : 0, businessCountry ?? null,
-          hasCurrency ? 1 : 0, currency,
-          hasDefaultLocale ? 1 : 0, defaultLocale,
-          hasMerchantCountry ? 1 : 0, merchantCountry ?? null,
-          now, current.row.shop_id, input.shopPublicId,
-          hasCurrency ? 1 : 0, currency,
-        ).run();
+    const statements: D1PreparedStatement[] = [];
+    if (slug !== null) {
+      if (currentPlatformDomain !== null) {
+        statements.push(input.env.PLATFORM_DB.prepare(`
+          UPDATE shop_domains
+          SET status = 'deleted', is_primary = 0, deleted_at = ?, delete_requested_at = NULL,
+              next_check_at = NULL, updated_at = ?, version = version + 1
+          WHERE id = ? AND shop_id = ? AND type = 'platform_subdomain' AND deleted_at IS NULL
+        `).bind(now, now, currentPlatformDomain.id, current.row.shop_id));
+      }
+      statements.push(input.env.PLATFORM_DB.prepare(`
+        INSERT INTO shop_domains (
+          id, shop_id, hostname_normalized, type, status, is_primary,
+          validation_metadata_json, activated_at, created_at, updated_at
+        ) VALUES (?, ?, ?, 'platform_subdomain', 'active', 1, '{}', ?, ?, ?)
+      `).bind(createId("dom"), current.row.shop_id, `${slug}.${input.env.PLATFORM_BASE_DOMAIN}`, now, now, now));
+    }
+    statements.push(input.env.PLATFORM_DB.prepare(`
+      UPDATE shops
+      SET name = CASE WHEN ? = 1 THEN ? ELSE name END,
+          slug = CASE WHEN ? = 1 THEN ? ELSE slug END,
+          canonical_domain_id = CASE WHEN ? = 1 THEN (
+            SELECT id FROM shop_domains
+            WHERE shop_id = shops.id AND type = 'platform_subdomain'
+              AND status = 'active' AND is_primary = 1 AND deleted_at IS NULL
+            ORDER BY created_at DESC, id DESC LIMIT 1
+          ) ELSE canonical_domain_id END,
+          business_country_code = CASE WHEN ? = 1 THEN ? ELSE business_country_code END,
+          currency = CASE WHEN ? = 1 THEN ? ELSE currency END,
+          default_locale = CASE WHEN ? = 1 THEN ? ELSE default_locale END,
+          merchant_country_code = CASE WHEN ? = 1 THEN ? ELSE merchant_country_code END,
+          readiness_version = readiness_version + 1,
+          updated_at = ?
+      WHERE id = ? AND public_id = ?
+        AND (
+          ? = 0 OR NOT EXISTS (
+            SELECT 1 FROM product_variants
+            WHERE product_variants.shop_id = shops.id
+              AND product_variants.currency <> ?
+          )
+        )
+    `).bind(
+      hasName ? 1 : 0, name,
+      hasSlug ? 1 : 0, slug,
+      hasSlug ? 1 : 0,
+      hasBusinessCountry ? 1 : 0, businessCountry ?? null,
+      hasCurrency ? 1 : 0, currency,
+      hasDefaultLocale ? 1 : 0, defaultLocale,
+      hasMerchantCountry ? 1 : 0, merchantCountry ?? null,
+      now, current.row.shop_id, input.shopPublicId,
+      hasCurrency ? 1 : 0, currency,
+    ));
+    result = (await input.env.PLATFORM_DB.batch(statements))[statements.length - 1] ?? { meta: { changes: 0 } };
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (error instanceof Error && error.message.includes("shop_currency_variant_mismatch")) {
@@ -878,6 +1062,7 @@ export async function updateShopProfile(input: {
 
   const changedFields = [
     ...(hasName ? ["name"] : []),
+    ...(hasSlug ? ["slug"] : []),
     ...(hasBusinessCountry ? ["businessCountry"] : []),
     ...(hasCurrency ? ["currency"] : []),
     ...(hasDefaultLocale ? ["defaultLocale"] : []),
@@ -900,6 +1085,7 @@ export async function updateShopProfile(input: {
     defaultLocale: hasDefaultLocale ? defaultLocale ?? current.shop.defaultLocale : current.shop.defaultLocale,
     merchantCountry: hasMerchantCountry ? merchantCountry ?? null : current.shop.merchantCountry,
     name: hasName ? name as string : current.shop.name,
+    slug: hasSlug ? slug as string : current.shop.slug,
   };
 }
 

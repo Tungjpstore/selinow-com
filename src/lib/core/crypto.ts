@@ -23,6 +23,11 @@ export async function sha256Json(value: unknown): Promise<string> {
   return toBase64Url(new Uint8Array(digest));
 }
 
+export async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function constantTimeEqual(left: string, right: string): boolean {
   const leftBytes = encoder.encode(left);
   const rightBytes = encoder.encode(right);
@@ -116,4 +121,3 @@ export function generateSecureOtp(length = 6): string {
 export async function hashOtp(secret: string, purpose: string, email: string, otp: string): Promise<string> {
   return hmacToken(secret, `otp:${purpose}:${email}`, otp);
 }
-

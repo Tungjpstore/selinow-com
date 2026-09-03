@@ -1,0 +1,99 @@
+---
+import { createDashboardTranslator } from "../../../lib/i18n";
+
+interface Props {
+  dialogId: string;
+  pendingLabel?: string;
+  submitLabel: string;
+  title: string;
+  triggerLabel: string;
+}
+
+const { dialogId, pendingLabel, submitLabel, title, triggerLabel } = Astro.props;
+const t = createDashboardTranslator(Astro.locals.locale);
+const titleId = `${dialogId}-title`;
+const resolvedPending = pendingLabel ?? t("dashboard.automation.rules.dialog.saving");
+const cancelLabel = t("dashboard.automation.rules.dialog.cancel");
+---
+
+<div data-rule-dialog-root data-rule-pending-label={resolvedPending}>
+  <button class="sln-button" data-rule-dialog-trigger type="button">{triggerLabel}</button>
+  <dialog class="sln-dialog" id={dialogId} aria-labelledby={titleId} data-rule-dialog>
+    <div class="sln-dialog__body">
+      <h2 data-rule-dialog-title id={titleId}>{title}</h2>
+      <slot />
+    </div>
+    <form class="sln-dialog__actions" method="dialog" data-rule-dialog-form>
+      <button class="sln-button" data-rule-dialog-cancel data-variant="secondary" type="submit" value="cancel">{cancelLabel}</button>
+      <button class="sln-button" data-rule-dialog-confirm data-variant="primary" type="submit" value="confirm">{submitLabel}</button>
+    </form>
+  </dialog>
+</div>
+
+<script>
+  type RuleConfirmDetail = { complete: () => void; fail: () => void };
+
+  // Wires every rule dialog root (create + edit); the edit dialog has no trigger button.
+  for (const root of document.querySelectorAll<HTMLElement>("[data-rule-dialog-root]")) {
+    if (root.dataset.ruleReady === "true") continue;
+    root.dataset.ruleReady = "true";
+    const trigger = root.querySelector<HTMLButtonElement>("[data-rule-dialog-trigger]");
+    const dialog = root.querySelector<HTMLDialogElement>("[data-rule-dialog]");
+    const form = root.querySelector<HTMLFormElement>("[data-rule-dialog-form]");
+    const cancel = root.querySelector<HTMLButtonElement>("[data-rule-dialog-cancel]");
+    const confirm = root.querySelector<HTMLButtonElement>("[data-rule-dialog-confirm]");
+    if (dialog === null || form === null || cancel === null || confirm === null) continue;
+    const confirmLabel = confirm.textContent ?? "Save";
+    const pendingLabel = root.dataset.rulePendingLabel ?? "Saving…";
+    let pending = false;
+    const setPending = (value: boolean): void => {
+      pending = value;
+      root.dataset.rulePending = String(value);
+      dialog.setAttribute("aria-busy", String(value));
+      if (trigger !== null) trigger.disabled = value;
+      cancel.disabled = value;
+      confirm.disabled = value;
+      confirm.dataset.loading = String(value);
+      confirm.textContent = value ? pendingLabel : confirmLabel;
+    };
+    trigger?.addEventListener("click", () => dialog.showModal());
+    dialog.addEventListener("click", (event) => {
+      if (!pending && event.target === dialog) dialog.close("cancel");
+    });
+    dialog.addEventListener("cancel", (event) => {
+      if (pending) event.preventDefault();
+    });
+    form.addEventListener("submit", (event) => {
+      const submitter = event.submitter;
+      if (!(submitter instanceof HTMLButtonElement) || submitter.value !== "confirm") return;
+      event.preventDefault();
+      if (pending) return;
+      setPending(true);
+
+      let settled = false;
+      const complete = (): void => {
+        if (settled) return;
+        settled = true;
+        setPending(false);
+        dialog.close("confirm");
+      };
+      const fail = (): void => {
+        if (settled) return;
+        settled = true;
+        setPending(false);
+        confirm.focus();
+      };
+      // Async consumers (the rules client script) prevent the default and settle via callbacks.
+      const confirmEvent = new CustomEvent<RuleConfirmDetail>("sln:confirm", {
+        bubbles: true,
+        cancelable: true,
+        detail: { complete, fail },
+      });
+      if (root.dispatchEvent(confirmEvent)) complete();
+    });
+    dialog.addEventListener("close", () => {
+      setPending(false);
+      trigger?.focus();
+    });
+  }
+</script>

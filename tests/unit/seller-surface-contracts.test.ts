@@ -76,7 +76,7 @@ class FakeDatabase {
           first() {
             if (sql.includes("FROM shop_settings")) { const state = readState(); return Promise.resolve({ brandingJson: state.branding, storefrontJson: state.storefront, version: state.version, publishedVersion: state.publishedVersion, publishedAt: state.publishedAt }); }
             if (sql.includes("FROM shop_subscriptions")) {
-              return Promise.resolve(values[0] === "shop-a" ? { planCode: "store", planName: "Store", planVersion: 7, featuresJson: '{"storefront":true}', limitsJson: '{"orders_month":100}', state: "active", trialEndsAt: null, currentPeriodStart: "2026-07-01T00:00:00.000Z", currentPeriodEnd: "2026-08-01T00:00:00.000Z", graceEndsAt: null, canceledAt: null, marketCode: "vn", priceCurrency: "VND", priceAmountMinor: 99000, priceInterval: "month" } : null);
+              return Promise.resolve(values[0] === "shop-a" ? { billingProviderCode: "dodo", planCode: "store", planName: "Store", planVersion: 7, featuresJson: '{"storefront":true}', limitsJson: '{"orders_month":100}', state: "active", trialEndsAt: null, currentPeriodStart: "2026-07-01T00:00:00.000Z", currentPeriodEnd: "2026-08-01T00:00:00.000Z", graceEndsAt: null, canceledAt: null, marketCode: "vn", priceCurrency: "VND", priceAmountMinor: 99000, priceInterval: "month", providerSubscriptionRef: "sub-provider-a", scheduledEffectiveAt: "2026-08-01T00:00:00.000Z", scheduledPlanCode: "starter", scheduledPlanName: "Starter" } : null);
             }
             if (sql.startsWith("UPDATE shop_settings")) { writeState(String(values[0]), String(values[1])); return Promise.resolve({ version: readState().version }); }
             if (sql.includes("FROM orders")) {
@@ -331,11 +331,16 @@ describe("seller surface contracts", () => {
     expect(membersResult[0]).not.toHaveProperty("email");
     expect(membersResult[0]).not.toHaveProperty("userId");
     expect(billing).toMatchObject({
+      billingProviderCode: "dodo",
       features: { storefront: true },
       limits: { orders_month: 100 },
       planCode: "store",
       planVersion: 7,
       currentPrice: { amountMinor: 99000, currency: "VND", interval: "month", marketCode: "vn" },
+      hasProviderSubscription: true,
+      scheduledEffectiveAt: "2026-08-01T00:00:00.000Z",
+      scheduledPlanCode: "starter",
+      scheduledPlanName: "Starter",
       state: "active",
       usage: [{ metric: "orders_month", periodKey: "2026-07", value: 12 }],
     });
@@ -363,7 +368,8 @@ describe("seller surface contracts", () => {
     expect(membersPage).toContain("data-member-save");
     expect(customersPage).toContain("data-customer-open");
     expect(customersPage).toContain("customers.detail");
-    expect(billingPage).toContain("data-billing-request-form");
+    expect(billingPage).toContain("data-plan-dialog");
+    expect(billingPage).toContain("data-billing-checkout");
     expect(sellerManagement).toContain('capability: "team:manage"');
     expect(membersPage).not.toContain("không còn quyền shop:read");
   });

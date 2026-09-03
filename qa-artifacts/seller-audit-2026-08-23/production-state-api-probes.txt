@@ -1,0 +1,31 @@
+Seller audit production state/API evidence
+Captured: 2026-08-23 Asia/Tokyo
+Method: read-only requests except empty quote/checkout bodies, which failed at entitlement before any order/payment creation
+
+GET https://api.selinow.com/api/health
+HTTP 200
+Body: {"ok":true,"service":"selinow.com","phase":10,"release":{"platform":"deployed","commerce":"provider_pending"},"commerce":{"channels":["telegram","website"],"contract":"principal-channel-canonical-v1"},"requestId":"f773eadf-89e0-4006-8fd8-ddd10890de0c"}
+
+GET https://a-tung.selinow.com/api/store/catalog
+HTTP 409
+Body: {"ok":false,"code":"tenant_not_ready","requestId":"b1024ef7-bf45-4e26-b4fb-d540292fb46e"}
+
+GET https://a-tung.selinow.com/api/store/products/chatgpt
+HTTP 409
+Body: {"ok":false,"code":"tenant_not_ready","requestId":"bad1149c-2652-4843-9c64-2d2492ed543c"}
+
+POST https://a-tung.selinow.com/api/store/quote with {"items":[]}
+HTTP 402
+Body: {"ok":false,"code":"subscription_required","requestId":"1ef6d505-2e5c-415a-8493-57472fe7b94f"}
+
+POST https://a-tung.selinow.com/api/store/checkout with {"items":[]}
+HTTP 402
+Body: {"ok":false,"code":"subscription_required","requestId":"0a84b5e8-b65c-4535-bab5-bf446f8a00a5"}
+
+GET https://app.selinow.com/api/app/shops/shop_401025f6-8d6f-4757-8f51-3b3dcf4ddea0/catalog without session
+HTTP 401
+Body: {"ok":false,"code":"authentication_required","requestId":"e7a0cc47-2ea7-4f22-b2e4-d049407a826b"}
+
+GET https://api.selinow.com/api/v1/shop without Bearer credential
+HTTP 401
+Body: {"ok":false,"code":"authentication_required","requestId":"8a769c8c-09d0-4816-9e54-33fc1843c346"}

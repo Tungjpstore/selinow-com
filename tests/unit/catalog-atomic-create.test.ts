@@ -68,6 +68,14 @@ function createDatabase(): SqliteD1 {
     "migrations/0001_platform_foundation.sql",
     "migrations/0002_tenant_auth_subscription.sql",
     "migrations/0003_catalog_inventory_orders.sql",
+    // Catalog writes read products.delivery_mode and fulfillments gains
+    // shipping columns (physical vertical, TV3 → 0006 + 0102).
+    "migrations/0006_payos_payments.sql",
+    "migrations/0102_physical_goods_vertical.sql",
+    // Variant writes persist duration_minutes (booking vertical, TV4).
+    "migrations/0103_appointment_booking_vertical.sql",
+    // Product writes persist attributes_json (storefront detail, CD).
+    "migrations/0107_storefront_template_completion.sql",
   ]) {
     database.exec(readFileSync(filename, "utf8"));
   }

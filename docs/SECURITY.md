@@ -35,7 +35,12 @@ The admin operations surface exposes allowlisted incident, dead-letter and repla
 
 Request IDs are accepted only from the bounded safe character set or replaced with a UUID, returned as `X-Request-Id`, included in stable API errors and used to correlate audits. Structured runtime logs accept a fixed event schema and discard arbitrary fields, unsafe strings and sensitive metric names; request bodies, cookies, email addresses, tokens, signatures, credentials and provider payloads are not log fields.
 
-Platform Legal, Privacy and Support pages remain explicit publication gates until owner and legal/support decisions are approved. They must not invent legal entity, address, jurisdiction, tax, refund, retention, contact or response-time values. The abuse-report workflow is the implemented intake exception and stores only bounded report content plus a keyed reporter-contact hash when contact is supplied.
+Platform Legal, Privacy and Support pages are published as policy V1 from
+2026-08-25 using owner-approved values. Future versions must preserve the
+publication gate until the owner records a new effective version; provider
+specific checkout/invoice facts remain conditional on the provider surface.
+The abuse-report workflow stores only bounded report content plus a keyed
+reporter-contact hash when contact is supplied.
 
 ## Verification priorities
 

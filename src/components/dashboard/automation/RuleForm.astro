@@ -1,0 +1,129 @@
+---
+import Icon from "../../console/Icon.astro";
+import Button from "../../primitives/Button.astro";
+import Input from "../../primitives/Input.astro";
+import SelectField from "../../primitives/SelectField.astro";
+import { RULE_CONDITION_FIELDS_BY_TRIGGER, type RuleView } from "../../../lib/dashboard/automation-rules-ui";
+import { createDashboardTranslator } from "../../../lib/i18n";
+
+type Option = { disabled?: boolean; label: string; value: string };
+
+interface Props {
+  actionOptions: readonly Option[];
+  formId: string;
+  mode: "create" | "edit";
+  operatorOptions: readonly Option[];
+  rule?: RuleView;
+  triggerOptions: readonly Option[];
+}
+
+const { actionOptions, formId, mode, operatorOptions, rule, triggerOptions } = Astro.props;
+const t = createDashboardTranslator(Astro.locals.locale);
+// Ids are computed here (not inline) so rendered markup never carries `${}`
+// expressions in id/for attributes; the a11y gate parses them literally.
+const nameId = `${formId}-name`;
+const triggerId = `${formId}-trigger`;
+const conditionsLabelId = `${formId}-conditions`;
+const actionTypeId = `${formId}-action-type`;
+const actionMessageId = `${formId}-action-message`;
+const actionUrlId = `${formId}-action-url`;
+const actionTagId = `${formId}-action-tag`;
+const actionNoteId = `${formId}-action-note`;
+const prototypeFieldId = `${formId}-cond-field-new`;
+const prototypeOperatorId = `${formId}-cond-op-new`;
+const prototypeValueId = `${formId}-cond-value-new`;
+const activeTrigger = rule?.triggerType ?? "order.paid";
+const fieldOptions: readonly Option[] = (RULE_CONDITION_FIELDS_BY_TRIGGER[activeTrigger] ?? []).map((field) => ({ label: field, value: field }));
+const conditionValue = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value);
+};
+const firstAction = rule?.actions[0];
+const firstConfig = firstAction?.config ?? {};
+---
+
+<form class="rule-form" data-mode={mode} data-rule-form id={formId}>
+  <Input
+    aria-label={t("dashboard.automation.rules.field.name")}
+    id={nameId}
+    label={t("dashboard.automation.rules.field.name")}
+    maxLength={120}
+    name="name"
+    required
+    value={rule?.name ?? ""}
+  />
+  <SelectField
+    id={triggerId}
+    label={t("dashboard.automation.rules.field.trigger")}
+    name="triggerType"
+    options={triggerOptions}
+    required
+    value={activeTrigger}
+  />
+
+  <div class="rule-form__section">
+    <p class="rule-form__section-label" id={conditionsLabelId}>{t("dashboard.automation.rules.field.conditions")}</p>
+    <div aria-labelledby={conditionsLabelId} class="rule-conditions" data-rule-conditions role="group">
+      {rule?.conditions.map((condition) => {
+        const conditionFieldId = `${formId}-cond-field-${condition.field}`;
+        const conditionOperatorId = `${formId}-cond-op-${condition.field}`;
+        const conditionValueId = `${formId}-cond-value-${condition.field}`;
+        return (
+          <div class="rule-condition-row" data-rule-condition-row>
+            <SelectField id={conditionFieldId} label={t("dashboard.automation.rules.field.condition_field")} name="conditionField" options={fieldOptions} value={condition.field} />
+            <SelectField id={conditionOperatorId} label={t("dashboard.automation.rules.field.condition_operator")} name="conditionOperator" options={[...operatorOptions]} value={condition.operator} />
+            <Input aria-label={t("dashboard.automation.rules.field.condition_value")} id={conditionValueId} label={t("dashboard.automation.rules.field.condition_value")} name="conditionValue" value={conditionValue(condition.value)} />
+            <Button ariaLabel={t("dashboard.automation.rules.condition.remove")} size="sm" type="button" variant="quiet"><Icon name="x" size={12} /></Button>
+          </div>
+        );
+      })}
+      <div class="rule-condition-row" data-rule-condition-prototype hidden>
+        <SelectField id={prototypeFieldId} label={t("dashboard.automation.rules.field.condition_field")} name="conditionField" options={fieldOptions} />
+        <SelectField id={prototypeOperatorId} label={t("dashboard.automation.rules.field.condition_operator")} name="conditionOperator" options={[...operatorOptions]} />
+        <Input aria-label={t("dashboard.automation.rules.field.condition_value")} id={prototypeValueId} label={t("dashboard.automation.rules.field.condition_value")} name="conditionValue" value="" />
+        <Button ariaLabel={t("dashboard.automation.rules.condition.remove")} size="sm" type="button" variant="quiet"><Icon name="x" size={12} /></Button>
+      </div>
+    </div>
+    <button class="sln-button" data-rule-condition-add data-size="sm" data-variant="quiet" type="button">+ {t("dashboard.automation.rules.condition.add")}</button>
+  </div>
+
+  <div class="rule-form__section">
+    <SelectField
+      id={actionTypeId}
+      label={t("dashboard.automation.rules.field.actions")}
+      name="actionType"
+      options={[...actionOptions]}
+      required
+      value={firstAction?.type ?? "rule_notify_telegram"}
+    />
+    <div class="sln-field" data-rule-config="rule_notify_telegram">
+      <label class="sln-field__label" for={actionMessageId}>{t("dashboard.automation.rules.config.message")}</label>
+      <div class="sln-field__control">
+        <textarea aria-label={t("dashboard.automation.rules.config.message")} id={actionMessageId} maxlength="1000" name="actionMessage" rows="3">{typeof firstConfig.message === "string" && firstAction?.type === "rule_notify_telegram" ? firstConfig.message : ""}</textarea>
+      </div>
+      <p class="sln-field__description">{t("dashboard.automation.rules.config.message_description")}</p>
+    </div>
+    <div data-rule-config="rule_call_webhook" hidden>
+      <Input aria-label={t("dashboard.automation.rules.config.url")} id={actionUrlId} inputmode="url" label={t("dashboard.automation.rules.config.url")} name="actionUrl" required type="url" value={typeof firstConfig.url === "string" && firstAction?.type === "rule_call_webhook" ? firstConfig.url : ""} />
+    </div>
+    <div data-rule-config="rule_tag_customer" hidden>
+      <Input aria-label={t("dashboard.automation.rules.config.tag")} id={actionTagId} label={t("dashboard.automation.rules.config.tag")} maxLength={40} name="actionTag" value={typeof firstConfig.tag === "string" && firstAction?.type === "rule_tag_customer" ? firstConfig.tag : ""} />
+    </div>
+    <div data-rule-config="rule_create_task" hidden>
+      <Input aria-label={t("dashboard.automation.rules.config.note")} id={actionNoteId} label={t("dashboard.automation.rules.config.note")} maxLength={500} name="actionNote" value={typeof firstConfig.note === "string" && firstAction?.type === "rule_create_task" ? firstConfig.note : ""} />
+    </div>
+  </div>
+</form>
+
+<style>
+  .rule-form { display:grid; gap:var(--sln-space-4); }
+  /* display:grid below would otherwise override the UA's [hidden] rule and
+     paint the hidden prototype condition row as if it were a real one. */
+  .rule-condition-row[hidden] { display:none; }
+  .rule-form__section { display:grid; gap:var(--sln-space-3); }
+  .rule-form__section-label { margin:0; color:var(--sln-text-secondary); font:var(--sln-font-label); }
+  .rule-conditions { display:grid; gap:var(--sln-space-3); }
+  .rule-condition-row { display:grid; align-items:end; gap:var(--sln-space-3); grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.2fr) auto; }
+  @media (max-width:760px) { .rule-condition-row { grid-template-columns:1fr; } }
+</style>

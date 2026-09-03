@@ -69,11 +69,19 @@ describe("system localization", () => {
       locale: "vi-VN",
       token: "token-abcdefghijklmnopqrstuvwxyz0123456789",
     });
+    await sendMagicLinkEmail({
+      email: "seller@example.test",
+      env: emailEnv(messages),
+      locale: "en",
+      redirect: "/onboarding?plan=pro",
+      token: "token-abcdefghijklmnopqrstuvwxyz0123456789",
+    });
 
     expect(messages[0]).toMatchObject({ subject: "Sign in to Selinow" });
     expect(messages[0]?.text).toContain("This link expires in 15 minutes");
     expect(messages[1]).toMatchObject({ subject: "Đăng nhập Selinow" });
     expect(messages[1]?.html).toContain("Liên kết này hết hạn sau 15 phút");
+    expect(messages[2]?.text).toContain("redirect=%2Fonboarding%3Fplan%3Dpro");
 
     const providerSecret = "provider-secret-must-not-escape";
     let caught: unknown;

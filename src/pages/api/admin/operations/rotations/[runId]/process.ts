@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 
 import { requireCsrfSession, requireRecentAuth } from "../../../../../../lib/auth/session";
 import { AppError } from "../../../../../../lib/core/errors";
+import { guardAdminMutationRate } from "../../../../../../lib/http/admin-rate-limit";
 import { readJsonObject, rejectUnknownFields } from "../../../../../../lib/http/request";
 import { createCaughtErrorResponse } from "../../../../../../lib/http/security";
 import {
@@ -14,7 +15,8 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
+    await guardAdminMutationRate({ env, family: "operations_rotations", request });
+    requireRecentAuth(auth, 5);
     const body = await readJsonObject(request, 1_024);
     rejectUnknownFields(body, ["limit"]);
     if (typeof params.runId !== "string") {

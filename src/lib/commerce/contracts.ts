@@ -60,17 +60,26 @@ export type CommerceQuoteView = {
   items: readonly CommerceQuoteItem[];
   /** Signed server evidence that binds this quote to the cart and expiry. */
   quoteEvidence?: string;
+  /** Present for physical carts: selectable methods and the applied fee. */
+  shipping?: {
+    feeMinor: number;
+    methodId: string | null;
+    methods: readonly { feeMinor: number; freeOverMinor: number | null; id: string; name: string }[];
+  };
   subtotalMinor: number;
   totalMinor: number;
 };
 
 export type CommerceQuoteCommand = {
   cart: CommerceCartReference;
+  /** Physical carts quote against one selected shipping method. */
+  shippingMethodId?: string;
 };
 
 export type CommerceCartMutation =
   | { kind: "item.increment"; quantity: number; variantId: string }
-  | { code: string; kind: "discount.apply" };
+  | { code: string; kind: "discount.apply" }
+  | { kind: "discount.remove" };
 
 export type CommerceCartMutationTarget =
   | { access: { kind: "opaque_token"; token: string }; cartId: string }
@@ -102,6 +111,8 @@ export type CommerceCheckoutCommand = {
   idempotencyKey: string;
   /** Signed evidence is required by channels that expose quote-based checkout. */
   quoteEvidence?: string;
+  /** Physical carts: shipping method selection and delivery address. */
+  shipping?: { address: unknown; methodId: unknown };
 };
 
 /** A quote-bound, retry-safe checkout intent/recovery capability. */

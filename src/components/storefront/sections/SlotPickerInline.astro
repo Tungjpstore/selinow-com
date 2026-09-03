@@ -1,0 +1,31 @@
+---
+import { createStorefrontTranslator } from "../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct } from "../../../lib/storefront/store";
+
+/**
+ * Inline slot picker for booking services on the detail page (Serenity/Craft/
+ * Clinic). The date strip and slot grid are rendered client-side by
+ * scripts/storefront/slot-picker-inline.ts against the public slots API; the
+ * "book now" action stores a slot draft and routes through the standard cart
+ * (readCart/saveCart), so checkout money paths stay untouched. Renders only
+ * when the product carries a duration (booking marker).
+ */
+interface Props {
+  locale: string;
+  product: StorefrontProduct;
+}
+
+const { locale, product } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const bookingVariant = product.variants.find((variant) => variant.durationMinutes !== undefined) ?? null;
+---
+{bookingVariant !== null && (
+  <section class="slot-picker-inline" id="book" aria-labelledby="slot-picker-title" data-slot-picker data-variant-id={bookingVariant.id} data-duration-minutes={bookingVariant.durationMinutes}>
+    <h2 id="slot-picker-title">{t("storefront.slot_picker.title")}</h2>
+    <p class="slot-picker-help">{t("storefront.slot_picker.help")}</p>
+    <div class="slot-picker-days" role="radiogroup" aria-label={t("storefront.slot_picker.day_aria")} data-slot-picker-days></div>
+    <div class="slot-picker-slots" id="inline-slots" role="radiogroup" aria-label={t("storefront.slot_picker.slot_aria")} data-slot-picker-slots></div>
+    <p class="slot-picker-status form-status" role="status" aria-live="polite" data-slot-picker-status></p>
+    <button class="store-button slot-picker-book" type="button" data-slot-picker-book disabled>{t("storefront.slot_picker.book")}</button>
+  </section>
+)}

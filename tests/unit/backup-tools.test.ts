@@ -372,6 +372,8 @@ describe("operations report compatibility", () => {
   it("requires generic channel and domain delivery tables in every restored schema", () => {
     expect(restoreValidationTables).toEqual(expect.arrayContaining([
       "api_credentials",
+      "auth_google_identities",
+      "auth_google_oauth_states",
       "catalog_channel_visibility",
       "channel_customer_identities",
       "channel_connector_requests",
@@ -435,6 +437,8 @@ describe("operations report compatibility", () => {
       "telegram_mini_app_sessions",
     ]));
     expect(restoreCountValidationTables).toEqual(expect.arrayContaining([
+      "auth_google_identities",
+      "auth_google_oauth_states",
       "catalog_channel_visibility",
       "channel_connector_requests",
       "channel_oauth_states",
@@ -1190,12 +1194,19 @@ describe("backup CLI dry runs", () => {
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "create")).toBe(true);
       expect(commands.filter(({ args }) => args[0] === "d1" && args[1] === "export"))
         .toHaveLength(1);
-      expect(commands.some(({ args }) => (
-        args[0] === "d1"
-        && args[1] === "execute"
-        && args.includes("--file")
-        && args[args.indexOf("--file") + 1] === PROTECTED_STAGING_ARTIFACT
-      ))).toBe(true);
+      const protectedImportFiles = commands
+        .filter(({ args }) => (
+          args[0] === "d1"
+          && args[1] === "execute"
+          && args.includes("--file")
+          && !args.some((argument) => argument.endsWith(latestMigration))
+        ))
+        .map(({ args }) => args[args.indexOf("--file") + 1]);
+      expect(protectedImportFiles).toHaveLength(4);
+      expect(protectedImportFiles.some((path) => path?.endsWith("import-schema.sql"))).toBe(true);
+      expect(protectedImportFiles.some((path) => path?.endsWith("import-indexes.sql"))).toBe(true);
+      expect(protectedImportFiles.some((path) => path?.endsWith("import-data.sql"))).toBe(true);
+      expect(protectedImportFiles.some((path) => path?.endsWith("import-triggers.sql"))).toBe(true);
       expect(commands.some(({ args }) => args[0] === "d1" && args[1] === "migrations"))
         .toBe(false);
       expect(commands.some(({ args, ci }) => (

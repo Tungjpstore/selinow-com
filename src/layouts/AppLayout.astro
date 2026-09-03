@@ -4,8 +4,12 @@ import "../styles/base.css";
 import "../styles/primitives.css";
 import "../styles/app-shell.css";
 import "../styles/selinow-a11y.css";
+import CommandPalette from "../components/workspace/CommandPalette.astro";
+import ToastRegion from "../components/primitives/ToastRegion.astro";
+import LiveActivityRadar from "../components/console/LiveActivityRadar.astro";
 import { shopSwitchHref, withSelectedShop as appendSelectedShop } from "../lib/dashboard/shop-navigation";
 import { createDashboardTranslator } from "../lib/i18n/catalogs/dashboard";
+import { createConsoleTranslator } from "../lib/i18n/catalogs/console";
 import { directionForLocale } from "../lib/i18n/locale";
 import { getBindings } from "../lib/platform/bindings";
 import type { ShopRole } from "../lib/tenants/policy";
@@ -16,7 +20,7 @@ interface Props {
   email: string;
   selectedShopName?: string | undefined;
   selectedShopPublicId?: string | undefined;
-  shops?: readonly { name: string; publicId: string; role: ShopRole; slug: string }[];
+  shops?: readonly { name: string; publicId: string; role: ShopRole; slug: string; defaultLocale?: string }[];
   title: string;
 }
 
@@ -25,15 +29,14 @@ type NavItem = {
   label: string;
   path: string;
   href?: string;
-  channel?: ChannelCode;
   roles?: readonly ShopRole[];
   visibleWithoutShop?: boolean;
 };
 
-type ChannelCode = "website" | "telegram" | "telegram-mini-app" | "zalo-mini-app" | "zalo-oa" | "whatsapp-cloud" | "discord-bot";
-
 type NavGroup = {
-  key: "administration" | "configuration" | "operations" | "sales_channels";
+  // "sales_channels" is retained in the union so the legacy class/badge
+  // comparisons below stay type-valid; no group uses it at runtime.
+  key: "automation" | "catalog" | "channels" | "sales_channels" | "sell" | "settings";
   label: string;
   items: readonly NavItem[];
 };
@@ -49,6 +52,8 @@ const {
   shops = [],
   title,
 } = Astro.props;
+const shellLocale = Astro.locals.locale ?? shops.find((candidate) => candidate.publicId === selectedShopPublicId)?.defaultLocale;
+const ct = createConsoleTranslator(shellLocale);
 const env = getBindings();
 const selectedShopRole = shops.find((shop) => shop.publicId === selectedShopPublicId)?.role;
 const roleLabels: Record<ShopRole, string> = {
@@ -62,15 +67,7 @@ const canOpenShopSetup = selectedShopRole === "owner" || selectedShopRole === "m
   || (selectedShopPublicId === undefined && shops.length === 0);
 
 const isCurrent = (path: string): boolean => activePath === path || (path !== "/app" && activePath.startsWith(`${path}/`));
-const isCurrentItem = (item: NavItem): boolean => {
-  if (item.channel !== undefined && activePath === "/app/integrations") {
-    return Astro.url.hash === `#channel-${item.channel}`;
-  }
-  if (item.channel === undefined && item.path === "/app/integrations" && Astro.url.hash.startsWith("#channel-")) {
-    return false;
-  }
-  return isCurrent(item.path);
-};
+const isCurrentItem = (item: NavItem): boolean => isCurrent(item.path);
 const itemPath = (item: NavItem): string => item.href ?? item.path;
 const withSelectedShop = (path: string): string => appendSelectedShop(path, selectedShopPublicId, Astro.url.origin);
 const shopSelectionHref = (shopPublicId: string): string => shopSwitchHref(Astro.url, shopPublicId);
@@ -78,84 +75,54 @@ const isVisibleForRole = (item: NavItem): boolean => item.roles === undefined
   || (selectedShopRole !== undefined && item.roles.includes(selectedShopRole))
   || (shops.length === 0 && item.visibleWithoutShop === true);
 
+// Console v2 IA (proposal §6.1): groups follow the seller's tasks instead of
+// the system's architecture. Role gating and icon keys are unchanged.
 const groups: readonly NavGroup[] = [
   {
-    key: "operations",
-    label: t("dashboard.nav.operations"),
+    key: "sell",
+    label: t("dashboard.console.nav.sell"),
     items: [
-      { icon: "overview", label: t("dashboard.nav.overview"), path: "/app" },
-      { icon: "automation", label: t("dashboard.nav.automation"), path: "/app/automation" },
-      { icon: "products", label: t("dashboard.nav.products"), path: "/app/products", roles: ["owner", "manager"] },
-      { icon: "inventory", label: t("dashboard.nav.inventory"), path: "/app/inventory", roles: ["owner", "manager"] },
-      { icon: "orders", label: t("dashboard.nav.orders"), path: "/app/orders" },
-      { icon: "customers", label: t("dashboard.nav.customers"), path: "/app/customers" },
+      { icon: "overview", label: t("dashboard.console.nav.overview"), path: "/app" },
+      { icon: "orders", label: t("dashboard.console.nav.orders"), path: "/app/orders" },
+      { icon: "calendar", label: t("dashboard.nav.bookings"), path: "/app/bookings", roles: ["owner", "manager", "support"] },
+      { icon: "customers", label: t("dashboard.console.nav.customers"), path: "/app/customers" },
     ],
   },
   {
-    key: "sales_channels",
-    label: t("dashboard.nav.sales_channels"),
+    key: "catalog",
+    label: t("dashboard.console.nav.catalog"),
     items: [
-      { icon: "store", label: t("dashboard.nav.website"), path: "/app/store", channel: "website" },
-      { icon: "telegram", label: t("dashboard.nav.telegram"), path: "/app/telegram", channel: "telegram", roles: ["owner", "manager"] },
-      { icon: "plug", label: t("dashboard.nav.integrations"), path: "/app/integrations", roles: ["owner", "manager"] },
-      {
-        icon: "miniapp",
-        label: t("dashboard.integrations.channel_expansion.name.telegram_mini_app"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-telegram-mini-app",
-        channel: "telegram-mini-app",
-        roles: ["owner", "manager"],
-      },
-      {
-        icon: "zalo",
-        label: t("dashboard.integrations.channel_expansion.name.zalo_mini_app"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-zalo-mini-app",
-        channel: "zalo-mini-app",
-        roles: ["owner", "manager"],
-      },
-      {
-        icon: "zalo",
-        label: t("dashboard.integrations.channel_expansion.name.zalo_oa"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-zalo-oa",
-        channel: "zalo-oa",
-        roles: ["owner", "manager"],
-      },
-      {
-        icon: "whatsapp",
-        label: t("dashboard.integrations.channel_expansion.name.whatsapp_cloud"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-whatsapp-cloud",
-        channel: "whatsapp-cloud",
-        roles: ["owner", "manager"],
-      },
-      {
-        icon: "discord",
-        label: t("dashboard.integrations.channel_expansion.name.discord_bot"),
-        path: "/app/integrations",
-        href: "/app/integrations#channel-discord-bot",
-        channel: "discord-bot",
-        roles: ["owner", "manager"],
-      },
+      { icon: "products", label: t("dashboard.console.nav.products"), path: "/app/products", roles: ["owner", "manager"] },
+      { icon: "inventory", label: t("dashboard.console.nav.inventory"), path: "/app/inventory", roles: ["owner", "manager"] },
     ],
   },
   {
-    key: "configuration",
-    label: t("dashboard.nav.configuration"),
+    key: "automation",
+    label: t("dashboard.console.nav.automation"),
+    items: [
+      { icon: "automation", label: t("dashboard.console.nav.rules"), path: "/app/automation" },
+    ],
+  },
+  {
+    key: "channels",
+    label: t("dashboard.console.nav.channels"),
+    items: [
+      { icon: "store", label: t("dashboard.console.nav.website"), path: "/app/store" },
+      { icon: "plug", label: t("dashboard.console.nav.telegram"), path: "/app/integrations", roles: ["owner", "manager"] },
+      { icon: "payments", label: t("dashboard.console.nav.payments"), path: "/app/payments", roles: ["owner", "manager"] },
+      { icon: "domain", label: t("dashboard.console.nav.domains"), path: "/app/domains", roles: ["owner"] },
+    ],
+  },
+  {
+    key: "settings",
+    label: t("dashboard.console.nav.settings"),
     items: [
       { icon: "check", label: t("dashboard.nav.readiness"), path: "/onboarding", roles: ["owner", "manager"], visibleWithoutShop: true },
-      { icon: "domain", label: t("dashboard.nav.domains"), path: "/app/domains", roles: ["owner"] },
       { icon: "palette", label: t("dashboard.nav.store_brand"), path: "/app/store/settings" },
-    ],
-  },
-  {
-    key: "administration",
-    label: t("dashboard.nav.administration"),
-    items: [
-      { icon: "lock", label: t("dashboard.nav.security"), path: "/app/security" },
-      { icon: "members", label: t("dashboard.nav.members"), path: "/app/members", roles: ["owner"] },
-      { icon: "billing", label: t("dashboard.nav.billing"), path: "/app/billing", roles: ["owner"] },
+      { icon: "members", label: t("dashboard.console.nav.members"), path: "/app/members", roles: ["owner"] },
+      { icon: "lock", label: t("dashboard.console.nav.security"), path: "/app/security" },
+      { icon: "billing", label: t("dashboard.console.nav.billing"), path: "/app/billing", roles: ["owner"] },
+      { icon: "developer", label: t("dashboard.console.nav.developer"), path: "/app/developer", roles: ["owner"] },
       { icon: "shield", label: t("dashboard.nav.audit_data"), path: "/app/data", roles: ["owner"] },
     ],
   },
@@ -167,20 +134,20 @@ const visibleGroups = groups
 const visibleItem = (path: string): NavItem | undefined => visibleGroups
   .flatMap((group) => group.items)
   .find((item) => item.path === path);
-const channelGroup = visibleGroups.find((group) => group.key === "sales_channels")
-  ?? { items: [], key: "sales_channels", label: t("dashboard.nav.sales_channels") };
+const channelGroup = visibleGroups.find((group) => group.key === "channels")
+  ?? { items: [], key: "channels", label: t("dashboard.console.nav.channels") };
 const mobilePrimaryThird = visibleItem("/app/products") ?? visibleItem("/app/customers");
 const mobileMoreGroups = ([
   {
-    key: "operations",
-    label: t("dashboard.nav.operations"),
+    key: "catalog",
+    label: t("dashboard.console.nav.catalog"),
     items: [visibleItem("/app/inventory"), visibleItem("/app/customers"), visibleItem("/app/automation")]
       .filter((item): item is NavItem => item !== undefined && item.path !== mobilePrimaryThird?.path),
   },
-  visibleGroups.find((group) => group.key === "configuration")
-    ?? { items: [], key: "configuration", label: t("dashboard.nav.configuration") },
-  visibleGroups.find((group) => group.key === "administration")
-    ?? { items: [], key: "administration", label: t("dashboard.nav.administration") },
+  visibleGroups.find((group) => group.key === "channels")
+    ?? { items: [], key: "channels", label: t("dashboard.console.nav.channels") },
+  visibleGroups.find((group) => group.key === "settings")
+    ?? { items: [], key: "settings", label: t("dashboard.console.nav.settings") },
 ] as readonly NavGroup[]).filter((group) => group.items.length > 0);
 const isChannelPath = channelGroup.items.some((item) => isCurrent(item.path));
 const isMorePath = mobileMoreGroups.some((group) => group.items.some((item) => isCurrent(item.path)));
@@ -191,9 +158,9 @@ const icons: Record<string, string> = {
   products: '<path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 7 8 4 8-4v10l-8 4-8-4V7Z"/>',
   inventory: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
   orders: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   customers: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   store: '<path d="M4 10v10h16V10"/><path d="M3 10 5 4h14l2 6"/><path d="M3 10c0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0 0 2 3 2 3 0"/>',
-  telegram: '<path d="m21 3-7.5 18-4.2-7.2L3 10.5 21 3Z"/><path d="m9.3 13.8 4.7-4.1"/>',
   plug: '<path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-6 6v4"/>',
   check: '<path d="M4 12 9 17 20 6"/>',
   domain: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4a12 12 0 0 1 0 16M12 4a12 12 0 0 0 0 16"/>',
@@ -203,10 +170,8 @@ const icons: Record<string, string> = {
   shield: '<path d="M12 3 20 6v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/>',
   lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
-  miniapp: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/>',
-  zalo: '<path d="M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z"/><path d="m8 16 8-8M8 8h4M12 16h4"/>',
-  whatsapp: '<path d="M20 11.5a8 8 0 0 1-11.7 7.1L4 20l1.5-4.1A8 8 0 1 1 20 11.5Z"/><path d="M9 9.5c.2 1.3 1.2 2.6 2.4 3.4 1.1.8 2.5 1.2 3.7.9"/>',
-  discord: '<path d="M7 7.5A13 13 0 0 1 12 6a13 13 0 0 1 5 1.5c1.5 2.1 2.2 4.6 2 7.5-1.3 1-2.7 1.6-4.2 2l-.8-1.4M5 15c-.2-2.9.5-5.4 2-7.5M8.5 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM15.5 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/>',
+  payments: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="7.5" cy="14.5" r="1"/>',
+  developer: '<path d="m9 8-4 4 4 4M15 8l4 4-4 4"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
@@ -241,13 +206,13 @@ const icons: Record<string, string> = {
       <div class="app-layout">
         <aside class="app-sidebar" aria-label={t("dashboard.shell.workspace_nav_aria")}>
           <a class="app-brand" href={withSelectedShop("/app")} aria-label={t("dashboard.shell.brand_aria")}>
-            <img src="/brand/logo/selinow-logo-reversed.svg" alt="Selinow" width="126" height="34" />
+            <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="118" height="30" />
           </a>
 
           <div class="app-shop-context" aria-label={t("dashboard.shell.current_shop_aria", { shop: selectedShopName })}>
             <span aria-hidden="true">{selectedShopName.slice(0, 1).toUpperCase()}</span>
             <span><small>{selectedRoleLabel === null ? t("dashboard.shell.current_shop") : t("dashboard.shell.current_shop_role", { role: selectedRoleLabel })}</small><strong>{selectedShopName}</strong></span>
-            {shops.length > 1 && (
+            {(shops.length > 1 || canOpenShopSetup) && (
               <details class="app-shop-selector">
                 <summary aria-label={t("dashboard.shell.switch_shop")} title={t("dashboard.shell.switch_shop")}>⌄</summary>
                 <nav aria-label={t("dashboard.shell.select_shop")}>
@@ -256,6 +221,7 @@ const icons: Record<string, string> = {
                       <strong>{shop.name}</strong><small>{shop.slug}</small>
                     </a>
                   ))}
+                  {canOpenShopSetup && <a href="/onboarding?new=1#shop" class="app-shop-create-link"><strong>{t("dashboard.shell.create_shop")}</strong><small>{t("dashboard.shell.create_shop_hint")}</small></a>}
                 </nav>
               </details>
             )}
@@ -266,8 +232,7 @@ const icons: Record<string, string> = {
               <section class:list={{ "app-nav-channel-group": group.key === "sales_channels" }} data-nav-group={group.key}>
                 <div class="app-nav-group-label"><p>{group.label}</p>{group.key === "sales_channels" && <span aria-hidden="true">{group.items.length}</span>}</div>
                 {group.items.map((item) => (
-                  <a class:list={{ "app-nav-item": true, "app-nav-item-channel": item.channel !== undefined }} data-channel={item.channel} href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined} title={item.label}>
-                    {item.channel !== undefined && <span class="app-nav-channel-mark" aria-hidden="true"></span>}
+                  <a class="app-nav-item" href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined} title={item.label}>
                     <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
                     <span>{item.label}</span>
                   </a>
@@ -285,8 +250,12 @@ const icons: Record<string, string> = {
         <div class="app-workspace">
           <header class="app-topbar">
             <div class="app-topbar-context">
-              <small>{t("dashboard.shell.sales_workspace")}</small>
-              <strong>{displayName}</strong>
+              <div class="app-breadcrumb">
+                <span class="breadcrumb-shop">{selectedShopName}</span>
+                <span class="breadcrumb-sep">/</span>
+                <strong class="breadcrumb-title">{title.replace(" — Selinow", "")}</strong>
+              </div>
+              <LiveActivityRadar label={ct("console.shell.activity_online")} tone="success" />
             </div>
 
             <div class="app-mobile-topbar">
@@ -303,6 +272,12 @@ const icons: Record<string, string> = {
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg>
               </button>
               <div class="app-mobile-topbar-actions">
+                <button class="app-icon-action" type="button" aria-label={ct("console.shell.search")} data-command-palette-trigger>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </button>
                 <a class="app-icon-action" href={withSelectedShop("/app#actions-title")} aria-label={t("dashboard.shell.mobile.attention_aria")}>
                   <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.bell}></svg>
                 </a>
@@ -312,11 +287,28 @@ const icons: Record<string, string> = {
               </div>
             </div>
 
-            <div class="app-account">
-              <span class="app-account-mark" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
-              <span><strong>{displayName}</strong><small>{email}</small></span>
-              <a href="/" aria-label={t("dashboard.shell.account.home_aria")} title={t("dashboard.shell.account.home_title")}>↗</a>
-              <button type="button" data-app-logout>{t("dashboard.shell.account.logout")}</button>
+            <div class="app-topbar-right">
+              <button type="button" class="app-command-trigger" data-command-palette-trigger title={ct("console.shell.search_hint")}>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span>{ct("console.shell.search_placeholder")}</span>
+                <kbd>⌘K</kbd>
+              </button>
+
+              {selectedShopPublicId && (
+                <a class="app-storefront-link" href={withSelectedShop("/app/store")} title={ct("console.shell.storefront_open")}>
+                  <span>Storefront</span>
+                  <span class="link-arrow">↗</span>
+                </a>
+              )}
+              <div class="app-account">
+                <span class="app-account-mark" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span>
+                <span><strong>{displayName}</strong><small>{email}</small></span>
+                <a href="/" aria-label={t("dashboard.shell.account.home_aria")} title={t("dashboard.shell.account.home_title")}>↗</a>
+                <button type="button" data-app-logout>{t("dashboard.shell.account.logout")}</button>
+              </div>
             </div>
           </header>
           <main id="app-content" class="app-main selinow-focus-target" tabindex="-1">
@@ -375,6 +367,7 @@ const icons: Record<string, string> = {
           ) : (
             <p>{t("dashboard.shell.mobile.only_shop")}</p>
           )}
+          {canOpenShopSetup && <a class="app-menu-primary" href="/onboarding?new=1#shop">{t("dashboard.shell.create_shop")}</a>}
           {canOpenShopSetup ? <a class="app-menu-primary" href={withSelectedShop("/onboarding#shop")}>{t("dashboard.shell.mobile.setup")}</a> : <p class="app-menu-permission-note">{t("dashboard.shell.mobile.permission")}</p>}
         </section>
 
@@ -382,8 +375,7 @@ const icons: Record<string, string> = {
           <nav aria-label={t("dashboard.shell.mobile.sales_channels_aria")}>
             <p>{channelGroup.label}</p>
             {channelGroup.items.map((item) => (
-              <a class:list={{ "app-menu-link": true, "app-menu-link-channel": item.channel !== undefined }} data-channel={item.channel} href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined}>
-                {item.channel !== undefined && <span class="app-menu-channel-mark" aria-hidden="true"></span>}
+              <a class="app-menu-link" href={withSelectedShop(itemPath(item))} aria-current={isCurrentItem(item) ? "page" : undefined}>
                 <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[item.icon]}></svg>
                 <span><strong>{item.label}</strong><small>{t("dashboard.shell.mobile.channel_open")}</small></span>
               </a>
@@ -477,29 +469,6 @@ const icons: Record<string, string> = {
         }).observe(shell, { childList: true, subtree: true });
       }
 
-      // Fragments never reach the server, so keep channel focus in sync after
-      // navigation without making the hash part of any backend contract.
-      const syncChannelFocus = (): void => {
-        if (window.location.pathname !== "/app/integrations") return;
-        const focusedChannel = window.location.hash.startsWith("#channel-")
-          ? window.location.hash.slice("#channel-".length)
-          : null;
-        for (const link of document.querySelectorAll<HTMLElement>("[data-channel]")) {
-          const channel = link.dataset.channel;
-          if (channel === undefined) continue;
-          const isFocused = focusedChannel !== null && channel === focusedChannel;
-          if (isFocused) link.setAttribute("aria-current", "page");
-          else if (link.classList.contains("app-nav-item-channel") || link.classList.contains("app-menu-link-channel")) link.removeAttribute("aria-current");
-        }
-        if (focusedChannel !== null) {
-          for (const link of document.querySelectorAll<HTMLElement>(".app-nav-item:not([data-channel]), .app-menu-link:not([data-channel])")) link.removeAttribute("aria-current");
-        }
-      };
-      syncChannelFocus();
-      window.addEventListener("hashchange", syncChannelFocus);
-      window.addEventListener("popstate", syncChannelFocus);
-      window.addEventListener("pageshow", syncChannelFocus);
-
       const readCookie = (name: string): string | null => document.cookie
         .split(";")
         .map((part) => part.trim())
@@ -528,5 +497,8 @@ const icons: Record<string, string> = {
         });
       }
     </script>
+    <ToastRegion label={ct("console.toast.region_label")} />
+    <CommandPalette locale={shellLocale} />
+    <script src="../scripts/dashboard/toast-boot.ts"></script>
   </body>
 </html>

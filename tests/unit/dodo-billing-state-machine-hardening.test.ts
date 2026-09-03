@@ -80,7 +80,13 @@ function fixture(input: { providerSubscriptionRef: string | null; state: "active
       'active', 'en', 'USD', 'UTC', 1, 'US', '${NOW_ISO}', '${NOW_ISO}');
     INSERT INTO shop_members (shop_id, user_id, role, status, created_at, updated_at)
     VALUES ('billing-shop-hardening', 'billing-user-hardening', 'owner', 'active', '${NOW_ISO}', '${NOW_ISO}');
-    UPDATE plan_prices SET provider_price_ref = 'prod_test_pro' WHERE id = 'price_pro_global_v1';
+    UPDATE plan_prices
+    SET provider_price_ref = CASE id
+      WHEN 'price_starter_global_v1' THEN 'dodo_pri_starter_global_v1'
+      WHEN 'price_pro_global_v1' THEN 'dodo_pri_pro_global_v1'
+      ELSE provider_price_ref
+    END
+    WHERE id IN ('price_starter_global_v1', 'price_pro_global_v1');
     INSERT INTO shop_subscriptions (id, shop_id, plan_id, state, trial_ends_at,
       current_period_start, current_period_end, billing_provider_code, provider_subscription_ref,
       market_code, price_currency, price_amount_minor, price_interval, price_version, price_id,
@@ -129,7 +135,7 @@ function bodyFor(input: { eventType: string; metadata?: Record<string, string> |
       ...(input.paymentId === undefined ? {} : { payment_id: input.paymentId }),
       ...(input.periodEnd === undefined ? {} : { period_end: input.periodEnd }),
       ...(input.periodStart === undefined ? {} : { period_start: input.periodStart }),
-      product_id: input.productId ?? "prod_test_pro",
+      product_id: input.productId ?? "dodo_pri_pro_global_v1",
       ...(input.scheduledPriceId === undefined ? {} : { scheduled_change: { product_id: input.scheduledPriceId } }),
       ...(input.cancelAtNextBillingDate === undefined ? {} : { cancel_at_next_billing_date: input.cancelAtNextBillingDate }),
       ...(input.status === undefined ? {} : { status: input.status }),
@@ -163,30 +169,13 @@ async function webhook(
   });
 }
 
-function trialSubscriptionFetcher(input: {
-  createdAt?: string;
-  nextBillingDate?: string;
-  trialAmount?: number | null;
-  trialPeriodDays?: number;
-} = {}): typeof fetch {
-  return () => Promise.resolve(new Response(JSON.stringify({
-    created_at: input.createdAt ?? NOW_ISO,
-    id: "sub_test_trial",
-    next_billing_date: input.nextBillingDate ?? "2026-08-15T00:00:00.000Z",
-    product_id: "prod_test_pro",
-    status: "active",
-    trial_amount: input.trialAmount ?? null,
-    trial_period_days: input.trialPeriodDays ?? 7,
-  }), { status: 200 }));
-}
-
 const exactMetadata = {
   amountMinor: "1500",
   checkoutSessionId: "bchk-hardening",
   currency: "USD",
   marketCode: "global",
   planCode: "pro",
-  providerPriceRef: "prod_test_pro",
+  providerPriceRef: "dodo_pri_pro_global_v1",
   shopId: "billing-shop-hardening",
   subscriptionId: "billing-sub-hardening",
 };
@@ -206,6 +195,20 @@ describe("Dodo billing state-machine hardening", () => {
 
     await expect(webhook(testFixture, body, "msg_initial_exact")).resolves.toMatchObject({ processed: true, state: "active" });
     expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "active", providerSubscriptionRef: "sub_test_initial" });
+    expect(testFixture.database.prepare(`
+      SELECT status, amount_minor AS amountMinor, currency,
+        provider_transaction_ref AS providerTransactionRef, paid_at AS paidAt
+      FROM billing_invoices
+      WHERE shop_id = 'billing-shop-hardening'
+    `).get()).toEqual({
+      amountMinor: 1500,
+      currency: "USD",
+      paidAt: NOW_ISO,
+      providerTransactionRef: "pay_test_initial",
+      status: "paid",
+    });
+    await expect(webhook(testFixture, body, "msg_initial_exact")).resolves.toMatchObject({ duplicate: true });
+    expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM billing_invoices WHERE provider_transaction_ref = 'pay_test_initial'").get()).toEqual({ count: 1 });
     testFixture.database.close();
   });
 
@@ -240,78 +243,56 @@ describe("Dodo billing state-machine hardening", () => {
     testFixture.database.close();
   });
 
-  it("accepts an explicitly verified zero-amount trial mandate without granting paid-active access", async () => {
+  it("rejects zero-amount provider trial payments because the catalog is paid-only", async () => {
     const testFixture = fixture();
-    testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment', plan_id = 'plan_starter_v1' WHERE id = 'billing-sub-hardening'").run();
+    testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment' WHERE id = 'billing-sub-hardening'").run();
     addCheckout(testFixture.database, { status: "open" });
-    const activeBody = bodyFor({
-      checkoutSessionId: "",
-      eventType: "subscription.active",
-      metadata: exactMetadata,
-      status: "active",
-      subscriptionId: "sub_test_trial",
-    });
-    const updatedBody = bodyFor({
-      checkoutSessionId: "",
-      eventType: "subscription.updated",
-      metadata: exactMetadata,
-      occurredAt: "2026-08-08T00:00:01.000Z",
-      status: "active",
-      subscriptionId: "sub_test_trial",
-    });
-    await expect(webhook(testFixture, activeBody, "msg_trial_subscription_active")).resolves.toMatchObject({ processed: false, state: "pending_payment" });
-    await expect(webhook(testFixture, updatedBody, "msg_trial_subscription_updated")).resolves.toMatchObject({ processed: false, state: "pending_payment" });
-
-    const mandateBody = bodyFor({
+    const body = bodyFor({
       amount: 0,
       eventType: "payment.succeeded",
       metadata: exactMetadata,
-      paymentId: "pay_test_trial_mandate",
-      periodEnd: "2026-08-15T00:00:00Z",
-      periodStart: NOW_ISO,
-      subscriptionId: "sub_test_trial",
+      paymentId: "pay_test_zero_amount",
+      subscriptionId: "sub_test_zero_amount",
     });
-    const fetcher = trialSubscriptionFetcher();
-    await expect(webhook(testFixture, mandateBody, "msg_trial_mandate", NOW_ISO, fetcher)).resolves.toEqual({ duplicate: false, processed: true, state: "trialing" });
-    expect(testFixture.database.prepare("SELECT state, plan_id AS planId, price_id AS priceId, price_amount_minor AS amountMinor, trial_ends_at AS trialEndsAt, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ amountMinor: 1500, planId: "plan_pro_v1", priceId: "price_pro_global_v1", providerSubscriptionRef: "sub_test_trial", state: "trialing", trialEndsAt: "2026-08-15T00:00:00.000Z" });
-    expect(testFixture.database.prepare("SELECT status FROM billing_checkout_sessions WHERE id = 'bchk-hardening'").get()).toEqual({ status: "completed" });
-    expect(testFixture.database.prepare("SELECT from_state AS fromState, to_state AS toState FROM subscription_events WHERE event_type = 'payment.succeeded'").get()).toEqual({ fromState: "pending_payment", toState: "trialing" });
-
-    await expect(webhook(testFixture, mandateBody, "msg_trial_mandate", NOW_ISO, fetcher)).resolves.toEqual({ duplicate: true, processed: false, state: "processed" });
-    const conflictingBody = bodyFor({
-      amount: 1,
-      eventType: "payment.succeeded",
-      metadata: exactMetadata,
-      paymentId: "pay_test_trial_mandate",
-      periodEnd: "2026-08-15T00:00:00.000Z",
-      periodStart: NOW_ISO,
-      subscriptionId: "sub_test_trial",
-    });
-    await expect(webhook(testFixture, conflictingBody, "msg_trial_mandate", NOW_ISO, fetcher)).rejects.toMatchObject({ code: "billing_webhook_conflict", status: 409 });
-    expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM subscription_events WHERE event_type = 'payment.succeeded'").get()).toEqual({ count: 1 });
+    await expect(webhook(testFixture, body, "msg_zero_amount")).rejects.toMatchObject({ code: "billing_webhook_amount_mismatch", status: 409 });
+    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: null, state: "pending_payment" });
+    expect(testFixture.database.prepare("SELECT status FROM billing_checkout_sessions WHERE id = 'bchk-hardening'").get()).toEqual({ status: "open" });
+    expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM billing_invoices").get()).toEqual({ count: 0 });
     testFixture.database.close();
   });
 
-  it("rejects expired or unproven zero-amount trial mandates", async () => {
-    for (const [webhookId, fetcher] of [
-      ["msg_trial_expired", trialSubscriptionFetcher({ createdAt: "2026-08-01T00:00:00.000Z", nextBillingDate: NOW_ISO })],
-      ["msg_trial_unproven", trialSubscriptionFetcher({ trialPeriodDays: 0 })],
-    ] as const) {
-      const testFixture = fixture();
-      testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment' WHERE id = 'billing-sub-hardening'").run();
-      addCheckout(testFixture.database, { status: "open" });
-      const body = bodyFor({
-        amount: 0,
-        eventType: "payment.succeeded",
-        metadata: exactMetadata,
-        paymentId: "pay_test_invalid_trial",
-        subscriptionId: "sub_test_trial",
-      });
-      await expect(webhook(testFixture, body, webhookId, NOW_ISO, fetcher)).rejects.toMatchObject({ code: "billing_webhook_trial_invalid", status: 409 });
-      expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: null, state: "pending_payment" });
-      expect(testFixture.database.prepare("SELECT status FROM billing_checkout_sessions WHERE id = 'bchk-hardening'").get()).toEqual({ status: "open" });
-      testFixture.database.close();
-    }
+  it("keeps an initial payment processing checkout open without requiring a provider subscription", async () => {
+    const testFixture = fixture();
+    testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment' WHERE id = 'billing-sub-hardening'").run();
+    addCheckout(testFixture.database, { status: "open" });
+    const body = bodyFor({
+      eventType: "payment.processing",
+      metadata: exactMetadata,
+      paymentId: "pay_test_processing",
+    });
+
+    await expect(webhook(testFixture, body, "msg_payment_processing")).resolves.toEqual({ duplicate: false, processed: true, state: "processed" });
+    expect(testFixture.database.prepare("SELECT status, next_reconciliation_at AS nextReconciliationAt FROM billing_checkout_sessions WHERE id = 'bchk-hardening'").get()).toEqual({ nextReconciliationAt: NOW_ISO, status: "open" });
+    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: null, state: "pending_payment" });
+    await expect(webhook(testFixture, body, "msg_payment_processing")).resolves.toEqual({ duplicate: true, processed: false, state: "processed" });
+    testFixture.database.close();
+  });
+
+  it("cancels an initial checkout without requiring a provider subscription", async () => {
+    const testFixture = fixture();
+    testFixture.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment' WHERE id = 'billing-sub-hardening'").run();
+    addCheckout(testFixture.database, { status: "open" });
+    const body = bodyFor({
+      eventType: "payment.cancelled",
+      metadata: exactMetadata,
+      paymentId: "pay_test_cancelled",
+    });
+
+    await expect(webhook(testFixture, body, "msg_payment_cancelled")).resolves.toEqual({ duplicate: false, processed: true, state: "processed" });
+    expect(testFixture.database.prepare("SELECT status, next_reconciliation_at AS nextReconciliationAt FROM billing_checkout_sessions WHERE id = 'bchk-hardening'").get()).toEqual({ nextReconciliationAt: null, status: "canceled" });
+    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ providerSubscriptionRef: null, state: "suspended" });
+    await expect(webhook(testFixture, body, "msg_payment_cancelled")).resolves.toEqual({ duplicate: true, processed: false, state: "processed" });
+    testFixture.database.close();
   });
 
   it("still rejects a nonzero amount that does not match the catalog price", async () => {
@@ -383,7 +364,7 @@ describe("Dodo billing state-machine hardening", () => {
     testFixture.database.close();
   });
 
-  it("keeps a late signed payment fail-closed, then activates one fresh checkout exactly once", async () => {
+  it("reconciles a late captured payment even after the local checkout TTL", async () => {
     const testFixture = fixture();
     addCheckout(testFixture.database, { status: "open" });
     testFixture.database.prepare("UPDATE billing_checkout_sessions SET expires_at = ?, status = 'expired', expired_at = ?, updated_at = ?, version = version + 1 WHERE id = 'bchk-hardening'").run(NOW_ISO, NOW_ISO, NOW_ISO);
@@ -395,13 +376,9 @@ describe("Dodo billing state-machine hardening", () => {
       paymentId: "pay_test_late",
       subscriptionId: "sub_test_late",
     });
-    await expect(webhook(testFixture, lateBody, "msg_payment_late")).rejects.toMatchObject({ code: "billing_webhook_checkout_expired", status: 409 });
-    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "suspended", providerSubscriptionRef: null });
-    expect(testFixture.database.prepare("SELECT status FROM billing_provider_events WHERE provider_event_id = 'msg_payment_late'").get()).toEqual({ status: "conflict" });
-    expect(testFixture.database.prepare("SELECT action, safe_metadata_json AS safeMetadataJson FROM audit_logs WHERE resource_id = (SELECT id FROM billing_provider_events WHERE provider_event_id = 'msg_payment_late')").get()).toEqual({
-      action: "billing.webhook_rejected",
-      safeMetadataJson: JSON.stringify({ eventType: "payment.succeeded", failureCode: "billing_webhook_checkout_expired" }),
-    });
+    await expect(webhook(testFixture, lateBody, "msg_payment_late")).resolves.toEqual({ duplicate: false, processed: true, state: "active" });
+    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "active", providerSubscriptionRef: "sub_test_late" });
+    expect(testFixture.database.prepare("SELECT status FROM billing_provider_events WHERE provider_event_id = 'msg_payment_late'").get()).toEqual({ status: "processed" });
     const lateProjectionBody = bodyFor({
       checkoutSessionId: "",
       eventType: "subscription.updated",
@@ -410,22 +387,8 @@ describe("Dodo billing state-machine hardening", () => {
       status: "active",
       subscriptionId: "sub_test_late",
     });
-    await expect(webhook(testFixture, lateProjectionBody, "msg_subscription_late_projection")).resolves.toEqual({ duplicate: false, processed: false, state: "suspended" });
-    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "suspended", providerSubscriptionRef: null });
-
-    addCheckout(testFixture.database, { id: "bchk-hardening-fresh", providerCheckoutRef: "chk_test_fresh", status: "open" });
-    const freshMetadata = { ...exactMetadata, checkoutSessionId: "bchk-hardening-fresh" };
-    const freshBody = bodyFor({
-      amount: 1500,
-      checkoutSessionId: "chk_test_fresh",
-      eventType: "payment.succeeded",
-      metadata: freshMetadata,
-      paymentId: "pay_test_fresh",
-      subscriptionId: "sub_test_fresh",
-    });
-    await expect(webhook(testFixture, freshBody, "msg_payment_fresh")).resolves.toMatchObject({ duplicate: false, processed: true, state: "active" });
-    await expect(webhook(testFixture, freshBody, "msg_payment_fresh")).resolves.toEqual({ duplicate: true, processed: false, state: "processed" });
-    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "active", providerSubscriptionRef: "sub_test_fresh" });
+    await expect(webhook(testFixture, lateProjectionBody, "msg_subscription_late_projection")).resolves.toEqual({ duplicate: false, processed: true, state: "active" });
+    expect(testFixture.database.prepare("SELECT state, provider_subscription_ref AS providerSubscriptionRef FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ state: "active", providerSubscriptionRef: "sub_test_late" });
     expect(testFixture.database.prepare("SELECT COUNT(*) AS count FROM subscription_events WHERE subscription_id = 'billing-sub-hardening' AND event_type = 'payment.succeeded'").get()).toEqual({ count: 1 });
     testFixture.database.close();
   });
@@ -556,7 +519,6 @@ describe("Dodo billing state-machine hardening", () => {
   it("applies a signed provider plan_changed event to the requested plan", async () => {
     const testFixture = fixture({ providerSubscriptionRef: "sub_test_plan_change", state: "active" });
     addCheckout(testFixture.database, { status: "completed" });
-    testFixture.database.prepare("UPDATE plan_prices SET provider_price_ref = 'prod_test_starter' WHERE id = 'price_starter_global_v1'").run();
     testFixture.database.prepare(`
       INSERT INTO subscription_change_requests (
         id, public_id, shop_id, subscription_id, current_plan_id, requested_plan_id,
@@ -566,9 +528,36 @@ describe("Dodo billing state-machine hardening", () => {
         'plan_pro_v1', 'plan_starter_v1', 'change_plan', 'provider_pending', 1, 'seller_requested',
         'billing-user-hardening', 'billing-user-hardening', '${NOW_ISO}', 'sreq-plan-change-key', 'sreq-plan-change-hash', '${NOW_ISO}', '${NOW_ISO}', 1)
     `).run();
-    const body = bodyFor({ eventType: "subscription.plan_changed", metadata: exactMetadata, productId: "prod_test_starter", subscriptionId: "sub_test_plan_change" });
+    const body = bodyFor({ eventType: "subscription.plan_changed", metadata: exactMetadata, productId: "dodo_pri_starter_global_v1", subscriptionId: "sub_test_plan_change" });
     await expect(webhook(testFixture, body, "msg_plan_changed")).resolves.toMatchObject({ processed: true, state: "active" });
     expect(testFixture.database.prepare("SELECT plan_id AS planId FROM shop_subscriptions WHERE id = 'billing-sub-hardening'").get()).toEqual({ planId: "plan_starter_v1" });
+    testFixture.database.close();
+  });
+
+  it("treats plan_changed with scheduled_change as a scheduled downgrade", async () => {
+    const testFixture = fixture({ providerSubscriptionRef: "sub_test_scheduled_change", state: "active" });
+    addCheckout(testFixture.database, { status: "completed" });
+    testFixture.database.prepare(`
+      INSERT INTO subscription_change_requests (
+        id, public_id, shop_id, subscription_id, current_plan_id, requested_plan_id,
+        action, status, expected_subscription_version, reason_code, requested_by_user_id,
+        reviewed_by_user_id, reviewed_at, idempotency_key_hash, request_hash, created_at, updated_at, version
+      ) VALUES ('sreq-scheduled-change', 'sreq-scheduled-change', 'billing-shop-hardening', 'billing-sub-hardening',
+        'plan_pro_v1', 'plan_starter_v1', 'change_plan', 'provider_pending', 1, 'seller_requested',
+        'billing-user-hardening', 'billing-user-hardening', '${NOW_ISO}', 'sreq-scheduled-key', 'sreq-scheduled-hash', '${NOW_ISO}', '${NOW_ISO}', 1)
+    `).run();
+    const body = bodyFor({
+      eventType: "subscription.plan_changed",
+      metadata: exactMetadata,
+      scheduledPriceId: "dodo_pri_starter_global_v1",
+      subscriptionId: "sub_test_scheduled_change",
+    });
+    await expect(webhook(testFixture, body, "msg_scheduled_plan_changed")).resolves.toMatchObject({ processed: true, state: "downgrade_scheduled" });
+    expect(testFixture.database.prepare(`
+      SELECT state, scheduled_plan_id AS scheduledPlanId, scheduled_price_id AS scheduledPriceId
+      FROM shop_subscriptions WHERE id = 'billing-sub-hardening'
+    `).get()).toEqual({ state: "downgrade_scheduled", scheduledPlanId: "plan_starter_v1", scheduledPriceId: "price_starter_global_v1" });
+    expect(testFixture.database.prepare("SELECT status FROM subscription_change_requests WHERE id = 'sreq-scheduled-change'").get()).toEqual({ status: "completed" });
     testFixture.database.close();
   });
 

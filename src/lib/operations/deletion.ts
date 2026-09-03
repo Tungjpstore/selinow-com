@@ -1,10 +1,12 @@
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId, createOpaqueToken } from "../core/ids";
+import { encodeCreatedIdCursor, parseCreatedIdCursor } from "../core/pagination";
 import { CloudflareProviderError, CloudflareSaaSClient } from "../domains/cloudflare";
 import type { AppBindings } from "../platform/bindings";
 import { TelegramClient, TelegramProviderError } from "../telegram/client";
 import { loadActiveTelegramCredential } from "../telegram/credentials";
+import { describePlatformAdminAccess } from "../tenants/store";
 import {
   createOperationsAuditEvent,
   prepareOperationsAuditForDeletionRequestVersion,
@@ -327,16 +329,15 @@ async function requirePlatformDeletionReader(input: {
   env: AppBindings;
   userId: string;
 }): Promise<"owner" | "risk" | "support"> {
-  const row = await input.env.PLATFORM_DB.prepare(`
-    SELECT role
-    FROM platform_admins
-    WHERE user_id = ? AND status = 'active'
-    LIMIT 1
-  `).bind(input.userId).first<{ role: "owner" | "risk" | "support" }>();
-  if (row === null || !["owner", "risk", "support"].includes(row.role)) {
+  // 2FA-aware lookup: un-enrolled admins are denied on deletion queue reads.
+  const access = await describePlatformAdminAccess({ env: input.env, userId: input.userId });
+  if (access.kind === "two_factor_required") {
+    throw new AppError("admin_two_factor_required", 403);
+  }
+  if (access.kind !== "authorized" || !["owner", "risk", "support"].includes(access.role)) {
     throw new AppError("authorization_denied", 403);
   }
-  return row.role;
+  return access.role;
 }
 
 function mapActiveDeletionAdmin(row: ActiveDeletionAdminRow): ActiveDeletionRequestAdminView {
@@ -362,15 +363,17 @@ function mapActiveDeletionAdmin(row: ActiveDeletionAdminRow): ActiveDeletionRequ
 }
 
 export async function listActiveDeletionRequests(input: {
+  cursor?: string | null;
   env: AppBindings;
   limit?: number;
   userId: string;
-}): Promise<{ canOperate: boolean; requests: ActiveDeletionRequestAdminView[] }> {
+}): Promise<{ canOperate: boolean; hasMore?: boolean; nextCursor?: string | null; requests: ActiveDeletionRequestAdminView[] }> {
   const role = await requirePlatformDeletionReader({ env: input.env, userId: input.userId });
   const limit = input.limit ?? 100;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new AppError("validation_failed", 400, ["limit_invalid"]);
   }
+  const cursor = parseCreatedIdCursor(input.cursor);
   const placeholders = ACTIVE_DELETION_STATUSES.map(() => "?").join(", ");
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT requests.id AS deletionRequestId,
@@ -390,17 +393,26 @@ export async function listActiveDeletionRequests(input: {
     FROM shop_deletion_requests AS requests
     INNER JOIN shops ON shops.id = requests.shop_id
     WHERE requests.status IN (${placeholders})
-    ORDER BY CASE requests.status
-      WHEN 'failed' THEN 4
-      WHEN 'retention_hold' THEN 3
-      WHEN 'blocked' THEN 2
-      ELSE 1
-    END DESC, requests.updated_at DESC, requests.id DESC
+      AND (? IS NULL OR requests.created_at < ? OR (requests.created_at = ? AND requests.id < ?))
+    ORDER BY requests.created_at DESC, requests.id DESC
     LIMIT ?
-  `).bind(...ACTIVE_DELETION_STATUSES, limit).all<ActiveDeletionAdminRow>();
+  `).bind(
+    ...ACTIVE_DELETION_STATUSES,
+    cursor?.createdAt ?? null,
+    cursor?.createdAt ?? null,
+    cursor?.createdAt ?? null,
+    cursor?.id ?? null,
+    limit + 1,
+  ).all<ActiveDeletionAdminRow>();
+  const page = rows.results.slice(0, limit);
+  const last = page.at(-1);
   return {
     canOperate: role === "owner" || role === "risk",
-    requests: rows.results.map(mapActiveDeletionAdmin),
+    hasMore: rows.results.length > limit,
+    nextCursor: rows.results.length > limit && last !== undefined
+      ? encodeCreatedIdCursor({ createdAt: last.createdAt, id: last.deletionRequestId })
+      : null,
+    requests: page.map(mapActiveDeletionAdmin),
   };
 }
 
@@ -623,17 +635,24 @@ async function requirePlatformDeletionOperator(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<{ shopId: string }> {
-  const row = await input.env.PLATFORM_DB.prepare(`
-    SELECT shops.id AS shopId, platform_admins.role
-    FROM platform_admins
-    INNER JOIN shops ON shops.public_id = ?
-    WHERE platform_admins.user_id = ? AND platform_admins.status = 'active'
-    LIMIT 1
-  `).bind(input.shopPublicId, input.userId).first<{ role: string; shopId: string }>();
-  if (row === null || !new Set(["owner", "risk"]).has(row.role)) {
+  // 2FA-aware lookup: un-enrolled admins cannot issue legal-hold mutations.
+  const access = await describePlatformAdminAccess({ env: input.env, userId: input.userId });
+  if (access.kind === "two_factor_required") {
+    throw new AppError("admin_two_factor_required", 403);
+  }
+  if (access.kind !== "authorized" || !new Set(["owner", "risk"]).has(access.role)) {
     throw new AppError("authorization_denied", 403);
   }
-  return { shopId: row.shopId };
+  const shop = await input.env.PLATFORM_DB.prepare(`
+    SELECT shops.id AS shopId
+    FROM shops
+    WHERE shops.public_id = ?
+    LIMIT 1
+  `).bind(input.shopPublicId).first<{ shopId: string }>();
+  if (shop === null) {
+    throw new AppError("authorization_denied", 403);
+  }
+  return { shopId: shop.shopId };
 }
 
 export async function cancelShopDeletion(input: {

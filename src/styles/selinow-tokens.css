@@ -40,6 +40,14 @@
   --sln-state-warning: #d97706;
   --sln-state-danger: #dc2626;
   --sln-state-info: #2563eb;
+  --sln-success-text: #047857;
+  --sln-warning-text: #92400e;
+  --sln-danger-text: #b91c1c;
+  --sln-info-text: #1d4ed8;
+  --sln-action-primary-ink: #fff;
+  --sln-disabled-ink: var(--sln-slate-600);
+  --sln-disabled-bg: var(--sln-slate-200);
+  --sln-focus: 0 0 0 3px rgb(59 130 246 / 32%);
 
   --sln-tint-indigo: #eef0ff;
   --sln-tint-blue: #eff6ff;
@@ -121,83 +129,30 @@
   --sln-duration-panel: 240ms;
   --sln-duration-marketing: 400ms;
   --sln-ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --sln-ease-spring: cubic-bezier(.16, 1, .3, 1);
+
+  /* ── Selinow Soft accent spine (EX0) ─────────────────────────────────────
+   * One warm-violet family shared by marketing, auth, and onboarding; the
+   * console keeps its own --sln-console-* Soft projection (console.css).
+   * Contrast roles: accent-strong is the fill-safe tone for white ink
+   * (#6957DE on white ≈ 5.2:1); accent is for tints, borders, and dark-ink
+   * surfaces (white on #7C6AF0 ≈ 4.0:1 — never use it as a white-text fill). */
+  --sln-soft-accent: #7C6AF0;
+  --sln-soft-accent-strong: #6957DE;
+  --sln-soft-accent-violet: #8B7BFF;
+  --sln-soft-focus: #7C6AF0;
+  --sln-soft-canvas: #EBE6F8;
+  --sln-soft-surface: #F5F2FB;
+  --sln-soft-border: #DAD2EE;
+  --sln-soft-border-strong: #C9BDE4;
+  --sln-soft-tint: #EDE8FB;
+
   --sln-z-base: 0;
   --sln-z-sticky: 20;
   --sln-z-dropdown: 40;
   --sln-z-drawer: 60;
   --sln-z-dialog: 80;
   --sln-z-toast: 100;
-
-  /* Compatibility aliases retained while existing surfaces move to PromptOS names. */
-  --selinow-brand-indigo: var(--sln-brand-indigo);
-  --selinow-brand-blue: var(--sln-brand-blue);
-  --selinow-brand-violet: var(--sln-brand-violet);
-  --selinow-brand-teal: var(--sln-brand-teal);
-  --selinow-ink-950: var(--sln-ink-950);
-  --selinow-ink-900: var(--sln-ink-900);
-  --selinow-ink-800: var(--sln-ink-800);
-  --selinow-ink-700: var(--sln-ink-700);
-  --selinow-slate-600: var(--sln-slate-600);
-  --selinow-slate-500: var(--sln-slate-500);
-  --selinow-slate-400: var(--sln-slate-400);
-  --selinow-slate-300: var(--sln-slate-300);
-  --selinow-slate-200: var(--sln-slate-200);
-  --selinow-slate-100: var(--sln-slate-100);
-  --selinow-cloud-50: var(--sln-cloud-50);
-  --selinow-white: var(--sln-white);
-  --selinow-bg-canvas: var(--sln-bg-canvas);
-  --selinow-bg-surface: var(--sln-bg-surface);
-  --selinow-bg-subtle: var(--sln-bg-subtle);
-  --selinow-bg-inverse: var(--sln-bg-inverse);
-  --selinow-bg-raised: var(--sln-bg-surface);
-  --selinow-bg-sidebar: var(--sln-ink-950);
-  --selinow-text-primary: var(--sln-text-primary);
-  --selinow-text-secondary: var(--sln-text-secondary);
-  --selinow-text-muted: var(--sln-text-muted);
-  --selinow-text-inverse: var(--sln-text-inverse);
-  --selinow-border: var(--sln-border-default);
-  --selinow-border-strong: var(--sln-border-strong);
-  --selinow-border-control: var(--sln-slate-500);
-  --selinow-action-primary: var(--sln-action-primary);
-  --selinow-action-primary-hover: var(--sln-action-primary-hover);
-  --selinow-action-primary-ink: var(--sln-white);
-  --selinow-action-secondary: var(--sln-action-secondary);
-  --selinow-focus-ring: var(--sln-focus-ring);
-  --selinow-success: var(--sln-state-success);
-  --selinow-success-text: #047857;
-  --selinow-warning: var(--sln-state-warning);
-  --selinow-warning-text: #92400e;
-  --selinow-danger: var(--sln-state-danger);
-  --selinow-state-danger: var(--sln-state-danger);
-  --selinow-danger-text: #b91c1c;
-  --selinow-info: var(--sln-state-info);
-  --selinow-info-text: #1d4ed8;
-  --selinow-disabled-ink: var(--sln-slate-600);
-  --selinow-disabled-bg: var(--sln-slate-200);
-  --selinow-success-soft: var(--sln-tint-success);
-  --selinow-warning-soft: var(--sln-tint-warning);
-  --selinow-danger-soft: var(--sln-tint-danger);
-  --selinow-action-soft: var(--sln-tint-indigo);
-  --selinow-gradient: var(--sln-brand-gradient);
-  --selinow-font-sans: var(--sln-font-sans);
-  --selinow-font-mono: var(--sln-font-mono);
-  --selinow-radius-sm: var(--sln-radius-sm);
-  --selinow-radius-md: var(--sln-radius-md);
-  --selinow-radius-lg: var(--sln-radius-lg);
-  --selinow-radius-xl: var(--sln-radius-xl);
-  --selinow-radius-pill: var(--sln-radius-pill);
-  --selinow-shadow-xs: var(--sln-shadow-xs);
-  --selinow-shadow-sm: var(--sln-shadow-sm);
-  --selinow-shadow-md: var(--sln-shadow-md);
-  --selinow-shadow-lg: var(--sln-shadow-lg);
-  --selinow-focus: 0 0 0 3px rgb(59 130 246 / 32%);
-  --selinow-ease: var(--sln-ease-standard);
-  --selinow-motion-fast: var(--sln-duration-fast);
-  --selinow-motion-default: var(--sln-duration-default);
-  --selinow-motion-panel: var(--sln-duration-panel);
-  --selinow-motion-slow: var(--sln-duration-marketing);
-  --selinow-reading-width: var(--sln-container-reading);
-  --selinow-marketing-width: var(--sln-container-marketing);
 }
 
 [data-selinow-theme="dark"],
@@ -222,13 +177,13 @@
   --sln-state-warning: #fbbf24;
   --sln-state-danger: #f87171;
   --sln-state-info: #60a5fa;
-  --selinow-action-primary-ink: var(--sln-ink-900);
-  --selinow-success-text: #6ee7b7;
-  --selinow-warning-text: #fcd34d;
-  --selinow-danger-text: #fca5a5;
-  --selinow-info-text: #93c5fd;
-  --selinow-disabled-ink: var(--sln-slate-300);
-  --selinow-disabled-bg: var(--sln-ink-700);
+  --sln-success-text: #6ee7b7;
+  --sln-warning-text: #fcd34d;
+  --sln-danger-text: #fca5a5;
+  --sln-info-text: #93c5fd;
+  --sln-action-primary-ink: var(--sln-ink-900);
+  --sln-disabled-ink: var(--sln-slate-300);
+  --sln-disabled-bg: var(--sln-ink-700);
 }
 
 [data-merchant-theme] {

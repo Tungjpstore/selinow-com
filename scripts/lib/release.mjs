@@ -34,6 +34,7 @@ export const REQUIRED_PRODUCTION_VARS = [
   "EMAIL_FROM_ADDRESS",
   "EMAIL_FROM_NAME",
   "EXPORT_KEY_VERSION",
+  "GOOGLE_OAUTH_REDIRECT_URI",
   "INVENTORY_KEY_VERSION",
   "LOG_LEVEL",
   "MAGIC_LINK_GLOBAL_RATE_LIMIT",
@@ -63,6 +64,8 @@ export const REQUIRED_WORKER_SECRET_NAMES = [
   "IDENTIFIER_HMAC_SECRET",
   "INVENTORY_KEK_V1",
   "MAGIC_LINK_SECRET",
+  "GOOGLE_OAUTH_CLIENT_ID",
+  "GOOGLE_OAUTH_CLIENT_SECRET",
   "SESSION_SECRET",
   "TURNSTILE_SECRET_KEY",
 ];
@@ -149,6 +152,21 @@ export const REQUIRED_PRODUCTION_ROLLBACK_INVARIANTS = Object.freeze([
   "idx_auth_request_admissions_requester_window",
   "idx_auth_request_admissions_expiry",
   "idx_auth_request_admissions_subject_window",
+  "auth_google_identities",
+  "idx_auth_google_identities_subject",
+  "idx_auth_google_identities_user",
+  "auth_google_identities_identity_immutable",
+  "auth_google_oauth_states",
+  "idx_auth_google_oauth_states_lookup",
+  "idx_auth_google_oauth_states_expiry",
+  "idx_auth_google_oauth_states_retention",
+  "auth_google_oauth_states_pending_insert_guard",
+  "auth_google_oauth_states_transition_guard",
+  "auth_otp_admissions",
+  "idx_auth_otp_admissions_window",
+  "idx_auth_otp_admissions_requester_window",
+  "idx_auth_otp_admissions_subject_window",
+  "idx_auth_otp_admissions_expiry",
   "telegram_updates",
   "telegram_actions",
   "telegram_action_history",
@@ -328,6 +346,414 @@ const PRODUCTION_DATABASE_INVARIANT_REGISTRY = Object.freeze({
     }),
   }),
   "0098_auth_email_otp_system.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  "0099_account_security_hardening.sql": Object.freeze({
+    columns: Object.freeze({
+      "platform_users.two_factor_enabled": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "platform_users.two_factor_enabled_at": Object.freeze({ defaultValue: "NULL", notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      auth_login_history_no_delete: "0bfdc944c5c7c37612ebb86a5b2b9c94169f797a0d9372cd9c4c3c3a508e87e5",
+      auth_login_history_no_update: "a99b8fc3d10d6bea01f69318420ad7dd7cfd69f70b2d1d145cfbf6847a8823c2",
+      idx_auth_login_history_user_created: "cbc4fa642df155b0ee7078829fb5623fe03f1f474a8b0e337cd8e860a2e6282a",
+    }),
+  }),
+  "0100_automation_rule_builder.sql": Object.freeze({
+    columns: Object.freeze({
+      "automation_tasks.rule_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_automation_customer_tags_shop_customer: "447912f73769a78745215a2bba15a3d8b4f50120dd598a72c7b1dd48fcbb3d1a",
+      idx_automation_rule_action_runs_shop_rule: "3a3657816b5519b7be2a10c7b766901e14e15a28cdbe683d82faab5242aeb9a9",
+      idx_automation_rules_shop_create_idempotency: "fb845066c26d67ff34c526746056050afb26fbbe925e57be2972cd7aa1c163a9",
+      idx_automation_rules_shop_trigger_enabled: "8a387bb0ff733013fb1ea7a432805bec2f02b51015473392b0db25bab42779bd",
+      idx_automation_rules_shop_updated: "0e6087712314b43cc74b1a5013b1fac6d45eeaaa7fe4e407e3d6b765ef4c8005",
+      idx_automation_tasks_shop_rule_created: "e6d905262b2095c5c0f7ece120c14b3f2c3ecb8cdb63ee1f85ac56add08f1d77",
+    }),
+  }),
+  "0101_storefront_media_assets.sql": Object.freeze({
+    columns: Object.freeze({
+      "media_assets.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "media_assets.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.public_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.kind": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.object_key": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.content_type": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.byte_size": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "media_assets.content_sha256": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.object_etag": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.created_by_user_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "media_assets.deleted_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "product_images.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "product_images.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.product_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.media_asset_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.sort_order": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "product_images.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "product_images.deleted_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_media_assets_shop_status: "56e7fa2194fd99113580a344d9cba7e3fbad860a55d7b8be34151b13d4bbfe30",
+      idx_product_images_product: "d628c689bba7b14766b3106fe7d7d992259da5979f6a157ca2b8241e8f13be65",
+      media_assets: "61afe23ed9be198bc12abf527191e701bdc37780689f47926092cc1ba7a2b0ff",
+      media_assets_identity_immutable: "66f369cca92cb4921907e9845c46334e1bc97a7bf0811bc003bfdd00bae59b53",
+      media_assets_transition_guard: "05dbad7c05ef62525e14726ffbb82ff3a31dd447024347ccbbf6cc9f26e4de82",
+      product_images: "b769bf28c672bccc9291a48784559a52c6d13bab6a57a9c3aa3edb09455eafe5",
+      product_images_identity_immutable: "214d387bb1e4dc0d7b01cd564c14f5c2b1867ab46dbbba9d27b55f663a33f0fa",
+      product_images_transition_guard: "e739b429922139787c62c870159e29cffd199b0b0dc6dd4071f417697616a4b2",
+    }),
+  }),
+  "0102_physical_goods_vertical.sql": Object.freeze({
+    columns: Object.freeze({
+      "shops.vertical": Object.freeze({ defaultValue: "'digital'", notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "products.delivery_mode": Object.freeze({ defaultValue: "'digital'", notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "orders.shipping_method_name": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "orders.shipping_fee_minor": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "fulfillments.shipping_state": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "fulfillments.carrier": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "fulfillments.tracking_code": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "variant_stock_levels.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "variant_stock_levels.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "variant_stock_levels.variant_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "variant_stock_levels.on_hand": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "variant_stock_levels.reserved": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "variant_stock_levels.active_reservation_token": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "variant_stock_levels.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "shop_shipping_methods.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.name": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.fee_minor": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "shop_shipping_methods.free_over_minor": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "INTEGER" }),
+      "shop_shipping_methods.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.sort_order": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "shop_shipping_methods.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "shop_shipping_methods.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "order_shipping_addresses.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.order_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.full_name": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.phone": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.address_line": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.ward": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.district": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.province": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.notes": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "order_shipping_addresses.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_order_shipping_addresses_order: "d0d92b593f354e03f587ff91212dcae7ff7e8cbf0b147397eaa16e4db60bfe62",
+      idx_product_variants_shop_id: "d4456020e4f70b628a40d33fa9334bd0426cb2f3a764e7a090455968430ce1ac",
+      idx_shop_shipping_methods_shop: "990c4548437975494c6a992d48e2f14327bd380330691e55dc223d4238534ad3",
+      idx_variant_stock_levels_variant: "61b065e97908b93c54efc9d052afc78558508e940d62c3f8cf58a0f669dd6d06",
+      order_shipping_addresses: "b4345def18abc7aa238eb4fdbcf5accc7d9e9622c5c9436eb17934b9e214dda9",
+      order_shipping_addresses_identity_immutable: "336a0c9583630b45d5842e0982066ecade0aede5449a8494a9bc434b301f47ab",
+      shop_shipping_methods: "05bef084e15e6225461b5d47a7060ad6d68b9b2b651f85075e3b004c4af4ec1c",
+      shop_shipping_methods_identity_immutable: "2a14d6bbd1be2dd70d4e78ed03fb79b741ba060da8c6d7dbf51db3150735be21",
+      shop_shipping_methods_transition_guard: "14f088052d0b818aab379c4b94485de650a8a917d9718ed05a62c094e4fd95aa",
+      variant_stock_levels: "af580bdab62db761db5ce0fa25064c337131628811d2a067a7c8ac6874190356",
+      variant_stock_levels_identity_immutable: "5e0c41010514558fc2c18e4afa8a8548dadd88c9338c65ee4b6b8b1563076bc3",
+    }),
+  }),
+  "0103_appointment_booking_vertical.sql": Object.freeze({
+    columns: Object.freeze({
+      "product_variants.duration_minutes": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "INTEGER" }),
+      "booking_resources.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "booking_resources.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.name": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.role_label": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resources.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "booking_resource_schedules.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.resource_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.weekday": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "booking_resource_schedules.start_minute": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "booking_resource_schedules.end_minute": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "booking_resource_schedules.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_resource_schedules.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "booking_holds.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.resource_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.variant_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.hold_token": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.start_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.end_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.released_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "booking_holds.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "bookings.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.order_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.order_item_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.variant_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.resource_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.start_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.end_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "bookings.cancelled_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      booking_holds: "80cf2fb0d53e6165e0379a8ba3a741f7b33e2c2af2707aac22522e0c525947ea",
+      booking_holds_identity_immutable: "331dc7f902e94627374921251a28e63bfca45dda275469ec88a8f5d987999c1c",
+      booking_holds_transition_guard: "6fb0f4b5387bd75c95abf4600a325e31ffe76a10b39bf0d81fe93d0f552dfb8f",
+      booking_resource_schedules: "59e51688ff958decfb6b7037de33bad8028f97cfa46bd46371fe0d73666eec7d",
+      booking_resource_schedules_identity_immutable: "94b063fa831ff702b85e3e44364a0d95cfc0ce9a643c3b390fcb4abc96caf579",
+      booking_resources: "66b012941acd7fefa1472d37a6f572f6a97fb6eea701a78d7df1660b09fb2888",
+      booking_resources_identity_immutable: "7d0ebf89ced39158a96cf52a1973f7d4d8d4601e5ed689d2720d891c62c21c66",
+      bookings: "9b5dc58e9993330ef0718597b87202fdebd3643a7e272308454b007d0397dc23",
+      bookings_identity_immutable: "396b2dd027cde1e27761d918ffb2f378da48540dd947dfa801ea1dfa368de8cf",
+      bookings_transition_guard: "d2594ba6f9c8a0e3bf042829333edfa2e33839700c398d3469949086c5309328",
+      idx_booking_holds_overlap: "7ad3020ad0cd30b1cae78ced26a1b28d86e245d7b918cedaa1f2a66944be95d6",
+      idx_booking_resource_schedules_resource: "68a6c15481e510b7ec6a97e75faaaf318a4461c248c33973171129906c0999b8",
+      idx_booking_resources_shop: "80fb03e1163c67f40840236d62e735d1830170468397ebb61b0c1f1ad8022ec9",
+      idx_bookings_resource_start: "649746d2f95b1b0a50909fb7c6f7eaecd40735f888d1624f8047ae603b265622",
+      idx_bookings_shop_start: "e34b81ca5f9ff5c55f9fe45b435b4a062dff29fb76f2fa1b638a3cddef4f22f0",
+    }),
+  }),
+  "0104_remediation_completion.sql": Object.freeze({
+    columns: Object.freeze({
+      "payment_remediation_requests.amount_minor": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "payment_remediation_requests.completed_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.currency": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.failure_code": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "payment_remediation_requests.idempotency_key_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.kind": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.order_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.payment_exception_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.provider_reference_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.public_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.reason_code": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.request_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.requested_by_user_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.reviewed_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.reviewed_by_user_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.shop_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "payment_remediation_requests.version": Object.freeze({ defaultValue: "1", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+    }),
+    objects: Object.freeze({
+      idx_payment_remediation_requests_active_exception: "c3604378e620239d703aa9e1c989398e08d64726d1ac2bf408798d6150f048d3",
+      idx_payment_remediation_requests_admin_status: "b600ab9532a369961916fcd54bab819aa8baa85c79e2d7717f7f088faac8dc9a",
+      idx_payment_remediation_requests_shop_status: "67118a4097df19db09e2a8dbc668ec1ab4149be76b4e25cd73e04908afc431d5",
+      payment_remediation_requests_no_delete: "628e54d77cf0bd7584f6503fbb8e68e9752583652d11ca628ebd0e2c03da0367",
+      payment_remediation_requests_scope_insert_guard: "198c6aa1abf4254f6a1f4dfe3a9582a944949bd6ec6ba4bfa9131ca47e43e125",
+      payment_remediation_requests_transition_guard: "a50886c52ea06669fe04124e4ab65011af851d1fb1db84f04f7fe1a9819619e9",
+    }),
+  }),
+  "0105_ops_platform_indexes.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_delivery_jobs_platform_attention: "e338257f5b8705f7e92f60b643e56ec99faa302629438c8f54314307a305b7bf",
+      idx_payment_exceptions_platform_status: "519fe99e4091fa7693a062603b4e47b2222c0ffee195c178b464bd1c273dfc94",
+      idx_queue_dead_letters_platform_status: "e8fe97147c2c5e04f4b0d2d7895d51b1d1b70186244ea52bcc58431a87a4bab3",
+    }),
+  }),
+  // 0106 only republishes plan_prices provider references (data-only UPDATEs);
+  // it introduces no schema objects or columns.
+  "0106_publish_dodo_plan_prices.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  // Storefront template completion (CD program): seller-authored product spec
+  // attributes plus the privacy-preserving buyer order-history email index.
+  "0107_storefront_template_completion.sql": Object.freeze({
+    columns: Object.freeze({
+      "orders.customer_email_lookup_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "products.attributes_json": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_orders_shop_email_created: "d6386b9052ea8e96e2e8ced0a2b298c6f09d753eb2fde686220816f195ff8212",
+    }),
+  }),
+  // EX3.1: tenant-leading index for the seller metrics day aggregate.
+  "0109_seller_metrics_index.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_orders_shop_paid_at: "1fbe4c8591f6548d021f306e24304c7dcfbe4e43632b3f0045fa8a0b2fc5cdb6",
+    }),
+  }),
+  "0108_dodo_billing_reconciliation.sql": Object.freeze({
+    columns: Object.freeze({
+      "shop_subscriptions.scheduled_plan_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "shop_subscriptions.scheduled_price_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "shop_subscriptions.scheduled_effective_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "shop_subscriptions.scheduled_change_request_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "subscription_change_requests.provider_acknowledged_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "subscription_change_requests.reconciliation_attempts": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "subscription_change_requests.next_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "subscription_change_requests.last_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "subscription_change_requests.reconciliation_failure_code": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      idx_shop_subscriptions_scheduled: "4575b32b806a6f7f9c7344bc2825592a05d97bfec9757d1848a04100855abf13",
+      idx_subscription_change_requests_reconciliation: "b9d0c9f1ae1f23dd4e29817aa4c69c4d483248fb22f19074bdfa0ec06d7e5105",
+      idx_subscription_change_requests_request_subscription: "9a40135c8a9fd3ea83841c9337a6df8d491d7e509dd92c91ed825b6654242f11",
+      shop_subscriptions_scheduled_target_guard: "c8a2d870fe7df1232659ca704c0079520a8571e76d3b0dd9d24d9102a20aeee6",
+      shop_subscriptions_scheduled_target_update_guard: "45cc73c4600641490118874124d60bb23779bda40d92ed8307ed4a9b9b9bb7f7",
+      subscription_change_requests_reconciliation_guard: "3f3a3dad86a3b8de9121aa14146c720abfa21cef27cddbf7988530c9dedf848e",
+    }),
+  }),
+  "0110_repair_subscription_ledger_foreign_keys.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      subscription_change_requests: "20998d6f6ef158f71222f61a706ffe439d4c5efe690399381f505a056fccbf59",
+      subscription_events: "e5db98135cc1615b6cf85c019acf50797590eeb3ed10fdaed8c078ac9a7c5093",
+      usage_events: "c64f608f73cd0543c1bd8e91b10f64261efa9d425486c8b4cfd143280072fafe",
+    }),
+  }),
+  "0111_allow_scheduled_plan_change_cancel.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      shop_subscriptions_scheduled_target_guard: "0899bed8897d795f9acf62aa45eb40da3cbcb634d449b4053ce74b92971f44fd",
+      shop_subscriptions_scheduled_target_update_guard: "1ab24f8869fdcff78426268cf93d28a8e14cdc2a5ebcd47f47856d67502e5688",
+      subscription_change_requests: "4442943e663792ac68fa880a82e72a506d9f240f37ea317905c2a351276b02c8",
+      subscription_change_requests_transition_guard: "33a261b3820d0a8a9e6a0c9a80d04f937747a71b52093cce98dd06d130125b5d",
+    }),
+  }),
+  "0112_google_auth_foundation.sql": Object.freeze({
+    columns: Object.freeze({
+      "auth_google_identities.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "auth_google_identities.user_id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.subject_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.subject_key_version": Object.freeze({ defaultValue: "'v1'", notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.last_authenticated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_identities.version": Object.freeze({ defaultValue: "1", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "auth_google_oauth_states.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "auth_google_oauth_states.flow": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.initiated_user_id": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.state_lookup_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.nonce_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.browser_binding_hash": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.redirect_uri": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.return_to": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.code_verifier_ciphertext_b64": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.code_verifier_iv_b64": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.key_version": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.status": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.expires_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.consumed_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.revoked_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.updated_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_google_oauth_states.version": Object.freeze({ defaultValue: "1", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+    }),
+    objects: Object.freeze({
+      auth_request_admissions: "410b631f2c97a144e3cfe8ddcf7669e0da77ee900adcf1d746f9f9468b6f907d",
+      idx_auth_request_admissions_window: "948c62c46ee63a42a09d18ba42f18a352c1c267c6ab23e102944d5c1e68ea73e",
+      idx_auth_request_admissions_requester_window: "0eae88a37e6f001da33ac076fa37527c747d327580fa25b191e13b050d164734",
+      idx_auth_request_admissions_expiry: "c1d1f0912034e724af8c68488f77bae0f9dcf9439fdf9eef0bd69b956180ef06",
+      idx_auth_request_admissions_subject_window: "fd963cf7fdc62169d6f43742b5d0b8e5dea620fd15feed6b6962675bf61682ac",
+      auth_google_identities: "a30428790d372efd6b3bb9da98444d23876647df6f8d2643c1832c09181edbf8",
+      idx_auth_google_identities_subject: "c2b4ab79c9fcb4eb5620031420b02939cba0d20bbff879d4628dc44f8d30cf33",
+      idx_auth_google_identities_user: "b1924243a8dc83b6e95cbaf5c952e1cc23e3262a73dc4fcfcf5c147208ae0cfe",
+      auth_google_identities_identity_immutable: "10f24b400912e35dcd7d787dc5de322f359101188c0ce2f0e912c8cb112abfdb",
+      auth_google_oauth_states: "c54bc9746b1223a03e6771a356e54ad72a63474e316c5278984a130a11367bb7",
+      idx_auth_google_oauth_states_lookup: "b44c293703dc872473b8fc2f460997579295abd90d2b50402952fc5d3f266dfd",
+      idx_auth_google_oauth_states_expiry: "89d835ab256f2590ff4b41ffbd93d47748191708985019f801588108eeb2da62",
+      idx_auth_google_oauth_states_retention: "ffc141f92fc7a1cc467bbff1a66d6a07d3a4b7eb208c2cb6bbbe885862e7b64b",
+      auth_google_oauth_states_pending_insert_guard: "aaeb73462e3baa97e5fdbef4595b0f28311a3a970cc6155371f85083ee503d9c",
+      auth_google_oauth_states_transition_guard: "89d1f14766dce98d5b5c129a3d53f240a3b71eda0e6f89a7816d97c167de4d0e",
+    }),
+  }),
+  "0113_dodo_checkout_reconciliation.sql": Object.freeze({
+    columns: Object.freeze({
+      "billing_checkout_sessions.reconciliation_attempts": Object.freeze({ defaultValue: "0", notNull: 1, primaryKey: 0, type: "INTEGER" }),
+      "billing_checkout_sessions.next_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "billing_checkout_sessions.last_reconciliation_at": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+      "billing_checkout_sessions.reconciliation_failure_code": Object.freeze({ defaultValue: null, notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      billing_checkout_sessions: "3f49e55a14b8ba4c9303d4089f9797426796667bf532ea21930da75435544f1a",
+      idx_billing_checkout_sessions_reconciliation: "cc74f5b4aea8f96ba558affeecc8ec93421bd16afa6725b9d0230fa6d1432edf",
+      idx_billing_checkout_sessions_shop_reconciliation: "cbec4665173db5f6502f1412673ac06f22f17d9b9dab86f6b6519a5a78630bda",
+    }),
+  }),
+  // These migrations retain their original identities because staging has
+  // already applied them under these exact names.
+  "0114_pro_storefront_template_entitlement.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  // Offset-aware seller metrics query the normalized julianday expression.
+  // Keep the index tenant-leading and aligned with the paid-row predicate.
+  "0115_seller_metrics_timestamp_index.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_orders_shop_paid_julianday_id: "c33ebdbb993f08dc65c8530b97070198ae43c0851bdeaf169e85bd7df49e8dec",
+    }),
+  }),
+  "0116_auth_otp_admission.sql": Object.freeze({
+    columns: Object.freeze({
+      "auth_otp_admissions.id": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 1, type: "TEXT" }),
+      "auth_otp_admissions.purpose": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.requester_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.subject_hash": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.window_started_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.window_ends_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+      "auth_otp_admissions.created_at": Object.freeze({ defaultValue: null, notNull: 1, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({
+      auth_otp_admissions: "641ef25c9df25637686dcf96be2c224ad620946ac1f75d0090c53ff4962752f0",
+      idx_auth_otp_admissions_window: "1f84a424b74d92b823ced2a253a582e259ed254e355b914909473330aa2a2afd",
+      idx_auth_otp_admissions_requester_window: "7149a4e43d9a773ca9b64a9ce6324aaab0dcddf17bf1285098740797379f8b57",
+      idx_auth_otp_admissions_subject_window: "f08531fca74d42a585a1de8c7b440101e1908fff7fc6280ea3c6142fee00fbec",
+      idx_auth_otp_admissions_expiry: "81affac85433d3a3412ca07060b8c164c56f6d9d9259488a836b5a3a3c202e0b",
+    }),
+  }),
+  "0117_auth_pending_password.sql": Object.freeze({
+    columns: Object.freeze({
+      "platform_users.pending_password_hash": Object.freeze({ defaultValue: "NULL", notNull: 0, primaryKey: 0, type: "TEXT" }),
+    }),
+    objects: Object.freeze({}),
+  }),
+  "0118_pro_premium_storefront_entitlement.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  "0119_payos_provider_projection_lifecycle.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      payment_integrations_payos_projection_insert: "99269608011f3555c68d412bd4029e2fcb8d9f1a9ea59f616106e5e5fbe2aa0a",
+      payment_integrations_payos_projection_update: "12d497fe20fa4c45150dafb4d200c51ebba1035a1aae753adebecfad9b8cb3a6",
+      payment_provider_connections_status_transition_guard: "4e4e491a896800528b22c32888dc88f25860ebc62a986eb436265920f2e5f31b",
+      payment_provider_connections_webhook_transition_guard: "2e9ce16640b0502b97ee766eea323b68de5becf2de5a7faa6e789d07d71fcf27",
+    }),
+  }),
+  "0120_payos_disconnect_reconnect_identity.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({
+      idx_payos_provider_identity_history_shop: "06a98567215c073f293e22b1e9d378e529c1941854992138d50718517b1d17b4",
+      payos_provider_identity_history: "e98fa2f85d34b9abbf14db68e4d1dabb54f2f2efc5c0a723b8338831339448cb",
+      payment_integrations_payos_identity_history_insert: "cfddc54d16c8affb22fbfff561b65f0cbd627fa3d3fe5e5f9eb83bf93e6366f1",
+      payment_integrations_payos_identity_history_update: "aeaf27cfe1a41a95a720bcaef059dd8cd7117f80b14651ebfd74ceedc7150634",
+      payment_provider_connections_identity_immutable: "56d4a84fc7a5825162e67e9c439f8701e8fbe8442f4f33c136cb4949bbd14ca9",
+    }),
+  }),
+  "0121_payos_disconnect_projection_repair.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  "0122_payos_quarantine_recovery.sql": Object.freeze({
+    columns: Object.freeze({}),
+    objects: Object.freeze({}),
+  }),
+  "0123_payos_in_flight_recovery.sql": Object.freeze({
     columns: Object.freeze({}),
     objects: Object.freeze({}),
   }),
@@ -795,6 +1221,67 @@ export function validateCandidateBoundReleaseEvidence({ evidence, now = new Date
   };
 }
 
+/**
+ * Prove that the candidate UUID used by operational evidence is an immutable
+ * deployable Worker version carrying the reviewed release provenance.
+ */
+export function validateCandidateWorkerVersionEvidence({ evidence, workerVersionInventory } = {}) {
+  const inventory = Array.isArray(workerVersionInventory) ? workerVersionInventory : [];
+  const workerVersionPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+  const inventoryShapeValid = inventory.length > 0 && inventory.every((entry) => (
+    entry !== null
+    && typeof entry === "object"
+    && typeof entry.id === "string"
+    && workerVersionPattern.test(entry.id)
+    && Object.hasOwn(entry, "binding")
+  ));
+  const inventoryIds = inventoryShapeValid ? inventory.map((entry) => entry.id) : [];
+  const matchingEntries = inventoryShapeValid
+    ? inventory.filter((entry) => entry.id === evidence?.candidateWorkerVersion)
+    : [];
+  const candidate = matchingEntries.length === 1 ? matchingEntries[0] : null;
+  const binding = candidate?.binding;
+  const expectedManifestRef = `.wrangler/releases/${evidence?.releaseId ?? ""}/release-manifest.json`;
+  const checks = [
+    makeCheck("evidence.candidateWorkerVersion.liveInventory", inventoryShapeValid),
+    makeCheck(
+      "evidence.candidateWorkerVersion.liveInventoryUnique",
+      inventoryShapeValid && new Set(inventoryIds).size === inventoryIds.length,
+    ),
+    makeCheck("evidence.candidateWorkerVersion.liveCandidate", matchingEntries.length === 1),
+    makeCheck("evidence.candidateWorkerVersion.liveBinding", binding !== null
+      && typeof binding === "object"
+      && binding.commitSha === evidence?.commitSha
+      && binding.treeSha === evidence?.treeSha
+      && binding.releaseId === evidence?.releaseId
+      && binding.manifestRef === expectedManifestRef
+      && binding.role === "candidate"),
+  ];
+  return {
+    checks,
+    missing: checks.filter((check) => !check.ok).map((check) => check.name),
+    ok: checks.every((check) => check.ok),
+  };
+}
+
+export async function inspectLiveCandidateWorkerVersionEvidence(input) {
+  const observation = await (
+    input.workerIdentityImplementation ?? assertProductionWorkerIdentityAdmission
+  )({
+    environment: input.environment,
+    infrastructureAdmissionMode: "pre_candidate",
+    productionSpec: input.productionSpec,
+    repositoryRoot: input.repositoryRoot ?? repositoryRoot,
+    requireCurrentWorkerVersion: true,
+    stagingSpec: input.stagingSpec,
+    wranglerConfig: input.wranglerConfig,
+  });
+  return validateCandidateWorkerVersionEvidence({
+    evidence: input.evidence,
+    workerVersionInventory: observation.deployableWorkerVersionInventory,
+  });
+}
+
 function projectCandidateBoundReleaseEvidence(evidence) {
   return Object.fromEntries(Object.keys(CANDIDATE_BOUND_EVIDENCE_DEFINITIONS).map((section) => {
     const entry = evidence?.[section] ?? {};
@@ -803,6 +1290,7 @@ function projectCandidateBoundReleaseEvidence(evidence) {
       artifactSha256: entry.artifactSha256,
       evidenceRef: entry.evidenceRef,
       observedAt: entry[CANDIDATE_BOUND_EVIDENCE_DEFINITIONS[section].timestampField],
+      workerVersion: candidateBoundEvidenceWorkerVersion(evidence, section),
     }];
   }));
 }
@@ -815,6 +1303,7 @@ function validProductionVar(name, value) {
   if (name === "PLATFORM_BASE_DOMAIN" || name === "SAAS_CNAME_TARGET") return validHostname(value);
   if (name === "RESOURCE_MANIFEST_VERSION") return typeof value === "string" && /^[a-f0-9]{16,64}$/u.test(value);
   if (name === "SESSION_COOKIE_NAME") return value === "selinow_session";
+  if (name === "GOOGLE_OAUTH_REDIRECT_URI") return value === "https://app.selinow.com/api/auth/google/callback";
   return isConfigured(value);
 }
 
@@ -2012,9 +2501,10 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   const quotedObjectNames = objectNames.map((name) => `'${name}'`).join(", ");
   const objectSql = `SELECT type, name, sql FROM sqlite_schema WHERE name IN (${quotedObjectNames}) ORDER BY type, name;`;
   const columnsByTable = Map.groupBy(Object.keys(expectedColumns), (name) => name.split(".")[0]);
-  const columnSql = [...columnsByTable.entries()].map(([table, names]) => (
-    `SELECT '${table}' AS table_name, name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info('${table}') WHERE name IN (${names.map((name) => `'${name.split(".")[1]}'`).join(", ")})`
-  )).join(" UNION ALL ").concat(" ORDER BY table_name, name;");
+  // D1 caps compound SELECT terms at a handful of UNION arms regardless of
+  // payload size, so the column inventory is queried in very small batches
+  // and the rows concatenated.
+  const columnSelectFor = (table) => `SELECT '${table}' AS table_name, name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info('${table}') WHERE name IN (${columnsByTable.get(table).map((name) => `'${name.split(".")[1]}'`).join(", ")})`;
   const dataSql = `SELECT
     (SELECT COUNT(*) FROM shop_subscriptions AS subscription
       WHERE subscription.state = 'trialing'
@@ -2129,15 +2619,49 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
             AND julianday(json_extract(canonical.validation_metadata_json, '$.turnstile.checkedAt')) <= julianday('now'))
       ) AS integrity_0093_custom_domain_canonical,
     (SELECT COUNT(*) FROM auth_request_admissions AS admission
-      WHERE admission.action NOT IN ('magic_link_request', 'shop_create')
+      WHERE admission.action NOT IN ('google_oauth_start', 'magic_link_request', 'shop_create')
         OR length(admission.requester_hash) NOT BETWEEN 16 AND 128
         OR admission.window_ends_at <= admission.window_started_at
         OR (admission.subject_hash IS NOT NULL
           AND length(admission.subject_hash) NOT BETWEEN 16 AND 128)
         OR admission.delivery_permitted NOT IN (0, 1)
-        OR (admission.action = 'shop_create'
+        OR (admission.action IN ('google_oauth_start', 'shop_create')
           AND (admission.subject_hash IS NULL OR admission.delivery_permitted != 1))
       ) AS integrity_0094_auth_request_admission,
+    (SELECT COUNT(*) FROM auth_google_identities AS identity_row
+      WHERE length(identity_row.subject_hash) != 43
+        OR identity_row.subject_hash GLOB '*[^A-Za-z0-9_-]*'
+        OR identity_row.subject_key_version != 'v1'
+        OR identity_row.version <= 0
+        OR identity_row.last_authenticated_at < identity_row.created_at
+        OR identity_row.updated_at < identity_row.last_authenticated_at
+        OR NOT EXISTS (SELECT 1 FROM platform_users AS user_row WHERE user_row.id = identity_row.user_id)
+      ) AS integrity_0112_google_identity,
+    (SELECT COUNT(*) FROM auth_google_oauth_states AS state_row
+      WHERE state_row.flow NOT IN ('link', 'login', 'register')
+        OR (state_row.flow = 'link') != (state_row.initiated_user_id IS NOT NULL)
+        OR state_row.status NOT IN ('pending', 'consumed', 'revoked')
+        OR state_row.expires_at <= state_row.created_at
+        OR state_row.updated_at < state_row.created_at
+        OR (state_row.status = 'pending' AND (state_row.nonce_hash IS NULL OR state_row.browser_binding_hash IS NULL OR state_row.code_verifier_ciphertext_b64 IS NULL OR state_row.code_verifier_iv_b64 IS NULL OR state_row.consumed_at IS NOT NULL OR state_row.revoked_at IS NOT NULL))
+        OR (state_row.status = 'consumed' AND (state_row.nonce_hash IS NOT NULL OR state_row.browser_binding_hash IS NOT NULL OR state_row.code_verifier_ciphertext_b64 IS NOT NULL OR state_row.code_verifier_iv_b64 IS NOT NULL OR state_row.consumed_at IS NULL OR state_row.revoked_at IS NOT NULL))
+        OR (state_row.status = 'revoked' AND (state_row.nonce_hash IS NOT NULL OR state_row.browser_binding_hash IS NOT NULL OR state_row.code_verifier_ciphertext_b64 IS NOT NULL OR state_row.code_verifier_iv_b64 IS NOT NULL OR state_row.consumed_at IS NOT NULL OR state_row.revoked_at IS NULL))
+      ) AS integrity_0112_google_oauth_state,
+    (SELECT CASE WHEN COUNT(*) = 1 THEN 0 ELSE 1 END FROM plans AS plan
+      WHERE plan.id = 'plan_pro_v1'
+        AND plan.code = 'pro'
+        AND plan.is_active = 1
+        AND json_extract(plan.feature_flags_json, '$.premiumStorefrontTemplates') = 1
+      ) AS integrity_0118_pro_entitlement,
+    (SELECT COUNT(*) FROM payment_integrations AS integration
+      WHERE integration.provider = 'payos'
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_provider_connections AS connection
+          WHERE connection.shop_id = integration.shop_id
+            AND connection.legacy_payos_integration_id = integration.id
+            AND connection.provider_code = integration.provider
+        )
+      ) AS integrity_0119_payos_projection,
     (SELECT COUNT(*) FROM outbox_jobs AS job
       WHERE job.kind = 'order_paid' AND job.status != 'completed'
       ) AS integrity_0095_legacy_order_paid_outbox,
@@ -2170,7 +2694,22 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
       WHERE history.integration_generation <= 0
         OR integration.id IS NULL
         OR history.integration_generation > integration.integration_generation
-      ) AS integrity_0097_telegram_action_history;`;
+      ) AS integrity_0097_telegram_action_history,
+    ((SELECT CASE
+        WHEN COUNT(*) = 1
+          AND MIN(CASE
+            WHEN json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true' THEN 1
+            ELSE 0
+          END) = 1
+        THEN 0 ELSE 1
+      END
+      FROM plans
+      WHERE code = 'pro' AND is_active = 1 AND is_public = 1 AND is_assignable = 1)
+      + (SELECT COUNT(*)
+        FROM plans
+        WHERE code != 'pro'
+          AND json_type(feature_flags_json, '$.premiumStorefrontTemplates') = 'true'))
+      AS integrity_0114_pro_premium_flag;`;
   const runner = input.runWranglerImplementation ?? runWrangler;
   const run = (sql, issue) => {
     try {
@@ -2191,7 +2730,7 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
   for (const row of objectRows) {
     let expectedType = "trigger";
     if (typeof row?.name === "string" && row.name.startsWith("idx_")) expectedType = "index";
-    if (["auth_request_admissions", "order_access_recovery_tokens", "payment_credentials", "payment_integrations", "telegram_actions", "telegram_action_history", "telegram_updates"].includes(row?.name)) expectedType = "table";
+    if (["auth_google_identities", "auth_google_oauth_states", "auth_otp_admissions", "auth_request_admissions", "billing_checkout_sessions", "booking_holds", "booking_resources", "booking_resource_schedules", "bookings", "media_assets", "order_access_recovery_tokens", "order_shipping_addresses", "payment_credentials", "payment_integrations", "payos_provider_identity_history", "product_images", "shop_shipping_methods", "subscription_change_requests", "subscription_events", "telegram_actions", "telegram_action_history", "telegram_updates", "usage_events", "variant_stock_levels"].includes(row?.name)) expectedType = "table";
     if (typeof row?.name !== "string" || !Object.hasOwn(expectedObjects, row.name)
       || row.type !== expectedType || typeof row.sql !== "string" || observedObjects.has(row.name)) {
       throw new Error("production_database_invariant_object_query_invalid_result");
@@ -2202,7 +2741,15 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     }
     observedObjects.set(row.name, digest);
   }
-  const columnRows = run(columnSql, "production_database_invariant_column_query");
+  const columnTables = [...columnsByTable.keys()];
+  const columnRows = [];
+  for (let offset = 0; offset < columnTables.length; offset += 4) {
+    const batchSql = columnTables.slice(offset, offset + 4)
+      .map((table) => columnSelectFor(table))
+      .join(" UNION ALL ")
+      .concat(" ORDER BY table_name, name;");
+    columnRows.push(...run(batchSql, "production_database_invariant_column_query"));
+  }
   const observedColumns = {};
   for (const row of columnRows) {
     const key = `${row?.table_name}.${row?.name}`;
@@ -2238,6 +2785,11 @@ export function assertProductionDatabaseInvariantContract(input = {}) {
     "integrity_0095_telegram_update_generation",
     "integrity_0097_telegram_action_generation",
     "integrity_0097_telegram_action_history",
+    "integrity_0112_google_identity",
+    "integrity_0112_google_oauth_state",
+    "integrity_0114_pro_premium_flag",
+    "integrity_0118_pro_entitlement",
+    "integrity_0119_payos_projection",
   ];
   if (dataRows.length !== 1
     || !isDeepStrictEqual(Object.keys(dataRows[0] ?? {}).sort(), expectedDataCodes)

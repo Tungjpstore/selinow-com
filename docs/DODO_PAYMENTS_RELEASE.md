@@ -11,9 +11,11 @@ while only a final staging release can produce accepted provider evidence.
   `live_mode`. The current staging Worker has the API-key and webhook-key
   secret names configured. Production provider secrets remain subject to the
   production release ceremony and are not implied by staging state.
-- Both test and live catalogs are tax-inclusive SaaS subscriptions with a
-  provider-managed 7-day trial. Four products are used per environment so a
-  webhook lookup cannot ambiguously cross currency or amount.
+- Both test and live catalogs are tax-inclusive monthly SaaS subscriptions with
+  provider trials disabled. Selinow's seven-day trial is local D1 entitlement
+  state; opening Dodo checkout must not replace or extend it. Four products are
+  used per environment so a webhook lookup cannot ambiguously cross currency or
+  amount.
 - The canonical staging webhook route is live and rejects an unsigned probe
   with `401 webhook_signature_invalid`. The Dodo test account has exactly one
   usable webhook for that endpoint with the required event contract. This
@@ -182,10 +184,42 @@ UAT blocked and do not run the collector.
    then create post-migration evidence and deploy that same manifest.
 4. Reprobe the canonical webhook route; it must reject unsigned input rather than
    return `404`.
-5. Register the environment-specific Dodo webhook, set the webhook secret through
-   Cloudflare Worker secrets, reconcile the four staging provider references, and
-   execute test-mode checkout -> signed webhook -> subscription UAT.
-6. Revoke temporary audit credentials and preserve only reference-only evidence.
+5. Export the four protected environment-specific product IDs and inspect D1
+   before mutation:
+
+   ```bash
+   DODO_PAYMENTS_ENVIRONMENT=test_mode npm run dodo:catalog:reconcile -- \
+     --env=staging --inspect --json
+   ```
+
+   `--inspect` performs remote SELECT/classification only. It must report one
+   exact four-offer state (`pending`, `already_configured`, `rotation_required`,
+   or `rotated`) and never uses `--file` or `--yes`.
+6. Register the environment-specific Dodo webhook, set the webhook secret through
+   Cloudflare Worker secrets, then reconcile the four staging provider references.
+   The guarded apply marks `dodo_catalog_reconciliation_required=false` only in
+   the same SQL execution that proves all four exact offers are published; the
+   command then re-inspects D1 and fails closed if the marker or catalog disagrees.
+
+   Catalog apply is a release-bound mutation. It must receive the exact fresh
+   staging/production release manifest and uses only the short-lived
+   `CLOUDFLARE_D1_API_TOKEN` inside a pinned Wrangler child process. Ambient
+   `CLOUDFLARE_API_TOKEN`, Wrangler OAuth and provider credentials are never
+   forwarded to that process:
+
+   ```bash
+   DODO_PAYMENTS_ENVIRONMENT=test_mode npm run dodo:catalog:reconcile -- \
+     --env=staging --apply --confirm-catalog-update \
+     --confirm-staging-test-catalog \
+     --release-manifest .wrangler/releases/staging/<release-id>/release-manifest.json
+   ```
+
+   The command performs payment-provider mutation admission before reading the
+   Dodo API key or sending any provider/D1 request. A missing, stale or
+   candidate-mismatched manifest fails closed.
+7. Execute test-mode checkout -> signed webhook -> subscription UAT. Provider
+   checkout must bill the first paid period; it must not create a second trial.
+8. Revoke temporary audit credentials and preserve only reference-only evidence.
 
 Production remains blocked until the non-Dodo admission contract, backup/restore,
 monitoring, rollback, owner, pilot, PayOS and other provider gates are accepted.

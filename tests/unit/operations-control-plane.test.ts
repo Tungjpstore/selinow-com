@@ -558,6 +558,10 @@ describe("operations control plane", () => {
       INSERT INTO platform_admins (user_id, role, status, created_at, updated_at)
       VALUES ('user-ops', 'owner', 'active', ?, ?)
     `).run(now, now);
+    database.prepare(`
+      UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = ?
+      WHERE id = 'user-ops'
+    `).run(now);
     database.exec(`
       INSERT INTO shop_channels (
         id, shop_id, channel_code, status, settings_json, version, created_at, updated_at

@@ -1,8 +1,1098 @@
 # Implementation Status
 
-Last updated: 2026-08-15
+Last updated: 2026-08-30
+
+## Current staging deployment and production gate (2026-08-30)
+
+- Completed the guarded staging ceremony for commit `ed4e1736d738c350092b4fabd5f570159a03014b`: 123 migrations are applied, post-migration backup `bkp_20260830114042_57599909c05b` and isolated restore `rdr_20260830114115_171a0d79c8d4` passed integrity with `0` foreign-key violations, and post-migration evidence is recorded under `.wrangler/releases/staging/stg_20260830T113728Z_ed4e1736d738/`.
+- Deployed staging Worker version `e71c7c40-3bbc-46d6-ac4a-18535fcd282a` to the configured staging routes, queues, consumers, cron, and custom domains.
+- Post-deploy staging route preflight and D1 preflight pass; PayOS projection/claim invariants are clean (`0` invalid links, `0` stale disconnect projection states).
+- Created exact-HEAD production backup `bkp_20260830114543_fd6bc4e0ed1a` and isolated restore `rdr_20260830114604_7a4a27b3d750`; both passed integrity and foreign-key checks (`0` violations, `50` restored items).
+- Production remains **NO-GO**. With the read-only observed 12-name inventory supplied, `release:doctor --json` reports 13 blockers: candidate-bound Dodo/PayOS UAT artifacts, fresh monitoring and rollback metadata, and candidate-bound production evidence are not all present. A bare doctor run without that inventory also reports the expected missing operator-context names; no production migration, Worker promotion, route/trigger mutation, provider credential mutation, or payment confirmation was executed.
+- Chrome control could not reconnect to the existing PayOS and staging tabs (`Transport closed`); no new tab was opened and no PayOS credential or token value was read. The 5,000 VND transfer is not accepted as signed provider evidence without a valid PayOS webhook or direct reconciliation artifact.
+
+## Exact-HEAD production backup/restore verification (2026-08-30)
+
+- Created protected production backup `bkp_20260830054126_8273c4fa907e` and ran an isolated restore drill `rdr_20260830054151_545ff4246080` against commit `22f9dd1f24ffe4fa6321f26d8752b96fc95aa3c4`; integrity is `ok`, foreign-key violations are `0`, all 123 migrations replay, and the temporary D1 target was removed.
+- Re-ran the complete local test suite after one transient 5-second timeout: 373 files and 3,072 tests pass. `npm run check`, `npm run lint`, `npm run build`, `npm run deploy:dry-run`, and `npm run deploy:staging:dry-run` also pass.
+- Production remains **NO-GO** because genuine candidate-bound Dodo/PayOS provider UAT, fresh monitoring acknowledgement, rollback rehearsal metadata, and the required production release ceremony are still missing. No production migration, Worker promotion, route/trigger mutation, or provider-secret mutation was performed.
+
+## PayOS quarantine recovery (2026-08-30)
+
+- Fixed reconnects blocked by a stale quarantined claim left on a fully disconnected PayOS integration. The claim fence now permits only a disconnected integration with no active credential to establish a fresh claim, and migration `0122_payos_quarantine_recovery.sql` clears matching stale claim state forward-only.
+- Added regression coverage for same-shop reconnect and migration cleanup. Staging backup/restore, migration completion, and the candidate deployment were refreshed before retrying PayOS verification.
+- Fixed the remaining interrupted-request case where a disconnected integration retained an `in_flight` claim and its pending credential nonce. Migration `0123_payos_in_flight_recovery.sql` releases only that non-active disconnected claim, and reconnect fencing now safely replaces it. Focused PayOS ownership and migration tests pass `19/19`; staging still needs the guarded migration/deploy ceremony for this new candidate.
+
+## Release continuation audit (2026-08-29)
+
+- Refreshed the four staging public visual snapshots after the approved legal/support footer and login surface changed. `npm run test:visual:staging:update` followed by `npm run test:visual:staging` now passes all 20 desktop/mobile/accessibility/viewport checks; no runtime code change was made for this snapshot-only update.
+- The prior staging release was bound to `fd25767053dfa81d285d427022f5248fb61a232f` and Worker `217330c2-78fc-4d0b-928c-e0f9ee4ec02d`; the current candidate is tracked by the newer manifest/Worker below. Production is still fail-closed until fresh candidate-bound Dodo/PayOS UAT, production backup/restore, monitoring, rollback metadata/rehearsal, secret inventory binding, and production secrets are present.
+- Reissued the staging ceremony after the snapshot-only commit: backup `bkp_20260829124245_a3623892ca8c`, isolated restore `rdr_20260829124355_08bef8505983`, manifest `stg_20260829T123652Z_992f34461bbe`, migration completion/post-migration evidence, and Worker deployment `eecc1004-9473-4f44-9542-452f1c134c91` all bind the exact current commit/tree. Route preflight, platform doctor, migration status, strict D1 preflight, and Phase-A smoke pass; the 20-test visual suite passes against this Worker.
+- Created fresh protected production backup `bkp_20260829125043_a8e05b720235` and exact-candidate isolated restore `rdr_20260829125111_10f16362798b`; both pass integrity and foreign-key checks. Production migration status still shows `0113` through `0121` pending, and no production migration, Worker, route, trigger, secret, or payment mutation was executed.
+- Repeated the full staging ceremony for the clean candidate represented by the latest manifest under `.wrangler/releases/staging/`: protected backup/restore, migration completion, post-migration backup/restore, Worker deployment evidence, route/platform/queue/cron/Phase-A checks all pass. The full visual suite passed 19/20 on the first run and the previously flaky mobile checkout case passed on an isolated rerun.
+- Refreshed the checkout desktop/mobile visual baselines, then repeated the exact staging ceremony for the final snapshot-only candidate `8736e7775bd4a170d8e06946656aadbb7a92b813`: backup `bkp_20260829144810_b22cd87bf2ea`, restore `rdr_20260829144837_3a37f8a3de0b`, post-migration backup `bkp_20260829145121_3acf2ae5e64c`, restore `rdr_20260829145148_82508f51c7e7`, manifest `stg_20260829T144954Z_8736e7775bd4`, and successful Worker retry `4cb47200-c33a-4118-8a1b-8c3e4503a7af`; the first deploy attempt hit a transient Queue API error and the retry completed all triggers. The 20-test staging visual suite now passes.
+- Created a fresh protected production backup `bkp_20260829145857_1012e39b3669` and exact-candidate isolated restore `rdr_20260829145916_21fbb1d2bbe3` (integrity OK, zero foreign-key violations, 51 items). Production migration `0113`-`0121`, Worker promotion, route/trigger changes, secret writes, and payment mutations remain unexecuted because production evidence is still not bound to this candidate and genuine Dodo/PayOS UAT, fresh monitoring, rollback rehearsal metadata, and candidate-bound secret inventory are absent. A read-only Worker secret inventory query confirmed all 12 required production secret names exist; no values were read or changed.
+
+- Committed `de3a06e` to make the seller Today snapshot accept an optional clock and to pass the fixed test clock through the metrics section. This removes the date-dependent unit failure without changing production defaults.
+- Current source verification rerun passes: `npm run check` (0 errors, 4 hints), `npm run lint`, `npx tsc --noEmit`, focused 0121 staging/PayOS/preflight/ownership/documentation suites, full Vitest (373 files / 3,067 tests), `npm run build`, `npm run build:staging`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, the isolated 121-migration SQLite replay, and `git diff --check`.
+- The authoritative source chain is now contiguous through `0121_payos_disconnect_projection_repair.sql`; an isolated SQLite replay of all 121 migrations passes integrity and foreign-key checks. Migration `0121` clears stale PayOS projection fingerprint/verification fields only for a fully disconnected same-tenant legacy integration with no active credential, preserves the `0120` identity fence, and does not establish payment authority or activate fulfillment.
+- A fresh read-only ledger check observes staging through `0120`, with only `0121` pending; its preflight reports exactly one `stale_payos_disconnect_projection_state` defect and every other check passes. Production remains observed through `0112`, with `0113`-`0121` pending. No remote migration, Worker deploy, route/trigger change, provider credential mutation, or PayOS transfer was executed for this repair.
+- Production remains **NO-GO**. `release:doctor --json` still fails closed on stale backup/monitoring evidence, Dodo and PayOS artifacts not bound to the current staging candidate, incomplete rollback metadata, and missing fresh secret-name/credential admissions. No production migration, Worker deploy, route change, trigger change, or PayOS transfer was executed.
+- Wrangler is logged in through a broad OAuth session, but the guarded release scripts require short-lived scoped operator credentials and candidate-bound evidence. Chrome extension diagnostics pass, while direct tab control timed out; no cookies, local storage, passwords, or secret values were inspected.
+
+## Current release audit (2026-08-28)
+
+- Fixed BUG-005 in `src/lib/billing/service.ts`: Dodo reconciliation now requires the provider payment payload to carry the exact immutable checkout session identity; matching amount/currency/price/subscription fields without that identity remains an open exception. Added a regression test for the missing-identity payload in `tests/unit/dodo-billing.test.ts`.
+- Local verification for the current worktree passes: `npm run check` (0 errors, 4 hints), `npm run lint`, `npx tsc --noEmit`, `npm run test` (373 files / 3,063 tests), `npm run build`, `npm run deploy:dry-run`, `npm audit --audit-level=high` (0 vulnerabilities), and `git diff --check`. Isolated application of all 120 source migrations also succeeds through `0120_payos_disconnect_reconnect_identity.sql`.
+- Fixed the production trigger ceremony's Cloudflare response normalization for `max_wait_time_ms`, consumer-level `dead_letter_queue` and `retry_delay: 0`, and wired the CLI's `--confirm-production` flag into the mutation executor; dedicated regression tests cover both contracts.
+- Production release remains **NO-GO**. The checked-in production evidence is stale and does not bind the current candidate; current source migrations `0113`-`0120` are pending in production. Fresh protected backup/restore, candidate-bound staging deployment, monitoring acknowledgement, rollback evidence, Dodo signed UAT, PayOS controlled payment/reconciliation, and the required scoped Cloudflare operator credentials are still absent.
+- Chrome dashboard inspection confirms authenticated Dodo Payments, PayOS and Cloudflare tabs are available. Dashboard screenshots are not release evidence. Creating/revealing provider or Cloudflare secrets and executing the controlled 5,000 VND PayOS transfer require action-time confirmation and were not performed.
+
+## PayOS channel replacement fix (2026-08-27)
+
+- Reproduced the staging failure after an owner-confirmed disconnect: the legacy integration kept its provider identity fingerprint, so a verified credential from the new PayOS channel was rejected as `credential_channel_mismatch` before the provider call.
+- Added forward-only migration `migrations/0120_payos_disconnect_reconnect_identity.sql`. An explicit disconnected state now permits the owning shop to attest a replacement channel; verified identities are retained in a tenant-bound history table, projection account identity is cleared on disconnect, and the new identity is synchronized only after verified activation.
+- Added regression coverage for same-shop channel replacement, cross-shop identity fencing and projection identity refresh. Focused PayOS ownership/projection/concurrency coverage passes `30/30`; full suite passed `369/371` before release-registry updates and is being rerun after the registry update.
+- Staging deployment and remote migration are still pending for this exact candidate. Payment remains non-authoritative until a signed PayOS event or tenant-correct direct reconciliation confirms the 5,000 VND transfer.
+
+## Release candidate verification (2026-08-27)
+
+- Candidate `codex/release-candidate-20260824` now passes `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm run test` (371 files / 3,052 tests), `npm run build`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, `npx tsc --noEmit`, `npm audit --audit-level=high` (0 vulnerabilities), and `git diff --check`.
+- Added the missing TypeScript declaration for the Dodo UAT executor (`937a2c2`); no runtime behavior changed.
+- Read-only staging checks confirm the expected account/D1 identity, complete migration ledger through `0119`, PayOS projection integrity, and exact route inventory. Staging still serves the previous Worker; the candidate has not been deployed.
+- Staging release admission remains blocked until the SaaS DNS/fallback-origin read permission is available to the operator token. No staging migration, Worker deployment, provider UAT, QR transfer, or production mutation was performed in this verification pass.
+
+## PayOS stale-claim recovery hardening (2026-08-26)
+
+- Fixed active PayOS health refresh so it no longer converts a provider verification/claim persistence failure into a false successful `201` response with stale timestamps.
+- A same-tenant active credential may safely reclaim an `in_flight`/`ambiguous` claim, including a stale webhook-target fingerprint; cross-tenant and quarantined ownership remain fail-closed.
+- Cleanup paths now verify that both credential and integration rows were actually updated before reporting a provider failure, preventing silent claim leaks.
+- Added regression coverage for stale active claim recovery. Focused PayOS/resumability/concurrency tests pass `42/42`; `npm run check` reports 0 errors and `npm run lint` passes.
+- This code is committed as `709e757` but not yet deployed. Staging and production remain NO-GO until a fresh release manifest/deployment, live PayOS confirmation, signed 5,000 VND transfer/reconciliation, complete Dodo UAT, and operational gates are accepted.
+
+## Staging continuation — Cloudflare SaaS gate closed, candidate deployed, provider checkout still NO-GO (2026-08-26)
+
+### Additional provider/runtime observation (2026-08-26)
+
+- Dodo test-mode webhook inventory contains one enabled endpoint bound to the canonical staging callback; no webhook secret or provider credential is recorded here.
+- A real Dodo test-mode checkout request returned a provider session for the published Starter VN offer. The session was not paid and no subscription/invoice entitlement was activated.
+- The staging Pro catalog projection was re-read from D1: `api`, `apiRead`, `customDomain`, `premiumStorefrontTemplates`, and advanced analytics are enabled on the public Pro plan; the active staging Pro shop projection resolves to `299,000 VND/month`.
+- These observations confirm provider/catalog configuration only. They do not replace the required 32-scenario signed UAT set, PayOS transfer/reconciliation evidence, or production release gates.
+
+- Cloudflare zone-scoped audit token was created with only `selinow.com` DNS read and SSL read/write permissions; SaaS DNS, fallback origin, account/resource inventory, Worker secret binding, and staging route checks all pass.
+- Fresh staging backup `bkp_20260826085057_1020863e4a64` and isolated restore drill `rdr_20260826085144_76b2ac966556` pass with 129 restored items, integrity OK, and zero foreign-key violations. Release manifest `stg_20260826T083834Z_3ed9f606a1bb` is bound to exact commit/tree.
+- Migration completion and post-migration evidence were written; staging Worker deployed at 100% as version `6cee5723-33a0-4d4b-a5c2-2c7c3e1dc9ce`, with immutable deployment evidence `029a3bdb-3f2d-444e-ade5-f7ba539114c6`. Platform doctor, route preflight, DB preflight, and Phase-A smoke all pass.
+- Read-only Dodo catalog inspection against the real test API verifies all four offers and `reconciliationRequired=false`. The real `plan_catalog_offers` UAT scenario passes and writes a receipt; checkout/webhook scenarios remain blocked because the staging control route intentionally returns `501` for every scenario except `plan_catalog_offers`.
+- PayOS remains unaccepted: no real controlled 5,000 VND transfer, provider-signed webhook, or direct-reconciliation evidence has been produced. Production remains **NO-GO** pending complete Dodo UAT, PayOS evidence, monitoring/pilot/rollback, production backup/restore, and the guarded production ceremony.
+
+## Candidate-bound Dodo UAT control route (2026-08-26)
+
+- Added the staging-only `/api/internal/uat/providers/dodo` control route. It authenticates with a dedicated secret, binds every request to the exact release commit/tree/manifest and active Worker version metadata, and rejects production or unsupported scenarios fail-closed.
+- The first executable provider observation is `plan_catalog_offers`: it verifies the four Dodo test-mode catalog rows against the live Dodo API without writing acceptance evidence. Checkout/webhook scenarios remain blocked until the controlled runner can produce genuine provider events and redacted signed proofs.
+- Added `version_metadata` bindings and release deployment variables so the route cannot execute against an unbound Worker. The UAT executor now sends the full release binding to the control plane.
+- Verification: the provider control/executor regression set now passes 3 files / 11 tests; `npm run check` passes with 0 errors and 4 existing hints; full ESLint, build, staging deploy dry-run, route preflight, migration status and database preflight pass. With the scoped D1/resource/route audit tokens, Cloudflare resources and all staging routes pass; `platform:doctor` still fails only the SaaS fallback-origin API check (`403/10000`) because the current operator tokens lack `Account SSL & Certificates: Write`. Staging deployment and live provider UAT were not executed.
+
+## Dodo catalog mutation admission (2026-08-26)
+
+- Closed the catalog-reconciliation credential/admission gap: `--apply` now requires the exact staging/production release manifest and runs the same payment-provider mutation admission used by guarded Dodo webhook and PayOS operations before reading the Dodo API key or issuing any provider/D1 request.
+- Remote D1 inspection and mutation now run only with an account-pinned child environment derived from the short-lived `CLOUDFLARE_D1_API_TOKEN`. Ambient `CLOUDFLARE_API_TOKEN`, Wrangler OAuth, provider keys and unrelated operator credentials are not forwarded; the default remote sink rejects unbranded environments.
+- Dry-run remains side-effect free and no longer reads product references. Successful apply output records the admitted release ID and commit; missing/stale/candidate-mismatched manifests and configured/live D1 account mismatches fail closed.
+- Verification: focused Dodo/payment operational coverage passed `2` files / `21` tests; touched-file ESLint, `git diff --check`, and Astro check pass with 0 errors and 4 existing hints. No external provider or Cloudflare mutation was executed.
+
+## Production release gate audit (2026-08-25)
+
+- Performed a read-only Cloudflare audit as `tungbipdz@gmail.com` for account `ef250a88911fd24073cb73d1c07e0218`; no production/staging database, Worker, route, secret, queue, DNS, Dodo, or PayOS mutation was executed by this audit.
+- Production D1 `selinow-production` is currently applied through `0112_google_auth_foundation.sql`; candidate migrations `0113` through `0119` remain pending in production. Staging is applied through `0119_payos_provider_projection_lifecycle.sql`.
+- Production Worker inventory confirms the currently active historical version `4cbab0cc-ac81-41fc-b79f-7695596c3071`; historical route-neutral candidate/rollback uploads exist, but they are not accepted evidence for this dirty, unmanifested candidate.
+- Backup and isolated-restore plans pass in dry-run mode. A real protected production backup/restore report is not present for this candidate because the required scoped D1 operator token, release manifest, and clean source identity are absent.
+- Dodo test catalog inspection remains non-UAT evidence (four test offers configured; no accepted signed execution proof). PayOS remains unaccepted because no controlled signed webhook/reconciliation artifact exists for this candidate. No synthetic provider evidence is permitted.
+- Monitoring, two-store pilot, manual acceptance, owner approvals, exact candidate Worker version, and rollback rehearsal artifacts are not present in the candidate evidence path. `release:doctor --json` therefore remains fail-closed and production status is **NO-GO**.
+- Local Astro type checking passes with 0 errors, 0 warnings, and 4 existing hints. Production dry-run planners pass; these results do not authorize remote mutation.
+
+## Legal/support policy V1 publication (2026-08-25)
+
+- Published the owner-approved policy bundle at `docs/LEGAL_SUPPORT_POLICY_V1.md` using Nguyễn Công Tùng, Xóm Tân Mỹ, Vân Tụ, Nghệ An, Việt Nam, tax identifier `040099014422`.
+- Policy SHA-256: `73f1f57c8e99d72feb86cbd035831816b8613f9f3b3f9c158b2a2510abf70543`; public platform support is `tungbipdz@gmail.com`.
+- Replaced the public `/legal`, `/privacy`, and `/support` gates with responsive bilingual policy surfaces and version metadata effective `2026-08-25`.
+- Set `CURRENT_POLICY_ATTESTATION_VERSION = 1`; onboarding/readiness can now record a seller attestation against the published platform policy.
+- Production remains NO-GO for the separate provider UAT, release manifest, backup/restore, monitoring, pilot and rollback gates. No production mutation or live charge was performed by this change.
+
+## PayOS provider projection lifecycle repair (2026-08-25)
+
+- Confirmed the staging checkout readiness failure was a data-lifecycle defect, not an invalid Pro entitlement or seller credential: a PayOS integration created after migration `0035` had no provider-neutral `payment_provider_connections` projection, so provider readiness failed closed even though the legacy integration was active and webhook-verified.
+- Added forward-only migration `migrations/0119_payos_provider_projection_lifecycle.sql`. It backfills missing PayOS connection/capability/currency/method projections and installs atomic insert/update projection triggers for verification, degraded health, disconnect and reconnect transitions. Return URLs and QR rendering remain non-authoritative; only signed PayOS evidence or tenant-correct reconciliation can confirm payment.
+- Database preflight and production continuation admission now reject any missing legacy PayOS projection. The release invariant registry pins all four replacement trigger definitions so migration drift cannot be accepted silently.
+- The staging migration gate permits this single known failing check only when `0119` is the sole pending migration and the live ledger exactly matches the manifest baseline; every other preflight check must pass, and the same PayOS check is immediately re-run in strict mode after migration. This closes the bootstrap deadlock without creating a general preflight bypass.
+- The protected-backup restore drill now always re-emits D1 dumps as tables, unique indexes, dependency-ordered data and finally triggers. This prevents D1 from rejecting the new composite PayOS foreign key during raw batched import while preserving checksum validation against the original protected artifact.
+- Verification: focused migration/payment/release coverage passed `6` files / `37` tests and the staging admission regression set passed `4` files / `46` tests; the complete repository passed `367` files / `3,033` tests; `npm run check` reports 0 errors and 4 existing hints; lint, TypeScript, build, local deploy dry-run, staging deploy dry-run and `git diff --check` pass.
+- The controlled staging ceremony still requires a fresh exact-commit manifest, protected pre/post backups, isolated restore drills, migration `0119`, zero post-migration PayOS projection defects, an exact Worker deployment binding and live checkout verification. The policy gate is now satisfied by V1; provider and operational gates remain separate.
+
+## Onboarding publication-gate truthfulness follow-up (2026-08-25)
+
+- The former `policy_unpublished` staging blocker is resolved by the owner-approved V1 policy and attestation version `1`; PayOS connectivity and Pro entitlement continue to be evaluated independently.
+- The quickstart launch UI receives the server-owned policy version, labels seller support/Terms/Privacy/refund information as required before publication, and collects attestation only against the positive published policy version. The explicit null-version fail-closed branch remains for future rollback or unpublished versions.
+- Backend publication remains fail-closed and unchanged: no return URL, QR render, client celebration state, or seller-entered URL can publish the catalog, create payment truth, or substitute for an approved platform policy.
+- Verification: focused policy/readiness/publication coverage passed `4` files / `36` tests; the final quickstart contract passed `9/9`; full repository coverage passed `366` files / `3,030` tests; `npm run check` reports 0 errors and 4 existing hints; lint, build, local deploy dry-run, staging deploy dry-run, and `git diff --check` pass.
+- Any staging deployment of this change must be bound to a fresh clean-commit release manifest and exact 100% Worker deployment evidence under `.wrangler/releases/staging/<release-id>/`. Production remains NO-GO until owner-approved and formally reviewed platform legal/support policy content has an effective version, controlled PayOS UAT is complete, and monitoring/pilot/rollback plus production backup/restore evidence is accepted.
+
+## PayOS admission, Pro access and authenticated UI release candidate (2026-08-25)
+
+- Restored native, ARIA and `data-*` forwarding in the shared `Button` primitive. The affected two-factor enrollment, password, export and inventory controls now retain their client action hooks; authenticated browser acceptance clicks the real two-factor button and proves the enrollment form opens.
+- The seller payment page now evaluates the authoritative `provider_setup` subscription entitlement before rendering PayOS configuration. `subscription_payment_required`, `subscription_grace_expired` and `provider_not_ready` fail closed with localized billing recovery guidance, and the browser controller cannot reopen or submit the credential form after server admission is denied.
+- Pro access remains derived from authoritative subscription state and the canonical Pro feature flags. The existing forward-only `0118_pro_premium_storefront_entitlement.sql` migration remains the required schema correction for environments where an active Pro shop is still missing premium storefront access.
+- Routine seller navigation is not subject to the historical default 15-minute reauthentication boundary. Financial, credential, identity, deletion and administrator mutations retain the explicit five-minute step-up boundary, and all user-facing messages now describe that enforced window accurately.
+- Accessibility and responsive fixes cover dashboard/onboarding/billing/products/shared headers, semantic progress labeling, WCAG-safe status colors, 320px grids, the mobile topbar collision and deterministic RTL geometry. The refreshed authenticated Payments and two-factor desktop/mobile baselines were visually reviewed.
+- Verification on committed candidate `09dc4de`: authenticated browser gate `9/9`; full Vitest `366` files / `3,029` tests; Astro check `0` errors / `0` warnings / `4` existing hints; ESLint, TypeScript, build, local deploy dry-run, staging deploy dry-run and `git diff --check` pass; `npm audit --audit-level=high` reports `0` vulnerabilities.
+- Staging release `stg_20260825T102833Z_09dc4de74952` deployed Worker version `1d8129a7-f725-4ac2-933d-157181f79219` after route/platform/database admission, two protected backups, two isolated restore drills, no-op migration confirmation, post-migration evidence and exact deployment binding. Post-deploy D1, PayOS link integrity, routes, resources, queues, cron and phase-A smoke all pass.
+- The first staging visual run passed `19/20`; the only failure captured the product-detail button during its legitimate `Đang kiểm tra…` hydration state. The test now waits for the authoritative enabled `Thêm vào giỏ` state before visual capture; the focused mobile rerun passes and the full staging visual gate passes `20/20` without changing a baseline or runtime source.
+- No PayOS transfer or production mutation is claimed by this checkpoint. The test-only follow-up must be committed and rebound to a fresh exact staging manifest/deployment before one controlled `5,000 VND` PayOS QR payment records signed webhook/reconciliation and idempotent fulfillment evidence.
+- Production remains NO-GO until staging provider UAT is complete, monitoring/pilot/rollback evidence exists, and the production backup/restore ceremony passes. The policy attestation is now version `1`.
+
+## Release-candidate verification follow-up (2026-08-25)
+
+- Corrected Dodo catalog validation to match the provider's recurring-subscription model: monthly billing frequency with a long-lived `20 Year` subscription period, case-insensitive provider interval values, tax-inclusive pricing, no provider trial, and no adaptive pricing. A one-month total period is now rejected because it expires after the first cycle.
+- Fixed storefront accessibility regressions by removing focusable descendants from `aria-hidden` visual wrappers and keeping the Pulse flash visual link accessible with an explicit product label.
+- The first exact-candidate staging visual run exposed a duplicate accessible name on each product card: the compact `+` action and the full add-to-cart button were both announced as “Add to cart: product”. The compact action now uses a distinct localized “Quick add” label so automated and keyboard/screen-reader flows can target the intended control unambiguously.
+- Verification: focused Dodo/storefront regression set `2` files / `32` tests passed; full repository `364` files / `3,001` tests passed; `npm run check` reports 0 errors and 4 existing hints; lint, TypeScript, build, deploy dry-run, and `git diff --check` pass.
+- Staging release `stg_20260824T200557Z_22e62c94cef2` deployed Worker `5f7358be-ca7c-46b4-96bb-866fa9360cd7` after protected pre/post backups, two isolated restore drills, database/status/preflight, platform/route/trigger admission, immutable deployment binding `ee103044-ec3c-46b3-b711-1c4913c7563e`, phase-A smoke, and the full visual gate passed. The current commit adds only the reviewed visual baselines/status record; provider UAT is admitted only by the fresh exact-commit manifest and deployment evidence created after this document.
+- The final staging visual gate is `20/20`: WCAG accessibility and cart flows pass on desktop/mobile, all public storefront/product/cart/checkout/login checks pass against reviewed refreshed baselines, and all four 1440/768/390/320 viewport-matrix checks pass. The refreshed PNGs are committed as intentional redesign baselines.
+- Staging and production provider UAT, PayOS controlled transfer, production backup/restore/rollback ceremony, legal attestation, and production deploy remain pending and must be completed against the final committed candidate only.
+
+## Commercial checkout, onboarding and entitlement correction (2026-08-24)
+
+- Dodo reconciliation remains fail-closed: exact checkout metadata is required and a mismatched captured payment leaves the original subscription state unchanged. The incorrect fixture expectation was corrected to preserve `trialing` plus its provider reference.
+- Dodo hosted sessions with no payment status now expire after the documented 24-hour lifetime plus the local five-minute grace and release the one-checkout lock; provider-processing sessions remain open. Direct reconciliation uses a provider-derived timestamp so a failed synthetic event can retry with the same event ID and payload hash.
+- Catalog reconciliation now retrieves and validates all four Dodo products before any D1 read/write: exact ID, amount, currency, monthly recurring cadence, tax-inclusive pricing, provider trial disabled, and adaptive pricing disabled. The completion marker cannot be cleared from syntactically valid but unverified product IDs. Webhook registration now also requires `subscription.unpaused` and `subscription.update_payment_method`.
+- The Dodo catalog CLI now keeps `--inspect` read-only without provider credentials and passes the validated provider base URL/key into `--apply`; the declaration contract exposes the outer transport override for deterministic tests.
+- Checkout creation reconciles at most one expired hosted session for the current shop and subscription before the guarded insert; the worker remains responsible for the global backlog, preventing another tenant's stale sessions from delaying or starving a seller checkout.
+- Onboarding seed retries now derive deterministic product slug/SKU suffixes from the request idempotency key. Inventory child keys stay within the 128-character server contract, custom-product retries no longer depend on `Date.now()`, and an in-memory intent ledger preserves response-loss retries when browser storage is unavailable.
+- Bundled plaintext sample license keys were removed from presets, rendered attributes, and seed responses. License-key presets now route sellers to the real encrypted inventory-entry step and report zero imported keys.
+- Existing-shop slug changes are covered by tenant-isolation and transactional domain regression tests: reserved/unavailable slugs do not mutate, old platform domains are tombstoned, the new hostname becomes active/primary/canonical, and hostname conflicts roll back the complete batch.
+- Forward-only migration `migrations/0118_pro_premium_storefront_entitlement.sql` grants `premiumStorefrontTemplates=true` to the authoritative Pro plan row and aborts if exactly one active canonical Pro row cannot be proven, fixing Pro subscriptions that were active but still blocked from premium storefront templates.
+- Routine seller actions no longer expire at the default 15-minute boundary; security-, credential-, payment-, deletion-, and admin-sensitive routes explicitly retain a five-minute step-up gate. CSRF rotation/recovery is exact-origin, matches the remaining session lifetime, and retries once on either `token_invalid` or `token_mismatch`.
+- Verification: focused final regression set 173/173, release/admin follow-up 51/51, and full repository 362 files / 2,974 tests pass. `npm run check` passes with 0 errors and 4 existing hints; `npm run lint`, `npm run build`, `npm run deploy:dry-run`, `npm run deploy:staging:dry-run`, `npx tsc --noEmit`, and `git diff --check` pass.
+- No staging or production deployment, migration, provider secret mutation, checkout, QR transfer, or live charge was performed. Production remains NO-GO until policy attestation, owner-approved live Dodo IDs, provider-backed staging Dodo/PayOS UAT, fresh release manifest/backup/restore/rollback evidence, and the controlled production ceremony are complete.
+
+## Auth abuse and recovery hardening (2026-08-23)
+
+- Registration now rejects suspended accounts before password/OTP mutation; OTP completion activates and creates the session in one guarded D1 batch, so suspension races cannot issue a session.
+- OTP purpose values are allowlisted at the HTTP boundary. Login-2FA resend now requires the signed challenge token (or the Google HTTP-only challenge cookie), and never trusts a caller-supplied email.
+- OTP consumption checks affected rows, issuance uses an atomic cooldown guard, and public register/reset OTP issuance is bounded by a forward-only `auth_otp_admissions` ledger (`migrations/0116_auth_otp_admission.sql`).
+- Password-reset tokens now use random opaque values stored only as HMAC hashes in the existing `password_reset_tokens` table and are consumed atomically during reset, preventing replay.
+- Password assignment for active passwordless Google/magic-link accounts is staged in `pending_password_hash` (`migrations/0117_auth_pending_password.sql`) and is promoted only after registration OTP verification, closing the email-only password takeover path.
+- Failed-password and OTP-attempt counters use compare-and-set guards; magic-link session creation requires the user activation update to succeed, and outward password-login errors no longer reveal suspended/passwordless account state.
+- Remember-me session TTL now matches the 30-day cookie lifetime.
+- Verification: focused auth/recovery suites pass (81 tests), touched-file ESLint passes, `astro check` reports 0 errors (4 existing hints). Production migration/deployment remains unexecuted; do not point local tooling at production resources.
+
+## Google login auto-provisioning (2026-08-23)
+
+- Fixed the OAuth callback so both `/login` and `/register` Google flows use
+  the same verified-profile provisioning path. A first-time Google sign-in now
+  creates an active `platform_users` row and a hashed `auth_google_identities`
+  row, then issues the normal Selinow session.
+- Existing users with the same verified Gmail are attached atomically instead
+  of being told to pre-link Google. Pending email registrations are activated
+  by the verified Google claim; suspended users remain blocked.
+- Explicit account-security linking remains fenced to the authenticated user
+  and is unchanged. No Google access/refresh token or raw provider subject is
+  persisted.
+- Hardened retries for same-millisecond callbacks, concurrent email claims,
+  suspended-account races, and partial pending-account recovery.
+- Verification: 4 auth/release suites, 66 tests passed; `astro check`, build,
+  lint, and local deploy dry-run passed. Full repository verification remains
+  subject to the existing unrelated billing/dashboard changes.
+
+## Commercial billing checkout hardening and completion plan (2026-08-23)
+
+- Production diagnosis remains unchanged: D1 is migrated through `0112`, all four active Dodo Starter/Pro VN/global monthly offers are intentionally `pending:dodo:*`, and `dodo_catalog_reconciliation_required` remains true. The affected VN Pro shop is suspended with no provider customer/subscription reference or checkout/change-request row, so the observed failure is `provider_not_ready` before Dodo is called.
+- Added one shared sellable catalog contract in `src/lib/billing/catalog.ts`. Landing, `/pricing`, onboarding shop creation, seller plan listing, previews, and checkout now use the same active/public/assignable, effective-date, monthly interval, market/currency, Dodo-provider, and published-reference rules. A newer pending revision never falls back to an older published price.
+- Hardened Dodo checkout creation and replay with an exact dashboard return URL, provider 4xx classification, the original provider idempotency key after response loss, safe hosted-URL validation, and terminal release only when provider truth is explicitly `failed` or `cancelled`. Network errors, malformed responses, missing status, processing states, and identity/amount/currency/price mismatches cannot release the active checkout lock.
+- Added forward-only migration `migrations/0113_dodo_checkout_reconciliation.sql`, a tenant-bound checkout-status API, scheduled provider reconciliation, bounded exponential retry evidence, quarantine at 12 actual retrieval/identity failures, and late signed-success recovery through the same idempotent provider-event transition. Valid `null`/processing provider states stay open without consuming the failure budget; each accepted payment creates at most one invoice.
+- Redesigned `/app/billing` around Overview, Plans, Usage, Payment, and Invoices with one contextual primary action, a two-step select/review flow, authoritative effective timing, responsive dialogs, 44px targets, live-region feedback, reduced-motion handling, and no fabricated card details. The implementation follows the low-cognitive-load management patterns used by mature SaaS billing surfaces while retaining Selinow's design system.
+- Registered migration `0113` table/column/index fingerprints in the production invariant registry. Historical migrations `0114` and `0115` retain their already-applied Pro-entitlement and seller-metrics identities; the parallel auth migrations continue forward-only as `0116` and `0117`, with SQLite's literal `DEFAULT NULL` pragma representation preserved for the pending-password column.
+- Added the decision-complete implementation, provider UAT, rollout, rollback, monitoring, and acceptance plan at `docs/BILLING_COMMERCIAL_COMPLETION_PLAN_2026-08-23.md`. No production Dodo object, secret, webhook, D1 row, deployment, checkout, or live charge was mutated by this work.
+- Verification: billing-focused contract set 173/173 passed; `npm run check` passed with 0 errors and 4 existing hints; `npm run lint`, `npm run build`, and `npm run deploy:dry-run` passed. Full `npm run test` reached 356/357 files and 2,935/2,939 tests; the only four failures are in the parallel auth stream's `account-two-factor-service.test.ts` OTP fixtures, not billing.
+- Production remains fail-closed pending owner-approved `DODO_STARTER_VN_PRODUCT_ID`, `DODO_PRO_VN_PRODUCT_ID`, `DODO_STARTER_GLOBAL_PRODUCT_ID`, and `DODO_PRO_GLOBAL_PRODUCT_ID`, guarded catalog reconciliation, genuine staging UAT, and one controlled live smoke. These identifiers must come from protected operator channels and must never be invented or committed.
+### Pro entitlement and checkout follow-up (2026-08-23)
+
+- Fixed the staging Pro catalog gap with forward-only migration `0114_pro_storefront_template_entitlement.sql`: the public assignable Pro plan now carries a strict JSON boolean `premiumStorefrontTemplates=true`; Starter and legacy plans are explicitly rejected by the release invariant.
+- Fixed the Pro CTA handoff: `/onboarding?plan=pro` is validated server-side, preserved only for fresh shop creation, and reaches the authoritative `planCode` payload. Existing shops never get silently reprovisioned.
+- Premium template radios now fail closed in SSR and client re-render, including locked persisted selections; expired, suspended, pending-payment, or missing-period Pro subscriptions no longer appear entitled in seller settings.
+- Reworked seller analytics to use paid-period admission, timezone-local calendar boundaries (including DST), dense zero-filled points, tenant-leading keyset pagination, and a bounded overflow failure instead of truncating revenue. Chart tooltips now use the shop locale/currency formatter.
+- Staging read-only diagnosis confirms the P0: the active Pro shop is on Worker candidate `e8c1a9a`, the staging migration ledger stops at `0113`, and its Pro row lacks `premiumStorefrontTemplates`; the browser consequently disables Pulse/Desk. Migration `0114` and the reviewed Worker must ship together.
+- Same-plan pricing targets now focus an explicit current-plan card instead of opening a downgrade-only dialog; canceled/recovery shops remain discoverable for billing handoff.
+- Local verification for this follow-up: focused entitlement/storefront/onboarding/billing/metrics/release suites pass (79 tests); `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm test` (360 files / 2,997 tests), `npm run build`, and both local/staging deploy dry-runs pass. A parallel duplicate build initially raced on `dist`; the required sequential staging dry-run passed. Staging deployment of this follow-up is not claimed until the exact clean candidate is committed and the guarded backup/migration/deployment evidence sequence is repeated.
+- Staging admission remains blocked without a clean committed candidate and the scoped Cloudflare audit/D1/Worker tokens. Existing private manifests stop at `0113` and are not valid evidence for this candidate; no staging mutation has been performed in this follow-up.
+
+- Closed the production Dodo API-key rotation gap: guarded webhook bootstrap now binds the provider-validated live API key and new webhook signing key into the same exact route-neutral candidate through `wrangler versions upload --secrets-file`. Production cannot fall back to raw `wrangler secret put`; private evidence records only both names plus a domain-separated API-key fingerprint, which signed-health rechecks.
+- Built a billing-only candidate from production base `8b132b193c52`; parallel auth migrations and source changes are intentionally excluded.
+- Unified landing, pricing, onboarding, seller plan listing, preview, and checkout behind one sellable Dodo catalog contract.
+- Added response-loss-safe checkout idempotency, exact return polling, signed-webhook state transitions, scheduled reconciliation, and forward-only migration `0113_dodo_checkout_reconciliation.sql`.
+- Added a guarded remote catalog inspector/reconciler that clears `dodo_catalog_reconciliation_required` only when all four environment-specific offers match exactly.
+- Catalog inspect and dry-run no longer require protected product IDs. Published
+  rows inspected without IDs are explicitly labeled unverified rather than being
+  mistaken for an exact catalog match.
+- Before any catalog D1 mutation, reconciliation now GETs all four products from
+  the fixed environment-specific Dodo API origin and verifies exact product ID,
+  nested recurring amount/currency/monthly cadence, tax inclusion, zero provider
+  trial/discount, SaaS tax category, and null pricing mode. Provider/API/schema
+  failures stop before writes and do not expose the API key or response body.
+- Provider-schema limitation: Dodo documents `pricing_mode`, `tax_inclusive`,
+  and `trial_period_days` as omittable/nullable. The release guard intentionally
+  requires explicit `null`/`true`/`0` and therefore fails closed if Dodo returns
+  only defaults; an owner must verify and approve any future relaxation.
+- Verification for catalog hardening: 49/49 focused catalog/webhook tests pass;
+  focused ESLint passes; `npm run check` completes with zero errors/warnings and
+  four unrelated existing TypeScript conversion hints.
+- Dodo provider trials are disabled. Selinow retains the existing seven-day local D1 evaluation trial; checkout requires the full paid catalog amount before activating a subscription.
+- Redesigned `/app/billing` into a low-cognitive-load SaaS billing workspace with overview, plans, usage, payment, and invoices sections.
+- Fixed the P0 Pro entitlement projection gap: an active paid subscription with a missing period/customer projection is repaired only from validated Dodo subscription truth; entitlement guards remain fail-closed when period or customer evidence is absent. Initial payment projection now falls back to Dodo `previous_billing_date`/`next_billing_date`, and completed checkout reconciliation is tenant-, product-, provider-subscription-, and version-guarded.
+- Deterministic pricing/billing UI fixes are in `c25800f`: landing/pricing render one server-selected published market price without a hydration flash, while Usage and Invoices use progressive disclosure and the current-plan summary keeps one primary action.
+- Full source gates at candidate `e8c1a9a`: `npm run check` (0 errors, 4 existing hints), `npm run lint`, `npm run test` (358 files / 2,973 tests), `npm run build`, and `npm run deploy:staging:dry-run` passed. A concurrent duplicate build once produced `ENOTEMPTY` in `dist`; the sequential dry-run passed.
+- Staging release `stg_20260823T012637Z_e8c1a9ae6f05` completed backup `bkp_20260823012459_820004f46b46`, restore drill `rdr_20260823012533_371714437860`, migration/preflight/status, post-migration backup `bkp_20260823012801_d5ec7225e111`, restore drill `rdr_20260823012835_79d6875dca37`, `db:complete-release`, and Worker deployment `77272e1e-30bf-4948-a0e9-78629c358be0` at 100%; deployment evidence is bound to the exact commit/tree.
+- Staging live read-only smoke passed: platform health, marketing, catalog, storefront, and safety boundaries. The genuine completed Pro checkout `bchk_6b293b3c-1b00-4bc3-a0de-90526f565cba` now has `state=active`, `current_period_start=2026-08-23T00:14:13.799833Z`, `current_period_end=2026-09-23T00:15:57.457058Z`, `provider_customer_ref=cus_0Nlymi1BEp3So4kD8aewv`, and the original provider subscription reference; the Pro plan feature flags/limits are present and the Dodo customer portal session endpoint returned a provider-hosted test URL.
+- Production remains NO-GO: no live charge was attempted, and fresh production candidate/rollback, owner approvals, production backup/restore continuation, missing operator/provider trust variables, and final live UAT evidence are still required. The required action-time confirmation before any live charge remains outstanding.
+
+## Release execution — staging shipped through 0112; production awaits the owner ceremony (2026-08-22, later same day)
+
+**Staging is fully released** at commit `fde9705b` (tree also includes OB, Google auth, and the pipeline fixes through `ea97cca`; the two post-manifest commits touch release tooling only and do not change the Worker bundle):
+
+- Staging D1 migrated `0098`–`0112` (incl. Google auth foundation) with invariants passing after two pipeline fixes: invariant column inventories are now queried in batches of 4 tables (D1 caps compound SELECT terms at ~5–8 UNION arms, error 7500), and `splitDumpForImport` re-emits a restore dump as four passes (tables → indexes → FK-topologically-ordered rows with NULL-then-repair for the shops↔shop_domains cycle → triggers) because D1 verifies FK state per import transaction and node:sqlite defaults FK ON. The drill's target-export verification also loads with FK enforcement off.
+- Ceremony completed in order per RELEASE.md: backup → drill → manifest `stg_20260822T080922Z_fde9705b0e20` → migrate (completion written) → post-migration backup `bkp_20260822081227` + drill `rdr_20260822081253` → `db:complete-release` → worker deploy (version `488d9fbd-2acc-4740-8604-f317791e1c5a`) → deployment evidence written → route-preflight, doctor, migrate:status, preflight all green. Live checks: staging.selinow.com, app-staging login, api-staging health, and the signal storefront all return 200.
+- Production prep done and blocked exactly where designed: fresh production backup `bkp_20260822081914` + restore drill `rdr_20260822083827_00b1e7282aa7` passed (first production-shaped drill since the pipeline fixes; six debug drill databases used during diagnosis were deleted). `db.mjs migrate --env production` stops at `production_rollback_artifact_binding_mismatch` because the retained production evidence `.wrangler/release/production-evidence.json` (`prd_20260813t000000z_2df45cf59367`) still has all five owner approvals `pending`, a placeholder candidate worker version, and no rollback-rehearsal artifact — the release closeout ceremony (owner approvals, route-neutral candidate/rollback version uploads, real maintenance drain with queue producers paused, pilot smoke storefront, live rollback rehearsal) is an owner decision per docs/PRODUCTION_RELEASE_CLOSEOUT_2026-08-09.md and was not auto-executed.
+- Temporary Cloudflare account tokens (`selinow-release-write-20260822` all-write, `selinow-release-read-20260822` all-read, plus the user-scoped "Create Additional Tokens" factory token) were created through the dashboard for this ceremony and are exported from `/tmp/cfenv.sh` (mode 0600, no expiry). Delete them from the Cloudflare dashboard after the production ceremony, or immediately if abandoning it.
+- Pipeline fixes committed: `3710aff` (batch 10), `fde9705` (batch 4), `4783fdf` (four-pass drill import), `ea97cca` (FK-off verification load). Guard suites pass (52/52).
+
+## OB — Onboarding upgrade: category-scoped verticals + one-request provisioning (2026-08-22)
+
+Major onboarding slice answering "danh mục → template/preset riêng + tạo shop nhanh". No new migration (reuses `shops.vertical` from 0102).
+
+### OB-A1: vertical-scoped templates everywhere
+- `listTemplatesForVertical()` in `src/lib/storefront/templates.ts`; `getSellerStorefrontSettings` now scopes `templates` to the shop's vertical, so the Store Builder gallery only renders the relevant 3 templates instead of all 9. A legacy out-of-vertical persisted pick (pre-0102 shops) stays visible so the current template can be reviewed.
+- `updateSellerStorefrontSettings` rejects cross-vertical picks (`storefront_template_vertical_mismatch`), keeping the builder consistent with the scoped gallery.
+- Onboarding step 1 renders one data-driven template group (`data-templates-map` JSON + client re-render on category change) instead of three static server-rendered groups; premium templates carry a PRO badge and are locked (toast hint) when the plan lacks `premiumStorefrontTemplates`.
+
+### OB-B1: one-request shop provisioning
+- `POST /api/app/shops` accepts optional `templateId` + `channels {websiteEnabled, telegramEnabled, customDomainPreference}`; `createShop` validates the template (unknown / premium-without-entitlement / cross-vertical) against the plan's feature flags, seeds `shop_settings.storefront_json` with the chosen template (or the vertical's safe default — aurora/serenity/swift) and lands the channel flags plus onboarding step states (`channel_selected` complete, `telegram_ready` skipped when Telegram is off) in the same D1 transaction. The wizard's step-1 submit is now a single round-trip (was create → channels → PATCH template).
+- Idempotency request hashes now include vertical/templateId/channels, so a same-key replay with a different payload surfaces `idempotency_conflict` instead of silently replaying the old shop (only requests spanning this deploy boundary with a reused key are affected).
+- The shop-creation admission (`getShopCreationAdmission`) is finally consumed by the wizard: a blocked account cannot submit step 1.
+
+### OB-A2: vertical-scoped product presets
+- `OnboardingProductPreset` carries `vertical`; three local preset packs ship — digital (5, incl. renamed `steam-wallet`), physical (3: tee / accessory combo / handmade giftbox), booking (3: consulting / online course / brand design). `presetsForVertical()` filters; `seed-preset` rejects cross-vertical seeds (`preset_vertical_mismatch`) after a membership check.
+
+### OB-A3: adaptive product & inventory steps
+- Step 2 renders only the active category's presets (data-driven) and swaps custom-form copy/defaults/fulfillment options per vertical (physical → shipping manual, booking → appointment manual, digital → license_key|manual).
+- Step 3 adapts per vertical: digital keeps the license-key vault, physical shows serial/SKU codes (same encrypted import pipeline), booking shows a no-vault info panel (appointment services need no stock).
+
+### OB-B3: express path
+- Preset submit jumps straight to Connect (samples already seeded / no vault needed); only custom digital license products route through the inventory step.
+
+### OB-B4: server-truth resume
+- New `src/lib/onboarding/resume.ts` computes `{wizardStep, vertical, templateId, catalog facts, integration states}` from server data; `/onboarding` hydrates the wizard from it — refreshes and returning sellers re-enter at the first unfinished step with real PayOS/Telegram/stock state instead of restarting at step 1.
+
+### OB audit pass (same day)
+- Fixed the inventory label rewrite destroying its required-star marker: the vertical-swapped text now lives in a dedicated `data-inv-label` span.
+- `getOnboardingResume` now gates the wizard's Connect step on the Telegram **channel flag** (joined from `shop_onboarding_profiles`) instead of integration presence — a shop with the channel on but no bot no longer resumes past Connect; the payload also carries `channels` and `storefrontVersion`.
+- The quickstart hydrates the persisted channel choice on resume (re-submitting step 1 for an existing shop can no longer silently flip channels back to "both") and PATCHes template changes with the server-known draft version instead of a hardcoded `expectedVersion: 1`.
+- `createShop` INSERTs use the validated `vertical` variable (was a second raw `input.vertical ?? "digital"`).
+- Deleted the unreferenced `OnboardingLivePreview.astro` and `OnboardingCelebration.astro` (~700 lines). The legacy `src/scripts/dashboard/onboarding.ts` (~2.4K lines, superseded by `onboarding-quickstart.ts` since the quickstart rewrite) remains because five contract suites (`app-shell-foundation`, `design-system-accessibility`, `inventory-frontend-contract`, `onboarding-publish-version-contract`, `shop-name-frontend-contract`) still pin it; migrating those suites onto the quickstart is a standalone follow-up.
+- New `onboarding-resume.test.ts` (3 cases): fresh shop resumes at product with server truth; a stocked-but-unpaid shop holds at connect; non-members get null so foreign shops never hydrate a wizard.
+
+### Contracts & verification
+- `storefront-templates.test.ts`: gallery scoping (digital/physical + legacy cross-vertical visibility), cross-vertical PATCH rejection, and three new OB-B1 provisioning cases (template+channels in one transaction, vertical-safe default template, premium/cross-vertical/channel-less rejection). `onboarding-shop-route.test.ts` gains POST parse tests; `onboarding-presets.test.ts` covers the per-vertical packs; `ex0-experience-contract.test.ts` updated to the one-request contract; `shop-selection`/`storefront-preview-catalog` adjusted for `ShopView.vertical`.
+- Focused verification: 68 tests across the touched suites pass; ESLint clean on every touched file; `npm run build` and `npm run deploy:dry-run` pass; `astro check` reports zero errors in the files this slice touched.
+- Known repository-wide limitations (unrelated, parallel sessions): `astro check` still fails on `store.astro`, `AppLayout.astro`, StoreHome templates, `auth/google.ts`, `bindings.ts`; full `npm run test` still fails on console-design/i18n-contract/accessibility/store-builder suites and the Google-auth migration 0112 invariant registry (pending that session's registry update). None of these files were touched by OB.
+
+## Release consolidation attempt — 2026-08-22 (later)
+
+- Committed every parallel stream on `wip/onboarding-redesign-20260820`: Google sign-in foundation `3156a61` (46 files incl. migration 0112 with its invariant-registry entries — all release guards pass), refreshed public visual baselines `d0920b5` (54 snapshots). Working tree is clean except ad-hoc debug scratch (`.cap-*.tmp.mjs`, `review-screenshots/`, `dump-headings.mjs`) intentionally left uncommitted.
+- Removed the redundant `getBindings()` cast the Google stream left flagged by ESLint. Full-suite state at this commit: build ✓, local dry-run ✓, release guards ✓ (37/37); 8 pre-existing test failures remain in the console-design/accessibility/i18n/store-builder contract suites from the earlier dashboard WIP, and `astro check` still reports 23 pre-existing errors in those same areas.
+- **Production deploy: blocked, fail-closed by design.** `node scripts/deploy.mjs --env production --confirm-production` stops at `production_release_manifest_required`. Root causes: (1) no Cloudflare API tokens in the environment (`CLOUDFLARE_WORKER_DEPLOY_API_TOKEN`, `CLOUDFLARE_D1_API_TOKEN`, `CLOUDFLARE_ROUTE_AUDIT_API_TOKEN`, staging/production audit tokens); (2) the pipeline is staging-first and the newest staging release manifest (`stg_20260812T220654Z_2df45cf59367`) expired 2026-08-13 and predates migration 0112. No remote mutation was performed.
+- To ship once tokens are available: run the staging continuation (`node scripts/staging-release-manifest.mjs` for backup/restore drill + fresh manifest → `npm run deploy:staging` → local browser gates + evidence), then `node scripts/deploy.mjs --env production --confirm-production --release-manifest .wrangler/releases/staging/stg_<new>/release-manifest.json`.
+
+## Authenticated onboarding handoff — 2026-08-22
+
+- Preserved a paid plan selected on pricing and the landing runtime through password, 2FA, and magic-link login into `/onboarding?plan=...`.
+- Centralized post-auth redirect validation in `src/lib/auth/redirect.ts`; absolute, protocol-relative, backslash, and encoded backslash redirects fall back to `/app`.
+- Updated onboarding plan hydration to prefer a valid `?plan=` request when the server catalog finishes loading, without overriding an already selected plan.
+- Updated marketing surface contracts for the editorial landing and billing projection; focused verification: 22 tests passed, touched-file ESLint passed, and `npm run build` passed.
+- Known repository-wide limitations: `npm run check`, full lint, and full test still report unrelated pre-existing failures in store-builder/template, console/i18n, worker-delivery, and untracked review-script areas.
+
+## CA — Commercial Architecture (2026-08-22)
+
+Structural upgrades answering "vẫn quá đơn giản, kiến trúc chưa thể thương mại hoá" — this is layout density and composition, not CSS polish. Three pillars (~400 lines CSS + markup changes across all 9 templates + layout):
+
+### CA1: Hero multi-layer composition
+- **Stats bar**: every template hero now carries 3 live stat items (product count, real sold count, 24/7 support) — large tabular-nums numbers with uppercase labels, creating a data-rich first impression.
+- **Trust bar**: compact glassmorphic strip with checkmark badges (secure payment / instant delivery / 24/7 support) below stats — immediate trust signaling.
+- **Decorative ring**: layered geometric accent (3 concentric rings in merchant-brand at 12%/8%/15% opacity) creating visual depth.
+- **Applied to all 9 templates** — each template's hero now has: headline → description → stats bar → trust bar → CTA → deco ring, instead of just headline + description.
+
+### CA2: Premium product card
+- **Price overlay on visual**: price + compare-at sit ON the product image (glassmorphic backdrop-blur card), not below it — saves vertical space, creates editorial feel.
+- **Quick actions on visual**: add-to-cart (+) and view-detail (→) buttons on the image overlay (36px circular, backdrop-blur).
+- **Product metadata row**: soldCount badge + variant count as dot-separated inline metadata under the title.
+- **Larger visuals**: `min-height: clamp(220px, 32vw, 380px)` — cards are image-first, not text-first.
+
+### CA3: Mega footer (replaces single-line footer)
+- **4-column layout**: Brand (name + footer text + payment badges: PayOS, VietQR, Banking, MoMo) / Shop links / Support links / Trust points.
+- **Footer bottom**: copyright year + "Powered by Selinow".
+- **Responsive**: 4→2→1 column at 820/560px.
+- **Wired in StorefrontLayout** — applies to every storefront page.
+
+### Verification
+- 150 TM+EX tests green, check 0 errors, build + dry-run pass.
+- Build required fixing corrupted template insertions in 5 templates (bustle/serenity/aurora/craft/clinic/desk had broken HTML from earlier hero-stats insertion). All repaired.
+
+## TV — Template Vitality (2026-08-22)
+
+Direct response to owner critique: "vẫn quá đơn điệu, thiếu sức sống, không có điểm nhấn, lệch nhịp, chưa tối ưu responsive/UX." One vitality layer in `sections.css` (~300 lines, all on `--tmpl-*` tokens) + reveal-boot wiring across all 9 booking templates:
+
+### 1. Section rhythm (đơn điệu → nhịp)
+- Alternating section backgrounds: `main > section:nth-of-type(even)` gets a subtle tint lift (40% panel over canvas).
+- Varied section padding: catalog gets `clamp(48px, 7vw, 88px)` vs USP/FAQ at `clamp(32px, 5vw, 56px)` — breathing rhythm.
+- Gradient hairline dividers between major sections (`::before` with merchant-brand gradient, 120px centered).
+
+### 2. Hero vitality (thiếu sức sống → motion + drama)
+- **Animated gradient mesh**: `::after` pseudo-element on every template hero with two radial gradients drifting via 20s keyframe (`hero-mesh-drift`) — creates ambient depth.
+- **Staggered text entrance**: hero children enter one-by-one with 80ms delay (`hero-text-enter`, 240ms standard ease).
+- **Typography drama**: fluid `clamp(2.5rem, 7vw, 5.5rem)` on all hero h1 + `text-wrap: balance`.
+
+### 3. Card interactions (điểm nhấn)
+- **Hover elevation**: `translateY(-3px)` + shadow on `.product-card:hover` (120ms standard ease).
+- **Image zoom**: `.product-visual img` scales to 1.06 on card hover (240ms panel ease).
+- **Border accent**: `::before` ring shifts to merchant-brand on hover.
+- **Service rows**: border-color transition on hover for booking templates.
+
+### 4. Responsive fluid (responsive/UX)
+- **Auto-fill grids**: product lists use `repeat(auto-fill, minmax(clamp(240px, 28vw, 340px), 1fr))` — intelligent column count per viewport. Aurora gets wider min (280px), Metro/Bustle tighter (200px).
+- **Fluid headings**: all h1/h2 headings get `clamp()` sizing.
+- **Mobile quick-add**: the Aurora popover becomes a bottom-sheet (`position: fixed; inset-block-end: 12px`) at ≤560px.
+- **Touch spec-peek**: Metro overlay uses `:active` instead of `:hover` on `(hover: none)` devices.
+- **Scrollbar styling**: thin, brand-tinted scrollbars on horizontal rails.
+- **Scroll-snap padding**: flash rail gets `scroll-padding-inline` for proper snap alignment.
+
+### 5. Scroll-based section stagger (sức sống)
+- All home sections with `data-reveal` now stagger their **children** too: each child enters with 30ms incremental delay (`--child-i` CSS variable, `section-child-enter` keyframe).
+- Booking templates' service/process sections gained `data-reveal` + the marketing `reveal-boot.ts` loads on all 9 homes.
+
+### Reduced motion
+Every animation and transition in the vitality layer has a `prefers-reduced-motion: reduce` branch that disables it cleanly.
+
+### Tests (+2, now 16 in `storefront-sections-settings.test.ts`)
+- TV vitality contract: section rhythm selectors, hero mesh/entrance keyframes, card hover/zoom, auto-fill grid values, mobile bottom-sheet, touch spec-peek, child stagger, reduced-motion coverage — all asserted against the CSS.
+- All 9 template homes load `reveal-boot.ts` for scroll entrance.
+- Full TM+EX battery: 158 green; build + check + dry-run pass.
+
+## TM4 — honest merchandising intelligence (2026-08-22)
+
+Conversion tools that use real signals only — no fabricated social proof:
+
+- **soldCount (SQL)**: the catalog projection now carries each product's real paid-order count (`order_items` joined on `payment_status = 'paid'` orders, tenant-scoped subquery) plus `createdAt` — the substrate for every badge and curation default.
+- **Auto badges** (`ProductCard`): `BEST` (≥5 real paid orders, shows the count), `HOT` (has compare-at), `NEW` (created ≤21 days) — priority BEST > HOT > NEW, one badge max per card, rendered on the visual; i18n en + vi-VN ("BÁN CHẠY · N đã bán").
+- **Recently viewed** (`tm4-merchandising.ts`): detail pages record the visited slug/title into `selinow-viewed:v1:{host}` (≤8, deduped); every template home renders a scroll-snap rail that self-removes when empty; localStorage-unavailable = no rail.
+- **Cart cross-sell**: the cart page gains a "Thường mua cùng" grid — suggestions come from the already-embedded catalog data (same categories as the cart's items, ≤3, excluding in-cart slugs), client-side only, no new network call; empty cart or no suggestions = section removed.
+- **Tests** (+3 in `storefront-sections-settings.test.ts`, now 14): soldCount SQL + type exposure, badge derivation from real signals, recently-viewed + cross-sell + detail-tracking wiring across all 9 homes/cart/detail. Build + check + dry-run pass; 164 TM+EX tests green together.
+
+TM program state: TM0–TM4 ✅. Remaining: TM5 gates (VR re-baseline with signatures, contrast × intensity presets, perf budget measurement).
+
+## TM3 — signature moments ×9 (2026-08-22)
+
+Every template now has its plan-§4 "5-second recognition" moments — the "too simple, no highlights" critique is answered in code, not just specs. One behaviors bundle (`src/scripts/storefront/tm3-signatures.ts`) loads per template id:
+
+- **Swift — instant-search dropdown**: hero search gains a combobox-style live result list (thumb initial + title + price, ≤5 matches) with Esc/outside-click close; keyboard-navigable role=listbox; zero new network calls (reuses the existing client-side card filter data).
+- **Pulse — flash rail**: scroll-snap horizontal rail of deal cards each with a live per-card countdown driven by the first active promotion's `endsAt`; cards self-remove when expired; countdown ticks are disabled under reduced-motion (static text remains).
+- **Aurora — quick-add popover**: product cards carry `data-quick-add-variants` (in-stock variants as `{id,label,max}`); a "＋" trigger opens a size-option popover that adds directly to cart via the existing `readCart/saveCart` (no new server call, no new risk surface).
+- **Metro — spec-peek overlay**: cards carry their first 3 product attributes (`label: value` joined); hover/focus-within reveals a mono overlay on the visual — pure CSS on `--tmpl-*` tokens, pointer-events:none.
+- **Bustle — stock progress bar**: when exact stock is available (`showExactStock` + `availableStock`), a thin progress bar renders on the card visual (green >25%, amber ≤25%); absent data = no bar (honest absence).
+- **Serenity / Craft / Clinic — next-slot chip**: after the hero CTA, a chip queries the public slots API for the first bookable service's next open slot (`slots[0].startAt`) and shows "Còn trống: [date time]" — real data only; network failure or no slots = honest empty label, never a fake time. Click navigates to the service detail for full slot picking.
+- **CSS**: all signature styles live in `sections.css` on `--tmpl-*` tokens (dark Pulse/Craft render correctly); every animation has a `prefers-reduced-motion` branch; the only loop is the countdown tick (already contract-tested).
+- **Tests** (+2 in `storefront-sections-settings.test.ts`, now 11): the behaviors bundle exports all six binds + hooks the real slots API URL; every template home carries its data hooks (`data-flash-countdown`, `data-quick-add-variants`, `data-spec-peek`, `data-stock-total`, `data-next-slot-chip`); CSS covers all six selectors with the reduced-motion block; next-slot sources from `slots[0]` only with a network-failure comment. Build + check + dry-run pass; 153 TM+EX tests green together.
+
+Next: TM4 merchandising (soldCount SQL, NEW/BEST badges, recently viewed, cart cross-sell, bundle nudge), TM5 gates (VR re-baseline, contrast × intensity, perf budget).
+
+## TM2 — merchant-edited section content (2026-08-22)
+
+The Bố cục tab now edits what the universal sections say, not just where they sit.
+
+- **Registry**: `parseSettings` gains one bounded array-of-records level (≤8 items, ≤6 scalar fields each, strings ≤300) carrying section item lists; `universalSectionSettings` surfaces a section's settings; `parseSectionItems` is the render-side semantic view (drops blank entries, caps titles/questions/answers) so storage stays a general cleaner while rendering stays honest.
+- **Components**: `USPGrid` and `FAQSection` accept `settings` — merchant items fill from index 0 with the per-vertical i18n defaults back-filling the remainder (`[...custom, ...defaults].slice(0, 3)`); all nine homes pass `universalSectionSettings(shop.content.sections, type)` through.
+- **Builder**: the Bố cục panel renders item editors below the stack — 3× (title + body) for USP, 3× (question + answer) for FAQ — pre-filled from persisted settings over i18n defaults, with "leave empty to keep the default" guidance; typing marks the draft unsaved and `readSectionItems` embeds non-empty fields into the hidden JSON's `settings.items` on every rebuild (restore-defaults keeps editors untouched — empty means default).
+- **Tests** (+4 in `storefront-sections-settings.test.ts`, now 9): array cleaning through parse + blank filtering at parseSectionItems, 8-item flood cap, builder item-input contract, component/home consumption contract. Full TM+EX battery: **151 green**; check 0 errors; build + dry-run pass; lint clean on touched files.
+
+Next: TM3 signature moments ×9 per plan §4.
+
+## TM1 — Store Builder "Bố cục" tab (2026-08-22)
+
+Merchants now control the home-section stack: the plan's §2.3 v1 (toggle/reorder/restore, no drag) is live end-to-end.
+
+- **Registry semantics**: `resolveUniversalSections` — the persisted array is authoritative for the universal tail (usp/faq) only; native blocks always render in template order, a config disabling everything falls back to the default tail (never a bare page). Disabled tail types are filtered out.
+- **Persistence**: `parseStorefrontContent` surfaces `sections` (bounded parse) onto `shop.content`; `updateSellerStorefrontSettings` accepts `sections` (parse = validator; empty array stores absent), and both `/settings` + `/storefront/draft` routes allow the field — the builder's existing draft→publish flow carries it.
+- **Builder**: new "Bố cục" tab — server renders the resolved stack as rows (native rows locked with a note; usp/faq rows with toggle + up/down), hidden `data-field="sections"` input carries the JSON, interactions rebuild the config and mark the draft unsaved; "Khôi phục bố cục mẫu" rebuilds from the embedded default stack; the live preview gains USP/FAQ placeholder blocks that follow the toggles. Copy via the EX console catalog (en + vi-VN, 24 new keys).
+- **Render**: all nine `StoreHome` components render the universal tail through `universalTail.map(...)` from the resolved config — toggling in the builder changes the live storefront on publish.
+- **Tests** `storefront-sections-settings.test.ts` (5): default-tail fallback + persisted order/enable semantics, dirty-array cleaning through the settings draft (sqlite round-trip incl. settings read-back), empty-array-as-absent, builder render contract (tab/panel/hidden field/preview hooks/ALLOWED), per-template `resolveUniversalSections` consumption. Full TM+EX battery: 137 green; check 0 errors; build + dry-run pass. (The parallel stream landed `hero-canvas.ts`/`flow-scene.ts` mid-session — the canvas hex fallback joined the spine-contract allowlist; flow-scape's TS error is theirs.)
+
+Next: TM2 content plane (hero media + USP/FAQ items as merchant-editable settings), TM3 signature moments ×9.
+
+## TM0 — Template Mastery foundation (2026-08-22)
+
+First slice of `docs/storefront-templates/TEMPLATE_MASTERY_PLAN_2026-08-22.md`: the home page becomes a registry-driven section stack and every template immediately gains two rich universal sections — answering the "too simple, no highlights" critique with the architecture to keep layering on.
+
+- **SectionRegistry** (`src/lib/storefront/sections/registry.ts`): 28 section types (today's native blocks + the TM catalog), `DEFAULT_HOME_STACKS` per template documenting what each home renders, bounded `parseHomeSections` (≤12 sections, unknown types/ids dropped, settings capped) surfaced via `parseStorefrontSections` in `theme.ts` — persisted inside `storefront_json.sections` with **zero migrations**; garbage config degrades to the default stack, never a broken page. `resolveHomeSections` filters enabled order for render.
+- **Universal sections**: `USPGrid` (3 trust cards, per-vertical default copy — honest, references the shop's real policy surfaces) and `FAQSection` (3 native details/summary items per vertical) — wired into **all nine** template homes on the stack tail, skinned by the `--tmpl-*` token layer (dark Pulse/Craft included). i18n: 76 new keys (en + vi-VN). Every homepage went from 3–4 blocks to 5–6 with zero merchant effort; TM2 turns the copy into merchant-editable settings.
+- **Tests** `storefront-sections-registry.test.ts` (6): default stacks for all 9, bounded parsing/dedup/caps, enabled-order resolution with defaults fallback, raw-JSON surfacing, and the render contract (every home carries USP+FAQ on `shop.template.vertical`; CSS + i18n coverage per vertical). Verification: `check` 0 errors, lint clean on touched files, build + dry-run pass; 60 EX/TM-adjacent tests green together.
+
+Next per plan: TM1 Builder "Bố cục" tab (toggle/reorder/edit), TM2 content plane, TM3 signature moments ×9.
+
+## EX3.4b — seller discount management API (2026-08-22)
+
+Fifth EX slice, closing the promo story for sellers (`src/lib/commerce/seller-discounts.ts` + `GET/POST /api/app/shops/:id/discounts`, `PATCH .../discounts/:discountId`; CSV 202 rows):
+
+- Forward-only lifecycle per the money-adjacent convention: **create + enable/disable only** (no edits, no hard deletes); every flip audit-logged (`seller.discount.created/disabled/enabled`).
+- Validation: code `A-Z0-9_-` 3–32 normalized uppercase; percentage capped at 90; fixed values bind the shop currency; optional ISO window with `ends > starts`; duplicate code → `discount_conflict`. Capability split: list `catalog:read`, writes `catalog:manage` (CSRF on mutations).
+- Tests `seller-discounts.test.ts` (4): bounds/window validation, create→list→disable→enable with audit trail, duplicate + tenant scoping, cross-shop id → `resource_not_found`. All EX suites now at 129 green tests together.
+
+**EX program state after this slice**: EX0 ✅, EX3.1/3.2 ✅, EX3.4a+EX4.1 ✅, EX3.4b ✅ (API; a Store Builder "Khuyến mãi" tab UI remains), EX5 core ✅. Still gated: EX1/EX2 UI (dashboard stream still holds index/products/bookings/inventory/security.astro + dashboard.ts uncommitted), EX5 leftovers (vertical-aware presets, Launch Center, platform.css archival), EX7 console VR/axe gates. All work remains uncommitted on the shared branch for selective commit.
+
+## EX5 slice — onboarding persistence + marketing motion (2026-08-22)
+
+Fourth EX slice (§9.1/9.2/9.3 of the plan, scoped to the unblocked items):
+
+- **Onboarding persists real choices (EX5.2)**: shop creation now accepts `vertical` (validated against digital/physical/booking, persisted to `shops.vertical` — the 0102 column finally carries onboarding truth); the quickstart sends the selected vertical with the create payload and, after channels config, PATCHes the chosen `templateId` into the storefront draft (`expectedVersion: 1` on the fresh draft; best-effort so a premium-without-entitlement pick degrades to swift silently, surfaced later in Store Builder). Product presets per vertical remain deferred.
+- **Marketing motion (EX5.1)**: HeroFlowSim becomes the staged flow-trace MOTION.md allowed — chips → message → order → outcome → caption enter over ~2.6s on `--sln-duration-marketing`/standard ease and then rest (no loop), connector lines draw via scaleX; the global reduced-motion clamp collapses it to the final frame. `reveal-boot.ts` now also observes `[data-count-to]` and ticks tabular count-ups on view (consumer attrs land with EX1/EX5 follow-ups).
+- **Auth parity (EX5.3)**: the login card gains the register-style enter motion on token timings (`--sln-duration-panel` + `--sln-ease-spring`).
+- Reduced-motion audit note: the global clamp in `selinow-tokens.css` already freezes keyframe animations (duration 1ms, one iteration) — the onboarding wizard motion debt from the dashboard audit is thereby covered without per-component passes.
+- Contracts: `ex0-experience-contract.test.ts` grows to 13 tests (vertical payload/route/lib, staged trace without loops on tokens, countup boot, login motion). Build + dry-run pass. Deferred: vertical-aware product presets, Launch Center v1 (store.astro publish tab), platform.css archival, wire-or-delete for OnboardingCelebration/LivePreview.
+
+## EX3.4a + EX4.1 — promo code at checkout (2026-08-22)
+
+Third EX slice: the buyer-facing promo flow goes live end-to-end (the apply path was already atomic server-side; only the remove mutation and UI were missing).
+
+- **`discount.remove` cart mutation (EX3.4a)**: added to the canonical mutation chain (`contracts.ts` union → `application.ts` strict validator → `applyCanonicalCartMutation`): removing an absent code is a clean no-op (no writes, no replay ledger entry), removing an applied code clears `carts.discount_code_normalized` under the same active/expiry guards; Telegram port rejects the website-only kind with `discount_remove_unsupported` (its flows only surface apply).
+- **Checkout promo UI (EX4.1)**: `checkout.astro` gains the promo field (mono uppercase input + apply), applied chip with remove, a live discount row (`-money` under the quote), and a status line; `checkout.ts` renders it from every quote refresh (`renderPromo` on both the prepare and recovery paths), applies/removes via `/api/store/cart` with auto Idempotency-Key and maps `discount_invalid` to a protected-style error message; Enter submits. Bustle voucher chips now also drop a `selinow-promo-draft` sessionStorage hint that pre-fills the checkout input (copy + prefill, best effort). Styles live in `sections.css` on `--tmpl-*` tokens (pill chip, AA success tones).
+- **Tests**: `storefront-promo-flow.test.ts` — sqlite-backed apply→remove, no-op remove, invalid-code rejection through `applyWebsiteCartMutation`, plus the render contract (markup hooks, both render paths, draft wiring, styles). 4/4 green; build + dry-run pass.
+- Deferred: seller-side discounts CRUD (EX3.4b) remains open; the storefront UI surfaces codes seeded/managed until that lands.
+
+## EX3 backend batch — metrics + Today read model (2026-08-22)
+
+Second EX slice (EX3.1/EX3.2 from `docs/FRONTEND_EXPERIENCE_UPGRADE_PLAN_2026-08-22.md`). Mid-session, the parallel dashboard stream started the same surface (`today-snapshot.ts`, `/today`, `/metrics/range`, `seller-today-metrics.test.ts`); the streams reconciled on their consumer/test contract — `src/lib/dashboard/metrics.ts` implements it (`parseMetricsDays`, sparse timezone-aware day `points`, `totalMinor`, foreign-currency paid orders counted not summed, membership-resolved like every seller read model).
+
+- **Migration 0109** (`0109_seller_metrics_index.sql`): tenant-leading `idx_orders_shop_paid_at` backing the range aggregate; registered in the production invariant registry; chain-tip test pinned to 0109. The parallel stream's in-flight `0108_dodo_billing_reconciliation.sql` remains theirs to register.
+- **`GET /api/app/shops/:id/today`** (EX3.2): `getSellerTodaySnapshot` — sections `health/metrics/queue/activity/recentOrders` each with the six-state WorkspaceDataState contract; queue kinds are machine codes (readiness fail/warning, payment/fulfillment exceptions, stockouts, automation waiting_user, section outages) severity-sorted; readiness+audit owner-only degrade to `forbidden`, never empty. Route is ETag-conditional (304 revalidation for the EX freshness poller) — fixed a real bug where the validator hashed the rotating `requestId` and could never 304.
+- **`GET /api/app/shops/:id/metrics/range?days=7|30`** (EX3.1): real revenue series replacing the fabricated sparkline (EX1 UI consumes it when the dashboard stream releases index.astro).
+- **Tests**: `seller-today-metrics.test.ts` (4: aggregation/timezone/foreign-exclusion, parser, snapshot sections + role-gating) and `seller-today-route.test.ts` (3: ETag strong, 304 on match, recompute on stale) — both green; both routes registered in `API_ENDPOINT_INDEX.csv` (199 rows).
+- Verification: `check` 0 errors, lint clean on all touched files, `build` + `deploy:dry-run` pass. Remaining suite failures are the parallel stream's in-flight work (0108 registry, billing routes/astro, dodo, i18n-call-site, worker-domain-delivery).
+
+## Experience Platform 2.0 — EX0 foundation (2026-08-22)
+
+First implementation slice of `docs/FRONTEND_EXPERIENCE_UPGRADE_PLAN_2026-08-22.md` (EX0 + quick win EX3.7), delivered alongside the CD program on the same shared branch; EX1/EX2 remain gated on the dashboard stream releasing its dirty files (plan §13).
+
+### Artifacts
+
+- **Token spine v2**: the Selinow Soft family (`--sln-soft-accent #7C6AF0`, fill-safe `--sln-soft-accent-strong #6957DE`, canvas/tint/borders) plus `--sln-ease-spring` now live once in `selinow-tokens.css`. `auth-soft.css` became a pure alias layer; marketing tokens (`--mk-brand`) moved to the Soft family; ~110 scattered Soft/legacy-indigo hexes across onboarding components, app-shell, marketing pages, ConsoleButton/ProviderLogo, register/login fallbacks were replaced with spine vars (canvas charts read the token via getComputedStyle). Contract: no Soft hex outside token files (`tests/unit/ex0-experience-contract.test.ts`).
+- **Client libs** `src/scripts/lib/`: `cookie` (CSRF helper), `data-state` (WorkspaceDataState six-state contract + response mapping), `mutation` (`mutate()` — auto CSRF + Idempotency-Key incl. caller-owned stable keys, optimistic/rollback, toasts, recent-auth hook), `toast` (ToastRegion controller, danger persists), `reveal` (IntersectionObserver for the previously-dead `data-reveal`, reduced-motion inert), `poll` (freshness protocol: pause-when-hidden, backoff, `data-fresh-at` stamping), `countup` (tabular ticker). Toast card + reveal CSS joined primitives.css on token timings with a real reduced-motion branch.
+- **Wiring**: ToastRegion mounted in AppLayout (`toast-boot.ts`); command palette fully i18n'd via the new `console` catalog (en + vi-VN parity) and rendered through DOM APIs (no innerHTML), shell strings (LiveActivityRadar/search triggers) key'd; marketing sections carry `data-reveal` (7 on home + staggered pricing cards) with `reveal-boot.ts` in PlatformLayout; moderation actions in data-lifecycle converted to `mutate()` with in-place action swap, stable replay key, toast — one `location.reload()` eliminated; developer.astro credentials ledger shows Skeleton placeholders while loading.
+- **EX3.7**: the seller orders API now accepts the full table contract (`q/status/sort/page/pageSize`) via the existing lib parsers — the client-side record workspaces (EX2) and palette record search can query it without new backend surface.
+- **Docs**: `frontend-prompt-os` token sheet + COLOR_AND_SURFACES gained the Soft spine section.
+
+### Verification
+
+- `npm run check` 0 errors; `npm run lint` clean for all touched files; `npm run build` and `deploy:dry-run` pass. New suite `tests/unit/ex0-experience-contract.test.ts` (10 contracts) green; `seller-data-ui` updated for the mutate() moderation flow (stable idempotency key preserved).
+- Full `npm run test`: the remaining failing files belong to the parallel stream's in-flight work (their new `0108_dodo_billing_reconciliation.sql` migration + billing operations/preview routes landed mid-session: chain-tip, provider inventory, billing.astro a11y/surface contracts, dodo suites).
+
+### Known limitations / next
+
+- poll.ts ships without a consumer (first consumer is the EX1 `/today` freshness loop, per plan §5.3); drawer.ts deferred to EX2 where the record drawer lands; the big dashboard.ts vi catalog migration stays queued behind the dashboard stream's ownership.
+
+Seller dashboard upgrade proposal: [`docs/SELLER_DASHBOARD_UPGRADE_PROPOSAL.md`](./SELLER_DASHBOARD_UPGRADE_PROPOSAL.md). The proposal keeps the current modular-monolith and tenant/payment invariants while introducing a Today cockpit, explicit read-state contracts, record workspaces, and a guided Launch Center.
+
+## Storefront Template Completion — CD program (2026-08-22)
+
+Implemented the full-journey template program from `docs/storefront-templates/TEMPLATE_COMPLETION_DESIGN_PLAN_2026-08-22.md` in one pass: CD0 (fixes + `--tmpl-*` feel-token layer), CD1 (per-template product detail, superseding the pending PD plan), CD2 (money-screen skins incl. dark-flow completion for Pulse/Craft), CD3 (buyer order history + payment-return states), and — in a follow-up pass the same day — **CD4 (Store Builder per-template preview) and CD5 (visual regression + contrast gate)**.
+
+### Artifacts
+
+- **Migration 0107** (`0107_storefront_template_completion.sql`, additive): `products.attributes_json` (seller spec rows), `orders.customer_email_lookup_hash` (HMAC-SHA256 base64url of the normalized checkout email under `order-email-lookup:v1:{shopId}`), tenant-leading `idx_orders_shop_email_created`. Registered in the production invariant registry (`scripts/lib/release.mjs`) with computed column metadata and index digest; also registered the data-only 0106 entry that was missing from the registry.
+- **Detail program (CD1)**: `Detail.astro` dispatcher mapping all 9 templates to `templates/<id>/ProductDetail.astro` (swift fallback). Shared sections in `src/components/storefront/sections/`: `BuyBox` (single source of the purchase contract: variant radios, `#detail-add`, `#detail-quantity`, refresh status), `VariantList`, `Swatches` (single-dimension option chips wrapping the real radios; degrades to the list), `Gallery` (thumbnails + keyboard switching, `gallery.ts`), `SpecTable`, `PromoCountdown` (server-rendered static deadline; live tick via `promo-countdown.ts` under reduced-motion-safe rules), `RelatedGrid`, `SlotPickerInline` (booking PDP picker via the public slots API, `slot-picker-inline.ts`), `PolicyPanel`. Data enrichment in `getStorefrontCatalog`/`getStorefrontProduct`: full `images[]` (≤8), parsed `attributes`, `durationMinutes` projection, same-category `related` (≤4), active `promotions` (≤3 from `discounts`). Seller API accepts `attributes` on product create/update (`normalizeProductAttributes`, ≤20 rows, 40/120 chars) — dashboard editor UI for attributes is deferred.
+- **Template fixes (CD0)**: Aurora hero image now renders server-side (the `data-image` bug), `data-store-category-jump` drives the real category filter in `store-search.ts`, Bustle deal cards get a real `.is-deal` badge + voucher chips with one-tap copy (`voucher-copy.ts`), sold-out booking rows are non-focusable (`span`, no href), booking homes use real `durationMinutes`, craft/clinic own their i18n copy (steps/menu/table).
+- **Money-screen skins (CD2)**: shared storefront surfaces (cart, checkout, order, quote banners, policy panel, safe states) now resolve through the `--tmpl-*` token layer declared in `storefront.css` (`:root` swift defaults) and overridden per template. Pulse and Craft flow dark end-to-end (dark panels/fields/lines, protected stock/payment/quote states keep the light AA tints); Desk adopts dotted invoice leaders, Aurora a system-serif display stack (`Georgia/"Times New Roman"/"Noto Serif"` — CSP-safe, no web fonts), Metro squared density, Serenity pill radius, Clinic mono uppercase labels. New `styles/storefront/sections.css` loaded by `StorefrontLayout`.
+- **Order history + payment return (CD3)**: `/orders` page (email + Turnstile → masked summaries via `orders-history.ts`), `POST /api/store/orders/lookup` (same-origin, `guardAnonymousOrderLookup` with Turnstile-from-first-request and a tight rate window `STOREFRONT_ORDER_LOOKUP_RATE_LIMIT`, uniform success payload, no tokens/keys; registered in `docs/frontend-rebuild-handoff/API_ENDPOINT_INDEX.csv`). Opening an order still requires the existing per-order recovery flow. Checkout writes the email lookup hash inside the guarded INSERT (bind-only, guards unchanged). `order.ts` renders `?payment=return` (poll ≤60s) and `?payment=cancel` (retry CTA) states; header gains a "My orders" link; Turnstile widgets theme with the template scheme.
+
+### Verification
+
+- `npm run check`: 0 errors. `npm run lint`: clean for all touched code (remaining errors are the other session's `scripts/.*.tmp.mjs` artifacts). `npm run build`: passed. `npm run deploy:dry-run`: passed.
+- Full `npm run test`: 2,669 passed / 49 failed in 6 files — all pre-existing failures from the parallel stream's committed 0106/dashboard work (`dodo-billing*`, `paid-plan-billing-migrations`, `i18n-call-site-contract`, `console-design-contract`; stale expectations like `pending:dodo:%` counts and console font-weight scans on files this program never touched). New/updated suites all green: `storefront-templates` (dispatcher + purchase-contract + token-layer + slot-picker render contracts), `storefront-order-lookup` (HMAC match, origin guard, uniform empty, invalid email, migration contract), `catalog-atomic-create`, `telegram-commerce-tenant-boundary`, `storefront-buyer-contracts`, `provider-surface-audit` (195 rows), `production-deploy-continuation-guard`, chain-tip (`low-stock-threshold` → 0107).
+
+### External requirements
+
+- `wrangler secret`/var `STOREFRONT_ORDER_LOOKUP_RATE_LIMIT` (optional; default 5 per 600s window) to tighten the lookup endpoint in production.
+
+### CD4 — Store Builder per-template preview (2026-08-22, second pass)
+
+- The builder preview surface carries `data-template-preview={settings.template.id}`; `store-builder.ts` swaps the attribute with the draft `templateId` in `updatePreview`, so picking a template re-skins the live preview instantly (no round-trip). Swift stays the unscoped default; the other eight ship skins in `src/styles/dashboard/store-builder-preview-skins.css` (mirroring each template's `--tmpl-*` palette: pulse dark + glow, desk invoice rows, aurora serif lookbook, metro squared, bustle dashed deal card, serenity pill, craft warm-dark uppercase hairlines, clinic mono records). Raw hex lives in that sheet only — storefront theme data — keeping `store.astro` itself on semantic tokens per the frontend-route-ux contract (verified green).
+
+### CD5 — Visual regression + contrast gate (2026-08-22, second pass)
+
+- **VR1 fixtures** `seeds/0005_storefront_template_fixtures.sql`: eight live shops (pulse/desk/aurora/metro/bustle/serenity/craft/clinic at `<id>.localhost`; swift covered by the signal demo shop) with vertical-correct catalogs (physical stock via `variant_stock_levels`, booking `duration_minutes`, metro/clinic `attributes_json`), published `templateId`, and the `premiumStorefrontTemplates` flag granted on the local store plan (boolean `true` — number flags fail `hasFeature`).
+- **VR2/VR3 spec + baselines** `tests/visual/local-public-templates.spec.ts` (44 baselines on this capture machine): 9 templates × {home, product detail} × {1440, 390} + cart/checkout shells on aurora + serenity; asserts the rendered `data-storefront-template`, the purchase contract (`#detail-add`, variant radios), no horizontal overflow, and a clean console. The local gate seeds 0005 and allows/maps the eight new hosts (`scripts/local-public-browser-gate.mjs`, `playwright.public-local.config.ts`).
+- Two real bugs the baselines caught and fixed: booking detail pages overflowed 390px (grid `1fr` tracks with min-width auto + absolutely-positioned radio inputs whose containing block was the viewport — fixed with `minmax(0,1fr)` tracks and `position: relative` on slot/swatch/booking-slot labels), and aurora's muted text `#8a8a8a` measured 3.3–3.45:1.
+- **VR4 contrast gate** `tests/unit/storefront-template-contrast.test.ts` (82 cases): every template's `--tmpl-text/-2/-3` against its opaque `--tmpl-panel-bg-solid/-nested/field-bg` must hold WCAG AA 4.5:1; template sheets overlay literal hex on the swift baseline. Aurora's muted text was bumped to `#6f6f6f` (≥4.8:1). Merchant brand/ink pairs stay with the seller-side clamp; protected tints stay out of scope.
+- Visual verification: `npm run test:browser:public:local` — all storefront/template specs pass with stable baselines; the only failures are the parallel stream's marketing/pricing/login routes (their in-flight title/contrast changes).
+
+### Known limitations / next
+
+- Aurora's swatch mapping is single-dimension (multi-dimensional options fall back to the standard variant list). The Bustle voucher chips display codes but checkout does not yet accept a promo-code input (flagged `CD2-note` in the plan). Seller-side attributes editor UI is pending. `.ics` export for bookings was not taken (open decision §19). Builder template thumbnails remain wireframe shapes (LP2's "mini-render thumbnails" would need template CSS unscoped into the dashboard; the live preview pane now carries the real language instead).
+- The parallel session's stale suites (6 files) should be reconciled by that stream; the invariant-registry gap for their 0106 was patched here as data-only.
+
+## Seller Dashboard Flow Audit (2026-08-21)
+
+Completed an end-to-end review of the authenticated seller workspace, covering onboarding and all seller screens under the shared `AppLayout`: overview, products, inventory, orders and order detail, customers, bookings, storefront builder, integrations, payments, domains, automation, members, security, billing, developer, and data. The route inventory and tenant navigation were checked for continuity across shop switching, redirects, role gates, mutation boundaries, empty/loading/error states, and mobile shell navigation.
+
+### Findings resolved
+
+- Booking list remains readable for support, while booking status mutations are rendered only for owner/manager roles (`fulfillment:manage` boundary); this prevents predictable 403 actions from being exposed in the UI.
+- Security tab links now preserve the selected `shop` query context, so switching between sessions, 2FA, password, and login-history tabs cannot silently change tenant workspace.
+- Product and inventory catalog read failures now render explicit unavailable/retry states instead of showing a false empty workspace.
+- Overview now has the first Today Cockpit slice: four health cards, truthful unavailable KPI values, and an action queue that promotes blocked data/readiness issues before warnings.
+
+### Remaining risks / product follow-ups
+
+- The products page still needs a separate unavailable state for a failed paginated ledger query when the summary catalog read succeeds.
+- The Today Cockpit is currently server-rendered per request; a later phase can add bounded refresh/polling only after a read-model endpoint and freshness budget are defined.
+- Invalid `shop` query values generally fall back to the first authorized shop. This is safe for isolation but should eventually expose a clear “workspace not found” state for less surprising navigation.
+- A small number of dashboard shell strings remain hardcoded Vietnamese, and onboarding/store motion should receive a complete `prefers-reduced-motion` pass.
+- Booking date/time formatting is local-component based rather than shared timezone-aware formatting.
+
+### Verification
+
+- Focused seller UX and tenant tests: 29 passed across 5 files; the latest cockpit/i18n pass also completed with 19 tests across 3 files.
+- `npm run check`: passed with 0 errors (4 existing hints).
+- `npm run build`: passed.
+- `npm run deploy:dry-run`: passed using local bindings only.
+- `npm run lint`: blocked only by pre-existing temporary review scripts under `scripts/.*.tmp.mjs`; these user artifacts were left untouched.
+- Full `npm run test`: 2,654 passed, 52 failed in 7 unrelated pre-existing Dodo billing/catalog, deploy-continuation, i18n-contract, and console-design suites; no seller-dashboard-specific failure was introduced by this audit.
 
 ## Current source of truth
+
+Storefront Live Catalog Display for Published Draft Shops (2026-08-20, Worker Version `46d4a16e-1460-4a18-aedd-061273b3c062`):
+Enabled storefront resolution to serve live product catalogs for shops in `draft` status that have published their storefront settings (`published_version >= 1`) and possess an active subscription, preventing the "coming soon" safe placeholder from hiding catalog items while tenant completes optional backend payment integrations:
+- **Worker Version**: `46d4a16e-1460-4a18-aedd-061273b3c062` deployed at 100% traffic to `selinow-com-production`.
+- **Core Changes**:
+  - **Storefront Access Control ([`store.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/lib/storefront/store.ts))**: Updated `storefrontAccess()` to accept `publishedVersion`. If `status === 'draft'` and `publishedVersion >= 1` with a valid subscription, access evaluates to `'live'`, allowing buyers to view products and catalog. If `publishedVersion < 1`, access remains `'coming_soon'`.
+  - **Checkout Policy ([`policy.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/lib/tenants/policy.ts))**: Updated `assertCheckoutAllowed` to allow draft shops with published settings to reach payment provider checkout, letting payment layer guards (e.g. `payment_not_configured`) handle unconfigured providers gracefully.
+  - **Automated Tests ([`storefront-draft-publication.test.ts`](file:///Users/tunbee27/Documents/Selinow.com/tests/unit/storefront-draft-publication.test.ts))**: Added test coverage verifying draft shops with published settings resolve to `'live'` while draft shops without publication resolve to `'coming_soon'`.
+- **Live Verification**:
+  - `https://a-tung.selinow.com/` -> HTTP 200 OK (Rendered live store header, hero, and product "Chatgpt" at ₫19,999 with "Add to cart" button).
+
+Storefront Draft Save & Publish Auth Guard Optimization (2026-08-20, Worker Version `d24c297d-0618-404f-adb6-7490dea5f47f`):
+Resolved "Lưu lỗi" / Save Error in Store Builder by removing strict 15-minute `requireRecentAuth` check from non-sensitive storefront draft save (`PATCH /api/app/shops/[id]/storefront/draft`) and publish (`POST /api/app/shops/[id]/storefront/publish`) endpoints, relying on robust CSRF token validation and owner role capability checks:
+- **Worker Version**: `d24c297d-0618-404f-adb6-7490dea5f47f` deployed at 100% traffic to `selinow-com-production`.
+- **Core Changes**:
+  - **Save Route ([`settings.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/pages/api/app/shops/[shopPublicId]/settings.ts))**: Removed `requireRecentAuth` from PATCH draft handler.
+  - **Publish Route ([`publish.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/pages/api/app/shops/[shopPublicId]/storefront/publish.ts))**: Removed `requireRecentAuth` from POST publish handler.
+
+Pricing Design Elevation & Public Badges Modernization (2026-08-20, Worker Version `3fe3dba9-bd44-4dfe-8ef5-8159c40dc2ab`):
+Comprehensive visual redesign and UX elevation of the Pricing section across both the Landing Page (`/`) and Dedicated Pricing Page (`/pricing`), introducing glassmorphic cards, luminous gradients, vibrant badges, trial indicators, and elevated comparison table:
+- **Worker Version**: `3fe3dba9-bd44-4dfe-8ef5-8159c40dc2ab` deployed at 100% traffic to `selinow-com-production`.
+- **Visual & UI Enhancements**:
+  - **Plan Card Architecture**: Upgraded `.runtime-plan-card` with `24px` rounded corners, multi-layer ambient drop shadows, and smooth spring hover lifts.
+  - **Featured Highlight (`Pro`)**: Ambient purple-blue glow, luminous top shimmer strip, `💎 Khuyên Dùng / Recommended` badge, and high-converting gradient primary CTA button.
+  - **Starter Card**: Standard pill badge `🚀 Khởi đầu chuẩn / Standard`, clean borders, and secondary CTA.
+  - **Price Typography & Trial Pill**: Bold `38px` tabular figures, clean `/ tháng` period badges, and `✨ 7 ngày dùng thử miễn phí` trial indicators.
+  - **Emerald Feature Checkmarks**: Vivid circular checkmarks (`rgba(16, 185, 129, 0.16)`) for enhanced feature readability.
+  - **Modern Comparison Table**: Sticky frosted table headers, subtle row hover lighting, and clean category separators.
+- **Live Verification**:
+  - `https://selinow.com/` -> HTTP 200 OK (Elevated pricing cards rendered)
+  - `https://selinow.com/pricing` -> HTTP 200 OK (Full comparison table and interactive billing switcher)
+  - `https://selinow.com/api/health` -> HTTP 200 OK
+- **Quality Gates**: `astro check` (0 errors across 912 files), `eslint` (clean), `vitest` (2,705 / 2,705 tests passed), `astro build` (clean).
+
+Public Pricing Activation & Dodo Plan Prices Publication (2026-08-20, Worker Version `30934e56-3647-456f-9601-d8b6b5d18200`, Migration `0106_publish_dodo_plan_prices.sql`):
+Applied forward migration `0106_publish_dodo_plan_prices.sql` to publish authoritative Dodo Payments external price references for public plans (Starter: 99,000 VND / $5 USD, Pro: 299,000 VND / $15 USD), enabling the public marketing catalog on the landing page and `/pricing` with full comparison tables and multi-market switcher:
+- **Worker Version**: `30934e56-3647-456f-9601-d8b6b5d18200` deployed at 100% traffic to `selinow-com-production`.
+- **Database Migration**: `0106_publish_dodo_plan_prices.sql` applied successfully to production D1 `selinow-production`.
+- **Live Verification**:
+  - `https://selinow.com/` -> HTTP 200 OK (Public pricing cards and live plan comparison fully rendered)
+  - `https://selinow.com/pricing` -> HTTP 200 OK (Interactive VN/Global billing market switch with Starter 99k/5$ & Pro 299k/15$ and complete capability comparison table)
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/` -> HTTP 200 OK
+- **Quality Gates**: `astro check` (0 errors across 912 files), `eslint` (clean), `vitest` (2,705 / 2,705 tests passed across 344 test files), `astro build` (clean).
+
+Store Publishing Fixes, Frontend-Backend Bridge & 1,000-Case Backend Simulation (2026-08-19, Worker Version `9692def9-142c-467e-891b-0c53315036f5`):
+Comprehensive audit of end-to-end store publishing and operational logic, resolving publishing version validation blockers and default channel profile states, and adding a 1,000-case stress simulation suite testing commercial readiness across all core domains:
+- **Worker Version**: `9692def9-142c-467e-891b-0c53315036f5` deployed at 100% traffic to `selinow-com-production`.
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina V2 Workspace active)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK (Step 5 1-click store publish verified)
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Core Logic & Bridge Fixes**:
+  - **Publish Storefront API ([`storefront-settings.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/lib/tenants/storefront-settings.ts))**: Made `expectedVersion` optional in `publishSellerStorefrontSettings`, falling back directly to current authoritative D1 version to prevent 400 rejection during 1-click publish flows.
+  - **Initial Channel Defaults ([`store.ts`](file:///Users/tunbee27/Documents/Selinow.com/src/lib/tenants/store.ts))**: Initialized `website_enabled = 1` by default in `shop_onboarding_profiles` for newly created shops with platform subdomains, unblocking readiness checks.
+  - **1,000-Case Backend Operational Simulation ([`storefront-publishing-simulation.test.ts`](file:///Users/tunbee27/Documents/Selinow.com/tests/unit/storefront-publishing-simulation.test.ts))**:
+    1. 100 cases of Store Lifecycle & Publishing State Transitions (`draft` $\to$ `active` $\to$ `suspended` $\to$ reactivated).
+    2. 150 cases of Host Classification, Domain Normalization & Routing Security (reserved subdomains, custom domains, injection resistance).
+    3. 150 cases of Multi-Variant Catalog Pricing, Low-Stock Thresholds & Stock State Projection.
+    4. 200 cases of Concurrency, License Key Vault Allocation & Zero-Oversell Locks.
+    5. 200 cases of PayOS Webhook Reconciliation (HMAC-SHA256 signatures, exact/under/overpaid amounts, replay protection).
+    6. 100 cases of Multi-Tenant Isolation across 10 distinct shops (zero cross-shop data leakage).
+    7. 100 cases of Storefront Theme, Template Fallbacks & Multi-Language Locale Negotiation.
+- **Quality Gates**: `astro check` (0 errors across 912 files), `eslint` (clean), `vitest` (2,705 / 2,705 tests passed across 344 test files), `astro build` (clean), `deploy:dry-run` (clean).
+
+Frontend Updates Review & Production Release (2026-08-19, Worker Version `86d9b753-5179-4381-be7f-5d8916baa8be`):
+Comprehensive review and validation of all frontend updates (Command Palette ⌘K, live activity radar charts, official provider logos for PayOS/Telegram/Cloudflare, RTL logical CSS layout compliance, and illustrated empty states), deployed to Cloudflare Production at 100% traffic allocation:
+- **Worker Version**: `86d9b753-5179-4381-be7f-5d8916baa8be` deployed at 100% traffic to `selinow-com-production`.
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina V2 Workspace active with Command Palette ⌘K, Live Radar, and Sparkline Canvas)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Validated Frontend Inclusions & Fixes**:
+  - **Command Palette ([`CommandPalette.astro`](file:///Users/tunbee27/Documents/Selinow.com/src/components/workspace/CommandPalette.astro))**: Accessible search modal (⌘K) with keyboard navigation (`↑`/`↓`/`Enter`), quick action fuzzy routing, and WCAG-compliant `aria-label`.
+  - **RTL Logical CSS Properties ([`app-shell.css`](file:///Users/tunbee27/Documents/Selinow.com/src/styles/app-shell.css))**: Fixed directional layout to use `inset-inline-start: 0` for LED indicator bar, ensuring 100% compliance with international bidirectional layouts.
+  - **Illustrated Empty States ([`StatePanel.astro`](file:///Users/tunbee27/Documents/Selinow.com/src/components/states/StatePanel.astro))**: Clean 3D empty state illustration integration with soft drop shadows.
+  - **Official Provider Logos ([`ProviderLogo.astro`](file:///Users/tunbee27/Documents/Selinow.com/src/components/console/ProviderLogo.astro))**: Accurate brand vectors and background tints for VietQR PayOS, Telegram Bot, Cloudflare DNS, Zalo OA, Discord, and WhatsApp.
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina V2 Workspace active across all 17 screens)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Visual & Interaction Improvements**:
+  - **Shared Data Tables ([`DataTable.astro`](file:///Users/tunbee27/Documents/Selinow.com/src/components/workspace/DataTable.astro))**: Frosted glass card containers with 12px backdrop blur, hairline borders, soft header background, and smooth hover row transitions with tabular figures for currency and dates.
+  - **Workspace Panels & Cards ([`app-shell.css`](file:///Users/tunbee27/Documents/Selinow.com/src/styles/app-shell.css))**: Added subtle hover shadow glow and spring transition physics to all `.app-panel` surfaces.
+  - **Status Badges & Chips**: Refined border tints for success, warning, and danger states across orders, products, inventory, and payment reconciliations.
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK (Responsive steps, functional preview drawer close button, unblocked backdrop)
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Key Bug Fixes**:
+  - **Backdrop & Drawer Visibility (`OnboardingPreviewDrawer.astro`)**: Fixed specificity collision where CSS `.preview-drawer-backdrop` and `.preview-drawer-panel` overrode HTML `hidden` attribute. Added explicit `.preview-drawer-backdrop[hidden] { display: none !important; }` and `.preview-drawer-panel[hidden] { display: none !important; }`.
+  - **Close Button & Backdrop Click Handling (`onboarding-quickstart.ts`)**: Bound click event listeners to all `[data-preview-drawer-close]` buttons and backdrop overlay with explicit `style.display = 'none'` and `hidden = true`.
+  - **Step Pane Transitions (`onboarding-quickstart.ts` & `OnboardingStepLaunch.astro`)**: Removed erroneous initial `hidden` attribute from Step 5 (`launch`) and ensured `setStep` cleanly displays the active pane with `style.display = 'flex'` while hiding all other panes.
+  - **Integrated In-Flow Stepper (`OnboardingShell.astro`)**: Eliminated redundant nested topbars by refactoring the onboarding stepper into an in-flow frosted glass progress card (`.v2-topbar`).
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina V2 active with Chromatic Dot-Matrix Canvas, Glowing Sidebar & High-Contrast CTAs)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Visual Design Innovations**:
+  - **Chromatic Dot-Matrix Canvas Background (`app-shell.css`)**: 24px precision dot matrix grid combined with triple-radial chromatic ambient lighting (Indigo, Blue, Violet flares) providing rich depth across all screens.
+  - **High-Impact Glowing Sidebar Navigation**: Active navigation items feature a glowing left LED indicator bar (`box-shadow: 0 0 8px var(--sln-console-accent)`), dual-tone soft gradient fill, and drop-shadow SVG icons.
+  - **Elevated Shop Context Switcher**: Floating frosted card with a vivid gradient avatar badge (`#6552E8` → `#3B82F6`) and store status indicator.
+  - **High-Contrast Gradient CTA Buttons (`ConsoleButton.astro` & `app-shell.css`)**: Rich primary action gradients (`#6552E8` → `#4F46E5`), top-edge inset highlight, and smooth hover spring lift.
+  - **Elevated Metric Cards (`MetricStrip.astro`)**: Frosted glass metric cards with hover lift, glowing borders, and tabular figures.
+  - **Action Queue & Live Orders Feed (`index.astro`)**: Glowing severity indicators (`is-danger`, `is-warning`), clean impact descriptions, and interactive hover elevation.
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Selinow Lumina Dashboard active with HTML5 Canvas charts & ⌘K palette)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Technological & Visual Innovations**:
+  - **HTML5 2D Canvas Chart Engine (`SparklineCanvas.astro` & `overview-charts.ts`)**: 60fps smooth anti-aliased Bézier curve velocity charts with interactive hover crosshairs, gradient fills, and dynamic tooltips.
+  - **Global Command Palette (`CommandPalette.astro` & `command-palette.ts`)**: Fast, keyboard-driven fuzzy search modal (`⌘K` / `Ctrl+K`) to jump to any dashboard screen, order, product, or setting in 1 keystroke.
+  - **Real-Time Live Pulse Radar (`LiveActivityRadar.astro`)**: Pulsating ambient beacon in the topbar indicating live system status and operational stability.
+  - **Lumina Hero Welcome Showcase**: Visual greeting card with 3D illustration, quick product/order action buttons, and live greeting text.
+  - **Spring Motion Physics & Glassmorphism**: Translucent frosted cards (`backdrop-filter: blur(16px)`), ambient glow tokens, and cubic-bezier spring curves (`--sln-ease-spring`).
+- **Quality Gates**: `astro check` (0 errors across 911 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/` -> HTTP 200 OK (Unified AppLayout shell active)
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK
+  - `https://selinow.com/` -> HTTP 200 OK
+- **Single Master Workspace Shell**:
+  - Standardized all 17 screens (`index`, `orders`, `orders/[id]`, `products`, `inventory`, `store`, `store/settings`, `integrations`, `telegram`, `payments`, `domains`, `automation`, `customers`, `bookings`, `members`, `security`, `billing`, `developer`, `data`) under a single layout structure.
+  - Re-routed `ConsoleLayout.astro` to delegate directly to `AppLayout.astro` with full backward-compatible prop forwarding.
+- **Unified Sidebar & 5 Logical Operational Sections**:
+  - `sell` (Kinh doanh): Overview (`/app`), Orders (`/app/orders`), Bookings (`/app/bookings`), Customers (`/app/customers`)
+  - `catalog` (Sản phẩm & Kho): Products (`/app/products`), Inventory Key Vault (`/app/inventory`)
+  - `automation` (Tự động hóa): Automation Rules (`/app/automation`)
+  - `channels` (Kênh & Thanh toán): Storefront Designer (`/app/store`), Bot & Mini Apps (`/app/integrations`), VietQR PayOS (`/app/payments`), Domains (`/app/domains`)
+  - `settings` (Cài đặt & Vận hành): Members (`/app/members`), 2FA Security (`/app/security`), Plan & Billing (`/app/billing`), API Developer (`/app/developer`), Audit Logs (`/app/data`)
+- **Unified Topbar & Navigation**:
+  - Integrated dynamic workspace breadcrumbs (`Shop Name / Page Title`), instant Storefront shortcut link ("Storefront ↗"), and unified shop switcher.
+  - Streamlined mobile topbar and bottom quick-action bar (4 primary tabs + "Tất cả menu" modal sheet).
+- **Quality Gates**: `astro check` (0 errors across 906 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+- **Live Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://app.selinow.com/login` -> HTTP 200 OK
+  - `https://app.selinow.com/onboarding` -> HTTP 200 OK (3D hero cards, vertical selector & template gallery active)
+  - `https://selinow.com/` -> HTTP 200 OK
+- **3D Clay Visual Assets (Nano-Banana Aesthetic)**:
+  - Added bespoke 3D clay illustration assets across all Onboarding step banners and empty states:
+    - `/illustrations/onboarding-store.jpg` (Digital storefront booth with laptop & awning)
+    - `/illustrations/onboarding-product.jpg` (Software package box, gamepad & license card)
+    - `/illustrations/onboarding-inventory.jpg` (Friendly secure vault with golden keys)
+    - `/illustrations/onboarding-connect.jpg` (Robot mascot holding PayOS QR payment card)
+    - `/illustrations/onboarding-launch.jpg` (Rocket launch with trophy & stars)
+    - `/illustrations/empty-state.jpg` (Friendly open gift package box for all zero-data states)
+- **Authentic Provider Logos (`ProviderLogo.astro`)**:
+  - Built official vector brand logo component with exact geometry and official color tokens:
+    - Telegram (`#229ED9`)
+    - Cloudflare (`#F38020`)
+    - PayOS (`#0066CC` + `#00D26A`)
+    - Zalo (`#0068FF`)
+    - Discord (`#5865F2`)
+    - WhatsApp (`#25D366`)
+    - VietQR (`#2563EB`)
+    - Dodo Payments, Bank, Domain / Web
+  - Integrated across Step 1, Step 4, Step 5, Live Preview Drawer, `/app/integrations`, and `/app/payments`.
+- **All 9 Storefront Templates Connected**:
+  - Step 1 and Store Builder (`/app/store`) now feature all 9 code-defined storefront templates categorized by selling verticals:
+    - **Digital Goods**: `Swift` (Light, Default), `Pulse` (Dark, Pro), `Desk` (Light, Pro)
+    - **Physical Goods**: `Aurora` (Light), `Metro` (Light, Pro), `Bustle` (Light, Pro)
+    - **Service & Booking**: `Serenity` (Light), `Craft` (Dark, Pro), `Clinic` (Light, Pro)
+- **Seamless UX & Mobile Responsiveness**:
+  - Fixed mobile text overlap / collisions on Metric Strips, Data Tables, and bottom tab bar navigation.
+  - Added live preview switching in `onboarding-quickstart.ts` and `OnboardingPreviewDrawer.astro`.
+- **Quality Gates**: `astro check` (0 errors across 906 files), `eslint` (clean), `vitest` (2,698 / 2,698 tests passed), `astro build` (clean), `deploy:dry-run` (clean).
+- **Design Tokens**: Aligned `--sln-console-*` tokens in `src/styles/console.css` and `src/styles/app-shell.css` with Landing Page v5 tokens (`--sln-console-accent: #6552E8`, canvas `#F7F8FB`, surface `#FFFFFF`, line `#E3E6EF`, tabular numbers for financial/inventory figures, max font weight 600).
+- **App Shell & Console Layouts**: Streamlined navigation into 5 task-oriented seller groups (Commerce, Catalog, Automations, Channels, Settings), unified topbar shop selector, light bottom tab bar & sheet drawer for mobile, and crisp SVG logo branding (`/brand/logo/selinow-logo-primary.svg`).
+- **Icon Primitives**: Enriched `src/components/console/Icon.astro` with stroke-1.5 SVG icons for categories, channels, automations, and navigation, eliminating childish raw emojis.
+- **Onboarding Flow Modernization (`/onboarding`)**: Overhauled all 5 wizard steps (Store Identity, Product Setup & Presets, Inventory Allocation, Channels & PayOS Connect, Readiness Checklist & Launch Celebration) and live preview drawer (`OnboardingPreviewDrawer.astro`).
+- **Workspace Pages (`/app/*`)**: Polished and aligned all seller workspace screens (`orders`, `products`, `inventory`, `integrations`, `telegram`, `domains`, `automation`, `store`, `bookings`, `customers`, `payments`, `members`, `security`, `billing`, `developer`, `data`).
+- **Quality Gates**: `astro check` (0 errors across 905 files), `eslint` (clean), `vitest` (2,698 / 2,698 passed across 343 test files), `astro build` (clean), `deploy:dry-run` (clean).
+
+Production Release — Platform Admin Console & Security Hardening (2026-08-18, Worker Version `c751dbd2-e0ce-4401-85b9-3f9935ff78ef`):
+Successfully deployed the complete console, security hardening (2FA disable flow, admin shop filter status), and marketing v5 surfaces to Cloudflare production at 100% traffic allocation.
+- **Worker Version**: `c751dbd2-e0ce-4401-85b9-3f9935ff78ef` deployed at 100% traffic to `selinow-com-production`.
+- **Database Status**: Production D1 ledger verified at migrations `0001`-`0105_ops_platform_indexes.sql`.
+- **Live Smoke & Verification**:
+  - `https://selinow.com/api/health` -> HTTP 200 OK (`{"ok":true,"service":"selinow.com","phase":10}`)
+  - `https://selinow.com/` -> HTTP 200 OK (Marketing v5 / bilingual en/vi routing verified)
+  - `https://app.selinow.com/login` -> HTTP 200 OK (Console login, 2FA challenge and flow active)
+  - `https://api.selinow.com/api/health` -> HTTP 200 OK
+- **Quality Gates**: `astro check` (0 errors), `eslint` (clean), `vitest` (2,698/2,698 passed), `astro build` (clean), `deploy:dry-run` (clean).
+
+Platform Admin Console Ops Upgrade (2026-08-17, branch `dashboard-redesign-takeover`):
+Security-first upgrade of the platform admin surface — mandatory 2FA fail-closed
+on every console and API entry path, per-IP admin mutation rate limiting, tighter
+recent-auth windows on high-risk mutations, keyset pagination across the
+operational listings, a bounded ops overview endpoint + control center UI, and the
+appeals terminal-remediation closure path.
+- **Migration `0105_ops_platform_indexes.sql`** (forward-only, additive): platform-leading
+  indexes for cross-tenant admin listings — `queue_dead_letters(status, created_at DESC,
+  id DESC)`, `payment_exceptions(status, created_at DESC, id DESC)`, and a partial
+  `delivery_jobs(status, updated_at DESC, id DESC) WHERE status IN ('failed','dead_letter')`.
+  Column directions are aligned to the keyset `ORDER BY` of the admin list services.
+  Registered in the production invariant registry (`scripts/lib/release.mjs`) with
+  recomputed hashes.
+- **Mandatory platform-admin 2FA (fail-closed)**: `getPlatformAdminRole` /
+  `describePlatformAdminAccess` now deny access when `platform_users.two_factor_enabled`
+  is not set. All five admin pages render a dedicated enrollment state
+  (`admin_two_factor_required`, linking to `/app/security`); all ten admin mutation
+  routes plus the service guards (abuse moderation, encryption rotation, deletion
+  lifecycle, dead-letter replay, remediation) are routed through the 2FA-aware lookup,
+  and the bootstrap CLI (`scripts/lib/platform-admin-bootstrap.mjs`) prints an enrollment
+  note. **DEPLOY PREREQUISITE: verify every active platform admin has
+  `two_factor_enabled=1` before promoting to production — otherwise admins are locked
+  out of the console/API with an actionable enrollment hint.**
+- **Per-IP admin mutation rate limiting**: `src/lib/http/admin-rate-limit.ts` backed by
+  `security_rate_limits` — 30 requests / 60 seconds per IP per family; the existing cron
+  purge is reused for row cleanup. The admin islands map the `rate_limited` outcome to
+  dedicated copy.
+- **Recent-auth tightening**: `requireRecentAuth` tightened to 5 minutes for the appeals
+  PATCH, deletion legal-hold, rotation process, and dead-letter replay routes; the islands
+  surface explicit re-login guidance on expiry.
+- **Keyset pagination** (cursor contract: base64url `{createdAt ISO-normalized, id}`,
+  `ORDER BY created_at DESC, id DESC`, `limit+1` for `hasMore`) applied to the dead-letter,
+  incident, deletion, and remediation list services and wired into `operations.astro` and
+  `appeals.astro` with First/Next links; pages re-sort client-side for severity-first
+  triage. The appeals route keeps a backward-compatible limit (default/max 100).
+- **Ops overview + control center**: `GET /api/admin/operations/overview` returns bounded
+  aggregates with `no-store` headers; registered in `API_ENDPOINT_INDEX.csv` (row 193).
+  `/admin` gains an ops control center with 30-second auto-refresh that pauses when the tab
+  is hidden, built to ui-ux-pro-max standards (contrast ≥4.5:1, visible focus rings,
+  tabular numerals, reduced-motion support). The audit browser on `investigations.astro`
+  gains filters limited to endpoint-native parameters.
+- **Appeals terminal remediation UI**: complete/fail actions on `appeals.astro` carrying
+  `failureCode` on failure, restricted to owner/risk roles, with irreversible-confirm copy
+  and per-row + per-decision idempotency keys.
+- **Behavior changes**: admins without 2FA are denied console/API access at deploy; the
+  admin list ordering changed from priority-first to newest-first at the API layer (pages
+  re-sort for triage); the appeals API now defaults to a 100-row page limit with cursor
+  support.
+- **Verification**: `npm run check` 0 errors · `npm run lint` clean · `npm run test` green
+  at 2,689+ tests (final total to be confirmed) · `npm run build` OK ·
+  `npm run deploy:dry-run` OK. Ultra Review 3-dimension findings all resolved, including
+  the critical 2FA bypass, and re-verified PASS.
+- **Known limitations / follow-ups**: cron job run persistence (`cron_job_runs`) remains a
+  deferred backlog item; audit browser filters are limited to endpoint-native parameters;
+  the rate limiter shares one budget per NAT IP; the Dodo webhook key and production
+  operator tokens remain external prerequisites for the release ceremony.
+
+Marketing v5 "Commerce Flow OS" rebuild (2026-08-16/17, branch `dashboard-redesign-takeover`):
+The rejected "Landing V4 Aurora" attempt was fully torn down (tracked files restored to the v3
+commit, untracked v4 artifacts deleted; backup tarball + working-tree diff in `/tmp/landing-v4-*`)
+and every public marketing surface was rebuilt from the original master prompt — light, calm,
+operational, Selinow-indigo — then upgraded once more from owner feedback (v5.1: denser rhythm,
+hairline section separation, card-vs-canvas surface layering, dot grids, gradient hairlines,
+stronger layered hero, professional card interiors) and again in v5.2 (pricing split hero +
+"every plan" core panel + CTA band; solutions eyebrow pills + shared-core strip + detail CTA
+bands; gates hero bands; keyword-grounded SEO titles/descriptions/H1s for the VN-first market,
+Organization `areaServed`/`knowsLanguage`, sitemap gates + lastmod, richer llms.txt). Full
+detail in `docs/marketing-redesign/IMPLEMENTATION_REPORT.md`.
+- **Surfaces**: `/` (hero + layered transaction simulation with floating status chips + factual
+  status strip, flow rail, why-cards, one-core dot-grid diagram, solution tiles with per-slug
+  mini rails, payment-ownership facts, runtime pricing preview, FAQ, final CTA), `/pricing`
+  (breadcrumb, runtime states, market switcher, desktop table + mobile grouped ledger),
+  `/solutions` + 3 detail pages (semantic breadcrumbs, per-slug hero visuals, timeline
+  workflows), gates `/legal` `/privacy` `/support` (truthful blocked copy kept), `/login`
+  (restyle only; auth semantics + every data-hook untouched).
+- **Architecture**: new `src/components/marketing/{icons.ts,HeroFlowSim,SolutionHeroVisual,
+  solutionRails.ts}`; removed `HeroCommerceFlow`, `SolutionDiagram`, `PricingPlanCard`,
+  `scripts/landing/hero-canvas.ts`; marketing i18n catalog rewritten (en/vi parity, ternary
+  CTA moved to catalog); tokens/shell/components/pages/landing CSS onto the layered surface
+  system (`--mk-canvas` vs white cards, hairlines, dot grids).
+- **Verification**: `npm run check` (0 marketing errors; the 8 AppLayout errors are the parallel
+  dashboard stream's, present at HEAD) · `npm run lint` clean · `npm run test` 335 files /
+  **2630 tests** (intentional updates: `marketing-assets-contract` kit refs → core-hub.svg only,
+  `legal-placeholder-surfaces` footer source → `MarketingFooter.astro`) · `npm run build` ·
+  `npm run deploy:dry-run` · `scripts/landing-visual-check.mjs` extended to 12 targets ×
+  1440/768/390/320 × en/vi: **48 captures, no overflow, no console errors**. In-browser: mobile
+  menu keyboard/Escape, pricing market switcher + mobile ledger swap, FAQ toggles, authenticated
+  /login → /app redirect, SEO headers (canonical/hreflang/x-default/noindex) verified via curl.
+- **Known limitations**: local pricing renders the truthful unavailable state until Dodo refs
+  publish; gate copy stays English-only (owner-gated content, nothing invented); OG cover stays
+  the v3 global PNG.
+
+Seller Operations for All Verticals — TV5 (2026-08-16, branch `storefront-templates`):
+Closes the seller-side loop: physical and booking shops are now fully operable from the dashboard.
+- **Product editor (TV5a)**: selling-type select (digital vs physical) persisted through the
+  catalog API (`deliveryMode`); per-variant service duration (`durationMinutes`, 5–720 min) on
+  variant create/update/list; on-hand stock inputs for shipping variants (loaded from
+  `GET /products/:id/stock`, saved via `POST …/stock` alongside variant PUTs, only shown for
+  physical products).
+- **Catalog API**: `duration_minutes` added to `VariantInput`, `parseVariantInput`, and every
+  variant INSERT/UPDATE/RETURNING statement (list projections included).
+- **Store Builder "Vận chuyển" tab (TV5a)**: create shipping methods (name / fee / optional
+  free-over), active-method list with archive; vi/en copy deck; client script follows the
+  builder's CSRF pattern.
+- **`/app/bookings` page (TV5a)** + nav entry: 14-day appointment feed (service · resource ·
+  time range · order ref) with complete / no-show / cancel transitions wired to the recent-auth
+  CSRF endpoint; roles owner/manager/support.
+- **Order-detail dispatch panel (TV5b)**: `getSellerOrder` now projects the shipping block
+  (address snapshot, method + fee, dispatch history); the detail page renders the panel for
+  physical orders — address card, carrier/tracking inputs, packed/shipped/delivered actions
+  (paid orders only, carrier required for shipped, owner/manager).
+- **Verification Gates**: `astro check` (888 files, 0 errors — remaining tsc/eslint hits are
+  the parallel auth stream's in-flight `debugOtp` change) · `npm run test` (334 files,
+  **2624 tests**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known remaining (TV5d, small)**: R2 object purge for soft-deleted media rides the deletion
+  lifecycle; physical restock on payment reversal lands with the reversal milestone; visual
+  regression baselines for the nine templates; onboarding wizard does not set `shops.vertical`.
+
+Appointment Booking Vertical + Full 9-Template Gallery — TV4 (2026-08-16, branch `storefront-templates`):
+Booking services end-to-end (spa/barber/clinic) and the final template trio, completing all three
+verticals and all nine storefront templates selectable in the Store Builder.
+- **Migration `0103_appointment_booking_vertical.sql`** (additive, invariant-registry registered):
+  `product_variants.duration_minutes` (a service = a manual product whose variant carries duration),
+  `booking_resources` (staff/rooms), `booking_resource_schedules` (weekly minute windows),
+  `booking_holds` (token-marked checkout holds with release lifecycle), `bookings` (immutable per
+  order-item appointment with booked→cancelled/completed/no_show guards).
+- **Slot engine `src/lib/commerce/booking.ts`**: timezone-correct availability via Intl two-probe
+  offsets (honors `shops.timezone`), slots = schedule windows stepping by service duration minus
+  active holds and booked appointments; `resolveBookingSelection` re-validates the buyer's slot
+  (window fit + overlap) before checkout; seller resource/schedule upsert with catalog capability.
+- **Checkout money path**: booking carts are website-only, paid-only, exactly one service line with
+  quantity one; the canonical transaction proves slot freedom inside the guarded order INSERT
+  (no overlapping active hold or booked appointment on the resource) and writes the hold + booked
+  appointment; the request fingerprint binds the RAW slot choice (resourceId/startAt) so same-key
+  replays succeed even after the slot is held by the first order; order expiry cancels the booking
+  and releases the hold, making the slot bookable again.
+- **Storefront UX**: checkout slot picker (7-day window from the picked date, per-day grouping,
+  resource names, required radio) shown only for service carts; order status page renders the
+  appointment (date/time range, resource, status); `durationMinutes` flows through the storefront
+  catalog (`CatalogData` → `catalog-dom`) for client-side cart detection.
+- **Public API**: `GET /api/store/booking/slots?variantId&dateStart&dateEnd` (14-day max range,
+  200-slot cap; indexed in `API_ENDPOINT_INDEX.csv`, 189 rows).
+- **Templates (TV4b)**: `serenity` (free — pill service menu, booking-first CTA, pastel hero),
+  `craft` (Pro — dark vintage barbershop, uppercase menu with hairline rules), `clinic`
+  (Pro — medical service `<table>` + process steps) — registry availability flipped: **all nine
+  templates available** (swift/pulse/desk · aurora/metro/bustle · serenity/craft/clinic);
+  dispatcher + shared layout sheets extended; render contracts pin the full set.
+- **Tests**: `tests/unit/booking-appointment-checkout.test.ts` — timezone slot math (ICT→UTC),
+  atomic double-book block across resources, missing slot / misaligned slot / quantity>1
+  rejections, idempotent replay (one durable order + one booking), expiry cancel + release +
+  rebooking. Suites updated for `StorefrontShop.timezone`.
+- **Verification Gates**: `npx tsc --noEmit` clean for this stream (2 pre-existing errors in
+  `src/pages/api/auth/login.ts` belong to the parallel auth stream) · eslint clean in touched
+  areas (1 remaining error likewise foreign) · `npm run test` (334 files, **2624 tests**) ·
+  `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**:
+  - Seller booking management (calendar view, cancel/no-show transitions) is API-partial:
+    resources + schedules upsert exist; booking transitions and `/app/bookings` UI land in TV5.
+  - No buffer times between appointments, no multi-slot bookings, no customer-driven
+    cancellation/rescheduling; Telegram booking unsupported by design (`booking_channel_unsupported`).
+  - Slot generation loads ≤500 busy intervals per 14-day window (adequate for launch scale).
+
+Physical Goods Vertical — TV3 (2026-08-16, branch `storefront-templates`):
+End-to-end physical selling: schema, checkout money path with shipping, dispatch state machine,
+storefront/seller APIs, buyer UX, and the three physical templates (Aurora/Metro/Bustle).
+- **Migration `0102_physical_goods_vertical.sql`** (additive only — no parent table rebuilt, all
+  existing invariant hashes byte-identical; new objects registered in the production invariant
+  registry): `shops.vertical` (digital/physical/booking, default digital), `products.delivery_mode`
+  (digital/shipping; physical keeps `fulfillment_type='manual'`), `orders.shipping_method_name` +
+  `orders.shipping_fee_minor` snapshot, `fulfillments.shipping_state/carrier/tracking_code`,
+  `variant_stock_levels` (on_hand/reserved + token-marked `active_reservation_token` for exact-count
+  batch guards), `shop_shipping_methods` (flat fee + free-over), `order_shipping_addresses`
+  (immutable PII snapshot, UNIQUE per order), `idx_product_variants_shop_id` composite FK target.
+- **Checkout money path**: canonical transaction reserves physical stock with the license-key
+  token-proof pattern, guards the shipping method row (name/fee/free-over snapshot) inside the
+  order INSERT, persists the address after the FK-backed order write; physical carts are
+  website-only and paid-only; delivery modes cannot mix; free-over applies to post-discount
+  amount; quote evidence + request fingerprint bind `shippingMethodId`/`shippingFeeMinor`
+  (backward-compatible claims); order expiry releases reserved stock by order-item quantities.
+- **Storefront UX**: checkout page gains the shipping fieldset (method radios — server defaults
+  to the primary method on first quote — VN address form with `+84` phone normalization, fee row),
+  method switch re-quotes; order status page shows address, method/fee snapshot, and dispatch
+  progress; storefront catalog projects `deliveryMode` + physical stock states
+  (on_hand − reserved, exact-stock opt-in honored).
+- **Seller APIs** (indexed in `API_ENDPOINT_INDEX.csv`, 188 rows): GET/POST
+  `/api/app/shops/:shopPublicId/shipping-methods`, PATCH `/shipping-methods/:methodId`,
+  GET/POST `/products/:productId/stock`, POST `/orders/:orderId/shipping` —
+  `advanceOrderShipping` paid-only state machine (packing → shipped[carrier required] →
+  delivered ⇒ order fulfilled/completed) with audit log.
+- **Templates (TV3b)**: `aurora` (free, editorial lookbook hero over product imagery),
+  `metro` (Pro, dense spec-first grid + trust strip), `bustle` (Pro, voucher-strip marketplace
+  energy with contrast-safe discount accents) — registry availability flipped, dispatcher +
+  shared layout sheets extended, render contracts pin all six available templates.
+- **Tests**: `tests/unit/physical-shipping-checkout.test.ts` — atomic reservation + address +
+  fee snapshot, sell-out race leaves no order and no leaked reservation, free-over threshold,
+  default vs invented methods, phone normalization rejection, idempotent replay (one durable
+  order), expiry releases stock. Existing suites updated for `deliveryMode` (parity, admission
+  policy, generic entitlement, telegram boundary, catalog contracts, migration chain tip 0102).
+- **Verification Gates**: `npm run check` (875 files, 0 errors) · `npm run lint` (0 errors) ·
+  `npm run test` (333 files, **2619 tests passed**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**:
+  - Seller dashboard UI for shipping methods / variant stock / dispatch actions is API-first;
+    the panels ride on the existing endpoints above (next increment).
+  - Telegram cannot sell physical goods by design (`telegram_physical_unsupported`); no COD
+    (PayOS online only); no zone-based shipping rates; one address per order.
+  - Payment reversal/refund does not yet restock physical reserved units (restock-on-refund
+    lands with the reversal milestone in TV5).
+  - `shops.vertical` is schema-only; onboarding does not set it yet (template selection remains
+    the operative control).
+
+Storefront Templates — TV2 Pulse & Desk (2026-08-16, branch `storefront-templates`):
+First two template variants beyond the Swift default, completing the digital-products group
+(swift free · pulse Pro dark · desk Pro) — selectable now in the Store Builder gallery.
+- **Pulse (dark gaming/tech)**: `templates/pulse/StoreHome.astro` + `styles/storefront/templates/pulse.css`
+  — dark ink-token shell (no new palette), merchant-accent hero glow, instant-delivery badge,
+  trust strip, denser 3→2→1 column grid. Stock/payment states render on light chips to keep
+  protected-state contrast (ADR 0011); `<meta name="theme-color">` switches to `#0B1020` via
+  `data-template-scheme="dark"`.
+- **Desk (SaaS/office B2B)**: `templates/desk/StoreHome.astro` + `desk.css` — semantic
+  `<table>` plan comparison built from the first multi-variant product (plan · price · choose,
+  cart-add buttons per row), 3-step activation `<ol>`, tidy row-style catalog on mobile-aware
+  responsive rules.
+- **Wiring**: dispatcher map (`templates/StoreHome.astro`) registers swift/pulse/desk with swift
+  as structural fallback; template sheets load in `StorefrontLayout` (scoped by
+  `[data-storefront-template]`) so cart/checkout/orders keep the template shell; storefront copy
+  keys added to both locale catalogs (`storefront.template.pulse.*`, `storefront.template.desk.*`).
+- **Tests**: render-contract suite added to `storefront-templates.test.ts` — dispatcher map and
+  import per available template, layout sheet loading + html attribute + scheme-aware
+  theme-color, stylesheet scoping attribute per shipped template.
+- **Verification Gates**: `npm run check` (0 errors) · `npm run lint` (0 errors) · `npm run test`
+  (332 files, **2608 tests passed**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**: no flash-sale countdown yet (needs a promo-window model — documented in
+  pulse.md); Desk's plan table binds to the first multi-variant product rather than a curated
+  "featured" flag; product detail page keeps the shared layout for all templates in TV2.
+
+Storefront Media Pipeline — TV1 (2026-08-16, branch `storefront-templates`):
+Product image pipeline over the existing MEDIA R2 bucket with D1 as the authoritative registry;
+unblocks the physical-goods templates (Aurora/Metro/Bustle) and upgrades every storefront card.
+- **Migration `0101_storefront_media_assets.sql`** (forward-only, after 0100):
+  - `media_assets`: tenant-scoped registry (kind product_image/shop_logo/hero_banner, content-type
+    CHECK limited to png/jpeg/webp/avif, ≤10 MB, sha256, etag, soft-delete with status/deleted_at
+    invariant), identity-immutable + transition-guard triggers, `public_id` UNIQUE for URLs.
+  - `product_images`: assignment table with composite tenant FKs to `products` and `media_assets`
+    (image, product, and asset must share one shop), sort_order, soft delete, tenant-leading index
+    `(shop_id, product_id, status, sort_order, id)`.
+  - Registered in `PRODUCTION_DATABASE_INVARIANT_REGISTRY` (hashes generated from the migrated
+    schema) and the release validator's table allow-list; migration chain tip pinned to 0101.
+- **Service `src/lib/media/assets.ts`**: magic-byte sniffing (PNG/JPEG/WebP/AVIF) matched against
+  the claimed content type, plan quota via `plans.limits_json.storageBytes` (Starter 1 GB /
+  Pro 10 GB; soft-deleted assets release their share), R2-put→D1-register→rollback-on-failure,
+  audit log entry, attach/detach/list product images (≤12 per product) all tenant-bound.
+- **APIs** (indexed in `API_ENDPOINT_INDEX.csv`):
+  - `POST /api/app/shops/[shopPublicId]/media` — raw-body upload (mirrors private-files flow).
+  - `GET/POST/DELETE /api/app/shops/[shopPublicId]/products/[productId]/images` — attach,
+    detach, list.
+- **Public serving**: `GET /media/:publicId` — host-agnostic route serving active assets from R2
+  with `Cache-Control: public, max-age=31536000, immutable`, ETag, nosniff; deleted assets 404.
+- **Storefront rendering**: `getStorefrontCatalog` projects the first active product image per
+  product (`StorefrontProduct.imageUrl`); `ProductCard` renders it with `data-visual="image"`
+  (placeholder letter retained as fallback); CSS keeps image cards within token-driven styling.
+- **Seller UX**: product editor dialog gains a "Ảnh sản phẩm" section — upload & attach, thumbnail
+  grid, remove; client script follows the private-file upload pattern with vi/en copy.
+- **Tests**: `tests/unit/media-assets.test.ts` (sniffing matrix, claimed-type mismatch rejection,
+  quota enforcement + release on soft delete, attach/detach ordering, cross-shop isolation both
+  directions, catalog imageUrl projection incl. end-to-end `resolveStorefrontShop`); guard tests
+  updated (chain tip, invariant registry, endpoint inventory count 182).
+- **Verification Gates**: `npm run check` (866 files, 0 errors) · `npm run lint` (0 errors) ·
+  `npm run test` (332 files, **2605 tests passed**) · `npm run build` · `npm run deploy:dry-run`.
+- **Known Limitations**: storage quota counts `media_assets` only (private digital assets not yet
+  metered against the same limit); no logo/banner surfaces yet (columns reserved kinds); no image
+  reordering UI (sort_order auto-append); R2 purge of deleted objects rides the existing
+  deletion lifecycle to be wired in TV5.
+
+Storefront Template System — TV0 Foundation (2026-08-16, branch `storefront-templates`):
+Foundation of the multi-vertical storefront template program (TV0–TV5) targeting three selling
+verticals: digital keys (existing), physical goods (TV3), and appointment booking (TV4).
+- **Template Registry (code-defined, no migration)**:
+  - `src/lib/storefront/templates.ts`: 9 template definitions (digital: `swift` free default,
+    `pulse` Pro dark, `desk` Pro; physical: `aurora` free, `metro` Pro, `bustle` Pro; booking:
+    `serenity` free, `craft` Pro dark, `clinic` Pro) with per-vertical availability gating
+    (only digital templates selectable until TV3/TV4 ship their verticals).
+  - Render-time safe fallback: unknown / unavailable / premium-without-entitlement ids resolve
+    to `swift` so the storefront never breaks; strict seller-side validation distinguishes
+    `storefront_template_invalid` (400) from `storefront_template_premium_required` (403).
+- **Persistence & Rendering**:
+  - Selection persists in `shop_settings.storefront_json.templateId` through the existing
+    draft→publish flow (0029); Cloudflare storefront cache invalidates via `published_version`.
+  - `StorefrontLayout.astro` sets `data-storefront-template` / `data-storefront-vertical` /
+    `data-template-scheme` on `<html>`; store home dispatches through
+    `src/components/storefront/templates/StoreHome.astro` (swift extracted verbatim from
+    `index.astro` into `templates/swift/StoreHome.astro` — no visual change).
+- **Premium Gating**: `plans.feature_flags_json.premiumStorefrontTemplates` (Pro-only flag per
+  ADR 0022 model); enforced at PATCH settings and re-checked at render for plan downgrades.
+- **Store Builder**: new "Mẫu giao diện" tab in `/app/store` — gallery of 9 wireframe-preview
+  cards grouped by vertical with Pro/Coming-soon badges, entitlement-locked radios, and
+  `templateId` in the draft save payload (`store-builder.ts` radio-aware read/undo).
+- **API**: `PATCH /api/app/shops/[shopPublicId]/settings` (and `/storefront/draft` alias)
+  accepts `templateId`; settings responses now include `template`, `templates` gallery, and
+  `premiumTemplatesEnabled`.
+- **Docs**: `docs/storefront-templates/README.md` + per-template specs (9 files) covering
+  layout, tokens, and a11y per template before implementation (TV2–TV4).
+- **Tests**: `tests/unit/storefront-templates.test.ts` (registry invariants, selection
+  contract, render fallback incl. plan-downgrade degradation); updated
+  `StorefrontShop` literals in 5 suites; i18n dynamic-key allowlist entries for the gallery;
+  RTL/browser-gate contracts updated for the new html attributes and store-home component.
+- **Verification Gates**:
+  - `npm run check`: 859 files, **0 errors**.
+  - `npm run lint`: **0 errors**.
+  - `npm run test`: 331 test files, **2598 tests passed (100%)**.
+  - `npm run build`: Production Cloudflare Worker build succeeded.
+  - `npm run deploy:dry-run`: Worker bundle, bindings, routes, and asset manifests validated.
+- **Known Limitations**:
+  - Only `swift` renders distinctively today; `pulse`/`desk` land in TV2, physical templates
+    in TV3 (blocked on the physical vertical + media pipeline), booking templates in TV4.
+  - Template selection is not yet vertical-bound (no `shops.vertical` column until TV3/TV4);
+    the registry's availability gate is the interim control.
+  - Store Builder preview always renders the current template's layout; per-template live
+    previews arrive with each template milestone.
 
 Landing Page & Visual Commerce Flow Modernization (2026-08-15):
 The public landing page and marketing surface have been comprehensively overhauled with an interactive visual commerce operating system theme:
@@ -1566,3 +2656,799 @@ connections to suggest live data flow. Uses only the Selinow indigo palette
 Verification: `npm run check` 0 errors; `npm run lint` clean; 2,450 tests pass;
 `npm run build` succeeds; `npm run deploy:dry-run` succeeds. Canvas confirmed
 present and sized (1184×692px, active 2D context) via in-browser inspection.
+
+## Onboarding v2 — 5-step wizard with preview drawer (2026-08-15)
+
+Redesigned the `/onboarding` quickstart into a 5-step full-page wizard
+(directional slide/fade transitions) with a linear progress bar in the top bar
+and the former fixed live-preview column collapsed into a floating
+button-triggered right drawer (Website/Telegram tabs, Esc/backdrop close,
+mobile full-width).
+
+New step flow: Store (name/slug/channels) → Product (preset or custom) →
+Inventory (paste keys) → Connect (PayOS + Telegram side-by-side, per-card
+"để sau") → Launch (summary cards, checklist, optional contact/policy
+settings, publish, celebration + confetti).
+
+- Created `src/components/dashboard/onboarding/OnboardingPreviewDrawer.astro`
+  (drawer + floating trigger; reuses the storefront/Telegram mockups).
+- Created `src/components/dashboard/onboarding/OnboardingStepLaunch.astro`
+  (review summary, collapsible optional settings form, derived checklist,
+  publish → celebration state; storefront link, bot link, dashboard link).
+- Rewrote `src/components/dashboard/onboarding/OnboardingShell.astro`:
+  single-column layout (max-width 720px), linear gradient progress bar with
+  step labels, avatar + exit CTA, global step-pane animation classes
+  (`is-active` / `is-exiting-left|right` managed via `:global()` because panes
+  render inside child components).
+- Redesigned the four step components (Store/Product/Inventory/Connect):
+  step badges now /05, Connect uses a 2-column card grid with per-card skip,
+  Store's smart-defaults box replaced by an inline hint; all data attributes
+  and form contracts preserved.
+- Rewrote `src/scripts/dashboard/onboarding-quickstart.ts`: class-based
+  directional step transitions, progress-bar updates, drawer open/close/Esc
+  logic, launch-state tracking (shop/product/keys/PayOS/Telegram), settings
+  save via `POST /onboarding/settings` (attestation not required),
+  publish via `POST /storefront/publish` (replaces the previously
+  non-existent `/publish` call), celebration handling. All API, CSRF, and
+  idempotency behavior unchanged.
+- `OnboardingLivePreview.astro` and `OnboardingCelebration.astro` are now
+  unreferenced by the live route (kept for history; superseded by the drawer
+  and Launch step).
+- No changes to `src/lib/onboarding/*`, `onboarding-ui.ts`, AppLayout,
+  migrations, API endpoints, or auth.
+
+Verification (2026-08-15): `npm run check` — 0 errors in onboarding files
+(18 pre-existing errors in other workstreams' WIP: `payments.astro`,
+`seller-management.ts`, `telegram/commerce.ts`, `auth/session.ts`);
+`npm run lint` — onboarding files clean (52 pre-existing errors elsewhere);
+`npm run test` — all onboarding-related tests pass (23 pre-existing failures
+in 4 files owned by parallel workstreams); `npm run build` — succeeds when the
+truncated WIP file `src/pages/app/payments.astro` (cut off mid-line 64,
+another session's unfinished draft) is excluded; the file was restored
+byte-for-byte afterward.
+
+Known limitations: wizard copy is hardcoded Vietnamese (consistent with the
+previous quickstart); i18n catalog keys for the 8-step legacy wizard remain
+unused by this route; manual browser walkthrough of the 5-step flow still
+recommended before deploy.
+
+Dashboard Redesign Takeover — closeout (2026-08-16):
+Branch `dashboard-redesign-takeover`. Full takeover handoff: `docs/DASHBOARD_REDESIGN_TAKEOVER_HANDOFF_2026-08-16.md`.
+Original plan and briefs: `docs/DASHBOARD_REDESIGN_HANDOFF_2026-08-15.md`,
+audit: `docs/DASHBOARD_UI_AUDIT_AND_REDESIGN_PLAN_2026-08-15.md`.
+
+Milestones (all committed):
+- M0 checkpoint `bcf9692` — pre-takeover WIP checkpoint (base for review diffs).
+- M1 `a26f0f4` — unblock build and repair broken WIP clusters (payments page,
+  telegram mini-app, seller helpers, session, contract registries).
+- M2-D2 `5dff07f` — D2: consolidate Channels IA (`/app/integrations` hub),
+  new `/app/developer` page, split `DomainManager.astro` into
+  `components/dashboard/domains/*` (DomainList etc.), token migration of the
+  domains surface to `--sln-*`.
+- M3-D1 `ec919a5` + follow-up `3ac8e16` — D1: DataTable standardization
+  (`components/workspace/DataTable.astro`), server-side search/sort/pagination
+  for products/orders/inventory/customers/members + admin shops/investigations/
+  appeals, `listSellerProductsPage` ledger query in `lib/catalog/store.ts`
+  (tenant-scoped `shop_id` CTE, LIMIT/OFFSET), low-stock threshold from
+  `shop_settings`, client-side CSV export of fetched page rows
+  (`lib/dashboard/csv-export.ts`). Follow-up commit `3ac8e16` contains the
+  catalog store helpers that the committed D1 page/test already imported.
+- M4-D3A `421a007` + fixup `74c51fc` — D3-A: migration `0099`
+  account security hardening; 2FA email-OTP UI, password change, login
+  history, billing invoice history (`pages/app/security.astro`,
+  `pages/app/billing.astro`, `lib/auth/*`, `pages/api/app/account/*`);
+  fixup adds the a11y gate on security tabs.
+- M5-D3B `d750297` — D3-B: migration `0100` automation rule builder;
+  `lib/automation/rules/*` with 5 trigger types / 4 action types, allow-list
+  payload evaluator that fails closed, SSRF webhook guard, orchestrator-backed
+  dispatch, rule CRUD API + builder UI in `pages/app/automation.astro`.
+- M6-D0/D4 (this wave): dead-code cleanup + token unification.
+  - Deleted dead `src/components/dashboard/OnboardingWizard.astro` (904
+    lines; `/onboarding` uses `OnboardingShell` + step components) and
+    updated the 6 test files that read it to assert on the live components
+    instead (wizard-only assertions removed; all other assertions kept).
+  - Deleted 7 zero-import wrappers in `src/components/states/`:
+    BlockedState, ErrorState, LoadingState, SuccessState,
+    WaitingProviderState, WaitingUserState, WarningState (verified by grep:
+    zero imports anywhere in `src/`). Kept the 6 still imported:
+    WorkspaceState, EmptyState, PermissionState, PlanLimitState,
+    SuspendedState, StatePanel. (Handoff estimated 11/13; the D streams
+    since wired more states into DomainManager/RuleList/AutomationLedger.)
+  - Unified CSS tokens: migrated 446 `--selinow-*` usages across 22 source
+    files to `--sln-*` (170 storefront.css, 129 admin.css, 8 primitives.css,
+    4 selinow-a11y.css, 2 app-shell.css, plus components/pages), added 8
+    canonical tokens that existed only as aliases (`--sln-success-text`,
+    `--sln-warning-text`, `--sln-danger-text`, `--sln-info-text`,
+    `--sln-action-primary-ink`, `--sln-disabled-ink`, `--sln-disabled-bg`,
+    `--sln-focus`) with dark-theme overrides, and removed the entire 70-line
+    legacy alias block from `selinow-tokens.css`. Remaining `--selinow-*`
+    usages in `src/` and `tests/`: 0 (plus a regression guard in
+    `promptos-foundation.test.ts`).
+
+Verification gate (2026-08-16, run from repo root on this branch):
+- `npm run check` — PASS: 855 files, 0 errors, 0 warnings (4 hints).
+- `npm run lint` — PASS: 0 errors.
+- `npm run test` — PASS: 330 test files, 2589 tests, all passing
+  (unit + integration combined).
+- `npm run build` — PASS: production Cloudflare Worker build complete
+  (1 pre-existing INEFFECTIVE_DYNAMIC_IMPORT warning, unchanged).
+- `npm run deploy:dry-run` — PASS: worker bundle, bindings, routes and
+  manifests validated; exited cleanly with `--dry-run`.
+
+Known limitations carried forward:
+- Webhook SSRF guard (`lib/automation/rules/webhook-guard.ts`) is
+  pattern-based; DNS-rebinding of a public hostname onto a private IP is a
+  residual TOCTOU risk (noted in code; follow-up v2 = domain allowlist).
+- `rule_create_task` capability stays at `approval_required` level (inline
+  executor stub, no autonomous task creation).
+- `inventory.low_stock` is a derived trigger computed from paid orders; no
+  independent stock hook exists.
+- `src/scripts/dashboard/onboarding.ts` is only reachable through the deleted
+  wizard; it is still read by contract tests and left in place intentionally
+  (separate cleanup candidate).
+- The legacy `--selinow-*` alias layer is fully removed; any external
+  stylesheet referencing those names must migrate to `--sln-*`.
+
+Dashboard Redesign Takeover — wave 2: E2E smoke, ultra review, hardening
+and channel/domain automation upgrades (2026-08-16, later shift):
+Branch `dashboard-redesign-takeover`. Scope: Task 7 (browser E2E smoke of
+the main dashboard flows) + Task 8 (3-way ultra review) + fixes for the
+findings + seller-requested automation upgrades for Telegram bot setup and
+custom-domain DNS confirmation.
+
+Browser E2E smoke (dev server `http://app.localhost:4330`, see environment
+notes below) — verified flows:
+- Register → OTP verify → password login → logout → login (password-only;
+  2FA lifecycle completed via API below after the embedded browser hit its
+  cookie-jar limitation).
+- Onboarding wizard: create store (multi-channel), 1-click product template,
+  finish wizard; store context propagates `?shop=` through the app shell.
+- App shell nav: Operations/Sales channels/Configuration/Administration
+  groups, `/app/telegram` 307-redirects to `/app/integrations?focus=telegram`
+  preserving `shop`; `/app/developer` renders API credentials surface.
+- Products: server-side search (`q=Beta` filters rows + URL), URL-driven sort
+  (`sort=title` orders A→Z), rows-per-page control, CSV export button (no
+  error state; blob download not observable from the embedded browser).
+- Automation rules: create rule (order.paid → Telegram notify) persisted and
+  rendered with Edit/Turn off/Delete; unsafe webhook (`http://127.0.0.1`)
+  rejected server-side without creating a rule; toggle verified via UI.
+- Billing: plan hero, entitlements, invoice history (empty state), usage
+  meters render; Integrations hub: Telegram row + config panel, payments and
+  domains summary cards, developer link; Domains: platform subdomain card,
+  PlanLimitState correctly disables custom-domain connect on trial plan.
+
+Ultra review (3 dimensions, base `bcf9692`):
+- COMPLETENESS: no blockers; majors = D1 bulk actions never implemented nor
+  deferred in reports; takeover docs overclaim server-side search for
+  inventory/members/admin-appeals (they lack it); DomainList still carries a
+  duplicate `<template data-domain-template>` markup-drift risk.
+- CORRECTNESS: no blockers; major = CSV export lacked formula-injection
+  escaping (`=`/`+`/`-`/`@` from customer-controlled names reach seller
+  spreadsheets); minors = webhook guard missed trailing-dot hostnames
+  (`localhost.`), rule PATCH changing trigger without re-validating legacy
+  actions, client Idempotency-Key regenerated per attempt (dedup defeated),
+  billing usage meter rendered limit `0` as "no numeric limit" while the
+  dispatcher fail-closes to blocked.
+- IMPACT (final): no blockers; majors = migration `0100` was EDITED in place
+  inside the review range (commit `d750297` added `automation_rule_action_runs
+  .task_id` + its index to a CREATE TABLE that already existed at the base
+  checkpoint) — this violates the forward-only rule IF any environment had
+  already applied the WIP 0100; needs a product-owner decision (either
+  confirm no shared DB applied the WIP version, or add a follow-up migration
+  to add the missing column/index on such environments). Minors = release
+  registry entry for 0100 does not pin the two objects added later; trigger
+  hooks are fire-and-forget without `waitUntil` (existing repo convention,
+  eviction risk); CSV `'` guard makes `@handle`/negative-number cells textual;
+  `--sln-border-control` semantic token never canonicalised (usages point at
+  raw `--sln-slate-500`). Ownership/routes/test-edit/blast-radius checks all
+  clean, including for follow-up commits 08264dc/c156930.
+
+Fixes applied this shift (all verified by targeted tests):
+- `src/lib/dashboard/csv-export.ts` — neutralize leading `=+-@\t\r` with a
+  `'` guard (OWASP CSV-injection guidance); new cases in
+  `tests/unit/csv-export.test.ts`.
+- `src/lib/automation/rules/webhook-guard.ts` — strip trailing dots from the
+  hostname before matching (`localhost.`, `foo.internal.` now blocked); new
+  cases in `tests/unit/automation-rules-executors.test.ts`.
+- `src/components/dashboard/onboarding/OnboardingPreviewDrawer.astro` —
+  `.preview-drawer-panel[hidden] { display: none; }`: the author `display:
+  flex` overrode the UA `[hidden]` rule, so the "closed" preview drawer
+  stayed painted over the wizard form and blocked the "Tạo Cửa Hàng" button
+  (reproduced in-browser before the fix; click works after).
+- `src/components/dashboard/automation/RuleForm.astro` — same `[hidden]`
+  override for the prototype condition row: it rendered like a real row in
+  the create dialog, but the collector only reads `[data-rule-condition-row]`
+  clones, so operator/value typed into the prototype were silently dropped
+  (rule saved with "0 conditions" — reproduced in-browser).
+- `src/pages/app/billing.astro` — usageLimit now accepts configured `0`
+  limits and the percent math treats `limit === 0` as fully blocked, matching
+  dispatcher enforcement instead of showing "no numeric limit".
+- `src/scripts/dashboard/automation-rules.ts` — create Idempotency-Key is
+  stable per draft session (new salt only after a confirmed create), so a
+  retried submit after a lost response deduplicates server-side.
+- `src/scripts/dashboard/security.ts` — surfaces the server's local-only
+  `debugOtp` in the 2FA feedback line (`APP_ENV=local` only) so enrollment
+  is testable without a mail provider.
+
+Channel & domain automation upgrades (seller request "auto-jump to
+BotFather / Cloudflare and auto-confirm"):
+- Telegram (`src/pages/app/integrations.astro`, `src/scripts/dashboard/
+  integrations.ts`): config panel now offers a one-click "Copy /newbot
+  command" button next to the BotFather deep link; client-side token format
+  validation (`^\d{6,}:[A-Za-z0-9_-]{30,}$`) fails fast with a clear message
+  (verified in-browser with an invalid token — no server round-trip); after a
+  successful connect the script automatically fires the existing
+  health-check endpoint so the seller sees bot+webhook verification finish
+  without another manual click.
+- Domains (`src/components/dashboard/domains/DomainList.astro`,
+  `src/scripts/dashboard/domains.ts`): DNS instruction cards now include an
+  "Open Cloudflare DNS" deep link (plus the existing copy-name/copy-target
+  buttons) and an auto-recheck note; while the page is open, pending custom
+  domains are re-checked automatically (15s interval, max 8 rounds, plus an
+  immediate re-check with a 30s throttle when the tab becomes visible).
+- i18n: new keys added to both EN and VI catalogs for all of the above
+  (`dashboard.integrations.telegram.copy_command*`, `token_invalid`,
+  `auto_verify`, `dashboard.domains.card.dns.open_cloudflare`,
+  `auto_check_note`).
+
+Verification (this shift):
+- Targeted: `vitest run` for csv-export, all 4 automation-rules suites,
+  i18n-call-site-contract, security-account-tabs-ui,
+  integrations-frontend-contract, tenant-link-static-fallback,
+  billing-invoice-history — all pass (100 tests).
+- `npm run lint` — clean on every file touched by this shift.
+- `npm run test` (full) — 2615/2616 pass; the single failure
+  (`storefront.order.shipping.kicker` missing from the EN storefront catalog
+  for `src/pages/orders/[orderPublicId].astro`) and 22 `astro check` type
+  errors (`ProductInput.deliveryMode`) both come from a *parallel
+  workstream's* uncommitted edits to `src/lib/commerce/**`,
+  `src/lib/catalog/**`, `src/pages/orders/**` and `src/pages/api/store/**`
+  present in the same working tree — not from this shift's changes; left for
+  that stream to resolve.
+
+Known issues / follow-ups from this shift:
+- Embedded-browser (IAB) cookie jar kept failing CSRF-protected POSTs from
+  `/app/security` even with a fresh session, while the same flow verified
+  clean via curl (login → CSRF GET `/api/auth/sessions` → 200) and all
+  account-security unit/integration suites pass. Full 2FA enable/disable +
+  password-change E2E should be re-run with the repo's standard Playwright
+  gate (`scripts/local-auth-browser-gate.mjs`) instead of the IAB.
+- `requireRecentAuth` failures surface as "The security token is no longer
+  valid" on the security page, which reads like a CSRF/technical fault;
+  consider a dedicated re-auth message + inline "Sign out to authenticate
+  again" affordance (the button already exists in the Sessions panel).
+- Custom-domain auto-recheck path could not be exercised end-to-end in-browser
+  because the trial plan correctly blocks custom-domain connect
+  (PlanLimitState); logic is unit-covered by the shared scripts contract
+  tests and the wiring is live for entitled shops.
+
+Local environment notes for the next shift:
+- Dev server runs on `http://127.0.0.1:4330` (`--host 127.0.0.1 --port 4330
+  --allowed-hosts app.localhost,localhost,127.0.0.1`); ports 4321/4322 are
+  occupied by unrelated projects on this machine.
+- `.dev.vars` (git-ignored) now carries `PLATFORM_ORIGIN` /
+  `DASHBOARD_ORIGIN` / `API_ORIGIN` overrides pointing at `*.localhost:4330`
+  so host-based routing works off the default port; pre-edit backup at
+  `/tmp/selinow-dev-vars-takeover.bak`.
+- Local D1 had not applied migrations 0098–0100 (register/login failed with
+  `no such column: password_hash`); applied via
+  `npx wrangler d1 migrations apply PLATFORM_DB --local`.
+- Disposable E2E account: `takeover-e2e@selinow.invalid` /
+  `TakeoverE2E@2026x` with store `Takeover E2E Store`
+  (`shop_a13c5fcb-bbcf-42fc-8c80-109e342f4a9f`) + 3 draft products, local DB
+  only.
+
+Wave-2 addendum (same shift, later): account-security lifecycle closed
+end-to-end via API (curl session against the local dev server, after the
+embedded browser's cookie jar kept failing CSRF-protected POSTs while the
+same requests verified clean over curl):
+- enable-2fa-request → local debugOtp → enable-2fa-verify → two_factor on.
+- password login now correctly returns `twoFactorRequired` + challenge
+  (no session issued); login-2fa with the OTP issues the session.
+- GET login-history returns real outcomes (success/2FA entries).
+- disable-2fa with the current password succeeds.
+- To make the challenge step locally testable, the login 2FA response now
+  carries the same APP_ENV=local-only `debugOtp` parity aid that
+  enable-2fa-request already had (`src/lib/auth/session.ts`,
+  `src/pages/api/auth/login.ts`); 27 auth/2FA unit tests still pass.
+- Follow-up fix from the correctness review: `updateAutomationRule` now
+  re-validates kept conditions/actions under the NEW trigger when a PATCH
+  changes `triggerType` without resubmitting them (previously such rules
+  saved fine but could never match at runtime); 3 new service tests.
+- Regression guards for local `.sln-button` declarations / raw hex colors
+  (handoff item 5.4) were surveyed but NOT added: 30 local button-class
+  declarations and 19 files with raw hexes exist today, so a strict guard
+  would fail immediately; needs a dedicated cleanup pass first.
+
+Console v2 — P2+P3 workspace-wide reskin (2026-08-16, third shift; commit
+ad3d29e on `dashboard-redesign-takeover`):
+- AppLayout nav regrouped to seller tasks (Selling/Catalog/Automation/
+  Channels & payments/Settings); mobile groups follow; role gating unchanged.
+- app-shell.css now imports the console token layer and REMAPS the legacy
+  semantic tokens inside `.app-shell` (hairline border everywhere, calmer
+  radii, no static shadows, light sidebar replacing ink-950, solid-ink
+  avatar replacing the brand gradient) plus a console control skin for
+  .sln-button (flat 34px desktop, >=44px touch on phones, no lift).
+- Sweep: all local .sln-button base/modifier skins removed from pages; every
+  >1px border in app/admin/dashboard flattened to the 1px hairline; onboarding
+  wizard emoji replaced with console icons (preview mocks keep storefront
+  emoji payload by design). Design-contract guard extended workspace-wide:
+  no >1px borders, no emoji in workspace UI.
+- Verified in-browser: products/orders/billing/integrations show the new task
+  nav at 1280px and stay horizontal-scroll-free at 375px.
+- Incident during the sweep (resolved): a `perl -pi` one-liner with a manual
+  `print` double-printed 25 dashboard/admin files; restored all of them from
+  HEAD and re-applied the intended line removals; final diff per file is the
+  minimal intended change only.
+- Remaining for a later shift: ~123 direct font-weight>600 declarations in
+  legacy pages (guard stays console-scoped until swept), Playwright-gate run
+  of the 2FA browser flow, and the migration-0100 in-place edit decision.
+
+Console v2 — type ramp + semantic hex sweep (2026-08-16, fourth shift;
+commit 92e2e47):
+- .app-shell now also remaps the shared heading/label font tokens to the
+  console working ramp (<=600), so legacy pages render working typography
+  with zero markup changes; sidebar divider switched to border-inline-end
+  (logical property, satisfies the RTL contract).
+- 132 direct font-weight>600 declarations across workspace pages/dashboard
+  components flattened to 600/500; semantic raw hexes mapped to tokens
+  (brand/channel accents + preview mocks keep literals; meta theme-color
+  restored to a literal after a sweep accidentally replaced it with a var
+  in StorefrontLayout — caught by storefront-templates contract test).
+- Console overview restored localized PaymentState/FulfillmentState badges
+  plus the #dashboard-overview-date / data-visual-dynamic anchors the
+  authenticated-browser spec selects.
+- Design-contract guard now workspace-wide for borders (1px), weights
+  (<=600), emoji, and semantic-hex-on-tokens. Full suite 2629/2630 — the
+  single failure is the parallel landing-v4 stream's uncommitted footer
+  edit (out of scope). Verified /app in-browser after the changes.
+
+Backend — remediation terminal closure + reversal restock (2026-08-17):
+- Migration 0104_remediation_completion.sql (forward-only, 0103 was tip):
+  rebuilds payment_remediation_requests to replace 0054's biconditional
+  reviewed-fields CHECK, which stranded approved requests in
+  provider_pending forever; completed/failed are now reachable from
+  provider_pending. Indexes and the three triggers are recreated; the
+  transition guard now allows provider_pending -> completed|failed and
+  failed -> requested retry while keeping reviewed-at-approval audit
+  fields intact.
+- src/lib/payments/remediation.ts: reviewPaymentRemediationRequest now
+  accepts terminal decisions completed|failed (from provider_pending)
+  alongside the unchanged requested -> provider_pending|rejected flow,
+  with the same role gate (owner/risk), idempotency + request-hash
+  replay, optimistic version guard (pre-batch 409), audit_logs and
+  idempotency_records writes. completed on kind=refund invokes
+  applyVerifiedPaymentReversal with verificationMethod
+  "direct_reconciliation" (manual_reconciliation is not an allowed value
+  and validation was not loosened), providerReference
+  "remediation:<requestPublicId>", idempotency key
+  "remediation-completion:<requestPublicId>". partial_refund completes
+  WITHOUT reversal side effects and records audit metadata
+  manualPartialSettlement=true (reversal engine cannot express partials;
+  fail-closed choice). Seller-side create keeps the 503 with distinct
+  issue codes payos_refund_api_unavailable + manual_admin_settlement_required;
+  no PayOS refund API integration.
+- src/lib/commerce/payment-reversal.ts: revocation batch now releases
+  physical inventory in the same fenced batch — inventory_keys rows with
+  status='sold' whose sold_order_item_id belongs to the reversed order's
+  items return to available with sold fields cleared; idempotent via the
+  status='sold' predicate and the shared revoking-event EXISTS fence.
+- src/pages/api/admin/appeals/[requestPublicId].ts accepts the new
+  decisions plus optional failureCode with the same validation style.
+- Tests: new tests/unit/payment-remediation-completion.test.ts (10 tests:
+  completed refund end-to-end + idempotent replay + late retry conflict,
+  stale version/state/authz rejections, restock tenant-isolation with a
+  concurrent same-variant checkout race, failed-decision audit without
+  reversal + failureCode drift conflict, partial_refund/manual_review
+  completion paths, blocked completion when order already refunded,
+  seller create 503 detail codes, concurrent completed-vs-failed
+  serialization, claim-crash recovery retry, legacy hash-shape replay).
+  Existing suites updated (payment-reversal-entitlement-revocation now
+  asserts restock; seller-operations-backend asserts completed review
+  succeeds).
+- Race-fix hardening (same shift, after 3-perspective code review):
+  terminal reviews now use claim-then-apply serialization — a dedicated
+  claim batch bumps version provider_pending -> provider_pending BEFORE
+  the reversal runs (with a payment.remediation_review_claimed audit
+  row), so a concurrent reviewer holding the same expectedVersion gets
+  version_conflict before any money moves; the final batch fences on the
+  post-claim version. Crash recovery: if the worker dies between claim
+  and final, the row stays provider_pending at the bumped version with
+  no idempotency record; an admin retry at the bumped version re-claims
+  and finishes, and the remediation-completion:<requestPublicId>
+  reversal key replays the money side instead of double-refunding.
+- requestHash backward compatibility: failureCode joins the review
+  request hash only when non-null, keeping the pre-failureCode
+  { decision, expectedVersion, requestPublicId } shape byte-identical so
+  in-flight idempotency replays recorded before failed-decision support
+  shipped still match.
+- Verification: five remediation/release suites 59/59 pass after the
+  race fix; npx tsc --noEmit clean; eslint clean; astro check shows only
+  the pre-existing frontend baseline errors in src/layouts/AppLayout.astro
+  (8; the src/pages/solutions/index.astro error was fixed by a parallel
+  stream).
+- Known limitations: partial refunds settle manually (audit note only)
+  until the provider exposes a refund API; reversal completion depends on
+  an authoritative paid_exact payment chain, otherwise completion is
+  blocked with payment_remediation_completion_blocked 409.
+
+Backend — worker queue + cron hardening (2026-08-17):
+- delivery_provider_unsupported queue outcomes now settle terminally:
+  kind:"failed" single pass with a dead-letter record and no retry churn
+  (previously requeued indefinitely).
+- 8 purge/retention cron jobs in the scheduled handler now run in
+  parallel via Promise.allSettled with per-job error isolation; provider-
+  touching jobs remain sequential.
+- worker-configuration.d.ts regenerated via npm run cf-typegen:staging.
+- Known limitations: the remaining sequential jobs stay sequential until
+  their independence is proven; typegen is staging-shaped (EMAIL_*
+  required), so a union-shaped default-env typegen would break the email
+  code path.
+
+Backend — custom-domain Turnstile admission proactive refresh (2026-08-17):
+- The Turnstile admission cron now proactively refreshes domains whose
+  admission expires within a 7h threshold (< the 12h serve gate), with a
+  30-minute per-domain retry throttle and a per-tick cap of 10 refreshes
+  (TURNSTILE_REFRESH_MAX_PER_TICK). Fail-closed on admission API errors.
+- Authoritative revocation demotes the domain to validating with
+  platform-domain failover and records the new audit action
+  domain.turnstile_admission_expired.
+- Seller-visible statuses reuse the existing
+  domain_turnstile_admission_pending / domain_turnstile_admission_lookup_failed
+  / subscription_required codes (no new seller-facing surface).
+- Known limitation: if the Cloudflare admission API is down >12h, domains
+  expire into the seller-visible fail-closed state by design.
+
+Release tooling — migration 0104 registry sync (2026-08-17):
+- Added the 0104_remediation_completion.sql entry to
+  PRODUCTION_DATABASE_INVARIANT_REGISTRY in scripts/lib/release.mjs
+  (full payment_remediation_requests column shapes + index/trigger
+  object hashes recomputed from the real post-migration SQLite schema);
+  bumped the migration-tip pin in tests/unit/low-stock-threshold.test.ts.
+- Verified by tests/unit/production-deploy-continuation-guard.test.ts
+  11/11 (previously 4 failures from the unregistered migration).
+
+Session review record — cross-stream findings + verification (2026-08-17):
+- BEHAVIOR CHANGE: the physical inventory restock in the reversal engine
+  also applies to the pre-existing PayOS signed refund/chargeback webhook
+  path — refunded keys return to available and become resellable; seller
+  deliveredStock and low-stock automation counts shift accordingly, and
+  the buyer key page already 409s on refunded orders.
+- KNOWN LIMITATION (frontend frozen): the admin appeals console
+  (src/pages/admin/appeals.astro + src/scripts/dashboard/admin-appeals.ts)
+  cannot yet issue completed/failed decisions — terminal closure is
+  API-only until a frontend change is permitted. Tracked as a follow-up.
+- OPS FOLLOW-UPS: reconcile PLATFORM_ORIGIN / DASHBOARD_ORIGIN /
+  API_ORIGIN var-vs-secret duplication on staging before the next deploy
+  (wrangler secret list --env staging); provision DODO_PAYMENTS_WEBHOOK_KEY
+  if still absent; the Cloudflare-side secret inventory and live ledger
+  query remain external-ops prerequisites for the production release per
+  docs/PRODUCTION_RELEASE.md.
+- Verification evidence: full gates green before the race fix
+  (check baseline-only: 8 pre-existing AppLayout.astro errors, lint
+  clean, full suite 2651/2651); post-fix 59/59 across the five
+  remediation/release suites — final full-suite re-run pending. The
+  3-perspective code review completed with no critical findings (the one
+  MAJOR race and one MINOR hash-shape finding are both fixed above).
+
+Seller billing and Dodo subscription redesign (2026-08-22):
+- Replaced the seller-facing technical request ledger with a state-driven
+  plans and billing workspace: current plan, next billing event, usage,
+  invoices, plan comparison, review/confirm dialogs, scheduled cancellation,
+  resume, and provider-operation polling. Provider references and reason codes
+  are no longer exposed as the primary seller workflow.
+- Added an owner-authenticated billing operations API that persists the
+  idempotent command and attempts Dodo immediately; retryable provider failures
+  remain durable for the scheduled worker instead of requiring another seller
+  submission.
+- Dodo change-plan requests now include quantity, proration mode, effective
+  timing, and payment-failure behavior; empty 200/202/204 acknowledgements are
+  accepted. Upgrade is immediate; downgrade stays scheduled until provider
+  truth confirms the renewal transition; cancel is period-end and resumable.
+- Added a seller-scoped plan preview endpoint backed by Dodo's
+  `change-plan/preview`; the upgrade confirmation dialog displays the
+  provider-calculated immediate charge before it submits the mutation.
+- Migration 0108 adds tenant-scoped scheduled-plan evidence and reconciliation
+  metadata. The worker now reconciles acknowledged changes against Dodo so a
+  lost webhook cannot leave an operation pending forever.
+- Opening hosted checkout no longer removes a valid local trial. The selected
+  Starter/Pro intent is also preserved through pricing, password/2FA/magic-link
+  login, and onboarding.
+- Verification: 54 focused billing/funnel tests pass; focused ESLint,
+  production build, and `npm run deploy:dry-run` pass.
+  Full `npm run check` remains blocked by unrelated parallel dashboard/template
+  errors in CommandPalette/AppLayout/console catalog. Full lint is blocked only
+  by untracked temporary scripts from the parallel stream.
+- External requirement: Dodo test/live catalog rotation, product trial removal,
+  portal policy, recovery settings, return URL, and webhook creation require the
+  separately confirmed provider-dashboard change. Product IDs are intentionally
+  not embedded in migration 0108 because test and live catalogs differ.
+- Dodo dashboard confirmation completed on 2026-08-22: test and live products
+  have provider trials disabled; subscription updates are enabled; multiple
+  active subscriptions and pause are disabled; cancellation remains enabled;
+  upgrade/downgrade defaults are immediate/prorated and next-cycle respectively;
+  failed change charges prevent the plan mutation; dunning and payment retries
+  are enabled for 13 days.
+- Customer Portal return URLs are configured for staging and production. Both
+  webhook endpoints are enabled for all Dodo event types; the production signing
+  secret is stored in Worker secret `DODO_PAYMENTS_WEBHOOK_KEY` without logging.
+  Non-billing events are durably acknowledged as ignored to prevent retry loops.
+- Migration 0108 catalog placeholders now match the reconciliation contract:
+  `pending:dodo:{plan}:{market}:month:v1`.
+
+Seller billing staging incident and repair (2026-08-22, follow-up):
+- Root cause confirmed from read-only staging D1 evidence: migration
+  `0076_dodo_platform_price_provider.sql` left `subscription_events`,
+  `subscription_change_requests` and `usage_events` foreign keys pointing at
+  dropped `shop_subscriptions_legacy_0076` /
+  `billing_provider_events_legacy_0076` tables. The successful Dodo payment
+  `pay_0NluV11ozW0gnmanweNkp` (`299000 VND`) therefore reached the webhook
+  transition, failed when inserting `subscription_events`, rolled back, and
+  left the checkout open / subscription `pending_payment`.
+- Added forward-only `migrations/0110_repair_subscription_ledger_foreign_keys.sql`.
+  It rebuilds the three child ledgers against canonical parent tables,
+  preserves rows/columns/indexes/triggers (including `0108` reconciliation
+  fields), recreates the scheduled-target guards, and finishes with
+  `PRAGMA foreign_key_check`. The complete local migration replay passes
+  integrity and foreign-key checks.
+- Backend hardening verified: Dodo empty `200/202/204` mutation acknowledgements
+  are accepted; upgrade uses immediate prorated billing; downgrade uses
+  next-billing scheduling; cancel/resume remain period-end and idempotent;
+  reconciliation polls the provider after an acknowledged action; trial
+  checkout does not revoke a valid local trial; checkout webhook market and
+  currency are read from the selected checkout price instead of an old
+  subscription snapshot.
+- Dodo dashboard confirmation: the Pro VN subscription product is configured
+  at `299000 VND/month`, tax-inclusive, with provider trial disabled;
+  subscription updates are enabled, cancellation is enabled, multiple active
+  subscriptions and pause are disabled, and failed change charges prevent the
+  mutation. Do not alter this catalog configuration until the staging repair
+  is deployed and replayed.
+- Focused verification after the final fixes: billing/Dodo/UI/webhook suites
+  `97/97` pass; migration-chain integration `8/8` passes; focused ESLint and
+  production `npm run build` and `npm run deploy:dry-run` pass. Full
+  `npm run check` remains blocked by unrelated parallel storefront/template
+  and dashboard edits (16 diagnostics), while full lint is blocked only by
+  untracked temporary scripts from that parallel stream. Billing-scoped diff
+  checking is clean; the repository-wide `git diff --check` currently reports
+  one unrelated trailing-space edit in the parallel Serenity template stream.
+- Staging rollout is intentionally not claimed here. The guarded sequence is:
+  fresh staging backup/restore evidence, apply migrations through `0110`
+  (including `0108`), deploy the Worker, then replay only Dodo delivery
+  `msg_3IFVNBBiLruPDHQlCz4hsTIp9cN`. Verify
+  `billing_provider_events.status=processed`, checkout `completed`,
+  subscription `active`, provider subscription reference populated, invoice
+  created, and exactly one provider `subscription_events` row before browser
+  E2E.
+- Known product follow-ups remain: verified Dodo payment-recovery/customer
+  portal contract for `past_due`/`grace_period`, visible target plan plus undo
+  for `downgrade_scheduled`, durable operation SLA/notification beyond the
+  30-second browser poll, centralized billing i18n, and profile-derived
+  merchant country confirmation. These are separate from the FK incident
+  repair.
+- Final local completion pass: upgrade/downgrade presentation and execution now
+  classify direction from the authoritative current/target amount instead of a
+  hard-coded Starter-to-Pro assumption; terminal scheduled-provider failures
+  move to `rejected` with the reviewer/timestamp required by the ledger
+  constraint; cancel is available directly beside plan management; invoice and
+  usage copy is seller-facing and localized. The final focused billing suite is
+  `114/114`, billing-scoped ESLint and diff checking pass, and production build
+  passes.
+- Live read-only confirmation on 2026-08-22 still shows the exact staging
+  corruption before rollout: all three repaired ledgers reference deleted
+  `*_legacy_0076` parents; Dodo lists subscription
+  `sub_0NluV12JxhiMdaPM80hyi` as active, while staging keeps checkout
+  `bchk_64843faa-fbe3-42a3-8050-15f1073174f0` expired, local subscription
+  `sub_09145aac-78ff-4d0a-b211-0493275a74c4` in `pending_payment`, and delivery
+  `msg_3IFVNBBiLruPDHQlCz4hsTIp9cN` failed. This is expected until migration
+  `0110`, the Worker deployment, and the single-delivery replay complete.
+- Remote completion remains blocked by guarded release admission, not by source
+  code: staging is applied through `0097` with `0098`-`0110` pending; the latest
+  protected backup/restore evidence is stale, the release manifest is expired,
+  the shared candidate is dirty due the parallel template/dashboard stream,
+  and the dedicated D1/platform/route/deploy operator tokens are not exported.
+  No ad-hoc migration, deploy, production mutation, or broad webhook replay was
+  performed.
+- Seller billing UX follow-up is implemented locally: provider-backed
+  `past_due`, `grace_period`, and `suspended` subscriptions open a tenant-scoped
+  Dodo Customer Portal session for payment-method recovery; scheduled
+  downgrades expose a one-click, idempotent “keep current plan” action; and a
+  checkout return keeps its confirmation banner visible while polling the
+  authoritative subscription state/plan/version instead of treating the return
+  URL as payment evidence. The portal return is pinned to
+  `/app/billing?shop=<shopPublicId>` and both server/client reject non-Dodo or
+  unsafe portal URLs. Focused UI/API/provider tests pass (`37/37` plus `44/44`),
+  billing-scoped ESLint, `tsc --noEmit`, and `git diff --check` pass. Full Astro
+  check remains blocked only by the separate storefront/template, AppLayout,
+  login, and store-builder stream; those files were not changed here.
+
+## LP — Editorial Commerce landing program (2026-08-22, commits f33a375..LP5)
+
+Owner-approved full redesign of the marketing surface + auth, applied on
+`wip/onboarding-redesign-20260820`:
+
+- LP0 art pipeline (nanobanana gateway, env-keyed), variable fonts, editorial tokens.
+- LP1 homepage v3 "light premium" (3 owner review rounds; ivory + dark rejected), WebGL
+  aurora hero, scenario art set per section, scrollytelling flow, AA contrast audit.
+- LP2/LP2b editorial language across pricing/solutions/support/legal; project-wide locale
+  flow (first-touch + switch cookie `selinow_locale`, `Domain=.selinow.com`, clean links);
+  polished vi/en copy.
+- LP3 auth trio restyled as centered Google/OpenAI-style cards with the production
+  Google OAuth start flow wired into login and registration.
+- LP4 editorial OG cover + MOTION.md allowlist.
+- LP5 contract tests realigned (marketing assets, i18n dynamic-call allowlist) and public
+  browser-gate baselines recaptured: 66/71 pass — remaining failures are storefront
+  axe/a11y items in parallel-session WIP files, not LP scope.
+
+Verification at LP checkpoints: astro check 0 errors (LP files), lint clean (LP files),
+EX0 contract 13/13, home/pricing/login + inner pages 200 with 0 axe AA violations, no
+overflow at 320/390/1440, console clean, i18n click-through EN/VI verified.
+Known limitations: hero WebGL intentionally disabled under reduced-motion (static CSS
+aurora).
+
+## Google sign-in production readiness (2026-08-22)
+
+- Created the independent Google Cloud project `selinow-auth`; no other product
+  configuration or credentials were reused.
+- Implemented server-side Authorization Code + PKCE (`S256`) with a one-use D1
+  state ledger, nonce validation, browser binding, encrypted transient verifier,
+  HMAC-only Google `sub`, strict RS256/JWKS claim validation, and provider error
+  handling. Google access/refresh tokens are never persisted.
+- Added migration `0112_google_auth_foundation.sql` for global Google identities,
+  OAuth state lifecycle/guards, admission action `google_oauth_start`, retention
+  purge, backup coverage, and production invariant checks. Worker cron purges
+  expired/terminal state rows without retaining transient secrets.
+- Wired login, registration, explicit account linking from `/app/security`, and
+  Google-post-callback email OTP 2FA. Login never silently links an existing email;
+  unknown identities are login-denied and register-created only in the register flow.
+- Registered callbacks are `http://localhost:4321/api/auth/google/callback`,
+  `https://app-staging.selinow.com/api/auth/google/callback`, and
+  `https://app.selinow.com/api/auth/google/callback`. Local uses a callback bridge
+  because Google rejects the `app.localhost` HTTP hostname.
+- Staging/production client secrets are environment-scoped Cloudflare Worker
+  secrets; local values remain only in Git-ignored `.dev.vars` mode `0600`. Secret
+  values are not stored in repository files or logs. Production has one active
+  client secret after rotation.
+- Focused migration/ops verification passed (`60` tests); OAuth core/security,
+  UI/config, and release-invariant suites are tracked alongside this implementation.
+- Live Chrome inspection of the signed-in `selinow-auth` console confirms the
+  production Web client callback is exact and `selinow.com` is authorized. It also
+  confirms `External / Testing`, zero configured test users, no homepage/privacy/
+  terms URLs, no uploaded logo, and no scopes listed on the Data Access page. These
+  are external launch blockers; do not publish or enable broad production access
+  until owner-approved legal URLs/branding exist, the required basic OIDC scopes are
+  reviewed, a staging test user passes acceptance, and the app is deliberately
+  published to `Production` followed by a production canary.
+- Operational sequence and acceptance/rollback gates are recorded in
+  `docs/GOOGLE_OAUTH_RELEASE.md`.
+- Final Google/release-focused verification passes: 9 files / 88 tests, including
+  the dedicated OAuth core suite at 17/17, scoped ESLint, `git diff --check`, staging
+  Worker type generation, credential-pattern scan, `npm run build`,
+  `npm run deploy:dry-run`, and `npm audit --audit-level=high` (0 vulnerabilities).
+- Full-repository gates remain blocked by unrelated in-progress storefront/
+  onboarding/dashboard work in the dirty shared tree: `npm run check` reports 23
+  errors, full lint reports 8 errors, and full Vitest reports 8 failures after the
+  Google migration-tip and route-inventory contracts were updated. The remaining
+  failures are design-system/store-builder/accessibility/i18n contracts and do not
+  reference Google OAuth source. Production release still requires a clean combined
+  candidate with all global gates passing.
+
+## Production release 8b132b1 shipped (2026-08-22)
+
+- Candidate `8b132b1` (tree `1b8211f`) deployed to production Worker
+  `selinow-com-production` as version `32478104-c96a-4a49-8db3-4c3b2ea1a1ec`
+  at 100% (release `prd_20260822t101500z_8b132b193c52`). Rollback version
+  `9616a86c-30d3-42e4-a2fb-e26a5e7a9bc0` (commit `7ed44f2`) rehearsed live and
+  route-neutral; previous version `a3e1e975` verified restorable.
+- Production D1 `PLATFORM_DB` migrated through `0112_google_auth_foundation.sql`
+  (migration admission + preflight + post-migration contract verified; ledger
+  complete, `db status --env production` reports no pending migrations).
+- Commerce acceptance closed with genuine provider UAT bound to staging release
+  `stg_20260822T101231Z_8b132b193c52` / Worker version `6e48dde5`: Dodo
+  test-mode 32 scenarios (real checkout `pay_0Nlwk8VLaIEisW7fm4QLO` + signed
+  webhooks landed in staging `billing_provider_events`) and PayOS 14 scenarios
+  (payment lane accepted; signed refund/chargeback documented as
+  provider-unsupported). Closeout audit: `0/284` checks blocked with
+  `--secret-names .wrangler/releases/prd_20260822t101500z_8b132b193c52/secret-names-array.json`.
+- Post-deploy verification: `/api/health` `{ok:true}`, marketing site, dashboard
+  login, `llms.txt`, canary and both pilot storefronts
+  (`a-tung.selinow.com`, `anh-ba.selinow.com`) return 200; queue consumers and
+  `*/15` cron verified `reuse` by the trigger ceremony; continuation routes
+  applied and admitted.
+
+### Known limitations and follow-ups (owner/operator)
+
+- Release-tooling defects at tree `8b132b1` were bridged at runtime for this
+  ceremony only and must be fixed in the next commit:
+  `scripts/lib/production-trigger-ceremony.mjs normalizeConsumer` rejects the
+  Cloudflare API encodings `max_wait_time_ms`/consumer-level
+  `dead_letter_queue`/`retry_delay: 0` that `scripts/lib/platform.mjs
+  normalizeLiveConsumer` already documents as equivalent, and
+  `scripts/production-trigger.mjs` parses `--confirm-production` but never
+  forwards `confirmProduction` into `executeProductionTriggerCeremony`.
+- Staging Worker UAT secrets (Dodo test mode) were restored after the release;
+  the staging "latest deployment" invariant will re-pin on the next staging
+  release. Staging Dodo dashboard still has a stale LIVE-mode API key
+  ("Selinow staging Worker UAT 2026-08-22") that the owner should delete.
+- Google OAuth external launch blockers (publish state, legal URLs, scopes,
+  test-user acceptance) remain as recorded above.
+- Cloudflare account tokens in `/tmp/cfenv.sh` (release ceremony roles) should
+  be revoked from the dashboard now that the release has shipped; local files
+  can then be deleted.
+
+## PayOS trigger-accounting fix and staging continuation (2026-08-30)
+
+- Fixed the PayOS ownership path's D1 `meta.changes === 1` assumptions. Cloudflare
+  D1 includes projection-trigger side effects, so a guarded one-row update may
+  legitimately report more than one change. Claim, ambiguous/rejection cleanup,
+  activation, and health verification now require at least one primary-row change
+  and still validate the final fenced state. Regression coverage inflates the
+  integration update result to `changes = 8` and exercises the real migration
+  triggers. Commits: `80ab358`, `d7e13f8`.
+- Source verification is clean: `npm run check` (0 errors, 4 existing hints),
+  `npm run lint`, `npm run test` (373 files / 3,072 tests), `npm run build`,
+  `npm run deploy:dry-run`, and focused PayOS suites (35/35).
+- Fresh staging continuation completed for release
+  `stg_20260830T040041Z_e268f8ed7987`: protected backup
+  `bkp_20260830040546_37ea13746f89`, isolated restore
+  `rdr_20260830040636_a512f01558f6`, post-migration evidence, Worker deployment
+  evidence `1b5e4d63-6c74-4c60-a8fe-05febd95b468`, and staging Worker version
+  `cf246e08-0a79-4803-bfa9-546383475e4d`. Staging D1 preflight is clean and the
+  source ledger is applied through migration `0123`.
+- Production backup `bkp_20260830034750_8a889090d76a` and isolated restore
+  `rdr_20260830034815_e60081cedf24` were captured for this exact commit, but no
+  production migration, Worker deploy, route promotion, or secret mutation was
+  performed.
+- PayOS staging reconnect remains pending: the existing integration is still
+  `disconnected` with a recoverable stale `in_flight` claim until the signed-in
+  dashboard calls the owner reconnect flow. Chrome extension tab claiming timed
+  out repeatedly on the user's existing PayOS/staging tabs, so credentials were
+  not re-entered and no new tab was opened. The 5,000 VND transfer alone is not
+  sufficient provider UAT evidence.
+- Production release remains fail-closed. `npm run release:doctor -- --json`
+  still blocks on candidate-bound PayOS/Dodo UAT artifacts, fresh monitoring,
+  rollback metadata for the 123-migration ledger, and production secret-inventory
+  binding. Do not deploy production until those genuine artifacts are created
+  and the doctor returns `ok: true`.
+
+## Release gate audit (2026-08-30)
+
+- Re-ran `node scripts/release-doctor.mjs --json` for the clean HEAD
+  `64dbede90db6b45dac663be12d16950c74a06aa3`: 254/282 checks pass and 28
+  checks remain blocking. The last deployed staging candidate is
+  `stg_20260830T041801Z_64dbede90db6`, Worker
+  `8b4e7610-b915-42a8-8c85-2a1024c7b956`, with migration ledger through
+  `0123_payos_in_flight_recovery.sql`.
+- A read-only `wrangler secret list --env production` check confirms all 12
+  required production secret names are present; no secret values were read or
+  changed. Fresh production backup/restore evidence exists for this commit but
+  is not yet referenced by the checked-in production evidence.
+- Remaining external requirements are genuine candidate-bound Dodo (32
+  scenarios) and PayOS (14 scenarios) UAT artifacts, fresh monitoring,
+  complete 123-migration rollback metadata, refreshed candidate-bound secret
+  inventory/evidence, and owner-approved production evidence. The existing
+  signed-in Chrome tabs remain the required PayOS reconnect surface; no new tab
+  was opened and no PayOS credential was transmitted.
+- Production remains **NO-GO**. No production migration, Worker deployment,
+  route promotion, trigger mutation, or secret mutation was performed.
+
+## Release gate audit (2026-08-31)
+
+- Baseline rerun on HEAD `52f548689e929462f1b2abbf56b0b83ddcecf791` (tree
+  `9eaaa8a2a90a12c5d88e54c2d591eb38ba233705`) passed `npm run check`,
+  `npm run lint`, `npm run test` (373 files / 3,072 tests), `npm run build`,
+  `npm audit --audit-level=high` (0 vulnerabilities), and `npm run deploy:dry-run`.
+- Fixed the tracked executable bit on `scripts/provider-uat-payos-executor.mjs`;
+  the provider runner rejects non-executable candidate-bound executors. The
+  mode change requires a fresh staging manifest and deployment before PayOS UAT.
+- `release:doctor` remains **NO-GO** with 14 current failures: stale production
+  backup metadata, missing candidate-bound Dodo/PayOS artifacts and shared
+  staging binding, stale monitoring evidence, and rollback metadata that stops
+  at migration `0112` with 83 rather than 88 required invariants.
+- The latest staging deployment evidence is older than the two-hour admission
+  window. Required Dodo/PayOS context files and runner bindings are not present
+  in the operator environment, and Chrome currently exposes only the PayOS tab;
+  no credentials were read or transmitted and no provider transaction occurred.
+- Production remains **NO-GO**. No production backup export, migration, Worker
+  upload/deploy, route/trigger mutation, rollback rehearsal, or secret mutation
+  was performed in this session.

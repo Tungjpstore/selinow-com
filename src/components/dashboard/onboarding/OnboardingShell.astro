@@ -1,10 +1,12 @@
 ---
-import OnboardingCelebration from "./OnboardingCelebration.astro";
-import OnboardingLivePreview from "./OnboardingLivePreview.astro";
+import OnboardingPreviewDrawer from "./OnboardingPreviewDrawer.astro";
 import OnboardingStepConnect from "./OnboardingStepConnect.astro";
 import OnboardingStepInventory from "./OnboardingStepInventory.astro";
+import OnboardingStepLaunch from "./OnboardingStepLaunch.astro";
 import OnboardingStepProduct from "./OnboardingStepProduct.astro";
 import OnboardingStepStore from "./OnboardingStepStore.astro";
+import type { OnboardingResumeState } from "../../../lib/onboarding/resume";
+import type { PublicPlanCode } from "../../../lib/billing/plan-catalog";
 
 type ShopView = {
   name: string;
@@ -14,123 +16,119 @@ type ShopView = {
 };
 
 type Props = {
+  creationAllowed?: boolean;
   csrfCookieName: string;
   defaultCurrency?: string;
   defaultLocale?: string;
   displayName: string;
   email: string;
   platformBaseDomain: string;
+  policyAttestationVersion: number | null;
+  premiumTemplatesEntitled?: boolean;
+  requestedPlanCode?: PublicPlanCode | null;
+  resume?: OnboardingResumeState | null;
   shops: ShopView[];
 };
 
 const {
+  creationAllowed = true,
   csrfCookieName,
   defaultCurrency = "VND",
   defaultLocale = "vi-VN",
   displayName,
   email,
   platformBaseDomain,
+  policyAttestationVersion,
+  premiumTemplatesEntitled = false,
+  requestedPlanCode = null,
+  resume = null,
   shops,
 } = Astro.props;
+void displayName;
+void email;
 
 const initialShop = shops[0];
+const initialVertical = resume?.shop.vertical ?? "digital";
+const initialTemplateId = resume?.shop.templateId ?? null;
+
+const steps = [
+  { code: "store", label: "Cửa hàng" },
+  { code: "product", label: "Sản phẩm" },
+  { code: "inventory", label: "Kho hàng" },
+  { code: "connect", label: "Kết nối" },
+  { code: "launch", label: "Mở bán" },
+] as const;
 ---
 
 <div
-  class="onboarding-focus-shell"
+  class="onboarding-v2-shell"
   data-quickstart-root
   data-csrf-cookie-name={csrfCookieName}
   data-platform-base-domain={platformBaseDomain}
+  data-policy-attestation-published={policyAttestationVersion !== null ? "true" : "false"}
+  data-policy-attestation-version={policyAttestationVersion ?? ""}
   data-default-currency={defaultCurrency}
   data-default-locale={defaultLocale}
   data-shops={JSON.stringify(shops)}
   data-active-shop-public-id={initialShop?.publicId ?? ""}
+  data-creation-allowed={creationAllowed ? "true" : "false"}
+  data-premium-templates-entitled={premiumTemplatesEntitled ? "true" : "false"}
+  data-requested-plan-code={requestedPlanCode ?? ""}
+  data-resume-state={resume === null ? "" : JSON.stringify(resume)}
 >
-  <!-- Top Focus Navigation Bar -->
-  <header class="focus-navbar">
-    <div class="navbar-container">
-      <div class="nav-brand-wrap">
-        <a href="/app" class="brand-link" aria-label="Selinow">
-          <img src="/brand/logo/selinow-logo-primary.svg" alt="Selinow" width="120" height="32" />
-        </a>
-        <span class="nav-divider"></span>
-        <span class="nav-mode-badge">⚡ Thiết Lập Bán Hàng</span>
-      </div>
-
-      <!-- Stepper Progress Tracker -->
-      <nav class="onboarding-stepper" aria-label="Tiến trình thiết lập">
-        <ol class="stepper-list">
-          <li class="stepper-item active" data-step-indicator="store">
-            <span class="step-circle">1</span>
-            <span class="step-label">Cửa hàng</span>
-          </li>
-          <li class="stepper-line" aria-hidden="true"></li>
-          <li class="stepper-item" data-step-indicator="product">
-            <span class="step-circle">2</span>
-            <span class="step-label">Sản phẩm</span>
-          </li>
-          <li class="stepper-line" aria-hidden="true"></li>
-          <li class="stepper-item" data-step-indicator="inventory">
-            <span class="step-circle">3</span>
-            <span class="step-label">Kho key</span>
-          </li>
-          <li class="stepper-line" aria-hidden="true"></li>
-          <li class="stepper-item" data-step-indicator="connect">
-            <span class="step-circle">4</span>
-            <span class="step-label">Thanh toán</span>
-          </li>
-        </ol>
-      </nav>
-
-      <!-- User Account & Exit Action -->
-      <div class="nav-account-wrap">
-        <div class="user-info-text">
-          <strong>{displayName}</strong>
-          <small>{email}</small>
+  <!-- Top navigation bar -->
+  <header class="v2-topbar">
+    <div class="v2-topbar-inner">
+      <!-- Progress bar -->
+      <div class="topbar-progress-section">
+        <div class="progress-track" role="progressbar" aria-label="Tiến trình thiết lập" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-fill" data-progress-fill></div>
         </div>
-        <a href="/app" class="btn-exit-dashboard" title="Lưu tiến trình và mở Bảng điều khiển">
-          <span>Vào Dashboard</span>
-          <span aria-hidden="true">↗</span>
-        </a>
+        <div class="progress-step-labels" aria-hidden="true">
+          {steps.map((step, i) => (
+            <span class="progress-label-item" data-progress-label={step.code}>
+              {i + 1}. {step.label}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   </header>
 
-  <!-- Global Feedback Toast Notification -->
-  <div class="feedback-toast" data-onboarding-toast role="status" aria-live="polite" hidden></div>
+  <!-- Toast notification -->
+  <div class="v2-toast" data-onboarding-toast role="status" aria-live="polite" hidden></div>
 
-  <!-- Main 2-Column Split Workspace -->
-  <main class="focus-main-layout">
-    <div class="focus-layout-container">
-      <!-- Left Column: Step Interactive Wizard Panes -->
-      <section class="wizard-pane-column">
-        <div class="wizard-pane-card">
-          <OnboardingStepStore
-            defaultCurrency={defaultCurrency}
-            defaultLocale={defaultLocale}
-            initialShopName={initialShop?.name}
-            initialShopSlug={initialShop?.slug}
-            platformBaseDomain={platformBaseDomain}
-            shopsCount={shops.length}
-          />
-          <OnboardingStepProduct defaultCurrency={defaultCurrency} />
-          <OnboardingStepInventory />
-          <OnboardingStepConnect />
-          <OnboardingCelebration platformBaseDomain={platformBaseDomain} />
-        </div>
-      </section>
-
-      <!-- Right Column: Real-time Live Interactive Preview Mockup -->
-      <aside class="live-preview-column">
-        <OnboardingLivePreview
-          defaultCurrency={defaultCurrency}
-          initialShopName={initialShop?.name}
-          initialShopSlug={initialShop?.slug}
-          platformBaseDomain={platformBaseDomain}
-        />
-      </aside>
+  <!-- Main step content area -->
+  <main class="v2-main">
+    <div class="v2-step-container">
+      <OnboardingStepStore
+        defaultCurrency={defaultCurrency}
+        defaultLocale={defaultLocale}
+        initialShopName={initialShop?.name}
+        initialShopSlug={initialShop?.slug}
+        initialTemplateId={initialTemplateId}
+        initialVertical={initialVertical}
+        platformBaseDomain={platformBaseDomain}
+        premiumTemplatesEntitled={premiumTemplatesEntitled}
+        shopsCount={shops.length}
+      />
+      <OnboardingStepProduct defaultCurrency={defaultCurrency} initialVertical={initialVertical} />
+      <OnboardingStepInventory initialVertical={initialVertical} />
+      <OnboardingStepConnect />
+      <OnboardingStepLaunch
+        platformBaseDomain={platformBaseDomain}
+        policyAttestationVersion={policyAttestationVersion}
+      />
     </div>
   </main>
+
+  <!-- Preview drawer -->
+  <OnboardingPreviewDrawer
+    defaultCurrency={defaultCurrency}
+    initialShopName={initialShop?.name}
+    initialShopSlug={initialShop?.slug}
+    platformBaseDomain={platformBaseDomain}
+  />
 </div>
 
 <script>
@@ -138,183 +136,81 @@ const initialShop = shops[0];
 </script>
 
 <style>
-  :global(*) {
-    box-sizing: border-box;
-  }
-
-  :global(body) {
-    margin: 0;
-    min-width: 320px;
-    min-height: 100vh;
-    background: var(--sln-bg-canvas);
-    color: var(--sln-text-primary);
-    font-family: var(--sln-font-sans);
-  }
-
-  .onboarding-focus-shell {
+  .onboarding-v2-shell {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
-    background: var(--sln-bg-canvas);
+    width: 100%;
   }
 
-  /* Top Navbar */
-  .focus-navbar {
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    background: var(--sln-bg-surface);
-    border-bottom: 1px solid var(--sln-border-default);
-    box-shadow: var(--sln-shadow-xs);
+  /* ---- Top progress card ---- */
+  .v2-topbar {
+    position: relative;
+    background: var(--sln-glass-bg);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--sln-glass-border);
+    border-radius: var(--sln-console-radius-container);
+    box-shadow: var(--sln-console-shadow-card);
+    margin-bottom: 20px;
   }
 
-  .navbar-container {
+  .v2-topbar-inner {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 12px 24px;
+    padding: 16px 20px;
   }
 
-  .nav-brand-wrap {
+  /* ---- Progress bar ---- */
+  .topbar-progress-section {
+    flex: 1;
     display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-
-  .brand-link {
-    display: flex;
-    align-items: center;
-    text-decoration: none;
-  }
-
-  .nav-divider {
-    width: 1px;
-    height: 22px;
-    background: var(--sln-border-strong);
-  }
-
-  .nav-mode-badge {
-    padding: 3px 10px;
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-tint-primary);
-    color: var(--sln-action-primary);
-    font-size: 11px;
-    font-weight: 750;
-    letter-spacing: 0.05em;
-  }
-
-  /* Stepper */
-  .stepper-list {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .stepper-item {
-    display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 8px;
-    color: var(--sln-text-muted);
-    font-size: 13px;
+    min-width: 0;
+  }
+
+  .progress-track {
+    width: 100%;
+    height: 6px;
+    border-radius: var(--sln-radius-pill);
+    background: var(--sln-console-line);
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--sln-soft-accent-strong), var(--sln-brand-blue));
+    width: 0%;
+    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .progress-step-labels {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .progress-label-item {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--sln-console-ink-2);
+    transition: color 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .progress-label-item.active {
+    color: var(--sln-console-accent-text);
     font-weight: 600;
   }
 
-  .step-circle {
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: var(--sln-bg-subtle);
-    border: 1.5px solid var(--sln-border-strong);
-    color: var(--sln-text-muted);
-    font-size: 12px;
-    font-weight: 750;
-    transition: all 0.2s ease;
+  .progress-label-item.done {
+    color: var(--sln-console-success-text);
   }
 
-  .stepper-item.active {
-    color: var(--sln-action-primary);
-  }
-
-  .stepper-item.active .step-circle {
-    background: var(--sln-action-primary);
-    border-color: var(--sln-action-primary);
-    color: var(--sln-white);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sln-action-primary) 20%, transparent);
-  }
-
-  .stepper-item.done {
-    color: var(--sln-state-success);
-  }
-
-  .stepper-item.done .step-circle {
-    background: var(--sln-state-success);
-    border-color: var(--sln-state-success);
-    color: var(--sln-white);
-  }
-
-  .stepper-line {
-    width: 24px;
-    height: 2px;
-    background: var(--sln-border-default);
-  }
-
-  /* Account & Exit */
-  .nav-account-wrap {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .user-info-text {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    line-height: 1.3;
-  }
-
-  .user-info-text strong {
-    font-size: 13px;
-    color: var(--sln-text-primary);
-  }
-
-  .user-info-text small {
-    font-size: 11px;
-    color: var(--sln-text-muted);
-  }
-
-  .btn-exit-dashboard {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 7px 14px;
-    border: 1px solid var(--sln-border-strong);
-    border-radius: var(--sln-radius-pill);
-    background: var(--sln-bg-surface);
-    color: var(--sln-text-secondary);
-    font-size: 12px;
-    font-weight: 650;
-    text-decoration: none;
-    transition: all 0.15s ease;
-  }
-
-  .btn-exit-dashboard:hover {
-    background: var(--sln-bg-subtle);
-    color: var(--sln-text-primary);
-    border-color: var(--sln-action-primary);
-  }
-
-  /* Toast Notification */
-  .feedback-toast {
+  /* ---- Toast ---- */
+  .v2-toast {
     position: fixed;
-    top: 76px;
+    top: 72px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 100;
@@ -325,80 +221,126 @@ const initialShop = shops[0];
     font-size: 13px;
     font-weight: 600;
     box-shadow: var(--sln-shadow-lg);
-    animation: slideDown 0.25s ease;
+    animation: toastSlideDown 0.25s ease;
   }
 
-  @keyframes slideDown {
+  @keyframes toastSlideDown {
     from { opacity: 0; transform: translate(-50%, -10px); }
     to { opacity: 1; transform: translate(-50%, 0); }
   }
 
-  .feedback-toast[data-tone="success"] {
+  .v2-toast[data-tone="success"] {
     background: var(--sln-tint-success);
     color: var(--sln-state-success);
     border: 1px solid color-mix(in srgb, var(--sln-state-success) 30%, transparent);
   }
 
-  .feedback-toast[data-tone="error"] {
+  .v2-toast[data-tone="error"] {
     background: var(--sln-tint-danger);
     color: var(--sln-state-danger);
     border: 1px solid color-mix(in srgb, var(--sln-state-danger) 30%, transparent);
   }
 
-  /* Main Split Layout */
-  .focus-main-layout {
+  /* ---- Main content ---- */
+  .v2-main {
     flex: 1;
-    padding: 32px 24px 64px;
+    padding: 40px 32px 80px;
+    overflow: hidden;
   }
 
-  .focus-layout-container {
-    display: grid;
-    grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.95fr);
-    gap: 36px;
-    max-width: 1360px;
+  .v2-step-container {
+    max-width: 720px;
     margin: 0 auto;
-    align-items: flex-start;
+    position: relative;
   }
 
-  .wizard-pane-card {
-    border: 1px solid var(--sln-border-default);
-    border-radius: var(--sln-radius-xl);
-    background: var(--sln-bg-surface);
-    padding: clamp(24px, 4vw, 36px);
-    box-shadow: var(--sln-shadow-sm);
+  /* Step pane animation system — :global because panes are rendered by child components */
+  :global(.onboarding-step-pane) {
+    display: none;
+    flex-direction: column;
+    gap: 24px;
   }
 
-  /* Responsive Breakpoints */
-  @media (max-width: 1040px) {
-    .focus-layout-container {
-      grid-template-columns: 1fr;
-      gap: 24px;
+  :global(.onboarding-step-pane.is-active) {
+    display: flex;
+    animation: stepEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  :global(.onboarding-step-pane.is-exiting-left) {
+    display: flex;
+    animation: stepExitLeft 0.25s ease forwards;
+  }
+
+  :global(.onboarding-step-pane.is-exiting-right) {
+    display: flex;
+    animation: stepExitRight 0.25s ease forwards;
+  }
+
+  @keyframes stepEnter {
+    from {
+      opacity: 0;
+      transform: translateX(40px);
     }
-
-    .live-preview-column {
-      order: -1;
+    to {
+      opacity: 1;
+      transform: translateX(0);
     }
   }
 
-  @media (max-width: 768px) {
-    .navbar-container {
+  @keyframes stepExitLeft {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(-40px);
+    }
+  }
+
+  @keyframes stepExitRight {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(40px);
+    }
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .v2-topbar-inner {
       padding: 10px 16px;
+      gap: 12px;
     }
 
-    .onboarding-stepper {
+    .progress-step-labels {
       display: none;
     }
 
-    .user-info-text {
+    .user-email {
       display: none;
     }
 
-    .focus-main-layout {
-      padding: 16px 12px 48px;
+    .v2-main {
+      padding: 24px 16px 64px;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .v2-topbar-inner {
+      flex-wrap: wrap;
     }
 
-    .wizard-pane-card {
-      padding: 20px 16px;
+    .topbar-progress-section {
+      order: 3;
+      flex-basis: 100%;
+    }
+
+    .v2-main {
+      padding: 16px 12px 56px;
     }
   }
 </style>

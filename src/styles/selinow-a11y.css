@@ -6,9 +6,9 @@
   transform: translateY(-180%);
   min-height: 44px;
   padding: 10px 14px;
-  border-radius: var(--selinow-radius-sm);
-  background: var(--selinow-bg-inverse);
-  color: var(--selinow-text-inverse);
+  border-radius: var(--sln-radius-sm);
+  background: var(--sln-bg-inverse);
+  color: var(--sln-text-inverse);
   font-weight: 700;
   text-decoration: none;
 }
@@ -30,7 +30,7 @@
 }
 
 :where(.selinow-focus-target:focus-visible) {
-  outline: 3px solid var(--selinow-focus-ring);
+  outline: 3px solid var(--sln-focus-ring);
   outline-offset: 8px;
 }
 

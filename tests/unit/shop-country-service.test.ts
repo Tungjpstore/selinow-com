@@ -570,7 +570,7 @@ describe("shop country configuration service", () => {
       FROM shop_settings
       WHERE shop_id = (SELECT id FROM shops WHERE public_id = ?)
     `).get(shop.shop.publicId)).toEqual({
-      attestationVersion: null,
+      attestationVersion: 1,
       privacyUrl: null,
       refundPolicyUrl: null,
       supportContact: null,

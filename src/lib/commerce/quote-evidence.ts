@@ -30,6 +30,8 @@ type QuoteEvidenceClaims = {
   expiresAt: string;
   issuedAt: string;
   shopId: string;
+  shippingFeeMinor?: number;
+  shippingMethodId?: string;
   totalMinor?: number;
   version: number;
 };
@@ -37,6 +39,8 @@ type QuoteEvidenceClaims = {
 export type QuoteEvidencePricing = {
   discountCode: string | null;
   discountMinor: number;
+  shippingFeeMinor?: number;
+  shippingMethodId?: string;
   totalMinor: number;
 };
 
@@ -122,6 +126,8 @@ export async function createQuoteEvidence(input: {
     ...(input.pricing === undefined ? {} : {
       discountCode: input.pricing.discountCode,
       discountMinor: input.pricing.discountMinor,
+      ...(input.pricing.shippingMethodId === undefined ? {} : { shippingMethodId: input.pricing.shippingMethodId }),
+      ...(input.pricing.shippingFeeMinor === undefined ? {} : { shippingFeeMinor: input.pricing.shippingFeeMinor }),
       totalMinor: input.pricing.totalMinor,
     }),
     expectedHash: await expectedHash(input.expected),
@@ -190,5 +196,14 @@ export async function verifyQuoteEvidence(input: {
       || claims.discountMinor !== input.pricing.discountMinor
       || claims.totalMinor !== input.pricing.totalMinor
     ) throw new AppError("quote_invalid", 409);
+    // Shipping claims bind the fee the buyer saw; quotes without them were
+    // minted before physical checkout and stay valid for digital carts.
+    const hasShippingClaim = claims.shippingMethodId !== undefined || claims.shippingFeeMinor !== undefined;
+    if (hasShippingClaim && (input.pricing.shippingMethodId === undefined || input.pricing.shippingFeeMinor === undefined)) {
+      throw new AppError("quote_invalid", 409);
+    }
+    if (hasShippingClaim && (claims.shippingMethodId !== input.pricing.shippingMethodId || claims.shippingFeeMinor !== input.pricing.shippingFeeMinor)) {
+      throw new AppError("quote_invalid", 409);
+    }
   }
 }

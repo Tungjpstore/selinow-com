@@ -237,6 +237,10 @@ function validateCartMutation(input: CommerceCartMutationCommand): CommerceCartM
     if (typeof mutation.code !== "string" || !/^[A-Z0-9_-]{3,32}$/u.test(mutation.code)) invalid("discount_code_invalid");
     return { cart: validateCartMutationTarget(input.cart), idempotencyKey: input.idempotencyKey, mutation: { code: mutation.code, kind: "discount.apply" } };
   }
+  if (mutation.kind === "discount.remove") {
+    assertExactKeys(mutation, ["kind"], "discount_mutation_invalid");
+    return { cart: validateCartMutationTarget(input.cart), idempotencyKey: input.idempotencyKey, mutation: { kind: "discount.remove" } };
+  }
   invalid("cart_mutation_invalid");
 }
 

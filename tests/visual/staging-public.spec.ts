@@ -34,6 +34,9 @@ test("storefront home", async ({ page }) => {
 test("product detail", async ({ page }) => {
   await page.goto(signalVisualProduct.path);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(signalVisualProduct.heading);
+  const addToCart = page.locator("#detail-add");
+  await expect(addToCart).toBeEnabled();
+  await expect(addToCart).toHaveText("Thêm vào giỏ");
   await expectStablePage(page);
   await expect(page).toHaveScreenshot(publicVisualScreenshots[1], { fullPage: true });
 });

@@ -1,0 +1,89 @@
+---
+/**
+ * LP Editorial Commerce — runtime pricing preview (LP1).
+ * Renders live plan rows from D1 (`getMarketingPlans`) with the unavailable
+ * fallback intact. Prices always come from runtime data — never invented.
+ */
+interface Props {
+  dashboardOrigin: string;
+  locale?: unknown;
+  plans: Awaited<ReturnType<typeof getMarketingPlans>>;
+  pricingState: "ready" | "unavailable";
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+import { getMarketingPlans, formatMarketingPrice, planFeatureList } from "../../../lib/storefront/marketing";
+
+const { dashboardOrigin, locale: propLocale, plans, pricingState } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+const loginHrefForPlan = (planCode: string): string => {
+  const login = new URL("/login", dashboardOrigin);
+  login.searchParams.set("redirect", `/onboarding?plan=${encodeURIComponent(planCode)}`);
+  return login.toString();
+};
+---
+
+<section class="ed-pricing" id="pricing" data-pricing-state={pricingState} aria-labelledby="ed-pricing-title">
+  <div class="platform-shell">
+    <header class="ed-section-heading">
+      <p class="ed-kicker">{t("marketing.home.pricing.kicker")}</p>
+      <h2 class="ed-title" id="ed-pricing-title">{t("marketing.home.pricing.title")}</h2>
+      <p class="ed-lead">{t("marketing.home.pricing.description")}</p>
+    </header>
+
+    {pricingState === "ready" ? (
+      <div class="ed-plan-grid">
+        {plans.map((plan) => (
+          <article class:list={["ed-plan-card", plan.recommended === true && "ed-plan-card-featured"]}>
+            {plan.recommended === true ? (
+              <p class="ed-plan-pill">💎 {t("marketing.home.pricing.recommended")}</p>
+            ) : (
+              <p class="ed-plan-pill ed-plan-pill-soft">🚀 {t("marketing.home.pricing.starter_pill")}</p>
+            )}
+            <div class="ed-plan-head">
+              <span class="ed-plan-code">{plan.code}</span>
+              <h3>{plan.name}</h3>
+            </div>
+            <div class="ed-plan-prices">
+              {(plan.prices ?? []).map((price) => {
+                const amount = formatMarketingPrice(price, locale);
+                return amount === null ? null : (
+                  <p data-market={price.marketCode}>
+                    <strong>{amount}</strong>
+                    <span> / {price.interval === "month" ? t("marketing.pricing.price_period.month").replace("per ", "") : price.interval}</span>
+                  </p>
+                );
+              })}
+              <p class="ed-plan-trial">✨ {t("marketing.home.pricing.trial_badge")}</p>
+            </div>
+            <ul>
+              {planFeatureList(plan, locale).map((feature) => (
+                <li>{feature}</li>
+              ))}
+            </ul>
+            <a class:list={["ed-button", plan.recommended === true ? "ed-button-primary" : "ed-button-ghost"]} href={loginHrefForPlan(plan.code)} data-plan-code={plan.code}>
+              <span>{t("marketing.home.pricing.create")}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+          </article>
+        ))}
+      </div>
+    ) : (
+      <div class="ed-plan-unavailable">
+        <h3>{t("marketing.pricing.unavailable.title")}</h3>
+        <p>{t("marketing.pricing.unavailable.description")}</p>
+      </div>
+    )}
+
+    {pricingState === "ready" && (
+      <div class="ed-pricing-footer">
+        <a class="ed-button ed-button-ghost" href="/pricing">
+          <span>{t("marketing.home.pricing.compare")}</span>
+          <span aria-hidden="true">→</span>
+        </a>
+      </div>
+    )}
+  </div>
+</section>

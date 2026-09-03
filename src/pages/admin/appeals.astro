@@ -2,10 +2,11 @@
 import AdminState from "../../components/admin/AdminState.astro";
 import AdminLayout from "../../layouts/AdminLayout.astro";
 import { authenticateRequest } from "../../lib/auth/session";
+import { encodeCreatedIdCursor } from "../../lib/core/pagination";
 import { getBindings } from "../../lib/platform/bindings";
 import { minorUnitFor } from "../../lib/i18n/currency";
 import { listAdminPaymentRemediationRequests, type AdminPaymentRemediationRequest } from "../../lib/payments/remediation";
-import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { describePlatformAdminAccess, type PlatformAdminAccess } from "../../lib/tenants/store";
 import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
 import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
 
@@ -20,19 +21,31 @@ Astro.response.headers.set("Pragma", "no-cache");
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
 Astro.response.headers.set("Referrer-Policy", "no-referrer");
 
-let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let adminAccess: PlatformAdminAccess = { kind: "not_admin" };
 let roleLookupFailed = false;
-try { adminRole = await getPlatformAdminRole({ env, userId: auth.userId }); } catch { roleLookupFailed = true; }
+try { adminAccess = await describePlatformAdminAccess({ env, userId: auth.userId }); } catch { roleLookupFailed = true; }
+const adminRole = adminAccess.kind === "authorized" ? adminAccess.role : null;
+const twoFactorRequired = adminAccess.kind === "two_factor_required";
 if (roleLookupFailed) Astro.response.status = 503;
 else if (adminRole === null) Astro.response.status = 403;
 
 const requestedStatus = Astro.url.searchParams.get("status") ?? "";
 const allowedStatuses = new Set(["", "requested", "provider_pending", "rejected", "completed", "failed", "canceled"]);
 const status = allowedStatuses.has(requestedStatus) ? requestedStatus : "";
+const cursorValue = Astro.url.searchParams.get("cursor");
+const APPEALS_PAGE_LIMIT = 50;
 let requests: AdminPaymentRemediationRequest[] = [];
+let appealsNextCursor: string | null = null;
 let dataUnavailable = false;
 if (adminRole !== null) {
-  try { requests = await listAdminPaymentRemediationRequests({ env, status, userId: auth.userId }); }
+  try {
+    // Fetch one extra row to detect hasMore while the service returns a plain array.
+    const fetched = await listAdminPaymentRemediationRequests({ cursor: cursorValue, env, limit: APPEALS_PAGE_LIMIT + 1, status, userId: auth.userId });
+    const hasMore = fetched.length > APPEALS_PAGE_LIMIT;
+    requests = hasMore ? fetched.slice(0, APPEALS_PAGE_LIMIT) : fetched;
+    const last = requests.at(-1);
+    appealsNextCursor = hasMore && last !== undefined ? encodeCreatedIdCursor({ createdAt: last.createdAt, id: last.id }) : null;
+  }
   catch { dataUnavailable = true; Astro.response.status = 503; }
 }
 
@@ -61,6 +74,17 @@ const formatTime = (value: string): string => {
   return Number.isNaN(date.getTime()) ? t("admin.common.unknown") : date.toLocaleString(locale, { dateStyle: "short", timeStyle: "short" });
 };
 const statusHref = (value: string): string => value === "" ? "/admin/appeals" : `/admin/appeals?status=${encodeURIComponent(value)}`;
+// Builds pagination links that keep the active status filter intact.
+const appealsHref = (overrides: Record<string, string | null>): string => {
+  const params = new URLSearchParams();
+  if (status !== "") params.set("status", status);
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === null || value === "") params.delete(key);
+    else params.set(key, value);
+  }
+  const query = params.toString();
+  return query === "" ? "/admin/appeals" : `/admin/appeals?${query}`;
+};
 const canReview = adminRole === "owner" || adminRole === "risk";
 const clientCopy = {
   approve: t("admin.appeals.approving"),
@@ -74,11 +98,25 @@ const clientCopy = {
   errorRecentAuth: t("admin.appeals.error_recent_auth"),
   errorConflict: t("admin.appeals.error_conflict"),
   errorReference: t("admin.appeals.error_reference"),
+  complete: t("admin.appeals.terminal.complete"),
+  markFailed: t("admin.appeals.terminal.mark_failed"),
+  completing: t("admin.appeals.terminal.completing"),
+  failing: t("admin.appeals.terminal.failing"),
+  completedFeedback: t("admin.appeals.terminal.completed"),
+  failedFeedback: t("admin.appeals.terminal.failed"),
+  confirmComplete: t("admin.appeals.terminal.confirm_complete"),
+  confirmFailed: t("admin.appeals.terminal.confirm_failed"),
+  failureCodeLabel: t("admin.appeals.terminal.failure_code_label"),
+  failureCodeRequired: t("admin.appeals.terminal.failure_code_required"),
+  errorForbidden: t("admin.appeals.terminal.error_forbidden"),
+  errorRateLimited: t("admin.security.rate_limited"),
+  errorTwoFactorRequired: `${t("admin.security.two_factor_required")} ${t("admin.security.two_factor_required_hint")}`,
 };
 ---
 
 <AdminLayout activePath="/admin/appeals" email={auth.email} role={adminRole} title={t("admin.appeals.title")}>
   {roleLookupFailed ? <AdminState tone="danger" eyebrow={t("admin.appeals.eyebrow")} title={t("admin.common.read_api_unavailable")} description={t("admin.appeals.error_generic")} code={t("admin.common.request", { requestId: Astro.locals.requestId })} actionHref="/admin/appeals" actionLabel={t("admin.common.reload")} />
+    : twoFactorRequired ? <AdminState tone="warning" eyebrow={t("admin.appeals.eyebrow")} title={t("admin.security.two_factor_required")} description={t("admin.security.two_factor_required_hint")} code="admin_two_factor_required" actionHref="/app/security" actionLabel={t("admin.ops.client.error.two_factor_link")} />
     : adminRole === null ? <AdminState tone="warning" eyebrow={t("admin.appeals.eyebrow")} title={t("admin.common.read_only")} description={t("admin.appeals.error_generic")} code="authorization_denied" actionHref="/admin" actionLabel={t("admin.common.back_workspace")} />
     : dataUnavailable ? <AdminState tone="danger" eyebrow={t("admin.appeals.eyebrow")} title={t("admin.common.read_api_unavailable")} description={t("admin.appeals.error_generic")} code={t("admin.common.request", { requestId: Astro.locals.requestId })} actionHref="/admin/appeals" actionLabel={t("admin.common.reload")} />
     : <div class="appeals-page" data-admin-appeals data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-copy={JSON.stringify(clientCopy)}>
@@ -93,8 +131,32 @@ const clientCopy = {
             <div class="appeal-record-head"><div><small>{request.shopName} · {request.shopPublicId}</small><strong>{kindLabel(request.kind)}</strong><span>{request.orderPublicId}</span></div><span class={`appeal-status appeal-status-${request.status}`}>{statusLabel(request.status)}</span></div>
             <dl><div><dt>{t("admin.appeals.kind.refund")}</dt><dd>{formatAmount(request.amountMinor, request.currency)}</dd></div><div><dt>{t("admin.appeals.filter")}</dt><dd>{request.reasonCode}</dd></div><div><dt>{t("admin.common.created")}</dt><dd>{formatTime(request.createdAt)}</dd></div></dl>
             {canReview && request.status === "requested" && <div class="appeal-actions"><button type="button" data-appeal-decision="provider_pending">{t("admin.appeals.approve")}</button><button type="button" data-appeal-decision="rejected" class="danger-action">{t("admin.appeals.reject")}</button></div>}
+            {canReview && request.status === "provider_pending" && <div class="appeal-actions"><button type="button" data-appeal-decision="completed">{t("admin.appeals.terminal.complete")}</button><button type="button" data-appeal-decision="failed" class="danger-action">{t("admin.appeals.terminal.mark_failed")}</button></div>}
           </article>)}
-        </div></section>}
+        </div>
+        {(appealsNextCursor !== null || cursorValue !== null) && (
+          <nav class="admin-pagination" aria-label={t("admin.appeals.pagination.aria")}>
+            <span>{requests.length}</span>
+            <div>
+              {cursorValue !== null && <a class="admin-button" href={appealsHref({ cursor: null })}>{t("admin.investigations.first")}</a>}
+              {appealsNextCursor !== null && <a class="admin-button admin-button-primary" href={appealsHref({ cursor: appealsNextCursor })}>{t("admin.investigations.next")}</a>}
+            </div>
+          </nav>
+        )}
+        </section>}
+      <dialog class="sln-dialog" id="appeal-confirm-dialog" aria-labelledby="appeal-confirm-title" aria-describedby="appeal-confirm-impact" data-appeal-confirm-dialog>
+        <div class="sln-dialog__body"><h2 id="appeal-confirm-title" data-appeal-confirm-title></h2><p id="appeal-confirm-impact" data-appeal-confirm-impact></p>
+          <div class="appeal-failure-code" data-appeal-failure-code-field hidden>
+            <label for="appeal-failure-code-input" data-appeal-failure-code-label></label>
+            <input id="appeal-failure-code-input" data-appeal-failure-code-input type="text" name="failureCode" maxlength="64" autocomplete="off" spellcheck="false">
+            <p class="appeal-failure-code-error" data-appeal-failure-code-error role="alert" hidden></p>
+          </div>
+        </div>
+        <form class="sln-dialog__actions" method="dialog" data-appeal-confirm-form>
+          <button class="sln-button" data-variant="secondary" type="submit" value="cancel">{t("admin.appeals.dialog.cancel")}</button>
+          <button class="sln-button" data-variant="danger" type="submit" value="confirm" data-appeal-confirm-action>{t("admin.appeals.dialog.confirm")}</button>
+        </form>
+      </dialog>
     </div>}
 </AdminLayout>
 
@@ -108,10 +170,10 @@ const clientCopy = {
   .admin-read-only-note { max-width:300px; color:var(--sln-text-muted); font-size:12px; line-height:1.5; text-align:end; }
   .appeals-filters { display:flex; flex-wrap:wrap; gap:8px; border-bottom:1px solid var(--sln-border-default); }
   .appeals-filters a { padding:10px 12px; color:var(--sln-text-muted); text-decoration:none; }
-  .appeals-filters a[aria-current="page"] { border-bottom:2px solid var(--sln-action-primary); color:var(--sln-text-primary); }
+  .appeals-filters a[aria-current="page"] { border-bottom:1px solid var(--sln-action-primary); color:var(--sln-text-primary); }
   .appeals-feedback { padding:12px 14px; border:1px solid var(--sln-border-default); border-radius:8px; }
-  .appeals-feedback[data-tone="error"] { color:var(--selinow-danger-text); }
-  .appeals-feedback[data-tone="success"] { color:var(--selinow-success-text); }
+  .appeals-feedback[data-tone="error"] { color:var(--sln-danger-text); }
+  .appeals-feedback[data-tone="success"] { color:var(--sln-success-text); }
   .appeals-list { display:grid; gap:12px; }
   .appeal-record { display:grid; gap:16px; border:1px solid var(--sln-border-default); border-radius:10px; padding:18px; background:var(--sln-bg-surface); }
   .appeal-record-head { display:flex; align-items:start; justify-content:space-between; gap:16px; }
@@ -128,7 +190,11 @@ const clientCopy = {
   .appeal-actions { display:flex; flex-wrap:wrap; gap:10px; }
   .appeal-actions button { min-height:40px; border:1px solid var(--sln-action-primary); border-radius:7px; padding:8px 13px; background:var(--sln-action-primary); color:var(--sln-white); cursor:pointer; }
   .appeal-actions button:disabled { cursor:wait; opacity:.6; }
-  .appeal-actions .danger-action { border-color:var(--sln-state-danger); background:transparent; color:var(--selinow-danger-text); }
+  .appeal-actions .danger-action { border-color:var(--sln-state-danger); background:transparent; color:var(--sln-danger-text); }
   .appeals-empty { display:grid; gap:8px; }
+  .appeal-failure-code { display:grid; gap:8px; }
+  .appeal-failure-code label { color:var(--sln-text-muted); font-size:12px; }
+  .appeal-failure-code input { min-height:40px; border:1px solid var(--sln-border-default); border-radius:7px; padding:8px 12px; background:var(--sln-bg-surface); color:var(--sln-text-primary); }
+  .appeal-failure-code-error { margin:0; color:var(--sln-danger-text); font-size:12px; line-height:1.5; }
   @media (max-width:760px) { .admin-page-header, .appeal-record-head { align-items:start; flex-direction:column; } .admin-read-only-note { max-width:none; text-align:start; } .appeal-record dl { grid-template-columns:1fr; } }
 </style>

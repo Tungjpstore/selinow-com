@@ -2,28 +2,42 @@
 import PlatformLayout from "../layouts/PlatformLayout.astro";
 import MarketingHeader from "../components/marketing/MarketingHeader.astro";
 import MarketingFooter from "../components/marketing/MarketingFooter.astro";
-import PublicationGate from "../components/marketing/PublicationGate.astro";
+import PolicyDocument from "../components/marketing/PolicyDocument.astro";
 import { getBindings } from "../lib/platform/bindings";
 import { normalizeSupportedLocale } from "../lib/i18n/locale";
 
 const env = getBindings();
 const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
 Astro.response.headers.set("Cache-Control", "public, max-age=300");
+const isVi = locale.toLowerCase().startsWith("vi");
+const sections = isVi ? [
+  { title: "Kênh liên hệ", paragraphs: ["Email hỗ trợ nền tảng: tungbipdz@gmail.com. Khi liên hệ, hãy gửi request ID/order code, thời điểm, cửa hàng và mô tả ngắn. Không gửi mật khẩu, OTP, token, API key, payment secret hoặc license key plaintext."] },
+  { title: "Phân luồng yêu cầu", bullets: ["Sản phẩm không đúng hoặc chưa nhận: liên hệ người bán trước; Selinow điều phối khi có lỗi nền tảng hoặc yêu cầu an toàn.", "PayOS hoặc sai số tiền: người bán làm việc với PayOS; Selinow kiểm tra tham chiếu và log an toàn.", "Gói Selinow/Dodo: liên hệ Selinow; chúng tôi kiểm tra subscription, checkout, invoice và provider reference.", "Tài khoản, bảo mật hoặc lạm dụng: Selinow có thể khóa bảo vệ, điều tra, khôi phục hoặc chuyển tuyến.", "Bản quyền/nội dung cấm: gửi URL/order code, căn cứ quyền và thông tin liên hệ; không gửi dữ liệu bí mật."] },
+  { title: "Mục tiêu phản hồi", paragraphs: ["Selinow đặt mục tiêu phản hồi yêu cầu thông thường trong 2 ngày làm việc và ưu tiên sự cố an toàn, gian lận hoặc thanh toán. Đây là mục tiêu vận hành, không phải bảo đảm thời hạn pháp lý."] },
+  { title: "Báo cáo lạm dụng và bản quyền", paragraphs: ["Selinow có thể yêu cầu xác minh, tạm ẩn nội dung, khóa giao dịch, tạm ngừng cửa hàng hoặc gỡ bỏ nội dung khi có báo cáo đáng tin cậy, dấu hiệu rủi ro hoặc yêu cầu hợp pháp. Selinow thông báo cho người bán khi phù hợp và tiếp nhận phản hồi, trừ trường hợp việc thông báo làm tăng rủi ro hoặc bị cấm."] },
+] : [
+  { title: "Contact", paragraphs: ["Platform support email: tungbipdz@gmail.com. Include a request ID/order code, time, store, and a short description. Never send passwords, OTPs, tokens, API keys, payment secrets, or plaintext license keys."] },
+  { title: "Routing", bullets: ["Product not as described or not received: contact the seller first; Selinow coordinates platform or safety issues.", "PayOS or amount issues: the seller works with PayOS; Selinow checks safe references and logs.", "Selinow/Dodo subscription: contact Selinow for subscription, checkout, invoice, and provider-reference checks.", "Account, security, or abuse: Selinow may protectively lock, investigate, recover, or escalate.", "Copyright or prohibited content: provide the URL/order code, rights basis, and contact information; do not send secrets."] },
+  { title: "Response target", paragraphs: ["Selinow targets a response to ordinary requests within two business days and prioritizes safety, fraud, and payment incidents. This is an operational target, not a statutory guarantee."] },
+  { title: "Abuse and copyright reports", paragraphs: ["Selinow may request verification, hide content, lock transactions, suspend a store, or remove content after a credible report, risk signal, or lawful request. We notify sellers where appropriate and accept responses unless notice would increase risk or is prohibited."] },
+];
 ---
 
 <PlatformLayout
-  title="Support status | Selinow"
-  description="Publication status of Selinow support channels and operational assistance."
+  title={isVi ? "Hỗ trợ — Selinow" : "Support — Selinow"}
+  description={isVi ? "Kênh hỗ trợ Selinow, phân luồng thanh toán, subscription và báo cáo nội dung." : "Selinow support channels, payment and subscription routing, and abuse reports."}
   locale={locale}
   canonical="https://selinow.com/support"
 >
-  <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-  <PublicationGate
-    eyebrow="SUPPORT INTAKE"
-    title="Public support contact is not approved."
-    detail="Blocked pending an owner-approved support identity, response scope, and abuse-handling process. This page does not collect messages."
-    aside="Support channels will be enabled once operating procedures and response commitments are formally ratified."
-    locale={locale}
-  />
-  <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  <div class="landing-page">
+    <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+    <PolicyDocument
+      eyebrow={isVi ? "HỖ TRỢ NỀN TẢNG" : "PLATFORM SUPPORT"}
+      title={isVi ? "Hỗ trợ Selinow" : "Selinow Support"}
+      intro={isVi ? "Kênh liên hệ chính thức và cách chuyển đúng yêu cầu tới Selinow, người bán hoặc provider." : "The official contact channel and how requests route to Selinow, sellers, or providers."}
+      sections={sections}
+      locale={locale}
+    />
+    <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
+  </div>
 </PlatformLayout>

@@ -128,6 +128,7 @@ function seed(database: DatabaseSync): void {
       ('${OWNER_B}', 'owner-b@example.test', 'Owner B', 'active', '${now}', '${now}'),
       ('${ADMIN}', 'admin@example.test', 'Admin', 'active', '${now}', '${now}');
     INSERT INTO platform_admins (user_id, role, status, created_at, updated_at) VALUES ('${ADMIN}', 'support', 'active', '${now}', '${now}');
+    UPDATE platform_users SET two_factor_enabled = 1, two_factor_enabled_at = '${now}' WHERE id = '${ADMIN}';
     INSERT INTO shops (id, public_id, slug, name, status, default_locale, currency, timezone, readiness_version, created_at, updated_at) VALUES
       ('${SHOP_A}', '${SHOP_A_PUBLIC}', 'ops-a', 'Operations A', 'active', 'en', 'USD', 'UTC', 1, '${now}', '${now}'),
       ('${SHOP_B}', '${SHOP_B_PUBLIC}', 'ops-b', 'Operations B', 'active', 'en', 'USD', 'UTC', 1, '${now}', '${now}');
@@ -554,6 +555,59 @@ describe("seller operations backend contracts", () => {
     expect(() => rawRequest("creq_scope_inactive_requester", SHOP_A, "telegram.mini_app", MANAGER_A)).toThrow("channel_connector_request_scope_mismatch");
   });
 
+  it("projects only published Dodo prices into seller billing plans", async () => {
+    database.prepare("UPDATE shops SET merchant_country_code = 'US' WHERE id = ?").run(SHOP_A);
+
+    const pendingPlans = await listSellerBillingPlans({ env: bindings, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
+    expect(pendingPlans.map((plan) => ({ code: plan.code, prices: plan.prices }))).toEqual([
+      { code: "pro", prices: [] },
+      { code: "starter", prices: [] },
+    ]);
+
+    database.prepare(`
+      UPDATE plan_prices
+      SET provider_price_ref = 'dodo_price_starter_global_ready', updated_at = ?
+      WHERE id = 'price_starter_global_v1'
+    `).run(NOW.toISOString());
+    const publishedPlans = await listSellerBillingPlans({ env: bindings, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
+    expect(publishedPlans.find((plan) => plan.code === "starter")?.prices).toEqual([
+      { amountMinor: 500, currency: "USD", interval: "month", marketCode: "global" },
+    ]);
+    expect(publishedPlans.find((plan) => plan.code === "pro")?.prices).toEqual([]);
+
+    database.prepare("UPDATE plan_prices SET effective_to = '2099-01-01T00:00:00.000Z', updated_at = ? WHERE id = 'price_starter_global_v1'").run(NOW.toISOString());
+    database.prepare(`
+      INSERT INTO plan_prices (
+        id, plan_id, market_code, currency, amount_minor, interval, tax_behavior,
+        provider_code, provider_price_ref, effective_from, version, is_active,
+        created_at, updated_at
+      )
+      SELECT
+        'price_starter_global_v2', id, 'global', 'USD', 700, 'month', 'inclusive',
+        'dodo', 'pending:dodo:starter:global:month:v2', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 2, 1,
+        ?, ?
+      FROM plans WHERE code = 'starter'
+    `).run(NOW.toISOString(), NOW.toISOString());
+    const pendingRevisionPlans = await listSellerBillingPlans({ env: bindings, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
+    expect(pendingRevisionPlans.find((plan) => plan.code === "starter")?.prices).toEqual([]);
+
+    database.prepare("UPDATE plan_prices SET is_active = 0, updated_at = ? WHERE id = 'price_pro_global_v1'").run(NOW.toISOString());
+    database.prepare(`
+      INSERT INTO plan_prices (
+        id, plan_id, market_code, currency, amount_minor, interval, tax_behavior,
+        provider_code, provider_price_ref, effective_from, version, is_active,
+        created_at, updated_at
+      )
+      SELECT
+        'price_pro_global_payos_v2', id, 'global', 'USD', 1600, 'month', 'inclusive',
+        'payos', 'payos_price_pro_global_ready', '2026-08-01T00:00:00.000Z', 2, 1,
+        ?, ?
+      FROM plans WHERE code = 'pro'
+    `).run(NOW.toISOString(), NOW.toISOString());
+    const nonDodoPlans = await listSellerBillingPlans({ env: bindings, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
+    expect(nonDodoPlans.find((plan) => plan.code === "pro")?.prices).toEqual([]);
+  });
+
   it("records billing changes without mutating the authoritative subscription", async () => {
     const plans = await listSellerBillingPlans({ env: bindings, shopPublicId: SHOP_A_PUBLIC, userId: OWNER_A });
     expect(plans.map((plan) => plan.code)).toEqual(["pro", "starter"]);
@@ -616,7 +670,10 @@ describe("seller operations backend contracts", () => {
     expect(reviewed).toMatchObject({ status: "provider_pending", version: 2 });
     expect(await reviewPaymentRemediationRequest({ decision: "provider_pending", env: bindings, expectedVersion: 1, idempotencyKey: "payment-review-1", requestPublicId: request.requestPublicId, requestId: "request-remediation-review-retry", userId: ADMIN, now: NOW })).toEqual(reviewed);
     await expect(reviewPaymentRemediationRequest({ decision: "rejected", env: bindings, expectedVersion: 2, idempotencyKey: "payment-review-terminal", requestPublicId: request.requestPublicId, requestId: "request-remediation-terminal", userId: ADMIN, now: NOW })).rejects.toMatchObject({ code: "payment_remediation_state_conflict" });
-    await expect(reviewPaymentRemediationRequest({ decision: "completed" as never, env: bindings, expectedVersion: 2, idempotencyKey: "payment-review-invalid", requestPublicId: request.requestPublicId, requestId: "request-remediation-invalid", userId: ADMIN, now: NOW })).rejects.toMatchObject({ code: "validation_failed" });
+    await expect(reviewPaymentRemediationRequest({ decision: "canceled" as never, env: bindings, expectedVersion: 2, idempotencyKey: "payment-review-invalid", requestPublicId: request.requestPublicId, requestId: "request-remediation-invalid", userId: ADMIN, now: NOW })).rejects.toMatchObject({ code: "validation_failed" });
+    const completed = await reviewPaymentRemediationRequest({ decision: "completed", env: bindings, expectedVersion: 2, idempotencyKey: "payment-review-complete", requestPublicId: request.requestPublicId, requestId: "request-remediation-complete", userId: ADMIN, now: NOW });
+    expect(completed).toMatchObject({ status: "completed", version: 4 });
+    expect(database.prepare("SELECT completed_at IS NOT NULL AS completed, provider_reference_hash IS NOT NULL AS referenced FROM payment_remediation_requests WHERE public_id = ?").get(request.requestPublicId)).toEqual({ completed: 1, referenced: 1 });
     expect(database.prepare("SELECT payment_status FROM orders WHERE id = ?").get(ORDER_A)).toEqual({ payment_status: "pending" });
     expect(() => database.prepare("DELETE FROM payment_remediation_requests WHERE id = ?").run(request.requestPublicId)).toThrow("payment_remediation_request_immutable");
   });

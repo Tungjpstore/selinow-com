@@ -268,5 +268,16 @@ export async function runPlatformAdminBootstrap(input) {
   ) {
     throw new Error("platform_admin_bootstrap_exact_empty_state_required");
   }
-  return { actions: [{ code: "first_platform_admin_created", ok: true }], environment: flags.environment, ok: true };
+  return {
+    actions: [{ code: "first_platform_admin_created", ok: true }],
+    environment: flags.environment,
+    // Post-step note: console access stays fail-closed until the new admin
+    // confirms two-factor enrollment (admin_two_factor_required guard).
+    nextSteps: [{
+      code: "admin_two_factor_enrollment_required_before_console_access",
+      detail: "the new platform admin must enroll two-factor authentication before console access",
+      ok: true,
+    }],
+    ok: true,
+  };
 }

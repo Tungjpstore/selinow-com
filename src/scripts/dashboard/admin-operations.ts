@@ -9,7 +9,9 @@ const DEFAULT_COPY = {
   "admin.overview.client.error.csrf_missing": "The action-protection session is no longer valid. Reload the page.",
   "admin.overview.client.error.generic": "The action could not be applied. The safe error code was retained for investigation.",
   "admin.overview.client.error.moderation_state_conflict": "The state changed in another session. Reload the page to review it.",
+  "admin.overview.client.error.rate_limited": "Too many admin actions were requested. Wait a moment and try again.",
   "admin.overview.client.error.recent_auth_required": "Your authentication is stale. Sign in again before taking this action.",
+  "admin.overview.client.error.two_factor_required": "Two-factor authentication is required for platform administrators. Enable it in account security (/app/security) to continue managing operations.",
   "admin.overview.client.feedback.applied": "Applied. Reloading the authoritative state...",
   "admin.overview.client.feedback.applying": "Applying the audited change...",
   "admin.overview.client.manual.confirm": "{action} will change authoritative state and write an audit entry. Continue?",
@@ -174,13 +176,17 @@ if (root !== null) {
         const code = safeError.message;
         const message = code === "recent_auth_required"
           ? text("admin.overview.client.error.recent_auth_required")
-          : code === "authorization_denied"
-            ? text("admin.overview.client.error.authorization_denied")
-            : code === "csrf_missing"
-              ? text("admin.overview.client.error.csrf_missing")
-              : code === "moderation_state_conflict"
-                ? text("admin.overview.client.error.moderation_state_conflict")
-                : text("admin.overview.client.error.generic");
+          : code === "rate_limited" || code === "http_429"
+            ? text("admin.overview.client.error.rate_limited")
+            : code === "admin_two_factor_required"
+              ? text("admin.overview.client.error.two_factor_required")
+              : code === "authorization_denied"
+                ? text("admin.overview.client.error.authorization_denied")
+                : code === "csrf_missing"
+                  ? text("admin.overview.client.error.csrf_missing")
+                  : code === "moderation_state_conflict"
+                    ? text("admin.overview.client.error.moderation_state_conflict")
+                    : text("admin.overview.client.error.generic");
         setStatus(root, text, message, "error", safeError);
         button.disabled = false;
         root.setAttribute("aria-busy", "false");
@@ -229,9 +235,13 @@ if (root !== null) {
           : new AdminOperationError("moderation_update_failed", null);
         const message = safeError.message === "recent_auth_required"
           ? text("admin.overview.client.manual.error.recent_auth_required")
-          : safeError.message === "moderation_state_conflict"
-            ? text("admin.overview.client.manual.error.moderation_state_conflict")
-            : text("admin.overview.client.manual.error.generic");
+          : safeError.message === "rate_limited" || safeError.message === "http_429"
+            ? text("admin.overview.client.error.rate_limited")
+            : safeError.message === "admin_two_factor_required"
+              ? text("admin.overview.client.error.two_factor_required")
+              : safeError.message === "moderation_state_conflict"
+                ? text("admin.overview.client.manual.error.moderation_state_conflict")
+                : text("admin.overview.client.manual.error.generic");
         setStatus(root, text, message, "error", safeError);
         if (submit !== null) submit.disabled = false;
         root.setAttribute("aria-busy", "false");

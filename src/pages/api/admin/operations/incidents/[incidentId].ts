@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 
 import { requireCsrfSession, requireRecentAuth } from "../../../../../lib/auth/session";
 import { AppError } from "../../../../../lib/core/errors";
+import { guardAdminMutationRate } from "../../../../../lib/http/admin-rate-limit";
 import { readJsonObject, rejectUnknownFields } from "../../../../../lib/http/request";
 import { createCaughtErrorResponse } from "../../../../../lib/http/security";
 import {
@@ -11,7 +12,7 @@ import {
   type IncidentView,
 } from "../../../../../lib/operations/incidents";
 import { getBindings } from "../../../../../lib/platform/bindings";
-import { isPlatformAdmin } from "../../../../../lib/tenants/store";
+import { requirePlatformAdminApiAccess } from "../../../../../lib/tenants/store";
 
 function requireExpectedVersion(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
@@ -28,10 +29,9 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
   try {
     const env = getBindings();
     const auth = await requireCsrfSession(request, env);
-    requireRecentAuth(auth);
-    if (!(await isPlatformAdmin({ env, userId: auth.userId }))) {
-      throw new AppError("authorization_denied", 403);
-    }
+    await guardAdminMutationRate({ env, family: "operations_incidents", request });
+    requireRecentAuth(auth, 5);
+    await requirePlatformAdminApiAccess({ env, userId: auth.userId });
     const body = await readJsonObject(request, 2 * 1_024);
     rejectUnknownFields(body, ["action", "expectedVersion", "resolutionCode", "shopId"]);
     const incidentId = safeOperationsReference(params.incidentId, "incident_id_invalid");

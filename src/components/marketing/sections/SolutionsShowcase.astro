@@ -1,0 +1,84 @@
+---
+/**
+ * LP Editorial Commerce — solutions showcase (LP1).
+ * Three large editorial cards, each led by an AI campaign image keyed by
+ * the solution slug. Content comes from the solutions content source that
+ * index.astro already resolves per locale.
+ */
+interface SolutionPreview {
+  eyebrow: string;
+  href: string;
+  index: number;
+  lead: string;
+  slug: string;
+  title: string;
+}
+
+interface Props {
+  locale?: unknown;
+  solutions: SolutionPreview[];
+}
+
+import { createMarketingTranslator } from "../../../lib/i18n/catalogs/marketing";
+import { normalizeSupportedLocale } from "../../../lib/i18n/locale";
+
+const { locale: propLocale, solutions } = Astro.props;
+const locale = normalizeSupportedLocale(propLocale ?? Astro.locals.locale);
+const t = createMarketingTranslator(locale);
+
+const artBySlug: Record<string, string> = {
+  "telegram-commerce": "solutions-telegram",
+  "digital-product-delivery": "solutions-delivery",
+  "license-key-inventory": "solutions-license",
+};
+const artBase = (slug: string): string => `/brand/landing/v1/${artBySlug[slug] ?? "solutions-telegram"}`;
+---
+
+<section class="ed-solutions" id="solutions" aria-labelledby="ed-solutions-title">
+  <div class="platform-shell">
+    <header class="ed-section-heading">
+      <p class="ed-kicker">{t("marketing.home.solutions.kicker")}</p>
+      <h2 class="ed-title" id="ed-solutions-title">{t("marketing.home.solutions.title")}</h2>
+      <p class="ed-lead">{t("marketing.home.solutions.description")}</p>
+    </header>
+
+    <div class="ed-solutions-grid">
+      {solutions.map((solution) => (
+        <article class="ed-solution-card">
+          <a class="ed-solution-media" href={solution.href}>
+            <picture>
+              <source
+                type="image/avif"
+                srcset={`${artBase(solution.slug)}-960.avif 960w, ${artBase(solution.slug)}-640.avif 640w`}
+                sizes="(min-width: 1024px) 30vw, 92vw"
+              />
+              <source
+                type="image/webp"
+                srcset={`${artBase(solution.slug)}-960.webp 960w, ${artBase(solution.slug)}-640.webp 640w`}
+                sizes="(min-width: 1024px) 30vw, 92vw"
+              />
+              <img
+                src={`${artBase(solution.slug)}-960.webp`}
+                alt={solution.title}
+                width="960"
+                height="640"
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+            <span class="ed-solution-index" aria-hidden="true">{String(solution.index).padStart(2, "0")}</span>
+          </a>
+          <div class="ed-solution-copy">
+            <p class="ed-solution-eyebrow">{solution.eyebrow}</p>
+            <h3><a href={solution.href}>{solution.title}</a></h3>
+            <p>{solution.lead}</p>
+            <a class="ed-solution-link" href={solution.href}>
+              <span>{t("marketing.home.solutions.explore")}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+          </div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>

@@ -93,7 +93,7 @@ describe("auth sessions route", () => {
 
     const response = await DELETE(context("DELETE"));
 
-    expect(dependencies.recent).toHaveBeenCalledWith(auth);
+    expect(dependencies.recent).toHaveBeenCalledWith(auth, 5);
     expect(dependencies.revokeAll).toHaveBeenCalledWith(auth, dependencies.env);
     expect(response.status).toBe(200);
     const cookies = response.headers.get("Set-Cookie") ?? "";

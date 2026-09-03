@@ -1,10 +1,11 @@
 ---
 import AdminState from "../../components/admin/AdminState.astro";
 import AdminLayout from "../../layouts/AdminLayout.astro";
+import DataTable from "../../components/workspace/DataTable.astro";
 import { authenticateRequest } from "../../lib/auth/session";
 import { listAdminAuditEntries, listAdminOrderInvestigations } from "../../lib/operations/admin-investigations";
 import { getBindings } from "../../lib/platform/bindings";
-import { getPlatformAdminRole } from "../../lib/tenants/store";
+import { describePlatformAdminAccess, type PlatformAdminAccess } from "../../lib/tenants/store";
 import { createAdminTranslator } from "../../lib/i18n/catalogs/admin";
 import { resolvePresentationLocale } from "../../lib/i18n/catalogs/system";
 
@@ -18,9 +19,11 @@ Astro.response.headers.set("Pragma", "no-cache");
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow");
 Astro.response.headers.set("Referrer-Policy", "no-referrer");
 
-let adminRole: Awaited<ReturnType<typeof getPlatformAdminRole>> = null;
+let adminAccess: PlatformAdminAccess = { kind: "not_admin" };
 let roleLookupFailed = false;
-try { adminRole = await getPlatformAdminRole({ env, userId: auth.userId }); } catch { roleLookupFailed = true; }
+try { adminAccess = await describePlatformAdminAccess({ env, userId: auth.userId }); } catch { roleLookupFailed = true; }
+const adminRole = adminAccess.kind === "authorized" ? adminAccess.role : null;
+const twoFactorRequired = adminAccess.kind === "two_factor_required";
 if (roleLookupFailed) Astro.response.status = 503;
 else if (adminRole === null) Astro.response.status = 403;
 
@@ -28,12 +31,17 @@ const tab = Astro.url.searchParams.get("tab") === "audit" ? "audit" : "orders";
 const q = Astro.url.searchParams.get("q") ?? "";
 const shopPublicId = Astro.url.searchParams.get("shopPublicId") ?? "";
 const paymentStatus = Astro.url.searchParams.get("paymentStatus") ?? "";
+// Mirrors the backend's audit filter allowlist so unsafe URL values are dropped
+// client-side before they reach the bounded query; the backend still revalidates.
+const sanitizeAuditFilter = (value: string): string => /^[a-z0-9_.:-]{2,64}$/u.test(value) ? value : "";
+const auditAction = sanitizeAuditFilter(Astro.url.searchParams.get("action") ?? "");
+const auditResourceType = sanitizeAuditFilter(Astro.url.searchParams.get("resourceType") ?? "");
 let orderResult: Awaited<ReturnType<typeof listAdminOrderInvestigations>> = { nextCursor: null, orders: [] };
 let auditResult: Awaited<ReturnType<typeof listAdminAuditEntries>> = { nextCursor: null, entries: [] };
 let dataUnavailable = false;
 if (adminRole !== null) {
   try {
-    if (tab === "audit") auditResult = await listAdminAuditEntries({ env, userId: auth.userId, filters: { action: Astro.url.searchParams.get("action"), cursor: Astro.url.searchParams.get("cursor"), limit: 25, resourceType: Astro.url.searchParams.get("resourceType"), shopPublicId: shopPublicId || null } });
+    if (tab === "audit") auditResult = await listAdminAuditEntries({ env, userId: auth.userId, filters: { action: auditAction || null, cursor: Astro.url.searchParams.get("cursor"), limit: 25, resourceType: auditResourceType || null, shopPublicId: shopPublicId || null } });
     else orderResult = await listAdminOrderInvestigations({ env, userId: auth.userId, filters: { cursor: Astro.url.searchParams.get("cursor"), limit: 25, paymentStatus: paymentStatus || null, query: q || null, shopPublicId: shopPublicId || null } });
   } catch { dataUnavailable = true; Astro.response.status = 503; }
 }
@@ -43,38 +51,171 @@ const href = (params: Record<string, string | null>): string => {
   for (const [key, value] of Object.entries(params)) if (value !== null && value.length > 0) next.set(key, value);
   return `/admin/investigations?${next.toString()}`;
 };
+
+const orderColumns = [
+  { label: t("admin.investigations.column.order") },
+  { label: t("admin.investigations.column.shop") },
+  { label: t("admin.investigations.column.payment") },
+  { label: t("admin.investigations.column.fulfillment") },
+  { label: t("admin.investigations.column.amount") },
+  { label: t("admin.investigations.column.updated") },
+];
+const auditColumns = [
+  { label: t("admin.investigations.column.action") },
+  { label: t("admin.investigations.column.resource") },
+  { label: t("admin.investigations.column.shop") },
+  { label: t("admin.investigations.column.updated") },
+  { label: t("admin.investigations.column.request") },
+];
+
+type OrderExportRow = { order: string; shop: string; payment: string; fulfillment: string; amount: string; updated: string };
+const orderExportHeaders = [
+  t("admin.investigations.column.order"),
+  t("admin.investigations.column.shop"),
+  t("admin.investigations.column.payment"),
+  t("admin.investigations.column.fulfillment"),
+  t("admin.investigations.column.amount"),
+  t("admin.investigations.column.updated"),
+];
+const orderExportRows: OrderExportRow[] = orderResult.orders.map((order) => ({
+  order: order.orderNumber,
+  shop: order.shopName,
+  payment: order.paymentStatus,
+  fulfillment: order.fulfillmentStatus,
+  amount: `${order.totalMinor} ${order.currency}`,
+  updated: formatTime(order.updatedAt),
+}));
+
+type AuditExportRow = { action: string; resource: string; shop: string; updated: string; request: string };
+const auditExportHeaders = [
+  t("admin.investigations.column.action"),
+  t("admin.investigations.column.resource"),
+  t("admin.investigations.column.shop"),
+  t("admin.investigations.column.updated"),
+  t("admin.investigations.column.request"),
+];
+const auditExportRows: AuditExportRow[] = auditResult.entries.map((entry) => ({
+  action: entry.action,
+  resource: `${entry.resourceType} · ${entry.resourceId ?? t("admin.common.none")}`,
+  shop: entry.shopName ?? t("admin.common.platform"),
+  updated: formatTime(entry.createdAt),
+  request: entry.requestId,
+}));
 ---
 
 <AdminLayout activePath="/admin/investigations" email={auth.email} role={adminRole} title={t("admin.investigations.title")}>
   {roleLookupFailed ? <AdminState tone="danger" eyebrow={t("admin.investigations.permission.eyebrow")} title={t("admin.investigations.permission.title")} description={t("admin.investigations.permission.description")} code={t("admin.common.request", { requestId: Astro.locals.requestId })} actionHref="/admin/investigations" actionLabel={t("admin.common.reload")} />
+    : twoFactorRequired ? <AdminState tone="warning" eyebrow={t("admin.investigations.forbidden.eyebrow")} title={t("admin.security.two_factor_required")} description={t("admin.security.two_factor_required_hint")} code="admin_two_factor_required" actionHref="/app/security" actionLabel={t("admin.ops.client.error.two_factor_link")} />
     : adminRole === null ? <AdminState tone="warning" eyebrow={t("admin.investigations.forbidden.eyebrow")} title={t("admin.investigations.forbidden.title")} description={t("admin.investigations.forbidden.description")} code="authorization_denied" actionHref="/admin" actionLabel={t("admin.common.back_workspace")} />
     : dataUnavailable ? <AdminState tone="danger" eyebrow={t("admin.investigations.data.eyebrow")} title={t("admin.investigations.data.title")} description={t("admin.investigations.data.description")} code={t("admin.common.request", { requestId: Astro.locals.requestId })} actionHref="/admin/investigations" actionLabel={t("admin.common.reload")} />
     : <div class="investigations-page">
       <header class="admin-page-header"><div><p class="admin-eyebrow">{t("admin.investigations.eyebrow")}</p><h1>{t("admin.investigations.title")}</h1><p>{t("admin.investigations.description")}</p></div><div class="admin-summary"><div><span>{t("admin.investigations.orders")}</span><strong>{orderResult.orders.length}</strong></div><div><span>{t("admin.investigations.audit")}</span><strong>{auditResult.entries.length}</strong></div></div></header>
-      <nav class="investigations-tabs" aria-label={t("admin.investigations.tabs_aria")}><a href={href({ tab: "orders", q, shopPublicId, paymentStatus })} aria-current={tab === "orders" ? "page" : undefined}>{t("admin.investigations.orders")}</a><a href={href({ tab: "audit", shopPublicId })} aria-current={tab === "audit" ? "page" : undefined}>{t("admin.investigations.audit")}</a></nav>
+      <nav class="investigations-tabs" aria-label={t("admin.investigations.tabs_aria")}><a href={href({ tab: "orders", q, shopPublicId, paymentStatus })} aria-current={tab === "orders" ? "page" : undefined}>{t("admin.investigations.orders")}</a><a href={href({ tab: "audit", action: auditAction, resourceType: auditResourceType, shopPublicId })} aria-current={tab === "audit" ? "page" : undefined}>{t("admin.investigations.audit")}</a></nav>
       {tab === "orders" ? <>
         <form class="investigation-filter" method="get"><input type="hidden" name="tab" value="orders" aria-label="tab" /><label>{t("admin.investigations.filter.query")}<input name="q" value={q} aria-label={t("admin.investigations.filter.query")} maxlength="64" placeholder="ord_…" /></label><label>{t("admin.investigations.filter.shop")}<input name="shopPublicId" value={shopPublicId} aria-label={t("admin.investigations.filter.shop")} maxlength="128" placeholder="shop_…" /></label><label>{t("admin.investigations.filter.payment")}<select name="paymentStatus" aria-label={t("admin.investigations.filter.payment")}><option value="">{t("admin.investigations.filter.all")}</option><option value="pending" selected={paymentStatus === "pending"}>pending</option><option value="paid" selected={paymentStatus === "paid"}>paid</option><option value="failed" selected={paymentStatus === "failed"}>failed</option></select></label><button type="submit">{t("admin.investigations.filter.apply")}</button></form>
-        <section class="admin-section" aria-labelledby="orders-title"><div class="admin-section-heading"><div><h2 id="orders-title">{t("admin.investigations.orders")}</h2><p>{t("admin.investigations.orders_description")}</p></div><span>{orderResult.orders.length}</span></div>{orderResult.orders.length === 0 ? <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div> : <div class="admin-records" role="list">{orderResult.orders.map((order) => <article class="admin-record" role="listitem"><div class="admin-record-summary"><div><small>{t("admin.investigations.column.order")}</small><strong>{order.orderNumber}</strong><span>{order.orderPublicId}</span></div><div><small>{t("admin.investigations.column.shop")}</small><strong>{order.shopName}</strong><span>{order.shopPublicId}</span></div><div><small>{t("admin.investigations.column.payment")}</small><span>{order.paymentStatus}</span></div><div><small>{t("admin.investigations.column.fulfillment")}</small><span>{order.fulfillmentStatus}</span></div><div><small>{t("admin.investigations.column.amount")}</small><span>{order.totalMinor} {order.currency}</span></div><div><small>{t("admin.investigations.column.updated")}</small><span>{formatTime(order.updatedAt)}</span></div></div><details><summary>{t("admin.investigations.details")}</summary><dl><div><dt>{t("admin.investigations.column.customer")}</dt><dd>{order.customerEmailMasked ?? t("admin.common.none")}</dd></div><div><dt>{t("admin.investigations.column.payment_evidence")}</dt><dd>{order.paymentEvidence === null ? t("admin.common.none") : `${order.paymentEvidence.provider} · ${order.paymentEvidence.state} · ${order.paymentEvidence.lastSafeErrorCode ?? t("admin.common.connected")}`}</dd></div></dl></details></article>)}</div>}{orderResult.nextCursor !== null && <a class="next-link" href={href({ tab: "orders", q, shopPublicId, paymentStatus, cursor: orderResult.nextCursor })}>{t("admin.investigations.next")}</a>}</section>
-      </> : <section class="admin-section" aria-labelledby="audit-title"><div class="admin-section-heading"><div><h2 id="audit-title">{t("admin.investigations.audit")}</h2><p>{t("admin.investigations.audit_description")}</p></div><span>{auditResult.entries.length}</span></div>{auditResult.entries.length === 0 ? <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div> : <div class="admin-records" role="list">{auditResult.entries.map((entry) => <article class="admin-record" role="listitem"><div class="admin-record-summary"><div><small>{t("admin.investigations.column.action")}</small><strong>{entry.action}</strong></div><div><small>{t("admin.investigations.column.resource")}</small><span>{entry.resourceType} · {entry.resourceId ?? t("admin.common.none")}</span></div><div><small>{t("admin.investigations.column.shop")}</small><span>{entry.shopName ?? t("admin.common.platform")}</span></div><div><small>{t("admin.investigations.column.updated")}</small><span>{formatTime(entry.createdAt)}</span></div><div><small>{t("admin.investigations.column.request")}</small><code>{entry.requestId}</code></div></div><details><summary>{t("admin.investigations.details")}</summary><dl>{Object.entries(entry.metadata).map(([key, value]) => <div><dt>{key}</dt><dd>{String(value ?? t("admin.common.none"))}</dd></div>)}</dl></details></article>)}</div>}{auditResult.nextCursor !== null && <a class="next-link" href={href({ tab: "audit", shopPublicId, cursor: auditResult.nextCursor })}>{t("admin.investigations.next")}</a>}</section>}
+        <section class="admin-section" aria-labelledby="orders-title" data-investigation-export-root data-export-name="investigations-orders" data-export-copy={JSON.stringify({ headers: orderExportHeaders })} data-export-rows={JSON.stringify(orderExportRows)}>
+          <div class="admin-section-heading"><div><h2 id="orders-title">{t("admin.investigations.orders")}</h2><p>{t("admin.investigations.orders_description")}</p></div><div class="ledger-tools"><span>{orderResult.orders.length}</span>{orderResult.orders.length > 0 && <button class="admin-button" type="button" data-investigation-export>{t("admin.common.export_csv")}</button>}</div></div>
+          {orderResult.orders.length === 0 ? <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div> : (
+            <DataTable caption={t("admin.investigations.orders")} columns={orderColumns}>
+              <tbody>
+                {orderResult.orders.map((order) => <>
+                  <tr data-investigation-order-row>
+                    <td data-label={t("admin.investigations.column.order")}><strong>{order.orderNumber}</strong><span class="cell-sub">{order.orderPublicId}</span></td>
+                    <td data-label={t("admin.investigations.column.shop")}><strong>{order.shopName}</strong><span class="cell-sub">{order.shopPublicId}</span></td>
+                    <td data-label={t("admin.investigations.column.payment")}>{order.paymentStatus}</td>
+                    <td data-label={t("admin.investigations.column.fulfillment")}>{order.fulfillmentStatus}</td>
+                    <td data-label={t("admin.investigations.column.amount")}>{order.totalMinor} {order.currency}</td>
+                    <td data-label={t("admin.investigations.column.updated")}>{formatTime(order.updatedAt)}</td>
+                  </tr>
+                  <tr class="investigation-detail-row">
+                    <td colspan={orderColumns.length} data-label={t("admin.investigations.details")}>
+                      <details><summary>{t("admin.investigations.details")}</summary><dl><div><dt>{t("admin.investigations.column.customer")}</dt><dd>{order.customerEmailMasked ?? t("admin.common.none")}</dd></div><div><dt>{t("admin.investigations.column.payment_evidence")}</dt><dd>{order.paymentEvidence === null ? t("admin.common.none") : `${order.paymentEvidence.provider} · ${order.paymentEvidence.state} · ${order.paymentEvidence.lastSafeErrorCode ?? t("admin.common.connected")}`}</dd></div></dl></details>
+                    </td>
+                  </tr>
+                </>)}
+              </tbody>
+              {orderResult.nextCursor !== null && <a slot="pagination" class="next-link" href={href({ tab: "orders", q, shopPublicId, paymentStatus, cursor: orderResult.nextCursor })}>{t("admin.investigations.next")}</a>}
+            </DataTable>
+          )}
+        </section>
+      </> : (<>
+        <form class="investigation-filter" method="get">
+          <input type="hidden" name="tab" value="audit" aria-label="tab" />
+          <label>{t("admin.investigations.filter.action")}<input name="action" value={auditAction} aria-label={t("admin.investigations.filter.action")} maxlength="64" pattern="[a-z0-9_.:-]{2,64}" placeholder="moderation_action_applied" autocomplete="off" spellcheck="false" /></label>
+          <label>{t("admin.investigations.filter.resource_type")}<input name="resourceType" value={auditResourceType} aria-label={t("admin.investigations.filter.resource_type")} maxlength="64" pattern="[a-z0-9_.:-]{2,64}" placeholder="shop" autocomplete="off" spellcheck="false" /></label>
+          <label>{t("admin.investigations.filter.shop")}<input name="shopPublicId" value={shopPublicId} aria-label={t("admin.investigations.filter.shop")} maxlength="128" placeholder="shop_…" autocomplete="off" spellcheck="false" /></label>
+          <button type="submit">{t("admin.investigations.filter.apply")}</button>
+          <p class="investigation-filter-help">{t("admin.investigations.filter.audit_help")}</p>
+        </form>
+        <section class="admin-section" aria-labelledby="audit-title" data-investigation-export-root data-export-name="investigations-audit" data-export-copy={JSON.stringify({ headers: auditExportHeaders })} data-export-rows={JSON.stringify(auditExportRows)}>
+          <div class="admin-section-heading"><div><h2 id="audit-title">{t("admin.investigations.audit")}</h2><p>{t("admin.investigations.audit_description")}</p></div><div class="ledger-tools"><span>{auditResult.entries.length}</span>{auditResult.entries.length > 0 && <button class="admin-button" type="button" data-investigation-export>{t("admin.common.export_csv")}</button>}</div></div>
+          {auditResult.entries.length === 0 ? <div class="admin-empty"><strong>{t("admin.investigations.empty_title")}</strong><span>{t("admin.investigations.empty_description")}</span></div> : (
+            <DataTable caption={t("admin.investigations.audit")} columns={auditColumns}>
+              <tbody>
+                {auditResult.entries.map((entry) => <>
+                  <tr data-investigation-audit-row>
+                    <td data-label={t("admin.investigations.column.action")}><strong>{entry.action}</strong></td>
+                    <td data-label={t("admin.investigations.column.resource")}>{entry.resourceType} · {entry.resourceId ?? t("admin.common.none")}</td>
+                    <td data-label={t("admin.investigations.column.shop")}>{entry.shopName ?? t("admin.common.platform")}</td>
+                    <td data-label={t("admin.investigations.column.updated")}>{formatTime(entry.createdAt)}</td>
+                    <td data-label={t("admin.investigations.column.request")}><code>{entry.requestId}</code></td>
+                  </tr>
+                  <tr class="investigation-detail-row">
+                    <td colspan={auditColumns.length} data-label={t("admin.investigations.details")}>
+                      <details><summary>{t("admin.investigations.details")}</summary><dl>{Object.entries(entry.metadata).map(([key, value]) => <div><dt>{key}</dt><dd>{String(value ?? t("admin.common.none"))}</dd></div>)}</dl></details>
+                    </td>
+                  </tr>
+                </>)}
+              </tbody>
+              {auditResult.nextCursor !== null && <div slot="pagination" class="audit-pagination" aria-label={t("admin.investigations.pagination_aria")}><a class="next-link" href={href({ tab: "audit", action: auditAction, resourceType: auditResourceType, shopPublicId })}>{t("admin.investigations.first")}</a><a class="next-link" href={href({ tab: "audit", action: auditAction, resourceType: auditResourceType, shopPublicId, cursor: auditResult.nextCursor })}>{t("admin.investigations.next")}</a></div>}
+            </DataTable>
+          )}
+        </section>
+      </>)}
     </div>}
 </AdminLayout>
+
+<script>
+  import { buildCsv, downloadCsv } from "../../lib/dashboard/csv-export";
+
+  const readJson = (value: string | undefined, fallback: unknown): unknown => {
+    try { return JSON.parse(value ?? "null") ?? fallback; } catch { return fallback; }
+  };
+  for (const exportRoot of Array.from(document.querySelectorAll<HTMLElement>("[data-investigation-export-root]"))) {
+    const rows = readJson(exportRoot.dataset.exportRows, []) as Record<string, string>[];
+    const copy = readJson(exportRoot.dataset.exportCopy, null) as { headers?: string[] } | null;
+    const headers = copy?.headers ?? [];
+    const exportName = exportRoot.dataset.exportName ?? "investigations";
+    exportRoot.querySelector("[data-investigation-export]")?.addEventListener("click", () => {
+      const csv = buildCsv(rows, headers.map((header, index) => ({
+        header,
+        value: (row: Record<string, string>) => Object.values(row)[index] ?? "",
+      })));
+      const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+      downloadCsv(`${exportName}-${stamp}.csv`, csv);
+    });
+  }
+</script>
 
 <style>
   .investigations-page { display:grid; gap:24px; }
   .investigations-tabs { display:flex; gap:8px; border-bottom:1px solid var(--sln-border-default); }
   .investigations-tabs a { padding:10px 14px; color:var(--sln-text-muted); text-decoration:none; }
-  .investigations-tabs a[aria-current="page"] { border-bottom:2px solid var(--sln-action-primary); color:var(--sln-text-primary); }
+  .investigations-tabs a[aria-current="page"] { border-bottom:1px solid var(--sln-action-primary); color:var(--sln-text-primary); }
   .investigation-filter { display:grid; grid-template-columns:1fr 1fr 180px auto; gap:12px; align-items:end; }
   .investigation-filter label { display:grid; gap:6px; color:var(--sln-text-muted); font-size:12px; }
   .investigation-filter input, .investigation-filter select { min-height:40px; border:1px solid var(--sln-border-default); border-radius:8px; padding:8px 10px; background:var(--sln-bg-surface); color:var(--sln-text-primary); }
   .investigation-filter button { min-height:40px; border:0; border-radius:8px; padding:8px 14px; background:var(--sln-action-primary); color:white; cursor:pointer; }
-  .admin-record-summary small { display:block; color:var(--sln-text-muted); font-size:11px; }
-  .admin-record-summary span, .admin-record-summary strong { overflow-wrap:anywhere; }
-  .admin-record details { border-top:1px solid var(--sln-border-default); margin-top:12px; padding-top:12px; }
-  .admin-record dl { display:grid; gap:8px; margin:12px 0 0; }
-  .admin-record dl div { display:grid; grid-template-columns:180px 1fr; gap:10px; }
-  .admin-record dt { color:var(--sln-text-muted); }
-  .admin-record dd { margin:0; color:var(--sln-text-primary); overflow-wrap:anywhere; }
-  .next-link { color:var(--sln-action-primary); }
-  @media (max-width:760px) { .investigation-filter { grid-template-columns:1fr; } .investigation-filter button { width:100%; } .admin-record dl div { grid-template-columns:1fr; gap:3px; } }
+  .investigation-filter-help { grid-column:1 / -1; margin:0; color:var(--sln-text-muted); font-size:11px; line-height:1.5; }
+  .audit-pagination { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .ledger-tools { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+  .cell-sub { display:block; color:var(--sln-text-muted); font-size:12px; overflow-wrap:anywhere; }
+  .investigation-detail-row td { background:var(--sln-bg-subtle); }
+  .investigation-detail-row details { display:grid; gap:8px; }
+  .investigation-detail-row dl { display:grid; gap:8px; margin:8px 0 0; }
+  .investigation-detail-row dl div { display:grid; grid-template-columns:180px 1fr; gap:10px; }
+  .investigation-detail-row dt { color:var(--sln-text-muted); }
+  .investigation-detail-row dd { margin:0; color:var(--sln-text-primary); overflow-wrap:anywhere; }
+  .next-link { display:inline-block; padding:12px 16px; color:var(--sln-action-primary); }
+  @media (max-width:760px) { .investigation-filter { grid-template-columns:1fr; } .investigation-filter button { width:100%; } .investigation-detail-row dl div { grid-template-columns:1fr; gap:3px; } }
 </style>

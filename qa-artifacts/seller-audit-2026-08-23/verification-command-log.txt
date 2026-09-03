@@ -1,0 +1,33 @@
+Seller Platform E2E audit verification log
+Date: 2026-08-23 Asia/Tokyo
+Mode: read-only; no production mutation
+
+Repository inventory
+- Astro pages: 40
+- API route files: 166 (101 Seller API routes)
+- Seller app route files: 19 (17 functional, 2 aliases)
+- test/spec files inventoried: 366
+- migration SQL files: 115 in worktree, 114 tracked in HEAD
+
+Quality gates recorded during audit
+- npm run check: PASS
+- npm run lint: PASS
+- npm run build: PASS
+- npm run deploy:dry-run: PASS (local Wrangler dry-run only; remote admission/preflight skipped)
+- npm audit --audit-level=high: PASS; 0 high/critical vulnerabilities
+- Full Vitest: 2934/2939 pass; 5 fail (4 2FA test-double defects, 1 Dodo full-concurrency timeout)
+- Billing/security focused suites: 153/153 pass
+- API/tenant-isolation focused suites: 164/164 pass
+- Onboarding focused suites: 91/91 pass
+- Static UI/browser contracts: 41/41 pass
+- Staging visual/a11y suite: 8 pass / 12 fail
+
+Browser/runtime limitation
+- Chrome extension bridge returned: Browser is not available: chrome
+- Local Astro/Vite server returned HTTP 500 due stale SSR optimized dependencies
+- No checkout charge, subscription mutation, domain mutation, external credential mutation,
+  destructive operation, webhook replay, or production DB inspection performed.
+
+Interpretation
+- Green build/check/lint/dry-run is insufficient for release readiness because deploy:dry-run
+  skips production/staging admission, migration ledger, backup/restore, secrets and route preflight.

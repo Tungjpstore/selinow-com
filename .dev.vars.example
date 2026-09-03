@@ -8,9 +8,12 @@ INVENTORY_KEK_V2=optional-replace-with-next-32-byte-base64url
 EXPORT_KEK_V1=replace-with-dedicated-32-byte-base64url
 IDENTIFIER_HMAC_SECRET=replace-with-local-random-secret
 TURNSTILE_SECRET_KEY=replace-me
+GOOGLE_OAUTH_CLIENT_ID=replace-with-local-google-client-id
+GOOGLE_OAUTH_CLIENT_SECRET=replace-with-local-google-client-secret
 
 # Public, non-secret local configuration.
 TURNSTILE_SITE_KEY=replace-me
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:4321/api/auth/google/callback
 ACTIVE_CREDENTIAL_KEY_VERSION=v1
 ACTIVE_INVENTORY_KEY_VERSION=v1
 EXPORT_KEY_VERSION=v1

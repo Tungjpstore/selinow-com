@@ -5,11 +5,12 @@ const dependencies = vi.hoisted(() => ({
   authenticate: vi.fn(),
   createShop: vi.fn(),
   env: { PLATFORM_DB: undefined as D1Database | undefined },
+  requireCsrf: vi.fn(),
 }));
 
 vi.mock("../../src/lib/auth/session", () => ({
   authenticateRequest: dependencies.authenticate,
-  requireCsrfSession: vi.fn(),
+  requireCsrfSession: dependencies.requireCsrf,
 }));
 
 vi.mock("../../src/lib/platform/bindings", () => ({
@@ -21,7 +22,7 @@ vi.mock("../../src/lib/tenants/store", () => ({
   getShopCreationAdmission: dependencies.admission,
 }));
 
-import { GET } from "../../src/pages/api/app/shops/index";
+import { GET, POST } from "../../src/pages/api/app/shops/index";
 
 function routeContext() {
   return {
@@ -34,7 +35,10 @@ describe("onboarding shop route", () => {
   beforeEach(() => {
     dependencies.authenticate.mockReset();
     dependencies.admission.mockReset();
+    dependencies.createShop.mockReset();
+    dependencies.requireCsrf.mockReset();
     dependencies.authenticate.mockResolvedValue({ userId: "user-a" });
+    dependencies.requireCsrf.mockResolvedValue({ userId: "user-a" });
     dependencies.admission.mockResolvedValue({
       allowed: true,
       creationMode: "trial",
@@ -89,5 +93,80 @@ describe("onboarding shop route", () => {
         offers: [{ amountMinor: 1700, currency: "USD", interval: "month", marketCode: "global" }],
       },
     ]);
+  });
+
+  it("forwards one-request provisioning fields to createShop (OB-B1)", async () => {
+    dependencies.createShop.mockResolvedValue({
+      created: true,
+      shop: { publicId: "shop_new", slug: "tiem-key" },
+    });
+    const response = await POST({
+      ...routeContext(),
+      request: new Request("https://app.example.test/api/app/shops", {
+        body: JSON.stringify({
+          channels: { customDomainPreference: "later", telegramEnabled: true, websiteEnabled: true },
+          currency: "VND",
+          defaultLocale: "vi-VN",
+          name: "Tiệm Key",
+          planCode: "starter",
+          slug: "tiem-key",
+          templateId: "swift",
+          vertical: "physical",
+        }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "shop-create-test-0001" },
+        method: "POST",
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(dependencies.createShop).toHaveBeenCalledWith(expect.objectContaining({
+      channels: { customDomainPreference: "later", telegramEnabled: true, websiteEnabled: true },
+      currency: "VND",
+      name: "Tiệm Key",
+      planCode: "starter",
+      slug: "tiem-key",
+      templateId: "swift",
+      vertical: "physical",
+    }));
+  });
+
+  it("still creates shops without the extended provisioning fields", async () => {
+    dependencies.createShop.mockResolvedValue({
+      created: true,
+      shop: { publicId: "shop_plain", slug: "cua-hang" },
+    });
+    const response = await POST({
+      ...routeContext(),
+      request: new Request("https://app.example.test/api/app/shops", {
+        body: JSON.stringify({ name: "Cửa Hàng", planCode: "starter", slug: "cua-hang" }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "shop-create-test-0002" },
+        method: "POST",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const rawCall: unknown = dependencies.createShop.mock.calls[0]?.[0];
+    const call = rawCall as { channels?: unknown; templateId?: unknown; vertical?: unknown } | undefined;
+    expect(call?.channels).toBeUndefined();
+    expect(call?.templateId).toBeUndefined();
+    expect(call?.vertical).toBeUndefined();
+  });
+
+  it("rejects malformed channel payloads before provisioning", async () => {
+    const response = await POST({
+      ...routeContext(),
+      request: new Request("https://app.example.test/api/app/shops", {
+        body: JSON.stringify({
+          channels: { telegramEnabled: "yes", websiteEnabled: true },
+          name: "Cửa Hàng",
+          planCode: "starter",
+          slug: "cua-hang",
+        }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "shop-create-test-0003" },
+        method: "POST",
+      }),
+    });
+    expect(response.status).toBe(400);
+    const body: { issues?: string[] } = await response.json();
+    expect(body.issues).toContain("channels_invalid");
+    expect(dependencies.createShop).not.toHaveBeenCalled();
   });
 });

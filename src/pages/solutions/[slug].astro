@@ -1,15 +1,18 @@
 ---
 import MarketingHeader from "../../components/marketing/MarketingHeader.astro";
 import MarketingFooter from "../../components/marketing/MarketingFooter.astro";
-import SolutionDiagram from "../../components/marketing/SolutionDiagram.astro";
+import SolutionHeroVisual from "../../components/marketing/SolutionHeroVisual.astro";
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import { icons } from "../../components/marketing/icons";
 import { getBindings } from "../../lib/platform/bindings";
 import { getSolutionNotFound, getSolutionPage, getSolutionsHub, solutionSlugs } from "../../lib/content/solutions";
+import { createMarketingTranslator } from "../../lib/i18n/catalogs/marketing";
 import { normalizeSupportedLocale } from "../../lib/i18n/locale";
 import { classifyPlatformHost } from "../../lib/storefront/routing";
 
 const env = getBindings();
 const locale = normalizeSupportedLocale(Astro.locals.locale ?? env.DEFAULT_LOCALE);
+const t = createMarketingTranslator(locale);
 const slug = Astro.params.slug ?? "";
 const content = getSolutionPage(slug, locale);
 const hub = getSolutionsHub(locale);
@@ -64,42 +67,47 @@ const structuredData = content === null || !validHost ? undefined : {
   noindex={!validHost || content === null}
   structuredData={structuredData}
 >
-  {validHost && content ? <>
+  {validHost && content ? <div class="landing-page"><>
     <MarketingHeader dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
     <main id="main-content" class="solution-page">
-      <section class="solution-hero platform-shell kit-section-dense">
-        <div class="solution-hero-copy">
-          <a class="solution-breadcrumb" href={localizedPath("/solutions")}>
-            <span aria-hidden="true">←</span> {hub.solutionsLabel} <span aria-hidden="true">/</span> {content.eyebrow}
-          </a>
-          <p class="section-eyebrow">{content.eyebrow}</p>
-          <h1 class="hero-headline">{content.title}</h1>
-          <p class="hero-lead">{content.lead}</p>
-          <div class="landing-actions">
-            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
-              <span>{content.cta}</span>
-              <span aria-hidden="true">→</span>
-            </a>
-            <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
+      <section class="solution-hero">
+        <div class="platform-shell">
+          <nav class="mk-breadcrumb" aria-label={t("marketing.breadcrumb.aria")}>
+            <a href={localizedPath("/")}>Selinow</a>
+            <span aria-hidden="true">/</span>
+            <a href={localizedPath("/solutions")}>{hub.solutionsLabel}</a>
+            <span aria-hidden="true">/</span>
+            <span aria-current="page">{content.eyebrow}</span>
+          </nav>
+          <div class="solution-hero-grid">
+            <div class="solution-hero-copy">
+              <p class="mk-hero-eyebrow">{content.eyebrow}</p>
+              <h1 class="hero-headline">{content.title}</h1>
+              <p class="hero-lead">{content.lead}</p>
+              <div class="landing-actions">
+                <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+                  <span>{content.cta}</span>
+                  <span aria-hidden="true">→</span>
+                </a>
+                <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>{content.ctaSecondary}</a>
+              </div>
+            </div>
+            <SolutionHeroVisual slug={content.slug} locale={locale} />
           </div>
         </div>
-        <aside class="solution-signal" aria-label={content.answerLabel}>
-          <span class="solution-signal-index" aria-hidden="true">01</span>
-          <p>{content.answerLabel}</p>
-          <strong>{content.answer}</strong>
-          <small>Selinow OS / {content.slug}</small>
-        </aside>
       </section>
 
       <section class="kit-section platform-shell" aria-labelledby="solution-proof-title">
         <div class="kit-section-heading">
-          <p class="kit-kicker">{content.proofLabel}</p>
-          <h2 class="section-title" id="solution-proof-title">{hub.proofTitle}</h2>
+          <div>
+            <p class="kit-kicker">{content.proofLabel}</p>
+            <h2 class="section-title" id="solution-proof-title">{hub.proofTitle}</h2>
+          </div>
         </div>
-        <ul class="solution-proof-grid">
-          {content.proof.map((item, index) => (
+        <ul class="solution-proof-list">
+          {content.proof.map((item) => (
             <li>
-              <span>{String(index + 1).padStart(2, "0")}</span>
+              <span class="solution-proof-check" set:html={icons.check(13)} aria-hidden="true"></span>
               {item}
             </li>
           ))}
@@ -113,12 +121,10 @@ const structuredData = content === null || !validHost ? undefined : {
             <h2 class="section-title" id="solution-workflow-title">{content.workflowTitle}</h2>
           </div>
 
-          <SolutionDiagram slug={content.slug} locale={locale} />
-
-          <ol class="solution-steps">
+          <ol class="solution-timeline">
             {content.workflow.map((step, index) => (
               <li>
-                <span class="solution-step-number">{String(index + 1).padStart(2, "0")}</span>
+                <span class="solution-timeline-dot" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
                 <div>
                   <h3>{step.title}</h3>
                   <p>{step.description}</p>
@@ -149,8 +155,10 @@ const structuredData = content === null || !validHost ? undefined : {
 
       <section class="kit-section platform-shell" aria-labelledby="solution-related-title">
         <div class="kit-section-heading">
-          <p class="kit-kicker">{content.relatedLabel}</p>
-          <h2 class="section-title" id="solution-related-title">{hub.relatedTitle}</h2>
+          <div>
+            <p class="kit-kicker">{content.relatedLabel}</p>
+            <h2 class="section-title" id="solution-related-title">{hub.relatedTitle}</h2>
+          </div>
         </div>
         <div class="solution-related-grid">
           {solutionSlugs.filter((item) => item !== content.slug).map((item) => {
@@ -159,19 +167,38 @@ const structuredData = content === null || !validHost ? undefined : {
               <a href={localizedPath(`/solutions/${item}`)}>
                 <span>{related.eyebrow}</span>
                 <strong>{related.title}</strong>
-                <b aria-hidden="true">↗</b>
+                <b aria-hidden="true">→</b>
               </a>
             );
           })}
           <a href={localizedPath("/")} class="solution-related-home">
             <span>{hub.relatedHomeLabel}</span>
             <strong>{hub.relatedHomeTitle}</strong>
-            <b aria-hidden="true">↗</b>
+            <b aria-hidden="true">→</b>
           </a>
+        </div>
+      </section>
+
+      <section class="mk-final">
+        <div class="platform-shell mk-final-inner">
+          <div>
+            <p class="kit-kicker">{content.eyebrow}</p>
+            <h2>{content.cta}</h2>
+          </div>
+          <div class="mk-final-actions">
+            <a class="kit-button kit-button-primary" href={`${env.DASHBOARD_ORIGIN}/login`}>
+              <span>{content.cta}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+            <a class="kit-button kit-button-ghost" href={localizedPath("/pricing")}>
+              <span>{content.ctaSecondary}</span>
+              <span aria-hidden="true">→</span>
+            </a>
+          </div>
         </div>
       </section>
     </main>
 
     <MarketingFooter dashboardOrigin={env.DASHBOARD_ORIGIN} locale={locale} />
-  </> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
+  </></div> : <main class="platform-shell error-page"><div><h1>404</h1><p>{notFound.description}</p></div></main>}
 </PlatformLayout>

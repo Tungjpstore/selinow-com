@@ -1,0 +1,45 @@
+---
+import BuyBox from "../../sections/BuyBox.astro";
+import Gallery from "../../sections/Gallery.astro";
+import PolicyPanel from "../../sections/PolicyPanel.astro";
+import RelatedGrid from "../../sections/RelatedGrid.astro";
+import SpecTable from "../../sections/SpecTable.astro";
+import { formatMoney } from "../../../../lib/storefront/view";
+import { createStorefrontTranslator } from "../../../../lib/i18n/catalogs/storefront";
+import type { StorefrontProduct, StorefrontPromotion, StorefrontShop } from "../../../../lib/storefront/store";
+
+interface Props {
+  locale: string;
+  product: StorefrontProduct;
+  promotions: StorefrontPromotion[];
+  related: StorefrontProduct[];
+  shop: StorefrontShop;
+}
+
+const { locale, product, related, shop } = Astro.props;
+const t = createStorefrontTranslator(locale);
+const firstVariant = product.variants.find((variant) => variant.stockState !== "out_of_stock") ?? product.variants[0];
+const sizeGuide = product.attributes.filter((attribute) => attribute.label.length > 0).slice(0, 6);
+---
+<section class="product-detail aurora-detail">
+  <div class="product-detail-media">
+    <Gallery aspect="portrait" images={product.images} locale={locale} title={product.title} />
+  </div>
+  <div class="product-detail-copy aurora-copy">
+    <a class="back-link" href="/">{t("storefront.product.back")}</a>
+    <h1>{product.title}</h1>
+    {firstVariant && (
+      <p class="aurora-price">
+        <strong>{formatMoney(firstVariant.priceMinor, firstVariant.currency, locale)}</strong>
+        {firstVariant.compareAtMinor && <del>{formatMoney(firstVariant.compareAtMinor, firstVariant.currency, locale)}</del>}
+      </p>
+    )}
+    <div class="aurora-buy">
+      <BuyBox locale={locale} product={product} variantDisplay="swatches" />
+    </div>
+    <p class="description aurora-editorial">{product.description || t("storefront.product.description_fallback")}</p>
+    {sizeGuide.length > 0 && <SpecTable attributes={sizeGuide} locale={locale} />}
+    <PolicyPanel locale={locale} shop={shop} />
+  </div>
+</section>
+<RelatedGrid locale={locale} related={related} />

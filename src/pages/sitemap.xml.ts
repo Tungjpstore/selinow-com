@@ -19,13 +19,15 @@ function escapeXml(value: string): string {
   })[character] ?? character);
 }
 
+const SITEMAP_LASTMOD = "2026-08-17";
+
 function urlEntry(pathname: string, origin: string, includeAlternates = true): string {
   const loc = absoluteSeoUrl(pathname, origin);
   const alternates = includeAlternates
     ? SUPPORTED_LOCALES.map((locale) => `<xhtml:link rel="alternate" hreflang="${escapeXml(locale)}" href="${escapeXml(alternateLocaleUrl(pathname, locale, origin))}" />`).join("")
       + `<xhtml:link rel="alternate" hreflang="x-default" href="${escapeXml(alternateLocaleUrl(pathname, "en", origin))}" />`
     : "";
-  return `<url><loc>${escapeXml(loc)}</loc>${alternates}</url>`;
+  return `<url><loc>${escapeXml(loc)}</loc><lastmod>${SITEMAP_LASTMOD}</lastmod>${alternates}</url>`;
 }
 
 function sitemapResponse(entries: readonly string[], indexable = false): Response {
@@ -54,6 +56,9 @@ export const GET: APIRoute = async ({ request }) => {
       urlEntry("/", SITE_ORIGIN),
       urlEntry("/pricing", SITE_ORIGIN),
       ...["/solutions", ...solutionSlugs.map((slug) => `/solutions/${slug}`)].map((pathname) => urlEntry(pathname, SITE_ORIGIN)),
+      urlEntry("/support", SITE_ORIGIN),
+      urlEntry("/legal", SITE_ORIGIN),
+      urlEntry("/privacy", SITE_ORIGIN),
     ], true);
   }
 

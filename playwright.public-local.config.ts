@@ -22,12 +22,12 @@ export default defineConfig({
   projects: [
     {
       name: "public-desktop-1440",
-      testMatch: /local-public(?:-states)?\.spec\.ts$/u,
+      testMatch: /local-public(?:-states|-templates)?\.spec\.ts$/u,
       use: { viewport: { height: 1024, width: 1440 } },
     },
     {
       name: "public-mobile-390",
-      testMatch: /local-public(?:-states)?\.spec\.ts$/u,
+      testMatch: /local-public(?:-states|-templates)?\.spec\.ts$/u,
       use: { viewport: { height: 844, width: 390 } },
     },
     {
@@ -52,7 +52,7 @@ export default defineConfig({
     colorScheme: "light",
     contextOptions: { reducedMotion: "reduce" },
     launchOptions: {
-      args: ["--host-resolver-rules=MAP localhost 127.0.0.1,MAP app.localhost 127.0.0.1,MAP signal.localhost 127.0.0.1,MAP api.localhost 127.0.0.1"],
+      args: ["--host-resolver-rules=MAP localhost 127.0.0.1,MAP app.localhost 127.0.0.1,MAP signal.localhost 127.0.0.1,MAP api.localhost 127.0.0.1,MAP pulse.localhost 127.0.0.1,MAP desk.localhost 127.0.0.1,MAP aurora.localhost 127.0.0.1,MAP metro.localhost 127.0.0.1,MAP bustle.localhost 127.0.0.1,MAP serenity.localhost 127.0.0.1,MAP craft.localhost 127.0.0.1,MAP clinic.localhost 127.0.0.1"],
     },
     locale: "vi-VN",
     navigationTimeout: 15_000,

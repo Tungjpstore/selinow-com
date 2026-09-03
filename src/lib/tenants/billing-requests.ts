@@ -1,6 +1,13 @@
 import { hmacToken, sha256Json } from "../core/crypto";
 import { AppError } from "../core/errors";
 import { createId } from "../core/ids";
+import {
+  EFFECTIVE_PLAN_OFFER_SQL_PREDICATE,
+  projectLatestSellablePlanOffers,
+  SELLABLE_PUBLIC_PLAN_SQL_PREDICATE,
+  type PlanOfferRevision,
+  type SellablePlanOfferCandidate,
+} from "../billing/catalog";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "./store";
 
@@ -9,15 +16,11 @@ const SAFE_REASON_CODE = /^[a-z][a-z0-9._:-]{2,63}$/u;
 
 type ExistingIdempotency = { request_hash: string; response_json: string };
 type PlanRow = { code: string; featuresJson: string; id: string; limitsJson: string; name: string; version: number };
-type PlanPriceRow = {
-  amountMinor: number;
-  currency: string;
-  interval: string;
-  marketCode: "global" | "vn";
+type PlanPriceRow = SellablePlanOfferCandidate & {
   planCode: string;
 };
 type RequestRow = {
-  action: "cancel" | "change_plan" | "resume";
+  action: "cancel" | "cancel_scheduled_plan_change" | "change_plan" | "resume";
   createdAt: string;
   executionAttempts: number;
   failureCode: string | null;
@@ -111,7 +114,7 @@ export async function listSellerBillingPlans(input: { env: AppBindings; shopPubl
   const rows = await input.env.PLATFORM_DB.prepare(`
     SELECT code, name, version, feature_flags_json AS featuresJson, limits_json AS limitsJson
     FROM plans
-    WHERE is_active = 1 AND is_public = 1 AND is_assignable = 1
+    WHERE ${SELLABLE_PUBLIC_PLAN_SQL_PREDICATE}
     ORDER BY code, id
     LIMIT 50
   `).all<PlanRow>();
@@ -129,24 +132,21 @@ export async function listSellerBillingPlans(input: { env: AppBindings; shopPubl
     const prices = await input.env.PLATFORM_DB.prepare(`
       SELECT plans.code AS planCode, plan_prices.market_code AS marketCode,
         plan_prices.currency, plan_prices.amount_minor AS amountMinor,
-        plan_prices.interval
+        plan_prices.id, plan_prices.effective_from AS effectiveFrom, plan_prices.version,
+        plan_prices.interval, plan_prices.provider_code AS providerCode,
+        plan_prices.provider_price_ref AS providerPriceRef
       FROM plan_prices
       INNER JOIN plans ON plans.id = plan_prices.plan_id
       WHERE plan_prices.market_code = ?
-        AND plan_prices.is_active = 1
-        AND plan_prices.interval = 'month'
-        AND plans.is_active = 1
-        AND plan_prices.effective_from <= ?
-        AND (plan_prices.effective_to IS NULL OR plan_prices.effective_to > ?)
-      ORDER BY plans.code, plan_prices.effective_from DESC, plan_prices.version DESC
-    `).bind(market, nowIso, nowIso).all<PlanPriceRow>();
+        AND ${SELLABLE_PUBLIC_PLAN_SQL_PREDICATE}
+        AND ${EFFECTIVE_PLAN_OFFER_SQL_PREDICATE}
+      ORDER BY plans.code, plan_prices.effective_from DESC, plan_prices.version DESC, plan_prices.id DESC
+    `).bind(market, nowIso, nowIso).all<PlanOfferRevision>();
     const byCode = new Map<string, SellerBillingPlan["prices"]>();
-    for (const price of prices.results) {
-      if (!Number.isSafeInteger(price.amountMinor) || price.amountMinor <= 0 || price.currency.length === 0) continue;
-      const list = byCode.get(price.planCode) ?? [];
-      if (list.some((item) => item.currency === price.currency && item.interval === price.interval)) continue;
-      list.push({ amountMinor: price.amountMinor, currency: price.currency, interval: price.interval, marketCode: price.marketCode });
-      byCode.set(price.planCode, list);
+    for (const { planCode, ...offer } of projectLatestSellablePlanOffers(prices.results)) {
+      const list = byCode.get(planCode) ?? [];
+      list.push(offer);
+      byCode.set(planCode, list);
     }
     return plans.map((plan) => ({ ...plan, prices: byCode.get(plan.code) ?? [] }));
   } catch {
@@ -179,7 +179,7 @@ export async function listSubscriptionChangeRequests(input: { env: AppBindings; 
 }
 
 export async function createSubscriptionChangeRequest(input: {
-  action: "cancel" | "change_plan" | "resume";
+  action: "cancel" | "cancel_scheduled_plan_change" | "change_plan" | "resume";
   env: AppBindings;
   expectedSubscriptionVersion: number;
   idempotencyKey: string | null;
@@ -192,7 +192,7 @@ export async function createSubscriptionChangeRequest(input: {
 }): Promise<SubscriptionChangeRequest> {
   const idempotencyKey = requireIdempotencyKey(input.idempotencyKey);
   if (!Number.isSafeInteger(input.expectedSubscriptionVersion) || input.expectedSubscriptionVersion < 1) throw new AppError("validation_failed", 400, ["expected_version_invalid"]);
-  if (!["cancel", "change_plan", "resume"].includes(input.action)) throw new AppError("validation_failed", 400, ["billing_action_invalid"]);
+  if (!["cancel", "cancel_scheduled_plan_change", "change_plan", "resume"].includes(input.action)) throw new AppError("validation_failed", 400, ["billing_action_invalid"]);
   const reasonCode = requireReasonCode(input.reasonCode);
   const actor = await getShopForMember({ capability: "billing:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
   let requestedPlanCode: string | null = null;
@@ -216,6 +216,9 @@ export async function createSubscriptionChangeRequest(input: {
   // retry remains deterministic when the subscription version changes.
   const subscription = await currentSubscription(input.env, actor.row.shop_id);
   if (input.action === "resume" && subscription.state !== "cancel_scheduled") throw new AppError("billing_resume_provider_required", 409);
+  if (input.action === "cancel_scheduled_plan_change" && subscription.state !== "downgrade_scheduled") {
+    throw new AppError("billing_scheduled_plan_change_required", 409);
+  }
   if (!new Set(["trialing", "active", "past_due", "grace_period", "cancel_scheduled", "upgrade_pending", "downgrade_scheduled"]).has(subscription.state)) {
     throw new AppError("billing_change_requires_request", 409);
   }
